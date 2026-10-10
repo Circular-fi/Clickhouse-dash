@@ -96,7 +96,7 @@ def test_trace_search_is_bounded_and_trace_detail_prefers_aux_index():
     trace_ui = read("src/static/app_traces.js")
     trace_html = read("src/static/trace.html")
 
-    assert "Timestamp >= fromUnixTimestamp64Milli" in api
+    assert "Timestamp >= fromUnixTimestamp64Milli" in read_traces()
     assert "start_ms" in api and "end_ms" in api
     assert "candidate_ids" in read_traces()
     assert "TraceId IN (SELECT TraceId FROM candidate_ids)" in read_traces()

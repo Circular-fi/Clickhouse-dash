@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -15,6 +16,9 @@ namespace chdash {
 namespace trace {
 
 constexpr int64_t kNsPerMs = 1000000;
+
+// Surrounding-context windows (± around the anchor span) offered by the span inspector; /api/traces/context accepts only these.
+constexpr int64_t kContextWindowsMs[] = {1000, 10000, 60000, 300000};
 
 // The pieces of `text` between `delimiter` (an empty piece too).
 std::vector<std::string> split_char(std::string_view text, char delimiter);
@@ -154,6 +158,63 @@ std::string service_map_estimate_sql(const std::string& table, int64_t start_ms,
 // An edge A -> B counts the spans of service B whose parent span (same TraceId) belongs to another service A; node metrics count
 // every span of the service.
 std::string service_map_sql(const TraceScope& scope, const ServiceMapSampling& sampling);
+
+// ---- the services view ----
+// RED metrics (rate, errors, duration) of each service's entry spans, after HyperDX's ServicesDashboardPage. Entry spans are the
+// spans that receive work: SpanKind Server or Consumer (the OTel exporter writes 'Server', the proto enum spelling is
+// 'SPAN_KIND_SERVER'), or a root span of any kind. The primary key starts with (ServiceName, SpanName), so a drill-down into one
+// service reads only that service's granules. A window estimated (EXPLAIN ESTIMATE, index only) above kServicesExactRows is
+// sampled by time: one slice per chart bucket, at a stable pseudo-random offset inside it, sized to read about kServicesSampleRows;
+// counts are scaled back by the sampled share of the window and the answer is marked estimated. exact=1 asks for the whole window;
+// the time budget still stops it (marked partial).
+constexpr const char* kServiceEntrySpans =
+    "(SpanKind IN ('Server', 'Consumer', 'SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = '')";
+constexpr const char* kServiceRootSpans = "ParentSpanId = ''";
+constexpr uint64_t kServicesExactRows = 150000000;
+constexpr uint64_t kServicesSampleRows = 50000000;
+constexpr int64_t kServicesMinSliceMs = 60 * 1000;
+constexpr int kServicesTimeBudgetSeconds = 25;
+constexpr uint64_t kServicesGroupByCap = 200000;
+constexpr size_t kServicesMaxEndpoints = 100;
+constexpr size_t kServicesSlowestSpans = 20;
+constexpr size_t kServicesMaxReleases = 50;
+constexpr uint64_t kServicesReleaseReadRowsCap = 200000000;
+constexpr size_t kServicesMaxStatements = 50;
+constexpr uint64_t kServicesDbReadRowsCap = 200000000;
+constexpr size_t kServicesMaxDetailBytes = 1024;
+
+// The time predicate of a services query: the whole window, or one slice per bucket of the chart grid. scale_for(bucket) turns a
+// bucket's sampled counts into window counts; `factor` does it for window totals.
+struct ServicesWindow {
+  bool sampled = false;
+  uint64_t estimated_rows = 0;
+  int64_t sampled_ms = 0;
+  double factor = 1.0;
+  std::string time_sql;
+  std::map<int64_t, double> bucket_scale;
+  double scale_for(int64_t bucket) const {
+    const auto it = bucket_scale.find(bucket);
+    return it == bucket_scale.end() ? 1.0 : it->second;
+  }
+};
+ServicesWindow services_window(int64_t start_ms, int64_t end_ms, int64_t bucket_ms, int64_t origin_ms, uint64_t estimated_rows, bool exact);
+
+// " FROM <table> PREWHERE <time> AND <span kind> WHERE <allowlist><where>": the span kind test joins the time range in PREWHERE, so it
+// drops most rows before Duration, StatusCode and the filter columns are read.
+std::string services_from(const std::string& table, const std::string& time_sql, const std::string& span_kind, const std::string& visibility,
+                          const std::string& where);
+std::string services_estimate_sql(const std::string& from);
+// One scan grouped by (service, bucket[, endpoint]) into t-digest states; the outer GROUPING SETS merge them into service totals,
+// service buckets and endpoint totals. grouping(b, op): 3 service, 1 bucket, 2 endpoint (a single '' endpoint per service outside
+// the drill-down, ignored).
+std::string services_sql(const std::string& from, int64_t bucket_ms, int64_t origin_ms, bool detail);
+std::string services_slowest_sql(const std::string& from);
+// The first span of each service.version in the whole window, any span kind (HyperDX useReleaseAnnotations).
+std::string services_releases_sql(const std::string& table, int64_t start_ms, int64_t end_ms, const std::string& service,
+                                  const std::string& visibility);
+// Database statements (HyperDX DatabaseTab): spans carrying db.query.text (current semconv) or db.statement (older), grouped by
+// statement text. Any span kind (database calls are Client spans).
+std::string services_db_sql(const std::string& table, int64_t start_ms, int64_t end_ms, const std::string& visibility, const std::string& where);
 
 // ---- the search ----
 

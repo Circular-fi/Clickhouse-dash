@@ -2,6 +2,8 @@
 
 #include "api_params.hpp"
 #include "time_util.hpp"
+#include "facet_limits.hpp"
+#include "trace_facets.hpp"
 #include "trace_sql.hpp"
 
 #include <algorithm>
@@ -223,6 +225,96 @@ bool parse_deltas(const httplib::Request& req, const TraceSettings& traces, Delt
   out->d1_ms = double_param(req, "d1", -1.0, 0.0, kMaxDurationMs);
   out->baseline = req.has_param("baseline") ? req.get_param_value("baseline") : std::string("outside");
   out->sample = int_param(req, "sample", kDeltaDefaultSample, 100, kDeltaMaxSample);
+  return true;
+}
+
+bool parse_services(const httplib::Request& req, const TraceSettings& traces, ServicesRequest* out, ApiError* error) {
+  const auto fail = [&](int status, const char* code, std::string message) {
+    error->status = status;
+    error->code = code;
+    error->message = std::move(message);
+    return false;
+  };
+  if (!traces.analytics) {
+    return fail(404, "trace_analytics_disabled", "Trace analytics (and the services view) are disabled by configuration.");
+  }
+  std::string message;
+  if (feature_param_rejected(traces, req, &message)) return fail(400, "trace_filter_disabled", message);
+  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &message)) return fail(400, "invalid_trace_range", message);
+  out->span_scope = req.has_param("scope") && !req.get_param_value("scope").empty() ? req.get_param_value("scope") : "entry";
+  if (out->span_scope != "entry" && out->span_scope != "root") return fail(400, "invalid_trace_filter", "scope must be entry or root.");
+  out->detail = req.has_param("detail") ? req.get_param_value("detail") : std::string{};
+  if (out->detail.size() > kServicesMaxDetailBytes) return fail(400, "invalid_trace_filter", "detail is limited to 1024 bytes.");
+  if (!out->detail.empty() && !traces.features.service_filter) {
+    return fail(400, "trace_filter_disabled", "service filter is disabled by traces.features");
+  }
+  out->min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, kMaxDurationMs);
+  out->max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, kMaxDurationMs);
+  if (out->max_duration_ms > 0.0 && out->min_duration_ms > out->max_duration_ms) {
+    return fail(400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+  }
+  if (!parse_trace_filters(req, &out->filters, &message)) return fail(400, "invalid_trace_filter", message);
+  // The grid of the charts and the whole window: the services route only (the statements of /services/db never read them).
+  parse_grid(req, &out->bucket_origin_ms, &out->align_buckets);
+  out->exact = req.has_param("exact") && req.get_param_value("exact") == "1";
+  return true;
+}
+
+bool parse_prefill(const httplib::Request& req, const TraceSettings& traces, PrefillRequest* out, ApiError* error) {
+  std::string message;
+  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &message)) {
+    error->status = 400;
+    error->code = "invalid_trace_range";
+    error->message = message;
+    return false;
+  }
+  // Minute-aligned superset of the requested range: the list only feeds the service/operation pickers, and alignment lets "last N
+  // minutes" requests made within the same minute (reloads, range toggles) share one scan.
+  out->aligned_start_ms = (out->start_ms / kPrefillAlignMs) * kPrefillAlignMs;
+  out->aligned_end_ms = ((out->end_ms + kPrefillAlignMs - 1) / kPrefillAlignMs) * kPrefillAlignMs;
+  if (!parse_trace_filters(req, &out->filters, &message)) {
+    error->status = 400;
+    error->code = "invalid_trace_filter";
+    error->message = message;
+    return false;
+  }
+  out->read_budget = read_rows_limit_param(req, kPrefillReadRows);
+  return true;
+}
+
+bool parse_facet_key(const httplib::Request& req, FacetRequest* out, ApiError* error) {
+  out->key_scope = req.has_param("scope") ? req.get_param_value("scope") : std::string{};
+  out->key = req.has_param("key") ? req.get_param_value("key") : std::string{};
+  if (out->key_scope != "span" && out->key_scope != "resource") {
+    error->status = 400;
+    error->code = "invalid_trace_facet";
+    error->message = "scope must be span or resource.";
+    return false;
+  }
+  if (out->key.empty() || out->key.size() > kMaxTagKeyBytes) {
+    error->status = 400;
+    error->code = "invalid_trace_facet";
+    error->message = "key must be 1 to 512 bytes.";
+    return false;
+  }
+  out->limit = int_param(req, "limit", 10, 1, kFacetMaxValues);
+  return true;
+}
+
+bool parse_facets(const httplib::Request& req, const TraceSettings& traces, FacetRequest* out, ApiError* error) {
+  const auto fail = [&](const char* code, std::string message) {
+    error->status = 400;
+    error->code = code;
+    error->message = std::move(message);
+    return false;
+  };
+  std::string message;
+  if (feature_param_rejected(traces, req, &message)) return fail("trace_filter_disabled", message);
+  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &message)) return fail("invalid_trace_range", message);
+  out->aligned_start_ms = (out->start_ms / kPrefillAlignMs) * kPrefillAlignMs;
+  out->aligned_end_ms = ((out->end_ms + kPrefillAlignMs - 1) / kPrefillAlignMs) * kPrefillAlignMs;
+  if (!parse_trace_filters(req, &out->filters, &message)) return fail("invalid_trace_filter", message);
+  out->read_cap = read_rows_limit_param(req, kFacetReadRowsCap);
   return true;
 }
 

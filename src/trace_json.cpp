@@ -1,5 +1,6 @@
 #include "trace_json.hpp"
 
+#include "facet_limits.hpp"
 #include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -283,6 +284,252 @@ std::string deltas_json(const DeltasAnswer& answer) {
   w.Key("attributes"); w.Uint64(answer.attributes_ms);
   w.Key("total"); w.Uint64(answer.total_ms);
   w.EndObject();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+namespace {
+
+uint64_t scaled_count(uint64_t value, double factor) { return static_cast<uint64_t>(std::llround(static_cast<double>(value) * factor)); }
+
+void write_service_stats(Writer& w, const std::string& name, const ServiceStats& s, double factor) {
+  w.StartArray();
+  write_json_text(w, name);
+  w.Uint64(scaled_count(s.spans, factor));
+  w.Uint64(scaled_count(s.errors, factor));
+  w.Uint64(s.p50); w.Uint64(s.p95); w.Uint64(s.p99);
+  w.Uint64(static_cast<uint64_t>(std::llround(s.total_ns * factor)));
+  w.EndArray();
+}
+
+}  // namespace
+
+std::string services_json(const ServicesAnswer& answer) {
+  const ServicesOutcome& out = answer.outcome;
+  const bool detail = !answer.detail.empty();
+  rapidjson::StringBuffer sb(nullptr, 64 * 1024);
+  Writer w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("scope"); write_json_text(w, answer.span_scope);
+  w.Key("span_predicate"); write_json_text(w, out.span_kind);
+  w.Key("detail"); write_json_text(w, answer.detail);
+  w.Key("range"); w.StartArray(); w.Int64(out.range_start_ms); w.Int64(out.range_end_ms); w.EndArray();
+  w.Key("window"); w.StartArray(); w.Int64(answer.start_ms); w.Int64(answer.end_ms); w.EndArray();
+  w.Key("bucket_ms"); w.Int64(out.bucket_ms);
+  w.Key("bucket_origin_ms"); w.Int64(out.origin_ms);
+  w.Key("estimated"); w.Bool(out.window.sampled);
+  w.Key("sample_fraction"); w.Double(out.window.sampled ? static_cast<double>(out.window.sampled_ms) / static_cast<double>(answer.end_ms - answer.start_ms) : 1.0);
+  w.Key("estimated_rows"); w.Uint64(out.window.estimated_rows);
+  w.Key("exact_rows_limit"); w.Uint64(kServicesExactRows);
+  w.Key("partial"); w.Bool(out.partial);
+  w.Key("timing_ms"); w.StartObject();
+  w.Key("estimate"); w.Uint64(out.estimate_ms);
+  w.Key("services"); w.Uint64(out.read.elapsed_ms);
+  w.Key("slowest"); w.Uint64(out.slowest_ms);
+  w.Key("releases"); w.Uint64(out.releases_ms);
+  w.Key("total"); w.Uint64(answer.total_ms);
+  w.EndObject();
+  w.Key("columns"); w.StartArray();
+  for (const char* col : {"service", "spans", "errors", "p50_ns", "p95_ns", "p99_ns", "total_ns"}) w.String(col);
+  w.EndArray();
+  w.Key("services"); w.StartArray();
+  for (const auto& [name, stats] : out.services) write_service_stats(w, name, stats, out.window.factor);
+  w.EndArray();
+  w.Key("series_columns"); w.StartArray();
+  for (const char* col : {"bucket_ms", "spans", "errors", "p50_ns", "p95_ns", "p99_ns"}) w.String(col);
+  w.EndArray();
+  w.Key("series"); w.StartObject();
+  for (const auto& [name, buckets] : out.series) {
+    write_json_key(w, name);
+    w.StartArray();
+    for (const auto& [bucket, stats] : buckets) {
+      const double scale = out.window.sampled ? out.window.scale_for(bucket) : 1.0;
+      w.StartArray(); w.Int64(bucket); w.Uint64(scaled_count(stats.spans, scale)); w.Uint64(scaled_count(stats.errors, scale));
+      w.Uint64(stats.p50); w.Uint64(stats.p95); w.Uint64(stats.p99); w.EndArray();
+    }
+    w.EndArray();
+  }
+  w.EndObject();
+  if (detail) {
+    w.Key("endpoints_truncated"); w.Bool(out.endpoints.size() > kServicesMaxEndpoints);
+    w.Key("endpoints"); w.StartArray();
+    for (size_t i = 0; i < out.endpoints.size() && i < kServicesMaxEndpoints; ++i) {
+      write_service_stats(w, out.endpoints[i].first, out.endpoints[i].second, out.window.factor);
+    }
+    w.EndArray();
+    w.Key("slowest_columns"); w.StartArray();
+    for (const char* col : {"trace_id", "span_id", "operation", "start_ms", "duration_ns", "status"}) w.String(col);
+    w.EndArray();
+    w.Key("slowest"); w.StartArray();
+    for (const auto& span : out.slowest) {
+      w.StartArray(); write_json_text(w, span.trace_id); write_json_text(w, span.span_id); write_json_text(w, span.operation);
+      w.Int64(span.start_ms); w.Uint64(span.duration_ns); write_json_text(w, span.status); w.EndArray();
+    }
+    w.EndArray();
+    w.Key("releases_supported"); w.Bool(out.releases_supported);
+    w.Key("releases_estimated"); w.Bool(out.releases_estimated);
+    w.Key("releases"); w.StartArray();
+    for (const auto& release : out.releases) {
+      w.StartArray(); write_json_text(w, release.version); w.Int64(release.first_ms); w.Uint64(release.spans); w.EndArray();
+    }
+    w.EndArray();
+  }
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+std::string services_db_json(const ServicesDbAnswer& answer) {
+  const DbOutcome& out = answer.outcome;
+  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
+  Writer w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("supported"); w.Bool(out.supported);
+  w.Key("detail"); write_json_text(w, answer.detail);
+  w.Key("range"); w.StartArray(); w.Int64(answer.start_ms); w.Int64(answer.end_ms); w.EndArray();
+  // Estimated only when a cap stopped the read (the bloom filter index makes read_rows fall short of total_rows without one).
+  w.Key("estimated"); w.Bool(out.read.read_rows >= kServicesDbReadRowsCap || timed_out(out.read));
+  w.Key("timing_ms"); w.StartObject(); w.Key("query"); w.Uint64(out.read.elapsed_ms); w.EndObject();
+  w.Key("columns"); w.StartArray();
+  for (const char* col : {"service", "statement", "db_system", "spans", "errors", "total_ns", "p95_ns"}) w.String(col);
+  w.EndArray();
+  w.Key("statements"); w.StartArray();
+  for (const auto& row : out.rows) {
+    w.StartArray(); write_json_text(w, row.service); write_json_text(w, row.statement); write_json_text(w, row.system);
+    w.Uint64(row.spans); w.Uint64(row.errors); w.Uint64(static_cast<uint64_t>(std::llround(row.total_ns))); w.Uint64(row.p95);
+    w.EndArray();
+  }
+  w.EndArray();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+std::string meta_json(const MetaAnswer& answer) {
+  const TraceSettings& traces = answer.traces;
+  const MetaOutcome& outcome = answer.outcome;
+  rapidjson::StringBuffer sb;
+  Writer w(sb);
+  w.StartObject();
+  w.Key("enabled"); w.Bool(true);
+  w.Key("analytics_enabled"); w.Bool(traces.analytics);
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("database"); write_json_text(w, traces.database);
+  w.Key("table"); write_json_text(w, traces.table);
+  w.Key("trace_index_table"); write_json_text(w, traces.trace_index_table);
+  w.Key("trace_index_available"); w.Bool(outcome.index_available);
+  w.Key("schema_ok"); w.Bool(outcome.schema_ok);
+  w.Key("default_lookback_minutes"); w.Int(traces.default_lookback_minutes);
+  w.Key("max_lookback_minutes"); w.Int(traces.max_lookback_minutes);
+  w.Key("search_limit"); w.Uint64(traces.search_limit);
+  w.Key("max_spans_per_trace"); w.Uint64(traces.max_spans_per_trace);
+  w.Key("tag_search_supported"); w.Bool(outcome.span_attribute_map || outcome.resource_attribute_map);
+  w.Key("span_attribute_map"); w.Bool(outcome.span_attribute_map);
+  w.Key("resource_attribute_map"); w.Bool(outcome.resource_attribute_map);
+  w.Key("highlighted_attributes"); write_string_array(w, traces.highlighted_attributes);
+  w.Key("linked_from_margin_minutes"); w.Int(traces.linked_from_margin_minutes);
+  w.Key("context_windows_ms"); w.StartArray();
+  for (int64_t window : kContextWindowsMs) w.Int64(window);
+  w.EndArray();
+  w.Key("features");
+  w.StartObject();
+  w.Key("service_filter"); w.Bool(traces.features.service_filter);
+  w.Key("operation_filter"); w.Bool(traces.features.operation_filter);
+  w.Key("status_filter"); w.Bool(traces.features.status_filter);
+  w.Key("duration_filter"); w.Bool(traces.features.duration_filter);
+  w.Key("resource_attributes"); w.Bool(traces.features.resource_attributes);
+  w.Key("span_attributes"); w.Bool(traces.features.span_attributes);
+  w.Key("events"); w.Bool(traces.features.events);
+  w.Key("links"); w.Bool(traces.features.links);
+  w.EndObject();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+std::string prefill_json(const PrefillAnswer& answer) {
+  const Prefill& value = *answer.value;
+  rapidjson::StringBuffer sb(nullptr, 64 * 1024);
+  Writer w(sb);
+  w.StartObject();
+  w.Key("range"); w.StartArray(); w.Int64(answer.start_ms); w.Int64(answer.end_ms); w.EndArray();
+  w.Key("truncated"); w.Bool(value.truncated);
+  w.Key("tag_filtered"); w.Bool(answer.tag_filtered);
+  w.Key("estimated"); w.Bool(value.estimated);
+  // The scan that filled the cache entry: passes run and rows read.
+  w.Key("scan"); w.StartObject();
+  w.Key("passes"); w.Int(value.passes);
+  w.Key("read_rows"); w.Uint64(value.read_rows);
+  w.Key("read_rows_limit"); w.Uint64(answer.read_budget);
+  w.EndObject();
+  w.Key("pairs"); w.StartArray();
+  for (const auto& [service, operation] : value.pairs) {
+    // The count column is kept for payload compatibility (existence only).
+    w.StartArray(); write_json_text(w, service); write_json_text(w, operation); w.Uint64(1); w.EndArray();
+  }
+  w.EndArray();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+namespace {
+
+void write_facet_common(Writer& w, const FacetRequest& request, bool estimated, bool timed_out_flag, uint64_t query_ms, bool cached,
+                        uint64_t read_rows_cap) {
+  w.Key("range"); w.StartArray(); w.Int64(request.start_ms); w.Int64(request.end_ms); w.EndArray();
+  w.Key("scanned_range"); w.StartArray(); w.Int64(request.aligned_start_ms); w.Int64(request.aligned_end_ms); w.EndArray();
+  w.Key("estimated"); w.Bool(estimated);
+  w.Key("timed_out"); w.Bool(timed_out_flag);
+  w.Key("sample_limit"); w.Uint64(kFacetSampleRows);
+  w.Key("read_rows_limit"); w.Uint64(read_rows_cap);
+  w.Key("cached"); w.Bool(cached);
+  w.Key("timing_ms"); w.StartObject(); w.Key("query"); w.Uint64(query_ms); w.EndObject();
+}
+
+}  // namespace
+
+std::string facet_keys_json(const FacetKeysAnswer& answer) {
+  const FacetKeys& value = *answer.value;
+  rapidjson::StringBuffer sb(nullptr, 32 * 1024);
+  Writer w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("supported"); w.Bool(answer.span || answer.resource);
+  w.Key("scopes"); w.StartArray(); if (answer.span) w.String("span"); if (answer.resource) w.String("resource"); w.EndArray();
+  write_facet_common(w, answer.request, value.estimated, value.timed_out, value.query_ms, answer.cached, answer.request.read_cap);
+  w.Key("sampled_spans"); w.Uint64(value.sampled_spans);
+  w.Key("truncated"); w.Bool(value.keys.size() > kFacetMaxKeys);
+  w.Key("keys"); w.StartArray();
+  for (size_t i = 0; i < value.keys.size() && i < kFacetMaxKeys; ++i) {
+    const auto& key = value.keys[i];
+    w.StartArray(); write_json_text(w, key.scope); write_json_text(w, key.key); w.Uint64(key.count); w.EndArray();
+  }
+  w.EndArray();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+std::string facet_values_json(const FacetValuesAnswer& answer) {
+  const FacetValues& value = *answer.value;
+  rapidjson::StringBuffer sb(nullptr, 16 * 1024);
+  Writer w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("scope"); write_json_text(w, answer.request.key_scope);
+  w.Key("key"); write_json_text(w, answer.request.key);
+  w.Key("limit"); w.Int(answer.request.limit);
+  write_facet_common(w, answer.request, value.estimated, value.timed_out, value.query_ms, answer.cached, answer.request.read_cap);
+  w.Key("spans_with_key"); w.Uint64(value.spans_with_key);
+  w.Key("distinct_values"); w.Uint64(value.distinct_values);
+  w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());
+  w.Key("values"); w.StartArray();
+  for (const auto& [text, count] : value.values) {
+    w.StartArray(); write_json_text(w, text); w.Uint64(count); w.EndArray();
+  }
+  w.EndArray();
   w.EndObject();
   return std::string(sb.GetString(), sb.GetSize());
 }

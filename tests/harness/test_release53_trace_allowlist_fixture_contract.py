@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -15,9 +16,9 @@ def test_trace_service_allowlist_is_hcl_list_and_backend_enforced():
     hcl = read("src/hcl.cpp")
     config = read("src/config.cpp")
     header = read("src/server.hpp")
-    api = read("src/api_traces.cpp")
+    api = read_traces()
     # The predicate lives in a header shared by the traces and logs routes.
-    assert '#include "otel_allowlist.hpp"' in api
+    assert '#include "otel_allowlist.hpp"' in read_unit("trace_service.cpp")
     api += read("src/otel_allowlist.hpp")
     example = read("config.example.hcl")
 
@@ -30,7 +31,7 @@ def test_trace_service_allowlist_is_hcl_list_and_backend_enforced():
     # The predicate is shared by every OTel signal (traces, logs).
     allowlist = read("src/otel_allowlist.hpp")
     assert "service_allowlist_predicate" in api
-    assert '#include "otel_allowlist.hpp"' in api
+    assert '#include "otel_allowlist.hpp"' in read_unit("trace_service.cpp")
     assert 'pattern == "*"' in allowlist
     assert "startsWith(ServiceName" in allowlist
     assert "endsWith(ServiceName" in allowlist

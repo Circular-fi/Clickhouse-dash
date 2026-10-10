@@ -77,6 +77,42 @@ struct DeltasRequest {
   std::string baseline = "outside";
   int sample = 1000;
 };
+// The services view and its database statements (trace_services.hpp): the window, the span scope ("entry" or "root"), the drilled-down
+// service, and the span filters, which describe the entry spans themselves; min / max duration bound the span's own Duration.
+struct ServicesRequest {
+  std::string source_host_id;
+  int64_t start_ms = 0, end_ms = 0;
+  std::string span_scope = "entry";
+  std::string detail;
+  TraceFilterSpec filters;
+  double min_duration_ms = 0.0, max_duration_ms = 0.0;
+  int64_t bucket_origin_ms = 0;
+  bool align_buckets = false;
+  bool exact = false;
+};
+
+// The service / operation pickers: the window (minute-aligned, so that requests made within the same minute share one cached scan) and
+// the tag filters, which are the only filters that narrow the pickers (the service / operation / status choices must stay selectable).
+struct PrefillRequest {
+  std::string source_host_id;
+  int64_t start_ms = 0, end_ms = 0;
+  int64_t aligned_start_ms = 0, aligned_end_ms = 0;
+  TraceFilterSpec filters;
+  uint64_t read_budget = 0;
+};
+
+// The attribute facets: the window (minute-aligned like the prefill), the filters, the read bound, and for the values of one key the
+// key and the number of values.
+struct FacetRequest {
+  std::string source_host_id;
+  int64_t start_ms = 0, end_ms = 0;
+  int64_t aligned_start_ms = 0, aligned_end_ms = 0;
+  TraceFilterSpec filters;
+  uint64_t read_cap = 0;
+  std::string key_scope, key;
+  int limit = 10;
+};
+
 constexpr int kDeltaDefaultSample = 1000;
 constexpr int kDeltaMaxSample = 2500;  // per side: the ids go as parameters, but the sample bounds the work
 
@@ -90,6 +126,13 @@ bool parse_analytics(const httplib::Request& req, const TraceSettings& traces, A
 bool parse_service_map(const httplib::Request& req, const TraceSettings& traces, ServiceMapRequest* out, ApiError* error);
 bool parse_heatmap(const httplib::Request& req, const TraceSettings& traces, HeatmapRequest* out, ApiError* error);
 bool parse_deltas(const httplib::Request& req, const TraceSettings& traces, DeltasRequest* out, ApiError* error);
+// The front half of /api/traces/services and /api/traces/services/db (they are off with traces.analytics = false, too).
+bool parse_services(const httplib::Request& req, const TraceSettings& traces, ServicesRequest* out, ApiError* error);
+bool parse_prefill(const httplib::Request& req, const TraceSettings& traces, PrefillRequest* out, ApiError* error);
+// The facets of the keys, and of the values of one key: the key (scope=span|resource, key, limit) is checked before the host, as the
+// route always did; the window and the filters after.
+bool parse_facet_key(const httplib::Request& req, FacetRequest* out, ApiError* error);
+bool parse_facets(const httplib::Request& req, const TraceSettings& traces, FacetRequest* out, ApiError* error);
 
 // columns=span:http.route,resource:host.name,key: attribute values returned with each span (scope "any" reads the span map first).
 bool parse_span_columns(const httplib::Request& req, std::vector<SpanAttributeColumn>* out, std::string* error);

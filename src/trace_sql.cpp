@@ -1,5 +1,6 @@
 #include "trace_sql.hpp"
 
+#include "facet_limits.hpp"
 #include "sql_literal.hpp"
 
 #include <algorithm>
@@ -281,6 +282,102 @@ std::string service_map_sql(const TraceScope& scope, const ServiceMapSampling& s
       "HAVING GROUPING(caller) = 1 OR caller != '' "
       "SETTINGS max_execution_time = " + std::to_string(kServiceMapTimeBudgetSeconds) +
       ", timeout_overflow_mode = 'throw', force_grouping_standard_compatibility = 1, join_use_nulls = 0";
+}
+
+// ---- the services view ----
+
+ServicesWindow services_window(int64_t start_ms, int64_t end_ms, int64_t bucket_ms, int64_t origin_ms, uint64_t estimated_rows, bool exact) {
+  ServicesWindow out;
+  out.estimated_rows = estimated_rows;
+  out.time_sql = time_predicate(start_ms, end_ms);
+  out.sampled_ms = end_ms - start_ms;
+  if (exact || estimated_rows <= kServicesExactRows) return out;
+  const double fraction = static_cast<double>(kServicesSampleRows) / static_cast<double>(estimated_rows);
+  const int64_t slice_ms = std::max<int64_t>(kServicesMinSliceMs, static_cast<int64_t>(std::llround(static_cast<double>(bucket_ms) * fraction / 1000.0)) * 1000);
+  if (slice_ms * 2 > bucket_ms) return out;
+  const int64_t offset = start_ms - origin_ms;
+  int64_t bucket = origin_ms + (offset >= 0 ? offset / bucket_ms : -((-offset + bucket_ms - 1) / bucket_ms)) * bucket_ms;
+  std::string terms;
+  int64_t sampled = 0;
+  for (; bucket < end_ms; bucket += bucket_ms) {
+    const int64_t lo = std::max(bucket, start_ms), hi = std::min(bucket + bucket_ms, end_ms);
+    if (hi <= lo) continue;
+    const int64_t length = std::min(slice_ms, hi - lo);
+    const int64_t bucket_index = bucket / bucket_ms;
+    // Golden-ratio offsets: spread over the bucket, stable for a given grid.
+    const double phase = std::fmod(static_cast<double>(bucket_index) * 0.6180339887498949, 1.0);
+    const int64_t at = lo + static_cast<int64_t>(std::floor(std::fabs(phase) * static_cast<double>(hi - lo - length)));
+    if (!terms.empty()) terms += " OR ";
+    terms += "(Timestamp >= fromUnixTimestamp64Milli(" + std::to_string(at) + ") AND Timestamp < fromUnixTimestamp64Milli(" +
+             std::to_string(at + length) + "))";
+    out.bucket_scale[bucket] = static_cast<double>(hi - lo) / static_cast<double>(length);
+    sampled += length;
+  }
+  if (terms.empty() || sampled <= 0) return out;
+  out.sampled = true;
+  out.sampled_ms = sampled;
+  out.factor = static_cast<double>(end_ms - start_ms) / static_cast<double>(sampled);
+  out.time_sql = "(" + terms + ")";
+  return out;
+}
+
+namespace {
+
+std::string services_settings_sql() {
+  return " SETTINGS max_execution_time = " + std::to_string(kServicesTimeBudgetSeconds) +
+         ", timeout_overflow_mode = 'break', max_rows_to_group_by = " + std::to_string(kServicesGroupByCap) +
+         ", group_by_overflow_mode = 'any'";
+}
+
+}  // namespace
+
+std::string services_from(const std::string& table, const std::string& time_sql, const std::string& span_kind, const std::string& visibility,
+                          const std::string& where) {
+  return " FROM " + table + " PREWHERE " + time_sql + " AND " + span_kind + " WHERE " + visibility + where;
+}
+
+std::string services_estimate_sql(const std::string& from) { return "EXPLAIN ESTIMATE SELECT 1" + from; }
+
+std::string services_sql(const std::string& from, int64_t bucket_ms, int64_t origin_ms, bool detail) {
+  const std::string bucket_sql = std::to_string(origin_ms) + " + intDiv(toUnixTimestamp64Milli(Timestamp) - " +
+      std::to_string(origin_ms) + ", " + std::to_string(bucket_ms) + ") * " + std::to_string(bucket_ms);
+  const std::string inner =
+      "SELECT ServiceName AS svc, " + bucket_sql + " AS b, " + (detail ? "SpanName" : "''") + " AS op, count() AS c, "
+      "countIf(StatusCode = 'Error') AS e, quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS st, sum(Duration) AS s" +
+      from + " GROUP BY svc, b, op";
+  return "SELECT toString(grouping(b, op)), toString(svc), toString(b), toString(op), toString(sum(c)), toString(sum(e)), "
+         "arrayStringConcat(arrayMap(x -> toString(toUInt64(x)), quantilesTDigestMerge(0.5, 0.95, 0.99)(st)), ','), "
+         "toString(sum(s)) FROM (" + inner +
+         ") GROUP BY GROUPING SETS ((svc), (svc, b), (svc, op))" + services_settings_sql();
+}
+
+std::string services_slowest_sql(const std::string& from) {
+  return "SELECT TraceId, SpanId, toString(SpanName), toString(toUnixTimestamp64Milli(Timestamp)), toString(Duration), "
+         "toString(StatusCode)" + from + " ORDER BY Duration DESC LIMIT " + std::to_string(kServicesSlowestSpans) +
+         " SETTINGS max_execution_time = " + std::to_string(kServicesTimeBudgetSeconds) + ", timeout_overflow_mode = 'break'";
+}
+
+std::string services_releases_sql(const std::string& table, int64_t start_ms, int64_t end_ms, const std::string& service,
+                                  const std::string& visibility) {
+  const std::string version = "ResourceAttributes['service.version']";
+  return "SELECT " + version + " AS v, toString(toUnixTimestamp64Milli(min(Timestamp))), toString(count()) FROM " + table +
+         " PREWHERE " + time_predicate(start_ms, end_ms) + " AND ServiceName = " + sql::quote_string(service) +
+         " WHERE " + visibility + " AND mapContains(ResourceAttributes, 'service.version') AND " + version +
+         " != '' GROUP BY v ORDER BY min(Timestamp) LIMIT " + std::to_string(kServicesMaxReleases) +
+         facet_settings_sql(kServicesReleaseReadRowsCap, true);
+}
+
+std::string services_db_sql(const std::string& table, int64_t start_ms, int64_t end_ms, const std::string& visibility, const std::string& where) {
+  const std::string statement =
+      "coalesce(nullif(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement'])";
+  return "SELECT toString(ServiceName), " + statement + " AS stmt, "
+         "any(coalesce(nullif(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system'])), toString(count()), "
+         "toString(countIf(StatusCode = 'Error')), toString(sum(Duration)), toString(toUInt64(quantileTDigest(0.95)(Duration))) FROM " +
+         table + " PREWHERE " + time_predicate(start_ms, end_ms) +
+         " WHERE " + visibility + where +
+         " AND (mapContains(SpanAttributes, 'db.query.text') OR mapContains(SpanAttributes, 'db.statement')) AND stmt != ''"
+         " GROUP BY ServiceName, stmt ORDER BY sum(Duration) DESC LIMIT " + std::to_string(kServicesMaxStatements) +
+         facet_settings_sql(kServicesDbReadRowsCap, true);
 }
 
 // ---- the search ----

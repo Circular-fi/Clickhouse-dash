@@ -508,39 +508,8 @@ private:
     std::vector<MetaCatalogItem> items;
   };
 
-  // Trace service/operation prefill. The browser re-requests it on every
-  // time-range change and page load; each miss scans every span of the window
-  // (seconds on wide windows), so identical minute-aligned ranges share one
-  // result for a short TTL.
-  struct TracePrefill {
-    std::vector<std::pair<std::string, std::string>> pairs;
-    bool truncated = false;
-    // A read bound stopped the scans: the pairs are then a subset.
-    bool estimated = false;
-    // The scans: passes run and rows read.
-    int passes = 0;
-    uint64_t read_rows = 0;
-    int64_t start_ms = 0;
-    int64_t end_ms = 0;
-  };
-  // Attribute facets of the Traces and Logs search pages (api_traces.cpp, api_logs.cpp): the most frequent keys of a
-  // sample, and the top values of one key. A value keeps kFacetMaxKeys + 1 keys at most.
-  struct TraceFacetKeys {
-    struct Key { std::string scope, key; uint64_t count = 0; };
-    std::vector<Key> keys;
-    uint64_t sampled_spans = 0;
-    bool estimated = false;
-    bool timed_out = false;
-    uint64_t query_ms = 0;
-  };
-  struct TraceFacetValues {
-    std::vector<std::pair<std::string, uint64_t>> values;
-    uint64_t spans_with_key = 0;
-    uint64_t distinct_values = 0;
-    bool estimated = false;
-    bool timed_out = false;
-    uint64_t query_ms = 0;
-  };
+  // The facets of the Logs search page (api_logs.cpp): the most frequent keys of a sample, and the top values of one key. A value keeps
+  // kFacetMaxKeys + 1 keys at most. (The ones of the Traces page are in trace_facets.hpp.)
   struct LogFacetKeys {
     struct Key { std::string scope, key; uint64_t count = 0; };
     std::vector<Key> keys;
@@ -695,15 +664,15 @@ private:
       std::chrono::minutes(1), {}, 256, 16u << 20)};
   TtlCache<std::string, SystemMonitorDiskGrowth> system_monitor_growth_cache_{cache_options<SystemMonitorDiskGrowth>(
       std::chrono::minutes(5), {}, 64, 16u << 20, cache_size::growth)};
-  TtlCache<std::string, TracePrefill> trace_prefill_cache_{cache_options<TracePrefill>(
+  trace::PrefillCache trace_prefill_cache_{cache_options<trace::Prefill>(
       std::chrono::minutes(1), {}, 256, 64u << 20,
-      [](const TracePrefill& v) { return sizeof(v) + cache_size::pairs(v.pairs); })};
-  TtlCache<std::string, TraceFacetKeys> trace_facet_keys_cache_{cache_options<TraceFacetKeys>(
+      [](const trace::Prefill& v) { return sizeof(v) + cache_size::pairs(v.pairs); })};
+  trace::FacetKeysCache trace_facet_keys_cache_{cache_options<trace::FacetKeys>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 512, 16u << 20,
-      [](const TraceFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
-  TtlCache<std::string, TraceFacetValues> trace_facet_values_cache_{cache_options<TraceFacetValues>(
+      [](const trace::FacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
+  trace::FacetValuesCache trace_facet_values_cache_{cache_options<trace::FacetValues>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 1024, 16u << 20,
-      [](const TraceFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
+      [](const trace::FacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
   TtlCache<std::string, LogFacetKeys> log_facet_keys_cache_{cache_options<LogFacetKeys>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 512, 16u << 20,
       [](const LogFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
@@ -719,7 +688,8 @@ private:
   // The Traces service (trace_service.hpp) and the cache of its attribute columns.
   trace::AttributeMapCache trace_attribute_maps_cache_{trace::attribute_map_cache_options()};
   trace::TraceService trace_service_{[this](const HostSpec& host, std::string* error) { return open_trace_executor(host, error); },
-                                     trace_attribute_maps_cache_};
+                                     trace::TraceCaches{trace_attribute_maps_cache_, trace_prefill_cache_, trace_facet_keys_cache_,
+                                                        trace_facet_values_cache_}};
 
   std::unique_ptr<CacheRefresher> cache_refresher_;
 };

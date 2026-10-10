@@ -2,6 +2,7 @@
 linked-from lookups, surrounding context) keep their bounded, allowlisted SQL
 and their configuration and page wiring."""
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import re
 import config_keys
 
@@ -49,7 +50,7 @@ def test_linked_from_and_context_sql_is_bounded_and_allowlisted():
 def test_trace_insight_settings_are_configured_validated_and_documented():
     header = read("src/otel_settings.hpp")
     config = read("src/config.cpp")
-    api = read("src/api_traces.cpp")
+    api = read_traces()
     example = read("config.example.hcl")
     docs = read("docs/traces.md")
     assert "highlighted_attributes" in header and "linked_from_margin_minutes = 60" in header

@@ -28,19 +28,21 @@ def test_tag_filters_are_parsed_server_side_and_quoted():
 
 
 def test_facet_queries_are_capped_allowlisted_and_cached():
-    cpp = read("src/api_traces.cpp")
+    cpp = read_traces()
     limits = read("src/facet_limits.hpp")
     server = read("src/server.cpp")
     assert '"/api/traces/facets"' in server and '"/api/traces/facet_values"' in server
-    facets = cpp[cpp.index("void Server::handle_traces_facets"):cpp.index("void Server::handle_traces_search")]
+    sql = read_unit("trace_facets.cpp")
+    service = read_unit("trace_service.cpp")
+    facets = service[service.index("TraceService::facet_keys"):]
     assert facets.count("service_allowlist_predicate(traces)") == 2
-    assert facets.count("std::to_string(kFacetSampleRows)") == 2
-    assert "SpanAttributes.keys AS sk" in facets and "ResourceAttributes.keys AS rk" in facets
-    assert "facet_settings_sql(read_cap, false)" in facets and "read_rows_limit_param(req, kFacetReadRowsCap)" in facets
-    assert "facet_settings_sql(read_cap, true)" in facets
-    assert "&key_scope, &key" in facets  # a facet's values ignore its own filters
+    assert sql.count("std::to_string(kFacetSampleRows)") == 2
+    assert "SpanAttributes.keys AS sk" in sql and "ResourceAttributes.keys AS rk" in sql
+    assert "facet_settings_sql(read_cap, false)" in sql and "read_rows_limit_param(req, kFacetReadRowsCap)" in read_unit("trace_request.cpp")
+    assert "facet_settings_sql(read_cap, true)" in sql
+    assert "&request.key_scope, &request.key" in facets  # a facet's values ignore its own filters
     # One set of caps for the trace and log facets (facet_limits.hpp).
-    assert '#include "facet_limits.hpp"' in cpp and "std::string facet_settings_sql" not in cpp
+    assert '#include "facet_limits.hpp"' in read_unit("trace_facets.hpp") and "std::string facet_settings_sql" not in cpp
     settings = limits[limits.index("inline std::string facet_settings_sql"):limits.index("inline bool timed_out")]
     for fragment in ("timeout_overflow_mode = 'break'", "max_rows_to_read = ", "read_overflow_mode = 'break'",
                      "max_rows_to_group_by = ", "group_by_overflow_mode = 'any'", "max_execution_time = "):
@@ -48,16 +50,17 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
     assert "constexpr uint64_t kFacetTtlMs = 60 * 1000;" in limits
     # Server-owned caches (single-flight); the client's text enters the keys as a digest, and a value keeps the served
     # keys only (kFacetMaxKeys + 1, ordered and cut in SQL too).
-    assert "trace_facet_keys_cache_.get(" in facets and "trace_facet_values_cache_.get(" in facets
-    assert "sha256_hex(span_filters)" in facets and "sha256_hex(key + '\\0' + span_filters)" in facets
-    assert '" ORDER BY t.3 DESC, t.2 ASC, t.1 DESC LIMIT " + std::to_string(kFacetMaxKeys + 1)' in facets
-    assert "if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);" in facets
+    assert "facet_keys_.get(" in facets and "facet_values_.get(" in facets
+    assert "trace_facet_keys_cache_" in read("src/server.hpp") and "trace_facet_values_cache_" in read("src/server.hpp")
+    assert "sha256_hex(span_filters)" in facets and "sha256_hex(request.key + '\\0' + span_filters)" in facets
+    assert '" ORDER BY t.3 DESC, t.2 ASC, t.1 DESC LIMIT " + std::to_string(kFacetMaxKeys + 1)' in sql
+    assert "if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);" in sql
     # Estimated when a bound stopped the scan (the read cap reached, the
     # sample full, the time budget), never from total_rows_to_read, which
     # counts the granules the skip indexes drop afterwards.
     assert "bool capped(uint64_t read_rows_cap) const { return read_rows_cap > 0 && read_rows >= read_rows_cap; }" in limits
     assert "partial()" not in cpp and "partial()" not in limits
-    assert "value.sampled_spans >= kFacetSampleRows || read.capped(read_cap) || value.timed_out" in cpp
+    assert "value.sampled_spans >= kFacetSampleRows || read.capped(read_cap) || value.timed_out" in sql
     assert 'w.Key("estimated")' in cpp
 
 

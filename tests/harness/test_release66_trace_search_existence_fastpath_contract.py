@@ -11,7 +11,8 @@ def test_trace_prefill_uses_existence_and_tag_discovery_is_removed():
     cpp = read("src/api_traces.cpp")
     server = read("src/server.cpp")
     api = read("src/static/app_api.js")
-    prefill = cpp[cpp.index("void Server::handle_traces_prefill"):cpp.index("void Server::handle_traces_search")]
+    sql = read_unit("trace_facets.cpp")
+    prefill = sql[sql.index("std::string prefill_pass_sql"):sql.index("Prefill read_prefill")]
     assert "LIMIT 1 BY ServiceName, SpanName LIMIT" in prefill
     assert "GROUP BY ServiceName, SpanName" not in prefill
     assert "handle_traces_tags" not in cpp
@@ -82,7 +83,7 @@ def test_trace_attribute_map_schema_is_cached_per_source():
     for route in ("search", "analytics", "service_map", "heatmap", "deltas"):
         assert f"TraceService::{route}(" in service and "open_scope(host, request" in service
     assert "cache.get(" in attributes and "cached_attribute_maps(" in attributes
-    assert "trace::store_attribute_maps(trace_attribute_maps_cache_, *host, traces" in meta
+    assert "store_attribute_maps(attribute_maps_, host, traces" in service[service.index("TraceService::meta"):]
     # One cache for the server (a member of Server, trace_service.hpp), with a 60 s TTL.
     assert "options.ttl = std::chrono::seconds(60);" in attributes
     assert "trace_attribute_maps_cache_{trace::attribute_map_cache_options()}" in read("src/server.hpp")

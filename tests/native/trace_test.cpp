@@ -13,6 +13,7 @@
 #include "ch_error.hpp"
 #include "ch_executor.hpp"
 #include "trace_analytics.hpp"
+#include "trace_facets.hpp"
 #include "trace_attributes.hpp"
 #include "trace_filters.hpp"
 #include "trace_golden.hpp"
@@ -20,6 +21,7 @@
 #include "trace_request.hpp"
 #include "trace_search.hpp"
 #include "trace_service.hpp"
+#include "trace_services.hpp"
 #include "trace_sql.hpp"
 
 #include <clickhouse/columns/numeric.h>
@@ -355,6 +357,7 @@ class FakeDb final : public ChExecutor {
   std::vector<Rule> rules;
   int invalidated = 0, renewed = 0;
   bool renew_ok = true;
+  BoundedRead bounded_result;  // what a bounded statement reports that it read
 
   void on(const std::string& contains, Rows rows, int times = -1) {
     rules.push_back(Rule{contains, [rows](const std::string&) { return rows; }, {}, {}, times});
@@ -389,7 +392,7 @@ class FakeDb final : public ChExecutor {
   }
   BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block, const ChParams& sent) override {
     select(sql, sent, on_block);
-    return BoundedRead{};
+    return bounded_result;
   }
   void invalidate() override { ++invalidated; }
   bool renew(std::string* error) override {
@@ -992,6 +995,15 @@ class ForwardDb final : public ChExecutor {
   FakeDb& db_;
 };
 
+// The caches of a service of a test: its own, so nothing is shared between two tests.
+struct TestCaches {
+  AttributeMapCache attribute_maps{attribute_map_cache_options()};
+  PrefillCache prefill{PrefillCache::Options{}};
+  FacetKeysCache facet_keys{FacetKeysCache::Options{}};
+  FacetValuesCache facet_values{FacetValuesCache::Options{}};
+  TraceCaches refs() { return TraceCaches{attribute_maps, prefill, facet_keys, facet_values}; }
+};
+
 HostSpec trace_host() {
   HostSpec host;
   host.id = "local";
@@ -1013,18 +1025,18 @@ WindowRequest window_request(int64_t start = kAStart, int64_t end = kAEnd) {
 }
 
 void test_the_service_cannot_connect() {
-  AttributeMapCache cache(attribute_map_cache_options());
+  TestCaches cache;
   TraceService service([](const HostSpec&, std::string* error) -> std::unique_ptr<ChExecutor> {
     *error = "pool_exhausted: no connection";
     return nullptr;
-  }, cache);
+  }, cache.refs());
   RequestContext context;
   const auto answer = service.search(context, trace_host(), window_request(), 10);
   CHECK(!answer);
   CHECK_EQ(answer.error.status, 503);
   CHECK_EQ(answer.error.code, std::string("trace_source_unavailable"));
   CHECK_EQ(answer.error.message, std::string("pool_exhausted: no connection"));
-  TraceService silent([](const HostSpec&, std::string*) -> std::unique_ptr<ChExecutor> { return nullptr; }, cache);
+  TraceService silent([](const HostSpec&, std::string*) -> std::unique_ptr<ChExecutor> { return nullptr; }, cache.refs());
   CHECK_EQ(silent.search(context, trace_host(), window_request(), 10).error.message, std::string("Cannot connect to trace ClickHouse source."));
   // The connection comes before the checks of what the route asked: a request that is wrong in two ways says the first.
   AnalyticsRequest bad;
@@ -1035,8 +1047,8 @@ void test_the_service_cannot_connect() {
 
 void test_the_attribute_columns_are_read_once_for_the_filters_of_a_source() {
   FakeDb db;
-  AttributeMapCache cache(attribute_map_cache_options());
-  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache);
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
   db.on("FROM system.columns", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "Map(LowCardinality(String), String)"}});
   RequestContext context;
   WindowRequest request = window_request();
@@ -1056,8 +1068,8 @@ void test_the_attribute_columns_are_read_once_for_the_filters_of_a_source() {
 
 void test_a_table_that_cannot_be_read_is_not_a_table_without_maps() {
   FakeDb db;
-  AttributeMapCache cache(attribute_map_cache_options());
-  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache);
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
   db.fail_on("FROM system.columns", [] { throw std::runtime_error("system.columns is not readable"); });
   RequestContext context;
   WindowRequest request = window_request();
@@ -1068,8 +1080,8 @@ void test_a_table_that_cannot_be_read_is_not_a_table_without_maps() {
   CHECK_EQ(answer.error.code, std::string("trace_schema_unavailable"));
   // Columns that are not Maps: 400. Columns that traces.features turns off: 400 too, with its own code.
   FakeDb plain;
-  AttributeMapCache plain_cache(attribute_map_cache_options());
-  TraceService plain_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(plain)); }, plain_cache);
+  TestCaches plain_cache;
+  TraceService plain_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(plain)); }, plain_cache.refs());
   plain.on("FROM system.columns", {{"SpanAttributes", "JSON"}, {"ResourceAttributes", "JSON"}});
   const auto unsupported = plain_service.search(context, trace_host(), request, 10);
   CHECK_EQ(unsupported.error.status, 400);
@@ -1083,8 +1095,8 @@ void test_a_table_that_cannot_be_read_is_not_a_table_without_maps() {
 
 void test_a_failure_of_a_statement_is_the_error_of_the_route() {
   FakeDb db;
-  AttributeMapCache cache(attribute_map_cache_options());
-  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache);
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
   RequestContext context;
   WindowRequest durations = window_request();
   durations.min_duration_ms = 10;
@@ -1095,13 +1107,13 @@ void test_a_failure_of_a_statement_is_the_error_of_the_route() {
   CHECK_EQ(timeout.error.code, std::string("trace_timeout"));
   CHECK(timeout.error.retryable.value_or(status_is_retryable(timeout.error.status)));
   FakeDb other;
-  TraceService other_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(other)); }, cache);
+  TraceService other_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(other)); }, cache.refs());
   other.fail_on("ORDER BY min(Timestamp) DESC", [] { throw server_error(60, "Table otel.otel_traces does not exist"); });
   CHECK_EQ(other_service.search(context, trace_host(), durations, 10).error.code, std::string("trace_search_failed"));
   AnalyticsRequest analytics;
   analytics.window = durations;
   FakeDb limit;
-  TraceService limit_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(limit)); }, cache);
+  TraceService limit_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(limit)); }, cache.refs());
   limit.fail_on("FROM trace_durations", [] { throw server_error(158, "Too many rows to read"); });
   const auto scan = limit_service.analytics(context, trace_host(), analytics);
   CHECK_EQ(scan.error.status, 422);
@@ -1110,8 +1122,8 @@ void test_a_failure_of_a_statement_is_the_error_of_the_route() {
 
 void test_the_box_of_the_deltas_is_checked() {
   FakeDb db;
-  AttributeMapCache cache(attribute_map_cache_options());
-  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache);
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
   RequestContext context;
   DeltasRequest request;
   request.window = window_request();
@@ -1148,8 +1160,8 @@ void test_the_box_of_the_deltas_is_checked() {
 
 void test_the_deltas_compare_two_samples() {
   FakeDb db;
-  AttributeMapCache cache(attribute_map_cache_options());
-  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache);
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
   db.on("FROM system.columns", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "Map(String, String)"}});
   db.on("count() OVER (PARTITION BY in_box)", {{"i1", "1", "40"}, {"i2", "1", "40"}, {"o1", "0", "400"}, {"o2", "0", "400"}});
   db.on("ARRAY JOIN top AS tv",
@@ -1193,8 +1205,8 @@ void test_the_deltas_compare_two_samples() {
 
 void test_the_service_map_and_its_json() {
   FakeDb db;
-  AttributeMapCache cache(attribute_map_cache_options());
-  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache);
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
   db.on_block("EXPLAIN ESTIMATE", [](const std::string&) {
     clickhouse::Block block;
     for (const char* name : {"database", "table"}) {
@@ -1250,8 +1262,8 @@ void test_the_service_map_and_its_json() {
 
 void test_the_json_of_the_search() {
   FakeDb db;
-  AttributeMapCache cache(attribute_map_cache_options());
-  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache);
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
   db.on("GROUP BY TraceId LIMIT 20001", {{"t1", "1789210799000000000"}, {"t2", "1789210798000000000"}}, 1);
   db.on("AS trace_bounds", summary_rows({"t1", "t2"}));
   RequestContext context;
@@ -1275,7 +1287,7 @@ void test_the_json_of_the_search() {
   HostSpec restricted = trace_host();
   restricted.otel.traces.service_allowlist = {"api-*"};
   FakeDb limited;
-  TraceService limited_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(limited)); }, cache);
+  TraceService limited_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(limited)); }, cache.refs());
   limited.on("AS batch_bounds", {{"t1"}});
   limited.on("GROUP BY TraceId LIMIT 20001", {{"t1", "1789210799000000000"}}, 1);
   auto row = summary_rows({"t1"});
@@ -1293,8 +1305,8 @@ void test_the_json_of_the_search() {
 
 void test_the_json_of_the_charts_and_the_heatmap() {
   FakeDb db;
-  AttributeMapCache cache(attribute_map_cache_options());
-  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache);
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
   db.on("FROM trace_durations GROUP BY bucket_ms, fine_bin", {{"1789207200000", "10", "30"}, {"1789207260000", "12", "70"}, {"1789207260000", "40", "1"}});
   db.on("FROM trace_durations GROUP BY bucket_ms", {{"1789207200000", "5", "1", "2", "3", "4"}});
   RequestContext context;
@@ -1335,6 +1347,588 @@ void test_the_json_of_the_charts_and_the_heatmap() {
   CHECK(!parse_analytics(req, off, &parsed, &error));
   CHECK_EQ(error.status, 404);
   CHECK_EQ(error.code, std::string("trace_analytics_disabled"));
+}
+
+
+// ---- the services view ----
+
+void test_services_statements_are_unchanged() {
+  const std::string table = "`otel`.`otel_traces`";
+  const std::string entry = kServiceEntrySpans;
+  const auto from = [&](const std::string& time, const std::string& kind, const std::string& where) {
+    return services_from(table, time, kind, "1", where);
+  };
+  const std::string hour = time_predicate(kAStart, kAEnd);
+  const std::string plain = from(hour, entry, "");
+  CHECK_EQ(services_estimate_sql(plain), std::string(golden::kServicesEstimate));
+  CHECK_EQ(services_sql(plain, 60000, 0, false), std::string(golden::kServicesPlain));
+  const std::string root = from(hour, kServiceRootSpans, "");
+  CHECK_EQ(services_estimate_sql(root), std::string(golden::kServicesRootEstimate));
+  CHECK_EQ(services_sql(root, 60000, 0, false), std::string(golden::kServicesRoot));
+  // The drill-down groups by endpoint too, and reads the slowest spans and the releases of the service.
+  const std::string detail = from(hour, entry, " AND ServiceName = 'api-gateway'");
+  CHECK_EQ(services_estimate_sql(detail), std::string(golden::kServicesDetailEstimate));
+  CHECK_EQ(services_sql(detail, 60000, 0, true), std::string(golden::kServicesDetail));
+  CHECK_EQ(services_slowest_sql(detail), std::string(golden::kServicesSlowest));
+  CHECK_EQ(services_releases_sql(table, kAStart, kAEnd, "api-gateway", "1"), std::string(golden::kServicesReleases));
+  const std::string filtered = from(hour, entry, " AND StatusCode = 'Error' AND ServiceName = 'api-gateway' AND Duration >= 5000000");
+  CHECK_EQ(services_estimate_sql(filtered), std::string(golden::kServicesDetailFilteredEstimate));
+  CHECK_EQ(services_sql(filtered, 60000, 0, true), std::string(golden::kServicesDetailFiltered));
+  // A day of 565 M spans is read as 48 slices, one for each chart bucket of 30 minutes.
+  const int64_t day_start = 1789689600000LL, day_end = 1789776000000LL;
+  const ServicesWindow sampled = services_window(day_start, day_end, 1800000, 0, 564912223ULL, false);
+  CHECK(sampled.sampled);
+  CHECK_EQ(sampled.bucket_scale.size(), size_t(48));
+  CHECK_EQ(services_sql(from(sampled.time_sql, entry, ""), 1800000, 0, false), std::string(golden::kServicesSampled));
+  CHECK_EQ(services_db_sql(table, kAStart, kAEnd, "1", ""), std::string(golden::kServicesDb));
+  CHECK_EQ(services_db_sql(table, kAStart, kAEnd, "1", " AND ServiceName = 'api-gateway'"), std::string(golden::kServicesDbDetail));
+}
+
+void test_services_window_sampling() {
+  const int64_t day_start = 1789689600000LL, day_end = 1789776000000LL;
+  // Up to 150 M spans: the window is read whole. exact=1 asks for the whole window whatever its size.
+  const ServicesWindow small = services_window(day_start, day_end, 1800000, 0, 150000000ULL, false);
+  CHECK(!small.sampled);
+  CHECK_EQ(small.time_sql, time_predicate(day_start, day_end));
+  CHECK_EQ(small.factor, 1.0);
+  CHECK(!services_window(day_start, day_end, 1800000, 0, 900000000ULL, true).sampled);
+  // Above it: one slice in each bucket, at a stable offset, together 8.8 % of the window for 565 M spans.
+  const ServicesWindow big = services_window(day_start, day_end, 1800000, 0, 564912223ULL, false);
+  CHECK_EQ(big.sampled_ms, int64_t(7632000));
+  CHECK(std::fabs(big.factor - 86400000.0 / 7632000.0) < 1e-9);
+  CHECK(big.scale_for(day_start) > 1.0);
+  CHECK_EQ(big.scale_for(day_start - 1800000), 1.0);  // a bucket that was not sampled
+  CHECK(big.time_sql.rfind("((Timestamp >= fromUnixTimestamp64Milli(", 0) == 0);
+  // The same window and the same estimate always give the same slices.
+  CHECK_EQ(services_window(day_start, day_end, 1800000, 0, 564912223ULL, false).time_sql, big.time_sql);
+  // A bucket that is too short for a slice of 1 minute twice is not sampled.
+  CHECK(!services_window(day_start, day_end, 60000, 0, 564912223ULL, false).sampled);
+}
+
+Rows services_rows() {
+  return {{"3", "api", "", "", "100", "5", "10,20,30", "123456"},
+          {"3", "auth", "", "", "50", "0", "1,2,3", "999"},
+          {"1", "api", "1789207200000", "", "60", "2", "11,21,31", "100"},
+          {"1", "api", "1789207260000", "", "40", "3", "12,22,32", "200"},
+          {"2", "api", "", "GET /home", "70", "1", "5,6,7", "5000"},
+          {"2", "api", "", "POST /cart", "30", "4", "8,9,10", "9000"}};
+}
+
+clickhouse::Block estimate_block(uint64_t rows) {
+  clickhouse::Block block;
+  for (const char* name : {"database", "table"}) {
+    auto column = std::make_shared<clickhouse::ColumnString>();
+    column->Append("otel");
+    block.AppendColumn(name, column);
+  }
+  for (const char* name : {"parts", "rows", "marks"}) {
+    auto column = std::make_shared<clickhouse::ColumnUInt64>();
+    column->Append(name == std::string("rows") ? rows : 3);
+    block.AppendColumn(name, column);
+  }
+  return block;
+}
+
+ServicesQuery services_query() {
+  ServicesQuery query;
+  query.table = "`otel`.`otel_traces`";
+  query.visibility = "1";
+  query.span_scope = "entry";
+  query.start_ms = kAStart;
+  query.end_ms = kAEnd;
+  return query;
+}
+
+void test_the_services_are_read_in_one_scan() {
+  FakeDb db;
+  db.on_block("EXPLAIN ESTIMATE", [](const std::string&) { return estimate_block(456356); });
+  db.on("GROUPING SETS", services_rows());
+  ServicesQuery query = services_query();
+  query.detail = "api";
+  query.releases_supported = true;
+  db.on("ORDER BY Duration DESC", {{"t1", "s1", "GET /home", "1789207200100", "900000000", "Error"}});
+  db.on("service.version", {{"1.2.0", "1789207200000", "700"}, {"1.3.0", "1789207900000", "20"}});
+  const auto result = run_services(db, query);
+  CHECK(result);
+  const ServicesOutcome& out = *result.value;
+  CHECK_EQ(out.span_kind, std::string(kServiceEntrySpans));
+  CHECK_EQ(out.bucket_ms, int64_t(60000));
+  CHECK_EQ(out.window.estimated_rows, uint64_t(456356));
+  CHECK(!out.window.sampled);
+  CHECK_EQ(out.services.size(), size_t(2));
+  CHECK_EQ(out.services.at("api").spans, uint64_t(100));
+  CHECK_EQ(out.services.at("api").p95, uint64_t(20));
+  CHECK_EQ(out.services.at("api").total_ns, 123456.0);
+  CHECK_EQ(out.series.at("api").size(), size_t(2));
+  CHECK_EQ(out.series.at("api").at(1789207260000LL).errors, uint64_t(3));
+  // The endpoints by total time, the longest first.
+  CHECK_EQ(out.endpoints.size(), size_t(2));
+  CHECK_EQ(out.endpoints[0].first, std::string("POST /cart"));
+  CHECK_EQ(out.slowest.size(), size_t(1));
+  CHECK_EQ(out.slowest[0].duration_ns, uint64_t(900000000));
+  CHECK(out.releases_supported && !out.releases_estimated);
+  CHECK_EQ(out.releases.size(), size_t(2));
+  CHECK(!out.partial);
+  // Without a drill-down: no endpoints, no slowest spans, no releases.
+  FakeDb plain;
+  plain.on_block("EXPLAIN ESTIMATE", [](const std::string&) { return estimate_block(10); });
+  plain.on("GROUPING SETS", services_rows());
+  ServicesQuery overview = services_query();
+  const auto totals = run_services(plain, overview);
+  CHECK(totals.value->endpoints.empty() && totals.value->slowest.empty() && totals.value->releases.empty());
+  CHECK_EQ(plain.sqls.size(), size_t(2));
+}
+
+void test_the_services_read_stops_at_its_time_budget_and_keeps_what_it_has() {
+  FakeDb db;
+  db.on_block("EXPLAIN ESTIMATE", [](const std::string&) { return estimate_block(10); });
+  db.on("GROUPING SETS", services_rows());
+  db.bounded_result.elapsed_ms = 24900;  // 25 s of budget, less the margin of 250 ms
+  const auto result = run_services(db, services_query());
+  CHECK(result.value->partial);
+  CHECK_EQ(result.value->services.size(), size_t(2));
+  // The release markers are decoration: a failure leaves them out and says so.
+  FakeDb marks;
+  marks.on_block("EXPLAIN ESTIMATE", [](const std::string&) { return estimate_block(10); });
+  marks.on("GROUPING SETS", services_rows());
+  marks.fail_on("service.version", [] { throw std::runtime_error("bloom filter index is missing"); });
+  ServicesQuery query = services_query();
+  query.detail = "api";
+  query.releases_supported = true;
+  const auto kept = run_services(marks, query);
+  CHECK(kept);
+  CHECK(kept.value->releases.empty() && kept.value->releases_estimated);
+  CHECK_EQ(marks.invalidated, 1);
+  // The services of the view are what the scan answers: a failure of the scan is the failure of the route.
+  FakeDb failing;
+  failing.on_block("EXPLAIN ESTIMATE", [](const std::string&) { return estimate_block(10); });
+  failing.fail_on("GROUPING SETS", [] { throw server_error(241, "Memory limit exceeded"); });
+  bool thrown = false;
+  try {
+    run_services(failing, services_query());
+  } catch (const std::exception&) {
+    thrown = true;
+  }
+  CHECK(thrown);
+  CHECK_EQ(failing.invalidated, 1);
+}
+
+void test_a_failed_estimate_reads_the_window_whole_on_a_new_connection() {
+  FakeDb db;
+  db.fail_on("EXPLAIN ESTIMATE", [] { throw std::runtime_error("estimate is not available"); });
+  db.on("GROUPING SETS", services_rows());
+  const auto result = run_services(db, services_query());
+  CHECK(result);
+  CHECK_EQ(result.value->window.estimated_rows, uint64_t(0));
+  CHECK(!result.value->window.sampled);
+  CHECK_EQ(db.renewed, 1);
+  CHECK_EQ(db.invalidated, 1);
+  FakeDb gone;
+  gone.renew_ok = false;
+  gone.fail_on("EXPLAIN ESTIMATE", [] { throw std::runtime_error("estimate is not available"); });
+  const auto refused = run_services(gone, services_query());
+  CHECK(!refused);
+  CHECK_EQ(refused.error.code, std::string("trace_source_unavailable"));
+}
+
+void test_the_database_statements() {
+  FakeDb db;
+  db.on("db.query.text", {{"api", "SELECT 1", "postgresql", "10", "1", "5000", "300"}, {"auth", "UPDATE t SET a = 1", "mysql", "4", "0", "900", "100"}});
+  db.bounded_result.read_rows = kServicesDbReadRowsCap;
+  const DbOutcome out = run_services_db(db, services_query(), true);
+  CHECK(out.supported);
+  CHECK_EQ(out.rows.size(), size_t(2));
+  CHECK_EQ(out.rows[0].system, std::string("postgresql"));
+  CHECK_EQ(out.rows[0].total_ns, 5000.0);
+  CHECK_EQ(out.rows[0].p95, uint64_t(300));
+  CHECK_EQ(out.read.read_rows, kServicesDbReadRowsCap);
+  // The span attributes are not a Map the page may read: nothing is asked.
+  FakeDb none;
+  const DbOutcome unsupported = run_services_db(none, services_query(), false);
+  CHECK(!unsupported.supported && unsupported.rows.empty() && none.sqls.empty());
+}
+
+void test_the_services_service_builds_the_where_of_the_entry_spans() {
+  FakeDb db;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
+  db.on("FROM system.columns", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "Map(String, String)"}});
+  db.on_block("EXPLAIN ESTIMATE", [](const std::string&) { return estimate_block(10); });
+  db.on("GROUPING SETS", services_rows());
+  RequestContext context;
+  ServicesRequest request;
+  request.source_host_id = "local";
+  request.start_ms = kAStart;
+  request.end_ms = kAEnd;
+  request.detail = "api";
+  request.filters.status = "Error";
+  request.min_duration_ms = 5;
+  request.max_duration_ms = 90;
+  const auto answer = service.services(context, trace_host(), request);
+  CHECK(answer);
+  // The filters, then the service of the drill-down, then the bounds of the span's own duration.
+  CHECK(db.sqls[1].find(" WHERE 1 AND StatusCode = 'Error' AND ServiceName = 'api' AND Duration >= 5000000 AND Duration <= 90000000") != std::string::npos);
+  CHECK_EQ(answer.value->span_scope, std::string("entry"));
+  rapidjson::Document doc;
+  doc.Parse(services_json(*answer.value).c_str());
+  CHECK(!doc.HasParseError());
+  CHECK_EQ(std::string(doc["detail"].GetString()), std::string("api"));
+  CHECK_EQ(doc["services"].Size(), rapidjson::SizeType(2));
+  CHECK_EQ(std::string(doc["services"][0][0].GetString()), std::string("api"));
+  CHECK_EQ(doc["services"][0][1].GetUint64(), uint64_t(100));
+  CHECK_EQ(doc["series"]["api"].Size(), rapidjson::SizeType(2));
+  CHECK_EQ(doc["endpoints"].Size(), rapidjson::SizeType(2));
+  CHECK(doc.HasMember("slowest") && doc.HasMember("releases"));
+  CHECK_EQ(doc["estimated"].GetBool(), false);
+  CHECK_EQ(doc["exact_rows_limit"].GetUint64(), kServicesExactRows);
+  // The database statements: the same where.
+  FakeDb dbs;
+  TraceService db_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(dbs)); }, cache.refs());
+  dbs.on("FROM system.columns", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "String"}});
+  dbs.on("db.query.text", {{"api", "SELECT 1", "postgresql", "10", "1", "5000", "300"}});
+  const auto statements = db_service.services_db(context, trace_host(), request);
+  CHECK(statements);
+  rapidjson::Document sd;
+  sd.Parse(services_db_json(*statements.value).c_str());
+  CHECK_EQ(sd["supported"].GetBool(), true);
+  CHECK_EQ(sd["statements"].Size(), rapidjson::SizeType(1));
+  // A source whose span attributes are not a Map has no statements, and no statement is asked for.
+  FakeDb plain;
+  TestCaches plain_cache;
+  TraceService plain_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(plain)); }, plain_cache.refs());
+  plain.on("FROM system.columns", {{"SpanAttributes", "String"}, {"ResourceAttributes", "String"}});
+  const auto empty = plain_service.services_db(context, trace_host(), request);
+  CHECK(empty && !empty.value->outcome.supported);
+  CHECK_EQ(plain.count("db.query.text"), size_t(0));
+}
+
+void test_the_services_request() {
+  TraceSettings traces = settings();
+  traces.analytics = true;
+  ServicesRequest parsed;
+  ApiError error;
+  CHECK(parse_services(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"scope", "root"}, {"detail", "api"}, {"exact", "1"},
+                                {"bucket_origin_ms", "1234"}, {"align_buckets", "1"}, {"status", "Error"}}),
+                       traces, &parsed, &error));
+  CHECK_EQ(parsed.span_scope, std::string("root"));
+  CHECK_EQ(parsed.detail, std::string("api"));
+  CHECK(parsed.exact && parsed.align_buckets);
+  CHECK_EQ(parsed.bucket_origin_ms, int64_t(1234));
+  CHECK_EQ(parsed.filters.status, std::string("Error"));
+  ServicesRequest defaults;
+  CHECK(parse_services(request({{"start_ms", "1000"}, {"end_ms", "9000"}}), traces, &defaults, &error));
+  CHECK_EQ(defaults.span_scope, std::string("entry"));
+  CHECK(!defaults.exact && !defaults.align_buckets);
+  auto refused = [&](std::initializer_list<std::pair<const char*, const char*>> params, const TraceSettings& use) {
+    ServicesRequest out;
+    ApiError e;
+    CHECK(!parse_services(request(params), use, &out, &e));
+    return e;
+  };
+  CHECK_EQ(refused({{"scope", "everything"}}, traces).message, std::string("scope must be entry or root."));
+  CHECK_EQ(refused({{"detail", std::string(1025, 'x').c_str()}}, traces).message, std::string("detail is limited to 1024 bytes."));
+  CHECK_EQ(refused({{"min_duration_ms", "9"}, {"max_duration_ms", "3"}}, traces).code, std::string("invalid_trace_duration"));
+  CHECK_EQ(refused({{"tag", "nokey"}}, traces).code, std::string("invalid_trace_filter"));
+  TraceSettings off = traces;
+  off.analytics = false;
+  const ApiError disabled = refused({{"start_ms", "1000"}}, off);
+  CHECK_EQ(disabled.status, 404);
+  CHECK_EQ(disabled.message, std::string("Trace analytics (and the services view) are disabled by configuration."));
+  TraceSettings no_service_filter = traces;
+  no_service_filter.features.service_filter = false;
+  CHECK_EQ(refused({{"detail", "api"}}, no_service_filter).message, std::string("service filter is disabled by traces.features"));
+}
+
+// ---- the discovery reads ----
+
+void test_prefill_and_facet_statements_are_unchanged() {
+  const std::string table = "`otel`.`otel_traces`";
+  // The first pass reads the newest 5 minutes, the second the whole window without the pairs that are known.
+  CHECK_EQ(prefill_pass_sql(table, 1789210500000LL, kAEnd, "1", "", "", 20000000), std::string(golden::kPrefillSeed));
+  const std::set<std::pair<std::string, std::string>> known{{"a", "x"}, {"b", "it's"}};
+  const std::string excluded = prefill_excluded_sql(known);
+  CHECK_EQ(excluded, std::string(" AND (ServiceName, SpanName) NOT IN (('a', 'x'), ('b', 'it\\'s'))"));
+  CHECK_EQ(prefill_pass_sql(table, kAStart, kAEnd, "1", "", excluded, 20000000), fill(golden::kPrefillPass, {{"KNOWN", "('a', 'x'), ('b', 'it\\'s')"}}));
+  CHECK_EQ(prefill_pass_sql(table, kAStart, kAEnd, "1", kTagFilter, excluded, 20000000),
+           fill(golden::kPrefillPassTagged, {{"KNOWN", "('a', 'x'), ('b', 'it\\'s')"}}));
+  CHECK_EQ(prefill_excluded_sql({}), std::string());
+  CHECK_EQ(facet_keys_sql(table, kAStart, kAEnd, "1", "", true, true, 50000000), std::string(golden::kFacetKeys));
+  CHECK_EQ(facet_keys_sql(table, kAStart, kAEnd, "1", " AND ServiceName = 'api-gateway' AND StatusCode = 'Error'", true, true, 50000000),
+           std::string(golden::kFacetKeysFiltered));
+  CHECK_EQ(facet_values_sql(table, kAStart, kAEnd, "1", "", "span", "server.address", 10, 50000000), std::string(golden::kFacetValues));
+  CHECK_EQ(facet_values_sql(table, kAStart, kAEnd, "1", " AND ServiceName = 'api-gateway'", "span", "server.address", 3, 50000000),
+           std::string(golden::kFacetValuesFiltered));
+  // A source with one map only reads that one.
+  const std::string span_only = facet_keys_sql(table, kAStart, kAEnd, "1", "", true, false, 1000);
+  CHECK(span_only.find("ResourceAttributes") == std::string::npos && span_only.find("SpanAttributes.keys AS sk") != std::string::npos);
+}
+
+void test_the_prefill_reads_what_it_does_not_know() {
+  FakeDb db;
+  // The seed holds most of the pairs; the pass over the whole window finds one more and completes.
+  db.on_fn("LIMIT 1 BY ServiceName, SpanName", [](const std::string& sql) -> Rows {
+    if (sql.find("NOT IN") == std::string::npos) return {{"api", "GET /"}, {"api", "POST /"}};
+    return {{"auth", "login"}};
+  });
+  const Prefill value = read_prefill(db, "`otel`.`otel_traces`", "1", "", kAStart, kAEnd, kPrefillReadRows);
+  CHECK_EQ(value.passes, 2);
+  CHECK(!value.estimated);
+  CHECK(!value.truncated);
+  CHECK_EQ(value.pairs.size(), size_t(3));
+  CHECK_EQ(value.pairs[0].first, std::string("api"));
+  CHECK_EQ(value.pairs[2].second, std::string("login"));
+  CHECK_EQ(value.start_ms, kAStart);
+  CHECK_EQ(db.sqls[0].find("NOT IN") == std::string::npos, true);
+  CHECK(db.sqls[1].find("NOT IN (('api', 'GET /'), ('api', 'POST /'))") != std::string::npos);
+  // A window shorter than the seed has no seed pass.
+  FakeDb short_window;
+  short_window.on("LIMIT 1 BY ServiceName, SpanName", {{"api", "GET /"}});
+  CHECK_EQ(read_prefill(short_window, "`t`", "1", "", kAEnd - 60000, kAEnd, kPrefillReadRows).passes, 1);
+  // A pass that its read cap cut is repeated, without the pairs found so far, until it finds nothing new (and then the list is a
+  // subset: estimated).
+  FakeDb cut;
+  cut.bounded_result.read_rows = kPrefillPassRows;
+  cut.on_fn("LIMIT 1 BY ServiceName, SpanName", [](const std::string& sql) -> Rows {
+    if (sql.find("NOT IN") == std::string::npos) return {{"api", "GET /"}};
+    return {};
+  });
+  const Prefill subset = read_prefill(cut, "`t`", "1", "", kAStart, kAEnd, kPrefillReadRows);
+  CHECK(subset.estimated);
+  CHECK_EQ(subset.passes, 2);
+  CHECK_EQ(subset.read_rows, uint64_t(2) * kPrefillPassRows);
+  // The read budget bounds the passes: a budget of one pass leaves no row for the second.
+  FakeDb budget;
+  budget.bounded_result.read_rows = 1000;
+  budget.on("LIMIT 1 BY ServiceName, SpanName", {{"api", "GET /"}});
+  const Prefill lowered = read_prefill(budget, "`t`", "1", "", kAStart, kAEnd, 1000);
+  CHECK(lowered.estimated);
+  CHECK_EQ(lowered.passes, 1);
+  CHECK(budget.sqls[0].find("max_rows_to_read = 1000") != std::string::npos);
+}
+
+void test_the_facet_keys_and_values_are_sorted_and_bounded() {
+  FakeDb db;
+  db.on("sumMap(sk", {{"3000", "span", "http.route", "300"}, {"3000", "resource", "host.name", "300"}, {"3000", "span", "a.key", "300"},
+                      {"3000", "resource", "a.key", "300"}, {"3000", "span", "rare", "7"}});
+  const FacetKeys keys = read_facet_keys(db, "SELECT sumMap(sk", 50000000);
+  CHECK_EQ(keys.sampled_spans, uint64_t(3000));
+  CHECK_EQ(keys.keys.size(), size_t(5));
+  // By count, then by key, then the span map before the resource map.
+  CHECK_EQ(keys.keys[0].key, std::string("a.key"));
+  CHECK_EQ(keys.keys[0].scope, std::string("span"));
+  CHECK_EQ(keys.keys[1].scope, std::string("resource"));
+  CHECK_EQ(keys.keys[4].key, std::string("rare"));
+  CHECK(!keys.estimated);
+  // A read that reached its cap, or a sample that is full, is an estimate.
+  FakeDb capped;
+  capped.bounded_result.read_rows = 1000;
+  capped.on("sumMap(sk", {{"10", "span", "k", "1"}});
+  CHECK(read_facet_keys(capped, "SELECT sumMap(sk", 1000).estimated);
+  FakeDb full;
+  full.on("sumMap(sk", {{std::to_string(kFacetSampleRows), "span", "k", "1"}});
+  CHECK(read_facet_keys(full, "SELECT sumMap(sk", 50000000).estimated);
+  // The keys beyond the served ones (and one more, which says truncated) are dropped.
+  FakeDb many;
+  Rows rows;
+  for (size_t i = 0; i < kFacetMaxKeys + 20; ++i) rows.push_back({"1", "span", "k" + std::to_string(1000 + i), "5"});
+  many.on("sumMap(sk", rows);
+  CHECK_EQ(read_facet_keys(many, "SELECT sumMap(sk", 50000000).keys.size(), kFacetMaxKeys + 1);
+  FakeDb values;
+  values.on("OVER ()", {{"/cart", "40", "100", "250"}, {"/home", "30", "100", "250"}});
+  const FacetValues v = read_facet_values(values, "SELECT toString(v) OVER ()", 50000000);
+  CHECK_EQ(v.values.size(), size_t(2));
+  CHECK_EQ(v.spans_with_key, uint64_t(100));
+  CHECK_EQ(v.distinct_values, uint64_t(250));
+  CHECK(!v.estimated);
+  FakeDb groups;
+  groups.on("OVER ()", {{"/cart", "40", "100", std::to_string(kFacetGroupByCap)}});
+  CHECK(read_facet_values(groups, "SELECT toString(v) OVER ()", 50000000).estimated);
+}
+
+void test_the_schema_of_the_source() {
+  FakeDb db;
+  db.on("FROM system.columns", {{"Timestamp"}, {"TraceId"}, {"SpanId"}, {"ParentSpanId"}, {"SpanName"}, {"ServiceName"}, {"Duration"}, {"StatusCode"}, {"SpanAttributes"}});
+  db.on("FROM system.tables", {{"1"}});
+  MetaOutcome out;
+  read_schema(db, trace_host().otel.traces, &out);
+  CHECK(out.schema_ok && out.index_available);
+  CHECK_EQ(db.sqls[1], std::string("SELECT toString(count()) FROM system.tables WHERE database = 'otel' AND name = 'otel_traces_trace_id_ts'"));
+  // A column that the page reads is missing: not ok. No trace index table: nothing is asked about it.
+  FakeDb missing;
+  missing.on("FROM system.columns", {{"Timestamp"}, {"TraceId"}});
+  HostSpec host = trace_host();
+  host.otel.traces.trace_index_table.clear();
+  MetaOutcome partial;
+  read_schema(missing, host.otel.traces, &partial);
+  CHECK(!partial.schema_ok && !partial.index_available);
+  CHECK_EQ(missing.sqls.size(), size_t(1));
+  // The service reads it fresh, and the maps that it reads replace the cached ones.
+  FakeDb source;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(source)); }, cache.refs());
+  source.on("name IN ('SpanAttributes','ResourceAttributes')", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "String"}});
+  source.on("FROM system.columns", {{"Timestamp"}});
+  source.on("FROM system.tables", {{"0"}});
+  RequestContext context;
+  const auto answer = service.meta(context, trace_host(), "local");
+  CHECK(answer);
+  CHECK(!answer.value->outcome.schema_ok && !answer.value->outcome.index_available);
+  CHECK(answer.value->outcome.span_attribute_map && !answer.value->outcome.resource_attribute_map);
+  bool span_map = false, resource_map = true;
+  ForwardDb reader(source);
+  const size_t before = source.sqls.size();
+  CHECK(cached_attribute_maps(reader, cache.attribute_maps, trace_host(), trace_host().otel.traces, &span_map, &resource_map));
+  CHECK(span_map && !resource_map);
+  CHECK_EQ(source.sqls.size(), before);  // answered by the cache that meta filled
+  rapidjson::Document doc;
+  doc.Parse(meta_json(*answer.value).c_str());
+  CHECK(!doc.HasParseError());
+  CHECK_EQ(doc["tag_search_supported"].GetBool(), true);
+  CHECK_EQ(doc["schema_ok"].GetBool(), false);
+  CHECK_EQ(doc["context_windows_ms"].Size(), rapidjson::SizeType(4));
+  CHECK_EQ(doc["features"]["links"].GetBool(), true);
+  // A failure of the schema read is its own error.
+  FakeDb broken;
+  TraceService broken_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(broken)); }, cache.refs());
+  broken.fail_on("FROM system.columns", [] { throw server_error(497, "Not enough privileges"); });
+  const auto denied = broken_service.meta(context, trace_host(), "local");
+  CHECK(!denied);
+  CHECK_EQ(denied.error.status, 503);  // a missing grant is a 503 not_granted on every page
+  CHECK_EQ(denied.error.code, std::string("trace_not_granted"));
+}
+
+void test_the_prefill_and_the_facets_are_cached_by_window_and_filters() {
+  FakeDb db;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
+  db.on("FROM system.columns", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "Map(String, String)"}});
+  db.on("LIMIT 1 BY ServiceName, SpanName", {{"api", "GET /"}});
+  db.on("sumMap(sk", {{"100", "span", "k", "9"}});
+  db.on("OVER ()", {{"v1", "9", "9", "1"}});
+  RequestContext context;
+  PrefillRequest prefill;
+  prefill.source_host_id = "local";
+  prefill.start_ms = kAStart + 1500;
+  prefill.end_ms = kAEnd - 1500;
+  prefill.aligned_start_ms = kAStart;
+  prefill.aligned_end_ms = kAEnd;
+  prefill.read_budget = kPrefillReadRows;
+  const auto first = service.prefill(context, trace_host(), prefill);
+  CHECK(first);
+  const size_t after_first = db.sqls.size();
+  CHECK(service.prefill(context, trace_host(), prefill));
+  CHECK_EQ(db.sqls.size(), after_first);  // the second request of the minute reads nothing
+  rapidjson::Document doc;
+  doc.Parse(prefill_json(*first.value).c_str());
+  CHECK(!doc.HasParseError());
+  CHECK_EQ(doc["pairs"].Size(), rapidjson::SizeType(1));
+  CHECK_EQ(doc["pairs"][0][2].GetUint64(), uint64_t(1));  // the count is kept for compatibility
+  CHECK_EQ(doc["range"][0].GetInt64(), kAStart + 1500);   // the range that was asked, not the aligned one
+  CHECK_EQ(doc["scan"]["read_rows_limit"].GetUint64(), kPrefillReadRows);
+  // A tag filter has its own entry, and narrows the pairs.
+  PrefillRequest tagged = prefill;
+  tagged.filters.tags.push_back(TagFilter{"span", TagOp::Eq, "k", "v"});
+  CHECK(service.prefill(context, trace_host(), tagged));
+  CHECK(db.count("SpanAttributes['k'] = 'v'") > 0);
+  // The facets: keys, and the values of a key.
+  FacetRequest facets;
+  facets.source_host_id = "local";
+  facets.start_ms = kAStart;
+  facets.end_ms = kAEnd;
+  facets.aligned_start_ms = kAStart;
+  facets.aligned_end_ms = kAEnd;
+  facets.read_cap = kFacetReadRowsCap;
+  const auto keys = service.facet_keys(context, trace_host(), facets);
+  CHECK(keys && !keys.value->cached);
+  CHECK(keys.value->span && keys.value->resource);
+  const auto again = service.facet_keys(context, trace_host(), facets);
+  CHECK(again.value->cached);
+  rapidjson::Document kd;
+  kd.Parse(facet_keys_json(*again.value).c_str());
+  CHECK(!kd.HasParseError());
+  CHECK_EQ(kd["supported"].GetBool(), true);
+  CHECK_EQ(kd["cached"].GetBool(), true);
+  CHECK_EQ(kd["scopes"].Size(), rapidjson::SizeType(2));
+  CHECK_EQ(kd["keys"][0][1].GetString() == std::string("k"), true);
+  FacetRequest values = facets;
+  values.key_scope = "span";
+  values.key = "k";
+  values.limit = 5;
+  const auto vals = service.facet_values(context, trace_host(), values);
+  CHECK(vals);
+  rapidjson::Document vd;
+  vd.Parse(facet_values_json(*vals.value).c_str());
+  CHECK(!vd.HasParseError());
+  CHECK_EQ(vd["limit"].GetInt(), 5);
+  CHECK_EQ(vd["has_more"].GetBool(), false);
+  CHECK_EQ(vd["values"][0][0].GetString() == std::string("v1"), true);
+  // The values of a key ignore the filters of that key.
+  FacetRequest own = values;
+  own.filters.tags.push_back(TagFilter{"span", TagOp::Eq, "k", "v1"});
+  own.limit = 6;
+  CHECK(service.facet_values(context, trace_host(), own));
+  CHECK_EQ(db.count("SpanAttributes['k'] = 'v1'"), size_t(0));
+  // A failure of the scan is a 503 with its own code, and is not kept.
+  FakeDb failing;
+  TraceService failing_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(failing)); }, cache.refs());
+  failing.on("FROM system.columns", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "Map(String, String)"}});
+  failing.fail_on("OVER ()", [] { throw std::runtime_error("the scan failed"); });
+  FacetRequest other = values;
+  other.key = "another";
+  const auto failed = failing_service.facet_values(context, trace_host(), other);
+  CHECK(!failed);
+  CHECK_EQ(failed.error.status, 503);
+  CHECK_EQ(failed.error.code, std::string("trace_facet_values_failed"));
+  CHECK_EQ(failing.invalidated, 1);
+  // A scope that is not a Map is refused before the scan; one that traces.features turned off too.
+  FakeDb plain;
+  TestCaches plain_cache;
+  TraceService plain_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(plain)); }, plain_cache.refs());
+  plain.on("FROM system.columns", {{"SpanAttributes", "String"}, {"ResourceAttributes", "Map(String, String)"}});
+  CHECK_EQ(plain_service.facet_values(context, trace_host(), values).error.code, std::string("trace_tag_search_unsupported"));
+  // With no usable map the keys are answered empty, without a scan.
+  FacetRequest none = facets;
+  none.aligned_start_ms = kAStart + 60000;
+  FakeDb nothing;
+  TestCaches nothing_cache;
+  TraceService no_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(nothing)); }, nothing_cache.refs());
+  nothing.on("FROM system.columns", {{"SpanAttributes", "String"}, {"ResourceAttributes", "String"}});
+  const auto empty = no_service.facet_keys(context, trace_host(), none);
+  CHECK(empty && !empty.value->span && !empty.value->resource && empty.value->value->keys.empty());
+  CHECK_EQ(nothing.count("sumMap"), size_t(0));
+}
+
+void test_the_requests_of_the_discovery_routes() {
+  TraceSettings traces = settings();
+  PrefillRequest prefill;
+  ApiError error;
+  CHECK(parse_prefill(request({{"start_ms", "1789207201500"}, {"end_ms", "1789210798500"}, {"read_rows_limit", "3000"}}), traces, &prefill, &error));
+  CHECK_EQ(prefill.aligned_start_ms, int64_t(1789207200000LL));
+  CHECK_EQ(prefill.aligned_end_ms, int64_t(1789210800000LL));
+  CHECK_EQ(prefill.read_budget, uint64_t(2000));
+  CHECK(!parse_prefill(request({{"start_ms", "5"}, {"end_ms", "3"}}), traces, &prefill, &error));
+  CHECK_EQ(error.code, std::string("invalid_trace_range"));
+  CHECK(!parse_prefill(request({{"start_ms", "1000"}, {"end_ms", "2000"}, {"status", "Bad"}}), traces, &prefill, &error));
+  CHECK_EQ(error.code, std::string("invalid_trace_filter"));
+  // The prefill does not refuse a filter that traces.features turned off: the pickers stay selectable.
+  TraceSettings no_service = traces;
+  no_service.features.service_filter = false;
+  CHECK(parse_prefill(request({{"start_ms", "1000"}, {"end_ms", "2000"}, {"service", "api"}}), no_service, &prefill, &error));
+  FacetRequest facets;
+  CHECK(parse_facets(request({{"start_ms", "1789207201500"}, {"end_ms", "1789210798500"}}), traces, &facets, &error));
+  CHECK_EQ(facets.aligned_end_ms, int64_t(1789210800000LL));
+  CHECK_EQ(facets.read_cap, kFacetReadRowsCap);
+  CHECK(!parse_facets(request({{"start_ms", "1000"}, {"end_ms", "2000"}, {"service", "api"}}), no_service, &facets, &error));
+  CHECK_EQ(error.code, std::string("trace_filter_disabled"));
+  FacetRequest key;
+  CHECK(parse_facet_key(request({{"scope", "resource"}, {"key", "host.name"}, {"limit", "9999"}}), &key, &error));
+  CHECK_EQ(key.limit, kFacetMaxValues);
+  CHECK_EQ(key.key, std::string("host.name"));
+  CHECK(!parse_facet_key(request({{"scope", "log"}, {"key", "k"}}), &key, &error));
+  CHECK_EQ(error.message, std::string("scope must be span or resource."));
+  CHECK(!parse_facet_key(request({{"scope", "span"}}), &key, &error));
+  CHECK_EQ(error.message, std::string("key must be 1 to 512 bytes."));
+  CHECK(!parse_facet_key(request({{"scope", "span"}, {"key", std::string(513, 'k').c_str()}}), &key, &error));
 }
 
 }  // namespace
@@ -1391,6 +1985,20 @@ int main() {
   RUN(test_the_service_map_and_its_json);
   RUN(test_the_json_of_the_search);
   RUN(test_the_json_of_the_charts_and_the_heatmap);
+  RUN(test_services_statements_are_unchanged);
+  RUN(test_services_window_sampling);
+  RUN(test_the_services_are_read_in_one_scan);
+  RUN(test_the_services_read_stops_at_its_time_budget_and_keeps_what_it_has);
+  RUN(test_a_failed_estimate_reads_the_window_whole_on_a_new_connection);
+  RUN(test_the_database_statements);
+  RUN(test_the_services_service_builds_the_where_of_the_entry_spans);
+  RUN(test_the_services_request);
+  RUN(test_prefill_and_facet_statements_are_unchanged);
+  RUN(test_the_prefill_reads_what_it_does_not_know);
+  RUN(test_the_facet_keys_and_values_are_sorted_and_bounded);
+  RUN(test_the_schema_of_the_source);
+  RUN(test_the_prefill_and_the_facets_are_cached_by_window_and_filters);
+  RUN(test_the_requests_of_the_discovery_routes);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }
