@@ -56,12 +56,15 @@ static f64 clamp01(f64 a) { return a < 0 ? 0 : a > 1 ? 1 : a; }
 
 static u16 *obuf;
 static i32 olen, ocap;
+/* Set when a text did not fit in the output: the call then answers -1 and the page takes the JavaScript path. */
+static i32 ofull;
 static i32 *ooff;
 static u8 *ostatus;
 static f64 *onum;
 
 static i32 out_reserve(i32 n, i32 chars_per_item, i32 numbers) {
   olen = 0;
+  ofull = 0;
   ocap = n * chars_per_item + 16;
   obuf = NEW(u16, ocap);
   ooff = NEW(i32, n + 1);
@@ -70,7 +73,10 @@ static i32 out_reserve(i32 n, i32 chars_per_item, i32 numbers) {
   return obuf && ooff && ostatus && (!numbers || onum) ? 1 : 0;
 }
 
-static void put_char(u32 c) { if (olen < ocap) obuf[olen++] = (u16)c; }
+static void put_char(u32 c) {
+  if (olen < ocap) obuf[olen++] = (u16)c;
+  else ofull = 1;
+}
 static void put_lit(const char *p) { while (*p) put_char((u8)*p++); }
 static void put_int(i32 v) {
   if (v < 0) { put_char('-'); v = -v; }
@@ -283,7 +289,7 @@ EXPORT(col_normalize) i32 col_normalize(const u16 *s, const i32 *offs, i32 n) {
     (void)start;
   }
   ooff[n] = olen;
-  return olen > ocap ? -1 : 0;
+  return ofull ? -1 : 0;
 }
 
 /* ------------------------------------------------------------------ parse for the chart engine */
@@ -317,7 +323,7 @@ EXPORT(col_rgba) i32 col_rgba(const f64 *colors, const f64 *alphas, i32 n) {
     ostatus[i] = 0;
   }
   ooff[n] = olen;
-  return olen > ocap ? -1 : 0;
+  return ofull ? -1 : 0;
 }
 
 /* ------------------------------------------------------------------ mix (app_graph_kit.js) */
@@ -340,7 +346,7 @@ EXPORT(col_mix) i32 col_mix(const f64 *x, const f64 *y, const f64 *t, i32 n) {
     ostatus[i] = 0;
   }
   ooff[n] = olen;
-  return olen > ocap ? -1 : 0;
+  return ofull ? -1 : 0;
 }
 
 /* ------------------------------------------------------------------ luminance, contrast, readable text (app_palette.js) */
