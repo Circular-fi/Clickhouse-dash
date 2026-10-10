@@ -109,12 +109,16 @@ def test_trace_analytics_is_separate_and_deduplicates_by_existence():
 
 
 def test_trace_detail_has_no_all_history_traceid_fallback():
-    cpp = read("src/api_traces.cpp")
-    detail = cpp[cpp.index("void Server::handle_trace_detail"):]
+    sql = read_unit("trace_sql.cpp")
+    service = read_unit("trace_service.cpp")
+    json = read_unit("trace_json.cpp")
+    detail = sql[sql.index("std::string trace_detail_sql"):sql.index("std::string span_sql")]
+    detail += service[service.index("TraceService::trace_detail"):service.index("TraceService::span(")]
+    detail_json = json[json.index("std::string trace_detail_json"):json.index("std::string span_json")]
     assert "full_trace_id_lookup" not in detail
     assert "used_full_trace_lookup" not in detail
     assert "fromUnixTimestamp64Nano(min(Timestamp))" not in detail
-    assert 'w.Key("range_source"); w.String("trace_index");' in detail
+    assert 'w.Key("range_source"); w.String("trace_index");' in detail_json
     assert "trace_index_lookup_failed" in detail
 
 

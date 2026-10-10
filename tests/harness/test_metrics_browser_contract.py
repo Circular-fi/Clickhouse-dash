@@ -1,6 +1,7 @@
 """Source contract of the metrics browser API (src/api_metrics.cpp)."""
 import json
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,8 +35,8 @@ def test_routes_are_registered_only_when_metrics_are_enabled():
 def test_shared_service_allowlist_header():
     header = read("src/otel_allowlist.hpp")
     assert "inline std::string service_allowlist_predicate(const TraceSettings& cfg) {" in header
-    assert '#include "otel_allowlist.hpp"' in read("src/api_traces.cpp")
-    assert "std::string service_allowlist_predicate(" not in read("src/api_traces.cpp")
+    assert '#include "otel_allowlist.hpp"' in read_unit("trace_service.cpp")
+    assert "std::string service_allowlist_predicate(" not in read_traces()
     api = read("src/api_metrics.cpp")
     assert '#include "otel_allowlist.hpp"' in api
     assert api.count("service_allowlist_predicate(host->otel.traces)") + api.count("service_allowlist_predicate(ctx.host->otel.traces)") >= 4

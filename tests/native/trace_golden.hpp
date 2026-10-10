@@ -197,4 +197,80 @@ inline constexpr const char* kFacetValues =
 inline constexpr const char* kFacetValuesFiltered =
     R"SQL(SELECT toString(v), toString(c), toString(sum(c) OVER ()), toString(count() OVER ()) FROM (SELECT v, count() AS c FROM (SELECT SpanAttributes['server.address'] AS v FROM `otel`.`otel_traces` PREWHERE Timestamp >= fromUnixTimestamp64Milli(1789207200000) AND Timestamp <= fromUnixTimestamp64Milli(1789210800000) WHERE 1 AND mapContains(SpanAttributes, 'server.address') AND ServiceName = 'api-gateway' LIMIT 3000000) GROUP BY v) ORDER BY c DESC, v LIMIT 3 SETTINGS max_execution_time = 5, timeout_overflow_mode = 'break', max_rows_to_read = 50000000, read_overflow_mode = 'break', max_rows_to_group_by = 100000, group_by_overflow_mode = 'any')SQL";
 
+// detail [0]
+inline constexpr const char* kTraceDetail =
+    R"SQL(WITH '8db8a43cf3f54ba8f984e09812308d7f' AS trace, (SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1)) FROM `otel`.`otel_traces_trace_id_ts` WHERE TraceId = trace) AS trace_bounds SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode), toString(StatusMessage), toJSONString(SpanAttributes), toJSONString(ResourceAttributes), toJSONString(Events.Timestamp), toJSONString(Events.Name), toJSONString(Events.Attributes), toJSONString(Links.TraceId), toJSONString(Links.SpanId), toJSONString(Links.Attributes) FROM `otel`.`otel_traces` PREWHERE Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2) WHERE TraceId = trace AND 1 ORDER BY Timestamp, SpanId LIMIT 10001)SQL";
+
+// linked-from [0]
+inline constexpr const char* kLinkedIndexBounds =
+    R"SQL(SELECT toString(count()), toString(toUnixTimestamp64Milli(min(Start))), toString(toUnixTimestamp64Milli(max(End))) FROM `otel`.`otel_traces_trace_id_ts` WHERE TraceId = '8db8a43cf3f54ba8f984e09812308d7f')SQL";
+
+// linked-from [1]
+inline constexpr const char* kLinkedFrom =
+    R"SQL(WITH '8db8a43cf3f54ba8f984e09812308d7f' AS trace SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode), toJSONString(arrayFilter((s, t) -> t = trace, Links.SpanId, Links.TraceId)), toJSONString(arrayFilter((a, t, s) -> t = trace, Links.Attributes, Links.TraceId, Links.SpanId)) FROM `otel`.`otel_traces` PREWHERE has(Links.TraceId, trace) WHERE Timestamp >= fromUnixTimestamp64Milli(1789207197855) AND Timestamp <= fromUnixTimestamp64Milli(1789214397877) AND TraceId != trace AND 1 ORDER BY Timestamp DESC, SpanId DESC LIMIT 101 SETTINGS max_execution_time = 15)SQL";
+
+// linked-from-window [0]
+inline constexpr const char* kLinkedFromSpan =
+    R"SQL(WITH '8db8a43cf3f54ba8f984e09812308d7f' AS trace SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode), toJSONString(arrayFilter((s, t) -> t = trace AND s = '57511f4eadbcc3e7', Links.SpanId, Links.TraceId)), toJSONString(arrayFilter((a, t, s) -> t = trace AND s = '57511f4eadbcc3e7', Links.Attributes, Links.TraceId, Links.SpanId)) FROM `otel`.`otel_traces` PREWHERE has(Links.TraceId, trace) WHERE Timestamp >= fromUnixTimestamp64Milli(1789203600000) AND Timestamp <= fromUnixTimestamp64Milli(1789214400000) AND TraceId != trace AND 1 AND arrayExists((t, s) -> t = trace AND s = '57511f4eadbcc3e7', Links.TraceId, Links.SpanId) ORDER BY Timestamp DESC, SpanId DESC LIMIT 101 SETTINGS max_execution_time = 15)SQL";
+
+// context-around [0]
+inline constexpr const char* kContextOlderAround =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode) FROM `otel`.`otel_traces` WHERE Timestamp >= fromUnixTimestamp64Nano(1789210737865030093) AND Timestamp <= fromUnixTimestamp64Nano(1789210857865030093) AND 1 AND Timestamp <= fromUnixTimestamp64Nano(1789210797865030093) ORDER BY Timestamp DESC, SpanId DESC LIMIT 26 SETTINGS max_execution_time = 10)SQL";
+
+// context-around [1]
+inline constexpr const char* kContextNewerAround =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode) FROM `otel`.`otel_traces` WHERE Timestamp >= fromUnixTimestamp64Nano(1789210737865030093) AND Timestamp <= fromUnixTimestamp64Nano(1789210857865030093) AND 1 AND Timestamp > fromUnixTimestamp64Nano(1789210797865030093) ORDER BY Timestamp ASC, SpanId ASC LIMIT 26 SETTINGS max_execution_time = 10)SQL";
+
+// context-around-service [0]
+inline constexpr const char* kContextOlderService =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode) FROM `otel`.`otel_traces` WHERE Timestamp >= fromUnixTimestamp64Nano(1789210787865030093) AND Timestamp <= fromUnixTimestamp64Nano(1789210807865030093) AND 1 AND ServiceName = 'checkout' AND Timestamp <= fromUnixTimestamp64Nano(1789210797865030093) ORDER BY Timestamp DESC, SpanId DESC LIMIT 26 SETTINGS max_execution_time = 10)SQL";
+
+// context-host [0]
+inline constexpr const char* kContextOlderHost =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode) FROM `otel`.`otel_traces` WHERE Timestamp >= fromUnixTimestamp64Nano(1789210737865030093) AND Timestamp <= fromUnixTimestamp64Nano(1789210857865030093) AND 1 AND mapContains(ResourceAttributes, 'host.name') AND ResourceAttributes['host.name'] = 'x' AND Timestamp <= fromUnixTimestamp64Nano(1789210797865030093) ORDER BY Timestamp DESC, SpanId DESC LIMIT 26 SETTINGS max_execution_time = 10)SQL";
+
+// context-attr [0]
+inline constexpr const char* kContextOlderAttribute =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode) FROM `otel`.`otel_traces` WHERE Timestamp >= fromUnixTimestamp64Nano(1789210737865030093) AND Timestamp <= fromUnixTimestamp64Nano(1789210857865030093) AND 1 AND mapContains(SpanAttributes, 'server.address') AND SpanAttributes['server.address'] = 'frontend.shop.svc.cluster.local' AND Timestamp <= fromUnixTimestamp64Nano(1789210797865030093) ORDER BY Timestamp DESC, SpanId DESC LIMIT 26 SETTINGS max_execution_time = 10)SQL";
+
+// context-older [0]
+inline constexpr const char* kContextOlderCursor =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode) FROM `otel`.`otel_traces` WHERE Timestamp >= fromUnixTimestamp64Nano(1789210737865030093) AND Timestamp <= fromUnixTimestamp64Nano(1789210857865030093) AND 1 AND (Timestamp < fromUnixTimestamp64Nano(1789210797865030093) OR (Timestamp = fromUnixTimestamp64Nano(1789210797865030093) AND SpanId < '57511f4eadbcc3e7')) ORDER BY Timestamp DESC, SpanId DESC LIMIT 8 SETTINGS max_execution_time = 10)SQL";
+
+// context-newer [0]
+inline constexpr const char* kContextNewerCursor =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), toString(StatusCode) FROM `otel`.`otel_traces` WHERE Timestamp >= fromUnixTimestamp64Nano(1789210796865030093) AND Timestamp <= fromUnixTimestamp64Nano(1789210798865030093) AND 1 AND (Timestamp > fromUnixTimestamp64Nano(1789210797865030093) OR (Timestamp = fromUnixTimestamp64Nano(1789210797865030093) AND SpanId > '57511f4eadbcc3e7')) ORDER BY Timestamp ASC, SpanId ASC LIMIT 8 SETTINGS max_execution_time = 10)SQL";
+
+// span-one [0]
+inline constexpr const char* kSpanOne =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), toString(StatusCode), toString(StatusMessage), toJSONString(SpanAttributes), toJSONString(ResourceAttributes), toJSONString(Events.Timestamp), toJSONString(Events.Name), toJSONString(Events.Attributes), toJSONString(Links.TraceId), toJSONString(Links.SpanId), toJSONString(Links.Attributes) FROM `otel`.`otel_traces` PREWHERE Timestamp = fromUnixTimestamp64Nano(1789210797865030093) AND 1 WHERE TraceId = '8db8a43cf3f54ba8f984e09812308d7f' AND SpanId = '57511f4eadbcc3e7' LIMIT 1 SETTINGS max_execution_time = 10)SQL";
+
+// spans-A [0]
+inline constexpr const char* kSpansPlain =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), toString(StatusCode), toString(StatusMessage) FROM `otel`.`otel_traces` PREWHERE Timestamp >= fromUnixTimestamp64Nano(1789209900000000001) AND Timestamp <= fromUnixTimestamp64Nano(1789210800000000000) AND 1 WHERE 1 ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT 101 SETTINGS max_execution_time = 20, timeout_overflow_mode = 'throw', max_rows_to_read = 1000000000, read_overflow_mode = 'throw')SQL";
+
+// spans-A-service [0]
+inline constexpr const char* kSpansService =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), toString(StatusCode), toString(StatusMessage) FROM `otel`.`otel_traces` PREWHERE Timestamp >= fromUnixTimestamp64Nano(1789209900000000001) AND Timestamp <= fromUnixTimestamp64Nano(1789210800000000000) AND 1 AND ServiceName = 'api-gateway' WHERE 1 ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT 31 SETTINGS max_execution_time = 20, timeout_overflow_mode = 'throw', max_rows_to_read = 1000000000, read_overflow_mode = 'throw')SQL";
+
+// spans-A-cols [0]
+inline constexpr const char* kSpansColumns =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), toString(StatusCode), toString(StatusMessage), toString(toUInt8(mapContains(SpanAttributes, 'server.address'))), toString(SpanAttributes['server.address']), toString(toUInt8(mapContains(ResourceAttributes, 'host.name'))), toString(ResourceAttributes['host.name']) FROM `otel`.`otel_traces` PREWHERE Timestamp >= fromUnixTimestamp64Nano(1789209900000000001) AND Timestamp <= fromUnixTimestamp64Nano(1789210800000000000) AND 1 WHERE 1 ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT 6 SETTINGS max_execution_time = 20, timeout_overflow_mode = 'throw', max_rows_to_read = 1000000000, read_overflow_mode = 'throw')SQL";
+
+// spans-A-kind [0]
+inline constexpr const char* kSpansKinds =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), toString(StatusCode), toString(StatusMessage) FROM `otel`.`otel_traces` PREWHERE Timestamp >= fromUnixTimestamp64Nano(1789209900000000001) AND Timestamp <= fromUnixTimestamp64Nano(1789210800000000000) AND 1 AND SpanKind IN ('Client', 'Server') WHERE 1 ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT 21 SETTINGS max_execution_time = 20, timeout_overflow_mode = 'throw', max_rows_to_read = 1000000000, read_overflow_mode = 'throw')SQL";
+
+// spans-A-duration [0]
+inline constexpr const char* kSpansDurations =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), toString(StatusCode), toString(StatusMessage) FROM `otel`.`otel_traces` PREWHERE Timestamp >= fromUnixTimestamp64Nano(1789209900000000001) AND Timestamp <= fromUnixTimestamp64Nano(1789210800000000000) AND 1 AND Duration >= 100000000 AND Duration <= 900000000 WHERE 1 ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT 21 SETTINGS max_execution_time = 20, timeout_overflow_mode = 'throw', max_rows_to_read = 1000000000, read_overflow_mode = 'throw')SQL";
+
+// spans-A-tag [0]
+inline constexpr const char* kSpansTag =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), toString(StatusCode), toString(StatusMessage) FROM `otel`.`otel_traces` PREWHERE Timestamp >= fromUnixTimestamp64Nano(1789209900000000001) AND Timestamp <= fromUnixTimestamp64Nano(1789210800000000000) AND 1 WHERE 1 AND (mapContains(SpanAttributes, 'server.address') AND SpanAttributes['server.address'] = 'frontend.shop.svc.cluster.local') ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT 21 SETTINGS max_execution_time = 20, timeout_overflow_mode = 'throw', max_rows_to_read = 1000000000, read_overflow_mode = 'throw')SQL";
+
+// spans-A-error [0]
+inline constexpr const char* kSpansError =
+    R"SQL(SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), toString(StatusCode), toString(StatusMessage) FROM `otel`.`otel_traces` PREWHERE Timestamp >= fromUnixTimestamp64Nano(1789209900000000001) AND Timestamp <= fromUnixTimestamp64Nano(1789210800000000000) AND 1 AND StatusCode = 'Error' WHERE 1 ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT 41 SETTINGS max_execution_time = 20, timeout_overflow_mode = 'throw', max_rows_to_read = 1000000000, read_overflow_mode = 'throw')SQL";
+
 }  // namespace golden

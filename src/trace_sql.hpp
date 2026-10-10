@@ -4,6 +4,8 @@
 // Nothing here reads a request or a connection, so a native test (tests/native/trace_test.cpp) compares each statement to its
 // expected text, and the strategies of trace_search.hpp / trace_service.hpp send them through a ChExecutor.
 
+#include "otel_settings.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -158,6 +160,61 @@ std::string service_map_estimate_sql(const std::string& table, int64_t start_ms,
 // An edge A -> B counts the spans of service B whose parent span (same TraceId) belongs to another service A; node metrics count
 // every span of the service.
 std::string service_map_sql(const TraceScope& scope, const ServiceMapSampling& sampling);
+
+// ---- one trace, one span, the spans around a time, the spans that link to a trace ----
+
+// The columns of a span row of the lists (linked-from, context), and of the span search and the span by its key.
+extern const char* const kSpanListColumns;
+extern const char* const kSpanSearchColumns;
+constexpr size_t kLinkedFromLimit = 100;
+
+// The spans of one trace with their attributes, events and links, in the time that the trace index gives: one lookup yields both
+// bounds of the window of the trace (±1 s). traces.features turns off what the page may not read.
+std::string trace_detail_sql(const TraceSettings& traces, const std::string& trace_id, const std::string& visibility);
+
+// One span by its full row key (HyperDX's row WHERE): the exact Timestamp bounds the read to a few granules.
+std::string span_sql(const TraceSettings& traces, const std::string& trace_id, const std::string& span_id, int64_t timestamp_ns,
+                     const std::string& visibility);
+
+// The bounds of a trace in the trace index (the number of its rows, its first Start, its last End), for linked-from without a window.
+std::string trace_index_bounds_sql(const TraceSettings& traces, const std::string& trace_id);
+
+// Spans of OTHER traces whose Links point to this trace (or to one of its spans), inside [lo_ms, hi_ms]. has() reads Links.TraceId alone
+// (PREWHERE); a span id also needs the pair to match, so the zipped arrays are checked for the remaining rows. With a restricted
+// allowlist a link names only a span of the trace that the allowlist shows (visible_targets): the others are hidden.
+std::string linked_from_sql(const TraceSettings& traces, const std::string& trace_id, const std::string& span_id, int64_t lo_ms,
+                            int64_t hi_ms, const std::string& visibility);
+
+// The spans around an anchor, newest first: the SQL of the filter ("" for any span), the window, and a page of one direction.
+std::string context_filter_sql(const std::string& column, const std::string& key, const std::string& value);
+std::string context_base_sql(const std::string& table, int64_t lo_ns, int64_t hi_ns, const std::string& visibility, const std::string& filter_sql);
+// `keyset` is the condition of the page (see context_keyset_*); a page reads n + 1 rows, so that the next one is known.
+std::string context_page_sql(const std::string& base, const std::string& keyset, int n, bool newer);
+std::string context_keyset_around(int64_t anchor_ns, bool newer);
+std::string context_keyset_after(int64_t cursor_ns, const std::string& cursor_span, bool newer);
+
+// ---- the span search ----
+
+// The columns filters of a span search: the span filters on columns, the kinds, the span's own duration. They go to PREWHERE with the
+// allowlist (primary key ServiceName / SpanName, status, kind, duration); the attribute maps predicates, which read the large map columns,
+// stay in WHERE for the rows left.
+std::string span_column_filters_sql(const std::string& span_filters, const std::vector<std::string>& kinds, double min_duration_ms,
+                                    double max_duration_ms);
+
+constexpr int kSpanSliceTimeoutSeconds = 20;
+constexpr uint64_t kSpanSliceReadRowsCap = 1000000000ULL;
+
+struct SpanSearchSql {
+  std::string select;  // "SELECT <columns> FROM <table>"
+  std::string visibility, column_filters, tag_sql;
+};
+// " AND (Timestamp < ts OR (Timestamp = ts AND (SpanId < id OR (SpanId = id AND TraceId < trace))))": the spans after a row key.
+std::string span_keyset_sql(int64_t ts_ns, const std::string& span_id, const std::string& trace_id);
+// One slice [lo_ns, upper_ns], newest first, at most need + 1 rows. A slice that would read more rows, or run longer, fails (throw mode,
+// so a truncated top-N is never returned as a page).
+std::string span_slice_sql(const SpanSearchSql& q, int64_t lo_ns, int64_t upper_ns, const std::string& keyset, size_t need);
+// The copies of one row key (a span exported twice has two timestamps for one key): all of them, so a page seam never splits them.
+std::string span_ties_sql(const SpanSearchSql& q, int64_t ts_ns, const std::string& span_id, const std::string& trace_id);
 
 // ---- the services view ----
 // RED metrics (rate, errors, duration) of each service's entry spans, after HyperDX's ServicesDashboardPage. Entry spans are the

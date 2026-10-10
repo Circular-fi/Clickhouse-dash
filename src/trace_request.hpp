@@ -7,6 +7,7 @@
 #include "error_envelope.hpp"
 #include "otel_settings.hpp"
 #include "trace_filters.hpp"
+#include "trace_spans.hpp"
 
 #include <httplib.h>
 
@@ -113,6 +114,47 @@ struct FacetRequest {
   int limit = 10;
 };
 
+// One trace, one span by its key, the spans of other traces that link to a trace, and the spans around a time.
+struct TraceDetailRequest {
+  std::string source_host_id;
+  std::string trace_id;
+};
+struct SpanRequest {
+  std::string source_host_id;
+  std::string trace_id, span_id;
+  int64_t timestamp_ns = 0;
+};
+struct LinkedFromRequest {
+  std::string source_host_id;
+  std::string trace_id, span_id;
+  bool has_range = false;  // start_ms and end_ms were given; else the trace index gives the window of the trace
+  int64_t start_ms = 0, end_ms = 0;
+};
+// The filter of a context is validated by the service (after the connection): `service`, `value`, `attr_*` are the raw parameters.
+struct ContextRequest {
+  std::string source_host_id;
+  int64_t anchor_ns = 0, window_ms = 60000;
+  std::string filter = "any", direction = "around";
+  int limit = 50;
+  int64_t cursor_ns = 0;
+  std::string cursor_span;
+  std::string service, value, attr_scope, attr_key, attr_value;
+};
+
+// The span search: the window, the page size and the widening budget, the span filters (each span must match all of them; the duration bounds are
+// the span's own), the kinds, the attribute columns to return with each span, and the cursor of the page.
+struct SpansRequest {
+  std::string source_host_id;
+  int64_t start_ms = 0, end_ms = 0;
+  int limit = kSpanPageDefaultLimit;
+  double budget_ms = kSpanPageBudgetMs;
+  double min_duration_ms = 0.0, max_duration_ms = 0.0;
+  TraceFilterSpec filters;
+  std::vector<std::string> kinds;
+  std::vector<SpanAttributeColumn> columns;
+  SpanCursor cursor;
+};
+
 constexpr int kDeltaDefaultSample = 1000;
 constexpr int kDeltaMaxSample = 2500;  // per side: the ids go as parameters, but the sample bounds the work
 
@@ -129,6 +171,12 @@ bool parse_deltas(const httplib::Request& req, const TraceSettings& traces, Delt
 // The front half of /api/traces/services and /api/traces/services/db (they are off with traces.analytics = false, too).
 bool parse_services(const httplib::Request& req, const TraceSettings& traces, ServicesRequest* out, ApiError* error);
 bool parse_prefill(const httplib::Request& req, const TraceSettings& traces, PrefillRequest* out, ApiError* error);
+bool parse_spans(const httplib::Request& req, const TraceSettings& traces, SpansRequest* out, ApiError* error);
+// These four check the request before the host is looked up, as the routes always did.
+bool parse_trace_detail(const httplib::Request& req, TraceDetailRequest* out, ApiError* error);
+bool parse_span(const httplib::Request& req, SpanRequest* out, ApiError* error);
+bool parse_linked_from(const httplib::Request& req, LinkedFromRequest* out, ApiError* error);
+bool parse_context(const httplib::Request& req, ContextRequest* out, ApiError* error);
 // The facets of the keys, and of the values of one key: the key (scope=span|resource, key, limit) is checked before the host, as the
 // route always did; the window and the filters after.
 bool parse_facet_key(const httplib::Request& req, FacetRequest* out, ApiError* error);

@@ -534,5 +534,223 @@ std::string facet_values_json(const FacetValuesAnswer& answer) {
   return std::string(sb.GetString(), sb.GetSize());
 }
 
+std::string trace_detail_json(const TraceDetailAnswer& answer) {
+  const TraceFeatureSettings& f = answer.features;
+  rapidjson::StringBuffer sb(nullptr, 128 * 1024);
+  Writer w(sb);
+  w.StartObject();
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("trace_id"); write_json_text(w, answer.trace_id);
+  w.Key("range_source"); w.String("trace_index");
+  w.Key("truncated"); w.Bool(answer.truncated);
+  w.Key("spans"); w.StartArray();
+  for (const auto& span : answer.spans) {
+    w.StartObject();
+    w.Key("timestamp"); write_json_text(w, span.timestamp);
+    w.Key("start_ns"); w.Int64(span.start_ns);
+    w.Key("duration_ns"); w.Uint64(span.duration_ns);
+    w.Key("trace_id"); write_json_text(w, span.trace_id);
+    w.Key("span_id"); write_json_text(w, span.span_id);
+    w.Key("parent_span_id"); write_json_text(w, span.parent_span_id);
+    w.Key("span_name"); write_json_text(w, span.name);
+    w.Key("span_kind"); write_json_text(w, span.kind);
+    w.Key("service_name"); write_json_text(w, span.service);
+    w.Key("status_code"); write_json_text(w, span.status);
+    w.Key("status_message"); write_json_text(w, span.status_message);
+    if (f.span_attributes) { w.Key("span_attributes"); write_json_text(w, span.span_attributes); }
+    if (f.resource_attributes) { w.Key("resource_attributes"); write_json_text(w, span.resource_attributes); }
+    if (f.events) {
+      w.Key("events_timestamp"); write_json_text(w, span.events_timestamp);
+      w.Key("events_name"); write_json_text(w, span.events_name);
+      w.Key("events_attributes"); write_json_text(w, span.events_attributes);
+    }
+    if (f.links) {
+      w.Key("links_trace_id"); write_json_text(w, span.links_trace_id);
+      w.Key("links_span_id"); write_json_text(w, span.links_span_id);
+      w.Key("links_attributes"); write_json_text(w, span.links_attributes);
+    }
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+std::string span_json(const SpanAnswer& answer) {
+  const TraceFeatureSettings& f = answer.features;
+  const auto& values = answer.values;
+  rapidjson::StringBuffer sb(nullptr, 16 * 1024);
+  Writer w(sb);
+  w.StartObject();
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("span"); w.StartObject();
+  w.Key("timestamp"); write_json_text(w, values[0]);
+  w.Key("start_ns_text"); write_json_text(w, values[1]);
+  w.Key("start_ns"); w.Int64(std::stoll(values[1]));
+  w.Key("trace_id"); write_json_text(w, values[2]);
+  w.Key("span_id"); write_json_text(w, values[3]);
+  const std::string_view parent = visible_parent(values[4], answer.all_services);
+  w.Key("parent_span_id"); write_json_text(w, parent);
+  w.Key("service_name"); write_json_text(w, values[5]);
+  w.Key("span_name"); write_json_text(w, values[6]);
+  w.Key("span_kind"); write_json_text(w, values[7]);
+  w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(values[8])));
+  w.Key("status_code"); write_json_text(w, values[9]);
+  w.Key("status_message"); write_json_text(w, values[10]);
+  if (f.span_attributes) { w.Key("span_attributes"); write_json_text(w, values[11]); }
+  if (f.resource_attributes) { w.Key("resource_attributes"); write_json_text(w, values[12]); }
+  if (f.events) {
+    w.Key("events_timestamp"); write_json_text(w, values[13]);
+    w.Key("events_name"); write_json_text(w, values[14]);
+    w.Key("events_attributes"); write_json_text(w, values[15]);
+  }
+  if (f.links) {
+    w.Key("links_trace_id"); write_json_text(w, values[16]);
+    w.Key("links_span_id"); write_json_text(w, values[17]);
+    w.Key("links_attributes"); write_json_text(w, values[18]);
+  }
+  w.EndObject();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+namespace {
+
+// start_ns is also sent as text: epoch nanoseconds pass 2^53, and the context keyset cursor must be exact.
+void write_span_row(Writer& w, const SpanRow& row, bool with_links, bool all_services) {
+  w.StartObject();
+  w.Key("timestamp"); write_json_text(w, row.timestamp);
+  w.Key("start_ns"); w.Int64(std::stoll(row.start_ns));
+  w.Key("start_ns_text"); write_json_text(w, row.start_ns);
+  w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(row.duration_ns)));
+  w.Key("trace_id"); write_json_text(w, row.trace_id);
+  w.Key("span_id"); write_json_text(w, row.span_id);
+  const std::string_view parent = visible_parent(row.parent_span_id, all_services);
+  w.Key("parent_span_id"); write_json_text(w, parent);
+  w.Key("span_name"); write_json_text(w, row.name);
+  w.Key("span_kind"); write_json_text(w, row.kind);
+  w.Key("service_name"); write_json_text(w, row.service);
+  w.Key("status_code"); write_json_text(w, row.status);
+  if (with_links) {
+    w.Key("link_span_ids"); write_json_text(w, row.link_span_ids);
+    w.Key("link_attributes"); write_json_text(w, row.link_attributes);
+  }
+  w.EndObject();
+}
+
+}  // namespace
+
+std::string linked_from_json(const LinkedFromAnswer& answer) {
+  rapidjson::StringBuffer sb;
+  Writer w(sb);
+  w.StartObject();
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("trace_id"); write_json_text(w, answer.trace_id);
+  w.Key("span_id"); write_json_text(w, answer.span_id);
+  w.Key("range_source"); write_json_text(w, answer.range_source);
+  w.Key("range"); w.StartArray(); w.Int64(answer.lo_ms); w.Int64(answer.hi_ms); w.EndArray();
+  w.Key("margin_minutes"); w.Int(answer.margin_minutes);
+  w.Key("limit"); w.Uint64(kLinkedFromLimit);
+  w.Key("truncated"); w.Bool(answer.truncated);
+  w.Key("elapsed_ms"); w.Double(answer.elapsed_ms);
+  w.Key("rows"); w.StartArray();
+  for (const auto& row : answer.rows) write_span_row(w, row, true, answer.all_services);
+  w.EndArray();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+std::string context_json(const ContextAnswer& answer) {
+  const ContextOutcome& out = answer.outcome;
+  rapidjson::StringBuffer sb(nullptr, 64 * 1024);
+  Writer w(sb);
+  w.StartObject();
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("timestamp_ns"); write_json_text(w, std::to_string(answer.request.anchor_ns));
+  w.Key("window_ms"); w.Int64(answer.request.window_ms);
+  w.Key("range_ns"); w.StartArray(); write_json_text(w, std::to_string(answer.lo_ns)); write_json_text(w, std::to_string(answer.hi_ns)); w.EndArray();
+  w.Key("filter"); write_json_text(w, answer.request.filter);
+  w.Key("direction"); write_json_text(w, answer.request.direction);
+  w.Key("limit"); w.Int(answer.request.limit);
+  if (out.query_newer) { w.Key("has_newer"); w.Bool(out.more_newer); }
+  if (out.query_older) { w.Key("has_older"); w.Bool(out.more_older); }
+  w.Key("elapsed_ms"); w.Double(out.elapsed_ms);
+  w.Key("rows"); w.StartArray();
+  for (auto it = out.newer.rbegin(); it != out.newer.rend(); ++it) write_span_row(w, *it, false, answer.all_services);
+  for (const auto& row : out.older) write_span_row(w, row, false, answer.all_services);
+  w.EndArray();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
+std::string spans_json(const SpansAnswer& answer) {
+  const SpansRequest& request = answer.request;
+  const SpanSearchOutcome& out = answer.outcome;
+  const bool has_more = !out.exhausted && out.next.present;
+  const int64_t start_ns = request.start_ms * kNsPerMs;
+  const int64_t searched_to_ns = out.exhausted ? start_ns : (out.next.present ? out.next.ts_ns : start_ns);
+  rapidjson::StringBuffer sb(nullptr, 64 * 1024);
+  Writer w(sb);
+  w.StartObject();
+  w.Key("v"); w.Int(1);
+  w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
+  w.Key("range"); w.StartArray(); w.Int64(request.start_ms); w.Int64(request.end_ms); w.EndArray();
+  w.Key("limit"); w.Int(request.limit);
+  w.Key("attribute_columns"); w.StartArray();
+  for (const auto& column : request.columns) {
+    w.StartObject();
+    w.Key("scope"); write_json_text(w, column.scope);
+    w.Key("key"); write_json_text(w, column.key);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("has_more"); w.Bool(has_more);
+  w.Key("cursor");
+  if (has_more) write_json_text(w, encode_span_cursor(out.next)); else w.Null();
+  w.Key("incomplete"); w.Bool(out.incomplete);
+  w.Key("budget_ms"); w.Double(request.budget_ms);
+  w.Key("stop_reason"); write_json_text(w, out.stop_reason);
+  w.Key("searched_to_ns"); write_json_text(w, std::to_string(searched_to_ns));
+  w.Key("slices"); w.StartArray();
+  for (const auto& slice : out.slices) {
+    w.StartObject();
+    w.Key("start_ns"); write_json_text(w, std::to_string(slice.lo_ns));
+    w.Key("end_ns"); write_json_text(w, std::to_string(slice.hi_ns));
+    w.Key("rows"); w.Uint64(slice.rows);
+    w.Key("ms"); w.Double(std::round(slice.ms * 10.0) / 10.0);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("timing_ms"); w.StartObject();
+  w.Key("queries"); w.Double(std::round(out.query_ms * 10.0) / 10.0);
+  w.Key("total"); w.Double(std::round(answer.total_ms * 10.0) / 10.0);
+  w.EndObject();
+  w.Key("rows"); w.StartArray();
+  for (const auto& row : out.rows) {
+    w.StartObject();
+    w.Key("timestamp"); write_json_text(w, row.timestamp);
+    w.Key("start_ns"); write_json_text(w, row.start_ns);
+    w.Key("trace_id"); write_json_text(w, row.trace_id);
+    w.Key("span_id"); write_json_text(w, row.span_id);
+    const std::string_view parent = visible_parent(row.parent_span_id, answer.all_services);
+    w.Key("parent_span_id"); write_json_text(w, parent);
+    w.Key("service_name"); write_json_text(w, row.service);
+    w.Key("span_name"); write_json_text(w, row.name);
+    w.Key("span_kind"); write_json_text(w, row.kind);
+    w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(row.duration_ns)));
+    w.Key("status_code"); write_json_text(w, row.status);
+    w.Key("status_message"); write_json_text(w, row.status_message);
+    w.Key("attributes"); w.StartArray();
+    for (const auto& [present, value] : row.attributes) {
+      if (present) write_json_text(w, value); else w.Null();
+    }
+    w.EndArray();
+    w.EndObject();
+  }
+  w.EndArray();
+  w.EndObject();
+  return std::string(sb.GetString(), sb.GetSize());
+}
+
 }  // namespace trace
 }  // namespace chdash

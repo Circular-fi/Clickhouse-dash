@@ -34,7 +34,7 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
     assert '"/api/traces/facets"' in server and '"/api/traces/facet_values"' in server
     sql = read_unit("trace_facets.cpp")
     service = read_unit("trace_service.cpp")
-    facets = service[service.index("TraceService::facet_keys"):]
+    facets = service[service.index("TraceService::facet_keys"):service.index("TraceService::trace_detail")]
     assert facets.count("service_allowlist_predicate(traces)") == 2
     assert sql.count("std::to_string(kFacetSampleRows)") == 2
     assert "SpanAttributes.keys AS sk" in sql and "ResourceAttributes.keys AS rk" in sql

@@ -2,6 +2,7 @@
 
 #include "facet_limits.hpp"
 #include "sql_literal.hpp"
+#include "trace_filters.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -282,6 +283,151 @@ std::string service_map_sql(const TraceScope& scope, const ServiceMapSampling& s
       "HAVING GROUPING(caller) = 1 OR caller != '' "
       "SETTINGS max_execution_time = " + std::to_string(kServiceMapTimeBudgetSeconds) +
       ", timeout_overflow_mode = 'throw', force_grouping_standard_compatibility = 1, join_use_nulls = 0";
+}
+
+// ---- one trace, one span, the spans around a time, the spans that link to a trace ----
+
+const char* const kSpanListColumns =
+    "toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), "
+    "toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), "
+    "toString(StatusCode)";
+
+const char* const kSpanSearchColumns =
+    "toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), "
+    "toString(ParentSpanId), toString(ServiceName), toString(SpanName), toString(SpanKind), toString(Duration), "
+    "toString(StatusCode), toString(StatusMessage)";
+
+std::string trace_detail_sql(const TraceSettings& traces, const std::string& trace_id, const std::string& visibility) {
+  const auto& f = traces.features;
+  const std::string span_attrs = f.span_attributes ? "toJSONString(SpanAttributes)" : "'{}'";
+  const std::string resource_attrs = f.resource_attributes ? "toJSONString(ResourceAttributes)" : "'{}'";
+  const std::string events_ts = f.events ? "toJSONString(Events.Timestamp)" : "'[]'";
+  const std::string events_name = f.events ? "toJSONString(Events.Name)" : "'[]'";
+  const std::string events_attrs = f.events ? "toJSONString(Events.Attributes)" : "'[]'";
+  const std::string links_trace = f.links ? "toJSONString(Links.TraceId)" : "'[]'";
+  const std::string links_span = f.links ? "toJSONString(Links.SpanId)" : "'[]'";
+  const std::string links_attrs = f.links ? "toJSONString(Links.Attributes)" : "'[]'";
+  const std::string main_table = qualified(traces.database, traces.table);
+  const std::string index_table = qualified(traces.database, traces.trace_index_table);
+  const std::string trace_literal = sql::quote_string(trace_id);
+  const size_t limit = traces.max_spans_per_trace + 1;
+  const std::string select_columns =
+      "SELECT toString(Timestamp), toString(toUnixTimestamp64Nano(Timestamp)), toString(TraceId), toString(SpanId), "
+      "toString(ParentSpanId), toString(SpanName), toString(SpanKind), toString(ServiceName), toString(Duration), "
+      "toString(StatusCode), toString(StatusMessage), " + span_attrs + ", " + resource_attrs + ", " +
+      events_ts + ", " + events_name + ", " + events_attrs + ", " + links_trace + ", " + links_span + ", " + links_attrs + " ";
+  return "WITH " + trace_literal + " AS trace, "
+         "(SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1)) FROM " + index_table +
+         " WHERE TraceId = trace) AS trace_bounds " +
+         select_columns +
+         "FROM " + main_table + " PREWHERE Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2) "
+         "WHERE TraceId = trace AND " + visibility +
+         " ORDER BY Timestamp, SpanId LIMIT " + std::to_string(limit);
+}
+
+std::string span_sql(const TraceSettings& traces, const std::string& trace_id, const std::string& span_id, int64_t timestamp_ns,
+                     const std::string& visibility) {
+  const auto& f = traces.features;
+  return std::string("SELECT ") + kSpanSearchColumns + ", " +
+         (f.span_attributes ? "toJSONString(SpanAttributes)" : "'{}'") + ", " +
+         (f.resource_attributes ? "toJSONString(ResourceAttributes)" : "'{}'") + ", " +
+         (f.events ? "toJSONString(Events.Timestamp), toJSONString(Events.Name), toJSONString(Events.Attributes)" : "'[]', '[]', '[]'") + ", " +
+         (f.links ? "toJSONString(Links.TraceId), toJSONString(Links.SpanId), toJSONString(Links.Attributes)" : "'[]', '[]', '[]'") +
+         " FROM " + qualified(traces.database, traces.table) +
+         " PREWHERE Timestamp = " + ns_time(timestamp_ns) + " AND " + visibility +
+         " WHERE TraceId = " + sql::quote_string(trace_id) + " AND SpanId = " + sql::quote_string(span_id) +
+         " LIMIT 1 SETTINGS max_execution_time = 10";
+}
+
+std::string trace_index_bounds_sql(const TraceSettings& traces, const std::string& trace_id) {
+  return "SELECT toString(count()), toString(toUnixTimestamp64Milli(min(Start))), toString(toUnixTimestamp64Milli(max(End))) FROM " +
+         qualified(traces.database, traces.trace_index_table) + " WHERE TraceId = " + sql::quote_string(trace_id);
+}
+
+std::string linked_from_sql(const TraceSettings& traces, const std::string& trace_id, const std::string& span_id, int64_t lo_ms,
+                            int64_t hi_ms, const std::string& visibility) {
+  const std::string trace_literal = sql::quote_string(trace_id);
+  const bool all_services = visibility == "1";
+  const std::string table = qualified(traces.database, traces.table);
+  const std::string visible_targets = all_services ? std::string{} :
+      ", (SELECT groupArray(toString(SpanId)) FROM " + table + " WHERE " +
+      time_predicate(lo_ms, hi_ms) + " AND TraceId = " + trace_literal + " AND " + visibility + ") AS visible_targets";
+  const std::string link_match = std::string("t = trace") + (all_services ? "" : " AND has(visible_targets, s)") +
+      (span_id.empty() ? std::string{} : " AND s = " + sql::quote_string(span_id));
+  return "WITH " + trace_literal + " AS trace" + visible_targets + " SELECT " + kSpanListColumns +
+         ", toJSONString(arrayFilter((s, t) -> " + link_match + ", Links.SpanId, Links.TraceId))"
+         ", toJSONString(arrayFilter((a, t, s) -> " + link_match + ", Links.Attributes, Links.TraceId, Links.SpanId))"
+         " FROM " + table +
+         " PREWHERE has(Links.TraceId, trace)"
+         " WHERE " + time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + visibility +
+         (span_id.empty() && all_services ? std::string{} : " AND arrayExists((t, s) -> " + link_match + ", Links.TraceId, Links.SpanId)") +
+         " ORDER BY Timestamp DESC, SpanId DESC LIMIT " + std::to_string(kLinkedFromLimit + 1) +
+         " SETTINGS max_execution_time = 15";
+}
+
+std::string context_filter_sql(const std::string& column, const std::string& key, const std::string& value) {
+  return "mapContains(" + column + ", " + sql::quote_string(key) + ") AND " + column + "[" + sql::quote_string(key) + "] = " + sql::quote_string(value);
+}
+
+std::string context_base_sql(const std::string& table, int64_t lo_ns, int64_t hi_ns, const std::string& visibility, const std::string& filter_sql) {
+  return " FROM " + table + " WHERE Timestamp >= " + ns_time(lo_ns) + " AND Timestamp <= " + ns_time(hi_ns) +
+         " AND " + visibility + (filter_sql.empty() ? std::string{} : " AND " + filter_sql);
+}
+
+std::string context_page_sql(const std::string& base, const std::string& keyset, int n, bool newer) {
+  return std::string("SELECT ") + kSpanListColumns + base + " AND " + keyset +
+         (newer ? " ORDER BY Timestamp ASC, SpanId ASC LIMIT " : " ORDER BY Timestamp DESC, SpanId DESC LIMIT ") + std::to_string(n + 1) +
+         " SETTINGS max_execution_time = 10";
+}
+
+std::string context_keyset_around(int64_t anchor_ns, bool newer) {
+  return std::string("Timestamp ") + (newer ? "> " : "<= ") + ns_time(anchor_ns);
+}
+
+std::string context_keyset_after(int64_t cursor_ns, const std::string& cursor_span, bool newer) {
+  const std::string time = ns_time(cursor_ns);
+  const std::string op = newer ? ">" : "<";
+  return "(Timestamp " + op + " " + time + " OR (Timestamp = " + time + " AND SpanId " + op + " " + sql::quote_string(cursor_span) + "))";
+}
+
+// ---- the span search ----
+
+std::string span_column_filters_sql(const std::string& span_filters, const std::vector<std::string>& kinds, double min_duration_ms,
+                                    double max_duration_ms) {
+  std::string out = span_filters;
+  if (!kinds.empty()) out += " AND " + exact_values_predicate("SpanKind", kinds);
+  if (min_duration_ms > 0.0) out += " AND Duration >= " + std::to_string(static_cast<uint64_t>(std::llround(min_duration_ms * 1e6)));
+  if (max_duration_ms > 0.0) out += " AND Duration <= " + std::to_string(static_cast<uint64_t>(std::llround(max_duration_ms * 1e6)));
+  return out;
+}
+
+namespace {
+
+std::string span_search_settings() {
+  return " SETTINGS max_execution_time = " + std::to_string(kSpanSliceTimeoutSeconds) +
+         ", timeout_overflow_mode = 'throw', max_rows_to_read = " + std::to_string(kSpanSliceReadRowsCap) +
+         ", read_overflow_mode = 'throw'";
+}
+
+}  // namespace
+
+std::string span_keyset_sql(int64_t ts_ns, const std::string& span_id, const std::string& trace_id) {
+  const std::string ts = ns_time(ts_ns);
+  return " AND (Timestamp < " + ts + " OR (Timestamp = " + ts + " AND (SpanId < " + sql::quote_string(span_id) +
+         " OR (SpanId = " + sql::quote_string(span_id) + " AND TraceId < " + sql::quote_string(trace_id) + "))))";
+}
+
+std::string span_slice_sql(const SpanSearchSql& q, int64_t lo_ns, int64_t upper_ns, const std::string& keyset, size_t need) {
+  return q.select +
+         " PREWHERE Timestamp >= " + ns_time(lo_ns) + " AND Timestamp <= " + ns_time(upper_ns) + " AND " + q.visibility + q.column_filters +
+         " WHERE 1" + keyset + q.tag_sql +
+         " ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT " + std::to_string(need + 1) + span_search_settings();
+}
+
+std::string span_ties_sql(const SpanSearchSql& q, int64_t ts_ns, const std::string& span_id, const std::string& trace_id) {
+  return q.select + " PREWHERE Timestamp = " + ns_time(ts_ns) + " AND " + q.visibility + q.column_filters +
+         " WHERE SpanId = " + sql::quote_string(span_id) + " AND TraceId = " + sql::quote_string(trace_id) + q.tag_sql +
+         span_search_settings();
 }
 
 // ---- the services view ----

@@ -318,6 +318,111 @@ bool parse_facets(const httplib::Request& req, const TraceSettings& traces, Face
   return true;
 }
 
+namespace {
+
+bool refuse(ApiError* error, int status, const char* code, std::string message) {
+  error->status = status;
+  error->code = code;
+  error->message = std::move(message);
+  return false;
+}
+
+std::string text_param(const httplib::Request& req, const char* name) { return req.has_param(name) ? req.get_param_value(name) : std::string{}; }
+
+}  // namespace
+
+bool parse_trace_detail(const httplib::Request& req, TraceDetailRequest* out, ApiError* error) {
+  if (!req.has_param("trace_id") || req.get_param_value("trace_id").empty()) return refuse(error, 400, "missing_trace_id", "trace_id is required.");
+  out->trace_id = req.get_param_value("trace_id");
+  if (out->trace_id.size() > 256) return refuse(error, 400, "invalid_trace_id", "trace_id is too long.");
+  return true;
+}
+
+bool parse_span(const httplib::Request& req, SpanRequest* out, ApiError* error) {
+  out->trace_id = text_param(req, "trace_id");
+  out->span_id = text_param(req, "span_id");
+  if (out->trace_id.empty() || out->span_id.empty() || !parse_i64_param(req, "timestamp_ns", &out->timestamp_ns)) {
+    return refuse(error, 400, "missing_span_key", "trace_id, span_id and timestamp_ns are required.");
+  }
+  if (out->trace_id.size() > 256 || out->span_id.size() > 256 || out->timestamp_ns < 0) {
+    return refuse(error, 400, "invalid_span_key", "The span key is invalid.");
+  }
+  return true;
+}
+
+bool parse_linked_from(const httplib::Request& req, LinkedFromRequest* out, ApiError* error) {
+  out->trace_id = text_param(req, "trace_id");
+  out->span_id = text_param(req, "span_id");
+  if (out->trace_id.empty()) return refuse(error, 400, "missing_trace_id", "trace_id is required.");
+  if (out->trace_id.size() > 256) return refuse(error, 400, "invalid_trace_id", "trace_id is too long.");
+  if (out->span_id.size() > 256) return refuse(error, 400, "invalid_span_id", "span_id is too long.");
+  const bool has_lo = parse_i64_param(req, "start_ms", &out->start_ms) != 0;
+  const bool has_hi = parse_i64_param(req, "end_ms", &out->end_ms) != 0;
+  if (has_lo != has_hi) return refuse(error, 400, "invalid_trace_range", "start_ms and end_ms must be provided together.");
+  out->has_range = has_lo;
+  return true;
+}
+
+bool parse_context(const httplib::Request& req, ContextRequest* out, ApiError* error) {
+  if (!parse_i64_param(req, "timestamp_ns", &out->anchor_ns)) return refuse(error, 400, "missing_timestamp", "timestamp_ns is required.");
+  out->window_ms = 60000;
+  if (req.has_param("window_ms") && !parse_i64_param(req, "window_ms", &out->window_ms)) out->window_ms = -1;
+  if (std::find(std::begin(kContextWindowsMs), std::end(kContextWindowsMs), out->window_ms) == std::end(kContextWindowsMs)) {
+    return refuse(error, 400, "invalid_context_window", "window_ms must be 1000, 10000, 60000 or 300000.");
+  }
+  const int64_t window_ns = out->window_ms * kNsPerMs;
+  if (out->anchor_ns < window_ns || out->anchor_ns > INT64_MAX - window_ns) {
+    return refuse(error, 400, "invalid_timestamp", "timestamp_ns is out of range.");
+  }
+  out->filter = req.has_param("filter") && !req.get_param_value("filter").empty() ? req.get_param_value("filter") : "any";
+  out->direction = req.has_param("direction") && !req.get_param_value("direction").empty() ? req.get_param_value("direction") : "around";
+  if (out->direction != "around" && out->direction != "older" && out->direction != "newer") {
+    return refuse(error, 400, "invalid_direction", "direction must be around, older or newer.");
+  }
+  out->limit = int_param(req, "limit", 50, 1, 200);
+  out->cursor_span = text_param(req, "cursor_span_id");
+  if (out->direction != "around") {
+    if (!parse_i64_param(req, "cursor_ns", &out->cursor_ns)) {
+      return refuse(error, 400, "missing_cursor", "cursor_ns is required to page older or newer.");
+    }
+    if (out->cursor_span.size() > 256) return refuse(error, 400, "invalid_cursor", "cursor_span_id is too long.");
+  }
+  out->service = text_param(req, "service");
+  out->value = text_param(req, "value");
+  out->attr_scope = text_param(req, "attr_scope");
+  out->attr_key = text_param(req, "attr_key");
+  out->attr_value = text_param(req, "attr_value");
+  return true;
+}
+
+bool parse_spans(const httplib::Request& req, const TraceSettings& traces, SpansRequest* out, ApiError* error) {
+  std::string message;
+  if (feature_param_rejected(traces, req, &message)) return refuse(error, 400, "trace_filter_disabled", message);
+  if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &message)) return refuse(error, 400, "invalid_trace_range", message);
+  out->limit = int_param(req, "limit", kSpanPageDefaultLimit, 1, kSpanPageMaxLimit);
+  // budget_ms may only lower the widening budget (tests use it to reach a resume point deterministically).
+  out->budget_ms = static_cast<double>(int_param(req, "budget_ms", static_cast<int>(kSpanPageBudgetMs), 0, static_cast<int>(kSpanPageBudgetMs)));
+  // Span-level here: the span's own Duration.
+  out->min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, kMaxDurationMs);
+  out->max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, kMaxDurationMs);
+  if (out->max_duration_ms > 0.0 && out->min_duration_ms > out->max_duration_ms) {
+    return refuse(error, 400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
+  }
+  if (!parse_trace_filters(req, &out->filters, &message)) return refuse(error, 400, "invalid_trace_filter", message);
+  out->kinds = repeated_param_values(req, "kind");
+  if (out->kinds.size() > kSpanKindsMax) return refuse(error, 400, "invalid_trace_filter", "At most 16 span kinds are accepted.");
+  for (const auto& kind : out->kinds) {
+    if (kind.size() > 64) return refuse(error, 400, "invalid_trace_filter", "kind values are limited to 64 bytes.");
+  }
+  if (!parse_span_columns(req, &out->columns, &message)) return refuse(error, 400, "invalid_trace_columns", message);
+  if (req.has_param("cursor") && !req.get_param_value("cursor").empty()) {
+    if (!decode_span_cursor(req.get_param_value("cursor"), &out->cursor) || out->cursor.ts_ns > out->end_ms * kNsPerMs) {
+      return refuse(error, 400, "invalid_cursor", "cursor is not a span search cursor of this range.");
+    }
+  }
+  return true;
+}
+
 bool parse_span_columns(const httplib::Request& req, std::vector<SpanAttributeColumn>* out, std::string* error) {
   constexpr size_t kSpanColumnsMax = 20;
   for (const auto& raw : repeated_param_values(req, "columns")) {

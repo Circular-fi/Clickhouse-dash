@@ -1,6 +1,7 @@
 """Source contract of the Logs explorer (the Logs view of /observability and /api/logs/* routes)."""
 import json
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,7 +28,7 @@ def test_logs_routes_are_registered_only_when_logs_are_enabled():
 
 def test_service_allowlist_predicate_is_shared_by_traces_and_logs():
     header = read("src/otel_allowlist.hpp")
-    traces = read("src/api_traces.cpp")
+    traces = read_unit("trace_service.cpp")
     logs = read("src/api_logs.cpp")
     assert "inline std::string service_allowlist_predicate(const TraceSettings& cfg)" in header
     assert "inline std::string service_pattern_predicate(std::string_view pattern)" in header

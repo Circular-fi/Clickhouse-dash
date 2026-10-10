@@ -190,7 +190,7 @@ if (CHDASH_BUILD_TRACE_TESTS)
   # The Traces page below its routes: the parsing of a request, the span filters and the statements, and the strategies of
   # the search and of the analytics on a fake executor.
   add_executable(chdash_trace_test ../tests/native/trace_test.cpp
-    trace_analytics.cpp trace_attributes.cpp trace_facets.cpp trace_filters.cpp trace_json.cpp trace_request.cpp trace_search.cpp trace_service.cpp trace_services.cpp trace_sql.cpp
+    trace_analytics.cpp trace_attributes.cpp trace_detail.cpp trace_facets.cpp trace_filters.cpp trace_json.cpp trace_request.cpp trace_search.cpp trace_service.cpp trace_services.cpp trace_spans.cpp trace_sql.cpp
     ch_query.cpp ch_client_pool.cpp ch_uri.cpp ch_error.cpp api_error.cpp error_envelope.cpp request_context.cpp log.cpp jwt.cpp secure_random.cpp)
   target_include_directories(chdash_trace_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_trace_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
@@ -292,6 +292,7 @@ if (CHDASH_BUILD_APP)
     api_traces.cpp
     trace_analytics.cpp
     trace_attributes.cpp
+    trace_detail.cpp
     trace_facets.cpp
     trace_filters.cpp
     trace_json.cpp
@@ -299,6 +300,7 @@ if (CHDASH_BUILD_APP)
     trace_search.cpp
     trace_service.cpp
     trace_services.cpp
+    trace_spans.cpp
     trace_sql.cpp
     api_otel_signals.cpp
     api_trace_logs.cpp

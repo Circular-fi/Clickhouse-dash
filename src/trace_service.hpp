@@ -14,12 +14,14 @@
 #include "request_context.hpp"
 #include "trace_analytics.hpp"
 #include "trace_attributes.hpp"
+#include "trace_detail.hpp"
 #include "trace_facets.hpp"
 #include "trace_result.hpp"
 #include "trace_filters.hpp"
 #include "trace_request.hpp"
 #include "trace_search.hpp"
 #include "trace_services.hpp"
+#include "trace_spans.hpp"
 #include "ttl_cache.hpp"
 
 #include <functional>
@@ -124,6 +126,45 @@ struct FacetValuesAnswer {
   std::shared_ptr<const FacetValues> value;
 };
 
+struct TraceDetailAnswer {
+  std::string source_host_id, trace_id;
+  TraceFeatureSettings features;
+  std::vector<DetailSpan> spans;  // the parent of a span that the allowlist hides is already removed
+  bool truncated = false;
+};
+struct SpanAnswer {
+  std::string source_host_id;
+  TraceFeatureSettings features;
+  bool all_services = true;
+  std::vector<std::string> values;  // the columns of the row: see kSpanSearchColumns, then the attributes, events and links
+};
+struct ContextAnswer {
+  std::string source_host_id;
+  ContextRequest request;
+  int64_t lo_ns = 0, hi_ns = 0;
+  bool all_services = true;
+  ContextOutcome outcome;
+};
+struct LinkedFromAnswer {
+  std::string source_host_id;
+  std::string trace_id, span_id;
+  std::string range_source;  // "request" or "trace_index"
+  int64_t lo_ms = 0, hi_ms = 0;
+  int margin_minutes = 0;
+  bool truncated = false;
+  double elapsed_ms = 0;
+  bool all_services = true;
+  std::vector<SpanRow> rows;
+};
+
+struct SpansAnswer {
+  std::string source_host_id;
+  SpansRequest request;
+  bool all_services = true;
+  SpanSearchOutcome outcome;
+  double total_ms = 0;
+};
+
 class TraceService {
  public:
   // A connection to the trace source of a host (the system account); null with the reason in *error when there is none.
@@ -157,6 +198,15 @@ class TraceService {
   // The attribute keys of the spans that match the filters, and the values of one key.
   Result<FacetKeysAnswer> facet_keys(const RequestContext& context, const HostSpec& host, const FacetRequest& request) const;
   Result<FacetValuesAnswer> facet_values(const RequestContext& context, const HostSpec& host, const FacetRequest& request) const;
+
+  // The spans of a trace (the trace index gives its window), one span by its row key, the spans of other traces that link to a trace, and the
+  // spans around a time.
+  Result<TraceDetailAnswer> trace_detail(const RequestContext& context, const HostSpec& host, const TraceDetailRequest& request) const;
+  Result<SpanAnswer> span(const RequestContext& context, const HostSpec& host, const SpanRequest& request) const;
+  Result<LinkedFromAnswer> linked_from(const RequestContext& context, const HostSpec& host, const LinkedFromRequest& request) const;
+  Result<ContextAnswer> context(const RequestContext& context, const HostSpec& host, const ContextRequest& request) const;
+  // The span search: keyset pages over newest-first time slices (trace_spans.hpp).
+  Result<SpansAnswer> spans(const RequestContext& context, const HostSpec& host, const SpansRequest& request) const;
 
  private:
   // A connection, the attribute columns of the table, and the statements' common parts of one request.

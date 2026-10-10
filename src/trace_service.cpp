@@ -1,13 +1,16 @@
 #include "trace_service.hpp"
 
 #include "api_error.hpp"
+#include "ch_block_value.hpp"
 #include "jwt.hpp"
 #include "otel_allowlist.hpp"
 #include "sql_literal.hpp"
 #include "trace_sql.hpp"
 
 #include <algorithm>
+#include <algorithm>
 #include <chrono>
+#include <unordered_set>
 
 namespace chdash {
 namespace trace {
@@ -432,6 +435,233 @@ Result<FacetValuesAnswer> TraceService::facet_values(const RequestContext&, cons
   answer.request = request;
   answer.cached = !cached.fetched;
   answer.value = cached.value;
+  return Out::ok(std::move(answer));
+}
+
+Result<TraceDetailAnswer> TraceService::trace_detail(const RequestContext&, const HostSpec& host, const TraceDetailRequest& request) const {
+  using Out = Result<TraceDetailAnswer>;
+  const TraceSettings& traces = host.otel.traces;
+  std::string error;
+  auto db = open_(host, &error);
+  if (!db) return Out::fail(make_error(503, "trace_source_unavailable", connect_error(error)));
+  if (traces.trace_index_table.empty()) return Out::fail(make_error(503, "trace_index_unavailable", "Trace detail requires traces.trace_index_table."));
+  const std::string visibility = otel::service_allowlist_predicate(traces);
+  TraceDetailAnswer answer;
+  answer.source_host_id = request.source_host_id;
+  answer.trace_id = request.trace_id;
+  answer.features = traces.features;
+  try {
+    answer.spans = read_detail_spans(*db, trace_detail_sql(traces, request.trace_id, visibility));
+  } catch (const std::exception& e) {
+    return Out::fail(error_from_clickhouse(e, "trace", "trace_index_lookup_failed"));
+  }
+  answer.truncated = answer.spans.size() > traces.max_spans_per_trace;
+  if (answer.truncated) answer.spans.resize(traces.max_spans_per_trace);
+  if (answer.spans.empty()) return Out::fail(make_error(404, "trace_not_found", "Trace was not found in the configured time scope."));
+
+  // Do not leak the SpanId of a parent that was hidden by the service allowlist. Treat the first visible descendant as a visible root instead.
+  std::unordered_set<std::string> visible_span_ids;
+  visible_span_ids.reserve(answer.spans.size());
+  for (const auto& span : answer.spans) visible_span_ids.insert(span.span_id);
+  for (auto& span : answer.spans) {
+    span.parent_span_id = std::string(visible_parent(span.parent_span_id, visibility == "1", &visible_span_ids));
+  }
+  return Out::ok(std::move(answer));
+}
+
+Result<SpanAnswer> TraceService::span(const RequestContext&, const HostSpec& host, const SpanRequest& request) const {
+  using Out = Result<SpanAnswer>;
+  const TraceSettings& traces = host.otel.traces;
+  std::string error;
+  auto db = open_(host, &error);
+  if (!db) return Out::fail(make_error(503, "trace_source_unavailable", connect_error(error)));
+  const std::string visibility = otel::service_allowlist_predicate(traces);
+  SpanAnswer answer;
+  answer.source_host_id = request.source_host_id;
+  answer.features = traces.features;
+  answer.all_services = visibility == "1";
+  try {
+    answer.values = read_first_row(*db, span_sql(traces, request.trace_id, request.span_id, request.timestamp_ns, visibility));
+  } catch (const std::exception& e) {
+    db->invalidate();
+    return Out::fail(error_from_clickhouse(e, "trace", "trace_span_failed"));
+  }
+  if (answer.values.size() < 19) return Out::fail(make_error(404, "span_not_found", "Span was not found."));
+  return Out::ok(std::move(answer));
+}
+
+Result<LinkedFromAnswer> TraceService::linked_from(const RequestContext&, const HostSpec& host, const LinkedFromRequest& request) const {
+  using Out = Result<LinkedFromAnswer>;
+  const TraceSettings& traces = host.otel.traces;
+  if (!traces.features.links) return Out::fail(make_error(404, "trace_links_disabled", "Span links are disabled by traces.features."));
+  std::string error;
+  auto db = open_(host, &error);
+  if (!db) return Out::fail(make_error(503, "trace_source_unavailable", connect_error(error)));
+
+  LinkedFromAnswer answer;
+  answer.source_host_id = request.source_host_id;
+  answer.trace_id = request.trace_id;
+  answer.span_id = request.span_id;
+  answer.range_source = "request";
+  int64_t start_ms = request.start_ms, end_ms = request.end_ms;
+  if (!request.has_range) {
+    // No window from the caller: the trace index gives the trace's bounds.
+    if (traces.trace_index_table.empty()) {
+      return Out::fail(make_error(503, "trace_index_unavailable", "Linked-from lookups without start_ms/end_ms require traces.trace_index_table."));
+    }
+    uint64_t count = 0;
+    try {
+      db->select(trace_index_bounds_sql(traces, request.trace_id), [&](const clickhouse::Block& block) {
+        if (!block.GetRowCount()) return;
+        count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
+        if (count) {
+          start_ms = std::stoll(ch_block_text_at(block, 1, 0));
+          end_ms = std::stoll(ch_block_text_at(block, 2, 0)) + 1;
+        }
+      });
+    } catch (const std::exception& e) {
+      return Out::fail(error_from_clickhouse(e, "trace", "trace_index_lookup_failed"));
+    }
+    if (!count) return Out::fail(make_error(404, "trace_not_found", "Trace was not found in the trace index."));
+    answer.range_source = "trace_index";
+  }
+  constexpr int64_t kMaxTraceTimeMs = INT64_MAX / 1000000 - 1;
+  const int64_t margin_ms = static_cast<int64_t>(traces.linked_from_margin_minutes) * 60 * 1000;
+  if (start_ms < 0 || end_ms < start_ms || end_ms > kMaxTraceTimeMs - margin_ms) {
+    return Out::fail(make_error(400, "invalid_trace_range", "Invalid trace time range."));
+  }
+  if (end_ms - start_ms > static_cast<int64_t>(traces.max_lookback_minutes) * 60 * 1000) {
+    return Out::fail(make_error(400, "invalid_trace_range", "Trace time range exceeds traces.max_lookback_minutes."));
+  }
+  answer.lo_ms = std::max<int64_t>(0, start_ms - margin_ms);
+  answer.hi_ms = end_ms + margin_ms;
+  answer.margin_minutes = traces.linked_from_margin_minutes;
+
+  const std::string visibility = otel::service_allowlist_predicate(traces);
+  answer.all_services = visibility == "1";
+  const auto started = std::chrono::steady_clock::now();
+  try {
+    answer.rows = read_span_rows(*db, linked_from_sql(traces, request.trace_id, request.span_id, answer.lo_ms, answer.hi_ms, visibility), true);
+  } catch (const std::exception& e) {
+    return Out::fail(error_from_clickhouse(e, "trace", "trace_linked_from_failed"));
+  }
+  answer.elapsed_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+  answer.truncated = answer.rows.size() > kLinkedFromLimit;
+  if (answer.truncated) answer.rows.resize(kLinkedFromLimit);
+  return Out::ok(std::move(answer));
+}
+
+Result<ContextAnswer> TraceService::context(const RequestContext&, const HostSpec& host, const ContextRequest& request) const {
+  using Out = Result<ContextAnswer>;
+  const TraceSettings& traces = host.otel.traces;
+  std::string error;
+  auto db = open_(host, &error);
+  if (!db) return Out::fail(make_error(503, "trace_source_unavailable", connect_error(error)));
+
+  std::string filter_sql;
+  const std::string& filter = request.filter;
+  const auto invalid = [&](std::string message) { return Out::fail(make_error(400, "invalid_context_filter", std::move(message))); };
+  if (filter == "service") {
+    if (request.service.empty() || request.service.size() > 1024) return invalid("service is required for the service filter.");
+    filter_sql = "ServiceName = " + sql::quote_string(request.service);
+  } else if (filter == "host" || filter == "pod" || filter == "attribute") {
+    std::string scope = "resource", key, value;
+    if (filter == "attribute") {
+      scope = request.attr_scope;
+      key = request.attr_key;
+      value = request.attr_value;
+      if (scope != "span" && scope != "resource") return invalid("attr_scope must be span or resource.");
+      if (key.empty() || key.size() > 256) return invalid("attr_key must be 1 to 256 bytes.");
+    } else {
+      key = filter == "host" ? "host.name" : "k8s.pod.name";
+      value = request.value;
+      if (value.empty()) return invalid("value is required for the " + filter + " filter.");
+    }
+    if (value.size() > 4096) return invalid("The attribute value is too long.");
+    const bool resource = scope == "resource";
+    if (!(resource ? traces.features.resource_attributes : traces.features.span_attributes)) {
+      return Out::fail(make_error(400, "context_filter_disabled", std::string(resource ? "resource" : "span") + " attributes are disabled by traces.features."));
+    }
+    bool span_map = false, resource_map = false;
+    cached_attribute_maps(*db, attribute_maps_, host, traces, &span_map, &resource_map);
+    if (!(resource ? resource_map : span_map)) {
+      return Out::fail(make_error(400, "context_filter_unavailable", "Attribute filters need Map attribute columns."));
+    }
+    filter_sql = context_filter_sql(resource ? "ResourceAttributes" : "SpanAttributes", key, value);
+  } else if (filter != "any") {
+    return invalid("filter must be any, service, host, pod or attribute.");
+  }
+
+  const std::string visibility = otel::service_allowlist_predicate(traces);
+  ContextQuery query;
+  query.table = qualified(traces.database, traces.table);
+  query.visibility = visibility;
+  query.filter_sql = filter_sql;
+  query.anchor_ns = request.anchor_ns;
+  query.window_ns = request.window_ms * kNsPerMs;
+  query.direction = request.direction;
+  query.limit = request.limit;
+  query.cursor_ns = request.cursor_ns;
+  query.cursor_span = request.cursor_span;
+  ContextAnswer answer;
+  answer.source_host_id = request.source_host_id;
+  answer.request = request;
+  answer.lo_ns = request.anchor_ns - query.window_ns;
+  answer.hi_ns = request.anchor_ns + query.window_ns;
+  answer.all_services = visibility == "1";
+  try {
+    answer.outcome = read_context(*db, query);
+  } catch (const std::exception& e) {
+    return Out::fail(error_from_clickhouse(e, "trace", "trace_context_failed"));
+  }
+  return Out::ok(std::move(answer));
+}
+
+Result<SpansAnswer> TraceService::spans(const RequestContext&, const HostSpec& host, const SpansRequest& request) const {
+  using Out = Result<SpansAnswer>;
+  const auto started = std::chrono::steady_clock::now();
+  const TraceSettings& traces = host.otel.traces;
+  std::string error;
+  auto db = open_(host, &error);
+  if (!db) return Out::fail(make_error(503, "trace_source_unavailable", connect_error(error)));
+
+  // Column predicates (primary key ServiceName / SpanName, status, kind, duration) and the allowlist go to PREWHERE; attribute map predicates,
+  // which read the large map columns, stay in WHERE for the rows left.
+  std::string tag_sql, columns_sql;
+  if (!request.filters.tags.empty() || !request.columns.empty()) {
+    const AttributeColumns cols = attribute_columns(*db, attribute_maps_, host, traces);
+    std::string code, message;
+    if (!tag_filters_sql(request.filters.tags, cols, &tag_sql, &code, &message)) {
+      return Out::fail(make_error(filter_error_status(code), code, message));
+    }
+    if (!span_columns_sql(request.columns, cols, &columns_sql, &code, &message)) {
+      return Out::fail(make_error(filter_error_status(code), code, message));
+    }
+  }
+  const std::string visibility = otel::service_allowlist_predicate(traces);
+  SpanSearchPlan plan;
+  plan.sql.select = std::string("SELECT ") + kSpanSearchColumns + columns_sql + " FROM " + qualified(traces.database, traces.table);
+  plan.sql.visibility = visibility;
+  plan.sql.column_filters = span_column_filters_sql(span_filters_sql(request.filters, ""), request.kinds, request.min_duration_ms, request.max_duration_ms);
+  plan.sql.tag_sql = tag_sql;
+  plan.attribute_count = request.columns.size();
+  plan.start_ns = request.start_ms * kNsPerMs;
+  plan.end_ns = request.end_ms * kNsPerMs;
+  plan.limit = request.limit;
+  plan.budget_ms = request.budget_ms;
+  plan.cursor = request.cursor;
+  SpansAnswer answer;
+  answer.source_host_id = request.source_host_id;
+  answer.request = request;
+  // A parent hidden by the service allowlist must not leak its SpanId (as in trace detail): with a restricted allowlist parent ids are not reported.
+  answer.all_services = visibility == "1";
+  try {
+    answer.outcome = run_span_search(*db, plan);
+  } catch (const std::exception& e) {
+    db->invalidate();
+    return Out::fail(error_from_clickhouse(e, "trace", "trace_spans_failed"));
+  }
+  answer.total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
   return Out::ok(std::move(answer));
 }
 

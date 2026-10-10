@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,14 +34,16 @@ def test_trace_source_always_uses_selected_host_system_connection():
     assert '"host_id", "credential_scope"' not in config
     # The connection of every OpenTelemetry page is the one of otel_request.hpp: the system account of the selected host, never the runner.
     helper = read("src/otel_request.hpp")
-    assert 'otel::acquire_client(host, pool, "Trace Explorer"' in api
+    assert 'otel::acquire_client(*spec, client_pool_, "Trace Explorer"' in api
     assert "host.system_uri.empty()" in helper and "host.system_uri" in helper and "runner_uri" not in helper
     assert "credential_scope" not in trace_section
     assert "host_id" not in trace_section
 
 def test_direct_trace_url_lookup_is_not_bounded_by_search_lookback():
-    api = read("src/api_traces.cpp")
-    detail = api[api.index("void Server::handle_trace_detail"): ]
+    sql = read_unit("trace_sql.cpp")
+    detail = sql[sql.index("std::string trace_detail_sql"):sql.index("std::string span_sql")]
+    service = read_unit("trace_service.cpp")
+    detail += service[service.index("TraceService::trace_detail"):service.index("TraceService::span(")]
     assert "full_trace_id_lookup" not in detail
     assert 'WITH " + trace_literal + " AS trace' in detail
     assert "PREWHERE Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2)" in detail

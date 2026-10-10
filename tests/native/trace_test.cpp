@@ -15,6 +15,7 @@
 #include "trace_analytics.hpp"
 #include "trace_facets.hpp"
 #include "trace_attributes.hpp"
+#include "trace_detail.hpp"
 #include "trace_filters.hpp"
 #include "trace_golden.hpp"
 #include "trace_json.hpp"
@@ -22,6 +23,7 @@
 #include "trace_search.hpp"
 #include "trace_service.hpp"
 #include "trace_services.hpp"
+#include "trace_spans.hpp"
 #include "trace_sql.hpp"
 
 #include <clickhouse/columns/numeric.h>
@@ -1931,6 +1933,738 @@ void test_the_requests_of_the_discovery_routes() {
   CHECK(!parse_facet_key(request({{"scope", "span"}, {"key", std::string(513, 'k').c_str()}}), &key, &error));
 }
 
+
+// ---- one trace, one span, the context, the links ----
+
+const std::string kTraceId = "8db8a43cf3f54ba8f984e09812308d7f";
+const std::string kSpanId = "57511f4eadbcc3e7";
+constexpr int64_t kAnchorNs = 1789210797865030093LL;
+
+void test_trace_statements_are_unchanged() {
+  const TraceSettings traces = trace_host().otel.traces;
+  CHECK_EQ(trace_detail_sql(traces, kTraceId, "1"), std::string(golden::kTraceDetail));
+  CHECK_EQ(trace_index_bounds_sql(traces, kTraceId), std::string(golden::kLinkedIndexBounds));
+  CHECK_EQ(linked_from_sql(traces, kTraceId, "", 1789207197855LL, 1789214397877LL, "1"), std::string(golden::kLinkedFrom));
+  CHECK_EQ(linked_from_sql(traces, kTraceId, kSpanId, 1789203600000LL, 1789214400000LL, "1"), std::string(golden::kLinkedFromSpan));
+  CHECK_EQ(span_sql(traces, kTraceId, kSpanId, kAnchorNs, "1"), std::string(golden::kSpanOne));
+  // What traces.features turns off is not selected: a constant stands in its place.
+  TraceSettings off = traces;
+  off.features.span_attributes = false;
+  off.features.events = false;
+  off.features.links = false;
+  const std::string limited = trace_detail_sql(off, kTraceId, "1");
+  CHECK(limited.find("toJSONString(SpanAttributes)") == std::string::npos && limited.find("'{}', toJSONString(ResourceAttributes), '[]', '[]', '[]', '[]', '[]', '[]'") != std::string::npos);
+  CHECK(span_sql(off, kTraceId, kSpanId, 1, "1").find("'[]', '[]', '[]'") != std::string::npos);
+  // With a restricted allowlist a link names only a span of the trace that the allowlist shows.
+  const std::string restricted = linked_from_sql(traces, kTraceId, "", 1000, 2000, "(ServiceName = 'a')");
+  CHECK(restricted.find("AS visible_targets") != std::string::npos && restricted.find("has(visible_targets, s)") != std::string::npos);
+  CHECK(restricted.find("arrayExists") != std::string::npos);
+  // The context: the window, the filter, and a page in a direction.
+  const std::string table = "`otel`.`otel_traces`";
+  const int64_t window_ns = 60000 * kNsPerMs;
+  const std::string base = context_base_sql(table, kAnchorNs - window_ns, kAnchorNs + window_ns, "1", "");
+  CHECK_EQ(context_page_sql(base, context_keyset_around(kAnchorNs, false), 25, false), std::string(golden::kContextOlderAround));
+  CHECK_EQ(context_page_sql(base, context_keyset_around(kAnchorNs, true), 25, true), std::string(golden::kContextNewerAround));
+  const std::string service_base = context_base_sql(table, kAnchorNs - 10000 * kNsPerMs, kAnchorNs + 10000 * kNsPerMs, "1", "ServiceName = 'checkout'");
+  CHECK_EQ(context_page_sql(service_base, context_keyset_around(kAnchorNs, false), 25, false), std::string(golden::kContextOlderService));
+  CHECK_EQ(context_page_sql(context_base_sql(table, kAnchorNs - window_ns, kAnchorNs + window_ns, "1", context_filter_sql("ResourceAttributes", "host.name", "x")),
+                            context_keyset_around(kAnchorNs, false), 25, false), std::string(golden::kContextOlderHost));
+  CHECK_EQ(context_page_sql(context_base_sql(table, kAnchorNs - window_ns, kAnchorNs + window_ns, "1",
+                                             context_filter_sql("SpanAttributes", "server.address", "frontend.shop.svc.cluster.local")),
+                            context_keyset_around(kAnchorNs, false), 25, false), std::string(golden::kContextOlderAttribute));
+  CHECK_EQ(context_page_sql(base, context_keyset_after(kAnchorNs, kSpanId, false), 7, false), std::string(golden::kContextOlderCursor));
+  const std::string narrow = context_base_sql(table, kAnchorNs - 1000 * kNsPerMs, kAnchorNs + 1000 * kNsPerMs, "1", "");
+  CHECK_EQ(context_page_sql(narrow, context_keyset_after(kAnchorNs, kSpanId, true), 7, true), std::string(golden::kContextNewerCursor));
+}
+
+void test_a_parent_that_the_allowlist_hides_is_never_named() {
+  const std::unordered_set<std::string> shown{"a", "b"};
+  CHECK_EQ(std::string(visible_parent("", false)), std::string());
+  // Every service allowed: every parent is named.
+  CHECK_EQ(std::string(visible_parent("p", true)), std::string("p"));
+  // A restricted allowlist: an answer about many traces names none; an answer about one trace names the parents that it shows too.
+  CHECK_EQ(std::string(visible_parent("p", false)), std::string());
+  CHECK_EQ(std::string(visible_parent("a", false, &shown)), std::string("a"));
+  CHECK_EQ(std::string(visible_parent("hidden", false, &shown)), std::string());
+  CHECK_EQ(std::string(visible_parent("hidden", true, &shown)), std::string());  // the list decides, whatever the allowlist
+}
+
+Rows span_row(const std::string& trace, const std::string& span, const std::string& parent, const std::string& service, int64_t ts_ns) {
+  return {{"2026-09-12 10:00:00.000000000", std::to_string(ts_ns), trace, span, parent, "GET /home", "Server", service, "1000000", "Ok"}};
+}
+
+Row detail_row(const std::string& span, const std::string& parent, const std::string& service, int64_t ts_ns) {
+  return {"2026-09-12 10:00:00.000000000", std::to_string(ts_ns), kTraceId, span, parent, "GET /home", "Server", service, "1000000", "Ok", "msg",
+          "{\"k\":\"v\"}", "{\"host.name\":\"h\"}", "[]", "[]", "[]", "[]", "[]", "[]"};
+}
+
+void test_the_spans_of_a_trace_hide_the_parents_that_the_allowlist_hides() {
+  FakeDb db;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
+  db.on("AS trace_bounds", {detail_row("s1", "", "api", 10), detail_row("s2", "s1", "api", 20), detail_row("s3", "hidden", "auth", 30)});
+  RequestContext context;
+  TraceDetailRequest request;
+  request.source_host_id = "local";
+  request.trace_id = kTraceId;
+  const auto all = service.trace_detail(context, trace_host(), request);
+  CHECK(all);
+  CHECK_EQ(all.value->spans.size(), size_t(3));
+  // Every service allowed: a parent that no span of the answer carries is still named (it may be in another window).
+  CHECK_EQ(all.value->spans[2].parent_span_id, std::string());  // the parents of an answer about one trace are the spans that it shows
+  CHECK_EQ(all.value->spans[1].parent_span_id, std::string("s1"));
+  rapidjson::Document doc;
+  doc.Parse(trace_detail_json(*all.value).c_str());
+  CHECK(!doc.HasParseError());
+  CHECK_EQ(std::string(doc["range_source"].GetString()), std::string("trace_index"));
+  CHECK_EQ(doc["spans"].Size(), rapidjson::SizeType(3));
+  CHECK_EQ(std::string(doc["spans"][0]["span_attributes"].GetString()), std::string("{\"k\":\"v\"}"));
+  CHECK_EQ(doc["truncated"].GetBool(), false);
+  // traces.features turns a part of the answer off.
+  HostSpec off = trace_host();
+  off.otel.traces.features.events = false;
+  off.otel.traces.features.span_attributes = false;
+  const auto limited = service.trace_detail(context, off, request);
+  rapidjson::Document less;
+  less.Parse(trace_detail_json(*limited.value).c_str());
+  CHECK(!less["spans"][0].HasMember("events_name") && !less["spans"][0].HasMember("span_attributes") && less["spans"][0].HasMember("links_span_id"));
+  // More spans than traces.max_spans_per_trace: the answer says that it is cut.
+  HostSpec small = trace_host();
+  small.otel.traces.max_spans_per_trace = 2;
+  const auto cut = service.trace_detail(context, small, request);
+  CHECK(cut.value->truncated);
+  CHECK_EQ(cut.value->spans.size(), size_t(2));
+  CHECK(db.sqls.back().find("LIMIT 3") != std::string::npos);
+}
+
+void test_the_detail_of_a_trace_says_what_is_missing() {
+  FakeDb db;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
+  RequestContext context;
+  TraceDetailRequest request;
+  request.source_host_id = "local";
+  request.trace_id = kTraceId;
+  const auto missing = service.trace_detail(context, trace_host(), request);
+  CHECK(!missing);
+  CHECK_EQ(missing.error.status, 404);
+  CHECK_EQ(missing.error.code, std::string("trace_not_found"));
+  // The detail needs the trace index: after the connection, as the route always did.
+  HostSpec no_index = trace_host();
+  no_index.otel.traces.trace_index_table.clear();
+  const auto unavailable = service.trace_detail(context, no_index, request);
+  CHECK_EQ(unavailable.error.status, 503);
+  CHECK_EQ(unavailable.error.code, std::string("trace_index_unavailable"));
+  TraceService gone([](const HostSpec&, std::string*) -> std::unique_ptr<ChExecutor> { return nullptr; }, cache.refs());
+  CHECK_EQ(gone.trace_detail(context, no_index, request).error.code, std::string("trace_source_unavailable"));
+  FakeDb failing;
+  TraceService failing_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(failing)); }, cache.refs());
+  failing.fail_on("AS trace_bounds", [] { throw server_error(60, "Table otel.otel_traces_trace_id_ts does not exist"); });
+  CHECK_EQ(failing_service.trace_detail(context, trace_host(), request).error.code, std::string("trace_index_lookup_failed"));
+}
+
+void test_one_span_by_its_key() {
+  FakeDb db;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
+  Row row = detail_row(kSpanId, "parent", "api", kAnchorNs);
+  db.on("PREWHERE Timestamp = ", {row});
+  RequestContext context;
+  SpanRequest request;
+  request.source_host_id = "local";
+  request.trace_id = kTraceId;
+  request.span_id = kSpanId;
+  request.timestamp_ns = kAnchorNs;
+  const auto answer = service.span(context, trace_host(), request);
+  CHECK(answer);
+  CHECK_EQ(db.sqls[0], std::string(golden::kSpanOne));
+  rapidjson::Document doc;
+  doc.Parse(span_json(*answer.value).c_str());
+  CHECK(!doc.HasParseError());
+  CHECK_EQ(std::string(doc["span"]["span_id"].GetString()), kSpanId);
+  CHECK_EQ(std::string(doc["span"]["parent_span_id"].GetString()), std::string("parent"));
+  CHECK_EQ(doc["span"]["start_ns"].GetInt64(), kAnchorNs);
+  CHECK_EQ(std::string(doc["span"]["start_ns_text"].GetString()), std::to_string(kAnchorNs));
+  // A restricted allowlist: an answer about one span cannot know which parents are hidden, so it names none.
+  HostSpec restricted = trace_host();
+  restricted.otel.traces.service_allowlist = {"api"};
+  const auto hidden = service.span(context, restricted, request);
+  rapidjson::Document hd;
+  hd.Parse(span_json(*hidden.value).c_str());
+  CHECK_EQ(std::string(hd["span"]["parent_span_id"].GetString()), std::string());
+  FakeDb none;
+  TraceService none_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(none)); }, cache.refs());
+  const auto absent = none_service.span(context, trace_host(), request);
+  CHECK_EQ(absent.error.status, 404);
+  CHECK_EQ(absent.error.code, std::string("span_not_found"));
+  FakeDb failing;
+  TraceService failing_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(failing)); }, cache.refs());
+  failing.fail_on("PREWHERE Timestamp = ", [] { throw std::runtime_error("boom"); });
+  CHECK_EQ(failing_service.span(context, trace_host(), request).error.code, std::string("trace_span_failed"));
+  CHECK_EQ(failing.invalidated, 1);
+}
+
+void test_the_spans_that_link_to_a_trace() {
+  FakeDb db;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
+  RequestContext context;
+  LinkedFromRequest request;
+  request.source_host_id = "local";
+  request.trace_id = kTraceId;
+  // traces.features turns the links off.
+  HostSpec off = trace_host();
+  off.otel.traces.features.links = false;
+  CHECK_EQ(service.linked_from(context, off, request).error.code, std::string("trace_links_disabled"));
+  CHECK(db.sqls.empty());  // nothing is asked, not even a connection
+  // Without a window the trace index gives the bounds of the trace; a trace that it does not know is a 404.
+  CHECK_EQ(service.linked_from(context, trace_host(), request).error.code, std::string("trace_not_found"));
+  db.on("FROM `otel`.`otel_traces_trace_id_ts` WHERE TraceId", {{"3", "1789207200000", "1789210796000"}});
+  Rows links;
+  for (int i = 0; i < 101; ++i) {
+    Row row = {"2026-09-12 10:00:00.000000000", std::to_string(kAnchorNs - i), "other" + std::to_string(i), "sp" + std::to_string(i), "parent", "GET /", "Client", "api",
+               "1000", "Ok", "[\"" + kSpanId + "\"]", "[{}]"};
+    links.push_back(row);
+  }
+  db.on("PREWHERE has(Links.TraceId, trace)", links);
+  const auto answer = service.linked_from(context, trace_host(), request);
+  CHECK(answer);
+  CHECK_EQ(answer.value->range_source, std::string("trace_index"));
+  // The window of the trace, widened by traces.linked_from_margin_minutes (60) on each side, and the end that the index gave, plus 1 ms.
+  CHECK_EQ(answer.value->lo_ms, int64_t(1789207200000LL - 3600000));
+  CHECK_EQ(answer.value->hi_ms, int64_t(1789210796001LL + 3600000));
+  CHECK(answer.value->truncated);
+  CHECK_EQ(answer.value->rows.size(), kLinkedFromLimit);
+  rapidjson::Document doc;
+  doc.Parse(linked_from_json(*answer.value).c_str());
+  CHECK(!doc.HasParseError());
+  CHECK_EQ(doc["rows"].Size(), rapidjson::SizeType(100));
+  CHECK_EQ(doc["limit"].GetUint64(), uint64_t(100));
+  CHECK_EQ(std::string(doc["rows"][0]["link_span_ids"].GetString()), "[\"" + kSpanId + "\"]");
+  CHECK_EQ(std::string(doc["rows"][0]["parent_span_id"].GetString()), std::string("parent"));  // every service is allowed
+  // A window from the caller is used as it is (and checked).
+  LinkedFromRequest windowed = request;
+  windowed.has_range = true;
+  windowed.start_ms = kAStart;
+  windowed.end_ms = kAEnd;
+  const auto explicit_window = service.linked_from(context, trace_host(), windowed);
+  CHECK_EQ(explicit_window.value->range_source, std::string("request"));
+  CHECK_EQ(explicit_window.value->lo_ms, kAStart - 3600000);
+  windowed.end_ms = kAStart - 1;
+  CHECK_EQ(service.linked_from(context, trace_host(), windowed).error.code, std::string("invalid_trace_range"));
+  windowed.end_ms = kAStart + int64_t(8) * 24 * 3600 * 1000;
+  CHECK_EQ(service.linked_from(context, trace_host(), windowed).error.message, std::string("Trace time range exceeds traces.max_lookback_minutes."));
+  // Without a trace index the window must be given.
+  HostSpec no_index = trace_host();
+  no_index.otel.traces.trace_index_table.clear();
+  CHECK_EQ(service.linked_from(context, no_index, request).error.code, std::string("trace_index_unavailable"));
+  // A restricted allowlist: the links name no parent.
+  HostSpec restricted = trace_host();
+  restricted.otel.traces.service_allowlist = {"api"};
+  const auto hidden = service.linked_from(context, restricted, windowed.end_ms == 0 ? request : LinkedFromRequest{"local", kTraceId, "", true, kAStart, kAEnd});
+  rapidjson::Document hd;
+  hd.Parse(linked_from_json(*hidden.value).c_str());
+  CHECK_EQ(std::string(hd["rows"][0]["parent_span_id"].GetString()), std::string());
+}
+
+void test_the_context_of_a_span() {
+  FakeDb db;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
+  db.on("Timestamp <= fromUnixTimestamp64Nano(" + std::to_string(kAnchorNs) + ")", {span_row("t", "o1", "p", "api", kAnchorNs - 1)[0], span_row("t", "o2", "p", "api", kAnchorNs - 2)[0], span_row("t", "o3", "p", "api", kAnchorNs - 3)[0]});
+  db.on("Timestamp > fromUnixTimestamp64Nano(" + std::to_string(kAnchorNs) + ")", {span_row("t", "n1", "p", "api", kAnchorNs + 1)[0], span_row("t", "n2", "p", "api", kAnchorNs + 2)[0]});
+  RequestContext context;
+  ContextRequest request;
+  request.source_host_id = "local";
+  request.anchor_ns = kAnchorNs;
+  request.limit = 3;
+  const auto answer = service.context(context, trace_host(), request);
+  CHECK(answer);
+  const ContextOutcome& out = answer.value->outcome;
+  // "around" asks for the nearest spans of each side: 2 at or before the anchor, and 1 after (limit 3, the older side gets the odd one).
+  CHECK(out.query_older && out.query_newer);
+  CHECK_EQ(out.older.size(), size_t(2));
+  CHECK_EQ(out.newer.size(), size_t(1));
+  CHECK(out.more_older && out.more_newer);
+  CHECK_EQ(db.sqls[0].find("LIMIT 3") != std::string::npos, true);
+  CHECK_EQ(db.sqls[1].find("LIMIT 2") != std::string::npos, true);
+  rapidjson::Document doc;
+  doc.Parse(context_json(*answer.value).c_str());
+  CHECK(!doc.HasParseError());
+  CHECK_EQ(doc["has_newer"].GetBool(), true);
+  CHECK_EQ(doc["has_older"].GetBool(), true);
+  // The rows: the newer ones (oldest of them first), then the older ones, newest first: one list in time order, newest first.
+  CHECK_EQ(doc["rows"].Size(), rapidjson::SizeType(3));
+  CHECK_EQ(std::string(doc["rows"][0]["span_id"].GetString()), std::string("n1"));
+  CHECK_EQ(std::string(doc["rows"][1]["span_id"].GetString()), std::string("o1"));
+  CHECK_EQ(std::string(doc["rows"][0]["parent_span_id"].GetString()), std::string("p"));
+  CHECK_EQ(std::string(doc["timestamp_ns"].GetString()), std::to_string(kAnchorNs));
+  CHECK_EQ(doc["range_ns"].Size(), rapidjson::SizeType(2));
+  // One span on the newer side is wanted when the limit is 1: nothing on that side, and a probe says whether there is more.
+  FakeDb probe;
+  TraceService probe_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(probe)); }, cache.refs());
+  probe.on("Timestamp <= ", {span_row("t", "o1", "p", "api", kAnchorNs - 1)[0]});
+  probe.on("Timestamp > ", {span_row("t", "n1", "p", "api", kAnchorNs + 1)[0]});
+  ContextRequest one = request;
+  one.limit = 1;
+  const auto single = probe_service.context(context, trace_host(), one);
+  CHECK(single.value->outcome.newer.empty() && single.value->outcome.more_newer && !single.value->outcome.more_older);
+  CHECK(probe.sqls[1].find("LIMIT 1") != std::string::npos);
+  // Paging: older than a cursor, newer than a cursor.
+  FakeDb paged;
+  TraceService paged_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(paged)); }, cache.refs());
+  paged.on("ORDER BY Timestamp DESC", {span_row("t", "o1", "p", "api", kAnchorNs - 1)[0], span_row("t", "o2", "p", "api", kAnchorNs - 2)[0]});
+  ContextRequest older = request;
+  older.direction = "older";
+  older.cursor_ns = kAnchorNs;
+  older.cursor_span = kSpanId;
+  older.limit = 7;
+  const auto page = paged_service.context(context, trace_host(), older);
+  CHECK(page && page.value->outcome.query_older && !page.value->outcome.query_newer && !page.value->outcome.more_older);
+  rapidjson::Document pd;
+  pd.Parse(context_json(*page.value).c_str());
+  CHECK(pd.HasMember("has_older") && !pd.HasMember("has_newer"));
+}
+
+void test_the_filters_of_the_context() {
+  FakeDb db;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
+  db.on("name IN ('SpanAttributes','ResourceAttributes')", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "Map(String, String)"}});
+  RequestContext context;
+  ContextRequest request;
+  request.source_host_id = "local";
+  request.anchor_ns = kAnchorNs;
+  auto refused = [&](ContextRequest r, const HostSpec& host = trace_host()) { return service.context(context, host, r).error; };
+  ContextRequest service_filter = request;
+  service_filter.filter = "service";
+  CHECK_EQ(refused(service_filter).message, std::string("service is required for the service filter."));
+  service_filter.service = "checkout";
+  CHECK(service.context(context, trace_host(), service_filter));
+  CHECK(db.sqls.back().find("AND ServiceName = 'checkout' AND Timestamp") != std::string::npos);
+  ContextRequest host_filter = request;
+  host_filter.filter = "host";
+  CHECK_EQ(refused(host_filter).message, std::string("value is required for the host filter."));
+  host_filter.value = "web-1";
+  CHECK(service.context(context, trace_host(), host_filter));
+  CHECK(db.sqls.back().find("mapContains(ResourceAttributes, 'host.name') AND ResourceAttributes['host.name'] = 'web-1'") != std::string::npos);
+  ContextRequest pod = request;
+  pod.filter = "pod";
+  pod.value = "pod-9";
+  CHECK(service.context(context, trace_host(), pod));
+  CHECK(db.sqls.back().find("ResourceAttributes['k8s.pod.name'] = 'pod-9'") != std::string::npos);
+  ContextRequest attribute = request;
+  attribute.filter = "attribute";
+  attribute.attr_scope = "elsewhere";
+  CHECK_EQ(refused(attribute).message, std::string("attr_scope must be span or resource."));
+  attribute.attr_scope = "span";
+  CHECK_EQ(refused(attribute).message, std::string("attr_key must be 1 to 256 bytes."));
+  attribute.attr_key = "server.address";
+  attribute.attr_value = std::string(4097, 'v');
+  CHECK_EQ(refused(attribute).message, std::string("The attribute value is too long."));
+  attribute.attr_value = "frontend";
+  CHECK(service.context(context, trace_host(), attribute));
+  CHECK(db.sqls.back().find("SpanAttributes['server.address'] = 'frontend'") != std::string::npos);
+  ContextRequest bogus = request;
+  bogus.filter = "bogus";
+  CHECK_EQ(refused(bogus).message, std::string("filter must be any, service, host, pod or attribute."));
+  // traces.features turns the attribute scope off: its own code. Columns that are not Maps: another one.
+  HostSpec off = trace_host();
+  off.otel.traces.features.span_attributes = false;
+  CHECK_EQ(refused(attribute, off).code, std::string("context_filter_disabled"));
+  FakeDb plain;
+  TestCaches plain_cache;
+  TraceService plain_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(plain)); }, plain_cache.refs());
+  plain.on("name IN ('SpanAttributes','ResourceAttributes')", {{"SpanAttributes", "String"}, {"ResourceAttributes", "String"}});
+  CHECK_EQ(plain_service.context(context, trace_host(), attribute).error.code, std::string("context_filter_unavailable"));
+}
+
+void test_the_requests_of_the_detail_routes() {
+  ApiError error;
+  TraceDetailRequest detail;
+  CHECK(!parse_trace_detail(request({}), &detail, &error));
+  CHECK_EQ(error.code, std::string("missing_trace_id"));
+  CHECK(!parse_trace_detail(request({{"trace_id", std::string(257, 'a').c_str()}}), &detail, &error));
+  CHECK_EQ(error.code, std::string("invalid_trace_id"));
+  CHECK(parse_trace_detail(request({{"trace_id", "abc"}}), &detail, &error));
+  SpanRequest span;
+  CHECK(!parse_span(request({{"trace_id", "t"}, {"span_id", "s"}}), &span, &error));
+  CHECK_EQ(error.code, std::string("missing_span_key"));
+  CHECK(!parse_span(request({{"trace_id", "t"}, {"span_id", "s"}, {"timestamp_ns", "-5"}}), &span, &error));
+  CHECK_EQ(error.code, std::string("invalid_span_key"));
+  CHECK(parse_span(request({{"trace_id", "t"}, {"span_id", "s"}, {"timestamp_ns", "12345"}}), &span, &error));
+  CHECK_EQ(span.timestamp_ns, int64_t(12345));
+  LinkedFromRequest linked;
+  CHECK(!parse_linked_from(request({}), &linked, &error));
+  CHECK_EQ(error.code, std::string("missing_trace_id"));
+  CHECK(!parse_linked_from(request({{"trace_id", "t"}, {"span_id", std::string(257, 's').c_str()}}), &linked, &error));
+  CHECK_EQ(error.code, std::string("invalid_span_id"));
+  CHECK(!parse_linked_from(request({{"trace_id", "t"}, {"start_ms", "5"}}), &linked, &error));
+  CHECK_EQ(error.message, std::string("start_ms and end_ms must be provided together."));
+  CHECK(parse_linked_from(request({{"trace_id", "t"}, {"start_ms", "5"}, {"end_ms", "9"}}), &linked, &error));
+  CHECK(linked.has_range);
+  CHECK(parse_linked_from(request({{"trace_id", "t"}}), &linked, &error));
+  CHECK(!linked.has_range);
+  ContextRequest context;
+  CHECK(!parse_context(request({}), &context, &error));
+  CHECK_EQ(error.code, std::string("missing_timestamp"));
+  CHECK(parse_context(request({{"timestamp_ns", "1789210797865030093"}}), &context, &error));
+  CHECK_EQ(context.window_ms, int64_t(60000));
+  CHECK_EQ(context.filter, std::string("any"));
+  CHECK_EQ(context.direction, std::string("around"));
+  CHECK_EQ(context.limit, 50);
+  // A window that is not one of the four: refused; present and empty: refused; a text that is not a number keeps the default.
+  CHECK(!parse_context(request({{"timestamp_ns", "1789210797865030093"}, {"window_ms", "5"}}), &context, &error));
+  CHECK_EQ(error.code, std::string("invalid_context_window"));
+  CHECK(!parse_context(request({{"timestamp_ns", "1789210797865030093"}, {"window_ms", ""}}), &context, &error));
+  CHECK(parse_context(request({{"timestamp_ns", "1789210797865030093"}, {"window_ms", "abc"}}), &context, &error));
+  CHECK_EQ(context.window_ms, int64_t(60000));
+  CHECK(parse_context(request({{"timestamp_ns", "1789210797865030093"}, {"window_ms", "1000"}, {"limit", "9999"}}), &context, &error));
+  CHECK_EQ(context.limit, 200);
+  CHECK(!parse_context(request({{"timestamp_ns", "5"}}), &context, &error));
+  CHECK_EQ(error.code, std::string("invalid_timestamp"));
+  CHECK(!parse_context(request({{"timestamp_ns", "1789210797865030093"}, {"direction", "sideways"}}), &context, &error));
+  CHECK_EQ(error.code, std::string("invalid_direction"));
+  CHECK(!parse_context(request({{"timestamp_ns", "1789210797865030093"}, {"direction", "older"}}), &context, &error));
+  CHECK_EQ(error.code, std::string("missing_cursor"));
+  CHECK(parse_context(request({{"timestamp_ns", "1789210797865030093"}, {"direction", "newer"}, {"cursor_ns", "7"}, {"cursor_span_id", "s"}}), &context, &error));
+  CHECK_EQ(context.cursor_ns, int64_t(7));
+  CHECK_EQ(context.cursor_span, std::string("s"));
+}
+
+// ---- the span search ----
+
+void test_the_span_search_statements_are_unchanged() {
+  const std::string table = "`otel`.`otel_traces`";
+  SpanSearchSql q;
+  q.select = std::string("SELECT ") + kSpanSearchColumns + " FROM " + table;
+  q.visibility = "1";
+  const int64_t end_ns = kAEnd * kNsPerMs;
+  CHECK_EQ(span_slice_sql(q, 1789209900000000001LL, end_ns, "", 100), std::string(golden::kSpansPlain));
+  SpanSearchSql service = q;
+  service.column_filters = span_column_filters_sql(" AND ServiceName = 'api-gateway'", {}, 0, 0);
+  CHECK_EQ(span_slice_sql(service, 1789209900000000001LL, end_ns, "", 30), std::string(golden::kSpansService));
+  SpanSearchSql kinds = q;
+  kinds.column_filters = span_column_filters_sql("", {"Client", "Server"}, 0, 0);
+  CHECK_EQ(span_slice_sql(kinds, 1789209900000000001LL, end_ns, "", 20), std::string(golden::kSpansKinds));
+  SpanSearchSql durations = q;
+  durations.column_filters = span_column_filters_sql("", {}, 100, 900);
+  CHECK_EQ(span_slice_sql(durations, 1789209900000000001LL, end_ns, "", 20), std::string(golden::kSpansDurations));
+  SpanSearchSql tagged = q;
+  tagged.tag_sql = kTagFilter;
+  CHECK_EQ(span_slice_sql(tagged, 1789209900000000001LL, end_ns, "", 20), std::string(golden::kSpansTag));
+  SpanSearchSql errors = q;
+  errors.column_filters = span_column_filters_sql(" AND StatusCode = 'Error'", {}, 0, 0);
+  CHECK_EQ(span_slice_sql(errors, 1789209900000000001LL, end_ns, "", 40), std::string(golden::kSpansError));
+  // The attribute columns follow the eleven columns of a span.
+  SpanSearchSql columns = q;
+  AttributeColumns maps;
+  maps.span_map = maps.resource_map = true;
+  std::string columns_sql, code, message;
+  CHECK(span_columns_sql({SpanAttributeColumn{"span", "server.address"}, SpanAttributeColumn{"resource", "host.name"}}, maps, &columns_sql, &code, &message));
+  columns.select = std::string("SELECT ") + kSpanSearchColumns + columns_sql + " FROM " + table;
+  CHECK_EQ(span_slice_sql(columns, 1789209900000000001LL, end_ns, "", 5), std::string(golden::kSpansColumns));
+  // After a row key: the keyset; and the copies of a key that a page seam would split.
+  const std::string keyset = span_keyset_sql(1789210000000000000LL, "span", "trace");
+  CHECK_EQ(keyset, std::string(" AND (Timestamp < fromUnixTimestamp64Nano(1789210000000000000) OR (Timestamp = fromUnixTimestamp64Nano(1789210000000000000) "
+                                "AND (SpanId < 'span' OR (SpanId = 'span' AND TraceId < 'trace'))))"));
+  CHECK(span_slice_sql(q, 1, 2, keyset, 1).find(" WHERE 1 AND (Timestamp < ") != std::string::npos);
+  CHECK(span_ties_sql(q, 5, "s", "t").find(" PREWHERE Timestamp = fromUnixTimestamp64Nano(5) AND 1 WHERE SpanId = 's' AND TraceId = 't' SETTINGS max_execution_time = 20") != std::string::npos);
+}
+
+void test_the_span_cursor() {
+  SpanCursor cursor;
+  cursor.ts_ns = 1789210000000000123LL;
+  cursor.slice_ns = 900000000000LL;
+  cursor.after_key = true;
+  cursor.span_id = "ab\x01" "c";
+  cursor.trace_id = "trace";
+  const std::string text = encode_span_cursor(cursor);
+  CHECK_EQ(text, std::string("1.1789210000000000123.900000000000.k.616201") + "63.7472616365");
+  SpanCursor back;
+  CHECK(decode_span_cursor(text, &back));
+  CHECK(back.present && back.after_key);
+  CHECK_EQ(back.ts_ns, cursor.ts_ns);
+  CHECK_EQ(back.slice_ns, cursor.slice_ns);
+  CHECK_EQ(back.span_id, cursor.span_id);
+  CHECK_EQ(back.trace_id, std::string("trace"));
+  cursor.after_key = false;
+  CHECK(encode_span_cursor(cursor).find(".b.") != std::string::npos);
+  // What is not a cursor of this version.
+  SpanCursor bad;
+  CHECK(!decode_span_cursor("zzz", &bad));
+  CHECK(!decode_span_cursor("2.1.1.k.00.00", &bad));
+  CHECK(!decode_span_cursor("1.1.1.x.00.00", &bad));
+  CHECK(!decode_span_cursor("1.1x.1.k.00.00", &bad));
+  CHECK(!decode_span_cursor("1.1.1.k.0.00", &bad));
+  CHECK(!decode_span_cursor("1.1.1.k.zz.00", &bad));
+  CHECK(!decode_span_cursor("1.-1.1.k.00.00", &bad));
+  CHECK(!decode_span_cursor(std::string(3000, '1'), &bad));
+  CHECK_EQ(hex_text(std::string("\xff\x00", 2)), std::string("ff00"));
+  std::string raw;
+  CHECK(unhex_text("FF00", &raw) && raw.size() == 2);
+  // The widths of the slices: 15 minutes, 1 h, 6 h, 24 h, and 24 h again.
+  CHECK_EQ(next_span_slice_ns(15 * kNsPerMinute), int64_t(60 * kNsPerMinute));
+  CHECK_EQ(next_span_slice_ns(kNsPerMinute), int64_t(15 * kNsPerMinute));
+  CHECK_EQ(next_span_slice_ns(1440 * kNsPerMinute), int64_t(1440 * kNsPerMinute));
+  // A slice that fails for its read bound or its time is a guard stop; any other failure is not.
+  CHECK(slice_guard_error(server_error(158, "Too many rows")));
+  CHECK(slice_guard_error(server_error(159, "Timeout exceeded")));
+  CHECK(!slice_guard_error(server_error(60, "Unknown table")));
+}
+
+SpanSearchPlan search_plan(int limit = 3) {
+  SpanSearchPlan plan;
+  plan.sql.select = std::string("SELECT ") + kSpanSearchColumns + " FROM `otel`.`otel_traces`";
+  plan.sql.visibility = "1";
+  plan.start_ns = kAStart * kNsPerMs;
+  plan.end_ns = kAEnd * kNsPerMs;
+  plan.limit = limit;
+  return plan;
+}
+
+Row span_search_row(const std::string& id, int64_t ts_ns, const std::string& trace = "t") {
+  return {"2026-09-12 10:00:00.000000000", std::to_string(ts_ns), trace, id, "", "api", "GET /", "Server", "1000", "Ok", ""};
+}
+
+void test_a_dense_range_answers_from_its_first_slice() {
+  FakeDb db;
+  const int64_t end_ns = kAEnd * kNsPerMs;
+  // limit 3: the slice has 4 rows (need + 1): the page ends after the third, and the cursor is that row.
+  db.on("LIMIT 4", {span_search_row("d", end_ns - 10), span_search_row("c", end_ns - 20), span_search_row("b", end_ns - 30), span_search_row("a", end_ns - 40)});
+  const SpanSearchOutcome out = run_span_search(db, search_plan(3));
+  CHECK_EQ(out.rows.size(), size_t(3));
+  CHECK(!out.exhausted && !out.incomplete);
+  CHECK(out.next.present && out.next.after_key);
+  CHECK_EQ(out.next.span_id, std::string("b"));
+  CHECK_EQ(out.next.ts_ns, end_ns - 30);
+  // The next page starts with a slice about 4x the time that this page covered (never below a minute, never wider than this slice).
+  CHECK_EQ(out.next.slice_ns, kNsPerMinute);
+  CHECK_EQ(out.slices.size(), size_t(1));
+  CHECK_EQ(out.slices[0].hi_ns, end_ns);
+  CHECK_EQ(out.slices[0].lo_ns, end_ns - 15 * kNsPerMinute + 1);
+  CHECK_EQ(db.sqls.size(), size_t(1));
+  // The next page: after that row, with the width that it asked for.
+  SpanSearchPlan next = search_plan(3);
+  next.cursor = out.next;
+  FakeDb second;
+  second.on("LIMIT 4", {});
+  const SpanSearchOutcome page2 = run_span_search(second, next);
+  CHECK(second.sqls[0].find(span_keyset_sql(out.next.ts_ns, "b", "t")) != std::string::npos);
+  CHECK(second.sqls[0].find("fromUnixTimestamp64Nano(" + std::to_string(out.next.ts_ns - kNsPerMinute + 1) + ")") != std::string::npos);
+  CHECK(page2.rows.empty());
+}
+
+void test_copies_of_the_boundary_key_stay_on_one_page() {
+  FakeDb db;
+  const int64_t end_ns = kAEnd * kNsPerMs;
+  // The third and the fourth row are the same span exported twice: the page takes both, so the strict keyset after it skips none.
+  db.on("LIMIT 4", {span_search_row("d", end_ns - 10), span_search_row("c", end_ns - 20), span_search_row("b", end_ns - 30), span_search_row("b", end_ns - 30)});
+  db.on("PREWHERE Timestamp = ", {span_search_row("b", end_ns - 30), span_search_row("b", end_ns - 30), span_search_row("b", end_ns - 30)});
+  const SpanSearchOutcome out = run_span_search(db, search_plan(3));
+  // d, c and the three copies of b that the ties statement returns.
+  CHECK_EQ(out.rows.size(), size_t(5));
+  CHECK_EQ(db.sqls.size(), size_t(2));
+  CHECK(db.sqls[1].find("WHERE SpanId = 'b' AND TraceId = 't'") != std::string::npos);
+  CHECK_EQ(out.next.span_id, std::string("b"));
+}
+
+void test_a_sparse_range_widens_the_slice() {
+  FakeDb db;
+  const int64_t end_ns = kAEnd * kNsPerMs;
+  // Nothing in the first 15 minutes, one span in the next hour, and the range ends: the page is the whole range.
+  db.on("LIMIT 4", {}, 1);
+  db.on("LIMIT 4", {span_search_row("a", end_ns - 40 * kNsPerMinute)}, 1);
+  const SpanSearchOutcome out = run_span_search(db, search_plan(3));
+  CHECK_EQ(out.rows.size(), size_t(1));
+  CHECK(out.exhausted && !out.incomplete);
+  CHECK_EQ(out.slices.size(), size_t(2));
+  CHECK_EQ(out.slices[0].lo_ns, end_ns - 15 * kNsPerMinute + 1);
+  // The second slice starts right under the first, and is 4x as wide, up to the start of the range.
+  CHECK_EQ(out.slices[1].hi_ns, end_ns - 15 * kNsPerMinute);
+  CHECK_EQ(out.slices[1].lo_ns, kAStart * kNsPerMs);
+}
+
+void test_a_spent_budget_gives_a_resume_point() {
+  FakeDb db;
+  SpanSearchPlan plan = search_plan(3);
+  plan.budget_ms = 0;
+  db.on("LIMIT 4", {});
+  const SpanSearchOutcome out = run_span_search(db, plan);
+  CHECK(out.incomplete && !out.exhausted);
+  CHECK_EQ(out.stop_reason, std::string("time_budget"));
+  CHECK(out.next.present && !out.next.after_key);
+  // Strictly before the slice that was read, and the width that the next page starts with.
+  CHECK_EQ(out.next.ts_ns, plan.end_ns - 15 * kNsPerMinute);
+  CHECK_EQ(out.next.slice_ns, 15 * kNsPerMinute);
+  CHECK_EQ(db.sqls.size(), size_t(1));
+}
+
+void test_a_slice_that_fails_a_guard_is_retried_narrower_then_a_resume_point() {
+  const int64_t end_ns = kAEnd * kNsPerMs;
+  // The first slice of the page is too heavy: it is read again, narrower (an eighth of its width).
+  FakeDb db;
+  db.fail_on("LIMIT 4", [] { throw server_error(159, "Timeout exceeded"); }, 1);
+  db.on("LIMIT 4", {span_search_row("a", end_ns - 10)});
+  const SpanSearchOutcome retried = run_span_search(db, search_plan(3));
+  CHECK(retried.rows.size() >= 1);
+  CHECK(db.sqls.size() >= 2);
+  CHECK(db.sqls[1].find("Timestamp >= fromUnixTimestamp64Nano(" + std::to_string(end_ns - 15 * kNsPerMinute / 8 + 1) + ")") != std::string::npos);
+  // Heavy again: the page cannot be answered.
+  FakeDb heavy;
+  heavy.fail_on("LIMIT 4", [] { throw server_error(158, "Too many rows to read"); });
+  bool thrown = false;
+  try {
+    run_span_search(heavy, search_plan(3));
+  } catch (const clickhouse::ServerException&) {
+    thrown = true;
+  }
+  CHECK(thrown);
+  CHECK_EQ(heavy.sqls.size(), size_t(2));
+  // A guard after answered slices is a resume point with a narrower slice, and says which guard.
+  FakeDb later;
+  later.on("LIMIT 4", {}, 1);
+  later.fail_on("LIMIT 4", [] { throw server_error(158, "Too many rows to read"); });
+  const SpanSearchOutcome stopped = run_span_search(later, search_plan(3));
+  CHECK(stopped.incomplete);
+  CHECK_EQ(stopped.stop_reason, std::string("read_rows_limit"));
+  CHECK_EQ(stopped.next.ts_ns, end_ns - 15 * kNsPerMinute);
+  CHECK_EQ(stopped.next.slice_ns, std::max(kSpanMinSliceNs, 60 * kNsPerMinute / 4));
+  FakeDb timed;
+  timed.on("LIMIT 4", {}, 1);
+  timed.fail_on("LIMIT 4", [] { throw server_error(159, "Timeout exceeded"); });
+  CHECK_EQ(run_span_search(timed, search_plan(3)).stop_reason, std::string("slice_timeout"));
+  // Any other failure is the failure of the search.
+  FakeDb broken;
+  broken.fail_on("LIMIT 4", [] { throw server_error(60, "Unknown table"); });
+  bool failed = false;
+  try {
+    run_span_search(broken, search_plan(3));
+  } catch (const clickhouse::ServerException&) {
+    failed = true;
+  }
+  CHECK(failed);
+  CHECK_EQ(broken.sqls.size(), size_t(1));
+}
+
+void test_the_span_search_service_and_its_request() {
+  FakeDb db;
+  TestCaches cache;
+  TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, cache.refs());
+  db.on("name IN ('SpanAttributes','ResourceAttributes')", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "Map(String, String)"}});
+  const int64_t end_ns = kAEnd * kNsPerMs;
+  Row row = span_search_row("a", end_ns - 10);
+  row.push_back("1");
+  row.push_back("frontend");
+  row.push_back("0");
+  row.push_back("");
+  db.on("LIMIT 3", {row});
+  RequestContext context;
+  httplib::Request req = request({{"start_ms", std::to_string(kAStart).c_str()}, {"end_ms", std::to_string(kAEnd).c_str()}, {"limit", "2"},
+                                  {"columns", "span:server.address,resource:host.name"}, {"service", "api"}, {"min_duration_ms", "1.5"}});
+  SpansRequest parsed;
+  ApiError error;
+  CHECK(parse_spans(req, trace_host().otel.traces, &parsed, &error));
+  CHECK_EQ(parsed.limit, 2);
+  CHECK_EQ(parsed.columns.size(), size_t(2));
+  CHECK_EQ(parsed.budget_ms, kSpanPageBudgetMs);
+  parsed.source_host_id = "local";
+  const auto answer = service.spans(context, trace_host(), parsed);
+  CHECK(answer);
+  // The service filter and the duration go to PREWHERE with the allowlist; the two attribute columns follow the eleven.
+  const std::string& sql = db.sqls.back();
+  CHECK(sql.find("PREWHERE Timestamp >= ") != std::string::npos);
+  CHECK(sql.find(" AND 1 AND ServiceName = 'api' AND Duration >= 1500000 WHERE 1 ORDER BY") != std::string::npos);
+  CHECK(sql.find("toString(toUInt8(mapContains(SpanAttributes, 'server.address')))") != std::string::npos);
+  rapidjson::Document doc;
+  doc.Parse(spans_json(*answer.value).c_str());
+  CHECK(!doc.HasParseError());
+  CHECK_EQ(doc["rows"].Size(), rapidjson::SizeType(1));
+  CHECK_EQ(std::string(doc["rows"][0]["attributes"][0].GetString()), std::string("frontend"));
+  CHECK(doc["rows"][0]["attributes"][1].IsNull());
+  CHECK_EQ(doc["attribute_columns"].Size(), rapidjson::SizeType(2));
+  CHECK_EQ(doc["has_more"].GetBool(), false);
+  CHECK(doc["cursor"].IsNull());
+  CHECK_EQ(doc["incomplete"].GetBool(), false);
+  CHECK_EQ(std::string(doc["searched_to_ns"].GetString()), std::to_string(kAStart * kNsPerMs));
+  CHECK_EQ(std::string(doc["rows"][0]["start_ns"].GetString()), std::to_string(end_ns - 10));
+  // A filter on an attribute of a source whose maps are not usable is refused before the scan.
+  FakeDb plain;
+  TestCaches plain_cache;
+  TraceService plain_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(plain)); }, plain_cache.refs());
+  plain.on("name IN ('SpanAttributes','ResourceAttributes')", {{"SpanAttributes", "String"}, {"ResourceAttributes", "String"}});
+  SpansRequest tagged = parsed;
+  tagged.filters.tags.push_back(TagFilter{"span", TagOp::Eq, "k", "v"});
+  CHECK_EQ(plain_service.spans(context, trace_host(), tagged).error.code, std::string("trace_tag_search_unsupported"));
+  CHECK_EQ(plain.count("LIMIT 3"), size_t(0));
+  // A failure of the scan: the code of the route, and the connection is not lent again.
+  FakeDb failing;
+  TraceService failing_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(failing)); }, cache.refs());
+  failing.fail_on("LIMIT 3", [] { throw server_error(60, "Unknown table"); });
+  SpansRequest plain_request = parsed;
+  plain_request.columns.clear();
+  const auto broken = failing_service.spans(context, trace_host(), plain_request);
+  CHECK_EQ(broken.error.code, std::string("trace_spans_failed"));
+  CHECK_EQ(failing.invalidated, 1);
+  // A restricted allowlist hides the parent of a span.
+  HostSpec restricted = trace_host();
+  restricted.otel.traces.service_allowlist = {"api"};
+  Row with_parent = span_search_row("a", end_ns - 10);
+  with_parent[4] = "parent";
+  FakeDb hidden;
+  TraceService hidden_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(hidden)); }, cache.refs());
+  hidden.on("LIMIT 3", {with_parent});
+  const auto hide = hidden_service.spans(context, restricted, plain_request);
+  rapidjson::Document hd;
+  hd.Parse(spans_json(*hide.value).c_str());
+  CHECK_EQ(std::string(hd["rows"][0]["parent_span_id"].GetString()), std::string());
+}
+
+void test_the_span_search_request() {
+  TraceSettings traces = settings();
+  SpansRequest parsed;
+  ApiError error;
+  CHECK(parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}}), traces, &parsed, &error));
+  CHECK_EQ(parsed.limit, kSpanPageDefaultLimit);
+  CHECK(parsed.kinds.empty() && parsed.columns.empty() && !parsed.cursor.present);
+  CHECK(parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"limit", "99999"}, {"budget_ms", "99999"}}), traces, &parsed, &error));
+  CHECK_EQ(parsed.limit, kSpanPageMaxLimit);
+  CHECK_EQ(parsed.budget_ms, kSpanPageBudgetMs);  // the budget may only be lowered
+  CHECK(parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"budget_ms", "300"}}), traces, &parsed, &error));
+  CHECK_EQ(parsed.budget_ms, 300.0);
+  CHECK(!parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"min_duration_ms", "9"}, {"max_duration_ms", "3"}}), traces, &parsed, &error));
+  CHECK_EQ(error.code, std::string("invalid_trace_duration"));
+  CHECK(!parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"kind", std::string(65, 'k').c_str()}}), traces, &parsed, &error));
+  CHECK_EQ(error.message, std::string("kind values are limited to 64 bytes."));
+  httplib::Request many;
+  many.params.emplace("start_ms", "1000");
+  many.params.emplace("end_ms", "9000");
+  for (int i = 0; i < 17; ++i) many.params.emplace("kind", "k" + std::to_string(i));
+  CHECK(!parse_spans(many, traces, &parsed, &error));
+  CHECK_EQ(error.message, std::string("At most 16 span kinds are accepted."));
+  CHECK(!parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"columns", ","}, {"columns", "span:"}}), traces, &parsed, &error));
+  CHECK_EQ(error.code, std::string("invalid_trace_columns"));
+  // A cursor of this range; one that is past its end, or is not a cursor, is refused.
+  SpanCursor cursor;
+  cursor.ts_ns = 5000 * kNsPerMs;
+  cursor.slice_ns = kNsPerMinute;
+  cursor.after_key = true;
+  cursor.span_id = "s";
+  cursor.trace_id = "t";
+  const std::string text = encode_span_cursor(cursor);
+  CHECK(parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"cursor", text.c_str()}}), traces, &parsed, &error));
+  CHECK(parsed.cursor.present);
+  CHECK_EQ(parsed.cursor.span_id, std::string("s"));
+  cursor.ts_ns = 9001 * kNsPerMs;
+  CHECK(!parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"cursor", encode_span_cursor(cursor).c_str()}}), traces, &parsed, &error));
+  CHECK_EQ(error.code, std::string("invalid_cursor"));
+  CHECK(!parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"cursor", "zzz"}}), traces, &parsed, &error));
+  TraceSettings no_status = traces;
+  no_status.features.status_filter = false;
+  CHECK(!parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"status", "Error"}}), no_status, &parsed, &error));
+  CHECK_EQ(error.code, std::string("trace_filter_disabled"));
+}
+
 }  // namespace
 
 // A test that throws is a failure with its name (a sanitizer finding stops the run anyway).
@@ -1999,6 +2733,24 @@ int main() {
   RUN(test_the_schema_of_the_source);
   RUN(test_the_prefill_and_the_facets_are_cached_by_window_and_filters);
   RUN(test_the_requests_of_the_discovery_routes);
+  RUN(test_trace_statements_are_unchanged);
+  RUN(test_a_parent_that_the_allowlist_hides_is_never_named);
+  RUN(test_the_spans_of_a_trace_hide_the_parents_that_the_allowlist_hides);
+  RUN(test_the_detail_of_a_trace_says_what_is_missing);
+  RUN(test_one_span_by_its_key);
+  RUN(test_the_spans_that_link_to_a_trace);
+  RUN(test_the_context_of_a_span);
+  RUN(test_the_filters_of_the_context);
+  RUN(test_the_requests_of_the_detail_routes);
+  RUN(test_the_span_search_statements_are_unchanged);
+  RUN(test_the_span_cursor);
+  RUN(test_a_dense_range_answers_from_its_first_slice);
+  RUN(test_copies_of_the_boundary_key_stay_on_one_page);
+  RUN(test_a_sparse_range_widens_the_slice);
+  RUN(test_a_spent_budget_gives_a_resume_point);
+  RUN(test_a_slice_that_fails_a_guard_is_retried_narrower_then_a_resume_point);
+  RUN(test_the_span_search_service_and_its_request);
+  RUN(test_the_span_search_request);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

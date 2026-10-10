@@ -66,7 +66,7 @@ def test_health_capabilities_only_probe_features_consumed_by_product():
 def test_trace_explorer_is_config_gated_and_uses_otel_clickhouse_schema():
     config = read("src/config.cpp")
     server = read("src/server.cpp")
-    api = read("src/api_traces.cpp")
+    api = read_traces()
     example = read("config.example.hcl")
 
     assert 'optional_block(root, "traces"' in config
@@ -92,24 +92,29 @@ def test_trace_explorer_is_config_gated_and_uses_otel_clickhouse_schema():
 
 
 def test_trace_search_is_bounded_and_trace_detail_prefers_aux_index():
-    api = read("src/api_traces.cpp")
+    api = read_traces()
     trace_ui = read("src/static/app_traces.js")
     trace_html = read("src/static/trace.html")
 
-    assert "Timestamp >= fromUnixTimestamp64Milli" in read_traces()
+    assert "Timestamp >= fromUnixTimestamp64Milli" in api
     assert "start_ms" in api and "end_ms" in api
-    assert "candidate_ids" in read_traces()
-    assert "TraceId IN (SELECT TraceId FROM candidate_ids)" in read_traces()
-    detail = api[api.index("void Server::handle_trace_detail"): ]
+    assert "candidate_ids" in api
+    assert "TraceId IN (SELECT TraceId FROM candidate_ids)" in api
+    sql = read_unit("trace_sql.cpp")
+    detail = sql[sql.index("std::string trace_detail_sql"):sql.index("std::string span_sql")]
+    service = read_unit("trace_service.cpp")
+    detail_route = service[service.index("TraceService::trace_detail"):service.index("TraceService::span(")]
+    json = read_unit("trace_json.cpp")
+    detail_json = json[json.index("std::string trace_detail_json"):json.index("std::string span_json")]
     assert 'WITH " + trace_literal + " AS trace' in detail
     # One index pass yields both bounds of the trace's time window.
     assert "SELECT tuple(min(Start) - toIntervalSecond(1), max(End) + toIntervalSecond(1))" in detail
     assert "SELECT min(Start) - toIntervalSecond(1)" not in detail
     assert "PREWHERE Timestamp >= tupleElement(trace_bounds, 1) AND Timestamp <= tupleElement(trace_bounds, 2)" in detail
     assert "WHERE TraceId = trace AND" in detail
-    assert 'w.Key("range_source"); w.String("trace_index");' in detail
-    assert "full_trace_id_lookup" not in detail
-    assert "max_lookback_minutes" not in detail
+    assert 'w.Key("range_source"); w.String("trace_index");' in detail_json
+    assert "full_trace_id_lookup" not in detail + detail_route + detail_json
+    assert "max_lookback_minutes" not in detail + detail_route
     assert "traceWaterfall" in trace_ui
     assert "traceInspector" in trace_ui
     assert "traceWaterfall" in trace_html
