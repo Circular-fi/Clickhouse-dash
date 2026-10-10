@@ -32,7 +32,7 @@ A range that is wider than `traces.max_lookback_minutes` (a link for `now-30d` w
 
 Each page loads only its own markup, modules and stylesheet. These rules apply:
 
-- `pages.traces`, `pages.logs` and `pages.metrics` in `src/static/modules.json` list the modules that every view needs, then the modules of the view.
+- `pages.traces`, `pages.logs` and `pages.metrics` in `src/static/modules.json` name the entry of each view (`app_page_traces.js`, `app_page_logs.js`, `app_page_metrics.js`) and its lazy groups. The modules of a view are the modules that its entry imports.
 - `style.traces.css`, `style.logs.css` and `style.metrics.css` are the stylesheets. `tools/build_page_css.py` writes them from `src/static/css/` at build time.
 - A page that is not the Traces page never loads the trace modules, and the other way round.
 
@@ -225,7 +225,7 @@ The URL of the search page holds the whole search. These are the parameters:
 
 Each search is a history entry (Back / Forward restore it and run it again). The search at page load keeps its URL. A reload or a shared link opens the same search. The URLs of trace pages (`/observability/traces/<id>?span=…`) carry the same parameters. For this reason, *back to search* returns to the search where the user opened the trace, also from a shared link.
 
-One trace is a page of its own (`trace.html`, started by `app_trace_page.js`). It is not a pane of the Observability page. It has the page header. It has none of the Traces / Logs / Metrics tabs and none of the search. The server answers `/observability/traces/<id>` with it before the Observability catch-all. These rules apply to the navigation:
+One trace is a page of its own (`trace.html`, started by `app_page_trace.js`). It is not a pane of the Observability page. It has the page header. It has none of the Traces / Logs / Metrics tabs and none of the search. The server answers `/observability/traces/<id>` with it before the Observability catch-all. These rules apply to the navigation:
 
 - The opening of a trace from the results is a page navigation. It can start from a row, a point of the charts, a span, or a Services or Logs link.
 - The back arrow returns to the exact search entry where the user opened the trace. The browser restores that page as it was left, or runs the search again from its address. The user can also open a trace by its address or from another page. In this case, the back arrow returns to the search of the context that the address carries.
@@ -312,7 +312,7 @@ The sidebar of the search page follows the search filters of HyperDX. It lists t
 - The user can pin keys to the top (stored in the browser), filter them by name and load them 20 at a time. Values load 10, then 50, 200 and 500.
 - The sidebar folds into a rail (remembered; folded by default below 1100 px). It loads nothing while it is folded.
 
-The sidebar is the facets component (`app_facet_panel.js`, `ns.facetPanel`). The Logs **Fields** panel uses it too (`docs/logs.md`). The caps below (`src/facet_limits.hpp`) bound both.
+The sidebar is the facets component (`app_facet_panel.js`, `facetPanel`). The Logs **Fields** panel uses it too (`docs/logs.md`). The caps below (`src/facet_limits.hpp`) bound both.
 
 `/api/traces/facets` returns the keys in one pass that reads only the key subcolumns of the maps:
 

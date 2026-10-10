@@ -7,7 +7,7 @@ The front end is vanilla JavaScript. Most of it builds the DOM, and WebAssembly 
 - A kernel has the same interface as the JavaScript code that it replaces. Typed arrays or strings go in. Typed arrays or strings come out.
 - The JavaScript code stays. It is the fallback and it is the reference of the tests.
 - The result of a kernel is identical to the result of the JavaScript code. For floating point numbers, "identical" means the same double.
-- A kernel loads on demand, in a lazy group of `src/static/modules.json`. A page that does not use a kernel never fetches it.
+- A kernel loads on demand, in a lazy group of `src/static/modules.json` (`loader.loadGroup("wasm-<name>")` imports its adapter). A page that does not use a kernel never fetches it.
 - A kernel never breaks a page. If the file is blocked, missing or refused, the page keeps its JavaScript path.
 - A short input stays on the JavaScript path. A call into a kernel has a fixed cost. Each kernel has a size threshold that was measured.
 - A call that takes more than a few milliseconds runs in a Web Worker, so the page does not freeze.
@@ -59,19 +59,19 @@ Without Docker, install `clang-18` and `lld`, and run `python3 tools/build_wasm.
 
 ## Loading
 
-`ns.wasm` (`src/static/app_wasm.js`) loads a kernel.
+`wasm` (`src/static/app_wasm.js`) loads a kernel.
 
-- `ns.wasm.load(name)` fetches `static/wasm/<name>.wasm`. It uses `WebAssembly.instantiateStreaming`. If that fails, it reads the bytes and calls `WebAssembly.instantiate`. It never rejects. A failure gives `null`.
-- `ns.wasm.get(name)` returns the kernel if it is ready now.
+- `wasm.load(name)` fetches `static/wasm/<name>.wasm`. It uses `WebAssembly.instantiateStreaming`. If that fails, it reads the bytes and calls `WebAssembly.instantiate`. It never rejects. A failure gives `null`.
+- `wasm.get(name)` returns the kernel if it is ready now.
 - The server sends `.wasm` as `application/wasm`. The staged build adds `?v=<hash>` to the address, and a `.gz` copy for clients that accept gzip.
 - A kernel has its own memory. `kernel.scope(fn)` frees all allocations of `fn` when it returns.
-- `ns.wasm.worker(name, adapterFile)` runs the same kernel in a Worker. It returns `{ call(op, args, transfer), close() }`, or `null` if Workers or the kernel are not available.
+- `wasm.worker(name, adapterFile)` runs the same kernel in a Worker. It returns `{ call(op, args, transfer), close() }`, or `null` if Workers or the kernel are not available.
 
-An adapter registers its operations in `ns.wasm.ops.<name>`. The same adapter file runs in the page and in the Worker.
+An adapter is an ES module. It imports `wasm` from `app_wasm.js` and registers its operations in `wasm.ops.<name>`. The same adapter file runs in the page and in the Worker. The Worker is a module Worker (`{ type: "module" }`): it imports `app_wasm.js` and the adapter, and the page sends the address of the adapter in the `init` message.
 
 ## When a kernel loads
 
-A page asks for a kernel when the work is big enough. The request never waits for `ns.wasm`. `ns.wasm` exists only after a kernel group has loaded. The request tests the browser's `WebAssembly` object instead.
+A page asks for a kernel when the work is big enough. The request never waits for `wasm`. `wasm` exists only after a kernel group has loaded. The request tests the browser's `WebAssembly` object instead.
 
 | Kernel | The page asks for it when |
 | --- | --- |

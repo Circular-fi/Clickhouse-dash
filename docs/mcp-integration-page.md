@@ -32,7 +32,7 @@ The page has the same frame as System and Observability (the header, then one sc
 
 The page says nothing of the state of MCP ("MCP enabled", "Storage configured" or "Managed from the UI" told the reader nothing that he could act on). A page that shows keys has MCP on. What stops a change (no storage file, `manage_from_ui = false`) is the note under the title of the keys.
 
-The page uses the shared components only. `ns.badge` draws the badges. `ns.uiState` draws the loading, empty and error states and the notes. `ns.dialog` draws the dialogs. The form kit (`.uiForm`, `.uiField`, `.uiInput`, `.uiCheck`) draws the fields. The part heading, the compact data table and its box are shared too. `mcp.css` keeps only what this page alone needs.
+The page uses the shared components only. `badge` draws the badges. `uiState` draws the loading, empty and error states and the notes. `dialog` draws the dialogs. The form kit (`.uiForm`, `.uiField`, `.uiInput`, `.uiCheck`) draws the fields. The part heading, the compact data table and its box are shared too. `mcp.css` keeps only what this page alone needs.
 
 The page switcher shows an **MCP** entry only when `/api/version` reports `features.mcp.enabled = true`. The switcher caches the answer in `chdash.pageNav.v1`, like the other entries.
 
@@ -154,10 +154,10 @@ The confirmation names what the action touches: the hosts of the key. After the 
 | File | Role |
 | --- | --- |
 | `src/static/mcp.html` | The shell: `<body data-page="mcp">`, one `h1` (`srOnly`), the panel (`#mcpState`, `#mcpLayout` with `#mcpKeys` and `#mcpSide`). |
-| `src/static/app_mcp_page.js` | The controller: loads the state, draws the containers again, runs create and delete. |
+| `src/static/app_page_mcp.js` | The controller: loads the state, draws the containers again, runs create and delete. |
 | `src/static/app_mcp_view.js` | The keys part (heading, table), the side column and the states. |
 | `src/static/app_mcp_form.js` | The make-a-key dialog, the details of a key (a node that the table puts in a row) and the secret dialog. |
-| `src/static/app_ui_dialog.js` | `ns.dialog.open`, with `validate` (the submit button is off while it answers a reason). |
+| `src/static/app_ui_dialog.js` | `dialog.open`, with `validate` (the submit button is off while it answers a reason). |
 | `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `deleteMcpKey`. They hold every `/api/mcp/*` shape. |
 | `src/static/css/10-components/form.css`, `part.css` | The form kit and the part heading that the page shares with other pages. |
 | `src/static/css/20-features/mcp.css` | The styles of this page only (`style.mcp.css` is generated from it). |

@@ -30,7 +30,7 @@ The important invariant is this: `system_uri` is for enrichment only. It never a
 
 ## Shell and navigation
 
-The Explorer shell has one nav row (48 px, `#explorerTopBar`). The nav row has one underline tab row (`#explorerNavTabs`) with the view tabs `Catalog | Functions`. On the Catalog only, it also has a divider and its `Browse | Graph` tabs (`#explorerModeTabs`, `?mode=graph`). These are the second-level sections of docs/ui-foundations.md ("Tabs"), like the Search / Services / Service map of Observability after Traces / Logs / Metrics. Each of the two rows is an `ns.tabs` tablist (Left / Right / Home / End within it).
+The Explorer shell has one nav row (48 px, `#explorerTopBar`). The nav row has one underline tab row (`#explorerNavTabs`) with the view tabs `Catalog | Functions`. On the Catalog only, it also has a divider and its `Browse | Graph` tabs (`#explorerModeTabs`, `?mode=graph`). These are the second-level sections of docs/ui-foundations.md ("Tabs"), like the Search / Services / Service map of Observability after Traces / Logs / Metrics. Each of the two rows is an `tabs` tablist (Left / Right / Home / End within it).
 
 There is no breadcrumb. In the Catalog, the tree selection carries the location, and the card header names the object. On a narrow window, the row scrolls sideways with its edge cues, after the drawer button. It never wraps.
 
@@ -81,9 +81,9 @@ The last two open the Storage tab of the table card, the database page scrolled 
 - The card tab as a path segment (`/explorer/catalog/<db>/<table>/<tab>`).
 - The former card tab slugs (`overview`, `schema`, `data`).
 
-`docs/ui-foundations.md` ("Routes") describes the scheme of every page. The Explorer writes its address through `ns.router` while its workspace shows.
+`docs/ui-foundations.md` ("Routes") describes the scheme of every page. The Explorer writes its address through `router` while its workspace shows.
 
-`ns.explorer.setView(view)` switches views programmatically. It also accepts a mode (`"browse"`, `"graph"`). `"storage"` opens Browse on the storage of the selection (the Storage tab of the table card, or the database page scrolled to it). The modes that `explorer.browse` / `explorer.graph` disable are hidden. A disabled mode falls back to the first available one.
+`explorer.setView(view)` switches views programmatically. It also accepts a mode (`"browse"`, `"graph"`). `"storage"` opens Browse on the storage of the selection (the Storage tab of the table card, or the database page scrolled to it). The modes that `explorer.browse` / `explorer.graph` disable are hidden. A disabled mode falls back to the first available one.
 
 The health of the selected server is not an Explorer view. This health includes its tiles, cluster, performance history, background activity, top queries and disks. It is the **System** page (`/system[/<section>]`, see [System](system.md)). The Explorer loads none of its modules. The former Monitoring tab (`/explorer/_monitoring[/<section>]`) and the former Server operations view (`/explorer/_operations`) answer a redirect to the matching System address. With `system.enabled = false`, they open the Catalog (`/explorer/catalog`).
 
@@ -115,12 +115,7 @@ The Functions list pane mirrors the tree pane. It has the same width, a search b
 
 ### Number formats and shared tokens
 
-Every Explorer number goes through the helpers at the top of `app_explorer.js`. They are also exposed as `ns.explorerFormat` for the other Explorer modules:
-
-- `fmtInt`: `120,064` (en-US grouping, as `util.formatInt` elsewhere in the app).
-- `fmtCompactInt`: `120.1K`, `3.2M`, `1.5B`.
-- `fmtBytes` / `fmtStorageBytes`: `0 B`, `205 B`, `1.7 KB`, `10.3 MB`. From KB up, they use one decimal and base 1024. The precision is the same in the tree, treemaps and tables.
-- `fmtRate`, `fmtPercent`. A missing value is always `—` (`MISSING`).
+Every Explorer number goes through `format` (`app_format.js`, see [UI foundations](ui-foundations.md)): `format.count` (`120,064`), `format.compact` (`120.1K`), `format.bytes` (`0 B`, `205 B`, `1.7 KB`, `10.3 MB`; from KB up, one decimal and base 1024), `format.rate` and `format.percent`. A missing value is always `—` (`format.EMPTY`).
 
 `src/static/css/00-tokens.css` defines the Explorer tokens (`--explorer-table-font` 13px, `--explorer-table-head-font` 12px, `--explorer-section-title-size` 13.5px / `--explorer-section-title-weight` 600, `--explorer-mono`). It also defines the shared in-cell bar: `class="explorerBar"` with `style="--bar-pct: 42%"` (callers normalize to the column maximum), plus `explorerBar--cell` on result-table cells. The bar uses `--explorer-bar-color` at `--explorer-bar-alpha` (35%) in both themes.
 
@@ -173,7 +168,7 @@ The database page has no tabs (user, 2026-10-04). It shows the object table abov
 
 The former `?tab=storage` address opens the page with its storage scrolled into view. The Explorer writes it back as `/explorer/catalog/<db>`.
 
-The catalog root (**All databases**) draws the size band of the visible databases (the component of the System Overview, `ns.explorerTreemap.band`, `app_explorer_treemap.js`; docs/ui-foundations.md, "Size bands"). The band is always a treemap (`#explorerDatabasesTreemap`, `strip: "never"`). The database rectangles use the on-disk bytes. Those under 1% are grouped into Others, on its chip and in the legend. This is true for any distribution. The band has the height of the size band. A rectangle opens that database. The band sits above the overview table. Both are under one **Databases** head without a count (the header has it).
+The catalog root (**All databases**) draws the size band of the visible databases (the component of the System Overview, `explorerTreemap.band`, `app_explorer_treemap.js`; docs/ui-foundations.md, "Size bands"). The band is always a treemap (`#explorerDatabasesTreemap`, `strip: "never"`). The database rectangles use the on-disk bytes. Those under 1% are grouped into Others, on its chip and in the legend. This is true for any distribution. The band has the height of the size band. A rectangle opens that database. The band sits above the overview table. Both are under one **Databases** head without a count (the header has it).
 
 ## Storage
 
@@ -215,8 +210,8 @@ The grouping runs in the browser on data that the card already holds (the catalo
 
 `app_explorer_storage.js` draws them:
 
-- `ns.explorerStorage.renderDatabase(container, { root, residentBytes, name, disks, onOpen })` draws the database tab.
-- `renderTreemap(container, { tree, name, id, stripId, ariaLabel, className, scopeLabel, measure, unit, resident, onOpen, minItems, fallback })` draws a size band (`ns.explorerTreemap.band`) with its legend and footnote. It returns `null` in one case: fewer than `minItems` (three) rectangles of >= 1% would show, and `fallback` is `"none"`. Its `setTree(tree, { measure })` redraws it for another measure.
+- `explorerStorage.renderDatabase(container, { root, residentBytes, name, disks, onOpen })` draws the database tab.
+- `renderTreemap(container, { tree, name, id, stripId, ariaLabel, className, scopeLabel, measure, unit, resident, onOpen, minItems, fallback })` draws a size band (`explorerTreemap.band`) with its legend and footnote. It returns `null` in one case: fewer than `minItems` (three) rectangles of >= 1% would show, and `fallback` is `"none"`. Its `setTree(tree, { measure })` redraws it for another measure.
 
 `GET /api/explorer/storage?host_id=<id>[&refresh=1]` (the server-wide distribution of the former Storage view) stays an API endpoint. The UI no longer calls it.
 
@@ -301,8 +296,8 @@ The detail is a card (`app_explorer_detail.js`, created by `app_explorer.js` wit
   - "Idle", when there is no operation to show.
 
   The panel shows every value whole. Long values (settings, paths, UUIDs, expressions, comments) wrap. Identifiers and paths wrap anywhere (`overflow-wrap: anywhere`). Nothing ends in an ellipsis. No tooltip repeats a value that the panel shows.
-- **Keys** lists ORDER BY, PRIMARY KEY, PARTITION BY and SAMPLE BY. PRIMARY KEY is listed when it differs from the sorting key. Otherwise, ORDER BY says "also the primary key". It shows one element on each line after its 0-based position (`0 service`, `1 toStartOfHour(ts)`). The elements are the top-level items of the key. Commas inside function parentheses, brackets, braces, strings and quoted identifiers do not split. One pair of parentheses (or `tuple(...)`) around the whole key is the tuple itself (`keyElements`, `ns.explorerDetail.keyElements`).
-- **Expressions** of the card are colored by the highlighter of the Query editor (`renderHighlightedCode`, `ns.highlight`). It uses the same `.tok-*` classes and theme colors. It has nothing of its own. The expressions are keys, DEFAULT / MATERIALIZED / ALIAS expressions, column TTL expressions, codecs, TTL rules, engine arguments and settings, skipping index and projection expressions, and mutation commands. Function names need the function list of the host (`ns.meta`). The expressions repaint when it arrives (`chdash:meta-changed`).
+- **Keys** lists ORDER BY, PRIMARY KEY, PARTITION BY and SAMPLE BY. PRIMARY KEY is listed when it differs from the sorting key. Otherwise, ORDER BY says "also the primary key". It shows one element on each line after its 0-based position (`0 service`, `1 toStartOfHour(ts)`). The elements are the top-level items of the key. Commas inside function parentheses, brackets, braces, strings and quoted identifiers do not split. One pair of parentheses (or `tuple(...)`) around the whole key is the tuple itself (`keyElements`, `explorerDetail.keyElements`).
+- **Expressions** of the card are colored by the highlighter of the Query editor (`renderHighlightedCode`, `highlight`). It uses the same `.tok-*` classes and theme colors. It has nothing of its own. The expressions are keys, DEFAULT / MATERIALIZED / ALIAS expressions, column TTL expressions, codecs, TTL rules, engine arguments and settings, skipping index and projection expressions, and mutation commands. Function names need the function list of the host (`meta`). The expressions repaint when it arrives (`chdash:meta-changed`).
 
 **Columns** is one shared result table. It has these columns:
 
