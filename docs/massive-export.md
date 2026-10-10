@@ -23,11 +23,11 @@ The short token belongs to the export and to the host. It expires quickly. The b
 
 Execution metadata is a **required** part of this export contract. Before the backend accepts the handshake, it does these checks:
 
-- It validates that it can discover the runner authorization boundary.
+- It validates that it can discover the runner authorization boundary. The boundary comes from the ACL cache of the runner identity, which the Explorer and the System pages share (refer to [Caches and privileges](configuration.md#caches-and-privileges)). The preflight does not run a new discovery for each request.
 - It validates that the system context for `execution.csv` is reachable.
-- If log flushing is enabled, it runs the `SYSTEM FLUSH LOGS query_log` operation. The collector uses the same operation.
+- If log flushing is enabled, it checks the privilege with `CHECK GRANT SYSTEM FLUSH LOGS ON *.*`. It does not flush. Only when the server gives an answer that the backend cannot decode, the preflight proves the privilege with one `SYSTEM FLUSH LOGS query_log`. Later, the collector flushes only when a `query_log` row is missing.
 
-If a check fails, `POST api/export/run` returns an explicit JSON error. The download does not start. The one-time stream repeats this preflight before it commits the attachment headers. This protects against changes of the grants or of the connectivity between the two requests.
+If a check fails, `POST api/export/run` returns an explicit JSON error. The download does not start. The one-time stream repeats this preflight before it commits the attachment headers. This protects against a loss of the connectivity between the two requests. A change of the grants shows after the TTL of the ACL cache (`explorer.acl_cache_ttl_ms`).
 
 ## Streaming pipeline
 

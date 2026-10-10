@@ -72,10 +72,10 @@ def test_manual_catalog_refresh_also_invalidates_function_metadata() -> None:
     api = read("src/api_explorer.cpp")
     catalog_handler = api[api.index("handle_explorer_catalog"):api.index("handle_explorer_table")]
 
-    assert "explorer_allowed_cache_.erase" in catalog_handler
-    assert "explorer_catalog_cache_.erase" in catalog_handler
-    assert "explorer_graph_cache_.erase" in catalog_handler
-    assert "explorer_functions_cache_.erase" in catalog_handler
+    assert "acl_.invalidate(access);" in catalog_handler
+    assert "explorer_catalog_cache_.invalidate" in catalog_handler
+    assert "explorer_graph_cache_.invalidate" in catalog_handler
+    assert "explorer_functions_cache_.invalidate" in catalog_handler
 
 
 def test_runner_identity_boundary_is_explicit_and_registry_sql_memory_is_capped() -> None:

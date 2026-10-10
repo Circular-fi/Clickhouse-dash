@@ -17,8 +17,8 @@ def test_graph_routes_share_runner_scoped_acl_boundary() -> None:
     # Each route establishes the same runner ACL boundary before using system metadata.
     graph_handler = api[api.index("void Server::handle_explorer_graph"):]
     assert "authenticate_request" not in graph_handler
-    assert "discover_allowed_objects(*runner)" in graph_handler
-    assert "explorer_graph_cache_.get_or_refresh" in graph_handler
+    assert "allowed = acl_.table_set(access);" in graph_handler
+    assert "explorer_graph_cache_.get_revalidating" in graph_handler
 
 
 def test_graph_backend_normalizes_dependencies_and_filters_both_ends() -> None:
@@ -44,7 +44,10 @@ def test_graph_uses_structured_metadata_and_only_targeted_sql_parsing() -> None:
     assert "FROM system.clusters" in graph
     assert "parse_engine_arguments" in graph
     assert "parse_select_sources" in graph
-    assert "qualified_after_keyword" in graph
+    # The TO target of a materialized view is the clause before AS SELECT, never a TTL TO VOLUME or a WITH FILL TO;
+    # ARRAY JOIN and table functions are not relations.
+    assert "materialized_view_target(table.ddl, table.database)" in graph
+    assert "preceded_by_array_keyword" in graph
     assert "unknown" in graph and "omitted rather than guessed" in graph
 
 

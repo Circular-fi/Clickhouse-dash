@@ -26,8 +26,12 @@ def test_explorer_cache_is_bound_to_host_runner_context() -> None:
     assert "return host_id;" in api
     assert "token_fingerprint" not in api
     assert "user.subject" not in api
-    assert "explorer_allowed_cache_.get_or_refresh" in api
-    assert "cfg_.explorer.cache_ttl_ms" in api
+    # The ACL of the runner identity (AclService, keyed by a digest of the runner URI) decides what is listed.
+    assert "const AclAccess access = runner_access(*host);" in api
+    assert "acl_.databases(access)" in api and "acl_.objects(access, database_filter)" in api
+    server = read("src/server.hpp")
+    assert "AclAccess runner_access(const HostSpec& host) const { return make_acl_access(client_pool_, host.runner_uri); }" in server
+    assert "cfg_.explorer.cache_ttl_ms" in server
 
 
 def test_system_metadata_is_filtered_by_allowed_object_set_before_output() -> None:
@@ -51,7 +55,8 @@ def test_dependencies_are_filtered_before_they_are_exposed() -> None:
     # The per-object ACL set holds only the selected table; related objects
     # are filtered by runner visibility before they are exposed.
     assert "if (!lineage_visible(dep_db, dep_table)) return;" in catalog
-    assert "discover_visible_objects(runner, dep_db)" in catalog
+    # Each neighbour is checked alone (CHECK GRANT, then a zero-row probe): its database is never enumerated.
+    assert "return acl.readable(dep_db, dep_table);" in catalog
     assert '"downstream"' in catalog and '"upstream"' in catalog
 
 
@@ -91,13 +96,16 @@ def test_manual_catalog_refresh_invalidates_acl_and_metadata_caches() -> None:
     api = read("src/api_explorer.cpp")
     frontend_api = read("src/static/app_api.js")
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    cache = read("src/stale_cache.hpp")
+    cache = read("src/ttl_cache.hpp")
 
     assert 'req.get_param_value("refresh") == "1"' in api
-    assert "explorer_allowed_cache_.erase(security_key)" in api
-    assert "explorer_catalog_cache_.erase(catalog_key)" in api
-    assert "explorer_graph_cache_.erase(graph_key)" in api
-    assert "void erase(const Key& key)" in cache
+    # refresh=1 invalidates (never removes): a read in progress is waited for, and every request that asked meanwhile
+    # shares the next read.
+    assert "acl_.invalidate(access);" in api
+    assert "explorer_catalog_cache_.invalidate(catalog_key)" in api
+    assert "explorer_graph_cache_.invalidate(graph_key)" in api
+    assert "void invalidate(const Key& key)" in cache
+    assert "void erase(" not in cache and "void clear()" not in cache
     assert 'query.set("refresh", "1")' in frontend_api
     assert 'api.getExplorerCatalog(hostId, "", !!force)' in explorer
 
@@ -126,7 +134,7 @@ def test_table_detail_is_lazy_targeted_and_cached_per_object() -> None:
     detail = catalog[catalog.index("bool load_explorer_table_detail"):catalog.index("bool load_explorer_preview")]
 
     table_handler = api[api.index("void Server::handle_explorer_table"):api.index("void Server::handle_explorer_functions")]
-    assert "explorer_table_detail_cache_.get_or_refresh" in table_handler
+    assert "explorer_table_detail_cache_.get(" in table_handler
     assert "kExplorerTableDetailCacheTtlMs" in table_handler
     assert "load_explorer_table_summary" in table_handler
     assert "load_explorer_catalog(" not in table_handler

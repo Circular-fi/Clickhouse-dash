@@ -189,7 +189,6 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
   if (!host) return json_error(res, 404, "unknown_host", "unknown host_id");
 
   const uint64_t ts_ms = static_cast<uint64_t>(now_ms());
-  const uint64_t ttl_ms = 10ULL * 60ULL * 1000ULL;
 
   rapidjson::StringBuffer sb(nullptr, 16 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -855,7 +854,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     if (t == "keywords") {
       constexpr MetaCredentialScope scope = MetaCredentialScope::System;
       const std::string cache_key = host_id + "::system::keywords";
-      auto r = meta_keywords_cache_.get_or_refresh(cache_key, ts_ms, ttl_ms, 5000, fetch_keywords);
+      auto r = meta_keywords_cache_.get(cache_key, fetch_keywords);
       if (!r.has_value) {
         errors.push_back({
             "keywords",
@@ -891,7 +890,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     if (t == "functions") {
       constexpr MetaCredentialScope scope = MetaCredentialScope::System;
       const std::string cache_key = host_id + "::system::functions";
-      auto r = meta_functions_cache_.get_or_refresh(cache_key, ts_ms, ttl_ms, 5000, fetch_functions);
+      auto r = meta_functions_cache_.get(cache_key, fetch_functions);
       if (!r.has_value) {
         errors.push_back({
             "functions",
@@ -942,7 +941,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       auto fetch = [&](MetaCatalog& out, std::string& err_code, std::string& err_msg) -> bool {
         return fetch_catalog(t, out, err_code, err_msg);
       };
-      auto r = meta_catalog_cache_.get_or_refresh(cache_key, ts_ms, ttl_ms, 5000, fetch);
+      auto r = meta_catalog_cache_.get(cache_key, fetch);
       if (!r.has_value) {
         errors.push_back({
             t,

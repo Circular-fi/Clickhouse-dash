@@ -136,11 +136,13 @@ struct SystemKeeperStatus {
   std::vector<std::string> unavailable_sections;
 };
 
-// Activity rows are kept only when `runner` can SHOW the object. At most
-// `row_limit` rows are returned per section.
+class AclView;
+
+// Activity rows are kept only when the runner reads the object (`runner_acl`).
+// At most `row_limit` rows are returned per section.
 bool load_system_activity(
     clickhouse::Client& system,
-    clickhouse::Client& runner,
+    AclView& runner_acl,
     size_t row_limit,
     SystemActivity& out,
     std::string* error);

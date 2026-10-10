@@ -27,23 +27,12 @@ namespace {
 // page.
 constexpr size_t kSystemActivityRowLimit = 200;
 
-uint64_t ops_api_now_ms() {
-  using namespace std::chrono;
-  return static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
 std::shared_ptr<clickhouse::Client> acquire_ops_client(
     const std::shared_ptr<ClickHouseClientPool>& pool,
     const std::string& uri,
     std::string* error) {
   return pool ? pool->acquire(uri, std::chrono::seconds(5), std::chrono::seconds(15), std::chrono::seconds(15), error)
               : make_client_from_uri(uri, std::chrono::seconds(5), std::chrono::seconds(15), std::chrono::seconds(15), error);
-}
-
-// The activity is live state: never older than the Explorer cache TTL, and at
-// most one read per second per host however many pages auto-refresh.
-uint64_t ops_ttl_ms(int cache_ttl_ms) {
-  return static_cast<uint64_t>(std::max(1000, std::min(cache_ttl_ms, 5000)));
 }
 
 void write_string(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::string& value) {
@@ -69,19 +58,17 @@ void Server::handle_system_activity(const httplib::Request& req, httplib::Respon
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
   }
 
+  // The activity is live state: never older than the Explorer cache TTL, at most one read a second per host however
+  // many pages auto-refresh; past its TTL it is served at once while one refresh runs (the fetch owns what it uses).
   const std::string key = host_id + std::string("\0ops-activity", 13);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_activity_cache_.erase(key);
-  auto result = system_activity_cache_.get_or_refresh(
-      key, ops_api_now_ms(), ops_ttl_ms(cfg_.explorer.cache_ttl_ms), 250,
-      [&](SystemActivity& value, std::string& code, std::string& message) {
+  const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  const AclAccess access = runner_access(*host);
+  if (refresh) acl_.invalidate(access);
+  const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+  auto result = system_activity_cache_.get_revalidating(
+      key,
+      [this, access, system_uri](SystemActivity& value, std::string& code, std::string& message) {
         std::string error;
-        auto runner = acquire_ops_client(client_pool_, host->runner_uri, &error);
-        if (!runner) {
-          code = "runner_unavailable";
-          message = error.empty() ? "Cannot connect to the runner context." : error;
-          return false;
-        }
-        const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
         auto system = acquire_ops_client(client_pool_, system_uri, &error);
         if (!system) {
           code = "system_context_unavailable";
@@ -89,22 +76,25 @@ void Server::handle_system_activity(const httplib::Request& req, httplib::Respon
           return false;
         }
         try {
-          if (!load_system_activity(*system, *runner, kSystemActivityRowLimit, value, &error)) {
+          AclView acl(acl_, access);
+          if (!load_system_activity(*system, acl, kSystemActivityRowLimit, value, &error)) {
             code = "system_activity_failed";
             message = error.empty() ? "The server activity is unavailable." : error;
             return false;
           }
           return true;
+        } catch (const AclUnavailable& e) {
+          code = e.code;
+          message = e.what();
+          return false;
         } catch (const std::exception& e) {
           code = "system_activity_failed";
           message = e.what();
-          if (client_pool_) {
-            client_pool_->invalidate(runner);
-            client_pool_->invalidate(system);
-          }
+          if (client_pool_) client_pool_->invalidate(system);
           return false;
         }
-      });
+      },
+      refresh);
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
@@ -243,12 +233,12 @@ void Server::handle_system_keeper(const httplib::Request& req, httplib::Response
   }
 
   const std::string key = host_id + std::string("\0ops-keeper", 11);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_keeper_cache_.erase(key);
-  auto result = system_keeper_cache_.get_or_refresh(
-      key, ops_api_now_ms(), ops_ttl_ms(cfg_.explorer.cache_ttl_ms), 250,
-      [&](SystemKeeperStatus& value, std::string& code, std::string& message) {
+  const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+  auto result = system_keeper_cache_.get_revalidating(
+      key,
+      [this, system_uri](SystemKeeperStatus& value, std::string& code, std::string& message) {
         std::string error;
-        const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
         auto system = acquire_ops_client(client_pool_, system_uri, &error);
         if (!system) {
           code = "system_context_unavailable";
@@ -268,7 +258,8 @@ void Server::handle_system_keeper(const httplib::Request& req, httplib::Response
           if (client_pool_) client_pool_->invalidate(system);
           return false;
         }
-      });
+      },
+      refresh);
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,

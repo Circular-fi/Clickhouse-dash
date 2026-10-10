@@ -8,13 +8,17 @@ Explorer has no application-level user authentication. Every request for a host 
 
 For every Explorer request, these steps apply:
 
-1. The runner context discovers databases and tables. It verifies `SELECT` access, including column-scoped grants when whole-table `SELECT` is not available.
+1. The runner context discovers databases and tables. It verifies `SELECT` access at table level: `CHECK GRANT SELECT` on the table, else a zero-row `SELECT` that ClickHouse refuses without a column grant. The columns of a table are checked only when the table is opened (its card and its data preview).
 2. The resulting `AllowedObjectSet` is the visibility boundary.
 3. The system context can enrich only objects that are already in that set.
 4. The backend filters dependencies against the same set before it serializes their names.
 5. Data preview and function discovery run with the runner context. They never run with the system context.
 
-The caches of Explorer for ACL, catalog, graph and functions have the scope of the configured host and runner context. `refresh=1` invalidates the relevant caches. In this way, the user can observe changed ClickHouse grants or metadata.
+The ACL cache has the scope of the runner identity: the digest of its URI (user, password, server and settings). Two hosts share it only when they connect in the same way. The derived MCP identity has its own. The caches of catalog, graph and functions have the scope of the configured host. The ACL is kept for `explorer.acl_cache_ttl_ms` (60 s by default). The Explorer, the System pages, the execution statistics, the analysis, the exports and MCP share it. `refresh=1` invalidates the relevant caches, the ACL of the runner included. In this way, the user can observe changed ClickHouse grants or metadata at once. Without a refresh, a change of the grants shows after the ACL TTL, at most twice the TTL. Refer to [Caches and privileges](configuration.md#caches-and-privileges).
+
+**Only `ACCESS_DENIED` means "not readable".** ClickHouse decides with code 497. Another server error about one object (a parameterized view, a `Distributed` table without its cluster) leaves that object out. The other objects are still checked. A connection error or a timeout is not an answer: the route answers 503, and the backend does not keep the failure beyond a back-off of 2 s. The menu is never empty because of a lost connection.
+
+**The discovery is bounded.** One discovery checks at most 4,000 objects in 20 s. To decide whether a database is readable, it probes at most 400 of its objects. When a bound stops it, the answer has `"acl_truncated": true`. An object that was not checked is not listed. A database whose answer the bound did not reach stays in the database list (its name is what `SHOW DATABASES` gives the runner). Its objects are checked when it is opened.
 
 **The names follow `SELECT`, not `SHOW`.** A runner can have `SHOW DATABASES` and `SHOW TABLES` on `*.*` and `SELECT` on two databases. The sidebar lists a database when the runner reads all of it (`CHECK GRANT SELECT ON db.*`) or at least one of its tables. In a database, it lists the tables that the runner reads. The sizes of the first answer come from the same list. `system` stays in the list, because ClickHouse lets every user read `system.databases`, `system.tables` and `system.columns`.
 
@@ -216,12 +220,12 @@ The grouping runs in the browser on data that the card already holds (the catalo
 
 `GET /api/explorer/storage?host_id=<id>[&refresh=1]` (the server-wide distribution of the former Storage view) stays an API endpoint. The UI no longer calls it.
 
-Object names come only from runner-context discovery (`discover_visible_databases` / `discover_visible_objects`, the same boundary as the lazy sidebar). The system context then contributes counters only for those names. It uses these two queries:
+Object names come only from the runner ACL (the AclService: the same boundary as the lazy sidebar). The system context then contributes counters only for those names. It uses these two queries:
 
 - One aggregated `system.parts` query (`active`, `GROUP BY database, table`, `database IN (<visible databases>)`).
 - One `system.tables` query for the engine identity and the non-MergeTree totals.
 
-Both are metadata reads. The multi-billion-row OTEL fixture costs the same as a small table. The backend issues no `SYSTEM FLUSH`. The Explorer StaleCache TTL (`explorer.cache_ttl_ms`) caches the response. `refresh=1` (and a global catalog refresh) invalidates it.
+Both are metadata reads. The multi-billion-row OTEL fixture costs the same as a small table. The backend issues no `SYSTEM FLUSH`. The Explorer cache TTL (`explorer.cache_ttl_ms`) caches the response. `refresh=1` (and a global catalog refresh) invalidates it.
 
 ```json
 {

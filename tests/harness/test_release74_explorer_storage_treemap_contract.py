@@ -102,11 +102,11 @@ def test_storage_endpoint_names_come_from_the_runner_boundary() -> None:
     api = read("src/api_explorer.cpp")
     catalog = read("src/explorer_catalog.cpp")
     assert 'http_.Get("/api/explorer/storage"' in server
-    assert "explorer_storage_cache_.get_or_refresh(" in api
-    assert "explorer_storage_cache_.erase(storage_key);" in api
+    assert "explorer_storage_cache_.get_revalidating(" in api
+    assert "if (force_refresh) acl_.invalidate(access);" in api
     block = catalog[catalog.index("bool load_explorer_storage_map("):catalog.index("bool load_explorer_table_summary(")]
-    assert "discover_visible_databases(runner)" in block
-    assert "discover_visible_objects(runner, database)" in block
+    assert "const auto databases = acl.databases();" in block
+    assert "for (const auto& database : databases) acl.objects(database);" in block
     assert "if (!is_visible(database, table)) continue;" in block
     assert "FROM system.parts WHERE active AND " in block
     assert "GROUP BY database, `table`" in block
