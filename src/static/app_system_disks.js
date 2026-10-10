@@ -160,7 +160,7 @@
       { id: "written", title: "Written and moved", help: "Bytes of the new parts the runner-visible databases wrote (inserts) and of the parts moved between disks by TTL or the storage policy (part_log). The tooltip adds the moves." },
     ];
     for (const spec of CHARTS) {
-      const card = h.html(ns.ui.chartCardHtml({
+      const card = h.html(ns.chartUi.cardHtml({
         title: spec.title,
         className: `systemChart systemDisks__chart--${spec.id}`,
         id: `systemDiskChart-${spec.id}`,
@@ -342,7 +342,7 @@
           : { label: "Fullest", value: DASH, sub: "no disk reports its capacity", attrs: { "data-tile": "fullest" } },
         { label: "ClickHouse data", value: format.bytes(bytes), sub: `${format.countLabel(parts, "active part")} of the visible databases`, attrs: { "data-tile": "data" } },
       ];
-      h.replace(tiles, h("div", { class: "statTiles statTiles--boxed systemDisks__tiles", role: "group", aria: { label: "Disks" } }, items.map((item) => ns.ui.statTile(item))));
+      h.replace(tiles, h("div", { class: "statTiles statTiles--boxed systemDisks__tiles", role: "group", aria: { label: "Disks" } }, items.map((item) => ns.stat.tile(item))));
     }
 
     function flagBadges(disk) {

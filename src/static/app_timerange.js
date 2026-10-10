@@ -766,6 +766,9 @@
     has: (params) => params.has("from") || params.has("to"),
   });
 
+  // ns.format.range names a relative range with the picker's names.
+  ns.format.setRangeNamer(describeRange);
+
   ns.timeRange = {
     QUICK_RANGES,
     url,

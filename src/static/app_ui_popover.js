@@ -98,7 +98,7 @@
   // covers the body).
   function hostFor(anchor) {
     const node = anchor instanceof Element ? anchor : null;
-    return node?.closest?.("dialog[open]") || ns.dialog?.host?.() || document.body;
+    return node?.closest?.("dialog[open]") || ns.layers.host();
   }
 
   // ------------------------------------------------------------ tooltips

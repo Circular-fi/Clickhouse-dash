@@ -74,7 +74,7 @@ def test_each_page_shell_holds_one_view_and_links_the_others():
 def test_each_page_lists_its_own_modules_and_the_controller_starts_them_once():
     manifest = json.loads(read("src/static/modules.json"))["pages"]
     assert "observability" not in manifest
-    base = ["app_api.js", "app_ui.js", "app_ui_filterbar.js", "app_timerange.js"]
+    base = ["app_api.js", "app_header.js", "app_ui_filterbar.js", "app_timerange.js"]
     own = {
         "traces": ["app_chart_core.js", "app_facet_panel.js", "app_traces.js"],
         "logs": ["app_chart_core.js", "app_facet_panel.js", "app_logs.js"],
@@ -137,7 +137,7 @@ def test_switcher_is_the_same_in_every_shell_and_the_row_is_plain_links():
         assert 'id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability"' in html, page
         for old in ("navTracesButton", "navLogsButton", "navMetricsButton"):
             assert old not in html, (page, old)
-    for module in ("app_dom.js", "app_ui.js", "app_explorer.js", "app_traces.js", "app_logs.js", "app_metrics.js"):
+    for module in ("app_dom.js", "app_header.js", "app_explorer.js", "app_traces.js", "app_logs.js", "app_metrics.js"):
         source = read(f"src/static/{module}")
         for old in ("navTracesButton", "navLogsButton", "navMetricsButton", 'route("traces")', 'route("logs")', 'route("metrics")'):
             assert old not in source, (module, old)

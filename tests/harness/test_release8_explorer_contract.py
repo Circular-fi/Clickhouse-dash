@@ -10,9 +10,9 @@ def read(path: str) -> str:
 def test_explorer_and_results_modules_import_every_namespace_they_use() -> None:
     explorer = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
     results = read('src/static/app_results.js')
-    assert 'const { dom, state, api, util, ui, storage, h } = ns;' in explorer
+    assert 'const { dom, state, api, util, header, storage, h } = ns;' in explorer
     assert 'const { dom, util, state } = ns;' in results
-    assert 'ui?.setPageSelectorValue?.' in explorer
+    assert 'header.setPageSelectorValue(' in explorer
     assert 'state.suppressResultsVisibility' in results
 
 
@@ -39,7 +39,7 @@ def test_create_statement_uses_editor_copy_icon_gutter_and_highlighting() -> Non
     css = css_sources.text()
     render = ui[ui.index('function renderDdl('):ui.index('function renderTabContent', ui.index('function renderDdl('))]
     # The shared SQL block: gutter, copy button (its icon) and highlighting.
-    assert 'ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true, label: "CREATE statement", className: "explorerDdlWrap" })' in render
+    assert 'ns.sqlBlock({ sql: ddl, gutter: true, copy: true, label: "CREATE statement", className: "explorerDdlWrap" })' in render
     assert 'explorerDdlGutter' in render and 'explorerDdlCopy' in render
     assert 'Copy DDL' not in render
     assert '.sqlBlock__gutter' in css and '.uiCopy__icon' in css

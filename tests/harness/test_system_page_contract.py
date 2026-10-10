@@ -277,7 +277,7 @@ def test_performance_draws_on_the_shared_chart_engine_and_time_range():
     perf = read("src/static/app_system_perf.js")
     assert "ns.systemPerf = { create," in perf
     assert "ns.chartCore.create(entry.plot, {" in perf and "syncKey: SYNC_KEY," in perf and "onZoom," in perf
-    assert "ns.ui.chartCardHtml({" in perf
+    assert "ns.chartUi.cardHtml({" in perf
     assert "for (const entry of state.charts.values()) entry.chart?.setZoom(startMs, endMs);" in perf
     # The range mounts on the first slot of the Overview's filter bar.
     assert "ns.timeRange.create(ctx.rangeRoot, {" in perf
@@ -379,12 +379,12 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
 
 def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
     ui = read("src/static/app_system_queries.js")
-    assert "ns.ui.sqlBlock({ sql: text," in ui
+    assert "ns.sqlBlock({ sql: text," in ui
     # The shape's SQL: the Query page's formatter, the raw text as fallback.
     assert "const out = await ns.api.formatSqls(kit.hostId(), [masked.sql]);" in ui
-    assert 'ns.ui.sqlBlock({ sql: shown, gutter: true, copy: true,' in ui
+    assert 'ns.sqlBlock({ sql: shown, gutter: true, copy: true,' in ui
     assert "innerHTML" not in ui and "insertAdjacentHTML" not in ui
-    for helper in ["ns.table.sortHeader(", "ns.table.cellBar(", "ns.badge.el(", "ns.ui.statTile(",
+    for helper in ["ns.table.sortHeader(", "ns.table.cellBar(", "ns.badge.el(", "ns.stat.tile(",
                    "ns.timeRange.create(pickerRoot, {", "ns.chartCore.create(entry.plot, {", "kit.issueBlock("]:
         assert helper in ui, helper
     assert "const ERROR_WARN = 0.01;" in ui and "const ERROR_DANGER = 0.05;" in ui
@@ -451,7 +451,7 @@ def test_native_monitor_unit_tests_pass_when_built():
 def test_disks_section_links_into_storage_and_states_its_thresholds():
     ui = read("src/static/app_system_disks.js")
     assert "innerHTML" not in ui and "insertAdjacentHTML" not in ui
-    for helper in ["ns.ui.statTile(", "ns.ui.chartCardHtml({", "ns.chartCore.create(entry.plot, {", "ns.table.shareBar(",
+    for helper in ["ns.stat.tile(", "ns.chartUi.cardHtml({", "ns.chartCore.create(entry.plot, {", "ns.table.shareBar(",
                    "ns.badge.el(", "ns.icon.el(", "kit.issueBlock(", "ns.timeRange.create(pickerRoot, {"]:
         assert helper in ui, helper
     assert "const FILL_WARN = 0.8;" in ui and "const FILL_DANGER = 0.9;" in ui

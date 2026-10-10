@@ -5,7 +5,7 @@
   // its own and not tied to a host: the header block and the keys table come from /api/mcp/meta and
   // /api/mcp/keys (ns.api, app_api.js), the key form and the one-time secret from app_mcp_form.js.
   //
-  // This controller starts the page's modules (ns.loader), the header (ns.ui.init: page switcher,
+  // This controller starts the page's modules (ns.loader), the header (ns.header.init: page switcher,
   // theme), loads the two answers and runs the actions of a key: create and delete (a key is never
   // changed). The details of a key open under its row (app_mcp_view.js). The keys (#mcpKeys, with the New key and Refresh buttons in its heading) and
   // the side column (#mcpSide) are drawn again after every change; #mcpState holds the loading, the
@@ -26,6 +26,8 @@
     onRetry: () => load(),
     onOpenChange: (id) => { state.openKeyId = id; },
     onFilter: (text) => { state.filterText = text; },
+    keyDetails: (args) => ns.mcpForm.keyDetails(args),
+    onDetailsClose: () => ns.util.latest.cancelPrefix(ns.mcpForm.REACH_SLOT),
   });
 
   // How many databases and tables each key reaches: asked once for all the keys, after the table is drawn, and written in
@@ -220,15 +222,13 @@
   function bindShell() {
     const dom = ns.dom || {};
     const route = (path) => ns.api.resolveUrl(path);
-    ns.ui?.setPageSelectorValue?.("mcp");
-    dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
+    ns.header.setPageSelectorValue("mcp");
   }
 
   async function start() {
     await ns.loader.startModules();
     bindShell();
-    ns.ui?.init?.();
+    ns.header.init();
     // A page restored from the back/forward cache is as old as the visit: it reads again.
     window.addEventListener("pageshow", (event) => { if (event.persisted) void reload(); });
     await load();

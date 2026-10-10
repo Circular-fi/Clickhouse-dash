@@ -93,7 +93,7 @@ def test_logs_view_follows_the_page_conventions():
 
 def test_logs_page_script_reuses_shared_pieces():
     js = read("src/static/app_logs.js")
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     state = read("src/static/app_state.js")
     assert "timePicker = ns.timeRange.create(root, {" in js and 'idPrefix: "logs",' in js
     assert 'settingName: "logs.max_lookback_minutes",' in js

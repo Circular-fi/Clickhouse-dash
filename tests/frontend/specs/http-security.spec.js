@@ -34,7 +34,7 @@ for (const path of PAGES) {
     expect(headers['x-content-type-options']).toBe('nosniff');
     expect(headers['x-frame-options']).toBe('DENY');
     expect(headers['referrer-policy']).toBe('same-origin');
-    await page.waitForFunction(() => !!(window.ChDash?.features && window.ChDash?.api && window.ChDash?.ui));
+    await page.waitForFunction(() => !!(window.ChDash?.features && window.ChDash?.api && window.ChDash?.header));
     await page.waitForLoadState('networkidle');
     const violations = await page.evaluate(() => window.__cspViolations);
     expect(violations).toEqual([]);
@@ -64,7 +64,7 @@ test('the WebAssembly kernels compile and run in a Worker under the policy', asy
 test('an inline script that the shell does not carry is refused', async ({ page }) => {
   await watchViolations(page);
   await page.goto('/');
-  await page.waitForFunction(() => !!window.ChDash?.ui);
+  await page.waitForFunction(() => !!window.ChDash?.header);
   const ran = await page.evaluate(() => {
     window.__injected = false;
     const script = document.createElement('script');

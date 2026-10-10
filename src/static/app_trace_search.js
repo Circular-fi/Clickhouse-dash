@@ -515,7 +515,7 @@
 
   // What a click landed on: a value that can become a filter.
   function filterTrigger(target) {
-    // A value of a filterable attribute row (ui.kvListHtml) opens the menu.
+    // A value of a filterable attribute row (kv.html) opens the menu.
     const kv = target.closest(".kvList__row[data-filter-scope] .kv__v, .kvList__row[data-filter-scope] .kvList__tree > .kvTree > summary");
     if (kv) {
       const row = kv.closest(".kvList__row[data-filter-scope]");

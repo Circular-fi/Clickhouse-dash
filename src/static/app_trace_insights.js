@@ -447,7 +447,7 @@
       // The trace page's shortcuts (a/d, arrows, [ ]) are not for the panel.
       event.stopPropagation();
     });
-    // Up / Down between spans, Enter / Space open one (ns.rovingRows).
+    // Up / Down between spans, Enter / Space open one (ns.table.rovingRows).
     ns.table.rovingRows(el, { rows: "tr[data-context-span]", onOpen: (row) => openContextRow(row) });
     return el;
   }

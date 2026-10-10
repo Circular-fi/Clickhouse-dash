@@ -74,7 +74,7 @@ async function open(page, path) {
   const errors = [];
   page.on('pageerror', (err) => errors.push(err.message));
   await page.goto(path);
-  await page.waitForFunction(() => !!(window.ChDash?.format && window.ChDash?.palette && window.ChDash?.ui));
+  await page.waitForFunction(() => !!(window.ChDash?.format && window.ChDash?.palette && window.ChDash?.header));
   return errors;
 }
 

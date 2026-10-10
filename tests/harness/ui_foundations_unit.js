@@ -251,7 +251,9 @@ else {
   eq("range Last 15 minutes", format.range("now-15m", "now"), "Last 15 minutes");
   eq("range other relative", format.range("now/d", "now/d"), `now/d ${ARROW} now/d`);
   eq("range bad", format.range(null, 5), DASH);
-  const withPicker = load({ extra: { timeRange: { describeRange: (raw) => ({ text: raw.from === "now/d" ? "Today" : "?" }) } } });
+  // The time range picker gives its names when it loads (setRangeNamer).
+  const withPicker = load();
+  withPicker.format.setRangeNamer((raw) => ({ text: raw.from === "now/d" ? "Today" : "?" }));
   eq("range picker names", withPicker.format.range("now/d", "now/d"), "Today");
 
   // -------------------------------------------------------------------- ago

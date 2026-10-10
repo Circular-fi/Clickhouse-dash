@@ -22,7 +22,7 @@ def test_page_switcher_ships_visible_in_every_shell():
         assert "pageNav.system === false" in html, page
         # MCP is an entry of the switcher too: a server with only Query and MCP keeps it.
         assert "pageNav.metrics !== true && pageNav.mcp !== true)" in html, page
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     state = read("src/static/app_state.js")
     css = css_sources.text()
     assert "function applyPageNavigation(nav)" in ui

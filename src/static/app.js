@@ -5,7 +5,7 @@
     const ns = window.ChDash;
     if (!ns) return;
 
-    const { ui, run, results, explorer, analysis, download, massExport } = ns;
+    const { header, meta, queryUi, run, results, explorer, analysis, download } = ns;
 
     if (results) {
       results.clearResultsStack();
@@ -13,10 +13,15 @@
       results.setMultiqueryMode(false);
     }
 
-    if (ui) ui.init();
+    // The order is the order of the host hooks (header.onHostSelected): the metadata, the editor, the Run buttons.
+    header.init();
+    meta.init();
+    if (queryUi) {
+      queryUi.init({ onRun: () => run.handleRun() });
+      meta.ensureHighlighterData();
+    }
     if (analysis) analysis.init();
     if (download) download.init();
-    if (massExport) massExport.init();
     if (run) run.init();
     if (explorer) explorer.init();
   };

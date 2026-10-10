@@ -35,7 +35,7 @@ def test_deep_routes_and_all_api_calls_are_subpath_aware_and_non_json_shells_fai
 def test_editor_keeps_historical_sizing_but_uses_centered_bottom_resize_handle() -> None:
     html = read("src/static/query.html")
     css = css_sources.text()
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
 
     assert 'class="editorResizeHandle"' in html
     assert 'aria-orientation="horizontal"' in html
@@ -166,7 +166,7 @@ def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_hi
     assert '`1 h persisted total ${format.count(physical.rows_total_1h)} rows' in ui
     assert "api.formatSqls(hostId" in ui
     assert "detail.formatted_ddl" in ui
-    assert "ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true" in ui
+    assert "ns.sqlBlock({ sql: ddl, gutter: true, copy: true" in ui
 
 
 def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_projection() -> None:
@@ -219,8 +219,8 @@ def test_table_switch_requires_requested_identity_instead_of_rendering_undefined
     assert "requested database/table" in block or "Invalid Explorer detail response" in block
 
 def test_host_bootstrap_uses_api_resolver_instead_of_falling_offline_from_reference_error() -> None:
-    ui = read("src/static/app_ui.js")
-    assert 'const { dom, state, storage, util, api } = ns;' in ui
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
+    assert 'const { dom, state, storage, api } = ns;' in ui
     # /api/version and /api/hosts go through the one request path of app_api.js.
     assert "data = await api.getVersion();" in ui
     assert "useSnapshot(await api.getHosts());" in ui

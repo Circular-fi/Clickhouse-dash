@@ -40,7 +40,6 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_ui_sql.js": (4, "the SQL highlighter output (it escapes every token)"),
     "app_ui_stat.js": (1, "statTile(): the element of statTileHtml(), which escapes"),
     "app_ui_state.js": (3, "empty / error / loading blocks and the banner, every text escaped; the static spinner"),
-    "app_util.js": (1, "highlightJsonHtml(): JSON escaped, then coloured"),
     # Editors and charts.
     "app_highlight.js": (4, "the SQL editor overlay: highlighter tokens, each escaped, " + HOT),
     "app_autocomplete.js": (2, "highlighted SQL snippets of the completion menu (the highlighter escapes)"),
@@ -48,7 +47,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_query_chart.js": (1, "the static skeleton of the chart panel"),
     "app_explorer_treemap.js": (1, "treemap tiles, up to thousands of rectangles, names escaped: " + HOT),
     "app_results.js": (2, "the NULL token template and the row Details copy action (component markup)"),
-    "app_ui.js": (1, "the library dialog's loading blocks (ns.uiState)"),
+    "app_query_ui.js": (1, "the library dialog's loading blocks (ns.uiState)"),
     "app_timerange.js": (4, "the time range panel: static skeleton, calendar grid of numbers, quick ranges escaped"),
     # Observability string renderers.
     "app_traces.js": (14, "trace list, table, overview, header and the waterfall rows, every value escaped; the waterfall is " + HOT),
@@ -63,7 +62,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_facet_panel.js": (5, "the facet list (values escaped) and its states (ns.uiState)"),
     "app_logs.js": (17, "the Logs grid rows (" + HOT + "), patterns, record panel, context and states, every value escaped"),
     "app_metrics.js": (8, "the metric catalog tree, panel skeleton, badges, chips and states, every value escaped"),
-    "app_system_perf.js": (1, "the chart cards of the System Performance: ui.chartCardHtml, the shared card component, which escapes"),
+    "app_system_perf.js": (1, "the chart cards of the System Performance: chartUi.cardHtml, the shared card component, which escapes"),
 }
 
 # The loader runs before app_dom.js: it reads the module manifest.

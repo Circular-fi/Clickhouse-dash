@@ -6,15 +6,14 @@
   // trace header, the Query metric rail, Explorer About, the Keeper tiles and
   // the pipeline columns draw them.
   //
-  //   ui.statTileHtml({ label, value, sub, tone, title, inline, tag, className,
+  //   stat.html({ label, value, sub, tone, title, inline, tag, className,
   //                     valueHtml, subHtml, attrs, dl }) -> HTML
   //     dl: true writes the parts as dt / dd (a tile inside a <dl>)
-  //   ui.statTile(options) -> element
-  //   ui.statTilesHtml(tiles, { className, label }) -> the tiles in a .statTiles
+  //   stat.tile(options) -> element
+  //   stat.tilesHtml(tiles, { className, label }) -> the tiles in a .statTiles
   // tone: "error" | "warn" | "ok" colours the value.
   const ns = window.ChDash;
   if (!ns) return;
-  const ui = (ns.ui = ns.ui || {});
 
   const esc = (value) => ns.util.escapeHtml(value ?? "");
   const TONES = { error: "is-error", warn: "is-warn", warning: "is-warn", ok: "is-ok" };
@@ -44,5 +43,5 @@
     return `<div class="statTiles${className ? ` ${esc(className)}` : ""}"${label ? ` role="group" aria-label="${esc(label)}"` : ""}>${(tiles || []).filter(Boolean).map(statTileHtml).join("")}</div>`;
   }
 
-  Object.assign(ui, { statTile, statTileHtml, statTilesHtml });
+  ns.stat = Object.freeze({ tile: statTile, html: statTileHtml, tilesHtml: statTilesHtml });
 })();

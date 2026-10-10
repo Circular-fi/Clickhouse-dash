@@ -86,7 +86,7 @@
     const delayed = value("DelayedInserts");
     tile("delayed", "Delayed inserts", delayed == null ? DASH : format.count(delayed), "waiting on too many parts", delayed > 0 ? "warn" : "");
     return h("div", { class: "statTiles statTiles--boxed systemTiles", role: "group", aria: { label: "Server" } },
-      tiles.map((item) => ns.ui.statTile(item)));
+      tiles.map((item) => ns.stat.tile(item)));
   }
 
   function createOverview(ctx) {
@@ -343,7 +343,7 @@
       const row = (key, label, value, extra = {}) => rows.push({ key, label, value, text: true, attrs: { "data-row": key }, ...extra });
       connections.forEach((connection, index) => {
         const name = connection.name && connection.name !== "default" ? ` (${connection.name})` : "";
-        const since = ns.ui.serverTime(connection.connected_time);
+        const since = ns.header.serverTime(connection.connected_time);
         row(index ? `host${index}` : "host", `Connection${name}`, `${connection.host}:${connection.port}`, { mono: true, keyTitle: since.text && since.text !== DASH ? `Connected since ${since.text}` : "" });
         const timeout = number(connection.session_timeout_ms);
         row(index ? `session${index}` : "session", "Session", connection.is_expired
@@ -368,7 +368,7 @@
         if (number(m.KeeperAvgLatency) != null) row("keeper_latency", "Keeper latency", `${format.duration.fromMs(m.KeeperAvgLatency)} average${number(m.KeeperMaxLatency) != null ? `${SEP}${format.duration.fromMs(m.KeeperMaxLatency)} max` : ""}`);
         if (number(m.KeeperFollowers) > 0) row("followers", "Followers", `${format.count(m.KeeperSyncedFollowers || 0)} of ${format.count(m.KeeperFollowers)} in sync`);
       }
-      el.appendChild(ns.ui.kvList(rows, { className: "systemKv", label: "Keeper" }));
+      el.appendChild(ns.kv.list(rows, { className: "systemKv", label: "Keeper" }));
       return el;
     }
 
@@ -395,7 +395,7 @@
         { label: "Max delay", value: seconds(r.max_delay_seconds), tone: r.max_delay_seconds > 300 ? "warn" : "", attrs: { "data-tile": "delay" } },
         { label: "Queue", value: format.count(r.queue_size), sub: `${format.countLabel(r.inserts_in_queue, "insert")}${SEP}${format.countLabel(r.merges_in_queue, "merge")}`, tone: r.queue_over > 0 || r.inserts_over > 0 ? "warn" : "", attrs: { "data-tile": "queue" } },
       ];
-      el.appendChild(h("div", { class: "statTiles statTiles--boxed systemTiles--small" }, tiles.map((item) => ns.ui.statTile(item))));
+      el.appendChild(h("div", { class: "statTiles statTiles--boxed systemTiles--small" }, tiles.map((item) => ns.stat.tile(item))));
       const alerts = [];
       if (r.future_parts_over > 0) alerts.push(`${format.countLabel(r.future_parts_over, "table")} with more than 20 parts to fetch or merge`);
       if (r.parts_to_check_over > 0) alerts.push(`${format.countLabel(r.parts_to_check_over, "table")} with more than 10 parts to check`);

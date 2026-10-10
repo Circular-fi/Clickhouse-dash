@@ -307,7 +307,7 @@ test.describe('SQL block and key/value', () => {
       const host = document.createElement('div');
       host.style.cssText = 'position:fixed;left:20px;top:80px;width:600px;z-index:9999';
       document.body.appendChild(host);
-      const block = window.ChDash.ui.sqlBlock({ sql, gutter: true, maxLines: 5 });
+      const block = window.ChDash.sqlBlock({ sql, gutter: true, maxLines: 5 });
       host.appendChild(block);
       const body = block.querySelector('.sqlBlock__body');
       const style = getComputedStyle(body);

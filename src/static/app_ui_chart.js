@@ -5,7 +5,7 @@
   // legend; this module gives every chart the same card and every trend line
   // the same sparkline.
   //
-  //   ui.chartCardHtml({ title, meta, actions, body, legend, className, id,
+  //   chartUi.cardHtml({ title, meta, actions, body, legend, className, id,
   //                      tag, titleTag, titleId, metaId, bodyClass, bodyId,
   //                      attrs, bodyAttrs })
   //     <article class="chartCard"><header class="chartCard__head">
@@ -13,15 +13,14 @@
   //       <span class="chartCard__actions"/></header>
   //       <div class="chartCard__body"/> [<footer class="chartCard__legend"/>]
   //     title / meta are text; actions, body and legend are trusted HTML.
-  //   ui.sparkline.html(values, { max, min, area, alt, marks, className, label })
+  //   chartUi.sparkline.html(values, { max, min, area, alt, marks, className, label })
   //     an SVG polyline (and area) in --sparkline-color, viewBox 100 x 24,
   //     stretched to its box; alt: a second series (errors) in --danger;
   //     marks: one entry per value, null or a tone ("warn", "danger",
   //     "accent") drawn as a dot on the line (an anomaly).
-  //   ui.sparkline.draw(el, values, options) writes it into el.
+  //   chartUi.sparkline.draw(el, values, options) writes it into el.
   const ns = window.ChDash;
   if (!ns) return;
-  const ui = (ns.ui = ns.ui || {});
 
   const esc = (value) => ns.util.escapeHtml(value ?? "");
 
@@ -112,6 +111,5 @@
     }
   }
 
-  ui.chartCardHtml = chartCardHtml;
-  ui.sparkline = Object.freeze({ html: sparklineHtml, draw: drawSparkline });
+  ns.chartUi = Object.freeze({ cardHtml: chartCardHtml, sparkline: Object.freeze({ html: sparklineHtml, draw: drawSparkline }) });
 })();

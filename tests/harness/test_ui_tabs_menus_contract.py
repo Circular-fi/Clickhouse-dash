@@ -49,14 +49,14 @@ def component_block(css: str, name: str) -> str:
 # ---------------------------------------------------------------- loading
 
 
-def test_components_load_on_every_page_after_the_foundations_and_before_app_ui():
+def test_components_load_on_every_page_after_the_foundations_and_before_app_header():
     # The one module list (src/static/modules.json): the components are
-    # common modules, after app_dom.js; app_ui.js is in every page's modules.
+    # common modules, after app_dom.js; app_header.js is in every page's modules.
     manifest = json.loads(read("modules.json"))
     common = manifest["common"]
     assert common.index("app_dom.js") < common.index("app_ui_tabs.js") < common.index("app_ui_segmented.js") < common.index("app_ui_menu.js")
     for name, page in manifest["pages"].items():
-        assert "app_ui.js" in page["modules"], name
+        assert "app_header.js" in page["modules"], name
         listed = page["modules"] + [f for group in page.get("lazy", {}).values() for f in group] + [f for view in page.get("views", {}).values() for f in view]
         for component in COMPONENTS:
             assert component not in listed, (name, component)
@@ -255,15 +255,15 @@ def test_no_module_runs_its_own_menu_motion_or_outside_click_closer():
 
 
 def test_menus_go_through_the_component():
-    ui = read("app_ui.js")
+    ui = read("app_header.js") + read("app_query_ui.js")
     for menu in ["menus.run = menu?.split(", "menus.host = menu?.bind(", "menus.page = menu?.bind(", "menus.runSettings = menu?.bind(",
                  "menus.theme = menu?.bind("]:
         assert menu in ui, menu
-    # The Copy JSON splits (Query, results panels, trace, Logs) are ui.copySplit
+    # The Copy JSON splits (Query, results panels, trace, Logs) are copy.split
     # (app_ui_copy.js), whose menu is an ns.menu split.
     assert "const handle = ns.menu.split(main, toggle, menu, { root });" in read("app_ui_copy.js")
     for name in ["app_run.js", "app_results.js", "app_traces.js", "app_logs.js"]:
-        assert "ns.ui.copySplit({" in read(name), name
+        assert "ns.copy.split({" in read(name), name
     assert "return ns.menu?.select(select) || null;" in read("app_traces.js")
     logs = read("app_logs.js")
     assert logs.count("ns.menu?.multi(...pickerParts(root), { root, onOpen:") == 2

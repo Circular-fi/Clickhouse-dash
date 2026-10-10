@@ -39,11 +39,13 @@ def test_metadata_and_history_caches_are_bounded() -> None:
 
 def test_idle_startup_does_not_activate_or_hydrate_catalogs() -> None:
     metadata = read("src/static/app_meta.js")
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     prepare_body = metadata.split("function prepareHost(hostId)", 1)[1].split("function activateHost", 1)[0]
     assert "hydrateFromStorage" not in prepare_body
     assert "fetchAndStore" not in prepare_body
-    assert "ns.meta.prepareHost(state.selectedHostId)" in ui
+    # The metadata is prepared for the stored host at start, and activated (hydrated, refreshed) when a host is selected.
+    assert "if (state.selectedHostId) prepareHost(state.selectedHostId);" in metadata
+    assert "ns.header.onHostSelected((hostId) => {" in metadata
     assert 'dom.queryTextArea.addEventListener("focus"' in ui
     assert "ns.meta.maybeRefreshOnUserAction()" in ui
 

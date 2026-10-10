@@ -928,7 +928,7 @@
 
   // Opening a query closes the dialog; the editor takes the focus.
   function closePanel() {
-    ns.ui?.closeQueryLibrary?.({ restoreFocus: false });
+    ns.queryUi.closeQueryLibrary({ restoreFocus: false });
   }
 
   // "Load": the editor takes the SQL (a saved query is then the
@@ -937,7 +937,7 @@
     if (!item) return;
     setEditorSql(item.sql);
     ctl.opened = savedQuery ? { store, id: savedQuery.id, sql: String(savedQuery.sql) } : null;
-    ns.ui?.syncQueryUrl?.(item.sql);
+    ns.queryUi.syncQueryUrl(item.sql);
     closePanel();
     dom.queryTextArea?.focus({ preventScroll: true });
     if (ctl.rendered.library) renderTree();
@@ -1063,14 +1063,14 @@
   }
 
   // Highlighted SQL, clipped (a prompt shows the start, the pane more):
-  // the shared read-only SQL block (ui.sqlBlock). The pane's block has its
+  // the shared read-only SQL block (sqlBlock). The pane's block has its
   // copy button and, when the editor shows line numbers, their gutter (its
   // lines then scroll rather than wrap, so each number stays on its line).
   function sqlPreview(sql, max = PROMPT_SQL_CHARS, { pane = false } = {}) {
     const text = String(sql || "");
     const clipped = text.length > max ? `${text.slice(0, max)}\n${ELLIPSIS}` : text;
     const gutter = pane && lineNumbersOn();
-    return ns.ui.sqlBlock({ sql: clipped, wrap: !gutter, gutter, copy: pane, label: "Query", className: "qlSql" });
+    return ns.sqlBlock({ sql: clipped, wrap: !gutter, gutter, copy: pane, label: "Query", className: "qlSql" });
   }
 
   // The selected place in Saved, as a default target: the selected root or
@@ -1441,7 +1441,7 @@
     const save = h("button", { class: "button button--primary qlFoot__save" });
     save.type = "button";
     save.dataset.action = "save";
-    save.title = `Save the editor's query (${ns.ui?.modifierKeyLabel?.() || "Ctrl"}+S)`;
+    save.title = `Save the editor's query (${ns.util.modifierKeyLabel()}+S)`;
     save.append(icon("plus"), h("span", null, "Save query"));
     const count = h("span", { class: "qlFoot__count" });
     foot.append(save, count);
@@ -1928,7 +1928,7 @@
     const menu = h("div", { class: "runMenu rowDetailsMenu qlMenu" });
     menu.setAttribute("role", "menu");
     menu.setAttribute("aria-label", `Actions for ${entity.name}`);
-    const mod = ns.ui?.modifierKeyLabel?.() || "Ctrl";
+    const mod = ns.util.modifierKeyLabel();
     if (item.kind === "query") menu.appendChild(menuItem("Load", "file", { key: `${mod}+\u21b5`, run: () => loadItem(li) }));
     else menu.appendChild(menuItem(li.getAttribute("aria-expanded") === "true" ? "Close" : "Open", "folderOpen", { key: "\u21b5", run: () => toggleFolder(li) }));
     if (item.kind === "query" && ctl.search.trim()) menu.appendChild(menuItem("Show in folder", "folder", { run: () => revealQuery(item) }));
@@ -1971,7 +1971,7 @@
       queries: tree.queries.map((q) => ({ folder_id: q.folder_id, name: q.name, description: q.description || "", sql: q.sql, created_at_ms: q.created_at_ms, updated_at_ms: q.updated_at_ms })),
     };
     const name = `${folder.name.replace(/[\\/:*?"<>|\s]+/g, "_").replace(/^_+|_+$/g, "") || "folder"}.json`;
-    ns.ui.downloadText(name, `${JSON.stringify(payload, null, 2)}\n`);
+    ns.copy.download(name, `${JSON.stringify(payload, null, 2)}\n`);
     toast(`Exported ${format.countLabel(payload.queries.length, "query", "queries")} to ${name}.`);
   }
 
@@ -2262,7 +2262,7 @@
     history: { items: () => historyItems(), preview: (key) => historyPreview(key) },
   };
 
-  const isPhone = () => !!ns.ui?.isPhoneLayout?.();
+  const isPhone = () => ns.util.isPhoneLayout();
 
   function selectedItem(tab) {
     const key = ctl.selection[tab];
@@ -2586,7 +2586,7 @@
       const foot = h("div", { class: "qlPreview__foot" });
       foot.setAttribute("role", "group");
       foot.setAttribute("aria-label", "Use this query");
-      const mod = ns.ui?.modifierKeyLabel?.() || "Ctrl";
+      const mod = ns.util.modifierKeyLabel();
       for (const action of model.actions) {
         const button = h("button", { class: action.primary ? "button button--primary" : "button" }, action.label);
         button.type = "button";

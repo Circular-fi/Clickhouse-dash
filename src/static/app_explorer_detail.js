@@ -137,7 +137,7 @@
   }
 
   function create(ctx) {
-    const { dom, state, api, util, ui, storage, h } = ns;
+    const { dom, state, api, util, header, storage, h } = ns;
     const graph = ns.explorerGraph;
     const {
       model, clear, appRoute, setError, quoteIdent, humanEngine,
@@ -233,7 +233,7 @@
     // A DateTime text of the server's system tables: browser-local text, the
     // server value (and ISO) in the tooltip (decision 48).
     function timeCell(td, value) {
-      const time = ui.serverTime(value);
+      const time = header.serverTime(value);
       td.textContent = time.text;
       if (time.title) td.title = time.title;
     }
@@ -611,7 +611,7 @@
     }
 
     function aboutTile(label, value, context = null, { mono = false, title = "", id = "", wide = false, block = false } = {}) {
-      // A stat tile (ui.statTile classes): label, value, context lines. The
+      // A stat tile (stat.tile classes): label, value, context lines. The
       // About panel shows every value whole: long ones wrap (CSS), nothing
       // is cut, so the title only adds what the tile does not show.
       const tile = h("div", { class: `statTile explorerAboutTile${wide ? " explorerAboutTile--wide" : ""}` });
@@ -814,9 +814,9 @@
       if (newest != null || schemaTime) {
         tiles.push(aboutTile(
           "Last modified",
-          newest != null ? `${format.duration.fromSeconds(newest)} ago` : ui.serverTime(schemaTime).text,
-          [newest != null ? "newest part written" : "schema changed", newest != null && schemaTime ? `schema changed ${ui.serverTime(schemaTime).text}` : ""],
-          { id: "modified", title: schemaTime ? ui.serverTime(schemaTime).title : "" },
+          newest != null ? `${format.duration.fromSeconds(newest)} ago` : header.serverTime(schemaTime).text,
+          [newest != null ? "newest part written" : "schema changed", newest != null && schemaTime ? `schema changed ${header.serverTime(schemaTime).text}` : ""],
+          { id: "modified", title: schemaTime ? header.serverTime(schemaTime).title : "" },
         ));
       }
 
@@ -1625,8 +1625,8 @@
         client.rows_total_1h != null ? `1 h client total ${format.count(client.rows_total_1h)} rows \u00b7 ${format.bytes(client.bytes_total_1h)}` : "",
         physical.rows_total_1h != null ? `1 h persisted total ${format.count(physical.rows_total_1h)} rows \u00b7 ${format.bytes(physical.bytes_total_1h)}` : "",
         physical.new_parts_per_minute != null ? `${format.count(physical.new_parts_per_minute)} new parts in the last minute` : "",
-        client.last_event_time ? `last client write ${ui.serverTime(client.last_event_time).text}` : "",
-        physical.last_event_time ? `last persisted write ${ui.serverTime(physical.last_event_time).text}` : "",
+        client.last_event_time ? `last client write ${header.serverTime(client.last_event_time).text}` : "",
+        physical.last_event_time ? `last persisted write ${header.serverTime(physical.last_event_time).text}` : "",
       ].filter(Boolean);
       if (facts.length) body.appendChild(h("div", { class: "explorerSection__facts" }, facts.join(" \u00b7 ")));
     }
@@ -1982,7 +1982,6 @@
         executionStats: state.runOptExecutionStats,
         flattenTuple: state.runOptFlattenTuple,
       });
-      ui?.applyRunOptionsUi?.();
       window.dispatchEvent(new CustomEvent("chdash:flatten-tuple-change", { detail: { enabled: state.runOptFlattenTuple } }));
     }
 
@@ -2158,9 +2157,9 @@
       const ddl = String(detail.formatted_ddl || detail.ddl);
       if (detail.ddl_format_error) container.appendChild(emptyNote(`Formatter unavailable: ${detail.ddl_format_error}`));
 
-      // The shared read-only SQL block (ui.sqlBlock): the editor's highlighter,
+      // The shared read-only SQL block (sqlBlock): the editor's highlighter,
       // a line gutter and the copy button; it grows with the DDL.
-      const wrap = ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true, label: "CREATE statement", className: "explorerDdlWrap" });
+      const wrap = ns.sqlBlock({ sql: ddl, gutter: true, copy: true, label: "CREATE statement", className: "explorerDdlWrap" });
       $(".sqlBlock__gutter", wrap)?.classList.add("explorerDdlGutter");
       $(".sqlBlock__body", wrap)?.classList.add("explorerDdl");
       $(".sqlBlock__copy", wrap)?.classList.add("explorerDdlCopy");

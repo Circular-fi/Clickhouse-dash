@@ -171,10 +171,8 @@
   function bindShell() {
     const dom = ns.dom || {};
     const route = (path) => ns.api.resolveUrl(path);
-    ns.ui?.setPageSelectorValue?.("observability");
-    dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
-    dom.navObservabilityButton?.addEventListener("click", () => ns.ui?.closePageMenu?.());
+    ns.header.setPageSelectorValue("observability");
+    dom.navObservabilityButton?.addEventListener("click", () => ns.header.closePageMenu());
     ns.shell?.edgeCues?.(ns.dom.byId("obsNav"));
     window.addEventListener("pagehide", publish);
     // A page restored from the back/forward cache never ran start(): it takes what the other pages changed meanwhile
@@ -192,7 +190,7 @@
     await ns.loader.startModules();
     ns.api.humanizeErrors();
     bindShell();
-    ns.ui?.init?.();
+    ns.header.init();
     adopt();
     renderRow();
     const scope = ns.lifecycle?.enter(view) || null;

@@ -30,18 +30,6 @@ MANIFEST = STATIC / "modules.json"
 LOADER = "app_loader.js"
 # Shipped, listed on no page: the Worker script of the WebAssembly kernels (app_wasm.js starts it by name).
 UNLISTED = {"app_wasm_worker.js"}
-# The members of the shared `ns.ui` object, by the script that adds them (app_ui.js adds the rest).
-UI_MEMBERS = {
-    "app_ui_chart.js": ("chartCardHtml", "sparkline"),
-    "app_ui_copy.js": ("copyText", "copyFeedback", "copyButton", "copyButtonHtml", "copyIconHtml", "copySplit", "downloadText"),
-    "app_ui_kv.js": ("kvList", "kvListHtml", "kvBind"),
-    "app_ui_sql.js": ("sqlBlock", "sqlBlockHtml", "sqlBind"),
-    "app_ui_stat.js": ("statTile", "statTileHtml", "statTilesHtml"),
-}
-# Aliases of one function under a second name (docs/ui-foundations.md): the script that owns the second name.
-ALIAS_OWNERS = {"rovingRows": "app_ui_table.js", "sqlBlock": "app_ui_sql.js", "copy": "app_ui_copy.js", "kv": "app_ui_kv.js"}
-
-
 def manifest() -> dict:
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
 
@@ -61,8 +49,6 @@ def owners(texts: dict[str, str]) -> dict[str, str]:
     for name, text in texts.items():
         for member in re.findall(r"^\s*ns\.([A-Za-z_]\w*)\s*=[^=]", text, flags=re.M):
             out.setdefault(member, name)
-    out.pop("ui", None)
-    out.update(ALIAS_OWNERS)
     return out
 
 
@@ -78,11 +64,6 @@ def uses(name: str, text: str, table: dict[str, str]) -> set[str]:
             if key:
                 members.add(key)
     found = {table[member] for member in members if member in table}
-    if "ui" in members and name != "app_ui.js":
-        subs = set(re.findall(r"\bns\.ui\??\.([A-Za-z_]\w*)", text)) | set(re.findall(r"(?<![\w.])ui\??\.([A-Za-z_]\w*)", text))
-        for sub in subs:
-            owner = next((script for script, names in UI_MEMBERS.items() if sub in names), "app_ui.js")
-            found.add(owner)
     if "loader" in members or any(re.search(r"\bloader\b", g) for g in DESTRUCTURE.findall(text)):
         found.add(LOADER)
     found.discard(name)

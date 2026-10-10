@@ -576,7 +576,7 @@
     select(index, { open: true });
   }
 
-  // Row keys (ns.rovingRows, index mode: the grid keeps focus, the selected
+  // Row keys (ns.table.rovingRows, index mode: the grid keeps focus, the selected
   // row is aria-activedescendant): Up / Down, Page Up / Down, Home / End
   // select, Enter / Space open the panel (Escape: ns.layers).
   function bindTableKeys(table) {
@@ -684,7 +684,7 @@
   }
 
   function copyButton(value, label) {
-    return ns.ui.copyButtonHtml({ label: `Copy ${label}`, className: "traceCopyButton", attrs: { "data-span-copy": value } });
+    return ns.copy.buttonHtml({ label: `Copy ${label}`, className: "traceCopyButton", attrs: { "data-span-copy": value } });
   }
 
   function eventsHtml(span, startNs) {
@@ -718,7 +718,7 @@
       ["Trace ID", `<code>${esc(row.trace_id)}</code>${copyButton(row.trace_id, "Trace ID")}`],
       ["Span ID", `<code>${esc(row.span_id)}</code>${copyButton(row.span_id, "Span ID")}`],
       ["Parent", row.parent_span_id ? `<code>${esc(row.parent_span_id)}</code>` : "<code>root</code>"],
-    ].map(([label, value]) => ns.ui.statTileHtml({ label, valueHtml: value, className: "traceSpanPanel__fact", dl: true })).join("");
+    ].map(([label, value]) => ns.stat.html({ label, valueHtml: value, className: "traceSpanPanel__fact", dl: true })).join("");
     let details = "";
     if (!entry || entry.status === "loading") {
       details = '<div class="traceSpanPanel__status" role="status">Loading span details\u2026</div>';

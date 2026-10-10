@@ -98,27 +98,7 @@
       .replace(/'/g, "&#039;");
   }
 
-  function highlightJsonHtml(jsonText) {
-    const s = escapeHtml(jsonText);
-    return s.replace(
-      /("(?:\\.|[^"\\])*"(?=\s*:))|("(?:\\.|[^"\\])*")|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g,
-      (m, key, str, bool) => {
-        if (key) return `<span class="jKey">${m}</span>`;
-        if (str) return `<span class="jStr">${m}</span>`;
-        if (bool) return `<span class="jBool">${m}</span>`;
-        if (m === "null") return `<span class="jNull">${m}</span>`;
-        return `<span class="jNum">${m}</span>`;
-      }
-    );
-  }
-
-  function renderPrettyJson(preEl, value) {
-    const pretty = JSON.stringify(value, null, 2);
-    preEl.className = "jsonPretty";
-    preEl.innerHTML = highlightJsonHtml(pretty);
-  }
-
-  // Copying is app_ui_copy.js (ns.ui.copyText): one helper and one feedback.
+  // Copying is app_ui_copy.js (ns.copy.text): one helper and one feedback.
 
   // formatInt and formatBytes keep their "-" for a missing value and hand
   // the rest to ns.format (app_format.js, loaded first), which owns the
@@ -456,6 +436,21 @@
     return !!error && (error.name === "AbortError" || error.code === "aborted");
   }
 
+  // The page is a phone's (the width of the phone layout of the stylesheets).
+  function isPhoneLayout() {
+    try {
+      return window.matchMedia("(max-width: 760px)").matches;
+    } catch {
+      return false;
+    }
+  }
+
+  // The name of the shortcut key of this platform: the Command sign on Apple devices, else Ctrl.
+  function modifierKeyLabel() {
+    const platform = String(navigator.userAgentData?.platform || navigator.platform || "");
+    return /mac|iphone|ipad/i.test(platform) ? "\u2318" : "Ctrl";
+  }
+
   ns.util = {
     SEARCH_DEBOUNCE_MS,
     debounce,
@@ -469,12 +464,12 @@
     setMetaLine,
     setMetricText,
     escapeHtml,
-    highlightJsonHtml,
-    renderPrettyJson,
     formatInt,
     formatSeconds,
     formatBytes,
     replaceTextAreaValue,
+    isPhoneLayout,
+    modifierKeyLabel,
     normalizeApiErrorPayload,
     buildApiErrorText,
     buildApiErrorFromResponse,

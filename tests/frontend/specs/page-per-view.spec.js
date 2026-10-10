@@ -21,7 +21,7 @@ for (const spec of PAGES) {
   test(`${spec.path} is a page of its own: ${spec.name}`, async ({ page }) => {
     const observers = installObservers(page);
     await page.goto(spec.path);
-    await page.waitForFunction(() => !!(window.ChDash?.features && window.ChDash?.api && window.ChDash?.ui));
+    await page.waitForFunction(() => !!(window.ChDash?.features && window.ChDash?.api && window.ChDash?.header));
     await expect(page.locator('body')).toHaveAttribute('data-page', spec.body);
     const state = await page.evaluate(() => ({
       page: window.ChDash.loader.page.name,

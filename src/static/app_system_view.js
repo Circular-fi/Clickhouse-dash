@@ -267,7 +267,7 @@
         ns.badge.el(REASONS[issue.reason] || REASONS.failed, { tone: issue.reason === "disabled" ? "neutral" : "warn" }),
         h("span", { class: "systemIssue__text" }, issue.text || issueText(issue))));
     if (issue.hint) {
-      const copy = ns.ui.copyButton(null, () => issue.hint, { label: "Copy the GRANT statement", className: "systemIssue__copy" });
+      const copy = ns.copy.button(null, () => issue.hint, { label: "Copy the GRANT statement", className: "systemIssue__copy" });
       el.appendChild(h("div", { class: "systemIssue__hint" }, h("code", { class: "systemIssue__code" }, issue.hint), copy));
     }
     if (issue.message && issue.reason !== "failed") el.title = issue.message;

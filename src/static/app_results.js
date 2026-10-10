@@ -2280,9 +2280,9 @@
     return Array.isArray(resultColumns) ? resultColumns.length : 0;
   }
 
-  // A query block's Copy JSON split (ui.copySplit): JSON, and CSV in the menu.
+  // A query block's Copy JSON split (copy.split): JSON, and CSV in the menu.
   function createCopySplitSmall({ getJsonText, getCsvText }) {
-    const ctrl = ns.ui.copySplit({
+    const ctrl = ns.copy.split({
       getText: () => (typeof getJsonText === "function" ? getJsonText() : ""),
       items: [{ label: "Copy CSV", copy: () => (typeof getCsvText === "function" ? getCsvText() : "") }],
     });
@@ -3428,7 +3428,7 @@
     if (table && table.tBodies[0]) bindKeyboardRows(table.tBodies[0]);
   }
 
-  // Keyboard rows (ns.rovingRows): every data row is focusable with a roving
+  // Keyboard rows (ns.table.rovingRows): every data row is focusable with a roving
   // tabindex, Right / Left step into its cells, Up / Down keep the column,
   // Enter opens the row's Details; Shift+F10 or the ContextMenu key opens the
   // row menu on the focused row or cell. Virtual windows rebuild their rows:
@@ -3842,7 +3842,7 @@
     };
 
     const returnFocus = document.activeElement;
-    const copy = (text) => { void ns.ui.copyText(text); };
+    const copy = (text) => { void ns.copy.text(text); };
     const absolute = (href) => new URL(href, window.location.href).href;
     addItem("Details", () => openRowDetails(binding, table, returnFocus));
     const ctx = rowDetailsContext(table);
@@ -3941,7 +3941,7 @@
     copyBtn.textContent = "Copy JSON";
     copyBtn.title = label ? `Copy row ${label} as JSON` : "Copy row as JSON";
     copyBtn.addEventListener("click", () => {
-      void ns.ui.copyText(rowJsonText(ctx, row), copyBtn);
+      void ns.copy.text(rowJsonText(ctx, row), copyBtn);
     });
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
@@ -3981,7 +3981,7 @@
       line.append(name, value);
       list.appendChild(line);
     }
-    ns.ui.kvBind(list);
+    ns.kv.bind(list);
     content.append(list, actions);
     return content;
   }

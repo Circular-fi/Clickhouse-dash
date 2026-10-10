@@ -52,7 +52,7 @@ def test_the_page_registers_in_the_shell_and_stylesheet_builders():
     page = data["pages"]["mcp"]
     assert page["bootstrap"] == "app_mcp_page.js"
     # No bar under the header: the strip is drawn by the view, so the page needs no filter bar module.
-    assert page["modules"] == ["app_api.js", "app_ui_dialog.js", "app_ui.js", "app_mcp_view.js", "app_mcp_form.js"]
+    assert page["modules"] == ["app_api.js", "app_ui_dialog.js", "app_header.js", "app_mcp_view.js", "app_mcp_form.js"]
     # None of the other pages' modules: the page is not tied to a host and draws no chart, table of data or editor.
     for name in ("app_explorer.js", "app_sql.js", "app_chart_core.js", "app_system_view.js", "app_traces.js"):
         assert name not in page["modules"], name
@@ -61,7 +61,7 @@ def test_the_page_registers_in_the_shell_and_stylesheet_builders():
 
 
 def test_the_switcher_follows_features_mcp():
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     state = read("src/static/app_state.js")
     assert 'const mcpEnabled = nav.mcp === true;' in ui
     assert "if (dom.navMcpButton) dom.navMcpButton.hidden = !mcpEnabled;" in ui

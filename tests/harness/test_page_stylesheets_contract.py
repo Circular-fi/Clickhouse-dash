@@ -115,8 +115,9 @@ def test_query_and_explorer_skip_the_modules_they_never_run():
     assert "return loader.startModules();" in read("src/static/app.js")
     query = builder.page_modules("query")
     explorer = builder.page_modules("explorer")
-    assert {"app_explorer.js", "app_run.js", "app_autocomplete.js", "app_analysis.js"} <= set(query)
-    assert "app_explorer_graph.js" not in query and "app_explorer_treemap.js" not in query
+    # Query has no Explorer at all: the page switcher takes a person to the Explorer page (app_header.js).
+    assert {"app_run.js", "app_autocomplete.js", "app_analysis.js", "app_query_ui.js"} <= set(query)
+    assert not any(name.startswith("app_explorer") for name in query)
     assert {"app_explorer.js", "app_explorer_graph.js", "app_explorer_treemap.js", "app_results.js", "app_highlight.js"} <= set(explorer)
-    for name in ["app_autocomplete.js", "app_run.js", "app_analysis.js", "app_pipeline_viewer.js", "app_trace_viewer.js", "app_download.js", "app_export.js"]:
+    for name in ["app_autocomplete.js", "app_run.js", "app_analysis.js", "app_pipeline_viewer.js", "app_trace_viewer.js", "app_download.js"]:
         assert name not in explorer, name

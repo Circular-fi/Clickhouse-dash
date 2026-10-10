@@ -36,14 +36,10 @@
   const { $, $$ } = ns.dom;
   const { h } = ns;
 
-  // Open dialogs, bottom first (the top layer order).
-  const stack = [];
+  // The open dialogs, bottom first (the top layer order), are ns.layers' modals.
   let uid = 0;
 
-
-  function host() {
-    return stack[stack.length - 1] || document.body;
-  }
+  const { host } = ns.layers;
 
   // A control the focus can go back to (not <body>: nothing was focused).
   function isFocusable(node) {
@@ -122,9 +118,7 @@
     let layer = null;
 
     const finish = () => {
-      const index = stack.indexOf(dialog);
-      if (index < 0) return;
-      stack.splice(index, 1);
+      if (!ns.layers.modalClosed(dialog)) return;
       // Toasts and other floating children move to the dialog now on top.
       for (const node of $$(":scope > [data-dialog-float]", dialog)) host().appendChild(node);
       // The layer gives the focus back: to the opener, else to the first
@@ -174,7 +168,7 @@
       value = null;
       restore = true;
       dialog.showModal();
-      stack.push(dialog);
+      ns.layers.modalOpened(dialog);
       layer = ns.layers.push({
         el: dialog,
         modal: true,

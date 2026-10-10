@@ -7,7 +7,7 @@
   // asynchronous_metric_log and narrow query_log columns; the server picks
   // the step, at most 300 buckets).
   //
-  // Ten charts on the shared engine (ns.chartCore) in ui.chartCardHtml
+  // Ten charts on the shared engine (ns.chartCore) in chartUi.cardHtml
   // cards, two a row (one on a phone). They share a crosshair (syncKey) and
   // a drag over any of them sets the time range of all of them, as on
   // Metrics. The range is the Observability picker (ns.timeRange) on the
@@ -474,7 +474,7 @@
 
     // The cards, built once in chart order; each holds its chart once drawn.
     for (const spec of CHARTS) {
-      grid.insertAdjacentHTML("beforeend", ns.ui.chartCardHtml({
+      grid.insertAdjacentHTML("beforeend", ns.chartUi.cardHtml({
         title: spec.title,
         className: "systemChart",
         id: `systemChart-${spec.id}`,

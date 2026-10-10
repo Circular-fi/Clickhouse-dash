@@ -5,22 +5,21 @@
   // ns.highlight.toHtml). A page that has not loaded it (Observability) gets
   // the plain text at once and the colours when the highlighter has loaded.
   //
-  //   ui.sqlBlock({ sql, gutter, copy, maxLines, expand, inline, label })
+  //   sqlBlock({ sql, gutter, copy, maxLines, expand, inline, label })
   //     gutter    line numbers
-  //     copy      a copy button (ui.copyButton) at the top right
+  //     copy      a copy button (copy.button) at the top right
   //     maxLines  the lines shown before "Show all N lines" (expand: true,
   //               the default when maxLines is set) or a scroll
   //     inline    one line cut with an ellipsis inside a table cell: a click
   //               (Enter / Space) shows it all, wrapped, and back
   //     wrap      long lines wrap instead of scrolling
   //   Returns the element (.sqlBlock).
-  //   ui.sqlBlockHtml({ sql, inline, label }) is the same block as an HTML
-  //   string, for modules that render strings; ui.sqlBind(root) once on their
+  //   sqlBlock.html({ sql, inline, label }) is the same block as an HTML
+  //   string, for modules that render strings; sqlBlock.bind(root) once on their
   //   container gives its inline blocks the toggle.
   const ns = window.ChDash;
   if (!ns) return;
   const { $$ } = ns.dom;
-  const ui = (ns.ui = ns.ui || {});
 
   // The highlighter: in the Query and Explorer modules, a lazy group of
   // Observability (src/static/modules.json, ns.loader).
@@ -133,8 +132,8 @@
     ns.util.scrollFocus(body, { label });
     paintInto(code, text);
 
-    if (copy && ui.copyButton) {
-      const button = ui.copyButton(null, () => text, { label: `Copy ${label}`, className: "sqlBlock__copy" });
+    if (copy && ns.copy?.button) {
+      const button = ns.copy.button(null, () => text, { label: `Copy ${label}`, className: "sqlBlock__copy" });
       block.appendChild(button);
     }
 
@@ -162,8 +161,7 @@
     return block;
   }
 
-  ui.sqlBlock = sqlBlock;
-  ui.sqlBlockHtml = sqlBlockHtml;
-  ui.sqlBind = sqlBind;
+  sqlBlock.html = sqlBlockHtml;
+  sqlBlock.bind = sqlBind;
   ns.sqlBlock = sqlBlock;
 })();

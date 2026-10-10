@@ -52,8 +52,10 @@ def test_component_modules_load_on_every_page_after_the_foundations():
         assert module in common, module
         assert common.index(module) > common.index("app_dom.js") and common.index(module) > common.index("app_util.js"), module
         assert css_sources.component(module[len("app_ui_"):-len(".js")]), module  # its file in src/static/css/10-components/
-    # ns.ui keeps what the component modules put on it.
-    assert "ns.ui = Object.assign(ns.ui || {}, {" in read("app_ui.js")
+    # ns.ui is what the component modules put on it: the shell's header (app_header.js) and the Query page's controls
+    # (app_query_ui.js) are modules of their own, ns.header and ns.queryUi.
+    assert "ns.header = Object.freeze({" in read("app_header.js") and "ns.queryUi = Object.freeze({" in read("app_query_ui.js")
+    assert "Object.assign(ns.ui" not in read("app_header.js") + read("app_query_ui.js")
 
 
 def test_every_table_is_a_data_table():
@@ -85,7 +87,7 @@ def test_one_sort_indicator_and_one_set_of_row_keys():
     block = css_block("data table")
     assert 'th[aria-sort="ascending"] > .dataTable__sort::after' in block
     assert "th:hover > .dataTable__sort::after" in block
-    # Row keys: ns.rovingRows, not a local ArrowUp / ArrowDown handler.
+    # Row keys: ns.table.rovingRows, not a local ArrowUp / ArrowDown handler.
     local = offenders(r"event\.key === \"ArrowDown\" \|\| event\.key === \"ArrowUp\"|event\.key !== \"ArrowDown\" && event\.key !== \"ArrowUp\"",
                       files={"app_logs.js", "app_trace_spans.js", "app_trace_services.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_results.js"})
     # The span panel's own Up / Down (previous / next span while the panel has
@@ -143,7 +145,7 @@ def test_one_copy_helper_and_one_feedback():
     assert not offenders(r"flashButtonText|copyTextToClipboard|copyJsonToast|classList\.add\(\"is-copied\"\)", {"app_ui_copy.js"})
     assert "copyJsonToast" not in read("query.html")
     for name in ["app_run.js", "app_traces.js", "app_logs.js"]:
-        assert "ns.ui.copySplit({" in read(name), name
+        assert "ns.copy.split({" in read(name), name
     assert not offenders(r"function (open|close)(Trace)?CopyMenu")
     css = css_sources.text()
     assert ".is-copied" not in css.replace(css_block("copy"), "").replace(css_block("data table"), "")
@@ -151,7 +153,7 @@ def test_one_copy_helper_and_one_feedback():
 
 def test_read_only_sql_is_the_sql_block():
     for name in ["app_explorer_detail.js", "app_explorer_graph.js", "app_trace_services.js", "app_query_library.js", "app_system_activity.js"]:
-        assert "ns.ui.sqlBlock" in read(name), name
+        assert "ns.sqlBlock" in read(name), name
     # Highlighted SQL elsewhere: the editor, autocomplete and function docs.
     assert not offenders(r"ns\.highlight\.renderInto\(", {"app_explorer.js", "app_ui_sql.js"})
     sql = read("app_ui_sql.js")
@@ -167,7 +169,7 @@ def test_key_value_lists_are_the_shared_list():
     assert not offenders(r"traceKv__|traceJson__|logsField__|logsFieldAction|explorerGraphPanel__columnName")
     for name in ["app_traces.js", "app_logs.js", "app_results.js", "app_explorer_graph.js"]:
         text = read(name)
-        assert "kvList" in text or "kvListHtml" in text, name
+        assert "kv.list" in text or "kv.html" in text or "kv.bind" in text, name
     block = css_block("key/value")
     for kind in ["string", "number", "bool", "null"]:
         assert f".kv__v--{kind} {{ color: var(--json-{kind});" in block, kind
@@ -196,7 +198,7 @@ def test_charts_share_the_card_legend_readout_and_sparkline():
         assert "xReadout: (i) => fmt.range" not in read(name), name
     for name, needle in [("traces.html", 'class="traceAnalyticsCard chartCard"'), ("app_metrics.js", '"metricsPanel chartCard"'),
                          ("app_query_chart.js", '"queryChart chartCard"'), ("logs.html", 'class="logsHistogram chartCard"'),
-                         ("app_trace_services.js", "ns.ui.chartCardHtml(")]:
+                         ("app_trace_services.js", "ns.chartUi.cardHtml(")]:
         assert needle in read(name), name
     # One sparkline: SVG polylines are drawn by app_ui_chart.js only.
     assert not offenders(r"<polyline", {"app_ui_chart.js"})

@@ -23,7 +23,7 @@ def test_nothing_repaints_or_relayouts_a_page_at_rest():
         body = css[css.find(f"@keyframes {name}"):].split("\n", 1)[0] if f"@keyframes {name}" in css else ""
         assert "box-shadow" not in body, name
     # The hosts stream's tick (every second) writes only what changed.
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     assert "function setText(el, text) {\n    if (el && el.textContent !== text) el.textContent = text;\n  }" in ui
     assert "setText(dom.hostPickerText," in ui and "setText(dom.hostPickerPing," in ui and "setText(dom.hostPickerVersion," in ui
     assert "if (dom.runButton.textContent !== runLabel) dom.runButton.textContent = runLabel;" in read("src/static/app_run.js")

@@ -98,10 +98,8 @@
 
   function notifyMetaChanged(hostId) {
     if (String(state.selectedHostId || "") !== String(hostId)) return;
-    if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") state.highlightCtrl.refresh();
-    if (ns.autocomplete && typeof ns.autocomplete.refresh === "function") ns.autocomplete.refresh();
-    // Read-only SQL painted before the keywords / functions arrived (the
-    // Explorer card's expressions) repaints with them.
+    // The editor's marks and the completion list (app_query_ui.js), and read-only SQL painted before the keywords /
+    // functions arrived (the Explorer card's expressions), repaint with them.
     window.dispatchEvent(new CustomEvent("chdash:meta-changed", { detail: { hostId: String(hostId) } }));
   }
 
@@ -449,7 +447,35 @@
     scheduleBackgroundRefresh();
   });
 
+  // The host's metadata follows the host selection (the header runs the hook before chdash:host-changed) and is prepared
+  // for the host the page starts with. A page that uses the metadata calls this after ns.header.init().
+  function init() {
+    ns.header.onHostSelected((hostId) => {
+      if (!hostId) return;
+      // Host selection is the authoritative point where editor diagnostics can become meaningful. Hydrate the cached
+      // catalog immediately and refresh stale catalog types in the background instead of briefly treating an empty
+      // metadata object as proof that every reference is unknown.
+      activateHost(hostId);
+      maybeRefreshOnLoad();
+    });
+    if (state.selectedHostId) prepareHost(state.selectedHostId);
+  }
+
+  // The highlighter colours function names from the host's function list. A returning visit restores the host from
+  // storage without selecting it again, so nothing else loads that list: ask for the cached copy at once and for the
+  // server's when it is missing. The marks repaint when it arrives (chdash:meta-changed).
+  function ensureHighlighterData() {
+    const hostId = String(state.selectedHostId || "");
+    if (!hostId) return;
+    hydrateFromStorage(hostId);
+    const host = state.meta?.hosts?.[hostId];
+    const missing = ["functions", "keywords"].filter((type) => !host?.[type]);
+    if (missing.length) void fetchAndStore(hostId, missing);
+  }
+
   ns.meta = {
+    init,
+    ensureHighlighterData,
     prepareHost,
     activateHost,
     maybeRefreshOnUserAction,

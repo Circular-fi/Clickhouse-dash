@@ -14,7 +14,7 @@
   // (/explorer/_monitoring[/<section>], /explorer/_operations) answer a redirect here
   // (server.cpp redirect_to_system).
   //
-  // This controller starts the page's modules (through ns.loader), the header (ns.ui.init: host
+  // This controller starts the page's modules (through ns.loader), the header (ns.header.init: host
   // picker, page switcher, theme) and the view; a host change refreshes the section on screen.
   window.ChDash = window.ChDash || {};
   const ns = window.ChDash;
@@ -102,9 +102,7 @@
   function bindShell() {
     const dom = ns.dom || {};
     const route = (path) => ns.api.resolveUrl(path);
-    ns.ui?.setPageSelectorValue?.("system");
-    dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
+    ns.header.setPageSelectorValue("system");
     router().on(ROUTE, onPopState);
     // Another host: the section on screen reads it.
     window.addEventListener("chdash:host-changed", () => ns.systemView?.refresh?.(false));
@@ -122,7 +120,7 @@
   async function start() {
     await ns.loader.startModules();
     bindShell();
-    ns.ui?.init?.();
+    ns.header.init();
     renderRow();
     show(router().current().params.toString());
     // The entry carries the router's state (its view) from the first paint on; the address, its

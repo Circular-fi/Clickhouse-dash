@@ -71,7 +71,7 @@ def test_one_state_component_and_no_local_state_markup():
     assert "ns.uiState.busy(body, true);" in ops and 'setAttribute("aria-live"' not in ops
     library = read("src/static/app_query_library.js")
     assert "retry: () => void reloadStore(store).then(() => renderLibrary())" in library and "retry: () => void loadHistory()" in library
-    assert 'retry: () => withQueryLibrary(fn)' in read("src/static/app_ui.js")
+    assert 'retry: () => withQueryLibrary(fn)' in read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     for gone in ("explorerListEmpty", "explorerOpsView__error", "qlEmpty", "qlNotice--error", "explorerUnavailable"):
         assert gone not in code and gone not in css, gone
     # A refresh button is busy (spinner, aria-busy) while it reloads.
@@ -104,7 +104,7 @@ def test_feature_flags_are_read_through_ns_features():
         if name == "app_state.js":
             continue
         assert "state.features" not in text and "state?.features" not in text, name
-        assert '"chdash:features-changed", ' not in text or name == "app_ui.js", name
+        assert '"chdash:features-changed", ' not in text or name == "app_header.js", name
         assert "featuresLoaded" not in text, name
 
 
@@ -132,7 +132,7 @@ def test_requests_go_through_api_and_superseded_ones_are_aborted():
         if name == "app_api.js":
             continue
         routes = re.findall(r"""["'`]api/[\w/-]*""", text)
-        allowed = {"app_ui.js": ['"api/hosts/stream'], "app_query_library.js": ['"api/query-library']}.get(name, [])
+        allowed = {"app_header.js": ['"api/hosts/stream'], "app_query_library.js": ['"api/query-library']}.get(name, [])
         assert sorted(routes) == sorted(allowed), (name, routes)
     # The query library sends its If-Match revision through api.request, and
     # its list reloads are util.latest requests.
@@ -223,7 +223,7 @@ def test_plain_debounces_use_util_debounce():
     hand-written clearTimeout/setTimeout pair."""
     code = sources()
     for name, needle in (("app_query_library.js", "util.debounce(() => loadHistory(), 150)"),
-                         ("app_ui.js", "util.debounce(() => saveEditorDraft(dom.queryTextArea.value), 200)")):
+                         ("app_query_ui.js", "util.debounce(() => saveEditorDraft(dom.queryTextArea.value), 200)")):
         assert needle in code[name], (name, needle)
-    for name, timer in (("app_query_library.js", "historyTimer"), ("app_ui.js", "draftSaveTimer")):
+    for name, timer in (("app_query_library.js", "historyTimer"), ("app_query_ui.js", "draftSaveTimer")):
         assert timer not in code[name], (name, timer)

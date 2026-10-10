@@ -20,7 +20,7 @@ def test_finished_results_virtualize_against_real_scroll_owner() -> None:
 def test_flatten_tuple_is_shared_enabled_by_default_and_used_by_query_and_data() -> None:
     state = read("src/static/app_state.js")
     dom = read("src/static/app_dom.js")
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     results = read("src/static/app_results.js")
     query_html = read("src/static/query.html")

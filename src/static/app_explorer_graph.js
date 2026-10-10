@@ -2886,11 +2886,11 @@
     return button;
   }
 
-  // The shared read-only SQL block (ui.sqlBlock): copy, the first 16 lines
+  // The shared read-only SQL block (sqlBlock): copy, the first 16 lines
   // and "Show all".
   function sqlBlock(sql, truncated) {
     const wrap = h("div", { class: "explorerGraphPanel__sqlWrap" });
-    wrap.append(ns.ui.sqlBlock({ sql, copy: true, maxLines: 16, wrap: true, label: "SELECT", className: "explorerGraphPanel__sql" }));
+    wrap.append(ns.sqlBlock({ sql, copy: true, maxLines: 16, wrap: true, label: "SELECT", className: "explorerGraphPanel__sql" }));
     if (truncated) wrap.append(h("p", { class: "graphKitPanel__note" }, "Truncated at 32 KB: the full text is in the object's DDL."));
     return wrap;
   }
@@ -2974,9 +2974,9 @@
       if (serial !== model.panelSerial) return;
       status.remove();
       if (!columns.length) { container.append(h("p", { class: "graphKitPanel__note" }, "No columns.")); return; }
-      // The shared key / value list (ui.kvList): name, type (mono), copy.
+      // The shared key / value list (kv.list): name, type (mono), copy.
       const limit = 40;
-      container.append(ns.ui.kvList(columns.slice(0, limit).map((column) => ({
+      container.append(ns.kv.list(columns.slice(0, limit).map((column) => ({
         key: column.name, value: column.type, json: false, text: true, mono: true, actions: ["copy"],
       })), { className: "explorerGraphPanel__columns", label: "Columns" }));
       if (columns.length > limit) container.append(h("p", { class: "graphKitPanel__note" }, `${format.count(columns.length - limit)} more columns in the table card.`));
@@ -3823,6 +3823,9 @@
     model.openTable = typeof options.openTable === "function" ? options.openTable : null;
     model.openCard = typeof options.openCard === "function" ? options.openCard : null;
     model.onStateChange = typeof options.onStateChange === "function" ? options.onStateChange : null;
+    // Canvas pixels are not CSS-reactive: the graph draws again in the same visual transaction as the theme switch
+    // (app_header.js).
+    window.addEventListener("chdash:theme-applied", () => redrawThemeNow());
     const canvas = dom.explorerGraphCanvas;
     if (!canvas) return;
     buildGraphChrome();

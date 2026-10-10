@@ -388,9 +388,10 @@
 
   const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Host", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["Actions", "actions"]];
 
-  function closeDetails(tbody) {
-    // The "Data it reads" read of the key that closes stops with it.
-    ns.util.latest.cancelPrefix(ns.mcpForm.REACH_SLOT);
+  // The page gives the details of a key (actions.keyDetails: app_mcp_form.js) and is told when they close
+  // (actions.onDetailsClose: the "Data it reads" read of the key that closes stops with it).
+  function closeDetails(tbody, actions) {
+    actions.onDetailsClose?.();
     for (const row of $$(".mcpDetailRow", tbody)) row.remove();
     for (const row of $$("tr.is-open", tbody)) {
       row.classList.remove("is-open");
@@ -398,10 +399,10 @@
     }
   }
 
-  function showDetails(tbody, key, meta) {
+  function showDetails(tbody, key, meta, actions) {
     const row = $(`tr[data-key-id="${CSS.escape(key.id)}"]`, tbody);
     if (!row) return;
-    const cell = h("td", { class: "mcpDetailCell", colspan: String(COLUMNS.length) }, ns.mcpForm.keyDetails({ meta, key }));
+    const cell = h("td", { class: "mcpDetailCell", colspan: String(COLUMNS.length) }, actions.keyDetails({ meta, key }));
     cell.setAttribute("role", "cell");
     const detail = h("tr", { class: "mcpDetailRow", id: `mcpDetail-${key.id}`, role: "row", dataset: { detailFor: key.id } }, cell);
     detail.hidden = row.hidden;
@@ -425,10 +426,10 @@
     // open key stays open when the list is drawn again.
     const toggle = (key, opener) => {
       const wasOpen = view.openKeyId === key.id;
-      closeDetails(tbody);
+      closeDetails(tbody, actions);
       view.openKeyId = wasOpen ? "" : key.id;
       actions.onOpenChange?.(view.openKeyId);
-      if (!wasOpen) showDetails(tbody, key, meta);
+      if (!wasOpen) showDetails(tbody, key, meta, actions);
       (opener || $(`tr[data-key-id="${CSS.escape(key.id)}"] [data-action="open"]`, tbody))?.focus();
     };
     // Roles are written out: a phone draws each row as a card and the browser would drop the table.
@@ -442,7 +443,7 @@
       if (key) toggle(key, $('[data-action="open"]', tr));
     });
     const held = keys.find((key) => key.id === view.openKeyId);
-    if (held) showDetails(tbody, held, meta);
+    if (held) showDetails(tbody, held, meta, actions);
     else if (view.openKeyId) {
       view.openKeyId = "";
       actions.onOpenChange?.("");

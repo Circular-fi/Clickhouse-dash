@@ -101,7 +101,7 @@ def test_metrics_view_shell_and_switcher():
         assert 'data-value="observability" aria-selected="false" hidden>Observability</button>' in shell, page
         # The shell hides the switcher only when no other page is enabled.
         assert "pageNav.traces !== true" in shell and "pageNav.metrics !== true" in shell, page
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     assert "if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;" in ui
     assert 'window.location.assign(api.resolveUrl("observability"))' in ui
     assert "metrics: nav?.metrics === true" in read("src/static/app_state.js")

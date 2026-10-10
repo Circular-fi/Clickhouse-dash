@@ -431,5 +431,16 @@
   document.addEventListener("keydown", onKeydown);
   document.addEventListener("pointerdown", onPointerdown, true);
 
-  ns.layers = Object.freeze({ push, top, handleOf, isOpen, closeAll, size: () => stack.length, debug });
+  // The open modal dialogs, bottom first (app_ui_dialog.js adds and removes its own). The page outside a modal dialog is
+  // inert, so a floating thing (menu, popover, tip, the copy fallback) mounts in the top one: host().
+  const modals = [];
+  const modalOpened = (dialog) => { modals.push(dialog); };
+  const modalClosed = (dialog) => {
+    const index = modals.indexOf(dialog);
+    if (index >= 0) modals.splice(index, 1);
+    return index >= 0;
+  };
+  const host = () => modals[modals.length - 1] || document.body;
+
+  ns.layers = Object.freeze({ push, top, handleOf, isOpen, closeAll, size: () => stack.length, debug, host, modalOpened, modalClosed });
 })();

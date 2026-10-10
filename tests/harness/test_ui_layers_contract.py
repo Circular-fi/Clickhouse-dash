@@ -34,7 +34,7 @@ def test_layers_load_first_on_every_page():
 
 def test_layers_own_one_escape_and_one_outside_listener():
     layers = read("src/static/app_ui_layers.js")
-    assert "ns.layers = Object.freeze({ push, top, handleOf, isOpen, closeAll, size: () => stack.length, debug });" in layers
+    assert "ns.layers = Object.freeze({ push, top, handleOf, isOpen, closeAll, size: () => stack.length, debug, host, modalOpened, modalClosed });" in layers
     assert "ns.lifecycle = Object.freeze({ scope, enter, leave, current, bind });" in layers
     assert layers.count('document.addEventListener("keydown", onKeydown);') == 1
     assert layers.count('document.addEventListener("pointerdown", onPointerdown, true);') == 1
@@ -75,7 +75,7 @@ ESCAPE_ALLOWED = {
     "app_trace_heatmap.js": 1,
     "app_trace_logs.js": 1,
     "app_trace_insights.js": 1,
-    "app_ui.js": 2,
+    "app_query_ui.js": 1,
     "app_results.js": 4,
     "app_query_chart.js": 1,
     "app_query_library.js": 4,
@@ -85,7 +85,7 @@ ESCAPE_ALLOWED = {
 # suggestions, header menus, result and chart menus, library menu).
 OUTSIDE_ALLOWED = {
     "app_ui_layers.js",
-    "app_autocomplete.js", "app_ui.js", "app_results.js", "app_query_chart.js", "app_query_library.js",
+    "app_autocomplete.js", "app_results.js", "app_query_chart.js", "app_query_library.js",
 }
 
 

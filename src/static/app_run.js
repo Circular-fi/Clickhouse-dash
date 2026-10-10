@@ -4,7 +4,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const { dom, state, storage, api, sql, results, util, ui, analysis, download } = ns;
+  const { dom, state, storage, api, sql, results, util, header, queryUi, analysis, download } = ns;
   const { $$ } = ns.dom;
 
   let activeEventSource = null;
@@ -82,7 +82,7 @@
     el.replaceChildren();
   }
 
-  // The shared sparkline (ui.sparkline, --sparkline-color): the series
+  // The shared sparkline (chartUi.sparkline, --sparkline-color): the series
   // decimated, from opts.min, its top the max (or a quantile of it), never
   // under opts.minMax.
   function drawSparkline(el, points, opts = {}) {
@@ -100,7 +100,7 @@
     }
     if (opts.minMax != null && Number.isFinite(opts.minMax)) vMax = Math.max(vMax, opts.minMax);
     if (!Number.isFinite(vMax) || vMax <= vMin) vMax = vMin + 1;
-    ns.ui.sparkline.draw(el, drawable.map((p) => p.v), { xs: drawable.map((p) => p.t), min: vMin, max: vMax, area: true });
+    ns.chartUi.sparkline.draw(el, drawable.map((p) => p.v), { xs: drawable.map((p) => p.t), min: vMin, max: vMax, area: true });
   }
 
   const chartCanvases = () => [
@@ -744,12 +744,11 @@
       const divider = dom.runWithProfilingButton.nextElementSibling;
       if (divider?.classList?.contains("runMenu__divider")) divider.hidden = profilingHidden;
     }
-    const exportBusy = ns.massExport && typeof ns.massExport.isPreparing === "function" && ns.massExport.isPreparing();
     if (dom.downloadCsvButton) {
       dom.downloadCsvButton.hidden = editorIsMulti;
-      dom.downloadCsvButton.disabled = busy || offline || exportBusy || editorStatements.length !== 1;
+      dom.downloadCsvButton.disabled = busy || offline || editorStatements.length !== 1;
     }
-    if (dom.downloadJsonButton) dom.downloadJsonButton.disabled = busy || offline || exportBusy || editorStatements.length < 1;
+    if (dom.downloadJsonButton) dom.downloadJsonButton.disabled = busy || offline || editorStatements.length < 1;
     if (dom.downloadDebugButton) dom.downloadDebugButton.disabled = busy || offline || editorStatements.length < 1;
     const editorEmpty = !String(dom.queryTextArea?.value || "").trim();
     if (dom.formatButton) dom.formatButton.disabled = busy || offline || editorEmpty || isFormatLocked();
@@ -767,14 +766,14 @@
     state.isBatchRun = !!batch;
     updateActionButtons();
     // The host picker is locked while a query runs (app_ui.js).
-    ui?.applyHostPickerUi?.();
+    header.applyHostPickerUi();
   }
 
   function getSelectedHostId() {
     return state.selectedHostId;
   }
 
-  // The results' Copy JSON split (ui.copySplit): JSON on the main button,
+  // The results' Copy JSON split (copy.split): JSON on the main button,
   // CSV and Download JSON (app_download.js) in its menu.
   function liveJsonText() {
     return state.lastRunMode === "batch" && download && typeof download.buildGlobalJson === "function"
@@ -906,7 +905,7 @@
       }
     }
 
-    if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
+    queryUi.clearEditorError();
 
     void ns.history.add({
       ts_ms: Date.now(),
@@ -1334,10 +1333,9 @@ function resolveEditorErrorLocation(editorText, statementIndexHint, payload, msg
 }
 
 function applyEditorErrorDecoration(editorText, statementIndexHint, payload, msg) {
-  if (!ui || typeof ui.setEditorError !== "function") return;
   const loc = resolveEditorErrorLocation(editorText, statementIndexHint, payload, msg);
   if (!loc) return;
-  ui.setEditorError({ line: loc.line, col: loc.col, near: loc.near, message: msg });
+  queryUi.setEditorError({ line: loc.line, col: loc.col, near: loc.near, message: msg });
 }
 
 
@@ -1793,8 +1791,8 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
     state.formatFailureShown = false;
     results.setError("");
-    if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
-    ui && ui.closeRunMenu && ui.closeRunMenu({ immediate: false });
+    queryUi.clearEditorError();
+    queryUi.closeRunMenu({ immediate: false });
 
     const hostId = getSelectedHostId();
     if (!hostId) {
@@ -1873,7 +1871,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
       historyRun = { tsMs: Date.now(), startedAt: runStartedAt, sql: trimmed, hostId, rows: 0, elapsedMs: NaN, error: "" };
       // The address bar links to what ran (?sql= / ?saved=).
-      if (!downloadKind) ui?.syncQueryUrl?.(dom.queryTextArea ? dom.queryTextArea.value : trimmed);
+      if (!downloadKind) queryUi.syncQueryUrl(dom.queryTextArea ? dom.queryTextArea.value : trimmed);
       const editorValue = dom.queryTextArea ? dom.queryTextArea.value : trimmed;
       // The editor holds the formatter's text when Format (or Auto-format) just wrote it.
       const editorFormatted = !!state.lastFormatOk && String(state.lastFormatHostId || "") === String(hostId || "") && String(state.lastFormatEditorValue || "") === editorValue;
@@ -2125,12 +2123,12 @@ function streamQuery(streamUrl, agg, sink, ctx) {
   }
 
   async function handleRunWithProfiling() {
-    ui && ui.closeRunMenu && ui.closeRunMenu({ immediate: true });
+    queryUi.closeRunMenu({ immediate: true });
     return handleRunMode("profiling");
   }
 
   async function handleDownloadRun(kind) {
-    ui?.closeRunMenu?.({ immediate: true });
+    queryUi.closeRunMenu({ immediate: true });
     // A debug download is a diagnostic run, not a normal export: execute every
     // statement with profiling enabled so the archive can include the complete
     // post-run analysis. CSV/JSON exports keep their normal execution mode.
@@ -2148,7 +2146,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
     // Formatting does not touch the last run: its error, status and query id stay together. Only an
     // error that a failed Format put there is Format's to take back, with the status it set.
-    const clearEditorError = () => { if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError(); };
+    const clearEditorError = () => { queryUi.clearEditorError(); };
     const ownErrorUp = state.formatFailureShown === true;
     if (ownErrorUp) {
       results.setError("");
@@ -2191,7 +2189,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       state.lastRunMode = "single";
       results.setMultiqueryMode(false);
       if (download && typeof download.resetRun === "function") download.resetRun({ hostId: getSelectedHostId(), multi: false });
-      if (ui && typeof ui.clearEditorError === "function") ui.clearEditorError();
+      queryUi.clearEditorError();
       results.clearResultsStack();
       results.clearLiveResults();
       results.setResultsVisible(false);
@@ -2249,6 +2247,11 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     updateActionButtons();
     initCharts();
 
+    // The Run buttons follow the host (its selection and its health) and the answer of the API (app_header.js, app_api.js).
+    header.onHostSelected(() => updateActionButtons());
+    window.addEventListener("chdash:api-online", () => updateActionButtons());
+    window.addEventListener("chdash:hosts", () => updateActionButtons());
+
     if (dom.queryTextArea) dom.queryTextArea.addEventListener("input", updateActionButtons);
     if (dom.runButton) dom.runButton.addEventListener("click", () => {
       if (state.isRunning) void handleCancelOrClear();
@@ -2261,7 +2264,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     if (dom.formatButton) dom.formatButton.addEventListener("click", handleFormat);
     if (dom.clearResultsButton) dom.clearResultsButton.addEventListener("click", handleCancelOrClear);
     if (dom.copySplit) {
-      ns.ui.copySplit({
+      ns.copy.split({
         root: dom.copySplit,
         getText: liveJsonText,
         items: [

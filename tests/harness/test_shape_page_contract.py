@@ -82,5 +82,5 @@ def test_a_row_opens_the_shape_page_and_the_shape_page_returns_to_the_list():
     assert 'router().on("/system", onPopState);' in controller
     system = read("src/static/app_system.js")
     assert "onOpenShape: (hash, { replace = false } = {}) => {" in system
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     assert '["system", "shape"].includes(document.body?.dataset?.page)' in ui

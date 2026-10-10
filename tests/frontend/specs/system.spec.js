@@ -1087,7 +1087,7 @@ test('Open in Query puts the example or the history in the editor without runnin
 });
 
 // The text the last copy put on the clipboard (http origins have no async
-// clipboard to read: ui.copyText selects a textarea and runs the copy command).
+// clipboard to read: copy.text selects a textarea and runs the copy command).
 async function captureCopies(page) {
   await page.evaluate(() => {
     window.__sqCopied = '';

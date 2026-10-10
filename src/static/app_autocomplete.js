@@ -3220,7 +3220,7 @@
       const highlight = wrap ? $(".editorHighlight", wrap) : null;
       const visualEl = highlight || textarea;
       const cs = getComputedStyle(visualEl);
-      const lineHeight = parseFloat(cs.lineHeight) || measureLineHeight(visualEl);
+      const lineHeight = parseFloat(cs.lineHeight) || 21;
       const padLeft = Number.parseFloat(cs.paddingLeft) || 0;
       const padTop = Number.parseFloat(cs.paddingTop) || 0;
       const padRight = Number.parseFloat(cs.paddingRight) || 0;

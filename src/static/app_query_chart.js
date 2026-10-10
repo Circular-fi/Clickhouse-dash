@@ -218,7 +218,7 @@
   // Milliseconds since the epoch (fractional below a millisecond). A bare date
   // is a calendar day (local midnight), so it reads the same day everywhere.
   // A time without a zone is the wall clock of `serverTz` (the timezone() of
-  // the host, ns.ui.serverTimeZone) when it is known, as ClickHouse wrote it;
+  // the host, ns.header.serverTimeZone) when it is known, as ClickHouse wrote it;
   // the browser's zone only when it is not. The API sends DateTime with "Z".
   function toTimeMs(value, kind, serverTz = "") {
     if (value == null) return NaN;
@@ -292,7 +292,7 @@
     // Parses the column up to row `end` (default: every row received).
     function column(rows, index, kind, columnKindValue, end = rows.length) {
       if (rows !== rowsRef) reset(rows);
-      const zone = kind === "time" && ns.ui && typeof ns.ui.serverTimeZone === "function" ? ns.ui.serverTimeZone() : "";
+      const zone = kind === "time" ? ns.header.serverTimeZone() : "";
       const key = `${kind}:${index}`;
       let col = columns.get(key);
       if (!col || col.parsed > rows.length) {

@@ -8,12 +8,11 @@ def read(rel: str) -> str:
 
 def test_query_reload_does_not_mark_known_relation_unknown_before_metadata_arrives() -> None:
     autocomplete = read("src/static/app_autocomplete.js")
-    ui = read("src/static/app_ui.js")
+    meta = read("src/static/app_meta.js")
     functional = read("tests/frontend/specs/functional.spec.js")
     assert 'if (!Array.isArray(meta?.tables?.items)) return { ok: true, pending: true };' in autocomplete
     assert 'Array.isArray(meta?.tables?.items)' in autocomplete
-    assert 'ns.meta.activateHost(state.selectedHostId)' in ui
-    assert 'ns.meta.maybeRefreshOnLoad()' in ui
+    assert "      activateHost(hostId);\n      maybeRefreshOnLoad();" in meta
     assert 'chdash_ui.weather_daily_summary' in functional
     assert ".editorDiagnostic--unknown_table" in functional
     assert 'await page.reload();' in functional

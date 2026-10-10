@@ -29,7 +29,7 @@
   // writes neither), sort, kind, errors, user, database, table
   // ("database.table", as query_log names it), hide=0 and, on a shape's page,
   // runs=<order>; the list's parameters stay on the shape's address, so the
-  // way back is the same list. Query text is drawn by ui.sqlBlock (the highlighter
+  // way back is the same list. Query text is drawn by sqlBlock (the highlighter
   // escapes), never as markup.
 
   const ns = window.ChDash;
@@ -734,7 +734,7 @@
         { label: "Errors", value: format.count(t.errors || 0), sub: Number(t.calls) > 0 ? `${format.percent(Number(t.errors || 0) / Number(t.calls))} of the queries` : "", tone: tone === "neutral" ? "" : tone, attrs: { "data-tile": "errors", "data-error-rate": tone } },
         { label: "Read", value: format.bytes(t.read_bytes || 0), sub: "by these queries", attrs: { "data-tile": "read" } },
       ];
-      return h("div", { class: "statTiles statTiles--boxed systemQueries__tiles", role: "group", aria: { label: "Window" } }, tiles.map((item) => ns.ui.statTile(item)));
+      return h("div", { class: "statTiles statTiles--boxed systemQueries__tiles", role: "group", aria: { label: "Window" } }, tiles.map((item) => ns.stat.tile(item)));
     }
 
     // Column priority: "low" columns go under 1280 px, "mid" ones under
@@ -813,7 +813,7 @@
       const text = item.has_text ? oneLine(item.normalized || item.example) : "";
       const parts = [];
       if (text) {
-        const block = ns.ui.sqlBlock({ sql: text, wrap: true, label: "Normalized query", className: "systemQueries__sql" });
+        const block = ns.sqlBlock({ sql: text, wrap: true, label: "Normalized query", className: "systemQueries__sql" });
         block.title = item.normalized || text;
         parts.push(block);
       } else {
@@ -891,7 +891,7 @@
       // Line numbers, like the Query editor's (so no wrapping: a wrapped line would shift them). A
       // long query scrolls inside its block; Raw shows the normalized text as query_log has it.
       const shown = state.rawSql ? text : formatted || text;
-      const block = ns.ui.sqlBlock({ sql: shown, gutter: true, copy: true, maxLines: 14, expand: false, label: state.rawSql ? "Normalized query (raw)" : "Normalized query", className: "systemQuery__sql" });
+      const block = ns.sqlBlock({ sql: shown, gutter: true, copy: true, maxLines: 14, expand: false, label: state.rawSql ? "Normalized query (raw)" : "Normalized query", className: "systemQuery__sql" });
       const isFormatted = !state.rawSql && !!formatted;
       block.dataset.formatted = isFormatted ? "1" : "0";
       return h("div", { class: "systemQuery__sqlWrap", id: "systemQuerySql", dataset: { formatted: isFormatted ? "1" : "0", raw: state.rawSql ? "1" : "0" } }, block);
@@ -978,7 +978,7 @@
         { label: "Memory", value: format.bytes(s.max_memory || 0), sub: "largest run", attrs: { "data-tile": "memory" } },
         { label: "CPU", value: cpuText(s.cpu_seconds), sub: "CPU time of every run", attrs: { "data-tile": "cpu" } },
       ];
-      return h("div", { class: "statTiles statTiles--boxed systemQuery__tiles", role: "group", aria: { label: "This shape in the window" } }, tiles.map((item) => ns.ui.statTile(item)));
+      return h("div", { class: "statTiles statTiles--boxed systemQuery__tiles", role: "group", aria: { label: "This shape in the window" } }, tiles.map((item) => ns.stat.tile(item)));
     }
 
     const CHARTS = [
@@ -996,7 +996,7 @@
       destroyCharts();
       const grid = h("div", { class: "systemQuery__charts", id: "systemQueryCharts" });
       for (const spec of CHARTS) {
-        const card = h.html(ns.ui.chartCardHtml({
+        const card = h.html(ns.chartUi.cardHtml({
           title: spec.title,
           className: "systemChart",
           id: `systemQueryChart-${spec.id}`,

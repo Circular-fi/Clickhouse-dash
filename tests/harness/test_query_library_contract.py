@@ -221,6 +221,6 @@ def test_saved_is_a_tree_with_row_menus_and_save_is_in_the_foot() -> None:
     assert 'className: wide ? "qlDialog qlDialog--wide" : "qlDialog",' in front and ".uiDialog.qlDialog--wide {" in css
     # A folder's menu exports it as the JSON body of the import route.
     assert 'menuItem("Export as JSON", "download"' in front and "function exportFolder(item) {" in front
-    assert "ns.ui.downloadText(name," in front and "host_id: ctl.host," in front
+    assert "ns.copy.download(name," in front and "host_id: ctl.host," in front
     # The Edit window does not replace the SQL with the editor's: that is Ctrl+S on the opened query.
     assert "replace_sql" not in front and "Replace the SQL" not in front and ".qlCheck" not in css

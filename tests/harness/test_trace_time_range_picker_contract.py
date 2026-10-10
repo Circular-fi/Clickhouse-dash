@@ -14,7 +14,7 @@ def test_time_range_picker_is_loaded_before_the_traces_page():
     # Common modules (the picker included) load before the view's modules.
     common = manifest["common"] + page["modules"][:4]
     assert common[:12] == ["app_format.js", "app_palette.js", "app_dom.js", "app_router.js", "app_ui_layers.js", "app_ui_popover.js", "app_ui_panel.js", "app_ui_tabs.js", "app_ui_segmented.js", "app_ui_menu.js", "app_state.js", "app_util.js"]
-    assert {"app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_ui.js", "app_timerange.js"} <= set(common)
+    assert {"app_dom.js", "app_state.js", "app_util.js", "app_api.js", "app_header.js", "app_timerange.js"} <= set(common)
     assert "app_timerange.js" not in page["modules"][4:]
     assert page["modules"][4:7] == ["app_chart_core.js", "app_facet_panel.js", "app_traces.js"]
     assert "await ns.loader.startModules();" in read("src/static/app_obs_page.js")

@@ -24,7 +24,7 @@ MODULES = [
     "app_run.js", "app_results.js", "app_query_chart.js", "app_query_library.js", "app_analysis.js",
     "app_analysis_data.js", "app_pipeline_viewer.js", "app_trace_viewer.js",
     # Shared
-    "app_ui.js", "app_util.js",
+    "app_header.js", "app_query_ui.js", "app_util.js",
 ]
 
 # (module, finding) pairs that stay, with why.
@@ -46,7 +46,7 @@ ALLOWED = {
     # SQL formatting, not a value format.
     ("app_run.js", "formatter formatEditorSql"),
     # The host ping label wraps ns.format.duration ("<1 ms" below a millisecond).
-    ("app_ui.js", "formatter formatPingMsLabel"),
+    ("app_header.js", "formatter formatPingMsLabel"),
     # History day headings ("Today", "Yesterday", "Mon, Sep 12"), en-US fixed.
     ("app_query_library.js", "locale toLocaleDateString"),
 }
@@ -115,13 +115,13 @@ def test_migrated_modules_read_the_shared_foundations() -> None:
     assert "return ns.palette.categorical(slot);" in chart
     run = (STATIC / "app_run.js").read_text(encoding="utf-8")
     # The rail trends are the shared SVG sparkline (--sparkline-color, a token).
-    assert "ns.ui.sparkline.draw(el, " in run and "palette.resolve" not in run
+    assert "ns.chartUi.sparkline.draw(el, " in run and "palette.resolve" not in run
     # Explorer instants: the server's DateTime text in the browser's zone, the
     # server value in the tooltip (decision 48).
-    ui = (STATIC / "app_ui.js").read_text(encoding="utf-8")
+    ui = (STATIC / "app_header.js").read_text(encoding="utf-8") + (STATIC / "app_query_ui.js").read_text(encoding="utf-8")
     assert "return ns.format.serverTime(value, { serverTz: serverTimeZone(hostId), precision });" in ui
     for name in ["app_explorer.js", "app_explorer_detail.js", "app_system_activity.js"]:
-        assert "ui.serverTime(" in (STATIC / name).read_text(encoding="utf-8"), name
+        assert "header.serverTime(" in (STATIC / name).read_text(encoding="utf-8"), name
     hosts = (ROOT / "src" / "api_hosts.cpp").read_text(encoding="utf-8")
     assert 'w.Key("clickhouse_timezone");' in hosts
     assert '"SELECT version(), timezone()"' in (ROOT / "src" / "health_runner.cpp").read_text(encoding="utf-8")
@@ -192,6 +192,5 @@ def test_object_kinds_take_the_kind_tokens_in_the_tree_and_the_lineage_icons() -
         assert rule in css, rule
     # The old .explorerMiniHealth badges matched nothing and are gone.
     assert ".explorerMiniHealth" not in css
-    assert ".jsonPretty .jStr { color: var(--json-string); }" in css
-    assert ".jsonPretty .jNum { color: var(--json-number); }" in css
-    assert ".jsonPretty .jBool { color: var(--json-bool); }" in css
+    # The JSON colours are the key / value tree's (kv.css); the dead .jsonPretty block is gone.
+    assert ".jsonPretty" not in css

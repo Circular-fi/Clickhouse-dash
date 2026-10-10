@@ -45,7 +45,7 @@ def test_inline_multi_span_inspectors_and_compact_error_badges():
     assert 'traceJaegerGroup--summary' in js
     assert 'renderAttributePreview' in js
     assert 'traceTag--error' in js
-    assert 'ns.ui.copyButtonHtml(' in js
+    assert 'ns.copy.buttonHtml(' in js
     assert '.traceSpanRow__serviceDot' in css
     assert 'width: 3px;' in css
     assert '.traceJaegerGroup--summary' in css

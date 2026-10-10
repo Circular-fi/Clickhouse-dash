@@ -5,7 +5,7 @@
   if (!ns) return;
   const { byId, $, $$ } = ns.dom;
 
-  const { dom, state, api, util, ui, storage, h } = ns;
+  const { dom, state, api, util, header, storage, h } = ns;
   const graph = ns.explorerGraph;
   const treemap = ns.explorerTreemap;
 
@@ -827,7 +827,7 @@
     dom.navExplorerButton?.classList.toggle("is-active", explorer);
     dom.navQueryButton?.toggleAttribute("aria-current", !explorer);
     dom.navExplorerButton?.toggleAttribute("aria-current", explorer);
-    ui?.setPageSelectorValue?.(explorer ? "explorer" : "query");
+    header.setPageSelectorValue(explorer ? "explorer" : "query");
 
     const route = explorer ? (parseExplorerRoute().workspace === "explorer" ? window.location.pathname : appRoute(`/explorer/${CATALOG_ROUTE_SEGMENT}`)) : appRoute("/query");
     if (window.location.pathname !== route) router.write(history, null, { href: route, view: explorer ? "explorer" : "query" });
@@ -1913,7 +1913,7 @@
         if (ctx.columnIndex === 6) { setBar(td, value, maxima[6], format.percent(value / 100)); return true; }
         if (ctx.columnIndex === 8) {
           // Server DateTime text, shown in the browser's zone (decision 48).
-          const time = ui.serverTime(value);
+          const time = header.serverTime(value);
           td.textContent = time.text;
           td.title = time.title || String(value);
           return true;
@@ -2613,20 +2613,6 @@
     }
   }
 
-  // The highlighter colours function names from the host's function list
-  // (ns.meta). A returning visit restores the host from storage without
-  // selecting it again, so nothing loads that list on the Explorer: ask for
-  // it here, the cached copy at once and the server's when it is missing.
-  // The card's expressions repaint when it arrives (chdash:meta-changed).
-  function ensureHighlighterMeta() {
-    const hostId = String(state.selectedHostId || "");
-    if (!hostId || !ns.meta) return;
-    ns.meta.hydrateFromStorage?.(hostId);
-    const host = state.meta?.hosts?.[hostId];
-    const missing = ["functions", "keywords"].filter((type) => !host?.[type]);
-    if (missing.length) void ns.meta.fetchAndStore?.(hostId, missing);
-  }
-
   function resetForHost() {
     // Everything of the old host stops now: its reads abort, and the loads that were waiting on them are forgotten, so
     // the new host starts its own (ARCH-F-097, ARCH-F-140).
@@ -2646,7 +2632,7 @@
     model.detailCache.clear();
     model.databaseDisks.clear();
     model.expandedDatabases.clear();
-    ensureHighlighterMeta();
+    ns.meta.ensureHighlighterData();
     model.selectedKey = null;
     model.selectedDatabase = null;
     model.detailSerial += 1;
@@ -2748,7 +2734,7 @@
     model.includeNonStoring = model.filters.views !== false || model.filters.mv !== false;
     syncVisibilityOptionLocks({ propagate: true });
     applyExplorerFeatures();
-    ensureHighlighterMeta();
+    ns.meta.ensureHighlighterData();
     setSection(ns.loader?.page?.name === "functions" ? "functions" : "tables");
     void applyRouteFromLocation();
   }

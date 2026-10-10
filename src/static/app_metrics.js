@@ -9,7 +9,7 @@
   const ns = window.ChDash;
   if (!ns) return;
   const { byId, $, $$ } = ns.dom;
-  const { dom, state, api, ui, util, h } = ns;
+  const { dom, state, api, util, h } = ns;
 
   const MAX_RANGE_MINUTES = 90 * 24 * 60;
   const PLOT_HEIGHT = 280;

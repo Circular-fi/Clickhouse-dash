@@ -1,525 +1,27 @@
 (() => {
   "use strict";
-
+  // ns.queryUi: the Query page's own controls (app_ui.js held them with the shell's header, now app_header.js): the
+  // editor with its highlighter, autocomplete, draft and height, the Run and settings menus, the Run options, the run
+  // stats summary of a phone, and the query library dialog with the page's ?sql= / ?saved= address.
+  //
+  //   queryUi.init({ onRun })                 binds the page's controls (after header.init()); Ctrl+Enter calls onRun
+  //   queryUi.closeRunMenu() / applyRunOptionsUi()   the Run split menu, the checked state of the Run options
+  //   queryUi.setEditorError(loc) / clearEditorError()   the error mark of the editor
+  //   queryUi.syncQueryUrl(sql)               the address follows the run (a saved query: ?saved=, else ?sql=)
+  //   queryUi.openQueryLibrary(tab) / closeQueryLibrary()   the library dialog (its module loads on first use)
   const ns = window.ChDash;
   if (!ns) return;
   const { byId, $, $$ } = ns.dom;
 
-  const { dom, state, storage, util, api } = ns;
+  const { dom, state, storage, util } = ns;
 
-  (() => {
-    const mode = storage && typeof storage.getSavedThemeMode === "function" ? storage.getSavedThemeMode() : null;
-    if (mode === "dark" || mode === "light") dom.root.dataset.theme = mode;
-    else if (mode === "system") delete dom.root.dataset.theme;
-  })();
-
-  function safelyParseJson(text) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return null;
-    }
-  }
-
-  // /api/version: the version badge and the feature flags (ns.features; a
-  // flag the server does not send keeps the defaults table's value).
-  async function loadMeta() {
-    // The features are loaded once /api/version has answered or failed, whatever the page shows of it: a page without
-    // the version badge must not leave ns.features.ready waiting.
-    const badge = dom.versionBadge;
-    let data;
-    try {
-      data = await api.getVersion();
-    } catch (error) {
-      if (badge) badge.textContent = error?.code === "network_error" ? "meta: offline" : "meta: error";
-      markFeaturesLoaded();
-      return;
-    }
-    try {
-      ns.features.set(data && data.features);
-      markFeaturesLoaded();
-      applyProductFeatures();
-      if (!badge) return;
-      const verObj = data && data.version ? data.version : null;
-      const ver = verObj && typeof verObj === "object" ? String(verObj.semver || "dev") : String(data.version || "dev");
-      const sha = verObj && typeof verObj === "object" ? String(verObj.git_sha || "") : String(data.git_sha || "");
-      const build = verObj && typeof verObj === "object" ? String(verObj.build_time || "") : String(data.build_time || "");
-      const text = sha && sha !== "unknown" ? `${ver} (${sha})` : ver;
-      badge.textContent = text;
-      if (build) badge.title = `Backend version\nBuild: ${build}`;
-    } catch {
-      if (badge) badge.textContent = "meta: offline";
-    }
-    markFeaturesLoaded();
-  }
-
-  // The library waits for /api/version to pick its storage; without an answer
-  // it stays in the browser.
-  function markFeaturesLoaded() {
-    ns.features.markLoaded();
-  }
-
-  // A host's ping in ns.format's duration ("12 ms"), whole milliseconds.
-  function formatPingMsLabel(pingMs) {
-    const ms = Number(pingMs);
-    if (pingMs == null || !Number.isFinite(ms)) return ns.format.EMPTY;
-    const rounded = Math.round(ms);
-    return rounded < 1 ? "<1 ms" : ns.format.duration.fromMs(rounded);
-  }
-
-  // timeZone() of a host (default: the selected one), from the health
-  // snapshot (api/hosts): the zone of the DateTime text its system tables
-  // print, for ns.format.serverTime. "" until the first version check.
-  function serverTimeZone(hostId = state.selectedHostId) {
-    const hosts = state.hostsSnapshot && Array.isArray(state.hostsSnapshot.hosts) ? state.hostsSnapshot.hosts : [];
-    const host = hostId ? hosts.find((h) => h && String(h.id) === String(hostId)) : null;
-    return host && host.clickhouse_timezone ? String(host.clickhouse_timezone) : "";
-  }
-
-  // A DateTime text of a host's system tables, for display: browser-local
-  // text, the tooltip with the server's zone, ISO for copies.
-  function serverTime(value, { hostId, precision } = {}) {
-    return ns.format.serverTime(value, { serverTz: serverTimeZone(hostId), precision });
-  }
-
-  function pickDefaultHostId(snapshot) {
-    const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
-    const ids = hosts.map((h) => String(h.id));
-    const stored = storage.getStoredHostId();
-    if (stored && ids.includes(String(stored))) return String(stored);
-    return ids.length ? ids[0] : null;
-  }
-
-  function setSelectedHostId(hostId) {
-    state.selectedHostId = hostId ? String(hostId) : null;
-    if (state.selectedHostId) storage.setStoredHostId(state.selectedHostId);
-    applyHostPickerUi();
-
-    if (ns.meta && state.selectedHostId) {
-      if (typeof ns.meta.activateHost === "function") ns.meta.activateHost(state.selectedHostId);
-      else if (typeof ns.meta.prepareHost === "function") ns.meta.prepareHost(state.selectedHostId);
-      // Host selection is the authoritative point where editor diagnostics can
-      // become meaningful. Hydrate the cached catalog immediately and refresh
-      // stale catalog types in the background instead of briefly treating an
-      // empty metadata object as proof that every reference is unknown.
-      if (typeof ns.meta.maybeRefreshOnLoad === "function") ns.meta.maybeRefreshOnLoad();
-    }
-    if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") {
-      state.highlightCtrl.refresh();
-    }
-    if (state.editorSizeCtrl && typeof state.editorSizeCtrl.apply === "function") {
-      state.editorSizeCtrl.apply(state.selectedHostId);
-    }
-    const run = ns.run;
-    if (run && typeof run.updateActionButtons === "function") run.updateActionButtons();
-    try {
-      window.dispatchEvent(new CustomEvent("chdash:host-changed", { detail: { hostId: state.selectedHostId } }));
-    } catch (_) {}
-  }
-
-  // The hosts stream answers every second with what is mostly the same: writing a text that is
-  // already there still replaces its text node, which restyles and lays the page out again, once a
-  // second on every page. Only a changed text is written.
-  function setText(el, text) {
-    if (el && el.textContent !== text) el.textContent = text;
-  }
-
-  function applyHostPickerUi() {
-    const snap = state.hostsSnapshot;
-    const apiOnline = state.apiOnline !== false;
-
-    const hosts = snap && Array.isArray(snap.hosts) ? snap.hosts : [];
-    const selected = state.selectedHostId ? hosts.find((h) => h && String(h.id) === String(state.selectedHostId)) : null;
-
-    const healthy = !!(selected && selected.healthy);
-    const pingMs = selected && selected.ping_ms != null ? Number(selected.ping_ms) : null;
-    const label = selected ? String(selected.label || selected.id) : (state.selectedHostId || "Host");
-    const hostVersion = selected && selected.clickhouse_version != null ? String(selected.clickhouse_version) : "";
-
-    setText(dom.hostPickerText, apiOnline ? label : `${label} (API offline)`);
-    setText(dom.hostPickerVersion, hostVersion || "");
-
-    if (dom.hostPickerDot) {
-      const good = apiOnline && healthy;
-      dom.hostPickerDot.classList.toggle("hostDot--good", good);
-      dom.hostPickerDot.classList.toggle("hostDot--bad", !good);
-    }
-
-    if (dom.hostPickerPing) {
-      if (!apiOnline) {
-        setText(dom.hostPickerPing, ns.format.EMPTY);
-      } else if (healthy && pingMs != null && Number.isFinite(pingMs)) {
-        setText(dom.hostPickerPing, formatPingMsLabel(pingMs));
-      } else {
-        setText(dom.hostPickerPing, healthy ? ns.format.EMPTY : "down");
-      }
-    }
-
-    if (dom.hostPickerButton) {
-      // A run keeps the host it started on: every statement of a batch, its
-      // history entry and its diagnostics go to that host (app_run.js).
-      const locked = !!state.isRunning;
-      dom.hostPickerButton.disabled = !apiOnline || locked;
-      const base = hostVersion ? `${label}\nClickHouse ${hostVersion}` : label;
-      const title = locked ? `${base}\nThe host is locked while the query runs.` : base;
-      if (dom.hostPickerButton.title !== title) dom.hostPickerButton.title = title;
-      if (!apiOnline || locked) closeHostMenu();
-    }
-  }
-
-
-  // The header and Query menus are ns.menu menus (app_ui_menu.js): open /
+  // The Run and settings menus are ns.menu menus (app_ui_menu.js): open /
   // close motion, keys, focus return and the one outside-click / Escape
   // layer. Bound in init(); these keep the names other modules call.
-  const menus = { host: null, page: null, theme: null, runSettings: null, run: null, copy: null };
+  const menus = { runSettings: null, run: null };
 
-  function closeHostMenu() {
-    menus.host?.close({ immediate: true, focus: false });
-  }
-
-  function hostPickerSignature(snapshot) {
-    const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
-    return JSON.stringify({
-      selected: state.selectedHostId || "",
-      apiOnline: state.apiOnline !== false,
-      hosts: hosts
-        .filter((h) => h && h.id)
-        .map((h) => ({
-          id: String(h.id),
-          label: String(h.label || h.id),
-          healthy: !!h.healthy,
-          ping_ms: h.ping_ms == null ? null : Number(h.ping_ms),
-          clickhouse_version: h.clickhouse_version == null ? "" : String(h.clickhouse_version),
-        })),
-    });
-  }
-
-  function renderHostPicker(snapshot) {
-    if (!dom.hostPickerMenu) return;
-    const hosts = snapshot && Array.isArray(snapshot.hosts) ? snapshot.hosts : [];
-
-    if (!state.selectedHostId) {
-      setSelectedHostId(pickDefaultHostId(snapshot));
-    } else {
-      const ids = hosts.map((x) => String(x.id));
-      if (!ids.includes(String(state.selectedHostId))) setSelectedHostId(ids.length ? ids[0] : null);
-    }
-
-    const signature = hostPickerSignature(snapshot);
-    if (state.hostPickerRenderSignature === signature) {
-      applyHostPickerUi();
-      return;
-    }
-    state.hostPickerRenderSignature = signature;
-
-    const staticPicker = hosts.length <= 1;
-
-    if (dom.hostPicker) dom.hostPicker.classList.toggle("is-static", staticPicker);
-
-    if (dom.hostPickerButton) {
-      dom.hostPickerButton.disabled = !!state.isRunning;
-      dom.hostPickerButton.setAttribute("aria-disabled", String(staticPicker));
-      if (staticPicker) closeHostMenu();
-    }
-
-    dom.hostPickerMenu.replaceChildren();
-
-    for (const h of hosts) {
-      if (!h || !h.id) continue;
-      const id = String(h.id);
-      const isSelected = state.selectedHostId && id === String(state.selectedHostId);
-      if (isSelected) continue;
-
-      const label = String(h.label || h.id);
-      const healthy = !!h.healthy;
-      const pingMs = h.ping_ms != null ? Number(h.ping_ms) : null;
-
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "pickerOption";
-      btn.setAttribute("role", "option");
-      btn.setAttribute("data-id", id);
-      btn.setAttribute("aria-selected", String(!!isSelected));
-
-      const dot = document.createElement("span");
-      dot.className = `hostDot ${healthy ? "hostDot--good" : "hostDot--bad"}`;
-      dot.setAttribute("aria-hidden", "true");
-
-      const text = document.createElement("span");
-      text.className = "pickerOption__label";
-      text.textContent = label;
-
-      const version = document.createElement("span");
-      version.className = "pickerOption__version";
-      version.textContent = h.clickhouse_version != null ? String(h.clickhouse_version) : "";
-
-      const meta = document.createElement("span");
-      meta.className = "pickerOption__meta";
-      meta.textContent = healthy && pingMs != null && Number.isFinite(pingMs) ? formatPingMsLabel(pingMs) : (healthy ? ns.format.EMPTY : "down");
-
-      btn.appendChild(dot);
-      btn.appendChild(text);
-      btn.appendChild(version);
-      btn.appendChild(meta);
-
-      btn.addEventListener("click", () => {
-        if (!isSelected && !state.isRunning) setSelectedHostId(id);
-        menus.host?.close({ focus: true });
-        renderHostPicker(state.hostsSnapshot || snapshot);
-      });
-
-      dom.hostPickerMenu.appendChild(btn);
-    }
-
-    applyHostPickerUi();
-  }
-
-  function setApiOnline(online) {
-    const next = online !== false;
-    if (state.apiOnline === next) return;
-    state.apiOnline = next;
-    applyHostPickerUi();
-    const run = ns.run;
-    if (run && typeof run.updateActionButtons === "function") run.updateActionButtons();
-  }
-
-  function startHostsSse() {
-    if (!dom.hostPicker) return;
-
-    const pollMs = 5000;
-    let es = null;
-    let pollTimer = 0;
-    let reconnectTimer = 0;
-    let hasSnapshot = false;
-    let booting = false;
-
-    const useSnapshot = (snap) => {
-      if (!snap || !Array.isArray(snap.hosts)) return;
-      hasSnapshot = true;
-      state.hostsSnapshot = snap;
-      renderHostPicker(snap);
-      setApiOnline(true);
-      const run = ns.run;
-      if (run && typeof run.updateActionButtons === "function") run.updateActionButtons();
-    };
-
-    const closeStream = () => {
-      if (!es) return;
-      try {
-        es.close();
-      } catch {
-        return;
-      } finally {
-        es = null;
-      }
-    };
-
-    const stopPoll = () => {
-      if (!pollTimer) return;
-      clearTimeout(pollTimer);
-      pollTimer = 0;
-    };
-
-    const stopReconnect = () => {
-      if (!reconnectTimer) return;
-      clearTimeout(reconnectTimer);
-      reconnectTimer = 0;
-    };
-
-    const fetchHostsOnce = async () => {
-      try {
-        useSnapshot(await api.getHosts());
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
-    const schedulePoll = () => {
-      if (document.hidden || pollTimer) return;
-      pollTimer = setTimeout(async () => {
-        pollTimer = 0;
-        const ok = await fetchHostsOnce();
-        if (!ok) setApiOnline(false);
-        if (ok) ensureStream();
-        if (!es) schedulePoll();
-      }, pollMs);
-    };
-
-    const scheduleReconnect = () => {
-      if (document.hidden || reconnectTimer || !hasSnapshot || es) return;
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = 0;
-        ensureStream();
-      }, pollMs);
-    };
-
-    const ensureStream = () => {
-      if (document.hidden || es || !hasSnapshot) return;
-      stopReconnect();
-
-      let next = null;
-      try {
-        next = new EventSource(api.resolveUrl("api/hosts/stream"));
-      } catch {
-        schedulePoll();
-        scheduleReconnect();
-        return;
-      }
-
-      es = next;
-
-      es.addEventListener("hosts", (ev) => {
-        const data = safelyParseJson(ev.data);
-        if (!data) return;
-        useSnapshot(data);
-      });
-
-      es.onopen = () => {
-        setApiOnline(true);
-        stopPoll();
-      };
-
-      es.onerror = () => {
-        closeStream();
-        schedulePoll();
-        scheduleReconnect();
-      };
-    };
-
-    const boot = async () => {
-      if (document.hidden || booting) return;
-      booting = true;
-      try {
-        const ok = await fetchHostsOnce();
-        if (!ok) {
-          setApiOnline(false);
-          schedulePoll();
-          return;
-        }
-        ensureStream();
-      } finally {
-        booting = false;
-      }
-    };
-
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        closeStream();
-        stopPoll();
-        stopReconnect();
-        return;
-      }
-      boot();
-    });
-
-    boot();
-  }
-
-
-  function getResolvedTheme(mode) {
-    if (mode === "dark" || mode === "light") return mode;
-    try {
-      const mql = window.matchMedia("(prefers-color-scheme: dark)");
-      return mql && mql.matches ? "dark" : "light";
-    } catch {
-      return "dark";
-    }
-  }
-
-  // The page switcher (Query, Explorer, Observability, System, MCP) ships visible
-  // in every page shell. Only a server with neither Explorer, System, any
-  // Observability view (Traces, Logs, Metrics) nor MCP hides it; the head script of
-  // each page applies the last known availability (chdash-page-select-hidden)
-  // before first paint.
-  function applyPageNavigation(nav) {
-    const explorerEnabled = nav.explorer !== false;
-    const systemEnabled = nav.system !== false;
-    const observabilityEnabled = nav.traces === true || nav.logs === true || nav.metrics === true;
-    const mcpEnabled = nav.mcp === true;
-    const hidden = !explorerEnabled && !systemEnabled && !observabilityEnabled && !mcpEnabled;
-    dom.root?.classList.toggle("chdash-page-select-hidden", hidden);
-    if (dom.pageSelect) dom.pageSelect.hidden = hidden;
-    if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
-    if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;
-    if (dom.navSystemButton) dom.navSystemButton.hidden = !systemEnabled;
-    if (dom.navMcpButton) dom.navMcpButton.hidden = !mcpEnabled;
-  }
-
-  function applyProductFeatures() {
-    const features = ns.features;
-    const f = features.get("explorer");
-    const explorerEnabled = f.enabled;
-    const tracesEnabled = features.get("traces.enabled");
-    const logsEnabled = features.get("logs.enabled");
-    const metricsEnabled = features.get("metrics.enabled");
-    const systemEnabled = features.get("system.enabled");
-    const mcpEnabled = features.get("mcp.enabled");
-    applyPageNavigation({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled, mcp: mcpEnabled });
-    storage?.savePageNav?.({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled, mcp: mcpEnabled });
-    if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
-      ns.router.replace("", { path: "/query", view: "query" });
-      if (ns.explorer && typeof ns.explorer.setWorkspace === "function") ns.explorer.setWorkspace("query", { history: "none" });
-    }
-    // A turned-off view falls back to another (app_obs_page.js); with no
-    // view left the page itself is gone.
-    if (!tracesEnabled && !logsEnabled && !metricsEnabled && document.body?.dataset?.page === "observability") {
-      window.location.replace(api.resolveUrl("query"));
-      return;
-    }
-    // A trace is Traces': the page is gone with it; Observability's first
-    // remaining view, else Query.
-    if (!tracesEnabled && document.body?.dataset?.page === "trace") {
-      window.location.replace(api.resolveUrl(logsEnabled ? "observability/logs" : metricsEnabled ? "observability/metrics" : "query"));
-      return;
-    }
-    // The System page turned off (system.enabled = false): its routes are gone,
-    // a query shape's page (shape.html) with them.
-    if (!systemEnabled && ["system", "shape"].includes(document.body?.dataset?.page)) {
-      window.location.replace(api.resolveUrl("query"));
-      return;
-    }
-  }
-
-  function setPageSelectorValue(value) {
-    const labels = { query: "Query", explorer: "Explorer", observability: "Observability", system: "System", mcp: "MCP" };
-    const page = Object.prototype.hasOwnProperty.call(labels, value) ? value : "query";
-    if (dom.pageSelectButton) dom.pageSelectButton.textContent = labels[page];
-    if (dom.pageSelectMenu) {
-      for (const b of $$(".themeSelect__option[data-value]", dom.pageSelectMenu)) {
-        b.setAttribute("aria-selected", String(b.getAttribute("data-value") === page));
-      }
-    }
-  }
-
-  function closePageMenu({ immediate = false } = {}) { menus.page?.close({ immediate }); }
   function closeRunSettings({ immediate = false } = {}) { menus.runSettings?.close({ immediate }); }
 
-  function applyTheme(mode) {
-    const resolved = getResolvedTheme(mode);
-    if (mode === "system") delete dom.root.dataset.theme;
-    else dom.root.dataset.theme = resolved;
-    // Drives the theme button icon from CSS (css/20-features/shell.css), like the head
-    // script does before the first paint.
-    dom.root.dataset.themeMode = mode;
-
-    if (dom.themeSelectButton) dom.themeSelectButton.setAttribute("aria-label", `Theme: ${mode}`);
-
-    if (dom.themeSelectMenu) {
-      const btns = $$(".themeSelect__option[data-value]", dom.themeSelectMenu);
-      for (const b of btns) {
-        const m = b.getAttribute("data-value");
-        b.setAttribute("aria-selected", String(m === mode));
-      }
-    }
-
-    // Canvas pixels are not CSS-reactive. Keep Explorer's graph in the same
-    // visual transaction as the DOM theme switch instead of waiting for its
-    // next animation/activity frame.
-    ns.explorerGraph?.redrawThemeNow?.();
-  }
-
-  function closeThemeMenu({ immediate = false } = {}) { menus.theme?.close({ immediate }); }
   function closeRunMenu({ immediate = false } = {}) { menus.run?.close({ immediate }); }
 
   function applyRunOptionsUi() {
@@ -579,19 +81,6 @@
 
   function writeQueryLibraryPrefs(patch) {
     queryLibraryPrefs().set({ ...readQueryLibraryPrefs(), ...patch });
-  }
-
-  function isPhoneLayout() {
-    try {
-      return window.matchMedia("(max-width: 760px)").matches;
-    } catch {
-      return false;
-    }
-  }
-
-  function modifierKeyLabel() {
-    const platform = String(navigator.userAgentData?.platform || navigator.platform || "");
-    return /mac|iphone|ipad/i.test(platform) ? "\u2318" : "Ctrl";
   }
 
   function loadQueryLibrary() {
@@ -743,7 +232,7 @@
   }
 
   function initQueryLibrary() {
-    const mod = modifierKeyLabel();
+    const mod = util.modifierKeyLabel();
     if (mod !== "Ctrl") {
       for (const kbd of $$(".queryKbd--mod")) kbd.textContent = mod;
     }
@@ -762,7 +251,7 @@
         // Never the browser's "Save page". Over the library the save prompt
         // stacks on it; over another dialog (a prompt, profiling) it waits.
         ev.preventDefault();
-        const top = ns.dialog?.host?.();
+        const top = ns.layers.host();
         if (top && top !== document.body && top !== dom.queryLibraryMenu) return;
         saveCurrentQuery();
       }
@@ -773,7 +262,7 @@
     });
   }
 
-  // The editor's copy button: the shared ui.copyButton (icon, tooltip and
+  // The editor's copy button: the shared copy.button (icon, tooltip and
   // the one "Copied" feedback).
   function initEditorCopyButton() {
     if (!dom.editorCopyButton || !dom.queryTextArea) return;
@@ -782,7 +271,7 @@
       dom.editorCopyButton.disabled = !String(dom.queryTextArea.value || "").trim();
     };
 
-    ns.ui.copyButton(dom.editorCopyButton, () => {
+    ns.copy.button(dom.editorCopyButton, () => {
       const text = String(dom.queryTextArea.value || "");
       return text.trim() ? text : "";
     }, { label: "Copy query" });
@@ -790,6 +279,9 @@
     sync();
     dom.queryTextArea.addEventListener("input", sync);
   }
+
+  // Ctrl+Enter runs the query: the page's controller says what runs it (init({ onRun })).
+  let runHandler = null;
 
   function initEditor() {
     if (!dom.queryTextArea) return;
@@ -876,8 +368,7 @@
       if (key !== "Shift") tabReleased = false;
       if ((e.ctrlKey || e.metaKey) && key === "Enter") {
         e.preventDefault();
-        const run = ns.run;
-        if (run && typeof run.handleRun === "function") run.handleRun();
+        if (runHandler) runHandler();
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1241,20 +732,12 @@
     refresh();
   }
 
-  function init() {
+  function init({ onRun } = {}) {
+    runHandler = typeof onRun === "function" ? onRun : null;
     applyRunOptionsUi();
     initRunStatsSummary();
-
-    // Menu entries follow the last known availability until /api/version answers.
-    const cachedPageNav = storage?.loadPageNav?.();
-    if (cachedPageNav) applyPageNavigation(cachedPageNav);
-    loadMeta();
     initEditor();
     initEditorCopyButton();
-
-    if (ns.meta && typeof ns.meta.prepareHost === "function" && state.selectedHostId) {
-      ns.meta.prepareHost(state.selectedHostId);
-    }
 
     const menu = ns.menu;
     menus.run = menu?.split(dom.runButton, dom.runMenuButton, dom.runMenu) || null;
@@ -1264,64 +747,24 @@
     if (dom.runOptExecutionStats) dom.runOptExecutionStats.addEventListener("click", () => toggleRunOption("executionStats"));
     if (dom.runOptFlattenTuple) dom.runOptFlattenTuple.addEventListener("click", () => toggleRunOption("flattenTuple"));
 
-    menus.host = menu?.bind(dom.hostPickerButton, dom.hostPickerMenu, {
-      root: dom.hostPicker,
-      openClass: "",
-      canOpen: () => !dom.hostPicker?.classList.contains("is-static"),
-    }) || null;
-
     initQueryLibrary();
     applyQueryUrl();
 
-    menus.page = menu?.bind(dom.pageSelectButton, dom.pageSelectMenu, { canOpen: () => !dom.pageSelect?.hidden }) || null;
-    // Observability (Traces, Logs, Metrics) is its own page: the other
-    // shells navigate to it, on its first enabled view.
-    dom.navObservabilityButton?.addEventListener("click", () => {
-      if (document.body?.dataset?.page !== "observability") window.location.assign(api.resolveUrl("observability"));
-    });
-    // System is its own page too (system.html, app_system.js).
-    dom.navSystemButton?.addEventListener("click", () => {
-      if (document.body?.dataset?.page !== "system") window.location.assign(api.resolveUrl("system"));
-      else closePageMenu();
-    });
-    // The MCP integration page (mcp.html, app_mcp_page.js) is its own page, listed once the server has MCP on.
-    dom.navMcpButton?.addEventListener("click", () => {
-      if (document.body?.dataset?.page !== "mcp") window.location.assign(api.resolveUrl("mcp-integration"));
-      else closePageMenu();
-    });
     menus.runSettings = menu?.bind(dom.runSettingsButton, dom.runSettingsMenu) || null;
-    menus.theme = menu?.bind(dom.themeSelectButton, dom.themeSelectMenu) || null;
-    if (dom.themeSelectMenu) {
-      const buttons = $$(".themeSelect__option[data-value]", dom.themeSelectMenu);
-      for (const b of buttons) {
-        b.addEventListener("click", () => {
-          const mode = b.getAttribute("data-value");
-          if (mode !== "system" && mode !== "dark" && mode !== "light") return;
-          storage.setSavedThemeMode(mode);
-          applyTheme(mode);
-        });
-      }
-    }
 
+    // The root address is the Query page: it takes the page's own address, so a reload and Back agree with it.
+    if (window.location.pathname === ns.router.url("/")) ns.router.replace(null, { path: "/query", view: "query" });
 
-    const themeMode = storage.getSavedThemeMode();
-    applyTheme(themeMode);
-
-    try {
-      const mql = window.matchMedia("(prefers-color-scheme: dark)");
-      if (mql && mql.addEventListener) {
-        mql.addEventListener("change", () => {
-          if (storage.getSavedThemeMode() === "system") applyTheme("system");
-        });
-      }
-    } catch {
-      // No OS theme change events: System keeps the theme resolved above.
-      // Startup still has to finish (ready class, hosts stream).
-    }
-
-    if (dom.root && dom.root.classList) dom.root.classList.add("is-ready");
-
-    startHostsSse();
+    // The editor's marks and the completion list repaint when the host's keywords, functions or tables arrive.
+    window.addEventListener("chdash:meta-changed", () => {
+      if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") state.highlightCtrl.refresh();
+      if (ns.autocomplete && typeof ns.autocomplete.refresh === "function") ns.autocomplete.refresh();
+    });
+    // The editor follows the host selection: its marks (the host's keywords and functions) and its remembered height.
+    ns.header.onHostSelected((hostId) => {
+      if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") state.highlightCtrl.refresh();
+      if (state.editorSizeCtrl && typeof state.editorSizeCtrl.apply === "function") state.editorSizeCtrl.apply(hostId);
+    });
   }
 
   function setEditorError(loc) {
@@ -1336,12 +779,5 @@
     ctrl.clearError();
   }
 
-  // The component modules (app_ui_copy.js, app_ui_sql.js, ...) load first
-  // and add their builders to ns.ui.
-  ns.ui = Object.assign(ns.ui || {}, {
-    init, setSelectedHostId, setApiOnline, applyHostPickerUi, closeRunMenu, closeHostMenu, closeThemeMenu, closePageMenu, closeRunSettings, setPageSelectorValue,
-    applyProductFeatures, applyRunOptionsUi, setEditorError, clearEditorError,
-    loadQueryLibrary, syncQueryUrl, openQueryLibrary, closeQueryLibrary, isQueryLibraryOpen, isPhoneLayout, modifierKeyLabel,
-    serverTimeZone, serverTime,
-  });
+  ns.queryUi = Object.freeze({ init, closeRunMenu, applyRunOptionsUi, setEditorError, clearEditorError, syncQueryUrl, openQueryLibrary, closeQueryLibrary });
 })();

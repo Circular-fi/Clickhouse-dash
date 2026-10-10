@@ -10,7 +10,7 @@
   // and with Search, never on a timer.
   const ns = window.ChDash;
   if (!ns) return;
-  const { state, api, util, ui, h } = ns;
+  const { state, api, util, h } = ns;
   // Formats and colours (docs/ui-foundations.md): a service keeps the colour
   // it has on Traces and Metrics (palette.service), severities are --sev-*.
   const fmt = ns.format;
@@ -111,10 +111,10 @@
     return fmt.timeTitle(Number(row.ts_ms), { precision: "ns", ns: row.ts_ns });
   }
 
-  // The shared copy (ui.copyText): the secure-context check, the textarea
+  // The shared copy (copy.text): the secure-context check, the textarea
   // fallback and the one "Copied" feedback.
   function copyText(text, button) {
-    return ns.ui.copyText(String(text), button);
+    return ns.copy.text(String(text), button);
   }
 
   // --- URL state -------------------------------------------------------------
@@ -812,7 +812,7 @@
       timePicker?.refresh();
       void search({ push: true });
     });
-    // Row keys (ns.rovingRows, index mode: the grid keeps focus): Up / Down,
+    // Row keys (ns.table.rovingRows, index mode: the grid keeps focus): Up / Down,
     // Page Up / Down, Home / End open the record in the side panel.
     const selectedIndex = () => model.rows.findIndex((row) => row.id === model.selectedId);
     const openAt = (index) => {
@@ -1071,9 +1071,9 @@
     }
   }
 
-  // The shared sparkline (ui.sparkline), in the pattern's severity colour.
+  // The shared sparkline (chartUi.sparkline), in the pattern's severity colour.
   function sparklineHtml(values, sev) {
-    return `<span class="logsSparkline" data-sev="${esc(sev)}">${ns.ui.sparkline.html(values, { min: 0 })}</span>`;
+    return `<span class="logsSparkline" data-sev="${esc(sev)}">${ns.chartUi.sparkline.html(values, { min: 0 })}</span>`;
   }
 
   function patternHtml(text) {
@@ -1250,7 +1250,7 @@
     else if (logParam.get()) logParam.close();
   }
 
-  // Record fields: the shared key / value list (ui.kvListHtml) with the
+  // Record fields: the shared key / value list (kv.html) with the
   // include / exclude / only / copy actions (applyFieldAction).
   const FIELD_ACTIONS = ["include", "exclude", "only", "copy"];
 
@@ -1262,7 +1262,7 @@
     const entries = Object.entries(map || {}).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
     return `<section class="logsFieldGroup">
       <h4>${esc(title)} <span>${entries.length}</span></h4>
-      ${ns.ui.kvListHtml(entries.map(([k, v]) => fieldRow(k, `${column}.${k}`, v)), { className: "logsFields", empty: "none" })}
+      ${ns.kv.html(entries.map(([k, v]) => fieldRow(k, `${column}.${k}`, v)), { className: "logsFields", empty: "none" })}
     </section>`;
   }
 
@@ -1293,7 +1293,7 @@
         </section>
         <section class="logsFieldGroup">
           <h4>Record</h4>
-          ${ns.ui.kvListHtml([
+          ${ns.kv.html([
             fieldRow("Timestamp", "Timestamp", fullTimeLabel(row), { actions: false }),
             fieldRow("ServiceName", "ServiceName", row.service),
             fieldRow("SeverityText", "SeverityText", row.severity_text),
@@ -1414,21 +1414,21 @@
 
   function initSidePanel() {
     detailPanel();
-    // Copy JSON / Copy body / Download JSON: the shared split (ui.copySplit),
+    // Copy JSON / Copy body / Download JSON: the shared split (copy.split),
     // like a trace's and a query's.
     const recordJson = () => (model.side.row ? JSON.stringify(model.side.row, null, 2) : "");
     if (byId("logsCopySplit")) {
-      ns.ui.copySplit({
+      ns.copy.split({
         root: byId("logsCopySplit"),
         getText: recordJson,
         items: [
           { el: byId("logsCopyBody"), copy: () => String(model.side.row?.body ?? "") },
-          { el: byId("logsDownloadJson"), onSelect: () => { if (model.side.row) ns.ui.downloadText(`log-${String(model.side.row.ts_ns || model.side.row.ts_ms || "record")}.json`, recordJson()); } },
+          { el: byId("logsDownloadJson"), onSelect: () => { if (model.side.row) ns.copy.download(`log-${String(model.side.row.ts_ns || model.side.row.ts_ms || "record")}.json`, recordJson()); } },
         ],
       });
     }
-    // The record fields' actions (ui.kvBind): include is the field filter.
-    ns.ui.kvBind(byId("logsSideDetails"), {
+    // The record fields' actions (kv.bind): include is the field filter.
+    ns.kv.bind(byId("logsSideDetails"), {
       onAction: (action, { key, text, button }) => {
         applyFieldAction(action === "include" ? "filter" : action, key, text, button);
         return true;

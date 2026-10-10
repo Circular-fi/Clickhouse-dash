@@ -51,7 +51,7 @@ def test_autocomplete_surfaces_types_without_enter_stealing_newline() -> None:
 
 def test_page_and_run_settings_use_connected_dropdowns() -> None:
     html = read("src/static/query.html")
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     dom = read("src/static/app_dom.js")
 
     assert html.index('id="hostPicker"') < html.index('id="pageSelect"') < html.index('id="themeSelect"')

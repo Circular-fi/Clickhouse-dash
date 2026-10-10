@@ -244,7 +244,7 @@ There is no Auto-refresh. The page of a shape hides the filters. A log or a gran
 
 | Column | |
 | --- | --- |
-| # / Query | the rank; the normalized SQL in mono through `ui.sqlBlock` (the highlighter escapes it), two lines, all of it on hover |
+| # / Query | the rank; the normalized SQL in mono through `sqlBlock` (the highlighter escapes it), two lines, all of it on hover |
 | Kind, Calls, Errors | `query_kind` as SQL writes it (SELECT, INSERT: the filter's casing); runs; failed runs as a badge with their share (neutral under 1 %, warning to 5 %, danger from 5 %) |
 | Total time, Avg, p95, Max | durations (`query_duration_ms`); Total time carries an in-cell bar |
 | Read rows, Read, Memory | rows and bytes read, the largest memory use of a run |

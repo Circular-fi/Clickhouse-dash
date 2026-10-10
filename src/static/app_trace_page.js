@@ -23,10 +23,8 @@
     ns.api.humanizeErrors();
     const dom = ns.dom || {};
     const route = (path) => ns.api.resolveUrl(path);
-    ns.ui?.setPageSelectorValue?.("observability");
-    dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
-    ns.ui?.init?.();
+    ns.header.setPageSelectorValue("observability");
+    ns.header.init();
     const scope = ns.lifecycle.enter("traces");
     ns.traces.init();
     ns.traces.onShow?.(scope);

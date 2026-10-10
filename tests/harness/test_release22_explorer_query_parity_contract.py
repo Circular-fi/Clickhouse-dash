@@ -83,7 +83,7 @@ def test_create_statement_reuses_query_editor_gutter_and_sql_highlighter() -> No
     css = css_sources.text()
     ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent", ui.index("function renderDdl"))]
     # One read-only SQL block (app_ui_sql.js) on the editor's highlighter.
-    assert "ns.ui.sqlBlock({ sql: ddl, gutter: true, copy: true" in ddl
+    assert "ns.sqlBlock({ sql: ddl, gutter: true, copy: true" in ddl
     sql = read("src/static/app_ui_sql.js")
     assert "ns.highlight.toHtml(" in sql
     assert '.sqlBlock__gutter' in css

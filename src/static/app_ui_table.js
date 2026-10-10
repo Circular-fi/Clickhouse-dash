@@ -18,7 +18,7 @@
   //               sortHeader(th, ...) for DOM tables, sortHeadHtml(...) plus
   //               bindSort(root, onSort) for string-rendered ones. The glyph
   //               is CSS: up / down when sorted, the idle glyph on hover.
-  //   Keyboard    rovingRows(container, ...) (also ns.rovingRows): Up / Down,
+  //   Keyboard    rovingRows(container, ...): Up / Down,
   //               Page Up / Down, Home / End move between rows, Enter / Space
   //               open one.
   const ns = window.ChDash;
@@ -177,17 +177,17 @@
   }
 
   // The hover copy button of a cell (shown while the row is hovered or the
-  // button focused); the click goes through ui.copyText.
+  // button focused); the click goes through copy.text.
   function copyCellHtml(text, label = "Copy") {
-    const html = ns.ui?.copyButtonHtml
-      ? ns.ui.copyButtonHtml({ label, className: "dataTable__copy", attrs: { "data-copy-text": text } })
+    const html = ns.copy.buttonHtml
+      ? ns.copy.buttonHtml({ label, className: "dataTable__copy", attrs: { "data-copy-text": text } })
       : "";
     return html;
   }
 
   function copyCell(td, getText, label = "Copy") {
-    if (!td || !ns.ui?.copyButton) return null;
-    const button = ns.ui.copyButton(null, getText, { label, className: "dataTable__copy" });
+    if (!td || !ns.copy.button) return null;
+    const button = ns.copy.button(null, getText, { label, className: "dataTable__copy" });
     td.classList.add("has-copy");
     td.appendChild(button);
     return button;
@@ -202,7 +202,7 @@
       if (!button || !root.contains(button)) return;
       event.preventDefault();
       event.stopPropagation();
-      void ns.ui?.copyText?.(button.getAttribute("data-copy-text") || "", button);
+      void ns.copy.text?.(button.getAttribute("data-copy-text") || "", button);
     }, true);
   }
 
@@ -448,5 +448,4 @@
     barEligible, barPercent, cellBar, cellBarStyle, shareBar, shareBarHtml, rowHeight, textCell, copyCellHtml, copyCell, bindCopy,
     rovingRows, targetIndex, keyboardMenuTarget,
   });
-  ns.rovingRows = rovingRows;
 })();

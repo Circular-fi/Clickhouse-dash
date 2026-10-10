@@ -676,10 +676,10 @@
     else closePanel();
   }
 
-  // The panel's stat tiles (ns.ui.statTileHtml), boxed.
+  // The panel's stat tiles (ns.stat.html), boxed.
   const SEVERITY_TONES = { err: "error", warn: "warn", ok: "" };
   function statsHtml(item, countLabel, count) {
-    const tile = (label, value, sub = "", tone = "") => ns.ui.statTileHtml({ label, value, sub, tone, dl: true });
+    const tile = (label, value, sub = "", tone = "") => ns.stat.html({ label, value, sub, tone, dl: true });
     return '<dl class="statTiles statTiles--boxed graphKitPanel__stats">'
       + tile(countLabel, fmt.compact(count), perSecond(count))
       + tile("Errors", fmt.percent(item.error_rate), fmt.compact(item.errors), SEVERITY_TONES[severity(item.error_rate)])

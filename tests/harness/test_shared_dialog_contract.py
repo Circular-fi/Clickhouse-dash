@@ -18,7 +18,7 @@ def read(rel: str) -> str:
 def test_dialog_module_is_loaded_by_query_only():
     pages = json.loads(read("src/static/modules.json"))["pages"]
     files = pages["query"]["modules"]
-    assert files.index("app_ui_dialog.js") < files.index("app_ui.js") < files.index("app_analysis.js")
+    assert files.index("app_ui_dialog.js") < files.index("app_query_ui.js") < files.index("app_analysis.js")
     assert "app_ui_dialog.js" not in pages["explorer"]["modules"]
 
 
@@ -40,7 +40,7 @@ def test_dialog_is_a_native_modal_with_backdrop_escape_and_focus_return():
 def test_profiling_and_library_share_the_large_shell():
     html = read("src/static/query.html")
     analysis = read("src/static/app_analysis.js")
-    ui = read("src/static/app_ui.js")
+    ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     assert '<dialog id="analysisModal" class="uiDialog uiDialog--lg analysisModal"' in html
     assert 'class="contentTabs uiDialog__tabs analysisTabs" role="tablist"' in html
     assert "analysisModalBackdrop" not in html and "analysisModalBackdrop" not in analysis
@@ -71,4 +71,4 @@ def test_no_shortcut_hint_beside_run():
     css = css_sources.text()
     assert ".queryActions__hint" not in css
     # The shortcut stays, in the Run tooltip.
-    assert "dom.runButton.title = `Run (${mod}+Enter)`;" in read("src/static/app_ui.js")
+    assert "dom.runButton.title = `Run (${mod}+Enter)`;" in read("src/static/app_header.js") + read("src/static/app_query_ui.js")

@@ -235,7 +235,7 @@
     });
   }
 
-  // The shared sparkline (ui.sparkline): the series over the searched range,
+  // The shared sparkline (chartUi.sparkline): the series over the searched range,
   // a neutral line, no area (a noisy series filled in grey reads as a box
   // behind the line, in the light theme above all), bound to the data (no zero baseline: the
   // range ends are gaps, and a P95 of a bucket without spans is no value),
@@ -278,7 +278,7 @@
         .slice(0, MAX_MARKS)
         .forEach((b) => { marks[b.i] = "accent"; });
     }
-    const svg = ns.ui.sparkline.html(pad(values), { xs, min: lo, max: hi > lo ? hi : lo + 1, area: false, marks: pad(marks), className: `traceSvcSpark ${cls}` });
+    const svg = ns.chartUi.sparkline.html(pad(values), { xs, min: lo, max: hi > lo ? hi : lo + 1, area: false, marks: pad(marks), className: `traceSvcSpark ${cls}` });
     const peak = drawn.length ? peakText(hi) : "";
     return `<span class="traceSvcTrend__cell"${peak ? ` title="Peak in the range: ${esc(peak)}"` : ""}>${svg}<span class="traceSvcTrend__peak">${esc(peak)}</span></span>`;
   }
@@ -541,7 +541,7 @@
     const total = rows.reduce((sum, r) => sum + Number(r[5] || 0), 0) || 1;
     return `<table class="traceSvcTable dataTable dataTable--compact traceSvcDb" aria-label="Database statements"><thead><tr><th scope="col">Statement</th><th scope="col">System</th><th scope="col" class="num">Count</th><th scope="col" class="num">Throughput</th><th scope="col" class="num">P95</th><th scope="col" class="num">Total time</th></tr></thead><tbody>${rows.map((r) => {
       const share = (Number(r[5] || 0) / total) * 100;
-      return `<tr data-db-statement="${esc(r[1])}"><th scope="row" class="traceSvcDb__stmtCell">${ns.ui.sqlBlockHtml({ sql: r[1], inline: true, label: "Statement" })}</th><td>${esc(r[2] || fmt.EMPTY)}</td><td class="num">${fmt.count(Number(r[3] || 0))}</td><td class="num">${esc(rateText(Number(r[3] || 0) / seconds))}</td><td class="num">${esc(fmt.duration(r[6]))}</td>${shareCell(share, fmt.duration(r[5]), `${fmt.duration(r[5])} in total`)}</tr>`;
+      return `<tr data-db-statement="${esc(r[1])}"><th scope="row" class="traceSvcDb__stmtCell">${ns.sqlBlock.html({ sql: r[1], inline: true, label: "Statement" })}</th><td>${esc(r[2] || fmt.EMPTY)}</td><td class="num">${fmt.count(Number(r[3] || 0))}</td><td class="num">${esc(rateText(Number(r[3] || 0) / seconds))}</td><td class="num">${esc(fmt.duration(r[6]))}</td>${shareCell(share, fmt.duration(r[5]), `${fmt.duration(r[5])} in total`)}</tr>`;
     }).join("")}</tbody></table>${payload.estimated ? '<div class="traceSvcNote">\u2248 The read cap or time budget stopped the scan: counts are partial.</div>' : ""}`;
   }
 
@@ -565,7 +565,7 @@
     const detail = view.detail;
     const payload = detail.payload;
     const row = detailRow(payload, name);
-    const stat = (label, valueHtml, tone = "") => ns.ui.statTileHtml({ label, valueHtml, tone, className: "traceSvcStat" });
+    const stat = (label, valueHtml, tone = "") => ns.stat.html({ label, valueHtml, tone, className: "traceSvcStat" });
     const stats = row
       ? stat("Requests", esc(rateText(row.rate))) + stat("Errors", esc(percentText(row.errorPct)), ERROR_TONE[errorLevel(row.errorPct)]) + stat("P50", esc(fmt.duration(row.p50))) + stat("P95", esc(fmt.duration(row.p95))) + stat("P99", p99Cell(row, name)) + stat("Total time", esc(fmt.duration(row.total)))
       : "";
@@ -576,9 +576,9 @@
     else {
       body = `${payload.estimated ? `<div class="traceSvcNote">\u2248 Estimated from ${esc(fmt.percent(Number(payload.sample_fraction || 1)))} of the window (one time slice per bucket). <button type="button" class="traceSvcAction" data-svc-exact>Compute exactly</button></div>` : ""}
         <div class="traceSvcCharts">
-          ${ns.ui.chartCardHtml({ title: "Requests", meta: `${view.scope === "root" ? "root" : "entry"} spans per ${rateUnit(row.rate).word}`, className: "traceAnalyticsCard", titleTag: "strong", bodyClass: "traceChart traceSvcChart", bodyAttrs: { "data-svc-chart": "rate" } })}
-          ${ns.ui.chartCardHtml({ title: "Error rate", meta: "% of entry spans with status Error", className: "traceAnalyticsCard", titleTag: "strong", bodyClass: "traceChart traceSvcChart", bodyAttrs: { "data-svc-chart": "errors" } })}
-          ${ns.ui.chartCardHtml({ title: "Latency", meta: "entry span duration", className: "traceAnalyticsCard", titleTag: "strong", bodyClass: "traceChart traceSvcChart", bodyAttrs: { "data-svc-chart": "latency" } })}
+          ${ns.chartUi.cardHtml({ title: "Requests", meta: `${view.scope === "root" ? "root" : "entry"} spans per ${rateUnit(row.rate).word}`, className: "traceAnalyticsCard", titleTag: "strong", bodyClass: "traceChart traceSvcChart", bodyAttrs: { "data-svc-chart": "rate" } })}
+          ${ns.chartUi.cardHtml({ title: "Error rate", meta: "% of entry spans with status Error", className: "traceAnalyticsCard", titleTag: "strong", bodyClass: "traceChart traceSvcChart", bodyAttrs: { "data-svc-chart": "errors" } })}
+          ${ns.chartUi.cardHtml({ title: "Latency", meta: "entry span duration", className: "traceAnalyticsCard", titleTag: "strong", bodyClass: "traceChart traceSvcChart", bodyAttrs: { "data-svc-chart": "latency" } })}
         </div>
         ${releasesHtml(payload)}
         <section class="traceSvcSection"><h4>Most time-consuming endpoints</h4>${endpointsHtml(payload, name)}</section>
@@ -730,8 +730,8 @@
     root = element;
     root.addEventListener("click", onClick);
     // The database statements' inline SQL (string-built): one toggle.
-    ns.ui.sqlBind(root);
-    // Up / Down move between services, Enter / Space open one (ns.rovingRows);
+    ns.sqlBlock.bind(root);
+    // Up / Down move between services, Enter / Space open one (ns.table.rovingRows);
     // Escape closes the detail (ns.layers).
     ns.table.rovingRows(root, { rows: "tr.traceSvcRow", onOpen: (row) => openDetail(row.getAttribute("data-svc-row") || "") });
     render();

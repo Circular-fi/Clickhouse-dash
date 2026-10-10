@@ -53,13 +53,26 @@
     viewPref().set(value);
   }
 
+  // History entries of an open trace count the steps back to the search entry
+  // it was opened from (state.searchBack): the trace page opened from the
+  // results is 1 step away (openedFromSearch), a span or view picked in it
+  // (a pushed entry) one more, a linked trace opened from it one more again.
+  // A direct link or a new tab has no such entry (no searchBack).
+  function detailEntryState(state) {
+    const steps = Number(ns.router.state().searchBack) || 0;
+    const next = { ...(state || {}) };
+    delete next.searchBack;
+    if (steps > 0 && ns.router.owner("traces").active()) next.searchBack = steps + 1;
+    return next;
+  }
+
   // The trace's own parameters (?tab=, ?span=) on its URL, through the
   // Traces owner of ns.router (nothing while another view shows).
   function updateParams(mutate, { push = false } = {}) {
     const address = ns.router.owner("traces");
     const href = ns.router.href();
     // A pushed entry keeps the count of steps back to the search (app_traces.js).
-    if (push) address.push(mutate, { href, state: ns.traces?.detailEntryState?.(ns.router.state()) || null });
+    if (push) address.push(mutate, { href, state: detailEntryState(ns.router.state()) });
     else address.replace(mutate, { href });
   }
 
@@ -1338,7 +1351,7 @@
       subtitle: node.operation,
       onClose: () => { closeGraphPanel(); graphCanvas()?.focus?.({ preventScroll: true }); },
     }));
-    const stat = (label, value, note = "", cls = "") => ns.ui.statTileHtml({ label, value, sub: note, tone: cls === "is-err" ? "error" : "", dl: true });
+    const stat = (label, value, note = "", cls = "") => ns.stat.html({ label, value, sub: note, tone: cls === "is-err" ? "error" : "", dl: true });
     const errorSpan = node.spans.find((span) => isError(span));
     const spans = node.spans.slice().sort((a, b) => spanStart(a) - spanStart(b));
     const spanRows = spans.slice(0, GRAPH_PANEL_SPANS).map((span) => `<li><button type="button" class="traceGraphPanel__span${isError(span) ? " is-err" : ""}" data-graph-span="${esc(span.span_id)}" title="Show this span in the timeline"><span>+${esc(fmt.duration(Math.max(0, spanStart(span) - traceStart)))}</span><span>${esc(fmt.duration(spanDuration(span)))}</span><code>${esc(span.span_id)}</code></button></li>`).join("");
@@ -1600,7 +1613,7 @@
       }
     });
     // Spans table rows: Up / Down move, Enter / Space show the span in the
-    // timeline (ns.rovingRows).
+    // timeline (ns.table.rovingRows).
     if (alt) ns.table.rovingRows(alt, { rows: "tr[data-table-span]", onOpen: (row) => ctx.focusSpanInTimeline(String(row.getAttribute("data-table-span") || ""), { push: true }) });
     alt?.addEventListener("mousemove", (event) => {
       const frame = event.target instanceof Element ? event.target.closest("[data-flame-key]") : null;
@@ -1674,5 +1687,5 @@
     if (detail) detail.dataset.traceView = "timeline";
   }
 
-  ns.traceViews = { install, applyLocation, render, setView, showTimeline, onSpanToggled, markFocusedSpan, eventGroups, openEventPopover, closeEventPopover, selfTimeOf };
+  ns.traceViews = { install, applyLocation, detailEntryState, render, setView, showTimeline, onSpanToggled, markFocusedSpan, eventGroups, openEventPopover, closeEventPopover, selfTimeOf };
 })();

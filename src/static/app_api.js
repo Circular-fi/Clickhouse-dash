@@ -4,7 +4,7 @@
   const ns = window.ChDash;
   if (!ns) return;
 
-  const { util } = ns;
+  const { util, state } = ns;
 
   function resolveUrl(path) {
     const raw = String(path || "");
@@ -18,16 +18,13 @@
     return { ...base };
   }
 
+  // Whether the API answers: state.apiOnline, and chdash:api-online (detail.online) when it changes. The header's host
+  // picker and the Run buttons follow on their own (app_header.js, app_run.js).
   function setApiOnline(online) {
     const next = online !== false;
-    const ui = ns.ui;
-    if (ui && typeof ui.setApiOnline === "function") {
-      ui.setApiOnline(next);
-      return;
-    }
-    if (ns.state) ns.state.apiOnline = next;
-    const run = ns.run;
-    if (run && typeof run.updateActionButtons === "function") run.updateActionButtons();
+    if (state.apiOnline === next) return;
+    state.apiOnline = next;
+    window.dispatchEvent(new CustomEvent("chdash:api-online", { detail: { online: next } }));
   }
 
   // The answer of a response: its JSON, `null` when the body is empty, and `undefined` when it is
@@ -471,27 +468,6 @@
   }
 
 
-  async function prepareExport(hostId, format, queries, { signal } = {}) {
-    if (!hostId) throw new Error("No host selected.");
-    const normalizedFormat = String(format || "").toLowerCase();
-    if (normalizedFormat !== "csv" && normalizedFormat !== "json") throw new Error("Invalid export format.");
-    if (!Array.isArray(queries) || !queries.length) throw new Error("No export queries supplied.");
-    const payload = await postJson("api/export/run", {
-      host_id: String(hostId),
-      format: normalizedFormat,
-      queries: queries.map((query) => String(query || "")),
-    }, { signal, timeoutMs: ANALYSIS_TIMEOUT_MS });
-    if (!payload || typeof payload.download_url !== "string" || !payload.download_url) {
-      throw new Error("Invalid export handshake response.");
-    }
-    return {
-      exportId: payload.export_id ? String(payload.export_id) : null,
-      downloadUrl: resolveUrl(payload.download_url),
-      expiresInMs: Number(payload.expires_in_ms) || 0,
-      format: payload.format ? String(payload.format) : normalizedFormat,
-    };
-  }
-
   async function getQueryExecution(hostId, queryId, { signal } = {}) {
     if (!hostId) throw new Error("No host selected.");
     if (!queryId) throw new Error("No query selected for execution statistics.");
@@ -925,7 +901,7 @@
 
   // Every call takes a last { signal } (AbortSignal, e.g. util.latest).
   ns.api = { resolveUrl, request, getJson, postJson, getHosts, getVersion,
-    formatSqls, runSql, openEventStream, analyzeQuery, getQueryExecution, prepareExport, cancelQuery, getMeta,
+    setApiOnline, formatSqls, runSql, openEventStream, analyzeQuery, getQueryExecution, cancelQuery, getMeta,
     getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
     getSystemActivity, getSystemKeeper, getSystemOverview, getSystemSeries,
     getSystemQueries, getSystemQuery, getSystemDisks, getSystemDiskGrowth,

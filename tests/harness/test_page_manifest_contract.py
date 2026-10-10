@@ -80,7 +80,7 @@ def test_one_loader_and_no_module_list_or_script_tag_in_code():
     assert "return loader.startModules();" in read("src/static/app.js")
     obs = read("src/static/app_obs_page.js")
     assert "await ns.loader.startModules();" in obs
-    assert "ns.loader.loadGroup(QUERY_LIBRARY_GROUP)" in read("src/static/app_ui.js")
+    assert "ns.loader.loadGroup(QUERY_LIBRARY_GROUP)" in read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     assert "ns.loader.loadGroup(CORE_GROUP)" in read("src/static/app_query_chart.js")
 
 

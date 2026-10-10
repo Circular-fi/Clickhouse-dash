@@ -54,8 +54,8 @@ def test_trace_charts_draw_on_the_engine_without_svg():
     assert "<svg" not in detail and "chart.mountChart(container, \"service\", {" in detail
     assert 'className: "traceSvcRelease"' in detail
     # The row sparklines stay static SVG (two per row, no interaction): the
-    # shared ui.sparkline.
-    assert "ns.ui.sparkline.html(" in services and "className: `traceSvcSpark ${cls}`" in services
+    # shared chartUi.sparkline.
+    assert "ns.chartUi.sparkline.html(" in services and "className: `traceSvcSpark ${cls}`" in services
 
 
 def test_engine_extensions_are_additive_options():

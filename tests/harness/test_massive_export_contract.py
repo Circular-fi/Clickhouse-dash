@@ -90,19 +90,18 @@ def test_massive_export_metadata_is_required_before_download_and_during_archive(
     assert "if (query_failed || metadata_failed)" in api
 
 
-def test_run_menu_direct_download_does_not_use_interactive_run_path() -> None:
+def test_the_pages_do_not_carry_the_massive_export() -> None:
+    # The Run menu downloads through the normal run (post-run-download.md). The export API is for other
+    # clients: the page has no module, no client function and no address of it.
     html = read("src/static/query.html")
-    frontend = read("src/static/app_export.js")
     api = read("src/static/app_api.js")
     run = read("src/static/app_run.js")
 
     assert 'id="downloadCsvButton"' in html
     assert 'id="downloadJsonButton"' in html
-    assert 'postJson("api/export/run"' in api
-    assert "api.prepareExport" in frontend
-    assert "triggerDownload(prepared.downloadUrl" in frontend
-    assert "api.runSql" not in frontend
-    assert "massExport.start" not in run
+    assert not (ROOT / "src/static/app_export.js").exists()
+    assert "api/export/" not in api and "prepareExport" not in api
+    assert "massExport" not in run
 
 
 def test_export_hcl_limits_are_validated_and_v1_compression_is_rejected() -> None:

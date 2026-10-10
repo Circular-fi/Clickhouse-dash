@@ -103,9 +103,7 @@
     const ns = window.ChDash;
     const dom = ns.dom || {};
     const route = (path) => ns.api.resolveUrl(path);
-    ns.ui?.setPageSelectorValue?.("system");
-    dom.navQueryButton?.addEventListener("click", () => window.location.assign(route("query")));
-    dom.navExplorerButton?.addEventListener("click", () => window.location.assign(route("explorer/catalog")));
+    ns.header.setPageSelectorValue("system");
     router().on("/system", onPopState);
     // Another host: the shape on screen reads it.
     window.addEventListener("chdash:host-changed", () => ns.systemView?.refresh?.(false));
@@ -113,7 +111,7 @@
     window.addEventListener("pageshow", (event) => { if (event.persisted) ns.systemView?.refresh?.(false); });
     // Queries turned off (system.top_queries): the System page is what is left.
     ns.features?.on?.(() => {
-      if (!ns.features.get("system.enabled")) return; // app_ui.js leaves the page
+      if (!ns.features.get("system.enabled")) return; // app_header.js leaves the page
       if (!ns.systemView.sections().includes("queries")) window.location.replace(route("system"));
     });
   }
@@ -122,7 +120,7 @@
     const ns = window.ChDash;
     await ns.loader.startModules();
     bindShell();
-    ns.ui?.init?.();
+    ns.header.init();
     if (!hashOf()) {
       window.location.replace(router().url("/system/queries"));
       return;

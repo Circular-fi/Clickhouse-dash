@@ -106,9 +106,10 @@ def test_expressions_use_the_shared_highlighter_and_repaint_with_the_function_li
     assert 'window.dispatchEvent(new CustomEvent("chdash:meta-changed"' in meta
     assert 'window.addEventListener("chdash:meta-changed", () => {' in detail
     # A returning visit (host restored from storage) still gets the list.
-    ui = read("app_explorer.js")
-    assert 'const missing = ["functions", "keywords"].filter((type) => !host?.[type]);' in ui
-    assert "if (missing.length) void ns.meta.fetchAndStore?.(hostId, missing);" in ui
+    meta_js = read("app_meta.js")
+    assert 'const missing = ["functions", "keywords"].filter((type) => !host?.[type]);' in meta_js
+    assert "if (missing.length) void fetchAndStore(hostId, missing);" in meta_js
+    assert "ns.meta.ensureHighlighterData();" in read("app_explorer.js")
     # No colour of its own: the expressions take the .tok-* rules.
     css = css_sources.text()
     assert ".explorerExpr .tok-" not in css

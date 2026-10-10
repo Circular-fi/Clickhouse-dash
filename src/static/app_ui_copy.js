@@ -2,16 +2,16 @@
   "use strict";
   // Copy to clipboard, one component for every page (css/10-components/copy.css):
   //
-  //   ui.copyText(text, control)      copies, then gives `control` the feedback
-  //   ui.copyButton(button, getText)  an icon button (.uiCopy): the copy icon,
+  //   copy.text(text, control)      copies, then gives `control` the feedback
+  //   copy.button(button, getText)  an icon button (.uiCopy): the copy icon,
   //                                   a tooltip (title / aria-label) and the
   //                                   feedback; getText() may return a promise
-  //   ui.copyButtonHtml({ label, attrs, className })
+  //   copy.buttonHtml({ label, attrs, className })
   //                                   the same button as an HTML string, for the
   //                                   modules that render strings and delegate
-  //                                   clicks to ui.copyText
-  //   ui.copySplit(options)           the "Copy JSON" split button and its menu
-  //   ui.downloadText(name, text)     its "Download JSON": the text as a file
+  //                                   clicks to copy.text
+  //   copy.split(options)           the "Copy JSON" split button and its menu
+  //   copy.download(name, text)     its "Download JSON": the text as a file
   //
   // One feedback, held FEEDBACK_MS: the control gets .is-copied (.is-copyFailed
   // when the clipboard refused) and reads "Copied" ("Copy failed"): a text
@@ -20,7 +20,6 @@
   const ns = window.ChDash;
   if (!ns) return;
   const { $ } = ns.dom;
-  const ui = (ns.ui = ns.ui || {});
 
   const FEEDBACK_MS = 1200;
   const COPIED = "Copied";
@@ -41,7 +40,7 @@
     area.style.position = "fixed";
     area.style.top = "-1000px";
     area.style.left = "-1000px";
-    (ns.dialog?.host?.() || document.body).appendChild(area);
+    ns.layers.host().appendChild(area);
     area.select();
     const ok = document.execCommand("copy");
     area.remove();
@@ -231,6 +230,5 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  Object.assign(ui, { copyText, copyFeedback: feedback, copyButton, copyButtonHtml, copyIconHtml: ICON, copySplit, downloadText });
-  ns.copy = Object.freeze({ text: copyText, feedback, button: copyButton, buttonHtml: copyButtonHtml, split: copySplit, download: downloadText, FEEDBACK_MS });
+  ns.copy = Object.freeze({ text: copyText, feedback, button: copyButton, buttonHtml: copyButtonHtml, split: copySplit, download: downloadText, iconHtml: ICON, FEEDBACK_MS });
 })();

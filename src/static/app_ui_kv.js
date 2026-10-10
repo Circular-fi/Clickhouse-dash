@@ -4,9 +4,9 @@
   // span and resource attributes, log record fields, the
   // Query row Details, the Explorer graph panel's columns.
   //
-  //   ui.kvListHtml(rows, { actions, className, empty, label }) -> HTML
-  //   ui.kvBind(root, { onAction })   delegated action clicks under root
-  //   ui.kvList(rows, options)        -> element (kvListHtml + kvBind)
+  //   kv.html(rows, { actions, className, empty, label }) -> HTML
+  //   kv.bind(root, { onAction })   delegated action clicks under root
+  //   kv.list(rows, options)        -> element (kvListHtml + kvBind)
   //
   // rows: [{ key, value, label, keyTitle, mono, muted, actions, attrs }]
   //   value   a scalar or an object / array (a JSON tree); a string holding a
@@ -30,7 +30,6 @@
   // --hit tall item.
   const ns = window.ChDash;
   if (!ns) return;
-  const ui = (ns.ui = ns.ui || {});
 
   const esc = (value) => ns.util.escapeHtml(value ?? "");
   const nullToken = () => (ns.format?.nullToken ? ns.format.nullToken() : '<span class="nullToken">NULL</span>');
@@ -42,7 +41,7 @@
     include: { label: "Filter for this value", icon: ns.icon("circle-plus", { size: "sm" }) },
     exclude: { label: "Exclude this value", icon: ns.icon("circle-minus", { size: "sm" }) },
     only: { label: "Search only this value", icon: ns.icon("search", { size: "sm" }) },
-    copy: { label: "Copy value", icon: ns.ui.copyIconHtml },
+    copy: { label: "Copy value", icon: ns.copy.iconHtml },
     json: { label: "Copy as JSON", icon: ns.icon("braces", { size: "sm" }) },
   };
 
@@ -180,8 +179,8 @@
       try { value = JSON.parse(json); } catch (_) { value = text; }
       const handled = state.onAction?.(action, { key, value, text, json, row, button, event }) === true;
       if (handled) return;
-      if (action === "copy") void ui.copyText?.(text, button);
-      else if (action === "json") void ui.copyText?.(json, button);
+      if (action === "copy") void ns.copy.text(text, button);
+      else if (action === "json") void ns.copy.text(json, button);
     };
     root.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -204,6 +203,5 @@
     return el;
   }
 
-  Object.assign(ui, { kvList, kvListHtml, kvBind });
   ns.kv = Object.freeze({ list: kvList, html: kvListHtml, bind: kvBind, actionsHtml, treeHtml, scalarHtml, scalarKind, jsonValue, valueText, ACTIONS: Object.keys(ACTIONS) });
 })();

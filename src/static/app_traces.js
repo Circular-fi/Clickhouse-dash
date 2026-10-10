@@ -3,7 +3,7 @@
   const ns = window.ChDash;
   if (!ns) return;
   const { byId, $, $$ } = ns.dom;
-  const { dom, state, api, util, ui, h } = ns;
+  const { dom, state, api, util, h } = ns;
   // Formats and colours (docs/ui-foundations.md): durations, counts and
   // instants through ns.format; service, percentile and status colours
   // through ns.palette (a service keeps one colour across Traces, Logs and
@@ -687,10 +687,10 @@
     renderDurationChart();
   }
 
-  // The shared copy (ui.copyText): the clipboard (a textarea copy on plain
+  // The shared copy (copy.text): the clipboard (a textarea copy on plain
   // http) and the one "Copied" feedback on the control.
   function copyText(text, button) {
-    return ns.ui.copyText(text, button);
+    return ns.copy.text(text, button);
   }
 
   // --- Search results: Jaeger-style list and sortable table ---------------
@@ -875,7 +875,7 @@
           <span class="traceResultItem__durationBar" style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}" aria-hidden="true"></span>
           <a title="${esc(title)}" class="traceResult__wideTitle" href="${esc(spanTraceUrl(trace.trace_id))}">${esc(title)}</a>${errors ? errorTagHtml(errors) : ""}${missing ? incompleteTagHtml(missing) : ""}
           <code class="traceResult__fullId">${esc(trace.trace_id)}</code>
-          ${ns.ui.copyButtonHtml({ label: "Copy Trace ID", className: "traceCopyButton", attrs: { "data-copy-trace": trace.trace_id } })}
+          ${ns.copy.buttonHtml({ label: "Copy Trace ID", className: "traceCopyButton", attrs: { "data-copy-trace": trace.trace_id } })}
           <span class="traceResult__right"><b>${esc(fmt.duration(trace.duration_ns))}</b></span>
         </div>
         <div class="traceResult__line traceResult__line--stats">
@@ -1039,7 +1039,7 @@
       const row = target.closest("[data-trace-id]");
       if (row && root.contains(row)) openRow(row);
     });
-    // The table rows rove (ns.rovingRows); a list card is its title link, so it needs no key handler.
+    // The table rows rove (ns.table.rovingRows); a list card is its title link, so it needs no key handler.
     serviceTip = ns.popover.tip(root, hiddenPills, { selector: ".traceSvcMore", side: "bottom", className: "traceSvcPopover" });
     ns.table.rovingRows(root, { rows: "tr.traceTable__row", onOpen: (row) => openRow(row) });
     ns.table.bindCopy(root);
@@ -1634,7 +1634,7 @@
       const filterableHtml = (field, value, text) => (value
         ? `<span class="traceFilterable" data-filter-field="${field}" data-filter-value="${esc(value)}" tabindex="0" role="button" aria-haspopup="menu" title="Filter traces by this ${field}">${text}</span>`
         : text);
-      dom.traceDetailTitle.innerHTML = `<strong><span>${filterableHtml("service", root?.service_name, esc(root?.service_name || "trace"))}:</span> ${filterableHtml("operation", root?.span_name, esc(root?.span_name || "trace"))}</strong><span class="tracePageHeader__traceId"><code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code>${ns.ui.copyButtonHtml({ label: "Copy full Trace ID", className: "traceCopyButton traceCopyButton--header", attrs: { "data-copy-active-trace": trace.trace_id } })}</span>`;
+      dom.traceDetailTitle.innerHTML = `<strong><span>${filterableHtml("service", root?.service_name, esc(root?.service_name || "trace"))}:</span> ${filterableHtml("operation", root?.span_name, esc(root?.span_name || "trace"))}</strong><span class="tracePageHeader__traceId"><code title="${esc(trace.trace_id)}">${esc(trace.trace_id)}</code>${ns.copy.buttonHtml({ label: "Copy full Trace ID", className: "traceCopyButton traceCopyButton--header", attrs: { "data-copy-active-trace": trace.trace_id } })}</span>`;
       $("[data-copy-active-trace]", dom.traceDetailTitle)?.addEventListener("click", (event) => {
         event.stopPropagation();
         copyText(trace.trace_id, event.currentTarget);
@@ -1650,7 +1650,7 @@
         ["Total Spans", fmt.count(spans.length)],
         ["Errors", fmt.count(cache.errorCount), cache.errorCount ? "is-error" : ""],
       ];
-      const itemsHtml = items.map(([label, value, cls]) => ns.ui.statTileHtml({ label, valueHtml: typeof value === "object" ? value.html : esc(value), tone: cls === "is-error" ? "error" : "", className: `statTile--sm tracePageOverviewItem${cls ? ` ${cls}` : ""}`, attrs: { "data-trace-header-item": label } })).join('<i class="tracePageOverviewDivider" aria-hidden="true"></i>');
+      const itemsHtml = items.map(([label, value, cls]) => ns.stat.html({ label, valueHtml: typeof value === "object" ? value.html : esc(value), tone: cls === "is-error" ? "error" : "", className: `statTile--sm tracePageOverviewItem${cls ? ` ${cls}` : ""}`, attrs: { "data-trace-header-item": label } })).join('<i class="tracePageOverviewDivider" aria-hidden="true"></i>');
       const orphans = cache.orphanCount;
       const incomplete = orphans
         ? ns.badge.html("", { tone: "warn", size: "md", className: "tracePageHeader__incomplete", title: `${orphans} span${orphans === 1 ? "" : "s"} reference${orphans === 1 ? "s" : ""} a parent span missing from this trace: the trace is incomplete.`, attrs: { "data-trace-incomplete": true }, html: `${WARNING_ICON}Incomplete` })
@@ -2407,7 +2407,7 @@
     }, null, 2).replace(/"start_ns": "\\u0000exact-ns:(\d+)"/g, '"start_ns": $1');
   }
 
-  // Copy JSON / Download JSON: the shared split control (ui.copySplit), the
+  // Copy JSON / Download JSON: the shared split control (copy.split), the
   // same as a query's results.
   function copyTraceJsonText() {
     const trace = model.activeTrace;
@@ -2417,7 +2417,7 @@
   function downloadTraceJson() {
     const trace = model.activeTrace;
     if (!trace?.spans?.length) return;
-    ns.ui.downloadText(`trace-${String(trace.trace_id || "trace").replace(/[^0-9A-Za-z_-]/g, "")}.json`, traceJsonText(trace));
+    ns.copy.download(`trace-${String(trace.trace_id || "trace").replace(/[^0-9A-Za-z_-]/g, "")}.json`, traceJsonText(trace));
   }
 
   let traceCopySplit = null;
@@ -2436,7 +2436,7 @@
     return Object.entries(value).sort(([a], [b]) => String(a).localeCompare(String(b)));
   }
 
-  // Attribute tables: the shared key / value list (ui.kvListHtml). A string
+  // Attribute tables: the shared key / value list (kv.html). A string
   // holding a JSON object or array is a tree (Jaeger's tryParseJson); HTTP
   // header arrays a plain list; otel.* keys in italics. filterScope ("span" /
   // "resource"): include / exclude actions, and a click on the value opens
@@ -2460,7 +2460,7 @@
   function renderAttributeTable(raw, emptyText = "No attributes", filterScope = "") {
     const entries = attributeEntries(raw);
     if (!entries.length) return emptyText ? `<span class="traceJaegerEmpty">${esc(emptyText)}</span>` : "";
-    return ns.ui.kvListHtml(entries.map(([key, value]) => attributeRow(key, value, filterScope)), { className: "traceKv" });
+    return ns.kv.html(entries.map(([key, value]) => attributeRow(key, value, filterScope)), { className: "traceKv" });
   }
 
   // The include / exclude / copy actions of the attribute lists: the search
@@ -2679,7 +2679,7 @@
 
   function idCopyHtml(label, value, field) {
     if (!value) return `<span>${esc(label)}: <code>root</code></span>`;
-    return `<span>${esc(label)}: <code>${esc(value)}</code>${ns.ui.copyButtonHtml({ label: `Copy ${field}`, className: "traceCopyButton traceInspectorIdentity__copy", attrs: { "data-copy-span-field": value } })}</span>`;
+    return `<span>${esc(label)}: <code>${esc(value)}</code>${ns.copy.buttonHtml({ label: `Copy ${field}`, className: "traceCopyButton traceInspectorIdentity__copy", attrs: { "data-copy-span-field": value } })}</span>`;
   }
 
   function renderSpanInspectorCard(span, spans, knownBounds = null) {
@@ -2806,7 +2806,7 @@
     ns.traceViews?.markFocusedSpan?.();
     if (push || replace) {
       const href = spanTraceUrl(String(model.activeTrace?.trace_id || ""), id);
-      if (push) address.push(null, { href, state: detailEntryState({ traceId: model.activeTrace?.trace_id, spanId: id }) });
+      if (push) address.push(null, { href, state: ns.traceViews.detailEntryState({ traceId: model.activeTrace?.trace_id, spanId: id }) });
       else address.replace(null, { href });
     }
     if (scroll) {
@@ -3153,7 +3153,7 @@
     // The entry is pushed once the answer is in (the search stays the current
     // entry while it loads), whether the trace was found or not.
     const pushEntry = () => {
-      if (push) address.push(null, { href: spanTraceUrl(id, pendingSpanId), state: detailEntryState({ traceId: id }) });
+      if (push) address.push(null, { href: spanTraceUrl(id, pendingSpanId), state: ns.traceViews.detailEntryState({ traceId: id }) });
     };
     try {
       const trace = await api.getTrace(currentHost(), id, { signal: req.signal });
@@ -3223,19 +3223,6 @@
       const range = widerRange();
       if (range) window.location.assign(searchHref(range));
     }
-  }
-
-  // History entries of an open trace count the steps back to the search entry
-  // it was opened from (state.searchBack): the trace page opened from the
-  // results is 1 step away (openedFromSearch), a span or view picked in it
-  // (a pushed entry) one more, a linked trace opened from it one more again.
-  // A direct link or a new tab has no such entry (no searchBack).
-  function detailEntryState(state) {
-    const steps = Number(ns.router.state().searchBack) || 0;
-    const next = { ...(state || {}) };
-    delete next.searchBack;
-    if (steps > 0 && address.active()) next.searchBack = steps + 1;
-    return next;
   }
 
   // The trace page was navigated to from the search page of this app: that
@@ -3490,7 +3477,7 @@
     });
     dom.traceDetail?.addEventListener("click", onUnavailableClick);
     if (dom.traceCopySplit) {
-      traceCopySplit = ns.ui.copySplit({
+      traceCopySplit = ns.copy.split({
         root: dom.traceCopySplit,
         getText: copyTraceJsonText,
         items: [{ el: dom.traceDownloadJsonButton, onSelect: downloadTraceJson }],
@@ -3519,5 +3506,5 @@
 
   // renderAnalytics (redraw the charts from the model) and scatterDots (the
   // scatter as drawn) are test and benchmark hooks.
-  ns.traces = { init, onLocation, onShow, onHide, getContext, applyContext, search, loadTrace, returnToSearch, detailEntryState, renderAnalytics, scatterDots };
+  ns.traces = { init, onLocation, onShow, onHide, getContext, applyContext, search, loadTrace, returnToSearch, renderAnalytics, scatterDots };
 })();

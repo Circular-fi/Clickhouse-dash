@@ -23,7 +23,7 @@
   // A DateTime text of the server's system tables: browser-local text, the
   // server value (and ISO) in the tooltip; an unset (epoch 0) time is EMPTY.
   function timeCell(value) {
-    const time = ns.ui.serverTime(value);
+    const time = ns.header.serverTime(value);
     return textCell(time.text, "", time.title);
   }
 
@@ -123,7 +123,7 @@
       const rows = items.map((item) => {
         const failed = String(item.latest_fail_reason || "").trim();
         const command = h("td", { class: "systemActivityTable__command", title: item.command },
-          ns.ui.sqlBlock({ sql: item.command, inline: true, label: "Mutation command" }));
+          ns.sqlBlock({ sql: item.command, inline: true, label: "Mutation command" }));
         return h("tr", null,
           objectCell(item),
           textCell(item.mutation_id, "mono"),

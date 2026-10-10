@@ -419,8 +419,13 @@
   // year), browser-local 24 h time. options.precision: "auto" (default:
   // minutes, seconds for a range under 10 minutes), "s", "ms", "us", "ns" or
   // "day" (the dates alone). Relative raw sides ("now-1h", "now"): "Last 1
-  // hour"; other relative ranges use the picker's names
-  // (ns.timeRange.describeRange) when it is loaded.
+  // hour"; other relative ranges use the picker's names (setRangeNamer: the
+  // time range picker, app_timerange.js, gives its describeRange when it loads).
+  let rangeNamer = null;
+  function setRangeNamer(fn) {
+    rangeNamer = typeof fn === "function" ? fn : null;
+  }
+
   function range(from, to, { precision = "auto" } = {}) {
     const relative = (v) => typeof v === "string" && /now/i.test(v);
     if (relative(from) || relative(to)) {
@@ -431,7 +436,7 @@
         const amount = Number(last[1]);
         return `Last ${amount} ${UNIT_WORDS[last[2]]}${amount === 1 ? "" : "s"}`;
       }
-      if (ns.timeRange && typeof ns.timeRange.describeRange === "function") return ns.timeRange.describeRange({ from: a, to: b }).text;
+      if (rangeNamer) return rangeNamer({ from: a, to: b }).text;
       return `${a} ${ARROW} ${b}`;
     }
     const a = num(from);
@@ -495,6 +500,7 @@
     parseTime,
     serverTime,
     range,
+    setRangeNamer,
     ago,
     emptyIfNull,
     nullToken,
