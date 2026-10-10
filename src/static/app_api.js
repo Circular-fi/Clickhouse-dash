@@ -677,9 +677,8 @@
       return await request(`api/mcp${path}`, options);
     } catch (error) {
       const body = error?.body && typeof error.body === "object" ? error.body : null;
-      // The server sends {error_code, message, ...} (docs/operations.md, "Errors"). `error` is the old name of the code: the
-      // mocks of the page tests still use it.
-      const code = body ? (typeof body.error_code === "string" ? body.error_code : typeof body.error === "string" ? body.error : "") : "";
+      // The server sends {error_code, message, ...} (docs/operations.md, "Errors").
+      const code = body && typeof body.error_code === "string" ? body.error_code : "";
       if (code) {
         error.mcp = {
           status: Number(error.status) || 0,

@@ -180,7 +180,7 @@ async function install(page, server) {
     const wait = server.delay[`${method} ${path}`];
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     if (method === 'GET' && path === '/meta') return json(route, 200, server.meta);
-    if (!server.meta.enabled) return json(route, 404, { error: 'mcp_disabled', message: 'MCP is turned off.' });
+    if (!server.meta.enabled) return json(route, 404, { error_code: 'mcp_disabled', message: 'MCP is turned off.' });
     if (method === 'GET' && path === '/keys') return json(route, 200, { keys: server.keys });
     if (method === 'GET' && path === '/access') return json(route, 200, server.summary(server.keys));
     if (method === 'POST' && path === '/keys') {
@@ -191,18 +191,18 @@ async function install(page, server) {
     const reach = method === 'GET' ? /^\/keys\/([^/]+)\/access$/.exec(path) : null;
     if (reach) {
       const owner = server.keys.find((k) => k.id === decodeURIComponent(reach[1]));
-      if (!owner) return json(route, 404, { error: 'not_found', message: 'No such key.' });
+      if (!owner) return json(route, 404, { error_code: 'not_found', message: 'No such key.' });
       return json(route, 200, server.access(owner, url.searchParams.get('refresh') === '1'));
     }
     const match = /^\/keys\/([^/]+)$/.exec(path);
     const found = match ? server.keys.find((k) => k.id === decodeURIComponent(match[1])) : null;
-    if (!found) return json(route, 404, { error: 'not_found', message: 'No such key.' });
-    if (found.source === 'config') return json(route, 409, { error: 'config_key', message: 'A key of the config file cannot change here.' });
+    if (!found) return json(route, 404, { error_code: 'not_found', message: 'No such key.' });
+    if (found.source === 'config') return json(route, 409, { error_code: 'config_key', message: 'A key of the config file cannot change here.' });
     if (method === 'DELETE') {
       server.keys = server.keys.filter((k) => k !== found);
       return json(route, 200, { ok: true, id: found.id });
     }
-    return json(route, 404, { error: 'not_found', message: 'No such route.' });
+    return json(route, 404, { error_code: 'not_found', message: 'No such route.' });
   });
 }
 
@@ -522,7 +522,7 @@ test('the data of a key is how many databases and tables it reaches, counted onc
 
 test('the data of the keys cannot be counted: the cells say so and the table stays', async ({ page }) => {
   const server = newServer();
-  server.errors['GET /access'] = { status: 503, body: { error: 'host_unavailable', message: 'The MCP user cannot connect.' } };
+  server.errors['GET /access'] = { status: 503, body: { error_code: 'host_unavailable', message: 'The MCP user cannot connect.' } };
   await open(page, server);
   await expect(row(page, 'ci-bot').locator('.mcpDataCell')).toHaveText('\u2014');
   await expect(row(page, 'ci-bot').locator('.mcpDataCell')).toHaveAttribute('title', /Data patterns: otel, analytics\.events/);
@@ -563,10 +563,10 @@ test('loading skeleton, error with Retry, empty list', async ({ page }) => {
   await expect(page.locator('#mcpKeysBody .uiState--loading')).toHaveAttribute('aria-busy', 'true');
   await expect(page.locator('#mcpKeysBody table')).toBeVisible();
   // An error of the keys call: the message and Retry.
-  server.errors['GET /keys'] = { status: 500, body: { error: 'storage_error', message: 'The key storage could not be read.' } };
+  server.errors['GET /keys'] = { status: 500, body: { error_code: 'storage_error', message: 'The key storage could not be read.' } };
   await page.locator('#mcpRefresh').click();
   await expect(page.locator('#mcpAlert')).toContainText('The key storage could not be read.');
-  server.errors['GET /keys'] = { status: 500, body: { error: 'storage_error', message: 'The key storage could not be read.' } };
+  server.errors['GET /keys'] = { status: 500, body: { error_code: 'storage_error', message: 'The key storage could not be read.' } };
   await page.reload();
   const error = page.locator('#mcpKeysBody .uiState--error');
   await expect(error).toBeVisible();
@@ -575,7 +575,7 @@ test('loading skeleton, error with Retry, empty list', async ({ page }) => {
   await error.getByRole('button', { name: 'Retry' }).click();
   await expect(page.locator('#mcpKeysBody table')).toBeVisible();
   // An error of the meta call: the state container shows it, with Retry.
-  server.errors['GET /meta'] = { status: 500, body: { error: 'internal', message: 'Meta failed.' } };
+  server.errors['GET /meta'] = { status: 500, body: { error_code: 'internal', message: 'Meta failed.' } };
   await page.reload();
   await expect(page.locator('#mcpState .uiState--error')).toContainText('Meta failed.');
   await page.locator('#mcpState').getByRole('button', { name: 'Retry' }).click();
@@ -961,24 +961,24 @@ test('server validation errors show next to their field, and the dialog stays op
   const d = dialog(page);
   await fillValid(d);
   // A validation error with a field and a reason.
-  server.errors['POST /keys'] = { status: 400, body: { error: 'validation', message: 'The pattern "otel" names no database.', field: 'databases', reason: 'invalid' } };
+  server.errors['POST /keys'] = { status: 400, body: { error_code: 'validation', message: 'The pattern "otel" names no database.', field: 'databases', reason: 'invalid' } };
   await d.getByRole('button', { name: 'Create key' }).click();
   await expect(d.locator('#mcpFieldError-databases')).toHaveText('The pattern "otel" names no database.');
   await expect(d.locator('#mcpField-databases')).toHaveAttribute('aria-invalid', 'true');
   await expect(d.locator('#mcpField-databases')).toBeFocused();
   await expect(d).toBeVisible();
   // A reason without a sentence, on an indexed field: the page's own sentence.
-  server.errors['POST /keys'] = { status: 400, body: { error: 'validation', field: 'hosts[0]', reason: 'unknown_host' } };
+  server.errors['POST /keys'] = { status: 400, body: { error_code: 'validation', field: 'hosts[0]', reason: 'unknown_host' } };
   await d.getByRole('button', { name: 'Create key' }).click();
   await expect(d.locator('#mcpFieldError-hosts')).toContainText('no mcp_uri');
   // A name that is taken (409) shows under the name, before its hint.
-  server.errors['POST /keys'] = { status: 409, body: { error: 'name_taken', message: 'A key named "analyst" exists.' } };
+  server.errors['POST /keys'] = { status: 409, body: { error_code: 'name_taken', message: 'A key named "analyst" exists.' } };
   await d.getByRole('button', { name: 'Create key' }).click();
   await expect(d.locator('#mcpFieldError-name')).toContainText('A key named "analyst" exists.');
   await expect(d.locator('#mcpField-name')).toBeFocused();
   await expect(d.locator('#mcpField-name')).toHaveAttribute('aria-describedby', 'mcpFieldError-name mcpFieldHint-name');
   // An error with no field shows at the foot of the dialog.
-  server.errors['POST /keys'] = { status: 500, body: { error: 'storage_error', message: 'The storage file could not be written.' } };
+  server.errors['POST /keys'] = { status: 500, body: { error_code: 'storage_error', message: 'The storage file could not be written.' } };
   await d.getByRole('button', { name: 'Create key' }).click();
   await expect(d.locator('.uiDialog__error')).toContainText('The storage file could not be written.');
   await expect(d).toBeVisible();
@@ -1019,7 +1019,7 @@ test('delete asks first and removes the key', async ({ page }) => {
 
 test('a failed delete shows its error above the table; a key that is gone reloads the list', async ({ page }) => {
   const server = await open(page);
-  server.errors['DELETE /keys/ui_0a1b2c3d4e5f'] = { status: 500, body: { error: 'storage_error', message: 'The storage file could not be written.' } };
+  server.errors['DELETE /keys/ui_0a1b2c3d4e5f'] = { status: 500, body: { error_code: 'storage_error', message: 'The storage file could not be written.' } };
   await row(page, 'ci-bot').locator('[data-action="remove"]').click();
   await dialog(page).getByRole('button', { name: 'Delete key' }).click();
   await expect(page.locator('#mcpAlert')).toContainText('The storage file could not be written.');
@@ -1420,7 +1420,7 @@ test('the details of a key name its host and mark the tools that the MCP user of
 
 test('the data of a key that cannot be listed says so and the rest of the details stay', async ({ page }) => {
   const server = newServer();
-  server.errors['GET /keys/ui_0a1b2c3d4e5f/access'] = { status: 500, body: { error: 'storage_error', message: 'The grants could not be read.' } };
+  server.errors['GET /keys/ui_0a1b2c3d4e5f/access'] = { status: 500, body: { error_code: 'storage_error', message: 'The grants could not be read.' } };
   await open(page, server);
   await row(page, 'ci-bot').locator('[data-action="open"]').click();
   await expect(details(page).locator('.mcpReach')).toContainText('The data of this key cannot be listed');
@@ -1555,7 +1555,7 @@ test('the secret shows as soon as the key is made, before the list is read again
 
 test('a server that says on for the meta and off for the keys is asked once more, then the page says so (no loop of requests)', async ({ page }) => {
   const server = newServer();
-  server.errors['GET /keys'] = { status: 404, body: { error: 'mcp_disabled', message: 'MCP is turned off.' }, keep: true };
+  server.errors['GET /keys'] = { status: 404, body: { error_code: 'mcp_disabled', message: 'MCP is turned off.' }, keep: true };
   await open(page, server);
   await expect(page.locator('#mcpKeysBody')).toContainText('Could not load the keys', { timeout: 10_000 });
   await page.waitForTimeout(1000);

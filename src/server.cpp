@@ -864,8 +864,9 @@ McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
   RequestScope scope(std::move(caller));
   try {
     if (!http_.dispatch(req, res)) {
+      // No route of this path: the part of ChDash is off in its configuration. The tool reads an empty answer with a 404 as
+      // not_enabled (mcp_tools.cpp).
       out.status = 404;
-      out.body = R"({"error_code":"not_found","message":"no such route","retryable":false})";
       return out;
     }
   } catch (const std::exception& error) {
