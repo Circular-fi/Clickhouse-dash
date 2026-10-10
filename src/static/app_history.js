@@ -14,7 +14,8 @@
   //   ns.history.ready                         Promise            the store is open and the older list is moved in
   //   ns.history.status()                      { stored, error }  stored: false when the runs stay in this page only
   //
-  // A change fires `chdash:query-history-changed` ({ detail: { hostId } }) on window, also when another tab made it.
+  // `chdash:query-history-changed` ({ detail: { hostId } }) fires on window when ANOTHER tab changed the History: the
+  // library then reads its list again. A change of this page needs no event: the page that made it already knows.
   // The list of a host is read once for each page (then kept here, bounded) and again only when another tab wrote.
   // An entry is { ts_ms, host_id, sql_raw, sql_formatted, formatted?, status?, elapsed_ms?, rows?, error?, truncated? }.
   // The History is the browser's: it is never sent to the server.
@@ -155,13 +156,9 @@
     channel = null;
   }
 
-  function changed(hostId, { broadcast = true } = {}) {
-    if (broadcast) {
-      try { channel?.postMessage({ hostId }); } catch { /* the other tabs read it at their next list() */ }
-    }
-    try {
-      window.dispatchEvent(new CustomEvent("chdash:query-history-changed", { detail: { hostId } }));
-    } catch { /* no listener */ }
+  // Tells the other tabs that the History of a host changed.
+  function changed(hostId) {
+    try { channel?.postMessage({ hostId }); } catch { /* the other tabs read it at their next list() */ }
   }
 
   if (channel) {
@@ -169,7 +166,9 @@
       const hostId = String(event?.data?.hostId || "");
       if (hostId) lists.delete(hostId);
       else lists.clear();
-      changed(hostId, { broadcast: false });
+      try {
+        window.dispatchEvent(new CustomEvent("chdash:query-history-changed", { detail: { hostId } }));
+      } catch { /* no listener */ }
     };
   }
 

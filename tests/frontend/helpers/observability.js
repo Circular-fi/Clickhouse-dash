@@ -1,10 +1,11 @@
 import { writeJson } from './review.js';
 
-// An Observability request superseded by a newer one (a range, filter or
-// panel changed while it still ran) is aborted on purpose (util.latest,
-// app_util.js): not a failure. Every other failed request, an abort of the
-// Query result stream included, still is.
-const SUPERSEDED = /\/api\/(traces|logs|metrics)\//;
+// An API read that a newer one superseded (a range, filter, table or panel
+// changed while it still ran), that a view that closed or a host change made
+// useless, is aborted on purpose (util.latest, app_util.js): not a failure.
+// Every other failed request, an abort of the Query result stream included,
+// still is.
+const SUPERSEDED = /\/api\/(traces|logs|metrics|explorer|system|mcp|meta|format|query\/analysis)\b/;
 export function unexpectedFailures(failedRequests) {
   return failedRequests.filter((r) => !(/net::ERR_ABORTED/.test(String(r.error || '')) && SUPERSEDED.test(String(r.url || ''))));
 }

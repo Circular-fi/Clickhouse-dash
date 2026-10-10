@@ -1583,8 +1583,6 @@ test('"Data it reads" is read once for a key within a minute, "Check again" read
   await row(page, 'second-ui-key').locator('[data-action="open"]').click();
   await expect(details(page)).toHaveCount(0);
   expect(await page.evaluate(() => window.__aborted.filter((url) => url.includes('/keys/ui_222222222222/access')).length)).toBe(1);
-  // The aborted read is the point of this test: it is not an unexpected failed request.
-  observers.get(page).failedRequests.splice(0);
 });
 
 test('a page restored from the back/forward cache reads the keys again', async ({ page }) => {

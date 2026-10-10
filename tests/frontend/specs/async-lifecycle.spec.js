@@ -156,7 +156,9 @@ test('System Overview: a forced Refresh replaces the read in flight (it is abort
   // 'commit': the held read must not make the navigation wait for it.
   await page.goto('/system', { waitUntil: 'commit' });
   await expect.poll(() => seen.length).toBe(1);
-  await page.locator('#systemRefresh-overview').click();
+  // The Refresh button is disabled while the section loads: a forced refresh in flight comes from the view's own call
+  // (a host change, or the page showing again).
+  await page.evaluate(() => window.ChDash.systemView.refresh(true));
   await expect.poll(() => seen.some((url) => url.includes('refresh=1'))).toBe(true);
   expect(await aborted(page, '/api/system/overview')).toBe(1);
   await expect(page.locator('#systemTopology')).toBeVisible({ timeout: 20_000 });
