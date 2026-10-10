@@ -330,6 +330,18 @@ std::optional<size_t> find_relation_keyword_ci(
   return std::nullopt;
 }
 
+// `[LEFT] ARRAY JOIN arr` joins an array of the row, not a relation.
+bool preceded_by_array_keyword(std::string_view text, size_t at) {
+  size_t end = at;
+  while (end > 0 && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
+  if (end < 5) return false;
+  const size_t start = end - 5;
+  for (size_t i = 0; i < 5; ++i) {
+    if (std::tolower(static_cast<unsigned char>(text[start + i])) != "array"[i]) return false;
+  }
+  return relation_token_boundary(text, start, 5);
+}
+
 std::vector<ParsedQualifiedName> parse_relation_sources(
     std::string_view select_sql,
     const std::string& default_database) {
@@ -340,18 +352,24 @@ std::vector<ParsedQualifiedName> parse_relation_sources(
     while (true) {
       const auto at = find_relation_keyword_ci(select_sql, keyword, start);
       if (!at) break;
+      start = *at + keyword.size();
+      if (keyword == "JOIN" && preceded_by_array_keyword(select_sql, *at)) continue;
       size_t pos = *at + keyword.size();
       while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
-      if (pos < select_sql.size() && select_sql[pos] != '(') {
-        auto parsed = parse_relation_name(select_sql, pos, default_database);
-        if (parsed && seen.insert({parsed->database, parsed->table}).second) result.push_back(std::move(*parsed));
-      }
-      start = *at + keyword.size();
+      if (pos >= select_sql.size() || select_sql[pos] == '(') continue;
+      auto parsed = parse_relation_name(select_sql, pos, default_database);
+      while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
+      // `FROM numbers(10)`, `JOIN remote(...)`: a table function, not an object.
+      if (pos < select_sql.size() && select_sql[pos] == '(') continue;
+      if (parsed && seen.insert({parsed->database, parsed->table}).second) result.push_back(std::move(*parsed));
     }
   }
   return result;
 }
 
+// The `TO [db.]table` of `CREATE MATERIALIZED VIEW name [ON CLUSTER c] [REFRESH ...] TO target AS SELECT`. A view
+// with its own ENGINE has no TO target: a `TO VOLUME 'x'` / `TO DISK 'x'` of its TTL is not one, nor a `WITH FILL
+// ... TO n` of its SELECT.
 std::optional<ParsedQualifiedName> parse_materialized_view_target(
     std::string_view create_sql,
     const std::string& default_database) {
@@ -363,8 +381,13 @@ std::optional<ParsedQualifiedName> parse_materialized_view_target(
   if (!to) return std::nullopt;
   const auto as = find_relation_keyword_ci(create_sql, "AS", *view + 4);
   if (as && *to > *as) return std::nullopt;
+  const auto engine = find_relation_keyword_ci(create_sql, "ENGINE", *view + 4);
+  if (engine && *engine < *to) return std::nullopt;
   size_t pos = *to + 2;
-  return parse_relation_name(create_sql, pos, default_database);
+  auto target = parse_relation_name(create_sql, pos, default_database);
+  while (pos < create_sql.size() && std::isspace(static_cast<unsigned char>(create_sql[pos]))) ++pos;
+  if (pos < create_sql.size() && create_sql[pos] == '\'') return std::nullopt;
+  return target;
 }
 
 // Top-level TTL clause of a server-generated CREATE TABLE: the text between the

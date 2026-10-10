@@ -255,16 +255,6 @@ std::optional<size_t> find_keyword_ci(std::string_view text, std::string_view ke
   return std::nullopt;
 }
 
-std::optional<QualifiedName> qualified_after_keyword(
-    std::string_view text,
-    std::string_view keyword,
-    const std::string& default_database) {
-  const auto at = find_keyword_ci(text, keyword);
-  if (!at) return std::nullopt;
-  size_t pos = *at + keyword.size();
-  return parse_qualified_name(text, pos, default_database);
-}
-
 std::optional<std::string> parse_ttl_destination(std::string_view text, size_t& pos) {
   while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
   if (pos >= text.size()) return std::nullopt;
@@ -500,6 +490,18 @@ std::vector<ExplorerGraphTtlRule> parse_table_ttl_rules(std::string_view ddl) {
   return out;
 }
 
+// `[LEFT] ARRAY JOIN arr` joins an array of the row, not a relation.
+bool preceded_by_array_keyword(std::string_view text, size_t at) {
+  size_t end = at;
+  while (end > 0 && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
+  if (end < 5) return false;
+  const size_t start = end - 5;
+  for (size_t i = 0; i < 5; ++i) {
+    if (std::tolower(static_cast<unsigned char>(text[start + i])) != "array"[i]) return false;
+  }
+  return token_boundary(text, start, 5);
+}
+
 std::vector<QualifiedName> parse_select_sources(std::string_view select_sql, const std::string& default_database) {
   std::vector<QualifiedName> result;
   std::set<std::pair<std::string, std::string>> seen;
@@ -508,18 +510,40 @@ std::vector<QualifiedName> parse_select_sources(std::string_view select_sql, con
     while (true) {
       const auto at = find_keyword_ci(select_sql, keyword, start);
       if (!at) break;
+      start = *at + keyword.size();
+      if (keyword == "JOIN" && preceded_by_array_keyword(select_sql, *at)) continue;
       size_t pos = *at + keyword.size();
       while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
       // A subquery after FROM/JOIN is intentionally ignored. The graph is
       // best-effort and never invents object names from SQL text.
-      if (pos < select_sql.size() && select_sql[pos] != '(') {
-        auto q = parse_qualified_name(select_sql, pos, default_database);
-        if (q && seen.insert({q->database, q->table}).second) result.push_back(std::move(*q));
-      }
-      start = *at + keyword.size();
+      if (pos >= select_sql.size() || select_sql[pos] == '(') continue;
+      auto q = parse_qualified_name(select_sql, pos, default_database);
+      while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
+      // `FROM numbers(10)`, `JOIN remote(...)`: a table function, not an object.
+      if (pos < select_sql.size() && select_sql[pos] == '(') continue;
+      if (q && seen.insert({q->database, q->table}).second) result.push_back(std::move(*q));
     }
   }
   return result;
+}
+
+// The `TO [db.]table` of `CREATE MATERIALIZED VIEW name [ON CLUSTER c] [REFRESH ...] TO target AS SELECT`. A view
+// with its own ENGINE has no TO target: a `TO VOLUME 'x'` / `TO DISK 'x'` of its TTL is not one, nor a `WITH FILL
+// ... TO n` of its SELECT.
+std::optional<QualifiedName> materialized_view_target(std::string_view ddl, const std::string& default_database) {
+  const auto view = find_keyword_ci(ddl, "VIEW");
+  if (!view) return std::nullopt;
+  const auto to = find_keyword_ci(ddl, "TO", *view + 4);
+  if (!to) return std::nullopt;
+  const auto as = find_keyword_ci(ddl, "AS", *view + 4);
+  if (as && *to > *as) return std::nullopt;
+  const auto engine = find_keyword_ci(ddl, "ENGINE", *view + 4);
+  if (engine && *engine < *to) return std::nullopt;
+  size_t pos = *to + 2;
+  auto target = parse_qualified_name(ddl, pos, default_database);
+  while (pos < ddl.size() && std::isspace(static_cast<unsigned char>(ddl[pos]))) ++pos;
+  if (pos < ddl.size() && ddl[pos] == '\'') return std::nullopt;
+  return target;
 }
 
 // Panels show the object's own SELECT; a pathological generated view must not
@@ -895,7 +919,7 @@ bool load_explorer_graph(
     };
 
     if (kind == "materialized_view" || kind == "refreshable_materialized_view") {
-      const auto target = qualified_after_keyword(table.ddl, "TO", table.database);
+      const auto target = materialized_view_target(table.ddl, table.database);
       if (target) set_definition_target(target->database, target->table);
       if (target && allowed.allows_table(target->database, target->table)) {
         add_edge_unique(out, seen_edges, {

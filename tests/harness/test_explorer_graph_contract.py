@@ -44,7 +44,10 @@ def test_graph_uses_structured_metadata_and_only_targeted_sql_parsing() -> None:
     assert "FROM system.clusters" in graph
     assert "parse_engine_arguments" in graph
     assert "parse_select_sources" in graph
-    assert "qualified_after_keyword" in graph
+    # The TO target of a materialized view is the clause before AS SELECT, never a TTL TO VOLUME or a WITH FILL TO;
+    # ARRAY JOIN and table functions are not relations.
+    assert "materialized_view_target(table.ddl, table.database)" in graph
+    assert "preceded_by_array_keyword" in graph
     assert "unknown" in graph and "omitted rather than guessed" in graph
 
 
