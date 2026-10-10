@@ -16,6 +16,7 @@
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "json_text.hpp"
 #include "otel_allowlist.hpp"
 
 #include <clickhouse/client.h>
@@ -408,9 +409,11 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
     w.Key("severity_number"); w.Int64(to_int(r.severity_number));
     w.Key("service_name"); w.String(r.service.c_str());
     w.Key("span_id"); w.String(r.span_id.c_str());
-    w.Key("body"); w.String(r.body.c_str(), static_cast<rapidjson::SizeType>(r.body.size()));
     const long long body_bytes = to_int(r.body_bytes);
-    if (body_bytes > static_cast<long long>(r.body.size())) {
+    const bool body_cut = body_bytes > static_cast<long long>(r.body.size());
+    // The cut is in bytes: it must not leave half a character at the end.
+    w.Key("body"); write_json_text(w, body_cut ? utf8_without_cut_tail(r.body) : std::string_view(r.body));
+    if (body_cut) {
       w.Key("body_truncated"); w.Bool(true);
       w.Key("body_bytes"); w.Int64(body_bytes);
     }

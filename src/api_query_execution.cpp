@@ -3,6 +3,7 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "json_text.hpp"
 #include "query_execution.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -86,7 +87,7 @@ void write_string_array(
     rapidjson::Writer<rapidjson::StringBuffer>& writer,
     const std::vector<std::string>& values) {
   writer.StartArray();
-  for (const auto& value : values) writer.String(value.c_str());
+  for (const auto& value : values) write_json_text(writer, value);
   writer.EndArray();
 }
 
@@ -164,15 +165,15 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
   writer.StartObject();
-  writer.Key("query_id"); writer.String(stats.query_id.c_str());
+  writer.Key("query_id"); write_json_text(writer, stats.query_id);
   writer.Key("available"); writer.Bool(stats.available);
   writer.Key("logs_pending"); writer.Bool(stats.logs_pending);
   writer.Key("partial_execution"); writer.Bool(record->partial_execution);
   writer.Key("terminal_status"); writer.String(record->terminal_status.c_str());
   writer.Key("run_mode"); writer.String(record->run_mode == QueryRunMode::Profiling ? "profiling" : "normal");
-  writer.Key("native_query_id"); writer.String(stats.native_query_id.c_str());
-  writer.Key("status"); writer.String(stats.status.c_str());
-  writer.Key("event_time"); writer.String(stats.event_time.c_str());
+  writer.Key("native_query_id"); write_json_text(writer, stats.native_query_id);
+  writer.Key("status"); write_json_text(writer, stats.status);
+  writer.Key("event_time"); write_json_text(writer, stats.event_time);
   writer.Key("duration_ms"); writer.Uint64(stats.duration_ms);
   writer.Key("read_rows"); writer.Uint64(stats.read_rows);
   writer.Key("read_bytes"); writer.Uint64(stats.read_bytes);
@@ -186,8 +187,8 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
   writer.Key("tables"); write_string_array(writer, stats.tables);
   writer.Key("projections"); write_string_array(writer, stats.projections);
   writer.Key("exception_code"); writer.Int(stats.exception_code);
-  writer.Key("exception"); writer.String(stats.exception.c_str());
-  writer.Key("error"); writer.String(stats.error.c_str());
+  writer.Key("exception"); write_json_text(writer, stats.exception);
+  writer.Key("error"); write_json_text(writer, stats.error);
   writer.EndObject();
 
   res.status = 200;

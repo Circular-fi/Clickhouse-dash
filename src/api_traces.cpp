@@ -7,6 +7,7 @@
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "json_text.hpp"
 #include "otel_allowlist.hpp"
 
 #include <clickhouse/client.h>
@@ -3452,35 +3453,35 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   rapidjson::StringBuffer sb(nullptr, 128 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
-  w.Key("source_host_id"); w.String(source_host_id.c_str());
-  w.Key("trace_id"); w.String(trace_id.c_str());
+  w.Key("source_host_id"); write_json_text(w, source_host_id);
+  w.Key("trace_id"); write_json_text(w, trace_id);
   w.Key("range_source"); w.String("trace_index");
   w.Key("truncated"); w.Bool(truncated);
   w.Key("spans"); w.StartArray();
   for (const auto& span : spans) {
     w.StartObject();
-    w.Key("timestamp"); w.String(span.timestamp.c_str());
+    w.Key("timestamp"); write_json_text(w, span.timestamp);
     w.Key("start_ns"); w.Int64(span.start_ns);
     w.Key("duration_ns"); w.Uint64(span.duration_ns);
-    w.Key("trace_id"); w.String(span.trace_id.c_str());
-    w.Key("span_id"); w.String(span.span_id.c_str());
-    w.Key("parent_span_id"); w.String(span.parent_span_id.c_str());
-    w.Key("span_name"); w.String(span.name.c_str());
-    w.Key("span_kind"); w.String(span.kind.c_str());
-    w.Key("service_name"); w.String(span.service.c_str());
-    w.Key("status_code"); w.String(span.status.c_str());
-    w.Key("status_message"); w.String(span.status_message.c_str());
-    if (f.span_attributes) { w.Key("span_attributes"); w.String(span.span_attributes.c_str()); }
-    if (f.resource_attributes) { w.Key("resource_attributes"); w.String(span.resource_attributes.c_str()); }
+    w.Key("trace_id"); write_json_text(w, span.trace_id);
+    w.Key("span_id"); write_json_text(w, span.span_id);
+    w.Key("parent_span_id"); write_json_text(w, span.parent_span_id);
+    w.Key("span_name"); write_json_text(w, span.name);
+    w.Key("span_kind"); write_json_text(w, span.kind);
+    w.Key("service_name"); write_json_text(w, span.service);
+    w.Key("status_code"); write_json_text(w, span.status);
+    w.Key("status_message"); write_json_text(w, span.status_message);
+    if (f.span_attributes) { w.Key("span_attributes"); write_json_text(w, span.span_attributes); }
+    if (f.resource_attributes) { w.Key("resource_attributes"); write_json_text(w, span.resource_attributes); }
     if (f.events) {
-      w.Key("events_timestamp"); w.String(span.events_timestamp.c_str());
-      w.Key("events_name"); w.String(span.events_name.c_str());
-      w.Key("events_attributes"); w.String(span.events_attributes.c_str());
+      w.Key("events_timestamp"); write_json_text(w, span.events_timestamp);
+      w.Key("events_name"); write_json_text(w, span.events_name);
+      w.Key("events_attributes"); write_json_text(w, span.events_attributes);
     }
     if (f.links) {
-      w.Key("links_trace_id"); w.String(span.links_trace_id.c_str());
-      w.Key("links_span_id"); w.String(span.links_span_id.c_str());
-      w.Key("links_attributes"); w.String(span.links_attributes.c_str());
+      w.Key("links_trace_id"); write_json_text(w, span.links_trace_id);
+      w.Key("links_span_id"); write_json_text(w, span.links_span_id);
+      w.Key("links_attributes"); write_json_text(w, span.links_attributes);
     }
     w.EndObject();
   }
