@@ -1,4 +1,5 @@
 #include "explorer_graph.hpp"
+#include "ch_query.hpp"
 #include "ddl_text_cache.hpp"
 #include "ch_block_value.hpp"
 
@@ -82,7 +83,7 @@ std::vector<std::string> split_unit_separator(std::string_view value) {
 template <typename Fn>
 bool try_select(clickhouse::Client& client, const std::string& sql, Fn&& fn, std::string* error = nullptr) {
   try {
-    client.Select(sql, std::forward<Fn>(fn));
+    ch_select(client, sql, std::forward<Fn>(fn));
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();

@@ -287,6 +287,8 @@ cd tests && QUERY_LIBRARY_DISABLED_BASE_URL=http://127.0.0.1:18080 \
   python3 -m pytest -q backend-functional/test_query_library.py
 ```
 
+The statements and the connections of ChDash have C++ unit tests (`native/ch_query_test.cpp`, CMake option `CHDASH_BUILD_CH_QUERY_TESTS`, target `chdash_ch_query_test`). Without a server they check the settings that a statement gets from its scope and from the settings profile of the user. With `CHDASH_TEST_CLICKHOUSE_URI` (for example `clickhouse://test:test@clickhouse:9000` on the network of the test stack) they also check these points: a statement that a callback interrupts never leaves its packets to the next lease, a callback that stops reading keeps its connection, the settings reach ClickHouse, the deadline and the cancel stop a statement before it is sent, and the pool bounds its leases. `harness/test_ch_query_contract.py` holds the source contract of these rules (for example, no statement and no connection outside `src/ch_query.cpp`).
+
 The path of a result to the browser has C++ unit tests (`native/result_path_test.cpp`, CMake option `CHDASH_BUILD_RESULT_TESTS`, target `chdash_result_path_test`): the JSON cell encoder against the generic algorithm (and a ratio budget for Map cells), and the thread that encodes the blocks. `harness/test_query_encoding_contract.py` runs the binary when `RESULT_PATH_TEST_BINARY` names it and holds the source contract. The performance phase has the case `select_weather_buffer_120k` (120,064 rows with nested columns), with a budget on the JSON encoding time that the `done` event reports (`timing_ms.encode`). `frontend/specs/streaming.spec.js` holds the budget of the stream reader (a ratio to `EventSource`) and the tests of the Elapsed tile.
 
 The store's C++ unit tests (`native/query_library_test.cpp`, CMake option `CHDASH_BUILD_QUERY_LIBRARY_TESTS`) run through `harness/test_query_library_contract.py` when `QUERY_LIBRARY_TEST_BINARY` names the built `chdash_query_library_test`.
@@ -399,7 +401,7 @@ These checks find defects that the functional tests do not see: a dangling refer
 
 | Command | What runs |
 | --- | --- |
-| `native` | `chdash_query_library_test`, `chdash_system_monitor_test`, `chdash_mcp_test` and `chdash_result_path_test` |
+| `native` | `chdash_query_library_test`, `chdash_system_monitor_test`, `chdash_mcp_test`, `chdash_result_path_test`, `chdash_format_depth_test` and `chdash_ch_query_test` (with its server cases when the network of the test stack exists) |
 | `backend` | the sanitized server next to the test ClickHouse, then the format and type checks of `tests/api`, `tests/backend-functional` (the whole directory) and `tests/harness` against it |
 | `frontend` | Playwright (`desktop-1440`) on `page-per-view`, `query-library`, `observability`, `system` and `explorer-nav` against the sanitized server |
 | `all` | the three above |

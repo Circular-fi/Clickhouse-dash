@@ -2,6 +2,7 @@
 
 #include "allowed_objects.hpp"
 #include "ch_block_value.hpp"
+#include "ch_query.hpp"
 #include "explorer_catalog.hpp"
 
 #include <algorithm>
@@ -84,7 +85,7 @@ std::string object_key(const std::string& database, const std::string& table) {
 template <typename Fn>
 bool try_select(clickhouse::Client& client, const std::string& sql, Fn&& fn, std::string* error) {
   try {
-    client.Select(sql, std::forward<Fn>(fn));
+    ch_select(client, sql, std::forward<Fn>(fn));
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();

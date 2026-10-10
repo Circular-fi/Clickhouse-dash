@@ -65,7 +65,7 @@ def test_analysis_log_lookup_is_bounded_and_flush_is_opt_in() -> None:
     # The span log is flushed at most once, never on a fixed cadence.
     assert 'next_otel_flush' not in source
     gate = read("src/system_log_flush.hpp")
-    assert 'client.Execute("SYSTEM FLUSH LOGS " + logs);' in gate
+    assert 'ch_execute(client, "SYSTEM FLUSH LOGS " + logs);' in gate
     assert 'Execute("SYSTEM FLUSH' not in source
 
 

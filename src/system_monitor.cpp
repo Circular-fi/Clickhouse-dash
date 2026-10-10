@@ -3,6 +3,7 @@
 #include "allowed_objects.hpp"
 #include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
+#include "ch_query.hpp"
 #include "facet_limits.hpp"
 
 #include <clickhouse/exceptions.h>
@@ -344,7 +345,7 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
   out = MonitorCapabilities{};
   out.detected_at_ms = monitor_now_ms();
   try {
-    system.Select("SELECT toString(currentUser())" + monitor_settings_sql(5, 10, 1), [&](const clickhouse::Block& block) {
+    ch_select(system, "SELECT toString(currentUser())" + monitor_settings_sql(5, 10, 1), [&](const clickhouse::Block& block) {
       if (block.GetRowCount() > 0) out.system_user = text(block, 0, 0);
     });
     std::vector<std::string> tables = monitor_detected_tables();
@@ -352,7 +353,7 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
       (void)columns;
       tables.push_back(table);
     }
-    system.Select(
+    ch_select(system,
         "SELECT toString(name) FROM system.tables WHERE database = 'system' AND name IN " + in_list(tables) +
             monitor_settings_sql(5, 1000000, 1000),
         [&](const clickhouse::Block& block) {
@@ -364,7 +365,7 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
       column_tables.push_back(table);
       column_names.insert(column_names.end(), columns.begin(), columns.end());
     }
-    system.Select(
+    ch_select(system,
         "SELECT toString(`table`), toString(name) FROM system.columns WHERE database = 'system' AND `table` IN " +
             in_list(column_tables) + " AND name IN " + in_list(column_names) + monitor_settings_sql(5, 1000000, 10000),
         [&](const clickhouse::Block& block) {
@@ -381,7 +382,7 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
     // Performance section's Replication chart shows only then. Not readable:
     // the chart stays hidden, the rest is detected.
     try {
-      system.Select("SELECT toString(count() > 0) FROM system.replicas" + monitor_settings_sql(5, 1000000, 1),
+      ch_select(system, "SELECT toString(count() > 0) FROM system.replicas" + monitor_settings_sql(5, 1000000, 1),
                     [&](const clickhouse::Block& block) {
                       if (block.GetRowCount() > 0) out.replicated_tables = flag(text(block, 0, 0));
                     });
@@ -417,7 +418,7 @@ bool load_system_monitor_overview(
   // Server identity: hostName() is the name the server reports for itself
   // (the container or host name, not system.clusters.host_name).
   try {
-    system.Select("SELECT toString(hostName()), toString(version()), toString(timezone()), toString(uptime())" +
+    ch_select(system, "SELECT toString(hostName()), toString(version()), toString(timezone()), toString(uptime())" +
                       monitor_settings_sql(5, 10, 1),
                   [&](const clickhouse::Block& block) {
                     if (block.GetRowCount() == 0) return;
@@ -434,7 +435,7 @@ bool load_system_monitor_overview(
   // Server tiles: allowlisted current values. A metric this server version
   // does not have is simply absent (the tile shows the empty value).
   try {
-    system.Select("SELECT toString(metric), toString(value) FROM system.asynchronous_metrics WHERE metric IN " +
+    ch_select(system, "SELECT toString(metric), toString(value) FROM system.asynchronous_metrics WHERE metric IN " +
                       in_list(monitor_overview_async_metrics()) + monitor_settings_sql(5, 100000, 1000),
                   [&](const clickhouse::Block& block) {
                     for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -446,7 +447,7 @@ bool load_system_monitor_overview(
     ++failed;
   }
   try {
-    system.Select("SELECT toString(metric), toString(value) FROM system.metrics WHERE metric IN " +
+    ch_select(system, "SELECT toString(metric), toString(value) FROM system.metrics WHERE metric IN " +
                       in_list(monitor_overview_metrics()) + monitor_settings_sql(5, 100000, 1000),
                   [&](const clickhouse::Block& block) {
                     for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -472,7 +473,7 @@ bool load_system_monitor_overview(
     sql += " FROM system.clusters ORDER BY cluster, shard_num, replica_num LIMIT " +
            std::to_string(kMonitorTopologyRowLimit + 1) + monitor_settings_sql(5, 100000, kMonitorTopologyRowLimit + 1);
     try {
-      system.Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(system, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           if (out.topology.size() >= kMonitorTopologyRowLimit) {
             out.topology_truncated = true;
@@ -517,7 +518,7 @@ bool load_system_monitor_overview(
           in_list(visibility.databases()) + " LIMIT " + std::to_string(kMonitorReplicaRowLimit + 1) +
           monitor_settings_sql(5, 100000, kMonitorReplicaRowLimit + 1);
       size_t seen = 0;
-      system.Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(system, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           if (++seen > kMonitorReplicaRowLimit) {
             summary.truncated = true;
@@ -946,7 +947,7 @@ void queries_failed(clickhouse::Client& runner, const MonitorQueriesRequest& r, 
     const std::string sql = "SELECT toString(count()) FROM system.query_log WHERE event_date >= toDate(toDateTime(" +
                             std::to_string(since) + ")) AND event_time >= toDateTime(" + std::to_string(since) + ")" +
                             monitor_settings_sql(kQueriesEstimateSeconds, std::max(r.max_rows, kQueriesEstimateRowsCap), 1);
-    runner.Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(runner, sql, [&](const clickhouse::Block& block) {
       if (block.GetRowCount() > 0) rows = u64(text(block, 0, 0));
     });
   } catch (const clickhouse::ServerException&) {
@@ -1465,7 +1466,7 @@ bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& r
     const bool broken = caps.has_column("disks", "is_broken");
     const bool encrypted = caps.has_column("disks", "is_encrypted");
     const bool remote = caps.has_column("disks", "is_remote");
-    system.Select(monitor_disks_sql(caps), [&](const clickhouse::Block& block) {
+    ch_select(system, monitor_disks_sql(caps), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         if (out.disks.size() >= kMonitorDiskRowLimit) {
           out.disks_truncated = true;
@@ -1502,7 +1503,7 @@ bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& r
     const bool move_factor = caps.has_column("storage_policies", "move_factor");
     const bool no_merge = caps.has_column("storage_policies", "prefer_not_to_merge");
     const bool ttl_on_insert = caps.has_column("storage_policies", "perform_ttl_move_on_insert");
-    system.Select(monitor_storage_policies_sql(caps), [&](const clickhouse::Block& block) {
+    ch_select(system, monitor_storage_policies_sql(caps), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         if (out.volumes.size() >= kMonitorPolicyRowLimit) {
           out.volumes_truncated = true;
@@ -1538,7 +1539,7 @@ bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& r
     std::vector<std::string> databases = discover_visible_databases(runner);
     std::sort(databases.begin(), databases.end());
     if (!databases.empty()) {
-      system.Select(monitor_disk_usage_sql(databases), [&](const clickhouse::Block& block) {
+      ch_select(system, monitor_disk_usage_sql(databases), [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           if (out.usage.size() >= kMonitorDiskUsageRowLimit) {
             out.usage_truncated = true;
@@ -1695,7 +1696,7 @@ void load_system_monitor_disk_growth(clickhouse::Client& system, clickhouse::Cli
     MonitorSeriesSource& source = out.sources["disks"];
     source.table = "disks";
     try {
-      system.Select("SELECT toString(name), toString(free_space), toString(total_space) FROM system.disks ORDER BY name LIMIT " +
+      ch_select(system, "SELECT toString(name), toString(free_space), toString(total_space) FROM system.disks ORDER BY name LIMIT " +
                         std::to_string(kMonitorDiskRowLimit) + monitor_settings_sql(kDisksTimeBudgetSeconds, 100000, kMonitorDiskRowLimit),
                     [&](const clickhouse::Block& block) {
                       for (size_t row = 0; row < block.GetRowCount(); ++row) {

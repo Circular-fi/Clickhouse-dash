@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ch_query.hpp"
+
 #include <clickhouse/client.h>
 
 #include <chrono>
@@ -56,7 +58,7 @@ public:
     lk.unlock();
     std::string failure;
     try {
-      client.Execute("SYSTEM FLUSH LOGS " + logs);
+      ch_execute(client, "SYSTEM FLUSH LOGS " + logs);
     } catch (const std::exception& e) {
       failure = e.what();
     }

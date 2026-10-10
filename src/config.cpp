@@ -69,6 +69,8 @@ void normalize_config(AppConfig& cfg) {
   cfg.client_pool_idle_ttl_ms = std::max(0, std::min(24 * 60 * 60 * 1000, cfg.client_pool_idle_ttl_ms));
   cfg.client_pool_validate_after_idle_ms = std::max(0, std::min(24 * 60 * 60 * 1000, cfg.client_pool_validate_after_idle_ms));
   cfg.client_pool_reaper_interval_ms = std::max(250, std::min(60 * 1000, cfg.client_pool_reaper_interval_ms));
+  cfg.client_pool_max_leased_per_uri = std::min<size_t>(100'000, cfg.client_pool_max_leased_per_uri);
+  cfg.client_pool_lease_wait_ms = std::max(0, std::min(60 * 1000, cfg.client_pool_lease_wait_ms));
 
   cfg.format_cache_max_entries = std::min<size_t>(100'000, cfg.format_cache_max_entries);
   cfg.format_cache_max_bytes = std::min<size_t>(1024 * 1024 * 1024, cfg.format_cache_max_bytes);
@@ -741,11 +743,14 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
   }
 
   if (const auto* pool = optional_block(root, "client_pool", source)) {
-    validate_object(*pool, "client_pool", {"max_idle", "idle_ttl_ms", "validate_after_idle_ms", "reaper_interval_ms"}, {});
+    validate_object(*pool, "client_pool", {"max_idle", "idle_ttl_ms", "validate_after_idle_ms", "reaper_interval_ms",
+                                           "max_leased_per_uri", "lease_wait_ms"}, {});
     if (auto v = int_attr(*pool, "max_idle", "client_pool")) cfg.client_pool_max_idle_per_key = size_value(*v, "client_pool.max_idle");
     if (auto v = int_attr(*pool, "idle_ttl_ms", "client_pool")) cfg.client_pool_idle_ttl_ms = int_value(*v, "client_pool.idle_ttl_ms");
     if (auto v = int_attr(*pool, "validate_after_idle_ms", "client_pool")) cfg.client_pool_validate_after_idle_ms = int_value(*v, "client_pool.validate_after_idle_ms");
     if (auto v = int_attr(*pool, "reaper_interval_ms", "client_pool")) cfg.client_pool_reaper_interval_ms = int_value(*v, "client_pool.reaper_interval_ms");
+    if (auto v = int_attr(*pool, "max_leased_per_uri", "client_pool")) cfg.client_pool_max_leased_per_uri = size_value(*v, "client_pool.max_leased_per_uri");
+    if (auto v = int_attr(*pool, "lease_wait_ms", "client_pool")) cfg.client_pool_lease_wait_ms = int_value(*v, "client_pool.lease_wait_ms");
   }
 
   if (const auto* cache = optional_block(root, "format_cache", source)) {

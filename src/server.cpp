@@ -205,7 +205,9 @@ Server::Server(AppConfig cfg, bool start_background)
           cfg_.client_pool_max_idle_per_key,
           std::chrono::milliseconds(cfg_.client_pool_idle_ttl_ms),
           std::chrono::milliseconds(cfg_.client_pool_validate_after_idle_ms),
-          std::chrono::milliseconds(cfg_.client_pool_reaper_interval_ms))),
+          std::chrono::milliseconds(cfg_.client_pool_reaper_interval_ms),
+          cfg_.client_pool_max_leased_per_uri,
+          std::chrono::milliseconds(cfg_.client_pool_lease_wait_ms))),
       format_cache_(std::make_unique<FormatCache>(
           cfg_.format_cache_max_entries,
           cfg_.format_cache_max_bytes,

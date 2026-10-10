@@ -262,7 +262,9 @@ def test_every_system_read_is_read_only_bounded_and_tagged():
     for row in rows:
         assert row["readonly"] == "2", row
         assert int(row["budget"]) > 0 and int(row["read_cap"]) > 0, row
-        assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row
+        # query_log lists a setting that differs from the default: 'throw' is the default of the three modes, so a read
+        # that ChDash bounds through its scope (ch_query.hpp: Activity, Keeper) shows them empty, never 'break'.
+        assert all(row[mode] in ("throw", "") for mode in ("on_timeout", "on_read_cap", "on_result_cap")), row
 
 
 def test_refresh_bypasses_the_short_cache():
@@ -485,7 +487,9 @@ def test_every_series_read_is_read_only_bounded_and_tagged():
     for row in rows:
         assert row["readonly"] == "2", row
         assert int(row["budget"]) == 10 and int(row["read_cap"]) > 0 and int(row["result_cap"]) > 0, row
-        assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row
+        # query_log lists a setting that differs from the default: 'throw' is the default of the three modes, so a read
+        # that ChDash bounds through its scope (ch_query.hpp: Activity, Keeper) shows them empty, never 'break'.
+        assert all(row[mode] in ("throw", "") for mode in ("on_timeout", "on_read_cap", "on_result_cap")), row
 
 
 # ---------------------------------------------------------------------------
@@ -856,7 +860,9 @@ def test_every_queries_read_runs_as_the_runner_read_only_bounded_and_tagged(topq
     for row in rows:
         assert row["user"] == "chdash_runner", row["user"]
         assert row["readonly"] == "2" and int(row["budget"]) > 0 and int(row["read_cap"]) == 50_000_000, row
-        assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row
+        # query_log lists a setting that differs from the default: 'throw' is the default of the three modes, so a read
+        # that ChDash bounds through its scope (ch_query.hpp: Activity, Keeper) shows them empty, never 'break'.
+        assert all(row[mode] in ("throw", "") for mode in ("on_timeout", "on_read_cap", "on_result_cap")), row
         assert "log_comment != 'chdash-system'" in row["query"], row["query"][:300]
 
 
@@ -1132,7 +1138,9 @@ def test_every_disks_read_is_read_only_bounded_and_tagged():
     for row in rows:
         assert row["readonly"] == "2", row
         assert int(row["budget"]) > 0 and int(row["read_cap"]) > 0 and int(row["result_cap"]) > 0, row
-        assert row["on_timeout"] == "throw" and row["on_read_cap"] == "throw" and row["on_result_cap"] == "throw", row
+        # query_log lists a setting that differs from the default: 'throw' is the default of the three modes, so a read
+        # that ChDash bounds through its scope (ch_query.hpp: Activity, Keeper) shows them empty, never 'break'.
+        assert all(row[mode] in ("throw", "") for mode in ("on_timeout", "on_read_cap", "on_result_cap")), row
 
 
 # The database and table filters (user, 2026-10-04 evening): query_log's

@@ -12,11 +12,15 @@ ClickHouseClientPool::ClickHouseClientPool(
   size_t max_idle_per_key,
   std::chrono::milliseconds idle_ttl,
   std::chrono::milliseconds validate_after_idle,
-  std::chrono::milliseconds reaper_interval
+  std::chrono::milliseconds reaper_interval,
+  size_t max_leased_per_uri,
+  std::chrono::milliseconds lease_wait
 ) : max_idle_per_key_(max_idle_per_key),
     idle_ttl_(std::max(std::chrono::milliseconds(0), idle_ttl)),
     validate_after_idle_(std::max(std::chrono::milliseconds(0), validate_after_idle)),
-    reaper_interval_(std::max(std::chrono::milliseconds(250), reaper_interval)) {
+    reaper_interval_(std::max(std::chrono::milliseconds(250), reaper_interval)),
+    max_leased_per_uri_(max_leased_per_uri),
+    lease_wait_(std::max(std::chrono::milliseconds(0), lease_wait)) {
   if (max_idle_per_key_ > 0 && idle_ttl_.count() > 0) {
     reaper_thread_ = std::thread([this] { reaper_loop(); });
   }
@@ -28,6 +32,7 @@ ClickHouseClientPool::~ClickHouseClientPool() {
     stopping_ = true;
   }
   cv_.notify_all();
+  lease_cv_.notify_all();
   if (reaper_thread_.joinable()) reaper_thread_.join();
   clear();
 }
@@ -58,14 +63,28 @@ std::shared_ptr<clickhouse::Client> ClickHouseClientPool::acquire(
   std::string* err
 ) {
   const std::string key = make_key(uri, connect_timeout, recv_timeout, send_timeout);
-  const auto now = std::chrono::steady_clock::now();
 
-  std::unique_ptr<clickhouse::Client> client;
-  std::vector<std::unique_ptr<clickhouse::Client>> expired;
+  ChClientPtr client;
+  std::vector<ChClientPtr> expired;
   bool validate = false;
   bool bounded_receive_timeout = recv_timeout.count() > 0;
   {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::unique_lock<std::mutex> lock(mu_);
+    // The lease is counted from here: a connection that fails to open gives it back below.
+    if (max_leased_per_uri_ > 0) {
+      const bool free = lease_cv_.wait_for(lock, lease_wait_, [&] {
+        return stopping_ || leased_[uri] < max_leased_per_uri_;
+      });
+      if (stopping_ || !free) {
+        if (err) {
+          *err = "pool_exhausted: " + std::to_string(max_leased_per_uri_) +
+                 " ClickHouse connections of this host are in use (client_pool.max_leased_per_uri).";
+        }
+        return nullptr;
+      }
+    }
+    ++leased_[uri];
+    const auto now = std::chrono::steady_clock::now();
     collect_expired_locked(now, expired);
 
     auto it = idle_.find(key);
@@ -116,12 +135,21 @@ std::shared_ptr<clickhouse::Client> ClickHouseClientPool::acquire(
   }
 
   if (!client) {
+    const auto give_back = [&] {
+      std::lock_guard<std::mutex> lock(mu_);
+      if (auto it = leased_.find(uri); it != leased_.end() && --it->second == 0) leased_.erase(it);
+      lease_cv_.notify_one();
+    };
     auto opt = client_options_from_uri(uri, connect_timeout, recv_timeout, send_timeout, err);
-    if (!opt) return nullptr;
+    if (!opt) {
+      give_back();
+      return nullptr;
+    }
     try {
-      client = std::make_unique<clickhouse::Client>(*opt);
+      client = ch_open_client(*opt);
     } catch (const std::exception& e) {
       if (err) *err = e.what();
+      give_back();
       return nullptr;
     }
   }
@@ -130,37 +158,40 @@ std::shared_ptr<clickhouse::Client> ClickHouseClientPool::acquire(
   auto self = shared_from_this();
   return std::shared_ptr<clickhouse::Client>(
       raw,
-      [self, key, bounded_receive_timeout](clickhouse::Client* c) {
-        self->release(key, c, bounded_receive_timeout);
+      [self, key, uri, bounded_receive_timeout](clickhouse::Client* c) {
+        self->release(key, uri, c, bounded_receive_timeout);
       });
 }
 
 void ClickHouseClientPool::invalidate(
   const std::shared_ptr<clickhouse::Client>& client
 ) noexcept {
-  if (!client) return;
+  if (client) ch_mark_dirty(*client);
+}
 
-  try {
-    std::lock_guard<std::mutex> lock(mu_);
-    invalidated_.insert(client.get());
-  } catch (...) {
-    // If bookkeeping allocation fails, the caller can still reset or release
-    // the client. Avoid throwing from an error-recovery path.
-  }
+size_t ClickHouseClientPool::leased(const std::string& uri) {
+  std::lock_guard<std::mutex> lock(mu_);
+  const auto it = leased_.find(uri);
+  return it == leased_.end() ? 0 : it->second;
 }
 
 void ClickHouseClientPool::release(
   const std::string& key,
+  const std::string& uri,
   clickhouse::Client* client,
   bool bounded_receive_timeout
 ) noexcept {
   if (!client) return;
 
-  std::unique_ptr<clickhouse::Client> owned(client);
+  ChClientPtr owned(client);
+  // A connection that a statement left in an unknown state is closed, never lent again.
+  const bool dirty = ch_connection_dirty(*client);
 
   try {
     std::lock_guard<std::mutex> lock(mu_);
-    if (stopping_ || invalidated_.erase(client) != 0 || max_idle_per_key_ == 0) {
+    if (auto it = leased_.find(uri); it != leased_.end() && --it->second == 0) leased_.erase(it);
+    lease_cv_.notify_one();
+    if (stopping_ || dirty || max_idle_per_key_ == 0) {
       return;
     }
 
@@ -180,7 +211,7 @@ void ClickHouseClientPool::release(
 
 void ClickHouseClientPool::collect_expired_locked(
   std::chrono::steady_clock::time_point now,
-  std::vector<std::unique_ptr<clickhouse::Client>>& expired
+  std::vector<ChClientPtr>& expired
 ) {
   if (idle_ttl_.count() <= 0) return;
 
@@ -205,7 +236,7 @@ void ClickHouseClientPool::collect_expired_locked(
 
 void ClickHouseClientPool::reaper_loop() {
   for (;;) {
-    std::vector<std::unique_ptr<clickhouse::Client>> expired;
+    std::vector<ChClientPtr> expired;
     {
       std::unique_lock<std::mutex> lock(mu_);
       cv_.wait_for(lock, reaper_interval_, [&] { return stopping_; });
@@ -221,7 +252,6 @@ void ClickHouseClientPool::clear() {
   {
     std::lock_guard<std::mutex> lock(mu_);
     idle.swap(idle_);
-    invalidated_.clear();
   }
   // Destroy sockets outside the mutex.
   idle.clear();

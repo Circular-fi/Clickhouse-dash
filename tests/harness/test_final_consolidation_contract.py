@@ -208,7 +208,7 @@ def test_clickhouse_text_decoder_handles_lowcardinality_metadata_without_empty_s
 def test_query_database_scope_never_fails_open_to_default_database() -> None:
     session = read("src/query_session.cpp")
     run_query = session[session.index("void QuerySession::run_query()"): ]
-    assert 'if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));' in run_query
+    assert 'if (!database_.empty()) ch_execute(*client_query_, "USE " + quote_ident(database_));' in run_query
     assert "apply_database_best_effort" not in run_query
     assert "auto apply_database =" in run_query
     apply = run_query[run_query.index("auto apply_database ="):run_query.index("auto execute_select_attempt")]

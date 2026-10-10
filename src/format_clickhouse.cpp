@@ -56,7 +56,7 @@ FormatQueryResult format_query_once(
         result.formatted_sql.emplace(value.data(), value.size());
       }
     });
-    client.Select(query);
+    ch_execute(client, query);
   } catch (const std::system_error& e) {
     result.failure = FormatQueryFailureKind::transport;
     result.message = e.what();

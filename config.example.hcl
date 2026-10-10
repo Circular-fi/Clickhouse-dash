@@ -56,6 +56,10 @@ client_pool {
   idle_ttl_ms            = 60000
   validate_after_idle_ms = 15000
   reaper_interval_ms     = 5000
+  # The connections lent at once for one ClickHouse URI (0 = no limit). Past
+  # it, a request waits lease_wait_ms for one, then fails with pool_exhausted.
+  max_leased_per_uri     = 128
+  lease_wait_ms          = 5000
 }
 
 format_cache {

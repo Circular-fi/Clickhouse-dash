@@ -208,7 +208,7 @@ void cancel_export_best_effort(
       else if (ch == '\'') escaped += "\\'";
       else escaped.push_back(ch);
     }
-    cancel->Execute("KILL QUERY WHERE query_id = '" + escaped + "' ASYNC");
+    ch_execute(*cancel, "KILL QUERY WHERE query_id = '" + escaped + "' ASYNC");
   } catch (...) {
   }
 }
@@ -583,7 +583,7 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
 
               // User/panel SQL always executes through runner_uri, including
               // CREATE/ALTER/INSERT/etc. system_uri is never used here.
-              client->Execute(query);
+              ch_execute(*client, query);
               if (serializer && !serializer->finish()) disconnected = true;
               if (disconnected) throw ClientDisconnected();
               if (result_entry_open) {

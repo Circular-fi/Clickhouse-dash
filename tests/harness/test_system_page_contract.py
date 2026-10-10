@@ -88,7 +88,7 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
                  "log_comment = 'chdash-system'"]:
         assert part in settings, part
     assert "'break'" not in source
-    selects = source.count(".Select(")
+    selects = source.count("ch_select(")
     assert selects >= 8, selects
     series = source.count("monitor_settings_sql(kSeriesTimeBudgetSeconds, ")
     assert series == 3, series
@@ -96,7 +96,7 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
     assert queries == 5, queries
     disks = sum(builder_body(source, name).count("monitor_settings_sql(") for name in DISK_BUILDERS)
     assert disks == 5, disks
-    builder_selects = sum(source.count(f".Select({name}(") for name in DISK_BUILDERS)
+    builder_selects = sum(source.count(f"ch_select(system, {name}(") for name in DISK_BUILDERS)
     assert builder_selects == 3, builder_selects
     assert source.count("bounded_select(") == 3
     assert source.count("monitor_settings_sql(") - 1 == selects - builder_selects + series + queries + disks, (selects, series, queries, disks, source.count("monitor_settings_sql("))

@@ -108,7 +108,7 @@ std::string attribute_expr(const std::string& column, const std::string& type) {
 LogColumns load_log_columns(clickhouse::Client& client, const LogSettings& logs) {
   LogColumns out;
   std::set<std::string> names;
-  client.Select(
+  ch_select(client,
       "SELECT toString(name), toString(type) FROM system.columns WHERE database = " + allowlist_quote_string(logs.database) +
       " AND `table` = " + allowlist_quote_string(logs.table),
       [&](const clickhouse::Block& block) {
@@ -333,7 +333,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   };
   std::vector<Record> records;
   try {
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Record r;
         r.timestamp_ns = ch_block_text_at(block, 0, row);

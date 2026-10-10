@@ -22,7 +22,7 @@ These items are startup errors:
 
 - `server`: listen host and port, and the capacity of the HTTP server (refer to [The server block](#the-server-block)).
 - `query`: limits for interactive queries, batching, SSE backpressure, compatibility DESCRIBE behavior and session lifecycle.
-- `client_pool`: lifecycle of the native ClickHouse connection pool.
+- `client_pool`: lifecycle of the native ClickHouse connection pool, and the bound of its connections.
 - `format_cache`: bounded cache of the SQL formatter.
 - `health`: polling of the host health.
 - `traces`: optional OpenTelemetry trace explorer. It uses a ClickHouse traces table of an OTel Collector.
@@ -75,6 +75,23 @@ A binary with embedded assets (every release) serves only those. A build without
 them (`-DCHDASH_EMBED_STATIC=OFF`, the test image) reads `./static` and serves a
 file only when its resolved path stays inside that directory.
 
+## The connections
+
+A connection goes back to the pool only when its last statement ended in a known state: the end of its result, or an error that ClickHouse sent. A statement that a transport error, a receive timeout, a cancel or an error of ChDash interrupted can leave its packets in the socket. ChDash then closes the connection, and a next statement of the same request opens a new one.
+
+```hcl
+client_pool {
+  max_leased_per_uri = 128
+  lease_wait_ms      = 5000
+}
+```
+
+- `max_leased_per_uri` (default 128, 0 = no limit): the connections that are lent at once for one ClickHouse URI. Past it, a request waits for a connection.
+- `lease_wait_ms` (0..60000, default 5000): how long a request waits. Then it fails with `pool_exhausted`.
+- A cancel (`KILL QUERY`) and an export use a connection of their own, outside of the pool.
+
+The preview limit of a run (`query.result_preview_row_limit`) is a normal end. ChDash stops reading with a Cancel packet of the native protocol: the connection stays usable, and ChDash sends no `KILL QUERY`.
+
 ## Host identities and the access audit
 
 A host has two ClickHouse users, and the health check proves one thing about them: the runner connects. A user that connects and may read nothing is healthy for the health check and useless for the features. For this reason ChDash audits the grants of both users with `CHECK GRANT`. It never reads data and never uses `SHOW GRANTS`. The audit runs with the first health cycles and every 10 minutes.
@@ -102,6 +119,8 @@ ChDash has no end-user login, no Bearer authentication and no RBAC for each user
 Every caller who can reach a given panel and host therefore has the same ClickHouse permissions. These are the permissions of its `runner_uri`. If you need different sets of permissions, expose different deployments or hosts that use different runners. Do this outside ChDash.
 
 The server still signs short-lived internal capability tokens with a random secret that it creates at boot. These tokens are not user identities. For example, `/api/query/cancel` requires the signed token that the server issued for that query. Cancel tokens carry `purpose=cancel`, the host ID, the query ID, `iat` and `exp`. `query.cancel_token_ttl_ms` has the default value of 48 hours. When ChDash restarts, it changes the signing secret. Older capabilities become invalid before their nominal expiry.
+
+`POST /api/query/cancel` answers `{"ok": true, "stopped": <bool>, "killed": <n>}`. `stopped` is true when a run of this server owned the query and stopped it. `killed` is the number of ClickHouse queries that `KILL QUERY` found (0: nothing ran any more). When `KILL QUERY` cannot run (a missing grant, no connection), the answer has `kill_error`, and the run of this server stops anyway. When no run of this server owned the query, that failure is a 502 `cancel_failed`.
 
 ## Evolution blocks
 

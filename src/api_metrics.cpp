@@ -321,7 +321,7 @@ std::set<std::string> existing_kinds(clickhouse::Client& client, const HostSpec&
   }
   names += ")";
   std::set<std::string> tables;
-  client.Select("SELECT toString(name) FROM system.tables WHERE database = " + quote_string(metrics.database) +
+  ch_select(client, "SELECT toString(name) FROM system.tables WHERE database = " + quote_string(metrics.database) +
                     " AND name IN " + names,
                 [&](const clickhouse::Block& block) {
                   for (size_t row = 0; row < block.GetRowCount(); ++row) tables.insert(ch_block_text_at(block, 0, row));
@@ -631,7 +631,7 @@ MetricInfo load_metric_info(clickhouse::Client& client, const std::string& table
       " FROM " + table + " PREWHERE " + prewhere + " WHERE " + where + kQuerySettings;
   MetricInfo info;
   const auto started = Clock::now();
-  client.Select(sql, [&](const clickhouse::Block& block) {
+  ch_select(client, sql, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       info.unit = ch_block_text_at(block, 0, row);
       info.description = ch_block_text_at(block, 1, row);
@@ -825,7 +825,7 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
       }
       sql += ") ORDER BY service, metric, kind LIMIT " + std::to_string(kCatalogLimit + 1) + kQuerySettings;
       const auto query_started = Clock::now();
-      client->Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(*client, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           if (rows >= kCatalogLimit) {
             truncated = true;
@@ -953,7 +953,7 @@ void Server::handle_metrics_attributes(const httplib::Request& req, httplib::Res
                               " PREWHERE " + prewhere + " WHERE " + visibility + filters_sql(filters) + " LIMIT " +
                               std::to_string(kAttributeKeyLimit + 1) + kQuerySettings;
       const auto query_started = Clock::now();
-      ctx.client->Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(*ctx.client, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) keys.push_back(ch_block_text_at(block, 0, row));
       });
       query_ms += elapsed_ms(query_started);
@@ -973,7 +973,7 @@ void Server::handle_metrics_attributes(const httplib::Request& req, httplib::Res
                               quote_string(key) + ")" + filters_sql(filters, key) + " GROUP BY v ORDER BY n DESC, v LIMIT " +
                               std::to_string(kAttributeValueLimit + 1) + ")" + kQuerySettings;
       const auto query_started = Clock::now();
-      ctx.client->Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(*ctx.client, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           values.emplace_back(ch_block_text_at(block, 0, row), text_to_i64(ch_block_text_at(block, 1, row)));
         }
@@ -1195,7 +1195,7 @@ void Server::handle_metrics_series(const httplib::Request& req, httplib::Respons
     size_t rows = 0;
     bool truncated_rows = false;
     const auto query_started = Clock::now();
-    ctx.client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*ctx.client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         if (rows >= kMaxSeriesRows) {
           truncated_rows = true;
@@ -1479,7 +1479,7 @@ void Server::handle_metrics_exemplars(const httplib::Request& req, httplib::Resp
     };
     std::vector<Exemplar> exemplars;
     const auto query_started = Clock::now();
-    ctx.client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*ctx.client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         exemplars.push_back(Exemplar{text_to_i64(ch_block_text_at(block, 1, row)), text_to_double(ch_block_text_at(block, 2, row)),
                                      ch_block_text_at(block, 3, row), ch_block_text_at(block, 4, row),

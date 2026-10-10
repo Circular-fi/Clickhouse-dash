@@ -1,5 +1,6 @@
 #include "explorer_catalog.hpp"
 #include "api_error.hpp"
+#include "ch_query.hpp"
 #include "ddl_text_cache.hpp"
 #include "ch_block_value.hpp"
 #include "ch_block_numeric.hpp"
@@ -434,7 +435,7 @@ bool block_bool_at(const clickhouse::Block& block, size_t column, size_t row) {
 template <typename Fn>
 bool try_select(clickhouse::Client& client, const std::string& sql, Fn&& fn, std::string* error = nullptr) {
   try {
-    client.Select(sql, std::forward<Fn>(fn));
+    ch_select(client, sql, std::forward<Fn>(fn));
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();
@@ -3090,7 +3091,7 @@ bool load_explorer_preview(
   sql += " FROM " + qualified_ident(database, table) + " LIMIT " + std::to_string(limit);
 
   try {
-    runner.Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(runner, sql, [&](const clickhouse::Block& block) {
       if (block.GetRowCount() == 0) return;
       if (block.GetColumnCount() != columns.size()) {
         throw std::runtime_error(

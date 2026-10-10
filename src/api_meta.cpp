@@ -287,7 +287,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     }
 
     try {
-      client->Select("SELECT keyword FROM system.keywords ORDER BY lower(keyword), keyword", [&](const clickhouse::Block& b) {
+      ch_select(*client, "SELECT keyword FROM system.keywords ORDER BY lower(keyword), keyword", [&](const clickhouse::Block& b) {
         if (b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
         auto col = b[0]->As<clickhouse::ColumnString>();
         if (!col) return;
@@ -384,7 +384,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     };
 
     auto load_functions_from_system = [&](const std::string& sql, bool with_origin, bool with_create_query) {
-      client->Select(sql, [&](const clickhouse::Block& b) {
+      ch_select(*client, sql, [&](const clickhouse::Block& b) {
         if (b.GetRowCount() == 0 || b.GetColumnCount() < 3) return;
         auto col_name = b[0]->As<clickhouse::ColumnString>();
         auto col_agg = b[1]->As<clickhouse::ColumnUInt8>();
@@ -415,7 +415,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     };
 
     auto load_functions_from_show = [&]() {
-      client->Select("SHOW FUNCTIONS", [&](const clickhouse::Block& b) {
+      ch_select(*client, "SHOW FUNCTIONS", [&](const clickhouse::Block& b) {
         if (b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
         auto col_name = b[0]->As<clickhouse::ColumnString>();
         if (!col_name) return;
@@ -446,7 +446,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       }
 
       try {
-        client->Select("SELECT name FROM system.aggregate_function_combinators WHERE is_internal = 0", [&](const clickhouse::Block& b) {
+        ch_select(*client, "SELECT name FROM system.aggregate_function_combinators WHERE is_internal = 0", [&](const clickhouse::Block& b) {
           if (b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
           auto col_name = b[0]->As<clickhouse::ColumnString>();
           if (!col_name) return;
@@ -513,7 +513,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
     auto fetch_databases_acl = [&]() -> std::vector<std::string> {
       std::vector<std::string> databases;
-      client->Select("SHOW DATABASES", [&](const clickhouse::Block& b) {
+      ch_select(*client, "SHOW DATABASES", [&](const clickhouse::Block& b) {
         if (b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
         auto col = b[0]->As<clickhouse::ColumnString>();
         if (!col) return;
@@ -539,7 +539,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       bool loaded = false;
 
       try {
-        client->Select("SHOW FULL TABLES FROM " + dbq, [&](const clickhouse::Block& b) {
+        ch_select(*client, "SHOW FULL TABLES FROM " + dbq, [&](const clickhouse::Block& b) {
           const size_t n = b.GetRowCount();
           if (!n || b.GetColumnCount() == 0) return;
           loaded = true;
@@ -557,7 +557,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       }
 
       if (!loaded) {
-        client->Select("SHOW TABLES FROM " + dbq, [&](const clickhouse::Block& b) {
+        ch_select(*client, "SHOW TABLES FROM " + dbq, [&](const clickhouse::Block& b) {
           const size_t n = b.GetRowCount();
           if (!n || b.GetColumnCount() == 0) return;
           tables.reserve(tables.size() + n);
@@ -601,7 +601,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     auto fetch_all_tables_system = [&]() -> std::optional<std::vector<MetaCatalogItem>> {
       std::vector<MetaCatalogItem> tables;
       try {
-        client->Select(
+        ch_select(*client,
           "SELECT database, name, engine "
           "FROM system.tables "
           "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') "
@@ -628,7 +628,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     auto fetch_all_columns_system = [&]() -> std::optional<std::vector<MetaCatalogItem>> {
       std::vector<MetaCatalogItem> columns;
       try {
-        client->Select(
+        ch_select(*client,
           "SELECT database, `table`, name, type "
           "FROM system.columns "
           "WHERE database NOT IN ('INFORMATION_SCHEMA', 'information_schema') "
@@ -679,7 +679,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
             if (!item.name.empty()) columns.push_back(std::move(item));
           }
         });
-        client->Select(query);
+        ch_execute(*client, query);
       } catch (const std::exception&) {
         return std::nullopt;
       }
@@ -690,7 +690,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
       std::vector<MetaCatalogItem> columns;
       const std::string table_ref = qualified_ident(table.database, table.name);
       auto load = [&](const std::string& sql) {
-        client->Select(sql, [&](const clickhouse::Block& b) {
+        ch_select(*client, sql, [&](const clickhouse::Block& b) {
           const size_t n = b.GetRowCount();
           if (!n || b.GetColumnCount() < 2) return;
           columns.reserve(columns.size() + n);
@@ -770,7 +770,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
           return false;
         }
 
-        client->Select(sql, [&](const clickhouse::Block& b) {
+        ch_select(*client, sql, [&](const clickhouse::Block& b) {
           const size_t n = b.GetRowCount();
           if (!n) return;
           out.items.reserve(out.items.size() + n);

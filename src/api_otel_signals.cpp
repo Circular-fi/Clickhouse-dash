@@ -191,7 +191,7 @@ std::map<std::string, TableInfo> load_table_infos(
   const std::string db = sql_quote(database);
   const std::string names = in_list(tables);
 
-  client.Select(
+  ch_select(client,
       "SELECT toString(name), toString(engine), toString(sorting_key), toString(primary_key), toString(partition_key) "
       "FROM system.tables WHERE database = " + db + " AND name IN " + names,
       [&](const clickhouse::Block& block) {
@@ -206,7 +206,7 @@ std::map<std::string, TableInfo> load_table_infos(
       });
   if (out.empty()) return out;
 
-  client.Select(
+  ch_select(client,
       "SELECT toString(`table`), toString(name), toString(type), toString(default_kind) "
       "FROM system.columns WHERE database = " + db + " AND `table` IN " + names + " ORDER BY `table`, position",
       [&](const clickhouse::Block& block) {
@@ -218,7 +218,7 @@ std::map<std::string, TableInfo> load_table_infos(
         }
       });
 
-  client.Select(
+  ch_select(client,
       "SELECT toString(`table`), toString(name), toString(type), toString(type_full), toString(expr), toString(granularity) "
       "FROM system.data_skipping_indices WHERE database = " + db + " AND `table` IN " + names + " ORDER BY `table`, name",
       [&](const clickhouse::Block& block) {
@@ -234,7 +234,7 @@ std::map<std::string, TableInfo> load_table_infos(
   // min_time/max_time come from the partition-key minmax index (exact to the
   // second for toDate(<time column>) partitions); min_date/max_date are the
   // day-precision fallback. Neither reads column data.
-  client.Select(
+  ch_select(client,
       "SELECT toString(`table`), toString(count()), toString(sum(rows)), toString(sum(bytes_on_disk)), "
       "toString(toUnixTimestamp(min(min_time))), toString(toUnixTimestamp(max(max_time))), "
       "toString(toUnixTimestamp(toDateTime(min(min_date), 'UTC'))), "

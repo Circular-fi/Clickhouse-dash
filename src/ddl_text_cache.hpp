@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ch_block_value.hpp"
+#include "ch_query.hpp"
 
 #include <clickhouse/client.h>
 
@@ -99,7 +100,7 @@ public:
         sql += ")";
       }
       std::vector<std::pair<std::string, DdlTexts>> fetched;
-      client.Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(client, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           const std::string key = object_key(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));
           if (!wanted.count(key)) continue;

@@ -327,7 +327,7 @@ public:
 
     const auto started = std::chrono::steady_clock::now();
     try {
-      client->Execute(query);
+      ch_execute(*client, query);
     } catch (const clickhouse::ServerException& error) {
       // A cut query ends with "cancelled" on some servers: the rows we kept are the answer.
       if (!(done && error.GetCode() == 394)) {

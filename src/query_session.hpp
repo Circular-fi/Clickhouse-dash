@@ -109,6 +109,17 @@ struct SamplePoint {
   int64_t mem_bytes = -1;  // -1 means unavailable
 };
 
+// The outcome of a KILL QUERY: whether ClickHouse answered it, and how many queries it found.
+struct KillOutcome {
+  bool sent = false;
+  uint64_t matched = 0;
+  std::string error;
+};
+
+// KILL QUERY WHERE <where> ASYNC (or SYNC) on a connection of its own: a cancel never waits for a lease of
+// the pool. Labelled chdash:cancel. Never throws.
+KillOutcome kill_queries(const std::string& uri, const std::string& where, bool synchronous);
+
 class QuerySession : public std::enable_shared_from_this<QuerySession> {
 public:
   QuerySession(
@@ -137,7 +148,7 @@ public:
   // use distinct native ClickHouse ids. Cancellation must target every native
   // attempt that belongs to this session.
   std::vector<std::string> native_query_ids() const;
-  void cancel_native_queries_best_effort(bool synchronous);
+  KillOutcome cancel_native_queries_best_effort(bool synchronous);
 
   // A query has one consuming SSE stream. Tracking attachment lets the server
   // reap abandoned POST /run sessions without touching active downloads.
@@ -161,7 +172,7 @@ private:
   void run_query();
   std::string begin_native_query_attempt();
   std::string latest_native_query_id() const;
-  void cancel_native_query_ids_best_effort(
+  KillOutcome cancel_native_query_ids_best_effort(
     const std::vector<std::string>& query_ids,
     bool synchronous
   );

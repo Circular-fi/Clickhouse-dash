@@ -1,5 +1,6 @@
 #include "health_runner.hpp"
 
+#include "ch_query.hpp"
 #include "ch_uri.hpp"
 
 #include <clickhouse/client.h>
@@ -37,7 +38,7 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
   if (!client) return out;
 
   try {
-    client->Select(
+    ch_select(*client,
       "SELECT name FROM system.tables WHERE database = 'system' AND name IN "
       "('query_log', 'query_views_log', 'processors_profile_log', 'opentelemetry_span_log')",
       [&](const clickhouse::Block& b) {
@@ -66,7 +67,7 @@ static bool check_grant(clickhouse::Client& client, const std::string& expressio
   *known = false;
   bool granted = false;
   try {
-    client.Select("CHECK GRANT " + expression, [&](const clickhouse::Block& b) {
+    ch_select(client, "CHECK GRANT " + expression, [&](const clickhouse::Block& b) {
       if (*known || b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
       if (auto col = b[0]->As<clickhouse::ColumnUInt8>()) {
         *known = true;
@@ -111,7 +112,7 @@ static const char* const kRunnerReads[] = {"system.functions", "system.documenta
 static bool reads_a_table(clickhouse::Client& client) {
   std::vector<std::string> databases;
   try {
-    client.Select("SHOW DATABASES", [&](const clickhouse::Block& b) {
+    ch_select(client, "SHOW DATABASES", [&](const clickhouse::Block& b) {
       if (b.GetColumnCount() == 0) return;
       if (auto col = b[0]->As<clickhouse::ColumnString>()) {
         for (size_t i = 0; i < b.GetRowCount(); ++i) databases.emplace_back(col->At(i));
@@ -127,7 +128,7 @@ static bool reads_a_table(clickhouse::Client& client) {
     if (!known || table_budget == 0) continue;
     try {
       std::vector<std::string> tables;
-      client.Select("SHOW TABLES FROM " + quote_name(database), [&](const clickhouse::Block& b) {
+      ch_select(client, "SHOW TABLES FROM " + quote_name(database), [&](const clickhouse::Block& b) {
         if (b.GetColumnCount() == 0) return;
         if (auto col = b[0]->As<clickhouse::ColumnString>()) {
           for (size_t i = 0; i < b.GetRowCount(); ++i) tables.emplace_back(col->At(i));
@@ -252,7 +253,7 @@ static HostVersion detect_host_version(clickhouse::Client* client) {
   HostVersion out;
   if (!client) return out;
   try {
-    client->Select(
+    ch_select(*client,
       "SELECT version(), timezone()",
       [&](const clickhouse::Block& b) {
         if (!out.version.empty() || b.GetRowCount() == 0 || b.GetColumnCount() < 2) return;

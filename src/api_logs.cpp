@@ -206,7 +206,7 @@ LogsSchema load_schema(clickhouse::Client& client, const HostSpec& host, const L
   }
   LogsSchema schema;
   std::map<std::string, std::string> columns;
-  client.Select(
+  ch_select(client,
       "SELECT toString(name), toString(type) FROM system.columns WHERE database = " + quote(logs.database) +
           " AND `table` = " + quote(logs.table),
       [&](const clickhouse::Block& block) {
@@ -230,7 +230,7 @@ LogsSchema load_schema(clickhouse::Client& client, const HostSpec& host, const L
   schema.resource_attributes_map = map_column("ResourceAttributes");
   schema.scope_attributes_map = map_column("ScopeAttributes");
   if (schema.exists) {
-    client.Select(
+    ch_select(client,
         "SELECT toString(type), toString(expr) FROM system.data_skipping_indices WHERE database = " +
             quote(logs.database) + " AND `table` = " + quote(logs.table),
         [&](const clickhouse::Block& block) {
@@ -653,7 +653,7 @@ struct LogRow {
 };
 
 void read_rows(clickhouse::Client& client, const std::string& sql, std::vector<LogRow>* rows) {
-  client.Select(sql, [&](const clickhouse::Block& block) {
+  ch_select(client, sql, [&](const clickhouse::Block& block) {
     for (size_t r = 0; r < block.GetRowCount(); ++r) {
       LogRow row;
       parse_i64(ch_block_text_at(block, 0, r), &row.ts_ns);
@@ -1169,7 +1169,7 @@ void Server::handle_logs_histogram(const httplib::Request& req, httplib::Respons
         "toString(countIf(SeverityNumber >= 9 AND SeverityNumber < 13)), toString(countIf(SeverityNumber < 9)) FROM " +
         r.table + " WHERE " + time_predicate(r.schema, q.start_ms * 1000000, q.end_ms * 1000000 + 999999) + q.where +
         " GROUP BY b ORDER BY toInt64(b)" + settings_clause();
-    r.client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*r.client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Bucket b{};
         parse_i64(ch_block_text_at(block, 0, row), &b.t);
@@ -1336,7 +1336,7 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   int64_t count_ms = 0, sample_ms = 0;
   try {
     auto t0 = Clock::now();
-    r.client->Select("SELECT toString(count()) FROM " + r.table + where + settings_clause(),
+    ch_select(*r.client, "SELECT toString(count()) FROM " + r.table + where + settings_clause(),
                      [&](const clickhouse::Block& block) {
                        if (block.GetRowCount()) parse_u64(ch_block_text_at(block, 0, 0), &total);
                      });
@@ -1355,7 +1355,7 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
       fetch_limit = sample_target * 2;
     }
     t0 = Clock::now();
-    r.client->Select("SELECT toString(toUnixTimestamp64Milli(Timestamp)), toString(SeverityNumber), toString(ServiceName), "
+    ch_select(*r.client, "SELECT toString(toUnixTimestamp64Milli(Timestamp)), toString(SeverityNumber), toString(ServiceName), "
                      "substringUTF8(Body, 1, 2048) FROM " + r.table + sample_where + " LIMIT " + std::to_string(fetch_limit) +
                      settings_clause(),
                      [&](const clickhouse::Block& block) {
@@ -1496,7 +1496,7 @@ void Server::handle_logs_services(const httplib::Request& req, httplib::Response
   const LogsQuery& q = r.query;
   std::vector<std::pair<std::string, uint64_t>> services;
   try {
-    r.client->Select("SELECT toString(ServiceName), toString(count()) FROM " + r.table + " WHERE " +
+    ch_select(*r.client, "SELECT toString(ServiceName), toString(count()) FROM " + r.table + " WHERE " +
                          time_predicate(r.schema, q.start_ms * 1000000, q.end_ms * 1000000 + 999999) + q.where +
                          " GROUP BY ServiceName ORDER BY ServiceName LIMIT 1000" + settings_clause(),
                      [&](const clickhouse::Block& block) {

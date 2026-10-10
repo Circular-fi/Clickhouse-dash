@@ -12,6 +12,7 @@ option(CHDASH_BUILD_MCP_TESTS "Build the MCP unit tests (scopes, keys, SQL, prot
 option(CHDASH_BUILD_SYSTEM_TESTS "Build the System page SQL builder unit tests" OFF)
 option(CHDASH_BUILD_RESULT_TESTS "Build the result path unit tests (JSON cell encoder, block encoder)" OFF)
 option(CHDASH_BUILD_FORMAT_TESTS "Build the bound tests of the JSON parse and the SQL formatter (small thread stacks)" OFF)
+option(CHDASH_BUILD_CH_QUERY_TESTS "Build the tests of the ClickHouse statements and connections (a server is optional)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
 set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
@@ -65,7 +66,7 @@ if (CHDASH_BUILD_MCP_TESTS)
   # and the startup errors of the mcp { } block (no ClickHouse server needed).
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
     mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
-    config.cpp hcl.cpp ch_uri.cpp query_library.cpp jwt.cpp)
+    config.cpp hcl.cpp ch_uri.cpp ch_query.cpp query_library.cpp jwt.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -97,9 +98,21 @@ if (CHDASH_BUILD_FORMAT_TESTS)
   chdash_configure_target(chdash_format_depth_test)
 endif()
 
+if (CHDASH_BUILD_CH_QUERY_TESTS)
+  # The settings of a statement, its scope, and the state of its connection; the cases that need a server
+  # run when CHDASH_TEST_CLICKHOUSE_URI names one.
+  add_executable(chdash_ch_query_test ../tests/native/ch_query_test.cpp ch_query.cpp ch_client_pool.cpp ch_uri.cpp)
+  target_include_directories(chdash_ch_query_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_ch_query_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR})
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_ch_query_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_ch_query_test)
+endif()
+
 if (CHDASH_BUILD_SYSTEM_TESTS)
   # The System page SQL builders and the disk forecast (no ClickHouse needed).
-  add_executable(chdash_system_monitor_test ../tests/native/system_monitor_test.cpp system_monitor.cpp allowed_objects.cpp)
+  add_executable(chdash_system_monitor_test ../tests/native/system_monitor_test.cpp system_monitor.cpp allowed_objects.cpp ch_query.cpp)
   target_include_directories(chdash_system_monitor_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_system_monitor_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR})
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -162,6 +175,7 @@ if (CHDASH_BUILD_APP)
     mcp_tools.cpp
     api_mcp.cpp
     ch_uri.cpp
+    ch_query.cpp
     ch_client_pool.cpp
     health_runner.cpp
   )

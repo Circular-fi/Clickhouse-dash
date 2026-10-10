@@ -1,5 +1,6 @@
 #include "allowed_objects.hpp"
 #include "ch_block_value.hpp"
+#include "ch_query.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -64,7 +65,7 @@ bool block_bool_at(const clickhouse::Block& block, size_t column, size_t row, bo
 bool check_grant(clickhouse::Client& runner, const std::string& expression) {
   bool seen = false;
   bool granted = false;
-  runner.Select("CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
+  ch_select(runner, "CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
     if (seen || block.GetRowCount() == 0 || block.GetColumnCount() == 0) return;
     bool parsed = false;
     const bool value = block_bool_at(block, 0, 0, &parsed);
@@ -101,7 +102,7 @@ bool zero_row_column_probe(
   }
   sql += ") FROM " + qualified_ident(database, table) + " LIMIT 0";
   try {
-    runner.Select(sql, [](const clickhouse::Block&) {});
+    ch_select(runner, sql, [](const clickhouse::Block&) {});
     return true;
   } catch (const std::exception& e) {
     if (is_access_denied_message(e.what())) return false;
@@ -111,7 +112,7 @@ bool zero_row_column_probe(
 
 std::vector<std::string> show_databases(clickhouse::Client& runner) {
   std::vector<std::string> databases;
-  runner.Select("SHOW DATABASES", [&](const clickhouse::Block& block) {
+  ch_select(runner, "SHOW DATABASES", [&](const clickhouse::Block& block) {
     databases.reserve(databases.size() + block.GetRowCount());
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       auto name = block_string_at(block, 0, row);
@@ -125,7 +126,7 @@ std::vector<std::string> show_databases(clickhouse::Client& runner) {
 
 std::vector<std::string> show_tables(clickhouse::Client& runner, const std::string& database) {
   std::vector<std::string> tables;
-  runner.Select("SHOW TABLES FROM " + quote_ident(database), [&](const clickhouse::Block& block) {
+  ch_select(runner, "SHOW TABLES FROM " + quote_ident(database), [&](const clickhouse::Block& block) {
     tables.reserve(tables.size() + block.GetRowCount());
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       auto name = block_string_at(block, 0, row);
@@ -140,7 +141,7 @@ std::vector<std::string> show_tables(clickhouse::Client& runner, const std::stri
 std::vector<std::string> show_dictionaries(clickhouse::Client& runner, const std::string& database) {
   std::vector<std::string> dictionaries;
   try {
-    runner.Select("SHOW DICTIONARIES FROM " + quote_ident(database), [&](const clickhouse::Block& block) {
+    ch_select(runner, "SHOW DICTIONARIES FROM " + quote_ident(database), [&](const clickhouse::Block& block) {
       dictionaries.reserve(dictionaries.size() + block.GetRowCount());
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         auto name = block_string_at(block, 0, row);
@@ -167,7 +168,7 @@ std::vector<std::string> describe_columns(
   std::vector<std::string> columns;
   const std::string target = qualified_ident(database, table);
   auto load = [&](const std::string& sql) {
-    runner.Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(runner, sql, [&](const clickhouse::Block& block) {
       columns.reserve(columns.size() + block.GetRowCount());
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         auto name = block_string_at(block, 0, row);
@@ -276,7 +277,7 @@ AllowedTable inspect_table(
 bool check_grant_expression(clickhouse::Client& client, const std::string& expression, bool* decoded) {
   bool seen = false;
   bool granted = false;
-  client.Select("CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
+  ch_select(client, "CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
     if (seen || block.GetRowCount() == 0 || block.GetColumnCount() == 0) return;
     bool parsed = false;
     const bool value = block_bool_at(block, 0, 0, &parsed);
@@ -371,7 +372,7 @@ bool table_readable(clickhouse::Client& runner, const std::string& database, con
   } catch (const std::exception&) {
   }
   try {
-    runner.Select("SELECT 1 FROM " + quote_ident(database) + "." + quote_ident(table) + " LIMIT 0", [](const clickhouse::Block&) {});
+    ch_select(runner, "SELECT 1 FROM " + quote_ident(database) + "." + quote_ident(table) + " LIMIT 0", [](const clickhouse::Block&) {});
     return true;
   } catch (const std::exception&) {
     return false;

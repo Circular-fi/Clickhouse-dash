@@ -453,7 +453,7 @@ bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, 
   *span_map = false;
   *resource_map = false;
   try {
-    client.Select(
+    ch_select(client,
         "SELECT toString(name), toString(type) FROM system.columns WHERE database = " + quote_string(cfg.database) +
         " AND `table` = " + quote_string(cfg.table) + " AND name IN ('SpanAttributes','ResourceAttributes')",
         [&](const clickhouse::Block& block) {
@@ -669,7 +669,7 @@ class TraceIndexCursor {
           " PREWHERE " + window_ + " AND Start >= " + ns_time(lo) + " AND Start <= " + ns_time(hi_ns_) +
           " GROUP BY TraceId LIMIT " + std::to_string(kSliceRowCap + 1);
       std::vector<Hit> rows;
-      client_.Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(client_, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           rows.push_back(Hit{ch_block_text_at(block, 0, row), std::stoll(ch_block_text_at(block, 1, row))});
         }
@@ -738,7 +738,7 @@ bool filters_are_broad(clickhouse::Client& client, const std::string& table, con
   // the narrow form, which needs no index.
   try {
     uint64_t index_rows = 0;
-    client.Select(
+    ch_select(client,
         "SELECT toString(count()) FROM " + index_table + " PREWHERE Start >= fromUnixTimestamp64Milli(" +
             std::to_string(start_ms) + ") AND Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")",
         [&](const clickhouse::Block& block) {
@@ -748,7 +748,7 @@ bool filters_are_broad(clickhouse::Client& client, const std::string& table, con
     const uint64_t threshold =
         std::max<uint64_t>(1000, static_cast<uint64_t>(static_cast<double>(index_rows) * kBroadFilterShare));
     uint64_t matching = 0;
-    client.Select(
+    ch_select(client,
         "SELECT toString(count()) FROM (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
             " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId LIMIT " + std::to_string(threshold) + ")",
         [&](const clickhouse::Block& block) {
@@ -833,7 +833,7 @@ std::vector<RankedTrace> rank_traces_by_start(clickhouse::Client& client, const 
         " PREWHERE " + q.time_predicate + slice + " WHERE " + q.visibility + candidate_where +
         " GROUP BY TraceId" + having + " ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(fetch);
     std::vector<RankedTrace> rows;
-    client.Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         rows.push_back(RankedTrace{ch_block_text_at(block, 0, row), std::stoll(ch_block_text_at(block, 1, row)),
                                    std::stoll(ch_block_text_at(block, 2, row))});
@@ -849,7 +849,7 @@ std::vector<RankedTrace> rank_traces_by_start(clickhouse::Client& client, const 
       const std::string probe_sql =
           "SELECT DISTINCT toString(TraceId) FROM " + q.table + " PREWHERE " + q.time_predicate +
           " AND Timestamp < " + ns_time(t) + " WHERE " + q.visibility + " AND TraceId IN " + trace_id_list_sql(ids);
-      client.Select(probe_sql, [&](const clickhouse::Block& block) {
+      ch_select(client, probe_sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) straddlers.insert(ch_block_text_at(block, 0, row));
       });
     }
@@ -893,7 +893,7 @@ const char* kSpanListColumns =
     "toString(StatusCode)";
 
 void select_span_rows(clickhouse::Client& client, const std::string& sql, std::vector<SpanListRow>* rows, bool with_links) {
-  client.Select(sql, [&](const clickhouse::Block& block) {
+  ch_select(client, sql, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       SpanListRow out;
       out.timestamp = ch_block_text_at(block, 0, row);
@@ -1109,7 +1109,7 @@ const char* kSpanSearchColumns =
 
 void select_span_search_rows(clickhouse::Client& client, const std::string& sql, size_t attribute_count,
                              std::vector<SpanSearchRow>* rows) {
-  client.Select(sql, [&](const clickhouse::Block& block) {
+  ch_select(client, sql, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       SpanSearchRow out;
       out.timestamp = ch_block_text_at(block, 0, row);
@@ -1166,7 +1166,7 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
   try {
     const std::string db = quote_string(traces.database);
     const std::string table = quote_string(traces.table);
-    client->Select(
+    ch_select(*client,
         "SELECT toString(name) FROM system.columns WHERE database = " + db + " AND `table` = " + table,
         [&](const clickhouse::Block& block) {
           for (size_t row = 0; row < block.GetRowCount(); ++row) columns.insert(ch_block_text_at(block, 0, row));
@@ -1176,7 +1176,7 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
 
     if (!traces.trace_index_table.empty()) {
       uint64_t count = 0;
-      client->Select(
+      ch_select(*client,
           "SELECT toString(count()) FROM system.tables WHERE database = " + db +
           " AND name = " + quote_string(traces.trace_index_table),
           [&](const clickhouse::Block& block) {
@@ -1730,7 +1730,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   std::vector<Row> rows;
 
   auto read_summary = [&](const std::string& sql) {
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Row out;
         out.trace_id = ch_block_text_at(block, 0, row);
@@ -1875,7 +1875,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
               " AND Timestamp >= tupleElement(batch_bounds, 1) AND Timestamp <= tupleElement(batch_bounds, 2)"
               " WHERE " + visibility + span_filters + " AND TraceId IN " + batch_ids +
               " LIMIT 1 BY TraceId";
-          client->Select(match_sql, [&](const clickhouse::Block& block) {
+          ch_select(*client, match_sql, [&](const clickhouse::Block& block) {
             for (size_t row = 0; row < block.GetRowCount(); ++row) matching_ids.insert(ch_block_text_at(block, 0, row));
           });
 
@@ -2136,7 +2136,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
 
   auto read_analytics = [&](const std::string& sql) {
     std::map<int64_t, uint64_t> count_by_bucket;
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         const int64_t q_bucket_ms = std::stoll(ch_block_text_at(block, 0, row));
         const uint64_t count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
@@ -2191,7 +2191,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
           std::to_string(start_ms) + ") AND Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) +
           ") GROUP BY TraceId) GROUP BY bucket_ms ORDER BY bucket_ms";
       std::map<int64_t, uint64_t> count_by_bucket;
-      client->Select(index_sql, [&](const clickhouse::Block& block) {
+      ch_select(*client, index_sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           count_by_bucket[std::stoll(ch_block_text_at(block, 0, row))] +=
               static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
@@ -2420,7 +2420,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   uint64_t estimated_spans = 0;
   std::string estimate_source = "explain";
   try {
-    client->Select("EXPLAIN ESTIMATE SELECT 1 FROM " + table + " PREWHERE " + trace_time_predicate(start_ms, end_ms),
+    ch_select(*client, "EXPLAIN ESTIMATE SELECT 1 FROM " + table + " PREWHERE " + trace_time_predicate(start_ms, end_ms),
                    [&](const clickhouse::Block& block) {
                      if (block.GetColumnCount() < 4 || block.GetRowCount() == 0) return;
                      const auto rows = block[3]->As<clickhouse::ColumnUInt64>();
@@ -2493,7 +2493,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   std::vector<EdgeRow> edges;
   const auto query_started = std::chrono::steady_clock::now();
   try {
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         ServiceMapStats stats;
         stats.count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row)));
@@ -2691,7 +2691,7 @@ struct ServicesWindow {
 
 uint64_t estimate_window_rows(clickhouse::Client& client, const std::string& from_where) {
   uint64_t rows = 0;
-  client.Select("EXPLAIN ESTIMATE SELECT 1" + from_where, [&](const clickhouse::Block& block) {
+  ch_select(client, "EXPLAIN ESTIMATE SELECT 1" + from_where, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       if (block.GetColumnCount() >= 4) rows += ch_block_u64_at(block, 3, row);
     }
@@ -2874,7 +2874,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
   if (detail) {
     try {
       const auto started = std::chrono::steady_clock::now();
-      client->Select(
+      ch_select(*client,
           "SELECT TraceId, SpanId, toString(SpanName), toString(toUnixTimestamp64Milli(Timestamp)), toString(Duration), "
           "toString(StatusCode)" + from + " ORDER BY Duration DESC LIMIT " + std::to_string(kServicesSlowestSpans) +
           " SETTINGS max_execution_time = " + std::to_string(kServicesTimeBudgetSeconds) + ", timeout_overflow_mode = 'break'",
@@ -3112,7 +3112,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
     }
     uint64_t count = 0;
     try {
-      client->Select(
+      ch_select(*client,
           "SELECT toString(count()), toString(toUnixTimestamp64Milli(min(Start))), toString(toUnixTimestamp64Milli(max(End))) FROM " +
               qualified(traces.database, traces.trace_index_table) + " WHERE TraceId = " + trace_literal,
           [&](const clickhouse::Block& block) {
@@ -3386,7 +3386,7 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   std::vector<Span> spans;
 
   auto load_spans = [&](const std::string& sql) {
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Span out;
         out.timestamp = ch_block_text_at(block, 0, row);
@@ -3701,7 +3701,7 @@ void Server::handle_traces_heatmap(const httplib::Request& req, httplib::Respons
         "toString(toInt32(floor(log2(greatest(duration_ns, 1)) * " + std::to_string(kHeatmapBinsPerOctave) + "))) AS fine_bin, "
         "toString(count()) FROM trace_durations GROUP BY bucket_ms, fine_bin"
         " SETTINGS max_execution_time = " + std::to_string(kHeatmapTimeBudgetSeconds);
-    scope.client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         const int64_t bucket = std::stoll(ch_block_text_at(block, 0, row));
         const int bin = std::stoi(ch_block_text_at(block, 1, row));
@@ -3876,7 +3876,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
         " GROUP BY TraceId HAVING (" + core_having + ")" +
         (scope.having.empty() ? std::string{} : " AND " + having_terms(scope.having)) +
         ")) ORDER BY in_box DESC, cityHash64(TraceId) LIMIT " + std::to_string(sample) + " BY in_box" + settings;
-    scope.client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         const bool in = ch_block_text_at(block, 1, row) == "1";
         const uint64_t side_total = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 2, row)));
@@ -3925,7 +3925,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
           " GROUP BY scope, key, value) GROUP BY scope, key HAVING occ_in + occ_out >= " + std::to_string(kDeltaMinOccurrences) +
           ") ARRAY JOIN top AS tv" + settings;
       std::map<std::pair<std::string, std::string>, size_t> index;
-      scope.client->Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           auto key = std::make_pair(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));
           auto it = index.find(key);
@@ -4386,7 +4386,7 @@ void Server::handle_traces_span(const httplib::Request& req, httplib::Response& 
       " LIMIT 1 SETTINGS max_execution_time = 10";
   std::vector<std::string> values;
   try {
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       if (!values.empty() || block.GetRowCount() == 0) return;
       for (size_t column = 0; column < block.GetColumnCount(); ++column) values.push_back(ch_block_text_at(block, column, 0));
     });

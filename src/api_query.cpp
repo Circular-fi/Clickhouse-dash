@@ -207,50 +207,43 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
     if (it != sessions_.end()) session = it->second;
   }
 
+  // The answer says what happened (docs/configuration.md, "Authorization model"): `stopped` when a run of this server
+  // owned the query and stopped streaming it, `killed` how many ClickHouse queries KILL QUERY found
+  // (0: nothing was running any more), `kill_error` when the KILL could not run.
+  KillOutcome kill;
   if (session) {
     session->request_cancel();
     // Compatibility retries use distinct native ids while keeping the public
     // browser id stable. Cancel every native attempt owned by the session.
-    session->cancel_native_queries_best_effort(false);
+    kill = session->cancel_native_queries_best_effort(false);
   } else {
     // The session may already have been reaped while ClickHouse still finishes
     // removing a compatibility attempt. Match both the public id and the
     // deterministic retry prefix without relying on in-memory session state.
-    try {
-      std::string err;
-      const std::string& cancel_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-      auto client = client_pool_ ? client_pool_->acquire(
-        cancel_uri,
-        std::chrono::seconds(5),
-        std::chrono::seconds(5),
-        std::chrono::seconds(5),
-        &err
-      ) : make_client_from_uri(
-        cancel_uri,
-        std::chrono::seconds(5),
-        std::chrono::seconds(5),
-        std::chrono::seconds(5),
-        &err
-      );
-      if (!client) {
-        std::cerr << "[cancel] host=" << host_id << " qid=" << qid
-                  << " connect error: " << err << "\n";
-      } else {
-        const std::string qid_esc = escape_single_quotes(qid);
-        const std::string retry_prefix_esc = escape_single_quotes(qid + "-attempt-");
-        client->Execute(
-            "KILL QUERY WHERE query_id = '" + qid_esc +
-            "' OR startsWith(query_id, '" + retry_prefix_esc + "') ASYNC");
-      }
-    } catch (const std::exception& e) {
-      std::cerr << "[cancel] host=" << host_id << " qid=" << qid
-                << " error: " << e.what() << "\n";
+    const std::string& cancel_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+    const std::string qid_esc = escape_single_quotes(qid);
+    const std::string retry_prefix_esc = escape_single_quotes(qid + "-attempt-");
+    kill = kill_queries(cancel_uri,
+                        "query_id = '" + qid_esc + "' OR startsWith(query_id, '" + retry_prefix_esc + "')", false);
+    if (!kill.sent) {
+      std::cerr << "[cancel] host=" << host_id << " qid=" << qid << " error: " << kill.error << "\n";
+      return json_error(res, 502, "cancel_failed",
+                        "The query could not be canceled: " + (kill.error.empty() ? std::string("no answer") : kill.error));
     }
   }
 
-
+  rapidjson::StringBuffer sb;
+  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
+  w.StartObject();
+  w.Key("ok"); w.Bool(true);
+  w.Key("stopped"); w.Bool(static_cast<bool>(session));
+  w.Key("killed"); w.Uint64(kill.matched);
+  if (!kill.sent) {
+    w.Key("kill_error"); w.String(kill.error.c_str(), static_cast<rapidjson::SizeType>(kill.error.size()));
+  }
+  w.EndObject();
   res.status = 200;
-  res.set_content("{\"ok\":true}", "application/json");
+  res.set_content(sb.GetString(), "application/json");
 }
 
 } // namespace chdash

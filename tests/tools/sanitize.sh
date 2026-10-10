@@ -53,7 +53,12 @@ sanitizer_findings() { # <log file>: print the lines of a sanitizer finding, ret
 run_native() {
   echo "== native unit tests (ASan + UBSan)"
   build_target native "$prefix-native:local"
-  docker run --rm "$prefix-native:local"
+  # On the network of the test stack, chdash_ch_query_test also runs the cases that need a server.
+  if docker network inspect "$network" >/dev/null 2>&1; then
+    docker run --rm --network "$network" -e CHDASH_TEST_CLICKHOUSE_URI="clickhouse://test:test@clickhouse:9000" "$prefix-native:local"
+  else
+    docker run --rm "$prefix-native:local"
+  fi
 }
 
 start_server() {

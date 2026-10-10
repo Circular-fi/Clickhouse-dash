@@ -28,7 +28,10 @@ def test_broken_format_connections_are_not_returned_to_the_pool() -> None:
 
     assert "client_pool_->invalidate(client);" in api_source
     assert "void invalidate(" in pool_header
-    assert "invalidated_.erase(client)" in pool_source
+    # A marked connection (ch_mark_dirty, or a statement that did not end) is closed, never lent again.
+    assert "if (client) ch_mark_dirty(*client);" in pool_source
+    assert "const bool dirty = ch_connection_dirty(*client);" in pool_source
+    assert "if (stopping_ || dirty || max_idle_per_key_ == 0) {" in pool_source
 
 
 def test_transport_failures_are_not_reported_as_sql_validation_errors() -> None:

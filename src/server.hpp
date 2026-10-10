@@ -181,6 +181,10 @@ struct AppConfig {
   int client_pool_idle_ttl_ms = 60 * 1000;
   int client_pool_validate_after_idle_ms = 15 * 1000;
   int client_pool_reaper_interval_ms = 5 * 1000;
+  // The connections lent at once for one ClickHouse URI (0 = no limit), and how long
+  // a request waits for one before it fails with pool_exhausted.
+  size_t client_pool_max_leased_per_uri = 128;
+  int client_pool_lease_wait_ms = 5 * 1000;
 
   // SQL formatting is frequently triggered repeatedly by editor actions. Cache
   // deterministic results to avoid a ClickHouse round trip and formatter pass.
