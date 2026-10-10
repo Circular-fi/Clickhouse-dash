@@ -33,7 +33,7 @@ The kernels are freestanding C. clang 18 compiles them to `wasm32`. lld links th
 | C and not Rust | No cargo, no crate download, no target install. One `apk add` gives the compiler. |
 | C and not Emscripten | Emscripten adds a glue file and a large runtime. A kernel here is a few KB and needs no glue. |
 | C and not AssemblyScript | It needs Node and npm packages at build time. |
-| No libc | The kernels use no `malloc`, no `printf` and no `libm`. `rt.h` has an arena allocator. |
+| No libc | The kernels use no `malloc`, no `printf` and no `libm`. `rt.h` has an arena allocator. The memory of an instance never shrinks, so a kernel gives back the arena that a step took (`wasm_mark` / `wasm_release`) as soon as the step ends: `layered.c` does it for each column of the row assignment and of the barycenter sort, which keeps a 2,000-object graph near the size of one pass (about 27 MB for a 1,500-object column) instead of hundreds of MB. |
 | Host Math | `sin`, `cos`, `pow` and the like are imports from JavaScript `Math`. A kernel then gives the same doubles as the JavaScript code. |
 
 The flags are in `tools/build_wasm.py`. They strip all debug data, producer names and paths. The same sources and the same compiler give the same bytes.

@@ -43,9 +43,9 @@
       "bytes": 7447
     },
     "layered": {
-      "source_sha256": "c3ce6f11f4a11d8b13b2331f72bcfac49186aca67a86e3822f179f010000c99e",
-      "wasm_sha256": "4d71fa93a5588961abbd6ad9abfdd6cd0328f732b2241bc69c346407c7aadb4e",
-      "bytes": 20853
+      "source_sha256": "4046428f511c31c6db59b590af4e0422ddba4014c9363bc5dc5253617afa1a50",
+      "wasm_sha256": "07005cbd41b339a6647dd2f906c5a25438b813af93ecfd4cd6a63b7eb4b07662",
+      "bytes": 20881
     },
     "router": {
       "source_sha256": "b33462291df33d10948ff628807fc6a716e410f71d45e074ea546e0809276d6f",
