@@ -102,25 +102,29 @@ def test_the_sanitized_server_ends_cleanly_on_sigterm_and_the_hook_is_sanitizer_
 def test_release_smoke_builds_the_binary_like_the_release_workflow() -> None:
     release = read(".github/workflows/release.yaml")
     docker = read("tests/smoke/Dockerfile.release")
-    version = re.search(r"version: (\d+\.\d+\.\d+)\n\s+cache-key: chdash-zig", release).group(1)
+    version = re.search(r"version: (\d+\.\d+\.\d+)\n\s+use-cache: false", release).group(1)
     assert f"ARG ZIG_VERSION={version}" in docker
+    # The Zig archive is checked: setup-zig checks its minisign signature, the Dockerfile its SHA-256.
+    assert 'echo "${sum}  /tmp/zig.tar.xz" | sha256sum -c -' in docker
+    assert "ARG ZIG_SHA256_X86_64=" in docker and "ARG ZIG_SHA256_AARCH64=" in docker
     for line in (
         'exec zig cc -target "${ZIG_TARGET}" -static "$@"',
         'exec zig c++ -target "${ZIG_TARGET}" -static "$@"',
-        'set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -s")',
+        'set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -pie")',
+        'set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE)',
         'set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)',
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCHDASH_EMBED_STATIC=ON",
         "-DFETCHCONTENT_BASE_DIR",
-        "= delete;",
+        "check_release_binary.sh",
     ):
         assert line in release, ("release.yaml", line)
         assert line in docker, ("Dockerfile.release", line)
     # The release job smoke-tests its own binaries before it publishes anything.
-    step = release[release.index("- name: Smoke test the Linux binary"):release.index("- name: Package")]
+    step = release[release.index("- name: Smoke test the binary"):release.index("- name: Package")]
     assert 'python3 tests/smoke/release_smoke.py --binary "${BUILD_DIR}/chdash"' in step
-    assert release.index("- name: Smoke test the Linux binary") > release.index("- name: Verify static Linux binary")
-    assert release.index("- name: Smoke test the Linux binary") < release.index("- name: Upload release asset")
+    assert release.index("- name: Smoke test the binary") > release.index("- name: Verify and strip the Linux binary")
+    assert release.index("- name: Smoke test the binary") < release.index("- name: Upload release asset")
     workflow = read(".github/workflows/release-smoke.yml")
     assert "docker build -f tests/smoke/Dockerfile.release --target binary" in workflow
     assert "release_smoke.py --binary smoke-out/chdash --scratch" in workflow

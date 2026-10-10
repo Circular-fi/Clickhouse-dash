@@ -53,6 +53,35 @@ Refer to `tests/README.md`, "Running tests quickly", for the details.
 
 The release workflow builds Linux amd64/arm64 and macOS amd64/arm64. It uses isolated CMake directories and bounded parallelism. If a matrix build fails, download its `build-diagnostics-*` artifact. Then examine `build.log` and `CMakeCache.txt`. Do not cache a `CMakeCache.txt` of one platform. Do not reuse it across runners.
 
+The release chain follows these rules:
+
+- The release runs the CI workflow (`ci.yml`) on the commit that it builds. The build starts only when the tests pass.
+- Each action has a pin to a commit SHA, with the version in a comment. Dependabot updates the pins.
+- No release job restores a cache. Each checkout uses `persist-credentials: false`.
+- Only the publish job can write to the repository. It runs in the `release` environment. Set a required reviewer for this environment in the repository settings. The `gh` CLI publishes the release. No third-party action gets the write token.
+- A manual run (`workflow_dispatch`) creates the tag after the build, on the tested commit. If the tag exists, it must point to that commit.
+- The publish job makes a build provenance attestation for each archive (`SECURITY.md`, "Verify a release").
+- Each binary runs the smoke test (`tests/smoke/release_smoke.py`), on Linux and on macOS.
+- A Linux binary is a static position independent executable (static-pie) with the stack protector and full RELRO. `tests/smoke/check_release_binary.sh` checks this before the strip.
+
+The dependencies of the build have pins too:
+
+- `src/CMakeLists.txt` fetches clickhouse-cpp, cpp-httplib and rapidjson by commit SHA. Dependabot does not read CMake: update a SHA and its comment by hand. `src/PatchRapidJSON.cmake` patches rapidjson for each toolchain.
+- `tests/smoke/Dockerfile.release` checks the SHA-256 of the Zig archive. The release workflow uses `mlugg/setup-zig`, which checks the minisign signature of Zig. A new Zig version needs new sums.
+- `tests/requirements.txt` holds the hash of each Python test package (`pip install --require-hashes`). Generate it from `tests/requirements.in` with the command in its header.
+- `tests/frontend/package-lock.json` pins the npm packages. The test image installs them with `npm ci`.
+
+### Hardening
+
+`-DCHDASH_HARDEN=ON` (the default, off with a sanitizer) adds these flags to all code, the dependencies too: `-fstack-protector-strong`, `-fstack-clash-protection`, `-ftrivial-auto-var-init=zero`, and `-D_FORTIFY_SOURCE=3` in an optimized build. It also turns on the cheap checks of the standard library: the hardened mode of libc++ (the release build) or `_GLIBCXX_ASSERTIONS` (libstdc++). The build tests each flag first and skips a flag that the compiler does not know.
+
+Some protections are not available in the release build:
+
+- musl has no fortified functions, so `_FORTIFY_SOURCE` has no effect in the Linux release binary. The test image (Alpine `fortify-headers`) and the macOS build use it.
+- The release build does not use `-fcf-protection`: musl does not turn on the control-flow protection (CET) of the CPU.
+
+The Linux release binary is static-pie (the kernel loads it at a random address), with full RELRO (`BIND_NOW`) and a stack that is not executable. `tests/smoke/check_release_binary.sh` checks these properties.
+
 ### Compiler warnings
 
 The build enables `-Wall`, `-Wextra` and `-Wdangling-reference` (GCC 13 and later) for our sources. The dependencies (clickhouse-cpp, cpp-httplib, rapidjson) do not get these flags. The file `src/BuildFlags.cmake` holds them.

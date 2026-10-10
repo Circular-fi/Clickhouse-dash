@@ -422,7 +422,7 @@ Two tests of `test_routes.py` and four Playwright tests (`explorer-nav`, `explor
 
 `tests/smoke/release_smoke.py --binary <chdash> [--scratch]` starts a release binary with `tests/smoke/release-smoke.hcl` (every page on, ClickHouse unreachable) and probes the routes: the pages, the redirects, `/api/version` (the features), `/api/health`, the query library, and the static files (`?v=`, immutable, gzip). It fails when a route answers a wrong status, `Location` or type. It also fails when the server dies. `--scratch` runs the binary in a `FROM scratch` container, like the shipped image.
 
-`tests/smoke/Dockerfile.release` builds the binary like the release workflow (Zig 0.15.2, musl, static, embedded files, stripped). `release.yaml` runs the script on each Linux binary before the upload. `release-smoke.yml` builds and probes the binary on each pull request. `tests/harness/test_sanitizers_and_analysis_contract.py` tests the script against a fake server with the 2.16.3 answer.
+`tests/smoke/Dockerfile.release` builds the binary like the release workflow (Zig 0.15.2 with a checked SHA-256, musl, static-pie, the hardening flags, embedded files, stripped). Before the strip, `tests/smoke/check_release_binary.sh` checks that the binary is static-pie, needs no shared library, has full RELRO, a stack that is not executable and the stack protector. `release.yaml` runs both on each Linux binary, and the smoke test on each macOS binary, before the upload. `release-smoke.yml` builds and probes the binary on each pull request. `tests/harness/test_sanitizers_and_analysis_contract.py` tests the script against a fake server with the 2.16.3 answer.
 
 ## Cleanup
 

@@ -44,7 +44,6 @@ def test_warning_flags_live_in_one_file_and_apply_to_our_targets_only() -> None:
 def test_werror_is_off_for_the_release_and_on_for_the_test_image() -> None:
     release = read(".github/workflows/release.yaml")
     assert "CHDASH_WERROR" not in release
-    assert "src/BuildFlags.cmake" in release  # part of the FetchContent cache key
     docker = read("tests/Dockerfile.source")
     assert "ARG SOURCE_WERROR=ON" in docker
     assert "-DCHDASH_WERROR=${SOURCE_WERROR}" in docker

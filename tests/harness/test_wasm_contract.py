@@ -103,9 +103,11 @@ def test_every_source_has_a_committed_binary_and_the_lock_matches():
 def test_the_build_is_reproducible_in_a_container_and_in_the_release_workflow():
     docker = read("tests/Dockerfile.source")
     assert "build_wasm.py --check" in docker and "COPY --from=wasm /work/src/static/wasm /app/static/wasm" in docker
-    for workflow in ("ci.yml", "release.yaml"):
-        text = read(f".github/workflows/{workflow}")
-        assert "tools/build_wasm.py --verify" in text and "tools/build_wasm.py --docker --check" in text, workflow
+    ci = read(".github/workflows/ci.yml")
+    assert "tools/build_wasm.py --verify" in ci and "tools/build_wasm.py --docker --check" in ci
+    # The release runs ci.yml (with this check) on the commit that it builds.
+    release = read(".github/workflows/release.yaml")
+    assert "uses: ./.github/workflows/ci.yml" in release and "workflow_call:" in ci
     builder = read("tools/build_wasm.py")
     for flag in ("-ffreestanding", "-nostdlib", "-fno-ident", "-Wl,--strip-all", "-Wl,--no-entry"):
         assert f'"{flag}"' in builder, flag
