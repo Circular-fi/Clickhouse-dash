@@ -5,6 +5,7 @@
 #include "ch_block_value.hpp"
 #include "ch_query.hpp"
 #include "explorer_catalog.hpp"
+#include "sql_literal.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -16,6 +17,8 @@
 
 namespace chdash {
 namespace {
+
+using sql::quote_string;
 
 uint64_t ops_now_ms() {
   using namespace std::chrono;
@@ -61,19 +64,6 @@ double f64(const std::string& value) {
 
 bool flag(const std::string& value) {
   return value == "1" || value == "true";
-}
-
-std::string quote_string(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (const char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
 }
 
 std::string object_key(const std::string& database, const std::string& table) {

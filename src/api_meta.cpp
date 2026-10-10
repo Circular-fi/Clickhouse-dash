@@ -8,6 +8,7 @@
 #include "host_util.hpp"
 #include "time_util.hpp"
 #include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/exceptions.h>
 
@@ -28,6 +29,8 @@
 
 namespace chdash {
 namespace {
+
+using sql::quote_ident;
 
 std::string lower_ascii(std::string_view s) {
   std::string out;
@@ -67,18 +70,6 @@ bool block_truthy_at(const clickhouse::Block& b, size_t col, size_t row) {
     return sv == "1" || sv == "true" || sv == "TRUE";
   }
   return false;
-}
-
-std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
 }
 
 std::string qualified_ident(std::string_view database, std::string_view table) {

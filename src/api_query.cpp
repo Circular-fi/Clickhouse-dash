@@ -10,6 +10,7 @@
 #include "time_util.hpp"
 #include "user_sql_policy.hpp"
 #include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <chrono>
 #include <string>
@@ -201,10 +202,10 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
     // removing a compatibility attempt. Match both the public id and the
     // deterministic retry prefix without relying on in-memory session state.
     const std::string& cancel_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-    const std::string qid_esc = escape_single_quotes(qid);
-    const std::string retry_prefix_esc = escape_single_quotes(qid + "-attempt-");
+    const std::string qid_quoted = sql::quote_string(qid);
+    const std::string retry_prefix_quoted = sql::quote_string(qid + "-attempt-");
     kill = kill_queries(cancel_uri,
-                        "query_id = '" + qid_esc + "' OR startsWith(query_id, '" + retry_prefix_esc + "')", false);
+                        "query_id = " + qid_quoted + " OR startsWith(query_id, " + retry_prefix_quoted + ")", false);
     if (!kill.sent) {
       log_event(LogLevel::Warn, "query.cancel_failed", {{"host", host_id}, {"error", kill.error}});
       return json_error(res, 502, "cancel_failed",

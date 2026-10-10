@@ -6,6 +6,7 @@
 
 #include "ch_client_pool.hpp"
 #include "ch_uri.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <clickhouse/columns/numeric.h>
@@ -23,18 +24,7 @@
 namespace chdash {
 namespace {
 
-std::string sql_quote(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
+using sql::quote_string;
 
 std::vector<std::string> analysis_query_ids(const QueryRegistryRecord& record) {
   std::vector<std::string> ids;
@@ -50,7 +40,7 @@ std::string sql_string_list(const std::vector<std::string>& values) {
   std::string out = "[";
   for (size_t i = 0; i < values.size(); ++i) {
     if (i) out += ',';
-    out += sql_quote(values[i]);
+    out += quote_string(values[i]);
   }
   out += ']';
   return out;
@@ -441,7 +431,7 @@ std::vector<OpenTelemetrySpanAnalysisRow> load_otel_spans(
     std::string parents = "[";
     for (size_t i = 0; i < level.size(); ++i) {
       if (i) parents += ',';
-      parents += "(" + sql_quote(level[i].trace_id) + "," + sql_quote(level[i].span_id) + ")";
+      parents += "(" + quote_string(level[i].trace_id) + "," + quote_string(level[i].span_id) + ")";
     }
     parents += "]";
 

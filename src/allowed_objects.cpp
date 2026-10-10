@@ -3,6 +3,7 @@
 #include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
 #include "ch_client_pool.hpp"
+#include "sql_literal.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -15,21 +16,11 @@
 namespace chdash {
 namespace {
 
+using sql::quote_ident;
+
 constexpr int kAccessDenied = 497;
 // An answer keeps this many issues at most: they explain a gap, they are not a listing.
 constexpr size_t kMaxIssues = 64;
-
-std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (const char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
-}
 
 std::string qualified_ident(std::string_view database, std::string_view table) {
   return quote_ident(database) + "." + quote_ident(table);

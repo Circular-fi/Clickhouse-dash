@@ -14,6 +14,7 @@
 #include "host_util.hpp"
 #include "ttl_cache.hpp"
 #include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -33,23 +34,12 @@
 namespace chdash {
 namespace {
 
+using sql::quote_string;
+
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 
 constexpr auto kSignalMetaCacheTtl = std::chrono::seconds(60);
 constexpr size_t kSignalMetaCacheMaxEntries = 256;
-
-std::string sql_quote(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
 
 int64_t text_to_i64(const std::string& text) {
   try {
@@ -201,7 +191,7 @@ std::string in_list(const std::vector<std::string>& values) {
   std::string out = "(";
   for (size_t i = 0; i < values.size(); ++i) {
     if (i) out += ", ";
-    out += sql_quote(values[i]);
+    out += quote_string(values[i]);
   }
   return out + ")";
 }
@@ -212,7 +202,7 @@ std::map<std::string, TableInfo> load_table_infos(
     const std::string& database,
     const std::vector<std::string>& tables) {
   std::map<std::string, TableInfo> out;
-  const std::string db = sql_quote(database);
+  const std::string db = quote_string(database);
   const std::string names = in_list(tables);
 
   ch_select(client,

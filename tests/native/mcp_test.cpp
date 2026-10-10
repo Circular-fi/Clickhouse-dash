@@ -20,6 +20,7 @@
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
 #include "mcp_sql.hpp"
+#include "sql_literal.hpp"
 #include "mcp_tools.hpp"
 #include "metrics.hpp"
 #include "secure_random.hpp"
@@ -706,16 +707,16 @@ void test_sql_scanner() {
 }
 
 void test_sql_quoting_and_types() {
-  CHECK_EQ(mcp_quote_identifier("a"), std::string("`a`"));
-  CHECK_EQ(mcp_quote_identifier("a`b"), std::string("`a\\`b`"));
-  CHECK_EQ(mcp_quote_identifier("a\\b"), std::string("`a\\\\b`"));
-  CHECK_EQ(mcp_quote_string("abc"), std::string("'abc'"));
-  CHECK_EQ(mcp_quote_string("o'rei\\lly"), std::string("'o\\'rei\\\\lly'"));
-  CHECK_EQ(mcp_quote_string("a\nb\tc\rd"), std::string("'a\\nb\\tc\\rd'"));
-  CHECK_EQ(mcp_quote_string(std::string("a\0b", 3)), std::string("'a\\0b'"));
-  CHECK_EQ(mcp_quote_string("a\x01" "b"), std::string("'a\\x01b'"));
-  CHECK_EQ(mcp_quote_string("' OR 1=1 --"), std::string("'\\' OR 1=1 --'"));
-  CHECK_EQ(mcp_quote_string(""), std::string("''"));
+  CHECK_EQ(sql::quote_ident("a"), std::string("`a`"));
+  CHECK_EQ(sql::quote_ident("a`b"), std::string("`a\\`b`"));
+  CHECK_EQ(sql::quote_ident("a\\b"), std::string("`a\\\\b`"));
+  CHECK_EQ(sql::quote_string("abc"), std::string("'abc'"));
+  CHECK_EQ(sql::quote_string("o'rei\\lly"), std::string("'o\\'rei\\\\lly'"));
+  CHECK_EQ(sql::quote_string("a\nb\tc\rd"), std::string("'a\\nb\\tc\\rd'"));
+  CHECK_EQ(sql::quote_string(std::string("a\0b", 3)), std::string("'a\\0b'"));
+  CHECK_EQ(sql::quote_string("a\x01" "b"), std::string("'a\\x01b'"));
+  CHECK_EQ(sql::quote_string("' OR 1=1 --"), std::string("'\\' OR 1=1 --'"));
+  CHECK_EQ(sql::quote_string(""), std::string("''"));
 
   const auto cls = [](const char* t) { return mcp_classify_type(t).cls; };
   CHECK(cls("Int8") == McpTypeClass::Integer);

@@ -7,6 +7,7 @@
 #include "json_clickhouse.hpp"
 #include "sql_scan.hpp"
 #include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/query.h>
 #include <clickhouse/columns/enum.h>
@@ -33,6 +34,11 @@
 #include <utility>
 
 namespace chdash {
+
+namespace {
+using sql::quote_ident;
+using sql::quote_string;
+}
 
 // ClickHouse may pretty-print complex types returned by DESCRIBE with newlines/indentation.
 // This produces noisy JSON ("\n    ") in result_meta. Normalize it to a single-line form
@@ -112,7 +118,6 @@ static int64_t ms_since(const std::chrono::steady_clock::time_point& start,
   return std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 }
 
-static std::string sql_quote_string(std::string_view s);
 
 // Decoded blocks that wait for the encoder thread (QuerySession::run_query): the memory bound.
 constexpr size_t kEncodeQueueBlocks = 4;
@@ -297,7 +302,7 @@ KillOutcome QuerySession::cancel_native_query_ids_best_effort(
   std::string where = "query_id IN (";
   for (size_t i = 0; i < query_ids.size(); ++i) {
     if (i > 0) where += ", ";
-    where += sql_quote_string(query_ids[i]);
+    where += quote_string(query_ids[i]);
   }
   where += ")";
   return kill_queries(stats_uri_.empty() ? runner_uri_ : stats_uri_, where, synchronous);
@@ -634,18 +639,6 @@ static std::string strip_trailing_semicolon_copy(std::string s) {
   return s;
 }
 
-static std::string sql_quote_string(std::string_view s) {
-  std::string out;
-  out.reserve(s.size() + 2);
-  out.push_back('\'');
-  for (char ch : s) {
-    out.push_back(ch);
-    if (ch == '\'') out.push_back('\'');
-  }
-  out.push_back('\'');
-  return out;
-}
-
 enum class ResultTransportMode {
   Passthrough,
   Stringify,
@@ -868,18 +861,6 @@ static bool should_retry_with_describe_after_direct_path_error(std::string_view 
          icontains(msg, "cannot create column") ||
          icontains(msg, "cannot read data") ||
          icontains(msg, "cannot parse type");
-}
-
-static std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
 }
 
 static std::string build_projected_expr(const std::string& col_name, const ResultColumnPlan& plan) {

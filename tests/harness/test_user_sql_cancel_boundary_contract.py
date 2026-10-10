@@ -9,8 +9,9 @@ def test_user_sql_kill_query_is_blocked_in_run_and_export():
     export_api = (ROOT / "src/api_export.cpp").read_text()
     cmake = (ROOT / "src/CMakeLists.txt").read_text()
 
-    assert 'first == "KILL"' in policy
-    assert 'second == "QUERY"' in policy
+    assert 'word_is(sql, token, "KILL")' in policy
+    assert 'word_is(sql, tokens[next], "QUERY")' in policy
+    assert "sql::lex(sql)" in policy
     assert "user_sql_is_forbidden(sql)" in query_api
     assert "user_sql_is_forbidden(sql)" in export_api
     assert '"cancel_requires_token"' in query_api

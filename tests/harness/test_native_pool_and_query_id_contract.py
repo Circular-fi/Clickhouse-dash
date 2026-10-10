@@ -116,7 +116,8 @@ def test_cancel_fallback_matches_reaped_compatibility_attempts() -> None:
 
     assert 'qid + "-attempt-"' in source
     assert "startsWith(query_id" in source
-    assert "query_id = '" in source
+    assert '"query_id = " + qid_quoted' in source
+    assert "sql::quote_string(qid)" in source
 
 
 def test_native_clients_enable_kernel_keepalive_without_ping_before_every_query() -> None:

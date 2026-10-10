@@ -14,6 +14,7 @@ option(CHDASH_BUILD_RESULT_TESTS "Build the result path unit tests (JSON cell en
 option(CHDASH_BUILD_FORMAT_TESTS "Build the bound tests of the JSON parse and the SQL formatter (small thread stacks)" OFF)
 option(CHDASH_BUILD_CH_QUERY_TESTS "Build the tests of the ClickHouse statements and connections (a server is optional)" OFF)
 option(CHDASH_BUILD_CACHE_TESTS "Build the unit tests of the caches and of the ACL discovery (fakes, no ClickHouse needed)" OFF)
+option(CHDASH_BUILD_SQL_TESTS "Build the unit tests of the SQL text: literals, lexer, policy, structure" OFF)
 option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
@@ -35,9 +36,9 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/ClickHouse/clickhouse-cpp.git
   GIT_TAG        001025cd72d904104c15657e85e0fb6b0ec58e14 # v2.6.2
 )
-FetchContent_MakeAvailable(clickhouse_cpp)
 # A Bool is a ColumnBool (true, false), not a UInt8: the JSON encoder, the export and the type of a result say Bool.
 set(CH_MAP_BOOL_TO_UINT8 OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(clickhouse_cpp)
 
 FetchContent_Declare(
   httplib
@@ -132,6 +133,13 @@ if (CHDASH_BUILD_CACHE_TESTS)
   chdash_configure_target(chdash_cache_acl_test)
 endif()
 
+if (CHDASH_BUILD_SQL_TESTS)
+  # The text of a statement: what is written into it, how it is read (the one lexer), and what is read from it.
+  add_executable(chdash_sql_test ../tests/native/sql_test.cpp sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp)
+  target_include_directories(chdash_sql_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  chdash_configure_target(chdash_sql_test)
+endif()
+
 if (CHDASH_BUILD_FUZZERS)
   # The libFuzzer targets of tests/fuzz: the parsers that read what a client, a config file or a pasted text
   # sends, and the WebAssembly kernels of the page built natively. Build them with clang and
@@ -210,6 +218,7 @@ if (CHDASH_BUILD_APP)
     allowed_objects.cpp
     explorer_catalog.cpp
     explorer_graph.cpp
+    sql_structure.cpp
     system_activity.cpp
     system_monitor.cpp
     api_explorer.cpp

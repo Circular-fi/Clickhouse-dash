@@ -20,6 +20,7 @@
 #include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
 #include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/document.h>
@@ -46,6 +47,9 @@
 
 namespace chdash {
 namespace {
+
+using sql::quote_ident;
+using sql::quote_string;
 
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 using Clock = std::chrono::steady_clock;
@@ -85,31 +89,6 @@ struct NotFound : std::runtime_error {
   NotFound(std::string c, const std::string& message) : std::runtime_error(message), code(std::move(c)) {}
   std::string code;
 };
-
-std::string quote_string(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
-
-std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
-}
 
 int64_t elapsed_ms(Clock::time_point since) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - since).count();

@@ -29,6 +29,7 @@
 #include "time_util.hpp"
 #include "ttl_cache.hpp"
 #include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -51,6 +52,9 @@
 namespace chdash {
 namespace {
 
+using sql::like_escape;
+using sql::quote_ident;
+
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 using Clock = std::chrono::steady_clock;
 
@@ -71,15 +75,6 @@ constexpr size_t kBodyMaxChars = 16384;
 constexpr size_t kMaxTextTerms = 16;
 constexpr size_t kMaxAttrFilters = 16;
 constexpr auto kSchemaCacheTtl = std::chrono::seconds(60);
-
-std::string quote_ident(std::string_view ident) {
-  std::string out = "`";
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  return out + "`";
-}
 
 std::string quote(std::string_view value) { return otel::allowlist_quote_string(value); }
 
@@ -328,15 +323,6 @@ std::string to_lower_ascii(std::string text) {
     if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
   }
   return text;
-}
-
-std::string like_escape(std::string_view text) {
-  std::string out;
-  for (char c : text) {
-    if (c == '%' || c == '_' || c == '\\') out.push_back('\\');
-    out.push_back(c);
-  }
-  return out;
 }
 
 // Token mode: every token of a term must be present (hasToken, served by the

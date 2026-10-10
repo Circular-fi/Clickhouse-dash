@@ -2,6 +2,7 @@
 
 #include "ch_block_value.hpp"
 #include "ch_query.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 
@@ -170,15 +171,7 @@ private:
     return out;
   }
 
-  static std::string quote(const std::string& value) {
-    std::string out = "'";
-    for (const char ch : value) {
-      if (ch == '\\' || ch == '\'') out.push_back('\\');
-      out.push_back(ch);
-    }
-    out.push_back('\'');
-    return out;
-  }
+  static std::string quote(const std::string& value) { return sql::quote_string(value); }
 
   static std::vector<std::pair<std::string, DdlTexts>> read_texts(
       clickhouse::Client& client, const std::string& database, const std::vector<std::string>& names) {

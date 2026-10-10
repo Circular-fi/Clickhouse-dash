@@ -1,4 +1,5 @@
 #include "format_postprocess.hpp"
+#include "sql_lexer.hpp"
 #include "sql_scan.hpp"
 
 #include <algorithm>
@@ -130,28 +131,52 @@ bool ci_match_at(string_view s, size_t pos, string_view word) {
   return true;
 }
 
+// The formatter gives up on a statement it cannot lay out in time (FormatGivesUp, caught by
+// postprocess_format_query, which then returns the statement as written). Every layout pass scans
+// the text with step_scan, so that is where the time is checked: some passes are quadratic in the
+// nesting (a CASE inside a CASE 2000 times takes seconds), and a worker thread must not spend
+// minutes on one request.
+struct FormatGivesUp {};
+
+struct FormatBudget {
+  std::chrono::steady_clock::time_point deadline;
+  uint64_t work = 0;        // characters scanned so far
+  uint64_t next_check = 0;  // the clock is read each time `work` passes this
+};
+
+// The budget of the statement being formatted on this thread; null outside postprocess_format_query.
+thread_local FormatBudget* t_format_budget = nullptr;
+
+constexpr auto kFormatTimeBudget = std::chrono::seconds(2);
+
+// Counts `units` characters of scanning against the budget of this thread, reading the clock once
+// every 64 Ki of them.
+inline void spend_format_budget(size_t units = 1) {
+  FormatBudget* budget = t_format_budget;
+  if (!budget) return;
+  budget->work += units;
+  if (budget->work < budget->next_check) return;
+  budget->next_check = budget->work + 65536;
+  if (std::chrono::steady_clock::now() > budget->deadline) throw FormatGivesUp{};
+}
+
+// The state of a byte by byte pass over a statement (sql_lexer.hpp, sql::Scan): the open quote or comment and the
+// depth of the brackets. Every layout pass reads the text with step_scan.
+using ScanState = sql::Scan;
+
+bool is_top_level(const ScanState& st) { return st.top_level(); }
+
+void step_scan(ScanState& st, string_view s, size_t& i) {
+  spend_format_budget();
+  st.step(s, i);
+}
+
 string repair_split_clause_keywords(string_view s) {
   string out;
   out.reserve(s.size());
-  bool in_str = false;
-  bool in_backtick = false;
-  bool in_line_comment = false;
-  bool in_block_comment = false;
-  bool esc = false;
+  ScanState st;
   for (size_t i = 0; i < s.size(); ++i) {
-    const char c = s[i];
-    const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
-    if (in_line_comment) { out.push_back(c); if (c == '\n') in_line_comment = false; continue; }
-    if (in_block_comment) { out.push_back(c); if (c == '*' && n == '/') { out.push_back(n); ++i; in_block_comment = false; } continue; }
-    if (in_str) { out.push_back(c); if (esc) esc = false; else if (c == '\\') esc = true; else if (c == '\'') in_str = false; continue; }
-    if (in_backtick) { out.push_back(c); if (c == '`') in_backtick = false; continue; }
-    if (c == '\'') { out.push_back(c); in_str = true; esc = false; continue; }
-    if (c == '`') { out.push_back(c); in_backtick = true; continue; }
-    if (c == '-' && n == '-') { out += "--"; ++i; in_line_comment = true; continue; }
-    if (c == '#') { out.push_back(c); in_line_comment = true; continue; }
-    if (c == '/' && n == '*') { out += "/*"; ++i; in_block_comment = true; continue; }
-
-    if (ci_match_at(s, i, "ARRAY")) {
+    if (st.in_code() && ci_match_at(s, i, "ARRAY")) {
       size_t j = i + 5;
       size_t k = j;
       while (k < s.size() && (s[k] == ' ' || s[k] == '\t' || s[k] == '\n' || s[k] == '\r')) ++k;
@@ -161,12 +186,12 @@ string repair_split_clause_keywords(string_view s) {
         continue;
       }
     }
-    out.push_back(c);
+    const size_t from = i;
+    step_scan(st, s, i);
+    out.append(s.substr(from, i - from + 1));
   }
   return out;
 }
-
-
 
 string normalize_code_spacing(string_view s) {
   const string trimmed_for_comment = trim_ascii_spaces(s);
@@ -174,9 +199,6 @@ string normalize_code_spacing(string_view s) {
 
   string out;
   out.reserve(s.size() + 16);
-  bool in_str = false;
-  bool in_backtick = false;
-  bool esc = false;
   // End of the last unary sign written to `out`: `-(a + b)` stays glued.
   size_t unary_sign_end = string::npos;
 
@@ -223,52 +245,35 @@ string normalize_code_spacing(string_view s) {
     char c = s[i];
     char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
 
-    if (in_str) {
-      out.push_back(c);
-      if (esc) esc = false;
-      else if (c == '\\') esc = true;
-      else if (c == '\'') in_str = false;
-      continue;
-    }
-    if (in_backtick) {
-      out.push_back(c);
-      if (c == '`') in_backtick = false;
-      continue;
-    }
-    if (c == '/' && n == '*') {
-      const size_t end = s.find("*/", i + 2);
-      if (end == string_view::npos) {
-        out.append(s.substr(i));
-        break;
-      }
-      out.append(s.substr(i, end + 2 - i));
-      i = end + 1;
-      continue;
-    }
-    // A `--` line comment is copied verbatim to the end of its line. Spacing
-    // it as two minus operators produced `- -comment`, turning the comment
-    // into code (a trailing comment after CREATE TABLE no longer parsed).
-    if (c == '-' && n == '-') {
-      const size_t end = s.find('\n', i);
-      if (!out.empty() && out.back() != ' ' && out.back() != '\n') out.push_back(' ');
-      if (end == string_view::npos) {
-        out.append(s.substr(i));
-        break;
-      }
+    // A comment, a text and a quoted name are copied whole: nothing in them is code to space.
+    if (sql::starts_block_comment(s, i)) {
+      const size_t end = sql::block_comment_end(s, i);
       out.append(s.substr(i, end - i));
       i = end - 1;
       continue;
     }
-    if (c == '\'') {
-      in_str = true;
-      esc = false;
-      out.push_back(c);
+    // A line comment is copied verbatim to the end of its line. Spacing
+    // it as two minus operators produced `- -comment`, turning the comment
+    // into code (a trailing comment after CREATE TABLE no longer parsed).
+    if (sql::starts_line_comment(s, i)) {
+      const size_t end = sql::line_comment_end(s, i);
+      if (!out.empty() && out.back() != ' ' && out.back() != '\n') out.push_back(' ');
+      out.append(s.substr(i, end - i));
+      i = end - 1;
       continue;
     }
-    if (c == '`') {
-      in_backtick = true;
-      out.push_back(c);
+    if (c == '\'' || c == '"' || c == '`') {
+      const size_t end = sql::quoted_end(s, i);
+      out.append(s.substr(i, end - i));
+      i = end - 1;
       continue;
+    }
+    if (c == '$') {
+      if (const size_t end = sql::heredoc_end(s, i)) {
+        out.append(s.substr(i, end - i));
+        i = end - 1;
+        continue;
+      }
     }
 
     if (c == ',') {
@@ -514,125 +519,6 @@ string indent_after_first_line(string_view s, size_t spaces) {
   return string(s.substr(0, pos + 1)) + indent_block(s.substr(pos + 1), static_cast<int>(spaces));
 }
 
-// The formatter gives up on a statement it cannot lay out in time (FormatGivesUp, caught by
-// postprocess_format_query, which then returns the statement as written). Every layout pass scans
-// the text with step_scan, so that is where the time is checked: some passes are quadratic in the
-// nesting (a CASE inside a CASE 2000 times takes seconds), and a worker thread must not spend
-// minutes on one request.
-struct FormatGivesUp {};
-
-struct FormatBudget {
-  std::chrono::steady_clock::time_point deadline;
-  uint64_t work = 0;        // characters scanned so far
-  uint64_t next_check = 0;  // the clock is read each time `work` passes this
-};
-
-// The budget of the statement being formatted on this thread; null outside postprocess_format_query.
-thread_local FormatBudget* t_format_budget = nullptr;
-
-constexpr auto kFormatTimeBudget = std::chrono::seconds(2);
-
-// Counts `units` characters of scanning against the budget of this thread, reading the clock once
-// every 64 Ki of them.
-inline void spend_format_budget(size_t units = 1) {
-  FormatBudget* budget = t_format_budget;
-  if (!budget) return;
-  budget->work += units;
-  if (budget->work < budget->next_check) return;
-  budget->next_check = budget->work + 65536;
-  if (std::chrono::steady_clock::now() > budget->deadline) throw FormatGivesUp{};
-}
-
-struct ScanState {
-  bool in_str = false;
-  bool in_double_quote = false;
-  bool in_backtick = false;
-  bool in_line_comment = false;
-  bool in_block_comment = false;
-  bool esc = false;
-  int par = 0;
-  int br = 0;
-  int brc = 0;
-};
-
-bool is_top_level(const ScanState& st) {
-  return !st.in_str && !st.in_double_quote && !st.in_backtick &&
-         !st.in_line_comment && !st.in_block_comment &&
-         st.par == 0 && st.br == 0 && st.brc == 0;
-}
-
-void step_scan(ScanState& st, string_view s, size_t& i) {
-  spend_format_budget();
-  const char c = s[i];
-  const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
-  if (st.in_str) {
-    if (st.esc) st.esc = false;
-    else if (c == '\\') st.esc = true;
-    else if (c == '\'' && n == '\'') ++i;
-    else if (c == '\'') st.in_str = false;
-    return;
-  }
-  if (st.in_double_quote) {
-    if (st.esc) st.esc = false;
-    else if (c == '\\') st.esc = true;
-    else if (c == '"' && n == '"') ++i;
-    else if (c == '"') st.in_double_quote = false;
-    return;
-  }
-  if (st.in_backtick) {
-    if (c == '`' && n == '`') ++i;
-    else if (c == '`') st.in_backtick = false;
-    return;
-  }
-  if (st.in_line_comment) {
-    if (c == '\n') st.in_line_comment = false;
-    return;
-  }
-  if (st.in_block_comment) {
-    if (c == '*' && n == '/') {
-      st.in_block_comment = false;
-      ++i;
-    }
-    return;
-  }
-
-  if (c == '\'') {
-    st.in_str = true;
-    st.esc = false;
-    return;
-  }
-  if (c == '"') {
-    st.in_double_quote = true;
-    st.esc = false;
-    return;
-  }
-  if (c == '`') {
-    st.in_backtick = true;
-    return;
-  }
-  if (c == '-' && n == '-') {
-    st.in_line_comment = true;
-    ++i;
-    return;
-  }
-  if (c == '#') {
-    st.in_line_comment = true;
-    return;
-  }
-  if (c == '/' && n == '*') {
-    st.in_block_comment = true;
-    ++i;
-    return;
-  }
-
-  if (c == '(') ++st.par;
-  else if (c == ')' && st.par > 0) --st.par;
-  else if (c == '[') ++st.br;
-  else if (c == ']' && st.br > 0) --st.br;
-  else if (c == '{') ++st.brc;
-  else if (c == '}' && st.brc > 0) --st.brc;
-}
-
 // Removes the indentation common to the lines after the first. A predicate
 // that follows a leading `--` comment keeps the indentation it had in the
 // input; without this, formatting the output again would indent it twice.
@@ -644,7 +530,7 @@ string dedent_after_first_line(string_view s) {
   ScanState st;
   for (size_t i = 0; i < s.size(); ++i) {
     if (s[i] == '\n' && i >= first_nl) {
-      if (st.in_str || st.in_double_quote || st.in_backtick || st.in_block_comment) return string(s);
+      if (st.in_quoted() || st.region == ScanState::Region::BlockComment) return string(s);
       starts.push_back(i + 1);
     }
     step_scan(st, s, i);
@@ -673,7 +559,7 @@ size_t find_matching_paren(string_view s, size_t open_pos) {
   ScanState st;
   st.par = 1;
   for (size_t i = open_pos + 1; i < s.size(); ++i) {
-    if (!st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment) {
+    if (st.in_code()) {
       if (s[i] == '(') ++st.par;
       else if (s[i] == ')') {
         --st.par;
@@ -892,7 +778,7 @@ string unwrap_outer_parens(string_view s) {
   ScanState st;
   for (size_t i = 0; i < text.size(); ++i) {
     const char c = text[i];
-    if (!st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment) {
+    if (st.in_code()) {
       if (c == '(') ++depth;
       else if (c == ')') {
         --depth;
@@ -1128,7 +1014,7 @@ static string format_alias_identifier(string_view alias) {
   {
     ScanState st;
     for (size_t i = 0; i + 1 < trimmed.size(); ++i) {
-      if (!st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment &&
+      if (st.in_code() &&
           trimmed[i] == '/' && trimmed[i + 1] == '*') {
         const string code = trim_ascii_spaces(string_view(trimmed).substr(0, i));
         if (!code.empty()) return format_alias_identifier(code) + " " + trimmed.substr(i);
@@ -1193,7 +1079,7 @@ int find_alias_marker_for_alignment(string_view line) {
   ScanState st;
   int last = -1;
   for (size_t i = 0; i + 4 <= line.size(); ++i) {
-    if (!st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment && line.substr(i, 4) == " AS ") {
+    if (st.in_code() && line.substr(i, 4) == " AS ") {
       last = static_cast<int>(i);
     }
     step_scan(st, line, i);
@@ -1536,11 +1422,7 @@ string align_multiline_tuple_closers(string_view source) {
   size_t line = 0;
   size_t source_line_start = 0;
   size_t output_line_start = 0;
-  bool in_single = false;
-  bool in_double = false;
-  bool in_backtick = false;
-  bool in_line_comment = false;
-  bool in_block_comment = false;
+  ScanState st;
 
   auto current_indent = [&](size_t pos) {
     size_t n = 0;
@@ -1567,50 +1449,14 @@ string align_multiline_tuple_closers(string_view source) {
 
   for (size_t i = 0; i < source.size(); ++i) {
     const char c = source[i];
-    const char n = i + 1 < source.size() ? source[i + 1] : '\0';
-
-    if (in_line_comment) {
-      out.push_back(c);
-      if (c == '\n') {
-        in_line_comment = false;
-        ++line;
-        source_line_start = i + 1;
-        output_line_start = out.size();
-      }
-      continue;
-    }
-    if (in_block_comment) {
-      out.push_back(c);
-      if (c == '*' && n == '/') {
-        out.push_back(n);
-        ++i;
-        in_block_comment = false;
-      } else if (c == '\n') {
-        ++line;
-        source_line_start = i + 1;
-        output_line_start = out.size();
-      }
-      continue;
-    }
-    if (!in_single && !in_double && !in_backtick && c == '-' && n == '-') {
-      out.push_back(c); out.push_back(n); ++i; in_line_comment = true; continue;
-    }
-    if (!in_single && !in_double && !in_backtick && c == '/' && n == '*') {
-      out.push_back(c); out.push_back(n); ++i; in_block_comment = true; continue;
-    }
-
-    if (!in_double && !in_backtick && c == '\'' && (i == 0 || source[i - 1] != '\\')) in_single = !in_single;
-    else if (!in_single && !in_backtick && c == '"' && (i == 0 || source[i - 1] != '\\')) in_double = !in_double;
-    else if (!in_single && !in_double && c == '`') in_backtick = !in_backtick;
-
-    if (!in_single && !in_double && !in_backtick && c == '(') {
+    if (st.in_code() && c == '(') {
       const string ident = preceding_identifier(i);
       stack.push_back({iequals_ascii(ident, "Tuple"), current_indent(i), line});
       out.push_back(c);
       continue;
     }
 
-    if (!in_single && !in_double && !in_backtick && c == ')' && !stack.empty()) {
+    if (st.in_code() && c == ')' && !stack.empty()) {
       const ParenFrame frame = stack.back();
       stack.pop_back();
       if (frame.tuple && line > frame.opened_line) {
@@ -1628,11 +1474,16 @@ string align_multiline_tuple_closers(string_view source) {
       continue;
     }
 
-    out.push_back(c);
-    if (c == '\n') {
-      ++line;
-      source_line_start = i + 1;
-      output_line_start = out.size();
+    // Everything else is copied as it is, a comment or a text included; a line break moves the line counters.
+    const size_t from = i;
+    step_scan(st, source, i);
+    for (size_t k = from; k <= i; ++k) {
+      out.push_back(source[k]);
+      if (source[k] == '\n') {
+        ++line;
+        source_line_start = k + 1;
+        output_line_start = out.size();
+      }
     }
   }
   return out;
@@ -1676,7 +1527,7 @@ string format_long_enum_type_lines(string_view source) {
   const auto enum_at = [](string_view line, size_t start = 0) -> size_t {
     ScanState st;
     for (size_t i = 0; i < line.size(); ++i) {
-      const bool lexical = !st.in_str && !st.in_double_quote && !st.in_backtick && !st.in_line_comment && !st.in_block_comment;
+      const bool lexical = st.in_code();
       if (i >= start && lexical) {
         const bool e8 = i + 6 <= line.size() && line.substr(i, 6) == "Enum8(";
         const bool e16 = i + 7 <= line.size() && line.substr(i, 7) == "Enum16(";

@@ -11,6 +11,7 @@
 #include "jwt.hpp"
 #include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -38,30 +39,8 @@
 namespace chdash {
 namespace {
 
-std::string quote_ident(std::string_view ident) {
-  std::string out;
-  out.reserve(ident.size() + 2);
-  out.push_back('`');
-  for (char ch : ident) {
-    if (ch == '`') out += "``";
-    else out.push_back(ch);
-  }
-  out.push_back('`');
-  return out;
-}
-
-std::string quote_string(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
-}
+using sql::quote_ident;
+using sql::quote_string;
 
 std::string qualified(std::string_view database, std::string_view table) {
   return quote_ident(database) + "." + quote_ident(table);

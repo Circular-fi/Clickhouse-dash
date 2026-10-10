@@ -6,6 +6,7 @@
 #include "ch_block_value.hpp"
 #include "ch_query.hpp"
 #include "facet_limits.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/exceptions.h>
 
@@ -18,6 +19,8 @@
 
 namespace chdash {
 namespace {
+
+using sql::quote_string;
 
 uint64_t monitor_now_ms() {
   using namespace std::chrono;
@@ -53,19 +56,6 @@ std::optional<double> finite(const std::string& value) {
 
 bool flag(const std::string& value) {
   return value == "1" || value == "true";
-}
-
-std::string quote_string(std::string_view value) {
-  std::string out;
-  out.reserve(value.size() + 2);
-  out.push_back('\'');
-  for (const char ch : value) {
-    if (ch == '\\') out += "\\\\";
-    else if (ch == '\'') out += "\\'";
-    else out.push_back(ch);
-  }
-  out.push_back('\'');
-  return out;
 }
 
 std::string in_list(const std::vector<std::string>& names) {

@@ -14,6 +14,7 @@
 #include "time_util.hpp"
 #include "zip_stream.hpp"
 #include "json_text.hpp"
+#include "sql_literal.hpp"
 
 #include <clickhouse/client.h>
 
@@ -183,7 +184,7 @@ void cancel_export_best_effort(
     const HostSpec& host,
     const std::string& query_id) {
   if (query_id.empty()) return;
-  kill_queries(host.runner_uri, "query_id = '" + escape_single_quotes(query_id) + "'", false);
+  kill_queries(host.runner_uri, "query_id = " + sql::quote_string(query_id), false);
 }
 
 // While an exported statement runs, a thread checks the download every second. A

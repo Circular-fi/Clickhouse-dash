@@ -1,4 +1,6 @@
 #include "explorer_graph.hpp"
+
+#include "sql_structure.hpp"
 #include "ch_query.hpp"
 #include "ddl_text_cache.hpp"
 #include "ch_block_value.hpp"
@@ -119,148 +121,15 @@ bool contains_ci(std::string_view haystack, std::string_view needle) {
   return false;
 }
 
-std::vector<std::string> parse_engine_arguments(std::string_view engine_full, std::string_view engine_name) {
-  size_t pos = 0;
-  while (pos < engine_full.size() && std::isspace(static_cast<unsigned char>(engine_full[pos]))) ++pos;
-  if (engine_full.substr(pos, engine_name.size()) != engine_name) return {};
-  pos += engine_name.size();
-  while (pos < engine_full.size() && std::isspace(static_cast<unsigned char>(engine_full[pos]))) ++pos;
-  if (pos >= engine_full.size() || engine_full[pos] != '(') return {};
-  ++pos;
-
-  std::vector<std::string> args;
-  std::string current;
-  char quote = 0;
-  int depth = 0;
-  for (; pos < engine_full.size(); ++pos) {
-    const char ch = engine_full[pos];
-    if (quote) {
-      if (ch == '\\' && quote == '\'' && pos + 1 < engine_full.size()) {
-        current.push_back(engine_full[++pos]);
-        continue;
-      }
-      if (ch == quote) {
-        if (pos + 1 < engine_full.size() && engine_full[pos + 1] == quote) {
-          current.push_back(quote);
-          ++pos;
-          continue;
-        }
-        quote = 0;
-        continue;
-      }
-      current.push_back(ch);
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') { quote = ch; continue; }
-    if (ch == '(') { ++depth; current.push_back(ch); continue; }
-    if (ch == ')') {
-      if (depth > 0) { --depth; current.push_back(ch); continue; }
-      auto trim = [](const std::string& value) {
-        const auto first = value.find_first_not_of(" \t\r\n");
-        if (first == std::string::npos) return std::string{};
-        const auto last = value.find_last_not_of(" \t\r\n");
-        return value.substr(first, last - first + 1);
-      };
-      args.push_back(trim(current));
-      break;
-    }
-    if (ch == ',' && depth == 0) {
-      const auto first = current.find_first_not_of(" \t\r\n");
-      const auto last = current.find_last_not_of(" \t\r\n");
-      args.push_back(first == std::string::npos ? std::string{} : current.substr(first, last - first + 1));
-      current.clear();
-      continue;
-    }
-    current.push_back(ch);
-  }
-  return args;
-}
-
-struct QualifiedName {
-  std::string database;
-  std::string table;
-};
-
-std::optional<std::string> parse_identifier_token(std::string_view text, size_t& pos) {
-  while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
-  if (pos >= text.size()) return std::nullopt;
-  const char quote = text[pos];
-  if (quote == '`' || quote == '"') {
-    ++pos;
-    std::string value;
-    while (pos < text.size()) {
-      const char ch = text[pos++];
-      if (ch == quote) {
-        if (pos < text.size() && text[pos] == quote) { value.push_back(quote); ++pos; continue; }
-        return value;
-      }
-      value.push_back(ch);
-    }
-    return std::nullopt;
-  }
-  const size_t start = pos;
-  while (pos < text.size()) {
-    const char ch = text[pos];
-    if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '$')) break;
-    ++pos;
-  }
-  if (pos == start) return std::nullopt;
-  return std::string(text.substr(start, pos - start));
-}
-
-std::optional<QualifiedName> parse_qualified_name(std::string_view text, size_t& pos, const std::string& default_database) {
-  auto first = parse_identifier_token(text, pos);
-  if (!first || first->empty()) return std::nullopt;
-  while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
-  if (pos < text.size() && text[pos] == '.') {
-    ++pos;
-    auto second = parse_identifier_token(text, pos);
-    if (!second || second->empty()) return std::nullopt;
-    return QualifiedName{*first, *second};
-  }
-  return QualifiedName{default_database, *first};
-}
-
-bool token_boundary(std::string_view text, size_t pos, size_t len) {
-  const auto is_word = [](char ch) {
-    return std::isalnum(static_cast<unsigned char>(ch)) || ch == '_';
-  };
-  if (pos > 0 && is_word(text[pos - 1])) return false;
-  if (pos + len < text.size() && is_word(text[pos + len])) return false;
-  return true;
-}
-
-std::optional<size_t> find_keyword_ci(std::string_view text, std::string_view keyword, size_t start = 0) {
-  char quote = 0;
-  int depth = 0;
-  for (size_t i = start; i + keyword.size() <= text.size(); ++i) {
-    const char ch = text[i];
-    if (quote) {
-      if (ch == '\\' && quote == '\'' && i + 1 < text.size()) { ++i; continue; }
-      if (ch == quote) quote = 0;
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') { quote = ch; continue; }
-    if (ch == '(') { ++depth; continue; }
-    if (ch == ')') { if (depth > 0) --depth; continue; }
-    if (depth != 0 || !token_boundary(text, i, keyword.size())) continue;
-    bool match = true;
-    for (size_t j = 0; j < keyword.size(); ++j) {
-      if (std::tolower(static_cast<unsigned char>(text[i + j])) !=
-          std::tolower(static_cast<unsigned char>(keyword[j]))) {
-        match = false;
-        break;
-      }
-    }
-    if (match) return i;
-  }
-  return std::nullopt;
-}
+using sql::QualifiedName;
+using sql::find_keyword;
+using sql::parse_identifier;
+using sql::parse_qualified_name;
 
 std::optional<std::string> parse_ttl_destination(std::string_view text, size_t& pos) {
   while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
   if (pos >= text.size()) return std::nullopt;
-  if (text[pos] != '\'') return parse_identifier_token(text, pos);
+  if (text[pos] != '\'') return parse_identifier(text, pos);
   ++pos;
   std::string value;
   while (pos < text.size()) {
@@ -282,84 +151,13 @@ std::string trim_copy(std::string_view value) {
   return std::string(value.substr(first, last - first + 1));
 }
 
-std::string compact_spaces(std::string_view value) {
-  std::string out;
-  out.reserve(value.size());
-  bool pending_space = false;
-  char quote = 0;
-  for (size_t i = 0; i < value.size(); ++i) {
-    const char ch = value[i];
-    if (quote) {
-      if (pending_space && !out.empty()) { out.push_back(' '); pending_space = false; }
-      out.push_back(ch);
-      if (ch == '\\' && quote == '\'' && i + 1 < value.size()) out.push_back(value[++i]);
-      else if (ch == quote) quote = 0;
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') {
-      if (pending_space && !out.empty()) { out.push_back(' '); pending_space = false; }
-      quote = ch;
-      out.push_back(ch);
-      continue;
-    }
-    if (std::isspace(static_cast<unsigned char>(ch))) {
-      pending_space = !out.empty();
-      continue;
-    }
-    if (pending_space && !out.empty()) out.push_back(' ');
-    pending_space = false;
-    out.push_back(ch);
-  }
-  return trim_copy(out);
-}
+// The text with each run of blanks written as one space, without the blanks and the commas at its start.
+std::string compact_spaces(std::string_view value) { return trim_copy(sql::compact_spaces(value)); }
 
-std::vector<std::string> split_top_level_commas(std::string_view text) {
-  std::vector<std::string> parts;
-  size_t start = 0;
-  int depth = 0;
-  char quote = 0;
-  for (size_t i = 0; i < text.size(); ++i) {
-    const char ch = text[i];
-    if (quote) {
-      if (ch == '\\' && quote == '\'' && i + 1 < text.size()) { ++i; continue; }
-      if (ch == quote) {
-        if (i + 1 < text.size() && text[i + 1] == quote) { ++i; continue; }
-        quote = 0;
-      }
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') { quote = ch; continue; }
-    if (ch == '(' || ch == '[' || ch == '{') { ++depth; continue; }
-    if (ch == ')' || ch == ']' || ch == '}') { if (depth > 0) --depth; continue; }
-    if (ch == ',' && depth == 0) {
-      const auto part = trim_copy(text.substr(start, i - start));
-      if (!part.empty()) parts.push_back(part);
-      start = i + 1;
-    }
-  }
-  const auto tail = trim_copy(text.substr(start));
-  if (!tail.empty()) parts.push_back(tail);
-  return parts;
-}
+std::vector<std::string> split_top_level_commas(std::string_view text) { return sql::split_top_level(text, ','); }
 
 std::optional<size_t> find_last_top_level_plus(std::string_view text, size_t before) {
-  char quote = 0;
-  int depth = 0;
-  std::optional<size_t> result;
-  const size_t limit = std::min(before, text.size());
-  for (size_t i = 0; i < limit; ++i) {
-    const char ch = text[i];
-    if (quote) {
-      if (ch == '\\' && quote == '\'' && i + 1 < limit) { ++i; continue; }
-      if (ch == quote) quote = 0;
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') { quote = ch; continue; }
-    if (ch == '(' || ch == '[' || ch == '{') { ++depth; continue; }
-    if (ch == ')' || ch == ']' || ch == '}') { if (depth > 0) --depth; continue; }
-    if (ch == '+' && depth == 0) result = i;
-  }
-  return result;
+  return sql::find_last_top_level(text, '+', before);
 }
 
 std::string ttl_unit_short(std::string unit) {
@@ -384,7 +182,7 @@ void derive_ttl_timing(std::string_view expression, std::string& base_expression
   };
 
   for (const auto& [function_name, suffix] : functions) {
-    const auto at = find_keyword_ci(expression, function_name);
+    const auto at = find_keyword(expression, function_name);
     if (!at) continue;
     size_t pos = *at + function_name.size();
     while (pos < expression.size() && std::isspace(static_cast<unsigned char>(expression[pos]))) ++pos;
@@ -406,7 +204,7 @@ void derive_ttl_timing(std::string_view expression, std::string& base_expression
     return;
   }
 
-  const auto interval_at = find_keyword_ci(expression, "INTERVAL");
+  const auto interval_at = find_keyword(expression, "INTERVAL");
   if (interval_at) {
     size_t pos = *interval_at + 8;
     while (pos < expression.size() && std::isspace(static_cast<unsigned char>(expression[pos]))) ++pos;
@@ -432,13 +230,13 @@ void derive_ttl_timing(std::string_view expression, std::string& base_expression
 
 std::vector<ExplorerGraphTtlRule> parse_table_ttl_rules(std::string_view ddl) {
   std::vector<ExplorerGraphTtlRule> out;
-  const auto ttl_at = find_keyword_ci(ddl, "TTL");
+  const auto ttl_at = find_keyword(ddl, "TTL");
   if (!ttl_at) return out;
 
   const size_t start = *ttl_at + 3;
   size_t end = ddl.size();
   for (std::string_view terminal : {std::string_view("SETTINGS"), std::string_view("COMMENT")}) {
-    if (const auto at = find_keyword_ci(ddl, terminal, start)) end = std::min(end, *at);
+    if (const auto at = find_keyword(ddl, terminal, start)) end = std::min(end, *at);
   }
   if (end <= start) return out;
 
@@ -449,7 +247,7 @@ std::vector<ExplorerGraphTtlRule> parse_table_ttl_rules(std::string_view ddl) {
     struct ActionMatch { size_t at; std::string_view keyword; std::string action; std::string target_kind; };
     std::vector<ActionMatch> actions;
     const auto add_action = [&](std::string_view keyword, std::string action, std::string target_kind = {}) {
-      if (const auto at = find_keyword_ci(raw_rule, keyword)) actions.push_back({*at, keyword, std::move(action), std::move(target_kind)});
+      if (const auto at = find_keyword(raw_rule, keyword)) actions.push_back({*at, keyword, std::move(action), std::move(target_kind)});
     };
     add_action("RECOMPRESS", "recompress", "codec");
     add_action("TO VOLUME", "move", "volume");
@@ -493,60 +291,12 @@ std::vector<ExplorerGraphTtlRule> parse_table_ttl_rules(std::string_view ddl) {
   return out;
 }
 
-// `[LEFT] ARRAY JOIN arr` joins an array of the row, not a relation.
-bool preceded_by_array_keyword(std::string_view text, size_t at) {
-  size_t end = at;
-  while (end > 0 && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
-  if (end < 5) return false;
-  const size_t start = end - 5;
-  for (size_t i = 0; i < 5; ++i) {
-    if (std::tolower(static_cast<unsigned char>(text[start + i])) != "array"[i]) return false;
-  }
-  return token_boundary(text, start, 5);
-}
-
 std::vector<QualifiedName> parse_select_sources(std::string_view select_sql, const std::string& default_database) {
-  std::vector<QualifiedName> result;
-  std::set<std::pair<std::string, std::string>> seen;
-  for (std::string_view keyword : {std::string_view("FROM"), std::string_view("JOIN")}) {
-    size_t start = 0;
-    while (true) {
-      const auto at = find_keyword_ci(select_sql, keyword, start);
-      if (!at) break;
-      start = *at + keyword.size();
-      if (keyword == "JOIN" && preceded_by_array_keyword(select_sql, *at)) continue;
-      size_t pos = *at + keyword.size();
-      while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
-      // A subquery after FROM/JOIN is intentionally ignored. The graph is
-      // best-effort and never invents object names from SQL text.
-      if (pos >= select_sql.size() || select_sql[pos] == '(') continue;
-      auto q = parse_qualified_name(select_sql, pos, default_database);
-      while (pos < select_sql.size() && std::isspace(static_cast<unsigned char>(select_sql[pos]))) ++pos;
-      // `FROM numbers(10)`, `JOIN remote(...)`: a table function, not an object.
-      if (pos < select_sql.size() && select_sql[pos] == '(') continue;
-      if (q && seen.insert({q->database, q->table}).second) result.push_back(std::move(*q));
-    }
-  }
-  return result;
+  return sql::relation_sources(select_sql, default_database);
 }
 
-// The `TO [db.]table` of `CREATE MATERIALIZED VIEW name [ON CLUSTER c] [REFRESH ...] TO target AS SELECT`. A view
-// with its own ENGINE has no TO target: a `TO VOLUME 'x'` / `TO DISK 'x'` of its TTL is not one, nor a `WITH FILL
-// ... TO n` of its SELECT.
 std::optional<QualifiedName> materialized_view_target(std::string_view ddl, const std::string& default_database) {
-  const auto view = find_keyword_ci(ddl, "VIEW");
-  if (!view) return std::nullopt;
-  const auto to = find_keyword_ci(ddl, "TO", *view + 4);
-  if (!to) return std::nullopt;
-  const auto as = find_keyword_ci(ddl, "AS", *view + 4);
-  if (as && *to > *as) return std::nullopt;
-  const auto engine = find_keyword_ci(ddl, "ENGINE", *view + 4);
-  if (engine && *engine < *to) return std::nullopt;
-  size_t pos = *to + 2;
-  auto target = parse_qualified_name(ddl, pos, default_database);
-  while (pos < ddl.size() && std::isspace(static_cast<unsigned char>(ddl[pos]))) ++pos;
-  if (pos < ddl.size() && ddl[pos] == '\'') return std::nullopt;
-  return target;
+  return sql::materialized_view_target(ddl, default_database);
 }
 
 // Panels show the object's own SELECT; a pathological generated view must not
@@ -557,29 +307,7 @@ constexpr size_t kDefinitionSqlLimit = 32 * 1024;
 // example `LIFETIME(MIN 0 MAX 300)` -> `MIN 0 MAX 300`. Quotes and nesting are
 // respected; an unterminated clause yields nothing.
 std::optional<std::string> clause_arguments(std::string_view ddl, std::string_view keyword) {
-  const auto at = find_keyword_ci(ddl, keyword);
-  if (!at) return std::nullopt;
-  size_t pos = *at + keyword.size();
-  while (pos < ddl.size() && std::isspace(static_cast<unsigned char>(ddl[pos]))) ++pos;
-  if (pos >= ddl.size() || ddl[pos] != '(') return std::nullopt;
-  const size_t start = ++pos;
-  int depth = 0;
-  char quote = 0;
-  for (; pos < ddl.size(); ++pos) {
-    const char ch = ddl[pos];
-    if (quote) {
-      if (ch == '\\' && quote == '\'' && pos + 1 < ddl.size()) { ++pos; continue; }
-      if (ch == quote) quote = 0;
-      continue;
-    }
-    if (ch == '\'' || ch == '`' || ch == '"') { quote = ch; continue; }
-    if (ch == '(') { ++depth; continue; }
-    if (ch == ')') {
-      if (depth == 0) return compact_spaces(ddl.substr(start, pos - start));
-      --depth;
-    }
-  }
-  return std::nullopt;
+  return sql::clause_arguments(ddl, keyword);
 }
 
 // `CLICKHOUSE(HOST ... TABLE 't')` -> `CLICKHOUSE`. Only the leading kind
@@ -587,7 +315,7 @@ std::optional<std::string> clause_arguments(std::string_view ddl, std::string_vi
 // not graph metadata.
 std::string leading_identifier(std::string_view text) {
   size_t pos = 0;
-  auto ident = parse_identifier_token(text, pos);
+  auto ident = parse_identifier(text, pos);
   if (!ident) return {};
   std::string out = *ident;
   std::transform(out.begin(), out.end(), out.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
@@ -802,7 +530,7 @@ bool load_explorer_graph(
         node.active_parts = summary.active_parts;
       }
       if (node.kind == "buffer") {
-        const auto args = parse_engine_arguments(table.engine_full, "Buffer");
+        const auto args = sql::engine_arguments(table.engine_full, "Buffer");
         if (args.size() >= 9) {
           node.buffer_layers = parse_u64(args[2]).value_or(0);
           node.buffer_min_time = parse_u64(args[3]);
@@ -949,7 +677,7 @@ bool load_explorer_graph(
     }
 
     if (kind == "buffer") {
-      const auto args = parse_engine_arguments(table.engine_full, "Buffer");
+      const auto args = sql::engine_arguments(table.engine_full, "Buffer");
       if (args.size() >= 2) {
         const std::string dest_db = args[0].empty() ? table.database : args[0];
         const std::string& dest_table = args[1];
@@ -963,7 +691,7 @@ bool load_explorer_graph(
     }
 
     if (kind == "distributed") {
-      const auto args = parse_engine_arguments(table.engine_full, "Distributed");
+      const auto args = sql::engine_arguments(table.engine_full, "Distributed");
       if (!args.empty()) {
         referenced_clusters.insert(args[0]);
         out.definitions[from_id].distributed_cluster = args[0];
@@ -1144,7 +872,7 @@ bool load_explorer_graph(
     std::unordered_map<std::string, std::vector<const RawTable*>> distributed_by_cluster;
     for (const auto& table : raw) {
       if (classify_node(table.engine, table.ddl) != "distributed") continue;
-      const auto args = parse_engine_arguments(table.engine_full, "Distributed");
+      const auto args = sql::engine_arguments(table.engine_full, "Distributed");
       if (!args.empty()) distributed_by_cluster[args[0]].push_back(&table);
     }
 

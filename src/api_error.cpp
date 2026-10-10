@@ -1,6 +1,7 @@
 #include "api_error.hpp"
 #include "json_parse.hpp"
 #include "json_text.hpp"
+#include "sql_lexer.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -10,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace chdash {
 
@@ -94,68 +96,25 @@ static bool is_sql_word_char(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
 
+// The first place where `ident` stands in the code of `sql`: not in a text, a heredoc or a comment, and not as a
+// part of a longer word. (A quoted name is code: `a b` is found by its text.)
 static std::optional<size_t> find_ident_outside_strings_comments(std::string_view sql, std::string_view ident) {
   if (ident.empty() || sql.empty()) return std::nullopt;
-
-  bool in_str = false;
-  bool esc = false;
-  bool in_line_comment = false;
-  bool in_block_comment = false;
-
-  for (size_t i = 0; i + ident.size() <= sql.size(); ++i) {
-    char c = sql[i];
-
-    if (in_line_comment) {
-      if (c == '\n') in_line_comment = false;
-      continue;
-    }
-    if (in_block_comment) {
-      if (c == '*' && i + 1 < sql.size() && sql[i + 1] == '/') {
-        in_block_comment = false;
-        ++i;
-      }
-      continue;
-    }
-
-    if (in_str) {
-      if (esc) {
-        esc = false;
-        continue;
-      }
-      if (c == '\\') {
-        esc = true;
-        continue;
-      }
-      if (c == '\'') in_str = false;
-      continue;
-    }
-
-    if (c == '\'') {
-      in_str = true;
-      esc = false;
-      continue;
-    }
-
-    if (c == '-' && i + 1 < sql.size() && sql[i + 1] == '-') {
-      in_line_comment = true;
-      ++i;
-      continue;
-    }
-    if (c == '/' && i + 1 < sql.size() && sql[i + 1] == '*') {
-      in_block_comment = true;
-      ++i;
-      continue;
-    }
-
-    if (sql.substr(i, ident.size()) == ident) {
-      const char prev = (i == 0) ? ' ' : sql[i - 1];
-      const char next = (i + ident.size() < sql.size()) ? sql[i + ident.size()] : ' ';
-      if (!is_sql_word_char(prev) && !is_sql_word_char(next)) return i;
-    }
+  std::vector<bool> skipped(sql.size(), false);
+  for (const sql::Token& token : sql::lex(sql)) {
+    if (!sql::is_comment(token.kind) && token.kind != sql::TokenKind::String && token.kind != sql::TokenKind::HereDoc) continue;
+    for (size_t i = token.begin; i < token.end; ++i) skipped[i] = true;
+  }
+  for (size_t at = sql.find(ident); at != std::string_view::npos; at = sql.find(ident, at + 1)) {
+    if (skipped[at]) continue;
+    const char prev = at == 0 ? ' ' : sql[at - 1];
+    const char next = at + ident.size() < sql.size() ? sql[at + ident.size()] : ' ';
+    if (!is_sql_word_char(prev) && !is_sql_word_char(next)) return at;
   }
   return std::nullopt;
 }
 
+// The line and the column (1-based) of the byte `idx`. The column counts UTF-16 units, as the editor of the page does.
 static void compute_line_col_from_index(std::string_view sql, size_t idx, int& line, int& col) {
   if (idx > sql.size()) idx = sql.size();
   line = 1;
@@ -173,7 +132,9 @@ static void compute_line_col_from_index(std::string_view sql, size_t idx, int& l
       col = 1;
       continue;
     }
-    ++col;
+    const auto u = static_cast<unsigned char>(c);
+    if ((u & 0xC0) == 0x80) continue;  // the rest of a character
+    col += u >= 0xF0 ? 2 : 1;          // a character above U+FFFF is two UTF-16 units
   }
 }
 

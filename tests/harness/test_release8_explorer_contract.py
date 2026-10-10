@@ -28,7 +28,7 @@ def test_page_selector_navigation_pushes_real_query_and_explorer_routes() -> Non
 
 def test_materialized_view_target_is_added_as_downstream_and_select_sources_remain_upstream() -> None:
     catalog = read('src/explorer_catalog.cpp')
-    assert 'parse_materialized_view_target' in catalog
+    assert 'sql::materialized_view_target' in catalog
     assert 'append_dependency(target->database, target->table, "downstream", "materialized_view")' in catalog
     assert 'append_dependency(source.database, source.table, "upstream", view_kind)' in catalog
     assert 'append_dependency(view_db, view_table, "downstream", view_kind)' in catalog

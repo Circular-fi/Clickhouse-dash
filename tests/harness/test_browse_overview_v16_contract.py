@@ -45,7 +45,7 @@ def test_buffer_rows_are_normalized_to_resident_rows() -> None:
     catalog = read("src/explorer_catalog.cpp")
     ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
     assert "void normalize_buffer_runtime_rows" in catalog
-    assert 'parse_engine_arguments_local(table.engine_full, "Buffer")' in catalog
+    assert 'sql::engine_arguments(table.engine_full, "Buffer")' in catalog
     assert "std::unordered_map<std::string, std::optional<uint64_t>> raw_rows;" in catalog
     assert "table.rows = readable_rows - target_readable_rows;" in catalog
     assert "if (readable_rows < target_readable_rows)" in catalog
