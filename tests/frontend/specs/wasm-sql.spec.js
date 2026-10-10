@@ -262,10 +262,12 @@ test('without the kernel (the file is blocked) the editor marks come from JavaSc
   await page.route('**/wasm/sqlscan.wasm*', (route) => route.abort());
   await openApp(page);
   const state = await page.evaluate(async ({ spec, build }) => {
-    await window.ChDash.loader.loadGroup('wasm-sqlscan');
-    const kernel = await window.ChDash.autocomplete.wasmReady();
+    // Before the first await: the Content-Security-Policy of the page (docs/operations.md) lets the code of an
+    // evaluate build a function only in its synchronous part.
     // eslint-disable-next-line no-new-func
     new Function('spec', 'mode', `(${build})(spec, mode)`)(spec, 'full');
+    await window.ChDash.loader.loadGroup('wasm-sqlscan');
+    const kernel = await window.ChDash.autocomplete.wasmReady();
     const ac = window.ChDash.autocomplete;
     ac.setReferenceDiagnosticsEnabled(true);
     ac.setTableWarningsEnabled(true); ac.setColumnWarningsEnabled(true); ac.setFunctionWarningsEnabled(true);

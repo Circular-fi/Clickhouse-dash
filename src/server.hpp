@@ -267,6 +267,10 @@ public:
   bool health_check(std::string* error_message = nullptr);
 
 private:
+  // The hooks of every request (server_http.cpp): the security headers, and the guard of the writes before the routing.
+  void install_http_hooks();
+  httplib::Server::HandlerResponse before_routing(const httplib::Request& req, httplib::Response& res);
+
   void handle_healthz(const httplib::Request& req, httplib::Response& res);
   void handle_api_version(const httplib::Request& req, httplib::Response& res);
   // /explorer/_monitoring[/<section>] and /explorer/_operations: a 302 to the

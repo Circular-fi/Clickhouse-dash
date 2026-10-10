@@ -10,6 +10,7 @@
 #include "allowed_objects.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "http_guard.hpp"
 #include "json_clickhouse.hpp"
 #include "mcp_grants.hpp"
 #include "mcp_identity.hpp"
@@ -93,48 +94,13 @@ void api_ok(httplib::Response& res, int status, const rapidjson::StringBuffer& s
   res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }
 
-std::string origin_authority(const std::string& origin) {
-  const auto scheme = origin.find("://");
-  if (scheme == std::string::npos) return {};
-  std::string authority = origin.substr(scheme + 3);
-  const auto slash = authority.find('/');
-  if (slash != std::string::npos) authority.resize(slash);
-  return lower_ascii(authority);
-}
-
-// Cross-site guard of the key routes: the same rule as the query library's
-// (api_query_library.cpp). ChDash has no login, so a write only needs protecting
-// from a third-party page that drives the user's browser:
-// - Sec-Fetch-Site, set by the browser, must be absent, same-origin or none;
-// - without it, an Origin header must name this server (Host or X-Forwarded-Host);
-// - a body must be application/json, which a cross-origin page cannot send without a CORS preflight.
-bool allow_mutation(const httplib::Request& req, httplib::Response& res, bool has_body) {
-  const std::string site = lower_ascii(trim_spaces(req.get_header_value("Sec-Fetch-Site")));
-  if (!site.empty() && site != "same-origin" && site != "none") {
-    api_error(res, 403, "cross_site_request", "MCP key changes are accepted from the ChDash page only");
-    return false;
-  }
-  const std::string origin = trim_spaces(req.get_header_value("Origin"));
-  if (site.empty() && !origin.empty()) {
-    const std::string authority = origin_authority(origin);
-    const std::string host = lower_ascii(trim_spaces(req.get_header_value("Host")));
-    std::string forwarded = req.get_header_value("X-Forwarded-Host");
-    if (const auto comma = forwarded.find(','); comma != std::string::npos) forwarded.resize(comma);
-    forwarded = lower_ascii(trim_spaces(forwarded));
-    if (authority.empty() || (authority != host && authority != forwarded)) {
-      api_error(res, 403, "cross_site_request", "MCP key changes are accepted from the ChDash page only");
-      return false;
-    }
-  }
-  if (has_body) {
-    std::string type = req.get_header_value("Content-Type");
-    if (const auto semi = type.find(';'); semi != std::string::npos) type.resize(semi);
-    if (lower_ascii(trim_spaces(type)) != "application/json") {
-      api_error(res, 415, "unsupported_media_type", "the request body must be application/json");
-      return false;
-    }
-  }
-  return true;
+// Cross-site guard of the key routes that are reads: a secret, and what a key reaches, are shown on the ChDash page
+// only (http_guard.hpp). Every write of the page (create, delete) has the same guard for every route, with the check
+// of its body, before the routing (Server::before_routing).
+bool allow_from_page(const httplib::Request& req, httplib::Response& res) {
+  if (!is_cross_site_request(req)) return true;
+  api_error(res, 403, "cross_site_request", "MCP key routes are accepted from the ChDash page only");
+  return false;
 }
 
 bool origin_listed(const std::string& origin, const std::vector<std::string>& allowed) {
@@ -789,8 +755,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     return;
   }
 
-  const bool has_body = route == McpApiRoute::KeyCreate;
-  if (!allow_mutation(req, res, has_body)) return;
+  if (!allow_from_page(req, res)) return;
   // Showing a secret is a read, so it works while the keys are read-only (manage_from_ui = false).
   if (route == McpApiRoute::KeyReveal) {
     const auto result = store.reveal(req.matches.size() > 1 ? std::string(req.matches[1]) : std::string());
@@ -957,7 +922,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     api_error(res, 403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
     return;
   }
-  if (has_body && req.body.size() > 256 * 1024) {
+  if (route == McpApiRoute::KeyCreate && req.body.size() > 256 * 1024) {
     api_error(res, 413, "payload_too_large", "the request body is too large");
     return;
   }

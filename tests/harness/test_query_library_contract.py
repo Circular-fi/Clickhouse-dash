@@ -57,13 +57,17 @@ def test_routes_exist_only_behind_the_feature_gate() -> None:
 
 
 def test_mutations_share_the_cross_site_guard() -> None:
+    # One guard for every POST, PUT, PATCH and DELETE of the server (http_guard.cpp), before the routing: the library
+    # keeps no copy of its own.
     api = read("src/api_query_library.cpp")
-    assert "bool allow_mutation(const httplib::Request& req, httplib::Response& res, bool has_body)" in api
-    assert 'req.get_header_value("Sec-Fetch-Site")' in api
-    assert 'req.get_header_value("Origin")' in api
-    assert '!= "application/json"' in api
-    assert "if (mutating && !allow_mutation(req, res, has_body)) return;" in api
-    assert "const bool mutating = route != QueryLibraryRoute::Get;" in api
+    assert "allow_mutation" not in api and "Sec-Fetch-Site" not in api
+    guard = read("src/http_guard.cpp")
+    assert 'req.get_header_value("Sec-Fetch-Site")' in guard
+    assert 'req.get_header_value("Origin")' in guard
+    assert 'request_media_type(req) != "application/json"' in guard
+    hooks = read("src/server_http.cpp")
+    assert 'if (is_write(req.method) && req.path != "/mcp") {' in hooks
+    assert "if (const auto refusal = check_browser_write(req)) {" in hooks
     assert '"read_only"' in read("src/query_library.cpp")
 
 

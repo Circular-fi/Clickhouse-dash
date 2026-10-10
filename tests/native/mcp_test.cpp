@@ -8,6 +8,7 @@
 // The Python harness (test_mcp_contract.py) runs it when MCP_TEST_BINARY points at it.
 
 #include "config.hpp"
+#include "http_guard.hpp"
 #include "mcp_api_tools.hpp"
 #include "mcp_grants.hpp"
 #include "mcp_identity.hpp"
@@ -2385,9 +2386,16 @@ void test_grants(const std::string& dir) {
   CHECK_EQ(again.list().size(), size_t(1));
 }
 
-// ---- the random source of the server -----------------------------------------------------------
+// ---- the random source and the HTTP hardening of the server ---------------------------------------
 
 namespace {
+
+httplib::Request request_with(std::initializer_list<std::pair<const char*, const char*>> headers, const char* method = "POST") {
+  httplib::Request req;
+  req.method = method;
+  for (const auto& [name, value] : headers) req.headers.emplace(name, value);
+  return req;
+}
 
 void test_random_identifiers() {
   std::set<std::string> seen;
@@ -2407,6 +2415,92 @@ void test_random_identifiers() {
   CHECK(random_hex(8) != random_hex(8));
   CHECK_EQ(secure_random_bytes(0).size(), size_t{0});
   CHECK_EQ(secure_random_bytes(64).size(), size_t{64});
+}
+
+void test_browser_write_guard() {
+  // No browser headers (a CLI, a script, the MCP API tools): accepted.
+  CHECK(!is_cross_site_request(request_with({})));
+  CHECK(!check_browser_write(request_with({{"Content-Type", "application/json"}, {"Content-Length", "2"}})));
+  // The browser says where the request comes from.
+  CHECK(!is_cross_site_request(request_with({{"Sec-Fetch-Site", "same-origin"}})));
+  CHECK(!is_cross_site_request(request_with({{"Sec-Fetch-Site", " None "}})));
+  CHECK(is_cross_site_request(request_with({{"Sec-Fetch-Site", "cross-site"}})));
+  CHECK(is_cross_site_request(request_with({{"Sec-Fetch-Site", "same-site"}})));
+  // Sec-Fetch-Site wins over Origin.
+  CHECK(!is_cross_site_request(request_with({{"Sec-Fetch-Site", "same-origin"}, {"Origin", "https://evil.example"}, {"Host", "dash:8080"}})));
+  // Without it, Origin must name this server (Host, or the first X-Forwarded-Host).
+  CHECK(!is_cross_site_request(request_with({{"Origin", "http://Dash:8080"}, {"Host", "dash:8080"}})));
+  CHECK(!is_cross_site_request(request_with({{"Origin", "https://dash.example.com"}, {"Host", "chdash:8080"},
+                                             {"X-Forwarded-Host", "dash.example.com, proxy.local"}})));
+  CHECK(is_cross_site_request(request_with({{"Origin", "https://evil.example"}, {"Host", "dash:8080"}})));
+  CHECK(is_cross_site_request(request_with({{"Origin", "null"}, {"Host", "dash:8080"}})));
+  CHECK(is_cross_site_request(request_with({{"Origin", "https://evil.example"}, {"Host", "dash:8080"}, {"X-Forwarded-Host", ""}})));
+  // A body must be application/json (a page of another site cannot send it without a preflight).
+  auto refusal = check_browser_write(request_with({{"Content-Type", "text/plain"}, {"Content-Length", "10"}}));
+  CHECK(refusal && refusal->status == 415 && std::string(refusal->code) == "unsupported_media_type");
+  refusal = check_browser_write(request_with({{"Content-Length", "10"}}));
+  CHECK(refusal && refusal->status == 415);
+  refusal = check_browser_write(request_with({{"Content-Type", "application/x-www-form-urlencoded"}, {"Transfer-Encoding", "chunked"}}));
+  CHECK(refusal && refusal->status == 415);
+  CHECK(!check_browser_write(request_with({{"Content-Type", "Application/JSON; charset=utf-8"}, {"Content-Length", "10"}})));
+  // No body (a DELETE, an empty POST): no media type needed.
+  CHECK(!check_browser_write(request_with({{"Content-Length", "0"}}, "DELETE")));
+  CHECK(!check_browser_write(request_with({}, "DELETE")));
+  refusal = check_browser_write(request_with({{"Sec-Fetch-Site", "cross-site"}, {"Content-Type", "application/json"}}));
+  CHECK(refusal && refusal->status == 403 && std::string(refusal->code) == "cross_site_request");
+}
+
+void test_page_policy() {
+  const std::string html =
+      "<html><head><script>alert(1)</script>\n"
+      "<script type=\"application/json\" id=\"chdashModules\">{\"a\":1}</script>\n"
+      "<script src=\"static/app.js\"></script>\n"
+      "<SCRIPT type='text/javascript'>\n  var a = 1;\n</SCRIPT>\n"
+      "<scripts>not a script</scripts>\n"
+      "</head></html>";
+  const std::string policy = page_content_security_policy(html);
+  CHECK(contains(policy, "script-src 'self' 'wasm-unsafe-eval' 'sha256-bhHHL3z2vDgxUt0W3dWQOrprscmda2Y5pLsLg4GF+pI=' "
+                         "'sha256-wYD6gJuOAPxlJHFvhr2Zk0r9F+gmt8nwaf1uW8o5LTY=';"));
+  CHECK(contains(policy, "frame-ancestors 'none'"));
+  CHECK(contains(policy, "object-src 'none'"));
+  CHECK(!contains(policy, "'unsafe-eval'"));
+  CHECK(!contains(policy, "'unsafe-inline'; img-src") || contains(policy, "style-src 'self' 'unsafe-inline'"));
+  // A page without an inline script gets the base policy.
+  CHECK_EQ(page_content_security_policy("<p>x</p>"), std::string(kContentSecurityPolicy));
+  // An unterminated script is not hashed.
+  CHECK_EQ(page_content_security_policy("<script>x"), std::string(kContentSecurityPolicy));
+  bool frame = false, sniff = false, referrer = false, policy_header = false;
+  for (const auto& [name, value] : security_headers()) {
+    frame = frame || (name == "X-Frame-Options" && value == "DENY");
+    sniff = sniff || (name == "X-Content-Type-Options" && value == "nosniff");
+    referrer = referrer || (name == "Referrer-Policy" && value == "same-origin");
+    policy_header = policy_header || (name == "Content-Security-Policy" && value == kContentSecurityPolicy);
+  }
+  CHECK(frame && sniff && referrer && policy_header);
+}
+
+void test_asset_versions() {
+  const std::string hash = "b9b85fc46d65b05c6e74a09fb7f1f1f0d3c23e4e83bcf36c2f5c3d48ef7d11ab";
+  CHECK(asset_version_matches("b9b85fc46d", hash));
+  CHECK(asset_version_matches("b9b85fc46d65", hash));
+  CHECK(asset_version_matches(hash, hash));
+  CHECK(!asset_version_matches("b9b85fc4", "c" + hash.substr(1)));
+  CHECK(!asset_version_matches("b9b85fc", hash));     // too short to name a version
+  CHECK(!asset_version_matches("B9B85FC46D", hash));  // lower case only
+  CHECK(!asset_version_matches("anything", hash));
+  CHECK(!asset_version_matches("", hash));
+  CHECK(!asset_version_matches(hash + "00", hash));
+}
+
+void test_request_ids() {
+  CHECK_EQ(request_id_for(request_with({{"X-Request-Id", "abc-123:x.y_z"}})), std::string("abc-123:x.y_z"));
+  const std::string fresh = request_id_for(request_with({{"X-Request-Id", "bad id\n"}}));
+  CHECK_EQ(fresh.size(), size_t{16});
+  CHECK(request_id_for(request_with({})) != fresh);
+  const std::string long_id(129, 'a');
+  httplib::Request req;
+  req.headers.emplace("X-Request-Id", long_id);
+  CHECK_EQ(request_id_for(req).size(), size_t{16});
 }
 
 } // namespace
@@ -2432,6 +2526,10 @@ int main() {
   test_observability_config(dir);
   test_grants(make_temp_dir());
   test_random_identifiers();
+  test_browser_write_guard();
+  test_page_policy();
+  test_asset_versions();
+  test_request_ids();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

@@ -166,7 +166,11 @@ def test_api_contract_codes() -> None:
         assert f'"{code}"' in store, code
     assert 'w.Key("endpoint_path"); w.String("/mcp")' in api
     assert "kMcpNamePattern" in api and "mcp_valid_secret" in read("src/config.cpp")
-    assert 'Sec-Fetch-Site' in api and "X-Forwarded-Host" in api
+    # The key routes that show a secret or what a key reaches answer the ChDash page only; every write passes the guard of
+    # the writes of the server first (http_guard.cpp: Sec-Fetch-Site, Origin against Host / X-Forwarded-Host, JSON body).
+    assert "if (!allow_from_page(req, res)) return;" in api and "is_cross_site_request(req)" in api
+    guard = read("src/http_guard.cpp")
+    assert 'Sec-Fetch-Site' in guard and "X-Forwarded-Host" in guard
     assert 'set_no_store(res);' in api
     assert 'features.mcp' not in api  # reported by /api/version only
     version = read("src/server.cpp")

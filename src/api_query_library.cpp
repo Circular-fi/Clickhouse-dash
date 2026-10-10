@@ -25,14 +25,6 @@ std::string lower_ascii(std::string s) {
   return s;
 }
 
-std::string trim_spaces(std::string_view s) {
-  size_t b = 0;
-  size_t e = s.size();
-  while (b < e && (s[b] == ' ' || s[b] == '\t')) ++b;
-  while (e > b && (s[e - 1] == ' ' || s[e - 1] == '\t')) --e;
-  return std::string(s.substr(b, e - b));
-}
-
 void library_error(httplib::Response& res, int status, const char* code, const std::string& message) {
   rapidjson::StringBuffer sb;
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
@@ -44,55 +36,6 @@ void library_error(httplib::Response& res, int status, const char* code, const s
   res.status = status;
   res.set_header("Cache-Control", "no-store");
   res.set_content(sb.GetString(), "application/json");
-}
-
-// The authority (host[:port]) of an Origin header value, lower-cased.
-std::string origin_authority(const std::string& origin) {
-  const auto scheme = origin.find("://");
-  if (scheme == std::string::npos) return {};
-  std::string authority = origin.substr(scheme + 3);
-  const auto slash = authority.find('/');
-  if (slash != std::string::npos) authority.resize(slash);
-  return lower_ascii(authority);
-}
-
-// Cross-site request guard for every mutating library route. ChDash has no
-// end-user authentication (README "Authorization model"), so the only thing a
-// library write needs protecting from is a third-party page driving the
-// user's browser:
-// - Sec-Fetch-Site (set by the browser, not by page script) must be absent,
-//   "same-origin" or "none";
-// - without Sec-Fetch-Site, an Origin header must name this server (Host or
-//   X-Forwarded-Host);
-// - a request body must be application/json, which a cross-origin page can
-//   only send after a CORS preflight that ChDash never grants.
-bool allow_mutation(const httplib::Request& req, httplib::Response& res, bool has_body) {
-  const std::string site = lower_ascii(trim_spaces(req.get_header_value("Sec-Fetch-Site")));
-  if (!site.empty() && site != "same-origin" && site != "none") {
-    library_error(res, 403, "cross_site_request", "query library changes are accepted from the ChDash page only");
-    return false;
-  }
-  const std::string origin = trim_spaces(req.get_header_value("Origin"));
-  if (site.empty() && !origin.empty()) {
-    const std::string authority = origin_authority(origin);
-    const std::string host = lower_ascii(trim_spaces(req.get_header_value("Host")));
-    std::string forwarded = req.get_header_value("X-Forwarded-Host");
-    if (const auto comma = forwarded.find(','); comma != std::string::npos) forwarded.resize(comma);
-    forwarded = lower_ascii(trim_spaces(forwarded));
-    if (authority.empty() || (authority != host && authority != forwarded)) {
-      library_error(res, 403, "cross_site_request", "query library changes are accepted from the ChDash page only");
-      return false;
-    }
-  }
-  if (has_body) {
-    std::string type = req.get_header_value("Content-Type");
-    if (const auto semi = type.find(';'); semi != std::string::npos) type.resize(semi);
-    if (lower_ascii(trim_spaces(type)) != "application/json") {
-      library_error(res, 415, "unsupported_media_type", "the request body must be application/json");
-      return false;
-    }
-  }
-  return true;
 }
 
 const std::string* optional_header(const httplib::Request& req, const char* name, std::string& storage) {
@@ -124,8 +67,8 @@ void Server::handle_query_library(const httplib::Request& req, httplib::Response
   const bool has_body = route == QueryLibraryRoute::FolderCreate || route == QueryLibraryRoute::FolderUpdate ||
                         route == QueryLibraryRoute::QueryCreate || route == QueryLibraryRoute::QueryUpdate ||
                         route == QueryLibraryRoute::Import;
-  const bool mutating = route != QueryLibraryRoute::Get;
-  if (mutating && !allow_mutation(req, res, has_body)) return;
+  // Every write (POST, PATCH, DELETE) passed the guard of the writes before the routing (http_guard.hpp,
+  // Server::before_routing): not from a page of another site, and a body of application/json only.
   if (has_body && req.body.size() > store.options().max_file_bytes + 64 * 1024) {
     library_error(res, 413, "too_large", "the request body exceeds query_library.max_file_bytes");
     return;

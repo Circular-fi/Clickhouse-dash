@@ -4,6 +4,8 @@
 
 #include "httplib.h"
 
+#include "http_guard.hpp"
+
 // This header expects that CMake generated:
 //   - embedded_static.hpp
 //   - embedded_static.cpp
@@ -35,11 +37,15 @@ inline const char* mime_from_path(std::string_view p) {
   return "application/octet-stream";
 }
 
-// Cache-Control of a static asset. Asset URLs are stable rather than content-hashed, so most
-// assets revalidate cheaply and a newly deployed binary is never paired with stale JavaScript
-// from cache. A web font never changes under its file name (a new face ships under a new name),
-// so browsers keep fonts for a week without asking. A versioned address (?v=<content hash>,
-// the icon sprite: tools/icons.py) never changes content, so browsers keep it for a year.
+// Cache-Control of a static asset. Two regimes:
+// - a versioned address (?v=<content hash>: the scripts, stylesheets and kernels of the staged shells,
+//   tools/stage_static.py, and the icon sprite, tools/icons.py) whose ?v= is the hash of the bytes that
+//   are served never changes content, so browsers keep it for a year (`versioned`, asset_version_matches);
+// - every other address (a shell, an asset without ?v=) revalidates, so a new binary is never paired
+//   with stale JavaScript. A web font never changes under its file name (a new face ships under a new
+//   name), so browsers keep fonts for a week without asking.
+// An address whose ?v= is not the hash of the bytes (a tab that a deploy left behind asks for the old
+// version) gets the new bytes with `no-store`: never kept, so the old address is never bound to new code.
 inline const char* cache_control_for(std::string_view p, bool versioned = false) {
   if (versioned) return "public, max-age=31536000, immutable";
   auto dot = p.find_last_of('.');
@@ -104,7 +110,13 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
   etag.push_back('"');
   res.set_header("ETag", etag);
   res.set_header("Vary", "Accept-Encoding");
-  res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v") && !html));
+  if (!html && req.has_param("v") && !asset_version_matches(req.get_param_value("v"), a->content_hash)) {
+    res.set_header("Cache-Control", "no-store");
+  } else {
+    res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v") && !html));
+  }
+  // A shell runs its inline scripts: the policy of the page lists their hashes (http_guard.hpp).
+  if (html) set_page_security_policy(res, std::string_view(reinterpret_cast<const char*>(a->data), a->size));
   if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == etag) {
     res.status = 304;
     return true;

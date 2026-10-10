@@ -70,6 +70,8 @@ struct FsStaticAsset {
   std::string body;
   std::string mime;
   std::string etag;
+  // The SHA-256 of the body in hexadecimal: a ?v= that starts it is the version of these bytes.
+  std::string content_hash;
   std::filesystem::file_time_type modified{};
   uintmax_t size = 0;
 };
@@ -150,13 +152,26 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
       loaded->size = size;
       loaded->etag = "\"" + std::to_string(size) + "-" +
           std::to_string(file_time_nanoseconds(modified)) + "\"";
+      const auto digest = sha256_digest(reinterpret_cast<const uint8_t*>(loaded->body.data()), loaded->body.size());
+      static constexpr char kHex[] = "0123456789abcdef";
+      for (const uint8_t b : digest) {
+        loaded->content_hash.push_back(kHex[b >> 4]);
+        loaded->content_hash.push_back(kHex[b & 15]);
+      }
       g_fs_static_cache[cache_key] = loaded;
       asset = std::move(loaded);
     }
   }
 
   res.set_header("ETag", asset->etag);
-  res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v")));
+  const bool html = rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".html") == 0;
+  if (!html && req.has_param("v") && !asset_version_matches(req.get_param_value("v"), asset->content_hash)) {
+    res.set_header("Cache-Control", "no-store");
+  } else {
+    res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v") && !html));
+  }
+  // A shell runs its inline scripts: the policy of the page lists their hashes (http_guard.hpp).
+  if (html) set_page_security_policy(res, asset->body);
   if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == asset->etag) {
     res.status = 304;
     return true;
@@ -226,6 +241,7 @@ Server::Server(AppConfig cfg, bool start_background)
     };
     http_.set_payload_max_length(limits.max_body_bytes);
   }
+  install_http_hooks();
 
   if (background_enabled_ && health_) health_->start();
   if (background_enabled_) {

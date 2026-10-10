@@ -526,10 +526,12 @@ A key in the answers:
 
 `source` is `config` or `ui`. A key of the configuration has `id` equal to its `name`. Its `secret_hint` is empty when the secret is not known (a key of a file written before the secret was kept). `secret_mask` is the secret as the page shows it hidden: the same length and the same hyphens, the first 8 characters in clear and a bullet (U+2022) for every other character. It says nothing but the shape of the secret, which the page needs to draw a hidden secret that looks like the shown one.
 
-The write routes use the same guard as the query library:
+The write routes pass the guard of every write of ChDash ([operations.md](operations.md#the-guard-of-the-writes)), before the routing:
 
 - `Sec-Fetch-Site` must be absent, `same-origin` or `none`. If it is absent, an `Origin` header must name this server (`Host` or `X-Forwarded-Host`).
 - The body must be `application/json`.
+
+The reads that show a secret or what a key reaches have the first rule too. `POST /mcp` is not a route of the page: it has its own rules (`allowed_origins`, the key).
 
 | Status | `error` | Case |
 | --- | --- | --- |
@@ -627,6 +629,6 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **Denied functions.** `file`, `url`, `remote`, `s3`, `hdfs`, `mysql`, `postgresql`, `mongodb`, `redis`, `jdbc`, `odbc`, `sqlite`, `executable`, `input`, the Azure, Iceberg, Delta Lake and Hudi readers, and their `Cluster` forms.
 - **Settings order.** The settings of a query go together in one packet. ClickHouse checks each of them against the profile of the user, then applies them. `readonly=1` does not block the limits that come with it. A `SETTINGS` clause in the SQL is refused after that, so the SQL cannot change a limit.
 - **Connections.** MCP queries use the shared connection pool with the `mcp_uri` of the host. The pool key includes the URI, so MCP connections never mix with runner or system connections. The receive timeout is `query_timeout_seconds` plus 15 seconds.
-- **API errors.** The page API uses `{"error", "message"}` (and `field` and `reason` for validation). The check of `manage_from_ui` comes after the cross-site guard and before the validation.
+- **API errors.** The page API uses `{"error", "message"}` (and `field` and `reason` for validation). The guard of the writes answers `{"error", "error_code", "message"}`. The check of `manage_from_ui` comes after the cross-site guard and before the validation.
 - **The page.** The route `/mcp-integration` always serves `mcp.html`, also when MCP is off. The page then shows how to turn MCP on. The link in the page switcher shows only when `features.mcp.enabled` is true. The route answers 404 when `mcp.html` is missing.
 - **Expiry date.** The page sends the end of the chosen day as `YYYY-MM-DDT23:59:59Z`. The API accepts a date alone (the start of that day) and a full UTC time.

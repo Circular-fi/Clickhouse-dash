@@ -62,10 +62,11 @@ endif()
 
 if (CHDASH_BUILD_MCP_TESTS)
   # Scopes, keys and their file, the SQL scanner and builder, the protocol and the tools with fakes,
-  # and the startup errors of the mcp { } block (no ClickHouse server needed).
+  # and the startup errors of the mcp { } block (no ClickHouse server needed). Also the HTTP hardening
+  # (the guard of the writes, the page policy, the asset versions) and the random source.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
     mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
-    config.cpp hcl.cpp ch_uri.cpp query_library.cpp jwt.cpp secure_random.cpp)
+    config.cpp hcl.cpp ch_uri.cpp query_library.cpp jwt.cpp secure_random.cpp http_guard.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -165,6 +166,8 @@ if (CHDASH_BUILD_APP)
     ch_client_pool.cpp
     health_runner.cpp
     secure_random.cpp
+    http_guard.cpp
+    server_http.cpp
   )
 endif()
 
