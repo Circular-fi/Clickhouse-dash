@@ -1,4 +1,5 @@
-"""The supply chain of the CI (SEC-010, SEC-019): pinned actions, no persisted token, no event text in a script."""
+"""The supply chain of the build and the CI (SEC-010, SEC-019, SEC-021): pinned actions and dependencies, no
+persisted token, no event text in a script."""
 import os
 import re
 from pathlib import Path
@@ -54,3 +55,24 @@ def test_no_expression_of_an_event_is_pasted_into_a_script() -> None:
             if in_run:
                 for name in risky:
                     assert "${{ " + name not in line, (workflow.name, line)
+
+
+def test_dependabot_covers_actions_images_python_and_npm() -> None:
+    config = read(".github/dependabot.yml")
+    for ecosystem in ("github-actions", "docker", "pip", "npm"):
+        assert f"package-ecosystem: {ecosystem}" in config, ecosystem
+    for directory in ("/tests", "/tests/smoke", "/tests/otel-fixture", "/tests/frontend"):
+        assert f"- {directory}\n" in config or f"directory: {directory}\n" in config, directory
+
+
+def test_python_test_packages_are_installed_by_hash() -> None:
+    docker = read("tests/Dockerfile.tests")
+    assert "pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt" in docker
+    requirements = read("tests/requirements.txt")
+    pins = re.findall(r"^([A-Za-z0-9_.-]+)==\S+ \\$", requirements, flags=re.M)
+    assert {"pytest", "requests"} <= set(pins)
+    # Every pinned package (the dependencies of the dependencies too) has its hashes.
+    for name in pins:
+        block = requirements.split(f"\n{name}==", 1)[1].split("\n    # via", 1)[0]
+        assert "--hash=sha256:" in block, name
+    assert "pytest==9.0.2" in read("tests/requirements.in")
