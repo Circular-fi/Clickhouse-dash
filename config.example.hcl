@@ -21,6 +21,17 @@ server {
   # Open host status streams (one per visible page). Past it, a page polls
   # GET /api/hosts every 5 s instead. At most half of max_worker_threads.
   max_host_streams    = 64
+  # How long one write of a response waits for a client that does not read
+  # (a paused download, a slow disk). Past it, the response ends: an export or
+  # a run is then canceled. 1000..3600000.
+  write_timeout_ms    = 120000
+
+  # Operations (docs/operations.md). SIGTERM drains the server for at most
+  # shutdown_timeout_ms, then the process exits; give the container more time.
+  shutdown_timeout_ms   = 10000
+  metrics               = true    # GET /metrics, the Prometheus text format
+  access_log            = true    # one JSON log line per request
+  stats_log_interval_ms = 300000  # a server.stats log line; 0 = never
 }
 
 query {
@@ -49,6 +60,21 @@ query {
   session_abandoned_ttl_ms   = 60000
   session_terminal_ttl_ms    = 30000
   session_reaper_interval_ms = 5000
+
+  # ClickHouse bounds of a run (and of Deep Analyze). 0 = the settings profile
+  # of the runner user decides. A bound is never looser than that profile.
+  max_execution_time_s = 0
+  max_memory_usage     = 0
+  max_rows_to_read     = 0
+}
+
+# The queries that ChDash writes itself (every page but the Run of the Query
+# page and the export). Each query of one request gets max_execution_time =
+# what remains of timeout_ms, and max_memory_usage. Neither is ever looser than
+# the settings profile of the ClickHouse user.
+generated_queries {
+  timeout_ms       = 60000        # 1000..3600000
+  max_memory_usage = 4294967296   # bytes per query; 0 = the settings profile
 }
 
 client_pool {
@@ -56,6 +82,10 @@ client_pool {
   idle_ttl_ms            = 60000
   validate_after_idle_ms = 15000
   reaper_interval_ms     = 5000
+  # The connections lent at once for one ClickHouse URI (0 = no limit). Past
+  # it, a request waits lease_wait_ms for one, then fails with pool_exhausted.
+  max_leased_per_uri     = 128
+  lease_wait_ms          = 5000
 }
 
 format_cache {
@@ -73,6 +103,7 @@ explorer {
   }
 
   cache_ttl_ms            = 5000
+  acl_cache_ttl_ms        = 60000
   live_refresh_ms         = 2000
   function_cache_ttl_ms   = 3600000
   function_markdown_links = false
@@ -243,6 +274,13 @@ export {
   pending_max_entries   = 32
   pending_sql_max_bytes = 16777216
   max_queries           = 256
+  # ClickHouse bounds of each exported statement; 0 = the settings profile of
+  # the runner user.
+  max_execution_time_s  = 0
+  max_memory_usage      = 0
+  # A statement that sends nothing (no row, no progress) for this long fails;
+  # 0 = no limit. At least 10000.
+  receive_timeout_ms    = 600000
 }
 
 health {

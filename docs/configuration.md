@@ -7,7 +7,7 @@ chdash --config /etc/clickhouse-dash/config.hcl
 chdash --config /etc/clickhouse-dash/config.hcl --health
 ```
 
-It is an error to start the server or to run `--health` without `--config`.
+It is an error to start the server or to run `--health` without `--config`. `--health` asks the running server (`GET /livez` on its listen port) and exits with status 0 when it answers ([operations.md](operations.md#health-probes)).
 The application does not read environment variables as configuration. A supervisor or a container runtime can still use environment variables for its own templating. The `chdash` process itself uses only the HCL file.
 
 [`config.example.hcl`](../config.example.hcl) shows the complete syntax.
@@ -22,7 +22,8 @@ These items are startup errors:
 
 - `server`: listen host and port, and the capacity of the HTTP server (refer to [The server block](#the-server-block)).
 - `query`: limits for interactive queries, batching, SSE backpressure, compatibility DESCRIBE behavior and session lifecycle.
-- `client_pool`: lifecycle of the native ClickHouse connection pool.
+- `generated_queries`: the bounds of the queries that ChDash writes itself (refer to [The bounds of the queries](#the-bounds-of-the-queries)).
+- `client_pool`: lifecycle of the native ClickHouse connection pool, and the bound of its connections.
 - `format_cache`: bounded cache of the SQL formatter.
 - `health`: polling of the host health.
 - `traces`: optional OpenTelemetry trace explorer. It uses a ClickHouse traces table of an OTel Collector.
@@ -43,6 +44,12 @@ server {
   max_queued_requests = 1024
   max_body_bytes      = 0
   max_host_streams    = 64
+  write_timeout_ms    = 120000
+
+  shutdown_timeout_ms   = 10000
+  metrics               = true
+  access_log            = true
+  stats_log_interval_ms = 300000
 }
 ```
 
@@ -65,6 +72,20 @@ thread, so a request such as a cancel still gets an answer.
 - `max_host_streams`: the open host status streams. Past it, a page gets 503
   and polls `GET /api/hosts` every 5 seconds instead. At most half of
   `max_worker_threads`.
+- `shutdown_timeout_ms` (1000..600000, default 10000): the longest stop after
+  SIGTERM or SIGINT. Past it, the process exits with status 1
+  ([operations.md](operations.md#shutdown)).
+- `metrics` (default true): `GET /metrics`, the Prometheus text format
+  ([operations.md](operations.md#metrics)).
+- `access_log` (default true): one log line for each request
+  ([operations.md](operations.md#logs)).
+- `stats_log_interval_ms` (default 300000; `0` = never, else at least 10000):
+  the interval of the `server.stats` log line.
+- `write_timeout_ms` (1000..3600000, default 120000): how long one write of a
+  response waits for a client that does not read. A paused download, a slow
+  disk or a busy browser tab can stop reading for a while. Past this time, the
+  response ends: an export or a run is then canceled. The value applies to
+  every response.
 
 Each worker thread has a stack of 8 MiB (the binary is linked with
 `-z stack-size`; musl would otherwise give 128 KiB). A request body nested
@@ -75,6 +96,55 @@ A binary with embedded assets (every release) serves only those. A build without
 them (`-DCHDASH_EMBED_STATIC=OFF`, the test image) reads `./static` and serves a
 file only when its resolved path stays inside that directory.
 
+## The bounds of the queries
+
+Every statement that ChDash sends to ClickHouse carries a label and bounds. The settings go with the statement, so the settings profile of the ClickHouse user stays the base:
+
+- ChDash reads the profile of the user once for each connection (`getSetting`). It sends a bound only when the bound is stricter than the profile. ChDash never makes a bound of the profile looser.
+- A user with `readonly = 1` cannot change a setting. Its statements get no setting from ChDash, and only its profile bounds them.
+- A `SETTINGS` clause in the SQL wins over the settings of ChDash. To enforce a bound on the users of the panel, put it in the settings profile of the runner, with a constraint.
+- If ClickHouse refuses a setting of ChDash (`READONLY` or a constraint of the profile), ChDash runs the statement again without its settings, and sends none again on that connection.
+
+| What | `log_comment` | Bounds |
+|---|---|---|
+| A run of the Query page | `chdash-run` | `query.max_execution_time_s`, `query.max_memory_usage`, `query.max_rows_to_read` (0 = the profile, the default) |
+| Deep Analyze | `chdash-deep-analysis` | the same as a run |
+| A statement of an export | `chdash-export` | `export.max_execution_time_s`, `export.max_memory_usage` (0 = the profile, the default) |
+| A request of a page (Explorer, System, Traces, Logs, Metrics, the analysis, the formatter, the metadata) | `chdash:<path of the route>`, `chdash-system` for the System page | `generated_queries` |
+| A tool of MCP | `chdash-mcp key=<id>` | the limits of the key (`docs/mcp.md`) |
+| A cancel, the health checks | `chdash:cancel`, `chdash:health` | none |
+
+```hcl
+generated_queries {
+  timeout_ms       = 60000
+  max_memory_usage = 4294967296
+}
+```
+
+- `timeout_ms` (1000..3600000, default 60000): the time of one request of a page. Each statement of the request gets `max_execution_time` = the seconds that remain (at least 1). A statement that would start after the end fails at once with `TIMEOUT_EXCEEDED`, and does not reach ClickHouse. A route that sets its own `max_execution_time` in its SQL keeps it.
+- `max_memory_usage` (default 4 GiB): the memory of one statement, in bytes. `0` leaves it to the profile.
+- The Explorer adds its own caps: 10 seconds for each statement, and for the data preview 30 seconds and 64 MiB of result (`result_overflow_mode = 'break'`: the preview then has fewer rows).
+- The Metrics catalog stops its scan after 200 million rows read and answers `estimated: true` (`docs/metrics.md`).
+
+A request of a page stops when the browser closes the connection: the next packet of the running statement throws, ChDash closes the connection, and ClickHouse cancels the statement. A run stops in the same way (and with `KILL QUERY`), and an export too.
+
+The preview limit of a run (`query.result_preview_row_limit`) is a normal end. ChDash stops reading with a Cancel packet of the native protocol: the connection stays usable, and ChDash sends no `KILL QUERY`.
+
+## The connections
+
+A connection goes back to the pool only when its last statement ended in a known state: the end of its result, or an error that ClickHouse sent. A statement that a transport error, a receive timeout, a cancel or an error of ChDash interrupted can leave its packets in the socket. ChDash then closes the connection, and a next statement of the same request opens a new one.
+
+```hcl
+client_pool {
+  max_leased_per_uri = 128
+  lease_wait_ms      = 5000
+}
+```
+
+- `max_leased_per_uri` (default 128, 0 = no limit): the connections that are lent at once for one ClickHouse URI. Past it, a request waits for a connection.
+- `lease_wait_ms` (0..60000, default 5000): how long a request waits. Then it fails with `pool_exhausted`.
+- A cancel (`KILL QUERY`) and an export use a connection of their own, outside of the pool.
+
 ## Host identities and the access audit
 
 A host has two ClickHouse users, and the health check proves one thing about them: the runner connects. A user that connects and may read nothing is healthy for the health check and useless for the features. For this reason ChDash audits the grants of both users with `CHECK GRANT`. It never reads data and never uses `SHOW GRANTS`. The audit runs with the first health cycles and every 10 minutes.
@@ -84,9 +154,9 @@ A host has two ClickHouse users, and the health check proves one thing about the
 - **The MCP user** (`mcp_uri`, when `mcp.enabled`) is checked the same way: `SELECT` on at least one table, and on `system.documentation` (`explorer_functions`). Every tool of Traces, Logs and Metrics reads the OpenTelemetry tables with the system user, which is checked for them as above (and for `system.data_skipping_indices` when Logs or Metrics are on). The findings are in `access.mcp_user`, `mcp_missing`, `mcp_reads_nothing`, `mcp_audited`, `mcp_connected` and `mcp_error`. An MCP user that cannot connect refuses the keys that name the host, and a missing grant takes some tools away from the keys of the host: the MCP page greys them (`docs/mcp.md`).
 - **A system user that cannot connect** is reported too, though the host stays healthy.
 
-A finding never stops the start. It appears in three places:
+The audit has a thread of its own and a budget of 60 seconds for each host: it never delays the health check of a host. A finding never stops the start. It appears in three places:
 
-1. The log, once when it appears and again when it changes: `[access] host=<name> The system user <user> has no SELECT on ...`. A host with no finding says nothing.
+1. The log, once when it appears and again when it changes: `{"event":"access.finding","host":"<name>","finding":"The system user <user> has no SELECT on ..."}` ([operations.md](operations.md#logs)). A host with no finding says nothing.
 2. `GET /api/hosts`, in the `access` object of each host: `ok`, `runner_user`, `system_user`, `runner_reads_nothing`, `runner_missing`, `system_missing` and `warnings` (one sentence each, with the `GRANT` to run). The `error` field of a host that is down says why (the last connection error).
 3. Every error answer that comes from a missing grant. The text of ClickHouse ("Not enough privileges") becomes `reason: "not_granted"` with `user`, `grant` and `hint` (`GRANT SELECT ON system.parts TO chdash_sysnone_user;`), whichever route answers.
 
@@ -103,6 +173,8 @@ Every caller who can reach a given panel and host therefore has the same ClickHo
 
 The server still signs short-lived internal capability tokens with a random secret that it creates at boot. These tokens are not user identities. For example, `/api/query/cancel` requires the signed token that the server issued for that query. Cancel tokens carry `purpose=cancel`, the host ID, the query ID, `iat` and `exp`. `query.cancel_token_ttl_ms` has the default value of 48 hours. When ChDash restarts, it changes the signing secret. Older capabilities become invalid before their nominal expiry.
 
+`POST /api/query/cancel` answers `{"ok": true, "stopped": <bool>, "killed": <n>}`. `stopped` is true when a run of this server owned the query and stopped it. `killed` is the number of ClickHouse queries that `KILL QUERY` found (0: nothing ran any more). When `KILL QUERY` cannot run (a missing grant, no connection), the answer has `kill_error`, and the run of this server stops anyway. When no run of this server owned the query, that failure is a 502 `cancel_failed`.
+
 ## Evolution blocks
 
 The HCL contract has the settings that Explorer, the System page, the analysis and the massive export need:
@@ -117,6 +189,7 @@ explorer {
   }
 
   cache_ttl_ms            = 5000
+  acl_cache_ttl_ms        = 60000
   live_refresh_ms         = 2000
   function_cache_ttl_ms   = 3600000
   function_markdown_links = false
@@ -234,7 +307,32 @@ Every System query sets `readonly = 2`, a time budget and read caps. For this re
 
 `/api/version` still reports `features.explorer.operations` (`enabled`, `keeper`). It mirrors `system.activity` and `system.keeper`. `/api/explorer/ops/activity` and `/api/explorer/ops/keeper` stay as aliases of `/api/system/activity` and `/api/system/keeper`.
 
+`explorer.cache_ttl_ms` (default 5,000, 0 to 1 hour) and `explorer.acl_cache_ttl_ms` (default 60,000, 0 to 1 hour) are the TTLs of the Explorer metadata and of the runner ACL. Refer to [Caches and privileges](#caches-and-privileges).
+
 `explorer.function_markdown_links` defaults to `false`. The dashboard then shows the links in the ClickHouse function Markdown as plain text. If you enable it, only the targets that are relative to the documentation and begin with `/` or `./` become links. Arbitrary external URLs stay not clickable.
+
+### Caches and privileges
+
+The backend keeps what it reads from ClickHouse in bounded caches (`src/ttl_cache.hpp`). These rules apply to all of them:
+
+- A value is fresh for its TTL after its read ended. The TTL uses a monotonic clock: a change of the system clock never ages a value or makes it young again.
+- There is one read for each key at a time. A second request of the same key waits for that read, up to 60 s. It never fails because the first request is still reading.
+- `refresh=1` asks for a read that starts after the request. A read in progress is waited for first. All the requests that asked meanwhile share the next read. A loop of `refresh=1` therefore never runs two reads of one key at a time.
+- A failed read is never kept as a value. Its error is sent again for 2 s, so that a host that is down is not asked on every request. When an older value exists, some pages send it with `"stale": true` instead of the error.
+- The live answers (the Explorer catalog and graph, and the Overview, Activity and Keeper of the System page) are sent at once after their TTL, with `"stale": true`, while one read runs in the background.
+- Each cache has a limit in entries and in bytes (the least recently used entry goes first). An entry older than 10 minutes, or than its TTL when the TTL is longer, is removed.
+- A key never holds the text of a client in full: the filters of the trace and log facets and of the trace prefill are in it as a SHA-256 digest. `read_rows_limit` is rounded down to 1, 2 or 5 times a power of ten.
+
+**The runner ACL.** What the runner of a host may read decides which objects the Explorer, the System pages, the execution statistics, the analysis, the exports and MCP show. The backend discovers it as the runner, with `CHECK GRANT` and zero-row probes. It never reads the grant list. It keeps one answer for each identity: the SHA-256 of the runner URI. The derived MCP identity has its own answer. These rules apply:
+
+- The answers are kept for `explorer.acl_cache_ttl_ms` (60 s by default). For as long again, they are sent while one read runs in the background. A change of the grants therefore shows after 2 × `acl_cache_ttl_ms` at most, or at once with the Refresh of a page (`refresh=1`). Set a short TTL if the grants change often and a refresh is not an option.
+- The lists are at table level: `CHECK GRANT SELECT` on the table, else a zero-row `SELECT`. The columns of a table are checked only when the table is opened.
+- Only `ACCESS_DENIED` (code 497) means "not readable". Another server error about one object leaves that object out. A connection error or a timeout is not an answer: the route answers 503, and the failure is not kept beyond 2 s. An ACL that cannot be read again is never sent from memory.
+- One discovery checks at most 4,000 objects in 20 s. To decide whether a database is readable, it probes at most 400 of its objects. Past a bound, the answer says `acl_truncated` (Explorer) or `truncated` (MCP), and the objects that were not checked are not shown.
+
+**The DDL texts.** The Explorer keeps the `engine_full` and `create_table_query` texts of the objects by identity (the SHA-256 of the URI of the connection), because ClickHouse masks the secrets of these texts by user. It reads at most 2,000 names in one query. The limits are 200,000 entries and 128 MiB.
+
+**The format cache** (`format_cache { }`). The key has the host, the ClickHouse version of the host (its health check), the line width and the SHA-256 of the text. A hit also compares the text. Only the text that was formatted is a key: formatting a formatted text runs the formatter again.
 
 ### The observability block
 
@@ -399,6 +497,8 @@ mcp {
 
 `analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory query registry for each host. This bound does not depend on the lifetime of the SSE session. The registry contains no query results and no user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget. It is for the exact original SQL that the backend retains only for Deep Analyze. Deep Analyze can then replay the statement through `runner_uri`. It does not need to trust a copy of the query log from the technical account.
 
+`export.max_execution_time_s` and `export.max_memory_usage` bound each exported statement in ClickHouse (0, the default, leaves them to the profile of the runner). `export.receive_timeout_ms` (default 600000, 0 = no limit, else at least 10000) ends a statement that sends nothing (no row, no progress) for that long. A dead peer is found sooner: the connections use TCP keepalive.
+
 `export.archive_format` currently accepts only `zip`. This fixes the V1 archive contract to ZIP/ZIP64 on purpose. Massive exports use the two-phase handshake `/api/export/run` → `/api/export/stream` and a forward-only ZIP64 writer. `docs/massive-export.md` describes them.
 
 The `query` block holds the safety limits for interactive results:
@@ -408,8 +508,13 @@ query {
   max_result_cell_bytes  = 33554432
   max_result_event_bytes = 33554432
   cancel_token_ttl_ms     = 172800000
+  max_execution_time_s    = 0
+  max_memory_usage        = 0
+  max_rows_to_read        = 0
 }
 ```
+
+`max_execution_time_s` (0..604800), `max_memory_usage` and `max_rows_to_read` bound a run in ClickHouse (refer to [The bounds of the queries](#the-bounds-of-the-queries)). `0`, the default, leaves the bound to the settings profile of the runner user. `result_preview_row_limit` limits only the rows that go to the browser, not the work of ClickHouse.
 
 The first two defaults are 32 MiB. A cell or an event that is too large fails with an explicit error: `result_cell_too_large` or `result_event_too_large`. The dashboard does not truncate data silently. These limits apply to interactive SSE results. They do not apply to the dedicated massive-export stream.
 

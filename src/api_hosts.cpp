@@ -133,7 +133,12 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
 
   res.set_chunked_content_provider(
       "text/event-stream; charset=utf-8",
-      [st, runner](size_t, httplib::DataSink& sink) {
+      [st, runner, this](size_t, httplib::DataSink& sink) {
+        // The server stops (Server::stop): the stream ends, the page reconnects to another replica or polls.
+        if (stopping()) {
+          sink.done();
+          return true;
+        }
         if (st->initial_event_pending) {
           st->initial_event_pending = false;
           sink.write(st->initial_event.data(), st->initial_event.size());

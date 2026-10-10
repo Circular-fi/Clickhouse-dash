@@ -6,7 +6,7 @@
 // A request is authenticated by the SHA-256 of the secret. The store keeps the hash and the first
 // characters of the secret (the hint), never the secret: the page shows a secret once, when it makes
 // the key, and no route gives it again. A config key's secret is hashed when the config is read.
-// A key file of an older ChDash that holds secrets in clear is written again without them at start.
+// A key file that holds a secret in clear (a file of an older ChDash) is refused at start: delete it.
 // The file is written atomically (temporary file, fsync, rename, mode 0600) through atomic_write_file(),
 // outside the lock that authenticate() takes. One process owns the file: two instances that share it
 // overwrite each other's keys.
@@ -123,20 +123,13 @@ void mcp_write_key(McpJsonWriter& writer, const McpKey& key, std::optional<int64
 
 std::string mcp_serialize_key_file(const std::vector<McpKey>& ui_keys);
 
-// What a key file held that the store does not keep: the file is written again without it at start.
-struct McpKeyFileNotes {
-  size_t clear_secrets = 0;          // keys that had their secret in clear (`secret`): the hash is kept, not the secret
-  std::vector<std::string> dropped;  // keys that are not loaded: "<name> (switched off)", "<name> (had an expiry)"
-};
-
-// Throws std::runtime_error (a message without file content) when the text is not a valid version-1 file.
-// A key that an older ChDash had switched off (`enabled: false`) or had given an expiry (`expires_at`, 2.17) is
-// not loaded: an expiry is no longer applied, so a key that had one must not come back without a limit.
-std::vector<McpKey> mcp_parse_key_file(std::string_view text, McpKeyFileNotes* notes = nullptr);
+// Throws std::runtime_error (a message without file content) when the text is not a valid version-1 file, or when a
+// key holds its secret in clear.
+std::vector<McpKey> mcp_parse_key_file(std::string_view text);
 
 // Reads `path`: an absent file is an empty list, an unreadable or invalid one throws.
 // Also throws when the directory of an absent file does not exist.
-std::vector<McpKey> mcp_load_key_file(const std::string& path, McpKeyFileNotes* notes = nullptr);
+std::vector<McpKey> mcp_load_key_file(const std::string& path);
 
 // ---- the store ----------------------------------------------------------
 
@@ -166,8 +159,7 @@ public:
     McpKey key;  // set unless Missing or Unknown
   };
 
-  // Throws std::runtime_error when the file is invalid or a name or secret is used twice. A file that holds
-  // secrets in clear (an older ChDash) is written again without them; when that fails, a line on stderr says so.
+  // Throws std::runtime_error when the file is invalid or a name or secret is used twice.
   explicit McpKeyStore(McpStoreOptions options);
 
   McpKeyStore(const McpKeyStore&) = delete;

@@ -2,7 +2,9 @@
 
 #include "api_error.hpp"
 #include "ch_uri.hpp"
+#include "log.hpp"
 #include "mcp_grants.hpp"
+#include "secure_random.hpp"
 #include "serve_embedded_static.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -19,7 +21,6 @@
 #include <thread>
 #include <utility>
 #include <memory>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,11 @@ namespace {
 static int64_t now_ms_local() {
   using namespace std::chrono;
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
+static int64_t steady_now_ms() {
+  using namespace std::chrono;
+  return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
 // The former address of a query shape, /system/queries?q=<hash>: the Location
@@ -56,13 +62,6 @@ static std::string query_shape_location(const std::string& target, const std::st
   return "queries/" + hash + rest;
 }
 
-static std::vector<uint8_t> random_bytes(size_t n) {
-  std::vector<uint8_t> out(n);
-  std::random_device rd;
-  for (size_t i = 0; i < n; ++i) out[i] = static_cast<uint8_t>(rd() & 0xFF);
-  return out;
-}
-
 #ifdef CHDASH_EMBED_STATIC
 // A build with embedded assets serves only them: no file of the disk is ever an answer.
 static bool try_serve_fs(const httplib::Request&, httplib::Response&) { return false; }
@@ -77,6 +76,8 @@ struct FsStaticAsset {
   std::string body;
   std::string mime;
   std::string etag;
+  // The SHA-256 of the body in hexadecimal: a ?v= that starts it is the version of these bytes.
+  std::string content_hash;
   std::filesystem::file_time_type modified{};
   uintmax_t size = 0;
 };
@@ -157,13 +158,26 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res) {
       loaded->size = size;
       loaded->etag = "\"" + std::to_string(size) + "-" +
           std::to_string(file_time_nanoseconds(modified)) + "\"";
+      const auto digest = sha256_digest(reinterpret_cast<const uint8_t*>(loaded->body.data()), loaded->body.size());
+      static constexpr char kHex[] = "0123456789abcdef";
+      for (const uint8_t b : digest) {
+        loaded->content_hash.push_back(kHex[b >> 4]);
+        loaded->content_hash.push_back(kHex[b & 15]);
+      }
       g_fs_static_cache[cache_key] = loaded;
       asset = std::move(loaded);
     }
   }
 
   res.set_header("ETag", asset->etag);
-  res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v")));
+  const bool html = rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".html") == 0;
+  if (!html && req.has_param("v") && !asset_version_matches(req.get_param_value("v"), asset->content_hash)) {
+    res.set_header("Cache-Control", "no-store");
+  } else {
+    res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v") && !html));
+  }
+  // A shell runs its inline scripts: the policy of the page lists their hashes (http_guard.hpp).
+  if (html) set_page_security_policy(res, asset->body);
   if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == asset->etag) {
     res.status = 304;
     return true;
@@ -189,10 +203,18 @@ HealthSettings health_settings_for(const AppConfig& cfg) {
 
 } // namespace
 
+AclService::Options Server::acl_options() {
+  AclService::Options options;
+  options.ttl = std::chrono::milliseconds(std::max(0, cfg_.explorer.acl_cache_ttl_ms));
+  options.stale_for = options.ttl;
+  options.submit = [this](std::function<void()> task) { return cache_refresher_ && cache_refresher_->submit(std::move(task)); };
+  return options;
+}
+
 Server::Server(AppConfig cfg, bool start_background)
     : cfg_(std::move(cfg)),
       health_(std::make_unique<HealthRunner>(cfg_.hosts, health_settings_for(cfg_))),
-      jwt_(random_bytes(32)),
+      jwt_(secure_random_bytes(32)),
       query_registry_(std::make_shared<QueryRegistry>(
           std::chrono::milliseconds(cfg_.analysis.registry_ttl_ms),
           cfg_.analysis.registry_max_entries,
@@ -205,7 +227,9 @@ Server::Server(AppConfig cfg, bool start_background)
           cfg_.client_pool_max_idle_per_key,
           std::chrono::milliseconds(cfg_.client_pool_idle_ttl_ms),
           std::chrono::milliseconds(cfg_.client_pool_validate_after_idle_ms),
-          std::chrono::milliseconds(cfg_.client_pool_reaper_interval_ms))),
+          std::chrono::milliseconds(cfg_.client_pool_reaper_interval_ms),
+          cfg_.client_pool_max_leased_per_uri,
+          std::chrono::milliseconds(cfg_.client_pool_lease_wait_ms))),
       format_cache_(std::make_unique<FormatCache>(
           cfg_.format_cache_max_entries,
           cfg_.format_cache_max_bytes,
@@ -222,17 +246,23 @@ Server::Server(AppConfig cfg, bool start_background)
     query_library_ = std::make_unique<QueryLibraryStore>(std::move(library));
   }
 
+  // The threads of the background cache refreshes (stale-while-revalidate): two, and a short queue.
+  cache_refresher_ = std::make_unique<CacheRefresher>(2, 64);
+
   if (cfg_.mcp.enabled) init_mcp();
 
   // The capacity of the HTTP server (ServerLimits): a pool that grows with the streams in progress,
   // a bounded queue, and a bounded request body, refused (413) before it is read.
   {
     const ServerLimits limits = cfg_.server;
-    http_.new_task_queue = [limits] {
-      return new httplib::ThreadPool(limits.worker_threads, limits.max_worker_threads, limits.max_queued_requests);
+    const std::shared_ptr<HttpMetrics> metrics = http_metrics_;
+    http_.new_task_queue = [limits, metrics] {
+      return new MeteredTaskQueue(limits.worker_threads, limits.max_worker_threads, limits.max_queued_requests, metrics);
     };
     http_.set_payload_max_length(limits.max_body_bytes);
+    http_.set_write_timeout(std::chrono::milliseconds(limits.write_timeout_ms));
   }
+  install_http_hooks();
 
   if (background_enabled_ && health_) health_->start();
   if (background_enabled_) {
@@ -435,66 +465,80 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   });
 
+  // A route that reads ClickHouse runs its handler inside a query scope (ch_query.hpp,
+  // request_limits): its statements carry the label and the deadline of the request,
+  // and stop when the browser goes away.
+  const auto scoped = [this](auto handler) {
+    return [this, handler](const httplib::Request& req, httplib::Response& res) {
+      ChQueryScope scope(request_limits(req));
+      handler(req, res);
+    };
+  };
+
+  // The probes (docs/operations.md, "Health probes"): the process (no ClickHouse), the hosts, and the strict form of v2.
+  http_.Get("/livez", [&](const auto& req, auto& res) { handle_livez(req, res); });
+  http_.Get("/readyz", [&](const auto& req, auto& res) { handle_readyz(req, res); });
   http_.Get("/healthz", [&](const auto& req, auto& res) { handle_healthz(req, res); });
+  if (cfg_.server.metrics) http_.Get("/metrics", [&](const auto& req, auto& res) { handle_metrics(req, res); });
   http_.Get("/api/version", [&](const auto& req, auto& res) { handle_api_version(req, res); });
-  http_.Get("/api/meta", [&](const auto& req, auto& res) { handle_api_meta(req, res); });
+  http_.Get("/api/meta", scoped([&](const auto& req, auto& res) { handle_api_meta(req, res); }));
   http_.Get("/api/hosts", [&](const auto& req, auto& res) { handle_api_hosts(req, res); });
   http_.Get("/api/hosts/stream", [&](const auto& req, auto& res) { handle_api_hosts_stream(req, res); });
   http_.Get("/api/health", [&](const auto& req, auto& res) { handle_api_health(req, res); });
 
-  http_.Post("/api/format", [&](const auto& req, auto& res) { handle_api_format(req, res); });
+  http_.Post("/api/format", scoped([&](const auto& req, auto& res) { handle_api_format(req, res); }));
 
   http_.Post("/api/query/run", [&](const auto& req, auto& res) { handle_query_run(req, res); });
   http_.Post("/api/query", [&](const auto& req, auto& res) { handle_query_run(req, res); });
 
   http_.Get("/api/query/stream", [&](const auto& req, auto& res) { handle_query_stream(req, res); });
-  http_.Post("/api/query/cancel", [&](const auto& req, auto& res) { handle_query_cancel(req, res); });
-  http_.Post("/api/query/analysis", [&](const auto& req, auto& res) { handle_query_analysis(req, res); });
-  http_.Post("/api/query/deep-analysis", [&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); });
-  http_.Get("/api/query/execution", [&](const auto& req, auto& res) { handle_query_execution(req, res); });
+  http_.Post("/api/query/cancel", scoped([&](const auto& req, auto& res) { handle_query_cancel(req, res); }));
+  http_.Post("/api/query/analysis", scoped([&](const auto& req, auto& res) { handle_query_analysis(req, res); }));
+  http_.Post("/api/query/deep-analysis", scoped([&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); }));
+  http_.Get("/api/query/execution", scoped([&](const auto& req, auto& res) { handle_query_execution(req, res); }));
 
-  http_.Post("/api/export/run", [&](const auto& req, auto& res) { handle_export_run(req, res); });
-  http_.Get("/api/export/stream", [&](const auto& req, auto& res) { handle_export_stream(req, res); });
+  http_.Post("/api/export/run", scoped([&](const auto& req, auto& res) { handle_export_run(req, res); }));
+  http_.Get("/api/export/stream", scoped([&](const auto& req, auto& res) { handle_export_stream(req, res); }));
 
   if (cfg_.traces_on()) {
-    http_.Get("/api/traces/meta", [&](const auto& req, auto& res) { handle_traces_meta(req, res); });
-    http_.Get("/api/traces/search", [&](const auto& req, auto& res) { handle_traces_search(req, res); });
-    http_.Get("/api/traces/analytics", [&](const auto& req, auto& res) { handle_traces_analytics(req, res); });
-    http_.Get("/api/traces/service_map", [&](const auto& req, auto& res) { handle_traces_service_map(req, res); });
-    http_.Get("/api/traces/heatmap", [&](const auto& req, auto& res) { handle_traces_heatmap(req, res); });
-    http_.Get("/api/traces/deltas", [&](const auto& req, auto& res) { handle_traces_deltas(req, res); });
-    http_.Get("/api/traces/services", [&](const auto& req, auto& res) { handle_traces_services(req, res); });
-    http_.Get("/api/traces/services/db", [&](const auto& req, auto& res) { handle_traces_services_db(req, res); });
-    http_.Get("/api/traces/prefill", [&](const auto& req, auto& res) { handle_traces_prefill(req, res); });
-    http_.Get("/api/traces/facets", [&](const auto& req, auto& res) { handle_traces_facets(req, res); });
-    http_.Get("/api/traces/facet_values", [&](const auto& req, auto& res) { handle_traces_facet_values(req, res); });
-    http_.Get("/api/traces/trace", [&](const auto& req, auto& res) { handle_trace_detail(req, res); });
-    http_.Get("/api/traces/linked_from", [&](const auto& req, auto& res) { handle_traces_linked_from(req, res); });
-    http_.Get("/api/traces/context", [&](const auto& req, auto& res) { handle_traces_context(req, res); });
-    http_.Get("/api/traces/spans", [&](const auto& req, auto& res) { handle_traces_spans(req, res); });
-    http_.Get("/api/traces/span", [&](const auto& req, auto& res) { handle_traces_span(req, res); });
+    http_.Get("/api/traces/meta", scoped([&](const auto& req, auto& res) { handle_traces_meta(req, res); }));
+    http_.Get("/api/traces/search", scoped([&](const auto& req, auto& res) { handle_traces_search(req, res); }));
+    http_.Get("/api/traces/analytics", scoped([&](const auto& req, auto& res) { handle_traces_analytics(req, res); }));
+    http_.Get("/api/traces/service_map", scoped([&](const auto& req, auto& res) { handle_traces_service_map(req, res); }));
+    http_.Get("/api/traces/heatmap", scoped([&](const auto& req, auto& res) { handle_traces_heatmap(req, res); }));
+    http_.Get("/api/traces/deltas", scoped([&](const auto& req, auto& res) { handle_traces_deltas(req, res); }));
+    http_.Get("/api/traces/services", scoped([&](const auto& req, auto& res) { handle_traces_services(req, res); }));
+    http_.Get("/api/traces/services/db", scoped([&](const auto& req, auto& res) { handle_traces_services_db(req, res); }));
+    http_.Get("/api/traces/prefill", scoped([&](const auto& req, auto& res) { handle_traces_prefill(req, res); }));
+    http_.Get("/api/traces/facets", scoped([&](const auto& req, auto& res) { handle_traces_facets(req, res); }));
+    http_.Get("/api/traces/facet_values", scoped([&](const auto& req, auto& res) { handle_traces_facet_values(req, res); }));
+    http_.Get("/api/traces/trace", scoped([&](const auto& req, auto& res) { handle_trace_detail(req, res); }));
+    http_.Get("/api/traces/linked_from", scoped([&](const auto& req, auto& res) { handle_traces_linked_from(req, res); }));
+    http_.Get("/api/traces/context", scoped([&](const auto& req, auto& res) { handle_traces_context(req, res); }));
+    http_.Get("/api/traces/spans", scoped([&](const auto& req, auto& res) { handle_traces_spans(req, res); }));
+    http_.Get("/api/traces/span", scoped([&](const auto& req, auto& res) { handle_traces_span(req, res); }));
     // Answers {"enabled": false, ...} when logs are disabled (no 404).
-    http_.Get("/api/traces/logs", [&](const auto& req, auto& res) { handle_trace_logs(req, res); });
+    http_.Get("/api/traces/logs", scoped([&](const auto& req, auto& res) { handle_trace_logs(req, res); }));
   }
 
   // Always registered: when logs/metrics are disabled the meta routes answer
   // {"enabled": false, ...} so a UI can explain why instead of seeing a 404.
-  http_.Get("/api/logs/meta", [&](const auto& req, auto& res) { handle_logs_meta(req, res); });
-  http_.Get("/api/metrics/meta", [&](const auto& req, auto& res) { handle_metrics_meta(req, res); });
+  http_.Get("/api/logs/meta", scoped([&](const auto& req, auto& res) { handle_logs_meta(req, res); }));
+  http_.Get("/api/metrics/meta", scoped([&](const auto& req, auto& res) { handle_metrics_meta(req, res); }));
   if (cfg_.logs_on()) {
-    http_.Get("/api/logs/search", [&](const auto& req, auto& res) { handle_logs_search(req, res); });
-    http_.Get("/api/logs/histogram", [&](const auto& req, auto& res) { handle_logs_histogram(req, res); });
-    http_.Get("/api/logs/context", [&](const auto& req, auto& res) { handle_logs_context(req, res); });
-    http_.Get("/api/logs/patterns", [&](const auto& req, auto& res) { handle_logs_patterns(req, res); });
-    http_.Get("/api/logs/services", [&](const auto& req, auto& res) { handle_logs_services(req, res); });
-    http_.Get("/api/logs/facets", [&](const auto& req, auto& res) { handle_logs_facets(req, res); });
-    http_.Get("/api/logs/facet_values", [&](const auto& req, auto& res) { handle_logs_facet_values(req, res); });
+    http_.Get("/api/logs/search", scoped([&](const auto& req, auto& res) { handle_logs_search(req, res); }));
+    http_.Get("/api/logs/histogram", scoped([&](const auto& req, auto& res) { handle_logs_histogram(req, res); }));
+    http_.Get("/api/logs/context", scoped([&](const auto& req, auto& res) { handle_logs_context(req, res); }));
+    http_.Get("/api/logs/patterns", scoped([&](const auto& req, auto& res) { handle_logs_patterns(req, res); }));
+    http_.Get("/api/logs/services", scoped([&](const auto& req, auto& res) { handle_logs_services(req, res); }));
+    http_.Get("/api/logs/facets", scoped([&](const auto& req, auto& res) { handle_logs_facets(req, res); }));
+    http_.Get("/api/logs/facet_values", scoped([&](const auto& req, auto& res) { handle_logs_facet_values(req, res); }));
   }
   if (cfg_.metrics_on()) {
-    http_.Get("/api/metrics/catalog", [&](const auto& req, auto& res) { handle_metrics_catalog(req, res); });
-    http_.Get("/api/metrics/attributes", [&](const auto& req, auto& res) { handle_metrics_attributes(req, res); });
-    http_.Get("/api/metrics/series", [&](const auto& req, auto& res) { handle_metrics_series(req, res); });
-    http_.Get("/api/metrics/exemplars", [&](const auto& req, auto& res) { handle_metrics_exemplars(req, res); });
+    http_.Get("/api/metrics/catalog", scoped([&](const auto& req, auto& res) { handle_metrics_catalog(req, res); }));
+    http_.Get("/api/metrics/attributes", scoped([&](const auto& req, auto& res) { handle_metrics_attributes(req, res); }));
+    http_.Get("/api/metrics/series", scoped([&](const auto& req, auto& res) { handle_metrics_series(req, res); }));
+    http_.Get("/api/metrics/exemplars", scoped([&](const auto& req, auto& res) { handle_metrics_exemplars(req, res); }));
   }
 
   // Query library: every route is absent (404) unless query_library.enabled.
@@ -516,8 +560,8 @@ Server::Server(AppConfig cfg, bool start_background)
   // MCP (docs/mcp.md): the endpoint and its page exist only when mcp.enabled; the
   // /api/mcp routes always answer (meta says enabled: false, the others 404 mcp_disabled).
   {
-    const auto mcp_api = [this](McpApiRoute route) {
-      return [this, route](const httplib::Request& req, httplib::Response& res) { handle_api_mcp(req, res, route); };
+    const auto mcp_api = [this, scoped](McpApiRoute route) {
+      return scoped([this, route](const httplib::Request& req, httplib::Response& res) { handle_api_mcp(req, res, route); });
     };
     http_.Get("/api/mcp/meta", mcp_api(McpApiRoute::Meta));
     http_.Get("/api/mcp/keys", mcp_api(McpApiRoute::KeysList));
@@ -540,38 +584,38 @@ Server::Server(AppConfig cfg, bool start_background)
   // The System page (docs/system.md): fixed, bounded system-table reads of
   // the selected host. system.enabled = false removes the page and every route.
   if (cfg_.system.enabled) {
-    http_.Get("/api/system/overview", [&](const auto& req, auto& res) { handle_system_overview(req, res); });
-    http_.Get("/api/system/series", [&](const auto& req, auto& res) { handle_system_series(req, res); });
-    http_.Get("/api/system/disks", [&](const auto& req, auto& res) { handle_system_disks(req, res); });
+    http_.Get("/api/system/overview", scoped([&](const auto& req, auto& res) { handle_system_overview(req, res); }));
+    http_.Get("/api/system/series", scoped([&](const auto& req, auto& res) { handle_system_series(req, res); }));
+    http_.Get("/api/system/disks", scoped([&](const auto& req, auto& res) { handle_system_disks(req, res); }));
     // Queries (runner context): system.top_queries.
     if (cfg_.system.top_queries_enabled()) {
-      http_.Get("/api/system/queries", [&](const auto& req, auto& res) { handle_system_queries(req, res); });
-      http_.Get(R"(/api/system/queries/([^/]+))", [&](const auto& req, auto& res) { handle_system_query(req, res); });
+      http_.Get("/api/system/queries", scoped([&](const auto& req, auto& res) { handle_system_queries(req, res); }));
+      http_.Get(R"(/api/system/queries/([^/]+))", scoped([&](const auto& req, auto& res) { handle_system_query(req, res); }));
     }
     // Activity and Keeper keep the v2.14.0 addresses of the Explorer's
     // Server operations as aliases (/api/explorer/ops/activity and
     // /api/explorer/ops/keeper, docs/configuration.md).
     if (cfg_.system.activity_enabled()) {
-      const auto activity = [&](const auto& req, auto& res) { handle_system_activity(req, res); };
+      const auto activity = scoped([&](const auto& req, auto& res) { handle_system_activity(req, res); });
       http_.Get("/api/system/activity", activity);
       http_.Get("/api/explorer/ops/activity", activity);
     }
     if (cfg_.system.keeper_enabled()) {
-      const auto keeper = [&](const auto& req, auto& res) { handle_system_keeper(req, res); };
+      const auto keeper = scoped([&](const auto& req, auto& res) { handle_system_keeper(req, res); });
       http_.Get("/api/system/keeper", keeper);
       http_.Get("/api/explorer/ops/keeper", keeper);
     }
   }
 
   if (cfg_.explorer.enabled()) {
-    http_.Get("/api/explorer/catalog", [&](const auto& req, auto& res) { handle_explorer_catalog(req, res); });
-    http_.Get("/api/explorer/table", [&](const auto& req, auto& res) { handle_explorer_table(req, res); });
-    http_.Post("/api/explorer/table/data", [&](const auto& req, auto& res) { handle_explorer_table_data(req, res); });
-    http_.Get("/api/explorer/functions", [&](const auto& req, auto& res) { handle_explorer_functions(req, res); });
-    http_.Get("/api/explorer/storage", [&](const auto& req, auto& res) { handle_explorer_storage(req, res); });
+    http_.Get("/api/explorer/catalog", scoped([&](const auto& req, auto& res) { handle_explorer_catalog(req, res); }));
+    http_.Get("/api/explorer/table", scoped([&](const auto& req, auto& res) { handle_explorer_table(req, res); }));
+    http_.Post("/api/explorer/table/data", scoped([&](const auto& req, auto& res) { handle_explorer_table_data(req, res); }));
+    http_.Get("/api/explorer/functions", scoped([&](const auto& req, auto& res) { handle_explorer_functions(req, res); }));
+    http_.Get("/api/explorer/storage", scoped([&](const auto& req, auto& res) { handle_explorer_storage(req, res); }));
     if (cfg_.explorer.graph_enabled()) {
-      http_.Get("/api/explorer/graph", [&](const auto& req, auto& res) { handle_explorer_graph(req, res); });
-      http_.Get("/api/explorer/graph/definition", [&](const auto& req, auto& res) { handle_explorer_graph_definition(req, res); });
+      http_.Get("/api/explorer/graph", scoped([&](const auto& req, auto& res) { handle_explorer_graph(req, res); }));
+      http_.Get("/api/explorer/graph/definition", scoped([&](const auto& req, auto& res) { handle_explorer_graph_definition(req, res); }));
     }
   }
 
@@ -579,7 +623,13 @@ Server::Server(AppConfig cfg, bool start_background)
 }
 
 Server::~Server() {
-  session_reaper_stop_.store(true, std::memory_order_relaxed);
+  // The same cancellation as a stop: a server that run() left for another reason (its socket failed) stops too.
+  stop();
+  {
+    // Under the lock of the wait: the reaper cannot miss the notification between its check and its wait.
+    std::lock_guard<std::mutex> lk(session_reaper_mu_);
+    session_reaper_stop_.store(true, std::memory_order_relaxed);
+  }
   session_reaper_cv_.notify_all();
   if (session_reaper_thread_.joinable()) session_reaper_thread_.join();
 
@@ -595,7 +645,17 @@ Server::~Server() {
     session->request_cancel();
     session->cancel_native_queries_best_effort(false);
   }
-  remaining.clear(); // joins query workers before shared infrastructure is destroyed
+  remaining.clear();
+
+  // A query thread may outlive its session's last owner (QuerySession::start): wait until each one has ended
+  // before anything that it uses goes (the pool, the registry, the caches), at most until the deadline of the stop.
+  const int64_t left_ms = stop_deadline_ms_.load(std::memory_order_acquire) - steady_now_ms();
+  if (!query_workers_->close_and_wait(std::chrono::milliseconds(std::max<int64_t>(0, left_ms)))) {
+    log_event(LogLevel::Error, "server.shutdown_timeout",
+              {{"query_threads", query_workers_->active()}, {"timeout_ms", cfg_.server.shutdown_timeout_ms}});
+    // Destroying the server under a running thread is undefined behaviour: end the process instead.
+    std::_Exit(1);
+  }
 
   if (health_) health_->stop();
 }
@@ -649,7 +709,13 @@ void Server::session_reaper_loop() {
           std::chrono::milliseconds(interval_ms),
           [this] { return session_reaper_stop_.load(std::memory_order_relaxed); });
     }
-    if (!session_reaper_stop_.load(std::memory_order_relaxed)) reap_sessions_once();
+    if (session_reaper_stop_.load(std::memory_order_relaxed)) break;
+    reap_sessions_once();
+    const auto now = std::chrono::steady_clock::now();
+    if (cfg_.server.stats_log_interval_ms > 0 && now - last_stats_log_ >= std::chrono::milliseconds(cfg_.server.stats_log_interval_ms)) {
+      last_stats_log_ = now;
+      log_stats();
+    }
   }
 }
 
@@ -661,46 +727,126 @@ int Server::run() {
     host = cfg_.listen.substr(0, pos);
     port = std::stoi(cfg_.listen.substr(pos + 1));
   }
-  return http_.listen(host.c_str(), port) ? 0 : 1;
+  if (stopping()) return 0;
+  if (!http_.bind_to_port(host, port)) {
+    log_event(LogLevel::Error, "server.listen_failed", {{"listen", cfg_.listen}});
+    return 1;
+  }
+  // A stop() that came before the bind found no socket to close: close it now (one after the bind closes it itself).
+  if (stopping()) http_.stop();
+  log_event(LogLevel::Info, "server.listening", {{"listen", cfg_.listen}});
+  const bool served = http_.listen_after_bind();
+  if (stopping()) {
+    log_event(LogLevel::Info, "server.stopped", {});
+    return 0;
+  }
+  return served ? 0 : 1;
 }
 
-void Server::stop() { http_.stop(); }
-
-bool Server::health_check(std::string* error_message) {
-  if (cfg_.hosts.empty()) {
-    if (error_message) *error_message = "no ClickHouse hosts configured";
-    return false;
+ChQueryLimits Server::request_limits(const httplib::Request& req, bool with_deadline) const {
+  ChQueryLimits limits;
+  // The System page labels its own reads 'chdash-system' (System > Queries never lists them); every other
+  // route 'chdash:<path>', which System > Queries leaves out with hide_chdash.
+  const bool system_page = req.path.rfind("/api/system/", 0) == 0 || req.path.rfind("/api/explorer/ops/", 0) == 0;
+  limits.log_comment = system_page ? std::string("chdash-system") : "chdash:" + req.path.substr(0, 160);
+  if (with_deadline) {
+    limits.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(cfg_.generated_queries.timeout_ms);
   }
-  for (const auto& h : cfg_.hosts) {
-    std::string err;
-    auto c = client_pool_ ? client_pool_->acquire(
-      h.runner_uri,
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      &err
-    ) : make_client_from_uri(
-      h.runner_uri,
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      std::chrono::milliseconds(cfg_.health.timeout_ms),
-      &err
-    );
-    if (!c) {
-      if (error_message) *error_message = "host=" + h.id + " connect error: " + err;
-      return false;
-    }
+  limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;
+  // The System page bounds every read as its own system-table reads are (docs/system.md): read only,
+  // a read cap and a result cap that fail rather than cut.
+  if (system_page) {
+    limits.read_only = true;
+    limits.timeout_overflow_mode = "throw";
+    limits.max_rows_to_read = cfg_.system.query_log_max_rows;
+    limits.read_overflow_mode = "throw";
+    limits.max_result_rows = 1'000'000;
+    limits.result_overflow_mode = "throw";
+  }
+  // The Explorer reads metadata: each statement ends in 10 s. Its data preview reads the rows of a table
+  // (a View or a Distributed table runs its whole source): 30 s, and 64 MiB of result at most (the
+  // preview then has fewer rows).
+  if (req.path == "/api/explorer/table/data") {
+    limits.max_execution_time_s = 30;
+    limits.max_result_bytes = 64 * 1024 * 1024;
+    limits.result_overflow_mode = "break";
+  } else if (!system_page && req.path.rfind("/api/explorer/", 0) == 0) {
+    limits.max_execution_time_s = 10;
+  }
+  limits.canceled = [&req] { return req.is_connection_closed && req.is_connection_closed(); };
+  return limits;
+}
+
+ChQueryLimits Server::user_sql_limits(const httplib::Request& req, std::string log_comment) const {
+  ChQueryLimits limits;
+  limits.log_comment = std::move(log_comment);
+  limits.max_execution_time_s = cfg_.query_options.max_execution_time_s;
+  limits.max_memory_usage = cfg_.query_options.max_memory_usage;
+  limits.max_rows_to_read = cfg_.query_options.max_rows_to_read;
+  limits.canceled = [&req] { return req.is_connection_closed && req.is_connection_closed(); };
+  return limits;
+}
+
+void Server::stop() {
+  bool expected = false;
+  if (!stopping_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
+  stop_deadline_ms_.store(steady_now_ms() + cfg_.server.shutdown_timeout_ms, std::memory_order_release);
+
+  // The running queries: cancelled, and KILL QUERY sent. Their streams see the stop and end with server_stopping.
+  std::vector<std::shared_ptr<QuerySession>> sessions;
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    for (const auto& item : sessions_) sessions.push_back(item.second);
+  }
+  // The exports: each hook kills the ClickHouse query of its export.
+  std::vector<std::function<void()>> hooks;
+  {
+    std::lock_guard<std::mutex> lk(stop_hooks_mu_);
+    for (const auto& item : stop_hooks_) hooks.push_back(item.second);
+  }
+  log_event(LogLevel::Info, "server.stopping",
+            {{"sessions", sessions.size()}, {"exports", hooks.size()}, {"timeout_ms", cfg_.server.shutdown_timeout_ms}});
+  for (const auto& session : sessions) {
+    if (!session) continue;
+    session->request_cancel();
+    session->cancel_native_queries_best_effort(false);
+  }
+  for (const auto& hook : hooks) {
     try {
-      c->Ping();
-    } catch (const std::exception& e) {
-      if (error_message) *error_message = "host=" + h.id + " ping error: " + std::string(e.what());
-      return false;
+      hook();
+    } catch (...) {
     }
   }
-  return true;
+  // The health threads end, which also wakes the host status streams (they end on the stop).
+  if (health_) health_->stop();
+  // No new connection; run() returns once the connections in progress end (the streams end above).
+  http_.stop();
 }
 
+uint64_t Server::add_stop_hook(std::function<void()> hook) {
+  {
+    std::lock_guard<std::mutex> lk(stop_hooks_mu_);
+    if (!stopping()) {
+      const uint64_t id = ++next_stop_hook_;
+      stop_hooks_.emplace(id, std::move(hook));
+      return id;
+    }
+  }
+  hook();
+  return 0;
+}
+
+void Server::remove_stop_hook(uint64_t id) {
+  if (id == 0) return;
+  std::lock_guard<std::mutex> lk(stop_hooks_mu_);
+  stop_hooks_.erase(id);
+}
+
+// The strict probe of v2 (docs/operations.md, "Health probes"): 200 only when every host answers and the server
+// does not stop. For an orchestrator, /livez and /readyz are the probes.
 void Server::handle_healthz(const httplib::Request&, httplib::Response& res) {
+  res.set_header("Cache-Control", "no-store");
+  if (stopping()) return json_error(res, 503, "server_stopping", "the server is stopping");
   const bool ok = health_ ? health_->all_healthy() : false;
   if (ok) {
     res.status = 200;

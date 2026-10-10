@@ -17,8 +17,10 @@ def test_execution_endpoint_uses_registered_query_and_runner_acl() -> None:
     assert 'Get("/api/query/execution"' in server
     assert "handle_query_execution" in header
     assert "authenticate_request" not in api
-    assert "query_registry_->find(query_id, host_id)" in api
-    assert "discover_allowed_objects(*runner)" in api
+    # The MCP identity of a host reads the records of the host (ARCH-B-069).
+    assert "query_registry_->find(query_id, std::string(mcp_base_host(host_id)))" in api
+    # The runner ACL of the host identity, kept by the AclService.
+    assert "acl_.table_set(runner_access(*host))" in api
     assert "collect_query_execution" in api
     assert "system.query_log" in collector
     assert "system.processors_profile_log" not in collector

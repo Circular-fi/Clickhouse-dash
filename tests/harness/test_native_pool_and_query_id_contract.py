@@ -49,7 +49,6 @@ def test_compatibility_retries_use_distinct_native_query_ids() -> None:
     assert "const std::string native_query_id = begin_native_query_attempt();" in source
     assert "clickhouse::Query q(effective_sql, native_query_id);" in source
     assert "cancel_native_query_ids_best_effort({failed_native_id}, true);" in source
-    assert "cancel_native_query_ids_best_effort({native_query_id}, false);" in source
     assert "discard_query_connection();" in source
     assert "acquire_query_connection();" in source
     assert "reset_query_connection_best_effort" not in source
@@ -61,36 +60,55 @@ def test_cancel_targets_every_native_attempt_owned_by_the_session() -> None:
     api_source = read("src/api_query.cpp")
 
     assert "std::vector<std::string> native_query_ids() const;" in header
-    assert "KILL QUERY WHERE query_id IN (" in session_source
-    assert 'synchronous ? "SYNC" : "ASYNC"' in session_source
-    assert "session->cancel_native_queries_best_effort(false);" in api_source
+    assert 'std::string where = "query_id IN (";' in session_source
+    assert '"KILL QUERY WHERE " + where + (synchronous ? " SYNC" : " ASYNC")' in session_source
+    assert "kill = session->cancel_native_queries_best_effort(false);" in api_source
 
 
 def test_health_runner_does_not_hold_a_system_socket_across_long_intervals() -> None:
     source = read("src/health_runner.cpp")
+    ping = source.split("void HealthRunner::ping_loop(size_t index) {", 1)[1].split("void HealthRunner::audit_loop() {", 1)[0]
+    audit = source.split("void HealthRunner::audit_loop() {", 1)[1]
 
     assert "kMaxPersistentHealthClientIdleMs = 60 * 1000" in source
-    assert "release_clients_before_wait" in source
-    assert "for (auto& ctx : ctx_) ctx.client.reset();" in source
-    assert "ping_jobs.clear();" in source
+    assert "if (interval_ms > kMaxPersistentHealthClientIdleMs) client.reset();" in ping
+    # The audit opens its connections for one audit and closes them before it waits.
+    assert "runner.reset();" in audit and "system.reset();" in audit
 
 
 def test_health_is_measured_with_runner_credentials_and_recovers_stale_sockets() -> None:
     source = read("src/health_runner.cpp")
     header = read("src/health_runner.hpp")
-    server = read("src/server.cpp")
+    main = read("src/main.cpp")
+    ping = source.split("void HealthRunner::ping_loop(size_t index) {", 1)[1].split("void HealthRunner::audit_loop() {", 1)[0]
 
-    assert "init_jobs.push_back(InitJob{i, ctx_[i].spec.id, ctx_[i].spec.runner_uri})" in source
-    assert "init_jobs.push_back(InitJob{i, ctx_[i].spec.id, ctx_[i].spec.system_uri})" not in source
-    assert "job.client->ResetConnection();" in source
-    assert "job.client->Ping();" in source
-    assert "result.discard_client = true;" in source
-    assert "if (result.discard_client) ctx.client.reset();" in source
-    assert "same_credentials ? ctx.client" in source
+    # One ping thread per host, with the runner credentials (the system user is only audited).
+    assert "client = make_client_from_uri(spec.runner_uri, timeout, timeout, timeout, &err);" in ping
+    assert "system_uri" not in ping
+    assert "client->ResetConnection();" in ping
+    assert "client->Ping();" in ping
+    assert "if (!ok) client.reset();" in ping
+    assert "same_credentials ? runner :" in source
     assert "One runner client per host" in header
-    health_check = server.split("bool Server::health_check", 1)[1]
-    assert "h.runner_uri" in health_check
-    assert "h.system_uri" not in health_check.split("void Server::handle_healthz", 1)[0]
+    assert "for (size_t i = 0; i < hosts_.size(); ++i) threads_.emplace_back([this, i] { ping_loop(i); });" in source
+    # --health asks the running server (GET /livez): it never builds a Server nor connects to ClickHouse.
+    probe = main.split("int probe_liveness(const chdash::AppConfig& cfg) {", 1)[1].split("\n}\n", 1)[0]
+    assert 'client.Get("/livez")' in probe and "runner_uri" not in probe and "Server" not in probe
+
+
+def test_health_threads_wake_on_stop_and_the_audit_never_blocks_a_ping() -> None:
+    source = read("src/health_runner.cpp")
+    header = read("src/health_runner.hpp")
+    stop = source.split("void HealthRunner::stop() {", 1)[1].split("\n}\n", 1)[0]
+    # The flag is written under the lock of the waits before the notification: no wake-up is lost.
+    assert stop.index("std::lock_guard<std::mutex> lk(mu_);") < stop.index("stop_ = true;") < stop.index("cv_.notify_all();")
+    # The audit runs in a thread of its own, with its own connections, a time budget and the stop checked between queries.
+    assert "if (!hosts_.empty()) threads_.emplace_back([this] { audit_loop(); });" in source
+    assert "static constexpr int64_t kAuditBudgetMs = 60 * 1000;" in header
+    assert "const AuditBudget budget{&stop_flag_, steady_clock::now() + milliseconds(kAuditBudgetMs)};" in source
+    check = source.split("static bool check_grant(", 1)[1].split("\n}\n", 1)[0]
+    assert "if (budget.exhausted()) return false;" in check
+    assert "std::async" not in source
 
 
 def test_cancel_fallback_matches_reaped_compatibility_attempts() -> None:

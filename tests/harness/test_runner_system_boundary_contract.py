@@ -29,7 +29,7 @@ def test_internal_cancel_capability_is_hs256_purpose_bound_and_expires() -> None
     config = read("src/config.cpp")
     example = read("config.example.hcl")
 
-    assert "jwt_(random_bytes(32))" in server
+    assert "jwt_(secure_random_bytes(32))" in server
     assert 'std::string(header["alg"].GetString()) != "HS256"' in jwt
     assert 'payload.AddMember("purpose", "cancel", pa)' in jwt
     assert 'payload.AddMember("iat", c.issued_at_unix, pa)' in jwt
@@ -72,8 +72,8 @@ def test_user_sql_execution_is_runner_only_and_system_is_technical_only() -> Non
     assert "host->runner_uri," in run
     assert "stats_uri," in run
     assert "runner_uri_(std::move(runner_uri))" in session
-    assert "client_query_->Execute(command);" in session
-    assert "client_query_->Select(q);" in session
+    assert "ch_execute(*client_query_, command);" in session
+    assert "ch_execute(*client_query_, q);" in session
 
     # Deep Analyze replays retained SQL only through runner_uri.
     assert "run_deep_analysis(*record, host->runner_uri" in deep_api
@@ -82,24 +82,29 @@ def test_user_sql_execution_is_runner_only_and_system_is_technical_only() -> Non
 
     # Massive export executes arbitrary panel SQL only with runner_uri.
     assert "make_export_client(host_copy.runner_uri" in export
-    assert "client->Execute(query);" in export
-    assert "client->Select(query);" not in export
+    assert "ch_execute(*client, query);" in export
+    assert "ch_select(*client, query);" not in export
     assert "query.OnDataCancelable" in export
     assert "make_export_client(system_uri" not in export
 
     # system/stats connections may issue only backend-built KILL/log/metadata work.
-    cancellation = session[session.index("void QuerySession::cancel_native_query_ids_best_effort"):session.index("bool QuerySession::attach_stream")]
-    assert 'std::string sql = "KILL QUERY WHERE query_id IN (";' in cancellation
+    cancellation = session[session.index("void QuerySession::cancel_native_query_ids_best_effort") if "void QuerySession::cancel_native_query_ids_best_effort" in session else session.index("KillOutcome QuerySession::cancel_native_query_ids_best_effort"):session.index("bool QuerySession::attach_stream")]
+    assert 'std::string where = "query_id IN (";' in cancellation
+    assert "return kill_queries(stats_uri_.empty() ? runner_uri_ : stats_uri_, where, synchronous);" in cancellation
 
 
 def test_allowed_object_set_is_discovered_with_runner_not_system_grants() -> None:
     source = read("src/allowed_objects.cpp")
     header = read("src/allowed_objects.hpp")
 
-    assert 'runner.Select("SHOW DATABASES"' in source
-    assert 'runner.Select("SHOW TABLES FROM "' in source
-    assert 'runner.Select("CHECK GRANT " + expression' in source
-    assert 'check_grant(runner, "SELECT ON " + target)' in source
+    # The runner connection is the AclSource: SHOW, CHECK GRANT and zero-row probes as the runner.
+    assert 'select_names(*client_, "SHOW DATABASES")' in source
+    assert 'select_names(*client_, "SHOW TABLES FROM " + quote_ident(database))' in source
+    assert 'ch_select(client, "CHECK GRANT " + expression' in source
+    assert 'source.check_grant("SELECT ON " + target)' in source
+    # ACCESS_DENIED (497) is the only "no"; another server error is about one object; a transport error is no answer.
+    assert "if (error.GetCode() == kAccessDenied) throw AclDenied(error.what());" in source
+    assert "throw AclObjectError(error.GetCode(), error.what());" in source
     assert "discover_columns_recursive" in source
     assert "DESCRIBE TABLE " in source
     assert "system.grants" not in source

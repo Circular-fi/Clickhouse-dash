@@ -120,7 +120,7 @@ def test_massive_export_allows_runner_commands_and_returns_stable_ok_result() ->
     docs = read("docs/massive-export.md")
 
     assert "make_export_client(host_copy.runner_uri" in api
-    assert "client->Execute(query);" in api
+    assert "ch_execute(*client, query);" in api
     assert "client->Select(query);" not in api
     assert "query.OnDataCancelable" in api
     assert "command_result_payload" in api

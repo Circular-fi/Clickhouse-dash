@@ -25,8 +25,10 @@ def test_each_view_is_served_as_its_own_page_and_the_bare_address_redirects():
     assert 'http_.Get(R"(/observability/.*)", redirect_to_first_view);' in block
     assert "location += req.target.substr(mark);" in server
     assert "observability.html" not in server
-    for old in ('"/traces"', '"/logs"', '"/metrics"', 'R"(/traces/.*)"', 'R"(/metrics/.*)"'):
+    for old in ('"/traces"', '"/logs"', 'R"(/traces/.*)"', 'R"(/metrics/.*)"'):
         assert old not in server, old
+    # /metrics is the Prometheus text of the server (docs/operations.md), not the former page.
+    assert server.count('"/metrics"') == 1 and 'handle_metrics(req, res)' in server
     for name in ("observability.html", "app_observability.js", "app_traces_bootstrap.js", "app_logs_bootstrap.js", "app_metrics_bootstrap.js",
                  "style.observability.css", "style.observability.traces.css"):
         assert not (ROOT / "src/static" / name).exists(), name

@@ -1,5 +1,6 @@
 #include "deep_analysis.hpp"
 
+#include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "sql_scan.hpp"
 
@@ -90,9 +91,12 @@ std::vector<std::string> execute_explain(
   size_t bytes = 0;
   clickhouse::Query query(sql, query_id);
   query.OnData([&](const clickhouse::Block& block) {
+    ch_check_canceled();
     append_explain_block(block, lines, bytes);
   });
-  client.Select(query);
+  // EXPLAIN ANALYZE runs the query: it stops when the browser goes away (ch_query.hpp).
+  query.OnProgress([](const clickhouse::Progress&) { ch_check_canceled(); });
+  ch_execute(client, query);
   return lines;
 }
 

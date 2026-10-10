@@ -8,6 +8,8 @@
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "json_text.hpp"
+#include "jwt.hpp"
+#include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
 
 #include <clickhouse/client.h>
@@ -454,7 +456,7 @@ bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, 
   *span_map = false;
   *resource_map = false;
   try {
-    client.Select(
+    ch_select(client,
         "SELECT toString(name), toString(type) FROM system.columns WHERE database = " + quote_string(cfg.database) +
         " AND `table` = " + quote_string(cfg.table) + " AND name IN ('SpanAttributes','ResourceAttributes')",
         [&](const clickhouse::Block& block) {
@@ -476,42 +478,54 @@ bool trace_attribute_maps(clickhouse::Client& client, const TraceSettings& cfg, 
 // That schema fact changes on DDL, not per request, so cache it per source
 // (system URI + table) instead of querying system.columns on every search.
 // /api/traces/meta always reads it fresh and refreshes the cache.
-struct AttributeMapCacheEntry {
+struct AttributeMaps {
   bool span_map = false;
   bool resource_map = false;
-  std::chrono::steady_clock::time_point loaded_at;
 };
 constexpr auto kAttributeMapCacheTtl = std::chrono::seconds(60);
-std::mutex g_attribute_map_mutex;
-std::unordered_map<std::string, AttributeMapCacheEntry> g_attribute_map_cache;
+
+// One read per source at a time (single-flight). Only successful lookups are kept: a failure is retried by the next
+// request (no back-off). The key comes from the configuration only.
+TtlCache<std::string, AttributeMaps>& attribute_map_cache() {
+  static TtlCache<std::string, AttributeMaps> cache([] {
+    TtlCache<std::string, AttributeMaps>::Options options;
+    options.ttl = kAttributeMapCacheTtl;
+    options.failure_backoff = std::chrono::milliseconds(0);
+    options.serve_stale_on_error = false;
+    options.max_entries = 256;
+    return options;
+  }());
+  return cache;
+}
 
 std::string attribute_map_cache_key(const HostSpec& host, const TraceSettings& cfg) {
   return host.system_uri + '\x1f' + cfg.database + '\x1f' + cfg.table;
 }
 
+// /api/traces/meta read the columns itself: its answer replaces the kept one.
 void store_trace_attribute_maps(const HostSpec& host, const TraceSettings& cfg, bool span_map, bool resource_map) {
-  std::lock_guard<std::mutex> lock(g_attribute_map_mutex);
-  g_attribute_map_cache[attribute_map_cache_key(host, cfg)] =
-      AttributeMapCacheEntry{span_map, resource_map, std::chrono::steady_clock::now()};
+  attribute_map_cache().get(
+      attribute_map_cache_key(host, cfg),
+      [&](AttributeMaps& value, std::string&, std::string&) {
+        value = AttributeMaps{span_map, resource_map};
+        return true;
+      },
+      true);
 }
 
 void cached_trace_attribute_maps(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg,
                                  bool* span_map, bool* resource_map) {
-  const std::string key = attribute_map_cache_key(host, cfg);
-  {
-    std::lock_guard<std::mutex> lock(g_attribute_map_mutex);
-    const auto it = g_attribute_map_cache.find(key);
-    if (it != g_attribute_map_cache.end() &&
-        std::chrono::steady_clock::now() - it->second.loaded_at < kAttributeMapCacheTtl) {
-      *span_map = it->second.span_map;
-      *resource_map = it->second.resource_map;
-      return;
-    }
-  }
-  // Only successful lookups are cached; a transient failure is retried next time.
-  if (trace_attribute_maps(client, cfg, span_map, resource_map)) {
-    store_trace_attribute_maps(host, cfg, *span_map, *resource_map);
-  }
+  const auto result = attribute_map_cache().get(
+      attribute_map_cache_key(host, cfg),
+      [&](AttributeMaps& value, std::string& code, std::string&) {
+        if (!trace_attribute_maps(client, cfg, &value.span_map, &value.resource_map)) {
+          code = "trace_attribute_maps_failed";
+          return false;
+        }
+        return true;
+      });
+  *span_map = result.value && result.value->span_map;
+  *resource_map = result.value && result.value->resource_map;
 }
 
 AttributeColumns trace_attribute_columns(clickhouse::Client& client, const HostSpec& host, const TraceSettings& cfg) {
@@ -550,36 +564,25 @@ constexpr int kPrefillMaxPasses = 8;
 constexpr int64_t kPrefillSeedMs = 5 * 60 * 1000;
 constexpr size_t kPrefillExcludeBytes = 128 * 1024;
 
+// The read bound a request asks for, at most `cap`, rounded down to 1, 2 or 5 times a power of ten: the bound is part
+// of the cache key, so the requests share a few keys instead of one per value.
 uint64_t read_rows_limit_param(const httplib::Request& req, uint64_t cap) {
   if (!req.has_param("read_rows_limit")) return cap;
+  uint64_t value = cap;
   try {
-    const long long value = std::stoll(req.get_param_value("read_rows_limit"));
-    return static_cast<uint64_t>(std::max<long long>(1, std::min<long long>(static_cast<long long>(cap), value)));
+    const long long asked = std::stoll(req.get_param_value("read_rows_limit"));
+    value = static_cast<uint64_t>(std::max<long long>(1, std::min<long long>(static_cast<long long>(cap), asked)));
   } catch (...) {
     return cap;
   }
+  if (value == cap) return cap;
+  uint64_t step = 1;
+  while (step <= value / 10) step *= 10;
+  for (const uint64_t factor : {5, 2, 1}) {
+    if (factor * step <= value) return factor * step;
+  }
+  return step;
 }
-
-struct TraceFacetKeys {
-  struct Key { std::string scope, key; uint64_t count = 0; };
-  std::vector<Key> keys;
-  uint64_t sampled_spans = 0;
-  bool estimated = false;
-  bool timed_out = false;
-  uint64_t query_ms = 0;
-};
-
-struct TraceFacetValues {
-  std::vector<std::pair<std::string, uint64_t>> values;
-  uint64_t spans_with_key = 0;
-  uint64_t distinct_values = 0;
-  bool estimated = false;
-  bool timed_out = false;
-  uint64_t query_ms = 0;
-};
-
-StaleCache<std::string, TraceFacetKeys> g_trace_facet_keys_cache;
-StaleCache<std::string, TraceFacetValues> g_trace_facet_values_cache;
 
 constexpr int64_t kNsPerMs = 1000000;
 
@@ -670,7 +673,7 @@ class TraceIndexCursor {
           " PREWHERE " + window_ + " AND Start >= " + ns_time(lo) + " AND Start <= " + ns_time(hi_ns_) +
           " GROUP BY TraceId LIMIT " + std::to_string(kSliceRowCap + 1);
       std::vector<Hit> rows;
-      client_.Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(client_, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           rows.push_back(Hit{ch_block_text_at(block, 0, row), std::stoll(ch_block_text_at(block, 1, row))});
         }
@@ -739,7 +742,7 @@ bool filters_are_broad(clickhouse::Client& client, const std::string& table, con
   // the narrow form, which needs no index.
   try {
     uint64_t index_rows = 0;
-    client.Select(
+    ch_select(client,
         "SELECT toString(count()) FROM " + index_table + " PREWHERE Start >= fromUnixTimestamp64Milli(" +
             std::to_string(start_ms) + ") AND Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) + ")",
         [&](const clickhouse::Block& block) {
@@ -749,7 +752,7 @@ bool filters_are_broad(clickhouse::Client& client, const std::string& table, con
     const uint64_t threshold =
         std::max<uint64_t>(1000, static_cast<uint64_t>(static_cast<double>(index_rows) * kBroadFilterShare));
     uint64_t matching = 0;
-    client.Select(
+    ch_select(client,
         "SELECT toString(count()) FROM (SELECT TraceId FROM " + table + " PREWHERE " + time_predicate +
             " WHERE " + visibility + span_filters + " LIMIT 1 BY TraceId LIMIT " + std::to_string(threshold) + ")",
         [&](const clickhouse::Block& block) {
@@ -834,7 +837,7 @@ std::vector<RankedTrace> rank_traces_by_start(clickhouse::Client& client, const 
         " PREWHERE " + q.time_predicate + slice + " WHERE " + q.visibility + candidate_where +
         " GROUP BY TraceId" + having + " ORDER BY min(Timestamp) DESC LIMIT " + std::to_string(fetch);
     std::vector<RankedTrace> rows;
-    client.Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         rows.push_back(RankedTrace{ch_block_text_at(block, 0, row), std::stoll(ch_block_text_at(block, 1, row)),
                                    std::stoll(ch_block_text_at(block, 2, row))});
@@ -850,7 +853,7 @@ std::vector<RankedTrace> rank_traces_by_start(clickhouse::Client& client, const 
       const std::string probe_sql =
           "SELECT DISTINCT toString(TraceId) FROM " + q.table + " PREWHERE " + q.time_predicate +
           " AND Timestamp < " + ns_time(t) + " WHERE " + q.visibility + " AND TraceId IN " + trace_id_list_sql(ids);
-      client.Select(probe_sql, [&](const clickhouse::Block& block) {
+      ch_select(client, probe_sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) straddlers.insert(ch_block_text_at(block, 0, row));
       });
     }
@@ -894,7 +897,7 @@ const char* kSpanListColumns =
     "toString(StatusCode)";
 
 void select_span_rows(clickhouse::Client& client, const std::string& sql, std::vector<SpanListRow>* rows, bool with_links) {
-  client.Select(sql, [&](const clickhouse::Block& block) {
+  ch_select(client, sql, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       SpanListRow out;
       out.timestamp = ch_block_text_at(block, 0, row);
@@ -916,9 +919,20 @@ void select_span_rows(clickhouse::Client& client, const std::string& sql, std::v
   });
 }
 
+// What an answer may say of the parent of a span (docs/traces.md, "service_allowlist"): never the SpanId of a
+// parent that the allowlist hides. With every service allowed (`all_services`) every parent is named. Otherwise
+// an answer about one trace names a parent only when it shows that span too (`visible`), and an answer that lists
+// spans of many traces (context, linked-from, span search, one span) names none: it cannot know which are hidden.
+// Every serialization of a span goes through this.
+std::string_view visible_parent(std::string_view parent, bool all_services, const std::unordered_set<std::string>* visible = nullptr) {
+  if (parent.empty()) return parent;
+  if (visible) return visible->count(std::string(parent)) ? parent : std::string_view{};
+  return all_services ? parent : std::string_view{};
+}
+
 // start_ns is also sent as text: epoch nanoseconds pass 2^53, and the context
 // keyset cursor must be exact.
-void write_span_row(rapidjson::Writer<rapidjson::StringBuffer>& w, const SpanListRow& row, bool with_links) {
+void write_span_row(rapidjson::Writer<rapidjson::StringBuffer>& w, const SpanListRow& row, bool with_links, bool all_services) {
   w.StartObject();
   w.Key("timestamp"); w.String(row.timestamp.c_str());
   w.Key("start_ns"); w.Int64(std::stoll(row.start_ns));
@@ -926,7 +940,8 @@ void write_span_row(rapidjson::Writer<rapidjson::StringBuffer>& w, const SpanLis
   w.Key("duration_ns"); w.Uint64(static_cast<uint64_t>(std::stoull(row.duration_ns)));
   w.Key("trace_id"); w.String(row.trace_id.c_str());
   w.Key("span_id"); w.String(row.span_id.c_str());
-  w.Key("parent_span_id"); w.String(row.parent_span_id.c_str());
+  const std::string_view parent = visible_parent(row.parent_span_id, all_services);
+  w.Key("parent_span_id"); w.String(parent.data(), static_cast<rapidjson::SizeType>(parent.size()));
   w.Key("span_name"); w.String(row.name.c_str());
   w.Key("span_kind"); w.String(row.kind.c_str());
   w.Key("service_name"); w.String(row.service.c_str());
@@ -1110,7 +1125,7 @@ const char* kSpanSearchColumns =
 
 void select_span_search_rows(clickhouse::Client& client, const std::string& sql, size_t attribute_count,
                              std::vector<SpanSearchRow>* rows) {
-  client.Select(sql, [&](const clickhouse::Block& block) {
+  ch_select(client, sql, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       SpanSearchRow out;
       out.timestamp = ch_block_text_at(block, 0, row);
@@ -1167,7 +1182,7 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
   try {
     const std::string db = quote_string(traces.database);
     const std::string table = quote_string(traces.table);
-    client->Select(
+    ch_select(*client,
         "SELECT toString(name) FROM system.columns WHERE database = " + db + " AND `table` = " + table,
         [&](const clickhouse::Block& block) {
           for (size_t row = 0; row < block.GetRowCount(); ++row) columns.insert(ch_block_text_at(block, 0, row));
@@ -1177,7 +1192,7 @@ void Server::handle_traces_meta(const httplib::Request& req, httplib::Response& 
 
     if (!traces.trace_index_table.empty()) {
       uint64_t count = 0;
-      client->Select(
+      ch_select(*client,
           "SELECT toString(count()) FROM system.tables WHERE database = " + db +
           " AND name = " + quote_string(traces.trace_index_table),
           [&](const clickhouse::Block& block) {
@@ -1251,7 +1266,6 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   // service/operation pickers, and alignment lets "last N minutes" requests
   // made within the same minute (reloads, range toggles) share one scan.
   constexpr int64_t kPrefillAlignMs = 60 * 1000;
-  constexpr uint64_t kPrefillTtlMs = 60 * 1000;
   const int64_t aligned_start_ms = (start_ms / kPrefillAlignMs) * kPrefillAlignMs;
   const int64_t aligned_end_ms = ((end_ms + kPrefillAlignMs - 1) / kPrefillAlignMs) * kPrefillAlignMs;
   // Only the tag filters narrow the picker lists (service / operation /
@@ -1273,12 +1287,13 @@ void Server::handle_traces_prefill(const httplib::Request& req, httplib::Respons
   }
   const uint64_t read_budget = read_rows_limit_param(req, kPrefillReadRows);
   const uint64_t pass_rows = std::min(read_budget, kPrefillPassRows);
+  // The filter part of the key is a digest: up to 32 filters of 4 KiB each are not kept as a key.
   const std::string cache_key = source_host_id + '\0' + std::to_string(aligned_start_ms) + '\0' +
-      std::to_string(aligned_end_ms) + '\0' + std::to_string(read_budget) + '\0' + tag_filters;
+      std::to_string(aligned_end_ms) + '\0' + std::to_string(read_budget) + '\0' + sha256_hex(tag_filters);
   const size_t hard_limit = 20000;
 
-  auto cached = trace_prefill_cache_.get_or_refresh(
-      cache_key, static_cast<uint64_t>(now_ms()), kPrefillTtlMs, 5000,
+  auto cached = trace_prefill_cache_.get(
+      cache_key,
       [&](TracePrefill& value, std::string& code, std::string& message) {
         std::string error;
         auto client = acquire_trace_client(*host, client_pool_, &error);
@@ -1468,12 +1483,10 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   const uint64_t read_cap = read_rows_limit_param(req, kFacetReadRowsCap);
   const std::string cache_key = scope.source_host_id + '\0' + std::to_string(scope.aligned_start_ms) + '\0' +
       std::to_string(scope.aligned_end_ms) + '\0' + (span ? "s" : "") + (resource ? "r" : "") + '\0' +
-      std::to_string(read_cap) + '\0' + span_filters;
-  bool fetched = false;
-  auto cached = g_trace_facet_keys_cache.get_or_refresh(
-      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      std::to_string(read_cap) + '\0' + sha256_hex(span_filters);
+  auto cached = trace_facet_keys_cache_.get(
+      cache_key,
       [&](TraceFacetKeys& value, std::string& code, std::string& message) {
-        fetched = true;
         if (!span && !resource) return true;
         const std::string table = qualified(traces.database, traces.table);
         const std::string ones = "arrayResize([toUInt64(1)], length(%), toUInt64(1))";
@@ -1505,6 +1518,8 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
             " PREWHERE " + trace_time_predicate(scope.aligned_start_ms, scope.aligned_end_ms) +
             " WHERE " + service_allowlist_predicate(traces) + span_filters +
             " LIMIT " + std::to_string(kFacetSampleRows) + ")) LEFT ARRAY JOIN arrayConcat(" + join(tuples) + ") AS t" +
+            // The served keys only (and one more, which says truncated), in the order of the sort below.
+            " ORDER BY t.3 DESC, t.2 ASC, t.1 DESC LIMIT " + std::to_string(kFacetMaxKeys + 1) +
             facet_settings_sql(read_cap, false);
         try {
           const BoundedRead read = bounded_select(*client, sql, [&](const clickhouse::Block& block) {
@@ -1531,6 +1546,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
           if (a.key != b.key) return a.key < b.key;
           return a.scope > b.scope;  // span before resource
         });
+        if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);
         return true;
       });
   if (!cached.has_value || !cached.value) {
@@ -1545,7 +1561,7 @@ void Server::handle_traces_facets(const httplib::Request& req, httplib::Response
   w.Key("source_host_id"); w.String(scope.source_host_id.c_str());
   w.Key("supported"); w.Bool(span || resource);
   w.Key("scopes"); w.StartArray(); if (span) w.String("span"); if (resource) w.String("resource"); w.EndArray();
-  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched, read_cap);
+  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !cached.fetched, read_cap);
   w.Key("sampled_spans"); w.Uint64(value.sampled_spans);
   w.Key("truncated"); w.Bool(value.keys.size() > kFacetMaxKeys);
   w.Key("keys"); w.StartArray();
@@ -1585,14 +1601,13 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
     return json_error(res, 400, filter_code, filter_error);
   }
   const uint64_t read_cap = read_rows_limit_param(req, kFacetReadRowsCap);
+  // The client's text (the attribute key and the filters) enters the key as a digest.
   const std::string cache_key = scope.source_host_id + '\0' + std::to_string(scope.aligned_start_ms) + '\0' +
-      std::to_string(scope.aligned_end_ms) + '\0' + key_scope + '\0' + key + '\0' + std::to_string(limit) + '\0' +
-      std::to_string(read_cap) + '\0' + span_filters;
-  bool fetched = false;
-  auto cached = g_trace_facet_values_cache.get_or_refresh(
-      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      std::to_string(scope.aligned_end_ms) + '\0' + key_scope + '\0' + std::to_string(limit) + '\0' +
+      std::to_string(read_cap) + '\0' + sha256_hex(key + '\0' + span_filters);
+  auto cached = trace_facet_values_cache_.get(
+      cache_key,
       [&](TraceFacetValues& value, std::string& code, std::string& message) {
-        fetched = true;
         const std::string table = qualified(traces.database, traces.table);
         const std::string column = key_scope == "span" ? "SpanAttributes" : "ResourceAttributes";
         const std::string sql =
@@ -1637,7 +1652,7 @@ void Server::handle_traces_facet_values(const httplib::Request& req, httplib::Re
   w.Key("scope"); w.String(key_scope.c_str());
   w.Key("key"); w.String(key.c_str());
   w.Key("limit"); w.Int(limit);
-  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !fetched, read_cap);
+  write_facet_common(w, scope, value.estimated, value.timed_out, value.query_ms, !cached.fetched, read_cap);
   w.Key("spans_with_key"); w.Uint64(value.spans_with_key);
   w.Key("distinct_values"); w.Uint64(value.distinct_values);
   w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());
@@ -1731,7 +1746,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
   std::vector<Row> rows;
 
   auto read_summary = [&](const std::string& sql) {
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Row out;
         out.trace_id = ch_block_text_at(block, 0, row);
@@ -1876,7 +1891,7 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
               " AND Timestamp >= tupleElement(batch_bounds, 1) AND Timestamp <= tupleElement(batch_bounds, 2)"
               " WHERE " + visibility + span_filters + " AND TraceId IN " + batch_ids +
               " LIMIT 1 BY TraceId";
-          client->Select(match_sql, [&](const clickhouse::Block& block) {
+          ch_select(*client, match_sql, [&](const clickhouse::Block& block) {
             for (size_t row = 0; row < block.GetRowCount(); ++row) matching_ids.insert(ch_block_text_at(block, 0, row));
           });
 
@@ -2011,7 +2026,8 @@ void Server::handle_traces_search(const httplib::Request& req, httplib::Response
       w.EndArray();
     }
     w.EndArray();
-    w.Uint64(row.missing_parents);
+    // With a restricted allowlist a parent may be absent because it is hidden: the count would reveal it.
+    w.Uint64(visibility == "1" ? row.missing_parents : 0);
     w.EndArray();
   }
   w.EndArray();
@@ -2137,7 +2153,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
 
   auto read_analytics = [&](const std::string& sql) {
     std::map<int64_t, uint64_t> count_by_bucket;
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         const int64_t q_bucket_ms = std::stoll(ch_block_text_at(block, 0, row));
         const uint64_t count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
@@ -2192,7 +2208,7 @@ void Server::handle_traces_analytics(const httplib::Request& req, httplib::Respo
           std::to_string(start_ms) + ") AND Start <= fromUnixTimestamp64Milli(" + std::to_string(end_ms) +
           ") GROUP BY TraceId) GROUP BY bucket_ms ORDER BY bucket_ms";
       std::map<int64_t, uint64_t> count_by_bucket;
-      client->Select(index_sql, [&](const clickhouse::Block& block) {
+      ch_select(*client, index_sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           count_by_bucket[std::stoll(ch_block_text_at(block, 0, row))] +=
               static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 1, row)));
@@ -2421,7 +2437,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   uint64_t estimated_spans = 0;
   std::string estimate_source = "explain";
   try {
-    client->Select("EXPLAIN ESTIMATE SELECT 1 FROM " + table + " PREWHERE " + trace_time_predicate(start_ms, end_ms),
+    ch_select(*client, "EXPLAIN ESTIMATE SELECT 1 FROM " + table + " PREWHERE " + trace_time_predicate(start_ms, end_ms),
                    [&](const clickhouse::Block& block) {
                      if (block.GetColumnCount() < 4 || block.GetRowCount() == 0) return;
                      const auto rows = block[3]->As<clickhouse::ColumnUInt64>();
@@ -2494,7 +2510,7 @@ void Server::handle_traces_service_map(const httplib::Request& req, httplib::Res
   std::vector<EdgeRow> edges;
   const auto query_started = std::chrono::steady_clock::now();
   try {
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         ServiceMapStats stats;
         stats.count = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 3, row)));
@@ -2692,7 +2708,7 @@ struct ServicesWindow {
 
 uint64_t estimate_window_rows(clickhouse::Client& client, const std::string& from_where) {
   uint64_t rows = 0;
-  client.Select("EXPLAIN ESTIMATE SELECT 1" + from_where, [&](const clickhouse::Block& block) {
+  ch_select(client, "EXPLAIN ESTIMATE SELECT 1" + from_where, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       if (block.GetColumnCount() >= 4) rows += ch_block_u64_at(block, 3, row);
     }
@@ -2875,7 +2891,7 @@ void Server::handle_traces_services(const httplib::Request& req, httplib::Respon
   if (detail) {
     try {
       const auto started = std::chrono::steady_clock::now();
-      client->Select(
+      ch_select(*client,
           "SELECT TraceId, SpanId, toString(SpanName), toString(toUnixTimestamp64Milli(Timestamp)), toString(Duration), "
           "toString(StatusCode)" + from + " ORDER BY Duration DESC LIMIT " + std::to_string(kServicesSlowestSpans) +
           " SETTINGS max_execution_time = " + std::to_string(kServicesTimeBudgetSeconds) + ", timeout_overflow_mode = 'break'",
@@ -3113,7 +3129,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
     }
     uint64_t count = 0;
     try {
-      client->Select(
+      ch_select(*client,
           "SELECT toString(count()), toString(toUnixTimestamp64Milli(min(Start))), toString(toUnixTimestamp64Milli(max(End))) FROM " +
               qualified(traces.database, traces.trace_index_table) + " WHERE TraceId = " + trace_literal,
           [&](const clickhouse::Block& block) {
@@ -3142,18 +3158,24 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   const int64_t hi_ms = end_ms + margin_ms;
 
   // has() reads Links.TraceId alone (PREWHERE); a span id also needs the pair
-  // to match, so the zipped arrays are checked for the remaining rows.
-  const std::string link_match = span_id.empty()
-      ? "t = trace"
-      : "t = trace AND s = " + quote_string(span_id);
+  // to match, so the zipped arrays are checked for the remaining rows. With a
+  // restricted allowlist a link names only a span of the trace that the
+  // allowlist shows (visible_targets): the others are hidden.
+  const std::string visibility = service_allowlist_predicate(traces);
+  const bool all_services = visibility == "1";
+  const std::string visible_targets = all_services ? std::string{} :
+      ", (SELECT groupArray(toString(SpanId)) FROM " + qualified(traces.database, traces.table) + " WHERE " +
+      trace_time_predicate(lo_ms, hi_ms) + " AND TraceId = " + trace_literal + " AND " + visibility + ") AS visible_targets";
+  const std::string link_match = std::string("t = trace") + (all_services ? "" : " AND has(visible_targets, s)") +
+      (span_id.empty() ? std::string{} : " AND s = " + quote_string(span_id));
   const std::string sql =
-      "WITH " + trace_literal + " AS trace SELECT " + kSpanListColumns +
+      "WITH " + trace_literal + " AS trace" + visible_targets + " SELECT " + kSpanListColumns +
       ", toJSONString(arrayFilter((s, t) -> " + link_match + ", Links.SpanId, Links.TraceId))"
       ", toJSONString(arrayFilter((a, t, s) -> " + link_match + ", Links.Attributes, Links.TraceId, Links.SpanId))"
       " FROM " + qualified(traces.database, traces.table) +
       " PREWHERE has(Links.TraceId, trace)"
-      " WHERE " + trace_time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + service_allowlist_predicate(traces) +
-      (span_id.empty() ? std::string{} : " AND arrayExists((t, s) -> " + link_match + ", Links.TraceId, Links.SpanId)") +
+      " WHERE " + trace_time_predicate(lo_ms, hi_ms) + " AND TraceId != trace AND " + visibility +
+      (span_id.empty() && all_services ? std::string{} : " AND arrayExists((t, s) -> " + link_match + ", Links.TraceId, Links.SpanId)") +
       " ORDER BY Timestamp DESC, SpanId DESC LIMIT " + std::to_string(kLinkedFromLimit + 1) +
       " SETTINGS max_execution_time = 15";
 
@@ -3181,7 +3203,7 @@ void Server::handle_traces_linked_from(const httplib::Request& req, httplib::Res
   w.Key("truncated"); w.Bool(truncated);
   w.Key("elapsed_ms"); w.Double(elapsed);
   w.Key("rows"); w.StartArray();
-  for (const auto& row : rows) write_span_row(w, row, true);
+  for (const auto& row : rows) write_span_row(w, row, true, all_services);
   w.EndArray();
   w.EndObject();
   res.status = 200;
@@ -3331,8 +3353,9 @@ void Server::handle_traces_context(const httplib::Request& req, httplib::Respons
   if (query_older) { w.Key("has_older"); w.Bool(more_older); }
   w.Key("elapsed_ms"); w.Double(elapsed);
   w.Key("rows"); w.StartArray();
-  for (auto it = newer.rbegin(); it != newer.rend(); ++it) write_span_row(w, *it, false);
-  for (const auto& row : older) write_span_row(w, row, false);
+  const bool all_services = service_allowlist_predicate(traces) == "1";
+  for (auto it = newer.rbegin(); it != newer.rend(); ++it) write_span_row(w, *it, false, all_services);
+  for (const auto& row : older) write_span_row(w, row, false, all_services);
   w.EndArray();
   w.EndObject();
   res.status = 200;
@@ -3387,7 +3410,7 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   std::vector<Span> spans;
 
   auto load_spans = [&](const std::string& sql) {
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Span out;
         out.timestamp = ch_block_text_at(block, 0, row);
@@ -3445,9 +3468,7 @@ void Server::handle_trace_detail(const httplib::Request& req, httplib::Response&
   visible_span_ids.reserve(spans.size());
   for (const auto& span : spans) visible_span_ids.insert(span.span_id);
   for (auto& span : spans) {
-    if (!span.parent_span_id.empty() && visible_span_ids.count(span.parent_span_id) == 0) {
-      span.parent_span_id.clear();
-    }
+    span.parent_span_id = std::string(visible_parent(span.parent_span_id, visibility == "1", &visible_span_ids));
   }
 
   rapidjson::StringBuffer sb(nullptr, 128 * 1024);
@@ -3702,7 +3723,7 @@ void Server::handle_traces_heatmap(const httplib::Request& req, httplib::Respons
         "toString(toInt32(floor(log2(greatest(duration_ns, 1)) * " + std::to_string(kHeatmapBinsPerOctave) + "))) AS fine_bin, "
         "toString(count()) FROM trace_durations GROUP BY bucket_ms, fine_bin"
         " SETTINGS max_execution_time = " + std::to_string(kHeatmapTimeBudgetSeconds);
-    scope.client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         const int64_t bucket = std::stoll(ch_block_text_at(block, 0, row));
         const int bin = std::stoi(ch_block_text_at(block, 1, row));
@@ -3877,7 +3898,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
         " GROUP BY TraceId HAVING (" + core_having + ")" +
         (scope.having.empty() ? std::string{} : " AND " + having_terms(scope.having)) +
         ")) ORDER BY in_box DESC, cityHash64(TraceId) LIMIT " + std::to_string(sample) + " BY in_box" + settings;
-    scope.client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         const bool in = ch_block_text_at(block, 1, row) == "1";
         const uint64_t side_total = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 2, row)));
@@ -3926,7 +3947,7 @@ void Server::handle_traces_deltas(const httplib::Request& req, httplib::Response
           " GROUP BY scope, key, value) GROUP BY scope, key HAVING occ_in + occ_out >= " + std::to_string(kDeltaMinOccurrences) +
           ") ARRAY JOIN top AS tv" + settings;
       std::map<std::pair<std::string, std::string>, size_t> index;
-      scope.client->Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(*scope.client, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           auto key = std::make_pair(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row));
           auto it = index.find(key);
@@ -4282,7 +4303,7 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
 
   // A parent hidden by the service allowlist must not leak its SpanId (as in
   // trace detail): with a restricted allowlist parent ids are not reported.
-  const bool hide_parents = visibility != "1";
+  const bool all_services = visibility == "1";
   const bool has_more = !exhausted && next.present;
   const int64_t searched_to_ns = exhausted ? start_ns : (next.present ? next.ts_ns : start_ns);
 
@@ -4329,7 +4350,8 @@ void Server::handle_traces_spans(const httplib::Request& req, httplib::Response&
     w.Key("start_ns"); w.String(row.start_ns.c_str());
     w.Key("trace_id"); w.String(row.trace_id.c_str());
     w.Key("span_id"); w.String(row.span_id.c_str());
-    w.Key("parent_span_id"); w.String(hide_parents ? "" : row.parent_span_id.c_str());
+    const std::string_view parent = visible_parent(row.parent_span_id, all_services);
+    w.Key("parent_span_id"); w.String(parent.data(), static_cast<rapidjson::SizeType>(parent.size()));
     w.Key("service_name"); w.String(row.service.c_str());
     w.Key("span_name"); w.String(row.name.c_str());
     w.Key("span_kind"); w.String(row.kind.c_str());
@@ -4387,7 +4409,7 @@ void Server::handle_traces_span(const httplib::Request& req, httplib::Response& 
       " LIMIT 1 SETTINGS max_execution_time = 10";
   std::vector<std::string> values;
   try {
-    client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, [&](const clickhouse::Block& block) {
       if (!values.empty() || block.GetRowCount() == 0) return;
       for (size_t column = 0; column < block.GetColumnCount(); ++column) values.push_back(ch_block_text_at(block, column, 0));
     });
@@ -4407,7 +4429,8 @@ void Server::handle_traces_span(const httplib::Request& req, httplib::Response& 
   w.Key("start_ns"); w.Int64(std::stoll(values[1]));
   w.Key("trace_id"); w.String(values[2].c_str());
   w.Key("span_id"); w.String(values[3].c_str());
-  w.Key("parent_span_id"); w.String(visibility != "1" ? "" : values[4].c_str());
+  const std::string_view parent = visible_parent(values[4], visibility == "1");
+  w.Key("parent_span_id"); w.String(parent.data(), static_cast<rapidjson::SizeType>(parent.size()));
   w.Key("service_name"); w.String(values[5].c_str());
   w.Key("span_name"); w.String(values[6].c_str());
   w.Key("span_kind"); w.String(values[7].c_str());

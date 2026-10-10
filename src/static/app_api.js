@@ -734,7 +734,8 @@
           truncated: database?.truncated === true,
           tables: (Array.isArray(database?.tables) ? database.tables : []).map((table) => ({
             name: mcpText(table?.name),
-            columns: table?.columns === "all" ? "all" : Number(table?.columns) || 0,
+            // "all", or "some" when the user reads some columns only (they are checked when a tool opens the table).
+            columns: table?.columns === "all" || table?.columns === "some" ? table.columns : Number(table?.columns) || 0,
           })),
         })),
       })),

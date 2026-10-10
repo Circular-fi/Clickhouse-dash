@@ -241,9 +241,11 @@ def test_the_process_says_at_start_what_the_hosts_lack():
 
     log = subprocess.run(LOGS_CMD, shell=True, capture_output=True, text=True, timeout=30)
     text = log.stdout + log.stderr
-    assert "[access] host=systemnone The system user chdash_sysnone_user has no SELECT on" in text
-    assert "[access] host=runnernone The runner user chdash_runner_none can read no table" in text
-    assert "[access] host=ok" not in text
+    # One JSON line for each finding (docs/operations.md, "Logs").
+    findings = [json.loads(line) for line in text.splitlines() if line.startswith("{") and '"event":"access.finding"' in line]
+    assert any(f["host"] == "systemnone" and f["finding"].startswith("The system user chdash_sysnone_user has no SELECT on") for f in findings)
+    assert any(f["host"] == "runnernone" and f["finding"].startswith("The runner user chdash_runner_none can read no table") for f in findings)
+    assert not any(f["host"] == "ok" for f in findings)
 
 
 # ---- the MCP user ------------------------------------------------------------------------------------------------------------------

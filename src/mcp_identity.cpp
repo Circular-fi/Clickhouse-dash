@@ -1,19 +1,13 @@
 #include "mcp_identity.hpp"
 
+#include "secure_random.hpp"
+
 #include <cstdint>
-#include <random>
 
 namespace chdash {
 
 const std::string& mcp_internal_token() {
-  static const std::string token = [] {
-    std::random_device device;
-    static constexpr char kHex[] = "0123456789abcdef";
-    std::string out;
-    out.reserve(32);
-    for (int i = 0; i < 32; ++i) out.push_back(kHex[device() & 0xF]);
-    return out;
-  }();
+  static const std::string token = random_hex(16);
   return token;
 }
 
@@ -29,6 +23,14 @@ std::string mcp_api_host(std::string_view host, McpIdentity identity) {
   std::string out(host);
   if (identity == McpIdentity::Runner) out.append(kMcpRunnerSuffix);
   return out;
+}
+
+std::string_view mcp_base_host(std::string_view host_id) {
+  if (host_id.size() > kMcpRunnerSuffix.size() &&
+      host_id.compare(host_id.size() - kMcpRunnerSuffix.size(), kMcpRunnerSuffix.size(), kMcpRunnerSuffix) == 0) {
+    host_id.remove_suffix(kMcpRunnerSuffix.size());
+  }
+  return host_id;
 }
 
 std::string mcp_strip_identity(std::string body) {

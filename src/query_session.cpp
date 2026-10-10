@@ -1,6 +1,7 @@
 #include "query_session.hpp"
 #include "api_error.hpp"
 #include "ch_client_pool.hpp"
+#include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
@@ -189,7 +190,23 @@ void QuerySession::start() {
     return;
   }
 
-  query_thread_ = std::thread([self = shared_from_this()] { self->run_query(); });
+  // The thread leaves the worker group as its last step, after the session it held: the session may end in this
+  // thread (its last owner), and the server destroys what the session uses only once the group is empty.
+  const std::shared_ptr<WorkerGroup> group = worker_group_;
+  if (group && !group->enter()) {
+    request_cancel();
+    return;
+  }
+  try {
+    query_thread_ = std::thread([self = shared_from_this(), group]() mutable {
+      self->run_query();
+      self.reset();
+      if (group) group->leave();
+    });
+  } catch (...) {
+    if (group) group->leave();
+    throw;
+  }
 }
 
 void QuerySession::request_cancel() {
@@ -242,51 +259,53 @@ std::string QuerySession::latest_native_query_id() const {
   return native_query_ids_.empty() ? query_id_ : native_query_ids_.back();
 }
 
-void QuerySession::cancel_native_query_ids_best_effort(
-  const std::vector<std::string>& query_ids,
-  bool synchronous
-) {
-  if (query_ids.empty()) return;
-
+KillOutcome kill_queries(const std::string& uri, const std::string& where, bool synchronous) {
+  KillOutcome out;
+  // The statement is not stopped by the cancel of the run it stops (the scope of
+  // that run says "canceled" by then).
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:cancel";
+  ChQueryScope scope(std::move(limits));
   std::string error;
-  auto client = client_pool_ ? client_pool_->acquire(
-      stats_uri_.empty() ? runner_uri_ : stats_uri_,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &error)
-    : make_client_from_uri(
-      stats_uri_.empty() ? runner_uri_ : stats_uri_,
+  auto client = make_client_from_uri(
+      uri,
       std::chrono::seconds(5),
       std::chrono::seconds(5),
       std::chrono::seconds(5),
       &error);
-  if (!client) return;
-
-  std::string sql = "KILL QUERY WHERE query_id IN (";
-  for (size_t i = 0; i < query_ids.size(); ++i) {
-    if (i > 0) sql += ", ";
-    sql += sql_quote_string(query_ids[i]);
+  if (!client) {
+    out.error = error.empty() ? "Cannot connect to ClickHouse." : error;
+    return out;
   }
-  sql += ") ";
-  sql += synchronous ? "SYNC" : "ASYNC";
-
   try {
-    client->Execute(sql);
-  } catch (const std::system_error&) {
-    if (client_pool_) client_pool_->invalidate(client);
-  } catch (const clickhouse::ProtocolError&) {
-    if (client_pool_) client_pool_->invalidate(client);
-  } catch (...) {
-    // Permission failures and already-finished queries do not corrupt the
-    // native connection. Cancellation remains best effort.
+    ch_select(*client, "KILL QUERY WHERE " + where + (synchronous ? " SYNC" : " ASYNC"),
+              [&out](const clickhouse::Block& block) { out.matched += block.GetRowCount(); });
+    out.sent = true;
+  } catch (const std::exception& e) {
+    // A missing grant or a lost connection: the cancel stays best effort, and says so.
+    out.error = e.what();
   }
+  return out;
 }
 
-void QuerySession::cancel_native_queries_best_effort(bool synchronous) {
+KillOutcome QuerySession::cancel_native_query_ids_best_effort(
+  const std::vector<std::string>& query_ids,
+  bool synchronous
+) {
+  if (query_ids.empty()) return {};
+  std::string where = "query_id IN (";
+  for (size_t i = 0; i < query_ids.size(); ++i) {
+    if (i > 0) where += ", ";
+    where += sql_quote_string(query_ids[i]);
+  }
+  where += ")";
+  return kill_queries(stats_uri_.empty() ? runner_uri_ : stats_uri_, where, synchronous);
+}
+
+KillOutcome QuerySession::cancel_native_queries_best_effort(bool synchronous) {
   auto ids = native_query_ids();
   if (ids.empty()) ids.push_back(query_id_);
-  cancel_native_query_ids_best_effort(ids, synchronous);
+  return cancel_native_query_ids_best_effort(ids, synchronous);
 }
 
 bool QuerySession::attach_stream() {
@@ -969,6 +988,16 @@ void QuerySession::run_query() {
     last_sample_cpu_total_us_ = 0;
   };
 
+  // Every statement of the run carries its bounds and its label; a cancel stops
+  // the next one before it is sent.
+  ChQueryLimits limits;
+  limits.log_comment = "chdash-run";
+  limits.max_execution_time_s = options_.max_execution_time_s;
+  limits.max_memory_usage = options_.max_memory_usage;
+  limits.max_rows_to_read = options_.max_rows_to_read;
+  limits.canceled = [this] { return cancel_requested_.load(std::memory_order_relaxed); };
+  ChQueryScope scope(std::move(limits));
+
   try {
     if (cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();
@@ -985,7 +1014,7 @@ void QuerySession::run_query() {
       return;
     }
 
-    if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
+    if (!database_.empty()) ch_execute(*client_query_, "USE " + quote_ident(database_));
     const std::string first_keyword = sql_first_keyword_lower(sql_);
     const bool is_wrappable_select = first_keyword == "select" || first_keyword == "with";
     const bool is_select_like = is_wrappable_select || first_keyword == "show" ||
@@ -1019,7 +1048,7 @@ void QuerySession::run_query() {
       if (cancel_requested_.load(std::memory_order_relaxed)) {
         throw std::runtime_error("canceled");
       }
-      client_query_->Execute(command);
+      ch_execute(*client_query_, command);
       // USE, SET (including SET ROLE) and temporary tables change native
       // *session* state. Returning such a connection to the shared pool would
       // leak the current database/settings/temporary objects into unrelated
@@ -1058,17 +1087,19 @@ void QuerySession::run_query() {
         result_rows_emitted_ = 1;
       }
 
+      client_query_.reset();
       finish_ok();
       return;
     }
 
     bool meta_sent = false;
+    bool result_limit_reached = false;
     uint64_t rows_returned = 0;
     const std::string plan_cache_key = describe_cache_key(host_id_, database_, sql_);
     bool attempt_used_cached_plan = false;
 
     auto apply_database = [&]() {
-      if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));
+      if (!database_.empty()) ch_execute(*client_query_, "USE " + quote_ident(database_));
     };
 
     auto execute_select_attempt = [&](bool use_describe, bool allow_cached_plan) {
@@ -1124,7 +1155,7 @@ void QuerySession::run_query() {
               result_plan.emplace_back(std::string(n), std::move(plan));
             }
           });
-          client_query_->Select(dq);
+          ch_execute(*client_query_, dq);
           cache_new_plan_after_success = !result_plan.empty();
         }
       }
@@ -1441,19 +1472,26 @@ void QuerySession::run_query() {
           }
         }
 
-        if (row < block.GetRowCount()) {
-          finish_result_limit_reached();
-          throw std::runtime_error("result_limit_reached");
-        }
       };
 
       // The first block with rows is encoded in the receiving thread: most
       // results are one block, and they never pay for a thread. From the second
       // block on, a thread encodes while the client decodes the next block. The
       // encoder (and its thread) end before the state it uses.
+      //
+      // The preview limit is a normal end, not an error: once the result has a
+      // row past the limit, the callback returns false once. clickhouse-cpp then
+      // sends a Cancel packet and reads the rest of the stream, so the
+      // connection goes back to the pool and no KILL QUERY is needed. The
+      // blocks that still arrive are dropped.
       std::optional<BlockEncoder> encoder;
       bool first_rows_block_encoded = false;
-      q.OnData([&](const clickhouse::Block& block) {
+      const uint64_t row_limit = result_preview_row_limit_ > 0
+        ? static_cast<uint64_t>(result_preview_row_limit_)
+        : std::numeric_limits<uint64_t>::max();
+      uint64_t rows_received = 0;
+      bool limit_reached = false;
+      q.OnDataCancelable([&](const clickhouse::Block& block) -> bool {
         struct OnDataTimer {
           int64_t& total;
           std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
@@ -1462,30 +1500,46 @@ void QuerySession::run_query() {
                 std::chrono::steady_clock::now() - since).count();
           }
         } on_data_timer{on_data_ns};
+        if (limit_reached) return true;
         if (cancel_requested_.load(std::memory_order_relaxed)) {
           throw std::runtime_error("canceled");
         }
+        const uint64_t block_rows = block.GetRowCount();
+        if (block_rows > 0 && rows_received >= row_limit) {
+          limit_reached = true;
+          return false;
+        }
+        rows_received += block_rows;
         if (encoder) {
-          if (block.GetRowCount() > 0) encoder->submit(block, cancel_requested_);
-          return;
+          if (block_rows > 0) encoder->submit(block, cancel_requested_);
+        } else if (block_rows > 0 && first_rows_block_encoded) {
+          encoder.emplace(encode_block, kEncodeQueueBlocks);
+          encoder->submit(block, cancel_requested_);
+        } else {
+          if (block_rows > 0) first_rows_block_encoded = true;
+          encode_block(block);
         }
-        if (block.GetRowCount() > 0) {
-          if (first_rows_block_encoded) {
-            encoder.emplace(encode_block, kEncodeQueueBlocks);
-            encoder->submit(block, cancel_requested_);
-            return;
-          }
-          first_rows_block_encoded = true;
+        // The encoder writes the rows up to the limit; a block that crosses it ends the result.
+        if (rows_received > row_limit) {
+          limit_reached = true;
+          return false;
         }
-        encode_block(block);
+        return true;
       });
 
       if (cancel_requested_.load(std::memory_order_relaxed)) {
-        cancel_native_query_ids_best_effort({native_query_id}, false);
         throw std::runtime_error("canceled");
       }
-      client_query_->Select(q);
+      try {
+        ch_execute(*client_query_, q);
+      } catch (const clickhouse::ServerError& error) {
+        // Some servers end a canceled stream with QUERY_WAS_CANCELLED (394) or
+        // QUERY_WAS_CANCELLED_BY_CLIENT (735): after the limit, it is the expected
+        // last packet.
+        if (!(limit_reached && (error.GetCode() == 394 || error.GetCode() == 735))) throw;
+      }
       if (encoder) encoder->finish();
+      if (limit_reached) result_limit_reached = true;
       {
         const int64_t select_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - select_started).count();
@@ -1518,7 +1572,7 @@ void QuerySession::run_query() {
       // no result row has reached the client: a second result_meta simply replaces
       // the provisional schema before any rows are appended.
       const bool can_retry_without_emitted_rows = rows_returned == 0 &&
-          msg != "canceled" && msg != "result_limit_reached" &&
+          msg != "canceled" &&
           !cancel_requested_.load(std::memory_order_relaxed);
 
       if (initial_describe && attempt_used_cached_plan && can_retry_without_emitted_rows) {
@@ -1555,19 +1609,27 @@ void QuerySession::run_query() {
       }
     }
 
-    finish_ok();
+    if (result_limit_reached) {
+      finish_result_limit_reached();
+    } else {
+      finish_ok();
+    }
+    client_query_.reset();
 
   } catch (const std::exception& e) {
     std::string msg = e.what() ? std::string(e.what()) : std::string("error");
-    // Do not return possibly mid-stream/error-state clients to the idle pool as-is.
-    // Also stop any native attempt that may still be executing after a transport
-    // failure or browser disconnect. This path runs only after an error.
-    discard_query_connection();
-    cancel_native_queries_best_effort(false);
+    // An error of the server ended the statement: the connection is clean and
+    // nothing runs any more. Anything else (a transport failure, a cancel, a
+    // limit of the encoder) left the statement in an unknown state: the pool
+    // closes the connection, and the native attempt that may still run is
+    // stopped.
+    if (client_query_ && ch_connection_dirty(*client_query_)) {
+      discard_query_connection();
+      cancel_native_queries_best_effort(false);
+    }
+    client_query_.reset();
     if (msg == "canceled" || cancel_requested_.load(std::memory_order_relaxed)) {
       finish_canceled();
-    } else if (msg == "result_limit_reached") {
-      cv_.notify_all();
     } else {
       finish_error(msg);
     }

@@ -821,11 +821,13 @@ def test_audit_lines_never_hold_sql_or_data():
     log = subprocess.run(LOGS_CMD, shell=True, capture_output=True, text=True, timeout=30)
     text = log.stdout + log.stderr
     assert marker not in text
-    lines = [line for line in text.splitlines() if line.startswith("[mcp] ") and "call=tools/call:run_query" in line]
-    assert lines
-    last = lines[-1]
-    assert "key=all-data" in last and "host=local" in last and "status=ok" in last and "duration_ms=" in last and "rows=1" in last
-    assert any("status=401_unknown" in line for line in text.splitlines())
+    # One JSON line for each call (docs/operations.md, "Logs").
+    events = [json.loads(line) for line in text.splitlines() if line.startswith("{") and '"event":"mcp.call"' in line]
+    calls = [e for e in events if e["call"] == "tools/call:run_query"]
+    assert calls
+    last = calls[-1]
+    assert last["key"] == "all-data" and last["host"] == "local" and last["status"] == "ok" and "duration_ms" in last and last["rows"] == 1
+    assert any(e["status"] == "401_unknown" for e in events)
     assert ALL not in text and "chm_nope" not in text
 
 
@@ -1128,8 +1130,7 @@ def test_read_only_instance():
     api_error(m("DELETE", "/api/mcp/keys/cfg-reader", base=RO_URL), 403, "manage_disabled")
     assert rpc(RO_URL, SEED, "ping").status_code == 200
     if RO_DATA_DIR:
-        # The seed file is one of an older ChDash: it held the secret in clear. The start wrote it again with the hash
-        # only (the keys of the file are ChDash's to clean, even when the page may not change them).
+        # The seed file holds the hash only, and the start does not touch it.
         text = (Path(RO_DATA_DIR) / "mcp_keys.json").read_text()
         document = json.loads(text)
         assert [k["name"] for k in document["keys"]] == ["seed-key"]
@@ -1573,6 +1574,29 @@ def _log_users(since: str, like: str, unlike: str = "") -> set[str]:
         "AND query LIKE '" + like + "' AND query NOT LIKE '%system.query_log%' AND query NOT LIKE 'CHECK GRANT%' " + (("AND query NOT LIKE '" + unlike + "' ") if unlike else "") + "FORMAT TSV"
     )
     return {line for line in text.splitlines() if line}
+
+
+@needs_mcp
+def test_query_execution_tool_finds_a_run_of_the_query_page():
+    """The registry keeps a run under its host; the tool asks with the MCP identity of that host (ARCH-B-069)."""
+    run = SESSION.post(f"{MCP_URL}/api/query/run", json={"host_id": "local", "sql": "SELECT 1 AS one"}, timeout=15)
+    assert run.status_code == 200, run.text
+    query_id = run.json()["query_id"]
+    with SESSION.get(f"{MCP_URL}/{run.json()['stream_url']}", stream=True, timeout=(10, 60)) as stream:
+        assert stream.status_code == 200, stream.text
+        for line in stream.iter_lines(decode_unicode=True):
+            if line and line.startswith("event:") and line[6:].strip() in ("done", "error"):
+                break
+    key, secret = make_key(new_key_body("execution", tools=["query_execution"], databases=["*"], hosts=["local"]))
+    try:
+        found = ok_tool(MCP_URL, secret, "query_execution", {"host": "local", "params": {"query_id": query_id}})
+        assert found["terminal_status"] == "finished", found
+        assert found["run_mode"] == "normal", found
+        # An unknown query is still not found.
+        fail_tool(MCP_URL, secret, "query_execution", {"host": "local", "params": {"query_id": str(uuid.uuid4())}},
+                  "execution_not_found")
+    finally:
+        drop_key(key["id"])
 
 
 @needs_clickhouse

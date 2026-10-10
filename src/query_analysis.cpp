@@ -1,4 +1,5 @@
 #include "query_analysis.hpp"
+#include "ch_query.hpp"
 #include "system_log_flush.hpp"
 #include "ch_block_value.hpp"
 #include "ch_block_numeric.hpp"
@@ -228,7 +229,7 @@ std::vector<QueryLogAnalysisRow> load_query_log_rows(
       "ORDER BY event_time_microseconds DESC LIMIT 512";
 
   std::vector<QueryLogAnalysisRow> rows;
-  client.Select(query, [&](const clickhouse::Block& block) {
+  ch_select(client, query, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       QueryLogAnalysisRow value;
       value.hostname = block_string(block, 0, row);
@@ -281,7 +282,7 @@ std::vector<ProcessorAnalysisRow> load_processors(
       "ORDER BY query_id, plan_step, plan_group, id LIMIT " + std::to_string(kMaxProcessors + 1);
 
   std::vector<ProcessorAnalysisRow> rows;
-  client.Select(query, [&](const clickhouse::Block& block) {
+  ch_select(client, query, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       ProcessorAnalysisRow value;
       value.hostname = block_string(block, 0, row);
@@ -338,7 +339,7 @@ std::vector<ProcessorTraceSummaryRow> load_processor_trace_summary(
       std::to_string(kMaxProcessorTraceSummaries + 1);
 
   std::vector<ProcessorTraceSummaryRow> rows;
-  client.Select(query, [&](const clickhouse::Block& block) {
+  ch_select(client, query, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       ProcessorTraceSummaryRow value;
       value.hostname = block_string(block, 0, row);
@@ -388,7 +389,7 @@ std::vector<OpenTelemetrySpanAnalysisRow> load_otel_spans(
         " ORDER BY start_time_us, finish_time_us, span_id LIMIT " + std::to_string(limit);
 
     std::vector<OpenTelemetrySpanAnalysisRow> out;
-    client.Select(query, [&](const clickhouse::Block& block) {
+    ch_select(client, query, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         OpenTelemetrySpanAnalysisRow value;
         value.hostname = block_string(block, 0, row);
@@ -412,7 +413,7 @@ std::vector<OpenTelemetrySpanAnalysisRow> load_otel_spans(
   // The overwhelmingly common case is below the configured cap. Keep it to one
   // span fetch; only use breadth-first retrieval when truncation is necessary.
   uint64_t total = 0;
-  client.Select(
+  ch_select(client,
       "SELECT toUInt64(count()) FROM system.opentelemetry_span_log PREWHERE " + time_scope + " WHERE " + trace_scope,
       [&](const clickhouse::Block& block) {
         if (block.GetRowCount()) total = block_u64(block, 0, 0);
@@ -476,7 +477,7 @@ std::vector<QueryViewAnalysisRow> load_views(
       "ORDER BY event_time_microseconds, view_name LIMIT 2048";
 
   std::vector<QueryViewAnalysisRow> rows;
-  client.Select(query, [&](const clickhouse::Block& block) {
+  ch_select(client, query, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       QueryViewAnalysisRow value;
       value.hostname = block_string(block, 0, row);

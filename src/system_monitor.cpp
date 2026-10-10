@@ -1,8 +1,10 @@
 #include "system_monitor.hpp"
 
+#include "acl_service.hpp"
 #include "allowed_objects.hpp"
 #include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
+#include "ch_query.hpp"
 #include "facet_limits.hpp"
 
 #include <clickhouse/exceptions.h>
@@ -226,31 +228,17 @@ uint64_t series_bucket_count(const MonitorSeriesWindow& w) {
   return w.step_s ? (w.to_s - w.from_s) / w.step_s : 0;
 }
 
-// The runner's SHOW boundary for the replication summary, resolved lazily per
+// The runner's boundary (its ACL, kept by the AclService), resolved lazily per
 // database (the RunnerVisibility of system_activity.cpp).
 class VisibleTables {
 public:
-  explicit VisibleTables(clickhouse::Client& runner) : runner_(runner), databases_(discover_visible_databases(runner)) {
-    std::sort(databases_.begin(), databases_.end());
-  }
+  explicit VisibleTables(AclView& acl) : acl_(acl) {}
 
-  const std::vector<std::string>& databases() const { return databases_; }
-
-  bool visible(const std::string& database, const std::string& table) {
-    if (!std::binary_search(databases_.begin(), databases_.end(), database)) return false;
-    auto it = objects_.find(database);
-    if (it == objects_.end()) {
-      auto objects = discover_visible_objects(runner_, database);
-      std::sort(objects.begin(), objects.end());
-      it = objects_.emplace(database, std::move(objects)).first;
-    }
-    return std::binary_search(it->second.begin(), it->second.end(), table);
-  }
+  const std::vector<std::string>& databases() { return acl_.databases(); }
+  bool visible(const std::string& database, const std::string& table) { return acl_.visible(database, table); }
 
 private:
-  clickhouse::Client& runner_;
-  std::vector<std::string> databases_;
-  std::unordered_map<std::string, std::vector<std::string>> objects_;
+  AclView& acl_;
 };
 
 void add_issue(SystemMonitorOverview& out, const MonitorCapabilities& caps, const std::string& panel,
@@ -344,7 +332,7 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
   out = MonitorCapabilities{};
   out.detected_at_ms = monitor_now_ms();
   try {
-    system.Select("SELECT toString(currentUser())" + monitor_settings_sql(5, 10, 1), [&](const clickhouse::Block& block) {
+    ch_select(system, "SELECT toString(currentUser())" + monitor_settings_sql(5, 10, 1), [&](const clickhouse::Block& block) {
       if (block.GetRowCount() > 0) out.system_user = text(block, 0, 0);
     });
     std::vector<std::string> tables = monitor_detected_tables();
@@ -352,7 +340,7 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
       (void)columns;
       tables.push_back(table);
     }
-    system.Select(
+    ch_select(system,
         "SELECT toString(name) FROM system.tables WHERE database = 'system' AND name IN " + in_list(tables) +
             monitor_settings_sql(5, 1000000, 1000),
         [&](const clickhouse::Block& block) {
@@ -364,7 +352,7 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
       column_tables.push_back(table);
       column_names.insert(column_names.end(), columns.begin(), columns.end());
     }
-    system.Select(
+    ch_select(system,
         "SELECT toString(`table`), toString(name) FROM system.columns WHERE database = 'system' AND `table` IN " +
             in_list(column_tables) + " AND name IN " + in_list(column_names) + monitor_settings_sql(5, 1000000, 10000),
         [&](const clickhouse::Block& block) {
@@ -381,7 +369,7 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
     // Performance section's Replication chart shows only then. Not readable:
     // the chart stays hidden, the rest is detected.
     try {
-      system.Select("SELECT toString(count() > 0) FROM system.replicas" + monitor_settings_sql(5, 1000000, 1),
+      ch_select(system, "SELECT toString(count() > 0) FROM system.replicas" + monitor_settings_sql(5, 1000000, 1),
                     [&](const clickhouse::Block& block) {
                       if (block.GetRowCount() > 0) out.replicated_tables = flag(text(block, 0, 0));
                     });
@@ -403,7 +391,7 @@ bool detect_monitor_capabilities(clickhouse::Client& system, MonitorCapabilities
 
 bool load_system_monitor_overview(
     clickhouse::Client& system,
-    clickhouse::Client& runner,
+    AclView& runner_acl,
     const MonitorCapabilities& caps,
     SystemMonitorOverview& out,
     std::string* error) {
@@ -417,7 +405,7 @@ bool load_system_monitor_overview(
   // Server identity: hostName() is the name the server reports for itself
   // (the container or host name, not system.clusters.host_name).
   try {
-    system.Select("SELECT toString(hostName()), toString(version()), toString(timezone()), toString(uptime())" +
+    ch_select(system, "SELECT toString(hostName()), toString(version()), toString(timezone()), toString(uptime())" +
                       monitor_settings_sql(5, 10, 1),
                   [&](const clickhouse::Block& block) {
                     if (block.GetRowCount() == 0) return;
@@ -434,7 +422,7 @@ bool load_system_monitor_overview(
   // Server tiles: allowlisted current values. A metric this server version
   // does not have is simply absent (the tile shows the empty value).
   try {
-    system.Select("SELECT toString(metric), toString(value) FROM system.asynchronous_metrics WHERE metric IN " +
+    ch_select(system, "SELECT toString(metric), toString(value) FROM system.asynchronous_metrics WHERE metric IN " +
                       in_list(monitor_overview_async_metrics()) + monitor_settings_sql(5, 100000, 1000),
                   [&](const clickhouse::Block& block) {
                     for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -446,7 +434,7 @@ bool load_system_monitor_overview(
     ++failed;
   }
   try {
-    system.Select("SELECT toString(metric), toString(value) FROM system.metrics WHERE metric IN " +
+    ch_select(system, "SELECT toString(metric), toString(value) FROM system.metrics WHERE metric IN " +
                       in_list(monitor_overview_metrics()) + monitor_settings_sql(5, 100000, 1000),
                   [&](const clickhouse::Block& block) {
                     for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -472,7 +460,7 @@ bool load_system_monitor_overview(
     sql += " FROM system.clusters ORDER BY cluster, shard_num, replica_num LIMIT " +
            std::to_string(kMonitorTopologyRowLimit + 1) + monitor_settings_sql(5, 100000, kMonitorTopologyRowLimit + 1);
     try {
-      system.Select(sql, [&](const clickhouse::Block& block) {
+      ch_select(system, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           if (out.topology.size() >= kMonitorTopologyRowLimit) {
             out.topology_truncated = true;
@@ -507,7 +495,7 @@ bool load_system_monitor_overview(
   // excluded inside ClickHouse; each row then passes the runner's table-level
   // SHOW boundary before it is counted, so a hidden table changes no figure.
   try {
-    VisibleTables visibility(runner);
+    VisibleTables visibility(runner_acl);
     MonitorReplicationSummary summary;
     if (!visibility.databases().empty()) {
       const std::string sql =
@@ -516,30 +504,38 @@ bool load_system_monitor_overview(
           "toString(future_parts), toString(parts_to_check) FROM system.replicas WHERE database IN " +
           in_list(visibility.databases()) + " LIMIT " + std::to_string(kMonitorReplicaRowLimit + 1) +
           monitor_settings_sql(5, 100000, kMonitorReplicaRowLimit + 1);
-      size_t seen = 0;
-      system.Select(sql, [&](const clickhouse::Block& block) {
+      // Read first, then checked against the runner's boundary (which may ask ClickHouse as the runner: never
+      // inside the callback of another read).
+      std::vector<std::vector<std::string>> rows;
+      ch_select(system, sql, [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
-          if (++seen > kMonitorReplicaRowLimit) {
+          if (rows.size() >= kMonitorReplicaRowLimit) {
             summary.truncated = true;
             continue;
           }
-          if (!visibility.visible(text(block, 0, row), text(block, 1, row))) continue;
-          const uint64_t delay = u64(text(block, 4, row));
-          const uint64_t queue = u64(text(block, 5, row));
-          const uint64_t inserts = u64(text(block, 6, row));
-          summary.tables += 1;
-          summary.readonly += flag(text(block, 2, row)) ? 1 : 0;
-          summary.session_expired += flag(text(block, 3, row)) ? 1 : 0;
-          summary.max_delay_seconds = std::max(summary.max_delay_seconds, delay);
-          summary.queue_size += queue;
-          summary.inserts_in_queue += inserts;
-          summary.merges_in_queue += u64(text(block, 7, row));
-          summary.future_parts_over += u64(text(block, 8, row)) > 20 ? 1 : 0;
-          summary.parts_to_check_over += u64(text(block, 9, row)) > 10 ? 1 : 0;
-          summary.queue_over += queue > 20 ? 1 : 0;
-          summary.inserts_over += inserts > 10 ? 1 : 0;
+          std::vector<std::string> cells;
+          cells.reserve(10);
+          for (size_t column = 0; column < 10; ++column) cells.push_back(text(block, column, row));
+          rows.push_back(std::move(cells));
         }
       });
+      for (const auto& cells : rows) {
+        if (!visibility.visible(cells[0], cells[1])) continue;
+        const uint64_t delay = u64(cells[4]);
+        const uint64_t queue = u64(cells[5]);
+        const uint64_t inserts = u64(cells[6]);
+        summary.tables += 1;
+        summary.readonly += flag(cells[2]) ? 1 : 0;
+        summary.session_expired += flag(cells[3]) ? 1 : 0;
+        summary.max_delay_seconds = std::max(summary.max_delay_seconds, delay);
+        summary.queue_size += queue;
+        summary.inserts_in_queue += inserts;
+        summary.merges_in_queue += u64(cells[7]);
+        summary.future_parts_over += u64(cells[8]) > 20 ? 1 : 0;
+        summary.parts_to_check_over += u64(cells[9]) > 10 ? 1 : 0;
+        summary.queue_over += queue > 20 ? 1 : 0;
+        summary.inserts_over += inserts > 10 ? 1 : 0;
+      }
     }
     out.replication = summary;
   } catch (const std::exception& e) {
@@ -778,7 +774,8 @@ constexpr int kQueriesDrillSeconds = 10;
 constexpr int kQueriesEstimateSeconds = 5;
 constexpr uint64_t kQueriesEstimateRowsCap = 10'000'000;
 // Phase 1 keeps at most this many distinct shapes (memory bound); past it a
-// new shape is not counted.
+// new shape is not counted, and the answer says so (totals.shapes_capped).
+constexpr uint64_t kQueriesMaxShapes = 1000000;
 const char* const kQueriesGroupBySettings =
     ", max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any', max_bytes_before_external_group_by = 0";
 
@@ -869,12 +866,17 @@ std::string queries_time_predicate(const MonitorQueriesRequest& r) {
 
 // The rows a shape counts: the window's finished or failed initial queries,
 // never the System page's own reads; with hide_chdash not the system
-// account's either; the kind when the list is filtered by one.
+// account's either, nor the other reads that ChDash writes itself (their
+// log_comment starts with 'chdash:', ch_query.hpp); the kind when the list is
+// filtered by one.
 // with_list_filters: the list's own filters too (the kind and the user; a
 // shape's page shows every run of the shape).
 std::string queries_filter_sql(const MonitorQueriesRequest& r, bool with_list_filters) {
   std::string sql = queries_time_predicate(r) + kQueryLogRows + " AND log_comment != 'chdash-system'";
-  if (r.hide_chdash && !r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);
+  if (r.hide_chdash) {
+    sql += " AND NOT startsWith(log_comment, 'chdash:')";
+    if (!r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);
+  }
   if (with_list_filters) {
     if (r.kind == "Select") sql += " AND query_kind = 'Select'";
     else if (r.kind == "Insert") sql += " AND query_kind = 'Insert'";
@@ -946,7 +948,7 @@ void queries_failed(clickhouse::Client& runner, const MonitorQueriesRequest& r, 
     const std::string sql = "SELECT toString(count()) FROM system.query_log WHERE event_date >= toDate(toDateTime(" +
                             std::to_string(since) + ")) AND event_time >= toDateTime(" + std::to_string(since) + ")" +
                             monitor_settings_sql(kQueriesEstimateSeconds, std::max(r.max_rows, kQueriesEstimateRowsCap), 1);
-    runner.Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(runner, sql, [&](const clickhouse::Block& block) {
       if (block.GetRowCount() > 0) rows = u64(text(block, 0, 0));
     });
   } catch (const clickhouse::ServerException&) {
@@ -1062,7 +1064,7 @@ std::string monitor_queries_top_sql(const MonitorQueriesRequest& r) {
          "toString(sum(read_rows)), toString(sum(read_bytes)), toString(sum(written_rows)), toString(sum(result_rows)), "
          "toString(avg(memory_usage)), toString(max(memory_usage)), "
          "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), groupUniqArray(5)(user)), '\\n'), "
-         "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), arraySlice(groupUniqArrayArray(tables), 1, 8)), '\\n'), "
+         "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), groupUniqArrayArray(8)(tables)), '\\n'), "
          "toString(toUnixTimestamp(min(event_time))), toString(toUnixTimestamp(max(event_time))), "
          // The window's totals over every shape: window functions run after
          // the GROUP BY and before the LIMIT.
@@ -1142,7 +1144,7 @@ std::string monitor_query_example_sql(const MonitorQueriesRequest& r) {
          monitor_settings_sql(kQueriesDrillSeconds, r.max_rows, 2);
 }
 
-bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabilities& caps,
+bool load_system_monitor_queries(clickhouse::Client& runner, AclView& runner_acl, const MonitorCapabilities& caps,
                                    const MonitorQueriesRequest& request, SystemMonitorQueries& out, std::string* error) {
   out = SystemMonitorQueries{};
   out.generated_at_ms = monitor_now_ms();
@@ -1187,6 +1189,7 @@ bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabi
         out.totals.total_ms = f64(text(block, 20, row));
         out.totals.read_bytes = u64(text(block, 21, row));
         out.totals.shapes = u64(text(block, 22, row));
+        out.totals.shapes_capped = out.totals.shapes >= kQueriesMaxShapes;
         out.queries.push_back(std::move(shape));
       }
     }, monitor_queries_params(request));
@@ -1207,7 +1210,7 @@ bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabi
   // "database.table", either name may hold dots: any split may match.
   if (!out.databases.empty() || !out.tables.empty()) {
     try {
-      VisibleTables visible(runner);
+      VisibleTables visible(runner_acl);
       const auto& databases = visible.databases();
       const auto database_visible = [&](const std::string& name) { return std::binary_search(databases.begin(), databases.end(), name); };
       std::vector<std::pair<std::string, uint64_t>> kept;
@@ -1448,7 +1451,7 @@ std::string monitor_disk_usage_sql(const std::vector<std::string>& databases) {
          monitor_settings_sql(kDiskUsageTimeBudgetSeconds, kDiskUsageReadRowsCap, kMonitorDiskUsageRowLimit + 1);
 }
 
-bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
+bool load_system_monitor_disks(clickhouse::Client& system, AclView& runner_acl, const MonitorCapabilities& caps,
                                  SystemMonitorDisks& out, std::string* error) {
   out = SystemMonitorDisks{};
   out.generated_at_ms = monitor_now_ms();
@@ -1465,7 +1468,7 @@ bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& r
     const bool broken = caps.has_column("disks", "is_broken");
     const bool encrypted = caps.has_column("disks", "is_encrypted");
     const bool remote = caps.has_column("disks", "is_remote");
-    system.Select(monitor_disks_sql(caps), [&](const clickhouse::Block& block) {
+    ch_select(system, monitor_disks_sql(caps), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         if (out.disks.size() >= kMonitorDiskRowLimit) {
           out.disks_truncated = true;
@@ -1502,7 +1505,7 @@ bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& r
     const bool move_factor = caps.has_column("storage_policies", "move_factor");
     const bool no_merge = caps.has_column("storage_policies", "prefer_not_to_merge");
     const bool ttl_on_insert = caps.has_column("storage_policies", "perform_ttl_move_on_insert");
-    system.Select(monitor_storage_policies_sql(caps), [&](const clickhouse::Block& block) {
+    ch_select(system, monitor_storage_policies_sql(caps), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         if (out.volumes.size() >= kMonitorPolicyRowLimit) {
           out.volumes_truncated = true;
@@ -1535,10 +1538,9 @@ bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& r
   // Bytes by disk and database: active parts of the databases the runner can
   // SHOW (inside the SQL), each row re-checked against that list.
   try {
-    std::vector<std::string> databases = discover_visible_databases(runner);
-    std::sort(databases.begin(), databases.end());
+    const std::vector<std::string> databases = runner_acl.databases();
     if (!databases.empty()) {
-      system.Select(monitor_disk_usage_sql(databases), [&](const clickhouse::Block& block) {
+      ch_select(system, monitor_disk_usage_sql(databases), [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           if (out.usage.size() >= kMonitorDiskUsageRowLimit) {
             out.usage_truncated = true;
@@ -1680,7 +1682,7 @@ void read_growth(clickhouse::Client& client, const std::string& sql, const Monit
 
 } // namespace
 
-void load_system_monitor_disk_growth(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
+void load_system_monitor_disk_growth(clickhouse::Client& system, AclView& runner_acl, const MonitorCapabilities& caps,
                                        const MonitorSeriesWindow& window, SystemMonitorDiskGrowth& out) {
   out = SystemMonitorDiskGrowth{};
   out.generated_at_ms = monitor_now_ms();
@@ -1695,7 +1697,7 @@ void load_system_monitor_disk_growth(clickhouse::Client& system, clickhouse::Cli
     MonitorSeriesSource& source = out.sources["disks"];
     source.table = "disks";
     try {
-      system.Select("SELECT toString(name), toString(free_space), toString(total_space) FROM system.disks ORDER BY name LIMIT " +
+      ch_select(system, "SELECT toString(name), toString(free_space), toString(total_space) FROM system.disks ORDER BY name LIMIT " +
                         std::to_string(kMonitorDiskRowLimit) + monitor_settings_sql(kDisksTimeBudgetSeconds, 100000, kMonitorDiskRowLimit),
                     [&](const clickhouse::Block& block) {
                       for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -1764,7 +1766,7 @@ void load_system_monitor_disk_growth(clickhouse::Client& system, clickhouse::Cli
     } else {
       static const char* const kNames[] = {"written_bytes", "moved_bytes", "moves"};
       try {
-        const std::vector<std::string> databases = discover_visible_databases(runner);
+        const std::vector<std::string> databases = runner_acl.databases();
         for (const char* name : kNames) out.series[name].assign(count, std::nan(""));
         if (!databases.empty()) {
           read_growth(system, monitor_disk_written_sql(window, databases), window, count, source,

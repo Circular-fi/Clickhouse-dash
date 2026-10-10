@@ -142,7 +142,7 @@ The page address follows the editor. It is `?saved=<id>` while the editor holds 
 
 ## Security
 
-ChDash has no end-user authentication (see the authorization model in [`configuration.md`](configuration.md)). Everyone who can reach the panel can read the library. When `writable = true`, they can also edit it. The library is persistent. For this reason, the mutating routes also refuse the requests that a third-party page can make through the browser of a user:
+ChDash has no end-user authentication (see the authorization model in [`configuration.md`](configuration.md)). Everyone who can reach the panel can read the library. When `writable = true`, they can also edit it. The library is persistent. For this reason, the mutating routes refuse the requests that a third-party page can make through the browser of a user. This is the guard of every write of ChDash ([operations.md](operations.md#the-guard-of-the-writes)):
 
 - `Sec-Fetch-Site` must be absent, `same-origin` or `none` (403 `cross_site_request` otherwise).
 - Without `Sec-Fetch-Site`, an `Origin` header must match the `Host` or the `X-Forwarded-Host` of the request (403 `cross_site_request`).

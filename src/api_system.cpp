@@ -25,9 +25,6 @@
 namespace chdash {
 namespace {
 
-// What a host exposes changes with its configuration or version only.
-constexpr uint64_t kMonitorCapabilitiesTtlMs = 10 * 60 * 1000;
-
 uint64_t monitor_api_now_ms() {
   using namespace std::chrono;
   return static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
@@ -39,12 +36,6 @@ std::shared_ptr<clickhouse::Client> acquire_monitor_client(
     std::string* error) {
   return pool ? pool->acquire(uri, std::chrono::seconds(5), std::chrono::seconds(15), std::chrono::seconds(15), error)
               : make_client_from_uri(uri, std::chrono::seconds(5), std::chrono::seconds(15), std::chrono::seconds(15), error);
-}
-
-// Live state, as the Activity: never older than the Explorer cache
-// TTL, at most one read per second per host however many pages refresh.
-uint64_t monitor_live_ttl_ms(int cache_ttl_ms) {
-  return static_cast<uint64_t>(std::max(1000, std::min(cache_ttl_ms, 5000)));
 }
 
 void write_string(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::string& value) {
@@ -86,18 +77,6 @@ bool parse_ms(const std::string& text, uint64_t& out) {
   return true;
 }
 
-// Series windows of one host share an entry for this long (proposal: 15 s
-// per aligned window); the map is emptied past this many windows.
-constexpr uint64_t kMonitorSeriesTtlMs = 15 * 1000;
-constexpr size_t kMonitorSeriesCacheEntries = 256;
-
-// Disks: 60 s per host (capacity, policies and the bytes by database move
-// slowly); growth: 5 min per aligned window (an hour-long step for the
-// default week).
-constexpr uint64_t kMonitorDisksTtlMs = 60 * 1000;
-constexpr uint64_t kMonitorGrowthTtlMs = 5 * 60 * 1000;
-constexpr size_t kMonitorGrowthCacheEntries = 64;
-
 void write_optional_bool(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::optional<bool>& value) {
   w.Key(key);
   if (value) w.Bool(*value);
@@ -118,13 +97,6 @@ void write_source(rapidjson::Writer<rapidjson::StringBuffer>& w, const MonitorSe
   w.EndArray();
   w.EndObject();
 }
-
-// Queries: 60 s per minute-aligned window (and sort, kind, filter). A second
-// viewer of the same window waits for the read in flight rather than
-// starting another (phase 1 may take its whole 15 s budget).
-constexpr uint64_t kMonitorQueriesTtlMs = 60 * 1000;
-constexpr int kMonitorQueriesWaitMs = 30 * 1000;
-constexpr size_t kMonitorQueriesCacheEntries = 256;
 
 // The runner client of the Queries reads: the receive timeout outlasts
 // their time budgets, so ClickHouse answers TIMEOUT_EXCEEDED first.
@@ -189,14 +161,26 @@ void write_queries_status(rapidjson::Writer<rapidjson::StringBuffer>& w, const s
 
 } // namespace
 
-// What a host exposes (its optional system logs and versioned columns),
-// detected once and cached 10 minutes. Until a detection succeeds (retried
-// after a short back-off) the panels read their base columns and let
+// What a host exposes (its optional system logs and versioned columns): kept
+// 10 minutes, 1 minute while an optional log table is missing (ClickHouse
+// creates it at its first flush). A failed detection is not kept (only its
+// short back-off): the panels then read their base columns and let
 // ClickHouse answer.
+TtlCache<std::string, MonitorCapabilities>::Options Server::capabilities_cache_options() {
+  auto options = cache_options<MonitorCapabilities>(std::chrono::minutes(10), {}, 256, 8u << 20);
+  options.ttl_of = [](const MonitorCapabilities& caps) -> std::chrono::milliseconds {
+    for (const auto& table : monitor_detected_tables()) {
+      if (table != "zookeeper_connection" && caps.tables.count(table) == 0) return std::chrono::minutes(1);
+    }
+    return std::chrono::minutes(10);
+  };
+  return options;
+}
+
 std::shared_ptr<const MonitorCapabilities> Server::system_monitor_capabilities(const std::string& host_id, const std::string& system_uri) {
   const std::string caps_key = host_id + std::string("\0monitor-caps", 13);
-  auto caps = system_monitor_caps_cache_.get_or_refresh(
-      caps_key, monitor_api_now_ms(), kMonitorCapabilitiesTtlMs, 250,
+  auto caps = system_monitor_caps_cache_.get(
+      caps_key,
       [&](MonitorCapabilities& value, std::string& code, std::string& message) {
         std::string error;
         auto system = acquire_monitor_client(client_pool_, system_uri, &error);
@@ -225,23 +209,17 @@ void Server::handle_system_overview(const httplib::Request& req, httplib::Respon
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
   }
   const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-  const uint64_t now = monitor_api_now_ms();
-
   const auto caps = system_monitor_capabilities(host_id, system_uri);
-  const MonitorCapabilities& capabilities = *caps;
 
   const std::string key = host_id + std::string("\0monitor-overview", 17);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_monitor_overview_cache_.erase(key);
-  auto result = system_monitor_overview_cache_.get_or_refresh(
-      key, now, monitor_live_ttl_ms(cfg_.explorer.cache_ttl_ms), 250,
-      [&](SystemMonitorOverview& value, std::string& code, std::string& message) {
+  const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  const AclAccess access = runner_access(*host);
+  if (refresh) acl_.invalidate(access);
+  // Served at once past its TTL while one refresh runs: the fetch owns what it uses.
+  auto result = system_monitor_overview_cache_.get_revalidating(
+      key,
+      [this, access, system_uri, caps](SystemMonitorOverview& value, std::string& code, std::string& message) {
         std::string error;
-        auto runner = acquire_monitor_client(client_pool_, host->runner_uri, &error);
-        if (!runner) {
-          code = "runner_unavailable";
-          message = error.empty() ? "Cannot connect to the runner context." : error;
-          return false;
-        }
         auto system = acquire_monitor_client(client_pool_, system_uri, &error);
         if (!system) {
           code = "system_context_unavailable";
@@ -249,7 +227,8 @@ void Server::handle_system_overview(const httplib::Request& req, httplib::Respon
           return false;
         }
         try {
-          if (!load_system_monitor_overview(*system, *runner, capabilities, value, &error)) {
+          AclView acl(acl_, access);
+          if (!load_system_monitor_overview(*system, acl, *caps, value, &error)) {
             code = "system_monitor_failed";
             message = error.empty() ? "The server overview is unavailable." : error;
             return false;
@@ -258,13 +237,11 @@ void Server::handle_system_overview(const httplib::Request& req, httplib::Respon
         } catch (const std::exception& e) {
           code = "system_monitor_failed";
           message = e.what();
-          if (client_pool_) {
-            client_pool_->invalidate(runner);
-            client_pool_->invalidate(system);
-          }
+          if (client_pool_) client_pool_->invalidate(system);
           return false;
         }
-      });
+      },
+      refresh);
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
@@ -441,16 +418,14 @@ void Server::handle_system_series(const httplib::Request& req, httplib::Response
   window.query_log_max_rows = cfg_.system.query_log_max_rows;
 
   const auto caps = system_monitor_capabilities(host_id, system_uri);
-  if (growth) return system_monitor_disk_growth(req, res, *host, system_uri, caps, window, from_ms, to_ms, now_ms);
+  if (growth) return system_monitor_disk_growth(req, res, *host, system_uri, caps, window, from_ms, to_ms);
   const std::string key = host_id + std::string("\0monitor-series\0", 16) + panel + "|" + std::to_string(window.from_s) + "-" +
                           std::to_string(window.to_s) + "/" + std::to_string(window.step_s) +
                           (window.span_s > window.query_log_max_span_s ? "/no-query-log" : "");
-  if (param("refresh") == "1") system_monitor_series_cache_.erase(key);
-  // Relative windows move with the clock: past this many windows the map is
-  // emptied rather than kept for windows nobody asks for again.
-  if (system_monitor_series_cache_.size() > kMonitorSeriesCacheEntries) system_monitor_series_cache_.clear();
-  auto result = system_monitor_series_cache_.get_or_refresh(
-      key, now_ms, kMonitorSeriesTtlMs, 250,
+  // Relative windows move with the clock: a window nobody asks for again
+  // leaves the cache with its age or the LRU.
+  auto result = system_monitor_series_cache_.get(
+      key,
       [&](SystemMonitorSeries& value, std::string& code, std::string& message) {
         std::string error;
         auto system = acquire_monitor_client(client_pool_, system_uri, &error);
@@ -472,7 +447,8 @@ void Server::handle_system_series(const httplib::Request& req, httplib::Response
           }
         }
         return true;
-      });
+      },
+      param("refresh") == "1");
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
@@ -568,42 +544,38 @@ void Server::handle_system_series(const httplib::Request& req, httplib::Response
 // validated by the series handler; 5 min per aligned window.
 void Server::system_monitor_disk_growth(const httplib::Request& req, httplib::Response& res, const HostSpec& host,
                                           const std::string& system_uri, const std::shared_ptr<const MonitorCapabilities>& caps,
-                                          const MonitorSeriesWindow& window, uint64_t from_ms, uint64_t to_ms, uint64_t now_ms) {
+                                          const MonitorSeriesWindow& window, uint64_t from_ms, uint64_t to_ms) {
   const std::string key = host.id + std::string("\0monitor-growth\0", 16) + std::to_string(window.from_s) + "-" +
                           std::to_string(window.to_s) + "/" + std::to_string(window.step_s);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_monitor_growth_cache_.erase(key);
-  if (system_monitor_growth_cache_.size() > kMonitorGrowthCacheEntries) system_monitor_growth_cache_.clear();
-  auto result = system_monitor_growth_cache_.get_or_refresh(
-      key, now_ms, kMonitorGrowthTtlMs, 250,
+  const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  const AclAccess access = runner_access(host);
+  if (refresh) acl_.invalidate(access);
+  auto result = system_monitor_growth_cache_.get(
+      key,
       [&](SystemMonitorDiskGrowth& value, std::string& code, std::string& message) {
         std::string error;
-        auto runner = acquire_monitor_client(client_pool_, host.runner_uri, &error);
-        if (!runner) {
-          code = "runner_unavailable";
-          message = error.empty() ? "Cannot connect to the runner context." : error;
-          return false;
-        }
         auto system = acquire_monitor_client(client_pool_, system_uri, &error);
         if (!system) {
           code = "system_context_unavailable";
           message = error.empty() ? "Cannot connect to the system context." : error;
           return false;
         }
-        load_system_monitor_disk_growth(*system, *runner, *caps, window, value);
+        AclView acl(acl_, access);
+        load_system_monitor_disk_growth(*system, acl, *caps, window, value);
         // A source that failed outside ClickHouse (a broken connection)
-        // leaves the clients in an unknown state.
+        // leaves the client in an unknown state.
         if (client_pool_) {
           for (const auto& [name, source] : value.sources) {
             (void)name;
             if (source.status == "failed") {
               client_pool_->invalidate(system);
-              client_pool_->invalidate(runner);
               break;
             }
           }
         }
         return true;
-      });
+      },
+      refresh);
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
@@ -729,21 +701,16 @@ void Server::handle_system_disks(const httplib::Request& req, httplib::Response&
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
   }
   const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
-  const uint64_t now = monitor_api_now_ms();
   const auto caps = system_monitor_capabilities(host_id, system_uri);
 
   const std::string key = host_id + std::string("\0monitor-disks", 14);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") system_monitor_disks_cache_.erase(key);
-  auto result = system_monitor_disks_cache_.get_or_refresh(
-      key, now, kMonitorDisksTtlMs, 250,
+  const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  const AclAccess access = runner_access(*host);
+  if (refresh) acl_.invalidate(access);
+  auto result = system_monitor_disks_cache_.get(
+      key,
       [&](SystemMonitorDisks& value, std::string& code, std::string& message) {
         std::string error;
-        auto runner = acquire_monitor_client(client_pool_, host->runner_uri, &error);
-        if (!runner) {
-          code = "runner_unavailable";
-          message = error.empty() ? "Cannot connect to the runner context." : error;
-          return false;
-        }
         auto system = acquire_monitor_client(client_pool_, system_uri, &error);
         if (!system) {
           code = "system_context_unavailable";
@@ -751,7 +718,8 @@ void Server::handle_system_disks(const httplib::Request& req, httplib::Response&
           return false;
         }
         try {
-          if (!load_system_monitor_disks(*system, *runner, *caps, value, &error)) {
+          AclView acl(acl_, access);
+          if (!load_system_monitor_disks(*system, acl, *caps, value, &error)) {
             code = "system_monitor_failed";
             message = error.empty() ? "The disks are unavailable." : error;
             return false;
@@ -760,13 +728,11 @@ void Server::handle_system_disks(const httplib::Request& req, httplib::Response&
         } catch (const std::exception& e) {
           code = "system_monitor_failed";
           message = e.what();
-          if (client_pool_) {
-            client_pool_->invalidate(runner);
-            client_pool_->invalidate(system);
-          }
+          if (client_pool_) client_pool_->invalidate(system);
           return false;
         }
-      });
+      },
+      refresh);
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
@@ -1058,10 +1024,13 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
                           std::to_string(request.to_s) + "|" + sort + "|" + kind + "|" + errors + "|" + hide + "|" +
                           std::to_string(user.size()) + ":" + user + "|" + std::to_string(database.size()) + ":" + database + "|" +
                           std::to_string(table.size()) + ":" + table;
-  if (param("refresh") == "1") system_monitor_queries_cache_.erase(key);
-  if (system_monitor_queries_cache_.size() > kMonitorQueriesCacheEntries) system_monitor_queries_cache_.clear();
-  auto result = system_monitor_queries_cache_.get_or_refresh(
-      key, now_ms, kMonitorQueriesTtlMs, kMonitorQueriesWaitMs,
+  // A second viewer of the same window waits for the read in flight rather
+  // than starting another (phase 1 may take its whole 15 s budget).
+  const bool refresh = param("refresh") == "1";
+  const AclAccess access = runner_access(*host);
+  if (refresh) acl_.invalidate(access);
+  auto result = system_monitor_queries_cache_.get(
+      key,
       [&](SystemMonitorQueries& value, std::string& code, std::string& message) {
         std::string error;
         auto runner = acquire_queries_client(client_pool_, host->runner_uri, &error);
@@ -1070,14 +1039,16 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
           message = error.empty() ? "Cannot connect to the runner context." : error;
           return false;
         }
-        if (!load_system_monitor_queries(*runner, *caps, request, value, &error)) {
+        AclView acl(acl_, access);
+        if (!load_system_monitor_queries(*runner, acl, *caps, request, value, &error)) {
           if (client_pool_) client_pool_->invalidate(runner);
           code = "system_monitor_failed";
           message = error.empty() ? "The top queries are unavailable." : error;
           return false;
         }
         return true;
-      });
+      },
+      refresh);
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,
@@ -1145,6 +1116,7 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
   w.Key("total_ms"); w.Double(data.totals.total_ms);
   w.Key("read_bytes"); w.Uint64(data.totals.read_bytes);
   w.Key("shapes"); w.Uint64(data.totals.shapes);
+  w.Key("shapes_capped"); w.Bool(data.totals.shapes_capped);
   w.EndObject();
   w.Key("queries");
   w.StartArray();
@@ -1237,10 +1209,8 @@ void Server::handle_system_query(const httplib::Request& req, httplib::Response&
   const std::string key = host_id + std::string("\0monitor-query\0", 15) + std::to_string(hash) + "|" +
                           std::to_string(request.from_s) + "-" + std::to_string(request.to_s) + "/" +
                           std::to_string(request.step_s) + "|" + order + "|" + hide;
-  if (param("refresh") == "1") system_monitor_query_cache_.erase(key);
-  if (system_monitor_query_cache_.size() > kMonitorQueriesCacheEntries) system_monitor_query_cache_.clear();
-  auto result = system_monitor_query_cache_.get_or_refresh(
-      key, now_ms, kMonitorQueriesTtlMs, kMonitorQueriesWaitMs,
+  auto result = system_monitor_query_cache_.get(
+      key,
       [&](SystemMonitorQuery& value, std::string& code, std::string& message) {
         std::string error;
         auto runner = acquire_queries_client(client_pool_, host->runner_uri, &error);
@@ -1256,7 +1226,8 @@ void Server::handle_system_query(const httplib::Request& req, httplib::Response&
           return false;
         }
         return true;
-      });
+      },
+      param("refresh") == "1");
   if (!result.has_value || !result.value) {
     return json_error(
         res, 503,

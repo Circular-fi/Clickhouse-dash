@@ -22,10 +22,12 @@ def test_routes_are_registered_only_when_metrics_are_enabled():
     ]:
         assert f'http_.Get("{route}"' in block, route
         assert f"void {handler}(const httplib::Request& req, httplib::Response& res);" in header, handler
-    # The page is /observability/metrics (metrics.html); /metrics is gone.
+    # The page is /observability/metrics (metrics.html); /metrics is the Prometheus text of the server
+    # (docs/operations.md, "Metrics"), never the page.
     assert 'if (cfg_.metrics_on()) http_.Get(R"(/observability/metrics/?)", serve_view_shell("metrics.html"));' in server
     assert 'http_.Get(R"(/observability/.*)", redirect_to_first_view);' in server
-    assert 'http_.Get("/metrics"' not in server
+    assert 'if (cfg_.server.metrics) http_.Get("/metrics", [&](const auto& req, auto& res) { handle_metrics(req, res); });' in server
+    assert 'http_.Get("/metrics", serve' not in server
     assert "api_metrics.cpp" in read("src/CMakeLists.txt")
 
 

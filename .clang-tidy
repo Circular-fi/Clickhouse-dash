@@ -7,6 +7,7 @@ Checks: >
   -*,
   bugprone-*,
   clang-analyzer-*,
+  concurrency-mt-unsafe,
   cppcoreguidelines-init-variables,
   cppcoreguidelines-misleading-capture-default-by-value,
   cppcoreguidelines-avoid-capturing-lambda-coroutines,

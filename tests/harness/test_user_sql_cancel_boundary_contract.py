@@ -23,4 +23,5 @@ def test_cancel_backend_still_uses_system_side_uri():
     session = (ROOT / "src/query_session.cpp").read_text()
     assert "host->system_uri.empty() ? host->runner_uri : host->system_uri" in query_api
     assert "stats_uri_.empty() ? runner_uri_ : stats_uri_" in session
-    assert 'sql = "KILL QUERY WHERE query_id IN ("' in session
+    assert 'std::string where = "query_id IN (";' in session
+    assert '"KILL QUERY WHERE " + where' in session

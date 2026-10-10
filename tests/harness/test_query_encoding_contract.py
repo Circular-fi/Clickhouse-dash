@@ -75,8 +75,8 @@ def test_a_large_result_is_decoded_and_encoded_at_the_same_time():
     assert "constexpr size_t kEncodeQueueBlocks = 4;" in session
     assert "std::optional<BlockEncoder> encoder;" in session
     assert "encoder.emplace(encode_block, kEncodeQueueBlocks);" in session
-    assert "if (block.GetRowCount() > 0) encoder->submit(block, cancel_requested_);" in session
-    # What the encoder threw (cancel, cell too large, result limit) stops the next block and the end of the result.
+    assert "if (block_rows > 0) encoder->submit(block, cancel_requested_);" in session
+    # What the encoder threw (cancel, cell too large) stops the next block and the end of the result.
     assert "if (error_) std::rethrow_exception(error_);" in encoder_header
     assert "if (encoder) encoder->finish();" in session
     # The thread ends before the state it encodes with: the encoder is declared after the lambda.

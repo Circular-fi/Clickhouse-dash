@@ -4,6 +4,7 @@
 #include "jwt.hpp"
 #include "mcp_scope.hpp"
 #include "query_library.hpp"
+#include "secure_random.hpp"
 
 #include <rapidjson/document.h>
 
@@ -14,16 +15,13 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#if defined(__linux__)
-#include <sys/random.h>
-#endif
 
 namespace chdash {
 namespace {
@@ -34,35 +32,6 @@ constexpr size_t kMaxEntryBytes = 256;
 
 McpValidationError verr(const char* field, const char* reason, std::string message) {
   return McpValidationError{field, reason, std::move(message)};
-}
-
-void random_fill(uint8_t* out, size_t n) {
-  size_t done = 0;
-#if defined(__linux__)
-  while (done < n) {
-    const ssize_t got = ::getrandom(out + done, n - done, 0);
-    if (got < 0) {
-      if (errno == EINTR) continue;
-      break;
-    }
-    done += static_cast<size_t>(got);
-  }
-#endif
-  if (done < n) {
-    const int fd = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-    if (fd < 0) throw std::runtime_error("no source of random bytes");
-    while (done < n) {
-      // The fallback of getrandom: /dev/urandom never blocks, and the analyzer sees a caller that holds the store's lock.
-      const ssize_t got = ::read(fd, out + done, n - done);  // NOLINT(clang-analyzer-unix.BlockInCriticalSection)
-      if (got < 0 && errno == EINTR) continue;
-      if (got <= 0) {
-        ::close(fd);
-        throw std::runtime_error("cannot read random bytes");
-      }
-      done += static_cast<size_t>(got);
-    }
-    ::close(fd);
-  }
 }
 
 bool all_digits(std::string_view s) {
@@ -171,19 +140,8 @@ bool mcp_parse_iso_utc(std::string_view text, int64_t* seconds) {
 // ---- secrets ------------------------------------------------------------------
 
 std::string mcp_generate_secret() {
-  uint8_t bytes[16];
-  random_fill(bytes, sizeof(bytes));
-  bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0f) | 0x40);  // version 4
-  bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3f) | 0x80);  // variant 10
-  static const char hex[] = "0123456789abcdef";
-  std::string out;
-  out.reserve(36);
-  for (size_t i = 0; i < sizeof(bytes); ++i) {
-    if (i == 4 || i == 6 || i == 8 || i == 10) out.push_back('-');
-    out.push_back(hex[bytes[i] >> 4]);
-    out.push_back(hex[bytes[i] & 15]);
-  }
-  return out;
+  // secure_random.hpp: the system CSPRNG (getrandom, else /dev/urandom), version 4 and variant 10 set.
+  return random_uuid_v4();
 }
 
 bool mcp_valid_secret(std::string_view secret) {
@@ -486,7 +444,7 @@ std::string file_string(const rapidjson::Value& obj, const char* name, size_t in
 
 } // namespace
 
-std::vector<McpKey> mcp_parse_key_file(std::string_view text, McpKeyFileNotes* notes) {
+std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
   rapidjson::Document doc;
   parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, text);
   if (doc.HasParseError()) file_error("not valid JSON");
@@ -507,21 +465,19 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text, McpKeyFileNotes* n
     key.source = "ui";
     key.id = file_string(item, "id", index, true);
     key.name = file_string(item, "name", index, true);
-    // A file of an older ChDash kept the secret in clear, for a page that showed it again. Only its hash is
-    // kept; the store writes the file again without it.
-    const std::string clear = file_string(item, "secret", index, false);
+    // The store keeps the hash and the hint only: a key with its secret in clear is a file that ChDash does not write.
+    if (item.HasMember("secret")) {
+      file_error("keys[" + std::to_string(index) + "] holds a secret in clear: ChDash stores only its hash. Delete the file and make the keys again");
+    }
     key.secret_hint = file_string(item, "secret_hint", index, false);
     if (!valid_ui_id(key.id)) file_error("keys[" + std::to_string(index) + "].id must look like ui_0a1b2c3d4e5f");
     if (!mcp_valid_key_name(key.name)) file_error("keys[" + std::to_string(index) + "].name is not a valid key name");
-    if (clear.size() > 512 || key.secret_hint.size() > 32) {
+    if (key.secret_hint.size() > 32) {
       file_error("keys[" + std::to_string(index) + "] has a field that is too long");
     }
     if (!mcp_parse_hash_hex(file_string(item, "secret_sha256", index, true), &key.secret_hash)) {
       file_error("keys[" + std::to_string(index) + "].secret_sha256 must be 64 hex characters");
     }
-    if (!clear.empty() && notes) ++notes->clear_secrets;
-    // The hint is the start of the secret, at the length the page shows, whatever an older file kept.
-    if (!clear.empty() && mcp_valid_secret(clear) && mcp_hash_secret(clear) == key.secret_hash) key.secret_hint = mcp_secret_hint(clear);
     if (key.secret_hint.size() > kMcpSecretHintChars) key.secret_hint.resize(kMcpSecretHintChars);
     key.hosts = file_string_list(item, "hosts", index);
     key.tools = file_string_list(item, "tools", index);
@@ -534,14 +490,9 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text, McpKeyFileNotes* n
     key.created_at = file_optional_time(item, "created_at", index);
     key.updated_at = file_optional_time(item, "updated_at", index);
     // A key that an older ChDash had switched off is a key that nobody wants: it is not loaded, so it
-    // cannot become active by the removal of the switch. A key that had an expiry (2.17) is not loaded
-    // either, expired or not: ChDash no longer applies one, and the key must not come back without a limit.
+    // cannot become active by the removal of the switch.
     const auto enabled = item.FindMember("enabled");
-    const auto expires = item.FindMember("expires_at");
-    const bool switched_off = enabled != item.MemberEnd() && enabled->value.IsBool() && !enabled->value.GetBool();
-    const bool had_expiry = expires != item.MemberEnd() && !expires->value.IsNull();
-    if (switched_off || had_expiry) {
-      if (notes) notes->dropped.push_back(key.name + (switched_off ? " (switched off)" : " (had an expiry)"));
+    if (enabled != item.MemberEnd() && enabled->value.IsBool() && !enabled->value.GetBool()) {
       ++index;
       continue;
     }
@@ -556,7 +507,7 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text, McpKeyFileNotes* n
   return out;
 }
 
-std::vector<McpKey> mcp_load_key_file(const std::string& path, McpKeyFileNotes* notes) {
+std::vector<McpKey> mcp_load_key_file(const std::string& path) {
   namespace fs = std::filesystem;
   std::error_code ec;
   const fs::path target(path);
@@ -571,11 +522,11 @@ std::vector<McpKey> mcp_load_key_file(const std::string& path, McpKeyFileNotes* 
   if (ec) file_error(std::string("cannot read the file: ") + ec.message());
   if (size > kMaxFileBytes) file_error("the file is larger than 4 MiB");
   std::ifstream input(path, std::ios::binary);
-  if (!input) file_error(std::string("cannot open the file: ") + std::strerror(errno));
+  if (!input) file_error(std::string("cannot open the file: ") + std::generic_category().message(errno));
   std::ostringstream content;
   content << input.rdbuf();
   if (input.bad()) file_error("cannot read the file");
-  return mcp_parse_key_file(content.str(), notes);
+  return mcp_parse_key_file(content.str());
 }
 
 // ---- the store -----------------------------------------------------------------------------
@@ -586,9 +537,8 @@ McpKeyStore::McpKeyStore(McpStoreOptions options) : options_(std::move(options))
     key.id = key.name;
     keys_.push_back(std::move(key));
   }
-  McpKeyFileNotes notes;
   if (!options_.storage_file.empty()) {
-    for (auto& key : mcp_load_key_file(options_.storage_file, &notes)) keys_.push_back(std::move(key));
+    for (auto& key : mcp_load_key_file(options_.storage_file)) keys_.push_back(std::move(key));
   }
   for (size_t i = 0; i < keys_.size(); ++i) {
     for (size_t j = 0; j < i; ++j) {
@@ -596,18 +546,6 @@ McpKeyStore::McpKeyStore(McpStoreOptions options) : options_(std::move(options))
       if (keys_[i].secret_hash == keys_[j].secret_hash) {
         throw std::runtime_error("keys " + keys_[j].name + " and " + keys_[i].name + " have the same secret");
       }
-    }
-  }
-  for (const auto& name : notes.dropped) std::cerr << "mcp: key " << name << " of " << options_.storage_file << " is not loaded\n";
-  // A file of an older ChDash keeps secrets in clear: write it again with the hashes only (the keys that are not
-  // loaded go with it). A file that cannot be written (a read-only volume) keeps working, and says so.
-  if (notes.clear_secrets || !notes.dropped.empty()) {
-    std::string error;
-    if (write_file(keys_, &error)) {
-      std::cerr << "mcp: " << options_.storage_file << " written again: " << notes.clear_secrets << " secret(s) in clear removed\n";
-    } else if (notes.clear_secrets) {
-      std::cerr << "mcp: warning: " << options_.storage_file << " still holds " << notes.clear_secrets
-                << " secret(s) in clear and cannot be written: " << error << "\n";
     }
   }
 }
@@ -657,7 +595,7 @@ std::string McpKeyStore::new_id_locked() const {
   static const char hex[] = "0123456789abcdef";
   for (int attempt = 0; attempt < 16; ++attempt) {
     uint8_t bytes[6];
-    random_fill(bytes, sizeof(bytes));
+    secure_random_bytes(bytes, sizeof(bytes));
     std::string id = "ui_";
     for (const uint8_t b : bytes) {
       id.push_back(hex[b >> 4]);

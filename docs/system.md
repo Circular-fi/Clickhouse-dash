@@ -56,13 +56,13 @@ Configuration: the `system { }` block (see [configuration.md](configuration.md#e
 
 ## Reads, budgets and degradation
 
-Every endpoint runs fixed queries. The request provides no SQL, no column, no filter and no limit. A parameter outside the allowlist of the endpoint is a 400 `unknown_parameter`. Every SELECT ends with this clause: `SETTINGS readonly = 2, max_execution_time = N, timeout_overflow_mode = 'throw', max_rows_to_read = R, read_overflow_mode = 'throw', max_result_rows = L, result_overflow_mode = 'throw', log_comment = 'chdash-system'`.
+Every endpoint runs fixed queries. The request provides no SQL, no column, no filter and no limit. A parameter outside the allowlist of the endpoint is a 400 `unknown_parameter`. Every SELECT of the system tables ends with this clause: `SETTINGS readonly = 2, max_execution_time = N, timeout_overflow_mode = 'throw', max_rows_to_read = R, read_overflow_mode = 'throw', max_result_rows = L, result_overflow_mode = 'throw', log_comment = 'chdash-system'`. The other reads of the page (the Activity, Keeper and the SHOW boundary of the runner) get `log_comment = 'chdash-system'`, the deadline of the request and `generated_queries.max_memory_usage` from their scope (`docs/configuration.md`, "The bounds of the queries").
 
 - A cap stops the read with an error. The answer is never silently partial.
 - The own load of ChDash stays visible (and can be excluded) in `system.query_log`.
 - The settings are set for each query. For this reason, neither account can have a `readonly = 1` profile.
 
-The runner bounds the objects. A read of `system.replicas`, `system.parts` and the activity tables is restricted to `database IN (<databases the runner can SHOW>)` inside ClickHouse. The page then keeps each row only when the runner can SHOW that object. The page does not list or count a database or table that is hidden from the runner.
+The runner bounds the objects. A read of `system.replicas`, `system.parts` and the activity tables is restricted to `database IN (<databases the runner reads>)` inside ClickHouse. The page then keeps each row only when the runner reads that object. The page does not list or count a database or table that is hidden from the runner. The boundary is the runner ACL that the Explorer uses too (`CHECK GRANT` and zero-row probes as the runner, kept for `explorer.acl_cache_ttl_ms`, refer to [Caches and privileges](configuration.md#caches-and-privileges)). A database whose answer the discovery bound did not reach is not used. When the ACL cannot be read (a lost connection), the route answers 503: it never counts as "nothing visible".
 
 The page detects once for each host what a server exposes, and keeps the result for 10 minutes. It detects these items:
 
@@ -121,9 +121,9 @@ There is **no live refresh** (no Auto-refresh toggle, no timer). The Overview re
 - `version()`, `timezone()`, `hostName()` and `uptime()`.
 - The allowlisted names of `system.asynchronous_metrics` and `system.metrics`.
 - `system.clusters` (`LIMIT 1001`).
-- The in-memory columns of `system.replicas`, restricted to the databases of the runner (`LIMIT 10001`). The route counts a row only when the runner can SHOW that table.
+- The in-memory columns of `system.replicas`, restricted to the databases of the runner (`LIMIT 10001`). The route counts a row only when the runner reads that table.
 
-`log_max_index`, `log_pointer`, `total_replicas` and `active_replicas` cost one Keeper request for each table. The route does not read them. The backend caches the snapshot for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). For this reason, any number of open pages costs one read for each interval. `refresh=1` bypasses the cache. The Keeper card adds `/api/system/keeper` (*Activity* below).
+`log_max_index`, `log_pointer`, `total_replicas` and `active_replicas` cost one Keeper request for each table. The route does not read them. The backend caches the snapshot for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). For this reason, any number of open pages costs one read for each interval. After the TTL, and for 10 s more, the backend sends the previous snapshot at once (`"stale": true`) while one read runs in the background. `refresh=1` reads again, the runner ACL included. The Keeper card adds `/api/system/keeper` (*Activity* below).
 
 ### Performance
 
@@ -204,7 +204,7 @@ The kinds with a problem come first. Then the kinds with rows follow. The part f
 - `system.replicas`.
 - `system.distribution_queue`.
 
-Each query is restricted to `database IN (<databases the runner can SHOW>)` inside ClickHouse. The route then keeps every row only when the runner can SHOW that object (runner-context `discover_visible_objects`, resolved lazily for the databases that actually appear). An object that is hidden from the runner never reaches the browser. Its rows never use the bound.
+Each query is restricted to `database IN (<databases the runner reads>)` inside ClickHouse. The route then keeps every row only when the runner reads that object (the runner ACL, resolved lazily for the databases that actually appear, after the read). An object that is hidden from the runner never reaches the browser. Its rows never use the bound.
 
 Each kind reads at most 201 rows and returns 200 (`row_limit`). The answer lists a full kind in `truncated_sections` and an unreadable kind in `unavailable_sections`. The `system.replicas` read selects only in-memory columns. `log_max_index`, `log_pointer`, `total_replicas`, `active_replicas`, `zookeeper_exception` and `replica_is_active` cost one Keeper request for each table. The route does not select them. The replica counts come from the same cache of 60 s for each server as the catalog (see [Explorer](explorer.md#replication-metadata-and-keeper-load)).
 
@@ -221,7 +221,7 @@ The route names no object. The paths of `system.zookeeper` are not browsable on 
 - A `LIMIT` cannot bound it before ClickHouse issues those requests.
 - The paths themselves (`/clickhouse/tables/<shard>/<table>/...`) name objects that the runner possibly cannot see. These objects are outside the `AllowedObjectSet` boundary.
 
-The backend caches both answers for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). `refresh=1` bypasses the cache. The routes are present while `system.activity` and `system.keeper` are set, respectively. The `/api/explorer/ops/activity` and `/api/explorer/ops/keeper` of v2.14.0 stay as aliases of the same handlers.
+The backend caches both answers for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). After the TTL, and for 10 s more, it sends the previous answer at once (`"stale": true`) while one read runs in the background. `refresh=1` reads again, the runner ACL included. The routes are present while `system.activity` and `system.keeper` are set, respectively. The `/api/explorer/ops/activity` and `/api/explorer/ops/keeper` of v2.14.0 stay as aliases of the same handlers.
 
 ## Queries
 
@@ -329,13 +329,13 @@ The answer has these fields:
 
 - It echoes `errors`, `user`, `database` and `table`.
 - `users`: `{name, calls}` of the users of the window under the same filters, most active first (`limits.user_limit`, 50).
-- `databases` / `tables`: the same, from the `databases` / `tables` arrays of query_log (how many runs involved each). The backend keeps the first 200 of the read when the runner can see them (the SHOW boundary of the System pages, `discover_visible_*`). The answer has 50 at most for each (`limits.object_limit`).
+- `databases` / `tables`: the same, from the `databases` / `tables` arrays of query_log (how many runs involved each). The backend keeps the first 200 of the read when the runner can see them (the runner ACL of the System pages, the AclService). The answer has 50 at most for each (`limits.object_limit`).
 
-A window wider than `query_log_max_lookback_hours` is a 400 `range_too_large`. Every row that the backend counts is a finished or failed initial query (`type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query`). It is never one of the own reads of the System page (`log_comment != 'chdash-system'`). `hide_chdash` (the default) also leaves out the user of the system account. The reads of ChDash on the runner side (health checks, the Catalog) share the user of the runner and stay listed.
+A window wider than `query_log_max_lookback_hours` is a 400 `range_too_large`. Every row that the backend counts is a finished or failed initial query (`type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query`). It is never one of the own reads of the System page (`log_comment != 'chdash-system'`). `hide_chdash` (the default) also leaves out the user of the system account, and every other read that ChDash writes itself (`log_comment` starting with `chdash:`: the Explorer, the formatter, the health checks, the reads of the other pages, on the runner side too). The runs of the Query page (`chdash-run`), the exports (`chdash-export`) and the MCP tools (`chdash-mcp key=...`) are the work of users: they stay listed.
 
 There are two phases, because the text costs several times more than the numbers:
 
-1. The backend reads the narrow columns, grouped by `normalized_query_hash`. It filters them by the errors `HAVING`, orders them by the sort, and uses `LIMIT 50`. The same read gives more items. These are the totals of the window over every shape, its users with their query counts, and its databases and tables with their run counts. They are window functions after the `GROUP BY`: `sumMap(sumMap([user], [1])) OVER ()`, no second read. The read uses `max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'` (past a million shapes, a new shape is not counted).
+1. The backend reads the narrow columns, grouped by `normalized_query_hash`. It filters them by the errors `HAVING`, orders them by the sort, and uses `LIMIT 50`. The same read gives more items. These are the totals of the window over every shape, its users with their query counts, and its databases and tables with their run counts. They are window functions after the `GROUP BY`: `sumMap(sumMap([user], [1])) OVER ()`, no second read. The read uses `max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'` (past a million shapes, a new shape is not counted, and `totals.shapes_capped` is true). The tables of a shape are `groupUniqArrayArray(8)(tables)`: the memory of the aggregation stays bounded.
 2. The backend reads the text of those 50 only: `PREWHERE normalized_query_hash IN (…)`, the `query` of the latest run (4,096 characters), its `normalizeQuery` and its query id.
 
 The answer for a shape is three reads `PREWHERE normalized_query_hash = <hash>`:
@@ -344,7 +344,7 @@ The answer for a shape is three reads `PREWHERE normalized_query_hash = <hash>`:
 - The 20 runs.
 - The text of the latest run (256K characters).
 
-Each SELECT has the System `SETTINGS` with `query_log_max_rows` (50 M) as its read cap, and 15 s (phase 1) or 10 s. The backend caches the answers for 60 s. The cache key has these parts: the minute-aligned window, sort, kind, errors, Hide ChDash, user, database and table. There is one read in flight for each key. `refresh=1` bypasses the cache. The answers carry `phases` (or `reads`: `status`, `rows_read`, `bytes_read`, `elapsed_ms`).
+Each SELECT has the System `SETTINGS` with `query_log_max_rows` (50 M) as its read cap, and 15 s (phase 1) or 10 s. The backend caches the answers for 60 s. The cache key has these parts: the minute-aligned window, sort, kind, errors, Hide ChDash, user, database and table. There is one read in flight for each key. A second request of the same key waits for that read: it does not fail. `refresh=1` asks for a read that starts after the request. A read in progress is waited for first, and every request that asked meanwhile shares the next read. Thus a loop of `refresh=1` never runs two reads of one key at a time. The answers carry `phases` (or `reads`: `status`, `rows_read`, `bytes_read`, `elapsed_ms`).
 
 The degraded states are `status`, and `unavailable_panels` in the shape above:
 
@@ -402,7 +402,7 @@ A forecast reads as a warning under 30 days and as danger under 7.
 
 - `system.disks` (`ORDER BY name LIMIT 201`): name, path, `free_space`, `total_space`. It also reads the columns that this server has of this list: `unreserved_space`, `keep_free_space`, `type`, `object_storage_type`, `cache_path`, `is_read_only`, `is_broken`, `is_encrypted`, `is_remote`. The route detects them with the other capabilities. Absent columns are `null`.
 - `system.storage_policies` (`ORDER BY policy_name, volume_priority LIMIT 501`), the optional columns detected in the same way.
-- `system.parts`: `WHERE active AND database IN (<databases the runner can SHOW>) GROUP BY disk_name, database`.
+- `system.parts`: `WHERE active AND database IN (<databases the runner reads>) GROUP BY disk_name, database`.
   - The read returns bytes, rows, parts and compact parts, largest first, `LIMIT 1001`.
   - It adds the totals of each disk over every visible database as window functions. In this way, a cut list still knows its Others.
   - The route checks each row again against the databases of the runner. The route does not list or count a database that the runner cannot see.

@@ -28,34 +28,6 @@
 namespace chdash {
 namespace {
 
-uint64_t now_ms_analysis() {
-  using namespace std::chrono;
-  return static_cast<uint64_t>(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
-}
-
-std::string analysis_security_key(const std::string& host_id) {
-  return host_id;
-}
-
-
-std::shared_ptr<clickhouse::Client> acquire_analysis_runner(
-    const std::shared_ptr<ClickHouseClientPool>& pool,
-    const std::string& uri,
-    std::string* error) {
-  return pool ? pool->acquire(
-      uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(15),
-      std::chrono::seconds(15),
-      error)
-    : make_client_from_uri(
-      uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(15),
-      std::chrono::seconds(15),
-      error);
-}
-
 std::optional<std::pair<std::string, std::string>> split_qualified_name(std::string value) {
   // system.query_log/system.query_views_log normally use database.table. Keep
   // this parser deliberately conservative: an unparseable system-account name
@@ -654,34 +626,12 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
         "Analysis is available only for queries executed in profiling mode.");
   }
 
-  const uint64_t timestamp = now_ms_analysis();
-  const uint64_t ttl = static_cast<uint64_t>(std::max(0, cfg_.explorer.cache_ttl_ms));
-  const std::string security_key = analysis_security_key(host_id);
-  auto allowed_result = explorer_allowed_cache_.get_or_refresh(
-      security_key, timestamp, ttl, 250,
-      [&](AllowedObjectSet& value, std::string& code, std::string& message) {
-        std::string error;
-        auto runner = acquire_analysis_runner(client_pool_, host->runner_uri, &error);
-        if (!runner) {
-          code = "runner_unavailable";
-          message = error.empty() ? "Cannot connect to the runner context." : error;
-          return false;
-        }
-        try {
-          value = discover_allowed_objects(*runner);
-          return true;
-        } catch (const std::exception& e) {
-          code = "acl_discovery_failed";
-          message = e.what();
-          if (client_pool_) client_pool_->invalidate(runner);
-          return false;
-        }
-      });
-  if (!allowed_result.has_value || !allowed_result.value) {
-    return json_error(
-        res, 503,
-        allowed_result.error_code.empty() ? "acl_unavailable" : allowed_result.error_code,
-        allowed_result.error_message.empty() ? "Unable to determine readable ClickHouse objects." : allowed_result.error_message);
+  // The objects the runner reads (the ACL of its identity, shared with the Explorer and the System pages).
+  std::shared_ptr<const AclTableSet> allowed;
+  try {
+    allowed = acl_.table_set(runner_access(*host));
+  } catch (const AclUnavailable& e) {
+    return json_error(res, 503, e.code == "acl_unavailable" ? "acl_unavailable" : e.code, e.what());
   }
 
   QueryAnalysisOptions options;
@@ -693,7 +643,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   if (!analysis.fatal_error.empty()) {
     return json_error(res, 503, "analysis_collection_failed", analysis.fatal_error);
   }
-  filter_analysis(analysis, *allowed_result.value);
+  filter_analysis(analysis, allowed->allowed);
 
   rapidjson::StringBuffer buffer(nullptr, 4096);
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -843,6 +793,9 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
 
   DeepAnalysisResult deep;
   DeepAnalysisError deep_error;
+  // Deep Analyze replays the SQL of the user: the bounds of a run (the query { } block), not the
+  // deadline of the generated queries. It stops when the browser goes away.
+  ChQueryScope scope(user_sql_limits(req, "chdash-deep-analysis"));
   if (!run_deep_analysis(*record, host->runner_uri, client_pool_, &deep, &deep_error)) {
     return json_error(
         res,

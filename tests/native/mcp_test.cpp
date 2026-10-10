@@ -1,6 +1,8 @@
 // Unit tests of the MCP server side: scopes, keys and their file, the rate limit, the SQL
 // scanner and builder, the protocol (with a fake backend), the tools (with a fake database)
-// and the startup errors of the mcp { } configuration block. No ClickHouse needed.
+// and the startup errors of the mcp { } configuration block. Also the HTTP hardening of the
+// server (http_guard.hpp), the random source, the log lines, the metrics text, the worker group
+// and the stop of the health runner. No ClickHouse needed.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_MCP_TESTS=ON
 //        cmake --build build --target chdash_mcp_test
@@ -8,6 +10,9 @@
 // The Python harness (test_mcp_contract.py) runs it when MCP_TEST_BINARY points at it.
 
 #include "config.hpp"
+#include "health_runner.hpp"
+#include "http_guard.hpp"
+#include "log.hpp"
 #include "mcp_api_tools.hpp"
 #include "mcp_grants.hpp"
 #include "mcp_identity.hpp"
@@ -16,6 +21,9 @@
 #include "mcp_scope.hpp"
 #include "mcp_sql.hpp"
 #include "mcp_tools.hpp"
+#include "metrics.hpp"
+#include "secure_random.hpp"
+#include "worker_group.hpp"
 
 #include <rapidjson/document.h>
 
@@ -23,15 +31,18 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace chdash;
@@ -595,49 +606,23 @@ void test_store_startup_errors(const std::string& dir) {
     CHECK_EQ(read_file(legacy), body);  // nothing to take out: the file is not written
   }
   {
-    // A file of a ChDash that kept the secrets in clear, so that its page could show them again, and of the 2.17
-    // that had an expiry and a switch. The store keeps the hashes only and writes the file again without the
-    // secrets; a key that was switched off or had an expiry (past or future) is not loaded, and is not in the file
-    // any more.
-    const std::string kept = "a11da7a0-0000-4000-8000-0000000000bb";
-    const std::string expired = "e4914ed0-0000-4000-8000-0000000000cc";
-    const std::string later = "1a7e0000-0000-4000-8000-0000000000dd";
-    const std::string off = "0ff00000-0000-4000-8000-0000000000ee";
-    const auto entry = [](const std::string& id, const std::string& name, const std::string& secret, const std::string& extra) {
-      return R"({"id":")" + id + R"(","name":")" + name + R"(","secret_sha256":")" + mcp_hash_hex(mcp_hash_secret(secret)) +
-             R"(","secret":")" + secret + R"(","secret_hint":")" + secret.substr(0, 12) + R"(","hosts":["prod"],"tools":["*"],"databases":["*"])" +
-             extra + "}";
-    };
-    const std::string body = R"({"version":1,"keys":[)" + entry("ui_00000000000a", "kept", kept, "") + "," +
-                             entry("ui_00000000000b", "expired", expired, R"(,"expires_at":"2020-01-01T00:00:00Z")") + "," +
-                             entry("ui_00000000000c", "later", later, R"(,"expires_at":"2099-01-01T00:00:00Z")") + "," +
-                             entry("ui_00000000000d", "off", off, R"(,"enabled":false)") + "]}";
+    // A key file that holds a secret in clear is not a file of this ChDash (it stores the hash only): the start is
+    // refused, with a message that names the key and does not repeat the secret.
+    const std::string secret = "a11da7a0-0000-4000-8000-0000000000bb";
+    const std::string body = R"({"version":1,"keys":[{"id":"ui_00000000000a","name":"kept","secret_sha256":")" + mcp_hash_hex(mcp_hash_secret(secret)) +
+                             R"(","secret":")" + secret + R"(","secret_hint":"a11da7a0","hosts":["prod"],"tools":["*"],"databases":["*"]}]})";
     const std::string old = dir + "/clear.json";
     write_file(old, body);
-    McpKeyFileNotes notes;
-    const auto parsed = mcp_parse_key_file(body, &notes);
-    CHECK_EQ(parsed.size(), size_t(1));
-    CHECK_EQ(notes.clear_secrets, size_t(4));
-    CHECK_EQ(notes.dropped.size(), size_t(3));
     McpStoreOptions o = store_options(old);
     o.config_keys.clear();
-    o.manage_from_ui = false;  // the file is ours to clean, whoever manages the keys
-    McpKeyStore store(o);
-    CHECK_EQ(store.list().size(), size_t(1));
-    CHECK_EQ(store.list()[0].key.name, std::string("kept"));
-    CHECK_EQ(store.list()[0].key.secret_hint, kept.substr(0, 8));  // the hint at the length the page shows
-    CHECK(store.authenticate(kept, now).status == McpKeyStore::AuthStatus::Ok);
-    for (const auto& gone : {expired, later, off}) CHECK(store.authenticate(gone, now).status == McpKeyStore::AuthStatus::Unknown);
-    const std::string text = read_file(old);
-    for (const auto& secret : {kept, expired, later, off}) CHECK(!contains(text, secret.substr(9)));
-    CHECK(!contains(text, "\"secret\""));
-    CHECK(!contains(text, "expires_at"));
-    CHECK_EQ(parse(text)["keys"].Size(), 1u);
-    CHECK(contains(text, mcp_hash_hex(mcp_hash_secret(kept))));
-    // The next start reads the clean file as it is.
-    McpKeyStore again(o);
-    CHECK(again.authenticate(kept, now).status == McpKeyStore::AuthStatus::Ok);
-    CHECK_EQ(read_file(old), text);
+    threw = false;
+    try {
+      McpKeyStore store(o);
+    } catch (const std::exception& e) {
+      threw = contains(e.what(), "secret in clear") && !contains(e.what(), secret);
+    }
+    CHECK(threw);
+    CHECK_EQ(read_file(old), body);  // never rewritten
   }
 }
 
@@ -2414,6 +2399,221 @@ void test_grants(const std::string& dir) {
   CHECK_EQ(again.list().size(), size_t(1));
 }
 
+// ---- server hardening --------------------------------------------------------------------------
+
+namespace {
+
+httplib::Request request_with(std::initializer_list<std::pair<const char*, const char*>> headers, const char* method = "POST") {
+  httplib::Request req;
+  req.method = method;
+  for (const auto& [name, value] : headers) req.headers.emplace(name, value);
+  return req;
+}
+
+void test_random_identifiers() {
+  std::set<std::string> seen;
+  for (int i = 0; i < 2000; ++i) {
+    const std::string id = random_uuid_v4();
+    CHECK_EQ(id.size(), size_t{36});
+    CHECK(id[8] == '-' && id[13] == '-' && id[18] == '-' && id[23] == '-');
+    CHECK(id[14] == '4');
+    CHECK(id[19] == '8' || id[19] == '9' || id[19] == 'a' || id[19] == 'b');
+    CHECK(mcp_valid_secret(id));
+    seen.insert(id);
+  }
+  CHECK_EQ(seen.size(), size_t{2000});
+  const std::string hex = random_hex(16);
+  CHECK_EQ(hex.size(), size_t{32});
+  CHECK(hex.find_first_not_of("0123456789abcdef") == std::string::npos);
+  CHECK(random_hex(8) != random_hex(8));
+  CHECK_EQ(secure_random_bytes(0).size(), size_t{0});
+  CHECK_EQ(secure_random_bytes(64).size(), size_t{64});
+}
+
+void test_browser_write_guard() {
+  // No browser headers (a CLI, a script, the MCP API tools): accepted.
+  CHECK(!is_cross_site_request(request_with({})));
+  CHECK(!check_browser_write(request_with({{"Content-Type", "application/json"}, {"Content-Length", "2"}})));
+  // The browser says where the request comes from.
+  CHECK(!is_cross_site_request(request_with({{"Sec-Fetch-Site", "same-origin"}})));
+  CHECK(!is_cross_site_request(request_with({{"Sec-Fetch-Site", " None "}})));
+  CHECK(is_cross_site_request(request_with({{"Sec-Fetch-Site", "cross-site"}})));
+  CHECK(is_cross_site_request(request_with({{"Sec-Fetch-Site", "same-site"}})));
+  // Sec-Fetch-Site wins over Origin.
+  CHECK(!is_cross_site_request(request_with({{"Sec-Fetch-Site", "same-origin"}, {"Origin", "https://evil.example"}, {"Host", "dash:8080"}})));
+  // Without it, Origin must name this server (Host, or the first X-Forwarded-Host).
+  CHECK(!is_cross_site_request(request_with({{"Origin", "http://Dash:8080"}, {"Host", "dash:8080"}})));
+  CHECK(!is_cross_site_request(request_with({{"Origin", "https://dash.example.com"}, {"Host", "chdash:8080"},
+                                             {"X-Forwarded-Host", "dash.example.com, proxy.local"}})));
+  CHECK(is_cross_site_request(request_with({{"Origin", "https://evil.example"}, {"Host", "dash:8080"}})));
+  CHECK(is_cross_site_request(request_with({{"Origin", "null"}, {"Host", "dash:8080"}})));
+  CHECK(is_cross_site_request(request_with({{"Origin", "https://evil.example"}, {"Host", "dash:8080"}, {"X-Forwarded-Host", ""}})));
+  // A body must be application/json (a page of another site cannot send it without a preflight).
+  auto refusal = check_browser_write(request_with({{"Content-Type", "text/plain"}, {"Content-Length", "10"}}));
+  CHECK(refusal && refusal->status == 415 && std::string(refusal->code) == "unsupported_media_type");
+  refusal = check_browser_write(request_with({{"Content-Length", "10"}}));
+  CHECK(refusal && refusal->status == 415);
+  refusal = check_browser_write(request_with({{"Content-Type", "application/x-www-form-urlencoded"}, {"Transfer-Encoding", "chunked"}}));
+  CHECK(refusal && refusal->status == 415);
+  CHECK(!check_browser_write(request_with({{"Content-Type", "Application/JSON; charset=utf-8"}, {"Content-Length", "10"}})));
+  // No body (a DELETE, an empty POST): no media type needed.
+  CHECK(!check_browser_write(request_with({{"Content-Length", "0"}}, "DELETE")));
+  CHECK(!check_browser_write(request_with({}, "DELETE")));
+  refusal = check_browser_write(request_with({{"Sec-Fetch-Site", "cross-site"}, {"Content-Type", "application/json"}}));
+  CHECK(refusal && refusal->status == 403 && std::string(refusal->code) == "cross_site_request");
+}
+
+void test_page_policy() {
+  const std::string html =
+      "<html><head><script>alert(1)</script>\n"
+      "<script type=\"application/json\" id=\"chdashModules\">{\"a\":1}</script>\n"
+      "<script src=\"static/app.js\"></script>\n"
+      "<SCRIPT type='text/javascript'>\n  var a = 1;\n</SCRIPT>\n"
+      "<scripts>not a script</scripts>\n"
+      "</head></html>";
+  const std::string policy = page_content_security_policy(html);
+  CHECK(contains(policy, "script-src 'self' 'wasm-unsafe-eval' 'sha256-bhHHL3z2vDgxUt0W3dWQOrprscmda2Y5pLsLg4GF+pI=' "
+                         "'sha256-wYD6gJuOAPxlJHFvhr2Zk0r9F+gmt8nwaf1uW8o5LTY=';"));
+  CHECK(contains(policy, "frame-ancestors 'none'"));
+  CHECK(contains(policy, "object-src 'none'"));
+  CHECK(!contains(policy, "'unsafe-eval'"));
+  CHECK(!contains(policy, "'unsafe-inline'; img-src") || contains(policy, "style-src 'self' 'unsafe-inline'"));
+  // A page without an inline script gets the base policy.
+  CHECK_EQ(page_content_security_policy("<p>x</p>"), std::string(kContentSecurityPolicy));
+  // An unterminated script is not hashed.
+  CHECK_EQ(page_content_security_policy("<script>x"), std::string(kContentSecurityPolicy));
+  bool frame = false, sniff = false, referrer = false, policy_header = false;
+  for (const auto& [name, value] : security_headers()) {
+    frame = frame || (name == "X-Frame-Options" && value == "DENY");
+    sniff = sniff || (name == "X-Content-Type-Options" && value == "nosniff");
+    referrer = referrer || (name == "Referrer-Policy" && value == "same-origin");
+    policy_header = policy_header || (name == "Content-Security-Policy" && value == kContentSecurityPolicy);
+  }
+  CHECK(frame && sniff && referrer && policy_header);
+}
+
+void test_asset_versions() {
+  const std::string hash = "b9b85fc46d65b05c6e74a09fb7f1f1f0d3c23e4e83bcf36c2f5c3d48ef7d11ab";
+  CHECK(asset_version_matches("b9b85fc46d", hash));
+  CHECK(asset_version_matches("b9b85fc46d65", hash));
+  CHECK(asset_version_matches(hash, hash));
+  CHECK(!asset_version_matches("b9b85fc4", "c" + hash.substr(1)));
+  CHECK(!asset_version_matches("b9b85fc", hash));     // too short to name a version
+  CHECK(!asset_version_matches("B9B85FC46D", hash));  // lower case only
+  CHECK(!asset_version_matches("anything", hash));
+  CHECK(!asset_version_matches("", hash));
+  CHECK(!asset_version_matches(hash + "00", hash));
+}
+
+void test_request_ids() {
+  CHECK_EQ(request_id_for(request_with({{"X-Request-Id", "abc-123:x.y_z"}})), std::string("abc-123:x.y_z"));
+  const std::string fresh = request_id_for(request_with({{"X-Request-Id", "bad id\n"}}));
+  CHECK_EQ(fresh.size(), size_t{16});
+  CHECK(request_id_for(request_with({})) != fresh);
+  const std::string long_id(129, 'a');
+  httplib::Request req;
+  req.headers.emplace("X-Request-Id", long_id);
+  CHECK_EQ(request_id_for(req).size(), size_t{16});
+}
+
+void test_log_lines() {
+  const std::string line = format_log_line(LogLevel::Warn, "health.host_down",
+      {{"host", "local"}, {"error", std::string("a \"quoted\"\nline")}, {"ping_ms", int64_t{-1}}, {"rows", uint64_t{3}},
+       {"ok", false}, {"ms", 1.5}, {"nan", std::numeric_limits<double>::quiet_NaN()}}, 1789171200123);
+  CHECK(!line.empty() && line.back() == '\n');
+  CHECK(line.find('\n') == line.size() - 1);  // one line, whatever the values hold
+  const auto doc = parse(line.substr(0, line.size() - 1));
+  CHECK_EQ(std::string(doc["ts"].GetString()), std::string("2026-09-12T00:00:00.123Z"));
+  CHECK_EQ(std::string(doc["level"].GetString()), std::string("warn"));
+  CHECK_EQ(std::string(doc["event"].GetString()), std::string("health.host_down"));
+  CHECK_EQ(std::string(doc["error"].GetString()), std::string("a \"quoted\"\nline"));
+  CHECK_EQ(doc["ping_ms"].GetInt64(), int64_t{-1});
+  CHECK_EQ(doc["rows"].GetUint64(), uint64_t{3});
+  CHECK(doc["ok"].IsFalse());
+  CHECK(doc["ms"].GetDouble() == 1.5);
+  CHECK(doc["nan"].IsNull());
+}
+
+void test_metrics_text() {
+  std::string out;
+  prom_sample(out, "chdash_x", {{"route", "/a\\\"b\n"}, {"code", "200"}}, 2);
+  CHECK_EQ(out, std::string("chdash_x{route=\"/a\\\\\\\"b\\n\",code=\"200\"} 2\n"));
+  out.clear();
+  prom_sample(out, "chdash_y", {}, 0.25);
+  CHECK_EQ(out, std::string("chdash_y 0.25\n"));
+  HttpMetrics metrics;
+  metrics.request_started();
+  metrics.request_started();
+  CHECK_EQ(metrics.in_flight(), int64_t{2});
+  metrics.request_answered("GET", "/api/hosts", 200, 0.003, true);
+  metrics.request_answered("GET", "/api/hosts", 503, 0.3, true);
+  metrics.request_answered("GET", "", 400, 0.0, false);
+  CHECK_EQ(metrics.in_flight(), int64_t{0});
+  out.clear();
+  metrics.write(out);
+  CHECK(contains(out, "chdash_http_requests_total{method=\"GET\",route=\"/api/hosts\",code=\"200\"} 1\n"));
+  CHECK(contains(out, "chdash_http_requests_total{method=\"GET\",route=\"/api/hosts\",code=\"503\"} 1\n"));
+  CHECK(contains(out, "chdash_http_requests_total{method=\"GET\",route=\"-\",code=\"400\"} 1\n"));
+  // Buckets are cumulative: 0.003 s in every bucket, 0.3 s from 0.5 s on.
+  CHECK(contains(out, "chdash_http_request_duration_seconds_bucket{method=\"GET\",route=\"/api/hosts\",le=\"0.005\"} 1\n"));
+  CHECK(contains(out, "chdash_http_request_duration_seconds_bucket{method=\"GET\",route=\"/api/hosts\",le=\"0.5\"} 2\n"));
+  CHECK(contains(out, "chdash_http_request_duration_seconds_bucket{method=\"GET\",route=\"/api/hosts\",le=\"+Inf\"} 2\n"));
+  CHECK(contains(out, "chdash_http_request_duration_seconds_count{method=\"GET\",route=\"/api/hosts\"} 2\n"));
+  CHECK(contains(out, "# TYPE chdash_http_request_duration_seconds histogram\n"));
+}
+
+void test_worker_group() {
+  WorkerGroup group;
+  CHECK(group.enter());
+  CHECK(group.enter());
+  CHECK_EQ(group.active(), size_t{2});
+  std::thread late([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    group.leave();
+    group.leave();
+  });
+  CHECK(group.close_and_wait(std::chrono::milliseconds(5000)));
+  late.join();
+  CHECK_EQ(group.active(), size_t{0});
+  CHECK(!group.enter());  // closed: no thread starts any more
+  WorkerGroup stuck;
+  CHECK(stuck.enter());
+  CHECK(!stuck.close_and_wait(std::chrono::milliseconds(20)));
+}
+
+// The health runner ends at once on stop(): a sleeping ping thread (the longest interval) and the audit thread wake up,
+// and one ping thread for each host means two hosts that refuse the connection are both checked in one interval.
+void test_health_runner_stops_at_once() {
+  HostSpec host;
+  host.id = "unreachable";
+  host.label = "unreachable";
+  host.runner_uri = "clickhouse://nobody@127.0.0.1:1";
+  host.system_uri = host.runner_uri;
+  HostSpec other = host;
+  other.id = "other";
+  HealthSettings settings;
+  settings.interval_ms = 600 * 1000;
+  settings.timeout_ms = 100;
+  HealthRunner runner({host, other}, settings);
+  runner.start();
+  const auto checked = [&] {
+    const auto snapshot = runner.snapshot();
+    return std::all_of(snapshot.hosts.begin(), snapshot.hosts.end(), [](const HostHealth& h) { return h.checked_at_ms > 0; });
+  };
+  for (int i = 0; i < 50 && !checked(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  CHECK(checked());
+  CHECK(!runner.all_healthy());
+  CHECK_EQ(runner.healthy_count(), size_t{0});
+  CHECK(!runner.snapshot().hosts.front().error.empty());
+  // Down hosts are retried every second; a stop during the wait ends both threads at once.
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  const auto started = std::chrono::steady_clock::now();
+  runner.stop();
+  CHECK(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(1500));
+}
+
+} // namespace
+
 int main() {
   const std::string dir = make_temp_dir();
   test_scope();
@@ -2434,6 +2634,15 @@ int main() {
   test_config(dir);
   test_observability_config(dir);
   test_grants(make_temp_dir());
+  test_random_identifiers();
+  test_browser_write_guard();
+  test_page_policy();
+  test_asset_versions();
+  test_request_ids();
+  test_log_lines();
+  test_metrics_text();
+  test_worker_group();
+  test_health_runner_stops_at_once();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

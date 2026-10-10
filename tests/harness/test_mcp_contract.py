@@ -97,7 +97,10 @@ def test_keys_are_hashed_compared_in_constant_time_and_written_atomically() -> N
     keys = read("src/mcp_keys.cpp")
     assert "constant_time_equal(" in keys
     assert "atomic_write_file(" in keys  # temporary file, fsync, rename, mode 0600
-    assert "getrandom" in keys and "/dev/urandom" in keys
+    # The random source of the secrets: the system CSPRNG (secure_random.cpp), never a seeded generator.
+    random = read("src/secure_random.cpp")
+    assert "getrandom" in random and "/dev/urandom" in random
+    assert '#include "secure_random.hpp"' in keys and "mt19937" not in keys and "random_device" not in keys
     serialize = block_after(keys, "std::string mcp_serialize_key_file(const std::vector<McpKey>& ui_keys) {")
     assert '"secret_sha256"' in serialize and '"secret_hint"' in serialize
     # The store keeps the hash and the hint, never the secret (SEC-009): the key has no field for it, the file
@@ -108,17 +111,19 @@ def test_keys_are_hashed_compared_in_constant_time_and_written_atomically() -> N
     # (Its mask, the shape of a UUID with the hint in clear, is not the secret.)
     assert 'w.Key("secret")' not in listing and "secret_available" not in listing
     assert 'w.Key("secret_mask"); write_string(w, mcp_secret_mask(key.secret_hint));' in listing
-    # A file of an older ChDash with secrets in clear is written again without them at start.
-    assert "notes.clear_secrets" in keys and "write_file(keys_, &error)" in keys
+    # A file with a secret in clear is refused, never rewritten.
+    assert "holds a secret in clear" in keys and "KeyFileNotes" not in keys
     # Name and secret uniqueness, across the two sources.
     assert "have the same secret" in keys and "two keys have the name" in keys
     # The key file is never rewritten when it is invalid: loading throws and the store never starts.
-    assert "mcp_load_key_file(options_.storage_file, &notes)" in keys
+    assert "mcp_load_key_file(options_.storage_file)" in keys
     keys_h = read("src/mcp_keys.hpp")
     assert "kMcpSecretBytes = 36" in keys_h and "kMcpNameMaxBytes = 32" in keys_h
     # A page key's secret is a version 4 UUID from the system random source.
     generate = block_after(keys, "std::string mcp_generate_secret() {")
-    assert "random_fill(bytes, sizeof(bytes))" in generate and "0x40" in generate and "0x80" in generate
+    assert "return random_uuid_v4();" in generate
+    uuid = block_after(random, "std::string random_uuid_v4() {")
+    assert "secure_random_bytes(bytes, sizeof(bytes));" in uuid and "0x40" in uuid and "0x80" in uuid
 
 
 def test_sql_tools_need_all_data_in_every_layer() -> None:
@@ -165,7 +170,11 @@ def test_api_contract_codes() -> None:
         assert f'"{code}"' in store, code
     assert 'w.Key("endpoint_path"); w.String("/mcp")' in api
     assert "kMcpNamePattern" in api and "mcp_valid_secret" in read("src/config.cpp")
-    assert 'Sec-Fetch-Site' in api and "X-Forwarded-Host" in api
+    # The key routes that show a secret or what a key reaches answer the ChDash page only; every write passes the guard of
+    # the writes of the server first (http_guard.cpp: Sec-Fetch-Site, Origin against Host / X-Forwarded-Host, JSON body).
+    assert "if (!allow_from_page(req, res)) return;" in api and "is_cross_site_request(req)" in api
+    guard = read("src/http_guard.cpp")
+    assert 'Sec-Fetch-Site' in guard and "X-Forwarded-Host" in guard
     assert 'set_no_store(res);' in api
     assert 'features.mcp' not in api  # reported by /api/version only
     version = read("src/server.cpp")

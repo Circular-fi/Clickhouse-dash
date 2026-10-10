@@ -21,6 +21,7 @@ FROM toolchain AS deps
 COPY src/CMakeLists.txt /work/src/
 COPY src/EmbedStatic.cmake /work/src/
 COPY src/BuildFlags.cmake /work/src/
+COPY src/PatchRapidJSON.cmake /work/src/
 
 RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
@@ -38,6 +39,7 @@ COPY --from=deps /work/build /work/build
 COPY src/CMakeLists.txt /work/src/
 COPY src/EmbedStatic.cmake /work/src/
 COPY src/BuildFlags.cmake /work/src/
+COPY src/PatchRapidJSON.cmake /work/src/
 COPY src/*.cpp /work/src/
 COPY src/*.hpp /work/src/
 
@@ -84,5 +86,7 @@ COPY --from=wasm /work/src/static/wasm /app/static/wasm
 COPY tests/entrypoints/source-entrypoint.sh /usr/local/bin/chdash-source-entrypoint
 RUN chmod +x /usr/local/bin/chdash-source-entrypoint
 EXPOSE 8080
-HEALTHCHECK --interval=5s --timeout=1s --start-period=5s --retries=1 CMD ["/usr/local/bin/chdash-source-entrypoint", "--health"]
+# Liveness only (GET /livez, docs/operations.md "Health probes"): a ClickHouse host that is down never makes the
+# container unhealthy, and three misses in a row are needed.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD ["/usr/local/bin/chdash-source-entrypoint", "--health"]
 ENTRYPOINT ["/usr/local/bin/chdash-source-entrypoint"]

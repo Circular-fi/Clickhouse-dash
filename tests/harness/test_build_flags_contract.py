@@ -44,7 +44,6 @@ def test_warning_flags_live_in_one_file_and_apply_to_our_targets_only() -> None:
 def test_werror_is_off_for_the_release_and_on_for_the_test_image() -> None:
     release = read(".github/workflows/release.yaml")
     assert "CHDASH_WERROR" not in release
-    assert "src/BuildFlags.cmake" in release  # part of the FetchContent cache key
     docker = read("tests/Dockerfile.source")
     assert "ARG SOURCE_WERROR=ON" in docker
     assert "-DCHDASH_WERROR=${SOURCE_WERROR}" in docker
@@ -63,7 +62,28 @@ def test_sanitizer_option_covers_the_dependencies_with_asan_and_our_targets_with
     assert "add_link_options(-fsanitize=address)" in flags
     assert "add_compile_options(-fsanitize=undefined" not in flags
     assert "target_link_options(${_target} PRIVATE ${CHDASH_SANITIZER_LINK_FLAGS})" in flags
-    assert "(address|undefined)" in flags
+    assert "(address|undefined|thread)" in flags
+
+
+def test_thread_sanitizer_is_global_and_cannot_join_address_sanitizer() -> None:
+    flags = read("src/BuildFlags.cmake")
+    # A race shows only when both sides are instrumented: the dependencies get ThreadSanitizer too.
+    assert "add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g1)" in flags
+    assert "add_link_options(-fsanitize=thread)" in flags
+    assert "thread cannot be combined with address" in flags
+
+
+def test_release_hardening_flags_are_on_by_default_and_off_with_sanitizers() -> None:
+    flags = read("src/BuildFlags.cmake")
+    assert 'set(CHDASH_HARDEN ${_chdash_harden_default} CACHE BOOL' in flags
+    assert "if (CHDASH_SANITIZE)\n  set(_chdash_harden_default OFF)" in flags
+    for flag in ("-fstack-protector-strong", "-fstack-clash-protection", "-ftrivial-auto-var-init=zero"):
+        assert flag in flags, flag
+    # Each flag is tested before use: Zig's clang, Apple clang and GCC differ.
+    assert "check_cxx_compiler_flag(${_flag} ${_var})" in flags
+    assert "-D_FORTIFY_SOURCE=3" in flags and "$<CONFIG:Release,RelWithDebInfo,MinSizeRel>" in flags
+    assert "-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST" in flags
+    assert "add_compile_definitions(_GLIBCXX_ASSERTIONS)" in flags
 
 
 def test_dangling_capture_check_flags_the_v2_16_3_pattern(tmp_path: Path) -> None:

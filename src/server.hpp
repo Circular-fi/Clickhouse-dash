@@ -1,5 +1,6 @@
 #pragma once
 
+#include "acl_service.hpp"
 #include "ch_client_pool.hpp"
 #include "format_cache.hpp"
 #include "allowed_objects.hpp"
@@ -8,20 +9,27 @@
 #include "system_monitor.hpp"
 #include "system_activity.hpp"
 #include "export_job.hpp"
+#include "facet_limits.hpp"
 #include "health_runner.hpp"
 #include "jwt.hpp"
+#include "metrics.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_tools.hpp"
 #include "otel_settings.hpp"
 #include "query_library.hpp"
 #include "query_session.hpp"
 #include "query_registry.hpp"
-#include "stale_cache.hpp"
+#include "cache_sizes.hpp"
+#include "ttl_cache.hpp"
+#include "worker_group.hpp"
 
 #include <httplib.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -41,6 +49,9 @@ struct ExplorerSettings {
   bool graph_enabled() const { return lineage || storage_topology; }
   bool enabled() const { return browse || graph_enabled(); }
   int cache_ttl_ms = 5000;
+  // What the runner of a host may read (CHECK GRANT discovery) is kept this long, then served while one refresh runs
+  // for as long again. refresh=1 reads it again at once.
+  int acl_cache_ttl_ms = 60 * 1000;
   int live_refresh_ms = 2000;
   int function_cache_ttl_ms = 60 * 60 * 1000;
   // Markdown links in ClickHouse function documentation are disabled by
@@ -129,6 +140,11 @@ struct AnalysisSettings {
 };
 
 struct ExportSettings {
+  // The ClickHouse bounds of each exported statement; 0 = the settings profile of the runner.
+  int64_t max_execution_time_s = 0;
+  uint64_t max_memory_usage = 0;
+  // A statement that sends nothing (no data, no progress) for this long fails; 0 = no limit.
+  int receive_timeout_ms = 10 * 60 * 1000;
   size_t max_concurrent = 1;
   size_t output_buffer_bytes = 256 * 1024;
   std::string archive_format = "zip";
@@ -149,6 +165,27 @@ struct ServerLimits {
   size_t max_queued_requests = 1024;
   size_t max_body_bytes = 0;        // largest request body; 0 = from query.max_sql_bytes and the query library
   size_t max_host_streams = 64;     // open host status streams (one per visible page); past it, pages poll
+  // How long one write of a response may wait for a client that does not read (a paused download,
+  // a slow disk). Past it, the response ends; for an export or a run, that cancels it.
+  int write_timeout_ms = 120 * 1000;
+  // A stop (SIGTERM, SIGINT) drains the server for at most this long (docs/operations.md, "Shutdown"); past it the
+  // process exits with status 1.
+  int shutdown_timeout_ms = 10 * 1000;
+  // GET /metrics, the Prometheus text format (docs/operations.md, "Metrics").
+  bool metrics = true;
+  // One log line for each request (docs/operations.md, "Logs"); the probes that succeed are left out.
+  bool access_log = true;
+  // A "server.stats" log line this often; 0 = never.
+  int stats_log_interval_ms = 5 * 60 * 1000;
+};
+
+// The bounds of the queries that ChDash writes itself, for every page but the Run of the Query page
+// and the export (the generated_queries { } block). Each statement of a request gets
+// max_execution_time = what remains of timeout_ms, and max_memory_usage; neither is ever looser than
+// the settings profile of the ClickHouse user (ch_query.hpp).
+struct GeneratedQuerySettings {
+  int timeout_ms = 60 * 1000;
+  uint64_t max_memory_usage = uint64_t{4} * 1024 * 1024 * 1024;  // 0 = the settings profile
 };
 
 struct AppConfig {
@@ -181,6 +218,12 @@ struct AppConfig {
   int client_pool_idle_ttl_ms = 60 * 1000;
   int client_pool_validate_after_idle_ms = 15 * 1000;
   int client_pool_reaper_interval_ms = 5 * 1000;
+  // The connections lent at once for one ClickHouse URI (0 = no limit), and how long
+  // a request waits for one before it fails with pool_exhausted.
+  size_t client_pool_max_leased_per_uri = 128;
+  int client_pool_lease_wait_ms = 5 * 1000;
+
+  GeneratedQuerySettings generated_queries;
 
   // SQL formatting is frequently triggered repeatedly by editor actions. Cache
   // deterministic results to avoid a ClickHouse round trip and formatter pass.
@@ -261,16 +304,42 @@ public:
   Server& operator=(const Server&) = delete;
 
   int run();
-  // Makes run() return (any thread). Used by the shutdown hook of the sanitizer builds.
+  // Stops the server (any thread; main.cpp calls it on SIGTERM or SIGINT; docs/operations.md, "Shutdown"): the
+  // readiness probe answers 503, a new run, export or stream answers 503 server_stopping, the running queries are
+  // cancelled (KILL QUERY) and their streams end with an error event server_stopping, and the listening socket
+  // closes. run() returns once the requests in progress have ended; the destructor then waits for the query
+  // threads, at most server.shutdown_timeout_ms from the stop.
   void stop();
-  bool health_check(std::string* error_message = nullptr);
+  bool stopping() const { return stopping_.load(std::memory_order_acquire); }
+
+  // A function that stop() calls (an export cancels its ClickHouse query with it). Returns its id for
+  // remove_stop_hook; a hook added once the server stops runs at once.
+  uint64_t add_stop_hook(std::function<void()> hook);
+  void remove_stop_hook(uint64_t id);
 
 private:
+  // The hooks of every request (server_http.cpp): the request id, the refusals of a stopping server and the guard of
+  // the writes before the routing; the access log and the metrics after it; the JSON answer of an exception.
+  void install_http_hooks();
+  httplib::Server::HandlerResponse before_routing(const httplib::Request& req, httplib::Response& res);
+  void after_routing(const httplib::Request& req, httplib::Response& res);
+  void handle_livez(const httplib::Request& req, httplib::Response& res);
+  void handle_readyz(const httplib::Request& req, httplib::Response& res);
+  void handle_metrics(const httplib::Request& req, httplib::Response& res);
+  void log_stats();
+
   void handle_healthz(const httplib::Request& req, httplib::Response& res);
   void handle_api_version(const httplib::Request& req, httplib::Response& res);
   // /explorer/_monitoring[/<section>] and /explorer/_operations: a 302 to the
   // matching System address (relative, so a reverse-proxy prefix stays).
   void redirect_to_system(const httplib::Request& req, httplib::Response& res);
+  // The query scope of a request of the pages (ch_query.hpp): log_comment "chdash:<path>" ("chdash-system"
+  // for the System page), the deadline generated_queries.timeout_ms, generated_queries.max_memory_usage,
+  // and "canceled" when the client closed the connection. `with_deadline` false: no deadline (MCP).
+  ChQueryLimits request_limits(const httplib::Request& req, bool with_deadline = true) const;
+  // The bounds of user SQL outside of the Query page run (Deep Analyze): the ones of the query { } block.
+  ChQueryLimits user_sql_limits(const httplib::Request& req, std::string log_comment) const;
+
   void handle_api_meta(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts(const httplib::Request& req, httplib::Response& res);
   void handle_api_hosts_stream(const httplib::Request& req, httplib::Response& res);
@@ -306,7 +375,7 @@ private:
   void handle_system_disks(const httplib::Request& req, httplib::Response& res);
   void system_monitor_disk_growth(const httplib::Request& req, httplib::Response& res, const HostSpec& host,
                                     const std::string& system_uri, const std::shared_ptr<const MonitorCapabilities>& caps,
-                                    const MonitorSeriesWindow& window, uint64_t from_ms, uint64_t to_ms, uint64_t now_ms);
+                                    const MonitorSeriesWindow& window, uint64_t from_ms, uint64_t to_ms);
   bool system_monitor_queries_window(const httplib::Request& req, httplib::Response& res, uint64_t now_ms,
                                        uint64_t& from_ms, uint64_t& to_ms);
   std::shared_ptr<const MonitorCapabilities> system_monitor_capabilities(const std::string& host_id, const std::string& system_uri);
@@ -398,39 +467,6 @@ private:
     std::vector<MetaCatalogItem> items;
   };
 
-  StaleCache<std::string, MetaKeywords> meta_keywords_cache_;
-  StaleCache<std::string, MetaFunctions> meta_functions_cache_;
-  StaleCache<std::string, MetaCatalog> meta_catalog_cache_;
-  StaleCache<std::string, AllowedObjectSet> explorer_allowed_cache_;
-  // Browse uses a tiny identity-only catalog. Rich summaries are loaded only
-  // when a table is opened or Graph explicitly needs them.
-  StaleCache<std::string, ExplorerCatalog> explorer_catalog_list_cache_;
-  StaleCache<std::string, ExplorerCatalog> explorer_catalog_cache_;
-  // Per-table detail is request-driven and expires after 30s. There is no
-  // periodic refresh: stale entries are refreshed only when requested again.
-  StaleCache<std::string, ExplorerTableDetail> explorer_table_detail_cache_;
-  StaleCache<std::string, ExplorerGraph> explorer_graph_cache_;
-  StaleCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_;
-  // Server-wide storage distribution for the Explorer System section.
-  StaleCache<std::string, ExplorerStorageMap> explorer_storage_cache_;
-  // Server operations view: short-lived snapshots shared by every viewer of
-  // a host, so an auto-refreshing page costs one read per TTL, not per tab.
-  StaleCache<std::string, SystemActivity> system_activity_cache_;
-  StaleCache<std::string, SystemKeeperStatus> system_keeper_cache_;
-  // Monitoring: what each host exposes (10 min), and the Overview snapshot
-  // (the operations TTL), shared by every viewer of a host.
-  StaleCache<std::string, MonitorCapabilities> system_monitor_caps_cache_;
-  StaleCache<std::string, SystemMonitorOverview> system_monitor_overview_cache_;
-  // Performance: 15 s per host and aligned window (the step-aligned
-  // from / to), so relative windows refreshed within a step share one read.
-  StaleCache<std::string, SystemMonitorSeries> system_monitor_series_cache_;
-  // Queries: 60 s per host, minute-aligned window and allowlisted choice
-  // (one read in flight per key); a drill-down per shape the same way.
-  StaleCache<std::string, SystemMonitorQueries> system_monitor_queries_cache_;
-  StaleCache<std::string, SystemMonitorQuery> system_monitor_query_cache_;
-  // Disks: 60 s per host; their growth 5 min per host and aligned window.
-  StaleCache<std::string, SystemMonitorDisks> system_monitor_disks_cache_;
-  StaleCache<std::string, SystemMonitorDiskGrowth> system_monitor_growth_cache_;
   // Trace service/operation prefill. The browser re-requests it on every
   // time-range change and page load; each miss scans every span of the window
   // (seconds on wide windows), so identical minute-aligned ranges share one
@@ -446,7 +482,45 @@ private:
     int64_t start_ms = 0;
     int64_t end_ms = 0;
   };
-  StaleCache<std::string, TracePrefill> trace_prefill_cache_;
+  // Attribute facets of the Traces and Logs search pages (api_traces.cpp, api_logs.cpp): the most frequent keys of a
+  // sample, and the top values of one key. A value keeps kFacetMaxKeys + 1 keys at most.
+  struct TraceFacetKeys {
+    struct Key { std::string scope, key; uint64_t count = 0; };
+    std::vector<Key> keys;
+    uint64_t sampled_spans = 0;
+    bool estimated = false;
+    bool timed_out = false;
+    uint64_t query_ms = 0;
+  };
+  struct TraceFacetValues {
+    std::vector<std::pair<std::string, uint64_t>> values;
+    uint64_t spans_with_key = 0;
+    uint64_t distinct_values = 0;
+    bool estimated = false;
+    bool timed_out = false;
+    uint64_t query_ms = 0;
+  };
+  struct LogFacetKeys {
+    struct Key { std::string scope, key; uint64_t count = 0; };
+    std::vector<Key> keys;
+    uint64_t sampled = 0;
+    bool estimated = false;
+    bool timed_out = false;
+    uint64_t query_ms = 0;
+  };
+  // The serialized catalog of the Metrics page (api_metrics.cpp), and the time its read took.
+  struct MetricsCatalogAnswer {
+    std::string body;
+    int64_t query_ms = 0;
+  };
+  struct LogFacetValues {
+    std::vector<std::pair<std::string, uint64_t>> values;
+    uint64_t with_key = 0;
+    uint64_t distinct_values = 0;
+    bool estimated = false;
+    bool timed_out = false;
+    uint64_t query_ms = 0;
+  };
 
   AppConfig cfg_;
   httplib::Server http_;
@@ -457,6 +531,7 @@ private:
   std::shared_ptr<ExportJobStore> export_jobs_;
   std::atomic<size_t> active_exports_{0};
   std::atomic<size_t> active_host_streams_{0};
+  std::atomic<size_t> active_query_streams_{0};
   std::shared_ptr<ClickHouseClientPool> client_pool_;
   std::unique_ptr<FormatCache> format_cache_;
   // Only constructed when query_library.enabled = true.
@@ -471,11 +546,127 @@ private:
   std::mutex mu_;
   std::unordered_map<std::string, std::shared_ptr<QuerySession>> sessions_;
 
+  // Shutdown (stop()): the state, its deadline, the hooks, and the query threads that the destructor waits for.
+  std::atomic<bool> stopping_{false};
+  std::atomic<int64_t> stop_deadline_ms_{0};  // steady clock
+  std::mutex stop_hooks_mu_;
+  std::map<uint64_t, std::function<void()>> stop_hooks_;
+  uint64_t next_stop_hook_ = 0;
+  std::shared_ptr<WorkerGroup> query_workers_ = std::make_shared<WorkerGroup>();
+
+  // GET /metrics and the access log (server_http.cpp).
+  std::shared_ptr<HttpMetrics> http_metrics_ = std::make_shared<HttpMetrics>();
+  const std::chrono::system_clock::time_point started_at_ = std::chrono::system_clock::now();
+  std::chrono::steady_clock::time_point last_stats_log_ = std::chrono::steady_clock::now();
+
   const bool background_enabled_ = true;
   std::atomic<bool> session_reaper_stop_{false};
   std::mutex session_reaper_mu_;
   std::condition_variable session_reaper_cv_;
   std::thread session_reaper_thread_;
+
+  // ---- Caches (docs/configuration.md, "Caches and privileges"). They are declared after cfg_ and client_pool_, which
+  // their fetches use; cache_refresher_ is the last member, so the background refreshes stop before anything goes.
+  template <typename Value>
+  typename TtlCache<std::string, Value>::Options cache_options(
+      std::chrono::milliseconds ttl,
+      std::chrono::milliseconds stale_for,
+      size_t max_entries,
+      size_t max_bytes,
+      std::function<size_t(const Value&)> bytes = {}) {
+    typename TtlCache<std::string, Value>::Options options;
+    options.ttl = ttl;
+    options.stale_for = stale_for;
+    options.max_age = std::max<std::chrono::milliseconds>(ttl + stale_for, std::chrono::minutes(10));
+    options.max_entries = max_entries;
+    options.max_bytes = max_bytes;
+    options.value_bytes = std::move(bytes);
+    options.submit = [this](std::function<void()> task) { return cache_refresher_ && cache_refresher_->submit(std::move(task)); };
+    return options;
+  }
+  AclService::Options acl_options();
+  // The runner identity of a host for the ACL: refresh=1 of a page calls acl_.invalidate() with it.
+  AclAccess runner_access(const HostSpec& host) const { return make_acl_access(client_pool_, host.runner_uri); }
+  std::chrono::milliseconds explorer_ttl() const { return std::chrono::milliseconds(std::max(0, cfg_.explorer.cache_ttl_ms)); }
+  // Live state (Activity, Keeper, Overview): never older than the Explorer TTL, at most one read a second per host.
+  std::chrono::milliseconds live_ttl() const {
+    return std::chrono::milliseconds(std::max(1000, std::min(cfg_.explorer.cache_ttl_ms, 5000)));
+  }
+
+  AclService acl_{acl_options()};
+  TtlCache<std::string, MetaKeywords> meta_keywords_cache_{cache_options<MetaKeywords>(
+      std::chrono::minutes(10), {}, 256, 16u << 20,
+      [](const MetaKeywords& v) { return sizeof(v) + 64 * v.items.size(); })};
+  TtlCache<std::string, MetaFunctions> meta_functions_cache_{cache_options<MetaFunctions>(
+      std::chrono::minutes(10), {}, 256, 32u << 20,
+      [](const MetaFunctions& v) { return sizeof(v) + 128 * v.items.size(); })};
+  TtlCache<std::string, MetaCatalog> meta_catalog_cache_{cache_options<MetaCatalog>(
+      std::chrono::minutes(10), {}, 2048, 64u << 20,
+      [](const MetaCatalog& v) { return sizeof(v) + 192 * v.items.size(); })};
+  // Browse uses a tiny identity-only catalog (one entry per host and database). Rich summaries are loaded only when a
+  // table is opened or Graph needs them.
+  TtlCache<std::string, ExplorerCatalog> explorer_catalog_list_cache_{cache_options<ExplorerCatalog>(
+      explorer_ttl(), std::chrono::minutes(1), 4096, 64u << 20, cache_size::catalog)};
+  TtlCache<std::string, ExplorerCatalog> explorer_catalog_cache_{cache_options<ExplorerCatalog>(
+      explorer_ttl(), std::chrono::minutes(1), 256, 128u << 20, cache_size::catalog)};
+  // Per-table detail is request-driven and expires after 30 s. There is no periodic refresh.
+  TtlCache<std::string, ExplorerTableDetail> explorer_table_detail_cache_{cache_options<ExplorerTableDetail>(
+      std::chrono::seconds(30), {}, 1024, 64u << 20, cache_size::table_detail)};
+  TtlCache<std::string, ExplorerGraph> explorer_graph_cache_{cache_options<ExplorerGraph>(
+      explorer_ttl(), std::chrono::minutes(1), 256, 128u << 20, cache_size::graph)};
+  TtlCache<std::string, ExplorerFunctionsCatalog> explorer_functions_cache_{cache_options<ExplorerFunctionsCatalog>(
+      std::chrono::milliseconds(std::max(1000, cfg_.explorer.function_cache_ttl_ms)), {}, 256, 64u << 20, cache_size::functions)};
+  // Server-wide storage distribution for the Explorer System section.
+  TtlCache<std::string, ExplorerStorageMap> explorer_storage_cache_{cache_options<ExplorerStorageMap>(
+      explorer_ttl(), std::chrono::minutes(1), 256, 32u << 20, cache_size::storage)};
+  // Short-lived snapshots shared by every viewer of a host, so an auto-refreshing page costs one read per TTL.
+  TtlCache<std::string, SystemActivity> system_activity_cache_{cache_options<SystemActivity>(
+      live_ttl(), std::chrono::seconds(10), 256, 32u << 20, cache_size::activity)};
+  TtlCache<std::string, SystemKeeperStatus> system_keeper_cache_{cache_options<SystemKeeperStatus>(
+      live_ttl(), std::chrono::seconds(10), 256, 8u << 20)};
+  // What each host exposes: 10 min, 1 min while an optional log table is still missing (ClickHouse creates them at
+  // their first flush), and a failed detection is not kept beyond the short back-off.
+  TtlCache<std::string, MonitorCapabilities>::Options capabilities_cache_options();
+  TtlCache<std::string, MonitorCapabilities> system_monitor_caps_cache_{capabilities_cache_options()};
+  TtlCache<std::string, SystemMonitorOverview> system_monitor_overview_cache_{cache_options<SystemMonitorOverview>(
+      live_ttl(), std::chrono::seconds(10), 256, 16u << 20)};
+  // Performance: 15 s per host and aligned window (the step-aligned from / to), so relative windows refreshed within a
+  // step share one read.
+  TtlCache<std::string, SystemMonitorSeries> system_monitor_series_cache_{cache_options<SystemMonitorSeries>(
+      std::chrono::seconds(15), {}, 256, 32u << 20, cache_size::series)};
+  // Queries: 60 s per host, minute-aligned window and allowlisted choice (one read in flight per key); a drill-down
+  // per shape the same way.
+  TtlCache<std::string, SystemMonitorQueries> system_monitor_queries_cache_{cache_options<SystemMonitorQueries>(
+      std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::queries)};
+  TtlCache<std::string, SystemMonitorQuery> system_monitor_query_cache_{cache_options<SystemMonitorQuery>(
+      std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::query)};
+  // Disks: 60 s per host; their growth 5 min per host and aligned window.
+  TtlCache<std::string, SystemMonitorDisks> system_monitor_disks_cache_{cache_options<SystemMonitorDisks>(
+      std::chrono::minutes(1), {}, 256, 16u << 20)};
+  TtlCache<std::string, SystemMonitorDiskGrowth> system_monitor_growth_cache_{cache_options<SystemMonitorDiskGrowth>(
+      std::chrono::minutes(5), {}, 64, 16u << 20, cache_size::growth)};
+  TtlCache<std::string, TracePrefill> trace_prefill_cache_{cache_options<TracePrefill>(
+      std::chrono::minutes(1), {}, 256, 64u << 20,
+      [](const TracePrefill& v) { return sizeof(v) + cache_size::pairs(v.pairs); })};
+  TtlCache<std::string, TraceFacetKeys> trace_facet_keys_cache_{cache_options<TraceFacetKeys>(
+      std::chrono::milliseconds(kFacetTtlMs), {}, 512, 16u << 20,
+      [](const TraceFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
+  TtlCache<std::string, TraceFacetValues> trace_facet_values_cache_{cache_options<TraceFacetValues>(
+      std::chrono::milliseconds(kFacetTtlMs), {}, 1024, 16u << 20,
+      [](const TraceFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
+  TtlCache<std::string, LogFacetKeys> log_facet_keys_cache_{cache_options<LogFacetKeys>(
+      std::chrono::milliseconds(kFacetTtlMs), {}, 512, 16u << 20,
+      [](const LogFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
+  TtlCache<std::string, LogFacetValues> log_facet_values_cache_{cache_options<LogFacetValues>(
+      std::chrono::milliseconds(kFacetTtlMs), {}, 1024, 16u << 20,
+      [](const LogFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
+
+  // The catalog of the Metrics page: per host, source and minute-aligned window.
+  TtlCache<std::string, MetricsCatalogAnswer> metrics_catalog_cache_{cache_options<MetricsCatalogAnswer>(
+      std::chrono::minutes(1), {}, 256, 64u << 20,
+      [](const MetricsCatalogAnswer& v) { return sizeof(v) + v.body.size(); })};
+
+  std::unique_ptr<CacheRefresher> cache_refresher_;
 };
 
 } // namespace chdash

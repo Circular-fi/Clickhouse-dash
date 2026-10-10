@@ -1,5 +1,7 @@
 #include "query_library.hpp"
 #include "json_parse.hpp"
+#include "log.hpp"
+#include "secure_random.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
@@ -21,9 +23,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 #include <iterator>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -432,14 +434,8 @@ std::optional<int64_t> parse_if_match_revision(const std::string& raw) {
   return std::stoll(v);
 }
 
-std::string hex64(uint64_t v) {
-  char buf[17];
-  std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(v));
-  return buf;
-}
-
-void log_line(const std::string& message) {
-  std::cerr << "[query_library] " << message << std::endl;
+void log_line(LogLevel level, const std::string& message) {
+  log_event(level, "query_library", {{"message", message}});
 }
 
 } // namespace
@@ -601,11 +597,8 @@ bool atomic_write_file(const std::string& path, std::string_view data, std::stri
   fs::path dir = target.parent_path();
   if (dir.empty()) dir = ".";
 
-  static std::atomic<uint64_t> counter{0};
-  std::random_device rd;
-  const uint64_t nonce = (static_cast<uint64_t>(rd()) << 32) ^ static_cast<uint64_t>(rd()) ^
-                         counter.fetch_add(1, std::memory_order_relaxed);
-  const fs::path tmp = dir / ("." + base + ".tmp-" + std::to_string(static_cast<long>(::getpid())) + "-" + hex64(nonce));
+  // An unpredictable name (secure_random.hpp): O_EXCL below refuses a file that someone made in advance.
+  const fs::path tmp = dir / ("." + base + ".tmp-" + std::to_string(static_cast<long>(::getpid())) + "-" + random_hex(8));
 
   int flags = O_WRONLY | O_CREAT | O_EXCL;
 #ifdef O_CLOEXEC
@@ -616,26 +609,26 @@ bool atomic_write_file(const std::string& path, std::string_view data, std::stri
 #endif
   const int fd = ::open(tmp.c_str(), flags, S_IRUSR | S_IWUSR);
   if (fd < 0) {
-    if (error) *error = std::string("cannot create the temporary file: ") + std::strerror(errno);
+    if (error) *error = std::string("cannot create the temporary file: ") + std::generic_category().message(errno);
     return false;
   }
 
   std::string failure;
-  if (::fchmod(fd, S_IRUSR | S_IWUSR) != 0) failure = std::string("fchmod: ") + std::strerror(errno);
+  if (::fchmod(fd, S_IRUSR | S_IWUSR) != 0) failure = std::string("fchmod: ") + std::generic_category().message(errno);
   size_t written = 0;
   while (failure.empty() && written < data.size()) {
     const ssize_t n = ::write(fd, data.data() + written, data.size() - written);
     if (n < 0) {
       if (errno == EINTR) continue;
-      failure = std::string("write: ") + std::strerror(errno);
+      failure = std::string("write: ") + std::generic_category().message(errno);
       break;
     }
     written += static_cast<size_t>(n);
   }
-  if (failure.empty() && ::fsync(fd) != 0) failure = std::string("fsync: ") + std::strerror(errno);
-  if (::close(fd) != 0 && failure.empty()) failure = std::string("close: ") + std::strerror(errno);
+  if (failure.empty() && ::fsync(fd) != 0) failure = std::string("fsync: ") + std::generic_category().message(errno);
+  if (::close(fd) != 0 && failure.empty()) failure = std::string("close: ") + std::generic_category().message(errno);
   if (failure.empty() && ::rename(tmp.c_str(), target.c_str()) != 0) {
-    failure = std::string("rename: ") + std::strerror(errno);
+    failure = std::string("rename: ") + std::generic_category().message(errno);
   }
   if (!failure.empty()) {
     ::unlink(tmp.c_str());
@@ -662,15 +655,12 @@ bool atomic_write_file(const std::string& path, std::string_view data, std::stri
 // --- store ------------------------------------------------------------------
 
 QueryLibraryStore::QueryLibraryStore(QueryLibraryOptions options) : options_(std::move(options)) {
-  std::random_device rd;
-  std::seed_seq seed{rd(), rd(), rd(), rd(), static_cast<unsigned>(now_ms() & 0xffffffff)};
-  rng_.seed(seed);
   std::lock_guard<std::mutex> lk(mu_);
   refresh_locked();
   std::error_code ec;
   const auto parent = std::filesystem::path(options_.file).parent_path();
   if (!parent.empty() && !std::filesystem::is_directory(parent, ec)) {
-    log_line("warning: the directory of " + options_.file + " does not exist; writes will fail until it is created");
+    log_line(LogLevel::Warn, "the directory of " + options_.file + " does not exist; writes will fail until it is created");
   }
 }
 
@@ -703,7 +693,7 @@ void QueryLibraryStore::refresh_locked() {
 
   const auto fail = [&](const std::string& message) {
     if (load_error_ != message) {
-      log_line("cannot load " + options_.file + ": " + message +
+      log_line(LogLevel::Warn, "cannot load " + options_.file + ": " + message +
                "; the library is served read-only and the file is not modified");
     }
     load_error_ = message;
@@ -711,7 +701,7 @@ void QueryLibraryStore::refresh_locked() {
 
   if (!now.exists) {
     if (now.stat_errno != ENOENT) {
-      fail(std::string("cannot stat the file: ") + std::strerror(now.stat_errno));
+      fail(std::string("cannot stat the file: ") + std::generic_category().message(now.stat_errno));
       return;
     }
     QueryLibraryState empty;
@@ -726,7 +716,7 @@ void QueryLibraryStore::refresh_locked() {
   }
   std::ifstream in(options_.file, std::ios::binary);
   if (!in) {
-    fail(std::string("cannot open the file: ") + std::strerror(errno));
+    fail(std::string("cannot open the file: ") + std::generic_category().message(errno));
     return;
   }
   std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
@@ -738,7 +728,7 @@ void QueryLibraryStore::refresh_locked() {
   try {
     QueryLibraryState parsed = parse_query_library_file(text, &migration);
     if (had) parsed.revision = std::max(parsed.revision, previous_revision + 1);
-    if (!load_error_.empty()) log_line("reloaded " + options_.file + "; the load error is cleared");
+    if (!load_error_.empty()) log_line(LogLevel::Info, "reloaded " + options_.file + "; the load error is cleared");
     state_ = std::move(parsed);
     load_error_.clear();
   } catch (const std::exception& e) {
@@ -755,14 +745,14 @@ void QueryLibraryStore::refresh_locked() {
                              std::to_string(migration.dropped_history) + " history entries (history is kept in the browser), moved " +
                              std::to_string(migration.rerooted) + " items to the top level of their host";
   if (!options_.writable) {
-    log_line("migrated " + options_.file + " in memory (" + counts + "); the library is read-only, the file is not modified");
+    log_line(LogLevel::Info, "migrated " + options_.file + " in memory (" + counts + "); the library is read-only, the file is not modified");
     return;
   }
   try {
     commit_locked(state_);
-    log_line("migrated " + options_.file + " to version " + std::to_string(kQueryLibraryFileVersion) + " (" + counts + ")");
+    log_line(LogLevel::Info, "migrated " + options_.file + " to version " + std::to_string(kQueryLibraryFileVersion) + " (" + counts + ")");
   } catch (const ApiError& e) {
-    log_line("migrated " + options_.file + " in memory (" + counts + "); rewriting it failed: " + e.message);
+    log_line(LogLevel::Warn, "migrated " + options_.file + " in memory (" + counts + "); rewriting it failed: " + e.message);
   }
 }
 
@@ -816,7 +806,7 @@ std::string QueryLibraryStore::require_host_locked(const std::string* raw, const
 
 std::string QueryLibraryStore::new_id_locked(char prefix, const QueryLibraryState& state) {
   for (;;) {
-    std::string id = std::string(1, prefix) + "_" + hex64(rng_());
+    std::string id = std::string(1, prefix) + "_" + random_hex(8);
     bool used = false;
     if (prefix == 'f') used = find_folder(state, id) != nullptr;
     else used = std::any_of(state.queries.begin(), state.queries.end(), [&](const auto& q) { return q.id == id; });
@@ -834,7 +824,7 @@ void QueryLibraryStore::commit_locked(QueryLibraryState candidate) {
   }
   std::string error;
   if (!atomic_write_file(options_.file, text, &error)) {
-    log_line("cannot write " + options_.file + ": " + error);
+    log_line(LogLevel::Warn, "cannot write " + options_.file + ": " + error);
     ApiError e;
     e.status = 500;
     e.code = "storage_error";
@@ -854,7 +844,7 @@ QueryLibraryStore::Response QueryLibraryStore::guarded(Fn&& fn) {
   } catch (const ApiError& e) {
     return render_error(e);
   } catch (const std::exception& e) {
-    log_line(std::string("internal error: ") + e.what());
+    log_line(LogLevel::Error, std::string("internal error: ") + e.what());
     ApiError err;
     err.status = 500;
     err.code = "internal_error";

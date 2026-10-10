@@ -28,9 +28,9 @@
       "bytes": 3532
     },
     "color": {
-      "source_sha256": "99f86272d995be74737b027fbfff6cd486aa3e970bb704e5e6e06a522e5c3fcd",
-      "wasm_sha256": "fe5e103fa493e10650b4c1967fd91780df55109fe666878375378f1e3fa97f02",
-      "bytes": 28506
+      "source_sha256": "d4a56aa10ac5a5bf3010e9daccf48323cc0c89587f82a0b5c3e2bf0746b706ff",
+      "wasm_sha256": "7207b8c11b7637c622bc69577fc37b2366141d085f1c6e4ed2a772fbb7fdc9fb",
+      "bytes": 29464
     },
     "highlight": {
       "source_sha256": "d01cba77df9be5bc500ee1066930d66d17c240510f540700c086e55aecf8cb8d",

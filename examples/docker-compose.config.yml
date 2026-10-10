@@ -12,12 +12,24 @@ services:
         target: chdash_system_password
     ports:
       - "127.0.0.1:8080:8080"
+    # Liveness: --health asks GET /livez of the running server (docs/operations.md, "Health probes").
+    # A proxy or an orchestrator routes traffic on GET /readyz.
     healthcheck:
       test: ["CMD", "/chdash", "--config", "/etc/clickhouse-dash/config.hcl", "--health"]
       interval: 10s
-      timeout: 2s
+      timeout: 3s
       retries: 3
       start_period: 10s
+    # SIGTERM drains the server for at most server.shutdown_timeout_ms (10 s by default): give it longer.
+    stop_grace_period: 15s
+    init: true
+    # Least privilege: no root, no capability, nothing written to the image. The files of ./secrets must be
+    # readable by this user (chown 65532 or chmod 0444 on them).
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
 configs:

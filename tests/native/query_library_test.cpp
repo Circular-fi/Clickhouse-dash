@@ -378,7 +378,7 @@ void test_malformed_and_reload(const std::string& dir) {
     CHECK(read_file(path) == "{\"version\":3}");  // never rewritten
   }
   std::cerr.rdbuf(old);
-  CHECK(captured.str().find("[query_library]") != std::string::npos);
+  CHECK(captured.str().find("\"event\":\"query_library\"") != std::string::npos);
   CHECK(captured.str().find("secret_marker_123") == std::string::npos);  // SQL is never logged
 }
 

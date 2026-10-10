@@ -1,14 +1,15 @@
 #include "health_runner.hpp"
 
+#include "ch_query.hpp"
 #include "ch_uri.hpp"
+#include "log.hpp"
 
 #include <clickhouse/client.h>
 
 #include <algorithm>
 #include <chrono>
-#include <future>
 #include <iterator>
-#include <iostream>
+#include <optional>
 #include <string_view>
 
 namespace chdash {
@@ -30,14 +31,32 @@ static constexpr int64_t kHostVersionRefreshMs = 10 * 60 * 1000;
 // through its receive/idle timeout path.
 static constexpr int kMaxPersistentHealthClientIdleMs = 60 * 1000;
 
-static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t ts_ms) {
+// What bounds one audit of a host: the runner stops, or the time budget is spent. A query that the budget does not
+// allow is not sent, and what it would have said is unknown (never reported as a missing grant).
+struct AuditBudget {
+  const std::atomic<bool>* stop = nullptr;
+  std::chrono::steady_clock::time_point deadline;
+  bool exhausted() const {
+    return (stop && stop->load(std::memory_order_acquire)) || std::chrono::steady_clock::now() >= deadline;
+  }
+};
+
+// A detection is read again after kSystemTablesRefreshMs; after 1 min while query_log is missing (ClickHouse creates
+// it at its first flush); after 30 s when it failed: the host then says "not checked", never "no query_log".
+static int64_t system_tables_refresh_ms(const HostSystemTables& tables) {
+  if (!tables.checked) return 30 * 1000;
+  if (!tables.query_log) return 60 * 1000;
+  return kSystemTablesRefreshMs;
+}
+
+static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t ts_ms, const AuditBudget& budget) {
   HostSystemTables out;
   out.checked = true;
   out.checked_at_ms = ts_ms;
-  if (!client) return out;
+  if (!client || budget.exhausted()) return out;
 
   try {
-    client->Select(
+    ch_select(*client,
       "SELECT name FROM system.tables WHERE database = 'system' AND name IN "
       "('query_log', 'query_views_log', 'processors_profile_log', 'opentelemetry_span_log')",
       [&](const clickhouse::Block& b) {
@@ -54,6 +73,7 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
       }
     );
   } catch (...) {
+    out.checked = false;
     return out;
   }
 
@@ -62,11 +82,12 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
 
 // CHECK GRANT: true when the grant is held; `known` is false when the server did not answer in a way that
 // can be read (an unsupported form, a missing table): the audit then says nothing about it.
-static bool check_grant(clickhouse::Client& client, const std::string& expression, bool* known) {
+static bool check_grant(clickhouse::Client& client, const std::string& expression, bool* known, const AuditBudget& budget) {
   *known = false;
   bool granted = false;
+  if (budget.exhausted()) return false;
   try {
-    client.Select("CHECK GRANT " + expression, [&](const clickhouse::Block& b) {
+    ch_select(client, "CHECK GRANT " + expression, [&](const clickhouse::Block& b) {
       if (*known || b.GetRowCount() == 0 || b.GetColumnCount() == 0) return;
       if (auto col = b[0]->As<clickhouse::ColumnUInt8>()) {
         *known = true;
@@ -108,10 +129,12 @@ static const char* const kSystemReads[] = {"system.databases", "system.tables", 
 static const char* const kRunnerReads[] = {"system.functions", "system.documentation", "system.dictionaries"};
 
 // Does the user of the client read any table? A database-wide SELECT is enough; else a table of a database it can SHOW.
-static bool reads_a_table(clickhouse::Client& client) {
+// nullopt: the budget ran out before an answer (the audit then says nothing).
+static std::optional<bool> reads_a_table(clickhouse::Client& client, const AuditBudget& budget) {
   std::vector<std::string> databases;
+  if (budget.exhausted()) return std::nullopt;
   try {
-    client.Select("SHOW DATABASES", [&](const clickhouse::Block& b) {
+    ch_select(client, "SHOW DATABASES", [&](const clickhouse::Block& b) {
       if (b.GetColumnCount() == 0) return;
       if (auto col = b[0]->As<clickhouse::ColumnString>()) {
         for (size_t i = 0; i < b.GetRowCount(); ++i) databases.emplace_back(col->At(i));
@@ -122,12 +145,13 @@ static bool reads_a_table(clickhouse::Client& client) {
   size_t table_budget = 200;
   for (const auto& database : databases) {
     if (database == "system" || database == "INFORMATION_SCHEMA" || database == "information_schema") continue;
+    if (budget.exhausted()) return std::nullopt;
     bool known = false;
-    if (check_grant(client, "SELECT ON " + quote_name(database) + ".*", &known)) return true;
+    if (check_grant(client, "SELECT ON " + quote_name(database) + ".*", &known, budget)) return true;
     if (!known || table_budget == 0) continue;
     try {
       std::vector<std::string> tables;
-      client.Select("SHOW TABLES FROM " + quote_name(database), [&](const clickhouse::Block& b) {
+      ch_select(client, "SHOW TABLES FROM " + quote_name(database), [&](const clickhouse::Block& b) {
         if (b.GetColumnCount() == 0) return;
         if (auto col = b[0]->As<clickhouse::ColumnString>()) {
           for (size_t i = 0; i < b.GetRowCount(); ++i) tables.emplace_back(col->At(i));
@@ -135,13 +159,15 @@ static bool reads_a_table(clickhouse::Client& client) {
       });
       for (const auto& table : tables) {
         if (table_budget == 0) break;
+        if (budget.exhausted()) return std::nullopt;
         --table_budget;
         bool table_known = false;
-        if (check_grant(client, "SELECT ON " + quote_name(database) + "." + quote_name(table), &table_known)) return true;
+        if (check_grant(client, "SELECT ON " + quote_name(database) + "." + quote_name(table), &table_known, budget)) return true;
       }
     } catch (...) {
     }
   }
+  if (budget.exhausted()) return std::nullopt;
   return false;
 }
 
@@ -150,7 +176,8 @@ static HostAccess audit_access(
     clickhouse::Client* system,
     const HostSpec& host,
     const HealthSettings& settings,
-    int64_t ts_ms) {
+    int64_t ts_ms,
+    const AuditBudget& budget) {
   const std::vector<std::string>& extra_system_reads = settings.system_reads;
   HostAccess out;
   out.checked = true;
@@ -166,7 +193,7 @@ static HostAccess audit_access(
     reads.insert(reads.end(), extra_system_reads.begin(), extra_system_reads.end());
     for (const auto& table : reads) {
       bool known = false;
-      const bool granted = check_grant(*system, "SELECT ON " + table, &known);
+      const bool granted = check_grant(*system, "SELECT ON " + table, &known, budget);
       if (known && !granted) out.system_missing.push_back("SELECT ON " + table);
     }
     if (!out.system_missing.empty()) {
@@ -180,10 +207,10 @@ static HostAccess audit_access(
   if (runner) {
     for (const char* table : kRunnerReads) {
       bool known = false;
-      const bool granted = check_grant(*runner, std::string("SELECT ON ") + table, &known);
+      const bool granted = check_grant(*runner, std::string("SELECT ON ") + table, &known, budget);
       if (known && !granted) out.runner_missing.push_back(std::string("SELECT ON ") + table);
     }
-    out.runner_reads_nothing = !reads_a_table(*runner);
+    out.runner_reads_nothing = reads_a_table(*runner, budget) == std::optional<bool>(false);
     if (out.runner_reads_nothing) {
       out.warnings.push_back("The " + describe("runner", out.runner_user) +
                              " can read no table: the Explorer, the Query page and the Functions page show nothing. Grant SELECT on the databases that it must show: GRANT SELECT ON <database>.* TO " +
@@ -207,7 +234,7 @@ static HostAccess audit_access(
   }
   // The MCP user: the API tools run as this user (mcp_identity.hpp), so what the pages ask of the runner and of the
   // system user, the tools ask of it.
-  if (settings.mcp_audit && !host.mcp_uri.empty()) {
+  if (settings.mcp_audit && !host.mcp_uri.empty() && !budget.exhausted()) {
     out.mcp_user = user_of(host.mcp_uri);
     std::string error;
     auto mcp = make_client_from_uri(host.mcp_uri, std::chrono::milliseconds(settings.timeout_ms), std::chrono::milliseconds(settings.timeout_ms),
@@ -221,10 +248,10 @@ static HostAccess audit_access(
       out.mcp_connected = true;
       for (const auto& table : settings.mcp_reads) {
         bool known = false;
-        const bool granted = check_grant(*mcp, "SELECT ON " + table, &known);
+        const bool granted = check_grant(*mcp, "SELECT ON " + table, &known, budget);
         if (known && !granted) out.mcp_missing.push_back("SELECT ON " + table);
       }
-      out.mcp_reads_nothing = !reads_a_table(*mcp);
+      out.mcp_reads_nothing = reads_a_table(*mcp, budget) == std::optional<bool>(false);
       if (out.mcp_reads_nothing) {
         out.warnings.push_back("The " + who + " can read no table: every tool of MCP answers with nothing. GRANT SELECT ON <database>.* TO " +
                                (out.mcp_user.empty() ? std::string("<user>") : out.mcp_user) + ";");
@@ -252,7 +279,7 @@ static HostVersion detect_host_version(clickhouse::Client* client) {
   HostVersion out;
   if (!client) return out;
   try {
-    client->Select(
+    ch_select(*client,
       "SELECT version(), timezone()",
       [&](const clickhouse::Block& b) {
         if (!out.version.empty() || b.GetRowCount() == 0 || b.GetColumnCount() < 2) return;
@@ -268,6 +295,7 @@ static HostVersion detect_host_version(clickhouse::Client* client) {
   }
   return out;
 }
+
 
 HealthRunner::HealthRunner(std::vector<HostSpec> hosts, HealthSettings settings)
   : hosts_(std::move(hosts)), settings_(settings) {
@@ -295,15 +323,35 @@ HealthRunner::~HealthRunner() {
 }
 
 void HealthRunner::start() {
-  if (th_.joinable()) return;
-  stop_.store(false, std::memory_order_relaxed);
-  th_ = std::thread([this] { loop(); });
+  if (!threads_.empty()) return;
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    stop_ = false;
+  }
+  stop_flag_.store(false, std::memory_order_release);
+  threads_.reserve(hosts_.size() + 1);
+  for (size_t i = 0; i < hosts_.size(); ++i) threads_.emplace_back([this, i] { ping_loop(i); });
+  if (!hosts_.empty()) threads_.emplace_back([this] { audit_loop(); });
 }
 
 void HealthRunner::stop() {
-  stop_.store(true, std::memory_order_relaxed);
+  {
+    // Under the lock: a thread that checked the flag and is about to wait cannot miss the notification.
+    std::lock_guard<std::mutex> lk(mu_);
+    stop_ = true;
+  }
+  stop_flag_.store(true, std::memory_order_release);
   cv_.notify_all();
-  if (th_.joinable()) th_.join();
+  for (auto& thread : threads_) {
+    if (thread.joinable()) thread.join();
+  }
+  threads_.clear();
+}
+
+bool HealthRunner::sleep_until(std::chrono::steady_clock::time_point deadline) {
+  std::unique_lock<std::mutex> lk(mu_);
+  cv_.wait_until(lk, deadline, [&] { return stop_; });
+  return stop_;
 }
 
 HostsSnapshot HealthRunner::snapshot() const {
@@ -329,7 +377,7 @@ uint64_t HealthRunner::version() const {
 bool HealthRunner::wait_for_update(uint64_t last_version, int wait_ms, uint64_t* new_version) {
   if (wait_ms < 0) wait_ms = 0;
   std::unique_lock<std::mutex> lk(mu_);
-  const auto pred = [&]() { return version_ != last_version || stop_.load(std::memory_order_relaxed); };
+  const auto pred = [&]() { return version_ != last_version || stop_; };
   if (wait_ms == 0) {
     if (pred()) {
       if (new_version) *new_version = version_;
@@ -351,299 +399,186 @@ bool HealthRunner::all_healthy() const {
   return true;
 }
 
-void HealthRunner::loop() {
-  using namespace std::chrono;
+size_t HealthRunner::healthy_count() const {
+  std::lock_guard<std::mutex> lk(mu_);
+  return static_cast<size_t>(std::count_if(ctx_.begin(), ctx_.end(), [](const HostCtx& c) { return c.last.healthy; }));
+}
 
-  while (!stop_.load(std::memory_order_relaxed)) {
+void HealthRunner::ping_loop(size_t index) {
+  using namespace std::chrono;
+  // The statements of the health checks and of the access audit are labelled (ch_query.hpp).
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:health";
+  ChQueryScope scope(std::move(limits));
+  const HostSpec spec = hosts_[index];
+  const auto timeout = milliseconds(settings_.timeout_ms);
+  // One runner client per host, owned by this thread: the health of a host is measured with the credentials that
+  // run the user queries (the system user is only audited).
+  std::shared_ptr<clickhouse::Client> client;
+  int64_t version_checked_at_ms = 0;
+
+  while (!stopping()) {
     const auto tick_start = steady_clock::now();
     const int64_t ts = now_ms();
+    bool ok = false;
+    int64_t ping_ms = -1;
+    std::string error;
 
-    struct InitJob {
-      size_t index = 0;
-      std::string id;
-      std::string uri;
-    };
-
-    std::vector<InitJob> init_jobs;
-    {
-      std::lock_guard<std::mutex> lk(mu_);
-      init_jobs.reserve(ctx_.size());
-      for (size_t i = 0; i < ctx_.size(); ++i) {
-        if (!ctx_[i].client) init_jobs.push_back(InitJob{i, ctx_[i].spec.id, ctx_[i].spec.runner_uri});
+    if (!client) {
+      // DNS and connect may block for the timeout: outside the lock, in this host's thread only.
+      std::string err;
+      client = make_client_from_uri(spec.runner_uri, timeout, timeout, timeout, &err);
+      if (!client) error = err.empty() ? "client initialization failed" : err;
+    }
+    if (client) {
+      const auto ping = [&] {
+        const auto started = steady_clock::now();
+        client->Ping();
+        ok = true;
+        ping_ms = duration_cast<milliseconds>(steady_clock::now() - started).count();
+      };
+      try {
+        ping();
+      } catch (const std::exception& e) {
+        error = e.what();
+      } catch (...) {
+        error = "unknown ping failure";
       }
+      if (!ok) {
+        // A stale socket (the server or a proxy closed it): reconnect once before the host is reported down.
+        try {
+          client->ResetConnection();
+          ping();
+          error.clear();
+        } catch (const std::exception& reconnect_error) {
+          error += "; reconnect failed: ";
+          error += reconnect_error.what();
+        } catch (...) {
+          error += "; reconnect failed";
+        }
+      }
+      if (!ok) client.reset();
     }
 
-    // Client creation is intentionally outside the runner mutex because DNS and
-    // connect timeouts may block. Repeated identical failures are logged once,
-    // not every retry cycle.
-    for (const auto& job : init_jobs) {
-      if (stop_.load(std::memory_order_relaxed)) break;
-      std::string err;
-      auto client = make_client_from_uri(
-          job.uri,
-          milliseconds(settings_.timeout_ms),
-          milliseconds(settings_.timeout_ms),
-          milliseconds(settings_.timeout_ms),
-          &err);
+    std::optional<HostVersion> version;
+    if (ok && (version_checked_at_ms == 0 || ts - version_checked_at_ms >= kHostVersionRefreshMs)) {
+      version = detect_host_version(client.get());
+      version_checked_at_ms = ts;
+    }
 
+    {
       std::lock_guard<std::mutex> lk(mu_);
-      if (job.index >= ctx_.size() || ctx_[job.index].client) continue;
-      auto& ctx = ctx_[job.index];
-      if (client) {
-        ctx.client = std::move(client);
+      auto& ctx = ctx_[index];
+      const bool was_healthy = ctx.last.healthy;
+      const bool first = ctx.last.checked_at_ms == 0;
+      ctx.last.checked_at_ms = ts;
+      ctx.last.healthy = ok;
+      ctx.last.ping_ms = ok ? ping_ms : -1;
+      if (ok) {
+        if (!was_healthy) {
+          ctx.audit_due = true;
+          if (!first) log_event(LogLevel::Info, "health.host_up", {{"host", spec.id}, {"ping_ms", ping_ms}});
+        }
         ctx.last_error.clear();
       } else {
-        const std::string message = err.empty() ? "client initialization failed" : err;
-        if (ctx.last_error != message) {
-          std::cerr << "[health] host=" << job.id << " client init error: " << message << "\n";
+        const std::string message = error.empty() ? "ping failed" : error;
+        // A failure is logged when the host goes down and when its reason changes, not at every retry.
+        if (was_healthy || ctx.last_error != message) {
+          log_event(LogLevel::Warn, "health.host_down", {{"host", spec.id}, {"error", message}});
         }
         ctx.last_error = message;
-        ctx.last.checked_at_ms = ts;
-        ctx.last.healthy = false;
-        ctx.last.ping_ms = -1;
       }
-    }
-
-    struct PingJob {
-      size_t index = 0;
-      std::shared_ptr<clickhouse::Client> client;
-    };
-    struct PingResult {
-      size_t index = 0;
-      bool ok = false;
-      bool discard_client = false;
-      int64_t ping_ms = -1;
-      std::string error;
-    };
-    struct AuxiliaryJob {
-      size_t index = 0;
-      std::shared_ptr<clickhouse::Client> client;
-      std::string uri;
-      // The runner client and the host, for the access audit that runs with the system tables check.
-      std::shared_ptr<clickhouse::Client> runner;
-      HostSpec spec;
-    };
-
-    std::vector<PingJob> ping_jobs;
-    std::vector<AuxiliaryJob> caps_jobs;
-    std::vector<AuxiliaryJob> version_jobs;
-    size_t context_count = 0;
-    {
-      std::lock_guard<std::mutex> lk(mu_);
-      context_count = ctx_.size();
-      ping_jobs.reserve(ctx_.size());
-      for (size_t i = 0; i < ctx_.size(); ++i) {
-        const auto& ctx = ctx_[i];
-        ping_jobs.push_back(PingJob{i, ctx.client});
-        if (ctx.client &&
-            (ctx.last.system_tables.checked_at_ms == 0 ||
-             ts - ctx.last.system_tables.checked_at_ms >= kSystemTablesRefreshMs)) {
-          const bool same_credentials = ctx.spec.system_uri == ctx.spec.runner_uri;
-          caps_jobs.push_back(AuxiliaryJob{
-              i,
-              same_credentials ? ctx.client : std::shared_ptr<clickhouse::Client>{},
-              same_credentials ? std::string{} : ctx.spec.system_uri,
-              ctx.client,
-              ctx.spec,
-          });
-        }
-        if (ctx.client &&
-            (ctx.last.version_checked_at_ms == 0 ||
-             ts - ctx.last.version_checked_at_ms >= kHostVersionRefreshMs)) {
-          version_jobs.push_back(AuxiliaryJob{i, ctx.client, {}, {}, {}});
-        }
-      }
-    }
-
-    auto ping_one = [](const PingJob& job) {
-      PingResult result;
-      result.index = job.index;
-      if (!job.client) {
-        result.error = "no client";
-        return result;
-      }
-      try {
-        const auto started = steady_clock::now();
-        job.client->Ping();
-        result.ok = true;
-        result.ping_ms = duration_cast<milliseconds>(steady_clock::now() - started).count();
-      } catch (const std::exception& e) {
-        result.error = e.what();
-        try {
-          const auto started = steady_clock::now();
-          job.client->ResetConnection();
-          job.client->Ping();
-          result.ok = true;
-          result.ping_ms = duration_cast<milliseconds>(steady_clock::now() - started).count();
-          result.error.clear();
-        } catch (const std::exception& reconnect_error) {
-          result.discard_client = true;
-          result.error += "; reconnect failed: ";
-          result.error += reconnect_error.what();
-        } catch (...) {
-          result.discard_client = true;
-          result.error += "; reconnect failed";
-        }
-      } catch (...) {
-        result.error = "unknown ping failure";
-        try {
-          const auto started = steady_clock::now();
-          job.client->ResetConnection();
-          job.client->Ping();
-          result.ok = true;
-          result.ping_ms = duration_cast<milliseconds>(steady_clock::now() - started).count();
-          result.error.clear();
-        } catch (const std::exception& reconnect_error) {
-          result.discard_client = true;
-          result.error += "; reconnect failed: ";
-          result.error += reconnect_error.what();
-        } catch (...) {
-          result.discard_client = true;
-          result.error += "; reconnect failed";
-        }
-      }
-      return result;
-    };
-
-    std::vector<PingResult> ping_results;
-    ping_results.reserve(ping_jobs.size());
-    if (ping_jobs.size() <= 1) {
-      for (const auto& job : ping_jobs) ping_results.push_back(ping_one(job));
-    } else {
-      // Preserve parallel health checks for multiple hosts, but avoid spawning a
-      // short-lived std::async worker every five seconds in the common 1-host case.
-      std::vector<std::future<PingResult>> futures;
-      futures.reserve(ping_jobs.size());
-      for (const auto& job : ping_jobs) {
-        futures.push_back(std::async(std::launch::async, [job, ping_one] { return ping_one(job); }));
-      }
-      for (auto& future : futures) ping_results.push_back(future.get());
-    }
-
-    std::vector<bool> ping_ok(context_count, false);
-    for (const auto& result : ping_results) {
-      if (result.index < ping_ok.size()) ping_ok[result.index] = result.ok;
-    }
-
-    std::vector<std::pair<size_t, HostSystemTables>> caps_results;
-    std::vector<std::pair<size_t, HostAccess>> access_results;
-    caps_results.reserve(caps_jobs.size());
-    for (const auto& job : caps_jobs) {
-      if (job.index < ping_ok.size() && ping_ok[job.index]) {
-        if (job.client) {
-          caps_results.emplace_back(job.index, detect_system_tables(job.client.get(), ts));
-          access_results.emplace_back(job.index, audit_access(job.runner.get(), job.client.get(), job.spec, settings_, ts));
-          continue;
-        }
-
-        std::string error;
-        auto system_client = make_client_from_uri(
-            job.uri,
-            milliseconds(settings_.timeout_ms),
-            milliseconds(settings_.timeout_ms),
-            milliseconds(settings_.timeout_ms),
-            &error);
-        if (system_client) {
-          caps_results.emplace_back(job.index, detect_system_tables(system_client.get(), ts));
-          access_results.emplace_back(job.index, audit_access(job.runner.get(), system_client.get(), job.spec, settings_, ts));
-        } else {
-          HostAccess unreachable = audit_access(job.runner.get(), nullptr, job.spec, settings_, ts);
-          unreachable.warnings.push_back("The system user " + (user_of(job.spec.system_uri).empty() ? std::string("(default)") : user_of(job.spec.system_uri)) +
-                                         " cannot connect: " + (error.empty() ? std::string("connection failed") : error));
-          access_results.emplace_back(job.index, std::move(unreachable));
-          HostSystemTables unavailable;
-          unavailable.checked = true;
-          unavailable.checked_at_ms = ts;
-          caps_results.emplace_back(job.index, unavailable);
-        }
-      }
-    }
-
-    std::vector<std::pair<size_t, HostVersion>> version_results;
-    version_results.reserve(version_jobs.size());
-    for (const auto& job : version_jobs) {
-      if (job.index < ping_ok.size() && ping_ok[job.index]) {
-        version_results.emplace_back(job.index, detect_host_version(job.client.get()));
-      }
-    }
-
-    {
-      std::lock_guard<std::mutex> lk(mu_);
-      for (const auto& result : ping_results) {
-        if (result.index >= ctx_.size()) continue;
-        auto& ctx = ctx_[result.index];
-        const bool was_healthy = ctx.last.healthy;
-        ctx.last.checked_at_ms = ts;
-        ctx.last.healthy = result.ok;
-        ctx.last.ping_ms = result.ok ? result.ping_ms : -1;
-        if (result.ok) {
-          ctx.last_error.clear();
-        } else {
-          std::string message = result.error.empty() ? "ping failed" : result.error;
-          // No client: the connection error of the last attempt is the reason, keep it.
-          if (message == "no client" && !ctx.last_error.empty()) message = ctx.last_error;
-          if (was_healthy || ctx.last_error != message) {
-            std::cerr << "[health] host=" << ctx.spec.id << " down: " << message << "\n";
-          }
-          ctx.last_error = message;
-        }
-        if (result.discard_client) ctx.client.reset();
-      }
-      for (auto& result : caps_results) {
-        if (result.first < ctx_.size()) ctx_[result.first].last.system_tables = result.second;
-      }
-      for (auto& result : access_results) {
-        if (result.first >= ctx_.size()) continue;
-        auto& health = ctx_[result.first].last;
-        // A finding is logged when it appears and when it changes, once for each: the start of the
-        // process, or a grant that is revoked later. A host with no finding says nothing.
-        if (result.second.warnings != health.access.warnings) {
-          for (const auto& warning : result.second.warnings) std::cerr << "[access] host=" << health.id << " " << warning << "\n";
-        }
-        health.access = std::move(result.second);
-      }
-      for (auto& result : version_results) {
-        if (result.first >= ctx_.size()) continue;
-        auto& health = ctx_[result.first].last;
-        health.version_checked_at_ms = ts;
-        if (!result.second.version.empty()) health.clickhouse_version = std::move(result.second.version);
-        if (!result.second.timezone.empty()) health.clickhouse_timezone = std::move(result.second.timezone);
+      if (version) {
+        ctx.last.version_checked_at_ms = ts;
+        if (!version->version.empty()) ctx.last.clickhouse_version = std::move(version->version);
+        if (!version->timezone.empty()) ctx.last.clickhouse_timezone = std::move(version->timezone);
       }
       ++version_;
     }
     cv_.notify_all();
 
-    const auto elapsed = duration_cast<milliseconds>(steady_clock::now() - tick_start);
-    int effective_interval_ms = settings_.interval_ms;
-    {
-      std::lock_guard<std::mutex> lk(mu_);
-      for (const auto& ctx : ctx_) {
-        if (!ctx.client) {
-          effective_interval_ms = std::min(effective_interval_ms, 1000);
-          break;
-        }
-      }
-    }
+    // A host without a connection is retried every second.
+    int interval_ms = settings_.interval_ms;
+    if (!client) interval_ms = std::min(interval_ms, 1000);
+    // A health connection is useful only while checks are frequent: close it before a long sleep, so ClickHouse
+    // never reaps an idle dashboard socket through its receive timeout.
+    if (interval_ms > kMaxPersistentHealthClientIdleMs) client.reset();
+    if (sleep_until(tick_start + milliseconds(interval_ms))) break;
+  }
+}
 
-    const bool release_clients_before_wait =
-        effective_interval_ms > kMaxPersistentHealthClientIdleMs;
-    if (release_clients_before_wait) {
+void HealthRunner::audit_loop() {
+  using namespace std::chrono;
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:health";
+  ChQueryScope scope(std::move(limits));
+  const auto timeout = milliseconds(settings_.timeout_ms);
+  while (!stopping()) {
+    for (size_t index = 0; index < ctx_.size() && !stopping(); ++index) {
+      HostSpec spec;
+      bool due = false;
+      const int64_t ts = now_ms();
       {
         std::lock_guard<std::mutex> lk(mu_);
-        for (auto& ctx : ctx_) ctx.client.reset();
+        const auto& ctx = ctx_[index];
+        due = ctx.last.healthy && (ctx.audit_due || ctx.last.system_tables.checked_at_ms == 0 ||
+                                   ts - ctx.last.system_tables.checked_at_ms >= system_tables_refresh_ms(ctx.last.system_tables));
+        if (due) spec = ctx.spec;
       }
-      // The job vectors also own shared references. Release them before the
-      // sleep so the TCP sockets are actually closed now, not next cycle.
-      ping_jobs.clear();
-      caps_jobs.clear();
-      version_jobs.clear();
+      if (!due) continue;
+
+      // Connections of the audit only (a clickhouse::Client serves one thread): the ping thread keeps its own.
+      const AuditBudget budget{&stop_flag_, steady_clock::now() + milliseconds(kAuditBudgetMs)};
+      std::string runner_error;
+      auto runner = make_client_from_uri(spec.runner_uri, timeout, timeout, timeout, &runner_error);
+      const bool same_credentials = spec.system_uri == spec.runner_uri;
+      std::string system_error;
+      auto system = same_credentials ? runner : make_client_from_uri(spec.system_uri, timeout, timeout, timeout, &system_error);
+      HostSystemTables tables;
+      HostAccess access;
+      if (system) {
+        tables = detect_system_tables(system.get(), ts, budget);
+        access = audit_access(runner.get(), system.get(), spec, settings_, ts, budget);
+      } else {
+        access = audit_access(runner.get(), nullptr, spec, settings_, ts, budget);
+        const std::string user = user_of(spec.system_uri);
+        access.warnings.push_back("The system user " + (user.empty() ? std::string("(default)") : user) +
+                                  " cannot connect: " + (system_error.empty() ? std::string("connection failed") : system_error));
+        tables.checked = false;
+        tables.checked_at_ms = ts;
+      }
+      runner.reset();
+      system.reset();
+      if (stopping()) break;
+      if (budget.exhausted()) {
+        log_event(LogLevel::Warn, "access.audit_incomplete", {{"host", spec.id}, {"budget_ms", kAuditBudgetMs}});
+      }
+
+      {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto& ctx = ctx_[index];
+        ctx.audit_due = false;
+        ctx.last.system_tables = tables;
+        // A finding is logged when it appears and when it changes, once for each: the start of the
+        // process, or a grant that is revoked later. A host with no finding says nothing.
+        if (access.warnings != ctx.last.access.warnings) {
+          for (const auto& warning : access.warnings) {
+            log_event(LogLevel::Warn, "access.finding", {{"host", spec.id}, {"finding", warning}});
+          }
+        }
+        ctx.last.access = std::move(access);
+        ++version_;
+      }
+      cv_.notify_all();
     }
 
-    const auto remaining = milliseconds(effective_interval_ms) - elapsed;
-    if (remaining.count() > 0) {
-      std::unique_lock<std::mutex> lk(mu_);
-      cv_.wait_for(lk, remaining, [&] { return stop_.load(std::memory_order_relaxed); });
-    }
+    // Until a host turns healthy again (its audit is due now), or the next check of the 10-minute refresh.
+    std::unique_lock<std::mutex> lk(mu_);
+    cv_.wait_for(lk, seconds(5), [&] {
+      if (stop_) return true;
+      return std::any_of(ctx_.begin(), ctx_.end(), [](const HostCtx& c) { return c.last.healthy && c.audit_due; });
+    });
+    if (stop_) break;
   }
 }
 

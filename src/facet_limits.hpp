@@ -4,6 +4,8 @@
 // /api/logs/facets (api_logs.cpp): one set of caps, so the Traces Attributes
 // and the Logs Fields panels sample, cap and estimate the same way.
 
+#include "ch_query.hpp"
+
 #include <clickhouse/client.h>
 
 #include <chrono>
@@ -44,13 +46,18 @@ inline BoundedRead bounded_select(clickhouse::Client& client, const std::string&
   const auto started = std::chrono::steady_clock::now();
   clickhouse::Query query(sql);
   for (const auto& [name, value] : params) query.SetParam(name, value);
-  query.OnData(on_block);
+  // The caller of the request may go away while the scan runs (ch_query.hpp).
+  query.OnData([&on_block](const clickhouse::Block& block) {
+    ch_check_canceled();
+    on_block(block);
+  });
   query.OnProgress([&](const clickhouse::Progress& progress) {
     out.read_rows += progress.rows;
     out.read_bytes += progress.bytes;
     out.total_rows += progress.total_rows;
+    ch_check_canceled();
   });
-  client.Execute(query);
+  ch_execute(client, query);
   out.elapsed_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - started).count());
   return out;

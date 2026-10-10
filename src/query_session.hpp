@@ -1,5 +1,7 @@
 #pragma once
 
+#include "worker_group.hpp"
+
 #include <clickhouse/client.h>
 
 #include <atomic>
@@ -58,6 +60,13 @@ struct QuerySessionOptions {
   // recent DESCRIBE result removes the extra round trip on repeated complex SQL.
   size_t describe_cache_entries = 256;
   int describe_cache_ttl_ms = 60 * 1000;
+
+  // The ClickHouse bounds of a run (the query { } block, docs/configuration.md).
+  // 0 = the settings profile of the runner user decides. A bound is never looser
+  // than the profile (ch_query.hpp).
+  int64_t max_execution_time_s = 0;
+  uint64_t max_memory_usage = 0;
+  uint64_t max_rows_to_read = 0;
 };
 
 struct SessionSnapshot {
@@ -109,6 +118,17 @@ struct SamplePoint {
   int64_t mem_bytes = -1;  // -1 means unavailable
 };
 
+// The outcome of a KILL QUERY: whether ClickHouse answered it, and how many queries it found.
+struct KillOutcome {
+  bool sent = false;
+  uint64_t matched = 0;
+  std::string error;
+};
+
+// KILL QUERY WHERE <where> ASYNC (or SYNC) on a connection of its own: a cancel never waits for a lease of
+// the pool. Labelled chdash:cancel. Never throws.
+KillOutcome kill_queries(const std::string& uri, const std::string& where, bool synchronous);
+
 class QuerySession : public std::enable_shared_from_this<QuerySession> {
 public:
   QuerySession(
@@ -130,6 +150,10 @@ public:
 
   const std::string& id() const { return query_id_; }
 
+  // The group that the query thread enters when it starts and leaves at its end (worker_group.hpp): the server
+  // waits for it at shutdown. Set before start(); a closed group (the server stops) cancels the session instead.
+  void set_worker_group(std::shared_ptr<WorkerGroup> group) { worker_group_ = std::move(group); }
+
   void start();
   void request_cancel();
 
@@ -137,7 +161,7 @@ public:
   // use distinct native ClickHouse ids. Cancellation must target every native
   // attempt that belongs to this session.
   std::vector<std::string> native_query_ids() const;
-  void cancel_native_queries_best_effort(bool synchronous);
+  KillOutcome cancel_native_queries_best_effort(bool synchronous);
 
   // A query has one consuming SSE stream. Tracking attachment lets the server
   // reap abandoned POST /run sessions without touching active downloads.
@@ -161,7 +185,7 @@ private:
   void run_query();
   std::string begin_native_query_attempt();
   std::string latest_native_query_id() const;
-  void cancel_native_query_ids_best_effort(
+  KillOutcome cancel_native_query_ids_best_effort(
     const std::vector<std::string>& query_ids,
     bool synchronous
   );
@@ -245,6 +269,7 @@ private:
   size_t queued_sse_bytes_ = 0;
 
   std::thread query_thread_;
+  std::shared_ptr<WorkerGroup> worker_group_;
 };
 
 } // namespace chdash

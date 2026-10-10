@@ -72,10 +72,10 @@ def test_manual_catalog_refresh_also_invalidates_function_metadata() -> None:
     api = read("src/api_explorer.cpp")
     catalog_handler = api[api.index("handle_explorer_catalog"):api.index("handle_explorer_table")]
 
-    assert "explorer_allowed_cache_.erase" in catalog_handler
-    assert "explorer_catalog_cache_.erase" in catalog_handler
-    assert "explorer_graph_cache_.erase" in catalog_handler
-    assert "explorer_functions_cache_.erase" in catalog_handler
+    assert "acl_.invalidate(access);" in catalog_handler
+    assert "explorer_catalog_cache_.invalidate" in catalog_handler
+    assert "explorer_graph_cache_.invalidate" in catalog_handler
+    assert "explorer_functions_cache_.invalidate" in catalog_handler
 
 
 def test_runner_identity_boundary_is_explicit_and_registry_sql_memory_is_capped() -> None:
@@ -208,7 +208,7 @@ def test_clickhouse_text_decoder_handles_lowcardinality_metadata_without_empty_s
 def test_query_database_scope_never_fails_open_to_default_database() -> None:
     session = read("src/query_session.cpp")
     run_query = session[session.index("void QuerySession::run_query()"): ]
-    assert 'if (!database_.empty()) client_query_->Execute("USE " + quote_ident(database_));' in run_query
+    assert 'if (!database_.empty()) ch_execute(*client_query_, "USE " + quote_ident(database_));' in run_query
     assert "apply_database_best_effort" not in run_query
     assert "auto apply_database =" in run_query
     apply = run_query[run_query.index("auto apply_database ="):run_query.index("auto execute_select_attempt")]

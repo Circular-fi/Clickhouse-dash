@@ -15,7 +15,7 @@ FormatCache::FormatCache(
   entries_.reserve(max_entries_);
 }
 
-FormatCache::ValuePtr FormatCache::get(const std::string& key) {
+FormatCache::ValuePtr FormatCache::get(const std::string& key, const std::string& input) {
   if (max_entries_ == 0 || max_bytes_ == 0 || ttl_.count() <= 0) return {};
 
   const auto now = std::chrono::steady_clock::now();
@@ -26,14 +26,15 @@ FormatCache::ValuePtr FormatCache::get(const std::string& key) {
     erase_locked(it);
     return {};
   }
+  if (it->second.input != input) return {};
   lru_.splice(lru_.begin(), lru_, it->second.lru_it);
   return it->second.value;
 }
 
-void FormatCache::put(std::string key, ValuePtr value) {
+void FormatCache::put(std::string key, std::string input, ValuePtr value) {
   if (!value || max_entries_ == 0 || max_bytes_ == 0 || ttl_.count() <= 0) return;
 
-  const size_t entry_bytes = key.size() + value->size();
+  const size_t entry_bytes = key.size() + input.size() + value->size();
   if (entry_bytes > max_bytes_) return;
 
   const auto now = std::chrono::steady_clock::now();
@@ -43,6 +44,7 @@ void FormatCache::put(std::string key, ValuePtr value) {
 
   lru_.push_front(key);
   Entry entry;
+  entry.input = std::move(input);
   entry.value = std::move(value);
   entry.expires_at = now + ttl_;
   entry.bytes = entry_bytes;

@@ -170,7 +170,7 @@ For this reason, a failure of the system account does not mark a host as down wh
 
 ## HTTP API
 
-- `GET /healthz` strict process health.
+- `GET /livez` liveness (the process answers), `GET /readyz` readiness (a host answers and the server does not stop), `GET /healthz` strict health (every host answers), `GET /metrics` the Prometheus text format. Refer to [`docs/operations.md`](docs/operations.md): the probes, the shutdown on SIGTERM, the JSON log, the metrics and the HTTP security (headers, the guard of the writes).
 - `GET /api/meta` build metadata and optional scoped autocomplete catalogs.
   The server-wide catalogs use `system_uri`. They are `keywords`, `functions`, `table_functions`, `formats`, `settings` and `data_types`.
   The catalogs that depend on visibility use `runner_uri`. They are `databases`, `tables` and `columns`.

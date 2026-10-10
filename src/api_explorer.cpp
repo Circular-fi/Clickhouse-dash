@@ -461,8 +461,6 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
   }
 
   const std::string database_filter = req.has_param("database") ? req.get_param_value("database") : std::string{};
-  const uint64_t ts = now_ms();
-  const uint64_t ttl = static_cast<uint64_t>(std::max(0, cfg_.explorer.cache_ttl_ms));
   const std::string security_key = explorer_security_key(host_id);
   std::string list_key = security_key + std::string("\0catalog-list\0", 14);
   list_key += database_filter.empty() ? std::string("@databases") : database_filter;
@@ -470,24 +468,29 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
   const std::string graph_key = security_key + std::string("\0graph", 6);
   const std::string functions_key = security_key + std::string("\0functions", 10);
   const bool force_refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  const AclAccess access = runner_access(*host);
   if (force_refresh) {
-    explorer_catalog_list_cache_.erase(list_key);
-    // A global refresh also invalidates rich graph/function metadata. A scoped
-    // database refresh intentionally touches only that sidebar branch.
+    // A global refresh reads the privileges of the runner and the rich graph metadata again too. A scoped database
+    // refresh touches that sidebar branch and the privileges of that database only. Nothing is removed: a read in
+    // progress is waited for, and every request that asked meanwhile shares the next one.
     if (database_filter.empty()) {
-      explorer_allowed_cache_.erase(security_key);
-      explorer_catalog_cache_.erase(catalog_key);
-      explorer_graph_cache_.erase(graph_key);
-      explorer_functions_cache_.erase(functions_key);
-      explorer_storage_cache_.erase(security_key + std::string("\0storage", 8));
+      acl_.invalidate(access);
+      explorer_catalog_cache_.invalidate(catalog_key);
+      explorer_graph_cache_.invalidate(graph_key);
+      explorer_functions_cache_.invalidate(functions_key);
+      explorer_storage_cache_.invalidate(security_key + std::string("\0storage", 8));
+    } else {
+      acl_.invalidate(access, database_filter);
     }
   }
 
-  auto catalog_result = explorer_catalog_list_cache_.get_or_refresh(
-      list_key, ts, ttl, 250,
-      [&](ExplorerCatalog& value, std::string& code, std::string& message) {
+  // Served at once past its TTL while one refresh runs: the fetch owns what it uses.
+  const HostSpec host_spec = *host;
+  auto catalog_result = explorer_catalog_list_cache_.get_revalidating(
+      list_key,
+      [this, host_spec, access, database_filter](ExplorerCatalog& value, std::string& code, std::string& message) {
         std::string error;
-        auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
+        auto runner = acquire_explorer_client(client_pool_, host_spec.runner_uri, &error);
         if (!runner) {
           code = "runner_unavailable";
           message = error.empty() ? "Cannot connect to the runner context." : error;
@@ -498,37 +501,39 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
           if (database_filter.empty()) {
             // First paint is database names only. Do not enumerate, DESCRIBE or
             // permission-probe every table in every database just to build the
-            // collapsed navigation tree.
+            // collapsed navigation tree. A database whose answer the discovery
+            // budget did not reach is listed too (its name is what SHOW gives
+            // the runner): its objects are checked when it is opened.
+            const auto listed = acl_.databases(access);
             value = ExplorerCatalog{};
             value.generated_at_ms = now_ms();
-            value.databases = discover_visible_databases(*runner);
+            value.databases = listed->databases;
+            value.databases.insert(value.databases.end(), listed->unverified.begin(), listed->unverified.end());
+            std::sort(value.databases.begin(), value.databases.end());
+            value.acl_truncated = listed->truncated;
             std::string summary_error;
             (void)load_explorer_database_summaries(
                 *runner, value.databases, value.database_summaries, &summary_error);
             return true;
           }
 
-          const auto databases = discover_visible_databases(*runner);
-          if (!std::binary_search(databases.begin(), databases.end(), database_filter)) {
+          // The expanded branch needs only this database. Its objects come from
+          // the runner's ACL (SHOW TABLES and the checks as the runner), so the
+          // technical account never decides which object names are allowed to
+          // reach the browser. A branch is asked by name: its own answer decides,
+          // whether or not the kept database list names it yet (a database
+          // created since).
+          const auto objects = acl_.objects(access, database_filter);
+          if (objects->objects.empty()) {
             value = ExplorerCatalog{};
             value.generated_at_ms = now_ms();
+            value.acl_truncated = objects->truncated;
             return true;
           }
-
-          // The expanded branch needs only this database. SHOW runs in the
-          // runner context, so the technical account never decides which
-          // object names are allowed to reach the browser.
-          const auto objects = discover_visible_objects(*runner, database_filter);
           AllowedObjectSet scoped_allowed;
-          for (const auto& object : objects) {
-            AllowedTable entry;
-            entry.database = database_filter;
-            entry.table = object;
-            entry.all_columns = true;
-            scoped_allowed.add_table(std::move(entry));
-          }
+          for (const auto& object : objects->objects) scoped_allowed.add_table(object);
 
-          const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+          const std::string system_uri = host_spec.system_uri.empty() ? host_spec.runner_uri : host_spec.system_uri;
           auto system = acquire_explorer_client(client_pool_, system_uri, &error);
           if (!system) {
             code = "system_context_unavailable";
@@ -540,14 +545,20 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
             message = error.empty() ? "Unable to load Explorer object list." : error;
             return false;
           }
+          value.acl_truncated = objects->truncated;
           return true;
+        } catch (const AclUnavailable& e) {
+          code = e.code;
+          message = e.what();
+          return false;
         } catch (const std::exception& e) {
           code = "explorer_catalog_failed";
           message = e.what();
           if (client_pool_) client_pool_->invalidate(runner);
           return false;
         }
-      });
+      },
+      force_refresh);
 
   if (!catalog_result.has_value || !catalog_result.value) {
     return json_error(
@@ -563,6 +574,8 @@ void Server::handle_explorer_catalog(const httplib::Request& req, httplib::Respo
   w.Key("host_id"); w.String(host_id.c_str());
   w.Key("generated_at_ms"); w.Uint64(catalog_result.value->generated_at_ms);
   w.Key("stale"); w.Bool(catalog_result.stale);
+  // A bound of the privilege discovery stopped it: objects that were not checked are not listed.
+  w.Key("acl_truncated"); w.Bool(catalog_result.value->acl_truncated);
   w.Key("database"); w.String(database_filter.c_str());
   w.Key("databases");
   w.StartArray();
@@ -640,24 +653,23 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
   }
 
-  const uint64_t ts = now_ms();
-  const uint64_t ttl = static_cast<uint64_t>(std::max(0, cfg_.explorer.cache_ttl_ms));
   const std::string storage_key = explorer_security_key(host_id) + std::string("\0storage", 8);
-  if (req.has_param("refresh") && req.get_param_value("refresh") == "1") {
-    explorer_storage_cache_.erase(storage_key);
-  }
+  const bool force_refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  const AclAccess access = runner_access(*host);
+  if (force_refresh) acl_.invalidate(access);
 
-  auto result = explorer_storage_cache_.get_or_refresh(
-      storage_key, ts, ttl, 250,
-      [&](ExplorerStorageMap& value, std::string& code, std::string& message) {
+  const HostSpec host_spec = *host;
+  auto result = explorer_storage_cache_.get_revalidating(
+      storage_key,
+      [this, host_spec, access](ExplorerStorageMap& value, std::string& code, std::string& message) {
         std::string error;
-        auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
+        auto runner = acquire_explorer_client(client_pool_, host_spec.runner_uri, &error);
         if (!runner) {
           code = "runner_unavailable";
           message = error.empty() ? "Cannot connect to the runner context." : error;
           return false;
         }
-        const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+        const std::string system_uri = host_spec.system_uri.empty() ? host_spec.runner_uri : host_spec.system_uri;
         auto system = acquire_explorer_client(client_pool_, system_uri, &error);
         if (!system) {
           code = "system_context_unavailable";
@@ -665,12 +677,17 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
           return false;
         }
         try {
-          if (!load_explorer_storage_map(*system, *runner, value, &error)) {
+          AclView acl(acl_, access);
+          if (!load_explorer_storage_map(*system, *runner, acl, value, &error)) {
             code = "explorer_storage_failed";
             message = error.empty() ? "Unable to load the Explorer storage distribution." : error;
             return false;
           }
           return true;
+        } catch (const AclUnavailable& e) {
+          code = e.code;
+          message = e.what();
+          return false;
         } catch (const std::exception& e) {
           code = "explorer_storage_failed";
           message = e.what();
@@ -680,7 +697,8 @@ void Server::handle_explorer_storage(const httplib::Request& req, httplib::Respo
           }
           return false;
         }
-      });
+      },
+      force_refresh);
 
   if (!result.has_value || !result.value) {
     return json_error(
@@ -763,7 +781,6 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
   }
 
-  const uint64_t ts = now_ms();
   const std::string security_key = explorer_security_key(host_id);
 
   std::string detail_key = security_key + std::string("\0table-detail\0", 14);
@@ -771,11 +788,12 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
   detail_key.push_back('\0');
   detail_key += table;
   const bool force_refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
-  if (force_refresh) explorer_table_detail_cache_.erase(detail_key);
+  const AclAccess access = runner_access(*host);
+  if (force_refresh) acl_.invalidate(access, database);
 
   const uint64_t detail_ttl = kExplorerTableDetailCacheTtlMs;
-  auto detail_result = explorer_table_detail_cache_.get_or_refresh(
-      detail_key, ts, detail_ttl, 250,
+  auto detail_result = explorer_table_detail_cache_.get(
+      detail_key,
       [&](ExplorerTableDetail& value, std::string& code, std::string& message) {
         const std::string system_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
         std::string error;
@@ -814,15 +832,23 @@ void Server::handle_explorer_table(const httplib::Request& req, httplib::Respons
           message = error.empty() ? "Unable to load Explorer table summary." : error;
           return false;
         }
-        if (!load_explorer_table_detail(
-                *system, *runner, scoped_allowed, database, table, summary, value, &error)) {
-          code = "explorer_table_metadata_failed";
-          message = error.empty() ? "Unable to load Explorer table metadata." : error;
+        try {
+          AclView acl(acl_, access);
+          if (!load_explorer_table_detail(
+                  *system, *runner, acl, scoped_allowed, database, table, summary, value, &error)) {
+            code = "explorer_table_metadata_failed";
+            message = error.empty() ? "Unable to load Explorer table metadata." : error;
+            return false;
+          }
+        } catch (const AclUnavailable& e) {
+          code = e.code;
+          message = e.what();
           return false;
         }
         value.generated_at_ms = now_ms();
         return true;
-      });
+      },
+      force_refresh);
 
   if (!detail_result.has_value || !detail_result.value) {
     const std::string code = detail_result.error_code.empty() ? "explorer_table_metadata_failed" : detail_result.error_code;
@@ -1056,18 +1082,15 @@ void Server::handle_explorer_functions(const httplib::Request& req, httplib::Res
     return json_error(res, 503, "host_unavailable", "Selected host is down.");
   }
 
-  const uint64_t ts = now_ms();
-  const uint64_t ttl = static_cast<uint64_t>(std::max(1000, cfg_.explorer.function_cache_ttl_ms));
   const std::string security_key = explorer_security_key(host_id);
   const std::string functions_key = security_key + std::string("\0functions", 10);
   const bool force_refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
-  if (force_refresh) explorer_functions_cache_.erase(functions_key);
 
   // Function discovery is intentionally executed with runner_uri. Unlike table
   // observability, there is no reason to elevate this metadata query through
   // the technical metadata account; the runner remains ClickHouse's own visibility boundary.
-  auto functions_result = explorer_functions_cache_.get_or_refresh(
-      functions_key, ts, ttl, 250,
+  auto functions_result = explorer_functions_cache_.get(
+      functions_key,
       [&](ExplorerFunctionsCatalog& value, std::string& code, std::string& message) {
         std::string error;
         auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
@@ -1082,7 +1105,8 @@ void Server::handle_explorer_functions(const httplib::Request& req, httplib::Res
           return false;
         }
         return true;
-      });
+      },
+      force_refresh);
   if (!functions_result.has_value || !functions_result.value) {
     return json_error(
         res, 503,
@@ -1340,59 +1364,52 @@ bool Server::explorer_graph_snapshot(
     return false;
   }
 
-  const uint64_t ts = now_ms();
-  const uint64_t ttl = static_cast<uint64_t>(std::max(0, cfg_.explorer.cache_ttl_ms));
   const std::string security_key = explorer_security_key(host_id);
   const std::string list_key = security_key + std::string("\0catalog-list", 13);
   const std::string catalog_key = security_key + std::string("\0catalog", 8);
   const std::string graph_key = security_key + std::string("\0graph", 6);
   const std::string functions_key = security_key + std::string("\0functions", 10);
   const bool force_refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  const AclAccess access = runner_access(*host);
   if (force_refresh) {
-    explorer_allowed_cache_.erase(security_key);
-    // Sidebar entries are keyed "<scope>\0catalog-list\0<database|@databases>",
-    // so an exact erase of the bare prefix never matched any of them.
-    explorer_catalog_list_cache_.erase_prefix(list_key);
-    explorer_catalog_cache_.erase(catalog_key);
-    explorer_graph_cache_.erase(graph_key);
-    explorer_functions_cache_.erase(functions_key);
+    acl_.invalidate(access);
+    // Sidebar entries are keyed "<scope>\0catalog-list\0<database|@databases>".
+    explorer_catalog_list_cache_.invalidate_prefix(list_key);
+    explorer_functions_cache_.invalidate(functions_key);
   }
 
-  auto allowed_result = explorer_allowed_cache_.get_or_refresh(
-      security_key, ts, ttl, 250,
-      [&](AllowedObjectSet& value, std::string& code, std::string& message) {
-        std::string error;
-        auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
-        if (!runner) { code = "runner_unavailable"; message = error; return false; }
-        try { value = discover_allowed_objects(*runner); return true; }
-        catch (const std::exception& e) { code = "acl_discovery_failed"; message = e.what(); return false; }
-      });
-  if (!allowed_result.has_value || !allowed_result.value) {
-    json_error(
-        res, 503,
-        allowed_result.error_code.empty() ? "acl_unavailable" : allowed_result.error_code,
-        allowed_result.error_message.empty() ? "Unable to determine readable ClickHouse objects." : allowed_result.error_message);
+  // Every object the runner reads, at table level (CHECK GRANT and zero-row probes as the runner, kept per identity).
+  std::shared_ptr<const AclTableSet> allowed;
+  try {
+    allowed = acl_.table_set(access);
+  } catch (const AclUnavailable& e) {
+    json_error(res, 503, e.code, e.what());
     return false;
   }
 
-  auto catalog_result = explorer_catalog_cache_.get_or_refresh(
-      catalog_key, ts, ttl, 250,
-      [&](ExplorerCatalog& value, std::string& code, std::string& message) {
-        const std::string uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+  const HostSpec host_spec = *host;
+  const std::string system_uri = host_spec.system_uri.empty() ? host_spec.runner_uri : host_spec.system_uri;
+  const ExplorerIdentities identities{acl_identity_key(system_uri), access.key};
+  // Both are served at once past their TTL while one refresh runs: the fetches own what they use.
+  auto catalog_result = explorer_catalog_cache_.get_revalidating(
+      catalog_key,
+      [this, host_spec, system_uri, allowed, identities](ExplorerCatalog& value, std::string& code, std::string& message) {
         std::string error;
-        auto system = acquire_explorer_client(client_pool_, uri, &error);
+        auto system = acquire_explorer_client(client_pool_, system_uri, &error);
         if (!system) { code = "system_context_unavailable"; message = error; return false; }
-        auto runner = acquire_explorer_client(client_pool_, host->runner_uri, &error);
+        auto runner = acquire_explorer_client(client_pool_, host_spec.runner_uri, &error);
         if (!runner) {
           code = "runner_unavailable";
           message = error.empty() ? "Cannot connect to the runner context." : error;
           return false;
         }
-        if (!load_explorer_catalog(*system, *runner, *allowed_result.value, value, &error)) {
+        if (!load_explorer_catalog(*system, *runner, identities, allowed->allowed, value, &error)) {
           code = "explorer_catalog_failed"; message = error; return false;
         }
+        value.acl_truncated = allowed->truncated;
         return true;
-      });
+      },
+      force_refresh);
   if (!catalog_result.has_value || !catalog_result.value) {
     json_error(
         res, 503,
@@ -1401,18 +1418,19 @@ bool Server::explorer_graph_snapshot(
     return false;
   }
 
-  auto graph_result = explorer_graph_cache_.get_or_refresh(
-      graph_key, ts, ttl, 250,
-      [&](ExplorerGraph& value, std::string& code, std::string& message) {
-        const std::string uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+  const std::shared_ptr<const ExplorerCatalog> catalog = catalog_result.value;
+  auto graph_result = explorer_graph_cache_.get_revalidating(
+      graph_key,
+      [this, system_uri, allowed, catalog, identities](ExplorerGraph& value, std::string& code, std::string& message) {
         std::string error;
-        auto system = acquire_explorer_client(client_pool_, uri, &error);
+        auto system = acquire_explorer_client(client_pool_, system_uri, &error);
         if (!system) { code = "system_context_unavailable"; message = error; return false; }
-        if (!load_explorer_graph(*system, *allowed_result.value, *catalog_result.value, value, &error)) {
+        if (!load_explorer_graph(*system, identities.system, allowed->allowed, *catalog, value, &error)) {
           code = "explorer_graph_failed"; message = error; return false;
         }
         return true;
-      });
+      },
+      force_refresh);
   if (!graph_result.has_value || !graph_result.value) {
     json_error(
         res, 503,
@@ -1422,7 +1440,7 @@ bool Server::explorer_graph_snapshot(
   }
 
   graph = graph_result.value;
-  stale = graph_result.stale || catalog_result.stale || allowed_result.stale;
+  stale = graph_result.stale || catalog_result.stale;
   return true;
 }
 

@@ -27,6 +27,7 @@
 #include "host_util.hpp"
 #include "otel_allowlist.hpp"
 #include "time_util.hpp"
+#include "ttl_cache.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -190,23 +191,29 @@ struct LogsSchema {
   bool body_token_index = false;
 };
 
-std::mutex g_schema_mutex;
-std::unordered_map<std::string, std::pair<LogsSchema, Clock::time_point>> g_schema_cache;
+// One read per source at a time (single-flight), kept kSchemaCacheTtl; a table that is not there yet (the exporter
+// creates it) a few seconds only. The key comes from the configuration only.
+TtlCache<std::string, LogsSchema>& schema_cache() {
+  static TtlCache<std::string, LogsSchema> cache([] {
+    TtlCache<std::string, LogsSchema>::Options options;
+    options.ttl = kSchemaCacheTtl;
+    options.max_entries = 256;
+    options.ttl_of = [](const LogsSchema& schema) -> std::chrono::milliseconds {
+      return schema.exists ? std::chrono::milliseconds(kSchemaCacheTtl) : std::chrono::milliseconds(5000);
+    };
+    return options;
+  }());
+  return cache;
+}
 
 bool attribute_column(const std::string& type) {
   return type.rfind("Map(", 0) == 0 || type.rfind("JSON", 0) == 0;
 }
 
-LogsSchema load_schema(clickhouse::Client& client, const HostSpec& host, const LogSettings& logs) {
-  const std::string key = host.system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
-  {
-    std::lock_guard<std::mutex> lock(g_schema_mutex);
-    const auto it = g_schema_cache.find(key);
-    if (it != g_schema_cache.end() && Clock::now() - it->second.second < kSchemaCacheTtl) return it->second.first;
-  }
+LogsSchema read_schema(clickhouse::Client& client, const LogSettings& logs) {
   LogsSchema schema;
   std::map<std::string, std::string> columns;
-  client.Select(
+  ch_select(client,
       "SELECT toString(name), toString(type) FROM system.columns WHERE database = " + quote(logs.database) +
           " AND `table` = " + quote(logs.table),
       [&](const clickhouse::Block& block) {
@@ -230,7 +237,7 @@ LogsSchema load_schema(clickhouse::Client& client, const HostSpec& host, const L
   schema.resource_attributes_map = map_column("ResourceAttributes");
   schema.scope_attributes_map = map_column("ScopeAttributes");
   if (schema.exists) {
-    client.Select(
+    ch_select(client,
         "SELECT toString(type), toString(expr) FROM system.data_skipping_indices WHERE database = " +
             quote(logs.database) + " AND `table` = " + quote(logs.table),
         [&](const clickhouse::Block& block) {
@@ -246,10 +253,16 @@ LogsSchema load_schema(clickhouse::Client& client, const HostSpec& host, const L
   }
   // A lower(Body) index is only preferred when there is no exact-case one.
   if (schema.body_token_index) schema.body_lower_index = false;
-  std::lock_guard<std::mutex> lock(g_schema_mutex);
-  if (g_schema_cache.size() > 64) g_schema_cache.clear();
-  g_schema_cache[key] = {schema, Clock::now()};
   return schema;
+}
+
+LogsSchema load_schema(clickhouse::Client& client, const HostSpec& host, const LogSettings& logs) {
+  const std::string key = host.system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
+  const auto result = schema_cache().get(key, [&](LogsSchema& schema, std::string&, std::string&) {
+    schema = read_schema(client, logs);
+    return true;
+  });
+  return *TtlCache<std::string, LogsSchema>::value_or_throw(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -653,7 +666,7 @@ struct LogRow {
 };
 
 void read_rows(clickhouse::Client& client, const std::string& sql, std::vector<LogRow>* rows) {
-  client.Select(sql, [&](const clickhouse::Block& block) {
+  ch_select(client, sql, [&](const clickhouse::Block& block) {
     for (size_t r = 0; r < block.GetRowCount(); ++r) {
       LogRow row;
       parse_i64(ch_block_text_at(block, 0, r), &row.ts_ns);
@@ -1169,7 +1182,7 @@ void Server::handle_logs_histogram(const httplib::Request& req, httplib::Respons
         "toString(countIf(SeverityNumber >= 9 AND SeverityNumber < 13)), toString(countIf(SeverityNumber < 9)) FROM " +
         r.table + " WHERE " + time_predicate(r.schema, q.start_ms * 1000000, q.end_ms * 1000000 + 999999) + q.where +
         " GROUP BY b ORDER BY toInt64(b)" + settings_clause();
-    r.client->Select(sql, [&](const clickhouse::Block& block) {
+    ch_select(*r.client, sql, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Bucket b{};
         parse_i64(ch_block_text_at(block, 0, row), &b.t);
@@ -1336,7 +1349,7 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   int64_t count_ms = 0, sample_ms = 0;
   try {
     auto t0 = Clock::now();
-    r.client->Select("SELECT toString(count()) FROM " + r.table + where + settings_clause(),
+    ch_select(*r.client, "SELECT toString(count()) FROM " + r.table + where + settings_clause(),
                      [&](const clickhouse::Block& block) {
                        if (block.GetRowCount()) parse_u64(ch_block_text_at(block, 0, 0), &total);
                      });
@@ -1355,7 +1368,7 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
       fetch_limit = sample_target * 2;
     }
     t0 = Clock::now();
-    r.client->Select("SELECT toString(toUnixTimestamp64Milli(Timestamp)), toString(SeverityNumber), toString(ServiceName), "
+    ch_select(*r.client, "SELECT toString(toUnixTimestamp64Milli(Timestamp)), toString(SeverityNumber), toString(ServiceName), "
                      "substringUTF8(Body, 1, 2048) FROM " + r.table + sample_where + " LIMIT " + std::to_string(fetch_limit) +
                      settings_clause(),
                      [&](const clickhouse::Block& block) {
@@ -1496,7 +1509,7 @@ void Server::handle_logs_services(const httplib::Request& req, httplib::Response
   const LogsQuery& q = r.query;
   std::vector<std::pair<std::string, uint64_t>> services;
   try {
-    r.client->Select("SELECT toString(ServiceName), toString(count()) FROM " + r.table + " WHERE " +
+    ch_select(*r.client, "SELECT toString(ServiceName), toString(count()) FROM " + r.table + " WHERE " +
                          time_predicate(r.schema, q.start_ms * 1000000, q.end_ms * 1000000 + 999999) + q.where +
                          " GROUP BY ServiceName ORDER BY ServiceName LIMIT 1000" + settings_clause(),
                      [&](const clickhouse::Block& block) {
@@ -1568,27 +1581,6 @@ bool facet_map_present(const LogsSchema& schema, const std::string& scope) {
 bool top_level_column(const std::string& key) {
   return std::any_of(std::begin(kTopLevelColumns), std::end(kTopLevelColumns), [&](const char* c) { return key == c; });
 }
-
-struct LogFacetKeys {
-  struct Key { std::string scope, key; uint64_t count = 0; };
-  std::vector<Key> keys;
-  uint64_t sampled = 0;
-  bool estimated = false;
-  bool timed_out = false;
-  uint64_t query_ms = 0;
-};
-
-struct LogFacetValues {
-  std::vector<std::pair<std::string, uint64_t>> values;
-  uint64_t with_key = 0;
-  uint64_t distinct_values = 0;
-  bool estimated = false;
-  bool timed_out = false;
-  uint64_t query_ms = 0;
-};
-
-StaleCache<std::string, LogFacetKeys> g_log_facet_keys_cache;
-StaleCache<std::string, LogFacetValues> g_log_facet_values_cache;
 
 // The key of an attr filter ("k=v" / "k!=v"), or "" when malformed.
 std::string attr_filter_key(const std::string& raw) {
@@ -1683,13 +1675,12 @@ void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& 
   std::string shape;
   for (const auto& scope : scopes) shape += scope + ",";
   for (const auto& column : columns) shape += column + ",";
+  // The client's text (the filters) enters the key as a digest.
   const std::string cache_key = r.host_id + '\0' + r.table + '\0' + std::to_string(win.start_ms) + '\0' +
-      std::to_string(win.end_ms) + '\0' + shape + '\0' + r.query.where;
-  bool fetched = false;
-  auto cached = g_log_facet_keys_cache.get_or_refresh(
-      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      std::to_string(win.end_ms) + '\0' + shape + '\0' + sha256_hex(r.query.where);
+  auto cached = log_facet_keys_cache_.get(
+      cache_key,
       [&](LogFacetKeys& value, std::string& code, std::string& message) {
-        fetched = true;
         std::vector<std::string> inner, aggregates, tuples, column_tuples;
         for (size_t i = 0; i < scopes.size(); ++i) {
           const std::string k = "k" + std::to_string(i), m = "m" + std::to_string(i);
@@ -1709,7 +1700,9 @@ void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& 
             "SELECT count() AS sampled, " + join_sql(aggregates) + " FROM ("
             "SELECT " + join_sql(inner) + " FROM " + r.table + facet_where(r, win) +
             " LIMIT " + std::to_string(kFacetSampleRows) + ")) LEFT ARRAY JOIN arrayConcat(" + join_sql(tuples) + ") AS t" +
-            facet_settings_sql(kFacetReadRowsCap, false);
+            // The served keys only (and one more, which says truncated), in the order of the sort below.
+            " ORDER BY t.3 DESC, multiIf(t.1 = 'column', 0, t.1 = 'log', 1, t.1 = 'resource', 2, 3), t.2 LIMIT " +
+            std::to_string(kFacetMaxKeys + 1) + facet_settings_sql(kFacetReadRowsCap, false);
         try {
           const BoundedRead read = bounded_select(*r.client, sql, [&](const clickhouse::Block& block) {
             for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -1737,6 +1730,7 @@ void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& 
           if (a.scope != b.scope) return facet_scope_rank(a.scope) < facet_scope_rank(b.scope);
           return a.key < b.key;
         });
+        if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);
         return true;
       });
   if (!cached.has_value || !cached.value) {
@@ -1750,7 +1744,7 @@ void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& 
   w.Key("supported"); w.Bool(true);
   w.Key("scopes"); w.StartArray(); for (const auto& scope : scopes) w.String(scope.c_str()); w.String("column"); w.EndArray();
   w.Key("columns"); w.StartArray(); for (const auto& column : columns) w.String(column.c_str()); w.EndArray();
-  write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !fetched);
+  write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !cached.fetched);
   w.Key("sampled_records"); w.Uint64(value.sampled);
   w.Key("truncated"); w.Bool(value.keys.size() > kFacetMaxKeys);
   w.Key("keys"); w.StartArray();
@@ -1786,13 +1780,12 @@ void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Resp
                                         : std::string(facet_map_column(scope)) + " is not stored as a Map column.");
   }
   const FacetWindow win = facet_window(r.query);
+  // The client's text (the field key and the filters) enters the key as a digest.
   const std::string cache_key = r.host_id + '\0' + r.table + '\0' + std::to_string(win.start_ms) + '\0' +
-      std::to_string(win.end_ms) + '\0' + scope + '\0' + key + '\0' + std::to_string(limit) + '\0' + r.query.where;
-  bool fetched = false;
-  auto cached = g_log_facet_values_cache.get_or_refresh(
-      cache_key, static_cast<uint64_t>(now_ms()), kFacetTtlMs, 5000,
+      std::to_string(win.end_ms) + '\0' + scope + '\0' + std::to_string(limit) + '\0' + sha256_hex(key + '\0' + r.query.where);
+  auto cached = log_facet_values_cache_.get(
+      cache_key,
       [&](LogFacetValues& value, std::string& code, std::string& message) {
-        fetched = true;
         std::string expr, presence;
         if (scope == "column") {
           expr = "toString(" + quote_ident(key) + ")";
@@ -1840,7 +1833,7 @@ void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Resp
   w.Key("scope"); w.String(scope.c_str());
   w.Key("key"); w.String(key.c_str());
   w.Key("limit"); w.Int(limit);
-  write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !fetched);
+  write_facet_common(w, r, win, value.estimated, value.timed_out, value.query_ms, !cached.fetched);
   w.Key("records_with_key"); w.Uint64(value.with_key);
   w.Key("distinct_values"); w.Uint64(value.distinct_values);
   w.Key("has_more"); w.Bool(value.distinct_values > value.values.size());
