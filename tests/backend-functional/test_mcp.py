@@ -1558,6 +1558,29 @@ def _log_users(since: str, like: str, unlike: str = "") -> set[str]:
     return {line for line in text.splitlines() if line}
 
 
+@needs_mcp
+def test_query_execution_tool_finds_a_run_of_the_query_page():
+    """The registry keeps a run under its host; the tool asks with the MCP identity of that host (ARCH-B-069)."""
+    run = SESSION.post(f"{MCP_URL}/api/query/run", json={"host_id": "local", "sql": "SELECT 1 AS one"}, timeout=15)
+    assert run.status_code == 200, run.text
+    query_id = run.json()["query_id"]
+    with SESSION.get(f"{MCP_URL}/{run.json()['stream_url']}", stream=True, timeout=(10, 60)) as stream:
+        assert stream.status_code == 200, stream.text
+        for line in stream.iter_lines(decode_unicode=True):
+            if line and line.startswith("event:") and line[6:].strip() in ("done", "error"):
+                break
+    key, secret = make_key(new_key_body("execution", tools=["query_execution"], databases=["*"], hosts=["local"]))
+    try:
+        found = ok_tool(MCP_URL, secret, "query_execution", {"host": "local", "params": {"query_id": query_id}})
+        assert found["terminal_status"] == "finished", found
+        assert found["run_mode"] == "normal", found
+        # An unknown query is still not found.
+        fail_tool(MCP_URL, secret, "query_execution", {"host": "local", "params": {"query_id": str(uuid.uuid4())}},
+                  "execution_not_found")
+    finally:
+        drop_key(key["id"])
+
+
 @needs_clickhouse
 def test_api_tools_run_as_the_mcp_user_not_as_the_runner():
     """The pages read as the runner (visibility, data) and the system user (figures, the otel tables); a tool reads the data as the MCP user and keeps the system user for the rest."""

@@ -3,6 +3,7 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "mcp_identity.hpp"
 #include "query_execution.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -109,7 +110,10 @@ void Server::handle_query_execution(const httplib::Request& req, httplib::Respon
     return json_error(res, 404, "execution_not_found", "Query execution statistics are not available.");
   }
 
-  auto record = query_registry_->find(query_id, host_id);
+  // The registry keeps a run under its configured host. The query_execution tool of MCP asks with the MCP
+  // identity of that host (mcp_identity.hpp): the record is the same, the visibility filter below is the
+  // one of the MCP user.
+  auto record = query_registry_->find(query_id, std::string(mcp_base_host(host_id)));
   if (!record) {
     return json_error(res, 404, "execution_not_found", "Query execution statistics are not available.");
   }

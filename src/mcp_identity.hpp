@@ -43,6 +43,10 @@ bool mcp_internal_token_matches(std::string_view text);
 // The id that the API takes for a tool: the host, and the suffix of its identity.
 std::string mcp_api_host(std::string_view host, McpIdentity identity);
 
+// The configured host behind an id: the id itself, or the host of an MCP identity (the suffix cut). The records
+// that are kept by host (the query registry) use the configured host.
+std::string_view mcp_base_host(std::string_view host_id);
+
 // An answer of the API names the host that it served: the suffix is cut, so a client sees its host id.
 std::string mcp_strip_identity(std::string body);
 
