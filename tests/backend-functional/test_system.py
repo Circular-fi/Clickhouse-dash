@@ -1143,7 +1143,8 @@ def test_every_disks_read_is_read_only_bounded_and_tagged():
         "OR query LIKE '%DiskUsed%' OR query LIKE '%FROM system.part_log%')"
     )
     queries = " ".join(row["query"] for row in rows)
-    for part in ["FROM system.disks", "FROM system.storage_policies", "FROM system.parts WHERE active AND database IN {databases:Array(String)}",
+    # The databases go as a query parameter: query_log shows its value in place of the {databases:Array(String)} of the SQL.
+    for part in ["FROM system.disks", "FROM system.storage_policies", "FROM system.parts WHERE active AND (database IN _CAST(",
                  "'DiskUsed_default'", "FROM system.part_log WHERE"]:
         assert part in queries, (part, queries[:1500])
     for row in rows:
