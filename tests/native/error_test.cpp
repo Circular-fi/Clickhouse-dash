@@ -230,7 +230,7 @@ void test_the_answer_of_each_failure() {
   CHECK_EQ(res.get_header_value("Content-Type"), std::string("application/json"));
   httplib::Response plain;
   json_error(plain, 404, "unknown_host", "no such host");
-  CHECK_EQ(parse(plain.body)["error_code"].GetString(), std::string("unknown_host"));
+  CHECK_EQ(std::string(parse(plain.body)["error_code"].GetString()), std::string("unknown_host"));
 }
 
 void test_the_parameters_of_a_route() {
@@ -257,7 +257,7 @@ void test_the_parameters_of_a_route() {
   httplib::Response refused;
   CHECK(refuse_unknown_params(req, refused, {"host_id", "refresh"}));
   CHECK_EQ(refused.status, 400);
-  CHECK_EQ(parse(refused.body)["error_code"].GetString(), std::string("unknown_parameter"));
+  CHECK_EQ(std::string(parse(refused.body)["error_code"].GetString()), std::string("unknown_parameter"));
   CHECK(std::string(parse(refused.body)["message"].GetString()).find("bogus") != std::string::npos);
 }
 
