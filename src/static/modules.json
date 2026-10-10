@@ -1,6 +1,7 @@
 {
   "//": [
     "The pages of the application. A page is its entry: pages.<page>.entry is an ES module (app_page_<page>.js) that imports what the page is made of; the browser loads the modules it imports, and theirs in turn, in dependency order. Nothing else lists them.",
+    "pages.<page>.label, .main, .nav: what the page says about its shell (tools/page_shells.py reads them): label is the page that the page switcher names; main is the id of the shell's <main>, the target of the skip link; nav is the page the switcher files the shell under when it is not its own entry. This file is the one list of pages: the page shells, the stylesheets and the contract tests read it.",
     "pages.<page>.lazy.<group>: modules that load on first use, through loader.loadGroup(group) (app_loader.js): the page names them here and imports none of them. A page that has no such group gets {} from loadGroup and keeps the path without it (no highlighter on the MCP page, no WebAssembly adapter that a page does not list).",
     "tools/page_shells.py copies each page's description ({ name, entry, files, lazy }) into its shell as <script type=\"application/json\" id=\"chdashModules\"> and the shell adds the entry as a module script; tools/build_page_css.py builds the page stylesheets from the modules the page can run (its closure and its lazy groups); tools/stage_static.py gives every module a content hash in the build. After a change of an import or of this file, run python3 tools/build_page_css.py.",
     "tools/module_graph.py (run by tools/build_page_css.py --check and the harness) fails on an import that is not a sibling module, on an import cycle, on a script that is on no page and on a lazy module that the page also imports.",
@@ -9,6 +10,8 @@
   "pages": {
     "query": {
       "entry": "app_page_query.js",
+      "label": "Query",
+      "main": "queryWorkspace",
       "lazy": {
         "chart": ["app_chart_core.js"],
         "library": ["app_query_library.js"],
@@ -21,6 +24,8 @@
     },
     "explorer": {
       "entry": "app_page_explorer.js",
+      "label": "Explorer",
+      "main": "explorerWorkspace",
       "lazy": {
         "wasm-rowsort": ["app_wasm_rowsort.js"],
         "wasm-router": ["app_wasm_router.js"],
@@ -33,12 +38,18 @@
     },
     "functions": {
       "entry": "app_page_functions.js",
+      "label": "Explorer",
+      "main": "explorerWorkspace",
+      "nav": "explorer",
       "lazy": {
         "wasm-highlight": ["app_wasm_highlight.js"]
       }
     },
     "traces": {
       "entry": "app_page_traces.js",
+      "label": "Observability",
+      "main": "tracesWorkspace",
+      "nav": "observability",
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-router": ["app_wasm_router.js"],
@@ -50,6 +61,9 @@
     },
     "logs": {
       "entry": "app_page_logs.js",
+      "label": "Observability",
+      "main": "logsWorkspace",
+      "nav": "observability",
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm_highlight.js"],
@@ -58,6 +72,9 @@
     },
     "metrics": {
       "entry": "app_page_metrics.js",
+      "label": "Observability",
+      "main": "metricsWorkspace",
+      "nav": "observability",
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm_highlight.js"],
@@ -66,6 +83,9 @@
     },
     "trace": {
       "entry": "app_page_trace.js",
+      "label": "Observability",
+      "main": "tracesWorkspace",
+      "nav": "observability",
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-router": ["app_wasm_router.js"],
@@ -77,6 +97,9 @@
     },
     "shape": {
       "entry": "app_page_shape.js",
+      "label": "System",
+      "main": "systemWorkspace",
+      "nav": "system",
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm_highlight.js"],
@@ -84,10 +107,14 @@
       }
     },
     "mcp": {
-      "entry": "app_page_mcp.js"
+      "entry": "app_page_mcp.js",
+      "label": "MCP",
+      "main": "mcpWorkspace"
     },
     "system": {
       "entry": "app_page_system.js",
+      "label": "System",
+      "main": "systemWorkspace",
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm_highlight.js"],
@@ -97,6 +124,9 @@
     },
     "queries": {
       "entry": "app_page_queries.js",
+      "label": "System",
+      "main": "systemWorkspace",
+      "nav": "system",
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm_highlight.js"],
@@ -105,6 +135,9 @@
     },
     "disks": {
       "entry": "app_page_disks.js",
+      "label": "System",
+      "main": "systemWorkspace",
+      "nav": "system",
       "lazy": {
         "highlight": ["app_highlight.js"],
         "wasm-highlight": ["app_wasm_highlight.js"],

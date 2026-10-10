@@ -43,26 +43,23 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "src" / "static"
 MANIFEST = STATIC / "modules.json"
 HEADER = ROOT / "src" / "shell" / "header.html"
-SHELLS = {
-    "query": "Query", "explorer": "Explorer", "functions": "Explorer", "traces": "Observability", "logs": "Observability", "metrics": "Observability",
-    "trace": "Observability", "system": "System", "queries": "System", "disks": "System", "shape": "System", "mcp": "MCP",
-}
-# The id of each shell's <main>: the target of the skip link at the top of the header.
-MAIN_ID = {
-    "query": "queryWorkspace", "explorer": "explorerWorkspace", "functions": "explorerWorkspace", "traces": "tracesWorkspace",
-    "logs": "logsWorkspace", "metrics": "metricsWorkspace", "trace": "tracesWorkspace", "system": "systemWorkspace",
-    "queries": "systemWorkspace", "disks": "systemWorkspace", "shape": "systemWorkspace", "mcp": "mcpWorkspace",
-}
-# A shell the page switcher files under another page: each Observability view and one trace are
-# Observability's, each System section and one query shape System's.
-NAV_PAGE = {"functions": "explorer", "traces": "observability", "logs": "observability", "metrics": "observability", "trace": "observability", "queries": "system", "disks": "system", "shape": "system"}  # "mcp" is its own entry
-# The faces of the first paint (body text, labels and buttons, code): the other weights and the
-# "Pi" symbols load when a page first uses them.
-FONT_PRELOADS = ("IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2")
 
 
 def manifest() -> dict:
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
+
+
+# The pages, and what each one says about itself, are in src/static/modules.json (pages.<page>.label, .main, .nav): the one
+# list of pages. label: the page the switcher names; main: the id of the shell's <main>, the target of the skip link at the
+# top of the header; nav: the page the switcher files a shell under when it is not its own (each Observability view and one
+# trace are Observability's, each System section and one query shape System's; a page with no "nav" is its own entry).
+SHELLS = {page: entry["label"] for page, entry in manifest()["pages"].items()}
+MAIN_ID = {page: entry["main"] for page, entry in manifest()["pages"].items()}
+NAV_PAGE = {page: entry["nav"] for page, entry in manifest()["pages"].items() if "nav" in entry}
+
+# The faces of the first paint (body text, labels and buttons, code): the other weights and the
+# "Pi" symbols load when a page first uses them.
+FONT_PRELOADS = ("IBMPlexSans-Regular-Latin1.woff2", "IBMPlexSans-Medium-Latin1.woff2", "IBMPlexMono-Regular-Latin1.woff2")
 
 
 def page_entry(page: str, data: dict | None = None) -> dict:

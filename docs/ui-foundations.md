@@ -375,7 +375,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 
   Side panels and detail panels scroll on their own.
 - Use `--shell-top` for anything that you place under the chrome. `app_dom.js` sets it on every page to the bottom of the header and the nav row. Do not use a literal header height.
-- The first element of the page is the skip link (`a.skipLink`, in `src/shell/header.html`): the first stop of the Tab order, out of sight until it has the focus. It goes to the `main` of the page. `tools/page_shells.py` (`MAIN_ID`) gives each shell the id of its `main`.
+- The first element of the page is the skip link (`a.skipLink`, in `src/shell/header.html`): the first stop of the Tab order, out of sight until it has the focus. It goes to the `main` of the page. `pages.<page>.main` of `src/static/modules.json` gives each shell the id of its `main`.
 - Headings: one `h1` for each page, the name of the page (`srOnly`: the page switcher shows it). It is the first child of the `main`, so that no text of the page is outside a landmark. Use one `h2` for each Observability view (`srOnly`, after the `h1`). Use one `h2` for the title of the Explorer card (`#explorerDetailName`, `#explorerFunctionDetailName`). The sections under it are `h3`.
 - The version badge of the header is a solid chip (`--pillBg`, the muted text at full strength), 4.5:1 in both themes.
 

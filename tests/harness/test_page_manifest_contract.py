@@ -16,7 +16,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-PAGES = ("query", "explorer", "functions", "traces", "logs", "metrics", "trace", "system", "queries", "disks", "shape", "mcp")
 
 
 def read(rel: str) -> str:
@@ -41,14 +40,20 @@ def manifest() -> dict:
     return json.loads(read("src/static/modules.json"))
 
 
+PAGES = tuple(manifest()["pages"])
+
+
 def test_every_page_has_one_entry_and_every_module_is_on_a_page():
     graph = load_tool("module_graph")
     data = manifest()
-    assert set(data["pages"]) == set(PAGES)
+    # The manifest is the one list of pages: one shell (<page>.html) and one entry module for each, and no other shell.
+    assert {path.stem for path in STATIC.glob("*.html")} == set(PAGES)
     assert graph.problems() == []
     for page, entry in data["pages"].items():
         assert entry["entry"] == f"app_page_{page}.js", page
-        assert set(entry) <= {"entry", "lazy"}, page
+        assert set(entry) <= {"entry", "label", "main", "nav", "lazy"}, page
+        assert entry["label"] and entry["main"], page
+        assert entry.get("nav", "") in ("", "explorer", "observability", "system"), page
         text = read(f"src/static/{entry['entry']}")
         # Every entry runs the common modules first and ends with boot(): the document is parsed, the handle is set, a
         # failing start is shown.

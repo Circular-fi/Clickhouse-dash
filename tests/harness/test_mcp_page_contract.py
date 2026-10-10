@@ -44,9 +44,10 @@ def test_the_mcp_page_is_its_own_shell_filed_as_its_own_switcher_entry():
 
 def test_the_page_registers_in_the_shell_and_stylesheet_builders():
     shells = read("tools/page_shells.py")
-    assert '"mcp": "MCP"' in shells and '"{{mcp.hidden}}": "" if nav == "mcp" else " hidden",' in shells
-    assert '"mcp"' not in re.search(r"NAV_PAGE = \{.*?\}", shells).group(0)
-    assert '"shape", "mcp")' in read("tools/build_page_css.py")
+    assert '"{{mcp.hidden}}": "" if nav == "mcp" else " hidden",' in shells
+    # The manifest is the one list of pages: MCP is its own entry in the switcher (no "nav"), with its own <main>.
+    page = modules.graph.manifest()["pages"]["mcp"]
+    assert page["label"] == "MCP" and page["main"] == "mcpWorkspace" and "nav" not in page
     index = read("src/static/css/index.css")
     assert 'url("20-features/mcp.css") layer(features)' in index
     files = modules.page_files("mcp")

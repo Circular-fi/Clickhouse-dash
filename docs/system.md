@@ -37,7 +37,7 @@ The former addresses of Explorer answer with a redirect to the System page (`ser
 
 `#performance` and `#activity` scroll the Overview to that part when the page opens on it. The page keeps the part at the top while the parts above it fill in, until the reader scrolls. With `system.enabled = false`, there is no redirect. These addresses open the Explorer Catalog.
 
-The shell is `src/static/system.html` (header partial `src/shell/header.html`, generated regions from `tools/page_shells.py` `SHELLS`). Its sheet is `style.system.css` (`tools/build_page_css.py` `PAGES`, source `src/static/css/20-features/system.css`). The bootstrap `app_system.js` handles the routes, Back / Forward, the host change and *Open in Query*. The entry of the page (`pages.system` in `src/static/modules.json`) imports it, and it starts the section of the page. The highlighter is the lazy group `highlight`:
+The shell is `src/static/system.html` (header partial `src/shell/header.html`, generated regions from `tools/page_shells.py`, which reads `pages.system` of `src/static/modules.json`). Its sheet is `style.system.css` (`tools/build_page_css.py`, source `src/static/css/20-features/system.css`). The bootstrap `app_system.js` handles the routes, Back / Forward, the host change and *Open in Query*. The entry of the page (`pages.system` in `src/static/modules.json`) imports it, and it starts the section of the page. The highlighter is the lazy group `highlight`:
 
 | Module | Holds |
 | --- | --- |

@@ -36,4 +36,4 @@ def imports(name: str) -> list[str]:
     return graph.static_imports(name)
 
 
-PAGES = ("query", "explorer", "functions", "traces", "logs", "metrics", "trace", "system", "queries", "disks", "shape", "mcp")
+PAGES = tuple(graph.manifest()["pages"])  # the one list of pages: src/static/modules.json
