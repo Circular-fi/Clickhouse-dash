@@ -97,11 +97,9 @@
       error: null,
       keeperError: null,
       loading: false,
-      serial: 0,
       databases: null,
       databasesError: null,
       databasesLoading: false,
-      databasesSerial: 0,
       databasesAt: 0,
       treemap: null,
       active: false,
@@ -144,23 +142,25 @@
     // --- Loading -------------------------------------------------------------
 
     // The tiles, the cluster cards and the activity: one round.
+    // Every read is cancelable (util.latest): a newer read of the same kind, a forced Refresh or another host aborts
+    // the one in flight, and an answer that is no longer the newest leaves the shared flags (loading, busy) alone.
     async function loadLive(force = false) {
       const host = kit.hostId();
       if (!host) return;
       const work = [];
-      if (activity && !activity.loading()) work.push(activity.load(force));
-      if (!state.loading) {
+      if (activity && (force || !activity.loading())) work.push(activity.load(force));
+      if (force || !state.loading || state.host !== host) {
+        const req = ns.util.latest("system.overview");
         state.loading = true;
-        const serial = ++state.serial;
+        state.host = host;
         renderBusy();
         work.push(Promise.allSettled([
-          ns.api.getSystemOverview(host, force),
-          keeperEnabled() ? ns.api.getSystemKeeper(host, force) : Promise.resolve(null),
+          ns.api.getSystemOverview(host, force, { signal: req.signal }),
+          keeperEnabled() ? ns.api.getSystemKeeper(host, force, { signal: req.signal }) : Promise.resolve(null),
         ]).then(([overview, keeper]) => {
+          if (!req.isCurrent() || kit.hostId() !== host) return;
           state.loading = false;
           renderBusy();
-          if (serial !== state.serial || kit.hostId() !== host) return;
-          state.host = host;
           if (overview.status === "fulfilled") { state.data = overview.value; state.error = null; } else state.error = overview.reason;
           if (keeper.status === "fulfilled") {
             const next = keeper.value;
@@ -184,20 +184,20 @@
 
     async function loadDatabases(force = false) {
       const host = kit.hostId();
-      if (!host || state.databasesLoading) return;
+      if (!host || (state.databasesLoading && !force)) return;
+      const req = ns.util.latest("system.databases");
       state.databasesLoading = true;
-      const serial = ++state.databasesSerial;
       ns.uiState.busy(databases.body, !state.databases);
       let data = null;
       let error = null;
       try {
-        data = await ns.api.getSystemDisks(host, force);
+        data = await ns.api.getSystemDisks(host, force, { signal: req.signal });
       } catch (e) {
         error = e;
       }
+      if (!req.isCurrent() || kit.hostId() !== host) return;
       state.databasesLoading = false;
       ns.uiState.busy(databases.body, false);
-      if (serial !== state.databasesSerial || kit.hostId() !== host) return;
       state.databasesAt = Date.now();
       if (data) { state.databases = data; state.databasesError = null; } else state.databasesError = error;
       renderDatabases();
@@ -518,11 +518,12 @@
       state.keeperRecent = null;
       state.error = null;
       state.keeperError = null;
-      state.serial += 1;
+      ns.util.latest.cancel("system.overview");
+      ns.util.latest.cancel("system.databases");
+      state.host = "";
       state.loading = false;
       state.databases = null;
       state.databasesError = null;
-      state.databasesSerial += 1;
       state.databasesLoading = false;
       state.databasesAt = 0;
       activity?.reset();
@@ -547,7 +548,7 @@
         perf?.hide();
       },
       refresh(force = true) {
-        if (state.host !== kit.hostId()) resetForHost();
+        if (state.host && state.host !== kit.hostId()) resetForHost();
         refreshAll(force);
       },
       query: () => perf?.query() || "",

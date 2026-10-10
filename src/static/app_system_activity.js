@@ -75,7 +75,7 @@
   }
 
   function create({ openTable = null } = {}) {
-    const state = { activity: null, error: null, loading: false, serial: 0 };
+    const state = { activity: null, error: null, loading: false };
     // Not a live region: a refresh would read the tables out again every time.
     const body = h("div", { class: "systemActivity", id: "systemActivity" });
 
@@ -246,20 +246,22 @@
 
     async function load(force = false) {
       const host = kit.hostId();
-      if (!host || state.loading) return;
+      if (!host || (state.loading && !force)) return;
+      // The newest read of the activity: a forced Refresh or another host aborts the one in flight, which then leaves
+      // the busy state to the newer one.
+      const req = ns.util.latest("system.activity");
       state.loading = true;
-      const serial = ++state.serial;
       ns.uiState.busy(body, true);
       let data = null;
       let error = null;
       try {
-        data = await ns.api.getSystemActivity(host, force);
+        data = await ns.api.getSystemActivity(host, force, { signal: req.signal });
       } catch (e) {
         error = e;
       }
+      if (!req.isCurrent() || kit.hostId() !== host) return;
       state.loading = false;
       ns.uiState.busy(body, false);
-      if (serial !== state.serial || kit.hostId() !== host) return;
       if (data) { state.activity = data; state.error = null; } else state.error = error;
       render();
     }
@@ -267,8 +269,9 @@
     function reset() {
       state.activity = null;
       state.error = null;
+      ns.util.latest.cancel("system.activity");
       state.loading = false;
-      state.serial += 1;
+      ns.uiState.busy(body, false);
       render();
     }
 

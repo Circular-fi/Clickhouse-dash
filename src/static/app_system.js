@@ -108,6 +108,8 @@
     router().on(ROUTE, onPopState);
     // Another host: the section on screen reads it.
     window.addEventListener("chdash:host-changed", () => ns.systemView?.refresh?.(false));
+    // A page restored from the back/forward cache is as old as the visit: it reads again.
+    window.addEventListener("pageshow", (event) => { if (event.persisted) ns.systemView?.refresh?.(false); });
     // A section a new answer of /api/version turns off (Queries without
     // system.top_queries) leaves for Overview.
     ns.features?.on?.(() => {

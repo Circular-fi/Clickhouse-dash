@@ -68,10 +68,10 @@ def test_activity_loads_on_the_system_page_only() -> None:
     assert not (Path(ROOT / "src/static/app_explorer_ops.js")).exists()
     activity = read("src/static/app_system_activity.js")
     assert "ns.systemActivity = { create," in activity
-    assert "ns.api.getSystemActivity(host, force)" in activity
+    assert "ns.api.getSystemActivity(host, force, { signal: req.signal })" in activity
     # The Overview polls it with its tiles, never while hidden.
     overview = read("src/static/app_system_overview.js")
     assert "activity = activityEnabled() ? ns.systemActivity.create({ openTable: ctx.openTable }) : null;" in overview
-    assert "if (activity && !activity.loading()) work.push(activity.load(force));" in overview
+    assert "if (activity && (force || !activity.loading())) work.push(activity.load(force));" in overview
     storage = read("src/static/app_explorer_storage.js")
     assert "ns.explorerStorage = {" in storage

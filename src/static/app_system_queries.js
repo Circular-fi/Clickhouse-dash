@@ -303,13 +303,11 @@
       listKey: "",
       listError: null,
       listLoading: false,
-      listSerial: 0,
       listResolved: null,
       drill: null,
       drillKey: "",
       drillError: null,
       drillLoading: false,
-      drillSerial: 0,
       drillResolved: null,
       charts: new Map(),
       // host|hash|text -> "pending" | { text } (formatted, "" when the
@@ -532,6 +530,9 @@
       if (!host) return;
       const { resolved, error } = resolveWindow();
       if (error) {
+        // A list in flight was asked for another window: it stops, so its answer never replaces this message.
+        ns.util.latest.cancel("system.queries");
+        state.listLoading = false;
         state.list = null;
         state.listKey = "";
         state.listError = error;
@@ -542,18 +543,19 @@
       if (!force && key === state.listKey && (state.list || state.listLoading)) {
         return;
       }
-      const serial = ++state.listSerial;
+      const req = ns.util.latest("system.queries");
       state.listKey = key;
+      state.host = host;
       state.listLoading = true;
       renderStatus();
       let data = null;
       let failure = null;
       try {
-        data = await ns.api.getSystemQueries(host, { fromMs: resolved.startMs, toMs: resolved.endMs, sort: state.sort, kind: state.kind, errors: state.errors, user: state.user, database: state.database, table: state.table, hideChdash: state.hide }, force);
+        data = await ns.api.getSystemQueries(host, { fromMs: resolved.startMs, toMs: resolved.endMs, sort: state.sort, kind: state.kind, errors: state.errors, user: state.user, database: state.database, table: state.table, hideChdash: state.hide }, force, { signal: req.signal });
       } catch (e) {
         failure = e;
       }
-      if (serial !== state.listSerial || kit.hostId() !== host) return;
+      if (!req.isCurrent() || kit.hostId() !== host) return;
       state.listLoading = false;
       state.host = host;
       state.list = data;
@@ -582,6 +584,8 @@
       ensureHighlighterMeta();
       const { resolved, error } = resolveWindow();
       if (error) {
+        ns.util.latest.cancel("system.query");
+        state.drillLoading = false;
         state.drill = null;
         state.drillKey = "";
         state.drillError = error;
@@ -592,19 +596,20 @@
       if (!force && key === state.drillKey && (state.drill || state.drillLoading)) {
         return;
       }
-      const serial = ++state.drillSerial;
+      const req = ns.util.latest("system.query");
       state.drillKey = key;
+      state.host = host;
       state.drillLoading = true;
       if (state.drill && state.drill.hash !== hash) state.drill = null;
       render();
       let data = null;
       let failure = null;
       try {
-        data = await ns.api.getSystemQuery(host, hash, { fromMs: resolved.startMs, toMs: resolved.endMs, order: state.order, hideChdash: state.hide }, force);
+        data = await ns.api.getSystemQuery(host, hash, { fromMs: resolved.startMs, toMs: resolved.endMs, order: state.order, hideChdash: state.hide }, force, { signal: req.signal });
       } catch (e) {
         failure = e;
       }
-      if (serial !== state.drillSerial || kit.hostId() !== host) return;
+      if (!req.isCurrent() || kit.hostId() !== host) return;
       state.drillLoading = false;
       state.host = host;
       state.drill = data;
@@ -1175,12 +1180,13 @@
       state.listKey = "";
       state.listError = null;
       state.listLoading = false;
-      state.listSerial += 1;
+      ns.util.latest.cancel("system.queries");
       state.drill = null;
       state.drillKey = "";
       state.drillError = null;
       state.drillLoading = false;
-      state.drillSerial += 1;
+      ns.util.latest.cancel("system.query");
+      state.host = "";
       // Another server, other users, databases and tables.
       state.users = [];
       state.databases = [];
@@ -1210,7 +1216,8 @@
         if (picker.isOpen()) picker.close();
       },
       refresh(force = true) {
-        if (state.host !== kit.hostId()) resetForHost();
+        // A Refresh while the first read runs keeps it (state.host is set at launch); a forced read replaces it.
+        if (state.host && state.host !== kit.hostId()) resetForHost();
         void loadVisible(force);
       },
       query,

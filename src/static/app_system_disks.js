@@ -118,8 +118,6 @@
       disksError: null,
       growth: null,
       growthError: null,
-      loading: 0,
-      serial: 0,
       active: false,
       host: "",
       pendingRender: false,
@@ -212,8 +210,12 @@
 
     // --- Loading -------------------------------------------------------------
 
-    function settle(serial, host) {
-      if (serial !== state.serial || kit.hostId() !== host) return false;
+    // The reads in flight, by name: each is the newest of its slot (util.latest). A read that was replaced or cut by a
+    // host change leaves this set alone, so the busy state follows the reads that are really running.
+    const inflight = new Set();
+
+    function settle(host) {
+      if (kit.hostId() !== host) return false;
       state.host = host;
       // An answer that lands while the section is hidden draws on its next show.
       if (!state.active) {
@@ -223,66 +225,70 @@
       return true;
     }
 
-    async function loadDisks(force, serial, host) {
-      state.loading += 1;
+    async function loadDisks(force, host) {
+      const req = ns.util.latest("system.disks");
+      inflight.add("disks");
       renderStatus();
       let data = null;
       let error = null;
       try {
-        data = await ns.api.getSystemDisks(host, force);
+        data = await ns.api.getSystemDisks(host, force, { signal: req.signal });
       } catch (e) {
         error = e;
       }
-      state.loading = Math.max(0, state.loading - 1);
-      if (serial !== state.serial || kit.hostId() !== host) return;
+      if (!req.isCurrent() || kit.hostId() !== host) return;
+      inflight.delete("disks");
+      renderStatus();
       if (data) { state.disks = data; state.disksError = null; } else state.disksError = error;
-      if (settle(serial, host)) render();
+      if (settle(host)) render();
     }
 
-    async function loadGrowth(force, serial = state.serial, host = kit.hostId()) {
+    async function loadGrowth(force, host = kit.hostId()) {
       if (!host) return;
       const resolved = ns.timeRange.resolveRange(state.range, Date.now());
-      if (!Number.isFinite(resolved.startMs) || !Number.isFinite(resolved.endMs) || resolved.endMs <= resolved.startMs) {
-        state.growthError = new Error("Select a valid time range.");
+      const invalid = !Number.isFinite(resolved.startMs) || !Number.isFinite(resolved.endMs) || resolved.endMs <= resolved.startMs
+        ? "Select a valid time range."
+        : resolved.endMs - resolved.startMs > maxMinutes() * 60000 ? `Max range is ${ns.timeRange.formatMinutes(maxMinutes())} (system.max_lookback_days).` : "";
+      if (invalid) {
+        // The range on screen is not the one that a read in flight was asked for: that read stops, so its answer
+        // never replaces this message with the data of another range.
+        ns.util.latest.cancel("system.diskgrowth");
+        inflight.delete("growth");
+        state.growthError = new Error(invalid);
         state.growth = null;
         render();
         return;
       }
-      if (resolved.endMs - resolved.startMs > maxMinutes() * 60000) {
-        state.growthError = new Error(`Max range is ${ns.timeRange.formatMinutes(maxMinutes())} (system.max_lookback_days).`);
-        state.growth = null;
-        render();
-        return;
-      }
-      const growthSerial = (state.growthSerial = (state.growthSerial || 0) + 1);
-      state.loading += 1;
+      const req = ns.util.latest("system.diskgrowth");
+      inflight.add("growth");
       renderStatus();
       let data = null;
       let error = null;
       try {
-        data = await ns.api.getSystemDiskGrowth(host, { fromMs: resolved.startMs, toMs: Math.min(resolved.endMs, Date.now()) }, force);
+        data = await ns.api.getSystemDiskGrowth(host, { fromMs: resolved.startMs, toMs: Math.min(resolved.endMs, Date.now()) }, force, { signal: req.signal });
       } catch (e) {
         error = e;
       }
-      state.loading = Math.max(0, state.loading - 1);
-      if (serial !== state.serial || growthSerial !== state.growthSerial || kit.hostId() !== host) return;
+      if (!req.isCurrent() || kit.hostId() !== host) return;
+      inflight.delete("growth");
+      renderStatus();
       state.resolved = resolved;
       state.loadedRange = { ...state.range };
       if (data) { state.growth = data; state.growthError = null; } else { state.growth = null; state.growthError = error; }
-      if (settle(serial, host)) render();
+      if (settle(host)) render();
     }
 
     function load(force = false) {
       const host = kit.hostId();
       if (!host) return Promise.resolve();
-      const serial = ++state.serial;
-      return Promise.all([loadDisks(force, serial, host), loadGrowth(force, serial, host)]);
+      state.host = host;
+      return Promise.all([loadDisks(force, host), loadGrowth(force, host)]);
     }
 
     // --- Rendering -----------------------------------------------------------
 
     function renderStatus() {
-      const loading = state.loading > 0;
+      const loading = inflight.size > 0;
       ns.uiState.busy(controls.button, loading);
       ns.uiState.busy(body, loading && !state.disks);
     }
@@ -766,8 +772,10 @@
       state.growth = null;
       state.disksError = null;
       state.growthError = null;
-      state.serial += 1;
-      state.loading = 0;
+      ns.util.latest.cancel("system.disks");
+      ns.util.latest.cancel("system.diskgrowth");
+      inflight.clear();
+      state.host = "";
       render();
     }
 
@@ -783,7 +791,7 @@
         if (state.pendingRender) render();
         picker.refresh();
         renderStatus();
-        if (!state.disks && !state.loading) void load(false);
+        if (!state.disks && !inflight.size) void load(false);
         else if (!sameRange(state.loadedRange, state.range)) void loadGrowth(false);
       },
       hide() {
@@ -791,7 +799,9 @@
         if (picker.isOpen()) picker.close();
       },
       refresh(force = true) {
-        if (state.host !== kit.hostId()) resetForHost();
+        // A Refresh while the first read runs (nothing has landed: state.host is set at launch) does not throw that
+        // read away; a forced read replaces it.
+        if (state.host && state.host !== kit.hostId()) resetForHost();
         void load(force);
       },
       query,

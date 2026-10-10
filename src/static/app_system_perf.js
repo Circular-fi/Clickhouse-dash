@@ -446,7 +446,6 @@
       d: null,
       error: null,
       loading: false,
-      serial: 0,
       active: false,
       host: "",
       loadedAt: 0,
@@ -531,27 +530,30 @@
       const host = kit.hostId();
       if (!host) return;
       const resolved = ns.timeRange.resolveRange(state.range, Date.now());
-      if (!Number.isFinite(resolved.startMs) || !Number.isFinite(resolved.endMs) || resolved.endMs <= resolved.startMs) {
-        state.error = new Error("Select a valid time range.");
+      const invalid = !Number.isFinite(resolved.startMs) || !Number.isFinite(resolved.endMs) || resolved.endMs <= resolved.startMs
+        ? "Select a valid time range."
+        : resolved.endMs - resolved.startMs > maxMinutes() * 60000 ? `Max range is ${ns.timeRange.formatMinutes(maxMinutes())} (system.max_lookback_days).` : "";
+      if (invalid) {
+        // A read in flight was asked for another range: it stops, so its answer never replaces this message.
+        ns.util.latest.cancel("system.series");
+        state.loading = false;
+        ns.uiState.busy(body, false);
+        state.error = new Error(invalid);
         render();
         return;
       }
-      if (resolved.endMs - resolved.startMs > maxMinutes() * 60000) {
-        state.error = new Error(`Max range is ${ns.timeRange.formatMinutes(maxMinutes())} (system.max_lookback_days).`);
-        render();
-        return;
-      }
-      const serial = ++state.serial;
+      const req = ns.util.latest("system.series");
       state.loading = true;
+      state.host = host;
       ns.uiState.busy(body, !state.data);
       let data = null;
       let error = null;
       try {
-        data = await ns.api.getSystemSeries(host, { fromMs: resolved.startMs, toMs: Math.min(resolved.endMs, Date.now()) }, force);
+        data = await ns.api.getSystemSeries(host, { fromMs: resolved.startMs, toMs: Math.min(resolved.endMs, Date.now()) }, force, { signal: req.signal });
       } catch (e) {
         error = e;
       }
-      if (serial !== state.serial || kit.hostId() !== host) return;
+      if (!req.isCurrent() || kit.hostId() !== host) return;
       state.loading = false;
       ns.uiState.busy(body, false);
       state.host = host;
@@ -746,8 +748,10 @@
       state.data = null;
       state.d = null;
       state.error = null;
-      state.serial += 1;
+      ns.util.latest.cancel("system.series");
+      state.host = "";
       state.loading = false;
+      ns.uiState.busy(body, false);
       state.loadedAt = 0;
       render();
     }
