@@ -1382,7 +1382,7 @@ void QuerySession::run_query() {
         std::vector<char> use_declared(columns.size(), 0);
         for (size_t c = 0; c < columns.size(); ++c) {
           const ResultColumnPlan* plan = column_plans[c];
-          use_declared[c] = plan && (plan->mode == ResultTransportMode::Opaque || is_bool_type_name(plan->original_type));
+          use_declared[c] = plan && (plan->mode == ResultTransportMode::Opaque || is_bool_type_name(plan->original_type)) ? 1 : 0;
         }
 
         // One event buffer per block, cleared (capacity kept) between events,

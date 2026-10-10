@@ -31,11 +31,6 @@ namespace chdash {
 
 namespace {
 
-static int64_t now_ms_local() {
-  using namespace std::chrono;
-  return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
-}
-
 static int64_t steady_now_ms() {
   using namespace std::chrono;
   return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
@@ -634,7 +629,6 @@ Server::Server(AppConfig cfg, bool start_background)
     }
   }
 
-  (void)now_ms_local;
 }
 
 Server::~Server() {
@@ -882,6 +876,7 @@ McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
     out.too_large = true;
     return out;
   }
+  out.body = std::move(res.body);
   return out;
 }
 

@@ -684,18 +684,4 @@ inline void write_cell_json_declared(rapidjson::Writer<rapidjson::StringBuffer>&
   write_cell_json(w, col, row);
 }
 
-// Encode one row of a block as a JSON object, with field names == ClickHouse column names.
-inline std::string encode_row_object(const clickhouse::Block& block, size_t row) {
-  rapidjson::StringBuffer sb;
-  rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-  w.StartObject();
-  for (size_t i = 0; i < block.GetColumnCount(); i++) {
-    const auto& name = block.GetColumnName(i);
-    write_json_key(w, name);
-    detail::write_column_value(w, block[i], row);
-  }
-  w.EndObject();
-  return std::string(sb.GetString(), sb.GetSize());
-}
-
 } // namespace chdash

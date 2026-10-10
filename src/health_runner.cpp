@@ -292,7 +292,7 @@ static HostVersion detect_host_version(clickhouse::Client* client) {
 
 
 HealthRunner::HealthRunner(std::vector<HostSpec> hosts, HealthSettings settings)
-  : hosts_(std::move(hosts)), settings_(settings) {
+  : hosts_(std::move(hosts)), settings_(std::move(settings)) {
 
 
   // Initialize snapshot with all hosts non-healthy.

@@ -367,7 +367,8 @@ private:
   void start_background_locked(const Key& key, const std::shared_ptr<Entry>& entry, const Fetch& fetch) {
     const uint64_t gen = begin_fetch_locked(*entry);
     entry->queued = true;
-    auto task = [this, key, entry, fetch, gen]() {
+    // The analyzer reports a leak that is not one: the lambda (and what it captures) is owned by the std::function that submit() takes.
+    auto task = [this, key, entry, fetch, gen]() {  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
       std::unique_lock<std::mutex> lk(mu_);
       if (!entry->queued || entry->started != gen) return;
       entry->queued = false;
@@ -407,7 +408,7 @@ private:
       e.retry_after = now + options_.failure_backoff;
       e.error_code = code.empty() ? "refresh_failed" : std::move(code);
       e.error_message = message.empty() ? "The data could not be read." : std::move(message);
-      e.exception = exception;
+      e.exception = std::move(exception);
     }
     e.cv.notify_all();
     if (mapped) enforce_limits_locked(nullptr);

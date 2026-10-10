@@ -169,38 +169,4 @@ FormatQueryResult format_query_with_client(
   return second;
 }
 
-std::optional<std::string> try_format_query_with_client(
-    clickhouse::Client& client,
-    const std::string& sql,
-    size_t max_bytes,
-    std::string* err_log
-) {
-  FormatQueryResult result = format_query_with_client(client, sql, max_bytes);
-  if (!result && err_log) *err_log = result.message;
-  return std::move(result.formatted_sql);
-}
-
-std::optional<std::string> try_format_query(
-    const HostSpec& host,
-    const std::string& sql,
-    size_t max_bytes,
-    std::string* err_log
-) {
-  std::string err;
-  auto client = make_client_from_uri(
-      host.runner_uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &err
-  );
-
-  if (!client) {
-    if (err_log) *err_log = "make_client failed: " + err;
-    return std::nullopt;
-  }
-
-  return try_format_query_with_client(*client, sql, max_bytes, err_log);
-}
-
 } // namespace chdash

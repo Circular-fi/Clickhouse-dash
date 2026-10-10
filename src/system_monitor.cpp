@@ -555,12 +555,6 @@ uint32_t monitor_series_step_seconds(uint64_t span_seconds) {
   return steps.back();
 }
 
-std::vector<std::string> monitor_series_metric_log_names() {
-  std::vector<std::string> names;
-  for (const auto& item : metric_log_series()) names.emplace_back(item.name);
-  return names;
-}
-
 const std::vector<std::string>& monitor_series_async_metrics() {
   static const std::vector<std::string> names = [] {
     std::vector<std::string> out;
@@ -568,10 +562,6 @@ const std::vector<std::string>& monitor_series_async_metrics() {
     return out;
   }();
   return names;
-}
-
-std::vector<std::string> monitor_series_query_log_names() {
-  return query_log_series();
 }
 
 std::string monitor_series_metric_log_sql(const MonitorCapabilities& caps, const MonitorSeriesWindow& window,

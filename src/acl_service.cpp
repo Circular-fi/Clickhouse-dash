@@ -59,7 +59,7 @@ std::string acl_identity_key(const std::string& uri) {
   return sha256_hex(uri);
 }
 
-AclAccess make_acl_access(std::shared_ptr<ClickHouseClientPool> pool, const std::string& uri) {
+AclAccess make_acl_access(const std::shared_ptr<ClickHouseClientPool>& pool, const std::string& uri) {
   AclAccess access;
   access.key = acl_identity_key(uri);
   access.connect = [pool, uri](std::string* error) -> std::unique_ptr<AclSource> {

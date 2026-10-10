@@ -203,9 +203,7 @@ struct SystemMonitorSeries {
 };
 
 // The series names of each source, for the contract tests and the docs.
-std::vector<std::string> monitor_series_metric_log_names();
 const std::vector<std::string>& monitor_series_async_metrics();
-std::vector<std::string> monitor_series_query_log_names();
 
 // Reads the three sources. A source that cannot be read is reported in
 // out.sources and the others still answer.

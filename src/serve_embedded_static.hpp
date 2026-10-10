@@ -131,17 +131,4 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
 #endif
 }
 
-// Installs a catch-all GET handler that serves embedded assets.
-// Put this BEFORE your API routes if you want assets to win,
-// or AFTER your API routes if you want /api/... to win.
-inline void install_embedded_static_routes(httplib::Server& svr) {
-#ifdef CHDASH_EMBED_STATIC
-  svr.Get(R"(/(.*))", [&](const httplib::Request& req, httplib::Response& res) {
-    (void)try_serve_embedded(req, res);
-  });
-#else
-  (void)svr;
-#endif
-}
-
 } // namespace chdash

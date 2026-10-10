@@ -462,10 +462,10 @@ McpKey parse_mcp_key(const HclObject& block) {
   if (string_attr(block, "secret_sha256", "mcp.key")) {
     throw std::runtime_error(context + ": secret_sha256 is not accepted any more: a key needs a secret that the page can show (secret or secret_file)");
   }
-  if ((secret ? 1 : 0) + (secret_file ? 1 : 0) != 1) {
+  if (secret.has_value() == secret_file.has_value()) {
     throw std::runtime_error(context + ": exactly one of secret and secret_file is required");
   }
-  const std::string value = secret ? *secret : read_secret_file(*secret_file, context);
+  const std::string value = secret ? *secret : read_secret_file(secret_file.value_or(std::string()), context);
   if (!mcp_valid_secret(value)) {
     throw std::runtime_error(context + ": the secret must be a UUID version 4 (like 3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f)");
   }

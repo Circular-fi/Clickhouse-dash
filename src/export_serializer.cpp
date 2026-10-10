@@ -258,7 +258,7 @@ bool ExportSerializer::write_csv_row(size_t row) {
 }
 
 bool ExportSerializer::write_json_row(size_t row) {
-  // Same output as encode_row_object(), serialized into a reused buffer.
+  // One JSON object for the row, serialized into a reused buffer.
   json_row_.Clear();
   rapidjson::Writer<rapidjson::StringBuffer> w(json_row_);
   w.StartObject();

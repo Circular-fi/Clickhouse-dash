@@ -200,7 +200,7 @@ bool asset_version_matches(std::string_view version, std::string_view content_ha
 }
 
 std::string request_id_for(const httplib::Request& req) {
-  const std::string given = req.get_header_value("X-Request-Id");
+  std::string given = req.get_header_value("X-Request-Id");
   if (!given.empty() && given.size() <= 128 && std::all_of(given.begin(), given.end(), request_id_character)) return given;
   return random_hex(8);
 }

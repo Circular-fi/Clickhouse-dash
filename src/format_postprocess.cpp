@@ -5491,7 +5491,7 @@ string Formatter::format_settings_profile(string_view s) {
 string Formatter::layout_insert_head(string_view target_view) {
   const FormatDepthGuard guard(depth);
   const string target = trim_ascii_spaces(target_view);
-  const string plain = "INSERT INTO " + target;
+  string plain = "INSERT INTO " + target;
   if (utf8_width(plain) <= threshold || target.find('\n') != string::npos) return plain;
   if (starts_with_ci(target, "FUNCTION ") || starts_with_ci(target, "TABLE FUNCTION ")) return plain;
   string name;
@@ -5530,7 +5530,7 @@ string Formatter::format_insert_format_clause(string_view s) {
   const int fmt_pos = find_top_level_keyword(text, "FORMAT");
   const string head_text = trim_ascii_spaces(fmt_pos > 0 ? text.substr(11, static_cast<size_t>(fmt_pos) - 11) : text.substr(11));
   const string tail = fmt_pos > 0 ? collapse_whitespace(trim_ascii_spaces(text.substr(static_cast<size_t>(fmt_pos)))) : string();
-  const string head = layout_insert_head(head_text);
+  string head = layout_insert_head(head_text);
   if (tail.empty()) return head;
   if (head.find('\n') == string::npos && utf8_width(head + " " + tail) <= threshold) return head + " " + tail;
   return head + "\n" + tail;

@@ -65,7 +65,7 @@ void Server::install_http_hooks() {
   http_.set_exception_handler([](const httplib::Request& req, httplib::Response& res, std::exception_ptr error) {
     std::string what = "unknown exception";
     try {
-      std::rethrow_exception(error);
+      std::rethrow_exception(std::move(error));
     } catch (const std::exception& e) {
       what = e.what();
     } catch (...) {
