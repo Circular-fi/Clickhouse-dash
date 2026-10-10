@@ -4,6 +4,7 @@
 #               findings in <regex> under ASan), clang-tidy, CMake. tests/tools/clang-tidy.sh runs in it.
 #   sanitized   the chdash server built with AddressSanitizer and UndefinedBehaviorSanitizer.
 #   native      the native unit tests built with the same sanitizers (CMD runs them).
+#   fuzz        the libFuzzer targets of tests/fuzz (ASan + UBSan); tests/tools/fuzz.sh runs them.
 #
 # ThreadSanitizer: the same targets with --build-arg CHDASH_SANITIZE=thread (tests/tools/sanitize.sh
 # with CHDASH_SANITIZE=thread). A race is reported on stderr and the process exits with code 25.
@@ -64,6 +65,29 @@ ENV ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer \
     TSAN_OPTIONS=halt_on_error=0:exitcode=25:second_deadlock_stack=1:suppressions=/work/tests/sanitize/tsan.supp
 COPY tests/sanitize /work/tests/sanitize
 CMD ["/work/tests/sanitize/run-native-tests.sh"]
+
+# The libFuzzer targets (tests/fuzz): the JSON parse, the formatter, the SQL policies, the HCL parser and the
+# WebAssembly kernels built natively. They need no ClickHouse and no dependency but rapidjson.
+FROM toolchain AS fuzz
+COPY src/CMakeLists.txt src/EmbedStatic.cmake src/BuildFlags.cmake src/PatchRapidJSON.cmake /work/src/
+COPY src/*.cpp src/*.hpp /work/src/
+COPY src/wasm /work/src/wasm
+COPY tests/fuzz /work/tests/fuzz
+RUN cmake -S /work/src -B /work/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+      -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_FUZZERS=ON \
+      -DCHDASH_WERROR=ON -DCHDASH_SANITIZE=address,undefined \
+ && cmake --build /work/build --target chdash_fuzzers -j$(nproc) \
+ && mkdir -p /work/fuzz && cp /work/build/chdash_fuzz_* /work/fuzz/
+# The configuration files of the repository seed the HCL corpus.
+COPY config.example.hcl /work/tests/fuzz/corpus/hcl/
+COPY tests/config/*.hcl /work/tests/fuzz/corpus/hcl/
+ENV ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer \
+    ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1:abort_on_error=0 \
+    UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+ENTRYPOINT ["/work/tests/fuzz/run-fuzzers.sh"]
+CMD ["60"]
 
 # The server. It needs the static files next to it, like the test image of the source build.
 FROM debian:trixie-slim AS static

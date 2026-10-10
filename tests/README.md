@@ -385,7 +385,7 @@ Design heuristics are report signals rather than aesthetic pass/fail rules. Visu
 
 ## Sanitizers, static analysis and the release smoke test
 
-These checks find defects that the functional tests do not see: a dangling reference, a heap overflow, a leak, undefined behavior, a data race and a bug that only the release binary has. They need Docker only.
+These checks find defects that the functional tests do not see: a dangling reference, a heap overflow, a leak, undefined behavior, a data race, a parser crash on a strange input and a bug that only the release binary has. They need Docker only.
 
 ### Sanitizers
 
@@ -422,6 +422,37 @@ CHDASH_SANITIZE=thread tests/tools/sanitize.sh load
 A race is written to the server log (`WARNING: ThreadSanitizer`). The server goes on and exits with code 25 at the end (`TSAN_OPTIONS=halt_on_error=0:exitcode=25`), so one run shows every race. The script fails on such a log line and on the exit code. `tests/sanitize/tsan.supp` lists the accepted reports (the file is empty). The `tsan` job of `sanitize.yml` runs `native`, `backend` and `load`.
 
 The `backend` tests send one request at a time. The races are in the shared state of concurrent requests (the caches, the client pool, the query registry, a session that the browser drops). `load` makes that traffic.
+
+### Fuzzing
+
+`tests/fuzz` holds one libFuzzer target for each parser of untrusted text and for each WebAssembly kernel:
+
+| Target | Code | Checks besides a crash or a sanitizer finding |
+| --- | --- | --- |
+| `json_parse` | `parse_json_bounded` (`src/json_parse.hpp`), the parse of every request body | the depth bound holds; a parsed text, written again, parses to the same value |
+| `format` | the SQL formatter without ClickHouse: `postprocess_format_query`, the masks and the restore passes of `src/sql_scan.hpp`, `unwrap_alter_table_commands` | no input takes more than 25 s (the formatter gives up after 2 s) |
+| `user_sql_policy` | `user_sql_is_forbidden` (no direct `KILL QUERY`) | a script that starts with `KILL QUERY` is refused; text after a refused script does not make it accepted |
+| `mcp_sql` | `mcp_scan_single_statement`, the quoting functions and `mcp_build_table_query` of `src/mcp_sql.cpp` | an accepted statement is accepted again alone; a quoted value never ends a statement; a built `SELECT` passes the scan |
+| `hcl` | `parse_hcl` (`src/hcl.cpp`), the parser of the configuration file | the parser fails only with `HclParseError` |
+| `wasm_<kernel>` | each kernel of `src/wasm` built natively (`tests/fuzz/wasm_native_rt.h`: one `malloc` block for each allocation, so AddressSanitizer sees the end of each block) | the results are inside their buffers and in order (tokens, rows, permutations) |
+
+The kernel targets give the inputs that the adapter of the page gives (`src/static/app_wasm_<kernel>.js`). The coordinates of the graph kernels stay finite and below 1e7: past 2^31 a double to int conversion is undefined in C and saturates in WebAssembly (`-mnontrapping-fptoint`), so a native report there does not apply to the browser.
+
+`tests/tools/fuzz.sh` builds the `fuzz` stage of `tests/Dockerfile.sanitize` (clang 19, `CHDASH_BUILD_FUZZERS=ON`, AddressSanitizer and UndefinedBehaviorSanitizer) and runs `tests/fuzz/run-fuzzers.sh` in it:
+
+```bash
+tests/tools/fuzz.sh                    # every target, 60 s each, several at a time
+tests/tools/fuzz.sh 900 format         # one target for 15 minutes
+CHDASH_FUZZ_JOBS=2 tests/tools/fuzz.sh # two targets at a time
+```
+
+Each target starts from `tests/fuzz/corpus/<target>` (the HCL target also from `config.example.hcl` and `tests/config/*.hcl`) and uses the dictionary of its language (`tests/fuzz/*.dict`). The corpus grows in `/tmp/chdash-fuzz/<target>/corpus` (`CHDASH_FUZZ_OUT`): the next run starts from it. A finding is a file `crash-*`, `leak-*`, `timeout-*` or `oom-*` next to `fuzz.log`, and the script exits with status 1. To replay a finding, run the target on the file:
+
+```bash
+docker run --rm -v /tmp/chdash-fuzz/format:/in:ro --entrypoint /work/fuzz/chdash_fuzz_format chdash-fuzz:local /in/crash-<sha1>
+```
+
+When you fix a finding, add its input to `tests/fuzz/corpus/<target>/`. The `fuzz` job of `sanitize.yml` runs every target for 60 s and keeps the findings as the `fuzz-findings` artifact.
 
 Two tests of `test_routes.py` and four Playwright tests (`explorer-nav`, `explorer-storage` and `functional` specs) need the fixture state of a fresh reset (the Buffer and Memory tables). They fail on any server, sanitized or not, when a long-running stack has flushed the fixtures.
 

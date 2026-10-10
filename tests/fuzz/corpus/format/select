@@ -1,0 +1,1 @@
+PSELECT a, b, count() AS c FROM db.t WHERE x = 1 AND y IN (1, 2, 3) GROUP BY a, b ORDER BY c DESC LIMIT 10

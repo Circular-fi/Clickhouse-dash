@@ -1,5 +1,5 @@
 """The supply chain of the build and the CI (SEC-010, SEC-019, SEC-021): pinned actions and dependencies, no
-persisted token, and the ThreadSanitizer setup (ARCH-B-128)."""
+persisted token, no event text in a script, and the ThreadSanitizer and fuzz setups (ARCH-B-128)."""
 import os
 import re
 from pathlib import Path
@@ -76,6 +76,31 @@ def test_python_test_packages_are_installed_by_hash() -> None:
         block = requirements.split(f"\n{name}==", 1)[1].split("\n    # via", 1)[0]
         assert "--hash=sha256:" in block, name
     assert "pytest==9.0.2" in read("tests/requirements.in")
+
+
+def test_fuzz_targets_build_from_one_option_and_run_from_one_script() -> None:
+    cmake = read("src/CMakeLists.txt")
+    assert 'option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)' in cmake
+    assert "target_compile_options(${name} PRIVATE -fsanitize=fuzzer)" in cmake
+    for target in ("json_parse", "format", "mcp_sql", "user_sql_policy", "hcl"):
+        assert f"chdash_add_fuzzer(chdash_fuzz_{target} ${{_FUZZ_DIR}}/fuzz_{target}.cpp" in cmake, target
+        assert (ROOT / f"tests/fuzz/fuzz_{target}.cpp").is_file(), target
+    kernels = sorted(path.stem for path in (ROOT / "src/wasm").glob("*.c"))
+    for kernel in kernels:
+        assert kernel in cmake.split("foreach(_kernel IN ITEMS", 1)[1].split(")", 1)[0], kernel
+        source = read(f"tests/fuzz/fuzz_wasm_{kernel}.c")
+        # The native runtime first: its guard keeps the kernel's own rt.h out.
+        assert source.index('#include "wasm_native_rt.h"') < source.index(f'#include "../../src/wasm/{kernel}.c"'), kernel
+    assert "#define CHDASH_WASM_RT_H" in read("tests/fuzz/wasm_native_rt.h")
+    assert "#ifndef CHDASH_WASM_RT_H" in read("src/wasm/rt.h")
+    docker = read("tests/Dockerfile.sanitize")
+    assert "FROM toolchain AS fuzz" in docker and "-DCHDASH_BUILD_FUZZERS=ON" in docker
+    assert 'ENTRYPOINT ["/work/tests/fuzz/run-fuzzers.sh"]' in docker
+    assert os.access(ROOT / "tests/tools/fuzz.sh", os.X_OK) and os.access(ROOT / "tests/fuzz/run-fuzzers.sh", os.X_OK)
+    runner = read("tests/fuzz/run-fuzzers.sh")
+    assert "-max_total_time=" in runner and "-timeout=25" in runner and "crash-* leak-* timeout-* oom-*" in runner
+    workflow = read(".github/workflows/sanitize.yml")
+    assert "run: tests/tools/fuzz.sh 60" in workflow
 
 
 def test_thread_sanitizer_runs_the_native_tests_the_backend_and_a_concurrent_load() -> None:

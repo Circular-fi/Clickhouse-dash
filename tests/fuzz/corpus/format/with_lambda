@@ -1,0 +1,1 @@
+PWITH x AS (SELECT number FROM numbers(10)) SELECT arrayMap(i -> i * 2, groupArray(number)) FROM x UNION ALL SELECT [1, 2]

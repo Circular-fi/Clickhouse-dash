@@ -3,6 +3,7 @@ name: Sanitizers
 # AddressSanitizer + UndefinedBehaviorSanitizer: the native unit tests, then the server built with
 # them under tests/backend-functional and tests/harness, then a Playwright subset.
 # ThreadSanitizer: the native unit tests, the backend tests and a concurrent load (tests/sanitize/load.py).
+# Fuzzing: every libFuzzer target of tests/fuzz for one minute.
 # Runs on every pull request, every night and on request. A finding fails the job.
 on:
   workflow_dispatch:
@@ -109,3 +110,30 @@ jobs:
         if: always()
         run: docker compose -f tests/docker-compose.yml --profile otel down -v --remove-orphans || true
 
+  fuzz:
+    name: Fuzzing (libFuzzer, one minute per target)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Run every fuzz target
+        env:
+          CHDASH_FUZZ_OUT: /tmp/chdash-fuzz
+        run: tests/tools/fuzz.sh 60
+
+      - name: Upload the findings
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-findings
+          path: |
+            /tmp/chdash-fuzz/*/crash-*
+            /tmp/chdash-fuzz/*/leak-*
+            /tmp/chdash-fuzz/*/timeout-*
+            /tmp/chdash-fuzz/*/oom-*
+            /tmp/chdash-fuzz/*/fuzz.log
+          if-no-files-found: ignore

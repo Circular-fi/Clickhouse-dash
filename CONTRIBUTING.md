@@ -136,6 +136,18 @@ The `backend` and `frontend` commands need the test ClickHouse stack (`docker co
 
 To accept a leak or a finding that is not ours, add it to `tests/sanitize/lsan.supp` (or `tests/sanitize/tsan.supp` for a race) with a comment that says why. Fix our own findings in the code.
 
+### Fuzzing
+
+`tests/fuzz` holds libFuzzer targets for the code that reads untrusted text: the JSON parse of a request body, the SQL formatter, the SQL policy of the Query page (`KILL QUERY`), the SQL checks of the MCP tools, the HCL parser and the WebAssembly kernels (built natively). `-DCHDASH_BUILD_FUZZERS=ON` builds them with clang, AddressSanitizer and UndefinedBehaviorSanitizer.
+
+```bash
+tests/tools/fuzz.sh                  # every target, 60 s each
+tests/tools/fuzz.sh 600 format hcl   # two targets, 600 s each
+tests/tools/fuzz.sh list             # the names of the targets
+```
+
+A finding is a file `crash-*`, `leak-*`, `timeout-*` or `oom-*` in `/tmp/chdash-fuzz/<target>/`. Fix the code, then add the input to `tests/fuzz/corpus/<target>/` so that the next runs start from it. The `sanitize.yml` workflow runs every target for one minute. `tests/README.md`, "Fuzzing", has the details.
+
 ### Release smoke test
 
 The test image is not the shipped binary. The release binary is static, stripped and optimized, and it serves the embedded files. `tests/smoke/release_smoke.py` starts a binary with every page enabled and a ClickHouse host that does not exist. It probes the routes that must answer.

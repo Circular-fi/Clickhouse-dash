@@ -1,0 +1,4 @@
+P-- top services
+SELECT ServiceName, count() /* spans */ FROM otel.otel_traces
+WHERE Timestamp > now() - INTERVAL 1 HOUR -- last hour
+GROUP BY ServiceName

@@ -1,0 +1,2 @@
+PCREATE FUNCTION f AS (x) -> $$ multi
+line $$ || x
