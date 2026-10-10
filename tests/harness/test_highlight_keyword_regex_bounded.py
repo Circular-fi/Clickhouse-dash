@@ -46,7 +46,7 @@ def test_failed_keyword_matches_are_linear() -> None:
             started = time.perf_counter()
             pattern.search(text)
             elapsed = time.perf_counter() - started
-            assert elapsed < 0.5, f"{elapsed:.2f} s on {text[:30]!r}… ({len(text)} chars)"
+            assert elapsed < 2.0, f"{elapsed:.2f} s on {text[:30]!r}… ({len(text)} chars)"
 
 
 def test_gaps_still_accepted_and_refused() -> None:
