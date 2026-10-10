@@ -3119,6 +3119,9 @@ string Formatter::format_select_like(string_view s) {
       text = trim_ascii_spaces(text.substr(static_cast<size_t>(pos)));
     }
   }
+  // What is left must be a SELECT: a WITH without one ("WITH", "WITHIN x"), or an operand of UNION that is not a
+  // SELECT ("SELECT 1 UNION ALL x"), keeps its words (the clause scan below reads past the six letters of SELECT).
+  if (!starts_with_ci(text, "SELECT") || (text.size() > 6 && is_ident_char(text[6]))) return out + cleanup_surface(text);
 
   static const vector<string_view> clauses = {
       "GLOBAL ARRAY JOIN",
