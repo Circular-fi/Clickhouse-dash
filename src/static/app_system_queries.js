@@ -393,6 +393,7 @@ function createQueries(ctx) {
     where: "system.query_log_max_lookback_hours",
     minZoomMs: MIN_ZOOM_MS,
     onChange: () => void loadVisible(false),
+    query: () => query(),
   });
 
   // --- Address -------------------------------------------------------------
@@ -629,10 +630,10 @@ function createQueries(ctx) {
     button.addEventListener("click", () => {
       const minutes = Math.max(1, Math.floor(spanMs / 60000));
       if (timeRange.isRelative(range.value) && String(range.value.to) === "now") {
-        applyRange({ from: `now-${timeRange.minutesToSpan(minutes)}`, to: "now" });
+        range.apply({ from: `now-${timeRange.minutesToSpan(minutes)}`, to: "now" });
       } else {
         const end = timeRange.resolveRange(range.value, Date.now()).endMs;
-        applyRange({ from: timeRange.formatDateTime(end - minutes * 60000), to: timeRange.formatDateTime(end) });
+        range.apply({ from: timeRange.formatDateTime(end - minutes * 60000), to: timeRange.formatDateTime(end) });
       }
     });
     return button;

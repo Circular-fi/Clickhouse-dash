@@ -5,7 +5,8 @@
 //   const range = systemCharts.range({ ctx, root, idPrefix, defaultRange, maxMinutes, where, minZoomMs, onChange, onZoom });
 //     range.value             the range { from, to } on screen (assign to change it without a load)
 //     range.picker            the time range picker (timeRange.create) in `root`, the range's place in the filter bar
-//     range.query()           the address parameters of the range: "" for the default range
+//     range.query()           the address parameters of the section ("" for the defaults): the range's own from / to, or
+//                             what the section's `query` option says when it has more parameters than the range
 //     range.read(params)      takes the range of the address (or the default); true when it changed
 //     range.apply(raw, opts)  a range picked by the user: it is kept, written to the address (ctx.setQuery) and onChange runs
 //     range.zoom(window, fromUser)  a drag over a chart: that window in whole seconds, at least minZoomMs wide, as apply()
@@ -30,7 +31,7 @@ const { $ } = dom;
 
 // --- The range of a section --------------------------------------------------------------
 
-function range({ ctx, root, idPrefix, defaultRange, maxMinutes, where, minZoomMs, onChange, onZoom = null }) {
+function range({ ctx, root, idPrefix, defaultRange, maxMinutes, where, minZoomMs, onChange, onZoom = null, query: fullQuery = null }) {
   const state = { value: defaultRange() };
   const picker = timeRange.create(root, {
     idPrefix,
@@ -43,7 +44,9 @@ function range({ ctx, root, idPrefix, defaultRange, maxMinutes, where, minZoomMs
     },
   });
 
+  // The address parameters of the section: the range's own, or all of the section's when it has more (`query` option).
   function query() {
+    if (fullQuery) return fullQuery();
     if (timeRange.sameRange(state.value, defaultRange())) return "";
     return timeRange.url.write(new URLSearchParams(), state.value).toString();
   }
