@@ -81,6 +81,7 @@ void normalize_config(AppConfig& cfg) {
   cfg.cancel_token_ttl_ms = std::max(1000, std::min(48 * 60 * 60 * 1000, cfg.cancel_token_ttl_ms));
 
   cfg.explorer.cache_ttl_ms = std::max(0, std::min(60 * 60 * 1000, cfg.explorer.cache_ttl_ms));
+  cfg.explorer.acl_cache_ttl_ms = std::max(0, std::min(60 * 60 * 1000, cfg.explorer.acl_cache_ttl_ms));
   cfg.explorer.live_refresh_ms = std::max(250, std::min(60 * 1000, cfg.explorer.live_refresh_ms));
   cfg.explorer.function_cache_ttl_ms = std::max(1000, std::min(24 * 60 * 60 * 1000, cfg.explorer.function_cache_ttl_ms));
   // System windows: 1 min .. 30 d by default, the history up to a year,
@@ -757,7 +758,7 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
 
 
   if (const auto* explorer = optional_block(root, "explorer", source)) {
-    validate_object(*explorer, "explorer", {"browse", "cache_ttl_ms", "live_refresh_ms", "function_cache_ttl_ms", "function_markdown_links"}, {"graph", "operations"});
+    validate_object(*explorer, "explorer", {"browse", "cache_ttl_ms", "acl_cache_ttl_ms", "live_refresh_ms", "function_cache_ttl_ms", "function_markdown_links"}, {"graph", "operations"});
     if (auto v = bool_attr(*explorer, "browse", "explorer")) cfg.explorer.browse = *v;
     if (const auto* graph = optional_block(*explorer, "graph", "explorer")) {
       validate_object(*graph, "explorer.graph", {"lineage", "storage_topology"}, {});
@@ -765,6 +766,7 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
       if (auto v = bool_attr(*graph, "storage_topology", "explorer.graph")) cfg.explorer.storage_topology = *v;
     }
     if (auto v = int_attr(*explorer, "cache_ttl_ms", "explorer")) cfg.explorer.cache_ttl_ms = int_value(*v, "explorer.cache_ttl_ms");
+    if (auto v = int_attr(*explorer, "acl_cache_ttl_ms", "explorer")) cfg.explorer.acl_cache_ttl_ms = int_value(*v, "explorer.acl_cache_ttl_ms");
     if (auto v = int_attr(*explorer, "live_refresh_ms", "explorer")) cfg.explorer.live_refresh_ms = int_value(*v, "explorer.live_refresh_ms");
     if (auto v = int_attr(*explorer, "function_cache_ttl_ms", "explorer")) cfg.explorer.function_cache_ttl_ms = int_value(*v, "explorer.function_cache_ttl_ms");
     if (auto v = bool_attr(*explorer, "function_markdown_links", "explorer")) cfg.explorer.function_markdown_links = *v;

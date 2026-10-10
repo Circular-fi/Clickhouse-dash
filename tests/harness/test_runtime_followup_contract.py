@@ -96,7 +96,8 @@ def test_function_search_is_name_only_and_server_description_catalog_is_cached()
     assert "name.startsWith(q)" in visible
     assert "model.functionsCatalog" in ui
     assert "if (!force && model.functionsCatalog)" in ui
-    assert "cfg_.explorer.function_cache_ttl_ms" in api
+    assert "explorer_functions_cache_.get(" in api
+    assert "std::chrono::milliseconds(std::max(1000, cfg_.explorer.function_cache_ttl_ms))" in header
     assert "function_cache_ttl_ms = 60 * 60 * 1000" in header
     assert "function_cache_ttl_ms   = 3600000" in config
 
@@ -299,10 +300,13 @@ def test_acl_discovery_falls_back_to_zero_row_column_probe_without_widening_perm
     source = read("src/allowed_objects.cpp")
     assert 'SELECT ignore(' in source
     assert 'LIMIT 0' in source
-    assert 'is_access_denied_message' in source
-    assert 'granted = zero_row_column_probe' in source
+    # Only ACCESS_DENIED (AclDenied, code 497) means "not readable": never a message match.
+    assert 'is_access_denied_message' not in source
+    assert '} catch (const AclDenied&) {\n    return false;\n  }' in source
+    assert 'const bool granted = checked ? *checked : zero_row_column_probe(source, database, table, columns, begin, end);' in source
     assert 'result.all_columns = true' in source
-    assert 'Fall through to exact column discovery' in source
+    # A CHECK GRANT that cannot be read falls back to the probes; the connection is opened again first.
+    assert 'client_->ResetConnection();' in source and 'check_grant_unreadable_ = true;' in source
 
 
 def test_preview_finalizes_aggregate_function_states_only_inside_bounded_limit() -> None:

@@ -31,10 +31,13 @@ def test_activity_rows_pass_the_runner_show_boundary_and_are_bounded() -> None:
     ops = read("src/system_activity.cpp")
     api = read("src/api_system_activity.cpp")
     activity = ops[ops.index("bool load_system_activity("):ops.index("bool load_system_keeper_status(")]
-    assert "RunnerVisibility visibility(runner);" in activity
-    assert "if (!visibility.visible(database, table)) continue;" in ops
-    assert "discover_visible_databases(runner)" in ops
-    assert "discover_visible_objects(runner_, database)" in ops
+    assert "RunnerVisibility visibility(runner_acl);" in activity
+    # The rows are checked after the read (the boundary may ask ClickHouse: never inside another read's callback).
+    assert "if (!visibility.visible(item.database, item.table)) continue;" in ops
+    assert "const std::vector<std::string>& databases() { return acl_.databases(); }" in ops
+    assert "return acl_.visible(database, table);" in ops
+    # refresh=1 reads the runner's privileges again too.
+    assert "if (refresh) acl_.invalidate(access);" in api
     assert 'std::string in_databases = "database IN (";' in activity
     for table in ["system.merges", "system.mutations WHERE NOT is_done", "system.replication_queue", "system.replicas", "system.distribution_queue"]:
         assert f"FROM {table}" in activity, table

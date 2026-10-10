@@ -117,6 +117,7 @@ explorer {
   }
 
   cache_ttl_ms            = 5000
+  acl_cache_ttl_ms        = 60000
   live_refresh_ms         = 2000
   function_cache_ttl_ms   = 3600000
   function_markdown_links = false
@@ -234,7 +235,32 @@ Every System query sets `readonly = 2`, a time budget and read caps. For this re
 
 `/api/version` still reports `features.explorer.operations` (`enabled`, `keeper`). It mirrors `system.activity` and `system.keeper`. `/api/explorer/ops/activity` and `/api/explorer/ops/keeper` stay as aliases of `/api/system/activity` and `/api/system/keeper`.
 
+`explorer.cache_ttl_ms` (default 5,000, 0 to 1 hour) and `explorer.acl_cache_ttl_ms` (default 60,000, 0 to 1 hour) are the TTLs of the Explorer metadata and of the runner ACL. Refer to [Caches and privileges](#caches-and-privileges).
+
 `explorer.function_markdown_links` defaults to `false`. The dashboard then shows the links in the ClickHouse function Markdown as plain text. If you enable it, only the targets that are relative to the documentation and begin with `/` or `./` become links. Arbitrary external URLs stay not clickable.
+
+### Caches and privileges
+
+The backend keeps what it reads from ClickHouse in bounded caches (`src/ttl_cache.hpp`). These rules apply to all of them:
+
+- A value is fresh for its TTL after its read ended. The TTL uses a monotonic clock: a change of the system clock never ages a value or makes it young again.
+- There is one read for each key at a time. A second request of the same key waits for that read, up to 60 s. It never fails because the first request is still reading.
+- `refresh=1` asks for a read that starts after the request. A read in progress is waited for first. All the requests that asked meanwhile share the next read. A loop of `refresh=1` therefore never runs two reads of one key at a time.
+- A failed read is never kept as a value. Its error is sent again for 2 s, so that a host that is down is not asked on every request. When an older value exists, some pages send it with `"stale": true` instead of the error.
+- The live answers (the Explorer catalog and graph, and the Overview, Activity and Keeper of the System page) are sent at once after their TTL, with `"stale": true`, while one read runs in the background.
+- Each cache has a limit in entries and in bytes (the least recently used entry goes first). An entry older than 10 minutes, or than its TTL when the TTL is longer, is removed.
+- A key never holds the text of a client in full: the filters of the trace and log facets and of the trace prefill are in it as a SHA-256 digest. `read_rows_limit` is rounded down to 1, 2 or 5 times a power of ten.
+
+**The runner ACL.** What the runner of a host may read decides which objects the Explorer, the System pages, the execution statistics, the analysis, the exports and MCP show. The backend discovers it as the runner, with `CHECK GRANT` and zero-row probes. It never reads the grant list. It keeps one answer for each identity: the SHA-256 of the runner URI. The derived MCP identity has its own answer. These rules apply:
+
+- The answers are kept for `explorer.acl_cache_ttl_ms` (60 s by default). For as long again, they are sent while one read runs in the background. A change of the grants therefore shows after 2 × `acl_cache_ttl_ms` at most, or at once with the Refresh of a page (`refresh=1`). Set a short TTL if the grants change often and a refresh is not an option.
+- The lists are at table level: `CHECK GRANT SELECT` on the table, else a zero-row `SELECT`. The columns of a table are checked only when the table is opened.
+- Only `ACCESS_DENIED` (code 497) means "not readable". Another server error about one object leaves that object out. A connection error or a timeout is not an answer: the route answers 503, and the failure is not kept beyond 2 s. An ACL that cannot be read again is never sent from memory.
+- One discovery checks at most 4,000 objects in 20 s. To decide whether a database is readable, it probes at most 400 of its objects. Past a bound, the answer says `acl_truncated` (Explorer) or `truncated` (MCP), and the objects that were not checked are not shown.
+
+**The DDL texts.** The Explorer keeps the `engine_full` and `create_table_query` texts of the objects by identity (the SHA-256 of the URI of the connection), because ClickHouse masks the secrets of these texts by user. It reads at most 2,000 names in one query. The limits are 200,000 entries and 128 MiB.
+
+**The format cache** (`format_cache { }`). The key has the host, the ClickHouse version of the host (its health check), the line width and the SHA-256 of the text. A hit also compares the text. Only the text that was formatted is a key: formatting a formatted text runs the formatter again.
 
 ### The observability block
 

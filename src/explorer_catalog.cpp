@@ -1,5 +1,6 @@
 #include "explorer_catalog.hpp"
 #include "api_error.hpp"
+#include "acl_service.hpp"
 #include "ddl_text_cache.hpp"
 #include "ch_block_value.hpp"
 #include "ch_block_numeric.hpp"
@@ -497,6 +498,7 @@ void classify_health(ExplorerTableSummary& table) {
 bool load_base_summaries(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    const ExplorerIdentities& identities,
     const AllowedObjectSet& allowed,
     std::vector<ExplorerTableSummary>& summaries,
     std::string* error) {
@@ -621,9 +623,9 @@ bool load_base_summaries(
   // engine_full for every summary (the runner-filled entries above included).
   try {
     auto& ddl_client = metadata_from_runner ? runner : system;
-    auto texts = DdlTextCache::instance().get(ddl_client, metadata_from_runner ? "runner" : "system", ddl_versions);
+    auto texts = DdlTextCache::instance().get(ddl_client, metadata_from_runner ? identities.runner : identities.system, ddl_versions);
     if (!runner_ddl_versions.empty()) {
-      for (auto& [key, value] : DdlTextCache::instance().get(runner, "runner", runner_ddl_versions)) {
+      for (auto& [key, value] : DdlTextCache::instance().get(runner, identities.runner, runner_ddl_versions)) {
         texts[key] = std::move(value);
       }
     }
@@ -1412,24 +1414,20 @@ std::string sql_string_list(const std::vector<std::string>& values) {
 bool load_explorer_storage_map(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    AclView& acl,
     ExplorerStorageMap& out,
     std::string* error) {
   out = ExplorerStorageMap{};
   out.generated_at_ms = now_ms();
   out.table_limit_per_database = kExplorerStorageTablesPerDatabase;
 
-  // Visibility boundary: exactly the lazy sidebar discovery (runner context).
-  // No name reaches the response unless the runner can SHOW it.
-  const auto databases = discover_visible_databases(runner);
+  // Visibility boundary: exactly the lazy sidebar discovery (the runner's ACL).
+  // No name reaches the response unless the runner reads it.
+  const auto databases = acl.databases();
   if (databases.empty()) return true;
-  std::unordered_map<std::string, std::unordered_set<std::string>> visible;
-  for (const auto& database : databases) {
-    const auto objects = discover_visible_objects(runner, database);
-    visible.emplace(database, std::unordered_set<std::string>(objects.begin(), objects.end()));
-  }
+  for (const auto& database : databases) acl.objects(database);
   const auto is_visible = [&](const std::string& database, const std::string& table) {
-    const auto it = visible.find(database);
-    return it != visible.end() && it->second.count(table) > 0;
+    return acl.visible(database, table);
   };
   const std::string database_filter = "database IN (" + sql_string_list(databases) + ")";
 
@@ -1503,9 +1501,10 @@ bool load_explorer_storage_map(
     ExplorerStorageDatabase entry;
     entry.name = database;
     std::vector<ExplorerStorageTable> storing;
-    const auto& objects = visible[database];
+    const auto& objects = acl.objects(database).objects;
     entry.objects = objects.size();
-    for (const auto& table : objects) {
+    for (const auto& object : objects) {
+      const std::string& table = object.table;
       const std::string key = table_key(database, table);
       const auto meta_it = meta_by_table.find(key);
       const auto parts_it = parts_by_table.find(key);
@@ -1818,6 +1817,7 @@ bool load_explorer_table_summary(
 bool load_explorer_catalog(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    const ExplorerIdentities& identities,
     const AllowedObjectSet& allowed,
     ExplorerCatalog& out,
     std::string* error) {
@@ -1826,7 +1826,7 @@ bool load_explorer_catalog(
   out.databases = allowed.databases();
   std::sort(out.databases.begin(), out.databases.end());
 
-  if (!load_base_summaries(system, runner, allowed, out.tables, error)) return false;
+  if (!load_base_summaries(system, runner, identities, allowed, out.tables, error)) return false;
 
   std::unordered_map<std::string, ExplorerTableSummary*> map;
   map.reserve(out.tables.size());
@@ -1893,6 +1893,7 @@ bool load_explorer_catalog(
 bool load_explorer_table_detail(
     clickhouse::Client& system,
     clickhouse::Client& runner,
+    AclView& acl,
     const AllowedObjectSet& allowed,
     const std::string& database,
     const std::string& table,
@@ -2684,23 +2685,20 @@ bool load_explorer_table_detail(
   // (upstream) so a view/MV does not misleadingly show an empty Lineage tab.
   //
   // The per-object ACL set passed to this function contains only the selected
-  // table, so it cannot decide whether a *related* object is visible. Resolve
-  // lineage endpoints in the runner context instead (SHOW TABLES/DICTIONARIES,
-  // the same boundary as the lazy sidebar), memoized once per database.
-  std::unordered_map<std::string, std::vector<std::string>> lineage_visible_objects;
+  // table, so it cannot decide whether a *related* object is visible. Each
+  // neighbour is checked alone (CHECK GRANT then a zero-row probe, as the
+  // runner, kept by the AclService): its database is never enumerated.
+  // The check may run inside the callback of a system read: it never throws there. When the runner's privileges cannot
+  // be read, the neighbour is not shown and the answer says that the lineage is incomplete (never a silent "none").
+  bool lineage_acl_failed = false;
   auto lineage_visible = [&](const std::string& dep_db, const std::string& dep_table) {
     if (allowed.allows_table(dep_db, dep_table)) return true;
-    auto it = lineage_visible_objects.find(dep_db);
-    if (it == lineage_visible_objects.end()) {
-      std::vector<std::string> objects;
-      try {
-        objects = discover_visible_objects(runner, dep_db);
-      } catch (const std::exception&) {
-        // An unreadable database is simply not visible to this runner.
-      }
-      it = lineage_visible_objects.emplace(dep_db, std::move(objects)).first;
+    try {
+      return acl.readable(dep_db, dep_table);
+    } catch (const std::exception&) {
+      lineage_acl_failed = true;
+      return false;
     }
-    return std::binary_search(it->second.begin(), it->second.end(), dep_table);
   };
   std::map<std::tuple<std::string, std::string, std::string>, size_t> dependency_seen;
   auto append_dependency = [&](const std::string& dep_db, const std::string& dep_table, const char* relation,
@@ -2870,13 +2868,15 @@ bool load_explorer_table_detail(
     }
   }
 
+  if (lineage_acl_failed) out.unavailable_sections.push_back("lineage_visibility");
+
   // Scope totals must be larger than the selected table. The per-table ACL
   // object set intentionally contains only this table, so using it here makes
   // Table / Database and Table / ClickHouse incorrectly report 100%. Aggregate
   // the runner-visible catalog instead; only database-level totals are retained.
   section_error.clear();
   try {
-    const auto visible_databases = discover_visible_databases(runner);
+    const auto visible_databases = acl.databases();
     std::vector<ExplorerDatabaseSummary> summaries;
     if (load_explorer_database_summaries(runner, visible_databases, summaries, &section_error)) {
       uint64_t clickhouse_bytes = 0;

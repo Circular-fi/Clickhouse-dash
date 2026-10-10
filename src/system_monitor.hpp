@@ -128,9 +128,11 @@ constexpr size_t kMonitorReplicaRowLimit = 10000;
 
 // Server tiles, topology and the replication summary of the runner-visible
 // replicated tables. Returns false only when nothing at all could be read.
+class AclView;
+
 bool load_system_monitor_overview(
     clickhouse::Client& system,
-    clickhouse::Client& runner,
+    AclView& runner_acl,
     const MonitorCapabilities& caps,
     SystemMonitorOverview& out,
     std::string* error);
@@ -425,7 +427,7 @@ struct SystemMonitorQuery {
 // Phase 1 and phase 2. Returns false only for a failure outside ClickHouse
 // (a broken connection: the caller drops the client); a ClickHouse error is
 // a status of the answer.
-bool load_system_monitor_queries(clickhouse::Client& runner, const MonitorCapabilities& caps,
+bool load_system_monitor_queries(clickhouse::Client& runner, AclView& runner_acl, const MonitorCapabilities& caps,
                                    const MonitorQueriesRequest& request, SystemMonitorQueries& out, std::string* error);
 bool load_system_monitor_query(clickhouse::Client& runner, const MonitorCapabilities& caps,
                                  const MonitorQueriesRequest& request, SystemMonitorQuery& out, std::string* error);
@@ -515,7 +517,7 @@ struct SystemMonitorDisks {
 
 // Disks, policies and the bytes by disk and database. Returns false only when
 // nothing at all could be read.
-bool load_system_monitor_disks(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
+bool load_system_monitor_disks(clickhouse::Client& system, AclView& runner_acl, const MonitorCapabilities& caps,
                                  SystemMonitorDisks& out, std::string* error);
 
 // The SQL, exposed for the contract and unit tests (no I/O). `databases` are
@@ -571,7 +573,7 @@ struct SystemMonitorDiskGrowth {
   bool key_column = false;
 };
 
-void load_system_monitor_disk_growth(clickhouse::Client& system, clickhouse::Client& runner, const MonitorCapabilities& caps,
+void load_system_monitor_disk_growth(clickhouse::Client& system, AclView& runner_acl, const MonitorCapabilities& caps,
                                        const MonitorSeriesWindow& window, SystemMonitorDiskGrowth& out);
 
 // The growth SQL. with_key: the 26.8 form, `(metric IN ('DiskUsed_<d>', ...)

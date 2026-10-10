@@ -96,10 +96,14 @@ def test_allowed_object_set_is_discovered_with_runner_not_system_grants() -> Non
     source = read("src/allowed_objects.cpp")
     header = read("src/allowed_objects.hpp")
 
-    assert 'runner.Select("SHOW DATABASES"' in source
-    assert 'runner.Select("SHOW TABLES FROM "' in source
-    assert 'runner.Select("CHECK GRANT " + expression' in source
-    assert 'check_grant(runner, "SELECT ON " + target)' in source
+    # The runner connection is the AclSource: SHOW, CHECK GRANT and zero-row probes as the runner.
+    assert 'select_names(*client_, "SHOW DATABASES")' in source
+    assert 'select_names(*client_, "SHOW TABLES FROM " + quote_ident(database))' in source
+    assert 'client.Select("CHECK GRANT " + expression' in source
+    assert 'source.check_grant("SELECT ON " + target)' in source
+    # ACCESS_DENIED (497) is the only "no"; another server error is about one object; a transport error is no answer.
+    assert "if (error.GetCode() == kAccessDenied) throw AclDenied(error.what());" in source
+    assert "throw AclObjectError(error.GetCode(), error.what());" in source
     assert "discover_columns_recursive" in source
     assert "DESCRIBE TABLE " in source
     assert "system.grants" not in source

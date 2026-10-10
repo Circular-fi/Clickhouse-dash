@@ -12,6 +12,7 @@ option(CHDASH_BUILD_MCP_TESTS "Build the MCP unit tests (scopes, keys, SQL, prot
 option(CHDASH_BUILD_SYSTEM_TESTS "Build the System page SQL builder unit tests" OFF)
 option(CHDASH_BUILD_RESULT_TESTS "Build the result path unit tests (JSON cell encoder, block encoder)" OFF)
 option(CHDASH_BUILD_FORMAT_TESTS "Build the bound tests of the JSON parse and the SQL formatter (small thread stacks)" OFF)
+option(CHDASH_BUILD_CACHE_TESTS "Build the unit tests of the caches and of the ACL discovery (fakes, no ClickHouse needed)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
 set(CHDASH_GIT_SHA_VALUE "unknown" CACHE STRING "Git SHA embedded in the binary")
@@ -97,11 +98,24 @@ if (CHDASH_BUILD_FORMAT_TESTS)
   chdash_configure_target(chdash_format_depth_test)
 endif()
 
+if (CHDASH_BUILD_CACHE_TESTS)
+  # TtlCache, the ACL discovery and AclService, DdlTextCache and FormatCache, with a fake clock and a fake identity.
+  add_executable(chdash_cache_acl_test ../tests/native/cache_acl_test.cpp
+    acl_service.cpp allowed_objects.cpp ch_client_pool.cpp ch_uri.cpp jwt.cpp format_cache.cpp)
+  target_include_directories(chdash_cache_acl_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_cache_acl_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_cache_acl_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_cache_acl_test)
+endif()
+
 if (CHDASH_BUILD_SYSTEM_TESTS)
   # The System page SQL builders and the disk forecast (no ClickHouse needed).
-  add_executable(chdash_system_monitor_test ../tests/native/system_monitor_test.cpp system_monitor.cpp allowed_objects.cpp)
+  add_executable(chdash_system_monitor_test ../tests/native/system_monitor_test.cpp system_monitor.cpp allowed_objects.cpp acl_service.cpp
+    ch_client_pool.cpp ch_uri.cpp jwt.cpp)
   target_include_directories(chdash_system_monitor_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-  target_include_directories(chdash_system_monitor_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR})
+  target_include_directories(chdash_system_monitor_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_system_monitor_test PRIVATE clickhouse-cpp-lib Threads::Threads)
@@ -137,6 +151,7 @@ if (CHDASH_BUILD_APP)
     export_job.cpp
     export_serializer.cpp
     zip_stream.cpp
+    acl_service.cpp
     allowed_objects.cpp
     explorer_catalog.cpp
     explorer_graph.cpp

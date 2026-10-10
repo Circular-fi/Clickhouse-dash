@@ -17,8 +17,8 @@ def test_graph_routes_share_runner_scoped_acl_boundary() -> None:
     # Each route establishes the same runner ACL boundary before using system metadata.
     graph_handler = api[api.index("void Server::handle_explorer_graph"):]
     assert "authenticate_request" not in graph_handler
-    assert "discover_allowed_objects(*runner)" in graph_handler
-    assert "explorer_graph_cache_.get_or_refresh" in graph_handler
+    assert "allowed = acl_.table_set(access);" in graph_handler
+    assert "explorer_graph_cache_.get_revalidating" in graph_handler
 
 
 def test_graph_backend_normalizes_dependencies_and_filters_both_ends() -> None:

@@ -155,6 +155,7 @@ int main(int argc, char** argv) {
               << " query_session_max_count=" << cfg.query_session_max_count
               << " query_session_abandoned_ttl_ms=" << cfg.query_session_abandoned_ttl_ms
               << " explorer_cache_ttl_ms=" << cfg.explorer.cache_ttl_ms
+              << " explorer_acl_cache_ttl_ms=" << cfg.explorer.acl_cache_ttl_ms
               << " explorer_live_refresh_ms=" << cfg.explorer.live_refresh_ms
               << " max_result_cell_bytes=" << cfg.query_options.max_result_cell_bytes
               << " max_result_event_bytes=" << cfg.query_options.max_result_event_bytes

@@ -413,7 +413,7 @@
   // --- The data that a key reaches ---------------------------------------------------------
 
   // What the MCP ClickHouse user of each host may read, cut by the patterns of the key, as databases that open on
-  // their tables. A table that the user reads only in part says how many columns.
+  // their tables. A table that the user reads only in part says "some columns".
   function reachSection(key) {
     const body = h("div", { class: "mcpReach__body", "aria-live": "polite" });
     const refresh = h("button", { type: "button", class: "button button--small mcpReach__refresh", title: "Check the grants of the MCP user again" }, "Check again");

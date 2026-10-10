@@ -3,13 +3,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_stale_cache_entries_have_shared_lifetime_across_erase() -> None:
-    source = (ROOT / "src/stale_cache.hpp").read_text()
-    assert "std::unordered_map<Key, std::shared_ptr<Entry>> entries_;" in source
-    assert "std::shared_ptr<Entry> entry;" in source
-    assert "entry = it->second;" in source
-    assert "auto& e = *entry;" in source
-    assert "auto& e = entries_[key]" not in source
+def test_cache_entries_have_shared_lifetime_and_a_monotonic_clock() -> None:
+    source = (ROOT / "src/ttl_cache.hpp").read_text()
+    # A fetch, its waiters and a background refresh keep their entry alive; an entry is never removed while it is read.
+    assert "std::unordered_map<Key, std::shared_ptr<Entry>> map_;" in source
+    assert "const std::shared_ptr<Entry> entry = find_or_insert_locked(key, arrival);" in source
+    assert "if (!e.refreshing && expired) it = erase_locked(it);" in source
+    assert "it->second->refreshing) continue;" in source
+    # TTLs and ages are measured on a monotonic clock, never on the wall clock.
+    assert "typename Clock = std::chrono::steady_clock" in source
+    assert "system_clock" not in source
+    assert not (ROOT / "src/stale_cache.hpp").exists()
 
 
 def test_external_dependencies_and_clickhouse_test_image_are_immutable_pins() -> None:

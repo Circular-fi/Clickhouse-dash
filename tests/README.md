@@ -326,6 +326,8 @@ cd tests && MCP_BASE_URL=http://127.0.0.1:18120 MCP_DATA_DIR=/tmp/mcp/rw MCP_RES
   python3 -m pytest -q backend-functional/test_mcp.py
 ```
 
+The server caches and the runner ACL have C++ unit tests (`native/cache_acl_test.cpp`, CMake option `CHDASH_BUILD_CACHE_TESTS`, target `chdash_cache_acl_test`), with a fake monotonic clock and a fake ClickHouse identity: `TtlCache` (single-flight, stale-while-revalidate, `refresh=1` and invalidation that keep one read per key, failures that are never values, LRU bounds in entries and bytes, purge), the ACL discovery and `AclService` (only `ACCESS_DENIED` means "not readable", a transport error is no answer, an object in error is left out alone, the budgets say `truncated`, one answer per identity), `DdlTextCache` (per identity, reads of 2,000 names at most, bounded) and `FormatCache` (a hit compares the text). `backend-functional/test_acl_and_caches.py` checks what the routes show of them.
+
 The C++ unit tests (`native/mcp_test.cpp`, CMake option `CHDASH_BUILD_MCP_TESTS`, target `chdash_mcp_test`) cover the scopes, the keys and their file, the rate limit, the SQL splitter and builder, the protocol and the tools with fakes, and the seven startup errors with the real configuration loader. `harness/test_mcp_contract.py` runs the binary when `MCP_TEST_BINARY` names it, and holds the source contract.
 
 ## Frontend functional
@@ -399,7 +401,7 @@ These checks find defects that the functional tests do not see: a dangling refer
 
 | Command | What runs |
 | --- | --- |
-| `native` | `chdash_query_library_test`, `chdash_system_monitor_test`, `chdash_mcp_test` and `chdash_result_path_test` |
+| `native` | `chdash_query_library_test`, `chdash_system_monitor_test`, `chdash_mcp_test`, `chdash_result_path_test`, `chdash_format_depth_test` and `chdash_cache_acl_test` |
 | `backend` | the sanitized server next to the test ClickHouse, then the format and type checks of `tests/api`, `tests/backend-functional` (the whole directory) and `tests/harness` against it |
 | `frontend` | Playwright (`desktop-1440`) on `page-per-view`, `query-library`, `observability`, `system` and `explorer-nav` against the sanitized server |
 | `all` | the three above |

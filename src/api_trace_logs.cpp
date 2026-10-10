@@ -17,6 +17,7 @@
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "otel_allowlist.hpp"
+#include "ttl_cache.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -75,13 +76,20 @@ struct LogColumns {
   std::vector<std::string> missing;
 };
 
-struct LogColumnsCacheEntry {
-  LogColumns columns;
-  std::chrono::steady_clock::time_point loaded_at;
-};
-
-std::mutex g_log_columns_mutex;
-std::unordered_map<std::string, LogColumnsCacheEntry> g_log_columns_cache;
+// One read per source at a time (single-flight), kept kLogColumnsCacheTtl. A missing table is not kept: the exporter
+// may create it any time. The key comes from the configuration only.
+TtlCache<std::string, LogColumns>& log_columns_cache() {
+  static TtlCache<std::string, LogColumns> cache([] {
+    TtlCache<std::string, LogColumns>::Options options;
+    options.ttl = kLogColumnsCacheTtl;
+    options.max_entries = kLogColumnsCacheMaxEntries;
+    options.ttl_of = [](const LogColumns& columns) -> std::chrono::milliseconds {
+      return columns.exists ? std::chrono::milliseconds(kLogColumnsCacheTtl) : std::chrono::milliseconds(0);
+    };
+    return options;
+  }());
+  return cache;
+}
 
 bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
@@ -134,21 +142,11 @@ LogColumns load_log_columns(clickhouse::Client& client, const LogSettings& logs)
 
 LogColumns cached_log_columns(clickhouse::Client& client, const HostSpec& host, const LogSettings& logs) {
   const std::string key = host.system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
-  {
-    std::lock_guard<std::mutex> lock(g_log_columns_mutex);
-    const auto it = g_log_columns_cache.find(key);
-    if (it != g_log_columns_cache.end() && std::chrono::steady_clock::now() - it->second.loaded_at < kLogColumnsCacheTtl) {
-      return it->second.columns;
-    }
-  }
-  LogColumns columns = load_log_columns(client, logs);
-  // A missing table is not cached: it may be created by the exporter any time.
-  if (columns.exists) {
-    std::lock_guard<std::mutex> lock(g_log_columns_mutex);
-    if (g_log_columns_cache.size() >= kLogColumnsCacheMaxEntries) g_log_columns_cache.clear();
-    g_log_columns_cache[key] = LogColumnsCacheEntry{columns, std::chrono::steady_clock::now()};
-  }
-  return columns;
+  const auto result = log_columns_cache().get(key, [&](LogColumns& columns, std::string&, std::string&) {
+    columns = load_log_columns(client, logs);
+    return true;
+  });
+  return *TtlCache<std::string, LogColumns>::value_or_throw(result);
 }
 
 bool parse_i64(const httplib::Request& req, const char* name, int64_t* out) {

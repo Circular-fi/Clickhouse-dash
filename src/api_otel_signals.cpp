@@ -4,7 +4,7 @@
 // Both routes only read system tables (tables, columns, data_skipping_indices,
 // parts): no query ever touches the signal data itself, so detection stays
 // cheap on multi-billion-row tables. Results are cached per source for
-// kSignalMetaCacheTtl; ?refresh=1 bypasses the cache.
+// kSignalMetaCacheTtl, one read per source at a time; ?refresh=1 reads again.
 #include "server.hpp"
 
 #include "allowed_objects.hpp"
@@ -12,6 +12,7 @@
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "ttl_cache.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/stringbuffer.h>
@@ -83,31 +84,34 @@ std::shared_ptr<clickhouse::Client> acquire_signal_client(
 }
 
 // ---------------------------------------------------------------------------
-// Cache of serialized detection results (successful lookups only).
+// Cache of serialized detection results (successful lookups only: no back-off,
+// no stale answer). The key comes from the configuration only.
 
-struct SignalMetaCacheEntry {
-  std::string body;
-  std::chrono::steady_clock::time_point loaded_at;
-};
-
-std::mutex g_signal_meta_mutex;
-std::unordered_map<std::string, SignalMetaCacheEntry> g_signal_meta_cache;
-
-bool cached_signal_meta(const std::string& key, std::string* body, int64_t* age_ms) {
-  std::lock_guard<std::mutex> lock(g_signal_meta_mutex);
-  const auto it = g_signal_meta_cache.find(key);
-  if (it == g_signal_meta_cache.end()) return false;
-  const auto age = std::chrono::steady_clock::now() - it->second.loaded_at;
-  if (age >= kSignalMetaCacheTtl) return false;
-  *body = it->second.body;
-  *age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(age).count();
-  return true;
+TtlCache<std::string, std::string>& signal_meta_cache() {
+  static TtlCache<std::string, std::string> cache([] {
+    TtlCache<std::string, std::string>::Options options;
+    options.ttl = kSignalMetaCacheTtl;
+    options.failure_backoff = std::chrono::milliseconds(0);
+    options.serve_stale_on_error = false;
+    options.max_entries = kSignalMetaCacheMaxEntries;
+    options.value_bytes = [](const std::string& body) { return body.size(); };
+    return options;
+  }());
+  return cache;
 }
 
-void store_signal_meta(const std::string& key, const std::string& body) {
-  std::lock_guard<std::mutex> lock(g_signal_meta_mutex);
-  if (g_signal_meta_cache.size() >= kSignalMetaCacheMaxEntries) g_signal_meta_cache.clear();
-  g_signal_meta_cache[key] = SignalMetaCacheEntry{body, std::chrono::steady_clock::now()};
+// The error answer of a detection: it is sent to the requests that waited for it, never kept.
+struct MetaRejected {
+  int status = 503;
+  httplib::Headers headers;
+  std::string body;
+};
+
+template <typename Write>
+[[noreturn]] void reject(Write&& write) {
+  httplib::Response response;
+  write(response);
+  throw MetaRejected{response.status, response.headers, response.body};
 }
 
 // The cached body is a JSON object; the cache status is appended per response.
@@ -126,6 +130,25 @@ void send_meta(httplib::Response& res, const std::string& body) {
   res.status = 200;
   res.set_header("Cache-Control", "private, no-store");
   res.set_content(body, "application/json");
+}
+
+// The answer of a detection (kept or read by this request or by the one it waited for), or its error.
+void send_meta_result(httplib::Response& res, const TtlCache<std::string, std::string>::Result& result, const char* failure_code) {
+  if (result.has_value && result.value) return send_meta(res, with_cache_status(*result.value, !result.fetched, static_cast<int64_t>(result.age_ms)));
+  if (result.exception) {
+    try {
+      std::rethrow_exception(result.exception);
+    } catch (const MetaRejected& rejected) {
+      res.status = rejected.status;
+      res.headers = rejected.headers;
+      res.body = rejected.body;
+      return;
+    } catch (const std::exception& e) {
+      return json_error(res, 503, failure_code, e.what());
+    } catch (...) {
+    }
+  }
+  json_error(res, 503, result.error_code.empty() ? failure_code : result.error_code, result.error_message);
 }
 
 // ---------------------------------------------------------------------------
@@ -689,36 +712,40 @@ void Server::handle_logs_meta(const httplib::Request& req, httplib::Response& re
 
   // The answer names the host (source_host_id): hosts that share an identity do not share it.
   const std::string key = "logs\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
-  std::string body;
-  int64_t age_ms = 0;
-  if (!refresh_requested(req) && cached_signal_meta(key, &body, &age_ms)) {
-    return send_meta(res, with_cache_status(body, true, age_ms));
-  }
-
-  std::string error;
-  auto client = acquire_signal_client(*host, client_pool_, &error);
-  if (!client) {
-    return json_error(res, 503, "logs_source_unavailable",
-        error.empty() ? "Cannot connect to the logs ClickHouse source." : error);
-  }
-  std::map<std::string, TableInfo> tables;
-  try {
-    tables = load_table_infos(*client, logs.database, {logs.table});
-  } catch (const std::exception& e) {
-    return json_error(res, 503, "logs_schema_failed", e.what());
-  }
-  const auto it = tables.find(logs.table);
-  if (it == tables.end() || !it->second.exists) {
-    if (const auto grant = missing_select_grant(*client, logs.database, logs.table)) {
-      const auto user = parse_clickhouse_uri(host->system_uri, nullptr);
-      return json_not_granted(res, 503, "logs_table_not_granted", user ? user->user : std::string(), *grant,
-                              "Table " + logs.database + "." + logs.table + " is not readable by the system user");
-    }
-  }
-  static const TableInfo kMissing;
-  body = build_logs_meta(host->otel, host_id, it == tables.end() ? kMissing : it->second);
-  store_signal_meta(key, body);
-  send_meta(res, with_cache_status(body, false, 0));
+  const auto result = signal_meta_cache().get(
+      key,
+      [&](std::string& body, std::string&, std::string&) {
+        std::string error;
+        auto client = acquire_signal_client(*host, client_pool_, &error);
+        if (!client) {
+          reject([&](httplib::Response& out) {
+            json_error(out, 503, "logs_source_unavailable",
+                       error.empty() ? "Cannot connect to the logs ClickHouse source." : error);
+          });
+        }
+        std::map<std::string, TableInfo> tables;
+        try {
+          tables = load_table_infos(*client, logs.database, {logs.table});
+        } catch (const std::exception& e) {
+          const std::string message = e.what();
+          reject([&](httplib::Response& out) { json_error(out, 503, "logs_schema_failed", message); });
+        }
+        const auto it = tables.find(logs.table);
+        if (it == tables.end() || !it->second.exists) {
+          if (const auto grant = missing_select_grant(*client, logs.database, logs.table)) {
+            const auto user = parse_clickhouse_uri(host->system_uri, nullptr);
+            reject([&](httplib::Response& out) {
+              json_not_granted(out, 503, "logs_table_not_granted", user ? user->user : std::string(), *grant,
+                               "Table " + logs.database + "." + logs.table + " is not readable by the system user");
+            });
+          }
+        }
+        static const TableInfo kMissing;
+        body = build_logs_meta(host->otel, host_id, it == tables.end() ? kMissing : it->second);
+        return true;
+      },
+      refresh_requested(req));
+  send_meta_result(res, result, "logs_schema_failed");
 }
 
 void Server::handle_metrics_meta(const httplib::Request& req, httplib::Response& res) {
@@ -733,41 +760,43 @@ void Server::handle_metrics_meta(const httplib::Request& req, httplib::Response&
 
   const std::string key = "metrics\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + metrics.database + '\x1f' +
       metrics.table_prefix;
-  std::string body;
-  int64_t age_ms = 0;
-  if (!refresh_requested(req) && cached_signal_meta(key, &body, &age_ms)) {
-    return send_meta(res, with_cache_status(body, true, age_ms));
-  }
-
-  std::string error;
-  auto client = acquire_signal_client(*host, client_pool_, &error);
-  if (!client) {
-    return json_error(res, 503, "metrics_source_unavailable",
-        error.empty() ? "Cannot connect to the metrics ClickHouse source." : error);
-  }
-  std::vector<std::string> names;
-  for (const auto& kind : metric_kinds()) names.push_back(metrics.table_prefix + kind.suffix);
-  std::map<std::string, TableInfo> tables;
-  try {
-    tables = load_table_infos(*client, metrics.database, names);
-  } catch (const std::exception& e) {
-    return json_error(res, 503, "metrics_schema_failed", e.what());
-  }
-  {
-    // Every kind table absent from system.tables: a grant that is missing looks the same as a table that is missing.
-    bool any = false;
-    for (const auto& entry : tables) any = any || entry.second.exists;
-    if (!any && !names.empty()) {
-      if (const auto grant = missing_select_grant(*client, metrics.database, names.front())) {
-        const auto user = parse_clickhouse_uri(host->system_uri, nullptr);
-        return json_not_granted(res, 503, "metrics_table_not_granted", user ? user->user : std::string(), *grant,
-                                "Table " + metrics.database + "." + names.front() + " is not readable by the system user");
-      }
-    }
-  }
-  body = build_metrics_meta(host->otel, host_id, tables);
-  store_signal_meta(key, body);
-  send_meta(res, with_cache_status(body, false, 0));
+  const auto result = signal_meta_cache().get(
+      key,
+      [&](std::string& body, std::string&, std::string&) {
+        std::string error;
+        auto client = acquire_signal_client(*host, client_pool_, &error);
+        if (!client) {
+          reject([&](httplib::Response& out) {
+            json_error(out, 503, "metrics_source_unavailable",
+                       error.empty() ? "Cannot connect to the metrics ClickHouse source." : error);
+          });
+        }
+        std::vector<std::string> names;
+        for (const auto& kind : metric_kinds()) names.push_back(metrics.table_prefix + kind.suffix);
+        std::map<std::string, TableInfo> tables;
+        try {
+          tables = load_table_infos(*client, metrics.database, names);
+        } catch (const std::exception& e) {
+          const std::string message = e.what();
+          reject([&](httplib::Response& out) { json_error(out, 503, "metrics_schema_failed", message); });
+        }
+        // Every kind table absent from system.tables: a grant that is missing looks the same as a table that is missing.
+        bool any = false;
+        for (const auto& entry : tables) any = any || entry.second.exists;
+        if (!any && !names.empty()) {
+          if (const auto grant = missing_select_grant(*client, metrics.database, names.front())) {
+            const auto user = parse_clickhouse_uri(host->system_uri, nullptr);
+            reject([&](httplib::Response& out) {
+              json_not_granted(out, 503, "metrics_table_not_granted", user ? user->user : std::string(), *grant,
+                               "Table " + metrics.database + "." + names.front() + " is not readable by the system user");
+            });
+          }
+        }
+        body = build_metrics_meta(host->otel, host_id, tables);
+        return true;
+      },
+      refresh_requested(req));
+  send_meta_result(res, result, "metrics_schema_failed");
 }
 
 } // namespace chdash

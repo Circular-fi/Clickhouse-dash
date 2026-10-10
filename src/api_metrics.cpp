@@ -16,6 +16,7 @@
 #include "ch_block_value.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
+#include "ttl_cache.hpp"
 #include "otel_allowlist.hpp"
 
 #include <clickhouse/client.h>
@@ -298,22 +299,19 @@ std::shared_ptr<clickhouse::Client> acquire_metrics_client(
       : make_client_from_uri(host.system_uri, connect_timeout, receive_timeout, send_timeout, error);
 }
 
-struct KindTablesEntry {
-  std::set<std::string> kinds;
-  Clock::time_point loaded_at;
-};
+// The kind tables of a source, one read per source at a time (single-flight), kept like the catalog. The key comes
+// from the configuration only.
+TtlCache<std::string, std::set<std::string>>& kind_tables_cache() {
+  static TtlCache<std::string, std::set<std::string>> cache([] {
+    TtlCache<std::string, std::set<std::string>>::Options options;
+    options.ttl = kCatalogTtl;
+    options.max_entries = kCatalogCacheMaxEntries;
+    return options;
+  }());
+  return cache;
+}
 
-std::mutex g_kind_tables_mutex;
-std::unordered_map<std::string, KindTablesEntry> g_kind_tables;
-
-// Kinds whose table exists (one system.tables read, cached like the catalog).
-std::set<std::string> existing_kinds(clickhouse::Client& client, const HostSpec& host, const MetricSettings& metrics) {
-  const std::string key = host.system_uri + '\x1f' + metrics.database + '\x1f' + metrics.table_prefix;
-  {
-    std::lock_guard<std::mutex> lock(g_kind_tables_mutex);
-    const auto it = g_kind_tables.find(key);
-    if (it != g_kind_tables.end() && Clock::now() - it->second.loaded_at < kCatalogTtl) return it->second.kinds;
-  }
+std::set<std::string> read_existing_kinds(clickhouse::Client& client, const MetricSettings& metrics) {
   std::string names = "(";
   for (size_t i = 0; i < std::size(kKinds); ++i) {
     if (i) names += ", ";
@@ -330,10 +328,17 @@ std::set<std::string> existing_kinds(clickhouse::Client& client, const HostSpec&
   for (const char* kind : kKinds) {
     if (tables.count(metrics.table_prefix + "_" + kind)) kinds.insert(kind);
   }
-  std::lock_guard<std::mutex> lock(g_kind_tables_mutex);
-  if (g_kind_tables.size() >= kCatalogCacheMaxEntries) g_kind_tables.clear();
-  g_kind_tables[key] = KindTablesEntry{kinds, Clock::now()};
   return kinds;
+}
+
+// Kinds whose table exists (one system.tables read, cached like the catalog).
+std::set<std::string> existing_kinds(clickhouse::Client& client, const HostSpec& host, const MetricSettings& metrics) {
+  const std::string key = host.system_uri + '\x1f' + metrics.database + '\x1f' + metrics.table_prefix;
+  const auto result = kind_tables_cache().get(key, [&](std::set<std::string>& kinds, std::string&, std::string&) {
+    kinds = read_existing_kinds(client, metrics);
+    return true;
+  });
+  return *TtlCache<std::string, std::set<std::string>>::value_or_throw(result);
 }
 
 std::string kind_table(const MetricSettings& metrics, const std::string& kind) {
@@ -649,15 +654,7 @@ MetricInfo load_metric_info(clickhouse::Client& client, const std::string& table
 }
 
 // ---------------------------------------------------------------------------
-// Catalog cache (serialized bodies).
-
-struct CatalogCacheEntry {
-  std::string body;
-  Clock::time_point loaded_at;
-};
-
-std::mutex g_catalog_mutex;
-std::unordered_map<std::string, CatalogCacheEntry> g_catalog_cache;
+// Catalog cache (serialized bodies, Server::metrics_catalog_cache_).
 
 // The cached catalog body has no timing: each answer reports its own (a hit
 // spends no query time).
@@ -766,150 +763,147 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
                           visibility + '\x1f' + std::to_string(window.start_ms / 60000) + '\x1f' +
                           std::to_string(window.end_ms / 60000);
   const bool refresh = param(req, "refresh") == "1" || param(req, "refresh") == "true";
-  if (!refresh) {
-    std::lock_guard<std::mutex> lock(g_catalog_mutex);
-    const auto it = g_catalog_cache.find(key);
-    if (it != g_catalog_cache.end()) {
-      const auto age = Clock::now() - it->second.loaded_at;
-      if (age < kCatalogTtl) {
-        return send_json(res, with_cache_status(it->second.body, true,
-                                                std::chrono::duration_cast<std::chrono::milliseconds>(age).count(),
-                                                0, elapsed_ms(started)));
-      }
-    }
-  }
-
-  std::string error;
-  auto client = acquire_metrics_client(*host, client_pool_, &error);
-  if (!client) {
-    return json_error(res, 503, "metrics_source_unavailable",
-                      error.empty() ? "Cannot connect to the metrics ClickHouse source." : error);
-  }
-
-  run_guarded(res, [&] {
-    int64_t query_ms = 0;
-    const auto kinds_started = Clock::now();
-    const std::set<std::string> kinds = existing_kinds(*client, *host, metrics);
-    query_ms += elapsed_ms(kinds_started);
-
-    struct Entry {
-      std::string kind, metric, unit, description, temporality;
-      int monotonic = -1;  // -1 = not a sum
-      int64_t points = 0;
-    };
-    std::map<std::string, std::vector<Entry>> services;
-    size_t rows = 0;
-    bool truncated = false;
-
-    std::vector<std::string> branches;
-    const std::string window_sql = time_predicate(window.start_ms, window.end_ms);
-    for (const char* kind : kKinds) {
-      if (!kinds.count(kind)) continue;
-      const std::string k = kind;
-      const bool has_temporality = k == "sum" || k == "histogram" || k == "exponential_histogram";
-      branches.push_back(
-          "SELECT '" + k + "' AS kind, toString(ServiceName) AS service, MetricName AS metric, any(MetricUnit) AS unit, "
-          "any(MetricDescription) AS description, " +
-          (has_temporality ? std::string("toString(min(AggregationTemporality)) AS tmin, toString(max(AggregationTemporality)) AS tmax, ")
-                           : std::string("'' AS tmin, '' AS tmax, ")) +
-          (k == "sum" ? std::string("toString(min(toUInt8(IsMonotonic))) AS mono_min, toString(max(toUInt8(IsMonotonic))) AS mono_max, ")
-                      : std::string("'' AS mono_min, '' AS mono_max, ")) +
-          "toString(count()) AS points FROM " + kind_table(metrics, k) + " PREWHERE " + window_sql + " WHERE " +
-          visibility + " GROUP BY ServiceName, MetricName");
-    }
-    if (!branches.empty()) {
-      std::string sql = "SELECT kind, service, metric, unit, description, tmin, tmax, mono_min, mono_max, points FROM (";
-      for (size_t i = 0; i < branches.size(); ++i) {
-        if (i) sql += " UNION ALL ";
-        sql += branches[i];
-      }
-      sql += ") ORDER BY service, metric, kind LIMIT " + std::to_string(kCatalogLimit + 1) + kQuerySettings;
-      const auto query_started = Clock::now();
-      client->Select(sql, [&](const clickhouse::Block& block) {
-        for (size_t row = 0; row < block.GetRowCount(); ++row) {
-          if (rows >= kCatalogLimit) {
-            truncated = true;
-            continue;
-          }
-          ++rows;
-          Entry e;
-          e.kind = ch_block_text_at(block, 0, row);
-          const std::string service = ch_block_text_at(block, 1, row);
-          e.metric = ch_block_text_at(block, 2, row);
-          e.unit = ch_block_text_at(block, 3, row);
-          e.description = ch_block_text_at(block, 4, row);
-          const std::string tmin = ch_block_text_at(block, 5, row);
-          const std::string tmax = ch_block_text_at(block, 6, row);
-          if (!tmin.empty()) {
-            if (tmin != tmax) e.temporality = "mixed";
-            else if (tmin == "1") e.temporality = "delta";
-            else if (tmin == "2") e.temporality = "cumulative";
-          }
-          const std::string mono_max = ch_block_text_at(block, 8, row);
-          if (!mono_max.empty()) e.monotonic = mono_max == "1" ? 1 : 0;
-          e.points = text_to_i64(ch_block_text_at(block, 9, row));
-          services[service].push_back(std::move(e));
+  // One read per key at a time: a second viewer of the same window waits for it (the scan covers the whole window).
+  const auto result = metrics_catalog_cache_.get(
+      key,
+      [&](MetricsCatalogAnswer& answer, std::string& code, std::string& message) {
+        std::string error;
+        auto client = acquire_metrics_client(*host, client_pool_, &error);
+        if (!client) {
+          code = "metrics_source_unavailable";
+          message = error.empty() ? "Cannot connect to the metrics ClickHouse source." : error;
+          return false;
         }
-      });
-      query_ms += elapsed_ms(query_started);
-    }
 
-    rapidjson::StringBuffer sb;
-    JsonWriter w(sb);
-    w.StartObject();
-    w.Key("v"); w.Int(1);
-    w.Key("source_host_id"); write_str(w, host_id);
-    w.Key("range"); w.StartArray(); w.Int64(window.start_ms); w.Int64(window.end_ms); w.EndArray();
-    w.Key("services");
-    w.StartArray();
-    for (const auto& [service, entries] : services) {
-      w.StartObject();
-      w.Key("name"); write_str(w, service);
-      w.Key("metrics");
-      w.StartArray();
-      for (const auto& e : entries) {
+        int64_t query_ms = 0;
+        const auto kinds_started = Clock::now();
+        const std::set<std::string> kinds = existing_kinds(*client, *host, metrics);
+        query_ms += elapsed_ms(kinds_started);
+
+        struct Entry {
+          std::string kind, metric, unit, description, temporality;
+          int monotonic = -1;  // -1 = not a sum
+          int64_t points = 0;
+        };
+        std::map<std::string, std::vector<Entry>> services;
+        size_t rows = 0;
+        bool truncated = false;
+
+        std::vector<std::string> branches;
+        const std::string window_sql = time_predicate(window.start_ms, window.end_ms);
+        for (const char* kind : kKinds) {
+          if (!kinds.count(kind)) continue;
+          const std::string k = kind;
+          const bool has_temporality = k == "sum" || k == "histogram" || k == "exponential_histogram";
+          branches.push_back(
+              "SELECT '" + k + "' AS kind, toString(ServiceName) AS service, MetricName AS metric, any(MetricUnit) AS unit, "
+              "any(MetricDescription) AS description, " +
+              (has_temporality ? std::string("toString(min(AggregationTemporality)) AS tmin, toString(max(AggregationTemporality)) AS tmax, ")
+                               : std::string("'' AS tmin, '' AS tmax, ")) +
+              (k == "sum" ? std::string("toString(min(toUInt8(IsMonotonic))) AS mono_min, toString(max(toUInt8(IsMonotonic))) AS mono_max, ")
+                          : std::string("'' AS mono_min, '' AS mono_max, ")) +
+              "toString(count()) AS points FROM " + kind_table(metrics, k) + " PREWHERE " + window_sql + " WHERE " +
+              visibility + " GROUP BY ServiceName, MetricName");
+        }
+        if (!branches.empty()) {
+          std::string sql = "SELECT kind, service, metric, unit, description, tmin, tmax, mono_min, mono_max, points FROM (";
+          for (size_t i = 0; i < branches.size(); ++i) {
+            if (i) sql += " UNION ALL ";
+            sql += branches[i];
+          }
+          sql += ") ORDER BY service, metric, kind LIMIT " + std::to_string(kCatalogLimit + 1) + kQuerySettings;
+          const auto query_started = Clock::now();
+          client->Select(sql, [&](const clickhouse::Block& block) {
+            for (size_t row = 0; row < block.GetRowCount(); ++row) {
+              if (rows >= kCatalogLimit) {
+                truncated = true;
+                continue;
+              }
+              ++rows;
+              Entry e;
+              e.kind = ch_block_text_at(block, 0, row);
+              const std::string service = ch_block_text_at(block, 1, row);
+              e.metric = ch_block_text_at(block, 2, row);
+              e.unit = ch_block_text_at(block, 3, row);
+              e.description = ch_block_text_at(block, 4, row);
+              const std::string tmin = ch_block_text_at(block, 5, row);
+              const std::string tmax = ch_block_text_at(block, 6, row);
+              if (!tmin.empty()) {
+                if (tmin != tmax) e.temporality = "mixed";
+                else if (tmin == "1") e.temporality = "delta";
+                else if (tmin == "2") e.temporality = "cumulative";
+              }
+              const std::string mono_max = ch_block_text_at(block, 8, row);
+              if (!mono_max.empty()) e.monotonic = mono_max == "1" ? 1 : 0;
+              e.points = text_to_i64(ch_block_text_at(block, 9, row));
+              services[service].push_back(std::move(e));
+            }
+          });
+          query_ms += elapsed_ms(query_started);
+        }
+
+        rapidjson::StringBuffer sb;
+        JsonWriter w(sb);
         w.StartObject();
-        w.Key("name"); write_str(w, e.metric);
-        w.Key("kind"); write_str(w, e.kind);
-        w.Key("unit"); write_str(w, e.unit);
-        w.Key("description"); write_str(w, e.description);
-        w.Key("temporality");
-        if (e.temporality.empty()) w.Null();
-        else write_str(w, e.temporality);
-        w.Key("monotonic");
-        if (e.monotonic < 0) w.Null();
-        else w.Bool(e.monotonic == 1);
-        w.Key("points"); w.Int64(e.points);
+        w.Key("v"); w.Int(1);
+        w.Key("source_host_id"); write_str(w, host_id);
+        w.Key("range"); w.StartArray(); w.Int64(window.start_ms); w.Int64(window.end_ms); w.EndArray();
+        w.Key("services");
+        w.StartArray();
+        for (const auto& [service, entries] : services) {
+          w.StartObject();
+          w.Key("name"); write_str(w, service);
+          w.Key("metrics");
+          w.StartArray();
+          for (const auto& e : entries) {
+            w.StartObject();
+            w.Key("name"); write_str(w, e.metric);
+            w.Key("kind"); write_str(w, e.kind);
+            w.Key("unit"); write_str(w, e.unit);
+            w.Key("description"); write_str(w, e.description);
+            w.Key("temporality");
+            if (e.temporality.empty()) w.Null();
+            else write_str(w, e.temporality);
+            w.Key("monotonic");
+            if (e.monotonic < 0) w.Null();
+            else w.Bool(e.monotonic == 1);
+            w.Key("points"); w.Int64(e.points);
+            w.EndObject();
+          }
+          w.EndArray();
+          w.EndObject();
+        }
+        w.EndArray();
+        w.Key("service_count"); w.Uint64(services.size());
+        w.Key("metric_count"); w.Uint64(rows);
+        w.Key("truncated"); w.Bool(truncated);
+        w.Key("limit"); w.Uint64(kCatalogLimit);
+        w.Key("kinds");
+        w.StartArray();
+        for (const char* kind : kKinds) {
+          if (kinds.count(kind)) w.String(kind);
+        }
+        w.EndArray();
+        if (kinds.empty()) {
+          w.Key("error_code"); w.String("metrics_tables_missing");
+          const std::string missing = "No OpenTelemetry exporter metrics tables named " + metrics.database + "." +
+                                      metrics.table_prefix + "_{gauge,sum,histogram,exponential_histogram,summary} exist.";
+          w.Key("message"); write_str(w, missing);
+        }
         w.EndObject();
-      }
-      w.EndArray();
-      w.EndObject();
-    }
-    w.EndArray();
-    w.Key("service_count"); w.Uint64(services.size());
-    w.Key("metric_count"); w.Uint64(rows);
-    w.Key("truncated"); w.Bool(truncated);
-    w.Key("limit"); w.Uint64(kCatalogLimit);
-    w.Key("kinds");
-    w.StartArray();
-    for (const char* kind : kKinds) {
-      if (kinds.count(kind)) w.String(kind);
-    }
-    w.EndArray();
-    if (kinds.empty()) {
-      w.Key("error_code"); w.String("metrics_tables_missing");
-      const std::string message = "No OpenTelemetry exporter metrics tables named " + metrics.database + "." +
-                                  metrics.table_prefix + "_{gauge,sum,histogram,exponential_histogram,summary} exist.";
-      w.Key("message"); write_str(w, message);
-    }
-    w.EndObject();
-    const std::string body = sb.GetString();
-    {
-      std::lock_guard<std::mutex> lock(g_catalog_mutex);
-      if (g_catalog_cache.size() >= kCatalogCacheMaxEntries) g_catalog_cache.clear();
-      g_catalog_cache[key] = CatalogCacheEntry{body, Clock::now()};
-    }
-    send_json(res, with_cache_status(body, false, 0, query_ms, elapsed_ms(started)));
+        answer.body = sb.GetString();
+        answer.query_ms = query_ms;
+        return true;
+      },
+      refresh);
+  if (!result.has_value && !result.exception) {
+    return json_error(res, 503, result.error_code.empty() ? "metrics_query_failed" : result.error_code, result.error_message);
+  }
+  run_guarded(res, [&] {
+    const auto answer = TtlCache<std::string, MetricsCatalogAnswer>::value_or_throw(result);
+    // A request that did not read spends no query time.
+    send_json(res, with_cache_status(answer->body, !result.fetched, static_cast<int64_t>(result.age_ms),
+                                     result.fetched ? answer->query_ms : 0, elapsed_ms(started)));
   });
 }
 

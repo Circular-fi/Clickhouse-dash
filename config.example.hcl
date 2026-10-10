@@ -73,6 +73,7 @@ explorer {
   }
 
   cache_ttl_ms            = 5000
+  acl_cache_ttl_ms        = 60000
   live_refresh_ms         = 2000
   function_cache_ttl_ms   = 3600000
   function_markdown_links = false
