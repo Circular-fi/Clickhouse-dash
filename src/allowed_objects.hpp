@@ -15,6 +15,7 @@
 namespace chdash {
 
 class ClickHouseClientPool;
+class ChExecutor;
 
 struct AllowedTable {
   std::string database;
@@ -139,6 +140,7 @@ std::optional<AllowedTable> discover_allowed_table(clickhouse::Client& runner, c
 // "SELECT ON `db`.`table`" when the user of the client has no SELECT on the table (CHECK GRANT), else nullopt.
 // A server that does not answer in a readable way says nothing: nullopt.
 std::optional<std::string> missing_select_grant(clickhouse::Client& client, const std::string& database, const std::string& table);
+std::optional<std::string> missing_select_grant(ChExecutor& db, const std::string& database, const std::string& table);
 
 // Run `CHECK GRANT <expression>` on `client`. `decoded` reports whether the
 // result could be read (some protocol/result variants cannot be decoded).

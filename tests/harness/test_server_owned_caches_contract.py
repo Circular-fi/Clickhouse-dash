@@ -28,5 +28,6 @@ def test_the_server_owns_the_caches_of_the_otel_routes():
         assert f"inline " in caches and factory in caches, factory
     assert "signal_meta_cache_.get(" in read("src/api_otel_signals.cpp")
     assert "logs_schema_cache_" in read("src/api_logs.cpp")
-    assert "kind_tables_cache_" in read("src/api_metrics.cpp")
+    # The Metrics service takes the kind tables and the catalog as caches of the server.
+    assert "metrics::MetricsCaches{metrics_catalog_cache_, kind_tables_cache_}" in server
     assert "log_columns_cache_" in read("src/api_trace_logs.cpp")

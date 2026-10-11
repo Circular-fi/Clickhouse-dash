@@ -7,6 +7,7 @@
 #include "allowed_objects.hpp"
 #include "explorer_catalog.hpp"
 #include "explorer_graph.hpp"
+#include "metrics_service.hpp"
 #include "system_monitor.hpp"
 #include "system_activity.hpp"
 #include "export_job.hpp"
@@ -436,6 +437,7 @@ private:
   void handle_traces_context(const httplib::Request& req, httplib::Response& res);
   // The connection of the Traces service to the trace source of a host (the system account); null with the reason in *error.
   std::unique_ptr<ChExecutor> open_trace_executor(const HostSpec& host, std::string* error);
+  std::unique_ptr<ChExecutor> open_metrics_executor(const HostSpec& host, std::string* error);
   // Span-level search (keyset pages over newest-first time slices) and one
   // span by its row key, for the search page's Spans mode.
   void handle_traces_spans(const httplib::Request& req, httplib::Response& res);
@@ -518,11 +520,6 @@ private:
     bool estimated = false;
     bool timed_out = false;
     uint64_t query_ms = 0;
-  };
-  // The serialized catalog of the Metrics page (api_metrics.cpp), and the time its read took.
-  struct MetricsCatalogAnswer {
-    std::string body;
-    int64_t query_ms = 0;
   };
   struct LogFacetValues {
     std::vector<std::pair<std::string, uint64_t>> values;
@@ -682,15 +679,18 @@ private:
       [](const LogFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
 
   // The catalog of the Metrics page: per host, source and minute-aligned window.
-  TtlCache<std::string, MetricsCatalogAnswer> metrics_catalog_cache_{cache_options<MetricsCatalogAnswer>(
-      std::chrono::minutes(1), {}, 256, 64u << 20,
-      [](const MetricsCatalogAnswer& v) { return sizeof(v) + v.body.size(); })};
+  metrics::CatalogCache metrics_catalog_cache_{cache_options<metrics::CatalogSnapshot>(
+      std::chrono::minutes(1), {}, 256, 64u << 20, [](const metrics::CatalogSnapshot& v) { return metrics::snapshot_bytes(v); })};
 
   // What the Logs, Metrics and Traces-logs routes read about a source (otel_caches.hpp).
   SignalMetaCache signal_meta_cache_{signal_meta_cache_options()};
   LogsSchemaCache logs_schema_cache_{logs_schema_cache_options()};
   LogColumnsCache log_columns_cache_{log_columns_cache_options()};
   KindTablesCache kind_tables_cache_{kind_tables_cache_options()};
+
+  // The Metrics service (metrics_service.hpp): the catalog and the kind tables are its caches.
+  metrics::MetricsService metrics_service_{[this](const HostSpec& host, std::string* error) { return open_metrics_executor(host, error); },
+                                           metrics::MetricsCaches{metrics_catalog_cache_, kind_tables_cache_}};
 
   // The Traces service (trace_service.hpp) and the cache of its attribute columns.
   trace::AttributeMapCache trace_attribute_maps_cache_{trace::attribute_map_cache_options()};
