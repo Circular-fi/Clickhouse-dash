@@ -137,12 +137,21 @@ struct SearchOutcome {
   // "trace_index", "trace_index_filtered", "trace_index_then_spans" (the index began the search, the spans completed it),
   // "span_aggregation" or "span_duration_two_phase".
   std::string search_path = "span_aggregation";
+  // What the order of the traces is: "newest_index_row" (the index paths: a trace ranks by the Start of its newest index row in the window, one row for
+  // each insert batch, so a trace that spans batches ranks by its last batch), "first_span" (the span paths: by the first span of its window, as one
+  // whole-window aggregation does), or "newest_index_row_then_first_span" (an index scan that reached its cap, completed by the span ranking: the
+  // traces of the index first, then the older ones that the scan did not test). The two orders differ only for a trace that spans insert batches,
+  // but then they can change which traces make the `limit`: see rank_by_of.
+  std::string rank_by = "first_span";
   // Why the index path gave way to the span aggregation, or to its completion: "index_scan_cap" (too many candidates), "index_error" (a failure).
   std::string fallback_reason;
   // The answer holds the traces that were found before the time of the route ran short, not all that match: `partial_reason` says why.
   bool partial = false;
   std::string partial_reason;
 };
+
+// The order of the answer of a search path (SearchOutcome::rank_by).
+std::string rank_by_of(const std::string& search_path);
 
 // The filtered index scan: pages of kCandidateBatch traces, growing to kMaxCandidateBatch when matches are rare, over at most
 // kCandidateScanCap traces.
