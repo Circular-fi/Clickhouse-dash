@@ -7,6 +7,7 @@
 #include "system_monitor.hpp"
 #include "system_overview.hpp"
 #include "system_queries.hpp"
+#include "system_query_format.hpp"
 #include "system_series.hpp"
 
 #include <cstddef>
@@ -84,6 +85,8 @@ inline size_t query(const SystemMonitorQuery& value) {
   for (const auto& [name, points] : value.series) bytes += name.size() + 8 * points.size() + 64;
   return bytes;
 }
+
+inline size_t shape_format(const system_page::ShapeFormatted& value) { return sizeof(value) + value.text.size(); }
 
 inline size_t series(const SystemMonitorSeries& value) {
   size_t bytes = sizeof(value) + 8 * value.buckets.size();

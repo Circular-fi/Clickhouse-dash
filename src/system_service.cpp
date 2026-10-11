@@ -2,6 +2,7 @@
 
 #include "acl_service.hpp"
 #include "ch_uri.hpp"
+#include "jwt.hpp"
 
 #include <algorithm>
 #include <memory>
@@ -233,6 +234,30 @@ Result<Cached<SystemMonitorQuery>> SystemService::query(const RequestContext&, c
       },
       request.refresh);
   return finished<SystemMonitorQuery>(result, "system_monitor_unavailable", "The query's history is unavailable.");
+}
+
+std::shared_ptr<const std::string> SystemService::shape_text_formatted(const RequestContext&, const HostSpec& host, const std::string& normalized) const {
+  if (!ports_.format || normalized.empty() || normalized.size() > kShapeFormatMaxInputBytes) return nullptr;
+  // The host (its identity: an MCP identity has a host of its own) and the text, as a digest: the text can be 64 KiB.
+  const std::string key = host.id + std::string("\0shape-format\0", 14) + std::to_string(normalized.size()) + ":" + sha256_hex(normalized);
+  try {
+    const auto result = caches_.shape_format.get(key, [&](ShapeFormatted& value, std::string& code, std::string& message) {
+      const ShapeFormat shape = format_shape_text(normalized, [&](const std::string& masked) { return ports_.format(host, masked); });
+      if (shape.status == ShapeFormatStatus::Transient) {
+        // Not kept as a value: the cache answers this error for a moment, and then asks again.
+        code = "format_unavailable";
+        message = "The formatter could not be asked.";
+        return false;
+      }
+      value.formatted = shape.status == ShapeFormatStatus::Formatted && shape.text.size() <= kShapeFormatMaxOutputBytes;
+      if (value.formatted) value.text = shape.text;
+      return true;
+    });
+    if (!result.has_value || !result.value || !result.value->formatted) return nullptr;
+    return std::shared_ptr<const std::string>(result.value, &result.value->text);
+  } catch (const std::exception&) {
+    return nullptr;
+  }
 }
 
 // The Activity is live state: never older than the Explorer cache TTL, at most one read a second per host however many pages auto-refresh; past its

@@ -47,88 +47,6 @@ import { uiState } from "./app_ui_state.js";
 import { table as tableMod } from "./app_ui_table.js";
 import { util } from "./app_util.js";
 
-// --- The shape's SQL, formatted ---------------------------------------------
-// A shape's text is normalizeQuery's: its literals are ? (a list ?..),
-// which no SQL parser accepts. The Query page's formatter (/api/format,
-// ns.api.formatSqls) gets a numeric literal in their place (a normalized
-// query has no number of its own), and they come back after; the AS
-// column the formatter aligned keeps its alignment. Quoted text and
-// comments are left alone.
-const MASK_BASE = 90900;
-const MASK_MAX = 9000;
-const MASK_TOKEN = /(?<![\w.$])9\d{4}(?![\w.])/g;
-
-function skipQuoted(sql, start) {
-  const quote = sql[start];
-  let i = start + 1;
-  while (i < sql.length) {
-    if (sql[i] === "\\") { i += 2; continue; }
-    if (sql[i] === quote) {
-      if (sql[i + 1] === quote) { i += 2; continue; }
-      return i + 1;
-    }
-    i += 1;
-  }
-  return sql.length;
-}
-
-// { sql, marks } with marks[k] the placeholder (? or ?..) of the literal
-// MASK_BASE + k, or null when the text cannot be masked (too many
-// placeholders, or a number in the masks' range already in it).
-function maskPlaceholders(sql) {
-  const text = String(sql || "");
-  const marks = [];
-  let out = "";
-  let i = 0;
-  while (i < text.length) {
-    const c = text[i];
-    let end = i;
-    if (c === "'" || c === '"' || c === "`") end = skipQuoted(text, i);
-    else if (c === "-" && text[i + 1] === "-") end = text.indexOf("\n", i) < 0 ? text.length : text.indexOf("\n", i);
-    else if (c === "/" && text[i + 1] === "*") end = text.indexOf("*/", i + 2) < 0 ? text.length : text.indexOf("*/", i + 2) + 2;
-    if (end > i) {
-      out += text.slice(i, end);
-      i = end;
-      continue;
-    }
-    if (c === "?") {
-      const list = text.startsWith("?..", i);
-      if (marks.length >= MASK_MAX) return null;
-      out += String(MASK_BASE + marks.length);
-      marks.push(list ? "?.." : "?");
-      i += list ? 3 : 1;
-      continue;
-    }
-    out += c;
-    i += 1;
-  }
-  MASK_TOKEN.lastIndex = 0;
-  if (MASK_TOKEN.test(text)) return null;
-  return { sql: out, marks };
-}
-
-// The formatted text with its placeholders back, or null when the
-// formatter did not keep every one of them exactly once.
-function restorePlaceholders(formatted, marks) {
-  const seen = new Array(marks.length).fill(0);
-  const lines = String(formatted || "").split("\n").map((line) => {
-    let removed = 0;
-    const restored = line.replace(MASK_TOKEN, (token) => {
-      const k = Number(token) - MASK_BASE;
-      if (!(k >= 0 && k < marks.length)) return token;
-      seen[k] += 1;
-      removed += token.length - marks[k].length;
-      return marks[k];
-    });
-    // The formatter padded the expressions before their AS to one column:
-    // the shorter placeholder gives the width back to that padding.
-    return removed > 0 ? restored.replace(/(\S)( {2,})(AS )/, (all, before, pad, as) => `${before}${pad}${" ".repeat(removed)}${as}`) : restored;
-  });
-  if (seen.some((count) => count !== 1)) return null;
-  return lines.join("\n");
-}
-
-export const systemQuerySql = Object.freeze({ maskPlaceholders, restorePlaceholders });
 const { $, $$ } = dom;
 const SEP = kit.SEP;
 const DASH = format.EMPTY;
@@ -307,9 +225,6 @@ function createQueries(ctx) {
     // The drill-down's grid of charts (systemCharts.grid) and its element, while a shape is open.
     charts: null,
     chartsEl: null,
-    // host|hash|text -> "pending" | { text } (formatted, "" when the
-    // formatter could not parse it).
-    formatted: new Map(),
     rawSql: false,
   };
 
@@ -837,7 +752,7 @@ function createQueries(ctx) {
       h.replace(drillView, children);
       return;
     }
-    const sql = text ? shapeSql(state.q, text) : null;
+    const sql = text ? shapeSql(text, data.normalized_formatted) : null;
     if (!Number(data.summary?.calls)) {
       if (sql) children.push(sql);
       children.push(uiState.block("empty", {
@@ -858,10 +773,11 @@ function createQueries(ctx) {
     drawCharts(data);
   }
 
-  // The shape's SQL, formatted as the Query page's Format button would
-  // (the raw text until the formatter answers, and when it cannot parse
-  // it). Its copy button gives the text shown.
-  function shapeSqlBlock(text, formatted) {
+  // The shape's SQL: the text that the server formatted (normalized_formatted of
+  // /api/system/queries/<hash>, laid out as the Query page's Format button
+  // would, its placeholders kept), or the raw text when the server could not
+  // format it (null) and in the Raw view. Its copy button gives the text shown.
+  function shapeSql(text, formatted) {
     // Line numbers, like the Query editor's (so no wrapping: a wrapped line would shift them). A
     // long query scrolls inside its block; Raw shows the normalized text as query_log has it.
     const shown = state.rawSql ? text : formatted || text;
@@ -869,36 +785,6 @@ function createQueries(ctx) {
     const isFormatted = !state.rawSql && !!formatted;
     block.dataset.formatted = isFormatted ? "1" : "0";
     return h("div", { class: "systemQuery__sqlWrap", id: "systemQuerySql", dataset: { formatted: isFormatted ? "1" : "0", raw: state.rawSql ? "1" : "0" } }, block);
-  }
-
-  function shapeSql(hash, text) {
-    const key = `${kit.hostId()}|${hash}|${text}`;
-    const cached = state.formatted.get(key);
-    if (cached && cached !== "pending") return shapeSqlBlock(text, cached.text);
-    const block = shapeSqlBlock(text, "");
-    if (!cached) {
-      if (state.formatted.size > 200) state.formatted.clear();
-      state.formatted.set(key, "pending");
-      void formatShapeSql(text).then((formatted) => {
-        state.formatted.set(key, { text: formatted });
-        if (state.q !== hash || !formatted || state.rawSql) return;
-        const current = $("#systemQuerySql", drillView);
-        if (current && current.dataset.formatted !== "1") current.replaceWith(shapeSqlBlock(text, formatted));
-      });
-    }
-    return block;
-  }
-
-  async function formatShapeSql(text) {
-    const masked = maskPlaceholders(text);
-    if (!masked) return "";
-    try {
-      const out = await api.formatSqls(kit.hostId(), [masked.sql]);
-      const formatted = String(out?.[0] || "").trim();
-      return formatted ? restorePlaceholders(formatted, masked.marks) || "" : "";
-    } catch {
-      return "";
-    }
   }
 
   function drillActions(data) {
@@ -935,7 +821,7 @@ function createQueries(ctx) {
       state.rawSql = mode === "raw";
       const text = data?.normalized || (state.list?.queries || []).find((item) => item.hash === state.q)?.normalized || "";
       const current = $("#systemQuerySql", drillView);
-      if (current && text) current.replaceWith(shapeSql(state.q, text));
+      if (current && text) current.replaceWith(shapeSql(text, data?.normalized_formatted));
     } });
     return h("div", { class: "systemQuery__actions" }, view, openExample, openHistory);
   }

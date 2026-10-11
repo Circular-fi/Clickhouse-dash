@@ -204,7 +204,8 @@ For this reason, a failure of the system account does not mark a host as down wh
   tables that the runner can see. It uses fixed, read-only, bounded reads of system tables.
   `/api/system/series`, `/api/system/disks`, `/api/system/queries`,
   `/api/system/activity` and `/api/system/keeper` serve the rest of the page
-  (the `system` block). The routes `/api/explorer/ops/activity` and
+  (the `system` block). `GET /api/system/queries/<hash>` answers the `normalized` text of a shape and the same text formatted
+  (`normalized_formatted`, `null` when it cannot be: [`docs/system.md`](docs/system.md#the-formatted-text-of-a-shape)). The routes `/api/explorer/ops/activity` and
   `/api/explorer/ops/keeper` of v2.14.0 stay as aliases.
 - `POST /mcp` the MCP endpoint (only when `mcp.enabled`). It needs `Authorization: Bearer <key>`. `/api/mcp/meta` and `/api/mcp/keys` serve the MCP page. Refer to [`docs/mcp.md`](docs/mcp.md).
 - `POST /api/export/run` prepare a direct-download request and issue a short-lived one-time export token.

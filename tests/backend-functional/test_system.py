@@ -19,8 +19,11 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
+import string
 import time
+import uuid
 
 import pytest
 import requests
@@ -802,6 +805,142 @@ def test_a_shape_has_its_timeline_and_at_most_20_runs_sorted(topq):
     times = [run["event_time_ms"] for run in latest]
     assert 0 < len(times) <= 20 and times == sorted(times, reverse=True), times
     assert payload["reads"]["timeline"]["rows_read"] > 0
+
+
+# ---------------------------------------------------------------------------
+# The formatted text of a shape: `normalized_formatted` (docs/system.md, "The formatted text of a shape")
+
+STAND_IN = re.compile(r"(?<![\w.$])9\d{4}(?![\w.])")
+PLACEHOLDER = re.compile(r"\?(?:\.\.)?")
+
+
+def placeholders(text: str) -> list[str]:
+    return PLACEHOLDER.findall(text)
+
+
+def letters(length: int = 12) -> str:
+    """A name that normalizeQuery keeps (it replaces the names with digits in them): a shape that is new on every run, so a text kept in the server's cache never answers it."""
+    return "".join(random.choices(string.ascii_lowercase, k=length))
+
+
+def format_query_runs(needle: str) -> int:
+    """How many formatQuery statements the System page's formatter ran for a text that holds `needle` (ClickHouse logs the text of the
+    statement with its parameter: the masked text of the shape). They are the statements of the runner account, labelled chdash-system."""
+    ch("SYSTEM FLUSH LOGS")
+    return int(ch_rows(
+        "SELECT count() AS n FROM system.query_log "
+        "WHERE event_date >= today() - 1 AND event_time >= now() - INTERVAL 1 HOUR "
+        "AND type IN ('QueryFinish', 'ExceptionBeforeStart', 'ExceptionWhileProcessing') "
+        "AND log_comment = concat('chdash', '-system') AND user = 'chdash_runner' AND query LIKE 'SELECT formatQuery(%' "
+        f"AND position(query, {sql_string(needle)}) > 0"
+    )[0]["n"])
+
+
+def run_as_runner(sql: str, tag: str) -> requests.Response:
+    """The text as written, on the runner account, with a log_comment of its own (a syntax error runs nothing and is logged all the same)."""
+    return requests.post(CH_URL + "/", params={"log_comment": tag}, data=sql.encode(), auth=RUNNER_AUTH, timeout=120)
+
+
+def shape_of(tag: str) -> dict:
+    """The hash and the window of the one shape that `tag` left in query_log (finished or failed runs)."""
+    ch("SYSTEM FLUSH LOGS")
+    rows = ch_rows(
+        "SELECT toString(normalized_query_hash) AS h, toUInt64(toUnixTimestamp(min(event_time))) AS lo, toUInt64(toUnixTimestamp(max(event_time))) AS hi "
+        f"FROM system.query_log WHERE event_date >= today() - 1 AND event_time >= now() - INTERVAL 1 HOUR AND log_comment = '{tag}' AND {QUERY_LOG_ROWS} "
+        "GROUP BY normalized_query_hash"
+    )
+    assert len(rows) == 1, (tag, rows)
+    now = int(time.time() * 1000)
+    return {"hash": rows[0]["h"], "from_ms": (int(rows[0]["lo"]) - 60) * 1000, "to_ms": min(now, (int(rows[0]["hi"]) + 61) * 1000)}
+
+
+def test_a_shape_answers_its_text_formatted_once_for_every_window():
+    tag = "chdash-test-fmt-" + uuid.uuid4().hex[:12]
+    unique = letters()
+    sql = (
+        f"SELECT sleepEachRow(0) AS s_{unique}, number AS n, number IN (1, 2, 3) AS member FROM numbers(5) "
+        f"WHERE number > 0 AND number IN (1, 2, 3, 4) ORDER BY n LIMIT 3 SETTINGS log_comment = '{tag}'"
+    )
+    assert run_as_runner(sql, tag).status_code == 200
+    located = shape_of(tag)
+    assert format_query_runs(unique) == 0
+    first = shape(located["hash"], from_ms=located["from_ms"], to_ms=located["to_ms"], refresh="1")
+    assert first["status"] == "ok", first
+    text, formatted = first["normalized"], first["normalized_formatted"]
+    assert "?" in text and isinstance(formatted, str), first
+    # Laid out: more than one line, the clauses at the start of a line. The placeholders are back, in order, and no stand-in number is left.
+    lines = formatted.split("\n")
+    assert len(lines) > 3 and lines[0] == "SELECT" and any(line.startswith("FROM ") for line in lines), formatted
+    assert placeholders(formatted) == placeholders(text), (text, formatted)
+    assert not STAND_IN.search(formatted), formatted
+    # The AS column that the formatter aligned is still one column after the placeholders came back.
+    columns = {line.index(" AS ") for line in lines if line.startswith("    ") and re.search(r"\S {2,}AS ", line)}
+    assert len(columns) == 1, formatted
+    # The statement ran once, on the runner account.
+    assert format_query_runs(unique) == 1
+    # Another window of the same shape, another order, another read (refresh): the same text, and ClickHouse is not asked again.
+    narrower = shape(located["hash"], from_ms=located["from_ms"] + 30_000, to_ms=located["to_ms"], refresh="1")
+    latest = shape(located["hash"], from_ms=located["from_ms"], to_ms=located["to_ms"], order="latest", refresh="1")
+    assert narrower["normalized_formatted"] == formatted and latest["normalized_formatted"] == formatted
+    assert format_query_runs(unique) == 1
+    # The list gives the same normalized text, and its shapes carry no formatted text (the page draws them on one line).
+    listed = queries(from_ms=located["from_ms"], to_ms=located["to_ms"], sort="calls", refresh="1")
+    row = next(item for item in listed["queries"] if item["hash"] == located["hash"])
+    assert row["normalized"] == text and "normalized_formatted" not in row, row
+
+
+def test_a_shape_the_formatter_refuses_has_a_null_text_and_is_not_formatted_again():
+    # A syntax error runs nothing and is logged as ExceptionBeforeStart: a shape whose text no parser reads.
+    tag = "chdash-test-fmt-bad-" + uuid.uuid4().hex[:12]
+    unique = letters()
+    response = run_as_runner(f"SELECT 1, 'x' FROM WHERE bad_{unique} = 2", tag)
+    assert response.status_code == 400 and "SYNTAX_ERROR" in response.text, response.text
+    located = shape_of(tag)
+    first = shape(located["hash"], from_ms=located["from_ms"], to_ms=located["to_ms"], refresh="1")
+    # The route is not failed by the formatter: the shape and its raw text are there.
+    assert first["status"] == "ok" and first["summary"]["errors"] >= 1, first
+    assert "?" in first["normalized"] and first["normalized_formatted"] is None, first
+    assert format_query_runs(unique) == 1
+    # Kept as what it is (the text's own fault): the second read of the shape does not ask again.
+    second = shape(located["hash"], from_ms=located["from_ms"] + 30_000, to_ms=located["to_ms"], refresh="1")
+    assert second["normalized_formatted"] is None and second["normalized"] == first["normalized"], second
+    assert format_query_runs(unique) == 1
+
+
+def test_a_shape_text_too_large_to_format_is_null_and_asks_nothing():
+    # A text of more than 64 KiB once normalized (literals and aliases become one character: the calls stay), short of the cut of query_log.
+    tag = "chdash-test-fmt-big-" + uuid.uuid4().hex[:12]
+    unique = letters()
+    columns = ", ".join(["toString(number)"] * 4500)
+    assert run_as_runner(f"SELECT {columns}, 1 AS big_{unique} FROM numbers(1) SETTINGS log_comment = '{tag}'", tag).status_code == 200
+    located = shape_of(tag)
+    big = shape(located["hash"], from_ms=located["from_ms"], to_ms=located["to_ms"], refresh="1")
+    assert big["status"] == "ok" and len(big["normalized"]) > 64 * 1024, len(big["normalized"])
+    assert big["normalized_formatted"] is None
+    assert format_query_runs(unique) == 0
+
+
+def test_an_insert_shape_is_formatted_with_its_placeholders_and_its_columns_one_to_a_line():
+    tag = "chdash-test-fmt-ins-" + uuid.uuid4().hex[:12]
+    unique = letters()
+    names = [f"c{i}_{unique}" for i in range(14)]
+    structure = ", ".join(f"{name} UInt8" for name in names)
+    sql = f"INSERT INTO FUNCTION null('{structure}') ({', '.join(names)}) VALUES ({', '.join(str(i) for i in range(14))})"
+    # Synchronous: an asynchronous insert is logged as a second shape (AsyncInsertFlush).
+    response = requests.post(CH_URL + "/", params={"log_comment": tag, "async_insert": "0"}, data=sql.encode(), auth=RUNNER_AUTH, timeout=60)
+    assert response.status_code == 200, response.text
+    located = shape_of(tag)
+    payload = shape(located["hash"], from_ms=located["from_ms"], to_ms=located["to_ms"], refresh="1")
+    assert payload["status"] == "ok" and payload["kind"] == "Insert", payload
+    formatted = payload["normalized_formatted"]
+    assert isinstance(formatted, str), payload
+    # The statement and its placeholder (the structure of the table function), one column to a line, the data is not in the text.
+    lines = formatted.split("\n")
+    assert lines[0].startswith("INSERT INTO FUNCTION null(?)"), formatted
+    assert [line.strip(" ,") for line in lines[1:15]] == names, formatted
+    assert lines[-1].rstrip().endswith("VALUES"), formatted
+    assert placeholders(formatted) == placeholders(payload["normalized"]) == ["?"], (payload["normalized"], formatted)
+    assert not STAND_IN.search(formatted), formatted
 
 
 def test_chdash_own_queries_are_hidden(topq):

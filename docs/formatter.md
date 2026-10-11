@@ -1,6 +1,6 @@
 # SQL formatter
 
-The Format button of the Query page, the `format_sql` tool of MCP, and the System page call `POST /api/format`. This page describes what the service does with a text, what it promises, and where the code is. The style of the output is in [`tests/api/format/README.md`](../tests/api/format/README.md).
+The Format button of the Query page and the `format_sql` tool of MCP call `POST /api/format`. The System page does not: the server formats the text of a query shape itself, by the same service (see [`system.md`](system.md#the-formatted-text-of-a-shape)). This page describes what the service does with a text, what it promises, and where the code is. The style of the output is in [`tests/api/format/README.md`](../tests/api/format/README.md).
 
 ## The route
 
@@ -50,7 +50,9 @@ When ClickHouse refuses a text, its message says where it stopped (`position 12 
 
 | Unit | What it holds |
 | --- | --- |
-| `src/api_format.cpp` | The route: the JSON, the host, the pooled connection, the answer |
+| `src/api_format.cpp` | The route: the JSON, the host, the answer |
+| `src/format_pooled_port.cpp` | The port of the server: `formatQuery` and `EXPLAIN AST` on a pooled connection of the runner account of the host (the route and the text of a query shape use it) |
+| `src/system_query_format.cpp` | The text of a query shape: the placeholders of normalizeQuery masked as numbers, and put back after the formatter |
 | `src/format_service.cpp` | `FormatBatch`: the steps above, the cache, the check of the meaning, the place of an error |
 | `src/format_clickhouse.cpp` | `formatQuery` and `EXPLAIN AST` on one connection, with one reconnect |
 | `src/format_postprocess.cpp` | The two entry points: `postprocess_format_query` and `unwrap_alter_table_commands` |

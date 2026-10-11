@@ -19,6 +19,7 @@
 #include "system_json.hpp"
 #include "system_monitor.hpp"
 #include "system_overview.hpp"
+#include "system_query_format.hpp"
 #include "system_queries.hpp"
 #include "system_request.hpp"
 #include "system_series.hpp"
@@ -31,6 +32,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -400,11 +402,18 @@ struct SystemTestCaches {
   TtlCache<std::string, SystemMonitorSeries> series{TtlCache<std::string, SystemMonitorSeries>::Options{}};
   TtlCache<std::string, SystemMonitorQueries> queries{TtlCache<std::string, SystemMonitorQueries>::Options{}};
   TtlCache<std::string, SystemMonitorQuery> query{TtlCache<std::string, SystemMonitorQuery>::Options{}};
+  // A failure of the formatter is asked again at once (no back-off), so a test sees that it was not kept.
+  static TtlCache<std::string, ShapeFormatted>::Options no_backoff() {
+    TtlCache<std::string, ShapeFormatted>::Options options;
+    options.failure_backoff = std::chrono::milliseconds(0);
+    return options;
+  }
+  TtlCache<std::string, ShapeFormatted> shape_format{no_backoff()};
   TtlCache<std::string, SystemMonitorDisks> disks{TtlCache<std::string, SystemMonitorDisks>::Options{}};
   TtlCache<std::string, SystemMonitorDiskGrowth> growth{TtlCache<std::string, SystemMonitorDiskGrowth>::Options{}};
   TtlCache<std::string, SystemActivity> activity{TtlCache<std::string, SystemActivity>::Options{}};
   TtlCache<std::string, SystemKeeperStatus> keeper{TtlCache<std::string, SystemKeeperStatus>::Options{}};
-  SystemCaches refs() { return SystemCaches{capabilities, overview, series, queries, query, disks, growth, activity, keeper}; }
+  SystemCaches refs() { return SystemCaches{capabilities, overview, series, queries, query, shape_format, disks, growth, activity, keeper}; }
 };
 
 struct ServiceRig {
@@ -415,7 +424,34 @@ struct ServiceRig {
   bool system_up = true, runner_up = true;
   int counts_asked = 0;
   std::vector<std::pair<std::string, std::string>> counted_tables;
+  // The formatter of a host: what it was asked (the masked text, the host), and what it answers (by default a layout of one clause a line).
+  std::vector<std::string> formatted_sqls, formatted_hosts;
+  std::function<ShapeFormatReply(const std::string&)> formatter = [](const std::string& sql) { return layout(sql); };
   std::unique_ptr<SystemService> service;
+
+  // A stand-in for formatQuery: FROM, WHERE and LIMIT start a line, a comma is followed by a new line, and the expressions before an AS are
+  // padded to one column when the text has more than one (what the real formatter does).
+  static ShapeFormatReply layout(const std::string& sql) {
+    ShapeFormatReply reply;
+    std::string out;
+    for (size_t i = 0; i < sql.size();) {
+      size_t skip = 0;
+      for (const std::string clause : {" FROM ", " WHERE ", " LIMIT "}) {
+        if (sql.compare(i, clause.size(), clause) == 0) {
+          out += "\n" + clause.substr(1);
+          skip = clause.size();
+          break;
+        }
+      }
+      if (skip) {
+        i += skip;
+      } else {
+        out.push_back(sql[i++]);
+      }
+    }
+    reply.text = out;
+    return reply;
+  }
 
   ServiceRig() {
     SystemService::Ports ports;
@@ -440,6 +476,11 @@ struct ServiceRig {
       std::unordered_map<std::string, SystemReplicaCounts> out;
       for (const auto& [database, table] : tables) out[database + std::string(1, '\0') + table] = SystemReplicaCounts{3, 2};
       return out;
+    };
+    ports.format = [this](const HostSpec& host, const std::string& sql) {
+      formatted_hosts.push_back(host.id);
+      formatted_sqls.push_back(sql);
+      return formatter(sql);
     };
     service = std::make_unique<SystemService>(std::move(ports), caches.refs(), acl.service);
   }
@@ -1134,6 +1175,208 @@ void one_shape_reads_the_runner_and_is_keyed_by_its_hash() {
   CHECK_EQ(doc["timestamps"].Size(), 3u);
 }
 
+// ---- The formatted text of a shape (system_query_format.hpp) ----------------------------------------------------------------------------
+
+// The stand-ins are 90900 and the next numbers; the quoted text, the comments and the backticks keep their question marks.
+void placeholders_are_masked_outside_of_quotes_and_comments() {
+  const auto mask = mask_shape_placeholders("SELECT `a?b`, \"c?\", '?' AS q, x IN (?..), [?..], ? -- why?\nFROM t /* ? */ LIMIT ?");
+  CHECK(mask.has_value());
+  CHECK_EQ(mask->sql, std::string("SELECT `a?b`, \"c?\", '?' AS q, x IN (90900), [90901], 90902 -- why?\nFROM t /* ? */ LIMIT 90903"));
+  CHECK((mask->marks == std::vector<std::string>{"?..", "?..", "?", "?"}));
+  // A doubled quote mark and a backslash stay inside the text; a text that is not closed runs to the end; so does a comment.
+  CHECK_EQ(mask_shape_placeholders("SELECT 'it''s ?', 'a\\'?', ?")->sql, std::string("SELECT 'it''s ?', 'a\\'?', 90900"));
+  CHECK_EQ(mask_shape_placeholders("SELECT ? FROM t WHERE a = '?")->sql, std::string("SELECT 90900 FROM t WHERE a = '?"));
+  CHECK_EQ(mask_shape_placeholders("SELECT ? /* ? ")->sql, std::string("SELECT 90900 /* ? "));
+  CHECK_EQ(mask_shape_placeholders("SELECT 1 -- ?")->marks.size(), size_t(0));
+  // An INSERT of rows: its placeholders are masked as the others.
+  CHECK_EQ(mask_shape_placeholders("INSERT INTO db.t (a, b) VALUES (?, ?), (?..)")->sql,
+           std::string("INSERT INTO db.t (a, b) VALUES (90900, 90901), (90902)"));
+  CHECK_EQ(mask_shape_placeholders("INSERT INTO db.t (a, b) FORMAT Native")->sql, std::string("INSERT INTO db.t (a, b) FORMAT Native"));
+}
+
+// A text that cannot be masked: a number of the masks in it (anywhere, a string and a comment included), or more placeholders than numbers.
+void a_text_that_cannot_be_masked_is_refused() {
+  CHECK(!mask_shape_placeholders("SELECT 91234, ?"));
+  CHECK(!mask_shape_placeholders("SELECT '90900', ?"));
+  CHECK(!mask_shape_placeholders("SELECT ? -- 99999"));
+  CHECK(!mask_shape_placeholders("SELECT 90900"));
+  // Not a stand-in: a longer number, a name, a decimal.
+  CHECK(mask_shape_placeholders("SELECT 190900, x90900, 90900a, 1.90900, 90900.5, 909000, ?").has_value());
+  std::string many = "SELECT ";
+  for (size_t i = 0; i < kShapeMaskMax; ++i) many += i ? ", ?" : "?";
+  const auto ok = mask_shape_placeholders(many);
+  CHECK(ok.has_value());
+  CHECK_EQ(ok->marks.size(), kShapeMaskMax);
+  CHECK(ok->sql.find("99899") != std::string::npos);
+  CHECK(!mask_shape_placeholders(many + ", ?"));
+}
+
+// The AS column that the formatter aligned keeps its alignment: a placeholder is shorter than its stand-in, and the width goes back to the
+// padding of the line, the first AS of it.
+void restoring_the_placeholders_keeps_the_as_column() {
+  const std::vector<std::string> two = {"?", "?"};
+  CHECK_EQ(*restore_shape_placeholders("SELECT\n    sleepEachRow(90900)  AS `s`,\n    number               AS `n`\nFROM numbers(90901)", two),
+           std::string("SELECT\n    sleepEachRow(?)      AS `s`,\n    number               AS `n`\nFROM numbers(?)"));
+  // A list is three bytes against five: two come back.
+  CHECK_EQ(*restore_shape_placeholders("SELECT\n    x IN (90900)  AS `a`,\n    y             AS `b`", {"?.."}),
+           std::string("SELECT\n    x IN (?..)    AS `a`,\n    y             AS `b`"));
+  // Two placeholders on the line: the width of both.
+  CHECK_EQ(*restore_shape_placeholders("a(90900, 90901)  AS x", two), std::string("a(?, ?)          AS x"));
+  // One space before AS is no padding; a line without AS or without a placeholder is left alone; only the first AS of a line is padded.
+  CHECK_EQ(*restore_shape_placeholders("SELECT 90900 AS x", {"?"}), std::string("SELECT ? AS x"));
+  CHECK_EQ(*restore_shape_placeholders("  a  AS x,\n  90900", {"?"}), std::string("  a  AS x,\n  ?"));
+  CHECK_EQ(*restore_shape_placeholders("f(90900)  AS x, g(1)  AS y", {"?"}), std::string("f(?)      AS x, g(1)  AS y"));
+}
+
+// Every placeholder comes back exactly once, or the text is not used.
+void a_placeholder_that_did_not_come_back_once_refuses_the_text() {
+  CHECK(!restore_shape_placeholders("SELECT 90900", {"?", "?"}));        // 90901 was lost
+  CHECK(!restore_shape_placeholders("SELECT 90900, 90900", {"?"}));      // twice
+  CHECK(!restore_shape_placeholders("SELECT 90900, 90900, 90901", {"?", "?"}));
+  CHECK_EQ(*restore_shape_placeholders("SELECT x90900, 90900", {"?"}), std::string("SELECT x90900, ?"));
+  // A number of the range that no placeholder has is the text's own, and it is not counted.
+  CHECK_EQ(*restore_shape_placeholders("SELECT 91000, 90900", {"?"}), std::string("SELECT 91000, ?"));
+  CHECK_EQ(*restore_shape_placeholders("SELECT 1", {}), std::string("SELECT 1"));
+  // The lines are kept, a trailing newline and an empty line too.
+  CHECK_EQ(*restore_shape_placeholders("a\n\n90900\n", {"?"}), std::string("a\n\n?\n"));
+}
+
+void the_shape_is_formatted_by_the_function_it_is_given() {
+  std::vector<std::string> asked;
+  const auto format = [&](const std::string& sql) {
+    asked.push_back(sql);
+    return ServiceRig::layout(sql);
+  };
+  const ShapeFormat done = format_shape_text("SELECT a FROM t WHERE x IN (?..) LIMIT ?", format);
+  CHECK(done.status == ShapeFormatStatus::Formatted);
+  CHECK_EQ(done.text, std::string("SELECT a\nFROM t\nWHERE x IN (?..)\nLIMIT ?"));
+  // The formatter got numbers, never a question mark, and was asked once.
+  CHECK_EQ(asked.size(), size_t(1));
+  CHECK_EQ(asked[0], std::string("SELECT a FROM t WHERE x IN (90900) LIMIT 90901"));
+  // The blanks around the answer are not kept.
+  const auto padded = [](const std::string& sql) { return ShapeFormatReply{"\n\n  " + sql + "  \n", false}; };
+  CHECK_EQ(format_shape_text("SELECT ?", padded).text, std::string("SELECT ?"));
+  // What cannot be formatted is not sent: an empty text, a text that cannot be masked.
+  asked.clear();
+  CHECK(format_shape_text("", format).status == ShapeFormatStatus::Unformattable);
+  CHECK(format_shape_text("   ", format).status == ShapeFormatStatus::Unformattable);
+  CHECK(format_shape_text("SELECT 91234, ?", format).status == ShapeFormatStatus::Unformattable);
+  CHECK(asked.empty());
+  // A formatter that refuses the text, one that gives nothing, one that lost a placeholder, one that failed for a reason of its own.
+  CHECK(format_shape_text("SELECT ?", [](const std::string&) { return ShapeFormatReply{}; }).status == ShapeFormatStatus::Unformattable);
+  CHECK(format_shape_text("SELECT ?", [](const std::string&) { return ShapeFormatReply{std::string("  "), false}; }).status == ShapeFormatStatus::Unformattable);
+  CHECK(format_shape_text("SELECT ?, ?", [](const std::string&) { return ShapeFormatReply{std::string("SELECT 90900"), false}; }).status ==
+        ShapeFormatStatus::Unformattable);
+  CHECK(format_shape_text("SELECT ?", [](const std::string&) { return ShapeFormatReply{std::nullopt, true}; }).status == ShapeFormatStatus::Transient);
+  // An INSERT with its data: the text of the statement is the one that is formatted; its payload is not in a normalized text.
+  const ShapeFormat insert = format_shape_text("INSERT INTO db.t (a, b) VALUES (?, ?)", format);
+  CHECK(insert.status == ShapeFormatStatus::Formatted);
+  CHECK_EQ(insert.text, std::string("INSERT INTO db.t (a, b) VALUES (?, ?)"));
+}
+
+// The text of a shape is formatted once for a host and a text, whatever the window, and a failure never fails the answer.
+void the_formatted_text_of_a_shape_is_kept_by_host_and_text() {
+  ServiceRig rig;
+  RequestContext context;
+  const std::string text = "SELECT a FROM t WHERE x IN (?..) LIMIT ?";
+  const auto first = rig.service->shape_text_formatted(context, system_host(), text);
+  CHECK(first != nullptr);
+  CHECK_EQ(*first, std::string("SELECT a\nFROM t\nWHERE x IN (?..)\nLIMIT ?"));
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(1));
+  CHECK_EQ(rig.formatted_hosts[0], std::string("local"));
+  // The same text again (another window of the shape asks it): the cache answers, ClickHouse is not asked.
+  const auto again = rig.service->shape_text_formatted(context, system_host(), text);
+  CHECK(again != nullptr && *again == *first);
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(1));
+  // Another text, and the same text on another host (an identity of MCP has a host of its own): asked.
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT b FROM t WHERE x = ?"));
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(2));
+  HostSpec other = system_host();
+  other.id = std::string("local") + '\x1f' + "mcp";
+  CHECK(rig.service->shape_text_formatted(context, other, text));
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(3));
+  CHECK_EQ(rig.formatted_hosts[2], other.id);
+}
+
+void a_shape_that_cannot_be_formatted_is_null_and_is_not_asked_again() {
+  ServiceRig rig;
+  RequestContext context;
+  // The formatter refuses the text: the text's own fault, kept as such.
+  rig.formatter = [](const std::string&) { return ShapeFormatReply{}; };
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT ? FROM") == nullptr);
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT ? FROM") == nullptr);
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(1));
+  // Lost placeholders, and a text that cannot be masked: no formatter call at all (the second) or one that is kept (the first).
+  rig.formatter = [](const std::string&) { return ShapeFormatReply{std::string("SELECT 1"), false}; };
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT ?, ?") == nullptr);
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT ?, ?") == nullptr);
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(2));
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT 91234, ?") == nullptr);
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(2));
+  // No text, and a text past the limit: nothing is asked.
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "") == nullptr);
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT ?" + std::string(kShapeFormatMaxInputBytes, ' ')) == nullptr);
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(2));
+  // A formatted text past the limit of the answer (the answer of the MCP tool stays inside its bytes): null, and kept as null.
+  rig.formatter = [](const std::string&) {
+    return ShapeFormatReply{"SELECT 90900" + std::string(kShapeFormatMaxOutputBytes, ' ') + ", 1", false};
+  };
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT ?") == nullptr);
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT ?") == nullptr);
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(3));
+  // The text at the limit of the input is formatted.
+  rig.formatter = [](const std::string& sql) { return ServiceRig::layout(sql); };
+  const std::string largest = "SELECT ?" + std::string(kShapeFormatMaxInputBytes - 8, ' ');
+  CHECK_EQ(largest.size(), kShapeFormatMaxInputBytes);
+  CHECK(rig.service->shape_text_formatted(context, system_host(), largest) != nullptr);
+}
+
+// A failure that is not the text's (the host is down, the time ran out) is not kept: the next request asks again. And nothing escapes.
+void a_formatter_that_failed_is_asked_again_and_never_throws() {
+  ServiceRig rig;
+  RequestContext context;
+  rig.formatter = [](const std::string&) { return ShapeFormatReply{std::nullopt, true}; };
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT ?") == nullptr);
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT ?") == nullptr);
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(2));
+  rig.formatter = [](const std::string& sql) { return ServiceRig::layout(sql); };
+  const auto recovered = rig.service->shape_text_formatted(context, system_host(), "SELECT ?");
+  CHECK(recovered != nullptr && *recovered == "SELECT ?");
+  CHECK_EQ(rig.formatted_sqls.size(), size_t(3));
+  // A formatter that throws.
+  rig.formatter = [](const std::string&) -> ShapeFormatReply { throw std::runtime_error("boom"); };
+  CHECK(rig.service->shape_text_formatted(context, system_host(), "SELECT 2, ?") == nullptr);
+}
+
+// The answer of the route has the field: the text, or null.
+void the_answer_of_a_shape_carries_its_formatted_text() {
+  ServiceRig rig;
+  rig.with_capabilities();
+  rig.runner.on("normalizeQuery(example)", {{"SELECT a FROM t WHERE x IN (1, 2) LIMIT 5", "0", "qid-1", "SELECT a FROM t WHERE x IN (?..) LIMIT ?", "Select"}});
+  rig.runner.on("FROM system.query_log PREWHERE normalized_query_hash = 77 WHERE", {});
+  QueryRequest request;
+  request.host_id = "local";
+  request.query.hash = 77;
+  request.query.step_s = 60;
+  request.query.from_s = 1020;
+  request.query.to_s = 1200;
+  request.query.now_s = 3000;
+  request.query.order = "duration";
+  request.query.max_rows = 100000;
+  RequestContext context;
+  const auto answer = rig.service->query(context, system_host(), request);
+  CHECK(answer);
+  const SystemMonitorQuery& shape = *answer.value->value;
+  CHECK_EQ(shape.normalized, std::string("SELECT a FROM t WHERE x IN (?..) LIMIT ?"));
+  const auto formatted = rig.service->shape_text_formatted(context, system_host(), shape.normalized);
+  const rapidjson::Document with = parse_json(query_json("local", 1020000, 1200000, shape, false, rig.settings, formatted.get()));
+  CHECK_EQ(std::string(with["normalized"].GetString()), shape.normalized);
+  CHECK_EQ(std::string(with["normalized_formatted"].GetString()), std::string("SELECT a\nFROM t\nWHERE x IN (?..)\nLIMIT ?"));
+  const rapidjson::Document without = parse_json(query_json("local", 1020000, 1200000, shape, false, rig.settings));
+  CHECK(without["normalized_formatted"].IsNull());
+  CHECK_EQ(std::string(without["normalized"].GetString()), shape.normalized);
+}
+
 } // namespace
 
 std::string reason_of_code(int code) {
@@ -1204,6 +1447,15 @@ int main(int argc, char** argv) {
   RUN(the_disk_growth_reads_the_disks_the_series_and_the_parts);
   RUN(the_disks_and_their_json);
   RUN(one_shape_reads_the_runner_and_is_keyed_by_its_hash);
+  RUN(placeholders_are_masked_outside_of_quotes_and_comments);
+  RUN(a_text_that_cannot_be_masked_is_refused);
+  RUN(restoring_the_placeholders_keeps_the_as_column);
+  RUN(a_placeholder_that_did_not_come_back_once_refuses_the_text);
+  RUN(the_shape_is_formatted_by_the_function_it_is_given);
+  RUN(the_formatted_text_of_a_shape_is_kept_by_host_and_text);
+  RUN(a_shape_that_cannot_be_formatted_is_null_and_is_not_asked_again);
+  RUN(a_formatter_that_failed_is_asked_again_and_never_throws);
+  RUN(the_answer_of_a_shape_carries_its_formatted_text);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }
