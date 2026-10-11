@@ -9,8 +9,7 @@
 //   queryUi.openQueryLibrary(tab) / closeQueryLibrary()   the library dialog (its module loads on first use)
 
 import { autocomplete } from "./app_autocomplete.js";
-import { dom, h } from "./app_dom.js";
-import { format } from "./app_format.js";
+import { dom } from "./app_dom.js";
 import { header } from "./app_header.js";
 import { highlight } from "./app_highlight.js";
 import { loader } from "./app_loader.js";
@@ -19,7 +18,6 @@ import { router } from "./app_router.js";
 import { state, storage } from "./app_state.js";
 import { copy } from "./app_ui_copy.js";
 import { dialog } from "./app_ui_dialog.js";
-import { icon as iconMod } from "./app_ui_icon.js";
 import { layers } from "./app_ui_layers.js";
 import { menu } from "./app_ui_menu.js";
 import { uiState } from "./app_ui_state.js";
@@ -701,58 +699,9 @@ function initEditor() {
   });
 }
 
-// 1100 px and below (query.css), where the rail is no longer beside the editor: the run stats tiles fold into one
-// summary line ("7 ms \u00b7 120,064 rows \u00b7 1.9 MB read \u00b7 CPU 87.7%
-// \u00b7 1.8 MB memory"), a .foldSummary that unfolds them, so the results
-// start above the fold. The fold only bites at that width.
-function initRunStatsSummary() {
-  const tiles = byId("runStatsTiles");
-  const panel = tiles?.closest(".panel--metrics");
-  if (!tiles || !panel) return;
-  const text = h("span", { class: "foldSummary__text" });
-  const icon = iconMod.el("chevron-down", { className: "foldSummary__chevron" });
-  const summary = h("button", { type: "button", id: "runStatsSummary", class: "foldSummary runStatsSummary", "aria-controls": tiles.id }, text, icon);
-  panel.prepend(summary);
-  const value = (el) => {
-    const v = String(el?.textContent || "").replace(/\s+/g, " ").trim();
-    return v && v !== format.EMPTY ? v : "";
-  };
-  const shown = (el) => !!el && !el.closest(".metricCompact.is-hidden");
-  const refresh = () => {
-    // Before the first run the rail is one line that says where the stats will be: the summary says what it is.
-    if (dom.runStatsTiles?.classList.contains("is-idle")) {
-      util.setMetaLine(text, "Run stats");
-      return;
-    }
-    const parts = [];
-    const add = (el, label) => {
-      const v = shown(el) ? value(el) : "";
-      if (v) parts.push(label.replace("#", v));
-    };
-    add(dom.elapsedSecondsText, "#");
-    add(dom.readRowsTotalText, "# rows");
-    add(dom.readBytesTotalText, "# read");
-    add(dom.writtenRowsTotalText, "# rows written");
-    add(dom.writtenBytesTotalText, "# written");
-    add(dom.cpuMaxText, "CPU #");
-    add(dom.memoryMaxText, "# memory");
-    util.setMetaLine(text, parts.length ? parts.join(" \u00b7 ") : "Run stats");
-  };
-  const fold = (folded) => {
-    panel.classList.toggle("is-folded", folded);
-    summary.setAttribute("aria-expanded", folded ? "false" : "true");
-    summary.title = folded ? "Show the run stats" : "Hide the run stats";
-  };
-  summary.addEventListener("click", () => fold(!panel.classList.contains("is-folded")));
-  new MutationObserver(util.rafOnce(refresh)).observe(tiles, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class"] });
-  fold(true);
-  refresh();
-}
-
 function init({ onRun } = {}) {
   runHandler = typeof onRun === "function" ? onRun : null;
   applyRunOptionsUi();
-  initRunStatsSummary();
   initEditor();
   initEditorCopyButton();
 
