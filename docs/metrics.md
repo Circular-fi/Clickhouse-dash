@@ -135,7 +135,7 @@ Common parameters: `host_id` (optional with one host) and `start_ms` / `end_ms` 
 - `503 metrics_source_unavailable`.
 - `503 metrics_query_failed` (ClickHouse error text).
 
-Every query carries `SETTINGS max_execution_time = 30`. Every response has `timing_ms: {query, total}`.
+Every query carries `SETTINGS max_execution_time = 30`. The statements that read or rank the series add `max_memory_usage = 2000000000`, `max_bytes_before_external_group_by = 1000000000` and `max_bytes_before_external_sort = 1000000000`. Every response has `timing_ms: {query, total}`.
 
 The service, the metric, the attribute keys and the attribute values of a request are not part of the SQL text. They go to ClickHouse as query parameters (`{p1:String}`, `{p2:String}`, ...), apart from the text. A quote mark, a backslash or a new line in a value is a plain character. The same is true for the logs of a trace (`GET /api/traces/logs`: the trace id, the span id and the services).
 
