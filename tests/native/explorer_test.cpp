@@ -2244,6 +2244,12 @@ void test_the_service_answers_storage_functions_and_preview() {
   CHECK(preview);
   CHECK_EQ(preview.value->rows.size(), size_t(1));
   CHECK_EQ(preview.value->rows[0][0], std::string("\"7\""));
+  // The functions and the rows of a table are read on the connection of the runner (what it cannot call or read is not shown): the system
+  // account is never asked for them.
+  CHECK(rig.runner.count("FROM system.documentation") >= 1 && rig.runner.count("SELECT `a` FROM `db`.`t` LIMIT 3") == 1);
+  CHECK_EQ(rig.system.count("FROM system.documentation"), size_t(0));
+  CHECK_EQ(rig.system.count("FROM system.functions"), size_t(0));
+  CHECK_EQ(rig.system.count("SELECT `a` FROM `db`.`t`"), size_t(0));
   const auto missing = rig.service->preview(context, explorer_host(), "db", "nope", 3);
   CHECK_EQ(missing.error.status, 404);
   CHECK_EQ(missing.error.code, std::string("object_not_found"));
@@ -2253,6 +2259,22 @@ void test_the_service_answers_storage_functions_and_preview() {
   CHECK(gone.error.message.find("the table is gone") != std::string::npos);
   rig.runner_down = true;
   CHECK_EQ(rig.service->preview(context, explorer_host(), "db", "t", 3).error.code, std::string("runner_unavailable"));
+}
+
+void test_a_manual_refresh_of_the_catalog_reads_the_functions_again() {
+  // refresh=1 on the catalog drops what the server kept of the functions too: the next read goes to ClickHouse, a read without it does not.
+  ServiceRig rig;
+  RequestContext context;
+  rig.runner.on("GROUP BY database ORDER BY database", {{"db", "2", "20", "200"}});
+  rig.runner.on("FROM system.documentation", {{"plus", "Function", "Adds.", ""}});
+  rig.runner.on("FROM system.functions", {{"plus", "0", "System", "", "", "plus(a)", "", "", "", "", "", "Arithmetic"}});
+  CHECK(rig.service->functions(context, explorer_host(), "local", false));
+  const size_t reads = rig.runner.count("FROM system.documentation");
+  CHECK(rig.service->functions(context, explorer_host(), "local", false));
+  CHECK_EQ(rig.runner.count("FROM system.documentation"), reads);
+  CHECK(rig.service->catalog(context, explorer_host(), "local", "", true));
+  CHECK(rig.service->functions(context, explorer_host(), "local", false));
+  CHECK_EQ(rig.runner.count("FROM system.documentation"), reads + 1);
 }
 
 void test_the_service_scopes_the_graph_and_answers_definitions() {
@@ -2390,6 +2412,7 @@ int main() {
   RUN(test_the_errors_of_the_service);
   RUN(test_the_service_keeps_the_card_of_a_table);
   RUN(test_the_service_answers_storage_functions_and_preview);
+  RUN(test_a_manual_refresh_of_the_catalog_reads_the_functions_again);
   RUN(test_the_service_scopes_the_graph_and_answers_definitions);
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
