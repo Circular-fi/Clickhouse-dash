@@ -159,11 +159,11 @@ test('the Elapsed tile says what it measures, and the run ends before the System
   await expect(page.locator('#clickhouseElapsedWrap')).toBeHidden();
   const tile = page.locator('.metricCompact--elapsed .metricCompact__content');
   const title = await tile.getAttribute('title');
-  expect(title).toMatch(/^Elapsed: the time ChDash needed from the start of the stream to the last row it sent\./);
+  expect(title).toMatch(/^Elapsed: the time ClickHouse Dash needed from the start of the stream to the last row it sent\./);
   expect(title).toMatch(/ClickHouse and column decoding [\d.]+ (?:\u00b5s|ms|s), JSON encoding [\d.]+ (?:\u00b5s|ms|s)/);
   expect(title).toMatch(/The browser had every row [\d.]+ (?:\u00b5s|ms|s) after the click\./);
   await expect(page.locator('#clickhouseElapsedWrap')).toBeVisible({ timeout: 10_000 });
-  expect(await page.locator('#clickhouseElapsedWrap').getAttribute('title')).toMatch(/query_duration_ms of ClickHouse \(system\.query_log\).*waited for ChDash to read the blocks/);
+  expect(await page.locator('#clickhouseElapsedWrap').getAttribute('title')).toMatch(/query_duration_ms of ClickHouse \(system\.query_log\).*waited for ClickHouse Dash to read the blocks/);
   expect(executionCalls).toBe(1);
   // A new run clears the tooltip with the figures.
   await page.locator('#queryTextArea').fill('SELECT 1');

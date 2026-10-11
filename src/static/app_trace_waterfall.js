@@ -332,8 +332,8 @@ function traceStartParts(ns) {
 
 const WARNING_ICON = icon("alert-triangle", { size: "sm" });
 
-// Jaeger's TracePageHeader items: Trace Start, Duration, Services, Depth,
-// Total Spans (plus Errors), and an Incomplete tag when spans reference a
+// Jaeger's TracePageHeader items: Trace start, Duration, Services, Depth,
+// Total spans (plus Errors), and an Incomplete tag when spans reference a
 // parent missing from the trace.
 function renderTraceHeader() {
   const trace = model.activeTrace;
@@ -374,11 +374,11 @@ function renderTraceHeader() {
   if (dom.traceDetailStats) {
     const start = traceStartParts(bounds.start);
     const items = [
-      ["Trace Start", { html: start ? `<time title="${esc(start.title)}">${esc(start.main)}<small class="tracePageOverviewItem__detail">${esc(start.fraction)}</small></time>` : fmt.EMPTY }, "is-start"],
+      ["Trace start", { html: start ? `<time title="${esc(start.title)}">${esc(start.main)}<small class="tracePageOverviewItem__detail">${esc(start.fraction)}</small></time>` : fmt.EMPTY }, "is-start"],
       ["Duration", fmt.duration(bounds.duration)],
       ["Services", fmt.count(cache.serviceCount)],
       ["Depth", fmt.count(cache.maxLevel + 1)],
-      ["Total Spans", fmt.count(spans.length)],
+      ["Total spans", fmt.count(spans.length)],
       ["Errors", fmt.count(cache.errorCount), cache.errorCount ? "is-error" : ""],
     ];
     const itemsHtml = items.map(([label, value, cls]) => stat.html({ label, valueHtml: typeof value === "object" ? value.html : esc(value), tone: cls === "is-error" ? "error" : "", className: `statTile--sm tracePageOverviewItem${cls ? ` ${cls}` : ""}`, attrs: { "data-trace-header-item": label } })).join('<i class="tracePageOverviewDivider" aria-hidden="true"></i>');

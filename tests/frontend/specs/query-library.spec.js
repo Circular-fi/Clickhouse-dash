@@ -1448,7 +1448,7 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   await settled(page.locator('#analysisModal'));
   const profiling = await shellOf('#analysisModal');
   // The profiling dialog keeps its title, its tabs under the head.
-  await expect(page.locator('#analysisModal .uiDialog__head .uiDialog__title')).toHaveText('Query Analysis');
+  await expect(page.locator('#analysisModal .uiDialog__head .uiDialog__title')).toHaveText('Query analysis');
   await expect(page.locator('#analysisModal > .uiDialog__frame > .uiDialog__tabs')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(page.locator('#analysisModal')).toBeHidden();

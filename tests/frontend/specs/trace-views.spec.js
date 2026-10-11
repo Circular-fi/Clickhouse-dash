@@ -446,7 +446,7 @@ test('span inspector header and the ?span= deep link round trip (copy, reload, b
   const meta = head.locator('.traceInspectorHead__meta');
   await expect(meta).toContainText('Service: payments');
   await expect(meta).toContainText('Duration: 30 ms');
-  await expect(meta).toContainText('Start Time: 30 ms');
+  await expect(meta).toContainText('Start: 30 ms');
   await expect(meta).toContainText('Kind: Client');
   await expect(meta.locator('.traceStatus')).toHaveText('Error');
   await expect(meta.locator('[title*="Sep 19, 2026 12:00:00.030000000 UTC"]')).toHaveCount(1);
@@ -544,7 +544,7 @@ test.describe('span inspector on a phone', () => {
     const card = inspector(page, ID.D);
     await expect(card).toBeVisible();
     const meta = card.locator('.traceInspectorHead__meta');
-    await expect(meta).toContainText('Start Time:');
+    await expect(meta).toContainText('Start:');
     const m = await card.evaluate((el) => {
       const head = el.querySelector('.traceInspectorHead__meta');
       const facts = [...head.querySelectorAll(':scope > span')];
@@ -753,7 +753,7 @@ test('trace flamegraph: a frame is its service colour 40 % into the surface unde
           name: el.dataset.flameName,
           ratio: contrast(cs.backgroundColor, cs.color),
           edge: cs.borderTopWidth === '2px' && cs.borderTopColor === resolve(service),
-          fill: cs.backgroundColor === resolve(`color-mix(in srgb, ${service} 40%, var(--panelBg))`),
+          fill: cs.backgroundColor === resolve(`color-mix(in srgb, ${service} 40%, var(--panel))`),
         };
       });
       probe.remove();
@@ -768,7 +768,7 @@ test('trace flamegraph: a frame is its service colour 40 % into the surface unde
       const resolve = (expr) => { probe.style.color = ''; probe.style.color = expr; return getComputedStyle(probe).color; };
       const out = [];
       for (let i = 1; i <= palette.SERVICE_SLOTS; i += 1) {
-        const fill = `color-mix(in srgb, var(--trace-span-color-${i}) 40%, var(--panelBg))`;
+        const fill = `color-mix(in srgb, var(--trace-span-color-${i}) 40%, var(--panel))`;
         out.push(contrast(resolve(fill), resolve(palette.readableText(fill))));
       }
       probe.remove();
@@ -943,15 +943,15 @@ test('trace graph: fit, zoom tools and keys, the minimap once a card is clipped;
   await page.keyboard.press('0');
 
   // Narrower: the graph no longer fits beside the legend at the readable
-  // scale, so the legend folds; still slightly too large, Fit opens at the
-  // readable scale on the root (full cards), the minimap giving the rest.
+  // scale, so the legend folds; it opens whole, its text a little smaller (a column cut at the edge would read as
+  // the end of the graph).
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(legendToggle(page)).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#traceGraphLegend')).toBeHidden();
   await settle(page);
   state = await inspectGraph(page);
   const root = state.nodes.find((n) => n.label === 'frontend GET /checkout');
-  expect(await expectFit(page, { canvas: '#traceGraphCanvas', minimap: '#traceGraphMinimap' }, state, root.id)).toBe('anchored');
+  expect(await expectFit(page, { canvas: '#traceGraphCanvas', minimap: '#traceGraphMinimap' }, state, root.id)).toBe('compact');
   expect(state.compact).toBe(false);
   await expectClearOfChrome(page, '#traceGraphPane', { nodes: [root], edgeLabels: [] });
   // The viewer opens it: a choice the next fits keep (they leave room for it).
@@ -1365,7 +1365,8 @@ test('trace views: a tab row with arrow / Home / End keys that follows ?tab= and
   await expect(viewPicker(page)).toBeVisible();
   await expect(viewPicker(page).locator('.tracePicker__button')).toHaveText('View \u00b7 Statistics');
   await viewPicker(page).locator('.tracePicker__button').click();
-  await expect(viewPicker(page).locator('.tracePicker__menu [role="option"]:visible')).toHaveText(['Timeline', 'Graph', 'Spans', 'Flamegraph']);
+  await expect(viewPicker(page).locator('.tracePicker__menu [role="option"]:visible')).toHaveText(['Timeline', 'Graph', 'Statistics', 'Spans', 'Flamegraph']);
+  await expect(viewPicker(page).locator('.tracePicker__menu [role="option"][aria-selected="true"]')).toHaveText('Statistics');
   await viewPicker(page).locator('.tracePicker__menu').getByRole('option', { name: 'Spans', exact: true }).click();
   await expect(page).toHaveURL(/\?tab=spans$/);
   await expect(page.locator('#traceAltView .traceSpansTable')).toBeVisible();

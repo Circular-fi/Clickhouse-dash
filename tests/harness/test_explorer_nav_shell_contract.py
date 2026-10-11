@@ -19,7 +19,9 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
         assert 'id="explorerViewTabs" class="contentTabs contentTabs--nav" role="group" aria-label="Explorer views"' in page
         for tab, view, href in [("explorerCatalogTab", "catalog", "/explorer/catalog"), ("explorerFunctionsTab", "functions", "/explorer/functions")]:
             assert f'id="{tab}" data-view="{view}" href="{href}"' in page
-        assert f'id="{current}" data-view=' in page and page.count('aria-current="page"') == 1
+        # One current tab in the row (the page switcher of the header has its own current link).
+        row = page[page.index('id="explorerViewTabs"'):page.index("</div>", page.index('id="explorerViewTabs"'))]
+        assert f'id="{current}" data-view=' in row and row.count('aria-current="page"') == 1
     # Graph is a mode of the Catalog, not a top tab; Storage is a card tab.
     for removed in ["explorerGraphTab", "explorerStorageTab", "explorerBreadcrumb", "explorerSectionSelect",
                     "explorerTableModeTabs", "explorerTableSettingsButton", "explorerIncludeNonStoring", "explorerFunctionSettings"]:

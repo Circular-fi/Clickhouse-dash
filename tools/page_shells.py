@@ -89,7 +89,7 @@ def header_markup(page: str) -> str:
         "{{mcp.hidden}}": "" if nav == "mcp" else " hidden",
     }
     for other in ("query", "explorer", "observability", "system", "mcp"):
-        values[f"{{{{selected.{other}}}}}"] = "true" if other == nav else "false"
+        values[f"{{{{current.{other}}}}}"] = ' aria-current="page"' if other == nav else ""
     for key, value in values.items():
         text = text.replace(key, value)
     assert "{{" not in text, f"unknown placeholder in {HEADER.name}"

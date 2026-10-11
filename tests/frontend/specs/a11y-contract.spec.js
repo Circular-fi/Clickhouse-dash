@@ -37,15 +37,15 @@ function contrastsOf(page, theme, pairs) {
   }, { theme, pairs });
 }
 
-const SURFACES = ['--editorSolidBg', '--panel', '--raised', '--bg'];
+const SURFACES = ['--editor-solid-bg', '--panel', '--raised', '--bg'];
 
 for (const theme of THEMES) {
   test(`tokens (${theme}): SQL colours, muted text and placeholders reach 4.5:1 on every surface`, async ({ page }) => {
     await page.goto('/query');
     const pairs = [];
-    for (const token of ['--sqlString', '--sqlKeyword', '--sqlFunction', '--sqlNumber', '--sqlNull', '--sqlType', '--sqlComment', '--muted', '--text'])
+    for (const token of ['--sql-string', '--sql-keyword', '--sql-function', '--sql-number', '--sql-null', '--sql-type', '--sql-comment', '--muted', '--text'])
       for (const surface of SURFACES) pairs.push([token, surface]);
-    for (const surface of ['--inputBg', '--buttonBg']) pairs.push(['--muted', surface]);
+    for (const surface of ['--input-bg', '--button-bg']) pairs.push(['--muted', surface]);
     const weak = (await contrastsOf(page, theme, pairs)).filter((c) => c.ratio < 4.5);
     expect(weak).toEqual([]);
   });
@@ -53,8 +53,8 @@ for (const theme of THEMES) {
   test(`tokens (${theme}): the edge of a field and the focus ring reach 3:1 on every surface`, async ({ page }) => {
     await page.goto('/query');
     const pairs = [];
-    for (const surface of ['--panel', '--raised', '--bg', '--editorSolidBg']) {
-      pairs.push(['--controlBorder', surface, '--inputBg'], ['--controlBorderHover', surface, '--inputBg'], ['--focusRingColor', surface]);
+    for (const surface of ['--panel', '--raised', '--bg', '--editor-solid-bg']) {
+      pairs.push(['--control-border', surface, '--input-bg'], ['--control-border-hover', surface, '--input-bg'], ['--focus-ring-color', surface]);
     }
     const weak = (await contrastsOf(page, theme, pairs)).filter((c) => c.ratio < 3);
     expect(weak).toEqual([]);
@@ -477,8 +477,8 @@ test('forced colors: mask icons take the text colour, a selection is outlined, a
   await page.goto('/query');
   await runSuccessfulQuery(page, 'SELECT number AS id FROM numbers(8)');
   expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
-  // A chevron drawn by a mask (the header's page selector): its background is the text colour, not the canvas.
-  const arrow = await page.locator('#pageSelectButton').evaluate((el) => {
+  // A chevron drawn by a mask (the header's host picker): its background is the text colour, not the canvas.
+  const arrow = await page.locator('#hostPickerButton').evaluate((el) => {
     const s = getComputedStyle(el, '::after');
     return { bg: s.backgroundColor, canvas: getComputedStyle(document.body).backgroundColor };
   });

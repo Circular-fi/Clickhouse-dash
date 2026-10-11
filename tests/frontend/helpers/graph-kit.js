@@ -257,7 +257,7 @@ export async function expectFit(page, { canvas, minimap, panel = null }, state, 
 // Level of detail from the card on screen (kit.isCompact): full cards while
 // the ordinary card (cardHeight, world px) is COMPACT_CARD_PX tall or more on
 // screen and its smallest text (minFont) MIN_TEXT_PX or more; compact
-// cards shrink to their title row, never an empty frame.
+// cards shrink to their title (a service name on two lines: kit.compactBox, lines 2), never an empty frame.
 export async function expectLevelOfDetail(page, state, { cardHeight, minFont = 12 }) {
   const rules = await kitRules(page);
   const onScreen = cardHeight * state.scale;
@@ -266,9 +266,8 @@ export async function expectLevelOfDetail(page, state, { cardHeight, minFont = 1
   const cards = state.nodes.filter((n) => !['storage_tier', 'ttl_expired'].includes(n.kind));
   for (const node of cards) {
     if (compact) {
-      // The title row: 1.3 x the title (8 to 12 px on screen) and 14 px.
-      expect(node.height, `${node.id || node.service} shrinks to its title`).toBeLessThan(Math.max(onScreen, 30));
-      expect(node.height, `${node.id || node.service} title row`).toBeLessThanOrEqual(12 * 1.3 + 14 + 0.5);
+      // The title: two lines of 1.2 x the title (8 to 12 px on screen) and 14 px; never taller than the card.
+      expect(node.height, `${node.id || node.service} title`).toBeLessThanOrEqual(12 * 1.2 * 2 + 14 + 0.5);
     } else {
       expect(node.height, `${node.id || node.service} full card`).toBeGreaterThanOrEqual(onScreen - 0.5);
     }

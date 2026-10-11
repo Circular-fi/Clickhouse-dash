@@ -33,8 +33,8 @@ const TOOLTIP_ROWS = 12;
 const KIND_LABEL = {
   gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exponential histogram", summary: "Summary",
 };
-const KIND_BADGE = { gauge: "gauge", sum: "sum", histogram: "hist", exponential_histogram: "exp hist", summary: "summary" };
-// A metric's kind and unit are muted mono text, no fill: the catalog
+const KIND_BADGE = { gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exp. histogram", summary: "Summary" };
+// A metric's kind and unit are muted text, no fill: the catalog
 // lists them on every row, and colour stays for signal.
 const metaText = (text, title, className) => `<span class="metricsMeta ${className}" title="${esc(title)}">${esc(text)}</span>`;
 const kindText = (kind, text, title = "") => metaText(text, title || KIND_LABEL[kind] || kind, `metricsBadge metricsBadge--${kind}`);
@@ -1026,6 +1026,12 @@ function renderPanel(panel) {
     if (!hasMetric || needsService) control.disabled = true;
     else if (control.matches(".metricsFilters__add, .metricsExemplarToggle")) control.disabled = false;
   }
+  // A control that cannot be used says why, in its title.
+  const unavailable = !hasMetric ? "Available once a metric is picked" : needsService ? "Available once a service is picked" : "";
+  for (const control of $$(".metricsPanel__controls button, .metricsPanel__controls input", el)) {
+    if (control.disabled && unavailable) control.title = unavailable;
+    else if (control.title === "Available once a metric is picked" || control.title === "Available once a service is picked") control.removeAttribute("title");
+  }
   if (!hasMetric || needsService) {
     $(".metricsPicker--agg .tracePicker__button", el).textContent = "Aggregation \u00b7 Default";
     $(".metricsPicker--group .tracePicker__button", el).textContent = "Group by \u00b7 None";
@@ -1064,6 +1070,8 @@ function renderPanel(panel) {
   const aggButton = $(".tracePicker__button", aggPicker);
   aggButton.textContent = `Aggregation \u00b7 ${panel.agg ? aggLabel(panel.agg) : "Default"}`;
   aggButton.disabled = !aggs.length;
+  if (aggButton.disabled) aggButton.title = "Available once the series is loaded";
+  else if (aggButton.title === "Available once the series is loaded") aggButton.removeAttribute("title");
   h.replace($(".tracePicker__menu", aggPicker), aggs.map((agg) => h("button", {
     type: "button", class: "themeSelect__option tracePicker__option", role: "option", "data-agg": agg, "aria-selected": agg === panel.agg,
   }, aggLabel(agg))));

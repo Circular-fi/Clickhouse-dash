@@ -27,7 +27,7 @@ ZONES = ["UTC", "Europe/Paris", "America/New_York", "Asia/Kolkata", "Australia/L
 SEMANTIC_TOKENS = [
     "--danger", "--danger-bg", "--warning", "--warning-bg", "--success", "--success-bg", "--info", "--info-bg",
     "--sev-fatal", "--sev-error", "--sev-warn", "--sev-info", "--sev-debug", "--sev-trace",
-    "--accent-fill", "--accent-tint", "--accent-text",
+    "--accent-fill", "--selected-bg", "--accent-text",
     "--kind-table", "--kind-view", "--kind-mv", "--kind-dict", "--kind-buffer", "--kind-distributed",
     "--pct-p50", "--pct-p90", "--pct-p95", "--pct-p99",
     "--json-string", "--json-number", "--json-bool", "--json-null",
@@ -122,19 +122,18 @@ def test_semantic_tokens_are_defined_in_every_theme_block() -> None:
         assert blocks["light"][token] == blocks["light-media"][token], token
 
 
-def test_old_families_alias_the_semantic_tokens_only_where_the_value_is_the_same() -> None:
-    blocks = theme_blocks(css_sources.text())
-    aliases = {
-        "--error-bg": "--danger-bg", "--accentText": "--accent-text", "--graph-error": "--danger",
-    }
-    for name, tokens in blocks.items():
-        for old, new in aliases.items():
-            assert tokens[old] == f"var({new})", (name, old)
+def test_the_former_token_aliases_and_the_camel_case_names_are_gone() -> None:
+    css = css_sources.text()
+    # One name for one value (UI-115): the aliases that only repeated a token (--panelBg of --panel, --accentBorder of
+    # --accent-fill, --accentText of --accent-text, --error-bg of --danger-bg, --graph-error of --danger) and the graph /
+    # explorer copies of the status colours (--graph-warn, --exd-ok / -warn / -err) are the tokens they were.
+    for old in ("--panelBg", "--accentBorder", "--accentText", "--error-bg", "--graph-error", "--graph-warn", "--exd-ok", "--exd-warn", "--exd-err"):
+        assert not re.search(re.escape(old) + r"(?![\w-])", css), old
     # The former --accent (a solid fill in dark, a tint in light) is gone: its callers
-    # name --accent-fill or --accent-tint.
-    for name, tokens in blocks.items():
+    # name --accent-fill or --selected-bg.
+    for name, tokens in theme_blocks(css).items():
         assert "--accent" not in tokens, name
-    assert "var(--accent)" not in css_sources.text()
+    assert "var(--accent)" not in css
 
 
 def exported(source: str, namespace: str) -> list[str]:

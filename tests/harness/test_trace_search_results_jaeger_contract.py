@@ -24,8 +24,9 @@ def test_result_items_follow_jaeger_result_item():
     js = modules.read_family("app_trace")
     css = css_sources.text()
     assert "traceResultItem__durationBar" in js and ".traceResultItem__durationBar" in css
-    assert "color-mix(in srgb, var(--accentBorder) 15%, transparent)" in css
-    assert "color-mix(in srgb, var(--accentBorder) 25%, transparent)" in css
+    # The duration is a 3 px rule along the foot of the title, from 0 (UI-049); the longest trace of the page is named in the count.
+    assert "color-mix(in srgb, var(--accent-fill) 65%, transparent)" in css and "height: 3px;" in css
+    assert "bars up to" in js and "SERVICE_PILLS_SHOWN = 3" in js
     assert "Span${spans === 1 ? \"\" : \"s\"}" in js
     assert "Error${errors === 1 ? \"\" : \"s\"}" in js
     assert "traceTag--incomplete" in js and ".traceTag--incomplete" in css

@@ -22,8 +22,8 @@
 .button {
   padding: 0 var(--space-12);
   border-radius: var(--r-md);
-  border: 1px solid var(--buttonBorder);
-  background: var(--buttonBg);
+  border: 1px solid var(--button-border);
+  background: var(--button-bg);
   color: var(--text);
   cursor: pointer;
   font-family: var(--font-sans);
@@ -38,8 +38,8 @@
 }
 
 button.button:not(:disabled):hover {
-  border-color: var(--buttonBorderHover);
-  background: var(--buttonBgHover);
+  border-color: var(--button-border-hover);
+  background: var(--button-bg-hover);
 }
 
 .button:disabled {
@@ -54,8 +54,8 @@ button.button:not(:disabled):hover {
 }
 
 .button--primary:disabled {
-  border-color: var(--buttonBorder);
-  background: var(--buttonBg);
+  border-color: var(--button-border);
+  background: var(--button-bg);
   color: var(--text);
 }
 
@@ -127,10 +127,24 @@ button.button--danger:not(:disabled):hover {
 
 /* Query editor size is persisted by ResizeObserver; interaction is handled by
    the centered .editorResizeHandle so the browser corner grip stays hidden. */
-#runButton.runSplit__main--cancel,
-#runButton.runSplit__main--cancel:hover {
-  border-right: 1px solid var(--buttonBorder);
+/* Cancel is not the primary action: a neutral button with a danger edge, in the place of Run (a second click meant for Run
+   must not look like the same go). */
+#runButton.runSplit__main--cancel {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--button-border));
+  border-right: 1px solid color-mix(in srgb, var(--danger) 60%, var(--button-border));
   border-radius: var(--r-md);
+  background: var(--button-bg);
+  color: var(--text);
+}
+
+#runButton.runSplit__main--cancel:hover {
+  border-right: 1px solid var(--danger);
+  border-radius: var(--r-md);
+}
+
+#runButton.runSplit__main--cancel:not(:disabled):hover {
+  border-color: var(--danger);
+  background: var(--danger-bg);
 }
 
 /* The refresh button, everywhere (the Explorer's panels, the filter bars): an icon, not a button. No
@@ -180,9 +194,9 @@ button.button--danger:not(:disabled):hover {
   width: 100%;
   min-height: var(--control-h);
   padding: 0 var(--space-10);
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-md);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   color: var(--text);
   font: var(--fw-semibold) var(--fs-sm)/1.2 var(--font-sans);
   font-variant-numeric: tabular-nums;
@@ -241,43 +255,11 @@ button.button--danger:not(:disabled):hover {
   background: transparent;
   box-shadow: none;
   color: var(--text);
-  text-shadow: 0 0 6px var(--accentBorder);
+  text-shadow: 0 0 6px var(--accent-fill);
 }
 
 .closeCross:disabled {
   background: transparent;
   color: color-mix(in srgb, var(--muted) 45%, transparent);
   cursor: default;
-}
-
-.traceLogsPanel__bar > .traceLogsPanel__title + .closeCross { margin-left: auto; }
-
-.metricsFilterForm .button { padding: 0 var(--space-12); }
-
-.obsFilterBar__toggle[aria-pressed="true"] { border-color: color-mix(in srgb, var(--success) 55%, var(--buttonBorder)); }
-
-.traceDeltaPanel__actions .button--small { padding: 0 var(--space-10); }
-
-/* A destructive tool (Delete, Remove) reads in the danger colour, without the
-   filled look of the confirm's own Delete. */
-.qlPreview__tools .button--danger {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  background: transparent;
-  color: var(--danger);
-  box-shadow: none;
-}
-
-.qlPreview__tools .button--danger:not(:disabled):hover {
-  border-color: var(--danger);
-  background: var(--danger-bg);
-}
-
-@media (max-width: 760px) {
-  .qlPreview__foot .button {
-    flex: 1 1 auto;
-    min-height: 2.4rem;
-  }
-  .qlPreview__tools .button {
-    min-height: 2.2rem;
-  }
 }

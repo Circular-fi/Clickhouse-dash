@@ -69,13 +69,13 @@ def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
     # shrinks to its title row (kit.compactBox), never an empty frame.
     assert "const COMPACT_CARD_PX = 40;" in js
     assert "kit.isCompact(NODE_HEIGHT, scale, LINEAGE_FONT_MIN)" in js
-    assert "const box = kit.compactBox(item, model.scale);" in js
+    assert "const box = kit.compactBox(item, model.scale, COMPACT_TITLE_LINES);" in js
     assert "function groupedOverview(nodes, edges)" in js
     assert 'kind: "database_group"' in js
     assert "function drawNodeExpandControls(ctx, compact)" in js
     assert "function renderNodePanel(body, node)" in js
     assert "function renderEdgePanel(body, edge)" in js
-    assert 'const MOBILE_QUERY = "(max-width: 720px)";' in js
+    assert 'const MOBILE_QUERY = "(max-width: 760px)";' in js
     # The canvas is the only view, on phones too: no Graph / List switch, no
     # impact list (keyboard access and the live region stay).
     for gone in ("renderImpactList", "impactRows", "viewSwitch", "graphKitList", "currentViewMode"):

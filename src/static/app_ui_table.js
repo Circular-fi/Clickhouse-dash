@@ -1,15 +1,15 @@
 // Data tables, one component for every page (css/10-components/table.css):
 // <table class="dataTable [dataTable--compact]">.
 //
-//   Header      11.5 px / 700, --muted on --theadBg, sentence case, sticky
+//   Header      11.5 px / 700, --muted on --thead-bg, sentence case, sticky
 //               inside the table's scroll container.
 //   Density     --row-regular (32 px, the default) or --row-compact (26 px,
 //               .dataTable--compact).
 //   Cells       .num: right-aligned tabular figures (no mono); .mono only for
 //               ids and hashes; a cut-off value keeps its full text in title.
-//   Selection   tr.is-selected: an accent bar on the left plus --rowHover.
+//   Selection   tr.is-selected: an accent bar on the left plus --row-hover.
 //   Row numbers td/th.dataTable__rowNum (results and previews only).
-//   Bars        td.cellBar with --cellBar (0-100 %) and --cellBar-color:
+//   Bars        td.cellBar with --cellBar (0-100 %) and --cell-bar-color:
 //               barEligible() keeps them off identifier and signed columns.
 //   Copy        one hover copy button per cell (copyCellHtml / copyCell).
 //   Sorting     a button in the th, the state in aria-sort only:
@@ -20,7 +20,7 @@
 //               Page Up / Down, Home / End move between rows, Enter / Space
 //               open one.
 
-import { dom, h } from "./app_dom.js";
+import { dom, h, shell } from "./app_dom.js";
 import { copy } from "./app_ui_copy.js";
 import { util } from "./app_util.js";
 
@@ -134,7 +134,7 @@ function cellBar(td, percent, { color = "" } = {}) {
   }
   td.classList.add("cellBar");
   td.style.setProperty("--cellBar", `${Math.max(0, Math.min(100, Number(percent) || 0)).toFixed(2)}%`);
-  if (color) td.style.setProperty("--cellBar-color", color);
+  if (color) td.style.setProperty("--cell-bar-color", color);
 }
 
 // The row heights of the densities, in px (--row-regular, --row-compact and
@@ -165,7 +165,7 @@ function shareBar(el, percent, text) {
 // The style attribute value of a bar cell, for HTML strings.
 function cellBarStyle(percent, color = "") {
   const fill = `--cellBar:${Math.max(0, Math.min(100, Number(percent) || 0)).toFixed(2)}%`;
-  return color ? `${fill};--cellBar-color:${color}` : fill;
+  return color ? `${fill};--cell-bar-color:${color}` : fill;
 }
 
 // A cell's text with the full value in title when CSS may cut it.
@@ -444,8 +444,15 @@ function keyboardMenuTarget(event, root) {
   return { el, x: Math.round(box.left + Math.min(box.width / 2, 24)), y: Math.round(box.top + box.height / 2) };
 }
 
+// A table that is wider than its box scrolls sideways, and the columns past its edge were not told by anything: the box
+// fades the edge it hides content on (ns.shell.edgeCues). Returns the wrap.
+function scrollCues(wrap) {
+  shell?.edgeCues?.(wrap);
+  return wrap;
+}
+
 export const table = Object.freeze({
-  ariaSort, setSort, sortHeader, sortHeadHtml, bindSort,
+  ariaSort, setSort, scrollCues, sortHeader, sortHeadHtml, bindSort,
   barEligible, barPercent, cellBar, cellBarStyle, shareBar, shareBarHtml, rowHeight, textCell, copyCellHtml, copyCell, bindCopy,
   rovingRows, targetIndex, keyboardMenuTarget,
 });

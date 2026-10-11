@@ -134,7 +134,7 @@ def test_badges_chips_and_swatches_are_the_shared_ones():
     # Metric kinds and units are muted mono text: no coloured fill, no status hue.
     metrics = read("app_metrics.js")
     assert "KIND_COLOR" not in metrics and "qchart-2" not in metrics
-    assert ".metricsMeta { color: var(--muted); font: var(--fw-regular) var(--fs-xs)/1.4 var(--font-mono);" in css
+    assert ".metricsMeta { color: var(--muted); font: var(--fw-regular) var(--fs-xs)/1.4 var(--font-sans);" in css
 
 
 def test_one_copy_helper_and_one_feedback():

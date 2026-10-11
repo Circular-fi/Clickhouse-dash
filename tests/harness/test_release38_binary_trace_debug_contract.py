@@ -32,6 +32,6 @@ def test_debug_json_keeps_compact_and_original_trace_and_readme_is_english() -> 
     assert 'trace_compact' in download
     assert 'trace_spans_original' in download
     assert 'files.push({ name: "README.md", text: debugArchiveReadme(many) });' in download
-    assert '# ChDash Debug Archive' in download
+    assert '# ClickHouse Dash Debug Archive' in download
     assert 'Compact live trace JSON (`chdash.trace.json.lod.v2`)' in download
     assert 'The normal live API does not send `trace_spans_original`' in download

@@ -8,7 +8,7 @@
 // allowlists (the user, the database and the table bound query
 // parameters; a shape is kept whole when one of its runs involved the
 // database or the table); the System page's own reads are never listed,
-// and "Hide ChDash" (on by default) drops the system account's queries.
+// and "Hide internal reads" (on by default) drops the system account's queries.
 // "Order by" and the sortable column headers are one setting: either
 // changes the other. No Auto-refresh: a window is read once, cached a
 // minute by the server.
@@ -316,7 +316,7 @@ function createQueries(ctx) {
   // --- Chrome: the filter bar ----------------------------------------------
   // The time range, then Kind, Errors, User, Database, Table and Order by
   // as the bar's "Label \u00b7 Value" pickers (ns.menu.select over native
-  // selects), Hide ChDash as a toggle chip, then the refresh button. A change
+  // selects), Hide internal reads as a toggle chip, then the refresh button. A change
   // applies at once. No Auto-refresh: a window is read once, cached a
   // minute by the server.
   const option = (item) => h("option", { value: item.value, title: item.title || null }, item.label);
@@ -345,8 +345,8 @@ function createQueries(ctx) {
     ],
     chips: [{
       id: "systemQueriesHide",
-      label: "Hide ChDash",
-      title: "Leave out the queries of ChDash's system account (the Catalog, health checks). The System page's own reads are never listed.",
+      label: "Hide internal reads",
+      title: "Leave out the queries of the system account of ClickHouse Dash (the Catalog, health checks). The System page's own reads are never listed.",
       pressed: true,
       onChange: (on) => setFilter({ hide: on }),
     }],
@@ -763,7 +763,7 @@ function createQueries(ctx) {
         h("td", { class: "num is-mid" }, ms(item.avg_ms)),
         h("td", { class: "num is-mid" }, ms(item.p95_ms)),
         h("td", { class: "num is-low" }, ms(item.max_ms)),
-        h("td", { class: "num is-low", title: format.count(item.read_rows) }, format.compact(item.read_rows)),
+        h("td", { class: "num is-low" }, format.count(item.read_rows)),
         h("td", { class: "num is-mid" }, format.bytes(item.read_bytes)),
         h("td", { class: "num is-mid" }, format.bytes(item.max_memory)),
         h("td", { class: "is-mid systemQueries__names", title: users || null }, users || DASH),
@@ -776,7 +776,7 @@ function createQueries(ctx) {
     });
     const table = h("table", { class: "dataTable dataTable--compact systemTable systemQueries__table", id: "systemQueriesTable" },
       h("thead", null, head), h("tbody", null, rows));
-    const wrap = h("div", { class: "dataTableWrap systemQueries__wrap" }, table);
+    const wrap = tableMod.scrollCues(h("div", { class: "dataTableWrap systemQueries__wrap" }, table));
     tableMod.rovingRows(wrap, { onOpen: (row) => openShape(row.dataset.hash) });
     return wrap;
   }
@@ -983,6 +983,25 @@ function createQueries(ctx) {
 
   const column = (data, name) => systemCharts.column(data.series?.[name]);
 
+  // Bars closer than 3 px read as a comb, not as volume: runs of consecutive buckets are summed into one (a bucket of 1
+  // minute, a window of a day, a plot of 700 px had 1,440 bars). Returns { xs, step, columns } with the sums.
+  const BAR_MIN_PX = 3;
+  function regroup(xs, step, columns, plotWidth) {
+    const group = Math.max(1, Math.ceil((xs.length * BAR_MIN_PX) / Math.max(200, plotWidth)));
+    if (group === 1) return { xs, step, columns };
+    const count = Math.ceil(xs.length / group);
+    const grouped = columns.map((values) => {
+      const out = new Float64Array(count).fill(NaN);
+      for (let i = 0; i < values.length; i++) {
+        if (values[i] !== values[i]) continue;
+        const k = Math.floor(i / group);
+        out[k] = (out[k] !== out[k] ? 0 : out[k]) + values[i];
+      }
+      return out;
+    });
+    return { xs: Float64Array.from({ length: count }, (_, k) => xs[k * group]), step: step * group, columns: grouped };
+  }
+
   function drawCharts(data) {
     const xs = Float64Array.from(data.timestamps || [], Number);
     const step = Number(data.step_seconds || 0) * 1000;
@@ -1027,10 +1046,12 @@ function createQueries(ctx) {
     for (const [id, entry] of state.charts.entries) {
       const spec = specs[id];
       util.setMetaLine(entry.meta, spec.meta || "");
+      // The bars of the runs, summed where they would be closer than 3 px.
+      const bars = id === "calls" ? regroup(xs, step, spec.series.map((item) => item.values), (entry.plot.clientWidth || 700) - 60) : null;
       state.charts.draw(entry, {
-        xs,
-        step,
-        series: spec.series,
+        xs: bars ? bars.xs : xs,
+        step: bars ? bars.step : step,
+        series: bars ? spec.series.map((item, k) => ({ ...item, values: bars.columns[k] })) : spec.series,
         type: spec.type,
         stack: !!spec.stack,
         // A few runs are dots: room above the largest one.
@@ -1092,8 +1113,8 @@ function createQueries(ctx) {
         id);
     });
     const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: [header.num && "num", header.className] }, header.label)));
-    section.appendChild(h("div", { class: "dataTableWrap" },
-      h("table", { class: "dataTable dataTable--compact systemTable systemQuery__table", id: "systemQueryRuns" }, h("thead", null, head), h("tbody", null, rows))));
+    section.appendChild(tableMod.scrollCues(h("div", { class: "dataTableWrap" },
+      h("table", { class: "dataTable dataTable--compact systemTable systemQuery__table", id: "systemQueryRuns" }, h("thead", null, head), h("tbody", null, rows)))));
     return section;
   }
 

@@ -7,16 +7,14 @@
   padding: var(--space-8) var(--space-12);
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
-  background: var(--pillBg);
+  background: var(--pill-bg);
   box-shadow: none;
 }
 
 .statusPill__label {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
   color: var(--muted);
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  font-weight: var(--fw-semibold);
+  font-weight: var(--fw-medium);
 }
 
 .statusPill__value {
@@ -40,12 +38,12 @@
   box-sizing: border-box;
   padding: var(--space-16);
   border-radius: var(--r-lg);
-  border: 1px solid var(--controlBorder);
-  background: var(--inputBg);
+  border: 1px solid var(--control-border);
+  background: var(--input-bg);
   color: var(--text);
   outline: none;
   scrollbar-width: thin;
-  scrollbar-color: var(--scrollThumb) var(--scrollTrack);
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
   font-family: var(--font-mono);
   font-size: var(--fs-md);
   line-height: 21px;
@@ -65,7 +63,7 @@
 .editorGutter {
   position: absolute;
   inset: 0 auto 0 0;
-  width: var(--gutterW);
+  width: var(--gutter-w);
   margin: 0;
   box-sizing: border-box;
   padding: var(--space-16) var(--space-10);
@@ -74,7 +72,7 @@
   user-select: none;
   text-align: right;
   color: var(--muted);
-  background: var(--panelBg);
+  background: var(--panel);
   z-index: var(--z-sticky);
   border-right: 1px solid var(--border);
   font-family: var(--font-mono);
@@ -95,7 +93,7 @@
   box-sizing: border-box;
   padding: var(--space-16);
   padding-right: var(--space-80);
-  padding-left: calc(14px + var(--gutterW));
+  padding-left: calc(14px + var(--gutter-w));
   border-radius: var(--r-lg);
   color: var(--text);
   font-family: var(--font-mono);
@@ -146,7 +144,7 @@
   border: 0;
   color: transparent;
   padding-right: var(--space-48);
-  padding-left: calc(14px + var(--gutterW));
+  padding-left: calc(14px + var(--gutter-w));
 }
 
 .editorCopyButton:active:not(:disabled) {
@@ -186,9 +184,9 @@
   right: 0;
   min-width: 9.8rem;
   padding: var(--space-4);
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-lg);
-  background: var(--panelBg);
+  background: var(--panel);
   box-shadow: var(--shadow-overlay);
   font-size: var(--fs-sm);
 }
@@ -202,7 +200,7 @@
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.035em;
+  letter-spacing: var(--ls-eyebrow);
   text-transform: uppercase;
   user-select: none;
 }
@@ -226,16 +224,16 @@
 }
 
 .editorAutocompleteControl__opt:hover {
-  background: var(--hoverTint);
+  background: var(--hover-tint);
 }
 
 .editorAutocompleteControl__check {
   width: 0.78rem;
   height: 0.78rem;
   border-radius: var(--r-sm);
-  border: 1px solid var(--buttonBorder);
-  background: var(--inputBg);
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--panelBg) 90%, transparent);
+  border: 1px solid var(--button-border);
+  background: var(--input-bg);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--panel) 90%, transparent);
 }
 
 .editorAutocompleteControl__opt.is-checked .editorAutocompleteControl__check {
@@ -302,7 +300,7 @@ html.is-ready #queryTextArea::placeholder {
   width: 1rem;
   height: 1rem;
   transform: translate(-50%, -50%);
-  background-color: var(--themeSelectArrow);
+  background-color: var(--theme-select-arrow);
   opacity: 0.95;
   pointer-events: none;
   mask-image: var(--icon-chevron-down);
@@ -331,8 +329,8 @@ html.is-ready #queryTextArea::placeholder {
   width: max-content;
   max-width: min(26rem, 90vw);
   border-radius: var(--r-lg) 0 var(--r-lg) var(--r-lg);
-  border: 1px solid var(--buttonBorder);
-  background-color: var(--buttonBg);
+  border: 1px solid var(--button-border);
+  background-color: var(--button-bg);
   box-shadow: var(--shadow-overlay);
   padding: var(--space-6);
   padding-left: 0;
@@ -373,7 +371,7 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .runMenu__opt:hover {
-  background: var(--hoverTint);
+  background: var(--hover-tint);
 }
 
 /* A menu checkbox (role=menuitemcheckbox): a square box, the check icon on
@@ -384,7 +382,7 @@ html.is-ready #queryTextArea::placeholder {
   inline-size: 1rem;
   block-size: 1rem;
   flex: 0 0 1rem;
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-xs);
   background: color-mix(in srgb, var(--panel) 86%, transparent);
   color: var(--on-fill);
@@ -488,9 +486,9 @@ html.is-ready #queryTextArea::placeholder {
   white-space: nowrap;
 }
 
-.queryChart__seriesOpt:hover { background: var(--rowHover); }
+.queryChart__seriesOpt:hover { background: var(--row-hover); }
 
-.queryChart__seriesOpt input { margin: 0; accent-color: var(--accentBorder); }
+.queryChart__seriesOpt input { margin: 0; accent-color: var(--accent-fill); }
 
 .queryChart__seriesOpt small { margin-left: auto; padding-left: var(--space-12); color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 
@@ -577,9 +575,9 @@ html.is-ready #queryTextArea::placeholder {
 .queryChart__gaps {
   height: 1.5rem;
   padding: 0 var(--space-10);
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-md);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   color: var(--text);
   font: inherit;
   font-weight: var(--fw-semibold);
@@ -587,21 +585,25 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .queryChart__resetZoom:hover,
-.queryChart__gaps:hover { border-color: var(--buttonBorderHover); }
+.queryChart__gaps:hover { border-color: var(--button-border-hover); }
 
 .queryChart__resetZoom:focus-visible { box-shadow: var(--ring); }
 
 .queryChart__gaps[aria-pressed="true"] {
-  border-color: var(--accentBorder);
-  background: var(--seg-active-bg);
+  border-color: var(--selected-edge);
+  background: var(--selected-bg);
 }
 
 .queryChart__stage { position: relative; min-width: 0; }
 
+/* The rail sets the height of the editor row (the editor fills it): five rows of tiles, kept while the tiles are
+   not there (idle, a failed run), so the editor does not change height when a run starts. */
 .metricColumn {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
   gap: var(--space-12);
+  min-height: calc(5 * 4.5rem + 4 * 0.75rem);
 }
 
 .metricColumn > .metricCompact {
@@ -610,22 +612,24 @@ html.is-ready #queryTextArea::placeholder {
   display: block;
 }
 
-.metricColumn > .metricCompact.is-hidden {
+.metricColumn > .metricCompact.is-hidden,
+.metricColumn > .metricCompact.is-empty {
   display: none;
 }
 
-/* Idle (no run yet): the tiles say so in the muted body text, without a rate line. */
-.metricColumn.is-idle .statTile__value {
-  display: block;
-  width: 100%;
+/* Idle (no run yet): no tile, one muted line where the stats will be. A run that failed hides the tiles that have no
+   figure (is-empty, app_run.js hideEmptyTiles): the elapsed time and the error are what there is to read. */
+.metricColumn > .metricColumn__idle {
+  display: none;
+  grid-column: 1 / -1;
   margin: 0;
   color: var(--muted);
   font-size: var(--fs-sm);
-  font-weight: var(--fw-regular);
-  text-align: left;
 }
 
-.metricColumn.is-idle .statTile__sub { visibility: hidden; }
+.metricColumn.is-idle > .metricCompact { display: none; }
+
+.metricColumn.is-idle > .metricColumn__idle { display: block; }
 
 .metricColumn > .metricCompact:nth-child(1),
 .metricColumn > .metricCompact:nth-child(2) {
@@ -638,14 +642,14 @@ html.is-ready #queryTextArea::placeholder {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--metricBg);
+  background: var(--metric-bg);
   box-shadow: none;
   box-sizing: border-box;
   height: 4.5rem;
   min-height: 4.5rem;
   /* Label, value and a sub row ("Avg ...", "System ...") fit with room under the last line for a
      descender: the tile is 72 px, so the spacing between them is tight rather than the tile taller. */
-  padding: var(--space-8) var(--space-12) var(--space-6);
+  padding: var(--space-6) var(--space-12) var(--space-6);
 }
 
 .metricCompact__content {
@@ -656,14 +660,15 @@ html.is-ready #queryTextArea::placeholder {
   width: 100%;
 }
 
-/* The rail's trends: the shared .sparkline across the lower half of the
-   tile, edge to edge (the tile's rounded corners clip it). */
+/* The rail's trends: the shared .sparkline in a band along the foot of the tile, edge to edge (the tile's rounded
+   corners clip it), under the figures: the line never crosses the value. */
 .metricCompact__bgChart {
   position: absolute;
-  top: 46%;
+  top: auto;
   right: 0;
   bottom: 0;
   left: 0;
+  height: 30%;
   z-index: var(--z-base);
   pointer-events: none;
   opacity: 0.5;
@@ -722,6 +727,22 @@ html.is-ready #queryTextArea::placeholder {
   );
 }
 
+.metricCompact--progress.is-complete::before { display: none; }
+
+/* A finished run: the figure is a result, not a state. */
+.metricCompact--progress.is-complete .statTile__value { color: var(--success); }
+
+.metricCompact--progress.is-complete .statTile__value::before {
+  content: "";
+  display: inline-block;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-right: var(--space-4);
+  vertical-align: -2px;
+  background-color: currentColor;
+  mask: var(--icon-check) center / var(--icon-sm) no-repeat;
+}
+
 .metricCompact--progress.is-indeterminate::before {
   background: linear-gradient(
     90deg,
@@ -729,9 +750,11 @@ html.is-ready #queryTextArea::placeholder {
     color-mix(in srgb, var(--accent-fill) 22%, transparent) 40%,
     transparent 80%
   );
-  animation: indet 1200ms ease-in-out infinite;
+  animation: indet var(--dur-sweep) ease-in-out infinite;
 }
 
+.panel--results.is-errorOnly #resultColumnsText,
+.panel--results.is-errorOnly .resultsViewToggle--main,
 .panel--results.is-multiquery #resultColumnsText {
   display: none;
 }
@@ -781,7 +804,7 @@ html.is-ready #queryTextArea::placeholder {
   margin-top: var(--space-10);
   border-radius: var(--r-lg);
   border: 1px solid var(--border);
-  background: var(--tableBg);
+  background: var(--table-bg);
   box-shadow: none;
   max-height: none;
   overflow-x: auto;
@@ -797,6 +820,7 @@ html.is-ready #queryTextArea::placeholder {
   }
   .metricColumn {
     grid-template-columns: repeat(6, minmax(0, 1fr));
+    min-height: 0;
   }
   .metricColumn > .metricCompact {
     grid-column: span 2;
@@ -807,7 +831,7 @@ html.is-ready #queryTextArea::placeholder {
   }
 }
 
-@media (max-width: 55rem) {
+@media (max-width: 820px) {
   .editorWrap {
     min-height: calc(100% - 6.25rem);
   }
@@ -815,12 +839,12 @@ html.is-ready #queryTextArea::placeholder {
 
 /* The editor should be useful without consuming an entire desktop viewport. */
 .editorWrap {
-  --gutterW: 6ch;
+  --gutter-w: 6ch;
   position: relative;
   width: 100%;
   overflow: hidden;
-  border: 1px solid var(--controlBorder);
-  background: var(--inputBg);
+  border: 1px solid var(--control-border);
+  background: var(--input-bg);
   border-radius: var(--r-lg);
   height: var(--initialEditorHeight, 100%);
   min-height: calc(100% - 3.25rem);
@@ -866,7 +890,7 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .resultTable.resultTable--vertical tbody th:not(:where(.dataTable > tbody > tr:focus-visible > th, .dataTable > tbody > tr:hover > th)) {
-  background: var(--theadBg);
+  background: var(--thead-bg);
 }
 
 .resultTable.resultTable--vertical thead th:last-child {
@@ -883,7 +907,8 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .copySplit > .runSplit__buttons > .runSplit__toggle {
-  width: 0.4rem;
+  width: 24px;
+  min-width: 24px;
 }
 
 .runSplit.is-open > .runSplit__buttons > #runMenuButton {
@@ -921,9 +946,9 @@ html.is-ready #queryTextArea::placeholder {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--muted) 14%, transparent) transparent;
   padding: var(--space-4);
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-lg);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   box-shadow: var(--shadow-overlay);
   color: var(--text);
   font-size: var(--fs-md);
@@ -966,18 +991,18 @@ html.is-ready #queryTextArea::placeholder {
 
 .autocompleteItem:hover,
 .autocompleteItem[aria-selected="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 10%, transparent);
+  background: color-mix(in srgb, var(--accent-fill) 10%, transparent);
 }
 
 html[data-theme="light"] .autocompleteItem:hover,
 html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 8%, transparent);
+  background: color-mix(in srgb, var(--accent-fill) 8%, transparent);
 }
 
 @media (prefers-color-scheme: light) {
   html:not([data-theme="dark"]) .autocompleteItem:hover,
   html:not([data-theme="dark"]) .autocompleteItem[aria-selected="true"] {
-    background: color-mix(in srgb, var(--accentBorder) 8%, transparent);
+    background: color-mix(in srgb, var(--accent-fill) 8%, transparent);
   }
 }
 
@@ -991,11 +1016,13 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   line-height: 1.08rem;
 }
 
+/* A long name ends in an ellipsis, the whole of it in the title of the label (a name that scrolled by itself could not be
+   read nor stopped, WCAG 2.2.2). */
 .autocompleteItem__labelText {
-  display: inline-block;
-  min-width: max-content;
-  padding-right: var(--space-32);
-  transform: translateX(0);
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .autocompleteItem__labelName {
@@ -1008,20 +1035,6 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-}
-
-.autocompleteItem__labelText::after {
-  content: "";
-}
-
-.autocompleteItem__label.is-overflowing .autocompleteItem__labelText::after {
-  content: attr(data-marquee);
-  padding-left: var(--space-32);
-}
-
-.autocompleteItem:hover .autocompleteItem__label.is-overflowing .autocompleteItem__labelText,
-.autocompleteItem[aria-selected="true"] .autocompleteItem__label.is-overflowing .autocompleteItem__labelText {
-  animation: autocompleteLabelScroll var(--ac-label-duration, 8s) linear infinite;
 }
 
 .autocompleteItem__badges {
@@ -1045,9 +1058,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   color: color-mix(in srgb, var(--ac-badge-color, var(--muted)) 72%, var(--text) 28%);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.028em;
   line-height: 1;
-  text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1057,7 +1068,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
 .autocompleteItem__badge--type {
   inline-size: 2.55rem;
   flex: 0 0 2.55rem;
-  --ac-badge-color: var(--sqlKeyword);
+  --ac-badge-color: var(--sql-keyword);
 }
 
 .autocompleteItem__badge--meta {
@@ -1069,31 +1080,31 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   --ac-badge-color: var(--muted);
 }
 
-.autocompleteItem__badge--function.autocompleteItem__badge--type { --ac-badge-color: var(--sqlFunction); }
+.autocompleteItem__badge--function.autocompleteItem__badge--type { --ac-badge-color: var(--sql-function); }
 
-.autocompleteItem__badge--keyword.autocompleteItem__badge--type { --ac-badge-color: var(--sqlKeyword); }
+.autocompleteItem__badge--keyword.autocompleteItem__badge--type { --ac-badge-color: var(--sql-keyword); }
 
-.autocompleteItem__badge--column.autocompleteItem__badge--type { --ac-badge-color: var(--sqlString); }
+.autocompleteItem__badge--column.autocompleteItem__badge--type { --ac-badge-color: var(--sql-string); }
 
-.autocompleteItem__badge--table.autocompleteItem__badge--type { --ac-badge-color: var(--sqlNumber); }
+.autocompleteItem__badge--table.autocompleteItem__badge--type { --ac-badge-color: var(--sql-number); }
 
-.autocompleteItem__badge--database.autocompleteItem__badge--type { --ac-badge-color: var(--accentBorder); }
+.autocompleteItem__badge--database.autocompleteItem__badge--type { --ac-badge-color: var(--accent-fill); }
 
-.autocompleteItem__badge--table_function.autocompleteItem__badge--type { --ac-badge-color: var(--sqlFunction); }
+.autocompleteItem__badge--table_function.autocompleteItem__badge--type { --ac-badge-color: var(--sql-function); }
 
-.autocompleteItem__badge--data_type.autocompleteItem__badge--type { --ac-badge-color: var(--sqlNull); }
+.autocompleteItem__badge--data_type.autocompleteItem__badge--type { --ac-badge-color: var(--sql-null); }
 
 .autocompleteItem__badge--setting.autocompleteItem__badge--type { --ac-badge-color: var(--muted); }
 
-.autocompleteItem__badge--format.autocompleteItem__badge--type { --ac-badge-color: var(--sqlNumber); }
+.autocompleteItem__badge--format.autocompleteItem__badge--type { --ac-badge-color: var(--sql-number); }
 
-.autocompleteItem__badge--function.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlFunction); }
+.autocompleteItem__badge--function.autocompleteItem__badge--meta { --ac-badge-color: var(--sql-function); }
 
-.autocompleteItem__badge--column.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlString); }
+.autocompleteItem__badge--column.autocompleteItem__badge--meta { --ac-badge-color: var(--sql-string); }
 
-.autocompleteItem__badge--table.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlNumber); }
+.autocompleteItem__badge--table.autocompleteItem__badge--meta { --ac-badge-color: var(--sql-number); }
 
-.autocompleteItem__badge--data_type.autocompleteItem__badge--meta { --ac-badge-color: var(--sqlNull); }
+.autocompleteItem__badge--data_type.autocompleteItem__badge--meta { --ac-badge-color: var(--sql-null); }
 
 .autocompleteItem__badge--setting.autocompleteItem__badge--meta { --ac-badge-color: var(--muted); }
 
@@ -1102,27 +1113,27 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
 .autocompleteItem__badge--tag-sql_udf,
 .autocompleteItem__badge--tag-exec_udf,
 .autocompleteItem__badge--tag-wasm_udf {
-  --ac-badge-color: var(--sqlFunction);
+  --ac-badge-color: var(--sql-function);
 }
 
-.autocompleteItem__badge--tag-alias { --ac-badge-color: var(--sqlNull); }
+.autocompleteItem__badge--tag-alias { --ac-badge-color: var(--sql-null); }
 
 .autocompleteItem__badge--tag-cte,
 .autocompleteItem__badge--tag-lowcard {
-  --ac-badge-color: var(--sqlKeyword);
+  --ac-badge-color: var(--sql-keyword);
 }
 
 .autocompleteItem__badge--tag-nullable { --ac-badge-color: var(--muted); }
 
-.autocompleteItem__badge--tag-array { --ac-badge-color: var(--sqlNumber); }
+.autocompleteItem__badge--tag-array { --ac-badge-color: var(--sql-number); }
 
-.autocompleteItem__badge--tag-tuple { --ac-badge-color: var(--sqlString); }
+.autocompleteItem__badge--tag-tuple { --ac-badge-color: var(--sql-string); }
 
 .autocompleteItem__badge--tag-map,
 .autocompleteItem__badge--tag-system,
 .autocompleteItem__badge--tag-mt,
 .autocompleteItem__badge--tag-replmt {
-  --ac-badge-color: var(--sqlNumber);
+  --ac-badge-color: var(--sql-number);
 }
 
 .autocompleteMore {
@@ -1130,9 +1141,9 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   bottom: 0;
   margin: var(--space-2) -4px -4px;
   padding: var(--space-4) var(--space-10) var(--space-4);
-  border-top: 1px solid color-mix(in srgb, var(--buttonBorder) 70%, transparent);
-  background: var(--buttonBg);
-  box-shadow: 0 -0.35rem 0.55rem var(--buttonBg);
+  border-top: 1px solid color-mix(in srgb, var(--button-border) 70%, transparent);
+  background: var(--button-bg);
+  box-shadow: 0 -0.35rem 0.55rem var(--button-bg);
   color: color-mix(in srgb, var(--muted) 82%, var(--text));
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -1167,7 +1178,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   box-sizing: border-box;
   white-space: pre;
   overflow: hidden;
-  background: var(--editorSolidBg, var(--panelBg));
+  background: var(--editor-solid-bg, var(--panel));
   color: var(--text);
   line-height: inherit;
 }
@@ -1178,7 +1189,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   box-sizing: border-box;
   white-space: pre;
   overflow: hidden;
-  background: var(--editorSolidBg, var(--panelBg));
+  background: var(--editor-solid-bg, var(--panel));
   color: var(--text);
   line-height: inherit;
   box-shadow: none;
@@ -1240,7 +1251,7 @@ html[data-theme="light"] .autocompleteItem__badge {
   box-shadow: none;
 }
 
-.editorWrap.is-line-numbers-hidden { --gutterW: 0px; }
+.editorWrap.is-line-numbers-hidden { --gutter-w: 0px; }
 
 .editorWrap.is-line-numbers-hidden .editorHighlight,
 .editorWrap.is-line-numbers-hidden #queryTextArea.editorInput {
@@ -1252,7 +1263,7 @@ html[data-theme="light"] .autocompleteItem__badge {
   color: var(--text);
 }
 
-html.chdash-line-numbers-hidden .editorWrap { --gutterW: 0px; }
+html.chdash-line-numbers-hidden .editorWrap { --gutter-w: 0px; }
 
 html.chdash-line-numbers-hidden .editorHighlight,
 html.chdash-line-numbers-hidden #queryTextArea.editorInput {
@@ -1277,7 +1288,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--ls-eyebrow);
   text-transform: uppercase;
   user-select: none;
   display: none;
@@ -1342,7 +1353,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
   box-sizing: border-box;
   padding: var(--space-16);
   padding-right: var(--space-80);
-  padding-left: calc(14px + var(--gutterW));
+  padding-left: calc(14px + var(--gutter-w));
   border-radius: var(--r-lg);
   font-family: var(--font-mono);
   font-size: var(--fs-md);
@@ -1364,7 +1375,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
   overflow: hidden;
   color: transparent;
   -webkit-text-fill-color: transparent;
-  --diagnosticWaveColor: color-mix(in srgb, var(--warning) 82%, var(--text));
+  --diagnostic-wave-color: color-mix(in srgb, var(--warning) 82%, var(--text));
   text-decoration: none;
   font: inherit;
   line-height: inherit;
@@ -1380,7 +1391,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
   right: 2px;
   bottom: 1px;
   height: 5px;
-  background: var(--diagnosticWaveColor);
+  background: var(--diagnostic-wave-color);
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 3 Q2 0.5 4 3 T8 3' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");
   mask-repeat: repeat-x;
   mask-size: 8px 5px;
@@ -1388,15 +1399,15 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
 }
 
 .editorDiagnostic--unknown_function {
-  --diagnosticWaveColor: color-mix(in srgb, var(--sqlFunction) 72%, var(--warning));
+  --diagnostic-wave-color: color-mix(in srgb, var(--sql-function) 72%, var(--warning));
 }
 
 .editorDiagnostic--unknown_table {
-  --diagnosticWaveColor: color-mix(in srgb, var(--warning) 78%, var(--accent-fill));
+  --diagnostic-wave-color: color-mix(in srgb, var(--warning) 78%, var(--accent-fill));
 }
 
 .editorDiagnostic--unknown_column {
-  --diagnosticWaveColor: color-mix(in srgb, var(--warning) 82%, var(--text));
+  --diagnostic-wave-color: color-mix(in srgb, var(--warning) 82%, var(--text));
 }
 
 .editorWrap.is-line-numbers-hidden .editorDiagnosticsLayer,
@@ -1415,7 +1426,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
    whenever it wrapped. The tile has a fixed height, so System arriving moves nothing, and the line
    never wraps: the label gives way before the figure does. */
 .metricCompact__systemLine {
-  border-top: 1px solid var(--rowDivider);
+  border-top: 1px solid var(--row-divider);
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -1508,7 +1519,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
   border-bottom-color: transparent;
-  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+  background: color-mix(in srgb, var(--button-bg) 70%, transparent);
   color: var(--text);
 }
 
@@ -1528,7 +1539,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 }
 
 .runSettings .runSettings__button:hover {
-  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+  background: color-mix(in srgb, var(--button-bg) 70%, transparent);
   color: var(--text);
 }
 
@@ -1556,7 +1567,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 }
 
 .formatButton:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--buttonBg) 70%, transparent);
+  background: color-mix(in srgb, var(--button-bg) 70%, transparent);
   color: var(--text);
 }
 
@@ -1609,7 +1620,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 /* A submenu item ("Open trace" with several trace ids): a chevron at the
    end, tinted while its submenu is open. The submenu is the same menu. */
 .rowDetailsMenu .runMenu__opt--submenu[aria-expanded="true"] {
-  background: var(--hoverTint);
+  background: var(--hover-tint);
 }
 
 .runMenu__optArrow {
@@ -1633,11 +1644,11 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 /* The row a right-click menu acts on reads as selected (the expanded row is
    .is-selected). */
 .resultTable tbody tr.is-rowMenuTarget > td:not(:where(.dataTable--grid > tbody > tr:hover > .dataTable__rowNum)) {
-  background-color: var(--rowHover);
+  background-color: var(--row-hover);
 }
 
-.resultTable tbody tr.is-rowMenuTarget > :first-child {
-  box-shadow: inset 3px 0 0 var(--accent-fill);
+.resultTable tbody tr.is-rowMenuTarget > td {
+  box-shadow: inset 0 1px 0 var(--selected-edge), inset 0 -1px 0 var(--selected-edge);
 }
 
 /* What the hovered / focused copy action applies to: the cell, the row or
@@ -1647,7 +1658,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 .resultTable tbody tr.is-selected > td.is-copyTarget,
 .resultTable tbody tr.is-rowMenuTarget > td.is-copyTarget,
 .resultTable tbody tr:hover > td.is-copyTarget {
-  background-color: color-mix(in srgb, var(--accentBorder) 22%, var(--panel));
+  background-color: color-mix(in srgb, var(--accent-fill) 22%, var(--panel));
 }
 
 .runMenu.rowDetailsMenu.is-open {
@@ -1659,7 +1670,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 }
 
 .rowDetailsMenu .runMenu__opt:focus-visible {
-  background: var(--hoverTint);
+  background: var(--hover-tint);
 }
 
 /* Inline expanded row: a detail <tr> right under the clicked row. Its content
@@ -1685,28 +1696,16 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   box-sizing: border-box;
   max-width: 100%;
   min-width: 16rem;
-  /* No left border, like the cells: the accent bar (::before) sits at the
-     exact x of its row's bar. */
-  background: transparent;
+  /* The expanded row is selected: its details go on in the same look (the selected fill, the 1 px edge under them). */
+  background: var(--selected-bg);
+  box-shadow: inset 0 -1px 0 var(--selected-edge);
   color: var(--text);
   outline: none;
   cursor: auto;
 }
 
-.rowDetails::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: -1px;
-  bottom: 0;
-  width: 3px;
-  z-index: var(--z-raised);
-  background: var(--accentBorder);
-  pointer-events: none;
-}
-
 .rowDetails:focus-visible {
-  outline: 1px solid var(--accentBorder);
+  outline: 1px solid var(--accent-fill);
   outline-offset: -1px;
 }
 
@@ -1773,7 +1772,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   background: color-mix(in srgb, var(--muted) 60%, transparent);
 }
 
-.panel--query[data-run-state="running"] #queryStatusText::before { background: var(--accentBorder); animation: queryRunPulse 1s ease-in-out infinite; }
+.panel--query[data-run-state="running"] #queryStatusText::before { background: var(--accent-fill); animation: queryRunPulse var(--dur-pulse) ease-in-out infinite; }
 
 .panel--query[data-run-state="ok"] #queryStatusText::before { background: var(--success); }
 
@@ -1782,7 +1781,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 .panel--query[data-run-state="canceled"] #queryStatusText::before { background: var(--warning); }
 
 .panel--query[data-run-state="running"] .editorWrap {
-  border-color: color-mix(in srgb, var(--accentBorder) 70%, var(--border));
+  border-color: color-mix(in srgb, var(--accent-fill) 70%, var(--border));
 }
 
 .panel--query[data-run-state="running"] .editorWrap::after {
@@ -1794,20 +1793,18 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   z-index: var(--z-panel);
   height: 2px;
   border-radius: var(--r-sm);
-  background: linear-gradient(90deg, transparent, var(--accentBorder) 40%, color-mix(in srgb, var(--accentBorder) 40%, var(--accent-text)) 60%, transparent);
+  background: linear-gradient(90deg, transparent, var(--accent-fill) 40%, color-mix(in srgb, var(--accent-fill) 40%, var(--accent-text)) 60%, transparent);
   background-size: 40% 100%;
   background-repeat: no-repeat;
-  animation: queryRunBar 1.1s linear infinite;
+  animation: queryRunBar var(--dur-band) linear infinite;
   pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .panel--query[data-run-state="running"] .editorWrap::after { animation: none; background-size: 100% 100%; opacity: 0.7; }
   .panel--query[data-run-state="running"] #queryStatusText::before { animation: none; }
-  /* The indeterminate bar rests as a static band, and a long completion label is cut instead of scrolling. */
+  /* The indeterminate bar rests as a static band. */
   .metricCompact--progress.is-indeterminate::before { animation: none; }
-  .autocompleteItem:hover .autocompleteItem__label.is-overflowing .autocompleteItem__labelText,
-  .autocompleteItem[aria-selected="true"] .autocompleteItem__label.is-overflowing .autocompleteItem__labelText { animation: none; }
 }
 
 /* -- Results header: one summary line ---------------------------------------- */
@@ -1920,13 +1917,18 @@ html:not(.is-ready) .queryEmptyState {
    stats next, then its actions. */
 .runStatsSummary { display: none; }
 
+/* From 1100 px down the rail is no longer beside the editor: its tiles would take two rows under it and push the results
+   below the fold, so they fold into the summary line too. */
+@media (max-width: 1100px) {
+  .runStatsSummary { display: flex; }
+  .panel--metrics.is-folded > .metricColumn { display: none; }
+}
+
 @media (max-width: 600px) {
   .panel--query .statusBlock { flex-wrap: nowrap; }
   .panel--query .statusPill { flex: 0 0 auto; }
   .panel--query .statusPill:last-child { flex: 0 1 auto; }
   .statusPill__label { white-space: nowrap; }
-  .runStatsSummary { display: flex; }
-  .panel--metrics.is-folded > .metricColumn { display: none; }
   .panel--results > .panel__header {
     flex-wrap: wrap;
     row-gap: var(--space-4);
@@ -1952,8 +1954,6 @@ html:not(.is-ready) .queryEmptyState {
 }
 
 @keyframes indet { 0% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
-
-@keyframes autocompleteLabelScroll { 0% { transform: translateX(0); } 100% { transform: translateX(calc(-1 * var(--ac-label-shift, 0px))); } }
 
 @keyframes queryRunBar { from { background-position: -40% 0; } to { background-position: 140% 0; } }
 
@@ -1986,7 +1986,7 @@ html.chdash-line-numbers-hidden .editorGutter {
   transform: translateX(-50%);
   border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
   border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--danger) 12%, var(--panelBg));
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
   box-shadow: var(--shadow-overlay);
   cursor: pointer;
 }

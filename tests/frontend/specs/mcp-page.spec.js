@@ -319,23 +319,19 @@ test('the layout wastes no room: the keys beside a wide side column, New key in 
 
 test('the page switcher lists MCP, selected on this page, and every other page can open it', async ({ page }) => {
   await open(page);
-  await page.locator('#pageSelectButton').click();
-  const options = page.locator('#pageSelectMenu .themeSelect__option:visible');
-  // The menu lists the other pages: the page's own entry is the button's label.
-  await expect(options).toHaveText(['Query', 'Explorer', 'Observability', 'System']);
-  await expect(page.locator('#navMcpButton')).toHaveAttribute('aria-selected', 'true');
+  // Every page is a link of the switcher; this page's own link is the current one.
+  await expect(page.locator('#pageSelectMenu a:visible')).toHaveText(['Query', 'Explorer', 'Observability', 'System', 'MCP']);
+  await expect(page.locator('#navMcpLink')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('#navMcpLink')).toHaveAttribute('href', '/mcp-integration');
   await expect(page.locator('#pageSelectButton')).toHaveText('MCP');
-  await page.keyboard.press('Escape');
   // From another page: the entry is there once /api/version reports features.mcp.enabled, and opens the page.
   await page.goto('/query');
-  await page.locator('#pageSelectButton').click();
-  await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Explorer', 'Observability', 'System', 'MCP']);
-  await page.locator('#navMcpButton').click();
+  await expect(page.locator('#pageSelectMenu a:visible')).toHaveText(['Query', 'Explorer', 'Observability', 'System', 'MCP']);
+  await page.locator('#navMcpLink').click();
   await expect(page).toHaveURL(/\/mcp-integration$/);
   await expect(page.locator('#mcpKeysBody table')).toBeVisible();
   // Going back to Query from MCP.
-  await page.locator('#pageSelectButton').click();
-  await page.locator('#navQueryButton').click();
+  await page.locator('#navQueryLink').click();
   await expect(page).toHaveURL(/\/query$/);
 });
 
@@ -344,10 +340,8 @@ test('the MCP entry is hidden while features.mcp is off, and its page shows how 
   server.meta = { enabled: false };
   await install(page, server);
   await page.goto('/system');
-  await page.locator('#pageSelectButton').click();
-  expect(await page.locator('#pageSelectMenu .themeSelect__option:visible').allTextContents()).not.toContain('MCP');
-  await expect(page.locator('#navMcpButton')).toBeHidden();
-  await page.keyboard.press('Escape');
+  expect(await page.locator('#pageSelectMenu a:visible').allTextContents()).not.toContain('MCP');
+  await expect(page.locator('#navMcpLink')).toBeHidden();
   await page.goto('/mcp-integration');
   await expect(page.locator('.mcpOff')).toBeVisible();
   await expect(page.locator('.mcpOff')).toContainText('MCP is off');
@@ -376,7 +370,7 @@ test('the side column: the endpoint with a copy button, connect tabs, hosts with
   await expect(hosts).toHaveCount(3);
   await expect(hosts.nth(0)).toContainText('prod');
   await expect(hosts.nth(0)).toContainText('Production cluster');
-  await expect(hosts.nth(0).locator('.badge--ok')).toHaveText('healthy');
+  await expect(hosts.nth(0).locator('.badge--ok')).toHaveText('Healthy');
   // A host whose MCP user cannot connect says so instead of its health; the others show the user that the tools run as.
   await expect(hosts.nth(1).locator('.badge--error')).toHaveText('MCP user down');
   await expect(hosts.nth(1).locator('.badge--error')).toHaveAttribute('title', /Authentication failed/);
@@ -438,8 +432,9 @@ test('the keys table: one line for each key, its secret, scope and limits, and D
   await expect(row(page, 'ci-bot').locator('[data-action="remove"]')).toHaveAttribute('aria-label', 'Delete ci-bot');
   const config = row(page, 'ops-all');
   await expect(config.locator('[data-action="remove"]')).toHaveCount(0);
-  await expect(config.locator('.mcpLocked, td.mcpCell--actions *')).toHaveCount(0);
-  await expect(config.locator('td.mcpCell--actions')).toHaveText('');
+  // No Delete: a lock stands where it would be, and says why.
+  await expect(config.locator('td.mcpCell--actions button')).toHaveCount(0);
+  await expect(config.locator('td.mcpCell--actions .mcpLock')).toHaveAttribute('title', /config file/);
   // The Delete icon has no frame around it, like the other icons of the table.
   const frame = await row(page, 'ci-bot').locator('[data-action="remove"]').evaluate((el) => { const c = getComputedStyle(el); return { border: c.borderTopColor, width: c.borderTopWidth, bg: c.backgroundColor }; });
   expect(frame.bg).toBe('rgba(0, 0, 0, 0)');
@@ -536,7 +531,7 @@ test('the secret of a key is never shown again: no eye, no copy, no request for 
   const text = ui.locator('.mcpSecret__text');
   // The hint and dots, nothing else: the server keeps a hash of the secret, and no route gives the secret.
   await expect(text).toHaveText(MASKED);
-  await expect(text).toHaveAttribute('title', /ChDash showed it once.*delete the key and make a new one/);
+  await expect(text).toHaveAttribute('title', /ClickHouse Dash showed it once.*delete the key and make a new one/);
   for (const name of ['ci-bot', 'ops-all', 'legacy']) {
     await expect(row(page, name).locator('td.mcpCell--secret button')).toHaveCount(0);
   }
@@ -552,7 +547,7 @@ test('the secret of a key is never shown again: no eye, no copy, no request for 
   expect(box.x + box.width).toBeLessThanOrEqual(hosts.x + 1);
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
   // The side column says how a secret is had: when the key is made.
-  await expect(page.locator('#mcpConnect')).toContainText('copy its secret when ChDash shows it (only once)');
+  await expect(page.locator('#mcpConnect')).toContainText('copy its secret when ClickHouse Dash shows it (only once)');
 });
 
 test('loading skeleton, error with Retry, empty list', async ({ page }) => {
@@ -612,8 +607,8 @@ test('manage_from_ui = false: a read-only page', async ({ page }) => {
   await expect(page.locator('#mcpNewKey')).toBeDisabled();
   await expect(rows(page)).toHaveCount(5);
   await expect(page.locator('#mcpKeysBody [data-action="remove"]')).toHaveCount(0);
-  await expect(row(page, 'ci-bot').locator('.mcpLocked, td.mcpCell--actions *')).toHaveCount(0);
-  await expect(row(page, 'ci-bot').locator('td.mcpCell--actions')).toHaveText('');
+  await expect(row(page, 'ci-bot').locator('td.mcpCell--actions button')).toHaveCount(0);
+  await expect(row(page, 'ci-bot').locator('td.mcpCell--actions .mcpLock')).toHaveAttribute('title', /read-only/);
 });
 
 test('New key: the form fits the dialog without a scroll, at the size of a small laptop', async ({ page }) => {
@@ -843,7 +838,7 @@ test('create a key: the request, the one-time secret and its commands, nothing l
   // secret shows, and the panel says so.
   await expect(d.locator('.uiDialog__title')).toHaveText('Key created');
   await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
-  await expect(d.locator('.mcpReveal__warn')).toContainText('ChDash shows it only this time');
+  await expect(d.locator('.mcpReveal__warn')).toContainText('ClickHouse Dash shows it only this time');
   const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
   expect(post.body).toEqual({
     name: 'analyst', hosts: ['prod'], databases: ['otel', 'analytics.events', 'logs_*.*'],
@@ -1354,7 +1349,7 @@ test('the details of a key list the data that it reads: each host, its databases
   await expect(prod).toContainText('as chdash_mcp');
   await expect(prod).toContainText('4 tables in 2 databases');
   // Why: what the MCP user reads, and what the patterns of the key leave out.
-  await expect(prod.locator('.mcpReachHost__why')).toContainText('The MCP user reads 12 tables');
+  await expect(prod.locator('.mcpReachHost__why')).toContainText('The ClickHouse grants of the MCP user let it read 12 tables');
   await expect(prod.locator('.mcpReachHost__why')).toContainText('otel, analytics.events');
   await expect(prod.locator('.mcpReachHost__why')).toContainText('leaves out 7');
   // The databases open on their tables; a table read in part says "some columns" (the backend checks the columns

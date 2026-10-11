@@ -39,12 +39,12 @@ def test_layout_tokens_and_breakpoints_are_defined_once():
     css = css_sources.text()
     shell = shell_block(css)
     for token in ("--gutter: 12px;", "--nav-row-h: 48px;", "--shell-border: 1px solid var(--border);",
-                  "--bp-sm: 600px;", "--bp-md: 820px;", "--bp-lg: 1100px;",
+                  "--bp-sm: 600px;", "--bp-tab: 760px;", "--bp-md: 820px;", "--bp-lg: 1100px;", "--bp-xl: 1279px;",
                   "--z-nav: 12;", "--z-drawer: 30;", "--z-header: 50;", "--z-modal: 120;"):
         assert token in css_sources.tokens(), token
         assert css.count(token) == 1, token
     dom = read("src/static/app_dom.js")
-    assert "const BREAKPOINTS = Object.freeze({ sm: 600, md: 820, lg: 1100 });" in dom
+    assert "const BREAKPOINTS = Object.freeze({ sm: 600, tab: 760, md: 820, lg: 1100, xl: 1279 });" in dom
     assert "shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop, edgeCues, revealInRow });" in dom
     explorer = modules.read_explorer()
     assert 'return !!shell?.isAtMost("md");' in explorer
@@ -101,7 +101,7 @@ def test_nav_rows_share_the_tokens():
         # No block padding: the tab row stands on the row's bottom border.
         assert rows["padding"] == "0 var(--gutter)", selector
         assert rows["border-bottom"] == "var(--shell-border)", selector
-        assert rows["background"] == "var(--panelBg)", selector
+        assert rows["background"] == "var(--panel)", selector
     # The Explorer has one nav row: Catalog | Functions, a divider and the
     # Catalog's Browse | Graph in one underline row that scrolls sideways.
     assert css_sources.decls(".explorerTopBar__tabs")["overflow-x"] == "auto"

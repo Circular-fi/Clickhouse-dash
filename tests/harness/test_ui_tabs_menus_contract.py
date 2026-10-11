@@ -5,7 +5,7 @@
   one keyboard implementation; the former pill tier (.viewTabs) is gone.
 - Segmented controls (app_ui_segmented.js, ns.segmented): .segmented /
   .segmented__option, two sizes, role=group of aria-pressed buttons, the
-  pressed option on --seg-active-bg.
+  pressed option on --selected-bg.
 - Menus, pickers and dropdowns (app_ui_menu.js, ns.menu): open / close,
   placement, keys, focus and one dismiss layer for every popup list.
 
@@ -176,9 +176,9 @@ def iter_rules(text: str, media: str = ""):
 def test_segmented_active_token_is_defined_in_every_theme_block():
     blocks = theme_blocks(css_sources.text())
     for name, tokens in blocks.items():
-        assert "--seg-active-bg" in tokens, name
-    assert blocks["dark"]["--seg-active-bg"] == blocks["root"]["--seg-active-bg"]
-    assert blocks["light"]["--seg-active-bg"] == blocks["light-media"]["--seg-active-bg"]
+        assert "--selected-bg" in tokens, name
+    assert blocks["dark"]["--selected-bg"] == blocks["root"]["--selected-bg"]
+    assert blocks["light"]["--selected-bg"] == blocks["light-media"]["--selected-bg"]
 
 
 def test_segmented_component_has_two_sizes_one_pattern_and_one_look():
@@ -188,7 +188,7 @@ def test_segmented_component_has_two_sizes_one_pattern_and_one_look():
     block = component_block(css_sources.text(), "segmented")
     assert ".segmented {" in block and "height: 28px;" in block
     assert ".segmented--compact {\n  height: 24px;" in block
-    assert '.segmented__option[aria-pressed="true"] {' in block and "background: var(--seg-active-bg);" in block
+    assert '.segmented__option[aria-pressed="true"] {' in block and "background: var(--selected-bg);" in block
 
 
 def test_old_segmented_families_are_gone():

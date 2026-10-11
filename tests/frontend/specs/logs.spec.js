@@ -573,18 +573,16 @@ test('logs: the page switcher reaches the Observability page, whose Logs tab ope
   const version = await (await request.get('/api/version')).json();
   test.skip(!version.features?.logs?.enabled, 'logs disabled');
   await page.goto('/query');
-  await page.locator('#pageSelectButton').click();
-  await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Explorer', 'Observability', 'System']);
-  await page.locator('#navObservabilityButton').click();
+  await expect(page.locator('#pageSelectMenu a:visible')).toHaveText(['Query', 'Explorer', 'Observability', 'System']);
+  await page.locator('#navObservabilityLink').click();
   await expect(page).toHaveURL(/\/observability\/(traces|logs|metrics)(\?|$)/);
-  await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
+  await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
   await page.locator('#obsTab-logs').click();
   await expect(page).toHaveURL(/\/observability\/logs(\?|$)/);
   await expect(page.locator('#logsWorkspace')).toBeVisible();
   await expect(page.locator('#obsTab-logs')).toHaveAttribute('aria-current', 'page');
-  await page.locator('#pageSelectButton').click();
-  await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'System']);
-  await page.locator('#navQueryButton').click();
+  await expect(page.locator('#pageSelectMenu a:visible')).toHaveText(['Query', 'Explorer', 'Observability', 'System']);
+  await page.locator('#navQueryLink').click();
   await expect(page).toHaveURL(/\/query$/);
   // The availability is cached for the next first paint.
   const nav = await page.evaluate(() => JSON.parse(localStorage.getItem('chdash.pageNav.v1')));

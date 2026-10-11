@@ -71,7 +71,7 @@ test('normalize, readable text, slots and steps give the single functions\' answ
   const r = rng(5);
   for (let i = 0; i < 1500 * SCALE; i += 1) names.push(r.pick(['', 'checkout', 'cart-api', 'café', '中文', 'emoji😀', 'lone\ud800', 'a'.repeat(1 + r.int(200)), `svc-${r.int(100000)}`, `S${r.int(50)}`]));
   const fills = [];
-  for (let n = 1; n <= 18; n += 1) fills.push(`--qchart-${n}`, `--trace-span-color-${n}`, `var(--trace-span-color-${n})`, `color-mix(in srgb, var(--trace-span-color-${n}) 40%, var(--panelBg))`, `color-mix(in srgb, var(--qchart-${n}) 60%, white)`);
+  for (let n = 1; n <= 18; n += 1) fills.push(`--qchart-${n}`, `--trace-span-color-${n}`, `var(--trace-span-color-${n})`, `color-mix(in srgb, var(--trace-span-color-${n}) 40%, var(--panel))`, `color-mix(in srgb, var(--qchart-${n}) 60%, white)`);
   fills.push('', 'garbage', '#fff', '#000000', 'rgb(10, 20, 30)', 'rgba(255, 255, 255, 0.5)', 'red', 'rgb(0, 0, 0)', 'rgb(255, 255, 255)', 'rgb(128, 128, 128)', 'rgb(118, 118, 118)', 'rgb(119, 119, 119)');
   const result = await page.evaluate(({ texts, names, fills }) => {
     const p = window.ChDash.palette;

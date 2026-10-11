@@ -159,17 +159,21 @@ function mountSummary(form) {
   const count = h("span", { class: "foldSummary__meta" });
   const summary = h("button", { type: "button", class: "foldSummary obsFilterSummary" }, range, count, iconMod.el("chevron-down", { className: "foldSummary__chevron" }));
   form.prepend(summary);
+  // Folded, the line says what the filters are ("<range> · 2 filters"); open, they are there to read and the line says what
+  // a click does (a range twice, once in the line and once in the picker, was one too many).
+  const refresh = () => {
+    const open = !form.classList.contains("is-folded");
+    const text = open ? "Hide the filters" : rangeText(form);
+    const n = open ? 0 : filterCount(form);
+    if (range.textContent !== text) range.textContent = text;
+    const label = n ? ` · ${n} filter${n === 1 ? "" : "s"}` : "";
+    if (count.textContent !== label) count.textContent = label;
+  };
   const fold = (folded) => {
     form.classList.toggle("is-folded", folded);
     summary.setAttribute("aria-expanded", folded ? "false" : "true");
     summary.title = folded ? "Show the filters" : "Hide the filters";
-  };
-  const refresh = () => {
-    const text = rangeText(form);
-    const n = filterCount(form);
-    if (range.textContent !== text) range.textContent = text;
-    const label = n ? ` · ${n} filter${n === 1 ? "" : "s"}` : "";
-    if (count.textContent !== label) count.textContent = label;
+    refresh();
   };
   summary.addEventListener("click", () => fold(!form.classList.contains("is-folded")));
   form.addEventListener("submit", () => { if (shell?.isAtMost("sm")) fold(true); });

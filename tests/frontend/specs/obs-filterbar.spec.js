@@ -548,7 +548,7 @@ test.describe('one filter bar on a phone', () => {
     const cases = [
       ['overview', '', 'Last 1 hour', ''],
       ['disks', '?from=now-24h&to=now', 'Last 24 hours', ''],
-      // Kind, User and Hide ChDash off are filters; Order by is not.
+      // Kind, User and Hide internal reads off are filters; Order by is not.
       ['queries', '?kind=Select&user=chdash_runner&hide=0&sort=calls', 'Last 1 hour', ' · 3 filters'],
     ];
     for (const [section, query, range, count] of cases) {
@@ -565,6 +565,9 @@ test.describe('one filter bar on a phone', () => {
       const style = await summary.evaluate((el) => { const s = getComputedStyle(el); return [s.height, s.fontSize, s.borderRadius, s.paddingLeft]; });
       await summary.click();
       await expect(summary).toHaveAttribute('aria-expanded', 'true');
+      // Open, the line says what a click does, not the range again.
+      await expect(summary.locator('.foldSummary__text')).toHaveText('Hide the filters');
+      await expect(summary.locator('.foldSummary__meta')).toHaveText('');
       await expect(bar.locator(SYSTEM_RANGE[section])).toBeVisible();
       const refresh = bar.locator('.obsFilterBar__submit');
       await expect(refresh).toBeVisible();

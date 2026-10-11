@@ -469,7 +469,7 @@ function fitTreemapLabels(map) {
     const isBranch = node.classList.contains("is-branch");
 
     label.style.maxHeight = `${Math.max(0, labelHeight)}px`;
-    label.classList.remove("is-hidden", "is-compact", "is-tiny", "is-other-compact", "is-other-inline", "is-vertical", "is-single-line");
+    label.classList.remove("is-hidden", "is-compact", "is-tiny", "is-other-compact", "is-other-inline", "is-vertical");
     node.classList.remove("is-sliver");
     if (meta) meta.hidden = false;
 
@@ -498,17 +498,12 @@ function fitTreemapLabels(map) {
       return;
     }
 
-    // Slivers keep a label whenever one line fits, rotated for tall
-    // narrow rectangles; anything smaller gets a visible edge mark so a
-    // 1% table never reads as part of its neighbour.
-    if (rect.width < 40 || labelHeight < 24) {
+    // A cell under 64 x 28 px has no label of its own: the name of a tile of 11 px text in a box of 40 px was a word cut in
+    // two. A tall narrow one keeps its name rotated; any other gets a visible edge mark (so a 1% table never reads as
+    // part of its neighbour), and its name is in its tooltip and in the table under the map.
+    if (rect.width < 64 || labelHeight < 28) {
       if (rect.width >= 12 && labelHeight >= 48) {
         label.classList.add("is-vertical");
-        if (meta) meta.hidden = true;
-        return;
-      }
-      if (rect.width >= 60 && labelHeight >= 13) {
-        label.classList.add("is-tiny", "is-single-line");
         if (meta) meta.hidden = true;
         return;
       }

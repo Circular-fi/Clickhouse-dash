@@ -2,7 +2,7 @@
 // switch a view in place (Traces | Spans, List | Table, Percentiles |
 // Heatmap, Table | Chart, the chart types, Lineage | Storage, the context
 // window presets...). One look (.segmented / .segmented__option, the
-// pressed option on --seg-active-bg), two sizes (default 28 px, compact
+// pressed option on --selected-bg), two sizes (default 28 px, compact
 // 24 px: .segmented--compact) and one ARIA pattern: role=group (named by
 // aria-label) of toggle buttons carrying aria-pressed. Each option keeps
 // its value in a data attribute the caller names (data-<attr>, "value" by

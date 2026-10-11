@@ -14,7 +14,6 @@ import { explorerGraph } from "./app_explorer_graph.js";
 import { explorerStorage } from "./app_explorer_storage.js";
 import { format } from "./app_format.js";
 import { header } from "./app_header.js";
-import { palette } from "./app_palette.js";
 import { results } from "./app_results.js";
 import { state, storage } from "./app_state.js";
 import { badge as badgeMod } from "./app_ui_badge.js";
@@ -436,13 +435,11 @@ function create(ctx) {
 
   // ---- header -------------------------------------------------------------
 
-  // A header chip: the shared badge (md, pill); the engine in its object
-  // kind's colour, the health in its status tone.
+  // A header chip: the shared badge (md, pill); the health in its status tone.
   const HEALTH_TONES = { healthy: "ok", warning: "warn", error: "error" };
-  function metaChip(text, { kind = "", title = "", dot = "", color = "" } = {}) {
-    const tone = dot ? HEALTH_TONES[dot] || "neutral" : color ? "category" : "neutral";
+  function metaChip(text, { kind = "", title = "", dot = "" } = {}) {
+    const tone = dot ? HEALTH_TONES[dot] || "neutral" : "neutral";
     const chip = h("span", { class: `${badgeMod.classes({ tone, size: "md", shape: "pill" })} explorerMetaChip${kind ? ` explorerMetaChip--${kind}` : ""}` });
-    if (color) chip.style.setProperty("--badge-color", color);
     if (dot) {
       const mark = h("i", { class: `explorerHealthDot explorerHealthDot--${dot}` });
       mark.setAttribute("aria-hidden", "true");
@@ -463,7 +460,8 @@ function create(ctx) {
   function headerChips(detail) {
     const s = detail.summary || {};
     const viewLike = isViewLikeSummary(s);
-    const chips = [metaChip(humanEngine(s.engine), { kind: "engine", title: s.engine_full || s.engine || "", color: palette.kind(s.engine) })];
+    // The engine is a neutral chip (a chip in the accent colour reads as a link); only the health has a tone.
+    const chips = [metaChip(humanEngine(s.engine), { kind: "engine", title: s.engine_full || s.engine || "" })];
     if (!detail._loading && !viewLike && s.health) {
       const warnings = Array.isArray(s.warnings) ? s.warnings : [];
       chips.push(metaChip(healthLabel(s), { kind: "health", dot: healthState(s), title: warnings.join("\n") || "No problem reported by system metadata." }));

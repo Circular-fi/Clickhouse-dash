@@ -179,7 +179,6 @@ function compactView() {
 function bindShell() {
   const dom = domMod || {};
   header.setPageSelectorValue("observability");
-  dom.navObservabilityButton?.addEventListener("click", () => header.closePageMenu());
   shell?.edgeCues?.(domMod.byId("obsNav"));
   window.addEventListener("pagehide", publish);
   // A page restored from the back/forward cache never ran start(): it takes what the other pages changed meanwhile

@@ -55,6 +55,7 @@ function createStaticResultTable({
 
   const wrap = document.createElement("div");
   wrap.className = `tableWrap ${String(className || "").trim()}`.trim();
+  tableMod.scrollCues(wrap);
   const table = document.createElement("table");
   table.className = `resultTable dataTable dataTable--grid${compact ? " dataTable--compact" : ""}`;
   const thead = document.createElement("thead");
@@ -141,6 +142,8 @@ function createStaticResultTable({
       const th = document.createElement("th");
       th.textContent = column;
       if (safeTypes[index]) th.title = safeTypes[index];
+      // A number's header is over its figures, on the right with them (the cells are .num).
+      if (staticNumericCols[index]) th.classList.add("num");
       tableMod.sortHeader(th, {
         key: index, dir: sortKey === index ? sortDir : "",
         onSort: () => {

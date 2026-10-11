@@ -33,7 +33,7 @@ const WHEEL_SPEED = 0.0012;
 const MAX_SCALE = 3.2;
 const MIN_SCALE = 0.02;
 const GRID_SPACING = 22;
-const MOBILE_QUERY = "(max-width: 720px)";
+const MOBILE_QUERY = "(max-width: 760px)";
 
 // ------------------------------------------------------------------ theme
 
@@ -116,8 +116,8 @@ const ROLE_TOKENS = {
   groupBg: "--graph-group-bg",
   bandBg: "--graph-band-bg",
   labelBg: "--graph-label-bg",
-  warn: "--graph-warn",
-  error: "--graph-error",
+  warn: "--warning",
+  error: "--danger",
   minimapBg: "--graph-minimap-bg",
   minimapView: "--graph-minimap-view",
   minimapViewFill: "--graph-minimap-view-fill",
@@ -251,6 +251,33 @@ function ellipsis(ctx, value, maxWidth, font = ctx.font) {
   return result;
 }
 
+// A title on up to `lines` lines: when it does not fit one it breaks after the last separator (_ . - / : a space) that
+// leaves the first line within `maxWidth` ("weather_alert_" / "target_mv"), else where the line is full; the last line
+// ends in an ellipsis. Cached like ellipsis(): a compact card draws it on every frame.
+const wrapCache = new Map();
+function wrapLines(ctx, value, maxWidth, lines, font = ctx.font) {
+  const text = String(value || "");
+  if (!text) return [];
+  if (lines < 2) return [ellipsis(ctx, text, maxWidth, font)];
+  const key = `${font}\u0000${lines}\u0000${maxWidth}\u0000${text}`;
+  const cached = wrapCache.get(key);
+  if (cached) return cached;
+  let result;
+  if (ctx.measureText(text).width <= maxWidth) result = [text];
+  else {
+    let fit = text.length;
+    while (fit > 1 && ctx.measureText(text.slice(0, fit)).width > maxWidth) fit -= 1;
+    let cut = fit;
+    for (let i = fit - 1; i > 0; i -= 1) {
+      if ("_.-/: ".includes(text[i - 1])) { cut = i; break; }
+    }
+    result = [text.slice(0, cut).trimEnd(), ...wrapLines(ctx, text.slice(cut).trimStart(), maxWidth, lines - 1, font)];
+  }
+  if (wrapCache.size > 4000) wrapCache.clear();
+  wrapCache.set(key, result);
+  return result;
+}
+
 // The dot grid of the graph background: one dot per GRID_SPACING CSS pixels,
 // a pattern tile in device pixels moved with the pan offset.
 const gridPatternCache = { key: "", pattern: null };
@@ -301,7 +328,9 @@ function fontOf(weight, size) {
 // right-aligned badge on the title row, then text rows at fixed offsets.
 //   card = { radius, fill, border, borderWidth, dashed, alpha, focused,
 //            strip, status: "warn" | "error", statusAlpha, badge,
-//            badgeSize, badgeY, statusY, rows: [{ text, size, weight, color, y, fit }] }
+//            badgeSize, badgeY, statusY, rows: [{ text, size, weight, color, y, fit, lines, lineHeight }] }
+// A row with lines > 1 (a compact card's title, see compactBox) wraps over up to that many lines, lineHeight apart. With
+// badgeApart the badge sits on its own line (badgeY): the title keeps its width, and a row with avoidBadge stops before it.
 // A focused card has a 2 px --graph-halo (accent) border and no ring around it.
 // The first row is the title: it stops before the status dot and badge.
 function drawCard(ctx, item, card) {
@@ -327,6 +356,7 @@ function drawCard(ctx, item, card) {
 
   const pad = card.pad ?? (card.strip ? 15 : 12);
   let rightEdge = item.x + item.width - 12;
+  let badgeWidth = 0;
   if (card.status) {
     ctx.save();
     ctx.globalAlpha *= card.statusAlpha ?? 1;
@@ -343,7 +373,9 @@ function drawCard(ctx, item, card) {
     ctx.textAlign = "right";
     ctx.fillText(card.badge, rightEdge, item.y + (card.badgeY ?? 22));
     ctx.textAlign = "left";
-    rightEdge -= ctx.measureText(card.badge).width + 8;
+    badgeWidth = ctx.measureText(card.badge).width + 8;
+    // A badge on a line of its own (badgeApart) leaves the title its width; the rows that avoid it give it theirs.
+    if (!card.badgeApart) rightEdge -= badgeWidth;
   }
   const rows = card.rows || [];
   for (let index = 0; index < rows.length; index += 1) {
@@ -352,7 +384,14 @@ function drawCard(ctx, item, card) {
     ctx.fillStyle = row.color || (index === 0 ? color("text") : color("muted"));
     const font = fontOf(row.weight || (index === 0 ? 600 : 400), row.size || 12);
     ctx.font = font;
-    const limit = index === 0 && row.fit !== "full" ? rightEdge - item.x - pad : item.width - pad - 12;
+    const limit = (index === 0 && row.fit !== "full" ? rightEdge - item.x - pad : item.width - pad - 12) - (row.avoidBadge ? badgeWidth : 0);
+    if (row.lines > 1) {
+      const wrapped = wrapLines(ctx, row.text, limit, row.lines, font);
+      // A title that fits one line is centred in a box made for several.
+      const shift = (row.lines - wrapped.length) * row.lineHeight / 2;
+      wrapped.forEach((line, at) => ctx.fillText(line, item.x + pad, item.y + row.y + shift + at * row.lineHeight));
+      continue;
+    }
     ctx.fillText(ellipsis(ctx, row.text, limit, font), item.x + pad, item.y + row.y);
   }
   ctx.restore();
@@ -382,15 +421,20 @@ function isCompact(cardHeight, scale, minFont = 12) {
 // The box a compact card draws in: the card shrunk to the height of its
 // title row (7 px above and below it on screen), centred on its edge ports
 // so the edges still meet its sides, and never taller than the card. No
-// compact card is an empty frame around a title. Returns { x, y, width,
-// height, titleSize, baseline } (baseline: from the box's top).
-function compactBox(item, scale) {
+// compact card is an empty frame around a title. With `lines` > 1 the box has
+// room for a title on that many lines (a long name wraps rather than ends in
+// an ellipsis: wrapLines through drawCard's row.lines); a one-line title in it
+// stays centred. Returns { x, y, width, height, titleSize, baseline, lineHeight }
+// (baseline: of the first line, from the box's top).
+function compactBox(item, scale, lines = 1) {
   const value = Math.max(0.01, Number(scale) || 1);
   const titleSize = compactTitleSize(value);
-  const height = Math.min(item.height, (titleSize || 12 / value) * 1.3 + 14 / value);
+  const size = titleSize || 12 / value;
+  const lineHeight = size * 1.2;
+  const height = Math.min(item.height, lines > 1 ? lineHeight * lines + 14 / value : size * 1.3 + 14 / value);
   const port = nodePort(item, "right").y;
   const y = Math.max(item.y, Math.min(item.y + item.height - height, port - height / 2));
-  return { x: item.x, y, width: item.width, height, titleSize, baseline: height / 2 + titleSize * 0.36 };
+  return { x: item.x, y, width: item.width, height, titleSize, lineHeight, baseline: height / 2 - (lines > 1 ? lineHeight * (lines - 1) / 2 : 0) + titleSize * 0.36 };
 }
 
 // ------------------------------------------------------------------ edges
@@ -502,7 +546,9 @@ function rectsOverlap(a, b, padding = 14) {
 // number of nodes, which keeps orthogonal routes straight.
 //   options = { nodes, edges, size(node) -> { width, height }, compare(a, b),
 //               queueCompare(a, b), weight(edge), rowGrid, rowPitch, xGap,
-//               yGap, minColumnWidth, origin, breakCycles }
+//               yGap, minColumnWidth, origin, breakCycles, maxPerColumn }
+// maxPerColumn: a column of more cards than that is drawn as side-by-side columns of at most that many (a service that
+// calls eleven others is a block of two columns, not a tower eleven cards high that a fit would have to shrink).
 // Returns { positions: Map(id -> { x, y, width, height, node, lineageRow }),
 // level: Map(id -> column), backEdges: Set(edge id) }.
 const WASM_LAYERED_MIN_NODES = 24;
@@ -778,23 +824,32 @@ function layeredPositions(options, { columns, levels, level, backEdges, lineageR
   const positions = new Map();
   const rowGrid = !!options.rowGrid;
   const lineageRowPitch = rowGrid ? options.rowPitch : null;
+  const maxPerColumn = options.maxPerColumn > 0 ? options.maxPerColumn : Infinity;
   let x = origin;
   for (const l of levels) {
-    const group = columns.get(l) || [];
-    let maxWidth = minColumnWidth;
-    for (let row = 0; row < group.length; row += 1) {
-      const node = group[row];
-      const box = size(node);
-      maxWidth = Math.max(maxWidth, box.width);
-      const gridRow = rowGrid ? (lineageRows.get(node.id) ?? row) : row;
-      const y = rowGrid ? origin + gridRow * lineageRowPitch : (() => {
-        let packed = origin;
-        for (let i = 0; i < row; i += 1) packed += size(group[i]).height + yGap;
-        return packed;
-      })();
-      positions.set(node.id, { x, y, width: box.width, height: box.height, node, lineageRow: gridRow });
+    const whole = columns.get(l) || [];
+    // The column's cards in as many equal runs as the limit asks, side by side from the column's first row.
+    const runs = Math.max(1, Math.ceil(whole.length / maxPerColumn));
+    const runSize = Math.ceil(whole.length / runs);
+    const firstRow = rowGrid && runs > 1 ? Math.min(...whole.map((node, row) => lineageRows.get(node.id) ?? row)) : 0;
+    for (let run = 0; run < runs; run += 1) {
+      const group = whole.slice(run * runSize, (run + 1) * runSize);
+      const runFirstRow = rowGrid && runs > 1 ? Math.min(...group.map((node, row) => lineageRows.get(node.id) ?? row)) : 0;
+      let maxWidth = minColumnWidth;
+      for (let row = 0; row < group.length; row += 1) {
+        const node = group[row];
+        const box = size(node);
+        maxWidth = Math.max(maxWidth, box.width);
+        const gridRow = rowGrid ? (lineageRows.get(node.id) ?? row) - runFirstRow + firstRow : row;
+        const y = rowGrid ? origin + gridRow * lineageRowPitch : (() => {
+          let packed = origin;
+          for (let i = 0; i < row; i += 1) packed += size(group[i]).height + yGap;
+          return packed;
+        })();
+        positions.set(node.id, { x, y, width: box.width, height: box.height, node, lineageRow: gridRow });
+      }
+      x += maxWidth + xGap;
     }
-    x += maxWidth + xGap;
   }
   return { positions, level, backEdges };
 }
@@ -3063,17 +3118,18 @@ function visibleArea(canvas, { panel = null } = {}) {
 // the free area (the bounds into safeArea()), `readable` the one keeping
 // the card text at 11 px.
 // - A graph readable as a whole opens whole: nothing clipped, no minimap.
-// - One that would need a little less (overview >= FIT_READABLE_SHARE of
-//   readable) opens at the readable scale on its root or focus, the
-//   minimap giving the rest: shrinking it would only turn its cards
-//   compact for a few clipped pixels.
+// - One that would need only a little less (overview >= FIT_READABLE_SHARE of
+//   readable: a few clipped pixels) opens at the readable scale on its root or
+//   focus, the minimap giving the rest. A larger one opens whole, its text a
+//   little smaller: a graph that opens with a column cut at its edge reads as
+//   complete, and the operator does not see what is out of view.
 // - A much larger one opens whole with compact cards (a map of titles),
 //   down to FIT_FLOOR; past it, at the readable scale on its anchor.
 // - On a phone (`phone`): the whole graph when it stays at PHONE_MIN_SCALE
 //   or more, else the anchor and its neighbours (`local`, their own fit
 //   scale) between PHONE_MIN_SCALE and the readable scale; the rest pans.
 const FIT_FLOOR = 0.25;
-const FIT_READABLE_SHARE = 0.6;
+const FIT_READABLE_SHARE = 0.9;
 const PHONE_MIN_SCALE = 0.7;
 function fitScale(overview, readable, { phone = false, local = null } = {}) {
   if (!(overview > 0)) return readable;

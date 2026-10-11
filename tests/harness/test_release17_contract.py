@@ -112,7 +112,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
     assert 'tierY += item.height + storageTierGap;' in graph
     lifecycle = graph[graph.index('function drawLifecycleEdgeLabel('):graph.index('function drawNode(')]
     assert 'ctx.fillStyle = graphColor("labelBg");' in lifecycle
-    assert 'ctx.fillStyle = css("--tableBg", "#10141d");' not in lifecycle
+    assert 'ctx.fillStyle = css("--table-bg", "#10141d");' not in lifecycle
     assert 'const hasStorageAnimation = model.detailMode === "physical"' in graph
     assert 'prefers-reduced-motion: reduce' in graph
     assert 'function drawTtlSummary(' in graph

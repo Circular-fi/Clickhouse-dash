@@ -45,7 +45,7 @@
   display: flex;
   flex-direction: column;
   border-right: var(--shell-border);
-  background: var(--panelBg);
+  background: var(--panel);
   overflow: hidden;
 }
 
@@ -100,7 +100,7 @@
   cursor: pointer;
 }
 
-.uiSide__toggle:hover { background: var(--rowHover); }
+.uiSide__toggle:hover { background: var(--row-hover); }
 
 .uiSide__meta {
   min-width: 0;
@@ -199,7 +199,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--panelBg);
+  background: var(--panel);
   color: var(--text);
   font-size: var(--fs-sm);
 }
@@ -219,7 +219,7 @@
   bottom: 10px;
   width: var(--graph-panel-width, var(--detail-w));
   min-width: 260px;
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-overlay);
   cursor: default;
@@ -289,16 +289,16 @@
   display: inline-grid;
   place-items: center;
   padding: 0;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-sm);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   color: var(--text);
   cursor: pointer;
 }
 
 .uiDetail__nav:disabled { opacity: .4; cursor: default; }
 
-.uiDetail__nav:not(:disabled):hover { border-color: var(--buttonBorderHover); background: var(--buttonBgHover); }
+.uiDetail__nav:not(:disabled):hover { border-color: var(--button-border-hover); background: var(--button-bg-hover); }
 
 .uiDetail__close { flex: 0 0 auto; width: 28px; height: 28px; margin: -2px -4px 0 0; }
 
@@ -319,7 +319,7 @@
     max-width: none;
     height: min(80dvh, calc(100dvh - var(--shell-top, 0px) - 16px));
     border: 0;
-    border-top: 1px solid var(--borderStrong);
+    border-top: 1px solid var(--border-strong);
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     overflow: hidden;
     box-shadow: var(--shadow-overlay);
@@ -343,7 +343,7 @@
     width: 36px;
     height: 4px;
     border-radius: var(--r-sm);
-    background: var(--borderStrong);
+    background: var(--border-strong);
   }
   .uiDetail__nav,
   .uiDetail__close { width: 32px; height: 32px; }

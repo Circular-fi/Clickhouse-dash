@@ -309,7 +309,8 @@ function createOverview(ctx) {
         ], rows)));
     }
     const notes = [];
-    if (single.length) notes.push(`${single.map((name) => `"${name}"`).join(", ")}: this server only`);
+    // Said in words: "default": this server only was a note that only its writer could read.
+    if (single.length) notes.push(`The ${single.length === 1 ? "cluster" : "clusters"} ${single.map((name) => `"${name}"`).join(", ")} ${single.length === 1 ? "has" : "have"} only this server`);
     if (data.topology?.truncated) notes.push(`first ${format.count(data.topology.row_limit)} nodes shown`);
     if (notes.length) el.appendChild(h("p", { class: "systemCard__note" }, `${notes.join(SEP)}.`));
     return el;

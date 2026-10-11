@@ -634,11 +634,11 @@ function renderFlamegraph(alt) {
   }
   const pending = [...colors];
   if (pending.length) {
-    const readable = palette.batch.readableTextBatch(pending.map((color) => `color-mix(in srgb, ${color} ${FLAME_FILL_PCT}%, var(--panelBg))`));
+    const readable = palette.batch.readableTextBatch(pending.map((color) => `color-mix(in srgb, ${color} ${FLAME_FILL_PCT}%, var(--panel))`));
     pending.forEach((color, i) => labels.set(color, readable[i]));
   }
   const labelOf = (color) => {
-    if (!labels.has(color)) labels.set(color, palette.readableText(`color-mix(in srgb, ${color} ${FLAME_FILL_PCT}%, var(--panelBg))`));
+    if (!labels.has(color)) labels.set(color, palette.readableText(`color-mix(in srgb, ${color} ${FLAME_FILL_PCT}%, var(--panel))`));
     return labels.get(color);
   };
   const frame = (node, left, width, row, ancestor) => {
@@ -742,6 +742,8 @@ const GRAPH_FIT_MAX = 1.35;
 // The smallest card font is 12 px: the readable scale keeps it at 11 px.
 const GRAPH_READABLE_SCALE = 11 / 12;
 const GRAPH_MIN_FONT = 12;
+// A compact card has two lines (kit.compactBox): the service, then the operation and the time.
+const GRAPH_COMPACT_LINES = 2;
 // Heat: up to 45 % of --graph-heat over the card (text keeps 4.5:1).
 const GRAPH_HEAT_MAX = 0.45;
 // Time mode: a call path taking 20 % of the trace or more is fully hot.
@@ -1161,12 +1163,16 @@ function drawGraphCard(context, item, compact) {
   };
   if (compact) {
     // The title row alone: "service \u00b7 operation" and the call path's time.
-    const box = kit.compactBox(item, graphUi.view.scale);
+    const box = kit.compactBox(item, graphUi.view.scale, GRAPH_COMPACT_LINES);
     if (box.titleSize) {
-      card.rows.push({ text: graphCompactTitle(node), size: box.titleSize, weight: 600, y: box.baseline });
+      // Two lines: the service, then the operation (the call paths of a service differ by it) with the path's time at
+      // the right of that line, so a name keeps the card's width.
+      card.rows.push({ text: node.service, size: box.titleSize, weight: 600, y: box.baseline });
+      if (node.operation) card.rows.push({ text: node.operation, size: box.titleSize, weight: 400, y: box.baseline + box.lineHeight, fit: "full", avoidBadge: true });
       card.badge = fmt.duration(node.time);
+      card.badgeApart = true;
       card.badgeSize = Math.round(box.titleSize * 9.2) / 10;
-      card.badgeY = box.baseline;
+      card.badgeY = box.baseline + box.lineHeight;
     }
     card.statusY = box.height / 2;
     kit.drawCard(context, box, card);
@@ -1283,7 +1289,7 @@ function graphHitTest(clientX, clientY) {
   // A compact card is hit on the box it draws.
   const compact = kit.isCompact(GRAPH_CARD_H, v.scale, GRAPH_MIN_FONT);
   for (const item of layout.items.values()) {
-    if (kit.pointInRect(point, compact ? kit.compactBox(item, v.scale) : item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
+    if (kit.pointInRect(point, compact ? kit.compactBox(item, v.scale, GRAPH_COMPACT_LINES) : item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
   }
   for (const hit of graphUi.labelHits) {
     if (kit.pointInRect(point, hit, 2 / v.scale)) return { type: "edge", key: `edge\u0000${hit.id}`, id: hit.id };
@@ -1499,7 +1505,7 @@ function inspectGraph() {
         // What the card shows: compact, its title row ("service \u00b7
         // operation") and its time; else every row.
         shown: compact ? [graphCompactTitle(node), fmt.duration(node.time)] : [node.service, node.operation, graphCountText(node), graphTimeText(node)],
-        fill: graphFill(node), strip: palette.resolve(palette.service(node.service)), ...toClient(compact ? graphKit().compactBox(item, v.scale) : item),
+        fill: graphFill(node), strip: palette.resolve(palette.service(node.service)), ...toClient(compact ? graphKit().compactBox(item, v.scale, GRAPH_COMPACT_LINES) : item),
       };
     }) : [],
     edges: layout ? layout.edges.map((item) => ({

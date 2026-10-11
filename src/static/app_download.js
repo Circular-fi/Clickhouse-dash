@@ -395,9 +395,9 @@ function buildGlobalJson() {
 
 function debugArchiveReadme(many) {
   const lines = [
-    "# ChDash Debug Archive",
+    "# ClickHouse Dash Debug Archive",
     "",
-    "This archive is a self-contained diagnostic snapshot produced by **Run \u2192 Download Debug**.",
+    "This archive is a self-contained diagnostic snapshot produced by **Run \u2192 Download debug**.",
     many
       ? "Each `query-NNN/` directory contains the files for one statement. Paths below are relative to that directory."
       : "The files below are stored at the archive root for this single-query export.",
@@ -405,7 +405,7 @@ function debugArchiveReadme(many) {
     "## Files",
     "",
     "### `query.sql`",
-    "The exact SQL statement executed by ChDash.",
+    "The exact SQL statement executed by ClickHouse Dash.",
     "",
     "### `results.csv`",
     "The rows received by the browser preview, encoded as CSV: the same text as Copy CSV and Download CSV. A value is written as ClickHouse stores it (the digits of a UInt64 or a Decimal, `nan`, the text of a String); a NULL is a bare `\\N` and a nested value is its compact JSON. This can be a partial result when preview limits or cancellation stopped the execution early.",
@@ -488,8 +488,8 @@ function updateUi() {
   }
   const text = dom.downloadReceivedZipButton ? $(".runMenu__optText", dom.downloadReceivedZipButton) : null;
   if (text) {
-    if (partial) text.textContent = "Download Debug (partial)";
-    else text.textContent = "Download Debug";
+    if (partial) text.textContent = "Download debug (partial)";
+    else text.textContent = "Download debug";
   }
 }
 

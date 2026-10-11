@@ -31,13 +31,13 @@ def test_the_mcp_page_is_its_own_shell_filed_as_its_own_switcher_entry():
     assert 'id="mcpLayout"' in html and "mcpFoot" not in html
     assert html.count('<header class="appHeader" role="banner">') == 1
     # MCP is its own entry: selected and visible here, hidden in every other shell until /api/version enables it.
-    assert 'id="navMcpButton" class="themeSelect__option" type="button" role="option" data-value="mcp" aria-selected="true">MCP</button>' in html
-    assert 'id="navSystemButton" class="themeSelect__option" type="button" role="option" data-value="system" aria-selected="false"' in html
+    assert 'id="navMcpLink" class="pageNav__link" href="/mcp-integration" aria-current="page">MCP</a>' in html
+    assert 'id="navSystemLink" class="pageNav__link" href="/system">System</a>' in html
     for other in ("query", "explorer", "functions", "traces", "logs", "metrics", "trace", "system", "queries", "disks", "shape"):
         page = read(f"src/static/{other}.html")
-        assert 'id="navMcpButton" class="themeSelect__option" type="button" role="option" data-value="mcp" aria-selected="false" hidden>MCP</button>' in page, other
+        assert 'id="navMcpLink" class="pageNav__link" href="/mcp-integration" hidden>MCP</a>' in page, other
     partial = read("src/shell/header.html")
-    assert '{{mcp.hidden}}>MCP</button>' in partial and '{{selected.mcp}}' in partial
+    assert '{{mcp.hidden}}>MCP</a>' in partial and '{{current.mcp}}' in partial
     # The page route is the shell's: no data and no address state of its own.
     assert "/mcp-integration" in html.split("<body")[0]
 
@@ -66,11 +66,12 @@ def test_the_switcher_follows_features_mcp():
     ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     state = read("src/static/app_state.js")
     assert 'const mcpEnabled = nav.mcp === true;' in ui
-    assert "if (dom.navMcpButton) dom.navMcpButton.hidden = !mcpEnabled;" in ui
+    assert "if (dom.navMcpLink) dom.navMcpLink.hidden = !mcpEnabled;" in ui
     assert 'const mcpEnabled = features.get("mcp.enabled");' in ui
-    assert 'if (document.body?.dataset?.page !== "mcp") window.location.assign(api.resolveUrl("mcp-integration"));' in ui
+    # The entry is a link: the browser opens it (a new tab, a copied address), no script navigates for it.
+    assert 'href="/mcp-integration"' in read("src/shell/header.html") and "navMcpLink.addEventListener" not in ui
     assert 'mcp: "MCP" };' in ui
-    assert 'navMcpButton: byId("navMcpButton"),' in read("src/static/app_dom.js")
+    assert 'navMcpLink: byId("navMcpLink"),' in read("src/static/app_dom.js")
     assert "mcp: { enabled: false }," in state and "mcp: { enabled: bool(src.mcp?.enabled, d.mcp.enabled) }," in state
     assert "mcp: obj.mcp === true" in state and "mcp: nav?.mcp === true" in state
     # The page itself never leaves when MCP is off: it shows how to turn it on.
@@ -129,7 +130,7 @@ def test_the_page_follows_the_ui_foundations():
     # Delete confirms and the focus starts on Cancel (ns.dialog.confirm danger).
     assert page.count("danger: true") == 1
     # The tools that need all the data are disabled with their reason until the data is the pattern * alone.
-    assert 'const NEEDS_EVERYTHING = "Needs the data pattern * alone: ChDash cannot limit this tool to some tables.";' in form
+    assert 'const NEEDS_EVERYTHING = "Needs the data pattern * alone: ClickHouse Dash cannot limit this tool to some tables.";' in form
     assert "box.input.disabled = locked;" in form and "tool.needsAllData" in form
     # A permission is a check box (there is no level to choose): no select in the form.
     assert 'h("select"' not in form and "<select" not in form

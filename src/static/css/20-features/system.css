@@ -17,7 +17,7 @@
   min-height: var(--nav-row-h);
   padding: 0 var(--gutter);
   border-bottom: var(--shell-border);
-  background: var(--panelBg);
+  background: var(--panel);
 }
 
 .systemPage__panel[hidden] {
@@ -224,7 +224,7 @@
 
 .systemActivityTable__link:hover,
 .systemActivityTable__link:focus-visible {
-  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  color: color-mix(in srgb, var(--accent-fill) 80%, var(--text));
   text-decoration: underline;
 }
 
@@ -304,7 +304,7 @@
   min-width: 0;
   padding: var(--space-2) var(--space-6);
   border-radius: var(--r-sm);
-  background: var(--theadBg);
+  background: var(--thead-bg);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   overflow-wrap: anywhere;
@@ -407,7 +407,7 @@
   text-align: left;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 820px) {
   .systemPerf__grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -452,6 +452,26 @@
   gap: var(--space-16);
 }
 
+/* The list of shapes: the table's own wrap is the scroller under the tiles (as tall as the panel leaves it, at least
+   14 rem), so its head stays over the rows while they scroll. A wrap that is a scroller on one axis is one on both:
+   the head of a table in the panel's scroller would never stick. A shape's page (shape.html) has no such list. */
+.systemQueries:not(.systemQueries--shape) {
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.systemQueries:not(.systemQueries--shape) > .systemQueries__list:not([hidden]) {
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.systemQueries__wrap {
+  min-height: 14rem;
+  max-height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
 .systemQueries__tiles {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
@@ -486,6 +506,14 @@
   border: 0;
   background: none;
   font-size: var(--fs-sm);
+}
+
+/* In a column of the list the colours of the editor made every line a row of links: the keywords and functions read as
+   text, bold; the full colours are in the shape's page. */
+.systemQueries__sql .tok-kw,
+.systemQueries__sql .tok-fn {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
 }
 
 .systemQueries__sql .sqlBlock__body {
@@ -608,7 +636,7 @@
 /* A wide screen has room right of the query: the figures take that side, two to a row, level with
    the query (a short one stretches to their height); the charts then run the whole width under
    both, the third one under the figures. */
-@media (min-width: 1281px) {
+@media (min-width: 1280px) {
   .systemQuery__top {
     grid-template-columns: minmax(0, 1fr) clamp(300px, 26vw, 420px);
     grid-template-areas: "sql tiles" "charts charts";
@@ -679,7 +707,7 @@
   }
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1279px) {
   .systemQueries__table .is-low,
   .systemQuery__table .is-low {
     display: none;
@@ -689,7 +717,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 820px) {
   .systemQueries__table .is-mid,
   .systemQuery__table .is-mid {
     display: none;
@@ -791,7 +819,7 @@
   padding: var(--space-12);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background: var(--panelBg);
+  background: var(--panel);
 }
 
 .systemDisk__main {
@@ -838,7 +866,7 @@
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 820px) {
   .systemDisk.is-group {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1018,7 +1046,7 @@
 
 .systemDiskDb__link:hover,
 .systemDiskDb__link:focus-visible {
-  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  color: color-mix(in srgb, var(--accent-fill) 80%, var(--text));
   text-decoration: underline;
 }
 

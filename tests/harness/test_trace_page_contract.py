@@ -16,7 +16,7 @@ def test_one_trace_is_its_own_html_page_without_the_observability_tabs():
     assert "static/style.trace.css" in html
     # The page header stays; the Observability view tabs (Traces, Logs, Metrics) and the search do not.
     assert '<header class="appHeader" role="banner">' in html
-    assert 'id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability" aria-selected="true"' in html
+    assert 'id="navObservabilityLink" class="pageNav__link" href="/observability" aria-current="page"' in html
     for token in ('id="obsNav"', 'id="obsTabs"', 'id="tracesTabs"', 'id="tracesForm"', 'data-obs-panel', 'id="logsWorkspace"', 'id="metricsWorkspace"'):
         assert token not in html, token
     # The trace pane lives in trace.html only; traces.html keeps the search.

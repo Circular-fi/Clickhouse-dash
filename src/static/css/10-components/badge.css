@@ -3,7 +3,7 @@
 .traceSvcMore { cursor: default; }
 
 .traceSvcMore:hover,
-.traceSvcMore[aria-expanded="true"] { border-color: var(--accentBorder); }
+.traceSvcMore[aria-expanded="true"] { border-color: var(--accent-fill); }
 
 .tracePageHeader__incomplete {
   margin: 0 var(--space-4) 0 var(--space-8);
@@ -79,7 +79,9 @@
 
 .badge--warn {
   --badge-color: var(--warning);
-  color: var(--badge-color);
+  /* The amber text on its own tint (and on a row's tint under it) is 4.3:1 in the light theme: a fifth of the text colour
+     keeps it at 4.5:1 and more wherever it sits. */
+  color: color-mix(in srgb, var(--badge-color) 80%, var(--text));
 }
 
 .badge--error {
@@ -168,8 +170,19 @@ button.badge[aria-pressed="false"] {
 }
 
 button.badge[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--badge-color) 70%, transparent);
-  background: color-mix(in srgb, var(--badge-color) 22%, transparent);
+  border-color: var(--selected-edge);
+  background: var(--selected-bg);
+}
+
+/* Pressed also says so without colour: a check before the label. */
+button.badge[aria-pressed="true"]::before {
+  content: "";
+  flex: 0 0 auto;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-right: var(--space-2);
+  background-color: currentColor;
+  mask: var(--icon-check) center / var(--icon-sm) no-repeat;
 }
 
 .badge > b {

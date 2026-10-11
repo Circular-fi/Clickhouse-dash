@@ -14,8 +14,8 @@ def read(rel):
 def test_page_switcher_ships_visible_in_every_shell():
     for page in PAGES:
         html = read(f"src/static/{page}")
-        assert '<div id="pageSelect" class="themeSelect pageSelect" aria-label="Page">' in html, page
-        assert 'aria-label="Page" hidden' not in html, page
+        assert '<nav id="pageSelect" class="themeSelect pageNav" aria-label="Pages">' in html, page
+        assert 'aria-label="Pages" hidden' not in html, page
         # The System page (and a query shape's, which belongs to it) and the MCP page are entries themselves: their switcher never hides.
         if page in ("system.html", "shape.html", "mcp.html"):
             continue
@@ -31,8 +31,8 @@ def test_page_switcher_ships_visible_in_every_shell():
     assert 'dom.root?.classList.toggle("chdash-page-select-hidden", hidden);' in ui
     assert "storage?.savePageNav?.({ explorer: explorerEnabled, system: systemEnabled, traces: tracesEnabled, logs: logsEnabled, metrics: metricsEnabled, mcp: mcpEnabled });" in ui
     assert "const hidden = !explorerEnabled && !systemEnabled && !observabilityEnabled && !mcpEnabled;" in ui
-    assert "if (dom.navSystemButton) dom.navSystemButton.hidden = !systemEnabled;" in ui
-    assert "if (dom.navMcpButton) dom.navMcpButton.hidden = !mcpEnabled;" in ui
+    assert "if (dom.navSystemLink) dom.navSystemLink.hidden = !systemEnabled;" in ui
+    assert "if (dom.navMcpLink) dom.navMcpLink.hidden = !mcpEnabled;" in ui
     assert 'const mcpEnabled = features.get("mcp.enabled");' in ui
     # The Observability shell picks its view, and the tabs of the enabled views, from the same cache.
     for page in ("traces", "logs", "metrics"):
@@ -42,7 +42,7 @@ def test_page_switcher_ships_visible_in_every_shell():
         assert "document.documentElement.dataset.obsView = view;" in html, page
         assert 'document.documentElement.dataset.obsEnabled = enabled.join(" ");' in html, page
     assert 'const PAGE_NAV_STORAGE_KEY = "chdash.pageNav.v1";' in state
-    assert "html.chdash-page-select-hidden .pageSelect {" in css
+    assert "html.chdash-page-select-hidden .pageNav {" in css
 
 
 def test_stylesheet_is_parser_inserted_so_it_blocks_first_paint():
@@ -80,5 +80,5 @@ def test_every_shell_header_lists_every_page_and_no_legacy_shell_remains():
     assert 'path = "/index.html"' not in server + read("src/serve_embedded_static.hpp")
     for page in PAGES:
         html = read(f"src/static/{page}")
-        for button in ("navQueryButton", "navExplorerButton", "navObservabilityButton", "navSystemButton", "navMcpButton"):
+        for button in ("navQueryLink", "navExplorerLink", "navObservabilityLink", "navSystemLink", "navMcpLink"):
             assert f'id="{button}"' in html, (page, button)

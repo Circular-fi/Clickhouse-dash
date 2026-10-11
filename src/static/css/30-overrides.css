@@ -7,7 +7,7 @@
 /* ---- 01-base.css ---- */
 
 :where(a[href], area[href], button, input, select, textarea:not(#queryTextArea), summary, iframe, [tabindex]:not([tabindex="-1"]), [contenteditable]:not([contenteditable="false"])):focus-visible {
-  outline: 2px solid var(--focusRingColor);
+  outline: 2px solid var(--focus-ring-color);
 }
 
 .srOnly {
@@ -62,7 +62,7 @@
 }
 
 .themeSelect--icons .themeSelect__button--icon {
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease), color var(--dur-quick) var(--ease), opacity var(--dur-quick) var(--ease);
 }
 
@@ -72,13 +72,13 @@
 
 .themeSelect--icons.themeSelect--open .themeSelect__button--icon,
 .themeSelect--icons.themeSelect--closing .themeSelect__button--icon {
-  border-color: var(--buttonBorder);
+  border-color: var(--button-border);
   border-bottom-color: transparent;
 }
 
 .themeSelect--icons .themeSelect__button--icon:hover,
 .themeSelect--icons .themeSelect__button--icon:focus-visible {
-  border-color: var(--buttonBorderHover);
+  border-color: var(--button-border-hover);
 }
 
 .tracePicker__native {
@@ -90,7 +90,7 @@
 }
 
 .tracePicker__button {
-  background: var(--buttonBg);
+  background: var(--button-bg);
   box-shadow: none;
 }
 
@@ -101,7 +101,7 @@
 
 .traceResultsSort .tracePicker__button {
   border-radius: var(--r-md);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   box-shadow: none;
   transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
@@ -115,12 +115,12 @@
   min-height: 31px;
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   border-radius: var(--r-md);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   box-shadow: none;
   transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 
-.traceSearchBar .tracePicker__button:hover:not(:disabled) { background: var(--buttonBg); }
+.traceSearchBar .tracePicker__button:hover:not(:disabled) { background: var(--button-bg); }
 
 .traceSearchBar .tracePicker__menu,
 .traceResultsSort .tracePicker__menu {
@@ -138,7 +138,7 @@
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover,
 .traceResultsSort .tracePicker__button:hover:not(:disabled) {
-  background: var(--buttonBg);
+  background: var(--button-bg);
 }
 
 .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button,
@@ -196,26 +196,26 @@
 
 /* ---- 20-features/observability.css ---- */
 
-.traceSearchBar .timeRangeList__item:focus-visible { box-shadow: inset 0 0 0 1px var(--buttonBorderHover); }
+.traceSearchBar .timeRangeList__item:focus-visible { box-shadow: inset 0 0 0 1px var(--button-border-hover); }
 
 .obsFilterBar .obsFilterBar__secondary {
-  height: var(--obsBarControl);
-  min-height: var(--obsBarControl);
+  height: var(--obs-bar-control);
+  min-height: var(--obs-bar-control);
 }
 
 .obsFilterBar .obsFilterBar__submit {
-  height: var(--obsBarControl);
-  min-height: var(--obsBarControl);
-  width: var(--obsBarSubmit);
-  min-width: var(--obsBarSubmit);
-  max-width: var(--obsBarSubmit);
+  height: var(--obs-bar-control);
+  min-height: var(--obs-bar-control);
+  width: var(--obs-bar-submit);
+  min-width: var(--obs-bar-submit);
+  max-width: var(--obs-bar-submit);
   justify-self: auto;
 }
 
 .obsFilterBar .obsFilterBar__submit--icon {
-  width: var(--obsBarControl);
-  min-width: var(--obsBarControl);
-  max-width: var(--obsBarControl);
+  width: var(--obs-bar-control);
+  min-width: var(--obs-bar-control);
+  max-width: var(--obs-bar-control);
   padding: 0;
   border: 0;
   background: transparent;
@@ -391,7 +391,7 @@
     min-height: 48px;
   }
 
-  .obsFilterBar { --obsBarControl: var(--hit); }
+  .obsFilterBar { --obs-bar-control: var(--hit); }
 
   /* The editor's buttons: the options cog in the corner, the copy button beside it. */
   .editorCopyButton { right: 52px; }
@@ -544,7 +544,12 @@
   .runSplit__toggle::after,
   .editorAutocompleteControl__caret,
   .traceJaegerGroup > summary::before,
-  .traceSpanEvent > summary::before {
+  .traceSpanEvent > summary::before,
+  .themeSelect__option[aria-selected="true"]:not(.themeSelect__option--icon)::after,
+  .pickerOption[aria-selected="true"]::after,
+  .pageNav__link[aria-current="page"]::after,
+  button.badge[aria-pressed="true"]::before,
+  .metricCompact--progress.is-complete .statTile__value::before {
     background-color: CanvasText;
   }
 
@@ -563,7 +568,7 @@
 
   /* A cell bar and a share bar: the bar in Highlight over a track in Canvas. */
   .cellBar {
-    --cellBar-color: Highlight;
+    --cell-bar-color: Highlight;
     forced-color-adjust: none;
     background-color: Canvas;
     color: CanvasText;

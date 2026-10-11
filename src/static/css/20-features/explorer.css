@@ -3,9 +3,9 @@
 
 .explorerSelect {
   min-height: 34px;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-md);
-  background: var(--inputBg);
+  background: var(--input-bg);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-md);
@@ -15,7 +15,7 @@
 }
 
 .explorerSelect:focus {
-  border-color: var(--accentBorder);
+  border-color: var(--accent-fill);
   box-shadow: var(--ring);
 }
 
@@ -147,7 +147,7 @@
   letter-spacing: .02em;
 }
 
-@media (max-width: 1150px) {
+@media (max-width: 1100px) {
   .explorerSummaryCards { grid-template-columns: repeat(2, minmax(110px, 1fr)); }
 }
 
@@ -208,7 +208,7 @@
   padding-left: var(--space-4);
 }
 
-.explorerTreeDatabase:hover { background: var(--rowHover); }
+.explorerTreeDatabase:hover { background: var(--row-hover); }
 
 .explorerTreeDatabase__chevron {
   color: var(--muted);
@@ -270,7 +270,7 @@
 
 .explorerTreeObject:hover {
   border-color: color-mix(in srgb, var(--border) 80%, transparent);
-  background: var(--rowHover);
+  background: var(--row-hover);
 }
 
 /* An object with no storage topology (Graph, Tiers): --muted whole, 4.5:1 and more, a "ban" icon at the end
@@ -293,8 +293,8 @@
 }
 
 .explorerTreeObject.is-selected {
-  border-color: color-mix(in srgb, var(--accentBorder) 65%, var(--border));
-  background: color-mix(in srgb, var(--accentBorder) 9%, transparent);
+  border-color: var(--selected-edge);
+  background: var(--selected-bg);
 }
 
 .explorerTreeObject__icon {
@@ -370,7 +370,7 @@
   padding: var(--space-10) var(--space-10);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background: var(--editorSolidBg);
+  background: var(--editor-solid-bg);
   color: var(--text);
   font: var(--fs-sm)/1.55 var(--font-mono);
   white-space: pre-wrap;
@@ -381,15 +381,15 @@
   padding: 1px var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: var(--editorSolidBg);
+  background: var(--editor-solid-bg);
   font: var(--fs-xs) var(--font-mono);
-  color: color-mix(in srgb, var(--accentBorder) 78%, var(--text));
+  color: color-mix(in srgb, var(--accent-fill) 78%, var(--text));
   font-weight: var(--fw-semibold);
 }
 
 .functionDoc__link,
 .functionDoc__source {
-  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  color: color-mix(in srgb, var(--accent-fill) 80%, var(--text));
   text-decoration: none;
 }
 
@@ -415,7 +415,7 @@
 }
 
 .functionDoc__alias {
-  border-left: 2px solid color-mix(in srgb, var(--accentBorder) 60%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--accent-fill) 60%, transparent);
   padding-left: var(--space-12);
 }
 
@@ -442,7 +442,8 @@
 }
 
 .explorerTreeDatabaseRow.is-selected {
-  background: color-mix(in srgb, var(--accent-fill) 11%, transparent);
+  background: var(--selected-bg);
+  box-shadow: inset 0 0 0 1px var(--selected-edge);
 }
 
 .explorerTreeDatabaseToggle {
@@ -459,7 +460,7 @@
 .explorerTreeDatabaseToggle:hover,
 .explorerTreeDatabaseToggle:focus-visible,
 .explorerTreeDatabase:focus-visible {
-  background: var(--rowHover);
+  background: var(--row-hover);
 }
 
 /* Database detail object table: the shared Query result table; only the name
@@ -479,7 +480,7 @@
   border: 0;
   padding: 0;
   background: none;
-  color: color-mix(in srgb, var(--accentBorder) 80%, var(--text));
+  color: color-mix(in srgb, var(--accent-fill) 80%, var(--text));
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -514,7 +515,7 @@
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--tableBg);
+  background: var(--table-bg);
 }
 
 .explorerTreemap {
@@ -555,9 +556,9 @@
    tint (or its column family's hue, --treemap-color), a stronger edge of the
    same hue, the text colour on it. */
 .explorerTreemap__node {
-  --cell: var(--treemap-color, var(--accentBorder));
-  background: color-mix(in srgb, var(--cell) 22%, var(--panelBg));
-  border: 1px solid color-mix(in srgb, var(--cell) 55%, var(--panelBg));
+  --cell: var(--treemap-color, var(--accent-fill));
+  background: color-mix(in srgb, var(--cell) 22%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--cell) 55%, var(--panel));
   position: absolute;
   box-sizing: border-box;
   overflow: hidden;
@@ -568,32 +569,32 @@
 
 /* An expanded database is a frame around its tables: a paler tint. */
 .explorerTreemap__node.is-database.is-branch {
-  background: color-mix(in srgb, var(--cell) 7%, var(--panelBg));
-  border-color: color-mix(in srgb, var(--cell) 40%, var(--panelBg));
+  background: color-mix(in srgb, var(--cell) 7%, var(--panel));
+  border-color: color-mix(in srgb, var(--cell) 40%, var(--panel));
 }
 
 button.explorerStorageStrip__segment:hover,
 button.explorerStorageStrip__segment:focus-visible {
-  background: color-mix(in srgb, var(--cell) 36%, var(--panelBg));
+  background: color-mix(in srgb, var(--cell) 36%, var(--panel));
 }
 
 .explorerTreemap__node.is-database.is-branch.is-hovered {
-  background: color-mix(in srgb, var(--cell) 14%, var(--panelBg));
+  background: color-mix(in srgb, var(--cell) 14%, var(--panel));
 }
 
 /* Others: neutral, hatched. */
 .explorerTreemap__node.is-other {
-  background-color: var(--panelBg);
+  background-color: var(--panel);
   background-image: repeating-linear-gradient(135deg, var(--hatch) 0, var(--hatch) 4px, transparent 4px, transparent 8px);
-  border-color: var(--borderStrong);
+  border-color: var(--border-strong);
   cursor: default;
 }
 
 .explorerStorageStrip__segment.is-other,
 .explorerTreemapLegend__swatch.is-other {
-  background-color: var(--panelBg);
+  background-color: var(--panel);
   background-image: repeating-linear-gradient(135deg, var(--hatch) 0, var(--hatch) 4px, transparent 4px, transparent 8px);
-  border-color: var(--borderStrong);
+  border-color: var(--border-strong);
 }
 
 .explorerTreemap__node[role="img"]:not(.is-other) {
@@ -603,9 +604,9 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerTreemap__node.is-hovered,
 .explorerTreemap__node:focus-visible {
   /* Tiles are tinted with the accent: the ring takes the text colour. */
-  background: color-mix(in srgb, var(--cell) 36%, var(--panelBg));
-  --focusRingColor: color-mix(in srgb, var(--text) 88%, transparent);
-  outline: 2px solid var(--focusRingColor);
+  background: color-mix(in srgb, var(--cell) 36%, var(--panel));
+  --focus-ring-color: color-mix(in srgb, var(--text) 88%, transparent);
+  outline: 2px solid var(--focus-ring-color);
   outline-offset: -2px;
 }
 
@@ -638,7 +639,7 @@ button.explorerStorageStrip__segment:focus-visible {
   inset: 3px auto auto 3px;
   max-width: calc(100% - 6px);
   border-radius: var(--r-sm);
-  background: var(--panelBg);
+  background: var(--panel);
 }
 
 /* Expanded databases reserve exactly two compact rows: name and size. */
@@ -813,9 +814,9 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerTreemapLegend__swatch {
-  --cell: var(--treemap-color, var(--accentBorder));
-  background: color-mix(in srgb, var(--cell) 22%, var(--panelBg));
-  border: 1px solid color-mix(in srgb, var(--cell) 55%, var(--panelBg));
+  --cell: var(--treemap-color, var(--accent-fill));
+  background: color-mix(in srgb, var(--cell) 22%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--cell) 55%, var(--panel));
   flex: 0 0 auto;
   width: 10px;
   height: 10px;
@@ -880,9 +881,9 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerStorageStrip__segment {
-  --cell: var(--treemap-color, var(--accentBorder));
-  background: color-mix(in srgb, var(--cell) 22%, var(--panelBg));
-  border: 1px solid color-mix(in srgb, var(--cell) 55%, var(--panelBg));
+  --cell: var(--treemap-color, var(--accent-fill));
+  background: color-mix(in srgb, var(--cell) 22%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--cell) 55%, var(--panel));
   display: flex;
   min-width: 4px;
   flex: 1 1 0;
@@ -909,7 +910,7 @@ button.explorerStorageStrip__segment {
 .explorerStorageStrip__segment.is-other > .explorerStorageStrip__label {
   padding: var(--space-2) var(--space-4);
   border-radius: var(--r-sm);
-  background: var(--panelBg);
+  background: var(--panel);
 }
 
 /* Treemap labels of slivers: rotated for tall narrow rectangles, one line
@@ -936,14 +937,6 @@ button.explorerStorageStrip__segment {
 
 .explorerTreemap__node.is-database > .explorerTreemap__label.is-vertical {
   height: 100%;
-}
-
-.explorerTreemap__label.is-single-line {
-  flex-direction: row;
-  align-items: center;
-  gap: var(--space-4);
-  padding: 0 var(--space-4);
-  white-space: nowrap;
 }
 
 .explorerTreemap__node.is-sliver {
@@ -1054,8 +1047,8 @@ button.explorerStorageStrip__segment {
 .explorerFunctionOverview__chip:focus-visible,
 .explorerFunctionOverview__category:hover,
 .explorerFunctionOverview__category:focus-visible {
-  border-color: var(--accentBorder);
-  background: var(--rowHover);
+  border-color: var(--accent-fill);
+  background: var(--row-hover);
 }
 
 .explorerGraphViewportControls__value {
@@ -1108,7 +1101,7 @@ button.explorerStorageStrip__segment {
   margin-top: var(--space-8);
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1100px) {
   .explorerStorageComposition { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -1118,7 +1111,7 @@ button.explorerStorageStrip__segment {
   margin-top: var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--panelBg);
+  background: var(--panel);
 }
 
 .explorerStorageComposition--stacked.is-embedded {
@@ -1159,7 +1152,7 @@ button.explorerStorageStrip__segment {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
   border-radius: var(--r-sm);
-  background: color-mix(in srgb, var(--tableBg) 78%, var(--panelBg));
+  background: color-mix(in srgb, var(--table-bg) 78%, var(--panel));
 }
 
 .explorerStorageStackedBar__segment {
@@ -1249,9 +1242,9 @@ button.explorerStorageStrip__segment {
   display: none;
   width: 270px;
   padding: var(--space-8) var(--space-10);
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  background: var(--panelBg);
+  background: var(--panel);
   box-shadow: var(--shadow-overlay);
   color: var(--text);
   font: var(--fw-medium) var(--fs-xs)/1.35 var(--font-sans);
@@ -1365,7 +1358,7 @@ button.explorerStorageStrip__segment {
   margin-bottom: var(--space-8);
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1100px) {
   .explorerStorageCompositionCard {
     border-left: 0;
     border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
@@ -1419,11 +1412,11 @@ button.explorerStorageStrip__segment {
   vertical-align: middle;
 }
 
-.explorerHealthDot--healthy { background: var(--exd-ok); }
+.explorerHealthDot--healthy { background: var(--success); }
 
-.explorerHealthDot--warning { background: var(--exd-warn); }
+.explorerHealthDot--warning { background: var(--warning); }
 
-.explorerHealthDot--error { background: var(--exd-err); }
+.explorerHealthDot--error { background: var(--danger); }
 
 /* Replication banner: first thing under the header of a replicated table. */
 .explorerSummaryCards.explorerSummaryCards--banner {
@@ -1432,7 +1425,7 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerReplicaBanner {
-  --exd-state: var(--exd-ok);
+  --exd-state: var(--success);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1446,9 +1439,9 @@ button.explorerStorageStrip__segment {
   font-variant-numeric: tabular-nums;
 }
 
-.explorerReplicaBanner--warning { --exd-state: var(--exd-warn); }
+.explorerReplicaBanner--warning { --exd-state: var(--warning); }
 
-.explorerReplicaBanner--error { --exd-state: var(--exd-err); }
+.explorerReplicaBanner--error { --exd-state: var(--danger); }
 
 .explorerReplicaBanner__title { font-weight: var(--fw-semibold); }
 
@@ -1457,9 +1450,9 @@ button.explorerStorageStrip__segment {
 .explorerReplicaBanner__open {
   margin-left: auto;
   appearance: none;
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-md);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-sm);
@@ -1468,7 +1461,7 @@ button.explorerStorageStrip__segment {
   cursor: pointer;
 }
 
-.explorerReplicaBanner__open:hover { border-color: var(--accentBorder); }
+.explorerReplicaBanner__open:hover { border-color: var(--accent-fill); }
 
 .explorerCard {
   display: grid;
@@ -1484,7 +1477,7 @@ button.explorerStorageStrip__segment {
   padding: var(--space-10) var(--space-12) var(--space-12);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--tableBg) 82%, transparent);
+  background: color-mix(in srgb, var(--table-bg) 82%, transparent);
 }
 
 .explorerAbout__title {
@@ -1650,7 +1643,7 @@ button.explorerStorageStrip__segment {
   background: none;
   padding: 0;
   margin-top: var(--space-4);
-  color: var(--accentBorder);
+  color: var(--accent-fill);
   font: inherit;
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
@@ -1662,7 +1655,7 @@ button.explorerStorageStrip__segment {
   border: 0;
   background: none;
   padding: 0;
-  color: var(--accentBorder);
+  color: var(--accent-fill);
   font: inherit;
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
@@ -1874,7 +1867,7 @@ button.explorerStorageStrip__segment {
   padding: var(--space-10) var(--space-12) var(--space-12);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--tableBg) 82%, transparent);
+  background: color-mix(in srgb, var(--table-bg) 82%, transparent);
 }
 
 .explorerCard .explorerStorageCompositionCard__label {
@@ -1982,9 +1975,9 @@ button.explorerStorageStrip__segment {
   max-width: 100%;
   min-height: 28px;
   padding: var(--space-4) var(--space-10);
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-md);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-md);
@@ -1994,8 +1987,8 @@ button.explorerStorageStrip__segment {
 
 .explorerLineageChip:hover,
 .explorerLineageChip:focus-visible {
-  border-color: var(--accentBorder);
-  background: var(--rowHover);
+  border-color: var(--accent-fill);
+  background: var(--row-hover);
 }
 
 .explorerLineageChip__name {
@@ -2020,7 +2013,7 @@ button.explorerStorageStrip__segment {
   color: var(--muted);
 }
 
-.explorerObjIcon--table { color: color-mix(in srgb, var(--accentBorder) 70%, var(--text)); }
+.explorerObjIcon--table { color: color-mix(in srgb, var(--accent-fill) 70%, var(--text)); }
 
 .explorerObjIcon--mv { color: var(--kind-mv); }
 
@@ -2190,7 +2183,7 @@ button.explorerStorageStrip__segment {
   width: 7px;
   height: 7px;
   box-sizing: border-box;
-  border: 1px solid var(--panelBg);
+  border: 1px solid var(--panel);
   border-radius: 50%;
   background: currentColor;
 }
@@ -2251,7 +2244,8 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerTreeRoot.is-selected {
-  background: color-mix(in srgb, var(--accent-fill) 11%, transparent);
+  background: var(--selected-bg);
+  box-shadow: inset 0 0 0 1px var(--selected-edge);
 }
 
 .explorerTreeRoot.is-selected .explorerTreeRoot__icon {

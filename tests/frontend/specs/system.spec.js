@@ -42,23 +42,22 @@ const routeOverview = routeJson(/\/api\/system\/overview\?/);
 test('the page switcher opens the System page: Overview, Queries, Disks', async ({ page }) => {
   await page.goto('/explorer/catalog');
   await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
-  await page.locator('#pageSelectButton').click();
   const menu = page.locator('#pageSelectMenu');
   await expect(menu).toBeVisible();
-  // The menu lists the other pages.
-  await expect(menu.locator('.themeSelect__option:visible')).toHaveText(['Query', 'Observability', 'System']);
-  await menu.locator('#navSystemButton').click();
+  // The switcher is a nav of links, one for each page.
+  await expect(menu.locator('a:visible')).toHaveText(['Query', 'Explorer', 'Observability', 'System']);
+  await expect(menu.locator('#navSystemLink')).toHaveAttribute('href', '/system');
+  await menu.locator('#navSystemLink').click();
   await expect(page).toHaveURL(/\/system$/, { timeout: 20_000 });
   await expect(page).toHaveTitle('ClickHouse Dash · System');
   await expect(page.locator('#pageSelectButton')).toHaveText('System');
-  await expect(page.locator('#navSystemButton')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#navSystemLink')).toHaveAttribute('aria-current', 'page');
   await expect(tabs(page)).toHaveText(['Overview', 'Queries', 'Disks']);
   await expect(selectedSection(page)).toHaveText('Overview');
   await expect(panel(page, 'overview')).toBeVisible();
   // From the System page, the other pages are a click away.
-  await page.locator('#pageSelectButton').click();
-  await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'Observability']);
-  await page.locator('#navExplorerButton').click();
+  await expect(page.locator('#pageSelectMenu a:visible')).toHaveText(['Query', 'Explorer', 'Observability', 'System']);
+  await page.locator('#navExplorerLink').click();
   await expect(page).toHaveURL(/\/explorer\/catalog$/, { timeout: 20_000 });
 });
 
@@ -101,7 +100,7 @@ test('the Overview runs top to bottom: tiles, databases, cluster, performance, a
   await expect(cluster.locator('tbody tr')).toHaveCount(2);
   await expect(cluster.locator('tbody tr.is-local')).toHaveCount(1);
   await expect(cluster.locator('tbody tr.is-local')).toContainText('this server');
-  await expect(page.locator('#systemTopology .systemCard__note')).toContainText('"default": this server only');
+  await expect(page.locator('#systemTopology .systemCard__note')).toContainText('The cluster "default" has only this server');
 
   // One Keeper card (embedded in the test server), the Activity has none.
   const keeper = page.locator('#systemKeeper');
@@ -350,7 +349,7 @@ test('a single server without Keeper says so instead of drawing empty cards', as
   await openOverview(page);
   const topology = page.locator('#systemTopology');
   await expect(topology.locator('.uiState__title')).toHaveText('Single server, no multi-replica cluster');
-  await expect(topology).toContainText('"default": this server only.');
+  await expect(topology).toContainText('The cluster "default" has only this server.');
   await expect(topology.locator('table')).toHaveCount(0);
   await expect(page.locator('#systemNoKeeper .uiState__title')).toHaveText('No Keeper configured');
   await expect(page.locator('#systemKeeper .badge')).toHaveCount(0);
@@ -427,7 +426,7 @@ test('the page follows system.enabled', async ({ page }) => {
   });
   await page.goto('/explorer/catalog');
   await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
-  await expect(page.locator('#navSystemButton')).toBeHidden();
+  await expect(page.locator('#navSystemLink')).toBeHidden();
   // A System page still open when the server turns it off leaves for Query.
   await page.goto('/system');
   await expect(page).toHaveURL(/\/query$/, { timeout: 20_000 });
@@ -922,7 +921,7 @@ test('a row opens its shape as a page of its own: timeline, runs, deep link and 
   await expect(drill).toBeVisible();
   // The page header stays; the System section tabs and the list do not.
   await expect(page.locator('.appHeader')).toBeVisible();
-  await expect(page.locator('#pageSelectButton')).toHaveText('System');
+  await expect(page.locator('#navSystemLink')).toHaveAttribute('aria-current', 'page');
   for (const id of ['systemTabs', 'systemQueriesTable']) await expect(page.locator(`#${id}`), id).toHaveCount(0);
   await expect(page.locator('#systemQueriesList')).toBeHidden();
   await expect(queryRows(page)).toHaveCount(0);

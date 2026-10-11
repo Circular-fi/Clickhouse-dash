@@ -259,7 +259,7 @@ function addRailTotals(sum, next) {
 // parts, and the time the browser needed until it had every row (from the click).
 function elapsedTitle(totals, clientMs) {
   const ms = (value) => format.duration.fromMs(value);
-  const lines = ["Elapsed: the time ChDash needed from the start of the stream to the last row it sent."];
+  const lines = ["Elapsed: the time ClickHouse Dash needed from the start of the stream to the last row it sent."];
   if (totals.receiveMs != null && totals.encodeMs != null) {
     const parts = [`ClickHouse and column decoding ${ms(totals.receiveMs)}`, `JSON encoding ${ms(totals.encodeMs)}`];
     if (totals.backpressureMs) parts.push(`wait for the browser ${ms(totals.backpressureMs)}`);
@@ -296,11 +296,19 @@ function finishRail(totals, clientMs = null) {
   setRailPhase("done");
 }
 
-// Before the first run (and after Clear) the rail is idle: its tiles say
-// "No run yet" rather than a column of dashes; a run puts the dashes back
-// until its figures arrive.
-const IDLE_TEXT = "No run yet";
-const IDLE_VALUES = ["elapsedSecondsText", "progressPercentText", "readRowsTotalText", "readBytesTotalText", "cpuMaxText", "memoryMaxText"];
+// Before the first run (and after Clear) the rail is idle: its tiles give way to one line that says where the stats
+// will be (query.css, .metricColumn.is-idle); a run puts the tiles back, with dashes until their figures arrive.
+// A run that failed keeps only the tiles that have a figure (hideEmptyTiles).
+const RAIL_VALUES = ["progressPercentText", "readRowsTotalText", "readBytesTotalText", "cpuMaxText", "memoryMaxText"];
+
+function hideEmptyTiles(failed) {
+  for (const id of RAIL_VALUES) {
+    const tile = dom[id]?.closest(".metricCompact");
+    if (!tile) continue;
+    const empty = failed && String(dom[id].textContent || "").trim() === EMPTY;
+    tile.classList.toggle("is-empty", empty);
+  }
+}
 
 function resetMetrics({ idle = false } = {}) {
   lockProgressIndeterminate = false;
@@ -327,20 +335,34 @@ function resetMetrics({ idle = false } = {}) {
   util.setText(dom.cpuMaxText, EMPTY);
   util.setMetricText(dom.memoryText, EMPTY);
   util.setMetricText(dom.memoryMaxText, EMPTY);
-  if (dom.progressCard) {
-    dom.progressCard.classList.remove("is-indeterminate");
-    dom.progressCard.style.setProperty("--p", "0");
-  }
+  dom.progressCard?.classList.remove("is-indeterminate");
+  setProgressFraction(0);
   dom.runStatsTiles?.classList.toggle("is-idle", idle);
-  if (idle) for (const id of IDLE_VALUES) util.setText(dom[id], IDLE_TEXT);
+  hideEmptyTiles(false);
   resetCharts();
 }
 
 // A run that finished: the progress tile full.
 function setProgressDone() {
   util.setText(dom.progressPercentText, format.percent(1));
-  if (dom.progressCard) dom.progressCard.style.setProperty("--p", "1");
+  setProgressFraction(1);
   setProgressIndeterminate(false);
+}
+
+// The Progress tile of a run that ended full stops being tinted: a tile that stays lit reads as a selection or an
+// alert. Its figure is then a result (green, with a check; query.css).
+let progressFraction = 0;
+function syncProgressComplete() {
+  if (!dom.progressCard) return;
+  const ended = dom.queryTextArea?.closest(".panel--query")?.dataset.runState === "ok";
+  dom.progressCard.classList.toggle("is-complete", ended && progressFraction >= 1);
+}
+
+// The Progress tile's fill (query.css reads --p) and what the run state makes of it.
+function setProgressFraction(fraction) {
+  progressFraction = fraction;
+  dom.progressCard?.style.setProperty("--p", String(fraction));
+  syncProgressComplete();
 }
 
 function setProgressIndeterminate(enabled) {
@@ -406,7 +428,7 @@ function applyTickMetrics(arr, agg) {
   if (percentKnown && Number.isFinite(percentCenti)) {
     const pct = Math.max(0, Math.min(100, percentCenti / 100));
     util.setText(dom.progressPercentText, format.percent(pct / 100));
-    if (dom.progressCard) dom.progressCard.style.setProperty("--p", String(pct / 100));
+    setProgressFraction(pct / 100);
     setProgressIndeterminate(false);
   } else {
     util.setText(dom.progressPercentText, EMPTY);
@@ -565,7 +587,7 @@ function applyDoneMetrics(done, agg) {
 }
 
 function setQueryIdText(queryId) {
-  util.setText(dom.queryIdentifierText, queryId ? `#${queryId}` : EMPTY);
+  util.setText(dom.queryIdentifierText, queryId || EMPTY);
 }
 
 // Prevent out-of-order SSE/UI updates from regressing the status text.
@@ -610,7 +632,8 @@ function setQueryStatusText(value, opts) {
   if (!force && nextRank < curRank) return;
 
   state.queryStatusText = next;
-  util.setText(dom.queryStatusText, next || "-");
+  // The status reads as a word of the interface: an initial capital (the model keeps the lower-case state name).
+  util.setText(dom.queryStatusText, next ? next[0].toUpperCase() + next.slice(1) : "-");
   setPanelRunState(runStateFor(next));
 }
 
@@ -1412,8 +1435,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       }
 
       if (lower === "finished") {
-        util.setText(dom.progressPercentText, format.percent(1));
-        if (dom.progressCard) dom.progressCard.style.setProperty("--p", "1");
+        setProgressDone();
       }
 
       applyDoneMetrics(data, agg);
@@ -1553,6 +1575,8 @@ function setPanelRunState(stateName) {
   const panel = dom.queryTextArea ? dom.queryTextArea.closest(".panel--query") : null;
   if (!panel) return;
   panel.dataset.runState = stateName || "idle";
+  hideEmptyTiles(stateName === "error");
+  syncProgressComplete();
 }
 
 // `hostId` is the host of the whole run (handleRunMode): a host chosen while

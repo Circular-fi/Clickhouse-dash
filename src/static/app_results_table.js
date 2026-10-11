@@ -167,6 +167,7 @@ function getVirtualRange(rowsLength, rowH, bodyEl) {
 }
 
 function createLiveTable({ wrap, host = {} }) {
+  if (wrap) tableMod.scrollCues(wrap);
   const table = $("table", wrap);
   const thead = $("thead", wrap);
   const tbody = $("tbody", wrap);
@@ -568,6 +569,8 @@ function createLiveTable({ wrap, host = {} }) {
       const th = document.createElement("th");
       th.textContent = resultColumns[i];
       if (resultTypes[i]) th.title = resultTypes[i];
+      // A number's header is over its figures, on the right with them (the cells are .num).
+      if (isScalarNumericType(resultTypeAsts[i] || null)) th.classList.add("num");
       tableMod.sortHeader(th, { key: i, onSort: () => setLiveSort(i) });
       tr.appendChild(th);
     }

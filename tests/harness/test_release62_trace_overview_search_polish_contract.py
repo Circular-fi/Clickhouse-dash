@@ -48,7 +48,7 @@ def test_search_controls_embed_field_names_and_use_theme_colors():
     # "Label · value" in a span of its own, so a long value ends in an ellipsis.
     assert "const full = label() ? `${label()} \\u00b7 ${text}` : text;" in js
     assert 'button.replaceChildren(h("span", { class: "tracePicker__label" }, full));' in js
-    assert css_sources.override("background: var(--buttonBg)")
+    assert css_sources.override("background: var(--button-bg)")
     assert css_sources.override("background: var(--panel)")
 
 

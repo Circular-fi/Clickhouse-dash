@@ -13,9 +13,9 @@
   min-width: 0;
   height: 28px;
   padding: 0 var(--space-10);
-  border: 1px solid var(--controlBorder);
+  border: 1px solid var(--control-border);
   border-radius: var(--r-md);
-  background: var(--inputBg);
+  background: var(--input-bg);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-sm);
@@ -24,9 +24,9 @@
 
 .uiSearch::placeholder { color: var(--muted); opacity: 1; }
 
-.uiSearch:hover { border-color: var(--controlBorderHover); }
+.uiSearch:hover { border-color: var(--control-border-hover); }
 
-.uiSearch:focus { border-color: var(--accentBorder); }
+.uiSearch:focus { border-color: var(--accent-fill); }
 
 /* In a dense bar (the trace view bar, the trace logs panel). */
 .uiSearch--compact { height: 24px; font-size: var(--fs-xs); }

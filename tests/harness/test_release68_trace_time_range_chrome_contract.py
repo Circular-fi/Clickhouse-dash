@@ -40,5 +40,5 @@ def test_range_picker_has_no_internal_scrollbar_and_theme_focus_is_neutral():
     menu = css_sources.decls('.traceSearchBar.obsFilterBar .tracePicker--range .tracePicker__menu')
     assert menu['max-height'] == 'none' and menu['overflow'] == 'visible'
     assert '.themeSelect--icons .themeSelect__button--icon:focus-visible' in css
-    assert css_sources.override('border-color: var(--buttonBorderHover)')
+    assert css_sources.override('border-color: var(--button-border-hover)')
     assert css_sources.override('box-shadow: none')

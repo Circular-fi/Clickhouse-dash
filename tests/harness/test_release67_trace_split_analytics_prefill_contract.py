@@ -73,9 +73,9 @@ def test_status_and_results_are_fixed_120px_and_search_button_is_fixed():
     assert '.traceSearchField--limit,' in css
     # The filter bar (.obsFilterBar) fixes Status / Results (narrow, 120 px)
     # and the Search button (the same primary submit on every view).
-    assert '--obsBarNarrow: 120px;' in css
-    assert '--obsBarSubmit: 112px;' in css
-    assert css_sources.override('width: var(--obsBarSubmit)')
+    assert '--obs-bar-narrow: 120px;' in css
+    assert '--obs-bar-submit: 112px;' in css
+    assert css_sources.override('width: var(--obs-bar-submit)')
     assert 'class="obsFilterBar__field obsFilterBar__field--narrow traceSearchField traceSearchField--status"' in html
     assert 'class="obsFilterBar__option traceSearchField traceSearchField--limit"' in html
 

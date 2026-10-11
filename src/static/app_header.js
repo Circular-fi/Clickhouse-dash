@@ -1,13 +1,13 @@
 // ns.header: what every page shell shares (app_ui.js held it together with the Query page's editor; that part is
 // app_query_ui.js now): the host picker and the hosts stream, the version badge and the feature flags
-// (/api/version), the page switcher, the theme, and the time zone of a host's DateTime text.
+// (/api/version), the page switcher (links), the theme, and the time zone of a host's DateTime text.
 //
 //   header.init()                  binds the shell: menus, page switcher, theme, hosts stream, /api/version
 //   header.setSelectedHostId(id)   the one place a host is selected (the host is state.selectedHostId)
 //   header.onHostSelected(fn)      fn(hostId) runs inside setSelectedHostId, before chdash:host-changed, in the order
 //                                  the modules asked (the host's metadata, the editor, the Run buttons)
 //   header.applyHostPickerUi()     the picker's label, dot, ping and lock
-//   header.setPageSelectorValue(page) / closePageMenu()      the page switcher's label and its menu
+//   header.setPageSelectorValue(page)     the page switcher's label and current link
 //   header.serverTimeZone(hostId) / serverTime(value, { hostId, precision })    the zone of a host's DateTime text
 //
 // The header never calls the modules of a page: it tells them by events. chdash:host-changed (detail.hostId: a host
@@ -232,7 +232,6 @@ function renderHostPicker(snapshot) {
     if (!h || !h.id) continue;
     const id = String(h.id);
     const isSelected = state.selectedHostId && id === String(state.selectedHostId);
-    if (isSelected) continue;
 
     const label = String(h.label || h.id);
     const healthy = !!h.healthy;
@@ -433,10 +432,10 @@ function applyPageNavigation(nav) {
   const hidden = !explorerEnabled && !systemEnabled && !observabilityEnabled && !mcpEnabled;
   dom.root?.classList.toggle("chdash-page-select-hidden", hidden);
   if (dom.pageSelect) dom.pageSelect.hidden = hidden;
-  if (dom.navExplorerButton) dom.navExplorerButton.hidden = !explorerEnabled;
-  if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;
-  if (dom.navSystemButton) dom.navSystemButton.hidden = !systemEnabled;
-  if (dom.navMcpButton) dom.navMcpButton.hidden = !mcpEnabled;
+  if (dom.navExplorerLink) dom.navExplorerLink.hidden = !explorerEnabled;
+  if (dom.navObservabilityLink) dom.navObservabilityLink.hidden = !observabilityEnabled;
+  if (dom.navSystemLink) dom.navSystemLink.hidden = !systemEnabled;
+  if (dom.navMcpLink) dom.navMcpLink.hidden = !mcpEnabled;
 }
 
 function applyProductFeatures() {
@@ -476,14 +475,13 @@ function setPageSelectorValue(value) {
   const labels = { query: "Query", explorer: "Explorer", observability: "Observability", system: "System", mcp: "MCP" };
   const page = Object.prototype.hasOwnProperty.call(labels, value) ? value : "query";
   if (dom.pageSelectButton) dom.pageSelectButton.textContent = labels[page];
-  if (dom.pageSelectMenu) {
-    for (const b of $$(".themeSelect__option[data-value]", dom.pageSelectMenu)) {
-      b.setAttribute("aria-selected", String(b.getAttribute("data-value") === page));
-    }
+  const links = { query: dom.navQueryLink, explorer: dom.navExplorerLink, observability: dom.navObservabilityLink, system: dom.navSystemLink, mcp: dom.navMcpLink };
+  for (const [name, link] of Object.entries(links)) {
+    if (name === page) link?.setAttribute("aria-current", "page");
+    else link?.removeAttribute("aria-current");
   }
 }
 
-function closePageMenu({ immediate = false } = {}) { menus.page?.close({ immediate }); }
 function applyTheme(mode) {
   const resolved = getResolvedTheme(mode);
   if (mode === "system") delete dom.root.dataset.theme;
@@ -522,27 +520,9 @@ function init() {
     canOpen: () => !dom.hostPicker?.classList.contains("is-static"),
   }) || null;
 
-  menus.page = menu?.bind(dom.pageSelectButton, dom.pageSelectMenu, { canOpen: () => !dom.pageSelect?.hidden }) || null;
-  // Every page is a document of its own: the other shells navigate to it. The Explorer's own controller
-  // (app_explorer.js) binds the Query and Explorer entries of its two pages.
-  const page = document.body?.dataset?.page;
-  if (page !== "explorer") dom.navExplorerButton?.addEventListener("click", () => window.location.assign(api.resolveUrl("explorer/catalog")));
-  if (page !== "explorer" && page !== "query") dom.navQueryButton?.addEventListener("click", () => window.location.assign(api.resolveUrl("query")));
-  // Observability (Traces, Logs, Metrics) is its own page: the other
-  // shells navigate to it, on its first enabled view.
-  dom.navObservabilityButton?.addEventListener("click", () => {
-    if (document.body?.dataset?.page !== "observability") window.location.assign(api.resolveUrl("observability"));
-  });
-  // System is its own page too (system.html, app_system.js).
-  dom.navSystemButton?.addEventListener("click", () => {
-    if (document.body?.dataset?.page !== "system") window.location.assign(api.resolveUrl("system"));
-    else closePageMenu();
-  });
-  // The MCP integration page (mcp.html, app_page_mcp.js) is its own page, listed once the server has MCP on.
-  dom.navMcpButton?.addEventListener("click", () => {
-    if (document.body?.dataset?.page !== "mcp") window.location.assign(api.resolveUrl("mcp-integration"));
-    else closePageMenu();
-  });
+  // The page switcher is a nav of links (header.html): every page is a document of its own, so a link is all it needs
+  // (a new tab, a copied address). Under 820 px the links fold into a menu under the current page's name.
+  menus.page = menu?.bind(dom.pageSelectButton, dom.pageSelectMenu, { items: "a[href]:not([hidden])", closeOnSelect: true, canOpen: () => !dom.pageSelect?.hidden }) || null;
   menus.theme = menu?.bind(dom.themeSelectButton, dom.themeSelectMenu) || null;
   if (dom.themeSelectMenu) {
     const buttons = $$(".themeSelect__option[data-value]", dom.themeSelectMenu);
@@ -576,4 +556,4 @@ function init() {
   startHostsSse();
 }
 
-export const header = Object.freeze({ init, setSelectedHostId, onHostSelected, applyHostPickerUi, setPageSelectorValue, closePageMenu, serverTimeZone, serverTime });
+export const header = Object.freeze({ init, setSelectedHostId, onHostSelected, applyHostPickerUi, setPageSelectorValue, serverTimeZone, serverTime });

@@ -33,7 +33,7 @@ test('a trace page has the header but no Observability tabs and no search', asyn
   // The header stays: the host and theme pickers, and the page switcher on Observability.
   await expect(page.locator('#hostPicker')).toBeVisible();
   await expect(page.locator('#themeSelect')).toBeVisible();
-  await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
+  await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
   // The back arrow is the one of a query shape's page (.pageBack).
   const arrow = page.locator('#traceBackButton');
   await expect(arrow).toHaveClass(/\bpageBack\b/);
@@ -128,10 +128,9 @@ test('the page switcher of a trace page leads to the other pages, and the trace 
   await mockTraceResults(page);
   await page.goto(`/observability/traces/${FIRST.trace_id}?from=now-1h&to=now`);
   await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
-  await page.locator('#pageSelectButton').click();
-  // The current page (Observability) is the button's label, not a menu entry.
-  await expect(page.locator('#navObservabilityButton')).toBeHidden();
-  await Promise.all([page.waitForURL(/\/query$/), page.locator('#navQueryButton').click()]);
+  // The trace is a page of Observability: its link is the current one. The others are links to their pages.
+  await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
+  await Promise.all([page.waitForURL(/\/query$/), page.locator('#navQueryLink').click()]);
   await expect(page.locator('body')).toHaveAttribute('data-page', 'query');
 });
 

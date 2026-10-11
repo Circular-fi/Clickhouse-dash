@@ -74,7 +74,7 @@ const MIDDOT = " \u00b7 ";
 const STORES = ["server", "local"];
 const ROOT_LABELS = { server: "Shared server storage", local: "Local browser storage" };
 const ROOT_HINTS = {
-  server: "Shared by everyone using this ChDash server, in its query library file.",
+  server: "Shared by everyone using this ClickHouse Dash server, in its query library file.",
   local: "Only this browser sees these queries (its localStorage).",
 };
 
@@ -1508,11 +1508,21 @@ function renderLibrary({ keepFocus = false } = {}) {
   const canEdit = anyEditable();
   libraryEls.actions.hidden = !canEdit;
   libraryEls.save.hidden = !canEdit;
-  libraryEls.save.disabled = !ctl.host;
+  syncSaveButton();
   libraryEls.wrap.classList.toggle("is-readonly", !canEdit);
   renderNotice();
   renderFoot();
   renderTree({ keepFocus });
+}
+
+// The editor is inert while the library is open: an empty one stays empty, and Save says so rather than only answering a
+// click. Read each time the library is shown (the editor changed since it was built).
+function syncSaveButton() {
+  const save = libraryEls.save;
+  if (!save) return;
+  const emptyEditor = !editorSql().trim();
+  save.disabled = !ctl.host || emptyEditor;
+  save.title = emptyEditor ? "Write a query first: the editor is empty" : `Save the editor's query (${util.modifierKeyLabel()}+S)`;
 }
 
 function renderNotice() {
@@ -2822,6 +2832,7 @@ async function show(tab) {
       renderLibrary();
     }
     if (!ctl.rendered.library) renderLibrary();
+    else syncSaveButton();
   } else if (!ctl.historyState.loaded) {
     renderHistory();
     await loadHistory();

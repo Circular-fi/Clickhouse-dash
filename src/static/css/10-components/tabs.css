@@ -39,7 +39,7 @@ a.contentTabs__tab {
 }
 
 .contentTabs__tab.is-active {
-  border-bottom-color: var(--accentBorder);
+  border-bottom-color: var(--accent-fill);
   color: var(--text);
 }
 

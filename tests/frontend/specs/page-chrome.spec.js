@@ -76,7 +76,7 @@ function chrome({ nav: navSelector, shells: shellSelectors }) {
     nav: box(nav),
     navPad: nav ? parseFloat(css(nav).paddingLeft) : null,
     navStyle: nav ? [css(nav).borderBottomWidth, css(nav).borderBottomColor, css(nav).backgroundColor] : null,
-    tokens: { border: probe('var(--border)'), panel: probe('var(--panelBg)'), bg: probe('var(--bg)') },
+    tokens: { border: probe('var(--border)'), panel: probe('var(--panel)'), bg: probe('var(--bg)') },
     bodyBg: [css(document.body).backgroundImage, css(document.body).backgroundColor],
     main: box(main),
     shells,
@@ -446,21 +446,27 @@ test.describe('touch screens', () => {
     await expect(nav).not.toHaveClass(/has-edge-(start|end)/);
   });
 
-  test('the header shows the host ClickHouse version in full on phones', async ({ page }, testInfo) => {
+  test('the header on a phone is one row: the logo, the host, the page menu and the theme; the host\'s version and ping stay in its menu', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-1440', 'the phone viewports are pinned: one project is enough');
     for (const size of [{ width: 390, height: 844 }, { width: 360, height: 740 }]) {
       await page.setViewportSize(size);
       for (const name of ['query', 'traces']) {
         await open(page, name);
-        const version = page.locator('#hostPickerVersion');
-        await expect(version).toHaveText(/\d+\.\d+/, { timeout: 15_000 });
-        await expect(version).toBeVisible();
-        const fit = await version.evaluate((el) => {
-          const r = el.getBoundingClientRect();
-          const button = el.closest('button').getBoundingClientRect();
-          return { clipped: el.scrollWidth > el.clientWidth + 1, inside: r.left >= button.left && r.right <= button.right };
+        const header = await page.evaluate(() => {
+          const box = (el) => el.getBoundingClientRect();
+          const text = document.getElementById('hostPickerText');
+          return {
+            height: box(document.querySelector('header.appHeader')).height,
+            versionShown: getComputedStyle(document.getElementById('hostPickerVersion')).display !== 'none',
+            badgeShown: getComputedStyle(document.getElementById('versionBadge')).display !== 'none',
+            clipped: text.scrollWidth > text.clientWidth + 1,
+            tops: ['hostPickerButton', 'pageSelectButton', 'themeSelectButton'].map((id) => Math.round(box(document.getElementById(id)).top)),
+          };
         });
-        expect(fit, `${name} @ ${size.width}`).toEqual({ clipped: false, inside: true });
+        expect(header.height, `${name} @ ${size.width}`).toBeLessThanOrEqual(64);
+        expect(header.versionShown && header.badgeShown, `${name} @ ${size.width}`).toBe(false);
+        expect(new Set(header.tops).size, `${name} @ ${size.width}: one row`).toBe(1);
+        expect(header.clipped, `${name} @ ${size.width}`).toBe(false);
       }
     }
   });

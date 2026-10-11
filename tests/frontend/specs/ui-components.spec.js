@@ -134,7 +134,7 @@ for (const scheme of ['dark', 'light']) {
     test('segmented: groups of pressed buttons, 28 / 24 px, the active token', async ({ page }) => {
       await page.goto('/observability/traces');
       await expect(page.locator('#tracesForm')).toBeVisible({ timeout: 15_000 });
-      const token = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--seg-active-bg').trim());
+      const token = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--selected-bg').trim());
       expect(token).toMatch(scheme === 'dark' ? /^rgba\(53, 111, 230, 0\.22\)$/ : /^rgba\(37, 88, 217, 0\.12\)$/);
       expect(token.endsWith(scheme === 'dark' ? '0.22)' : '0.12)')).toBe(true);
       for (const [selector, height] of [['.traceModeToggle', 28], ['.traceResultsViewToggle', 28], ['.traceDurationViews', 24]]) {
@@ -188,11 +188,17 @@ for (const scheme of ['dark', 'light']) {
       await expect(theme).toBeFocused();
       await expect(theme).toHaveAttribute('aria-expanded', 'false');
 
-      // Down on the button opens on the first item; type-ahead jumps.
+      // The page switcher is a nav of links from 821 px: no menu. Under it the links fold into a menu: Down on the
+      // button opens on the first link; type-ahead jumps.
+      await expect(page.locator('#pageSelectButton')).toBeHidden();
+      await expect(page.locator('#pageSelectMenu a:visible').first()).toBeVisible();
+      await page.setViewportSize({ width: 700, height: 800 });
       const pageButton = page.locator('#pageSelectButton');
+      await expect(pageButton).toBeVisible();
+      await expect(page.locator('#pageSelectMenu')).toBeHidden();
       await pageButton.focus();
       await page.keyboard.press('ArrowDown');
-      const pages = page.locator('#pageSelectMenu [role="option"]:visible');
+      const pages = page.locator('#pageSelectMenu a:visible');
       await expect(pages.first()).toBeFocused();
       const lastPage = (await pages.last().textContent()).trim();
       await page.keyboard.press(lastPage[0].toLowerCase());
@@ -232,7 +238,7 @@ for (const scheme of ['dark', 'light']) {
         await expect(select).toHaveAttribute('tabindex', '-1');
         await expect(select).toHaveAttribute('aria-hidden', 'true');
       }
-      await expect(page.locator('.traceResultsSort .tracePicker__button')).toHaveText('Sort · Most Recent');
+      await expect(page.locator('.traceResultsSort .tracePicker__button')).toHaveText('Sort · Most recent');
       await expect(page.locator('.traceResultsSort')).not.toContainText('Sort:');
       const sort = page.locator('.traceResultsSort .tracePicker__button');
       await sort.focus();
@@ -343,10 +349,12 @@ test.describe('ui components on a phone', () => {
     // The tab rows keep one row.
     const row = await page.locator('#obsNav').boundingBox();
     expect(row.height).toBeLessThanOrEqual(49);
-    // The header menus too.
+    // The header menus too (the page switcher folds into one under 821 px).
+    await page.setViewportSize({ width: 700, height: 800 });
+    const folded = await page.evaluate(() => document.documentElement.clientWidth);
     await page.locator('#pageSelectButton').click();
     const menu = await page.locator('#pageSelectMenu').boundingBox();
-    expect(menu.x + menu.width).toBeLessThanOrEqual(vw + 0.5);
+    expect(menu.x + menu.width).toBeLessThanOrEqual(folded + 0.5);
     await page.keyboard.press('Escape');
   });
 });

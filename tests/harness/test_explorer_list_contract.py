@@ -77,8 +77,8 @@ def test_frontend_has_real_list_workspace_and_graph_mode() -> None:
     html = read("src/static/explorer.html")
     explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
 
-    assert 'id="navQueryButton"' in html
-    assert 'id="navExplorerButton"' in html
+    assert 'id="navQueryLink"' in html
+    assert 'id="navExplorerLink"' in html
     assert 'id="explorerWorkspace"' in html
     # Graph is a mode of the Catalog (its mode bar), no longer a top tab.
     assert 'id="explorerModeGraph"' in html and 'data-mode="graph"' in html

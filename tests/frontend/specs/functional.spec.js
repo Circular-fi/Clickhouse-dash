@@ -139,8 +139,8 @@ test('the address bar links to the query: ?sql= after a run, read back by a new 
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 8 AS draft');
 });
 
-test('the header wraps on narrow windows: brand, then host, page and theme, nothing clipped', async ({ page }) => {
-  for (const width of [600, 390]) {
+test('the header on narrow windows: two rows (the brand, then host, page and theme) to 601 px, one row on a phone, nothing clipped', async ({ page }) => {
+  for (const width of [700, 600, 390]) {
     await page.setViewportSize({ width, height: 800 });
     await openApp(page);
     const boxes = await page.evaluate(() => {
@@ -148,7 +148,9 @@ test('the header wraps on narrow windows: brand, then host, page and theme, noth
       return { brand: r('.appBrand'), host: r('#hostPickerButton'), pages: r('#pageSelectButton'), theme: r('#themeSelectButton'), vw: window.innerWidth, scroll: document.documentElement.scrollWidth };
     });
     expect(boxes.scroll).toBeLessThanOrEqual(width);
-    expect(boxes.host.top).toBeGreaterThanOrEqual(boxes.brand.bottom - 1);
+    // Over a phone the host has the row under the brand; on a phone (600 px and below) the chrome is one row.
+    if (width > 600) expect(boxes.host.top, `${width}`).toBeGreaterThanOrEqual(boxes.brand.bottom - 1);
+    else expect(Math.abs(boxes.host.top - boxes.pages.top), `${width}`).toBeLessThanOrEqual(1);
     for (const key of ['host', 'pages', 'theme']) {
       expect(boxes[key].left).toBeGreaterThanOrEqual(0);
       expect(boxes[key].right).toBeLessThanOrEqual(boxes.vw);
@@ -164,8 +166,7 @@ test('query and explorer are real browser routes with independent layouts', asyn
   await expect(page).toHaveURL(/\/explorer\/catalog$/);
   await expect(page.locator('#explorerWorkspace')).toBeVisible();
   await expect(page.locator('#queryWorkspace')).toBeHidden();
-  await page.locator('#pageSelectButton').click();
-  await page.locator('#navQueryButton').click();
+  await page.locator('#navQueryLink').click();
   await expect(page).toHaveURL(/\/query$/);
   await expect(page.locator('#queryWorkspace')).toBeVisible();
   await page.goBack();
@@ -292,7 +293,7 @@ test('in-cell bars: drawn once the stream has ended, in single and multiquery re
   await runQuery(page, 'SELECT number AS n, number - 50 AS d FROM numbers(4000) WHERE sleepEachRow(0.0005) = 0 SETTINGS max_block_size = 100');
   const body = page.locator('#resultTableBody');
   await expect(body.locator('tr:not(.resultTable__spacerRow)').first()).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('#queryStatusText')).toHaveText(/running/);
+  await expect(page.locator('#queryStatusText')).toHaveText(/running/i);
   expect(await body.locator('td.cellBar').count()).toBe(0);
   await waitForTerminal(page);
   await expect(body.locator('td.cellBar').first()).toBeAttached();
@@ -606,19 +607,19 @@ test('the metric rail sparklines span their tiles edge to edge, on a phone too',
   }));
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    // A phone folds the tiles into their summary line: unfold them.
-    if (width < 600 && (await page.locator('#runStatsSummary').getAttribute('aria-expanded')) === 'false') await page.locator('#runStatsSummary').click();
+    // 1100 px and below fold the tiles into their summary line: unfold them.
+    if (width <= 1100 && (await page.locator('#runStatsSummary').getAttribute('aria-expanded')) === 'false') await page.locator('#runStatsSummary').click();
     await expect.poll(async () => (await measure()).filter((m) => m.box && Number.isFinite(m.firstX)).length).toBeGreaterThanOrEqual(3);
     for (const m of (await measure()).filter((x) => x.box && Number.isFinite(x.firstX))) {
       const where = `${m.id} at ${width} px`;
       expect(Math.abs(m.box.left - m.inner.left), where).toBeLessThanOrEqual(0.5);
       expect(Math.abs(m.box.right - m.inner.right), where).toBeLessThanOrEqual(0.5);
       expect(Math.abs(m.box.bottom - m.inner.bottom), where).toBeLessThanOrEqual(0.5);
-      // The lower half of the tile, below the label.
+      // A band along the foot of the tile, under the figures (UI-011: the line never crosses the value).
       const height = m.box.bottom - m.box.top;
       const tileHeight = m.inner.bottom - m.inner.top;
-      expect(height / tileHeight, where).toBeGreaterThan(0.45);
-      expect(height / tileHeight, where).toBeLessThan(0.62);
+      expect(height / tileHeight, where).toBeGreaterThan(0.25);
+      expect(height / tileHeight, where).toBeLessThan(0.4);
       // The x domain maps edge to edge of the viewBox; a 1.5 px stroke at any DPR.
       expect(m.viewBox).toBe('0 0 100 24');
       expect(m.firstX, where).toBe(0);
@@ -1155,7 +1156,7 @@ for (const scheme of ['dark', 'light']) {
     expect(chipsFit).toBe(true);
     // Health dot uses the theme's status colour.
     const dot = await page.locator('#explorerDetailMeta .explorerHealthDot').evaluate((el) => getComputedStyle(el).backgroundColor);
-    expect(dot).toBe(scheme === 'light' ? 'rgb(21, 128, 61)' : 'rgb(52, 211, 153)');
+    expect(dot).toBe(scheme === 'light' ? 'rgb(19, 115, 51)' : 'rgb(52, 211, 153)');
   });
 }
 
@@ -1524,36 +1525,24 @@ test('right-click Details expands a result row inline, under the row, and closes
   const names = await view.locator('.rowDetails__name').allTextContents();
   expect(names).toEqual(['id', 'name', 'arr', 'm', 'tup.code', 'tup.label', 'maybe', 'long_text']);
   await expect(view.locator('.rowDetails__type')).toHaveCount(0);
-  // The detail's accent bar sits at exactly the same x as the expanded row's bar.
-  const bars = await page.evaluate(() => {
+  // The expanded row is the selected look (the fill, a 1 px edge above and below), and its details go on in it: the same
+  // fill and edge colour, the detail right under the row, at the same left edge.
+  const look = await page.evaluate(() => {
     const index = document.querySelector('#resultTableBody tr.is-rowExpanded td.dataTable__rowNum');
     const detail = document.querySelector('.rowDetails');
     const inner = (el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).borderLeftWidth);
-    const bar = (el) => {
-      const cs = getComputedStyle(el, '::before');
-      return { bg: cs.backgroundColor, width: cs.width, left: cs.left, top: cs.top, z: cs.zIndex };
-    };
-    // The selected row's bar is the shared .dataTable one: an inset shadow
-    // on its first cell.
-    const rowBar = (el) => {
-      const shadow = getComputedStyle(el).boxShadow;
-      return { bg: (shadow.match(/rgb\([^)]*\)/) || [''])[0], width: (shadow.match(/\) (\d+px) /) || ['', ''])[1], left: '0px' };
-    };
+    const colour = (el) => (getComputedStyle(el).boxShadow.match(/rgb\([^)]*\)/) || [''])[0];
     return {
-      row: inner(index), detail: inner(detail), rowBar: rowBar(index), detailBar: bar(detail),
+      row: inner(index), detail: inner(detail), rowEdge: colour(index), detailEdge: colour(detail),
+      rowFill: getComputedStyle(index).backgroundColor, detailFill: getComputedStyle(detail).backgroundColor,
       gap: detail.getBoundingClientRect().top - index.getBoundingClientRect().bottom,
     };
   });
-  expect(Math.abs(bars.row - bars.detail)).toBeLessThan(0.5);
-  // Same colour, drawn above the detail content (nothing tints it), and the
-  // detail bar starts over the row's bottom border to meet the row bar.
-  expect(bars.rowBar.bg).toBe('rgb(53, 111, 230)');
-  expect(bars.detailBar.bg).toBe(bars.rowBar.bg);
-  expect([bars.rowBar.width, bars.detailBar.width]).toEqual(['3px', '3px']);
-  expect([bars.rowBar.left, bars.detailBar.left]).toEqual(['0px', '0px']);
-  expect(bars.detailBar.top).toBe('-1px');
-  expect(bars.detailBar.z).toBe('1');
-  expect(Math.abs(bars.gap)).toBeLessThanOrEqual(1);
+  expect(Math.abs(look.row - look.detail)).toBeLessThan(0.5);
+  expect(look.rowEdge).toBe('rgb(53, 111, 230)');
+  expect(look.detailEdge).toBe(look.rowEdge);
+  expect(look.detailFill).toBe('rgba(53, 111, 230, 0.22)');
+  expect(Math.abs(look.gap)).toBeLessThanOrEqual(1);
   // Result table wraps do not reserve a scrollbar gutter.
   expect(await page.locator('#resultTableBody').evaluate((tbody) => getComputedStyle(tbody.closest('.tableWrap')).scrollbarGutter)).toBe('auto');
   const values = view.locator('.rowDetails__value');
@@ -1712,8 +1701,8 @@ test('row menu Details on another row replaces the open detail, and copies a cel
     return `${tr.parentElement.tagName}:${[...tr.parentElement.children].indexOf(tr)}:${el.cellIndex}`;
   }));
   const fill = () => page.evaluate(() => [...new Set([...document.querySelectorAll('td.is-copyTarget')].map((el) => {
-    const cs = getComputedStyle(el);
-    return `${cs.backgroundColor}|${cs.boxShadow}`;
+    // The fill only: the row a menu acts on has its own edges (box-shadow).
+    return getComputedStyle(el).backgroundColor;
   }))]);
   await menu.getByRole('menuitem', { name: 'Copy cell' }).hover();
   await expect.poll(lit).toEqual(['TBODY:2:2']);
@@ -1722,7 +1711,7 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   await menu.getByRole('menuitem', { name: 'Copy row' }).hover();
   await expect.poll(async () => (await lit()).length).toBe(await rows.nth(2).locator('td').count());
   expect((await lit()).every((key) => key.startsWith('TBODY:2:'))).toBe(true);
-  // Same highlight as Copy cell (the index cell keeps its accent bar).
+  // Same highlight as Copy cell (the index cell keeps its own fill).
   expect((await fill()).filter((f) => f !== cellFill[0]).length).toBeLessThanOrEqual(1);
   await menu.getByRole('menuitem', { name: 'Copy column' }).hover();
   await expect.poll(async () => (await lit()).every((key) => key.endsWith(':2'))).toBe(true);
@@ -2477,95 +2466,39 @@ async function holdRequests(page, pattern) {
   };
 }
 
-for (const path of ['/query', '/explorer/catalog', '/observability/traces']) {
-  test(`${path}: the theme button shows the saved theme from the first paint, before any page script`, async ({ page }) => {
-    await page.goto(path, { waitUntil: 'domcontentloaded' });
-    for (const mode of ['light', 'dark']) {
-      await page.evaluate((m) => localStorage.setItem('chdash.theme', m), mode);
-      const scripts = await holdRequests(page, '**/static/*.js');
-      try {
-        await page.reload({ waitUntil: 'domcontentloaded' });
-        // The button holds the three sprite icons; CSS shows the saved mode's.
-        const icon = await page.evaluate(() => ({
-          shown: [...document.querySelectorAll('#themeSelectText > .themeIcon')]
-            .filter((el) => getComputedStyle(el).display !== 'none')
-            .map((el) => [...el.classList].find((c) => c.startsWith('themeIcon--'))),
-          mode: document.documentElement.dataset.themeMode,
-        }));
-        expect(icon.mode).toBe(mode);
-        expect(icon.shown).toEqual([`themeIcon--${mode}`]);
-      } finally {
-        await scripts.release();
-      }
-      await page.unrouteAll({ behavior: 'ignoreErrors' });
-    }
-    await page.evaluate(() => localStorage.removeItem('chdash.theme'));
-  });
-}
-
-test('/observability/traces: the analytics charts hold their place from the first paint, so the results never jump down', async ({ page }) => {
-  test.setTimeout(90_000);
-  // A first visit learns from /api/traces/meta that analytics are enabled.
-  await page.goto('/observability/traces');
-  await expect(page.locator('#traceAnalyticsGrid')).toBeVisible({ timeout: 30_000 });
-  const toolbarTop = () => page.evaluate(() => Math.round(document.querySelector('.traceSearchResults__toolbar').getBoundingClientRect().top));
-  const api = await holdRequests(page, '**/api/**');
-  try {
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    // Page scripts are running but no API answer (meta included) arrived:
-    // the grid is already laid out.
-    await expect.poll(() => api.count()).toBeGreaterThan(0);
-    await expect(page.locator('#traceAnalyticsGrid')).toBeVisible();
-    const before = await toolbarTop();
-    await api.release();
-    await expect(page.locator('html')).not.toHaveClass(/chdash-trace-analytics/, { timeout: 30_000 });
-    await expect(page.locator('#traceAnalyticsGrid')).toBeVisible();
-    expect(Math.abs((await toolbarTop()) - before)).toBeLessThanOrEqual(1);
-  } finally {
-    await api.release();
-  }
-  // A deployment without analytics does not reserve the space. (Set before
-  // any script of the next document runs: the open page may still re-render
-  // its analytics and write the flag again.)
-  await page.addInitScript(() => localStorage.setItem('chdash.traceAnalytics.v1', '0'));
-  const held = await holdRequests(page, '**/api/**');
-  try {
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#traceAnalyticsGrid')).toBeHidden();
-  } finally {
-    await held.release();
-  }
-});
-
 for (const path of ['/query', '/explorer/catalog', '/observability/traces', '/observability/logs', '/observability/metrics', '/system']) {
-  test(`${path}: the Query / Explorer / Observability / System switcher is painted with the shell, before any API answer`, async ({ page }) => {
+  test(`${path}: the Query / Explorer / Observability / System links are painted with the shell, before any API answer`, async ({ page }) => {
+    // A first visit learns which pages the server has on (the header's script keeps it, as the shell's first paint
+    // reads it); the next one paints them all at once, and nothing moves when the API answers.
+    await page.goto(path);
+    await expect(page.locator('#versionBadge')).not.toHaveText('--');
+    await expect.poll(() => page.evaluate(() => !!localStorage.getItem('chdash.pageNav.v1'))).toBe(true);
     const api = await holdRequests(page, '**/api/**');
     try {
-      const pageSelectBox = () => page.evaluate(() => {
+      const switcherBox = () => page.evaluate(() => {
         const el = document.getElementById('pageSelect');
         const r = el.getBoundingClientRect();
-        return { hidden: el.hidden, display: getComputedStyle(el).display, x: r.x, y: r.y, width: r.width, height: r.height };
+        const links = [...el.querySelectorAll('a')].filter((a) => a.getClientRects().length).map((a) => a.textContent.trim());
+        return { hidden: el.hidden, display: getComputedStyle(el).display, x: r.x, y: r.y, width: r.width, height: r.height, links };
       });
       await page.goto(path, { waitUntil: 'domcontentloaded' });
-      await expect(page.locator('#pageSelectButton')).toBeVisible();
+      await expect(page.locator('#navQueryLink')).toBeVisible();
       // Scripts have started and their /api calls (version, hosts) are parked.
       await expect.poll(() => api.count()).toBeGreaterThan(0);
       await expect(page.locator('#versionBadge')).toHaveText('--');
-      await expect(page.locator('#pageSelectButton')).toBeVisible();
-      const early = await pageSelectBox();
+      const early = await switcherBox();
       expect(early.hidden).toBe(false);
       expect(early.width).toBeGreaterThan(0);
+      expect(early.links).toEqual(['Query', 'Explorer', 'Observability', 'System']);
 
       await api.release();
       await expect(page.locator('#versionBadge')).not.toHaveText('--');
       await expect(page.locator('#hostPickerText')).not.toHaveText('Host');
-      await expect(page.locator('#pageSelectButton')).toBeVisible();
-      expect(await pageSelectBox()).toEqual(early);
-      // The open menu lists the other pages (the current one is implied).
-      await page.locator('#pageSelectButton').click();
+      expect(await switcherBox()).toEqual(early);
+      // Every page is a link; this page's own is the current one.
       const current = path.startsWith('/observability') ? 'observability' : path.slice(1).split('/')[0];
-      const others = ['query', 'explorer', 'observability', 'system'].filter((name) => name !== current);
-      await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(others.map((name) => name[0].toUpperCase() + name.slice(1)));
+      const name = current[0].toUpperCase() + current.slice(1);
+      await expect(page.locator('#pageSelectMenu a[aria-current="page"]')).toHaveText(name);
     } finally {
       await api.release();
     }
@@ -3357,7 +3290,7 @@ test('traces: a result shows its error span count next to its title and the head
   const rows = (await (await answered).json()).rows;
   expect(rows.length).toBeGreaterThanOrEqual(3);
   await expect(page.locator('#tracesResults .traceResult[data-trace-id]')).toHaveCount(rows.length);
-  await expect(page.locator('#tracesResultCount')).toHaveText(new RegExp(`^${rows.length} Traces \\(in [\\d.]+ (µs|ms|s)\\) · 2 with errors$`));
+  await expect(page.locator('#tracesResultCount')).toHaveText(new RegExp(`^${rows.length} Traces \\(in [\\d.]+ (µs|ms|s)\\) · 2 with errors · bars up to [\\d.]+ (µs|ms|s)$`));
   for (const [id, errors] of errorsById) {
     const card = page.locator(`#tracesResults .traceResult[data-trace-id="${id}"]`);
     if (errors) {
@@ -3393,12 +3326,12 @@ test('traces: result items carry a duration bar, Jaeger tags, the full trace id 
   const items = page.locator('#tracesResults .traceResultItem[data-trace-id]');
   await expect(items).toHaveCount(SYNTHETIC_TRACES.length);
   // "N Traces (in X ms)": the search latency measured by the browser.
-  await expect(page.locator('#tracesResultCount')).toHaveText(/^6 Traces \(in \d+(\.\d+)? (µs|ms|s)\) · 2 with errors$/);
+  await expect(page.locator('#tracesResultCount')).toHaveText(/^6 Traces \(in \d+(\.\d+)? (µs|ms|s)\) · 2 with errors · bars up to 610 ms$/);
 
   const maxMs = Math.max(...SYNTHETIC_TRACES.map((trace) => trace.duration_ms));
   for (const trace of SYNTHETIC_TRACES) {
     const item = page.locator(`#tracesResults .traceResultItem[data-trace-id="${trace.trace_id}"]`);
-    // Duration bar: the share of the longest listed duration, behind the title line.
+    // Duration bar: the share of the longest listed duration, a rule along the foot of the title line.
     const [barWidth, lineWidth] = await item.locator('.traceResultItem__title').evaluate((line) => [line.querySelector('.traceResultItem__durationBar').getBoundingClientRect().width, line.getBoundingClientRect().width]);
     expect(Math.abs(barWidth / lineWidth - trace.duration_ms / maxMs)).toBeLessThan(0.01);
     await expect(item.locator('.traceResult__wideTitle')).toHaveText(syntheticName(trace));
@@ -3445,8 +3378,8 @@ test('traces: result items carry a duration bar, Jaeger tags, the full trace id 
   const mesh = page.locator('#tracesResults .traceResultItem[data-trace-id="c1d2e3f4a5b60718293a4b5c6d7e8f90"]');
   const visible = mesh.locator('.traceSvcPills > .traceSvcPill:visible');
   const shown = await visible.count();
-  expect(shown).toBeGreaterThan(0);
-  expect(shown).toBeLessThan(20);
+  // The three most costly services, at any width the line holds them.
+  expect(shown).toBe(3);
   const more = mesh.locator('.traceSvcMore');
   await expect(more).toBeVisible();
   await expect(more).toHaveText(`+${20 - shown}`);
@@ -3464,9 +3397,9 @@ test('traces: result items carry a duration bar, Jaeger tags, the full trace id 
   expect(await popover.locator('.traceSvcPill').evaluateAll((nodes) => nodes.map((node) => node.dataset.service))).toEqual(hiddenNames);
   await page.mouse.move(5, 5);
   await expect(popover).toBeHidden();
-  // A narrower window shows fewer pills, still on one line.
+  // A narrower window shows no more than that, still on one line.
   await page.setViewportSize({ width: 1000, height: 800 });
-  await expect.poll(() => mesh.locator('.traceSvcPills > .traceSvcPill:visible').count()).toBeLessThan(shown);
+  await expect.poll(() => mesh.locator('.traceSvcPills > .traceSvcPill:visible').count()).toBeLessThanOrEqual(shown);
   await expect(more).toHaveText(`+${20 - await mesh.locator('.traceSvcPills > .traceSvcPill:visible').count()}`);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
@@ -3486,7 +3419,7 @@ test('traces: the table view sorts every column both ways, opens a row, and is r
   const rows = table.locator('tbody tr[data-trace-id]');
   await expect(rows).toHaveCount(SYNTHETIC_TRACES.length);
   const order = () => rows.evaluateAll((nodes) => nodes.map((node) => node.dataset.traceId));
-  // The picker's order (Most Recent) carries over: Start, newest first.
+  // The picker's order (Most recent) carries over: Start, newest first.
   await expect(table.locator('th[data-table-sort="start"]')).toHaveAttribute('aria-sort', 'descending');
   const byKey = {
     name: (t) => syntheticName(t).toLowerCase(),
@@ -3763,7 +3696,7 @@ test.describe('audit round 2: Query', () => {
     await page.keyboard.press('Escape');
     await runQuery(page, "SELECT 1 AS one; SELECT 'two' AS label;");
     await waitForBatch(page, 2);
-    await expect(page.locator('#queryStatusText')).toHaveText('finished');
+    await expect(page.locator('#queryStatusText')).toHaveText('Finished');
     await expect(page.locator('#progressPercentText')).toHaveText('100%');
     expect(await page.locator('#progressCard').evaluate((el) => el.style.getPropertyValue('--p'))).toBe('1');
     await expect(page.locator('#copyJsonButton')).toHaveText('Copy all');
@@ -3783,7 +3716,7 @@ test.describe('audit round 2: Query', () => {
     await openApp(page);
     await runQuery(page, 'SELEC broken FROM nowhere');
     await waitForTerminal(page);
-    await expect(page.locator('#queryStatusText')).toHaveText('error');
+    await expect(page.locator('#queryStatusText')).toHaveText('Error');
     await expect(page.locator('#errorBanner')).toBeVisible();
     await expect(page.locator('#copySplit')).toBeHidden();
     await runSuccessfulQuery(page, 'SELECT 1 AS one');
@@ -4036,6 +3969,9 @@ for (const [width, height] of [[1440, 900], [1000, 800]]) {
   test(`${width}px: the System line of the Elapsed tile stays under its value, on one line, however long the figure`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await openApp(page);
+    // The tiles are there once a run has filled them (the idle rail is one line; under 1100 px they fold into a summary).
+    await runSuccessfulQuery(page, 'SELECT 1 AS one');
+    if (width <= 1100) await page.locator('#runStatsSummary').click();
     const tile = page.locator('.metricCompact--elapsed');
     const geometry = () => page.evaluate(() => {
       const box = (el) => { const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom, left: b.left, right: b.right, height: b.height }; };

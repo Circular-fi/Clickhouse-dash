@@ -31,7 +31,7 @@ const TOKENS = {
   '--sev-debug': ['#8b95a5', '#556378'],
   '--sev-trace': ['#7d8590', '#66727f'],
   '--accent-fill': ['#356fe6', '#2558d9'],
-  '--accent-tint': ['rgba(53, 111, 230, 0.16)', 'rgba(37, 88, 217, 0.1)'],
+  '--selected-bg': ['rgba(53, 111, 230, 0.22)', 'rgba(37, 88, 217, 0.12)'],
   '--danger-fill': ['#dc2626', '#dc2626'],
   '--on-fill': ['#ffffff', '#ffffff'],
   '--accent-text': ['#93b4ff', '#1d4ed8'],
@@ -66,9 +66,9 @@ const computed = (value) => (value.startsWith('#') ? rgb(value) : value);
 
 // Older tokens that now alias a semantic one: the values they had before.
 const ALIASES = {
-  '--error-bg': ['rgba(239, 68, 68, 0.12)', 'rgba(239, 68, 68, 0.12)'],
-  '--accentText': ['rgb(147, 180, 255)', 'rgb(29, 78, 216)'],
-  '--graph-error': ['rgb(248, 113, 113)', 'rgb(185, 28, 28)'],
+  '--danger-bg': ['rgba(239, 68, 68, 0.12)', 'rgba(239, 68, 68, 0.12)'],
+  '--accent-text': ['rgb(147, 180, 255)', 'rgb(29, 78, 216)'],
+  '--danger': ['rgb(248, 113, 113)', 'rgb(185, 28, 28)'],
 };
 
 async function open(page, path) {

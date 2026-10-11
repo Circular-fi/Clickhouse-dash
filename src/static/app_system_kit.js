@@ -15,6 +15,7 @@ import { router } from "./app_router.js";
 import { features as featuresMod, state, storage } from "./app_state.js";
 import { badge } from "./app_ui_badge.js";
 import { copy as copyMod } from "./app_ui_copy.js";
+import { table as tableMod } from "./app_ui_table.js";
 import { util } from "./app_util.js";
 
 const SEP = " · ";
@@ -103,8 +104,8 @@ const seconds = (value) => (Number(value) > 0 ? format.duration.fromSeconds(valu
 
 function dataTable(id, headers, rows) {
   const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: [header.num && "num", header.className], title: header.title || null }, header.label)));
-  return h("div", { class: "dataTableWrap" },
-    h("table", { class: "dataTable dataTable--compact systemTable", id }, h("thead", null, head), h("tbody", null, rows)));
+  return tableMod.scrollCues(h("div", { class: "dataTableWrap" },
+    h("table", { class: "dataTable dataTable--compact systemTable", id }, h("thead", null, head), h("tbody", null, rows))));
 }
 
 // The error share of a section's queries: neutral under 1 %, a warning to 5 %, danger from there.

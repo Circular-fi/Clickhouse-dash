@@ -35,7 +35,7 @@ body[data-page="mcp"] #mcpPanel {
 }
 
 .mcpNote--fine {
-  font-size: var(--fs-xs);
+  font-size: var(--fs-sm);
 }
 
 /* The page's main text, when MCP is off, reads at the body size. */
@@ -78,7 +78,7 @@ body[data-page="mcp"] #mcpPanel {
   display: none;
 }
 
-@media (min-width: 1366px) {
+@media (min-width: 1280px) {
   .mcpLayout {
     grid-template-columns: minmax(0, 1fr) clamp(28rem, 36vw, 42rem);
   }
@@ -93,7 +93,7 @@ body[data-page="mcp"] #mcpPanel {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--tableBg);
+  background: var(--table-bg);
 }
 
 .mcpSide:empty {
@@ -112,7 +112,7 @@ body[data-page="mcp"] #mcpPanel {
   border-top: 1px solid var(--border);
 }
 
-@media (min-width: 760px) and (max-width: 1365px) {
+@media (min-width: 761px) and (max-width: 1279px) {
   .mcpSide {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) minmax(0, 2fr);
   }
@@ -224,7 +224,7 @@ body[data-page="mcp"] #mcpPanel {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--editorSolidBg);
+  background: var(--editor-solid-bg);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -299,6 +299,16 @@ body[data-page="mcp"] #mcpPanel {
 .mcpTable .mcpCell--limits { width: 4.75rem; }
 .mcpTable .mcpCell--actions { width: 3.25rem; }
 
+/* A key that cannot be deleted: the lock stands where the Delete icon would be. */
+.mcpLock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+}
+
 .mcpKeyOpen {
   display: flex;
   align-items: center;
@@ -326,11 +336,6 @@ body[data-page="mcp"] #mcpPanel {
 .mcpKeyOpen:hover .mcpKeyChevron,
 .mcpKeyOpen:focus-visible .mcpKeyChevron {
   color: var(--text);
-}
-
-.mcpKeyOpen:hover .mcpKeyName,
-.mcpKeyOpen:focus-visible .mcpKeyName {
-  text-decoration: underline;
 }
 
 .mcpTable > tbody > tr[data-key-id] {
@@ -496,11 +501,11 @@ body[data-page="mcp"] #mcpPanel {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--tableBg);
+  background: var(--table-bg);
 }
 
 .mcpGroup.has-tools {
-  border-color: color-mix(in srgb, var(--accentBorder) 55%, var(--border));
+  border-color: color-mix(in srgb, var(--accent-fill) 55%, var(--border));
 }
 
 .mcpGroup__head {
@@ -523,8 +528,10 @@ body[data-page="mcp"] #mcpPanel {
   overflow: hidden;
   color: var(--muted);
   font-size: var(--fs-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Two lines, then an ellipsis (the whole text is in the title): a description cut after five words said nothing. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .mcpGroup__reason {
@@ -593,7 +600,7 @@ body[data-page="mcp"] #mcpPanel {
 /* The details of a key open in a row under it, one at a time: its facts at the left, its permissions at
    the right, in as many columns as fit. */
 .mcpTable > tbody > tr.is-open {
-  background: var(--rowHover);
+  background: var(--row-hover);
 }
 
 .mcpTable > tbody > tr.mcpDetailRow > td {
@@ -658,7 +665,7 @@ body[data-page="mcp"] #mcpPanel {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--tableBg);
+  background: var(--table-bg);
 }
 
 .mcpReachDb__summary {
@@ -750,7 +757,7 @@ body[data-page="mcp"] #mcpPanel {
 .mcpGrantGroup {
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--tableBg);
+  background: var(--table-bg);
 }
 
 /* A family the key holds nothing of: dashed, its count in --muted (no opacity: the count keeps 4.5:1). */
@@ -897,7 +904,7 @@ body[data-page="mcp"] #mcpPanel {
     padding: var(--space-10) var(--space-12);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
-    background: var(--tableBg);
+    background: var(--table-bg);
   }
   .mcpTable > tbody > tr > td {
     display: block;
@@ -1059,7 +1066,7 @@ body[data-page="mcp"] #mcpPanel {
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--ls-eyebrow);
   text-transform: uppercase;
 }
 

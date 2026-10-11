@@ -110,7 +110,7 @@ test('the progress of a batch shows: "running (2/3)" while the second statement 
   await enableMultiquery(page);
   await page.locator('#queryTextArea').fill('SELECT 1 AS a; SELECT sleep(1.2) AS b; SELECT 3 AS c;');
   await page.locator('#runButton').click();
-  await expect(page.locator('#queryStatusText')).toHaveText(/running \(2\/3\)/, { timeout: 8000 });
+  await expect(page.locator('#queryStatusText')).toHaveText(/running \(2\/3\)/i, { timeout: 8000 });
   await expectRunEnded(page, 20_000);
 });
 

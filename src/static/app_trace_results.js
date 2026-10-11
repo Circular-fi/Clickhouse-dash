@@ -59,47 +59,56 @@ function incompleteTagHtml(missing) {
   return badge.html("", { tone: "warn", className: "traceTag traceTag--incomplete", title: incompleteTooltip(missing), attrs: { "data-missing-parents": missing }, html: `${icon("alert-triangle", { size: "sm" })}Incomplete` });
 }
 
-function servicePillHtml(stat) {
+function servicePillHtml(stat, minor = false) {
   const errors = Number(stat.errors || 0);
   const errorTitle = errors ? ` · ${fmt.count(errors)} error span${errors === 1 ? "" : "s"}` : "";
   // A service chip: the shared badge with the service's left bar.
-  return `<span class="badge badge--md badge--neutral traceSvcPill${errors ? " has-errors" : ""}" data-service="${esc(stat.service)}" data-spans="${esc(stat.spans)}" data-errors="${errors}" style="--trace-service-color:${palette.service(stat.service)}" title="${esc(stat.service)} \u00b7 ${fmt.count(stat.spans)} span${stat.spans === 1 ? "" : "s"}${errorTitle}"><i class="serviceSwatch serviceSwatch--bar" aria-hidden="true"></i>${errors ? badge.html("!", { tone: "error", solid: true, className: "badge--count traceSvcPill__error", attrs: { "aria-label": "has errors" } }) : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${fmt.count(stat.spans)})</span></span>`;
+  return `<span class="badge badge--md badge--neutral traceSvcPill${errors ? " has-errors" : ""}${minor ? " is-minor" : ""}" data-service="${esc(stat.service)}" data-spans="${esc(stat.spans)}" data-errors="${errors}" style="--trace-service-color:${palette.service(stat.service)}" title="${esc(stat.service)} \u00b7 ${fmt.count(stat.spans)} span${stat.spans === 1 ? "" : "s"}${errorTitle}"><i class="serviceSwatch serviceSwatch--bar" aria-hidden="true"></i>${errors ? badge.html("!", { tone: "error", solid: true, className: "badge--count traceSvcPill__error", attrs: { "aria-label": "has errors" } }) : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${fmt.count(stat.spans)})</span></span>`;
 }
 
-// One line of service pills; layoutServicePills hides the ones that do not
-// fit and shows them behind a "+N" chip.
+// A row names its three most costly services (still in the order of their first span), the others are behind a "+N"
+// chip, in the list and in the table at any width: a wall of chips repeated down the page says nothing. Costly: the
+// services with errors first, then the most spans.
+const SERVICE_PILLS_SHOWN = 3;
+
+// One line of service pills; layoutServicePills hides the ones that do not fit, and the minor ones always, and shows them
+// behind a "+N" chip.
 function servicePillsHtml(stats) {
   if (!stats.length) return `<div class="traceSvcPills is-empty">${fmt.EMPTY}</div>`;
-  return `<div class="traceSvcPills">${stats.map(servicePillHtml).join("")}<button type="button" class="badge badge--md badge--neutral traceSvcMore" hidden>+0</button></div>`;
+  const costly = [...stats].sort((a, b) => (Number(b.errors || 0) > 0) - (Number(a.errors || 0) > 0) || Number(b.spans || 0) - Number(a.spans || 0) || String(a.service).localeCompare(String(b.service)));
+  const major = new Set(costly.slice(0, SERVICE_PILLS_SHOWN).map((stat) => stat.service));
+  return `<div class="traceSvcPills">${stats.map((stat) => servicePillHtml(stat, !major.has(stat.service))).join("")}<button type="button" class="badge badge--md badge--neutral traceSvcMore" hidden>+0</button></div>`;
 }
 
 function layoutServicePills(scope) {
   const groups = [...($$(".traceSvcPills:not(.is-empty)", scope) || [])];
   if (!groups.length) return;
-  // Write, read, then write again: one layout pass for the whole list.
+  // Write, read, then write again: one layout pass for the whole list. The minor pills (past the three most costly
+  // services) are never shown: only the major ones are measured and fitted.
   const prepared = groups.map((group) => {
     const pills = [...$$(":scope > .traceSvcPill", group)];
     const more = $(":scope > .traceSvcMore", group);
-    for (const pill of pills) pill.hidden = false;
+    for (const pill of pills) pill.hidden = pill.classList.contains("is-minor");
     if (more) { more.hidden = false; more.textContent = `+${pills.length}`; }
     // Natural widths: no pill shrinks while measuring.
     group.classList.add("is-measuring");
-    return { group, pills, more };
+    return { group, pills, major: pills.filter((pill) => !pill.hidden), more };
   });
   const gap = parseFloat(getComputedStyle(groups[0]).columnGap) || 4;
   const measured = prepared.map((item) => ({
     ...item,
     width: item.group.clientWidth,
-    widths: item.pills.map((pill) => pill.offsetWidth),
+    widths: item.major.map((pill) => pill.offsetWidth),
     moreWidth: item.more ? item.more.offsetWidth : 0,
   }));
-  for (const { group, pills, more, width, widths, moreWidth } of measured) {
+  for (const { group, pills, major, more, width, widths, moreWidth } of measured) {
     group.classList.remove("is-measuring");
     if (!width) { if (more) more.hidden = true; continue; }
     let used = 0;
     let shown = 0;
+    const minors = pills.length - major.length;
     const total = widths.reduce((sum, w) => sum + w, 0) + gap * Math.max(0, widths.length - 1);
-    if (total <= width + 0.5) shown = pills.length;
+    if (total + (minors ? gap + moreWidth : 0) <= width + 0.5) shown = major.length;
     else {
       for (let i = 0; i < widths.length; i += 1) {
         const next = used + (i ? gap : 0) + widths[i];
@@ -110,7 +119,7 @@ function layoutServicePills(scope) {
       // The first pill always shows (ellipsized when it alone is too wide).
       shown = Math.max(1, shown);
     }
-    pills.forEach((pill, index) => { pill.hidden = index >= shown; });
+    major.forEach((pill, index) => { pill.hidden = index >= shown; });
     if (more) {
       const rest = pills.length - shown;
       more.hidden = rest <= 0;
@@ -159,7 +168,7 @@ function resultItemHtml(trace, maxDurationNs) {
           <span class="traceResultItem__durationBar" style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}" aria-hidden="true"></span>
           <a title="${esc(title)}" class="traceResult__wideTitle" href="${esc(spanTraceUrl(trace.trace_id))}">${esc(title)}</a>${errors ? errorTagHtml(errors) : ""}${missing ? incompleteTagHtml(missing) : ""}
           <code class="traceResult__fullId">${esc(trace.trace_id)}</code>
-          ${copy.buttonHtml({ label: "Copy Trace ID", className: "traceCopyButton", attrs: { "data-copy-trace": trace.trace_id } })}
+          ${copy.buttonHtml({ label: "Copy trace ID", className: "traceCopyButton", attrs: { "data-copy-trace": trace.trace_id } })}
           <span class="traceResult__right"><b>${esc(fmt.duration(trace.duration_ns))}</b></span>
         </div>
         <div class="traceResult__line traceResult__line--stats">
@@ -190,7 +199,7 @@ function resultTableHtml(rows, maxDurationNs) {
     const percent = maxDurationNs > 0 ? Math.max(0, Math.min(100, (Number(trace.duration_ns || 0) / maxDurationNs) * 100)) : 0;
     const { absolute, ago, title: startTitle, timeTitle: startTimeTitle } = startTexts(trace);
     return `<tr class="traceTable__row" data-trace-id="${esc(trace.trace_id)}" tabindex="-1">
-        <td class="traceTable__name has-copy" data-cell="name"><span class="traceTable__nameText" title="${esc(name)}"><b>${esc(trace.root_service || "unknown")}:</b> ${esc(trace.root_operation || "trace")}</span>${missing ? incompleteTagHtml(missing) : ""}${table.copyCellHtml(trace.trace_id, "Copy Trace ID")}</td>
+        <td class="traceTable__name has-copy" data-cell="name"><span class="traceTable__nameText" title="${esc(name)}"><b>${esc(trace.root_service || "unknown")}:</b> ${esc(trace.root_operation || "trace")}</span>${missing ? incompleteTagHtml(missing) : ""}${table.copyCellHtml(trace.trace_id, "Copy trace ID")}</td>
         <td class="traceTable__services" data-cell="services">${servicePillsHtml(services)}</td>
         <td class="num" data-cell="spans">${fmt.count(Number(trace.span_count || 0))}</td>
         <td class="num" data-cell="errors">${errors ? badge.html(fmt.count(errors), { tone: "error", className: "badge--count traceErrorBadge", title: `${fmt.count(errors)} error span${errors === 1 ? "" : "s"}` }) : "0"}</td>
@@ -260,10 +269,12 @@ function renderResultCount(rows) {
   const count = byId("tracesResultCount");
   if (!count) return;
   const withErrors = rows.filter((trace) => Number(trace.error_count || 0) > 0).length;
+  const longest = Math.max(0, ...rows.map((trace) => Number(trace.duration_ns || 0)));
   const latency = model.searched && Number.isFinite(model.searchLatencyMs)
     && [" ", h("span", { class: "tracesResultCount__latency", title: "Search request time, measured in the browser" }, `(in ${fmt.duration.fromMs(model.searchLatencyMs)})`)];
   h.replace(count, `${fmt.count(rows.length)} Trace${rows.length === 1 ? "" : "s"}`, latency,
-    withErrors > 0 && [" ", h("span", { class: "tracesResultCount__errors", title: `${fmt.count(withErrors)} of the listed traces have error spans` }, `· ${fmt.count(withErrors)} with error${withErrors === 1 ? "" : "s"}`)]);
+    withErrors > 0 && [" ", h("span", { class: "tracesResultCount__errors", title: `${fmt.count(withErrors)} of the listed traces have error spans` }, `· ${fmt.count(withErrors)} with error${withErrors === 1 ? "" : "s"}`)],
+    model.resultsView !== "table" && longest > 0 && [" ", h("span", { class: "tracesResultCount__scale", title: "The bar under each trace is its duration against the longest trace listed, from 0" }, `· bars up to ${fmt.duration(longest)}`)]);
 }
 
 let resultsResizeObserver = null;

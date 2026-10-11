@@ -10,7 +10,7 @@
   padding: var(--space-10) var(--space-12) var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--tableBg);
+  background: var(--table-bg);
 }
 
 .queryChart__toolbar {
@@ -46,7 +46,7 @@
 
 .chartCore__yline { height: 0; border-top: 1px dashed color-mix(in srgb, var(--text) 40%, transparent); }
 
-.chartCore__select { background: color-mix(in srgb, var(--accentBorder) 16%, transparent); border-inline: 1px solid color-mix(in srgb, var(--accentBorder) 70%, transparent); }
+.chartCore__select { background: color-mix(in srgb, var(--accent-fill) 16%, transparent); border-inline: 1px solid color-mix(in srgb, var(--accent-fill) 70%, transparent); }
 
 .chartCore__dot { width: 9px; height: 9px; margin: -4px 0 0 -4px; border: 2px solid var(--panel); border-radius: 50%; box-sizing: border-box; }
 
@@ -54,7 +54,7 @@
 
 .chartCore__badge { padding: 0 var(--space-6); border-radius: var(--r-sm); background: color-mix(in srgb, var(--text) 92%, transparent); color: var(--panel); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-.chartCore__overlay:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 60%, transparent); border-radius: var(--r-sm); }
+.chartCore__overlay:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-fill) 60%, transparent); border-radius: var(--r-sm); }
 
 .chartCore__probe { position: absolute; width: 0; height: 0; overflow: hidden; visibility: hidden; forced-color-adjust: none; }
 
@@ -68,7 +68,7 @@
   min-width: 160px;
   max-width: 340px;
   padding: var(--space-8) var(--space-10);
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-md);
   background: var(--panel);
   box-shadow: var(--shadow-overlay);
@@ -114,7 +114,7 @@
 
 .chartCore__legendTable thead th { color: var(--muted); font-weight: var(--fw-semibold); }
 
-.chartCore__legendTable tbody tr:hover { background: var(--rowHover); }
+.chartCore__legendTable tbody tr:hover { background: var(--row-hover); }
 
 .chartCore__legendItem {
   display: inline-flex;
@@ -134,7 +134,7 @@
 
 .chartCore__legendTable .chartCore__legendItem { max-width: 100%; padding-left: var(--space-2); }
 
-.chartCore__legendItem:hover { border-color: var(--buttonBorder); }
+.chartCore__legendItem:hover { border-color: var(--button-border); }
 
 .chartCore__legendItem i { flex: 0 0 auto; width: 14px; height: 3px; border-radius: var(--r-sm); }
 
@@ -153,7 +153,7 @@
   flex: 0 0 auto;
   height: 1.4rem;
   padding: 0 var(--space-8);
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-md);
   background: transparent;
   color: var(--muted);
@@ -170,7 +170,7 @@
 .chartCore__legendMode:focus-visible { box-shadow: var(--ring); }
 
 /* Chart extensions: dashed series, folded tooltip rows, markers (exemplar links). */
-.chartCore__legendItem.is-dashed i { background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--panelBg) 3px 5px); }
+.chartCore__legendItem.is-dashed i { background-image: repeating-linear-gradient(90deg, transparent 0 3px, var(--panel) 3px 5px); }
 
 .chartCore__tipRow--more em { color: var(--muted); font-size: var(--fs-xs); }
 
@@ -184,7 +184,7 @@
   height: 7px;
   border-radius: var(--r-sm);
   background: var(--warning);
-  box-shadow: 0 0 0 1.25px var(--panelBg);
+  box-shadow: 0 0 0 1.25px var(--panel);
   transform: rotate(45deg);
 }
 
@@ -196,9 +196,9 @@
 
 .chartCore__pick { width: 0; height: 0; border: 1.5px solid var(--text); border-radius: 50%; box-sizing: border-box; box-shadow: 0 0 0 1px var(--panel); }
 
-.chartCore__box { box-sizing: border-box; background: color-mix(in srgb, var(--accentBorder) 16%, transparent); border: 1.5px dashed color-mix(in srgb, var(--accentBorder) 80%, transparent); }
+.chartCore__box { box-sizing: border-box; background: color-mix(in srgb, var(--accent-fill) 16%, transparent); border: 1.5px dashed color-mix(in srgb, var(--accent-fill) 80%, transparent); }
 
-.chartCore__region { box-sizing: border-box; background: color-mix(in srgb, var(--accentBorder) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accentBorder) 70%, transparent); }
+.chartCore__region { box-sizing: border-box; background: color-mix(in srgb, var(--accent-fill) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent-fill) 70%, transparent); }
 
 .chartCore__region[hidden],
 .chartCore__box[hidden],
@@ -266,9 +266,9 @@
 /* Services trends: a neutral line and light area; anomalies are the only colour (dots). */
 .sparkline.traceSvcSpark { --sparkline-color: var(--graph-edge-muted); flex: 1 1 0; min-width: 0; width: 0; height: 24px; }
 
-.chartCore__annotation.traceSvcRelease { border-left-color: var(--accentBorder); }
+.chartCore__annotation.traceSvcRelease { border-left-color: var(--accent-fill); }
 
-.chartCore__annotation.traceSvcRelease > span { color: var(--accentBorder); }
+.chartCore__annotation.traceSvcRelease > span { color: var(--accent-fill); }
 
 /* Zero-specificity display: a page that hides its card (the Query chart
    outside the Chart view) keeps hiding it. */

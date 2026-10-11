@@ -340,13 +340,17 @@ function createDisks(ctx) {
     return (growing[0] || list[0]).forecast;
   }
 
+  // A path breaks after a "/", never inside a segment: <wbr> after each slash (else "/var/lib/clickhouse/disks/fixture_" and
+  // "hot/" on two lines).
+  const pathNodes = (path) => String(path).split(/(?<=\/)/).flatMap((part, index) => (index ? [h("wbr"), part] : [part]));
+
   // A disk's own facts: its share of the visible data, its path and policies.
   function diskFacts(data, disk) {
     const usage = usageOf(data, disk.name);
     return [
       fact("data", "ClickHouse data", usage ? format.bytes(usage.bytes) : format.bytes(0), { sub: usage ? `${format.countLabel(usage.parts, "part")}${SEP}${format.countLabel(usage.databases, "database")}` : "no active part of a visible database" }),
-      fact("path", "Path", disk.path || DASH, { mono: true }),
-      disk.cache_path ? fact("cache", "Cache path", disk.cache_path, { mono: true }) : null,
+      fact("path", "Path", disk.path ? pathNodes(disk.path) : DASH, { mono: true, title: disk.path || "" }),
+      disk.cache_path ? fact("cache", "Cache path", pathNodes(disk.cache_path), { mono: true, title: disk.cache_path }) : null,
       fact("policies", "Policies", (disk.policies || []).length
         ? (disk.policies || []).map((item, index) => [index ? ", " : "", h("span", { class: "mono" }, `${item.policy} / ${item.volume}`)])
         : "In no storage policy", { title: "Storage policy / volume" }),
@@ -612,7 +616,7 @@ function createDisks(ctx) {
           h("span", { class: "systemDiskDb__disk mono" }, disk),
           h("span", { class: "systemDiskDb__total" }, `${format.bytes(total)}${SEP}${format.countLabel(Number(totals[disk].databases) || own.length, "database")}${SEP}${format.countLabel(Number(totals[disk].parts) || 0, "part")}`)),
         strip,
-        h("div", { class: "dataTableWrap" }, table));
+        tableMod.scrollCues(h("div", { class: "dataTableWrap" }, table)));
     });
     const note = h("p", { class: "systemCard__note" },
       `Active parts of the databases the runner can see (bytes on disk); a database opens on its storage in the Explorer.${data.usage?.truncated ? ` The first ${format.count(data.limits?.usage_row_limit || 1000)} rows.` : ""}`);
@@ -648,7 +652,7 @@ function createDisks(ctx) {
           h("td", { class: "is-mid" }, volume.volume_type || DASH),
           h("td", { class: "num is-mid", title: "max_data_part_size: larger parts go to the next volume (0: no limit)" }, volume.max_data_part_size == null ? DASH : Number(volume.max_data_part_size) > 0 ? format.bytes(volume.max_data_part_size) : "No limit"),
           h("td", { class: "num is-mid", title: "move_factor: parts move to the next volume when the free share falls under it" }, volume.move_factor == null ? DASH : format.percent(volume.move_factor)),
-          h("td", { class: "is-mid" }, volume.prefer_not_to_merge == null ? DASH : volume.prefer_not_to_merge ? "No merges" : "Merges")));
+          h("td", { class: "is-mid", title: volume.prefer_not_to_merge ? "prefer_not_to_merge: merges avoid this volume" : null }, volume.prefer_not_to_merge ? "Avoided" : DASH)));
       });
     }
     const table = h("table", { class: "dataTable dataTable--compact systemTable systemDiskPolicy__table", id: "systemDiskPolicyTable" },
@@ -662,7 +666,7 @@ function createDisks(ctx) {
         h("th", { scope: "col", class: "is-mid", title: "prefer_not_to_merge" }, "Merging"))),
       h("tbody", null, rows));
     const note = data.policies_truncated ? h("p", { class: "systemCard__note" }, `The first ${format.count(data.limits?.policy_row_limit || 500)} volumes.`) : null;
-    h.replace(policies, head, h("div", { class: "dataTableWrap" }, table), note);
+    h.replace(policies, head, tableMod.scrollCues(h("div", { class: "dataTableWrap" }, table)), note);
   }
 
   function resetForHost() {

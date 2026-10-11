@@ -23,7 +23,7 @@
   width: 16px;
   height: 16px;
   transform: translateY(-50%);
-  background-color: var(--themeSelectArrow);
+  background-color: var(--theme-select-arrow);
   opacity: 0.95;
   pointer-events: none;
   mask-image: var(--icon-chevron-down);
@@ -65,11 +65,11 @@
 }
 
 .queryLibraryMenu__tab:hover {
-  background: var(--hoverTint);
+  background: var(--hover-tint);
 }
 
 .queryLibraryMenu__tab[aria-selected="true"] {
-  border-color: var(--buttonBorder);
+  border-color: var(--button-border);
   background: color-mix(in srgb, var(--panel) 88%, transparent);
 }
 
@@ -93,8 +93,8 @@
 }
 
 .queryLibrary.is-open > .queryLibrary__button:hover {
-  background: var(--buttonBg);
-  border-color: var(--buttonBorder);
+  background: var(--button-bg);
+  border-color: var(--button-border);
 }
 
 .queryLibrary.is-open > .queryLibraryMenu {
@@ -112,7 +112,7 @@
 }
 
 .queryLibrary.is-open > .queryLibraryButton {
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
+  background: color-mix(in srgb, var(--accent-fill) 16%, transparent);
   color: var(--text);
 }
 
@@ -161,7 +161,7 @@
 .qlIconButton:focus-visible,
 .qlNode:focus-visible > .qlRow,
 .qhItem:focus-visible {
-  outline: 2px solid var(--accentBorder);
+  outline: 2px solid var(--accent-fill);
   outline-offset: -2px;
 }
 
@@ -182,13 +182,13 @@
    tools slot holds the icon buttons (Saved) or nothing (History), so the
    search stands at the same place on both tabs. */
 .ql__head {
-  --qlHeadRow: 1.9rem;
+  --ql-head-row: 1.9rem;
   box-sizing: border-box;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  min-height: calc(var(--qlHeadRow) + 0.95rem);
+  min-height: calc(var(--ql-head-row) + 0.95rem);
   padding: var(--space-8) var(--space-10) var(--space-6);
 }
 
@@ -201,21 +201,20 @@
   gap: var(--space-6);
   height: 28px;
   padding: 0 var(--space-10);
-  border: 1px solid var(--controlBorder);
+  border: 1px solid var(--control-border);
   border-radius: var(--r-md);
-  background: var(--inputBg);
+  background: var(--input-bg);
   color: var(--muted);
 }
 
-.qlSearch:hover { border-color: var(--controlBorderHover); }
+.qlSearch:hover { border-color: var(--control-border-hover); }
 
 /* One ring around the field (the input itself draws none). */
-.qlSearch:focus-within { border-color: var(--accentBorder); }
 
 .qlSearch:has(> .qlSearch__input:focus-visible) { box-shadow: var(--ring); }
 
 /* The input's own ring is recoloured away: the field draws the one ring. */
-.qlSearch > .qlSearch__input { --focusRingColor: transparent; }
+.qlSearch > .qlSearch__input { --focus-ring-color: transparent; }
 
 .ql__actions {
   display: flex;
@@ -254,7 +253,7 @@
 }
 
 .qlTree.is-dropTarget {
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 55%, transparent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-fill) 55%, transparent);
   border-radius: var(--r-lg);
 }
 
@@ -300,17 +299,18 @@
 
 .qlNode[aria-selected="true"] > .qlRow,
 .qlNode.is-menuTarget > .qlRow {
-  background: color-mix(in srgb, var(--accentBorder) 15%, transparent);
+  background: var(--selected-bg);
+  box-shadow: inset 0 0 0 1px var(--selected-edge);
 }
 
 .qlRow.is-opened .qlRow__name {
-  color: color-mix(in srgb, var(--accentBorder) 60%, var(--text));
+  color: color-mix(in srgb, var(--accent-fill) 60%, var(--text));
   font-weight: var(--fw-semibold);
 }
 
 .qlNode.is-dropTarget > .qlRow {
-  background: color-mix(in srgb, var(--accentBorder) 22%, transparent);
-  box-shadow: inset 0 0 0 1px var(--accentBorder);
+  background: color-mix(in srgb, var(--accent-fill) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--accent-fill);
 }
 
 .qlNode.is-dragging > .qlRow {
@@ -477,7 +477,7 @@
 /* A touch screen's icon buttons are --hit square, and the row's menu button is always there. */
 @media (pointer: coarse) {
   .qlIconButton { width: var(--hit); height: var(--hit); }
-  .ql__head { --qlHeadRow: var(--hit); }
+  .ql__head { --ql-head-row: var(--hit); }
   .qlRow__menu { opacity: 1; }
   .qlRow { min-height: var(--hit); }
 }
@@ -499,7 +499,7 @@
 
 .qlMenu__opt:focus-visible,
 .qlMenu__opt:hover {
-  background: var(--hoverTint);
+  background: var(--hover-tint);
 }
 
 .qlMenu__opt--danger:hover,
@@ -557,9 +557,9 @@
   max-width: min(30rem, calc(100vw - 2rem));
   transform: translateX(-50%);
   padding: var(--space-8) var(--space-10);
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
-  background: var(--panelBg);
+  background: var(--panel);
   box-shadow: var(--shadow-overlay);
   color: var(--text);
   font-size: var(--fs-sm);
@@ -568,7 +568,7 @@
 
 .qlToast--error {
   border-color: color-mix(in srgb, var(--danger) 55%, transparent);
-  background: color-mix(in srgb, var(--danger) 12%, var(--panelBg));
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
 }
 
 /* Nothing listed: the tab's one empty state, centred across the dialog (no
@@ -597,11 +597,11 @@
   top: 0;
   z-index: var(--z-raised);
   padding: var(--space-8) var(--space-8) var(--space-4);
-  background: var(--panelBg);
+  background: var(--panel);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--ls-eyebrow);
   text-transform: uppercase;
 }
 
@@ -621,7 +621,8 @@
 }
 
 .qhItem[aria-selected="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 12%, transparent);
+  background: var(--selected-bg);
+  box-shadow: inset 0 0 0 1px var(--selected-edge);
 }
 
 .qhItem__status {
@@ -912,5 +913,29 @@
   /* Narrow list: the "Updated" column goes, the row keeps its name and its "..." button. */
   .qlRow__meta {
     display: none;
+  }
+}
+
+/* A destructive tool (Delete, Remove) reads in the danger colour, without the
+   filled look of the confirm's own Delete. */
+.qlPreview__tools .button--danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: transparent;
+  color: var(--danger);
+  box-shadow: none;
+}
+
+.qlPreview__tools .button--danger:not(:disabled):hover {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+@media (max-width: 760px) {
+  .qlPreview__foot .button {
+    flex: 1 1 auto;
+    min-height: 2.4rem;
+  }
+  .qlPreview__tools .button {
+    min-height: 2.2rem;
   }
 }

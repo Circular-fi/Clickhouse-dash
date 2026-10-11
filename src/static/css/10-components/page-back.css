@@ -17,7 +17,7 @@
 }
 
 .pageBack:focus-visible {
-  background: var(--rowHover);
+  background: var(--row-hover);
   color: var(--text);
 }
 

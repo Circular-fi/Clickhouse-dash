@@ -35,7 +35,7 @@ const EMPTY = format.EMPTY;
 
 // The tools that a new key holds: the data tools (hosts, databases, tables, rows). The other families are chosen.
 const DEFAULT_GROUPS = new Set(["data"]);
-const NEEDS_EVERYTHING = "Needs the data pattern * alone: ChDash cannot limit this tool to some tables.";
+const NEEDS_EVERYTHING = "Needs the data pattern * alone: ClickHouse Dash cannot limit this tool to some tables.";
 
 // What the server's reason says when it sends no sentence of its own.
 const REASON_TEXT = {
@@ -47,7 +47,7 @@ const REASON_TEXT = {
   too_many: "A key reads one host at most: make one key for each host.",
   mcp_user_unavailable: "The MCP user of this host cannot connect.",
   not_grantable: "The MCP user of this host cannot serve this tool.",
-  unknown_tool: "ChDash does not know this tool.",
+  unknown_tool: "ClickHouse Dash does not know this tool.",
   needs_all_data: NEEDS_EVERYTHING,
   duplicate: "This value is listed twice.",
   range: "This number is outside the allowed range.",
@@ -195,7 +195,7 @@ function buildForm(meta) {
       reason.hidden = true;
       only.wrap.classList.add("mcpGroup__only");
       const card = h("div", { class: "mcpGroup mcpGroup--single", dataset: { group: group.id } },
-        h("div", { class: "mcpGroup__head" }, only.wrap, h("span", { class: "mcpGroup__note" }, group.note), reason));
+        h("div", { class: "mcpGroup__head" }, only.wrap, h("span", { class: "mcpGroup__note", title: group.note }, group.note), reason));
       groupsBox.appendChild(card);
       cards.push({ group, card, single: true, all: only, members, reason, count: null });
       continue;
@@ -207,7 +207,7 @@ function buildForm(meta) {
     const reason = h("span", { class: "mcpGroup__reason" });
     reason.hidden = true;
     const card = h("div", { class: "mcpGroup", dataset: { group: group.id } },
-      h("div", { class: "mcpGroup__head" }, all.wrap, h("span", { class: "mcpGroup__note" }, group.note), reason, count, toggle), body);
+      h("div", { class: "mcpGroup__head" }, all.wrap, h("span", { class: "mcpGroup__note", title: group.note }, group.note), reason, count, toggle), body);
     toggle.addEventListener("click", () => {
       const open = body.hidden;
       body.hidden = !open;
@@ -480,7 +480,7 @@ function reachBody(access) {
     const total = host.databases.reduce((sum, database) => sum + database.tableCount, 0);
     head.appendChild(h("span", { class: "mcpMuted" }, `${count(total)} ${total === 1 ? "table" : "tables"} in ${count(host.databases.length)} ${host.databases.length === 1 ? "database" : "databases"}`));
     const why = [];
-    why.push(`The MCP user reads ${count(host.readableByUser)} ${host.readableByUser === 1 ? "table" : "tables"} (CHECK GRANT).`);
+    why.push(`The ClickHouse grants of the MCP user let it read ${count(host.readableByUser)} ${host.readableByUser === 1 ? "table" : "tables"}.`);
     if (access.allData) why.push("This key's data is *: all of them.");
     else why.push(`The key keeps those that match ${access.patterns.join(", ")}${host.excludedByKey ? `, and leaves out ${count(host.excludedByKey)}` : ""}.`);
     block.appendChild(h("p", { class: "mcpNote mcpReachHost__why" }, why.join(" ")));
@@ -599,7 +599,7 @@ function showSecret({ meta, key, secret }) {
   const body = h("div", { class: "mcpReveal" });
   body.append(
     h("p", { class: "mcpReveal__lead" }, `Key ${key.name} is ready.`),
-    h("p", { class: "mcpReveal__warn", role: "note" }, "Copy the secret now: ChDash shows it only this time. It keeps a hash of the secret, so a lost secret cannot be found again: delete the key and make a new one."),
+    h("p", { class: "mcpReveal__warn", role: "note" }, "Copy the secret now: ClickHouse Dash shows it only this time. It keeps a hash of the secret, so a lost secret cannot be found again: delete the key and make a new one."),
     h("div", { class: "uiField" },
       h("label", { class: "uiField__label", for: "mcpSecret" }, "Secret"),
       h("div", { class: "uiField__row" },

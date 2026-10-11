@@ -178,6 +178,29 @@ def test_every_page_sheet_declares_the_layers_once_and_keeps_them_in_order():
         assert blocks == sorted(blocks, key=list(LAYER_DIRS).index) and len(blocks) == len(set(blocks)), (name, blocks)
 
 
+# The widths at which a layout changes (docs/ui-foundations.md, "Page shell"): --bp-sm, --bp-tab, --bp-md, --bp-lg, --bp-xl.
+BREAKPOINTS = {600, 760, 820, 1100, 1279}
+
+
+def test_a_media_query_names_one_of_the_five_breakpoints():
+    offenders = []
+    for path, layer, nodes in sources():
+        for node in nodes:
+            stack = [node]
+            while stack:
+                current = stack.pop()
+                if not isinstance(current, css_tree.AtRule):
+                    continue
+                if current.name == "media":
+                    for kind, value, unit in re.findall(r"\((max|min)-width:\s*([0-9.]+)(px|rem|em)\)", current.prelude):
+                        px = float(value) * (1 if unit == "px" else 16)
+                        # A min-width is the pixel above a breakpoint (821 pairs with max-width: 820).
+                        if px not in (BREAKPOINTS if kind == "max" else {b + 1 for b in BREAKPOINTS}):
+                            offenders.append(f"{rel(path)}: @media {current.prelude}")
+                stack.extend(current.children or [])
+    assert not offenders, "use --bp-sm / --bp-tab / --bp-md / --bp-lg / --bp-xl (600, 760, 820, 1100, 1279):\n" + "\n".join(offenders)
+
+
 SPACES = {2, 4, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64, 80}
 SPACING = re.compile(r"(padding|margin|gap|row-gap|column-gap)(-(top|right|bottom|left|inline|block)(-(start|end))?)?")
 

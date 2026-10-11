@@ -14,7 +14,7 @@ def test_nothing_repaints_or_relayouts_a_page_at_rest():
     shell = read("src/static/css/20-features/shell.css")
     # The healthy host dot: a ring moved by transform and opacity (the compositor), three times, not a
     # box-shadow animated forever on the main thread (7 to 20 % of a core on every page).
-    assert "animation: hostDotHealthyPulse 1.8s ease-in-out 3;" in shell
+    assert "animation: hostDotHealthyPulse var(--dur-settle) ease-in-out 3;" in shell
     keyframes = shell[shell.index("@keyframes hostDotHealthyPulse"):].split("\n", 1)[0]
     assert "transform" in keyframes and "opacity" in keyframes and "box-shadow" not in keyframes
     assert ".hostDot--good::after" in css and "hostDotHealthyPulse 1.8s ease-in-out infinite" not in css

@@ -60,7 +60,7 @@ test('observability: the view tabs are links to pages of their own, each a histo
   // /observability sends the browser to the first enabled view's page.
   await expect.poll(() => pathOf(page)).toBe('/observability/traces');
   await expectView(page, 'traces');
-  await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
+  await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#tracesTabs [data-trace-tab]')).not.toHaveCount(0);
   // The tabs are plain links, in the Tab order.
   await expect(page.locator('#obsTabs a[data-obs-tab]')).toHaveCount(3);
@@ -103,7 +103,7 @@ test('observability: the view tabs are a row under the header, the Traces tabs o
   const header = page.locator('header.appHeader');
   await expect(header.locator('[role="tab"], [role="tablist"]')).toHaveCount(0);
   await expect(header.locator('#hostPicker, #pageSelect, #themeSelect')).toHaveCount(3);
-  await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
+  await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
   // The row, in the body under the header: the nav row's underline tabs (.contentTabs--nav).
   const nav = page.locator('body > nav#obsNav');
   await expect(nav).toBeVisible();
@@ -433,14 +433,14 @@ for (const path of ['/query', '/explorer/catalog']) {
   test(`observability: the ${path} switcher opens the Observability page`, async ({ page, request }) => {
     await features(request);
     await page.goto(path);
-    await page.locator('#pageSelectButton').click();
-    await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toContainText(['Observability']);
-    await page.locator('#navObservabilityButton').click();
+    await expect(page.locator('#pageSelectMenu a:visible')).toContainText(['Observability']);
+    await expect(page.locator('#navObservabilityLink')).toHaveAttribute('href', '/observability');
+    await page.locator('#navObservabilityLink').click();
     await expect.poll(() => pathOf(page)).toBe('/observability/traces');
     await expectView(page, 'traces');
-    await page.locator('#pageSelectButton').click();
-    await expect(page.locator('#pageSelectMenu .themeSelect__option:visible')).toHaveText(['Query', 'Explorer', 'System']);
-    await page.locator('#navExplorerButton').click();
+    await expect(page.locator('#pageSelectMenu a:visible')).toHaveText(['Query', 'Explorer', 'Observability', 'System']);
+    await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
+    await page.locator('#navExplorerLink').click();
     await expect.poll(() => pathOf(page)).toMatch(/^\/explorer\/catalog/);
   });
 }
@@ -536,7 +536,7 @@ test.describe('observability formats on a French browser in Paris', () => {
 
     await result.click();
     await expect(page.locator('#traceDetail')).toBeVisible();
-    const start = page.locator('#traceDetailStats [data-trace-header-item="Trace Start"] .statTile__value');
+    const start = page.locator('#traceDetailStats [data-trace-header-item="Trace start"] .statTile__value');
     await expect(start).toHaveText(sep20('03:22:52.000'));
     expect(await start.locator('time').getAttribute('title')).toContain('2026-09-20T01:22:52.000Z');
     // The span inspector: the start offset, then the local time to the ms.
@@ -552,7 +552,7 @@ test.describe('observability formats on a French browser in Paris', () => {
     const trace = largeTrace(2000);
     await routeTrace(page, trace);
     await page.goto(`/observability/traces/${trace.trace_id}`);
-    await expect(page.locator('#traceDetailStats [data-trace-header-item="Total Spans"] .statTile__value')).toHaveText('2,000', { timeout: 30_000 });
+    await expect(page.locator('#traceDetailStats [data-trace-header-item="Total spans"] .statTile__value')).toHaveText('2,000', { timeout: 30_000 });
   });
 
   test('observability formats: Services releases and slowest spans print 24 h local times', async ({ page }) => {
@@ -596,7 +596,7 @@ test.describe('observability formats on a French browser in Paris', () => {
       return same;
     })).toBe(true);
     await tableRow.click();
-    await expect(page.locator('#logsSideTitle .logsSideTitle__time')).toHaveText(sep20('03:22:55.742983150'));
+    await expect(page.locator('#logsSideTitle .logsSideTitle__time')).toHaveText(sep20('03:22:55.742'));
   });
 });
 

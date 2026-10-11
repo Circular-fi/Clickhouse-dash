@@ -700,7 +700,7 @@ function initEditor() {
   });
 }
 
-// A phone (600 px and below, query.css): the run stats tiles fold into one
+// 1100 px and below (query.css), where the rail is no longer beside the editor: the run stats tiles fold into one
 // summary line ("7 ms \u00b7 120,064 rows \u00b7 1.9 MB read \u00b7 CPU 87.7%
 // \u00b7 1.8 MB memory"), a .foldSummary that unfolds them, so the results
 // start above the fold. The fold only bites at that width.
@@ -718,7 +718,7 @@ function initRunStatsSummary() {
   };
   const shown = (el) => !!el && !el.closest(".metricCompact.is-hidden");
   const refresh = () => {
-    // Before the first run the tiles say "No run yet": so does the summary.
+    // Before the first run the rail is one line that says where the stats will be: the summary says what it is.
     if (dom.runStatsTiles?.classList.contains("is-idle")) {
       util.setMetaLine(text, "Run stats");
       return;

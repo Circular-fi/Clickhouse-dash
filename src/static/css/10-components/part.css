@@ -24,7 +24,7 @@
 .pagePart__title {
   margin: 0;
   color: var(--text);
-  font-size: var(--fs-lg);
+  font-size: var(--fs-xl);
   font-weight: var(--fw-semibold);
   line-height: 1.3;
 }

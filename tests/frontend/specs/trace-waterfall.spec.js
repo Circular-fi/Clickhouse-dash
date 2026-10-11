@@ -110,15 +110,15 @@ test('trace detail: header items like Jaeger\'s, with Errors and an Incomplete t
   await openTrace(page, trace);
   const item = (label) => page.locator(`#traceDetailStats [data-trace-header-item="${label}"] .statTile__value`);
   // Then the trace's logs (app_trace_logs.js, when logs are enabled).
-  await expect(page.locator('#traceDetailStats [data-trace-header-item] > .statTile__label')).toHaveText(['Trace Start', 'Duration', 'Services', 'Depth', 'Total Spans', 'Errors', 'Logs']);
+  await expect(page.locator('#traceDetailStats [data-trace-header-item] > .statTile__label')).toHaveText(['Trace start', 'Duration', 'Services', 'Depth', 'Total spans', 'Errors', 'Logs']);
   // Browser-local (UTC here), 24 h, the year only when it is not this one,
   // seconds and muted milliseconds.
-  await expect(item('Trace Start')).toHaveText(`Sep 20${new Date().getFullYear() === 2026 ? '' : ', 2026'} 01:22:52.000`);
-  await expect(item('Trace Start').locator('small')).toHaveText('.000');
+  await expect(item('Trace start')).toHaveText(`Sep 20${new Date().getFullYear() === 2026 ? '' : ', 2026'} 01:22:52.000`);
+  await expect(item('Trace start').locator('small')).toHaveText('.000');
   await expect(item('Duration')).toHaveText('100 ms');
   await expect(item('Services')).toHaveText('10');
   await expect(item('Depth')).toHaveText('6');
-  await expect(item('Total Spans')).toHaveText('13');
+  await expect(item('Total spans')).toHaveText('13');
   await expect(item('Errors')).toHaveText('2');
   await expect(page.locator('#traceDetailStats [data-trace-header-item="Errors"]')).toHaveClass(/is-error/);
   // One span (the mailer) points at a parent missing from the trace.

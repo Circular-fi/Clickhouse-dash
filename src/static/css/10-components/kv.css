@@ -35,7 +35,7 @@
   margin: 0;
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: var(--r-sm);
-  background: color-mix(in srgb, var(--panelBg) 70%, transparent);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
   font-size: var(--fs-sm);
   line-height: 1.35;
 }
@@ -49,11 +49,11 @@
 }
 
 .kvList__row:nth-child(even) {
-  background: color-mix(in srgb, var(--theadBg) 48%, transparent);
+  background: color-mix(in srgb, var(--thead-bg) 48%, transparent);
 }
 
 .kvList__row:hover {
-  background: var(--rowHover);
+  background: var(--row-hover);
 }
 
 .kvList__key {
@@ -141,7 +141,7 @@
 
 .kvList__action:hover,
 .kvList__more:hover {
-  background: var(--hoverTint);
+  background: var(--hover-tint);
   color: var(--text);
 }
 
@@ -286,7 +286,7 @@
 
 .kvList__row[data-filter-scope] .kv__v:hover,
 .kvList__row[data-filter-scope] .kv__v[aria-expanded="true"] {
-  background: var(--rowHover);
+  background: var(--row-hover);
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }

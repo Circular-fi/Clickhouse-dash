@@ -711,7 +711,7 @@ def test_user_filter_lists_one_users_shapes_and_the_window_names_its_users(topq)
     assert sum(counts) == every["totals"]["calls"], (users, every["totals"])
     runner = next((item for item in users if item["name"] == "chdash_runner"), None)
     assert runner is not None and runner["calls"] >= 30, users
-    # Hide ChDash (the default): never the system account.
+    # Hide internal reads (the default): never the system account.
     assert all(item["name"] != "chdash_system" for item in users), users
     one = queries(user="chdash_runner", sort="calls", **window)
     assert one["user"] == "chdash_runner" and one["status"] == "ok", one

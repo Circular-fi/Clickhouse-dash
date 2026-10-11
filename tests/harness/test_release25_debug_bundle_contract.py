@@ -40,7 +40,7 @@ def test_copy_split_no_longer_contains_debug_download() -> None:
     for page in ("src/static/query.html",):
         html = read(page)
         copy_menu = html[html.index('id="copyMenu"'):html.index('id="clearResultsButton"')]
-        assert "Download Debug" not in copy_menu
+        assert "Download debug" not in copy_menu
         assert 'id="downloadReceivedZipButton"' not in copy_menu
         run_menu = html[html.index('id="runMenu"'):html.index('id="queryLibrary"')]
         assert 'id="downloadDebugButton"' in run_menu

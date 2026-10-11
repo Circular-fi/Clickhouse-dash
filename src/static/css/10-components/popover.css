@@ -33,9 +33,9 @@
   display: grid;
   gap: var(--space-2);
   padding: var(--space-6) var(--space-10);
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  background: var(--panelBg);
+  background: var(--panel);
   box-shadow: var(--shadow-overlay);
   color: var(--text);
   font-size: var(--fs-xs);
@@ -65,9 +65,9 @@
   max-width: calc(100vw - 16px);
   max-height: calc(100dvh - 16px);
   overflow: auto;
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-md);
-  background: var(--panelBg);
+  background: var(--panel);
   box-shadow: var(--shadow-overlay);
   color: var(--text);
 }

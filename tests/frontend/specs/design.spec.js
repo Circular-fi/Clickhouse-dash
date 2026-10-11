@@ -296,7 +296,6 @@ test('system captures the Overview top to bottom, Queries, a query shape, Disks 
   await page.goto('/system/disks');
   await expect(page.locator('#systemDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 30_000 });
   await captureState(page, testInfo, 'system-disks');
-  await page.locator('#pageSelectButton').click();
   await expect(page.locator('#pageSelectMenu')).toBeVisible();
   await captureState(page, testInfo, 'system-page-switcher');
 });

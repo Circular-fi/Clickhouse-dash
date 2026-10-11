@@ -21,7 +21,7 @@ def test_global_focus_visible_ring_is_the_only_override_outline():
     # The ring lives in the overrides layer: it wins over every component and
     # feature rule without !important, and it is the only outline there.
     overrides = (css_sources.CSS / "30-overrides.css").read_text(encoding="utf-8")
-    ring = re.search(r":where\(a\[href\], [^{]*\):focus-visible \{\n  outline: 2px solid var\(--focusRingColor\);", overrides)
+    ring = re.search(r":where\(a\[href\], [^{]*\):focus-visible \{\n  outline: 2px solid var\(--focus-ring-color\);", overrides)
     assert ring, "the global :focus-visible ring is missing"
     assert "textarea:not(#queryTextArea)" in ring.group(0)
     # The forced-colors block (Windows high contrast) outlines the selected states: that is not a focus ring.
@@ -42,8 +42,8 @@ def test_no_focus_rule_removes_the_outline():
 
 
 def test_ring_token_is_the_same_two_pixel_ring_in_every_theme():
-    assert "--ring: 0 0 0 2px var(--focusRingColor);" in CSS
+    assert "--ring: 0 0 0 2px var(--focus-ring-color);" in CSS
     assert CSS.count("--ring:") == 1
     for block in ('html[data-theme="dark"] {', 'html[data-theme="light"] {'):
         start = CSS.index(block)
-        assert "--focusRingColor:" in CSS[start : CSS.index("}", start)], block
+        assert "--focus-ring-color:" in CSS[start : CSS.index("}", start)], block

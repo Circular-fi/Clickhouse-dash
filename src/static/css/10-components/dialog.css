@@ -6,7 +6,7 @@
   max-height: none;
   margin: auto;
   padding: 0;
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--r-lg);
   background: var(--panel);
   color: var(--text);
@@ -157,7 +157,7 @@
   padding: var(--space-8) var(--space-10);
   border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
   border-radius: var(--r-lg);
-  background: var(--error-bg);
+  background: var(--danger-bg);
   font-size: var(--fs-sm);
 }
 
@@ -170,7 +170,7 @@
   border-top: 1px solid var(--border);
 }
 
-@media (max-width: 920px) {
+@media (max-width: 820px) {
   .uiDialog--lg {
     width: calc(100vw - 40px);
     height: calc(100vh - 64px);

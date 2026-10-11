@@ -91,16 +91,16 @@ function getErrorText() {
 
 // The Query result error: the server's sentence cleaned up
 // (util.queryErrorParts: no code prefix, no formatQuery wrapper, "Syntax
-// error, line 1 col 8 near FROM"), the parser's "Expected one of" list
-// behind a toggle. getErrorText() keeps the message as sent (history,
+// error, line 1 col 8 near FROM"), the parser's "Expected one of" list and the
+// expression a function failed in ("while executing ...") behind a toggle. getErrorText() keeps the message as sent (history,
 // downloads).
 function queryErrorBanner(el, message, where = null) {
   const parts = message ? util.queryErrorParts(message, where) : null;
   return uiState.banner(el, {
     message: parts ? parts.summary : "",
     verbatim: true,
-    details: parts?.expected || "",
-    detailsLabel: "Expected one of\u2026",
+    details: parts?.expected || parts?.trace || "",
+    detailsLabel: parts?.expected ? "Expected one of\u2026" : "Where it failed\u2026",
   });
 }
 
@@ -108,6 +108,8 @@ function setError(message, where = null) {
   lastErrorMessage = String(message || "").trim();
   if (!dom.errorBanner) return;
   queryErrorBanner(dom.errorBanner, lastErrorMessage, where);
+  // An error with no row to show: the header has no columns to count and no view to switch (query.css, .is-errorOnly).
+  dom.resultsPanel?.classList.toggle("is-errorOnly", !!lastErrorMessage && !(mainTable?.rowCount() > 0));
   if (lastErrorMessage) {
     if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
     setResultsVisible(true);
@@ -157,6 +159,7 @@ function clearLiveResults() {
 
   currentStatusValue = "";
   lastErrorMessage = "";
+  dom.resultsPanel?.classList.remove("is-errorOnly");
 
   setLiveBodyHold(preservedBodyScrollHeight);
 

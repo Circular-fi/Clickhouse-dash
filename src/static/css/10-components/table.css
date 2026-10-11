@@ -9,8 +9,8 @@
   z-index: var(--z-sticky-top);
   flex: 0 0 auto;
   align-items: center;
-  border-bottom: 1px solid var(--borderStrong);
-  background: var(--panelBg);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--panel);
 }
 
 .pipelineViewer__row {
@@ -31,6 +31,11 @@
 .logsRow[data-sev="error"],
 .logsRow[data-sev="warn"] { box-shadow: inset 3px 0 0 var(--sev-color); }
 
+/* A selected row of a severity keeps its bar: the selected fill and edge go on top, the bar is the severity's alone. */
+.logsRow.dataList__row.is-selected[data-sev="fatal"],
+.logsRow.dataList__row.is-selected[data-sev="error"],
+.logsRow.dataList__row.is-selected[data-sev="warn"] { box-shadow: inset 3px 0 0 var(--sev-color), inset 0 0 0 1px var(--selected-edge); }
+
 .traceSvcAction:focus-visible, .traceSvcLink:focus-visible,
 .traceSvcRow:focus-visible, .traceSvcSlowest__link:focus-visible { box-shadow: var(--ring); }
 
@@ -48,7 +53,7 @@
   top: var(--trace-span-sticky-top, 0px);
   z-index: var(--z-sticky-top);
   border-radius: var(--r-sm) var(--r-sm) 0 0;
-  background: linear-gradient(var(--theadBg), var(--theadBg)), var(--bg);
+  background: linear-gradient(var(--thead-bg), var(--thead-bg)), var(--bg);
 }
 
 .traceSpanListRow {
@@ -93,7 +98,7 @@
   height: var(--dt-row);
   padding: 0 var(--dt-pad-x);
   border-bottom: 1px solid var(--border);
-  background: var(--theadBg);
+  background: var(--thead-bg);
   color: var(--muted);
   font-size: var(--dt-head-font);
   font-weight: var(--dt-head-weight);
@@ -142,14 +147,16 @@
 .dataTable > tbody > tr:hover > td,
 .dataTable > tbody > tr:hover > th,
 .dataTable > tbody > tr:focus-visible > td,
-.dataTable > tbody > tr:focus-visible > th,
-.dataTable > tbody > tr.is-selected > td,
-.dataTable > tbody > tr.is-selected > th {
-  background-color: var(--rowHover);
+.dataTable > tbody > tr:focus-visible > th {
+  background-color: var(--row-hover);
 }
 
-.dataTable > tbody > tr.is-selected > :first-child {
-  box-shadow: inset 3px 0 0 var(--accent-fill);
+/* A selected row: the selected fill and a 1 px edge above and below it (a bar at the left would be the channel of a row's
+   severity). */
+.dataTable > tbody > tr.is-selected > td,
+.dataTable > tbody > tr.is-selected > th {
+  background-color: var(--selected-bg);
+  box-shadow: inset 0 1px 0 var(--selected-edge), inset 0 -1px 0 var(--selected-edge);
 }
 
 .dataTable__rowNum {
@@ -177,12 +184,15 @@
   position: sticky;
   left: 0;
   z-index: var(--z-sticky-top);
-  background: var(--theadBg);
+  background: var(--thead-bg);
 }
 
-.dataTable--grid > tbody > tr:hover > .dataTable__rowNum,
+.dataTable--grid > tbody > tr:hover > .dataTable__rowNum {
+  background: linear-gradient(var(--row-hover), var(--row-hover)) var(--panel);
+}
+
 .dataTable--grid > tbody > tr.is-selected > .dataTable__rowNum {
-  background: linear-gradient(var(--rowHover), var(--rowHover)) var(--panel);
+  background: linear-gradient(var(--selected-bg), var(--selected-bg)) var(--panel);
 }
 
 /* A sortable header is all button: a click anywhere on it sorts. */
@@ -261,7 +271,7 @@ th[aria-sort="descending"] > .dataTable__sort::after {
 .dataList__head {
   min-height: var(--dt-row, var(--row-regular));
   border-bottom: 1px solid var(--border);
-  background: var(--theadBg);
+  background: var(--thead-bg);
   color: var(--muted);
   font-size: var(--dt-head-font);
   font-weight: var(--dt-head-weight);
@@ -286,12 +296,12 @@ th[aria-sort="descending"] > .dataTable__sort::after {
 
 .dataList__row:hover,
 .dataList__row:focus-visible {
-  background-color: var(--rowHover);
+  background-color: var(--row-hover);
 }
 
 .dataList__row.is-selected {
-  background-color: var(--rowHover);
-  box-shadow: inset 3px 0 0 var(--accent-fill);
+  background-color: var(--selected-bg);
+  box-shadow: inset 0 0 0 1px var(--selected-edge);
 }
 
 .dataList .num {
@@ -340,10 +350,10 @@ th[aria-sort="descending"] > .dataTable__sort::after {
 }
 
 .cellBar {
-  --cellBar-color: var(--accent-fill);
+  --cell-bar-color: var(--accent-fill);
   background-image:
-    linear-gradient(color-mix(in srgb, var(--cellBar-color) 70%, transparent), color-mix(in srgb, var(--cellBar-color) 70%, transparent)),
-    linear-gradient(color-mix(in srgb, var(--cellBar-color) 14%, transparent), color-mix(in srgb, var(--cellBar-color) 14%, transparent)),
+    linear-gradient(color-mix(in srgb, var(--cell-bar-color) 70%, transparent), color-mix(in srgb, var(--cell-bar-color) 70%, transparent)),
+    linear-gradient(color-mix(in srgb, var(--cell-bar-color) 14%, transparent), color-mix(in srgb, var(--cell-bar-color) 14%, transparent)),
     linear-gradient(transparent, transparent);
   background-repeat: no-repeat;
   background-origin: content-box, content-box, padding-box;

@@ -2315,7 +2315,7 @@ function drawLifecycleEdgeLabel(ctx, edge, a, p1, p2, b, selected, explicitPoint
   // readable against the animated storage route.
   ctx.globalAlpha = 1;
   roundedRectPath(ctx, x, y, width, height, 6);
-  // --tableBg is intentionally translucent in the general UI theme. TTL
+  // --table-bg is intentionally translucent in the general UI theme. TTL
   // labels sit on top of moving routes, so they must use the fully opaque
   // panel background or the arrow remains visible through the label.
   ctx.fillStyle = graphColor("labelBg");
@@ -2348,6 +2348,9 @@ function nodeSizeLabel(node) {
   return `${rows} · ${bytes}`;
 }
 
+// A compact card writes the object's name over two lines (kit.compactBox) rather than end it in an ellipsis.
+const COMPACT_TITLE_LINES = 2;
+
 // Level of detail (kit.isCompact): the cards turn compact once an ordinary
 // card is under 40 px on screen or its smallest text under 7.5 px; a
 // compact card is its title row only, in kit.compactBox().
@@ -2361,7 +2364,8 @@ function compactCards(scale = model.scale) {
 // and TTL terminals always draw in full.
 function drawnBox(item, compact) {
   const kind = item.node.kind;
-  return compact && kind !== "storage_tier" && kind !== "ttl_expired" ? kit.compactBox(item, model.scale) : item;
+  if (!compact || kind === "storage_tier" || kind === "ttl_expired") return item;
+  return kit.compactBox(item, model.scale, kind === "database_group" ? 1 : COMPACT_TITLE_LINES);
 }
 
 // Card texts per payload node: formatting every card on every frame
@@ -2409,8 +2413,8 @@ function drawNode(ctx, item, focused, compact) {
     rows: [],
   };
   if (compact) {
-    const box = kit.compactBox(item, model.scale);
-    if (box.titleSize) card.rows.push({ text: baseName, size: box.titleSize, weight: 600, color: titleColor, y: box.baseline, fit: "full" });
+    const box = kit.compactBox(item, model.scale, COMPACT_TITLE_LINES);
+    if (box.titleSize) card.rows.push({ text: baseName, size: box.titleSize, weight: 600, color: titleColor, y: box.baseline, fit: "full", lines: COMPACT_TITLE_LINES, lineHeight: box.lineHeight });
     card.statusY = box.height / 2;
     kit.drawCard(ctx, box, card);
     return;
@@ -2493,8 +2497,8 @@ function drawGroupNode(ctx, card, compact) {
   const objects = format.countLabel(stat.total, "object");
   const linked = stat.connected ? `${format.count(stat.connected)} with dependencies` : "no dependencies";
   ctx.fillText(canvasEllipsis(ctx, `${objects} · ${linked}`, item.width - pad * 2), item.x + pad, item.y + 44);
-  ctx.fillStyle = graphColor("accentText");
-  ctx.fillText("Click to expand", item.x + pad, item.y + 64);
+  // What a click or Enter does, in the muted text of a hint (the link colour is for links).
+  ctx.fillText("Expand \u00b7 Enter", item.x + pad, item.y + 64);
   ctx.restore();
 }
 

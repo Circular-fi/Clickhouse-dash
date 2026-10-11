@@ -114,8 +114,8 @@ function sevBadgeHtml(row, title = "") {
   return badge.severityHtml(severityLevel(row), row.severity_text || "", { title });
 }
 
-// A log time: to the millisecond in the table, every nanosecond in the
-// detail and the tooltip (fmt.time / fmt.timeTitle, browser-local).
+// A log time: to the millisecond in the table and the head of the detail (the nanoseconds were cut off there), every
+// nanosecond in the Timestamp field of the detail and the tooltip (fmt.time / fmt.timeTitle, browser-local).
 function timeLabel(row) {
   return fmt.time(Number(row.ts_ms), { precision: "ms" });
 }
@@ -904,7 +904,8 @@ const SEV_COLORS = {
   info: `color-mix(in srgb, ${palette.severity("info")} 78%, transparent)`,
   debug: `color-mix(in srgb, ${palette.severity("debug")} 60%, transparent)`,
 };
-const HISTOGRAM_HEIGHT = 120;
+// Tall enough for three y graduations (a bar chart of 120 px had 0 and the top).
+const HISTOGRAM_HEIGHT = 150;
 let histogramChart = null;
 
 async function loadHistogram(range) {
@@ -933,7 +934,7 @@ async function loadHistogram(range) {
 }
 
 // A message in place of the bars (the chart keeps its instance, hidden).
-function histogramMessage(box, text, isError = false) {
+function histogramMessage(box, text, isError = false, isEmpty = false) {
   if (histogramChart) histogramChart.root.hidden = true;
   let note = $(":scope > .logsHistogram__placeholder", box);
   if (!note) {
@@ -942,7 +943,8 @@ function histogramMessage(box, text, isError = false) {
     box.appendChild(note);
   }
   note.className = "logsHistogram__placeholder";
-  note.innerHTML = isError ? failedHtml("", text, "histogram", { compact: true }) : uiState.loadingHtml({ label: text, compact: true });
+  if (isEmpty) note.replaceChildren(uiState.block("empty", { body: text, compact: true }));
+  else note.innerHTML = isError ? failedHtml("", text, "histogram", { compact: true }) : uiState.loadingHtml({ label: text, compact: true });
   note.hidden = false;
 }
 
@@ -998,6 +1000,11 @@ function renderHistogram() {
   const count = Number(hist.totals?.total || 0);
   if (total) total.textContent = `${fmt.count(count)} log${count === 1 ? "" : "s"}`;
   if (meta) meta.textContent = `${timeRange.describeRange(model.timeRange).text} · ${fmt.duration.fromMs(hist.bucket_ms)} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
+  // No log in the range: a sentence, not axes from 0 to 1 over bars that are not there.
+  if (!model.histogramLoading && count === 0) {
+    histogramMessage(box, "No logs in this range.", false, true);
+    return;
+  }
   // While a refetch runs, the previous bars stay (dimmed) until it answers.
   if (model.histogramLoading || !chartCore) return;
   for (const note of $$(":scope > .logsHistogram__placeholder, :scope > .uiState", box)) note.hidden = true;
@@ -1277,7 +1284,7 @@ function renderSidePanel() {
   if (title) {
     title.innerHTML = `${sevBadgeHtml(row)}
         <span class="logsSideTitle__service">${badge.swatchHtml(row.service)}${esc(row.service)}</span>
-        <time class="logsSideTitle__time" title="${esc(timeTitle(row))}">${esc(fullTimeLabel(row))}</time>`;
+        <time class="logsSideTitle__time" title="${esc(timeTitle(row))}">${esc(timeLabel(row))}</time>`;
   }
   const openTrace = byId("logsOpenTrace");
   if (openTrace) {
@@ -1491,7 +1498,7 @@ async function loadMeta() {
     input.disabled = mode === "off";
     input.placeholder = mode === "off" ? "Body search is disabled (logs.body_search = off)"
       : mode === "substring" ? "Search Body (substring): words, \"exact phrase\", -exclude"
-      : "Search Body: words, \"exact phrase\", -exclude";
+      : "Search body: words, \"exact phrase\", -exclude";
     input.title = mode === "token"
       ? "Whole-token search (hasToken, served by the Body token index). Tokens are case-sensitive; punctuation separates tokens."
       : mode === "substring" ? "Case-insensitive substring search (scans Body)." : "";

@@ -44,7 +44,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: .04em;
+  letter-spacing: var(--ls-eyebrow);
   text-transform: uppercase;
 }
 
@@ -57,9 +57,8 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 
 .timeRangeField__label {
   color: var(--muted);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: .02em;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
 }
 
 .timeRangeField.is-active .timeRangeField__label { color: var(--text); }
@@ -72,10 +71,10 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   min-width: 0;
   height: 31px;
   padding: 0 var(--space-10);
-  border: 1px solid var(--controlBorder);
+  border: 1px solid var(--control-border);
   border-radius: var(--r-md);
   outline: none;
-  background: var(--inputBg);
+  background: var(--input-bg);
   color: var(--text);
   font: var(--fw-medium) var(--fs-xs)/1 var(--font-sans);
   font-variant-numeric: tabular-nums;
@@ -85,15 +84,15 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 .traceSearchBar .timeRangeField__input::placeholder { color: var(--muted); opacity: 1; }
 
 .traceSearchBar .timeRangeField__input:hover,
-.traceSearchBar .timeRangeField__input:focus { border-color: var(--controlBorderHover); }
+.traceSearchBar .timeRangeField__input:focus { border-color: var(--control-border-hover); }
 
 /* The field the calendar is picking: after a start day, the To field. */
 .traceSearchBar .timeRangeField.is-active .timeRangeField__input {
-  border-color: color-mix(in srgb, var(--accentBorder) 72%, var(--controlBorder));
+  border-color: color-mix(in srgb, var(--accent-fill) 72%, var(--control-border));
 }
 
 .traceSearchBar .timeRangeField__input[aria-invalid="true"] {
-  border-color: color-mix(in srgb, var(--danger) 70%, var(--controlBorder));
+  border-color: color-mix(in srgb, var(--danger) 70%, var(--control-border));
 }
 
 .timeRangeField__error {
@@ -110,7 +109,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   padding: var(--space-8) var(--space-10);
   border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border));
   border-radius: var(--r-md);
-  background: var(--error-bg);
+  background: var(--danger-bg);
 }
 
 .timeRangeField__error[hidden],
@@ -128,7 +127,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   padding: var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: color-mix(in srgb, var(--inputBg) 55%, transparent);
+  background: color-mix(in srgb, var(--input-bg) 55%, transparent);
 }
 
 .timeCalendar__header {
@@ -190,6 +189,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
+  letter-spacing: var(--ls-eyebrow);
   text-align: center;
   text-transform: uppercase;
 }
@@ -210,7 +210,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 
 .traceSearchBar .timeCalendar__day:hover:not(.is-disabled) {
   border-radius: var(--r-md);
-  border-color: var(--buttonBorderHover);
+  border-color: var(--button-border-hover);
 }
 
 .traceSearchBar .timeCalendar__day.is-outside { color: var(--muted); }
@@ -229,11 +229,11 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 }
 
 .traceSearchBar .timeCalendar__day.is-inRange {
-  background: color-mix(in srgb, var(--accentBorder) 18%, transparent);
+  background: color-mix(in srgb, var(--accent-fill) 18%, transparent);
 }
 
 .traceSearchBar .timeCalendar__day.is-preview {
-  background: color-mix(in srgb, var(--accentBorder) 10%, transparent);
+  background: color-mix(in srgb, var(--accent-fill) 10%, transparent);
 }
 
 .traceSearchBar .timeCalendar__day.is-start {
@@ -296,7 +296,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: .04em;
+  letter-spacing: var(--ls-eyebrow);
   text-transform: uppercase;
 }
 
@@ -324,11 +324,11 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 
 .traceSearchBar .timeRangeList__item:hover,
 .traceSearchBar .timeRangeList__item:focus-visible {
-  background: var(--rowHover);
+  background: var(--row-hover);
 }
 
 .traceSearchBar .timeRangeList__item.is-selected {
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
+  background: var(--selected-bg);
 }
 
 .timeRangeList__empty {
@@ -356,7 +356,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 
 .timeRangePanel__nav { display: flex; gap: var(--space-2); flex: 0 0 auto; }
 
-@media (max-width: 680px) {
+@media (max-width: 760px) {
   .timeRangePanel__body { grid-template-columns: minmax(0, 1fr); }
   .timeRangePanel__quick {
     border-left: 0;
@@ -370,20 +370,20 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 .metricsWorkspace > .obsFilterBar { grid-column: 1 / -1; }
 
 .obsFilterBar {
-  --obsBarGap: 8px;
-  --obsBarControl: 31px;
-  --obsBarRange: 264px;
-  --obsBarNarrow: 120px;
-  --obsBarSubmit: 112px;
-  --obsBarFont: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
+  --obs-bar-gap: 8px;
+  --obs-bar-control: 31px;
+  --obs-bar-range: 264px;
+  --obs-bar-narrow: 120px;
+  --obs-bar-submit: 112px;
+  --obs-bar-font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
 }
 
 .obsFilterBar__lead,
 .obsFilterBar__tail { display: contents; }
 
 .obsFilterBar__range {
-  flex: 0 0 var(--obsBarRange);
-  width: var(--obsBarRange);
+  flex: 0 0 var(--obs-bar-range);
+  width: var(--obs-bar-range);
   min-width: 0;
 }
 
@@ -391,10 +391,10 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 
 .obsFilterBar .obsFilterBar__field--narrow,
 .obsFilterBar .obsFilterBar__option {
-  flex: 0 0 var(--obsBarNarrow);
-  width: var(--obsBarNarrow);
-  min-width: var(--obsBarNarrow);
-  max-width: var(--obsBarNarrow);
+  flex: 0 0 var(--obs-bar-narrow);
+  width: var(--obs-bar-narrow);
+  min-width: var(--obs-bar-narrow);
+  max-width: var(--obs-bar-narrow);
 }
 
 .obsFilterBar .obsFilterBar__text { position: relative; display: block; flex: 2 1 200px; min-width: 150px; }
@@ -418,15 +418,15 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 .obsFilterBar .obsFilterBar__input {
   box-sizing: border-box;
   width: 100%;
-  height: var(--obsBarControl);
+  height: var(--obs-bar-control);
   min-width: 0;
   padding: 0 var(--space-10);
-  border: 1px solid var(--controlBorder);
+  border: 1px solid var(--control-border);
   border-radius: var(--r-md);
   outline: none;
-  background: var(--buttonBg);
+  background: var(--button-bg);
   color: var(--text);
-  font: var(--obsBarFont);
+  font: var(--obs-bar-font);
 }
 
 .obsFilterBar .obsFilterBar__input::placeholder { color: var(--muted); opacity: 1; }
@@ -448,7 +448,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: var(--obsBarGap);
+  gap: var(--obs-bar-gap);
   margin-left: auto;
 }
 
@@ -468,31 +468,31 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 .obsFilterBar .obsFilterBar__chip {
   box-sizing: border-box;
   justify-content: center;
-  height: var(--obsBarControl);
-  min-height: var(--obsBarControl);
+  height: var(--obs-bar-control);
+  min-height: var(--obs-bar-control);
   padding: 0 var(--space-10);
   border-radius: var(--r-md);
   color: var(--muted);
-  font: var(--obsBarFont);
+  font: var(--obs-bar-font);
   white-space: nowrap;
 }
 
 .obsFilterBar .obsFilterBar__chip[aria-pressed="true"] {
-  border-color: var(--accentBorder);
-  background: var(--seg-active-bg);
+  border-color: var(--selected-edge);
+  background: var(--selected-bg);
   color: var(--text);
 }
 
 @media (max-width: 1100px) {
   .obsFilterBar__lead,
-  .obsFilterBar__tail { display: flex; align-items: center; gap: var(--obsBarGap); min-width: 0; }
+  .obsFilterBar__tail { display: flex; align-items: center; gap: var(--obs-bar-gap); min-width: 0; }
 }
 
 /* A bar with more pickers than one row holds under 1280 px (System Queries: six and a chip):
    its lead and its tail take a row each from 1279 px down. */
 @media (max-width: 1279px) {
   .obsFilterBar--wide > .obsFilterBar__lead,
-  .obsFilterBar--wide > .obsFilterBar__tail { display: flex; align-items: center; gap: var(--obsBarGap); min-width: 0; }
+  .obsFilterBar--wide > .obsFilterBar__tail { display: flex; align-items: center; gap: var(--obs-bar-gap); min-width: 0; }
   .traceSearchBar.obsFilterBar.obsFilterBar--wide { flex-direction: column; align-items: stretch; }
 }
 
@@ -502,7 +502,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   .obsFilterBar__range { flex: 1 1 100%; width: auto; }
   .obsFilterBar .obsFilterBar__field,
   .obsFilterBar .obsFilterBar__field--narrow {
-    flex: 1 1 calc(50% - var(--obsBarGap) / 2);
+    flex: 1 1 calc(50% - var(--obs-bar-gap) / 2);
     width: auto;
     min-width: 0;
     max-width: none;
@@ -535,3 +535,5 @@ html:not([data-obs-view="logs"]) .obsView[data-obs-panel="logs"],
 html:not([data-obs-view="metrics"]) .obsView[data-obs-panel="metrics"] {
   display: none;
 }
+
+.obsFilterBar__toggle[aria-pressed="true"] { border-color: var(--selected-edge); background: var(--selected-bg); }

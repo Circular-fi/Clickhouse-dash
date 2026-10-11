@@ -120,8 +120,18 @@
       <div class="appBrand">
         <svg class="appBrand__logo" viewBox="0 0 18 18" aria-hidden="true"><rect x="0.75" y="10.5" width="3" height="6" rx="1"/><rect x="5.25" y="5.5" width="3" height="11" rx="1"/><rect x="9.75" y="8" width="3" height="8.5" rx="1"/><rect x="14.25" y="1.5" width="3" height="15" rx="1"/></svg>
         <span class="appBrand__name">ClickHouse Dash</span>
-        <span id="versionBadge" class="versionBadge" title="Backend version">--</span>
       </div>
+      <nav id="pageSelect" class="themeSelect pageNav" aria-label="Pages">
+        <button id="pageSelectButton" class="button themeSelect__button pageNav__toggle" type="button" aria-haspopup="false" aria-expanded="false" aria-controls="pageSelectMenu">Query</button>
+        <div id="pageSelectMenu" class="themeSelect__menu pageNav__list" tabindex="-1">
+          <a id="navQueryLink" class="pageNav__link" href="/query" aria-current="page">Query</a>
+          <a id="navExplorerLink" class="pageNav__link" href="/explorer/catalog">Explorer</a>
+          <a id="navObservabilityLink" class="pageNav__link" href="/observability" hidden>Observability</a>
+          <a id="navSystemLink" class="pageNav__link" href="/system">System</a>
+          <a id="navMcpLink" class="pageNav__link" href="/mcp-integration" hidden>MCP</a>
+        </div>
+      </nav>
+      <span id="versionBadge" class="versionBadge" title="Backend version">--</span>
     </div>
     <div class="appHeader__right">
       <div id="hostPicker" class="picker" aria-label="Target host">
@@ -138,16 +148,6 @@
           <span id="hostPickerPing" class="hostPing" aria-label="ping"></span>
         </button>
         <div id="hostPickerMenu" class="picker__menu" role="listbox" tabindex="-1" hidden></div>
-      </div>
-      <div id="pageSelect" class="themeSelect pageSelect" aria-label="Page">
-        <button id="pageSelectButton" class="button themeSelect__button pageSelect__button" type="button" aria-haspopup="listbox" aria-expanded="false">Query</button>
-        <div id="pageSelectMenu" class="themeSelect__menu pageSelect__menu" role="listbox" tabindex="-1" hidden>
-          <button id="navQueryButton" class="themeSelect__option" type="button" role="option" data-value="query" aria-selected="true">Query</button>
-          <button id="navExplorerButton" class="themeSelect__option" type="button" role="option" data-value="explorer" aria-selected="false">Explorer</button>
-          <button id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability" aria-selected="false" hidden>Observability</button>
-          <button id="navSystemButton" class="themeSelect__option" type="button" role="option" data-value="system" aria-selected="false">System</button>
-          <button id="navMcpButton" class="themeSelect__option" type="button" role="option" data-value="mcp" aria-selected="false" hidden>MCP</button>
-        </div>
       </div>
       <div id="themeSelect" class="themeSelect themeSelect--icons" aria-label="Theme">
         <button
@@ -172,6 +172,15 @@
             var early = window.__chdashEarlyState || {};
             var mode = early.themeMode || "system";
             if (mode !== "system" && mode !== "dark" && mode !== "light") mode = "system";
+            // The page links: under the page's base path (a reverse-proxy prefix), and the pages the server last
+            // reported on or off (the key of storage.savePageNav), so the row does not move when /api/version answers.
+            var nav = JSON.parse(localStorage.getItem("chdash.pageNav.v1") || "null");
+            var links = document.querySelectorAll("#pageSelectMenu a");
+            for (var j = 0; j < links.length; j += 1) {
+              if (window.__chdashUrl) links[j].setAttribute("href", window.__chdashUrl(links[j].getAttribute("href")));
+              var shown = nav ? { navExplorerLink: nav.explorer !== false, navObservabilityLink: nav.traces === true || nav.logs === true || nav.metrics === true, navSystemLink: nav.system !== false, navMcpLink: nav.mcp === true }[links[j].id] : undefined;
+              if (shown !== undefined && links[j].getAttribute("aria-current") !== "page") links[j].hidden = !shown;
+            }
             var trigger = document.getElementById("themeSelectButton");
             if (trigger) trigger.setAttribute("aria-label", "Theme: " + mode);
             var menu = document.getElementById("themeSelectMenu");
@@ -291,7 +300,7 @@
         <div class="statusBlock">
           <div class="statusPill">
             <span class="statusPill__label">Status</span>
-            <span id="queryStatusText" class="statusPill__value">idle</span>
+            <span id="queryStatusText" class="statusPill__value">Idle</span>
           </div>
 
           <div class="statusPill">
@@ -326,7 +335,7 @@
                 <span class="runMenu__optText">Download JSON</span>
               </button>
               <button id="downloadDebugButton" class="runMenu__opt" type="button" role="menuitem">
-                <span class="runMenu__optText">Download Debug</span>
+                <span class="runMenu__optText">Download debug</span>
               </button>
             </div>
           </div>
@@ -368,8 +377,8 @@
         <div class="metricCompact metricCompact--elapsed">
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Elapsed</div>
-            <div class="metricCompact__value statTile__value" id="elapsedSecondsText">No run yet</div>
-            <div id="clickhouseElapsedWrap" class="metricCompact__systemLine" hidden title="System: the query_duration_ms of ClickHouse (system.query_log), from the start of the query to its last block. It includes the time ClickHouse waited for ChDash to read the blocks. The System page shows the same figure.">
+            <div class="metricCompact__value statTile__value" id="elapsedSecondsText">&mdash;</div>
+            <div id="clickhouseElapsedWrap" class="metricCompact__systemLine" hidden title="System: the query_duration_ms of ClickHouse (system.query_log), from the start of the query to its last block. It includes the time ClickHouse waited for ClickHouse Dash to read the blocks. The System page shows the same figure.">
               <span>System</span><strong id="clickhouseElapsedText"></strong>
             </div>
           </div>
@@ -378,7 +387,7 @@
         <div class="metricCompact metricCompact--progress" id="progressCard">
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Progress</div>
-            <div class="metricCompact__value statTile__value" id="progressPercentText">No run yet</div>
+            <div class="metricCompact__value statTile__value" id="progressPercentText">&mdash;</div>
           </div>
         </div>
 
@@ -386,7 +395,7 @@
           <span id="readRowsChart" class="metricCompact__bgChart" role="img" aria-label="Read rows per second"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Rows read</div>
-            <div class="metricCompact__value statTile__value" id="readRowsTotalText">No run yet</div>
+            <div class="metricCompact__value statTile__value" id="readRowsTotalText">&mdash;</div>
             <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="rate">Now</span> <span id="readRowsRateText">&mdash;</span></div>
           </div>
         </div>
@@ -395,7 +404,7 @@
           <span id="readBytesChart" class="metricCompact__bgChart" role="img" aria-label="Read bytes per second"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Bytes read</div>
-            <div class="metricCompact__value statTile__value" id="readBytesTotalText">No run yet</div>
+            <div class="metricCompact__value statTile__value" id="readBytesTotalText">&mdash;</div>
             <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="rate">Now</span> <span id="readBytesRateText">&mdash;</span></div>
           </div>
         </div>
@@ -422,7 +431,7 @@
           <span id="cpuChart" class="metricCompact__bgChart" role="img" aria-label="CPU progression"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Peak CPU</div>
-            <div class="metricCompact__value statTile__value" id="cpuMaxText">No run yet</div>
+            <div class="metricCompact__value statTile__value" id="cpuMaxText">&mdash;</div>
             <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="level">Now</span> <span id="cpuText">&mdash;</span></div>
           </div>
         </div>
@@ -431,11 +440,12 @@
           <span id="memoryChart" class="metricCompact__bgChart" role="img" aria-label="Memory progression"></span>
           <div class="metricCompact__content statTile">
             <div class="metricCompact__label statTile__label">Peak memory</div>
-            <div class="metricCompact__value statTile__value" id="memoryMaxText">No run yet</div>
+            <div class="metricCompact__value statTile__value" id="memoryMaxText">&mdash;</div>
             <div class="metricCompact__sub statTile__sub"><span class="metricCompact__subLabel" data-rail-sub="level">Now</span> <span id="memoryText">&mdash;</span></div>
           </div>
         </div>
 
+        <p class="metricColumn__idle" id="runStatsIdle">The statistics of a run appear here.</p>
       </div>
     </section>
 
@@ -494,7 +504,7 @@
     <div class="uiDialog__frame">
       <div class="uiDialog__head">
         <div class="uiDialog__heading">
-          <h2 id="analysisModalTitle" class="uiDialog__title">Query Analysis</h2>
+          <h2 id="analysisModalTitle" class="uiDialog__title">Query analysis</h2>
           <div id="analysisSummary" class="uiDialog__subtitle analysisModal__summary"></div>
         </div>
         <div class="uiDialog__actions">

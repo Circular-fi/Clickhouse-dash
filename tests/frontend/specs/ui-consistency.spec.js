@@ -39,7 +39,7 @@ for (const path of ['/explorer/catalog', '/observability/traces']) {
         expect(names.length).toBeGreaterThan(100);
         const differ = names.filter((name) => system[name] !== forced[name]).map((name) => `${name}: ${system[name]} vs ${forced[name]}`);
         expect(differ).toEqual([]);
-        for (const name of ['--accent-fill', '--accentBorder', '--accentText', '--ring', '--shadow-overlay', '--focusRingColor', '--danger', '--sev-error', '--font-mono', '--font-sans']) {
+        for (const name of ['--accent-fill', '--accent-fill', '--accent-text', '--ring', '--shadow-overlay', '--focus-ring-color', '--danger', '--sev-error', '--font-mono', '--font-sans']) {
           expect(forced[name], name).toBeTruthy();
         }
       } finally {
@@ -57,7 +57,7 @@ async function focusRing(locator) {
       style: style.outlineStyle,
       width: style.outlineWidth,
       color: style.outlineColor,
-      ring: getComputedStyle(document.documentElement).getPropertyValue('--focusRingColor').trim(),
+      ring: getComputedStyle(document.documentElement).getPropertyValue('--focus-ring-color').trim(),
     };
   });
 }

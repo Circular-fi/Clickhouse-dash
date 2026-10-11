@@ -56,8 +56,8 @@ def test_page_and_run_settings_use_connected_dropdowns() -> None:
     ui = read("src/static/app_header.js") + read("src/static/app_query_ui.js")
     dom = read("src/static/app_dom.js")
 
-    assert html.index('id="hostPicker"') < html.index('id="pageSelect"') < html.index('id="themeSelect"')
-    assert 'id="pageSelect" class="themeSelect pageSelect"' in html
+    assert html.index('id="pageSelect"') < html.index('id="hostPicker"') < html.index('id="themeSelect"')
+    assert 'id="pageSelect" class="themeSelect pageNav"' in html
     assert 'id="runSettings" class="themeSelect runSettings"' in html
     assert html.index('id="queryLibrary"') < html.index('id="runSettings"')
     run_menu = html[html.index('id="runMenu"'):html.index('id="queryLibrary"')]
@@ -124,10 +124,10 @@ def test_run_menu_owns_debug_archive_and_results_copy_menu_does_not() -> None:
     download = read("src/static/app_download.js")
     results = read("src/static/app_results.js")
 
-    assert html.count("Download Debug") == 1
+    assert html.count("Download debug") == 1
     copy_menu = html[html.index('id="copyMenu"'):html.index('id="clearResultsButton"')]
     assert 'id="copyJsonToast"' not in html  # the dead toast is gone
-    assert "Download Debug" not in copy_menu
+    assert "Download debug" not in copy_menu
     assert 'id="downloadReceivedZipButton"' not in copy_menu
     assert 'handleDownloadRun("json")' in run
     assert 'handleDownloadRun("csv")' in run

@@ -117,7 +117,7 @@ def test_logs_page_script_reuses_shared_pieces():
     assert 'const address = router.owner("logs", { path: "/observability/logs", params: () => urlParams() });' in js
     assert 'address.write(push ? "push" : "replace");' in js
     assert 'observability/traces/${encodeURIComponent(row.trace_id)}' in js
-    assert "if (dom.navObservabilityButton) dom.navObservabilityButton.hidden = !observabilityEnabled;" in ui
+    assert "if (dom.navObservabilityLink) dom.navObservabilityLink.hidden = !observabilityEnabled;" in ui
     assert "logs: nav?.logs === true" in state
     assert "getLogs," in read("src/static/app_api.js")
 

@@ -395,7 +395,9 @@ function errorText(error, fallback = "The request failed.") {
 // "Syntax error, line 1 col 8 near FROM" (`where` is the server's
 // { line, col, near } when it sent one), and the parser's long
 // "Expected one of: ..." list comes apart as `expected`, for a toggle.
-//   -> { summary, expected, name }   (name: "SYNTAX_ERROR", or "")
+// What the server adds after "while executing 'FUNCTION throwIf(...)'" (the expression it was evaluating) comes apart as
+// `trace`, for the same toggle: the sentence before it is what to read.
+//   -> { summary, expected, trace, name }   (name: "SYNTAX_ERROR", or "")
 function queryErrorParts(message, where = null) {
   let text = String(message ?? "").trim();
   text = text.replace(/^[a-z][a-z0-9]*(?:_[a-z0-9]+)+:\s*/, "");
@@ -414,6 +416,12 @@ function queryErrorParts(message, where = null) {
     expected = list[1].replace(/[.:\s]+$/, "").trim();
     text = text.slice(0, list.index).trim();
   }
+  let trace = "";
+  const executing = text.match(/[:.]?\s*\bwhile executing\s+'/);
+  if (executing && executing.index > 0) {
+    trace = text.slice(executing.index).replace(/^[:.]?\s*/, "").trim();
+    text = text.slice(0, executing.index).trim();
+  }
   const syntax = text.match(/^Syntax error:\s*failed at position (\d+)(?:\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\))?(?:\s*\(line (\d+), col (\d+)\))?/);
   if (syntax) {
     const line = Number(where?.line) || Number(syntax[3]) || 0;
@@ -423,7 +431,7 @@ function queryErrorParts(message, where = null) {
     const nearText = !near ? "" : /^end of query$/i.test(near) ? " at the end of the query" : ` near ${near}`;
     text = `Syntax error, ${at}${nearText}`;
   }
-  return { summary: text.replace(/\s+$/, "") || "The query failed.", expected, name };
+  return { summary: text.replace(/\s+$/, "") || "The query failed.", expected, trace, name };
 }
 
 function isAbort(error) {

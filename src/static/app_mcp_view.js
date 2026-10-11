@@ -22,6 +22,7 @@ import { badge as badgeMod } from "./app_ui_badge.js";
 import { copy as copyMod } from "./app_ui_copy.js";
 import { icon } from "./app_ui_icon.js";
 import { segmented } from "./app_ui_segmented.js";
+import { table as tableMod } from "./app_ui_table.js";
 import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
@@ -199,8 +200,8 @@ function sideBlock(id, title, countText, ...body) {
 }
 
 function healthBadge(healthy) {
-  if (healthy === true) return badgeMod.el("healthy", { tone: "ok" });
-  if (healthy === false) return badgeMod.el("down", { tone: "error" });
+  if (healthy === true) return badgeMod.el("Healthy", { tone: "ok" });
+  if (healthy === false) return badgeMod.el("Down", { tone: "error" });
   return badgeMod.el("unknown", { tone: "neutral" });
 }
 
@@ -216,7 +217,7 @@ function endpointField(url) {
 function connectBlock(meta, url) {
   return sideBlock("mcpConnect", "Connect a client", null,
     endpointField(url),
-    h("p", { class: "mcpNote" }, "Make a key, copy its secret when ChDash shows it (only once), and put it where <secret> stands."),
+    h("p", { class: "mcpNote" }, "Make a key, copy its secret when ClickHouse Dash shows it (only once), and put it where <secret> stands."),
     clientTabs(url, "name", "<secret>", "mcpHelpClient", authHeader(meta)),
     h("p", { class: "mcpNote mcpNote--fine" }, `${authHeader(meta) === "Authorization" ? "Bearer token in Authorization" : `The key in the ${authHeader(meta)} header`}. Protocol ${meta.protocolVersions.join(", ") || EMPTY}. Use HTTPS when the client is on another machine.`));
 }
@@ -262,7 +263,7 @@ function renderDisabled(container) {
   const wrap = h("section", { class: "pagePart mcpOff", id: "mcpOff", "aria-labelledby": "mcpOffTitle" },
     h("div", { class: "pagePart__head" }, h("h2", { class: "pagePart__title", id: "mcpOffTitle" }, "Turn MCP on"), badge("MCP is off", "neutral")),
     h("div", { class: "pagePart__body" },
-      h("p", { class: "mcpNote" }, "MCP lets an AI client read your ClickHouse data through ChDash. It is off now. Add this to the config file, then restart ChDash:"),
+      h("p", { class: "mcpNote" }, "MCP lets an AI client read your ClickHouse data through ClickHouse Dash. It is off now. Add this to the config file, then restart ClickHouse Dash:"),
       codeBlock(HCL_EXAMPLE, "the HCL block", "hcl"),
       h("p", { class: "mcpNote" }, "Set mcp_uri on each host that MCP can read. It names a separate ClickHouse user with SELECT and SHOW grants only. Without storage_file, keys come from key blocks of the config only.")));
   container.replaceChildren(wrap);
@@ -362,13 +363,14 @@ const maskOf = (key) => {
 };
 
 function secretCell(key) {
-  const why = `The secret of ${key.name} is not kept: ChDash showed it once, when it made the key. A lost secret cannot be found again: delete the key and make a new one.`;
+  const why = `The secret of ${key.name} is not kept: ClickHouse Dash showed it once, when it made the key. A lost secret cannot be found again: delete the key and make a new one.`;
   return h("div", { class: "mcpSecret" }, h("span", { class: "mcpSecret__text", title: why }, maskOf(key)));
 }
 
 function keyRow(key, meta, actions, reason) {
   const readOnly = key.source === "config";
-  // A key that cannot be deleted (it comes from the config file, or the page is read-only) has no Delete icon: nothing replaces it.
+  // A key that cannot be deleted (it comes from the config file, or the page is read-only) has no Delete icon: a lock stands
+  // where it would be, and says why.
   const locked = readOnly || reason;
   const cell = (label, cls, ...children) => {
     const td = h("td", { class: cls }, ...children);
@@ -381,7 +383,9 @@ function keyRow(key, meta, actions, reason) {
     icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("strong", { class: "mcpKeyName" }, key.name));
   open.addEventListener("click", () => actions.onOpen(key, open));
   const nameCell = cell("Name", "mcpCell--name", open);
-  const actionsCell = cell("Actions", "mcpCell--actions", locked ? null : deleteButton(key, actions.onDelete));
+  const lockTitle = readOnly ? SOURCE_TITLE.config : reason;
+  const lock = locked ? h("span", { class: "mcpLock", title: lockTitle, role: "img", "aria-label": lockTitle }, icon.el("lock", { size: "sm" })) : null;
+  const actionsCell = cell("Actions", "mcpCell--actions", locked ? lock : deleteButton(key, actions.onDelete));
   return h("tr", { role: "row", dataset: { keyId: key.id, source: key.source, find: `${key.name} ${key.source}`.toLowerCase() } },
     nameCell,
     cell("Secret", "mcpCell--secret", secretCell(key)),
@@ -459,7 +463,7 @@ function keysTable(keys, meta, actions, view) {
   const table = h("table", { class: "dataTable dataTable--compact mcpTable" }, h("thead", { role: "rowgroup" }, head), tbody);
   table.setAttribute("role", "table");
   table.setAttribute("aria-label", "Access keys");
-  const wrap = h("div", { class: "dataTableWrap mcpTableWrap" }, table);
+  const wrap = tableMod.scrollCues(h("div", { class: "dataTableWrap mcpTableWrap" }, table));
   wrap.setAttribute("role", "region");
   wrap.setAttribute("aria-label", "Access keys, scroll sideways when the table is wider than the page");
   wrap.tabIndex = 0;

@@ -276,11 +276,13 @@ def test_column_metadata_uses_technical_account_and_reports_compact_storage_with
     assert 'Wide ratio' not in render and 'Wide weight' not in render
 
 
-def test_theme_dropdown_is_vertical_and_hides_current_choice() -> None:
+def test_theme_dropdown_is_vertical_and_keeps_the_current_choice() -> None:
     css = css_sources.text()
     assert css_sources.decls('.themeSelect__menu--icons')['grid-template-columns'] == '34px'
-    current = css_sources.decls('.themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"]')
-    assert current['display'] == 'none'
+    # The current choice stays in its list (UI-004): marked as selected, never taken out of it.
+    current = css_sources.decls('.themeSelect__option--icon[aria-selected="true"]')
+    assert current['background'] == 'var(--selected-bg)'
+    assert 'themeSelect--open .themeSelect__option[aria-selected="true"]' not in css
 
 
 def test_graph_controls_live_in_viewport_and_depth_can_increase_or_decrease() -> None:

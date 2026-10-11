@@ -23,10 +23,8 @@
   display: block;
   padding: 0;
   color: var(--muted);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
 }
 
 /* A fieldset's legend sits outside the field's grid: it keeps the grid's gap itself. */
@@ -66,9 +64,9 @@ legend.uiField__label {
   width: 100%;
   min-width: 0;
   padding: var(--space-8) var(--space-10);
-  border: 1px solid var(--controlBorder);
+  border: 1px solid var(--control-border);
   border-radius: var(--r-md);
-  background: var(--inputBg);
+  background: var(--input-bg);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-md);
@@ -80,7 +78,7 @@ legend.uiField__label {
 }
 
 .uiInput:focus {
-  border-color: var(--accentBorder);
+  border-color: var(--accent-fill);
   box-shadow: var(--ring);
 }
 
@@ -127,7 +125,7 @@ legend.uiField__label {
   width: 16px;
   height: 16px;
   margin: 1px 0 0;
-  accent-color: var(--accentBorder);
+  accent-color: var(--accent-fill);
 }
 
 .uiCheck__text {

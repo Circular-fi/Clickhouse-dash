@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import css_tree  # noqa: E402
 
-SQL_TOKENS = ("--sqlString", "--sqlKeyword", "--sqlFunction", "--sqlNumber", "--sqlNull", "--sqlType")
+SQL_TOKENS = ("--sql-string", "--sql-keyword", "--sql-function", "--sql-number", "--sql-null", "--sql-type")
 
 
 def rules():
@@ -42,7 +42,7 @@ def declared(selector, prop, ctx=()):
 
 def test_the_edge_of_a_field_is_a_token_in_every_palette():
     tokens = css_sources.tokens()
-    for name in ("--controlBorder", "--controlBorderHover"):
+    for name in ("--control-border", "--control-border-hover"):
         # The dark :root, the System light block, the forced dark and the forced light blocks.
         assert len(re.findall(rf"^\s*{name}:", tokens, re.M)) == 4, name
 
@@ -53,7 +53,7 @@ def test_the_sql_colours_are_set_for_the_light_theme_and_reset_by_the_forced_dar
         # :root (dark), the light media block, forced dark, forced light.
         assert len(re.findall(rf"^\s*{name}:", tokens, re.M)) == 4, name
     # The light values are literals that reach 4.5:1 (tests/frontend/specs/a11y-contract.spec.js measures them).
-    for name, value in (("--sqlString", "#9a3412"), ("--sqlFunction", "#6d28d9"), ("--sqlNumber", "#047857"), ("--sqlNull", "#b91c1c"), ("--sqlType", "#0f766e")):
+    for name, value in (("--sql-string", "#9a3412"), ("--sql-function", "#6d28d9"), ("--sql-number", "#047857"), ("--sql-null", "#b91c1c"), ("--sql-type", "#0f766e")):
         assert tokens.count(f"{name}: {value};") == 2, name
 
 
@@ -77,7 +77,7 @@ def test_a_field_draws_its_edge_with_the_control_border_token():
         found = [value for _, ctx, rule in rules() if not ctx and any(s == selector or s.endswith(" " + selector) or selector in s.split(", ") for s in rule.selectors)
                  for decl in rule.decls if decl.name == prop for value in [decl.value]]
         assert found, f"{selector} has no {prop}"
-        assert any("--controlBorder" in value for value in found), f"{selector}: {found}"
+        assert any("--control-border" in value for value in found), f"{selector}: {found}"
 
 
 # Text that was once dimmed with `opacity` (33 rules, UI-116): the contrast then depended on what was behind it.

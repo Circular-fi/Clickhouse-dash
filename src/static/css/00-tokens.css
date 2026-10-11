@@ -84,6 +84,8 @@
   --fs-2xl: 20px;
   /* The one display size: the value of a single-number Query chart. */
   --fs-display: 32px;
+  /* The one letter-spacing of an eyebrow: the small uppercase heading of a group (docs/ui-foundations.md, "Labels"). */
+  --ls-eyebrow: 0.04em;
   --fw-regular: 400;
   --fw-medium: 500;
   --fw-semibold: 600;
@@ -94,7 +96,7 @@
   --r-md: 6px;
   --r-lg: 8px;
   --r-pill: 999px;
-  /* Spacing: one scale for every padding, margin and gap (tests/harness/test_css_layers_contract.py), named by its px. A
+  /* Spacing: one scale for every padding, margin and gap (tests/harness/test_type_scale_contract.py), named by its px. A
      hairline (1px) and a negative margin that overlaps two borders are the only literals. */
   --space-2: 2px;
   --space-4: 4px;
@@ -123,6 +125,14 @@
      infinite animations. */
   --dur-quick: 120ms;
   --dur-base: 160ms;
+  /* The loops and the long one-shots (stopped under prefers-reduced-motion): a spinner turn, a running pulse and band, the
+     sweep of an indeterminate bar, the pulse of a healthy dot, the flash of a deep link. */
+  --dur-spin: 800ms;
+  --dur-pulse: 1000ms;
+  --dur-band: 1100ms;
+  --dur-sweep: 1200ms;
+  --dur-flash: 1400ms;
+  --dur-settle: 1800ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
   /* Icons (docs/ui-foundations.md, "Icons"): sprite icons (.icon) are --icon-md, 14 and 18 px
      variants; the masks below are the same drawings for the pseudo-elements that cannot hold an
@@ -136,60 +146,57 @@
   --icon-selector: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 9l4 -4l4 4'/%3E%3Cpath d='M16 15l-4 4l-4 -4'/%3E%3C/svg%3E");
   --icon-arrow-up: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5l0 14'/%3E%3Cpath d='M18 11l-6 -6'/%3E%3Cpath d='M6 11l6 -6'/%3E%3C/svg%3E");
   --icon-arrow-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5l0 14'/%3E%3Cpath d='M18 13l-6 6'/%3E%3Cpath d='M6 13l6 6'/%3E%3C/svg%3E");
+  --icon-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5l10 -10'/%3E%3C/svg%3E");
   /* icons:end */
   /* Surfaces, graphite: the page, panels on it, raised controls and cards on panels. */
   --bg: #0d0f12;
   --panel: #13161a;
-  --panelBg: #13161a;
   --raised: #191d22;
-  --error-bg: var(--danger-bg);
   --border: rgba(255, 255, 255, 0.08);
-  --borderStrong: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.14);
   --muted: #959ba5;
   --text: #e6e8eb;
-  --accentBorder: var(--accent-fill);
   /* Accent-coloured text and icons (links, active facets, pins). */
-  --accentText: var(--accent-text);
   /* Keyboard focus indicator: the global :focus-visible outline and the
      box-shadow --ring of controls that draw it as a shadow. */
-  --focusRingColor: #3b82f6;
-  --ring: 0 0 0 2px var(--focusRingColor);
+  --focus-ring-color: #3b82f6;
+  --ring: 0 0 0 2px var(--focus-ring-color);
   /* Hover / focus tint of menu rows and tabs. */
-  --hoverTint: rgba(255, 255, 255, 0.06);
+  --hover-tint: rgba(255, 255, 255, 0.06);
   /* Elevation: only what opens over the page (menus, popovers, tooltips, dialogs, drawers, toasts)
      casts a shadow. */
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
   --shadow-sticky: 0 6px 8px -6px rgba(0, 0, 0, 0.6);
   /* The page behind a modal dialog. */
   --backdrop: rgba(0, 0, 0, 0.5);
-  --pillBg: var(--bg);
-  --inputBg: #0f1215;
-  --editorSolidBg: #0f1215;
-  --tableBg: var(--panel);
-  --theadBg: var(--panel);
-  --scrollTrack: rgba(13, 15, 18, 0.55);
-  --scrollThumb: rgba(255, 255, 255, 0.14);
-  --scrollThumbHover: rgba(255, 255, 255, 0.22);
-  --scrollThumbBorder: rgba(13, 15, 18, 0.85);
-  --buttonBg: var(--raised);
-  --buttonBgHover: #1f2329;
-  --buttonBorder: rgba(255, 255, 255, 0.12);
-  --buttonBorderHover: rgba(255, 255, 255, 0.2);
+  --pill-bg: var(--bg);
+  --input-bg: #0f1215;
+  --editor-solid-bg: #0f1215;
+  --table-bg: var(--panel);
+  --thead-bg: var(--panel);
+  --scroll-track: rgba(13, 15, 18, 0.55);
+  --scroll-thumb: rgba(255, 255, 255, 0.14);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.22);
+  --scroll-thumb-border: rgba(13, 15, 18, 0.85);
+  --button-bg: var(--raised);
+  --button-bg-hover: #1f2329;
+  --button-border: rgba(255, 255, 255, 0.12);
+  --button-border-hover: rgba(255, 255, 255, 0.2);
   /* The edge of a field (text input, search, picker): 3:1 and more against every surface it sits on
-     (WCAG 1.4.11). --border and --buttonBorder stay for rules and for buttons, whose label names them. */
-  --controlBorder: rgba(255, 255, 255, 0.4);
-  --controlBorderHover: rgba(255, 255, 255, 0.58);
-  --metricBg: var(--bg);
-  --rowHover: rgba(53, 111, 230, 0.08);
-  --rowDivider: rgba(255, 255, 255, 0.02);
-  --themeSelectArrow: color-mix(in srgb, var(--text) 72%, transparent);
-  --sqlString: color-mix(in srgb, #fb923c 78%, var(--text));
-  --sqlComment: color-mix(in srgb, var(--muted) 90%, transparent);
-  --sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));
-  --sqlFunction: color-mix(in srgb, #a78bfa 70%, var(--text));
-  --sqlNumber: color-mix(in srgb, #34d399 70%, var(--text));
-  --sqlNull: color-mix(in srgb, #f87171 75%, var(--text));
-  --sqlType: color-mix(in srgb, #2dd4bf 72%, var(--text));
+     (WCAG 1.4.11). --border and --button-border stay for rules and for buttons, whose label names them. */
+  --control-border: rgba(255, 255, 255, 0.4);
+  --control-border-hover: rgba(255, 255, 255, 0.58);
+  --metric-bg: var(--bg);
+  --row-hover: rgba(53, 111, 230, 0.08);
+  --row-divider: rgba(255, 255, 255, 0.02);
+  --theme-select-arrow: color-mix(in srgb, var(--text) 72%, transparent);
+  --sql-string: color-mix(in srgb, #fb923c 78%, var(--text));
+  --sql-comment: color-mix(in srgb, var(--muted) 90%, transparent);
+  --sql-keyword: color-mix(in srgb, #60a5fa 75%, var(--text));
+  --sql-function: color-mix(in srgb, #a78bfa 70%, var(--text));
+  --sql-number: color-mix(in srgb, #34d399 70%, var(--text));
+  --sql-null: color-mix(in srgb, #f87171 75%, var(--text));
+  --sql-type: color-mix(in srgb, #2dd4bf 72%, var(--text));
   /* Status: text / icon colour and its 12 % tint background. */
   --danger: #f87171;
   --danger-bg: rgba(239, 68, 68, 0.12);
@@ -206,13 +213,14 @@
   --sev-info: #60a5fa;
   --sev-debug: #8b95a5;
   --sev-trace: #7d8590;
-  /* Accent, split by role: a solid fill (--on-fill text on it), a tint (selected / active
-     backgrounds) and accent-coloured text. */
+  /* Accent, split by role: a solid fill (--on-fill text on it), accent-coloured text, and the selected state: the
+     chosen option, the pressed toggle, the selected row look the same everywhere, this fill and a --selected-edge border
+     (docs/ui-foundations.md, "Selected and pressed"). The focus ring is separate and stays. */
   --accent-fill: #356fe6;
   --accent-fill-hover: #2c62d4;
-  --accent-tint: rgba(53, 111, 230, 0.16);
   --accent-text: #93b4ff;
-  --seg-active-bg: rgba(53, 111, 230, 0.22);
+  --selected-bg: rgba(53, 111, 230, 0.22);
+  --selected-edge: var(--accent-fill);
   /* The solid danger fill of a destructive primary action (Delete), the same in both themes. */
   --danger-fill: #dc2626;
   --danger-fill-hover: #c21f1f;
@@ -268,7 +276,7 @@
      treemap and the hatch of Others (the text colour at 14 %, read in both themes). */
   --sizemap-h: 180px;
   --hatch: color-mix(in srgb, var(--text) 14%, transparent);
-  --traceDot: #12939a;
+  --trace-dot: #12939a;
   /* Service colours (ns.palette.service): the categorical slots. */
   --trace-span-color-1: var(--qchart-1);
   --trace-span-color-2: var(--qchart-2);
@@ -301,9 +309,6 @@
   --trace-heat-8: #cde2fb;
   --trace-delta-selection: #f5a454;
   --trace-delta-baseline: #7d8796;
-  --exd-ok: #34d399;
-  --exd-warn: #fbbf24;
-  --exd-err: #f87171;
   --graph-bg: var(--bg);
   --graph-grid: rgba(160, 166, 175, 0.16);
   --graph-text: var(--text);
@@ -314,15 +319,13 @@
   --graph-edge-muted: #8d939c;
   --graph-node-border: rgba(255, 255, 255, 0.2);
   --graph-node-bg: var(--raised);
-  --graph-disabled-bg: var(--panelBg);
+  --graph-disabled-bg: var(--panel);
   --graph-group-bg: #16191e;
-  --graph-band-bg: var(--tableBg);
-  --graph-label-bg: var(--panelBg);
-  --graph-warn: #f0a33a;
-  --graph-error: var(--danger);
+  --graph-band-bg: var(--table-bg);
+  --graph-label-bg: var(--panel);
   --graph-heat: #c2410c;
   --graph-surface: rgba(19, 22, 26, 0.92);
-  --graph-minimap-bg: var(--panelBg);
+  --graph-minimap-bg: var(--panel);
   --graph-minimap-view: var(--graph-halo);
   --graph-minimap-view-fill: transparent;
   /* The detail panel width (--detail-w), within the canvas. */
@@ -337,9 +340,14 @@
   --gutter: 12px;
   --nav-row-h: 48px;
   --shell-border: 1px solid var(--border);
+  /* The five widths at which a layout changes (tests/harness/test_css_layers_contract.py lists them: a media query
+     names one of them, or the pixel above it for a min-width; from 1280 px a window is wide). Media queries cannot read custom properties, so they
+     repeat the numbers; scripts read shell.BREAKPOINTS. */
   --bp-sm: 600px;
+  --bp-tab: 760px;
   --bp-md: 820px;
   --bp-lg: 1100px;
+  --bp-xl: 1279px;
   /* Stacking scale: every z-index names one of these (tests/harness/test_type_scale_contract.py).
      The low steps order the layers inside a component (a sticky head over its rows, a control
      over a canvas); the high steps order the shell and what opens over it. */
@@ -386,39 +394,36 @@
     color-scheme: light;
     /* SQL colours: 4.5:1 and more on every light surface (white editor, --bg, the Graph group fill).
        The dark mixes of a bright hue into --text are 3.0 to 3.5:1 on white. */
-    --sqlString: #9a3412;
-    --sqlKeyword: color-mix(in srgb, #60a5fa 60%, var(--text));
-    --sqlFunction: #6d28d9;
-    --sqlNumber: #047857;
-    --sqlNull: #b91c1c;
-    --sqlType: #0f766e;
+    --sql-string: #9a3412;
+    --sql-keyword: color-mix(in srgb, #60a5fa 60%, var(--text));
+    --sql-function: #6d28d9;
+    --sql-number: #047857;
+    --sql-null: #b91c1c;
+    --sql-type: #0f766e;
     --bg: #f6f7f9;
     --panel: #ffffff;
-    --panelBg: #ffffff;
     --raised: #ffffff;
-    --error-bg: var(--danger-bg);
     --border: rgba(15, 18, 25, 0.1);
-    --borderStrong: rgba(15, 18, 25, 0.18);
+    --border-strong: rgba(15, 18, 25, 0.18);
     --muted: #5b6270;
     --text: #15181d;
-    --accentText: var(--accent-text);
-    --focusRingColor: #2563eb;
-    --hoverTint: rgba(15, 18, 25, 0.05);
+    --focus-ring-color: #2563eb;
+    --hover-tint: rgba(15, 18, 25, 0.05);
     --shadow-overlay: 0 8px 24px rgba(15, 18, 25, 0.12), 0 0 0 1px rgba(15, 18, 25, 0.04);
     --shadow-sticky: 0 6px 8px -6px rgba(15, 18, 25, 0.18);
-    --inputBg: #ffffff;
-    --editorSolidBg: #ffffff;
-    --scrollTrack: rgba(15, 18, 25, 0.04);
-    --scrollThumb: rgba(15, 18, 25, 0.18);
-    --scrollThumbHover: rgba(15, 18, 25, 0.26);
-    --scrollThumbBorder: rgba(255, 255, 255, 0.92);
-    --buttonBgHover: #f3f4f6;
-    --buttonBorder: rgba(15, 18, 25, 0.14);
-    --buttonBorderHover: rgba(15, 18, 25, 0.24);
-    --controlBorder: rgba(15, 18, 25, 0.54);
-    --controlBorderHover: rgba(15, 18, 25, 0.72);
-    --rowHover: rgba(37, 88, 217, 0.06);
-    --rowDivider: rgba(15, 18, 25, 0.04);
+    --input-bg: #ffffff;
+    --editor-solid-bg: #ffffff;
+    --scroll-track: rgba(15, 18, 25, 0.04);
+    --scroll-thumb: rgba(15, 18, 25, 0.18);
+    --scroll-thumb-hover: rgba(15, 18, 25, 0.26);
+    --scroll-thumb-border: rgba(255, 255, 255, 0.92);
+    --button-bg-hover: #f3f4f6;
+    --button-border: rgba(15, 18, 25, 0.14);
+    --button-border-hover: rgba(15, 18, 25, 0.24);
+    --control-border: rgba(15, 18, 25, 0.54);
+    --control-border-hover: rgba(15, 18, 25, 0.72);
+    --row-hover: rgba(37, 88, 217, 0.06);
+    --row-divider: rgba(15, 18, 25, 0.04);
     --danger: #b91c1c;
     --danger-bg: rgba(239, 68, 68, 0.12);
     --warning: #9a5b00;
@@ -435,9 +440,8 @@
     --sev-trace: #66727f;
     --accent-fill: #2558d9;
     --accent-fill-hover: #1e49bd;
-    --accent-tint: rgba(37, 88, 217, 0.1);
     --accent-text: #1d4ed8;
-    --seg-active-bg: rgba(37, 88, 217, 0.12);
+    --selected-bg: rgba(37, 88, 217, 0.12);
     --kind-table: #1f52c9;
     --kind-view: #0e87cd;
     --kind-mv: #7051db;
@@ -470,13 +474,11 @@
     --qchart-16: #7b78b4;
     --qchart-17: #656019;
     --qchart-18: #03464c;
+    --qchart-other: #6f6d68;
     --dot-ring: rgba(255, 255, 255, 0.5);
     --trace-critical-path: #000;
     --trace-critical-outline: rgba(255, 255, 255, 0.85);
     --trace-clip-shadow: rgba(25, 25, 25, 0.25);
-    --exd-ok: #15803d;
-    --exd-warn: #b45309;
-    --exd-err: #dc2626;
     --graph-grid: rgba(15, 18, 25, 0.12);
     --graph-muted: #4b515c;
     --graph-accent-text: #1d4ed8;
@@ -485,8 +487,6 @@
     --graph-edge-muted: #6b717c;
     --graph-node-border: rgba(15, 18, 25, 0.3);
     --graph-group-bg: #f1f2f5;
-    --graph-warn: #b45309;
-    --graph-error: var(--danger);
     --graph-heat: #f97316;
     --graph-surface: rgba(255, 255, 255, 0.94);
     --graph-minimap-view: rgba(21, 24, 29, 0.92);
@@ -499,40 +499,37 @@
    resets every token the System light block sets, the forced light block sets the same ones
    (tests/harness/test_css_tokens_contract.py). */
 html[data-theme="dark"] {
-  --sqlString: color-mix(in srgb, #fb923c 78%, var(--text));
-  --sqlKeyword: color-mix(in srgb, #60a5fa 75%, var(--text));
-  --sqlFunction: color-mix(in srgb, #a78bfa 70%, var(--text));
-  --sqlNumber: color-mix(in srgb, #34d399 70%, var(--text));
-  --sqlNull: color-mix(in srgb, #f87171 75%, var(--text));
-  --sqlType: color-mix(in srgb, #2dd4bf 72%, var(--text));
+  --sql-string: color-mix(in srgb, #fb923c 78%, var(--text));
+  --sql-keyword: color-mix(in srgb, #60a5fa 75%, var(--text));
+  --sql-function: color-mix(in srgb, #a78bfa 70%, var(--text));
+  --sql-number: color-mix(in srgb, #34d399 70%, var(--text));
+  --sql-null: color-mix(in srgb, #f87171 75%, var(--text));
+  --sql-type: color-mix(in srgb, #2dd4bf 72%, var(--text));
   color-scheme: dark;
   --bg: #0d0f12;
   --panel: #13161a;
-  --panelBg: #13161a;
   --raised: #191d22;
-  --error-bg: var(--danger-bg);
   --border: rgba(255, 255, 255, 0.08);
-  --borderStrong: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.14);
   --muted: #959ba5;
   --text: #e6e8eb;
-  --accentText: var(--accent-text);
-  --focusRingColor: #3b82f6;
-  --hoverTint: rgba(255, 255, 255, 0.06);
+  --focus-ring-color: #3b82f6;
+  --hover-tint: rgba(255, 255, 255, 0.06);
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.04);
   --shadow-sticky: 0 6px 8px -6px rgba(0, 0, 0, 0.6);
-  --inputBg: #0f1215;
-  --editorSolidBg: #0f1215;
-  --scrollTrack: rgba(13, 15, 18, 0.55);
-  --scrollThumb: rgba(255, 255, 255, 0.14);
-  --scrollThumbHover: rgba(255, 255, 255, 0.22);
-  --scrollThumbBorder: rgba(13, 15, 18, 0.85);
-  --buttonBgHover: #1f2329;
-  --buttonBorder: rgba(255, 255, 255, 0.12);
-  --buttonBorderHover: rgba(255, 255, 255, 0.2);
-  --controlBorder: rgba(255, 255, 255, 0.4);
-  --controlBorderHover: rgba(255, 255, 255, 0.58);
-  --rowHover: rgba(53, 111, 230, 0.08);
-  --rowDivider: rgba(255, 255, 255, 0.02);
+  --input-bg: #0f1215;
+  --editor-solid-bg: #0f1215;
+  --scroll-track: rgba(13, 15, 18, 0.55);
+  --scroll-thumb: rgba(255, 255, 255, 0.14);
+  --scroll-thumb-hover: rgba(255, 255, 255, 0.22);
+  --scroll-thumb-border: rgba(13, 15, 18, 0.85);
+  --button-bg-hover: #1f2329;
+  --button-border: rgba(255, 255, 255, 0.12);
+  --button-border-hover: rgba(255, 255, 255, 0.2);
+  --control-border: rgba(255, 255, 255, 0.4);
+  --control-border-hover: rgba(255, 255, 255, 0.58);
+  --row-hover: rgba(53, 111, 230, 0.08);
+  --row-divider: rgba(255, 255, 255, 0.02);
   --danger: #f87171;
   --danger-bg: rgba(239, 68, 68, 0.12);
   --warning: #fbbf24;
@@ -549,9 +546,8 @@ html[data-theme="dark"] {
   --sev-trace: #7d8590;
   --accent-fill: #356fe6;
   --accent-fill-hover: #2c62d4;
-  --accent-tint: rgba(53, 111, 230, 0.16);
   --accent-text: #93b4ff;
-  --seg-active-bg: rgba(53, 111, 230, 0.22);
+  --selected-bg: rgba(53, 111, 230, 0.22);
   --kind-table: #5f8ced;
   --kind-view: #44b7eb;
   --kind-mv: #9f7cf5;
@@ -584,13 +580,11 @@ html[data-theme="dark"] {
   --qchart-16: #bdbcfd;
   --qchart-17: #8e8945;
   --qchart-18: #85e2ed;
+  --qchart-other: #898781;
   --dot-ring: rgba(255, 255, 255, 0.22);
   --trace-critical-path: #05070a;
   --trace-critical-outline: rgba(255, 255, 255, 0.5);
   --trace-clip-shadow: rgba(0, 0, 0, 0.5);
-  --exd-ok: #34d399;
-  --exd-warn: #fbbf24;
-  --exd-err: #f87171;
   --graph-grid: rgba(160, 166, 175, 0.16);
   --graph-muted: #a4aab3;
   --graph-accent-text: #93b4ff;
@@ -599,8 +593,6 @@ html[data-theme="dark"] {
   --graph-edge-muted: #8d939c;
   --graph-node-border: rgba(255, 255, 255, 0.2);
   --graph-group-bg: #16191e;
-  --graph-warn: #f0a33a;
-  --graph-error: var(--danger);
   --graph-heat: #c2410c;
   --graph-surface: rgba(19, 22, 26, 0.92);
   --graph-minimap-view: var(--graph-halo);
@@ -610,39 +602,36 @@ html[data-theme="dark"] {
 
 html[data-theme="light"] {
   color-scheme: light;
-  --sqlString: #9a3412;
-  --sqlKeyword: color-mix(in srgb, #60a5fa 60%, var(--text));
-  --sqlFunction: #6d28d9;
-  --sqlNumber: #047857;
-  --sqlNull: #b91c1c;
-  --sqlType: #0f766e;
+  --sql-string: #9a3412;
+  --sql-keyword: color-mix(in srgb, #60a5fa 60%, var(--text));
+  --sql-function: #6d28d9;
+  --sql-number: #047857;
+  --sql-null: #b91c1c;
+  --sql-type: #0f766e;
   --bg: #f6f7f9;
   --panel: #ffffff;
-  --panelBg: #ffffff;
   --raised: #ffffff;
-  --error-bg: var(--danger-bg);
   --border: rgba(15, 18, 25, 0.1);
-  --borderStrong: rgba(15, 18, 25, 0.18);
+  --border-strong: rgba(15, 18, 25, 0.18);
   --muted: #5b6270;
   --text: #15181d;
-  --accentText: var(--accent-text);
-  --focusRingColor: #2563eb;
-  --hoverTint: rgba(15, 18, 25, 0.05);
+  --focus-ring-color: #2563eb;
+  --hover-tint: rgba(15, 18, 25, 0.05);
   --shadow-overlay: 0 8px 24px rgba(15, 18, 25, 0.12), 0 0 0 1px rgba(15, 18, 25, 0.04);
   --shadow-sticky: 0 6px 8px -6px rgba(15, 18, 25, 0.18);
-  --inputBg: #ffffff;
-  --editorSolidBg: #ffffff;
-  --scrollTrack: rgba(15, 18, 25, 0.04);
-  --scrollThumb: rgba(15, 18, 25, 0.18);
-  --scrollThumbHover: rgba(15, 18, 25, 0.26);
-  --scrollThumbBorder: rgba(255, 255, 255, 0.92);
-  --buttonBgHover: #f3f4f6;
-  --buttonBorder: rgba(15, 18, 25, 0.14);
-  --buttonBorderHover: rgba(15, 18, 25, 0.24);
-  --controlBorder: rgba(15, 18, 25, 0.54);
-  --controlBorderHover: rgba(15, 18, 25, 0.72);
-  --rowHover: rgba(37, 88, 217, 0.06);
-  --rowDivider: rgba(15, 18, 25, 0.04);
+  --input-bg: #ffffff;
+  --editor-solid-bg: #ffffff;
+  --scroll-track: rgba(15, 18, 25, 0.04);
+  --scroll-thumb: rgba(15, 18, 25, 0.18);
+  --scroll-thumb-hover: rgba(15, 18, 25, 0.26);
+  --scroll-thumb-border: rgba(255, 255, 255, 0.92);
+  --button-bg-hover: #f3f4f6;
+  --button-border: rgba(15, 18, 25, 0.14);
+  --button-border-hover: rgba(15, 18, 25, 0.24);
+  --control-border: rgba(15, 18, 25, 0.54);
+  --control-border-hover: rgba(15, 18, 25, 0.72);
+  --row-hover: rgba(37, 88, 217, 0.06);
+  --row-divider: rgba(15, 18, 25, 0.04);
   --danger: #b91c1c;
   --danger-bg: rgba(239, 68, 68, 0.12);
   --warning: #9a5b00;
@@ -659,9 +648,8 @@ html[data-theme="light"] {
   --sev-trace: #66727f;
   --accent-fill: #2558d9;
   --accent-fill-hover: #1e49bd;
-  --accent-tint: rgba(37, 88, 217, 0.1);
   --accent-text: #1d4ed8;
-  --seg-active-bg: rgba(37, 88, 217, 0.12);
+  --selected-bg: rgba(37, 88, 217, 0.12);
   --kind-table: #1f52c9;
   --kind-view: #0e87cd;
   --kind-mv: #7051db;
@@ -694,13 +682,11 @@ html[data-theme="light"] {
   --qchart-16: #7b78b4;
   --qchart-17: #656019;
   --qchart-18: #03464c;
+  --qchart-other: #6f6d68;
   --dot-ring: rgba(255, 255, 255, 0.5);
   --trace-critical-path: #000;
   --trace-critical-outline: rgba(255, 255, 255, 0.85);
   --trace-clip-shadow: rgba(25, 25, 25, 0.25);
-  --exd-ok: #15803d;
-  --exd-warn: #b45309;
-  --exd-err: #dc2626;
   --graph-grid: rgba(15, 18, 25, 0.12);
   --graph-muted: #4b515c;
   --graph-accent-text: #1d4ed8;
@@ -709,8 +695,6 @@ html[data-theme="light"] {
   --graph-edge-muted: #6b717c;
   --graph-node-border: rgba(15, 18, 25, 0.3);
   --graph-group-bg: #f1f2f5;
-  --graph-warn: #b45309;
-  --graph-error: var(--danger);
   --graph-heat: #f97316;
   --graph-surface: rgba(255, 255, 255, 0.94);
   --graph-minimap-view: rgba(21, 24, 29, 0.92);
@@ -730,7 +714,7 @@ html[data-theme="light"] {
 
 
 @supports not (color: color-mix(in srgb, white 50%, black)) {
-  :root { --themeSelectArrow: var(--muted); }
+  :root { --theme-select-arrow: var(--muted); }
 }
 
 /* One severity palette for every log of Traces and Logs (ns.palette.severity,

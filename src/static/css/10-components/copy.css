@@ -54,7 +54,7 @@
 }
 
 .uiCopy:hover:not(:disabled) {
-  background: var(--hoverTint);
+  background: var(--hover-tint);
   color: var(--text);
 }
 

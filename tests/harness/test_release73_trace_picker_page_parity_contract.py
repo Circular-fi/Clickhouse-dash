@@ -27,7 +27,7 @@ def test_trace_picker_hover_and_close_motion_follow_page_selector():
     # Closing first, then the open class drops a frame later (ns.menu).
     assert 'if (closingClass) root?.classList.add(closingClass);' in js
     assert 'requestAnimationFrame(() => { if (!isOpen() && openClass) root?.classList.remove(openClass); });' in js
-    assert css_sources.override("border-color: var(--buttonBorderHover)")
+    assert css_sources.override("border-color: var(--button-border-hover)")
     assert css_sources.override("border-bottom-color: transparent")
     assert css_sources.override("border-bottom-left-radius: 0")
     assert css_sources.override("border-bottom-right-radius: 0")

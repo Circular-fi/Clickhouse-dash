@@ -121,7 +121,7 @@ def test_the_elapsed_tile_says_what_it_measures_and_does_not_hold_the_run():
     run = read("src/static/app_run.js")
     html = read("src/static/query.html")
     assert "function elapsedTitle(totals, clientMs) {" in run
-    assert "Elapsed: the time ChDash needed from the start of the stream to the last row it sent." in run
+    assert "Elapsed: the time ClickHouse Dash needed from the start of the stream to the last row it sent." in run
     assert "ClickHouse and column decoding" in run and "JSON encoding" in run and "The browser had every row" in run
     assert 'finishRail(railTotals(out?.done, out?.agg), performance.now() - runStartedPerf);' in run
     assert "function timingMs(done, part) {" in run and "backpressureMs: timingMs(done, \"backpressure\")" in run
@@ -132,7 +132,7 @@ def test_the_elapsed_tile_says_what_it_measures_and_does_not_hold_the_run():
     assert "let elapsedLookupSeq = 0;" in run and run.count("if (seq !== elapsedLookupSeq) return;") == 2
     assert "elapsedLookupSeq += 1;" in run
     assert 'id="clickhouseElapsedWrap" class="metricCompact__systemLine" hidden title="System: the query_duration_ms of ClickHouse (system.query_log)' in html
-    assert "It includes the time ClickHouse waited for ChDash to read the blocks." in html
+    assert "It includes the time ClickHouse waited for ClickHouse Dash to read the blocks." in html
 
 
 def test_the_system_queries_page_says_what_a_duration_is():

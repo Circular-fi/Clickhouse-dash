@@ -42,8 +42,7 @@ export async function runSuccessfulQuery(page, sql, options = {}) {
 }
 
 export async function openExplorer(page) {
-  await page.locator('#pageSelectButton').click();
-  await page.locator('#navExplorerButton').click();
+  await page.locator('#navExplorerLink').click();
   await expect(page.locator('#explorerWorkspace')).toBeVisible();
   await expect(page).toHaveURL(/\/explorer(?:\/|$)/);
   await expect(page.locator('#explorerTableList')).toBeVisible({ timeout: 15_000 });

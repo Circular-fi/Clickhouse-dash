@@ -1548,15 +1548,10 @@ function defaultBadgesForSuggestion(s) {
     if (s.is_aggregate) badges.push("agg");
   }
   if (s.kind === "column" && s.type) badges.push(...typeBadges(s.type));
-  if (s.kind === "table" && s.detail) badges.push(compactEngineName(s.detail));
+  // The engine as ClickHouse names it (MergeTree, MaterializedView), not an abbreviation.
+  if (s.kind === "table" && s.detail) badges.push(String(s.detail).trim());
   if (s.kind === "data_type" && s.parent) badges.push("alias");
   return badges.filter(Boolean);
-}
-
-function compactEngineName(engine) {
-  const e = String(engine || "").trim();
-  if (!e) return "";
-  return e.replace(/MergeTree$/i, "MT").replace(/^Replicated/i, "Repl");
 }
 
 function badgeClassSuffix(text) {
@@ -1656,7 +1651,7 @@ function buildSuggestions(ta, explicit = false) {
       // In db-qualified context (`system.`), the prefix is the part after the dot.
       // Match both `one` and `system.one`, but insert only `one` after the dot.
       if (!matchPrefix(matchName, prefix) && !matchPrefix(name, prefix) && !(qualified && !prefix)) continue;
-      addSuggestion(list, seen, { label, insert, kind: "table", database: db, detail: t.detail || "", badges: t.detail ? [compactEngineName(t.detail)] : [] });
+      addSuggestion(list, seen, { label, insert, kind: "table", database: db, detail: t.detail || "", badges: t.detail ? [String(t.detail).trim()] : [] });
     }
   };
 
@@ -2842,7 +2837,7 @@ function renderMenu(ta, items, token, totalAvailable = 0) {
       labelText.appendChild(sourceText);
     }
 
-    labelText.setAttribute("data-marquee", `${String(s.label || "")}${source ? ` ${source}` : ""}`);
+    labelText.setAttribute("data-full", `${String(s.label || "")}${source ? ` ${source}` : ""}`);
     label.appendChild(labelText);
 
     const badges = document.createElement("span");
@@ -2887,16 +2882,9 @@ function renderMenu(ta, items, token, totalAvailable = 0) {
     positionMenu(ta);
     for (const label of $$(".autocompleteItem__label", m)) {
       const inner = $(".autocompleteItem__labelText", label);
-      if (inner && inner.scrollWidth > label.clientWidth + 2) {
-        const shift = Math.ceil((inner.scrollWidth / 2) || (inner.scrollWidth - label.clientWidth + 16));
-        label.style.setProperty("--ac-label-shift", `${shift}px`);
-        label.style.setProperty("--ac-label-duration", `${Math.max(1.2, shift / 28).toFixed(2)}s`);
-        label.classList.add("is-overflowing");
-      } else {
-        label.style.removeProperty("--ac-label-shift");
-        label.style.removeProperty("--ac-label-duration");
-        label.classList.remove("is-overflowing");
-      }
+      // A cut name keeps its whole text in the title of the label.
+      if (inner && inner.scrollWidth > inner.clientWidth + 1) label.title = inner.getAttribute("data-full") || inner.textContent || "";
+      else label.removeAttribute("title");
     }
     syncGhostWithPointer();
   });

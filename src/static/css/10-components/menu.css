@@ -65,7 +65,7 @@
   width: 16px;
   height: 16px;
   transform: translateY(-50%);
-  background-color: var(--themeSelectArrow);
+  background-color: var(--theme-select-arrow);
   opacity: 0.95;
   pointer-events: none;
   mask-image: var(--icon-chevron-down);
@@ -79,7 +79,7 @@
 }
 
 .themeSelect__button:focus-visible {
-  border-color: var(--accentBorder);
+  border-color: var(--accent-fill);
   box-shadow: var(--ring);
 }
 
@@ -96,7 +96,7 @@
   z-index: var(--z-dropdown);
   padding: 1px var(--space-6) var(--space-6) var(--space-6);
   border-radius: var(--r-lg);
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-top: 0;
   /* Remove the divider between the button and menu. */
   background: var(--panel);
@@ -136,12 +136,23 @@
 }
 
 .themeSelect__option:hover {
-  background: var(--rowHover);
+  background: var(--row-hover);
 }
 
 .themeSelect__option[aria-selected="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
+  background: var(--selected-bg);
+  border-color: var(--selected-edge);
+}
+
+/* The chosen option stays in its list, marked with a check (it is the current value, not an action). */
+.themeSelect__option[aria-selected="true"]:not(.themeSelect__option--icon)::after {
+  content: "";
+  flex: 0 0 auto;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-left: auto;
+  background-color: currentColor;
+  mask: var(--icon-check) center / var(--icon-sm) no-repeat;
 }
 
 .themeSelect__option:focus-visible {
@@ -162,7 +173,7 @@
 
 .themeSelect.themeSelect--closing .themeSelect__button {
   border-bottom-color: transparent;
-  background: var(--buttonBg);
+  background: var(--button-bg);
 }
 
 .themeSelect.themeSelect--open .themeSelect__button {
@@ -170,12 +181,6 @@
   border-bottom-right-radius: 0;
   border-bottom-color: transparent;
   background: var(--panel);
-}
-
-.themeSelect.themeSelect--open .themeSelect__option[aria-selected="true"],
-.themeSelect.themeSelect--closing .themeSelect__option[aria-selected="true"] {
-  display: none;
-
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -187,8 +192,8 @@
 
 .themeSelect.themeSelect--open .themeSelect__button:hover,
 .themeSelect.themeSelect--closing .themeSelect__button:hover {
-  background: var(--buttonBg);
-  border-color: var(--buttonBorder);
+  background: var(--button-bg);
+  border-color: var(--button-border);
 }
 
 /* ---- Pretty host picker (similar to theme picker) ---- */
@@ -204,21 +209,35 @@
 .picker__button {
   position: relative;
   display: grid;
-  grid-template-columns: 0.6rem minmax(0, 1fr) 6rem 3.5rem;
+  /* The host's name is what the operator checks before a run: it takes the room it needs (up to 28rem) and
+     the version and the ping, columns of fixed width, give way first (under 1280 px they stay in the menu). */
+  grid-template-columns: 0.6rem minmax(6rem, max-content) 4.5rem 3.25rem;
   align-items: center;
   column-gap: var(--space-10);
   white-space: nowrap;
-  width: 18.6rem;
-  min-width: 18.6rem;
-  max-width: 18.6rem;
+  width: auto;
+  min-width: 15rem;
+  max-width: 28rem;
   padding: 0 var(--space-40) 0 var(--space-12);
   transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
+}
+
+/* Under 1280 px the host's version and ping stay in its menu: the name takes their room, never the other way. */
+@media (min-width: 821px) and (max-width: 1279px) {
+  .picker__button {
+    grid-template-columns: 0.6rem minmax(6rem, max-content);
+    min-width: 11rem;
+  }
+  .picker__button > .hostVersion,
+  .picker__button > .hostPing {
+    display: none;
+  }
 }
 
 .pickerOption {
   width: calc(100% + 2px);
   display: grid;
-  grid-template-columns: 0.6rem minmax(0, 1fr) 6rem 3.5rem;
+  grid-template-columns: 0.6rem minmax(0, 1fr) 4.5rem 3.25rem;
   align-items: center;
   column-gap: var(--space-10);
   margin-left: -1px;
@@ -242,7 +261,7 @@
   width: 16px;
   height: 16px;
   transform: translateY(-50%);
-  background-color: var(--themeSelectArrow);
+  background-color: var(--theme-select-arrow);
   opacity: 0.95;
   pointer-events: none;
   mask-image: var(--icon-chevron-down);
@@ -267,14 +286,14 @@
 }
 
 .picker__button:focus-visible {
-  border-color: var(--accentBorder);
+  border-color: var(--accent-fill);
   box-shadow: var(--ring);
 }
 
 /* Host picker: when only one host, render as static info (no dropdown affordance) */
 .picker.is-static .picker__button {
   cursor: default;
-  border-color: var(--buttonBorder);
+  border-color: var(--button-border);
   background: transparent;
   box-shadow: none;
   padding-right: var(--space-12);
@@ -282,11 +301,11 @@
 
 .picker.is-static .picker__button:hover {
   background: transparent;
-  border-color: var(--buttonBorder);
+  border-color: var(--button-border);
 }
 
 .picker.is-static .picker__button:focus-visible {
-  border-color: var(--buttonBorder);
+  border-color: var(--button-border);
   box-shadow: none;
 }
 
@@ -310,15 +329,16 @@
 .picker__menu {
   position: absolute;
   left: 0;
-  right: 0;
-  width: 100%;
+  right: auto;
+  width: max-content;
   min-width: 100%;
+  max-width: calc(100vw - 16px);
   box-sizing: border-box;
   top: 100%;
   margin-top: -1px;
   z-index: var(--z-dropdown);
   border-radius: var(--r-lg);
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-top: 0;
   background: var(--panel);
   box-shadow: var(--shadow-overlay);
@@ -328,12 +348,25 @@
 }
 
 .pickerOption:hover {
-  background: var(--rowHover);
+  background: var(--row-hover);
 }
 
 .pickerOption[aria-selected="true"] {
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
+  position: relative;
+  background: var(--selected-bg);
+  border-color: var(--selected-edge);
+}
+
+.pickerOption[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  right: 0.85rem;
+  top: 50%;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin: calc(var(--icon-sm) / -2) 0 0;
+  background-color: currentColor;
+  mask: var(--icon-check) center / var(--icon-sm) no-repeat;
 }
 
 .pickerOption__version {
@@ -362,7 +395,7 @@
   width: 34px;
   min-width: 34px;
   padding: 0;
-  background: var(--buttonBg);
+  background: var(--button-bg);
   box-shadow: none;
   color: color-mix(in srgb, var(--muted) 82%, transparent);
 }
@@ -422,11 +455,6 @@
   border-bottom-color: transparent;
 }
 
-.themeSelect--icons.themeSelect--open .themeSelect__option[aria-selected="true"],
-.themeSelect--icons.themeSelect--closing .themeSelect__option[aria-selected="true"] {
-  display: none;
-}
-
 .themeSelect--icons.themeSelect--closing .themeSelect__button {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
@@ -439,13 +467,6 @@
   margin-top: -1px;
 }
 
-.themeSelect--icons.themeSelect--open .themeSelect__option--icon[aria-selected="true"],
-.themeSelect--icons.themeSelect--closing .themeSelect__option--icon[aria-selected="true"],
-.pageSelect.themeSelect--open .themeSelect__option[aria-selected="true"],
-.pageSelect.themeSelect--closing .themeSelect__option[aria-selected="true"] {
-  display: none;
-}
-
 .runSettings__menu {
   top: calc(100% + 4px);
   right: 0;
@@ -453,9 +474,9 @@
   width: 11.5rem;
   min-width: 11.5rem;
   padding: var(--space-4);
-  border: 1px solid var(--buttonBorder);
+  border: 1px solid var(--button-border);
   border-radius: var(--r-lg);
-  background: var(--panelBg);
+  background: var(--panel);
   box-shadow: var(--shadow-overlay);
 }
 
@@ -483,7 +504,7 @@
 .themeSelect__option--icon:hover {
   box-shadow: none;
   opacity: 1;
-  background: var(--rowHover);
+  background: var(--row-hover);
   border-color: transparent;
   color: var(--text);
 }
@@ -492,35 +513,35 @@
   border-color: transparent;
   color: var(--text);
   opacity: 1;
-  background: var(--rowHover);
+  background: var(--row-hover);
   box-shadow: var(--ring);
 }
 
 .themeSelect__option--icon[aria-selected="true"] {
   color: var(--text);
   opacity: 1;
-  background: color-mix(in srgb, var(--accentBorder) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accentBorder) 45%, var(--border));
+  background: var(--selected-bg);
+  border-color: var(--selected-edge);
 }
 
 /* Theme picker uses the same restrained hover/focus treatment as other selectors. */
 .themeSelect--icons .themeSelect__button--icon:hover,
 .themeSelect--icons .themeSelect__button--icon:focus-visible {
   color: var(--text);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   box-shadow: none;
 }
 
 .themeSelect--icons.themeSelect--open .themeSelect__button--icon {
   box-shadow: none;
   color: var(--text);
-  background: var(--buttonBg);
+  background: var(--button-bg);
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
 
 .themeSelect--icons.themeSelect--closing .themeSelect__button--icon {
-  background: var(--buttonBg);
+  background: var(--button-bg);
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
@@ -575,7 +596,7 @@ body > .explorerDataSettings__menu.is-open {
   min-height: 30px;
   padding: 0 var(--space-32) 0 var(--space-12);
   justify-content: flex-start;
-  border: 1px solid var(--controlBorder);
+  border: 1px solid var(--control-border);
   border-radius: var(--r-md);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
@@ -609,12 +630,12 @@ body > .explorerDataSettings__menu.is-open {
   padding: 1px var(--space-6) var(--space-6);
   overflow-y: auto;
   overflow-x: hidden;
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-top: 0;
   scrollbar-gutter: stable;
   border-radius: var(--r-lg);
   background: var(--panel);
-  border-color: var(--borderStrong);
+  border-color: var(--border-strong);
 }
 
 .tracePicker__option {
@@ -654,7 +675,7 @@ body > .explorerDataSettings__menu.is-open {
   width: 100%;
   min-width: 100%;
   max-width: 100%;
-  border-color: var(--controlBorder);
+  border-color: var(--control-border);
 }
 
 .traceSearchField > .tracePicker {
@@ -663,14 +684,14 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 .tracePicker__button:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accentBorder) 50%, var(--controlBorderHover));
-  background: var(--buttonBgHover);
+  border-color: color-mix(in srgb, var(--accent-fill) 50%, var(--control-border-hover));
+  background: var(--button-bg-hover);
 }
 
 .tracePicker.is-disabled .tracePicker__button {
   cursor: default;
   opacity: .48;
-  background: color-mix(in srgb, var(--inputBg) 78%, transparent);
+  background: color-mix(in srgb, var(--input-bg) 78%, transparent);
 }
 
 .tracePicker.themeSelect--closing .tracePicker__button {
@@ -682,7 +703,7 @@ body > .explorerDataSettings__menu.is-open {
 .tracePicker.themeSelect--open .tracePicker__button {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  border-color: var(--accentBorder);
+  border-color: var(--accent-fill);
 }
 
 .traceTagSearch__inputs > .tracePicker + .tracePicker {
@@ -711,19 +732,19 @@ body > .explorerDataSettings__menu.is-open {
   height: 31px;
   min-height: 31px;
   border-radius: var(--r-md);
-  background: var(--inputBg);
+  background: var(--input-bg);
   box-shadow: none;
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
 }
 
 .traceSearchField > .tracePicker .tracePicker__button:not(:where(.tracePicker.themeSelect--open .tracePicker__button)),
 .traceTagSearch__inputs > .tracePicker .tracePicker__button:not(:where(.tracePicker.themeSelect--open .tracePicker__button)) {
-  border: 1px solid var(--controlBorder);
+  border: 1px solid var(--control-border);
 }
 
 .traceTagSearch__inputs > .tracePicker .tracePicker__button {
   border-radius: var(--r-md);
-  background: var(--inputBg);
+  background: var(--input-bg);
   box-shadow: none;
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   height: 31px;
@@ -733,7 +754,7 @@ body > .explorerDataSettings__menu.is-open {
 
 .traceSearchField > .tracePicker .tracePicker__button:hover,
 .traceTagSearch__inputs > .tracePicker .tracePicker__button:hover {
-  border-color: var(--accentBorder);
+  border-color: var(--accent-fill);
 }
 
 .traceTagSearch__inputs > .tracePicker .tracePicker__menu {
@@ -775,19 +796,19 @@ body > .explorerDataSettings__menu.is-open {
 
 .traceSearchBar .tracePicker__button {
   padding: 0 var(--space-32) 0 var(--space-10);
-  border: 1px solid var(--controlBorder);
+  border: 1px solid var(--control-border);
   color: var(--text);
   box-sizing: border-box;
   width: 100%;
   min-width: 100%;
   max-width: 100%;
-  border-color: var(--controlBorder);
+  border-color: var(--control-border);
 }
 
 /* Same hover as pageSelectButton: only the standard button border changes. */
 .traceSearchBar .tracePicker__button:hover:not(:disabled) {
   color: var(--text);
-  border-color: var(--controlBorderHover);
+  border-color: var(--control-border-hover);
   box-shadow: none;
 }
 
@@ -801,7 +822,7 @@ body > .explorerDataSettings__menu.is-open {
   max-width: 100%;
   margin-top: -1px;
   padding: 1px var(--space-6) var(--space-6) var(--space-6);
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-top: 0;
   border-radius: var(--r-lg);
   background: var(--panel);
@@ -819,12 +840,12 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 .traceSearchBar .tracePicker__option:hover:not(:disabled) {
-  background: var(--rowHover);
+  background: var(--row-hover);
 }
 
 /* Focused search bar buttons keep their border and no shadow: the global ring is the only focus mark. */
 .traceSearchBar button:focus:not(:where(.themeSelect--icons.themeSelect--closing .themeSelect__button, .themeSelect--icons.themeSelect--open .themeSelect__button, .themeSelect.themeSelect--closing .themeSelect__button, .themeSelect.themeSelect--open .themeSelect__button, .tracePicker.themeSelect--closing .tracePicker__button, .tracePicker.themeSelect--open .tracePicker__button, .tracePicker__button:hover:not(:disabled), .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceSearchField > .tracePicker .tracePicker__button:hover, .traceTagSearch__inputs > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button:hover, button.badge[aria-pressed="false"], button.badge[aria-pressed="true"], button.button:not(:disabled):hover)) {
-  border-color: var(--controlBorder);
+  border-color: var(--control-border);
 }
 
 .traceSearchBar button:focus:not(:where(.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker__button:focus, .traceSearchBar .tracePicker__button:focus-visible, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button)) {
@@ -832,7 +853,7 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 .traceSearchBar button:focus-visible:not(:where(.themeSelect--icons.themeSelect--closing .themeSelect__button, .themeSelect--icons.themeSelect--open .themeSelect__button, .themeSelect.themeSelect--closing .themeSelect__button, .themeSelect.themeSelect--open .themeSelect__button, .tracePicker.themeSelect--closing .tracePicker__button, .tracePicker.themeSelect--open .tracePicker__button, .tracePicker__button:hover:not(:disabled), .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button:hover, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceSearchField > .tracePicker .tracePicker__button:hover, .traceTagSearch__inputs > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button:hover, button.badge[aria-pressed="false"], button.badge[aria-pressed="true"], button.button:not(:disabled):hover)) {
-  border-color: var(--controlBorder);
+  border-color: var(--control-border);
 }
 
 .traceSearchBar button:focus-visible:not(:where(.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button, .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button, .traceSearchBar .tracePicker.themeSelect--open .tracePicker__button, .traceSearchBar .tracePicker__button:focus, .traceSearchBar .tracePicker__button:focus-visible, .traceSearchBar .tracePicker__button:hover:not(:disabled), .traceSearchField > .tracePicker .tracePicker__button, .traceTagSearch__inputs > .tracePicker .tracePicker__button)) {
@@ -842,7 +863,7 @@ body > .explorerDataSettings__menu.is-open {
 /* Focus shows the global ring only; otherwise the pickers follow the page selector surface. */
 .traceSearchBar .tracePicker__button:focus,
 .traceSearchBar .tracePicker__button:focus-visible {
-  border-color: var(--controlBorder);
+  border-color: var(--control-border);
   box-shadow: none;
 }
 
@@ -856,7 +877,7 @@ body > .explorerDataSettings__menu.is-open {
   max-width: 100%;
   margin-top: -1px;
   padding: 1px var(--space-6) var(--space-6) var(--space-6);
-  border: 1px solid var(--borderStrong);
+  border: 1px solid var(--border-strong);
   border-top: 0;
   border-radius: var(--r-lg);
   background: var(--panel);
@@ -883,12 +904,12 @@ body > .explorerDataSettings__menu.is-open {
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button:hover,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button:hover {
-  border-color: var(--controlBorder);
+  border-color: var(--control-border);
   border-bottom-color: transparent;
 }
 
 .traceResultsSort .tracePicker__button:hover:not(:disabled) {
-  border-color: var(--controlBorderHover);
+  border-color: var(--control-border-hover);
   box-shadow: none;
 }
 
@@ -897,23 +918,15 @@ body > .explorerDataSettings__menu.is-open {
 .traceSearchBar .tracePicker.themeSelect--closing .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--open .tracePicker__button,
 .traceResultsSort .tracePicker.themeSelect--closing .tracePicker__button {
-  border-color: var(--controlBorder);
+  border-color: var(--control-border);
   border-bottom-color: transparent;
   box-shadow: none;
 }
 
 .traceResultsSort .tracePicker__button:focus,
 .traceResultsSort .tracePicker__button:focus-visible {
-  border-color: var(--controlBorder);
+  border-color: var(--control-border);
   box-shadow: none;
-}
-
-/* The selected option is represented by the button while the menu is open/closing. */
-.traceSearchBar .tracePicker.themeSelect--open .tracePicker__option[aria-selected="true"],
-.traceSearchBar .tracePicker.themeSelect--closing .tracePicker__option[aria-selected="true"],
-.traceResultsSort .tracePicker.themeSelect--open .tracePicker__option[aria-selected="true"],
-.traceResultsSort .tracePicker.themeSelect--closing .tracePicker__option[aria-selected="true"] {
-  display: none;
 }
 
 /* The time-range menu (on every filter bar) should not gain a scrollbar merely because Custom is active. */
@@ -946,7 +959,7 @@ body > .explorerDataSettings__menu.is-open {
   display: flex;
   flex-direction: column;
   z-index: var(--z-popover);
-  border-top: 1px solid var(--borderStrong);
+  border-top: 1px solid var(--border-strong);
   border-radius: 0 var(--r-lg) var(--r-lg) var(--r-lg);
   color: var(--text);
   font: var(--fw-medium) var(--fs-xs)/1.35 var(--font-sans);
@@ -976,16 +989,16 @@ body > .explorerDataSettings__menu.is-open {
   font-weight: var(--fw-semibold);
 }
 
-.graphKitGroup.traceGraph__color .tracePicker__button:hover { background: var(--rowHover); }
+.graphKitGroup.traceGraph__color .tracePicker__button:hover { background: var(--row-hover); }
 
 .traceTagSearch__op {
   height: 31px;
   min-width: 34px;
   margin-left: -1px;
   padding: 0 var(--space-8);
-  border: 1px solid var(--controlBorder);
+  border: 1px solid var(--control-border);
   border-radius: 0;
-  background: var(--buttonBg);
+  background: var(--button-bg);
   color: var(--text);
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-mono);
   cursor: pointer;

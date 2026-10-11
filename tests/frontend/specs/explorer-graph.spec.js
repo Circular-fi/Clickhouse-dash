@@ -102,7 +102,7 @@ test('unfocused lineage collapses databases, hides objects without dependencies 
 test('fit opens readable: the whole graph, or the readable scale on the focus with the minimap; a phone on the focus at 0.7 or more', async ({ page }) => {
   const FOCUS = 'table:chdash_ui.weather_observations';
   const cases = [
-    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { depth: 2 }), /neighborhood depth 2/, 'anchored'],
+    [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { depth: 2 }), /neighborhood depth 2/, 'compact'],
     [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { depth: 3 }), /neighborhood depth 3/, null],
     [VIEWPORTS['desktop-1440'], focusUrl('chdash_ui', 'weather_observations', { mode: 'storage' }), /\d+ nodes/, null],
     [VIEWPORTS['laptop-1280'], focusUrl('chdash_ui', 'weather_observations', { depth: 3 }), /neighborhood depth 3/, null],
@@ -169,7 +169,8 @@ test('compact cards follow the on-screen card height and shrink to their title r
     seen.add(compact);
     if (compact) {
       expect(state.edgeLabels, 'no edge label on compact cards').toEqual([]);
-      for (const node of state.nodes) expect(node.height, node.id).toBeLessThan(80 * state.scale - 4);
+      // The room of a two-line title (a taller card, a Buffer, has no more).
+      for (const node of state.nodes) expect(node.height, node.id).toBeLessThanOrEqual(12 * 1.2 * 2 + 14 + 0.5);
     }
     const before = state.scale;
     await page.locator('#explorerGraphZoomOutButton').click();
@@ -484,14 +485,14 @@ test('graph colour tokens stay readable in both themes and Storage keeps its rea
     await page.goto(focusUrl('chdash_ui', 'weather_observations', { mode: 'storage' }));
     await graphReady(page, /\d+ nodes/);
     const tokens = await tokenColors(page, ['--graph-text', '--graph-muted', '--graph-accent-text', '--graph-halo', '--graph-node-bg',
-      '--graph-label-bg', '--graph-bg', '--graph-warn', '--graph-error', '--graph-edge']);
+      '--graph-label-bg', '--graph-bg', '--warning', '--danger', '--graph-edge']);
     const bg = tokens['--graph-node-bg'];
     // Card and label text, TTL expressions (accent text) and secondary text.
     for (const name of ['--graph-text', '--graph-muted', '--graph-accent-text']) {
       expect(contrast(tokens[name], bg), `${theme} ${name} on cards`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(tokens[name], tokens['--graph-label-bg']), `${theme} ${name} on labels`).toBeGreaterThanOrEqual(4.5);
     }
-    for (const name of ['--graph-halo', '--graph-warn', '--graph-error', '--graph-edge']) {
+    for (const name of ['--graph-halo', '--warning', '--danger', '--graph-edge']) {
       expect(contrast(tokens[name], bg), `${theme} ${name}`).toBeGreaterThanOrEqual(3);
       expect(contrast(tokens[name], tokens['--graph-bg']), `${theme} ${name} on the background`).toBeGreaterThanOrEqual(3);
     }

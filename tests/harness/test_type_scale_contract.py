@@ -21,7 +21,7 @@ import css_tree  # noqa: E402
 FONT_SIZES = {"--fs-xs": "11px", "--fs-sm": "12px", "--fs-md": "13px", "--fs-lg": "14px", "--fs-xl": "16px", "--fs-2xl": "20px", "--fs-display": "32px"}
 FONT_WEIGHTS = {"--fw-regular": "400", "--fw-medium": "500", "--fw-semibold": "600"}
 RADII = {"--r-xs": "3px", "--r-sm": "4px", "--r-md": "6px", "--r-lg": "8px", "--r-pill": "999px"}
-MOTION = {"--dur-quick": "120ms", "--dur-base": "160ms"}
+MOTION = {"--dur-quick": "120ms", "--dur-base": "160ms", "--dur-spin": "800ms", "--dur-pulse": "1000ms", "--dur-band": "1100ms", "--dur-sweep": "1200ms", "--dur-flash": "1400ms", "--dur-settle": "1800ms"}
 # The pill: status badges, filter chips, status dots' containers and scrollbar thumbs.
 PILL_SELECTORS = {
     "::-webkit-scrollbar-thumb", ".autocompleteMenu::-webkit-scrollbar-thumb", ".badge--pill", ".traceSpanRow__errorBadge",
@@ -31,7 +31,7 @@ PILL_SELECTORS = {
 OVERLAY_WORDS = ("menu", "Menu", "popover", "Popover", "Tip", "tooltip", "Tooltip", "Dialog", "dialog", "Toast", "toast",
                  "uiSide", "uiDetail", "ContextPanel", "timeRangePanel")
 # A blurred shadow that is not elevation: the fade over the autocomplete list's last row.
-BLUR_ALLOWED = {(".autocompleteMore", "0 -0.35rem 0.55rem var(--buttonBg)")}
+BLUR_ALLOWED = {(".autocompleteMore", "0 -0.35rem 0.55rem var(--button-bg)")}
 
 
 def walk(nodes, ctx=()):
@@ -245,6 +245,14 @@ def test_transitions_use_the_motion_tokens_and_infinite_animations_stop_on_reduc
                 if ms not in ("0s",):
                     offenders.append(f"{name}: {prelude[:70]} {{transition: {value}}}")
     assert not offenders, "transitions take var(--dur-quick) / var(--dur-base) and var(--ease):\n" + "\n".join(offenders)
+    # An animation names a duration token too (UI-120): the loops and the long one-shots are --dur-spin to --dur-settle.
+    loops = []
+    for name, prelude, prop, value in declarations():
+        if prop == "animation" and value.strip() != "none":
+            for ms in re.findall(r"(?<![\w-])(\d*\.?\d+m?s)\b", value):
+                if ms not in ("0s",):
+                    loops.append(f"{name}: {prelude[:70]} {{animation: {value}}}")
+    assert not loops, "animations take a --dur-* token:\n" + "\n".join(loops)
     css = css_sources.text()
     infinite = []
     for path, _ in css_sources.files():
@@ -289,3 +297,10 @@ def test_canvas_fonts_follow_the_tokens():
         if re.search(r"Arial|Helvetica|monospace", text.replace(f"const FONT = '{sans}';", "")):
             offenders.append(f"{path.name}: a raw font family")
     assert not offenders, "\n".join(offenders)
+
+
+def test_every_custom_property_is_named_in_kebab_case():
+    names = {name for _, _, name, _ in declarations() if name.startswith("--")}
+    assert names
+    bad = sorted(name for name in names if not re.fullmatch(r"--[a-z0-9]+(-[a-z0-9]+)*", name))
+    assert not bad, f"custom properties are lower-case words joined by hyphens (UI-115): {bad}"

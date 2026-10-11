@@ -55,7 +55,8 @@ def test_each_page_shell_holds_one_view_and_links_the_others():
         # The row under the header: three links, this one current.
         header = html[html.index('<header class="appHeader"'):html.index("</header>")]
         assert "data-obs-tab" not in header and "data-trace-tab" not in header, view
-        nav = html[html.index('<nav id="obsNav" class="obsNav"'):html.index("</nav>")]
+        nav_start = html.index('<nav id="obsNav" class="obsNav"')
+        nav = html[nav_start:html.index("</nav>", nav_start)]
         assert '<div id="obsTabs" class="contentTabs contentTabs--nav obsNav__views" role="group"' in nav, view
         for name in VIEWS:
             link = re.search(rf'<a class="contentTabs__tab([^"]*)"( aria-current="page")? id="obsTab-{name}" data-obs-tab="{name}" href="/observability/{name}">', nav)
@@ -139,7 +140,7 @@ def test_time_range_and_service_follow_from_page_to_page_and_other_filters_stay_
 def test_switcher_is_the_same_in_every_shell_and_the_row_is_plain_links():
     for page in ("query.html", "explorer.html", "traces.html", "logs.html", "metrics.html", "system.html"):
         html = read(f"src/static/{page}")
-        assert 'id="navObservabilityButton" class="themeSelect__option" type="button" role="option" data-value="observability"' in html, page
+        assert 'id="navObservabilityLink" class="pageNav__link" href="/observability"' in html, page
         for old in ("navTracesButton", "navLogsButton", "navMetricsButton"):
             assert old not in html, (page, old)
     for module in ("app_dom.js", "app_header.js", "app_explorer.js", "app_traces.js", "app_logs.js", "app_metrics.js"):

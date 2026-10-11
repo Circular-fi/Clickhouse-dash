@@ -81,5 +81,5 @@ def test_light_minimap_viewport_is_darker_and_icon_selectors_keep_outline() -> N
     assert '--graph-minimap-view-fill: rgba(21, 24, 29, 0.1);' in css and '--graph-minimap-view: rgba(21, 24, 29, 0.92);' in css
     assert ".themeSelect--icons .themeSelect__button--icon {" in css
     icon = css_sources.decls(".themeSelect--icons .themeSelect__button--icon")
-    assert icon["border"] == "1px solid var(--buttonBorder)"
+    assert icon["border"] == "1px solid var(--button-border)"
     assert icon["transition"].startswith("border-radius var(--dur-base) var(--ease)")

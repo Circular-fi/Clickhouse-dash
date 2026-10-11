@@ -37,7 +37,7 @@
   background: var(--graph-surface);
 }
 
-.traceMap__state > .uiState--error { border-color: color-mix(in srgb, var(--graph-error) 55%, transparent); }
+.traceMap__state > .uiState--error { border-color: color-mix(in srgb, var(--danger) 55%, transparent); }
 
 .traceSvc__table > .uiState { min-height: 160px; }
 
@@ -214,7 +214,7 @@
   border-top-color: var(--accent-fill);
   border-radius: 50%;
   vertical-align: -2px;
-  animation: uiSpin 0.8s linear infinite;
+  animation: uiSpin var(--dur-spin) linear infinite;
 }
 
 button > .uiSpin {

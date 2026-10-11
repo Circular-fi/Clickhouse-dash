@@ -57,11 +57,11 @@ const build = () => ({
 
   versionBadge: byId("versionBadge"),
 
-  navQueryButton: byId("navQueryButton"),
-  navExplorerButton: byId("navExplorerButton"),
-  navObservabilityButton: byId("navObservabilityButton"),
-  navSystemButton: byId("navSystemButton"),
-  navMcpButton: byId("navMcpButton"),
+  navQueryLink: byId("navQueryLink"),
+  navExplorerLink: byId("navExplorerLink"),
+  navObservabilityLink: byId("navObservabilityLink"),
+  navSystemLink: byId("navSystemLink"),
+  navMcpLink: byId("navMcpLink"),
   queryWorkspace: byId("queryWorkspace"),
   explorerWorkspace: byId("explorerWorkspace"),
   tracesWorkspace: byId("tracesWorkspace"),
@@ -372,9 +372,9 @@ Object.freeze(h);
 export { h };
 
 // The page shell (css/20-features/shell.css), shared by every page.
-// BREAKPOINTS mirror --bp-sm / --bp-md / --bp-lg: media queries cannot read
+// BREAKPOINTS mirror --bp-sm / --bp-tab / --bp-md / --bp-lg / --bp-xl: media queries cannot read
 // custom properties, so CSS and scripts both name these three numbers.
-const BREAKPOINTS = Object.freeze({ sm: 600, md: 820, lg: 1100 });
+const BREAKPOINTS = Object.freeze({ sm: 600, tab: 760, md: 820, lg: 1100, xl: 1279 });
 const mediaQuery = (name) => `(max-width: ${BREAKPOINTS[name]}px)`;
 const isAtMost = (name) => {
   try { return window.matchMedia(mediaQuery(name)).matches; } catch { return false; }

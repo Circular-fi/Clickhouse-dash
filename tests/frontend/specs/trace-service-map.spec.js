@@ -148,7 +148,7 @@ test('cards, orthogonal edges, dash by call kind, labels on every edge, the lege
     pane: '#traceMapPane', zoomOut: '#traceMapZoomOut', fit: '#traceMapFit', zoomIn: '#traceMapZoomIn',
     legend: '#traceMapLegend', status: '#traceMapPane .graphKitStatus',
   });
-  const colors = await tokenColors(page, ['--graph-bg', '--bg', '--graph-error', '--graph-warn', '--graph-edge-muted']);
+  const colors = await tokenColors(page, ['--graph-bg', '--bg', '--danger', '--warning', '--graph-edge-muted']);
   expect(colors['--graph-bg']).toEqual(colors['--bg']);
   await expectDotGrid(page, '#traceMapCanvas', state, colors['--graph-bg']);
   const badge = page.locator('#traceMapSampled');
@@ -240,13 +240,13 @@ test('the health dot, border and edges take the shared thresholds: 0.5 % nothing
   await expect(page.locator('#traceMapLegend')).toContainText('Health dot: amber 1–5% errors, red ≥ 5% with a red border');
   await expect(page.locator('#traceMapLegend .graphKitLegend__dot--warn')).toHaveCount(1);
   // The dots as drawn: amber on cart, red on checkout, none on frontend.
-  const colors = await tokenColors(page, ['--graph-warn', '--graph-error']);
+  const colors = await tokenColors(page, ['--warning', '--danger']);
   const dot = (n) => pixel(page, '#traceMapCanvas', n.x + n.width - 16 * state.scale, n.y + 17 * state.scale);
-  expect(colorDistance(await dot(at.cart), colors['--graph-warn'])).toBeLessThan(40);
-  expect(colorDistance(await dot(at.checkout), colors['--graph-error'])).toBeLessThan(40);
+  expect(colorDistance(await dot(at.cart), colors['--warning'])).toBeLessThan(40);
+  expect(colorDistance(await dot(at.checkout), colors['--danger'])).toBeLessThan(40);
   const none = await dot(at.frontend);
-  expect(colorDistance(none, colors['--graph-warn'])).toBeGreaterThan(80);
-  expect(colorDistance(none, colors['--graph-error'])).toBeGreaterThan(80);
+  expect(colorDistance(none, colors['--warning'])).toBeGreaterThan(80);
+  expect(colorDistance(none, colors['--danger'])).toBeGreaterThan(80);
 });
 
 test('zoom tools, + - 0 keys, wheel and drag pan, and the minimap once a card is clipped', async ({ page }) => {
@@ -492,8 +492,8 @@ test('service map: no page overflow and readable tokens in both themes', async (
     expect(overflow.x, theme).toBeLessThanOrEqual(1);
     expect(overflow.y, theme).toBeLessThanOrEqual(1);
     expect(await page.evaluate(() => document.documentElement.dataset.themeMode)).toBe(theme);
-    const tokens = await tokenColors(page, ['--graph-text', '--graph-muted', '--graph-warn', '--graph-error', '--graph-halo', '--graph-node-bg', '--graph-label-bg', '--graph-edge-muted']);
-    for (const name of ['--graph-text', '--graph-muted', '--graph-warn', '--graph-error']) {
+    const tokens = await tokenColors(page, ['--graph-text', '--graph-muted', '--warning', '--danger', '--graph-halo', '--graph-node-bg', '--graph-label-bg', '--graph-edge-muted']);
+    for (const name of ['--graph-text', '--graph-muted', '--warning', '--danger']) {
       expect(contrast(tokens[name], tokens['--graph-node-bg']), `${theme} ${name}`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(tokens[name], tokens['--graph-label-bg']), `${theme} ${name} on labels`).toBeGreaterThanOrEqual(4.5);
     }

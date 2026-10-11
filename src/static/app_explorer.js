@@ -196,10 +196,6 @@ function setWorkspace(name, { history = "push" } = {}) {
   model.active = explorer;
   if (dom.queryWorkspace) dom.queryWorkspace.hidden = explorer;
   if (dom.explorerWorkspace) dom.explorerWorkspace.hidden = !explorer;
-  dom.navQueryButton?.classList.toggle("is-active", !explorer);
-  dom.navExplorerButton?.classList.toggle("is-active", explorer);
-  dom.navQueryButton?.toggleAttribute("aria-current", !explorer);
-  dom.navExplorerButton?.toggleAttribute("aria-current", explorer);
   header.setPageSelectorValue(explorer ? "explorer" : "query");
 
   const route = explorer ? (parseExplorerRoute().workspace === "explorer" ? window.location.pathname : appRoute(`/explorer/${CATALOG_ROUTE_SEGMENT}`)) : appRoute("/query");
@@ -474,8 +470,6 @@ function openTableCardFromGraph(database, table) {
 
 function init() {
   parts.graph?.init({ openTable: openTableFromGraph, openCard: openTableCardFromGraph, onStateChange: () => { syncVisibilityOptionLocks(); renderTableList(); syncExplorerUrl("replace"); } });
-  dom.navQueryButton?.addEventListener("click", () => setWorkspace("query"));
-  dom.navExplorerButton?.addEventListener("click", () => setWorkspace("explorer"));
   // The detail pane scrolls: a keyboard user reaches it (a region while it overflows).
   for (const pane of $$(".explorerDetailPane")) util.scrollFocus(pane, { label: pane.id ? "Object details" : "Function details", mutations: true });
   // Back / Forward within the Explorer (ns.router: the one popstate listener).

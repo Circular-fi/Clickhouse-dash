@@ -1,31 +1,31 @@
 /* Read-only SQL (app_ui_sql.js): .sqlBlock, and the highlighter tokens (.tok-*). */
 
 .tok-str {
-  color: var(--sqlString);
+  color: var(--sql-string);
 }
 
 .tok-com {
-  color: var(--sqlComment);
+  color: var(--sql-comment);
 }
 
 .tok-kw {
-  color: var(--sqlKeyword);
+  color: var(--sql-keyword);
 }
 
 .tok-fn {
-  color: var(--sqlFunction);
+  color: var(--sql-function);
 }
 
 .tok-num {
-  color: var(--sqlNumber);
+  color: var(--sql-number);
 }
 
 .tok-null {
-  color: var(--sqlNull);
+  color: var(--sql-null);
 }
 
 .tok-type {
-  color: var(--sqlType);
+  color: var(--sql-type);
 }
 
 .tok-err {
@@ -53,7 +53,7 @@
   padding: var(--space-8) var(--space-10);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--editorSolidBg);
+  background: var(--editor-solid-bg);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -69,7 +69,7 @@
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background: var(--editorSolidBg);
+  background: var(--editor-solid-bg);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--fs-md);
@@ -132,7 +132,7 @@
   position: absolute;
   top: 6px;
   right: 22px;
-  background: var(--editorSolidBg);
+  background: var(--editor-solid-bg);
 }
 
 .sqlBlock__expand {
@@ -150,7 +150,7 @@
 }
 
 .sqlBlock__expand:hover {
-  background: var(--hoverTint);
+  background: var(--hover-tint);
 }
 
 .sqlBlock--inline {
@@ -179,7 +179,7 @@
 
 .sqlBlock--inline.is-expanded {
   border-color: var(--border);
-  background: var(--editorSolidBg);
+  background: var(--editor-solid-bg);
 }
 
 .sqlBlock--inline.is-expanded .sqlBlock__code {

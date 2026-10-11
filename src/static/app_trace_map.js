@@ -36,6 +36,8 @@ const { warn: ERROR_ELEVATED, danger: ERROR_HIGH } = palette.ERROR_RATE;
 const CARD_WIDTH = 216;
 const CARD_HEIGHT = 72;
 const X_GAP = 128;
+// A service calling more than this many others is a block of columns, not a tower of cards.
+const MAX_PER_COLUMN = 6;
 const Y_GAP = 40;
 const FIT_MAX = 1.35;
 // Main-thread slice of a layout spread over frames (kit.runSliced).
@@ -45,6 +47,8 @@ const READABLE_SCALE = 11 / 12;
 const MIN_FONT = 12;
 const PANEL_EDGES = 6;
 const NAME_CHARS = 22;
+// A compact card writes the service's name over two lines (kit.compactBox): the name is the datum of a map.
+const COMPACT_LINES = 2;
 const KIND_DASH = { sync: kit.DASH.solid, async: kit.DASH.message, db: kit.DASH.dotted };
 const KIND_LABELS = { sync: "Synchronous calls", async: "Asynchronous messages", db: "Database / cache calls" };
 
@@ -182,6 +186,7 @@ function* layoutSteps(data, measure = null) {
       minColumnWidth: CARD_WIDTH,
       origin: 0,
       breakCycles: true,
+      maxPerColumn: MAX_PER_COLUMN,
     });
     let maxY = -Infinity;
     for (const item of positions.values()) maxY = Math.max(maxY, item.y + item.height);
@@ -299,8 +304,8 @@ function drawService(context, item, compactCards) {
   };
   if (compactCards) {
     // The title row alone (kit.compactBox).
-    const box = kit.compactBox(item, map.view.scale);
-    if (box.titleSize) card.rows.push({ text: node.service, size: box.titleSize, weight: 600, y: box.baseline });
+    const box = kit.compactBox(item, map.view.scale, COMPACT_LINES);
+    if (box.titleSize) card.rows.push({ text: node.service, size: box.titleSize, weight: 600, y: box.baseline, lines: COMPACT_LINES, lineHeight: box.lineHeight });
     card.statusY = box.height / 2;
     kit.drawCard(context, box, card);
     return;
@@ -592,7 +597,7 @@ function hitTest(clientX, clientY) {
   // A compact card is hit on the box it draws.
   const compact = kit.isCompact(CARD_HEIGHT, map.view.scale, MIN_FONT);
   for (const item of layout.items.values()) {
-    if (kit.pointInRect(point, compact ? kit.compactBox(item, map.view.scale) : item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
+    if (kit.pointInRect(point, compact ? kit.compactBox(item, map.view.scale, COMPACT_LINES) : item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
   }
   for (const hit of map.labelHits || []) {
     if (kit.pointInRect(point, hit, 2 / map.view.scale)) return { type: "edge", key: `edge\u0000${hit.id}`, id: hit.id };
@@ -929,7 +934,7 @@ function inspect() {
         id: node.service, service: node.service, severity: severity(Number(node.error_rate) || 0),
         health: severity(Number(node.error_rate) || 0) !== "ok", status: HEALTH_STATUS[severity(Number(node.error_rate) || 0)],
         // The box drawn on screen (a compact card's is its title row).
-        strip: serviceColor(node.service), ...toClient(compact ? kit.compactBox(item, view.scale) : item),
+        strip: serviceColor(node.service), ...toClient(compact ? kit.compactBox(item, view.scale, COMPACT_LINES) : item),
       };
     }) : [],
     edges: layout ? layout.edges.map((item) => ({

@@ -89,7 +89,7 @@ test('metrics: the catalog groups by metric with human units, or by service', as
   const group = catalog.locator('.metricsCatalog__group[data-metric-group="http.server.request.duration"]');
   await expect(group).toBeVisible({ timeout: 30_000 });
   const head = group.locator('[data-metric-toggle]');
-  await expect(head.locator('.metricsBadge--histogram')).toHaveText('hist');
+  await expect(head.locator('.metricsBadge--histogram')).toHaveText('Histogram');
   await expect(head.locator('.metricsBadge--unit')).toHaveText('seconds');
   await expect(head.locator('.metricsBadge--unit')).toHaveAttribute('title', 'Unit: s');
   expect(Number(await head.locator('.metricsCatalog__count').textContent())).toBeGreaterThan(1);
@@ -123,10 +123,10 @@ test('metrics: catalog lists services and metrics with type and unit badges, and
   await page.goto(metricsUrl(range));
   const catalog = page.locator('#metricsCatalog');
   await expect(catalog.locator('.metricsCatalog__metric').first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('#pageSelectButton')).toHaveText('Observability');
+  await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#obsTab-metrics')).toHaveAttribute('aria-current', 'page');
   const api = catalog.locator('.metricsCatalog__service', { has: page.locator('[data-service-toggle="api_service"]') });
-  await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--histogram')).toHaveText('hist');
+  await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--histogram')).toHaveText('Histogram');
   await expect(api.locator('.metricsCatalog__metric[data-metric="http.server.request.duration"] .metricsBadge--unit')).toHaveText('seconds');
   await expect(api.locator('.metricsCatalog__metric[data-metric="traces.span.metrics.calls"] .metricsBadge--sum')).toBeVisible();
   await expect(api.locator('.metricsCatalog__metric[data-metric="process.cpu.utilization"] .metricsBadge--gauge')).toBeVisible();

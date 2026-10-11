@@ -102,7 +102,7 @@ function renderDurationChart() {
   const series = [["p50", "P50"], ["p90", "P90"], ["p95", "P95"], ["p99", "P99"]].map(([id, label], c) => ({ id, label, color: palette.quantile(id), values: columns[c], nulls }));
   if (scatterTraces.length) {
     series.unshift({
-      id: "traces", label: "Listed traces", type: "points", xs: dotXs, values: dotYs, radius, color: "var(--traceDot)", pickable: true,
+      id: "traces", label: "Listed traces", type: "points", xs: dotXs, values: dotYs, radius, color: "var(--trace-dot)", pickable: true,
       pointColor: (i) => (Number(scatterTraces[i].error_count || 0) > 0 ? "var(--danger)" : null),
     });
   }

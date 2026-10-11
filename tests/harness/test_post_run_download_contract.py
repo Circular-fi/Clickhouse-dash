@@ -70,8 +70,8 @@ def test_partial_preview_is_never_presented_as_full_export() -> None:
     download = read("src/static/app_download.js")
     run = read("src/static/app_run.js")
 
-    assert '"Download Debug (partial)"' in download
-    assert '"Download Debug"' in download
+    assert '"Download debug (partial)"' in download
+    assert '"Download debug"' in download
     assert 'partial: !!done.result_truncated' in run
     assert 'String(st).toLowerCase() === "result_limit_reached"' in run
 
