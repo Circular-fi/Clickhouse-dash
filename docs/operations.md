@@ -78,14 +78,14 @@ The heavy reads of the pages, and the calls of the API tools of MCP, take a plac
 | Class | Routes | Limit (the `admission` block) |
 |---|---|---|
 | `heavy` | The reads of the Explorer, System, Traces, Logs and Metrics pages (not their `meta` routes) | `heavy_per_host` (default 16) for each host |
-| `analysis` | `POST /api/query/analysis` and `POST /api/query/deep-analysis` | `analysis_per_host` (default 1) for each host |
+| `analysis` | `POST /api/query/analysis`, and the job of `POST /api/query/deep-analysis` (from its start to its end) | `analysis_per_host` (default 1) for each host |
 | `mcp` | The API tools of MCP | `mcp_max` (default 8) in all |
 
 A request past the limit waits at most `admission.wait_ms` (default 5000). It stops waiting when the browser goes away or the server stops. When no place comes, the answer is `503 server_busy` with `Retry-After: 1` and `retryable: true`. `0` for a limit means no limit. A host that the request does not name (an unknown one) takes no place.
 
 `GET /metrics` shows `chdash_admission_in_use`, `chdash_admission_waiting` and `chdash_admission_refused_total` for each class and host.
 
-Deep Analyze is a synchronous request: it replays the SQL of the run with `EXPLAIN ANALYZE` on the connection of the runner. It has the bounds of a run (`query.max_execution_time_s`, `query.max_memory_usage` and `query.max_rows_to_read`), one place for each host, and it stops when the browser closes the request or the server stops. It is not a job that the page polls, because that would need another protocol between the page and the server.
+Deep Analyze is a job: it replays the SQL of the run with `EXPLAIN ANALYZE` on the connection of the runner, and the request that starts it answers at once. The job keeps one place of the `analysis` class until it ends. It has the bounds of a run, a time limit of its own (`analysis.deep_max_execution_time_s`), a cancel, and a bounded store of results. A client polls it. [query-analysis.md](query-analysis.md#deep-analyze-backend) describes the protocol.
 
 ## Logs
 

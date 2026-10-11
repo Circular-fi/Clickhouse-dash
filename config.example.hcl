@@ -280,6 +280,7 @@ analysis {
   log_lookup_timeout_ms = 2000
   flush_logs            = false
   allow_deep_analyze    = false
+  deep_max_execution_time_s = 300
 }
 
 export {

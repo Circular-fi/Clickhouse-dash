@@ -4,6 +4,7 @@
 #include "query_registry.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -43,11 +44,18 @@ struct DeepAnalysisError {
 // query is actually re-executed.
 bool deep_analysis_candidate_sql(const std::string& sql);
 
+// The checks that need no ClickHouse: the SQL is retained and is a SELECT-family statement. False sets `error` (409).
+bool deep_analysis_precheck(const QueryRegistryRecord& record, DeepAnalysisError* error);
+
+// Runs the analysis on the connection of the runner. `query_started` is told the id of each ClickHouse statement before it
+// starts, so that a cancel can KILL it (a statement that sends nothing for long never reaches the checks of the caller that went
+// away). A canceled scope (ch_query.hpp) ends it with the code "canceled".
 bool run_deep_analysis(
     const QueryRegistryRecord& record,
     const std::string& runner_uri,
     const std::shared_ptr<ClickHouseClientPool>& client_pool,
     DeepAnalysisResult* result,
-    DeepAnalysisError* error);
+    DeepAnalysisError* error,
+    const std::function<void(const std::string&)>& query_started = {});
 
 } // namespace chdash

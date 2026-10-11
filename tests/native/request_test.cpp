@@ -1,11 +1,13 @@
 // Unit tests of the way a request is served: the admission of the heavy work (src/admission.hpp), the context of a request
-// (src/request_context.cpp), and the routes that are also callable in the process (src/routed_server.hpp). No ClickHouse is needed.
+// (src/request_context.cpp), the routes that are also callable in the process (src/routed_server.hpp), and the jobs of Deep
+// Analyze (src/deep_analysis_jobs.hpp). No ClickHouse is needed.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_REQUEST_TESTS=ON
 //        cmake --build build --target chdash_request_test
 // Run:   ./build/chdash_request_test   (exit code 0 = every check passed)
 
 #include "admission.hpp"
+#include "deep_analysis_jobs.hpp"
 #include "request_context.hpp"
 #include "routed_server.hpp"
 
@@ -14,6 +16,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace chdash;
 using namespace std::chrono_literals;
@@ -287,6 +290,130 @@ void test_the_handler_sees_the_context_of_the_caller() {
 
 } // namespace
 
+// ---- the jobs of Deep Analyze (src/deep_analysis_jobs.hpp) ----
+
+void test_deep_jobs_run_end_and_are_read_by_their_host() {
+  DeepAnalysisJobs jobs(4, 1024, std::chrono::minutes(10));
+  const auto a = jobs.start("h1", "q1", "job-a");
+  CHECK(a.created && a.control);
+  // The same query while its job runs is the same job: nothing new starts.
+  const auto again = jobs.start("h1", "q1", "job-other");
+  CHECK(!again.created && again.job_id == "job-a" && !again.control);
+  CHECK(jobs.start("h2", "q1", "job-b").created);  // another host: another job
+
+  DeepJobSnapshot job;
+  CHECK(jobs.snapshot("job-a", "h1", &job));
+  CHECK(job.state == DeepJobState::Running && job.query_id == "q1" && !job.result_json);
+  CHECK(!jobs.snapshot("job-a", "h2", &job));  // a job of another host is not found
+  CHECK(!jobs.snapshot("nope", "h1", &job));
+
+  jobs.finish("job-a", "{\"plan\":1}");
+  CHECK(jobs.snapshot("job-a", "h1", &job));
+  CHECK(job.state == DeepJobState::Finished && job.result_json && *job.result_json == "{\"plan\":1}");
+  CHECK_EQ(jobs.retained_bytes(), size_t(10));
+  // A job that ended is not a running job any more: the query can start another one.
+  CHECK(jobs.start("h1", "q1", "job-c").created);
+  jobs.fail("job-c", "deep_analysis_failed", "boom", 502);
+  CHECK(jobs.snapshot("job-c", "h1", &job));
+  CHECK(job.state == DeepJobState::Failed && job.error_code == "deep_analysis_failed" && job.error_status == 502 && !job.result_json);
+  // A job ends once: a second end does not change it.
+  jobs.finish("job-c", "{}");
+  CHECK(jobs.snapshot("job-c", "h1", &job) && job.state == DeepJobState::Failed);
+}
+
+void test_deep_jobs_cancel() {
+  DeepAnalysisJobs jobs(4, 1024, std::chrono::minutes(10));
+  const auto started = jobs.start("h1", "q1", "job-a");
+  started.control->add_statement("stmt-1");
+  CHECK(!started.control->cancel_requested());
+  std::shared_ptr<DeepJobControl> control;
+  CHECK(jobs.request_cancel("job-a", "h1", &control));
+  CHECK(control && control->cancel_requested() && started.control->cancel_requested());
+  CHECK_EQ(control->statements().size(), size_t(1));
+  CHECK(!jobs.request_cancel("job-a", "h2", nullptr));  // not the host of the job
+  CHECK(!jobs.request_cancel("nope", "h1", nullptr));
+  CHECK_EQ(jobs.running_controls().size(), size_t(1));
+  jobs.cancel_done("job-a");
+  DeepJobSnapshot job;
+  CHECK(jobs.snapshot("job-a", "h1", &job) && job.state == DeepJobState::Canceled);
+  CHECK(jobs.running_controls().empty());
+  // Canceling a job that ended is accepted and does nothing.
+  std::shared_ptr<DeepJobControl> none;
+  CHECK(jobs.request_cancel("job-a", "h1", &none) && !none);
+  // A job that never started leaves no trace.
+  CHECK(jobs.start("h1", "q2", "job-d").created);
+  jobs.discard("job-d");
+  CHECK(!jobs.snapshot("job-d", "h1", &job));
+}
+
+void test_deep_jobs_are_bounded() {
+  // At most 3 jobs: the oldest that ended goes first, a job that runs never goes.
+  DeepAnalysisJobs jobs(3, 1 << 20, std::chrono::minutes(10));
+  jobs.start("h", "q0", "running");
+  for (int i = 1; i <= 5; ++i) {
+    const std::string id = "done-" + std::to_string(i);
+    jobs.start("h", "q" + std::to_string(i), id);
+    jobs.finish(id, "{}");
+    std::this_thread::sleep_for(2ms);
+  }
+  DeepJobSnapshot job;
+  CHECK(jobs.snapshot("running", "h", &job) && job.state == DeepJobState::Running);
+  CHECK(!jobs.snapshot("done-1", "h", &job) && !jobs.snapshot("done-2", "h", &job) && !jobs.snapshot("done-3", "h", &job));
+  CHECK(jobs.snapshot("done-4", "h", &job) && jobs.snapshot("done-5", "h", &job));
+  CHECK_EQ(jobs.size(), size_t(3));
+
+  // The bytes of the results are bounded too.
+  DeepAnalysisJobs bytes(10, 100, std::chrono::minutes(10));
+  for (int i = 0; i < 4; ++i) {
+    const std::string id = "r" + std::to_string(i);
+    bytes.start("h", id, id);
+    bytes.finish(id, std::string(40, 'x'));
+    std::this_thread::sleep_for(2ms);
+  }
+  CHECK(bytes.retained_bytes() <= 100);
+  CHECK(!bytes.snapshot("r0", "h", &job) && !bytes.snapshot("r1", "h", &job));
+  CHECK(bytes.snapshot("r3", "h", &job));
+
+  // A result is kept for the retention, then it is gone.
+  DeepAnalysisJobs brief(10, 1 << 20, 20ms);
+  brief.start("h", "q", "j");
+  brief.finish("j", "{}");
+  CHECK(brief.snapshot("j", "h", &job));
+  std::this_thread::sleep_for(60ms);
+  CHECK(!brief.snapshot("j", "h", &job));
+  CHECK_EQ(brief.retained_bytes(), size_t(0));
+  // A job that runs is not dropped by the retention.
+  brief.start("h", "q2", "j2");
+  std::this_thread::sleep_for(60ms);
+  CHECK(brief.snapshot("j2", "h", &job) && job.state == DeepJobState::Running);
+}
+
+void test_deep_jobs_many_threads() {
+  DeepAnalysisJobs jobs(8, 1 << 16, std::chrono::minutes(1));
+  std::vector<std::thread> threads;
+  std::atomic<int> created{0};
+  for (int t = 0; t < 6; ++t) {
+    threads.emplace_back([&, t] {
+      for (int i = 0; i < 200; ++i) {
+        const std::string query = "q" + std::to_string(i % 10);
+        const auto started = jobs.start("h", query, "job-" + std::to_string(t) + "-" + std::to_string(i));
+        DeepJobSnapshot job;
+        jobs.snapshot(started.job_id, "h", &job);
+        if (started.created) {
+          ++created;
+          if (i % 3 == 0) jobs.fail(started.job_id, "c", "m", 500);
+          else if (i % 3 == 1) jobs.finish(started.job_id, "{}");
+          else jobs.cancel_done(started.job_id);
+        }
+        jobs.running_controls();
+      }
+    });
+  }
+  for (auto& thread : threads) thread.join();
+  CHECK(created.load() > 0);
+  CHECK(jobs.size() <= 8);
+}
+
 int main() {
   test_admission_limits_each_key();
   test_admission_zero_is_no_limit();
@@ -297,6 +424,10 @@ int main() {
   test_the_context_does_not_cross_threads();
   test_a_route_runs_in_the_process();
   test_the_handler_sees_the_context_of_the_caller();
+  test_deep_jobs_run_end_and_are_read_by_their_host();
+  test_deep_jobs_cancel();
+  test_deep_jobs_are_bounded();
+  test_deep_jobs_many_threads();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

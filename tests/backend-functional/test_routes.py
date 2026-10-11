@@ -139,6 +139,27 @@ def retry_analysis(path: str, *, attempts: int = 8, **kwargs):
     assert last is not None
     pytest.fail(f"POST {path} failed: {last.status_code} {last.text}")
 
+def deep_analysis_job(query_id: str, *, timeout_s: float = 60.0) -> dict:
+    """Starts the Deep Analyze job of a run (202, retried while the run settles) and polls it until it ends."""
+    start = None
+    for _ in range(8):
+        start = post("/api/query/deep-analysis", json={"host_id": "local", "query_id": query_id})
+        if start.status_code == 202 or start.status_code not in {409, 503}:
+            break
+        time.sleep(0.25)
+    assert start is not None and start.status_code == 202, start.text
+    job = start.json()
+    assert job["status"] == "running" and job["job_id"], job
+    deadline = time.monotonic() + timeout_s
+    while True:
+        polled = get(f"/api/query/deep-analysis?host_id=local&job_id={job['job_id']}")
+        assert polled.status_code == 200, polled.text
+        state = polled.json()
+        if state["status"] != "running" or time.monotonic() > deadline:
+            return state
+        time.sleep(0.25)
+
+
 def test_core_routes_are_live_and_json_contracts_are_valid():
     for route in ["/", "/query", "/explorer"]:
         root = get(route)
@@ -234,8 +255,12 @@ def test_query_run_alias_stream_analysis_execution_and_deep_analysis():
     assert execution["query_id"] == qid
     assert execution["terminal_status"] == "finished"
 
-    deep = retry_json("POST", "/api/query/deep-analysis", json={"host_id": "local", "query_id": qid})
+    # Deep Analyze is a job: POST starts it (202), GET polls it, the analysis is the `result` of the finished job.
+    job = deep_analysis_job(qid)
+    assert job["status"] == "finished", job
+    deep = job["result"]
     assert deep.get("query_id") == qid
+    assert deep["plan_nodes"] and deep["plan_lines"], deep
 
 
 

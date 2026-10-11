@@ -77,7 +77,7 @@ def test_user_sql_execution_is_runner_only_and_system_is_technical_only() -> Non
     assert "ch_execute(*client_query_, q);" in session
 
     # Deep Analyze replays retained SQL only through runner_uri.
-    assert "run_deep_analysis(*record, host->runner_uri" in deep_api
+    assert "host.runner_uri, client_pool_, &deep, &error" in deep_api
     assert "const std::string& runner_uri" in deep
     assert "system_uri" not in deep
 

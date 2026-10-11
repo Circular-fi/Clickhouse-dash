@@ -115,7 +115,7 @@ Every statement that ChDash sends to ClickHouse carries a label and bounds. The 
 | What | `log_comment` | Bounds |
 |---|---|---|
 | A run of the Query page | `chdash-run` | `query.max_execution_time_s`, `query.max_memory_usage`, `query.max_rows_to_read` (0 = the profile, the default) |
-| Deep Analyze | `chdash-deep-analysis` | the same as a run |
+| Deep Analyze | `chdash-deep-analysis` | the same as a run, and `analysis.deep_max_execution_time_s` (default 300 seconds) |
 | A statement of an export | `chdash-export` | `export.max_execution_time_s`, `export.max_memory_usage` (0 = the profile, the default) |
 | A request of a page (Explorer, System, Traces, Logs, Metrics, the analysis, the formatter, the metadata) | `chdash:<path of the route>`, `chdash-system` for the System page | `generated_queries` |
 | A tool of MCP | `chdash-mcp key=<id>` | the limits of the key (`docs/mcp.md`) |
@@ -257,6 +257,7 @@ analysis {
   log_lookup_timeout_ms = 2000
   flush_logs            = false
   allow_deep_analyze    = false
+  deep_max_execution_time_s = 300
 }
 
 export {
@@ -506,7 +507,7 @@ mcp {
 
 [`docs/mcp.md`](mcp.md) describes the keys, the tools, the endpoint, the API, the grants of the ClickHouse user and the startup errors.
 
-`analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory query registry for each host. This bound does not depend on the lifetime of the SSE session. The registry contains no query results and no user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget. It is for the exact original SQL that the backend retains only for Deep Analyze. Deep Analyze can then replay the statement through `runner_uri`. It does not need to trust a copy of the query log from the technical account.
+`analysis.registry_ttl_ms` and `analysis.registry_max_entries` bound the in-memory query registry for each host. This bound does not depend on the lifetime of the SSE session. The registry contains no query results and no user identity. `analysis.registry_sql_max_bytes` adds a separate global byte budget. It is for the exact original SQL that the backend retains only for Deep Analyze. Deep Analyze can then replay the statement through `runner_uri`. It does not need to trust a copy of the query log from the technical account. Deep Analyze runs as a job that a client polls (`docs/query-analysis.md`). `analysis.deep_max_execution_time_s` (default 300, 0 = the profile of the runner) bounds each job in ClickHouse. The server keeps at most 16 jobs and 64 MiB of results, and each job that ended for 10 minutes.
 
 `export.max_execution_time_s` and `export.max_memory_usage` bound each exported statement in ClickHouse (0, the default, leaves them to the profile of the runner). `export.receive_timeout_ms` (default 600000, 0 = no limit, else at least 10000) ends a statement that sends nothing (no row, no progress) for that long. A dead peer is found sooner: the connections use TCP keepalive.
 

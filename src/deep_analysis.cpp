@@ -222,18 +222,7 @@ bool deep_analysis_candidate_sql(const std::string& sql) {
   return keyword == "select" || keyword == "with";
 }
 
-bool run_deep_analysis(
-    const QueryRegistryRecord& record,
-    const std::string& runner_uri,
-    const std::shared_ptr<ClickHouseClientPool>& client_pool,
-    DeepAnalysisResult* result,
-    DeepAnalysisError* error) {
-  if (!result) {
-    set_error(error, 500, "deep_analysis_internal_error", "Deep Analyze result target is missing.");
-    return false;
-  }
-  *result = {};
-
+bool deep_analysis_precheck(const QueryRegistryRecord& record, DeepAnalysisError* error) {
   if (record.original_sql.empty()) {
     set_error(
         error, 409, "deep_analysis_sql_unavailable",
@@ -246,6 +235,23 @@ bool run_deep_analysis(
         "Deep Analyze is limited to SELECT-family read queries in V1.");
     return false;
   }
+  return true;
+}
+
+bool run_deep_analysis(
+    const QueryRegistryRecord& record,
+    const std::string& runner_uri,
+    const std::shared_ptr<ClickHouseClientPool>& client_pool,
+    DeepAnalysisResult* result,
+    DeepAnalysisError* error,
+    const std::function<void(const std::string&)>& query_started) {
+  if (!result) {
+    set_error(error, 500, "deep_analysis_internal_error", "Deep Analyze result target is missing.");
+    return false;
+  }
+  *result = {};
+
+  if (!deep_analysis_precheck(record, error)) return false;
 
   std::string connect_error;
   auto client = acquire_runner(client_pool, runner_uri, &connect_error);
@@ -260,6 +266,7 @@ bool run_deep_analysis(
     // Defense in depth: let ClickHouse parse the exact original SQL and require
     // a SELECT-family root before EXPLAIN ANALYZE is allowed to execute it.
     const std::string ast_query_id = make_deep_query_id(record.query_id, "ast");
+    if (query_started) query_started(ast_query_id);
     const auto ast_lines = execute_explain(
         *client,
         "EXPLAIN AST\n" + record.original_sql,
@@ -272,6 +279,7 @@ bool run_deep_analysis(
     }
 
     result->deep_query_id = make_deep_query_id(record.query_id, "run");
+    if (query_started) query_started(result->deep_query_id);
     const auto lines = execute_explain(
         *client,
         "EXPLAIN ANALYZE\n" + record.original_sql,
@@ -282,6 +290,11 @@ bool run_deep_analysis(
       return false;
     }
     return true;
+  } catch (const ChQueryCanceled&) {
+    // The caller canceled: the statement may still run on the server (the job KILLs it), and the connection is not lent again.
+    if (client_pool) client_pool->invalidate(client);
+    set_error(error, 499, "canceled", "Deep Analyze was canceled.");
+    return false;
   } catch (const std::exception& e) {
     if (client_pool) client_pool->invalidate(client);
     set_error(error, 502, "deep_analysis_failed", e.what());

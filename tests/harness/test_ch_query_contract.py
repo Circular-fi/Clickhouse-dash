@@ -96,7 +96,12 @@ def test_every_api_route_runs_in_a_query_scope():
     assert "RequestScope scope(make_context(req, false));" in read("src/api_mcp.cpp")
     assert 'limits.log_comment = "chdash-run";' in read("src/query_session.cpp")
     assert 'limits.log_comment = "chdash-export";' in read("src/api_export.cpp")
-    assert 'ChQueryScope scope(user_sql_limits(req, "chdash-deep-analysis"));' in read("src/api_analysis.cpp")
+    # Deep Analyze is a job: its thread opens the scope with the limits of a run, and a cancel of the job (not the end of the
+    # request that started it) is what stops its statements.
+    api = read("src/api_analysis.cpp")
+    assert 'user_sql_limits(req, "chdash-deep-analysis")' in api
+    assert "limits.canceled = [this, control] { return stopping() || control->cancel_requested(); };" in api
+    assert "ChQueryScope scope(std::move(limits));" in api
 
 
 def test_request_limits_label_and_bound_the_generated_queries():

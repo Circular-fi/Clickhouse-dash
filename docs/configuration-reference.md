@@ -136,6 +136,7 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 | `log_lookup_timeout_ms` | integer | `2000` | 0 to 60000 ms | How long the analysis waits for the log tables of ClickHouse to show a run. |
 | `flush_logs` | boolean | `false` |  | Run SYSTEM FLUSH LOGS when the log tables do not show a run yet. |
 | `allow_deep_analyze` | boolean | `false` |  | Allow Deep Analyze. It runs the statement again with EXPLAIN ANALYZE. |
+| `deep_max_execution_time_s` | integer | `300` | 0 to 604800 seconds | How long a Deep Analyze job can run before ClickHouse stops its statement. 0 = the settings profile of the runner user decides. |
 
 ## `export`
 

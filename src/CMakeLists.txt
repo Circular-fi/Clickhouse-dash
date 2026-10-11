@@ -151,7 +151,7 @@ endif()
 
 if (CHDASH_BUILD_REQUEST_TESTS)
   # The way a request is served: admission, the context of a request, the routes that are also callable in the process.
-  add_executable(chdash_request_test ../tests/native/request_test.cpp request_context.cpp ch_query.cpp)
+  add_executable(chdash_request_test ../tests/native/request_test.cpp request_context.cpp ch_query.cpp deep_analysis_jobs.cpp export_job.cpp)
   target_include_directories(chdash_request_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_request_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -275,6 +275,7 @@ if (CHDASH_BUILD_APP)
     query_execution.cpp
     api_query_execution.cpp
     deep_analysis.cpp
+    deep_analysis_jobs.cpp
     api_export.cpp
     export_job.cpp
     export_serializer.cpp

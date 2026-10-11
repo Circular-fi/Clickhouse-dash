@@ -3,11 +3,14 @@
 #include "api_error.hpp"
 #include "ch_uri.hpp"
 #include "deep_analysis.hpp"
+#include "deep_analysis_jobs.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
 #include "json_text.hpp"
 #include "query_analysis.hpp"
 #include "processor_json.hpp"
+#include "secure_random.hpp"
+#include "sql_literal.hpp"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -20,6 +23,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <unordered_map>
 #include <unordered_set>
@@ -754,57 +758,8 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
 }
 
 
-void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Response& res) {
-  rapidjson::Document doc;
-  if (!parse_json_body(req, doc)) {
-    return json_error(res, 400, "invalid_json", "Invalid JSON request body.");
-  }
-  if (!doc.HasMember("host_id") || !doc["host_id"].IsString()) {
-    return json_error(res, 400, "missing_host_id", "Missing host_id.");
-  }
-  if (!doc.HasMember("query_id") || !doc["query_id"].IsString()) {
-    return json_error(res, 400, "missing_query_id", "Missing query_id.");
-  }
-  if (!cfg_.analysis.allow_deep_analyze) {
-    return json_error(res, 403, "deep_analysis_disabled", "Deep Analyze is disabled by configuration.");
-  }
-
-  const std::string host_id = doc["host_id"].GetString();
-  const std::string query_id = doc["query_id"].GetString();
-  const HostSpec* host = find_host(cfg_.hosts, host_id);
-  if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
-
-  // Deep Analyze replays the retained user SQL with runner_uri only.
-  if (!query_registry_) {
-    return json_error(res, 404, "analysis_not_found", "Query is not available for analysis.");
-  }
-
-  auto record = query_registry_->find(query_id, host_id);
-  if (!record) {
-    return json_error(res, 404, "analysis_not_found", "Query is not available for analysis.");
-  }
-  if (record->terminal_status.empty()) {
-    return json_error(res, 409, "query_not_finished", "Deep Analyze is available after execution finishes.");
-  }
-  if (record->run_mode != QueryRunMode::Profiling) {
-    return json_error(
-        res, 409, "analysis_not_enabled",
-        "Deep Analyze is available only for queries executed in profiling mode.");
-  }
-
-  DeepAnalysisResult deep;
-  DeepAnalysisError deep_error;
-  // Deep Analyze replays the SQL of the user: the bounds of a run (the query { } block), not the
-  // deadline of the generated queries. It stops when the browser goes away.
-  ChQueryScope scope(user_sql_limits(req, "chdash-deep-analysis"));
-  if (!run_deep_analysis(*record, host->runner_uri, client_pool_, &deep, &deep_error)) {
-    return json_error(
-        res,
-        deep_error.http_status > 0 ? deep_error.http_status : 500,
-        deep_error.code.empty() ? "deep_analysis_failed" : deep_error.code,
-        deep_error.message.empty() ? "Deep Analyze failed." : deep_error.message);
-  }
-
+// The JSON object of a finished analysis (the `result` of the job that the poll answers).
+static std::string deep_analysis_result_json(const std::string& query_id, const std::string& host_id, const DeepAnalysisResult& deep) {
   rapidjson::StringBuffer buffer(nullptr, 8192);
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   writer.StartObject();
@@ -844,9 +799,213 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
   for (const auto& line : deep.lines) write_json_text(writer, line);
   writer.EndArray();
   writer.EndObject();
+  return std::string(buffer.GetString(), buffer.GetSize());
+}
 
+// KILL QUERY for the statements of a job, through the system account like every cancel (docs/configuration.md, "Authorization model").
+static void kill_deep_statements(const HostSpec& host, const std::vector<std::string>& statements) {
+  if (statements.empty()) return;
+  std::string where = "query_id IN (";
+  for (size_t i = 0; i < statements.size(); ++i) {
+    if (i > 0) where += ", ";
+    where += sql::quote_string(statements[i]);
+  }
+  where += ")";
+  kill_queries(host.system_uri.empty() ? host.runner_uri : host.system_uri, where, false);
+}
+
+static void write_deep_job_head(rapidjson::Writer<rapidjson::StringBuffer>& writer, const std::string& job_id, const std::string& host_id,
+                                const std::string& query_id, const char* status) {
+  writer.Key("job_id"); write_json_text(writer, job_id);
+  writer.Key("host_id"); write_json_text(writer, host_id);
+  writer.Key("query_id"); write_json_text(writer, query_id);
+  writer.Key("status"); writer.String(status);
+}
+
+// POST /api/query/deep-analysis starts the job and answers 202 at once; the analysis runs in a thread of the server that holds one
+// place of the analysis admission for each host (operations.md, "Admission") until it ends. The client polls
+// GET /api/query/deep-analysis and can cancel with POST /api/query/deep-analysis/cancel.
+void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Response& res) {
+  rapidjson::Document doc;
+  if (!parse_json_body(req, doc)) {
+    return json_error(res, 400, "invalid_json", "Invalid JSON request body.");
+  }
+  if (!doc.HasMember("host_id") || !doc["host_id"].IsString()) {
+    return json_error(res, 400, "missing_host_id", "Missing host_id.");
+  }
+  if (!doc.HasMember("query_id") || !doc["query_id"].IsString()) {
+    return json_error(res, 400, "missing_query_id", "Missing query_id.");
+  }
+  if (!cfg_.analysis.allow_deep_analyze) {
+    return json_error(res, 403, "deep_analysis_disabled", "Deep Analyze is disabled by configuration.");
+  }
+
+  const std::string host_id = doc["host_id"].GetString();
+  const std::string query_id = doc["query_id"].GetString();
+  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
+
+  // Deep Analyze replays the retained user SQL with runner_uri only.
+  if (!query_registry_) {
+    return json_error(res, 404, "analysis_not_found", "Query is not available for analysis.");
+  }
+
+  auto record = query_registry_->find(query_id, host_id);
+  if (!record) {
+    return json_error(res, 404, "analysis_not_found", "Query is not available for analysis.");
+  }
+  if (record->terminal_status.empty()) {
+    return json_error(res, 409, "query_not_finished", "Deep Analyze is available after execution finishes.");
+  }
+  if (record->run_mode != QueryRunMode::Profiling) {
+    return json_error(
+        res, 409, "analysis_not_enabled",
+        "Deep Analyze is available only for queries executed in profiling mode.");
+  }
+  DeepAnalysisError precheck;
+  if (!deep_analysis_precheck(*record, &precheck)) {
+    return json_error(res, precheck.http_status, precheck.code, precheck.message);
+  }
+
+  const auto started = deep_jobs_.start(host_id, query_id, random_uuid_v4());
+  const auto answer = [&](const std::string& job_id) {
+    rapidjson::StringBuffer buffer(nullptr, 512);
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    writer.StartObject();
+    write_deep_job_head(writer, job_id, host_id, query_id, "running");
+    writer.Key("poll_after_ms"); writer.Int(1000);
+    writer.EndObject();
+    res.status = 202;
+    res.set_header("Cache-Control", "no-store");
+    res.set_content(buffer.GetString(), buffer.GetSize(), "application/json");
+  };
+  // The analysis of this query already runs: the same job, no second EXPLAIN ANALYZE.
+  if (!started.created) return answer(started.job_id);
+
+  // A place for the job: it is held until the job ends. Without one (a burst of analyses), 503 server_busy.
+  auto ticket = admit(WorkClass::Analysis, req, res);
+  if (!ticket) {
+    deep_jobs_.discard(started.job_id);
+    return;
+  }
+  const std::shared_ptr<WorkerGroup> group = query_workers_;
+  if (!group->enter()) {
+    deep_jobs_.discard(started.job_id);
+    return json_error(res, 503, "server_stopping", "the server is stopping");
+  }
+
+  ChQueryLimits limits = user_sql_limits(req, "chdash-deep-analysis");
+  // The request is over when the job runs: the job stops by its own cancel, or when the server stops.
+  const std::shared_ptr<DeepJobControl> control = started.control;
+  limits.canceled = [this, control] { return stopping() || control->cancel_requested(); };
+  // The bound of the job (analysis.deep_max_execution_time_s); the query { } bounds of a run apply too, the smaller one wins.
+  if (cfg_.analysis.deep_max_execution_time_s > 0) {
+    limits.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(cfg_.analysis.deep_max_execution_time_s);
+  }
+
+  const std::string job_id = started.job_id;
+  try {
+    std::thread([this, group, ticket = std::move(*ticket), record = std::move(*record), host = *host, job_id, control,
+                 limits = std::move(limits)]() mutable {
+      {
+        // A stop of the server, or a cancel, kills the statements: EXPLAIN ANALYZE can send nothing for as long as the run did.
+        struct StopHook {
+          Server& server;
+          uint64_t id;
+          ~StopHook() { server.remove_stop_hook(id); }
+        } stop_hook{*this, add_stop_hook([host, control] {
+                      control->request_cancel();
+                      kill_deep_statements(host, control->statements());
+                    })};
+        ChQueryScope scope(std::move(limits));
+        DeepAnalysisResult deep;
+        DeepAnalysisError error;
+        const bool ok = run_deep_analysis(record, host.runner_uri, client_pool_, &deep, &error,
+                                          [&control](const std::string& statement) { control->add_statement(statement); });
+        if (control->cancel_requested() || error.code == "canceled") {
+          deep_jobs_.cancel_done(job_id);
+        } else if (ok) {
+          deep_jobs_.finish(job_id, deep_analysis_result_json(record.query_id, record.host_id, deep));
+        } else {
+          deep_jobs_.fail(job_id, error.code.empty() ? "deep_analysis_failed" : error.code,
+                          error.message.empty() ? "Deep Analyze failed." : error.message,
+                          error.http_status > 0 ? error.http_status : 500);
+        }
+      }
+      // The place goes back before the thread leaves the group: the server waits for the group, then destroys the admission.
+      ticket = Admission::Ticket();
+      group->leave();
+    }).detach();
+  } catch (...) {
+    group->leave();
+    deep_jobs_.discard(job_id);
+    throw;
+  }
+  answer(job_id);
+}
+
+// GET /api/query/deep-analysis?host_id=&job_id=: the state of the job, and the analysis once it finished.
+void Server::handle_query_deep_analysis_status(const httplib::Request& req, httplib::Response& res) {
+  res.set_header("Cache-Control", "no-store");
+  if (!req.has_param("host_id")) return json_error(res, 400, "missing_host_id", "Missing host_id.");
+  if (!req.has_param("job_id")) return json_error(res, 400, "missing_job_id", "Missing job_id.");
+  const std::string host_id = req.get_param_value("host_id");
+  if (!find_host(cfg_.hosts, host_id)) return json_error(res, 404, "unknown_host", "Unknown host_id.");
+
+  DeepJobSnapshot job;
+  if (!deep_jobs_.snapshot(req.get_param_value("job_id"), host_id, &job)) {
+    return json_error(res, 404, "deep_analysis_job_not_found", "The Deep Analyze job is unknown, or its result is no longer kept.");
+  }
+  rapidjson::StringBuffer buffer(nullptr, job.result_json ? job.result_json->size() + 512 : 512);
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  write_deep_job_head(writer, job.job_id, job.host_id, job.query_id, deep_job_state_name(job.state));
+  writer.Key("elapsed_ms"); writer.Int64(job.elapsed_ms);
+  if (job.state == DeepJobState::Finished && job.result_json) {
+    writer.Key("result");
+    writer.RawValue(job.result_json->data(), job.result_json->size(), rapidjson::kObjectType);
+  } else if (job.state == DeepJobState::Failed) {
+    // The poll itself succeeded: the failure is the state of the job, with the code and the message of the envelope (operations.md,
+    // "Errors"). `http_status` is the status that a synchronous answer would have had.
+    writer.Key("error_code"); write_json_text(writer, job.error_code);
+    writer.Key("message"); write_json_text(writer, job.error_message);
+    writer.Key("retryable"); writer.Bool(false);
+    writer.Key("http_status"); writer.Int(job.error_status);
+  }
+  writer.EndObject();
   res.status = 200;
-  res.set_content(buffer.GetString(), "application/json");
+  res.set_content(buffer.GetString(), buffer.GetSize(), "application/json");
+}
+
+// POST /api/query/deep-analysis/cancel {host_id, job_id}: the job stops and its statements are killed. The state turns "canceled" when
+// the thread of the job has seen it: the client polls once more.
+void Server::handle_query_deep_analysis_cancel(const httplib::Request& req, httplib::Response& res) {
+  res.set_header("Cache-Control", "no-store");
+  rapidjson::Document doc;
+  if (!parse_json_body(req, doc)) return json_error(res, 400, "invalid_json", "Invalid JSON request body.");
+  if (!doc.HasMember("host_id") || !doc["host_id"].IsString()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
+  if (!doc.HasMember("job_id") || !doc["job_id"].IsString()) return json_error(res, 400, "missing_job_id", "Missing job_id.");
+  const std::string host_id = doc["host_id"].GetString();
+  const std::string job_id = doc["job_id"].GetString();
+  const HostSpec* host = find_host(cfg_.hosts, host_id);
+  if (!host) return json_error(res, 404, "unknown_host", "Unknown host_id.");
+
+  std::shared_ptr<DeepJobControl> control;
+  if (!deep_jobs_.request_cancel(job_id, host_id, &control)) {
+    return json_error(res, 404, "deep_analysis_job_not_found", "The Deep Analyze job is unknown, or its result is no longer kept.");
+  }
+  if (control) kill_deep_statements(*host, control->statements());
+
+  DeepJobSnapshot job;
+  deep_jobs_.snapshot(job_id, host_id, &job);
+  rapidjson::StringBuffer buffer(nullptr, 512);
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  writer.StartObject();
+  write_deep_job_head(writer, job_id, host_id, job.query_id, deep_job_state_name(job.state));
+  writer.Key("cancel_requested"); writer.Bool(control != nullptr);
+  writer.EndObject();
+  res.status = 200;
+  res.set_content(buffer.GetString(), buffer.GetSize(), "application/json");
 }
 
 } // namespace chdash

@@ -184,7 +184,7 @@ For this reason, a failure of the system account does not mark a host as down wh
 - `POST /api/query/cancel` cancel a query with its signed token.
 - `POST /api/query/analysis` inspect a registered, completed query. The data come from `system.query_log`, the optional processor profiles, the query-view logs and the distributed child records that are locally visible. The backend does not replay the query.
 - `GET /api/query/execution?host_id=...&query_id=...` retrieve the lightweight registered execution record that the post-run downloads use.
-- `POST /api/query/deep-analysis` explicitly run the stored original SELECT-family SQL again with ClickHouse 26.7 `EXPLAIN ANALYZE`. The backend refuses mutating statements before it runs them.
+- `POST /api/query/deep-analysis` start a job that runs the stored original SELECT-family SQL again with ClickHouse 26.7 `EXPLAIN ANALYZE` (`202`, then `GET /api/query/deep-analysis?host_id=&job_id=` to poll it and `POST /api/query/deep-analysis/cancel` to stop it). The backend refuses mutating statements before it runs them. [`docs/query-analysis.md`](docs/query-analysis.md#deep-analyze-backend) describes the job.
 - `GET /api/explorer/catalog?host_id=...` ACL-filtered Explorer List catalog. A
   manual `refresh=1` invalidates both the metadata caches and the authorization caches.
 - `GET /api/explorer/table?host_id=...&database=...&table=...` table detail

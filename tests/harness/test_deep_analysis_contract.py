@@ -17,13 +17,34 @@ def test_deep_analysis_is_a_separate_explicit_endpoint() -> None:
     session = read("src/query_session.cpp")
 
     assert 'Post("/api/query/deep-analysis"' in server
-    assert "handle_query_deep_analysis" in header
+    assert 'Get("/api/query/deep-analysis"' in server
+    assert 'Post("/api/query/deep-analysis/cancel"' in server
+    assert "handle_query_deep_analysis" in header and "handle_query_deep_analysis_status" in header and "handle_query_deep_analysis_cancel" in header
     assert "cfg_.analysis.allow_deep_analyze" in api
     assert "authenticate_request" not in api
     assert "query_registry_->find(query_id, host_id)" in api
-    assert "run_deep_analysis(*record, host->runner_uri" in api
+    assert "host.runner_uri, client_pool_, &deep, &error" in api
     assert "run_deep_analysis" not in query_api
     assert "EXPLAIN ANALYZE" not in session
+
+
+def test_deep_analysis_is_a_bounded_job_that_can_be_polled_and_canceled() -> None:
+    # ARCH-B-016: the request does not wait for EXPLAIN ANALYZE. POST starts a job that holds a place of the analysis admission
+    # until it ends, GET polls it, POST .../cancel stops it and KILLs its statements; the store of jobs is bounded.
+    api = read("src/api_analysis.cpp")
+    jobs = read("src/deep_analysis_jobs.hpp")
+    header = read("src/server.hpp")
+    assert "admit(WorkClass::Analysis, req, res)" in api
+    assert "ticket = std::move(*ticket)" in api and "ticket = Admission::Ticket();" in api
+    assert "group->enter()" in api and "group->leave();" in api  # the server waits for the thread before it goes
+    assert "res.status = 202;" in api
+    assert "kill_deep_statements(" in api and "query_started" in read("src/deep_analysis.hpp")
+    assert "add_stop_hook(" in api  # a stop of the server cancels the job
+    assert "limits.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(cfg_.analysis.deep_max_execution_time_s);" in api
+    assert "DeepAnalysisJobs deep_jobs_{16, 64u * 1024u * 1024u, std::chrono::minutes(10)};" in header
+    assert "max_jobs" in jobs and "max_bytes" in jobs and "retention" in jobs
+    assert config_keys.row("analysis", "deep_max_execution_time_s")["kind"] == "INT"
+    assert 'Allow Deep Analyze' in read("src/config_keys.def")
 
 
 def test_deep_analysis_replays_exact_bounded_original_sql() -> None:

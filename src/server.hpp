@@ -9,6 +9,7 @@
 #include "explorer_graph.hpp"
 #include "system_monitor.hpp"
 #include "system_activity.hpp"
+#include "deep_analysis_jobs.hpp"
 #include "export_job.hpp"
 #include "facet_limits.hpp"
 #include "health_runner.hpp"
@@ -144,6 +145,7 @@ struct AnalysisSettings {
   int log_lookup_timeout_ms = 2000;
   bool flush_logs = false;
   bool allow_deep_analyze = false;
+  int64_t deep_max_execution_time_s = 300;
 };
 
 struct ExportSettings {
@@ -392,6 +394,8 @@ private:
   void handle_query_cancel(const httplib::Request& req, httplib::Response& res);
   void handle_query_analysis(const httplib::Request& req, httplib::Response& res);
   void handle_query_deep_analysis(const httplib::Request& req, httplib::Response& res);
+  void handle_query_deep_analysis_status(const httplib::Request& req, httplib::Response& res);
+  void handle_query_deep_analysis_cancel(const httplib::Request& req, httplib::Response& res);
   void handle_query_execution(const httplib::Request& req, httplib::Response& res);
 
   void handle_export_run(const httplib::Request& req, httplib::Response& res);
@@ -542,6 +546,8 @@ private:
   std::shared_ptr<QueryRegistry> query_registry_;
   std::shared_ptr<ExportJobStore> export_jobs_;
   std::atomic<size_t> active_exports_{0};
+  // The jobs of Deep Analyze: at most 16 kept, 64 MiB of results, each for 10 minutes after it ends (deep_analysis_jobs.hpp).
+  DeepAnalysisJobs deep_jobs_{16, 64u * 1024u * 1024u, std::chrono::minutes(10)};
   std::atomic<size_t> active_host_streams_{0};
   std::atomic<size_t> active_query_streams_{0};
   std::shared_ptr<ClickHouseClientPool> client_pool_;

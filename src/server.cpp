@@ -507,7 +507,11 @@ Server::Server(AppConfig cfg, bool start_background)
   http_.Get("/api/query/stream", [&](const auto& req, auto& res) { handle_query_stream(req, res); });
   http_.Post("/api/query/cancel", scoped([&](const auto& req, auto& res) { handle_query_cancel(req, res); }));
   http_.Post("/api/query/analysis", limited(WorkClass::Analysis, [&](const auto& req, auto& res) { handle_query_analysis(req, res); }));
-  http_.Post("/api/query/deep-analysis", limited(WorkClass::Analysis, [&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); }));
+  // Deep Analyze is a job (deep_analysis_jobs.hpp): POST starts it (the job takes its own place of the analysis admission), GET polls it, POST
+  // .../cancel stops it.
+  http_.Post("/api/query/deep-analysis", scoped([&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); }));
+  http_.Get("/api/query/deep-analysis", scoped([&](const auto& req, auto& res) { handle_query_deep_analysis_status(req, res); }));
+  http_.Post("/api/query/deep-analysis/cancel", scoped([&](const auto& req, auto& res) { handle_query_deep_analysis_cancel(req, res); }));
   http_.Get("/api/query/execution", scoped([&](const auto& req, auto& res) { handle_query_execution(req, res); }));
 
   http_.Post("/api/export/run", scoped([&](const auto& req, auto& res) { handle_export_run(req, res); }));

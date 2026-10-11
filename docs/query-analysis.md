@@ -195,3 +195,39 @@ The current implementation reports the correlated distributed-child records that
 ## Deep Analyze backend
 
 Deep Analyze is **not exposed in the current browser UI**. It is disabled by default (`analysis.allow_deep_analyze = false`). The Raw analysis tab is also removed. The separately gated backend implementation `/api/query/deep-analysis` is retained for future work and for explicit development configurations. It requires `allow_deep_analyze=true`. Normal deployments do not advertise it and do not call it.
+
+Deep Analyze runs the stored SQL of a run again with `EXPLAIN ANALYZE`. This can take as long as the run took. For this reason, a request does not wait for it. Deep Analyze is a **job**: the client starts it, polls it, and can cancel it.
+
+```http
+POST api/query/deep-analysis
+{"host_id": "local", "query_id": "..."}
+
+202 {"job_id": "...", "host_id": "local", "query_id": "...", "status": "running", "poll_after_ms": 1000}
+```
+
+The same checks as before apply first, and they answer at once: `403 deep_analysis_disabled`, `404 analysis_not_found`, `409 query_not_finished`, `409 analysis_not_enabled` (the run was not in profiling mode), `409 deep_analysis_sql_unavailable` and `409 deep_analysis_unsafe_query` (only a `SELECT` or a `WITH` statement is replayed). A second `POST` for a query whose job still runs gives the same job: ChDash does not run the same `EXPLAIN ANALYZE` twice at the same time.
+
+```http
+GET api/query/deep-analysis?host_id=local&job_id=...
+
+200 {"job_id": "...", "host_id": "local", "query_id": "...", "status": "running", "elapsed_ms": 4200}
+```
+
+`status` is `running`, `finished`, `failed` or `canceled`. A finished job has the analysis in `result` (`summary`, `plan_nodes`, `plan_lines`, `deep_query_id`). A failed job has `error_code`, `message`, `retryable` and `http_status` (the status that a synchronous answer would have had). The poll itself answers `200` in all these states. An unknown job, a job of another host, and a job whose result is no longer kept answer `404 deep_analysis_job_not_found`.
+
+```http
+POST api/query/deep-analysis/cancel
+{"host_id": "local", "job_id": "..."}
+
+200 {"job_id": "...", "status": "running", "cancel_requested": true}
+```
+
+The cancel stops the job and sends `KILL QUERY` for its statements through the system account, as the cancel of a run does. The state turns `canceled` once the thread of the job has seen it, so poll once more. Cancel on a job that ended answers `200` and does nothing.
+
+The bounds of a job:
+
+- It holds one place of the `analysis` admission class for its host (`admission.analysis_per_host`, default 1) from its start to its end. When no place is free within `admission.wait_ms`, `POST` answers `503 server_busy`. Query Analysis requests share this class.
+- ClickHouse stops its statements after `analysis.deep_max_execution_time_s` (default 300 seconds; 0 leaves the limit to the profile of the runner). The bounds of a run (`query.max_execution_time_s`, `query.max_memory_usage`, `query.max_rows_to_read`) apply too, and the smaller limit wins.
+- ChDash keeps at most 16 jobs and 64 MiB of results. A job that ended stays 10 minutes. When the store is full, the oldest job that ended goes first. A job that runs never goes.
+- A stop of the server cancels the jobs and kills their statements, as it does for the runs and the exports (`server.shutdown_timeout_ms`).
+- The statements of a job are labelled `chdash-deep-analysis` in `system.query_log`.
