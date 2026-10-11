@@ -150,6 +150,23 @@ void test_a_statement_that_cannot_be_judged_keeps_its_layout() {
     CHECK(out.ok() && !out.warning);
     CHECK_EQ(port.ast_calls.size(), size_t(0));
   }
+  {  // The formatted text is refused because it is longer than ClickHouse reads: that is not a change of the statement.
+    class LongPort final : public FakePort {
+    public:
+      FormatQueryResult explain_ast(const std::string& sql, size_t max) override {
+        FormatQueryResult result = FakePort::explain_ast(sql, max);
+        if (sql.find("FROM") != std::string::npos) {
+          result = FormatQueryResult();
+          result.failure = FormatQueryFailureKind::server;
+          result.message = "Max query size exceeded (can be increased with the `max_query_size` setting)";
+        }
+        return result;
+      }
+    } port;
+    const FormatOutcome out = format_once(port, text);
+    CHECK(out.ok() && !out.warning);
+    CHECK(out.formatted->find("FROM t") != std::string::npos);
+  }
   {  // The formatted statement is refused and the written one is not: that is a change.
     FakePort port;
     port.ast_refuses = "FROM";
@@ -331,6 +348,27 @@ void test_the_restoration_of_literals_is_not_quadratic() {
   CHECK_EQ(restore_sql_single_quoted_literals("SELECT 'it\\'s', 'x', 'y'", "select 'it''s', 'y'"), std::string("SELECT 'it''s', 'x', 'y'"));
 }
 
+// ---- The budget ----
+
+// A statement that is quadratic in its nesting gives up after the budget of the formatter (2 s) and comes back as written: the call
+// returns, and the text is the user's text (it keeps its meaning).
+void test_a_statement_that_is_too_deep_comes_back_as_written() {
+  std::string text = "SELECT ";
+  const int depth = 3000;
+  for (int i = 0; i < depth; ++i) text += "CASE WHEN a THEN ";
+  text += "1";
+  for (int i = 0; i < depth; ++i) text += " ELSE 0 END";
+  text += " -- note";
+  FakePort port;
+  const auto started = std::chrono::steady_clock::now();
+  const FormatOutcome out = format_once(port, text);
+  CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(20));
+  CHECK(out.ok());
+  CHECK(out.formatted && out.formatted->find("-- note") != std::string::npos);
+  // Whatever the layout is, the tokens are the tokens of the text.
+  CHECK(out.formatted && (out.warning || fake_tree(*out.formatted) == fake_tree(text)));
+}
+
 // ---- The properties of the layout ----
 
 // The statements of the properties: comments in every place that the layout reads, and the shapes that broke the layout.
@@ -510,6 +548,7 @@ int main(int argc, char** argv) {
   RUN(test_an_alter_has_one_layout_with_and_without_comments);
   RUN(test_a_name_that_formatquery_drops_does_not_stop_the_restoration);
   RUN(test_the_restoration_of_literals_is_not_quadratic);
+  RUN(test_a_statement_that_is_too_deep_comes_back_as_written);
   RUN(test_properties_of_statements_with_comments);
   RUN(test_a_comment_stays_a_comment);
   RUN(test_the_in_inside_a_name_is_not_an_operator);

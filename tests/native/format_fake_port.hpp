@@ -36,7 +36,7 @@ inline std::string fake_tree(const std::string& sql) {
   return out;
 }
 
-class FakePort final : public FormatQueryPort {
+class FakePort : public FormatQueryPort {
 public:
   std::vector<std::string> format_calls, ast_calls;
   // What each call answers: nothing set, the text (formatQuery) or its tokens (EXPLAIN AST).

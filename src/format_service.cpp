@@ -320,8 +320,10 @@ std::optional<FormatWarning> FormatBatch::check_meaning(const std::string& befor
   if (!tree_before) return std::nullopt;
   const FormatQueryResult tree_after = port_.explain_ast(sent_after, limit);
   if (!tree_after) {
-    // The statement that was written is understood and the formatted one is not: that is a change. A connection that failed is not.
-    return tree_after.failure == FormatQueryFailureKind::server ? std::optional<FormatWarning>(changed()) : std::nullopt;
+    // The statement that was written is understood and the formatted one is not: that is a change. A connection that failed is not, and
+    // neither is a text that grew past what ClickHouse reads (the message names max_query_size).
+    if (tree_after.failure != FormatQueryFailureKind::server || tree_after.message.find("max_query_size") != std::string::npos) return std::nullopt;
+    return changed();
   }
   if (*tree_before.formatted_sql != *tree_after.formatted_sql) return changed();
   return std::nullopt;
