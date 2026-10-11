@@ -76,3 +76,9 @@ def function_text(source: str, name: str) -> str:
     end = re.compile(r"^[}\]];?$", re.M).search(source, match.start())
     assert end, name
     return source[match.start():end.end()]
+
+
+def read_explorer_graph() -> str:
+    """The text of the Explorer graph and of the modules it was split into (model, text, geometry, layout, store, scene, viewport, nodes, edges,
+    frame, hit, panel, focus), for a contract on the graph as one unit."""
+    return read_family("app_explorer_graph")

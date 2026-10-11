@@ -41,12 +41,12 @@ def test_collapsing_selected_database_switches_to_database_view_without_reopenin
 
 
 def test_storage_vertical_stacks_use_equal_width_and_straight_overlap_route() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = modules.read_explorer_graph()
     assert 'const logicalStackWidth = Math.max' in graph
     assert 'item.width = logicalStackWidth;' in graph
     assert 'const maxTierWidth = Math.max' in graph
     assert 'item.width = maxTierWidth;' in graph
-    route = graph[graph.index('function storageRouteGeometry'):graph.index('function storagePolylineMetric')]
+    route = modules.function_text(graph, "storageRouteGeometry")
     assert 'const overlapLeft = Math.max(from.x, to.x);' in route
     assert 'const x = (overlapLeft + overlapRight) / 2;' in route
     assert '{ x, y: from.y + from.height }' in route

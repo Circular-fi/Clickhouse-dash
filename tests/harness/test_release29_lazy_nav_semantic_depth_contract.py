@@ -43,7 +43,7 @@ def test_explorer_data_static_numeric_columns_get_gauges() -> None:
 def test_hidden_non_storing_nodes_cost_zero_semantic_depth() -> None:
     cpp = read_api()
     api = read("src/static/app_api.js")
-    graph = read("src/static/app_explorer_graph.js")
+    graph = modules.read_explorer_graph()
     assert 'scope.include_non_storing = !req.has_param("include_non_storing")' in cpp
     assert "is_non_storing_graph_node" in cpp
     assert "? 0 : 1" in cpp

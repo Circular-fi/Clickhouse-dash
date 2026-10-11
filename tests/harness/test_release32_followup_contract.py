@@ -79,7 +79,7 @@ def test_data_settings_is_portalled_and_storage_tuple_geometry_is_stable() -> No
 
 
 def test_light_minimap_viewport_is_darker_and_icon_selectors_keep_outline() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     css = css_sources.text()
     # The light viewport rectangle is a darker fill and stroke, now tokens.
     assert 'ctx.fillStyle = color("minimapViewFill");' in graph and 'ctx.strokeStyle = color("minimapView");' in graph

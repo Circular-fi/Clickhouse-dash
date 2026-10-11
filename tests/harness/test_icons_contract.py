@@ -146,7 +146,7 @@ def test_no_unicode_glyph_stands_in_for_an_icon():
         # A close button holds the x icon, not the multiplication sign.
         assert not re.search(r">\s*(?:×|\\u00d7)\s*</button>", code), name
         assert not re.search(r"\"(?:×|\\u00d7)\"\)", code), name
-    graph = (STATIC / "app_explorer_graph.js").read_text(encoding="utf-8")
+    graph = modules.read_explorer_graph()
     assert graph.count("ctx.fillText(") >= 2 and "\\u25be" in graph and "\\u25b8" in graph
 
 

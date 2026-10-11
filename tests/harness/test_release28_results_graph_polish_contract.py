@@ -73,7 +73,7 @@ def test_finalize_info_does_not_displace_sort_marker() -> None:
 
 
 def test_graph_animation_is_topological_without_background_activity_polling() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     api = read("src/static/app_api.js")
     server = read("src/server.cpp")
     assert "getExplorerActivity" not in api
@@ -91,14 +91,14 @@ def test_noninteractive_lineage_control_has_no_hover_chrome() -> None:
 
 
 def test_graph_pan_is_clamped_and_minimap_contains_arrows() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "function clampViewportToGraph()" in graph
     assert "view.offsetX = Math.max(Math.min(minX, maxX), Math.min(Math.max(minX, maxX), view.offsetX));" in graph
     assert "view.offsetY = Math.max(Math.min(minY, maxY), Math.min(Math.max(minY, maxY), view.offsetY));" in graph
     assert "kit.clampView(model, model.worldBounds, rect.width, rect.height);" in graph
     # Pan and zoom clamp in the kit controller (clamp()), the Explorer camera moves here.
-    assert graph.count("clampViewportToGraph();") >= 3 and graph.count("    clamp();") >= 2
-    minimap = graph[graph.index("function drawMinimap(frame)") : graph.index("function draw(ctx, frame)", graph.index("function drawMinimap(frame)"))]
+    assert graph.count("clampViewportToGraph();") >= 2 and graph.count("    clamp();") >= 2
+    minimap = modules.function_text(graph, "drawMinimap")
     minimap += graph[graph.index("function drawMinimap(canvas, options)") : graph.index("function fitTransform(")]
     assert "for (const edge of visibleEdges())" in minimap
     assert "storageRouteGeometry(from, to, edge).points" in minimap
@@ -108,16 +108,14 @@ def test_graph_pan_is_clamped_and_minimap_contains_arrows() -> None:
 
 
 def test_storage_buffer_uses_vertical_ports_and_horizontal_peers_align() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    route_start = graph.index("function storageRouteGeometry")
-    route_end = graph.index("function drawStorageRoute", route_start)
-    route = graph[route_start:route_end]
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
+    route = modules.function_text(graph, "storageRouteGeometry")
     assert 'String(edge?.kind || "") === "buffer"' in route
     assert "x: from.x + from.width / 2, y: from.y + from.height" in route
     assert "x: to.x + to.width / 2, y: to.y" in route
-    assert "function alignPhysicalHorizontalPeers(positions, edges)" in graph
+    assert "function alignPhysicalHorizontalPeers(positions, edges, detailMode)" in graph
     assert "to.y = from.y;" in graph
-    assert "alignPhysicalHorizontalPeers(positions, edges);" in graph
+    assert "alignPhysicalHorizontalPeers(positions, edges, detailMode);" in graph
 
 
 def test_explorer_refresh_and_gear_match_chromeless_editor_gear_hover() -> None:

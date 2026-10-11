@@ -150,7 +150,7 @@ def test_the_right_panels_are_detail_panel_shells():
     kit = read("src/static/app_graph_kit.js")
     assert 'return detailPanel.head({ eyebrow, title, subtitle, dot, onClose, closeLabel, graphKit: true });' in kit
     assert 'const shell = detailPanel.create({ el: panel, layout: "floating", onClose, returnFocus: opener });' in kit
-    for module in ("app_trace_map.js", "app_trace_views.js", "app_explorer_graph.js"):
+    for module in ("app_trace_map.js", "app_trace_views.js", "app_explorer_graph_panel.js"):
         assert "panelShell(" in read(f"src/static/{module}"), module
 
 

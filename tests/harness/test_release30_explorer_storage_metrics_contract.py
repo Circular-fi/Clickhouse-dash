@@ -30,7 +30,7 @@ def test_non_storing_toggle_filters_sidebar_objects() -> None:
 
 def test_non_storing_toggle_is_locked_while_selected_object_is_non_storing() -> None:
     ui = (modules.read_explorer() + modules.read_explorer_detail())
-    graph = read("src/static/app_explorer_graph.js")
+    graph = modules.read_explorer_graph()
     assert "includeNonStoring: !!table && nonStoringSummary(table)" in ui
     assert "const nextIncludeNonStoring = required.includeNonStoring || options.includeNonStoring !== false;" in graph
     assert "includeNonStoring: !!node && isNonStoringNode(node)" in graph

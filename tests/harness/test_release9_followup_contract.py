@@ -20,7 +20,7 @@ def test_storage_topology_is_physical_only_and_ttl_is_rendered_as_tier_lifecycle
     backend = read_graph()
     header = read("src/explorer_graph.hpp")
     api = read_api()
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "FROM system.storage_policies" in backend
     assert '"volume_tier"' in backend
     assert "previous_volume_id" in backend
@@ -28,17 +28,17 @@ def test_storage_topology_is_physical_only_and_ttl_is_rendered_as_tier_lifecycle
     assert "ExplorerGraphTtlRule" in header
     assert 'w.Key("ttl_rules")' in api
     assert '["contains", "storage_policy", "policy_volume", "volume_tier", "volume_disk"]' in graph
-    assert 'function rawStorageProjection()' in graph
+    assert 'function rawStorageProjection(graph, view)' in graph
     assert 'function storageProjection()' in graph
     assert 'kind: "storage_tier"' in graph
     assert 'TTL while in ${volumeName}' in graph
     assert 'function drawLifecycleEdgeLabel(' in graph
-    raw_projection = graph[graph.index("function rawStorageProjection()") : graph.index("function storageProjection()")]
+    raw_projection = modules.function_text(graph, "rawStorageProjection")
     assert 'target.layer !== "physical"' in raw_projection
 
 
 def test_graph_layout_has_barycentric_and_local_transposition_crossing_minimization() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "Sugiyama-style barycentric sweeps" in graph
     assert "const swapDelta = (leftId, rightId) =>" in graph
     assert "Adjacent transposition after barycentric sweeps" in graph

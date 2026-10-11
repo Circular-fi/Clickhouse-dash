@@ -51,8 +51,8 @@ def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_remo
 
 
 def test_storage_mode_cross_database_navigation_treats_missing_scope_as_unknown_not_blocked() -> None:
-    graph = read("src/static/app_explorer_graph.js")
-    block = graph[graph.index("function canUseStorageForTable"):graph.index("function rawStorageProjection")]
+    graph = modules.read_explorer_graph()
+    block = modules.function_text(graph, "canUseStorageForTable")
     assert 'const exists = (model.graph.nodes || []).some' in block
     assert 'if (!exists) return null;' in block
     assert 'return canUseStorageForId(id);' in block

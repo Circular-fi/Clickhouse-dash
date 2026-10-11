@@ -167,7 +167,7 @@ def test_information_schema_is_excluded_at_runner_discovery_boundary() -> None:
 
 def test_explorer_uses_the_sans_token_and_owns_no_document_scroll_on_desktop() -> None:
     css = css_sources.text()
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'font-family: var(--font-sans);' in css
     assert '"Inter"' not in css
     assert 'const FONT = \'"IBM Plex Sans", ' in graph

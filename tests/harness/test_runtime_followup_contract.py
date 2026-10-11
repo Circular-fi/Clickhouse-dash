@@ -135,7 +135,7 @@ def test_explorer_toolbar_has_tables_functions_search_filter_reload_and_no_stand
 
 def test_explorer_uses_the_sans_token_for_ui_and_only_code_surfaces_keep_monospace() -> None:
     css = css_sources.text()
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
 
     assert css_sources.decls(".explorerWorkspace button")["font-family"] == "var(--font-sans)"
     assert css_sources.decls(".functionDoc__code")["font"].endswith("var(--font-mono)")
@@ -174,7 +174,7 @@ def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_hi
 
 def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_projection() -> None:
     ui = modules.read_explorer_detail()
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     graph_backend = read_graph()
 
     assert '!/^_?row$/i.test(String(d.table || ""))' in ui
@@ -291,7 +291,7 @@ def test_theme_dropdown_is_vertical_and_keeps_the_current_choice() -> None:
 
 def test_graph_controls_live_in_viewport_and_depth_can_increase_or_decrease() -> None:
     html = read("src/static/explorer.html")
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     css = css_sources.text()
     assert 'class="explorerGraphViewportControls graphKitBar"' in html
     assert '<span class="explorerGraphDepthControls__name">Depth</span>' in html
@@ -330,7 +330,7 @@ def test_preview_finalizes_aggregate_function_states_only_inside_bounded_limit()
 def test_graph_keeps_browser_visible_has_inline_topology_controls_and_no_reset_focus() -> None:
     html = read("src/static/explorer.html")
     ui = (modules.read_explorer() + modules.read_explorer_detail())
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert html.index('id="explorerTableList"') < html.index('id="explorerGraphPane"')
     assert 'id="explorerGraphLogicalButton"' in html
     assert 'id="explorerGraphPhysicalButton"' in html
@@ -345,18 +345,18 @@ def test_graph_keeps_browser_visible_has_inline_topology_controls_and_no_reset_f
 
 
 def test_graph_depth_preserves_focus_and_disables_plus_when_no_new_nodes() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'function recomputePreservingFocus()' in graph
     assert 'stabilizeLayoutPositions' in graph
-    recompute = graph[graph.index('function recomputePreservingFocus()'):graph.index('function setFocus(')]
+    recompute = modules.function_text(graph, "recomputePreservingFocus")
     assert 'model.offsetX' not in recompute and 'model.offsetY' not in recompute
     assert 'model.graph?.scope_has_more === true' in graph
     assert 'Number(model.graph?.scope_depth) === model.focusDepth' in graph
-    assert 'fitToScreen();' not in graph[graph.index("function contractNeighborhood"):graph.index("function defaultFocusId")]
+    assert 'fitToScreen();' not in modules.function_text(graph, "contractNeighborhood")
 
 
 def test_graph_uses_full_object_names_hides_view_storage_metrics_and_enriches_disks() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     backend = read_graph()
     api = read_api()
     assert 'materialized_view: "MaterializedView"' in graph

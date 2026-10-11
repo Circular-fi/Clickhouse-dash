@@ -61,7 +61,7 @@ def test_graph_expansions_are_bounded_and_only_grow_from_shown_anchors() -> None
 
 
 def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
-    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    js = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     css = css_sources.text()
     assert "const READABLE_TEXT_PX = 11;" in js
     # Fit (kit.fitView / kit.fitScale): the whole graph when readable as a
@@ -78,7 +78,7 @@ def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
     assert "const COMPACT_CARD_PX = 40;" in js
     assert "kit.isCompact(NODE_HEIGHT, scale, LINEAGE_FONT_MIN)" in js
     assert "const box = kit.compactBox(item, model.scale, COMPACT_TITLE_LINES);" in js
-    assert "function groupedOverview(nodes, edges)" in js
+    assert "function groupOverview(nodes, edges, { expandedGroups, showIsolated })" in js
     assert 'kind: "database_group"' in js
     assert "function drawNodeExpandControls(ctx, compact)" in js
     assert "function renderNodePanel(body, node)" in js

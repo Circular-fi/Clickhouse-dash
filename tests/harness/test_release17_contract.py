@@ -13,7 +13,7 @@ def read(path: str) -> str:
 def test_storage_topology_controls_are_grouped_and_storage_select_can_lock() -> None:
     html = read("src/static/explorer.html")
     css = css_sources.text()
-    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    js = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
 
     assert 'class="graphKitGroup explorerGraphScopeControls"' in html
     assert '<div class="graphKitGroup" aria-label="Graph actions">' in html
@@ -25,13 +25,13 @@ def test_storage_topology_controls_are_grouped_and_storage_select_can_lock() -> 
 
 
 def test_non_storing_toggle_now_covers_buffers_and_can_reflow_around_focus() -> None:
-    frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    frontend = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     explorer = (modules.read_explorer() + modules.read_explorer_detail())
 
     assert '"buffer"' in frontend
     assert '"buffer"].includes(String(node?.kind || ""))' in frontend
     assert 'recomputePreservingFocusAnchorOnly' in frontend
-    assert 'computeLayout();' in frontend[frontend.index('function recomputePreservingFocusAnchorOnly'):frontend.index('function logicalFocusId')]
+    assert 'computeLayout();' in modules.function_text(frontend, "recomputePreservingFocusAnchorOnly")
     assert 'restoreViewportAnchor(anchor);' in frontend
     assert 'resolveBufferRepresentative' in frontend
     assert 'key === "buffer"' in explorer
@@ -72,9 +72,9 @@ def test_explorer_storage_and_fixtures_cover_projection_index_and_complex_types(
 
 
 def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
 
-    assert 'function rawStorageProjection()' in graph
+    assert 'function rawStorageProjection(graph, view)' in graph
     assert 'function storageProjection()' in graph
     assert 'kind: "storage_tier"' in graph
     assert 'tier_disks: disks' in graph
@@ -93,7 +93,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
     assert 'lines.push(ttlTimingSummary(event));' in graph
     assert '`MOVE \\u2192 ${kind ? `${kind} ` : ""}${target}`' in graph
     assert 'lines.push("DELETE");' in graph
-    assert 'ctx.globalAlpha = 1;' in graph[graph.index('function drawLifecycleEdgeLabel('):graph.index('function drawNode(')]
+    assert 'ctx.globalAlpha = 1;' in modules.function_text(graph, "drawLifecycleEdgeLabel")
     assert 'function alignPhysicalStorageRows(' in graph
     assert 'const tierX = Math.max(logicalRight, middleRight) + columnGap;' in graph
     assert 'item.x = tierX;' in graph
@@ -111,7 +111,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
     assert 'ctx.arc(point.x, point.y, FLOW_DOT_RADIUS_WORLD, 0, Math.PI * 2);' in graph
     assert 'const storageTierGap = 82;' in graph
     assert 'tierY += item.height + storageTierGap;' in graph
-    lifecycle = graph[graph.index('function drawLifecycleEdgeLabel('):graph.index('function drawNode(')]
+    lifecycle = modules.function_text(graph, "drawLifecycleEdgeLabel")
     assert 'ctx.fillStyle = graphColor("labelBg");' in lifecycle
     assert 'ctx.fillStyle = css("--table-bg", "#10141d");' not in lifecycle
     assert 'const hasStorageAnimation = model.detailMode === "physical"' in graph
@@ -122,7 +122,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
 
 def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> None:
     explorer = (modules.read_explorer() + modules.read_explorer_detail())
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     css = css_sources.text()
 
     assert 'button.classList.toggle("is-storage-blocked", !!storageBlocked);' in explorer
@@ -133,7 +133,7 @@ def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> Non
     assert 'color: var(--muted);' in blocked and 'opacity' not in blocked
     assert 'cursor: default;' in blocked
 
-    assert 'storage_disabled: !canUseStorageForId(node.id)' in graph
+    assert 'storage_disabled: !canUseStorage(graph, node.id)' in graph
     # Greyed in Storage mode by a dashed frame and muted text at full
     # opacity: legible in the light theme, unlike a translucent card.
     assert 'dashed: viewLike || storageDisabled,' in graph

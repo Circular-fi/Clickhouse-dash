@@ -63,7 +63,7 @@ def test_lineage_has_one_normalized_two_direction_layout() -> None:
 
 
 def test_graph_labels_buffer_rows_and_memory_as_ram() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = modules.read_explorer_graph()
     assert 'node.kind === "buffer" ? " buffered rows" : " rows"' in graph
     assert 'node.kind === "buffer" || node.kind === "memory" || node.kind === "dictionary"' in graph
     assert 'memoryResident ? " RAM" : " logical"' in graph

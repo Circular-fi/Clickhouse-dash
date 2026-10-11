@@ -72,7 +72,7 @@ def test_wide_types_preview_reads_decimal_at_its_physical_width_and_open_query_c
 
 
 def test_lineage_layout_allocates_global_rows_and_interrow_routing_lanes() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "const lineageRows = new Map();" in graph
     assert "const assignRows = (group) =>" in graph
     assert "for (let sweep = 0; sweep < 6; sweep += 1)" in graph

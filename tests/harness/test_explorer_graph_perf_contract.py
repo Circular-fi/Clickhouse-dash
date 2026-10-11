@@ -9,9 +9,9 @@ def read(path: str) -> str:
 
 
 def test_layout_transposition_uses_incremental_crossing_delta() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     layout = graph[graph.index("function layered(options)"):graph.index("function cycleBackEdges(")]
-    assert "kit.layered({" in graph[graph.index("function computeLayout("):graph.index("function overviewScale()")]
+    assert "kit.layered({" in modules.function_text(graph, "layoutNodes")
     # Re-scoring every crossing twice per adjacent swap froze a 2k-node catalog
     # for a minute; the swap decision must use the exact incremental delta.
     assert "const before = crossingScore();" not in layout
@@ -21,12 +21,14 @@ def test_layout_transposition_uses_incremental_crossing_delta() -> None:
 
 
 def test_projection_colors_and_route_scoring_are_cached_or_pruned() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    projection = graph[graph.index("function logicalProjection()"):graph.index("function canUseStorageForId")]
-    assert projection.index("logicalProjectionCacheValid(model.logicalProjectionCache)") < projection.index("resolveBufferRepresentative")
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
+    # The cache answers before the projection is built, for the payload object and the visibility inputs.
+    cached = modules.function_text(graph, "cachedProjection")
+    assert cached.index("cache.graph === model.graph") < cached.index("build(model.graph, model)")
+    assert 'cachedProjection("logicalProjectionCache", buildLogicalProjection)' in graph
     assert "function visibleSet()" in graph
     assert "themeCache.colors.get(name)" in graph
-    assert "kit.theme.invalidate();" in graph[graph.index("function redrawThemeNow()"):]
+    assert "kit.theme.invalidate();" in modules.function_text(graph, "redrawThemeNow")
     # Pair conflicts through the segment index, not every pair of routes.
     assert "const index = createSegmentIndex(all);" in graph
     assert "if (segmentsApart(a, b, segment.a, segment.b, LANE_GAP)) continue;" in graph

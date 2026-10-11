@@ -12,7 +12,7 @@ def read(path: str) -> str:
 
 def test_theme_change_repaints_graph_in_same_ui_transaction() -> None:
     ui = read("src/static/app_header.js")
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     # The header tells the graph by an event; the graph draws again in the same event turn.
     assert 'window.dispatchEvent(new CustomEvent("chdash:theme-applied", { detail: { mode } }));' in ui
     assert 'window.addEventListener("chdash:theme-applied", () => redrawThemeNow());' in graph
@@ -41,18 +41,18 @@ def test_aggregate_function_preview_is_explicitly_marked_as_finalized() -> None:
 
 def test_storage_graph_has_no_depth_controls_and_switch_preserves_focused_screen_position() -> None:
     html = read("src/static/explorer.html")
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     dom = read("src/static/app_dom.js")
     assert 'id="explorerGraphDepthControls"' in html
     assert 'explorerGraphDepthControls: byId("explorerGraphDepthControls")' in dom
     assert 'dom.explorerGraphDepthControls.hidden = model.detailMode !== "logical";' in graph
     assert 'if (model.focusedId) recomputePreservingFocus();' in graph
     assert "stabilizeLayoutPositions" in graph
-    assert "model.offsetX" not in graph[graph.index("function recomputePreservingFocus()"):graph.index("function setFocus(")]
+    assert "model.offsetX" not in modules.function_text(graph, "recomputePreservingFocus")
 
 
 def test_graph_click_then_browse_sync_preserves_canvas_camera_but_offscreen_sidebar_focus_can_fit() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'function setFocus(id, center = false, { preserveDepth = true } = {})' in graph
     assert 'const needsFit = shouldEnsure && !nodeIsOnScreen(id);' in graph
     assert 'setFocus(id, needsFit, { preserveDepth: true });' in graph

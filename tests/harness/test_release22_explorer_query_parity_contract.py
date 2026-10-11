@@ -11,7 +11,7 @@ def read(path: str) -> str:
 
 
 def test_card_uses_ram_labels_without_resident_runtime_cards_or_extra_section_titles() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert '`${format.bytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`' in graph
     ui = modules.read_explorer_detail()
     assert "renderResidentRuntime" not in ui
@@ -92,7 +92,7 @@ def test_create_statement_reuses_query_editor_gutter_and_sql_highlighter() -> No
 
 
 def test_flow_emission_is_time_based_and_zoom_out_is_clamped_to_fit_scale() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "const FLOW_EMISSION_INTERVAL_MS = 900;" in graph
     assert "const travelMs = metric.total / FLOW_SPEED_WORLD_PER_SECOND * 1000;" in graph
     assert "newestAgeMs" in graph and "markerCount" in graph
@@ -106,8 +106,8 @@ def test_flow_emission_is_time_based_and_zoom_out_is_clamped_to_fit_scale() -> N
 
 
 def test_storage_layout_places_buffers_before_downstream_targets() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    align = graph[graph.index("function alignPhysicalStorageRows"):graph.index("function computeLayout")]
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
+    align = modules.function_text(graph, "alignPhysicalStorageRows")
     assert 'edge.kind === "buffer"' in align
     assert "const maxSourceY = target.y - source.height - rowGap;" in align
     assert "source.y = maxSourceY;" in align

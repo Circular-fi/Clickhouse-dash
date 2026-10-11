@@ -35,12 +35,12 @@ def test_trace_header_and_rows_share_the_same_single_scroll_viewport() -> None:
 
 
 def test_offscreen_graph_sidebar_selection_performs_a_real_focused_fit() -> None:
-    graph = read("src/static/app_explorer_graph.js")
-    block = graph[graph.index("function focusTable"):graph.index("function focusDatabase")]
+    graph = modules.read_explorer_graph()
+    block = modules.function_text(graph, "focusTable")
     assert 'const needsFit = shouldEnsure && !nodeIsOnScreen(id);' in block
     assert 'setFocus(id, needsFit, { preserveDepth: true });' in block
     assert 'if (shouldEnsure) ensureNodeVisible(id);' not in block
-    refresh = graph[graph.index("async function refresh("):graph.index("function setDetailMode", graph.index("async function refresh("))]
+    refresh = modules.function_text(graph, "refresh")
     assert 'if (ensurePendingFocus && model.focusedId) {' in refresh
     assert 'fitToScreen();' in refresh
 
