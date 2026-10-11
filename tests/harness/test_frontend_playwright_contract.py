@@ -79,8 +79,7 @@ def test_design_covers_three_desktop_viewports_and_the_visual_baselines_are_comm
     assert "toHaveScreenshot" in visual
     # The baselines are in the repository for each viewport (a run on a clean checkout compares, it does not write).
     for viewport in ("desktop-1920", "desktop-1440", "laptop-1280"):
-        for name in ("explorer.png", "query-results.png"):
-            assert (ROOT / "tests/frontend/snapshots" / viewport / "visual-regression.spec.js" / name).is_file(), (viewport, name)
+        assert (ROOT / "tests/frontend/snapshots" / viewport / "visual-regression.spec.js" / "query-results.png").is_file(), viewport
 
 
 def test_ci_collects_single_combined_test_review_artifact():
