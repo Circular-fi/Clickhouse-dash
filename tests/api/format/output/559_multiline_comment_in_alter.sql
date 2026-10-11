@@ -1,3 +1,5 @@
-alter table db.t
-update v = 0 -- , w = 1 or x
-where id = 1
+ALTER TABLE db.t
+UPDATE
+    v = 0 -- , w = 1 or x
+WHERE
+    id = 1

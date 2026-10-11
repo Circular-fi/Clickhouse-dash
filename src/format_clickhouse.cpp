@@ -16,8 +16,16 @@
 namespace chdash {
 namespace {
 
-FormatQueryResult format_query_once(
+// What a statement of the formatter asks of ClickHouse: formatQuery of a text (one row, one String), or EXPLAIN AST of it (one row for each
+// line of the tree).
+enum class TextQuery { format_query, explain_ast };
+
+// The tree of a 256 KiB statement is a few megabytes: past this size the answer is not kept (the statement is not judged).
+constexpr size_t kMaxAstBytes = 64u * 1024 * 1024;
+
+FormatQueryResult run_text_query_once(
     clickhouse::Client& client,
+    TextQuery kind,
     const std::string& sql,
     size_t max_bytes
 ) {
@@ -31,8 +39,10 @@ FormatQueryResult format_query_once(
   try {
     // Query parameters avoid copying and escaping the complete editor buffer
     // into a second SQL string. They also keep quotes and backslashes exact.
-    clickhouse::Query query("SELECT formatQuery({sql:String}) AS query");
-    query.SetParam("sql", sql);
+    // EXPLAIN AST takes the text as the statement itself: ClickHouse parses it and does not run it.
+    clickhouse::Query query(kind == TextQuery::format_query ? "SELECT formatQuery({sql:String}) AS query" : "EXPLAIN AST " + sql);
+    if (kind == TextQuery::format_query) query.SetParam("sql", sql);
+    std::string tree;
     query.OnData([&](const clickhouse::Block& block) {
       if (block.GetRowCount() == 0 || block.GetColumnCount() == 0) return;
 
@@ -45,6 +55,14 @@ FormatQueryResult format_query_once(
       }
 
       if (auto strings = col->As<clickhouse::ColumnString>()) {
+        if (kind == TextQuery::explain_ast) {
+          for (size_t row = 0; row < strings->Size(); ++row) {
+            if (tree.size() > kMaxAstBytes) return;
+            tree.append(strings->At(row));
+            tree.push_back('\n');
+          }
+          return;
+        }
         const std::string_view value = strings->At(0);
         const size_t output_limit = max_bytes > (static_cast<size_t>(-1) - 64 * 1024) / 4
           ? static_cast<size_t>(-1)
@@ -58,6 +76,14 @@ FormatQueryResult format_query_once(
       }
     });
     ch_execute(client, query);
+    if (kind == TextQuery::explain_ast) {
+      if (tree.size() > kMaxAstBytes) {
+        result.failure = FormatQueryFailureKind::client;
+        result.message = "The syntax tree of the statement is unexpectedly large.";
+      } else if (!tree.empty()) {
+        result.formatted_sql = std::move(tree);
+      }
+    }
   } catch (const std::system_error& e) {
     result.failure = FormatQueryFailureKind::transport;
     result.message = e.what();
@@ -92,7 +118,7 @@ FormatQueryResult format_query_once(
   if (!result.formatted_sql) {
     if (result.failure == FormatQueryFailureKind::none) {
       result.failure = FormatQueryFailureKind::empty_result;
-      result.message = "ClickHouse returned no formatted SQL.";
+      result.message = kind == TextQuery::explain_ast ? "ClickHouse returned no syntax tree." : "ClickHouse returned no formatted SQL.";
     }
     return result;
   }
@@ -126,12 +152,13 @@ bool is_format_transport_failure(FormatQueryFailureKind kind) noexcept {
          kind == FormatQueryFailureKind::protocol;
 }
 
-FormatQueryResult format_query_with_client(
+static FormatQueryResult run_text_query(
     clickhouse::Client& client,
+    TextQuery kind,
     const std::string& sql,
     size_t max_bytes
 ) {
-  FormatQueryResult first = format_query_once(client, sql, max_bytes);
+  FormatQueryResult first = run_text_query_once(client, kind, sql, max_bytes);
   if (first || !is_format_transport_failure(first.failure)) return first;
 
   const std::string first_error = first.message;
@@ -151,7 +178,7 @@ FormatQueryResult format_query_with_client(
     return first;
   }
 
-  FormatQueryResult second = format_query_once(client, sql, max_bytes);
+  FormatQueryResult second = run_text_query_once(client, kind, sql, max_bytes);
   second.reconnect_attempted = true;
   if (second) {
     second.connection_reusable = true;
@@ -167,6 +194,22 @@ FormatQueryResult format_query_with_client(
     second.message = "formatQuery retry failed after reconnect.";
   }
   return second;
+}
+
+FormatQueryResult format_query_with_client(
+    clickhouse::Client& client,
+    const std::string& sql,
+    size_t max_bytes
+) {
+  return run_text_query(client, TextQuery::format_query, sql, max_bytes);
+}
+
+FormatQueryResult explain_ast_with_client(
+    clickhouse::Client& client,
+    const std::string& sql,
+    size_t max_bytes
+) {
+  return run_text_query(client, TextQuery::explain_ast, sql, max_bytes);
 }
 
 } // namespace chdash

@@ -40,6 +40,15 @@ FormatQueryResult format_query_with_client(
     size_t max_bytes
 );
 
+// EXPLAIN AST of a text: the tree that ClickHouse reads from it, the same for two layouts of one statement and for a text with and without
+// its comments. The answer is the text of the tree (in `formatted_sql`). ClickHouse parses the text and does not run it. Same reconnect
+// rule as formatQuery.
+FormatQueryResult explain_ast_with_client(
+    clickhouse::Client& client,
+    const std::string& sql,
+    size_t max_bytes
+);
+
 bool is_format_transport_failure(FormatQueryFailureKind kind) noexcept;
 
 } // namespace chdash

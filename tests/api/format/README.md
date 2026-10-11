@@ -689,8 +689,11 @@ ALTER TABLE anon.metrics_store
 ```
 
 A one-command `ALTER TABLE ... UPDATE` puts `IN PARTITION p` on its own line
-after the assignments, before `WHERE`. A multi-command ALTER keeps formatQuery's
-`(command),` layout.
+after the assignments, before `WHERE`. A multi-command ALTER writes its
+commands one for each line at the left edge, separated by commas. A statement
+with comments has the same layout (fixtures `514`, `515`, `559`, `589`-`591`):
+the comment stays on the line of the command that it follows, and the comma goes
+before it.
 
 ### Set operators
 
@@ -871,6 +874,14 @@ A one-line buffer whose comment swallows the rest of the query keeps that rest
 in the comment (fixture `059_comments_header_and_select`); fixtures `499`–`588`
 pin comments that hold clause keywords, commas and quotes, on one line and on
 several.
+
+### A layout that would change the statement
+
+The local layout works on the text. For each text with comments, the service
+checks that ClickHouse reads the formatted text as it reads the written one
+(`EXPLAIN AST`, see [`docs/formatter.md`](../../../docs/formatter.md)). When it does not, the answer is the text as
+it was written, with a `warning`. Fixture `596` pins this: `WITH t AS (SELECT 1)
+INSERT INTO t2 ...` with a comment comes back unchanged.
 
 ## Canonical Principle
 

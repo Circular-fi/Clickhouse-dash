@@ -1,3 +1,4 @@
+from format_sources import read_formatter
 from pathlib import Path
 import css_sources
 import modules
@@ -26,7 +27,7 @@ def test_remaining_review_regressions_are_locked() -> None:
 
 
 def test_create_view_formatting_regressions_have_fixtures() -> None:
-    formatter = read("src/format_postprocess.cpp")
+    formatter = read_formatter()
     view_in = read("tests/api/format/input/084_create_view_explicit_columns.sql")
     view_out = read("tests/api/format/output/084_create_view_explicit_columns.sql")
     mv_out = read("tests/api/format/output/085_create_materialized_view_explicit_columns.sql")

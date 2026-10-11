@@ -4,6 +4,7 @@
 #include "json_text.hpp"
 #include "service_result.hpp"
 #include "sql_lexer.hpp"
+#include "sql_util.hpp"
 
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
@@ -111,30 +112,6 @@ static std::optional<size_t> find_ident_outside_strings_comments(std::string_vie
     if (!is_sql_word_char(prev) && !is_sql_word_char(next)) return at;
   }
   return std::nullopt;
-}
-
-// The line and the column (1-based) of the byte `idx`. The column counts UTF-16 units, as the editor of the page does.
-static void compute_line_col_from_index(std::string_view sql, size_t idx, int& line, int& col) {
-  if (idx > sql.size()) idx = sql.size();
-  line = 1;
-  col = 1;
-  for (size_t i = 0; i < idx; ++i) {
-    const char c = sql[i];
-    if (c == '\r') {
-      if (i + 1 < sql.size() && sql[i + 1] == '\n') ++i;
-      ++line;
-      col = 1;
-      continue;
-    }
-    if (c == '\n') {
-      ++line;
-      col = 1;
-      continue;
-    }
-    const auto u = static_cast<unsigned char>(c);
-    if ((u & 0xC0) == 0x80) continue;  // the rest of a character
-    col += u >= 0xF0 ? 2 : 1;          // a character above U+FFFF is two UTF-16 units
-  }
 }
 
 }
@@ -299,7 +276,7 @@ ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view msg, st
         const size_t idx0 = (out.position > 0) ? static_cast<size_t>(out.position - 1) : 0;
         int line = 1;
         int col = 1;
-        compute_line_col_from_index(original_sql, idx0, line, col);
+        sql_line_col(original_sql, idx0, line, col);
         out.has_line_col = true;
         out.line = line;
         out.col = col;
@@ -311,7 +288,7 @@ ClickHouseErrorLocation parse_clickhouse_error_location(std::string_view msg, st
           out.position = static_cast<int>(*idx) + 1;
           int line = 1;
           int col = 1;
-          compute_line_col_from_index(original_sql, *idx, line, col);
+          sql_line_col(original_sql, *idx, line, col);
           out.has_line_col = true;
           out.line = line;
           out.col = col;

@@ -35,16 +35,25 @@ int requested_line_width(const rapidjson::Document& doc) {
   return std::max(40, std::min(200, width));
 }
 
-// The ClickHouse version of the host (its health check): formatQuery may answer another layout after an upgrade, so
-// the version is part of the key. An MCP identity (<host>\x1fmcp) formats with the server of its host.
-std::string formatter_version(const HealthRunner* health, const std::string& host_id) {
-  if (!health) return {};
+// What the health check of the host knows of its server (the host of an MCP identity, <host>\x1fmcp, is the host that it is for).
+struct FormatterHost {
+  // formatQuery may answer another layout after an upgrade, so the version is part of the key of the cache.
+  std::string version;
+  // max_query_size: the longest text that ClickHouse parses (0 when the check did not read it).
+  size_t max_query_size = 0;
+};
+
+FormatterHost formatter_host(const HealthRunner* health, const std::string& host_id) {
+  FormatterHost out;
+  if (!health) return out;
   const std::string base = host_id.substr(0, host_id.find('\x1f'));
   const HostsSnapshot snap = health->snapshot();
   for (const auto& h : snap.hosts) {
-    if (h.id == base) return h.clickhouse_version;
+    if (h.id != base) continue;
+    out.version = h.clickhouse_version;
+    out.max_query_size = h.clickhouse_max_query_size;
   }
-  return {};
+  return out;
 }
 
 void set_format_cache_header(httplib::Response& res, size_t hits, size_t misses) {
@@ -64,17 +73,10 @@ public:
       : pool_(pool), health_(health), host_(host), host_id_(std::move(host_id)) {}
 
   FormatQueryResult format_query(const std::string& sql, size_t max_bytes) override {
-    FormatQueryResult result;
-    auto client = connect();
-    if (!client) {
-      result.failure = FormatQueryFailureKind::transport;
-      result.message = connect_error_.empty() ? "Failed to connect to ClickHouse for formatQuery." : connect_error_;
-      return result;
-    }
-    result = format_query_with_client(*client, sql, max_bytes);
-    reconnect_attempted_ = reconnect_attempted_ || result.reconnect_attempted;
-    if (!result.connection_reusable && pool_) pool_->invalidate(client);
-    return result;
+    return run(sql, max_bytes, format_query_with_client);
+  }
+  FormatQueryResult explain_ast(const std::string& sql, size_t max_bytes) override {
+    return run(sql, max_bytes, explain_ast_with_client);
   }
 
   // The host is down (its health check): the answer is the one of every other route, not a transport error.
@@ -82,6 +84,22 @@ public:
   bool reconnect_attempted() const { return reconnect_attempted_; }
 
 private:
+  using Call = FormatQueryResult (*)(clickhouse::Client&, const std::string&, size_t);
+
+  FormatQueryResult run(const std::string& sql, size_t max_bytes, Call call) {
+    FormatQueryResult result;
+    auto client = connect();
+    if (!client) {
+      result.failure = FormatQueryFailureKind::transport;
+      result.message = connect_error_.empty() ? "Failed to connect to ClickHouse for formatQuery." : connect_error_;
+      return result;
+    }
+    result = call(*client, sql, max_bytes);
+    reconnect_attempted_ = reconnect_attempted_ || result.reconnect_attempted;
+    if (!result.connection_reusable && pool_) pool_->invalidate(client);
+    return result;
+  }
+
   std::shared_ptr<clickhouse::Client> connect() {
     if (connect_failed_) return {};
     if (!is_host_healthy(health_, host_id_)) {
@@ -116,6 +134,16 @@ int format_error_status(FormatQueryFailureKind kind) {
   return 422;
 }
 
+// What the formatter says of a text that it did not lay out: {"warning": {"code": ..., "message": ...}} (the answer is the text as written).
+void write_warning(rapidjson::Writer<rapidjson::StringBuffer>& w, const FormatOutcome& outcome) {
+  if (!outcome.warning) return;
+  w.Key("warning");
+  w.StartObject();
+  w.Key("code"); write_json_text(w, outcome.warning->code);
+  w.Key("message"); write_json_text(w, outcome.warning->message);
+  w.EndObject();
+}
+
 const char* format_error_code(FormatQueryFailureKind kind) {
   if (is_format_transport_failure(kind)) return "clickhouse_transport_error";
   if (kind == FormatQueryFailureKind::timeout) return "format_timeout";
@@ -142,7 +170,9 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
 
   FormatSettings settings;
   settings.line_width = requested_line_width(doc);
-  settings.cache_scope = host_id + '\x1f' + formatter_version(health_.get(), host_id);
+  const FormatterHost formatter = formatter_host(health_.get(), host_id);
+  settings.cache_scope = host_id + '\x1f' + formatter.version;
+  settings.clickhouse_max_query_size = formatter.max_query_size;
   // `"cache": false` formats from scratch (the idempotence checks of the formatter suite run the formatter on its own output).
   settings.use_cache = !(doc.HasMember("cache") && doc["cache"].IsBool() && !doc["cache"].GetBool());
   settings.max_sql_bytes = kMaxFormatSqlBytes;
@@ -166,8 +196,8 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   };
   // A text that could not be formatted: the answer names it (`index` in a batch) and, for an error of ClickHouse, where.
   const auto fail = [&](const std::string& sql, const FormatOutcome& outcome, const int* index) {
-    const std::string sql_trimmed = trim_sql(sql);
-    const auto loc = parse_clickhouse_error_location(outcome.error, sql_trimmed);
+    // The position is in the text that the user sent (the service counted it back from the text that ClickHouse read).
+    const auto loc = parse_clickhouse_error_location(outcome.error, sql);
     const ClickHouseErrorLocation* locp = (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
     if (port.reconnect_attempted()) res.set_header("X-Chdash-Format-Reconnect", "1");
     if (port.host_down()) return json_error(res, 503, "host_unavailable", "Selected host is down.");
@@ -212,6 +242,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
         ++formatted;
         w.Key("status"); w.String("formatted");
         w.Key("formatted_sql"); write_json_text(w, *item.outcome.formatted);
+        write_warning(w, item.outcome);
       } else {
         ApiError error;
         error.index = index;
@@ -225,8 +256,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
         } else {
           ++failed;
           w.Key("status"); w.String("error");
-          const std::string trimmed = trim_sql(texts[i]);
-          const auto loc = parse_clickhouse_error_location(item.outcome.error, trimmed);
+          const auto loc = parse_clickhouse_error_location(item.outcome.error, texts[i]);
           if (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) error.clickhouse = loc;
           if (port.host_down() && is_format_transport_failure(item.outcome.failure)) {
             error.status = 503;
@@ -270,6 +300,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   w.StartObject();
   w.Key("formatted_sql");
   write_json_text(w, *outcome.formatted);
+  write_warning(w, outcome);
   write_cache_meta(w);
   w.EndObject();
 
