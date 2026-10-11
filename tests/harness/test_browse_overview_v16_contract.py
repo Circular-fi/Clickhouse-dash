@@ -11,8 +11,8 @@ def read(path: str) -> str:
 
 
 def test_storage_tab_starts_with_the_composition_card_without_key_value_lists() -> None:
-    ui = read("src/static/app_explorer_detail.js")
-    storage = ui[ui.index("function renderStorageTab") : ui.index("function ingestionState")]
+    ui = modules.read_explorer_detail()
+    storage = modules.function_text(ui, "renderStorageTab")
     assert "simpleRows(" not in ui
     assert "renderStorageCompositionCard(container, detail);" in storage
     card = ui[ui.index("function renderStorageCompositionCard") : ui.index("function renderDisks")]
@@ -21,7 +21,7 @@ def test_storage_tab_starts_with_the_composition_card_without_key_value_lists() 
 
 
 def test_share_and_composition_percentages_are_unknown_when_not_derivable() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert "if (!Number.isFinite(v) || !Number.isFinite(t) || t <= 0) return null;" in ui
     assert 'bar.appendChild(h("span", { class: "explorerStorageStackedBar__unknown" }, "unknown"));' in ui
     # The Share tile exists only when both byte totals are known and non-zero.
@@ -31,7 +31,7 @@ def test_share_and_composition_percentages_are_unknown_when_not_derivable() -> N
 
 
 def test_storage_breakdown_reuses_query_sorting_and_numeric_alignment() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     results = modules.read_family("app_results")
     css = css_sources.text()
     assert 'results?.createStaticResultTable?.({' in ui
@@ -45,7 +45,7 @@ def test_storage_breakdown_reuses_query_sorting_and_numeric_alignment() -> None:
 
 def test_buffer_rows_are_normalized_to_resident_rows() -> None:
     catalog = read_catalog()
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert "void normalize_buffer_runtime_rows" in catalog
     assert 'sql::engine_arguments(table.engine_full, "Buffer")' in catalog
     assert "std::unordered_map<std::string, std::optional<uint64_t>> raw_rows;" in catalog
@@ -55,19 +55,19 @@ def test_buffer_rows_are_normalized_to_resident_rows() -> None:
 
 
 def test_storage_and_operations_are_separate_tabs_of_collapsible_sections() -> None:
-    ui = read("src/static/app_explorer_detail.js")
-    tabs = ui[ui.index("function availableTabs") : ui.index("function openTab")]
+    ui = modules.read_explorer_detail()
+    tabs = modules.function_text(ui, "availableTabs")
     assert 'if (!empty && (isMergeTreeSummary(summary) || isLogFamilySummary(summary))) tabs.push("Storage");' in tabs
     assert 'if (!empty && hasOperations(detail)) tabs.push("Operations");' in tabs
-    storage = ui[ui.index("function renderStorageTab") : ui.index("function ingestionState")]
+    storage = modules.function_text(ui, "renderStorageTab")
     for section in ["disks", "parts", "partitions", "indexes", "projections"]:
         assert f'id: "{section}"' in storage
     assert "renderMerges" not in storage
-    operations = ui[ui.index("function operationSections") : ui.index("function renderLineageTab")]
+    operations = modules.function_text(ui, "operationSectionList")
     for section in ["replication", "replication_queue", "merges", "mutations", "ingestion", "distribution_queue", "cluster"]:
         assert f'id: "{section}"' in operations
     # Sections with data first, then one muted line naming the empty ones.
-    render = ui[ui.index("function renderSections") : ui.index("function objectType")]
+    render = modules.function_text(ui, "renderSections")
     assert "const shown = sections.filter((item) => item && item.hasData);" in render
     assert 'h("div", { class: "explorerIdleLine" }' in render
 

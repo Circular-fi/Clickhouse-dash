@@ -1,3 +1,4 @@
+import modules
 from pathlib import Path
 import css_sources
 from explorer_sources import read_catalog
@@ -25,9 +26,9 @@ def test_buffer_lineage_is_reversed_for_destination_details() -> None:
 
 
 def test_zero_row_tables_keep_columns_lineage_and_ddl_only() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert 'return optionalNumber(summary?.rows) === 0;' in ui
-    tabs = ui[ui.index("function availableTabs"):ui.index("function openTab")]
+    tabs = modules.function_text(ui, "availableTabs")
     assert 'const tabs = ["Columns"];' in tabs
     assert 'if (!viewLike && !empty) tabs.push("Preview");' in tabs
     assert 'if (loading || detail?.ddl) tabs.push("DDL");' in tabs

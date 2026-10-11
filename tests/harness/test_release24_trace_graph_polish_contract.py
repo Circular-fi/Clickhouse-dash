@@ -1,3 +1,4 @@
+import modules
 from pathlib import Path
 import css_sources
 
@@ -45,7 +46,7 @@ def test_offscreen_graph_sidebar_selection_performs_a_real_focused_fit() -> None
 
 
 def test_finalize_info_is_small_top_right_after_sort_arrow() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     css = css_sources.text()
     info = ui[ui.index("function appendFinalizePreviewInfo"):ui.index("function persistFlattenTuple", ui.index("function appendFinalizePreviewInfo"))]
     assert 'th.classList.add("has-finalize-info")' in info
@@ -59,14 +60,14 @@ def test_finalize_info_is_small_top_right_after_sort_arrow() -> None:
 
 
 def test_lineage_tab_has_one_title_per_direction() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     lineage = ui[ui.index("function renderLineageTab"):ui.index("function previewLimit")]
     assert 'sectionTitle("Lineage")' not in ui
     assert 'h("h3", { class: "explorerLineage__title" }, relation === "upstream" ? "Upstream" : "Downstream")' in lineage
 
 
 def test_storage_composition_legend_omits_zero_or_nonexistent_categories() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     block = ui[ui.index("function buildStorageComposition"):ui.index("function renderStorageCompositionCard")]
     assert 'composition.items.filter((item) => Number(item.bytes) > 0)' in block
     assert 'if (legendItems.length) wrap.appendChild(legend);' in block

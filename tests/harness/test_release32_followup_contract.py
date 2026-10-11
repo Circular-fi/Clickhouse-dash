@@ -48,7 +48,7 @@ def test_profiling_label_and_function_description_alignment() -> None:
 
 def test_database_catalog_includes_only_database_level_size_summaries() -> None:
     api = read_api()
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     service = read_unit("explorer_service.cpp")
     handler = service[service.index("ExplorerService::catalog("):service.index("ExplorerService::storage(")]
     json = read_unit("explorer_json.cpp")
@@ -66,7 +66,7 @@ def test_database_catalog_includes_only_database_level_size_summaries() -> None:
 
 
 def test_data_settings_is_portalled_and_storage_tuple_geometry_is_stable() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     css = css_sources.text()
     menu = read("src/static/app_ui_menu.js")
     assert 'menuMod?.bind(button, menu, { root, portal: true, portalAlign: "end", closeOnSelect: true })' in ui

@@ -11,14 +11,14 @@ def read(path: str) -> str:
 
 
 def test_finalize_hint_uses_svg_not_text_i() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     block = ui[ui.index("function appendFinalizePreviewInfo"):ui.index("function persistFlattenTuple")]
     assert 'iconMod.el("info-circle", { size: "sm", className: "explorerFinalizeInfo__icon" })' in block
     assert 'node("span", "explorerFinalizeInfo__icon", "i")' not in block
 
 
 def test_non_storing_toggle_filters_sidebar_objects() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert "function sidebarObjectVisible(table)" in ui
     assert "!model.includeNonStoring && nonStoringSummary(table)" in ui
     # Tables are grouped per database once per catalog payload; the visibility
@@ -29,7 +29,7 @@ def test_non_storing_toggle_filters_sidebar_objects() -> None:
 
 
 def test_non_storing_toggle_is_locked_while_selected_object_is_non_storing() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     graph = read("src/static/app_explorer_graph.js")
     assert "includeNonStoring: !!table && nonStoringSummary(table)" in ui
     assert "const nextIncludeNonStoring = required.includeNonStoring || options.includeNonStoring !== false;" in graph
@@ -37,7 +37,7 @@ def test_non_storing_toggle_is_locked_while_selected_object_is_non_storing() -> 
 
 
 def test_storage_metric_columns_share_query_style_background_gauges() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     gauge = ui[ui.index("function gaugeCell"):ui.index("function numericCell")]
     assert 'td.classList.add("num");' in gauge
     assert "table.cellBar(td, table.barPercent(optionalNumber(value), max));" in gauge
@@ -48,7 +48,7 @@ def test_storage_metric_columns_share_query_style_background_gauges() -> None:
 
 
 def test_storage_shares_of_database_and_server_are_one_about_tile() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     css = css_sources.text()
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
     assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in about
@@ -58,12 +58,12 @@ def test_storage_shares_of_database_and_server_are_one_about_tile() -> None:
 
 
 def test_columns_tab_comes_first_and_indexes_projections_live_in_storage() -> None:
-    ui = read("src/static/app_explorer_detail.js")
-    tabs = ui[ui.index("function availableTabs"):ui.index("function openTab")]
+    ui = modules.read_explorer_detail()
+    tabs = modules.function_text(ui, "availableTabs")
     assert 'const tabs = ["Columns"];' in tabs
     content = ui[ui.index("function renderTabContent"):]
     assert "default: renderColumnsTab(main, detail); break;" in content
-    storage = ui[ui.index("function renderStorageTab"):ui.index("function ingestionState")]
+    storage = modules.function_text(ui, "renderStorageTab")
     assert "renderColumnsTab" not in storage
     assert 'id: "indexes"' in storage and 'id: "projections"' in storage
     assert "Compact parts share one physical data stream" not in ui
@@ -71,8 +71,8 @@ def test_columns_tab_comes_first_and_indexes_projections_live_in_storage() -> No
 
 
 def test_tuple_storage_accounts_for_hidden_array_offsets_and_array_tuple_roots() -> None:
-    ui = read("src/static/app_explorer_detail.js")
-    block = ui[ui.index("function columnRows"):ui.index("function renderColumnsTab")]
+    ui = modules.read_explorer_detail()
+    block = modules.function_text(ui, "columnRows")
     assert '/Tuple\\s*\\(/i.test(String(column?.type || ""))' in block
     assert "const implementationByRoot = new Map();" in block
     assert 'name: `${tupleRoot}.[offsets]`' in block

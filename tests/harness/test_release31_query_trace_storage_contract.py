@@ -28,7 +28,7 @@ def test_trace_initial_expansion_uses_visible_span_budget_and_gutter_is_only_on_
 
 
 def test_storage_tuple_rows_are_collapsed_locally_and_shared_tables_are_used() -> None:
-    src = read("src/static/app_explorer_detail.js")
+    src = modules.read_explorer_detail()
     results = modules.read_family("app_results")
     assert "tuple_root:" in src and "tuple_parent:" in src
     assert "explorerStorageTupleToggle" in src
@@ -40,7 +40,7 @@ def test_storage_tuple_rows_are_collapsed_locally_and_shared_tables_are_used() -
 
 
 def test_data_preview_numeric_finalized_states_and_menu_portal_positioning() -> None:
-    src = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    src = (modules.read_explorer() + modules.read_explorer_detail())
     assert 'values.every((value) => Number.isFinite(Number(value))) ? "Float64" : c.type' in src
     # The data settings menu is an ns.menu portal, fixed and right-aligned
     # with its gear (app_ui_menu.js placeFloating).

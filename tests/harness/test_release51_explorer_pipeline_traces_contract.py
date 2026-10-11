@@ -15,7 +15,7 @@ def test_explorer_detail_cache_uses_metadata_revision_without_hover_prefetch():
     catalog_hpp = read("src/explorer_catalog.hpp")
     catalog_cpp = read_catalog()
     api = read_api()
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
 
     assert "metadata_modification_time" in catalog_hpp
     assert "toString(metadata_modification_time)" in catalog_cpp

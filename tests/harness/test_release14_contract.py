@@ -134,7 +134,7 @@ def test_non_merge_tree_counts_and_graph_labels_are_engine_specific() -> None:
 
 def test_graph_sidebar_missing_target_forces_fresh_graph_and_mode_trigger_is_single_bound() -> None:
     graph = read("src/static/app_explorer_graph.js")
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     assert 'if (!exists) {' in graph
     assert 'if (model.active) refresh(false, { reflow: !!ensureVisible });' in graph
     assert 'model.refreshQueuedForce = true;' in graph

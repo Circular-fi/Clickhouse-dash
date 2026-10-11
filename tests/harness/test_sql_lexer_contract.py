@@ -2,6 +2,7 @@
 other module scans quotes, comments and semicolons by hand. The behaviour is tested by tests/frontend/model/sql-lex.test.cjs
 (Node), the kernels by tests/frontend/specs/wasm-sql.spec.js and the backend lexer by tests/native/sql_test.cpp, which all
 read tests/frontend/model/sql-lex-vectors.json."""
+import modules
 import json
 import re
 from pathlib import Path
@@ -21,13 +22,13 @@ def test_no_module_but_the_lexer_scans_quotes_and_comments_by_hand():
         text = path.read_text(encoding="utf-8")
         assert not scanner.search(text), f"{path.name} scans SQL by hand: use app_sql_lex.js"
     # The consumers read the text through it.
-    for name in ("app_highlight.js", "app_autocomplete.js", "app_sql.js", "app_results_values.js", "app_explorer_detail.js"):
+    for name in ("app_highlight.js", "app_autocomplete.js", "app_sql.js", "app_results_values.js", "app_explorer_detail_model.js"):
         assert 'import { sqlLex } from "./app_sql_lex.js";' in read(f"src/static/{name}"), name
     assert "sqlLex.nextSpan(" in read("src/static/app_highlight.js")
     assert "sqlLex.mask(sql)" in read("src/static/app_autocomplete.js")
     assert "sqlLex.splitRanges(s)" in read("src/static/app_sql.js")
     # The text that the server wrote is read with the ClickHouse rules, the text that a person types with those of the page.
-    assert "sqlLex.spanAt(text, at, true)" in read("src/static/app_explorer_detail.js")
+    assert "sqlLex.spanAt(text, at, true)" in modules.read_explorer_detail()
 
 
 def test_the_kernels_follow_the_lexer():

@@ -11,7 +11,7 @@ def read(rel: str) -> str:
 
 
 def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'const hasDepth = params.has("depth");' in ui
     assert 'const parsedDepth = hasDepth ? Number(params.get("depth")) : Number.NaN;' in ui
@@ -20,7 +20,7 @@ def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
 
 
 def test_graph_click_does_not_restart_catalog_and_route_intent_is_one_shot() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert 'if (model.section !== "tables") setSection("tables");' in ui
     assert 'selectTable(database, table, false, { graphOrigin: true });' in ui
     assert 'model.routeIntent = null;' in ui
@@ -90,7 +90,7 @@ def test_terminal_single_query_failure_never_reopens_result_table() -> None:
 
 
 def test_header_is_chips_and_about_is_value_context_tiles() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     chips = ui[ui.index("function headerChips"):ui.index("function replicationStatus")]
     assert 'metaChip(humanEngine(s.engine)' in chips
     # Audit 2 T-E7: rows, size and parts are a muted text line, not chips.
@@ -111,7 +111,7 @@ def test_analysis_modal_has_large_desktop_inset() -> None:
 
 
 def test_legacy_schema_rewrite_injects_default_browse_parameter() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     # ?view= and the other aliases are rewritten to the one Catalog scheme.
     block = ui[ui.index('if (route.workspace === "explorer" && route.section === "tables") {\n    // Aliases'):ui.index('model.routeIntent = route;')]
     assert "const canonical = appRoute(catalogPath({" in block

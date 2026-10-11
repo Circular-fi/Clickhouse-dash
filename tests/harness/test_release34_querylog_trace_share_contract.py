@@ -25,7 +25,7 @@ def test_trace_initial_expansion_is_whole_depths_under_50_visible_spans() -> Non
     assert "for (const key of beforeDepth) collapsed.add(key);" in js
 
 def test_browse_share_ui_is_reworked_and_tuple_names_have_no_angle_wrappers() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     css = css_sources.text()
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
     assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in about
@@ -36,7 +36,7 @@ def test_browse_share_ui_is_reworked_and_tuple_names_have_no_angle_wrappers() ->
     assert "`<${item.name}>`" not in ui
 
 def test_storage_static_tables_do_not_sort_the_row_number_column() -> None:
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     results = modules.read_family("app_results")
     assert "indexSortable: false" in explorer
     assert "indexSortable = true" in results

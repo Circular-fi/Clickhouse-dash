@@ -22,7 +22,7 @@ def test_buffer_memory_and_dictionary_are_resident_not_disk_footprints() -> None
     assert "summary.uncompressed_bytes.reset();" in catalog
     assert "function isResidentMemorySummary(summary)" in shell
     assert "return isBufferSummary(summary) || isMemorySummary(summary) || isDictionarySummary(summary);" in shell
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert "renderResidentRuntime" not in ui
     assert '"Resident rows"' not in ui
     assert '"Resident memory"' not in ui
@@ -33,7 +33,7 @@ def test_buffer_memory_and_dictionary_are_resident_not_disk_footprints() -> None
 
 def test_buffer_flush_target_is_a_normal_downstream_dependency() -> None:
     catalog = read_catalog()
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert 'if (summary_.engine == "Buffer") {' in catalog
     assert 'sql::engine_arguments(summary_.engine_full, "Buffer")' in catalog
     assert 'append_dependency(args[0], args[1], "downstream", "buffer");' in catalog
@@ -44,7 +44,7 @@ def test_buffer_flush_target_is_a_normal_downstream_dependency() -> None:
 
 def test_tinylog_log_and_stripelog_are_disk_backed_without_system_parts() -> None:
     catalog = read_catalog()
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert "is_log_family(summary.engine)" in catalog
     # The Log family is one rule, in explorer_rules.cpp.
     assert 'return engine == "TinyLog" || engine == "Log" || engine == "StripeLog";' in read_unit("explorer_rules.cpp")
@@ -59,9 +59,9 @@ def test_tinylog_log_and_stripelog_are_disk_backed_without_system_parts() -> Non
 
 
 def test_lineage_chips_wrap_with_type_icon_and_short_in_database_names() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     css = css_sources.text()
-    chip = ui[ui.index("function dependencyChip"):ui.index("// ---- tabs")]
+    chip = modules.function_text(ui, "dependencyChip")
     assert 'const qualified = `${dep.database || DASH}.${dep.table || DASH}`;' in chip
     assert "button.appendChild(objectIcon(dep.engine));" in chip
     assert '{ class: "explorerLineageChip__name" }, shortName(dep.database, dep.table, contextDatabase)' in chip
@@ -74,7 +74,7 @@ def test_column_default_codec_comes_from_active_parts_when_observable() -> None:
     header = read("src/explorer_catalog.hpp")
     catalog = read_catalog()
     api = read_api()
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert "std::vector<std::string> default_compression_codecs;" in header
     assert "groupUniqArray(default_compression_codec)" in catalog
     assert 'w.Key("default_compression_codecs");' in api

@@ -26,7 +26,7 @@ def test_storage_topology_controls_are_grouped_and_storage_select_can_lock() -> 
 
 def test_non_storing_toggle_now_covers_buffers_and_can_reflow_around_focus() -> None:
     frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
 
     assert '"buffer"' in frontend
     assert '"buffer"].includes(String(node?.kind || ""))' in frontend
@@ -52,7 +52,7 @@ def test_explorer_storage_and_fixtures_cover_projection_index_and_complex_types(
     api = read_api()
     catalog_h = read("src/explorer_catalog.hpp")
     catalog_cpp = read_catalog()
-    explorer = read("src/static/app_explorer_detail.js")
+    explorer = modules.read_explorer_detail()
     fixtures = read("tests/clickhouse-init/02-frontend-fixtures.sql")
     formatted = read("tests/api/format/output/092_create_table_wide_types.sql")
 
@@ -121,7 +121,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
 
 
 def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> None:
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     css = css_sources.text()
 

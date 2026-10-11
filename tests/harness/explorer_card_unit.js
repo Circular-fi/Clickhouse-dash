@@ -1,5 +1,5 @@
 // Unit checks of the Explorer card's SQL expression helpers
-// (app_explorer_detail.js: splitTopLevel, keyElements, expressionIdentifiers,
+// (app_explorer_detail_model.js: splitTopLevel, keyElements, expressionIdentifiers,
 // keyColumnPositions) and of the shared highlighter on key expressions
 // (app_highlight.js), run by test_explorer_card_contract.py:
 //   node --experimental-vm-modules explorer_card_unit.js <repo root>
@@ -16,13 +16,13 @@ const root = process.argv[2] || path.resolve(__dirname, "..", "..");
 // what is under test is pure text work.
 const run = await esm.load({ root, stubs: {
   "app_dom.js": { dom: { $: () => null, $$: () => [], byId: () => null } },
-  "app_api.js": {}, "app_header.js": {}, "app_explorer_graph.js": {}, "app_explorer_storage.js": {}, "app_results.js": {},
+  "app_api.js": {}, "app_header.js": {}, "app_results.js": {},
   "app_ui_badge.js": {}, "app_ui_icon.js": {}, "app_ui_menu.js": {}, "app_ui_segmented.js": {}, "app_ui_sql.js": {},
   "app_ui_state.js": {}, "app_ui_table.js": {}, "app_ui_tabs.js": {},
 } });
 const { state } = await run.import("app_state.js");
 const { highlight } = await run.import("app_highlight.js");
-const { explorerDetail } = await run.import("app_explorer_detail.js");
+const detailModel = await run.import("app_explorer_detail_model.js");
 
 const failures = [];
 let checks = 0;
@@ -33,7 +33,7 @@ function eq(label, actual, expected) {
   if (a !== e) failures.push({ label, actual, expected });
 }
 
-const { splitTopLevel, keyElements, expressionIdentifiers, keyColumnPositions } = explorerDetail;
+const { splitTopLevel, keyElements, expressionIdentifiers, keyColumnPositions } = detailModel;
 
 // ------------------------------------------------------- top-level split
 eq("split simple", splitTopLevel("a, b, c"), ["a", "b", "c"]);

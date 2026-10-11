@@ -90,7 +90,7 @@ def test_trace_viewer_is_compact_resizable_and_uses_service_marker() -> None:
 
 def test_graph_sidebar_can_reveal_offscreen_focus_without_moving_canvas_clicks() -> None:
     graph = read("src/static/app_explorer_graph.js")
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     assert "function nodeIsOnScreen(" in graph
     assert "function ensureNodeVisible(" in graph
     assert "function focusTable(database, table, { ensureVisible = false } = {})" in graph

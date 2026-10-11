@@ -14,7 +14,7 @@ def test_dictionary_reports_allocated_size_without_pretending_it_is_compressed()
     catalog = read_catalog()
     header = read("src/explorer_catalog.hpp")
     api = read_api()
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert "bytes_allocated" in catalog
     assert "resident_bytes" in header
     assert 'w.Key("resident_bytes")' in api
@@ -24,10 +24,10 @@ def test_dictionary_reports_allocated_size_without_pretending_it_is_compressed()
 
 
 def test_lineage_is_a_conditional_tab_and_about_summarises_keys_and_ttl() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert 'simpleRows(' not in ui
     assert 'explorerKvGrid' not in ui
-    available = ui[ui.index("function availableTabs"):ui.index("function openTab")]
+    available = modules.function_text(ui, "availableTabs")
     assert 'if (loading || visibleDependencies(detail).length) tabs.push("Lineage");' in available
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
     # The keys are one tile: every key, one element per line (keysTile).
@@ -39,7 +39,7 @@ def test_lineage_is_a_conditional_tab_and_about_summarises_keys_and_ttl() -> Non
 
 def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> None:
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     assert "function canUseStorageForId" in graph
     assert 'model.detailMode === "physical" && !canUseStorageForId(id)' in graph
     assert 'node.storage_disabled === true' in graph
@@ -67,7 +67,7 @@ def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
 
 def test_table_visibility_cog_controls_system_and_non_storing_objects() -> None:
     html = read("src/static/explorer.html")
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     # Release 15's settings cog became object-type chips under the search.
     assert 'id="explorerTableSettingsButton"' not in html
     for chip in ['explorerFilterTables', 'explorerFilterViews', 'explorerFilterMv', 'explorerFilterDict', 'explorerFilterSystem']:
@@ -141,7 +141,7 @@ def test_log_family_storage_uses_data_paths_instead_of_parts() -> None:
 
 
 def test_legacy_schema_canonicalization_preserves_explorer_query_state() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     # Canonical rewrites keep the mode and the graph type / depth.
     assert "graphRoute: { mode: route.graphType, depth: route.graphDepth }," in ui
     assert 'const mode = MODES.includes(modeParam) ? modeParam : (params.get("view") === "graph" ? "graph" : "browse");' in ui

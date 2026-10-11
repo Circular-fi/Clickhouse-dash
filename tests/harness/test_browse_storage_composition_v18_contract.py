@@ -10,7 +10,7 @@ def read(path: str) -> str:
 
 
 def test_storage_composition_reconciles_to_bytes_on_disk() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert "function storageComposition(detail)" in ui
     assert "const baseBytes = footprint - structureBytes;" in ui
     assert "wideBytes = baseBytes * (rawWide / rawBase);" in ui
@@ -35,7 +35,7 @@ def test_projection_composition_uses_projection_footprint_not_only_compressed_da
     catalog = read_catalog()
     header = read("src/explorer_catalog.hpp")
     api = read_api()
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert "toString(sum(bytes_on_disk)) FROM system.projection_parts" in catalog
     assert "std::optional<uint64_t> on_disk_bytes;" in header
     assert 'w.Key("on_disk_bytes")' in api

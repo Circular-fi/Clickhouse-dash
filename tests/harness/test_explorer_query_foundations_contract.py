@@ -120,7 +120,7 @@ def test_migrated_modules_read_the_shared_foundations() -> None:
     # server value in the tooltip (decision 48).
     ui = (STATIC / "app_header.js").read_text(encoding="utf-8") + (STATIC / "app_query_ui.js").read_text(encoding="utf-8")
     assert "return format.serverTime(value, { serverTz: serverTimeZone(hostId), precision });" in ui
-    for name in ["app_explorer_database.js", "app_explorer_detail.js", "app_system_activity.js"]:
+    for name in ["app_explorer_database.js", "app_explorer_detail_cells.js", "app_system_activity.js"]:
         assert "header.serverTime(" in (STATIC / name).read_text(encoding="utf-8"), name
     hosts = (ROOT / "src" / "api_hosts.cpp").read_text(encoding="utf-8")
     assert 'w.Key("clickhouse_timezone");' in hosts

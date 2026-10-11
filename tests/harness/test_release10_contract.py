@@ -28,7 +28,7 @@ def test_aggregate_function_preview_is_explicitly_marked_as_finalized() -> None:
     header = read("src/explorer_catalog.hpp")
     catalog = read_catalog()
     api = read_api()
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     assert "bool finalized_for_preview = false;" in header
     assert 'out.columns[i].finalized_for_preview = declared_type.rfind("AggregateFunction(", 0) == 0;' in catalog
     assert 'w.Key("finalized_for_preview")' in api
@@ -61,9 +61,9 @@ def test_graph_click_then_browse_sync_preserves_canvas_camera_but_offscreen_side
 
 
 def test_zero_row_table_has_no_preview_storage_or_operations_tab() -> None:
-    explorer = read("src/static/app_explorer_detail.js")
+    explorer = modules.read_explorer_detail()
     assert 'return optionalNumber(summary?.rows) === 0;' in explorer
-    block = explorer[explorer.index("function availableTabs"):explorer.index("function openTab")]
+    block = modules.function_text(explorer, "availableTabs")
     assert 'const empty = isEmptyRowSummary(summary);' in block
     assert 'if (!viewLike && !empty) tabs.push("Preview");' in block
     assert 'if (!empty && (isMergeTreeSummary(summary) || isLogFamilySummary(summary))) tabs.push("Storage");' in block

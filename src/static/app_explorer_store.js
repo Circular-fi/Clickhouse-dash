@@ -15,16 +15,17 @@ const { byId } = dom;
 // The Catalog page is made of more than this controller: the graph, the size views of the databases and tables, the
 // table card and the static result tables. The Functions page has none of them, so the page's entry
 // (app_page_explorer.js) hands them over with explorer.use() before init(), and they never load on the Functions page.
-const parts = { graph: null, storage: null, detail: null, results: null, detailView: null };
+const parts = { graph: null, storage: null, detail: null, results: null };
 
 // What a module provides to the modules that cannot import it, because it imports them. Each is set once, when its module loads. A call before that is a bug that shows at once (a TypeError).
-//   openCatalogRoot(options)  refreshCatalog(force)  applyRouteFromLocation()                      the controller
+//   openCatalogRoot(options)  refreshCatalog(force)  applyRouteFromLocation()  setMode(mode)       the controller
 //   renderTableList()                                                                              the tree
 //   selectDatabase(name, options)  renderDatabaseDetail(name)  renderBrowseRoot()                  the database page
 //   selectTable(database, table, force, options)                                                   the card of a table
+//   openTab(label)  renderTabContent()                                                             the card's tabs (app_explorer_detail.js)
 const actions = {
-  selectDatabase: null, selectTable: null, openCatalogRoot: null, refreshCatalog: null, applyRouteFromLocation: null,
-  renderTableList: null, renderDatabaseDetail: null, renderBrowseRoot: null,
+  selectDatabase: null, selectTable: null, openCatalogRoot: null, refreshCatalog: null, applyRouteFromLocation: null, setMode: null,
+  renderTableList: null, renderDatabaseDetail: null, renderBrowseRoot: null, openTab: null, renderTabContent: null,
 };
 
 const model = {
@@ -43,6 +44,11 @@ const model = {
   // The newest address being applied: a slower, older one stops at its next await (applyRouteFromLocation).
   routeSerial: 0,
   tab: "Columns",
+  // The table card: the About panel's tiles past the first four show (narrow panes), the preview's row limit and the measure of the
+  // column size treemap, kept for the session.
+  aboutExpanded: false,
+  previewLimit: 0,
+  columnSizeMeasure: "",
   // The database page shows its storage below its objects; "storage"
   // scrolls it into view once (a former ?tab=storage address).
   databaseFocus: "",

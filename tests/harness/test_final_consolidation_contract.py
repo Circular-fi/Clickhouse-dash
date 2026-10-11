@@ -38,7 +38,7 @@ def test_functions_explorer_is_runner_scoped_and_version_matched() -> None:
 
 def test_functions_frontend_has_search_filter_and_safe_text_rendering() -> None:
     html = read("src/static/functions.html")
-    js = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    js = (modules.read_explorer() + modules.read_explorer_detail())
     api = read("src/static/app_api.js")
 
     assert 'id="explorerFunctionsTab"' in html and 'data-view="functions"' in html
@@ -63,7 +63,7 @@ def test_table_operational_metadata_includes_storage_compression_weight_and_dist
     header = read("src/explorer_catalog.hpp")
     catalog = read_catalog()
     api = read_api()
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
 
     assert "storage_policy" in header
     assert "compressed_bytes" in header and "uncompressed_bytes" in header
@@ -249,7 +249,7 @@ def test_function_aliases_are_resolved_server_side_with_cycle_and_depth_guards()
     header = read("src/explorer_catalog.hpp")
     catalog = read_catalog()
     api = read_api()
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
 
     assert "ExplorerFunctionAliasDocument" in header
     assert "alias_documents" in header

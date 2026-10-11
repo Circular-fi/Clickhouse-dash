@@ -54,3 +54,25 @@ EXPLORER_CORE = ("app_explorer_summary.js", "app_explorer_route.js", "app_explor
 def read_explorer() -> str:
     """The text of the Explorer controller and of the modules it was split into, for a contract on the Explorer as one unit."""
     return "\n".join((STATIC / name).read_text(encoding="utf-8") for name in EXPLORER_CORE)
+
+
+def read_explorer_detail() -> str:
+    """The text of the table card (app_explorer_detail.js and the modules it was split into: model, cells, header, about, columns, storage,
+    operations, preview), for a contract on the card as one unit."""
+    return read_family("app_explorer_detail")
+
+
+def read_card_module(part: str = "") -> str:
+    """One module of the table card: "" is app_explorer_detail.js (tabs, body, facade); "model", "cells", "about", "columns", "storage",
+    "operations", "preview" or "header" is app_explorer_detail_<part>.js."""
+    name = f"app_explorer_detail{'_' + part if part else ''}.js"
+    return (STATIC / name).read_text(encoding="utf-8")
+
+
+def function_text(source: str, name: str) -> str:
+    """The text of one function (`function name(`, `async function name(` or `const name =`) of a module's source, up to its closing line."""
+    match = re.search(rf"^(?:async )?function {re.escape(name)}\(|^const {re.escape(name)}\b", source, flags=re.M)
+    assert match, name
+    end = re.compile(r"^[}\]];?$", re.M).search(source, match.start())
+    assert end, name
+    return source[match.start():end.end()]

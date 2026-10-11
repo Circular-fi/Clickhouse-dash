@@ -13,7 +13,7 @@ def read(path: str) -> str:
 def test_card_uses_ram_labels_without_resident_runtime_cards_or_extra_section_titles() -> None:
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert '`${format.bytes(rawBytes)}${memoryResident ? " RAM" : " logical"}`' in graph
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert "renderResidentRuntime" not in ui
     assert '"Resident rows"' not in ui
     assert '"Resident memory"' not in ui
@@ -25,28 +25,28 @@ def test_card_uses_ram_labels_without_resident_runtime_cards_or_extra_section_ti
 
 
 def test_lineage_chips_keep_the_plain_qualified_name_as_tooltip() -> None:
-    ui = read("src/static/app_explorer_detail.js")
-    chip = ui[ui.index("function dependencyChip"):ui.index("// ---- tabs")]
+    ui = modules.read_explorer_detail()
+    chip = modules.function_text(ui, "dependencyChip")
     assert 'const qualified = `${dep.database || DASH}.${dep.table || DASH}`;' in chip
     assert 'button.title = [qualified,' in chip
     assert 'const qualified = `<${dep.database' not in chip
 
 
 def test_data_preview_has_compact_finalize_marker_and_open_in_query_formats_equivalent_sql() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
-    data = ui[ui.index("function aggregatePreviewColumn"):ui.index("function renderDdl")]
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
+    data = modules.read_card_module("model") + modules.read_card_module("preview")
     assert "Preview executes SELECT" not in data
     assert "Finalized for preview" not in data
     assert 'finalizeAggregation(${quoted}) AS ${quoted}' in data
     assert 'api.formatSqls(state.selectedHostId, [String(sql || "")])' in data
-    assert 'await openFormattedSqlInQuery(buildPreviewSelectSql(detail));' in data
+    assert 'await openFormattedSqlInQuery(buildPreviewSelectSql(detail, model.preview?.columns, previewLimit()));' in data
     assert 'finalizeAggregation() used so Explorer can display the value of a single row' in data
     assert 'h("div", { class: "explorerFinalizeInfo__tooltip" }, text)' in data
 
 
 def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
     html = read("src/static/explorer.html")
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     css = css_sources.text()
     # The Browse/Graph icon selector became segmented tabs: the top views and
     # the Catalog's Browse / Graph / Storage mode bar share the pill look.
@@ -69,7 +69,7 @@ def test_browse_graph_switch_uses_icon_theme_selector_grammar() -> None:
 
 
 def test_storage_metric_tables_reuse_query_result_component() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     results = modules.read_family("app_results")
     block = ui[ui.index("function staticTable"):ui.index("function section(")]
     assert 'results?.createStaticResultTable?.({' in block
@@ -81,7 +81,7 @@ def test_storage_metric_tables_reuse_query_result_component() -> None:
 
 
 def test_create_statement_reuses_query_editor_gutter_and_sql_highlighter() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     css = css_sources.text()
     ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent", ui.index("function renderDdl"))]
     # One read-only SQL block (app_ui_sql.js) on the editor's highlighter.
@@ -117,7 +117,7 @@ def test_storage_layout_places_buffers_before_downstream_targets() -> None:
 
 def test_log_family_keeps_clickhouse_uncompressed_total_when_clickhouse_exposes_it() -> None:
     catalog = read_catalog()
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed)" in catalog
     assert "summary.uncompressed_bytes = total_uncompressed_bytes;" in catalog
     assert "if (is_log_family(summary.engine)) summary.physical_bytes = total_bytes;" in catalog

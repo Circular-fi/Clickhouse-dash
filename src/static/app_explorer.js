@@ -6,12 +6,11 @@ import { api } from "./app_api.js";
 import { dom, shell } from "./app_dom.js";
 import { catalogContainsTable, loadBranches, loadDatabaseTables } from "./app_explorer_data.js";
 import { destroyDatabaseTreemap, renderBrowseRoot, renderDatabaseDetail, renderNotFound, selectDatabase, showNotFound } from "./app_explorer_database.js";
-import { renderHighlightedCode } from "./app_explorer_doc.js";
 import { forgetFunctionsLoad, refreshFunctions, renderFunctionDetail, renderFunctionList, revealSelectedFunction } from "./app_explorer_functions.js";
 import { CATALOG_ROUTE_SEGMENT, DEFAULT_TAB, MODES, appRoute, catalogPath, parseExplorerRoute } from "./app_explorer_route.js";
 import { currentView, modeAvailability, setTreeDrawerOpen, sidePanel, syncModeTabs, syncViewTabs } from "./app_explorer_shell.js";
-import { actions, clear, clearSelection, explorerFeatures, model, parts, searches, selectionScope, setError, shellEl, showDetailState, syncExplorerUrl } from "./app_explorer_store.js";
-import { functionKey, healthLabel, humanEngine, isDictionarySummary, isDistributedSummary, isLogFamilySummary, isMergeTreeSummary, isResidentMemorySummary, isViewLikeSummary, quoteIdent, summaryFootprintBytes, summaryRowsLabel } from "./app_explorer_summary.js";
+import { actions, clearSelection, explorerFeatures, model, parts, searches, selectionScope, setError, shellEl, showDetailState, syncExplorerUrl } from "./app_explorer_store.js";
+import { functionKey } from "./app_explorer_summary.js";
 import { renderTabContent, renderTabs, selectTable } from "./app_explorer_table.js";
 import { loadVisibilityOptions, renderTableList, syncVisibilityOptionLocks, toggleTypeFilter } from "./app_explorer_tree.js";
 import { header } from "./app_header.js";
@@ -295,17 +294,6 @@ async function refreshCatalog(force) {
   return load.promise;
 }
 
-// Table detail (header, tabs and tab bodies) lives in app_explorer_detail.js.
-// The shell hands it the model and the helpers it shares with the tree.
-function createDetailView() {
-  return parts.detail?.create?.({
-    model, clear, appRoute, setError, quoteIdent, humanEngine,
-    healthLabel, summaryFootprintBytes, summaryRowsLabel, isViewLikeSummary, isMergeTreeSummary, isDictionarySummary,
-    isDistributedSummary, isLogFamilySummary, isResidentMemorySummary, renderHighlightedCode, destroyDatabaseTreemap, selectTable,
-    setMode, setWorkspace, syncExplorerUrl,
-  }) || null;
-}
-
 async function applyRouteFromLocation() {
   // Back / Forward in quick succession start several of these; the newest wins, the others stop at their next await.
   const gen = ++model.routeSerial;
@@ -535,7 +523,7 @@ function init() {
 }
 
 // The functions that the modules under this controller call (app_explorer_store.js, `actions`).
-Object.assign(actions, { openCatalogRoot, refreshCatalog, applyRouteFromLocation });
+Object.assign(actions, { openCatalogRoot, refreshCatalog, applyRouteFromLocation, setMode });
 
 // explorer.use({ graph, storage, detail, results }): the parts of the Catalog page (see `parts`).
 function use({ graph: graphView = null, storage: storageViews = null, detail = null, results = null } = {}) {
@@ -543,7 +531,7 @@ function use({ graph: graphView = null, storage: storageViews = null, detail = n
   parts.storage = storageViews;
   parts.detail = detail;
   parts.results = results;
-  parts.detailView = createDetailView();
+  parts.detail?.init();
 }
 
 export const explorer = {

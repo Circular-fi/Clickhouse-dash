@@ -91,7 +91,7 @@ def test_table_summary_queries_are_scoped_to_requested_object() -> None:
     assert "quote_string" not in statements
 
 def test_graph_focus_does_not_fetch_browse_detail_until_browse_is_visible() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     select = read("src/static/app_explorer_table.js")
     show_mode = ui[ui.index("function showMode()"):ui.index("function openCard(")]
 
@@ -104,7 +104,7 @@ def test_graph_focus_does_not_fetch_browse_detail_until_browse_is_visible() -> N
 
 
 def test_table_list_renders_stats_only_for_lazily_loaded_database_branch() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
     assert 'model.databaseTablesLoaded.has(database)' in tree
     assert 'loadDatabaseTables(database)' in tree
@@ -119,7 +119,7 @@ def test_table_list_renders_stats_only_for_lazily_loaded_database_branch() -> No
 def test_selected_table_keeps_lazy_scope_totals_for_percentages() -> None:
     header = read("src/explorer_catalog.hpp")
     api = read_api()
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert "database_footprint_bytes" in header
     assert "clickhouse_footprint_bytes" in header
     assert 'w.Key("footprint_scope")' in api
