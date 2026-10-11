@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { runSuccessfulQuery } from '../helpers/app.js';
 
 // The WebAssembly kernels load on their own (docs/wasm.md, "When a kernel loads"). The other wasm-*.spec.js
 // files call loadGroup() themselves, so they cannot see a page that never asks for its kernel: the v2.17.0
@@ -56,13 +57,34 @@ test('the Explorer graph loads the router, layered and labels kernels', async ({
 });
 
 test('a blocked kernel never breaks the page: the Query page still highlights and sorts', async ({ page }) => {
-  await page.route(/\.wasm(\?|$)/, (route) => route.abort());
+  const pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  const blocked = [];
+  await page.route(/\.wasm(\?|$)/, (route) => {
+    blocked.push(/\/([a-z]+)\.wasm/.exec(route.request().url())?.[1]);
+    return route.abort();
+  });
   await page.goto('/query');
-  const editor = page.locator('textarea').first();
+  const editor = page.locator('#queryTextArea');
   await editor.click();
   await page.keyboard.press('Control+A');
   await page.keyboard.insertText(longSql());
-  await page.waitForTimeout(800);
+  // The page asked for the highlight kernel (the text is long), was refused, and the JavaScript lexer coloured the
+  // text: keywords and numbers carry their token classes.
+  await expect.poll(() => blocked, { timeout: 8000 }).toContain('highlight');
+  const overlay = page.locator('.editorHighlight');
+  await expect(overlay.locator('.tok-kw').first()).toHaveText('SELECT');
+  await expect(overlay.locator('.tok-num').first()).toBeVisible();
   await expect(editor).toHaveValue(/SELECT col0 \+ 1 AS c0/);
-  await expect(page.locator('body')).toBeVisible();
+  // A numeric result of 6000 rows sorts on the JavaScript path: the largest value comes first.
+  await runSuccessfulQuery(page, 'SELECT number AS n FROM numbers(6000)');
+  await expect.poll(() => blocked, { timeout: 8000 }).toContain('rowsort');
+  const header = page.locator('#resultTableHead th[data-sort-key="0"]');
+  await header.locator('.dataTable__sort').click();
+  await expect(header).toHaveAttribute('aria-sort', 'descending');
+  await expect(page.locator('#resultTableBody tr[data-row-key]').first().locator('td').nth(1)).toHaveText('5999');
+  await header.locator('.dataTable__sort').click();
+  await expect(header).toHaveAttribute('aria-sort', 'ascending');
+  await expect(page.locator('#resultTableBody tr[data-row-key]').first().locator('td').nth(1)).toHaveText('0');
+  expect(pageErrors).toEqual([]);
 });
