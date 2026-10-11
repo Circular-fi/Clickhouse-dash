@@ -257,7 +257,28 @@ Result<SeriesAnswer> MetricsService::series(const RequestContext&, const HostSpe
     if (!plan_aggregation(request.kind, answer.info, request.agg, &answer.plan, &plan_error)) return Out::fail(bad_request(plan_error));
     const AggregationPlan& plan = answer.plan;
     const std::string quantile = plan.mode == Mode::SummaryQuantile ? summary_quantile_literal(answer.info, plan.agg) : std::string();
-    const Statement statement = statements.series(plan.mode, plan.all_delta, quantile);
+    const double bucket_seconds = static_cast<double>(request.grid.size_ms) / 1000.0;
+
+    // A request that groups by attributes (or reads the series of a summary) ranks its groups in ClickHouse first: the cells of every group would
+    // be more rows than a read keeps, and the groups past the cap would be the ones that come last in the alphabet, not the smallest ones.
+    const bool ranked = !request.group_by.empty() || plan.mode == Mode::SummaryQuantile;
+    std::vector<std::string> kept_keys;
+    size_t group_total = 0;
+    double kept_score = 0, total_score = 0;
+    if (ranked) {
+      const Statement ranking = statements.ranking(plan.mode, plan.all_delta, quantile, plan.agg, bucket_seconds, static_cast<size_t>(request.top_k));
+      const auto ranking_started = Clock::now();
+      db->select(ranking.sql, ranking.params.list(), [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) {
+          kept_keys.push_back(ch_block_text_at(block, 0, row));
+          group_total = static_cast<size_t>(text_to_i64(ch_block_text_at(block, 1, row)));
+          kept_score += text_to_double(ch_block_text_at(block, 2, row));
+          total_score = text_to_double(ch_block_text_at(block, 3, row));
+        }
+      });
+      query_ms += elapsed_ms(ranking_started);
+    }
+    const Statement statement = statements.series(plan.mode, plan.all_delta, quantile, ranked ? &kept_keys : nullptr);
 
     std::map<std::string, Group> groups;
     size_t rows = 0;
@@ -274,12 +295,28 @@ Result<SeriesAnswer> MetricsService::series(const RequestContext&, const HostSpe
     });
     query_ms += elapsed_ms(query_started);
 
-    const double bucket_seconds = static_cast<double>(request.grid.size_ms) / 1000.0;
-    RankedGroups ranked = rank_groups(&groups, plan.mode, plan.agg, bucket_seconds, request.top_k, plan.per_series);
-    answer.group_count = groups.size();
-    answer.other_count = ranked.other_count;
-    answer.other = std::move(ranked.other);
-    for (size_t i = 0; i < ranked.kept; ++i) answer.series.push_back(*ranked.ordered[i]);
+    // The group of the groups that were not ranked among the best ones came folded from ClickHouse.
+    Group folded;
+    if (ranked) {
+      const auto it = groups.find(kOtherGroupKey);
+      if (it != groups.end()) {
+        folded = std::move(it->second);
+        groups.erase(it);
+      }
+    }
+    RankedGroups ranked_groups = rank_groups(&groups, plan.mode, plan.agg, bucket_seconds, request.top_k, plan.per_series);
+    answer.group_count = ranked ? std::max(group_total, groups.size()) : groups.size();
+    if (ranked && plan.mode != Mode::SummaryQuantile && answer.group_count > groups.size()) {
+      answer.other_count = answer.group_count - groups.size();
+      folded.key = kOtherGroupKey;
+      // The score of the others is what the best ones leave of the sum of the scores of every group.
+      folded.score = std::isfinite(total_score - kept_score) ? std::max(0.0, total_score - kept_score) : 0.0;
+      answer.other = std::move(folded);
+    } else {
+      answer.other_count = ranked_groups.other_count;
+      answer.other = std::move(ranked_groups.other);
+    }
+    for (size_t i = 0; i < ranked_groups.kept; ++i) answer.series.push_back(*ranked_groups.ordered[i]);
     answer.timestamps = bucket_timestamps(request.grid, request.window);
 
     answer.value_unit = answer.info.unit;

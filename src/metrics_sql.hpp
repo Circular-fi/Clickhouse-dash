@@ -25,6 +25,12 @@ using Statement = SqlStatement;
 // The time that one statement may run (a statement of ClickHouse takes this SETTINGS clause as its own; the scope of the request keeps the
 // bounds of the whole request below it).
 constexpr const char* kQuerySettings = " SETTINGS max_execution_time = 30";
+// The statements of the series group and rank every point of a window: their memory is bounded, and past 1 GB a grouping or a sort goes to disk.
+constexpr const char* kSeriesSettings =
+    " SETTINGS max_execution_time = 30, max_memory_usage = 2000000000, max_bytes_before_external_group_by = 1000000000, "
+    "max_bytes_before_external_sort = 1000000000";
+// The key of the group that holds the groups that are not among the best ones.
+constexpr const char* kOtherGroupKey = "__other__";
 
 constexpr size_t kCatalogLimit = 5000;
 // The catalog groups every point of its window: past this many rows read, the scan stops and the counts are estimates (`estimated: true`).
@@ -75,12 +81,25 @@ class SeriesStatements {
   // Unit, description, temporality, monotonicity, point count and (summary) quantiles of the metric over the window.
   Statement info() const;
   // The statement that reads the buckets. `all_delta`: every point is a delta (nothing to difference); `quantile` (summary): the literal of
-  // the wanted quantile.
-  Statement series(Mode mode, bool all_delta, const std::string& quantile);
+  // the wanted quantile. `keep`: the groups to read, when the groups are ranked first (ranking): the others are one group, kOtherGroupKey
+  // (a summary reads the kept series only).
+  Statement series(Mode mode, bool all_delta, const std::string& quantile, const std::vector<std::string>* keep = nullptr) const;
+  // The `top_k` best groups, best first (a row is the key of a group, the number of groups, its score and the sum of the scores of every group):
+  // ClickHouse ranks them
+  // by the score of rank_groups, with the formulas of the aggregation `agg`. Only a request that groups by an attribute needs it.
+  Statement ranking(Mode mode, bool all_delta, const std::string& quantile, const std::string& agg, double bucket_seconds, size_t top_k) const;
 
   const std::string& series_id() const { return series_id_; }
 
  private:
+  // The statement of the buckets without its order and its limit, and the order.
+  struct Body {
+    std::string cells;
+    std::string order;
+    SqlParams params;
+  };
+  Body body(Mode mode, bool all_delta, const std::string& quantile, const std::vector<std::string>* keep) const;
+
   const SeriesRequest& request_;
   std::string table_;
   SqlParams params_;
