@@ -222,18 +222,24 @@ test('a failed run keeps the elapsed time and the tiles that have a figure, no r
   await expect(page.locator('#runStatsTiles .metricCompact:visible')).toHaveCount(6);
 });
 
-test('from 1100 px down the rail folds into one summary line, so the results stay above the fold', async ({ page }) => {
+test('from 1100 px down the run stats stay on the page, under the editor, and the results still start in the first screen', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   await openApp(page);
   await runSuccessfulQuery(page, 'SELECT number AS n FROM numbers(30)');
-  const summary = page.locator('#runStatsSummary');
-  await expect(summary).toBeVisible();
-  await expect(page.locator('#runStatsTiles')).toBeHidden();
-  await expect(summary).toContainText('30 rows');
+  await expect(page.locator('#runStatsSummary')).toHaveCount(0);
+  const tiles = page.locator('#runStatsTiles');
+  await expect(tiles).toBeVisible();
+  await expect(tiles.locator('.metricCompact:visible')).toHaveCount(6);
+  await expect(page.locator('#readRowsTotalText')).toHaveText('30');
+  // The tiles sit under the editor, not beside it.
+  const place = await page.evaluate(() => {
+    const editor = document.querySelector('.panel--query').getBoundingClientRect();
+    const rail = document.querySelector('#runStatsTiles').getBoundingClientRect();
+    return { editorBottom: editor.bottom, railTop: rail.top };
+  });
+  expect(place.railTop, 'the tiles are under the editor').toBeGreaterThanOrEqual(place.editorBottom - 1);
   const top = await page.locator('#resultsPanel').evaluate((el) => el.getBoundingClientRect().top);
-  expect(top, 'the results start in the first screen').toBeLessThan(700);
-  await summary.click();
-  await expect(page.locator('#runStatsTiles')).toBeVisible();
+  expect(top, 'the results start in the first screen').toBeLessThan(768);
 });
 
 // ---- Traces ---------------------------------------------------------------------------------------------------------------

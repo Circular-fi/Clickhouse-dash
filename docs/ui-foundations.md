@@ -447,7 +447,6 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 
 - A `.foldSummary` (one line, with a chevron that turns while the region is open) stands for a folded region. It is used in these places:
   - Each filter bar of Observability and System ("2026-09-12 12:30 -> 13:30 . 2 filters"). The action (Search or refresh) folds it again. Its chips fold with it (`filterBar.mountSummary`, `app_ui_filterbar.js`).
-  - The Query run stats ("7 ms . 120,064 rows . 1.9 MB read . CPU 87.7% . 1.8 MB memory", `app_run.js`). Under 1100 px they fold into this line (`#runStatsSummary`), as on a phone, so the results start above the fold.
 
   The overview charts (`[data-phone-fold]`: Matching traces, Trace duration, the Logs histogram) start folded to their head (`.chartCard__fold`). The folds work only at that width: their rules are in `max-width: 600px` blocks.
 - Logs records are two-line cards, `--row-card` (52 px) tall: Time, Level and Service, then the Body.

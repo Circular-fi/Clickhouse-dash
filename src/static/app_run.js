@@ -296,9 +296,8 @@ function finishRail(totals, clientMs = null) {
   setRailPhase("done");
 }
 
-// Before the first run (and after Clear) the rail is idle: its tiles are there with dashes until a run gives their figures
-// (.metricColumn.is-idle only tells the folded summary to say "Run stats"). A run that failed keeps only the tiles that have a
-// figure (hideEmptyTiles).
+// Before the first run (and after Clear) the rail's tiles are there with dashes until a run gives their figures.
+// A run that failed keeps only the tiles that have a figure (hideEmptyTiles).
 const RAIL_VALUES = ["progressPercentText", "readRowsTotalText", "readBytesTotalText", "cpuMaxText", "memoryMaxText"];
 
 function hideEmptyTiles(failed) {
@@ -310,7 +309,7 @@ function hideEmptyTiles(failed) {
   }
 }
 
-function resetMetrics({ idle = false } = {}) {
+function resetMetrics() {
   lockProgressIndeterminate = false;
   setRailPhase("live");
   util.setMetricText(dom.elapsedSecondsText, EMPTY);
@@ -337,7 +336,6 @@ function resetMetrics({ idle = false } = {}) {
   util.setMetricText(dom.memoryMaxText, EMPTY);
   dom.progressCard?.classList.remove("is-indeterminate");
   setProgressFraction(0);
-  dom.runStatsTiles?.classList.toggle("is-idle", idle);
   hideEmptyTiles(false);
   resetCharts();
 }
@@ -2082,7 +2080,7 @@ async function handleCancelOrClear() {
     results.clearResultsStack();
     results.clearLiveResults();
     results.setResultsVisible(false);
-    resetMetrics({ idle: true });
+    resetMetrics();
     setResultSummary("");
     setQueryIdText(null);
     setQueryStatusText("-", { force: true });

@@ -596,8 +596,6 @@ test('the metric rail sparklines span their tiles edge to edge, on a phone too',
   }));
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
-    // 1100 px and below fold the tiles into their summary line: unfold them.
-    if (width <= 1100 && (await page.locator('#runStatsSummary').getAttribute('aria-expanded')) === 'false') await page.locator('#runStatsSummary').click();
     await expect.poll(async () => (await measure()).filter((m) => m.box && Number.isFinite(m.firstX)).length).toBeGreaterThanOrEqual(3);
     for (const m of (await measure()).filter((x) => x.box && Number.isFinite(x.firstX))) {
       const where = `${m.id} at ${width} px`;
@@ -3533,30 +3531,29 @@ test.describe('query on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const SQL = 'SELECT city, count() AS n, round(avg(temperature_c), 2) AS avg_t, min(observed_at) AS first_seen FROM chdash_ui.weather_observations GROUP BY city ORDER BY n DESC';
 
-  test('query on a phone: the run stats fold into one line and the first result row shows without scrolling', async ({ page }) => {
+  test('query on a phone: the run stats are on the page, in three columns under the editor, and the results are in reach', async ({ page }) => {
     await openApp(page);
-    const summary = page.locator('#runStatsSummary');
-    await expect(summary).toBeVisible();
-    await expect(summary).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.locator('#runStatsTiles')).toBeHidden();
+    // Before a run the tiles are there with dashes; a run fills them. They are never folded into a summary line.
+    const tiles = page.locator('#runStatsTiles');
+    await expect(tiles).toBeVisible();
+    await expect(page.locator('#runStatsSummary')).toHaveCount(0);
+    await expect(tiles.locator('.metricCompact:visible')).toHaveCount(6);
     await runSuccessfulQuery(page, SQL);
-    await expect(summary).toContainText(/rows/);
-    await expect(summary).toContainText(/read/);
+    await expect(page.locator('#readRowsTotalText')).not.toHaveText('\u2014');
+    await expect(page.locator('#readBytesTotalText')).not.toHaveText('\u2014');
+    // Three tiles on a row, two rows, each tile inside the window.
+    const boxes = await tiles.locator('.metricCompact:visible').evaluateAll((els) => els.map((el) => { const b = el.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top }; }));
+    expect(new Set(boxes.map((b) => Math.round(b.top))).size, 'two rows of tiles').toBe(2);
+    for (const b of boxes) { expect(b.left).toBeGreaterThanOrEqual(0); expect(b.right).toBeLessThanOrEqual(390); }
+    // The results start under the tiles and the first row can be reached by scrolling the workspace.
     const firstRow = page.locator('#resultTableBody tr').first();
+    await firstRow.scrollIntoViewIfNeeded();
     await expect(firstRow).toBeVisible();
-    const box = await firstRow.boundingBox();
-    expect(box.y + box.height).toBeLessThanOrEqual(844);
-    expect(await page.locator('#queryWorkspace').evaluate((el) => el.scrollTop)).toBe(0);
-    // The line unfolds the tiles, and folds them again.
-    await summary.click();
-    await expect(page.locator('#runStatsTiles')).toBeVisible();
-    await expect(summary).toHaveAttribute('aria-expanded', 'true');
-    await summary.click();
-    await expect(page.locator('#runStatsTiles')).toBeHidden();
-    // A wide window shows the tiles and no summary line.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth), 'no sideways scroll').toBeLessThanOrEqual(1);
+    // A wide window shows the same tiles beside the editor.
     await page.setViewportSize({ width: 1440, height: 900 });
-    await expect(summary).toBeHidden();
-    await expect(page.locator('#runStatsTiles')).toBeVisible();
+    await expect(tiles).toBeVisible();
+    await expect(page.locator('#runStatsSummary')).toHaveCount(0);
   });
 
   test('query on a phone: Format leaves the editor at its left edge, the placeholder clears the editor buttons', async ({ page }) => {
@@ -3888,9 +3885,8 @@ for (const [width, height] of [[1440, 900], [1000, 800]]) {
   test(`${width}px: the System line of the Elapsed tile stays under its value, on one line, however long the figure`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await openApp(page);
-    // The tiles are there once a run has filled them (the idle rail is one line; under 1100 px they fold into a summary).
+    // The tiles are there at every width, filled once a run has given their figures.
     await runSuccessfulQuery(page, 'SELECT 1 AS one');
-    if (width <= 1100) await page.locator('#runStatsSummary').click();
     const tile = page.locator('.metricCompact--elapsed');
     const geometry = () => page.evaluate(() => {
       const box = (el) => { const b = el.getBoundingClientRect(); return { top: b.top, bottom: b.bottom, left: b.left, right: b.right, height: b.height }; };
