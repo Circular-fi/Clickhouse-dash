@@ -30,7 +30,8 @@ export function installObservers(page) {
   const consoleErrors = [];
   const pageErrors = [];
   const failedRequests = [];
-  failedRequests.voluntaryAborts = [];
+  // Not enumerable: a spec that compares failedRequests with [] does not see it.
+  Object.defineProperty(failedRequests, 'voluntaryAborts', { value: [], enumerable: false });
   // Quiet when the page is already closed: the binding only matters while the test runs.
   page.exposeFunction('__chdashVoluntaryAbort', (url) => failedRequests.voluntaryAborts.push(url)).catch(() => {});
   page.addInitScript(() => {
