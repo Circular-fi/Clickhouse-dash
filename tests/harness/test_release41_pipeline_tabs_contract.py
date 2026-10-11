@@ -1,6 +1,5 @@
 from pathlib import Path
 import modules
-import subprocess
 import css_sources
 
 
@@ -69,11 +68,3 @@ def test_pipeline_and_trace_have_separate_lazy_mount_surfaces() -> None:
     # The tab look is the shared dialog's (the query library uses it too).
     assert '.uiDialog__tabs {' in css
     assert '.contentTabs__tab.is-active {' in css
-
-
-def test_pipeline_model_behavior() -> None:
-    result = subprocess.run(
-        ["node", "--experimental-vm-modules", "--no-warnings", "--test", "tests/frontend/model/pipeline.test.cjs"],
-        cwd=ROOT, capture_output=True, text=True, timeout=60,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr

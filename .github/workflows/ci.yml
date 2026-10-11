@@ -28,7 +28,8 @@ jobs:
   test:
     name: Build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # The browser tests run twice, on the build that reads ./static and on the build with the files embedded.
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -41,6 +42,11 @@ jobs:
         run: |
           python3 tools/build_wasm.py --verify
           python3 tools/build_wasm.py --docker --check
+
+      # The pure modules of the frontend in a bare vm (tests/frontend/model, tests/harness/esm_vm.js): seconds, no
+      # container. The harness runs the same files again inside the test container.
+      - name: Node unit tests of the frontend modules
+        run: node --experimental-vm-modules --no-warnings --test tests/frontend/model/*.test.cjs
 
       - name: Show Docker versions
         run: |
