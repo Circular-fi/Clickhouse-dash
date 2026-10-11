@@ -2171,6 +2171,11 @@ button.explorerStorageStrip__segment {
   white-space: nowrap;
 }
 
+/* The filter chips say they are on by their colour alone: no check mark before the label. */
+.explorerFilterChip[aria-pressed="true"]::before {
+  content: none;
+}
+
 .explorerFilterChip[aria-disabled="true"] {
   cursor: default;
 }
