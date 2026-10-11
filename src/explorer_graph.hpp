@@ -2,25 +2,16 @@
 
 #include "allowed_objects.hpp"
 #include "explorer_catalog.hpp"
-
-#include <clickhouse/client.h>
+#include "explorer_ttl.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace chdash {
-
-struct ExplorerGraphTtlRule {
-  std::string expression;
-  std::string base_expression;
-  std::string offset_label;
-  std::string action;      // recompress | move | delete | group_by | ttl
-  std::string target_kind; // codec | volume | disk | expression
-  std::string target;
-};
 
 // What an edge or node side panel explains about a logical object. Built from
 // the same authorized system.tables texts as the graph; never serialized in
@@ -93,12 +84,24 @@ struct ExplorerGraphEdge {
   bool can_animate = false;
 };
 
+// The graph is bounded: the topology of a cluster (a node for each shard and each replica) is left out of a Distributed table when it would
+// make the graph larger than this, and `truncated` says so.
+constexpr size_t kMaxGraphNodes = 20000;
+constexpr size_t kMaxGraphEdges = 40000;
+
+// The adjacency of a graph, made once for a snapshot (explorer_graph_scope.hpp).
+struct ExplorerGraphIndex;
+
 struct ExplorerGraph {
   uint64_t generated_at_ms = 0;
   std::string metric_scope = "local-replica";
   bool refreshable_views_available = true;
   std::vector<ExplorerGraphNode> nodes;
   std::vector<ExplorerGraphEdge> edges;
+  // A bound left out some topology (kMaxGraphNodes, kMaxGraphEdges).
+  bool truncated = false;
+  // Made when the graph is loaded; the scope of a request reads it.
+  std::shared_ptr<const ExplorerGraphIndex> index;
   // Keyed by logical node id. Kept beside the nodes so scoped graph payloads
   // never copy SELECT texts they do not serialize.
   std::unordered_map<std::string, ExplorerGraphDefinition> definitions;
@@ -107,9 +110,10 @@ struct ExplorerGraph {
   std::vector<ExplorerUnavailableIssue> unavailable_issues;
 };
 
-// `system_identity`: acl_identity_key of the system URI (DdlTextCache).
+// `system_identity`: acl_identity_key of the system URI (DdlTextCache). Reads what the graph needs from the system account (explorer_graph.cpp),
+// then builds it (explorer_graph_build.hpp).
 bool load_explorer_graph(
-    clickhouse::Client& system,
+    ChExecutor& system,
     ExplorerCaches& caches,
     const std::string& system_identity,
     const AllowedObjectSet& allowed,

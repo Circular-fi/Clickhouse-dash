@@ -1,4 +1,5 @@
 from pathlib import Path
+from explorer_sources import read_api, read_graph, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,20 +10,27 @@ def read(path: str) -> str:
 
 def test_graph_routes_share_runner_scoped_acl_boundary() -> None:
     server = read("src/server.cpp")
-    api = read("src/api_explorer.cpp")
+    api = read_api()
 
     assert 'http_.Get("/api/explorer/graph"' in server
     assert 'http_.Get("/api/explorer/activity"' not in server
     assert "handle_explorer_graph" in api
     # Each route establishes the same runner ACL boundary before using system metadata.
-    graph_handler = api[api.index("void Server::handle_explorer_graph"):]
+    # The route calls the service; the service reads the privileges of the runner (graph_snapshot) before any system metadata.
+    route = read_unit("api_explorer.cpp")
+    graph_handler = route[route.index("void Server::handle_explorer_graph("):]
+    graph_handler = graph_handler[:graph_handler.index("\n}\n")]
     assert "authenticate_request" not in graph_handler
-    assert "allowed = acl_.table_set(access);" in graph_handler
-    assert "explorer_graph_cache_.get_revalidating" in graph_handler
+    assert "explorer_service_.graph(" in graph_handler
+    service = read_unit("explorer_service.cpp")
+    snapshot = service[service.index("ExplorerService::graph_snapshot"):service.index("ExplorerService::graph(")]
+    assert "allowed = acl_.table_set(access);" in snapshot
+    assert "stores_.graph.get_revalidating" in snapshot
+    assert snapshot.index("acl_.table_set(access)") < snapshot.index("stores_.catalog.get_revalidating") < snapshot.index("stores_.graph.get_revalidating")
 
 
 def test_graph_backend_normalizes_dependencies_and_filters_both_ends() -> None:
-    graph = read("src/explorer_graph.cpp")
+    graph = read_graph()
 
     assert "dependencies_database" in graph
     assert "dependencies_table" in graph
@@ -38,19 +46,18 @@ def test_graph_backend_normalizes_dependencies_and_filters_both_ends() -> None:
 
 
 def test_graph_uses_structured_metadata_and_only_targeted_sql_parsing() -> None:
-    graph = read("src/explorer_graph.cpp")
+    graph = read_graph()
 
     assert "FROM system.tables" in graph
     assert "FROM system.clusters" in graph
     assert "sql::engine_arguments" in graph
-    assert "parse_select_sources" in graph
     # The TO target of a materialized view is the clause before AS SELECT, never a TTL TO VOLUME or a WITH FILL TO;
     # ARRAY JOIN and table functions are not relations.
     assert "materialized_view_target(table.ddl, table.database)" in graph
     # (the reading is in src/sql_structure.cpp, over the tokens of the one lexer; tests/native/sql_test.cpp runs it)
     structure = read("src/sql_structure.cpp")
     assert 'v.is_word(k - 1, "ARRAY")' in structure
-    assert "sql::relation_sources(select_sql, default_database)" in graph
+    assert "sql::relation_sources(select_sql, table.database)" in graph
     assert "unknown" in graph and "omitted rather than guessed" in graph
 
 
@@ -91,7 +98,7 @@ def test_graph_frontend_uses_canvas_dag_lod_zoom_pan_focus_and_minimap() -> None
 
 def test_logical_lineage_and_physical_storage_are_separate_projections_of_one_backend_model() -> None:
     graph_h = read("src/explorer_graph.hpp")
-    graph_cpp = read("src/explorer_graph.cpp")
+    graph_cpp = read_graph()
     frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert 'std::string layer = "logical"' in graph_h
@@ -109,9 +116,9 @@ def test_logical_lineage_and_physical_storage_are_separate_projections_of_one_ba
 
 
 def test_ttl_is_serialized_as_ordered_metadata_and_projected_onto_storage_lifecycle() -> None:
-    graph_h = read("src/explorer_graph.hpp")
-    graph_cpp = read("src/explorer_graph.cpp")
-    api = read("src/api_explorer.cpp")
+    graph_h = read("src/explorer_graph.hpp") + read_unit("explorer_ttl.hpp")
+    graph_cpp = read_graph()
+    api = read_api()
     frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
 
     assert "struct ExplorerGraphTtlRule" in graph_h

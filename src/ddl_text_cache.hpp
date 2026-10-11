@@ -1,10 +1,8 @@
 #pragma once
 
 #include "ch_block_value.hpp"
-#include "ch_query.hpp"
-#include "sql_literal.hpp"
-
-#include <clickhouse/client.h>
+#include "ch_executor.hpp"
+#include "sql_params.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -64,13 +62,13 @@ public:
       "toString(metadata_modification_time), toString(toUInt8(metadata_modification_time >= now() - 2))";
 
   // Return the DDL texts of `objects` (keyed "database\0name"), reading only
-  // missing/changed ones from `client`, as `account`.
+  // missing/changed ones from `db`, as `account`.
   std::unordered_map<std::string, DdlTexts> get(
-      clickhouse::Client& client,
+      ChExecutor& db,
       const std::string& account,
       const std::vector<DdlObjectVersion>& objects) {
-    return get(account, objects, [&client](const std::string& database, const std::vector<std::string>& names) {
-      return read_texts(client, database, names);
+    return get(account, objects, [&db](const std::string& database, const std::vector<std::string>& names) {
+      return read_texts(db, database, names);
     });
   }
 
@@ -166,20 +164,17 @@ private:
     return out;
   }
 
-  static std::string quote(const std::string& value) { return sql::quote_string(value); }
-
+  // The database and the names are query parameters of the statement, one each: a name may hold any byte.
   static std::vector<std::pair<std::string, DdlTexts>> read_texts(
-      clickhouse::Client& client, const std::string& database, const std::vector<std::string>& names) {
-    std::string sql =
+      ChExecutor& db, const std::string& database, const std::vector<std::string>& names) {
+    SqlParams params;
+    const std::string database_placeholder = params.text(database);
+    const std::string name_list = params.texts(names);
+    const std::string sql =
         "SELECT toString(database), toString(name), toString(engine_full), toString(create_table_query), "
-        "toString(as_select) FROM system.tables WHERE database = " + quote(database) + " AND name IN (";
-    for (size_t i = 0; i < names.size(); ++i) {
-      if (i) sql += ", ";
-      sql += quote(names[i]);
-    }
-    sql += ")";
+        "toString(as_select) FROM system.tables WHERE database = " + database_placeholder + " AND name IN (" + name_list + ")";
     std::vector<std::pair<std::string, DdlTexts>> fetched;
-    ch_select(client, sql, [&](const clickhouse::Block& block) {
+    db.select(sql, params.list(), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         fetched.emplace_back(object_key(ch_block_text_at(block, 0, row), ch_block_text_at(block, 1, row)),
                              DdlTexts{ch_block_text_at(block, 2, row), ch_block_text_at(block, 3, row),

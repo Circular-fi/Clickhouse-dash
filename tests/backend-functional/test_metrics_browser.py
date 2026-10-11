@@ -571,11 +571,12 @@ def test_summary_quantiles_are_per_series(meta):
     assert body["per_series"] is True and body["note"] and body["group_by"] == []
     assert "p50" in body["aggs"] and "p90" in body["aggs"] and body["aggs"][-2:] == ["avg", "count_rate"]
     rows = ch_rows(
-        f"SELECT toString(cityHash64(Attributes, ResourceAttributes)) AS sid, "
+        f"SELECT toString(cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion)) AS sid, "
         f"{bucket_expr(size)} AS b, argMax(`ValueAtQuantiles.Value`[indexOf(`ValueAtQuantiles.Quantile`, 0.9)], TimeUnix) AS v "
         f"FROM {table(meta, kind)} WHERE ServiceName = {q(ref['s'])} AND MetricName = {q(ref['m'])} "
         f"AND TimeUnix >= fromUnixTimestamp64Milli({start}) AND TimeUnix <= fromUnixTimestamp64Milli({end}) "
         f"GROUP BY sid, b SETTINGS output_format_json_quote_64bit_integers = 0")
+    # The identity of a series holds the scope of the instrument when the table has it (docs/metrics.md, Series identity).
     expected = {(r["sid"], int(r["b"])): r["v"] for r in rows}
     got = {}
     for s in body["series"]:

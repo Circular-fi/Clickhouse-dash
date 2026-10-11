@@ -48,6 +48,7 @@ std::string search_json(const SearchAnswer& answer) {
   w.Key("v"); w.Int(3);
   w.Key("source_host_id"); write_json_text(w, answer.source_host_id);
   w.Key("search_path"); write_json_text(w, outcome.search_path);
+  w.Key("rank_by"); write_json_text(w, outcome.rank_by);
   if (!outcome.fallback_reason.empty()) { w.Key("fallback_reason"); write_json_text(w, outcome.fallback_reason); }
   if (outcome.partial) {
     w.Key("partial"); w.Bool(true);

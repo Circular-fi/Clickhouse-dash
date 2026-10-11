@@ -3,6 +3,7 @@
 #include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
 #include "ch_client_pool.hpp"
+#include "ch_executor.hpp"
 #include "sql_literal.hpp"
 
 #include <algorithm>
@@ -52,11 +53,11 @@ bool block_bool_at(const clickhouse::Block& block, size_t column, size_t row, bo
   return false;
 }
 
-// CHECK GRANT on a client: nullopt when no row could be read.
-std::optional<bool> select_check_grant(clickhouse::Client& client, const std::string& expression) {
+// CHECK GRANT on a connection: nullopt when no row could be read.
+std::optional<bool> select_check_grant(ChExecutor& db, const std::string& expression) {
   bool seen = false;
   bool granted = false;
-  ch_select(client, "CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
+  db.select("CHECK GRANT " + expression, [&](const clickhouse::Block& block) {
     if (seen || block.GetRowCount() == 0 || block.GetColumnCount() == 0) return;
     bool parsed = false;
     const bool value = block_bool_at(block, 0, 0, &parsed);
@@ -66,6 +67,11 @@ std::optional<bool> select_check_grant(clickhouse::Client& client, const std::st
   });
   if (!seen) return std::nullopt;
   return granted;
+}
+
+std::optional<bool> select_check_grant(clickhouse::Client& client, const std::string& expression) {
+  BorrowedExecutor db(client);
+  return select_check_grant(db, expression);
 }
 
 std::vector<std::string> select_names(clickhouse::Client& client, const std::string& sql) {
@@ -293,14 +299,19 @@ bool check_grant_expression(clickhouse::Client& client, const std::string& expre
   return answer.value_or(false);
 }
 
-std::optional<std::string> missing_select_grant(clickhouse::Client& client, const std::string& database, const std::string& table) {
+std::optional<std::string> missing_select_grant(ChExecutor& db, const std::string& database, const std::string& table) {
   try {
-    bool decoded = false;
-    if (check_grant_expression(client, "SELECT ON " + qualified_ident(database, table), &decoded) || !decoded) return std::nullopt;
+    const auto answer = select_check_grant(db, "SELECT ON " + qualified_ident(database, table));
+    if (!answer || *answer) return std::nullopt;
     return "SELECT ON " + database + "." + table;
   } catch (const std::exception&) {
     return std::nullopt;
   }
+}
+
+std::optional<std::string> missing_select_grant(clickhouse::Client& client, const std::string& database, const std::string& table) {
+  BorrowedExecutor db(client);
+  return missing_select_grant(db, database, table);
 }
 
 std::string AllowedObjectSet::table_key(const std::string& database, const std::string& table) {

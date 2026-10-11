@@ -2,6 +2,7 @@
 #include "ch_error.hpp"
 #include "json_parse.hpp"
 #include "json_text.hpp"
+#include "service_result.hpp"
 #include "sql_lexer.hpp"
 
 #include <rapidjson/document.h>
@@ -35,12 +36,7 @@ void json_error(httplib::Response& res, int status, std::string_view code, std::
 
 void json_not_granted(httplib::Response& res, int status, std::string_view code, std::string_view user, std::string_view grant,
                       std::string_view what) {
-  std::string message(what);
-  message += ": DB::Exception: ";
-  message += user;
-  message += ": Not enough privileges. To execute this query, it's necessary to have the grant ";
-  message += grant;
-  json_error(res, status, code, message);
+  send_error(res, not_granted_error(status, std::string(code), std::string(user), std::string(grant), std::string(what)));
 }
 
 ApiError error_from_clickhouse(const std::exception& error, std::string_view area, std::string_view failed_code) {

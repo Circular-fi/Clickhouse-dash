@@ -7,6 +7,8 @@
 #include "allowed_objects.hpp"
 #include "explorer_catalog.hpp"
 #include "explorer_graph.hpp"
+#include "explorer_service.hpp"
+#include "metrics_service.hpp"
 #include "system_monitor.hpp"
 #include "system_activity.hpp"
 #include "deep_analysis_jobs.hpp"
@@ -407,8 +409,7 @@ private:
   void handle_explorer_table_data(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_graph(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_graph_definition(const httplib::Request& req, httplib::Response& res);
-  bool explorer_graph_snapshot(const httplib::Request& req, httplib::Response& res, const std::string& host_id,
-                               std::shared_ptr<const ExplorerGraph>& graph, bool& stale);
+  std::unique_ptr<ChExecutor> open_explorer_executor(const std::string& uri, std::string* error);
   void handle_explorer_functions(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_storage(const httplib::Request& req, httplib::Response& res);
   void handle_system_activity(const httplib::Request& req, httplib::Response& res);
@@ -441,6 +442,7 @@ private:
   void handle_traces_context(const httplib::Request& req, httplib::Response& res);
   // The connection of the Traces service to the trace source of a host (the system account); null with the reason in *error.
   std::unique_ptr<ChExecutor> open_trace_executor(const HostSpec& host, std::string* error);
+  std::unique_ptr<ChExecutor> open_metrics_executor(const HostSpec& host, std::string* error);
   // Span-level search (keyset pages over newest-first time slices) and one
   // span by its row key, for the search page's Spans mode.
   void handle_traces_spans(const httplib::Request& req, httplib::Response& res);
@@ -523,11 +525,6 @@ private:
     bool estimated = false;
     bool timed_out = false;
     uint64_t query_ms = 0;
-  };
-  // The serialized catalog of the Metrics page (api_metrics.cpp), and the time its read took.
-  struct MetricsCatalogAnswer {
-    std::string body;
-    int64_t query_ms = 0;
   };
   struct LogFacetValues {
     std::vector<std::pair<std::string, uint64_t>> values;
@@ -646,6 +643,13 @@ private:
   // Server-wide storage distribution for the Explorer System section.
   TtlCache<std::string, ExplorerStorageMap> explorer_storage_cache_{cache_options<ExplorerStorageMap>(
       explorer_ttl(), std::chrono::minutes(1), 256, 32u << 20, cache_size::storage)};
+
+  // The Explorer service (explorer_service.hpp): the privileges of the runner, these caches, and the two connections of a read.
+  explorer::ExplorerService explorer_service_{
+      [this](const std::string& uri, std::string* error) { return open_explorer_executor(uri, error); },
+      [this](const HostSpec& host) { return runner_access(host); }, acl_, explorer_caches_,
+      explorer::ExplorerStores{explorer_catalog_list_cache_, explorer_catalog_cache_, explorer_table_detail_cache_, explorer_graph_cache_,
+                               explorer_functions_cache_, explorer_storage_cache_}};
   // Short-lived snapshots shared by every viewer of a host, so an auto-refreshing page costs one read per TTL.
   TtlCache<std::string, SystemActivity> system_activity_cache_{cache_options<SystemActivity>(
       live_ttl(), std::chrono::seconds(10), 256, 32u << 20, cache_size::activity)};
@@ -689,15 +693,18 @@ private:
       [](const LogFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
 
   // The catalog of the Metrics page: per host, source and minute-aligned window.
-  TtlCache<std::string, MetricsCatalogAnswer> metrics_catalog_cache_{cache_options<MetricsCatalogAnswer>(
-      std::chrono::minutes(1), {}, 256, 64u << 20,
-      [](const MetricsCatalogAnswer& v) { return sizeof(v) + v.body.size(); })};
+  metrics::CatalogCache metrics_catalog_cache_{cache_options<metrics::CatalogSnapshot>(
+      std::chrono::minutes(1), {}, 256, 64u << 20, [](const metrics::CatalogSnapshot& v) { return metrics::snapshot_bytes(v); })};
 
   // What the Logs, Metrics and Traces-logs routes read about a source (otel_caches.hpp).
   SignalMetaCache signal_meta_cache_{signal_meta_cache_options()};
   LogsSchemaCache logs_schema_cache_{logs_schema_cache_options()};
   LogColumnsCache log_columns_cache_{log_columns_cache_options()};
   KindTablesCache kind_tables_cache_{kind_tables_cache_options()};
+
+  // The Metrics service (metrics_service.hpp): the catalog and the kind tables are its caches.
+  metrics::MetricsService metrics_service_{[this](const HostSpec& host, std::string* error) { return open_metrics_executor(host, error); },
+                                           metrics::MetricsCaches{metrics_catalog_cache_, kind_tables_cache_}};
 
   // The Traces service (trace_service.hpp) and the cache of its attribute columns.
   trace::AttributeMapCache trace_attribute_maps_cache_{trace::attribute_map_cache_options()};

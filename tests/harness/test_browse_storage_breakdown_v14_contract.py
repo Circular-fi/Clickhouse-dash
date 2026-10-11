@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_catalog, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,11 +28,12 @@ def test_browse_uses_flat_storage_breakdown_and_share_tile() -> None:
 
 def test_tuple_subcolumns_and_structure_sizes_are_loaded_from_clickhouse_metadata() -> None:
     header = read("src/explorer_catalog.hpp")
-    catalog = read("src/explorer_catalog.cpp")
-    api = read("src/api_explorer.cpp")
+    catalog = read_catalog()
+    api = read_api()
     assert "bool is_subcolumn = false;" in header
     assert "std::string parent_name;" in header
-    assert "describe_include_subcolumns = 1" in catalog
+    assert "describe_sql(database_, table_, true)" in read_unit("explorer_detail.cpp")
+    assert '" SETTINGS describe_include_subcolumns = " +' in catalog and '(with_subcolumns ? "1" : "0")' in catalog
     assert "subcolumns.names" in catalog
     assert "subcolumns.data_compressed_bytes" in catalog
     assert "subcolumns.data_uncompressed_bytes" in catalog

@@ -33,6 +33,8 @@
 #include "time_util.hpp"
 #include "ttl_cache.hpp"
 #include "json_text.hpp"
+#include "logs_drain.hpp"
+#include "logs_text.hpp"
 #include "sql_literal.hpp"
 #include "sql_params.hpp"
 
@@ -57,8 +59,8 @@
 namespace chdash {
 namespace {
 
-using sql::like_escape;
 using sql::quote_ident;
+using namespace logs;
 
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 using Clock = std::chrono::steady_clock;
@@ -79,7 +81,6 @@ constexpr int64_t kSearchWindowsSeconds[] = {15 * 60, 60 * 60, 6 * 60 * 60, 24 *
 constexpr int64_t kSubstringWindowSeconds = 15 * 60;
 constexpr int64_t kSubstringMaxRangeMs = 6LL * 60 * 60 * 1000;
 constexpr size_t kBodyMaxChars = 16384;
-constexpr size_t kMaxTextTerms = 16;
 constexpr size_t kMaxAttrFilters = 16;
 
 std::string quote(std::string_view value) { return otel::allowlist_quote_string(value); }
@@ -216,90 +217,6 @@ LogsSchema load_schema(LogsSchemaCache& cache, clickhouse::Client& client, const
 
 // ---------------------------------------------------------------------------
 // Filters.
-
-// tokenbf_v1 / hasToken() split on every ASCII non-alphanumeric byte; bytes
-// >= 0x80 (UTF-8) belong to tokens.
-bool token_byte(unsigned char ch) {
-  return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch >= 0x80;
-}
-
-std::vector<std::string> split_tokens(std::string_view text) {
-  std::vector<std::string> out;
-  std::string current;
-  for (char c : text) {
-    if (token_byte(static_cast<unsigned char>(c))) {
-      current.push_back(c);
-    } else if (!current.empty()) {
-      out.push_back(current);
-      current.clear();
-    }
-  }
-  if (!current.empty()) out.push_back(current);
-  return out;
-}
-
-struct TextTerm {
-  std::string text;
-  bool negate = false;
-};
-
-// Whitespace-separated terms, "quoted phrases" and -negated terms.
-std::vector<TextTerm> parse_terms(std::string_view q) {
-  std::vector<TextTerm> terms;
-  size_t i = 0;
-  while (i < q.size()) {
-    while (i < q.size() && std::isspace(static_cast<unsigned char>(q[i]))) ++i;
-    if (i >= q.size()) break;
-    TextTerm term;
-    if (q[i] == '-' && i + 1 < q.size() && !std::isspace(static_cast<unsigned char>(q[i + 1]))) {
-      term.negate = true;
-      ++i;
-    }
-    if (q[i] == '"') {
-      const size_t close = q.find('"', i + 1);
-      const size_t end = close == std::string_view::npos ? q.size() : close;
-      term.text = std::string(q.substr(i + 1, end - i - 1));
-      i = close == std::string_view::npos ? q.size() : close + 1;
-    } else {
-      size_t end = i;
-      while (end < q.size() && !std::isspace(static_cast<unsigned char>(q[end]))) ++end;
-      term.text = std::string(q.substr(i, end - i));
-      i = end;
-    }
-    if (!term.text.empty()) terms.push_back(std::move(term));
-  }
-  return terms;
-}
-
-std::string to_lower_ascii(std::string text) {
-  for (char& c : text) {
-    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-  }
-  return text;
-}
-
-// Token mode: every token of a term must be present (hasToken, served by the
-// tokenbf index); a term with separators ("analytics.events_buffer",
-// "key=user:12") must also appear verbatim, which position() checks on the
-// granules the index kept.
-std::string token_term_sql(const TextTerm& term, bool lower_index, SqlParams& params) {
-  const std::string body = lower_index ? "lower(Body)" : "Body";
-  const std::string text = lower_index ? to_lower_ascii(term.text) : term.text;
-  const auto tokens = split_tokens(text);
-  std::vector<std::string> parts;
-  for (const auto& token : tokens) parts.push_back("hasToken(" + body + ", " + params.text(token) + ")");
-  if (!(tokens.size() == 1 && tokens.front() == text)) {
-    parts.push_back(std::string(lower_index ? "positionCaseInsensitive(Body, " : "position(Body, ") + params.text(term.text) + ") > 0");
-  }
-  std::string sql = "(";
-  for (size_t i = 0; i < parts.size(); ++i) sql += (i ? " AND " : "") + parts[i];
-  sql += ")";
-  return term.negate ? "NOT " + sql : sql;
-}
-
-std::string substring_term_sql(const TextTerm& term, SqlParams& params) {
-  return std::string("Body ") + (term.negate ? "NOT " : "") + "ILIKE " + params.text("%" + like_escape(term.text) + "%");
-}
 
 struct Severity {
   const char* name;
@@ -770,227 +687,6 @@ std::string bucket_sql(const LogsSchema& schema, int64_t size, int64_t origin) {
       : "toUnixTimestamp64Milli(Timestamp)";
   return std::to_string(origin) + " + intDiv(" + ms + " - " + std::to_string(origin) + ", " + std::to_string(size) +
          ") * " + std::to_string(size);
-}
-
-// ---------------------------------------------------------------------------
-// Patterns: masking + a Drain port (He et al. 2017, as in HyperDX's
-// common-utils/drain: depth 4, similarity 0.4, 100 children per node).
-
-const std::string kParam = "<*>";
-
-bool is_hex(char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; }
-bool is_digit(char c) { return c >= '0' && c <= '9'; }
-bool is_word(char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_'; }
-
-// Replaces variable parts with <*>: quoted strings, UUIDs, long hex ids,
-// IPv4 addresses and numbers that are not glued to a word (v1 stays).
-std::string mask_body(std::string_view body) {
-  std::string out;
-  out.reserve(std::min<size_t>(body.size(), 2048));
-  const size_t n = std::min<size_t>(body.size(), 2048);
-  size_t i = 0;
-  const auto emit_param = [&]() {
-    if (out.size() < kParam.size() || out.compare(out.size() - kParam.size(), kParam.size(), kParam) != 0) out += kParam;
-  };
-  while (i < n) {
-    const char c = body[i];
-    if ((c == '"' || c == '\'') && (i == 0 || !is_word(body[i - 1]))) {
-      const size_t close = body.find(c, i + 1);
-      if (close != std::string_view::npos && close < n && close - i <= 256) {
-        emit_param();
-        i = close + 1;
-        continue;
-      }
-    }
-    if (is_hex(c) && (i == 0 || !is_word(body[i - 1]))) {
-      // Run of hex digits and dashes (UUIDs, trace ids, traceparent parts).
-      size_t j = i;
-      size_t hex_count = 0;
-      bool digit = false, dash = false;
-      while (j < n && (is_hex(body[j]) || body[j] == '-')) {
-        if (body[j] == '-') dash = true;
-        else ++hex_count;
-        if (is_digit(body[j])) digit = true;
-        ++j;
-      }
-      if (hex_count >= 8 && digit && (j == n || !is_word(body[j]))) {
-        (void)dash;
-        emit_param();
-        i = j;
-        continue;
-      }
-    }
-    if (is_digit(c) && (i == 0 || !std::isalpha(static_cast<unsigned char>(body[i - 1])))) {
-      size_t j = i;
-      while (j < n && (is_digit(body[j]) || (body[j] == '.' && j + 1 < n && is_digit(body[j + 1])))) ++j;
-      if (j == n || !std::isalpha(static_cast<unsigned char>(body[j]))) {
-        emit_param();
-        i = j;
-        continue;
-      }
-      out.append(body.substr(i, j - i));
-      i = j;
-      continue;
-    }
-    out.push_back(c);
-    ++i;
-  }
-  return out;
-}
-
-std::vector<std::string> whitespace_tokens(const std::string& text) {
-  std::vector<std::string> out;
-  std::string current;
-  for (char c : text) {
-    if (std::isspace(static_cast<unsigned char>(c))) {
-      if (!current.empty()) out.push_back(std::move(current));
-      current.clear();
-    } else {
-      current.push_back(c);
-    }
-  }
-  if (!current.empty()) out.push_back(std::move(current));
-  if (out.size() > 64) out.resize(64);
-  return out;
-}
-
-struct Cluster {
-  std::vector<std::string> tokens;
-  size_t size = 0;
-  std::string sample;
-  std::vector<uint32_t> buckets;
-  std::map<std::string, size_t> services;
-  size_t severity[4] = {0, 0, 0, 0};
-};
-
-struct DrainNode {
-  std::map<std::string, std::unique_ptr<DrainNode>> children;
-  std::vector<size_t> clusters;
-};
-
-class Drain {
- public:
-  static constexpr int kDepth = 4;
-  static constexpr double kSimilarity = 0.4;
-  static constexpr size_t kMaxChildren = 100;
-  // The clusters of one leaf (the messages of one length that start alike): past this a message joins the nearest cluster
-  // whatever its similarity, so the search for the best one stays short (50 comparisons at most for each message).
-  static constexpr size_t kMaxClustersPerLeaf = 50;
-
-  size_t add(const std::vector<std::string>& tokens) {
-    DrainNode* leaf = descend(tokens, false);
-    if (leaf) {
-      const size_t match = best_match(*leaf, tokens, leaf->clusters.size() >= kMaxClustersPerLeaf);
-      if (match != SIZE_MAX) {
-        Cluster& c = clusters_[match];
-        for (size_t i = 0; i < c.tokens.size(); ++i) {
-          if (c.tokens[i] != tokens[i]) c.tokens[i] = kParam;
-        }
-        ++c.size;
-        return match;
-      }
-    }
-    clusters_.push_back(Cluster{tokens, 1, {}, {}, {}, {0, 0, 0, 0}});
-    const size_t id = clusters_.size() - 1;
-    descend(tokens, true)->clusters.push_back(id);
-    return id;
-  }
-
-  std::vector<Cluster>& clusters() { return clusters_; }
-
- private:
-  static bool has_digit(const std::string& token) {
-    return std::any_of(token.begin(), token.end(), is_digit);
-  }
-
-  // Root -> token count -> first (depth - 2) tokens -> leaf cluster list.
-  DrainNode* descend(const std::vector<std::string>& tokens, bool create) {
-    const std::string length_key = std::to_string(tokens.size());
-    auto it = root_.children.find(length_key);
-    if (it == root_.children.end()) {
-      if (!create) return nullptr;
-      it = root_.children.emplace(length_key, std::make_unique<DrainNode>()).first;
-    }
-    DrainNode* node = it->second.get();
-    int depth = 1;
-    for (const auto& token : tokens) {
-      if (depth >= kDepth - 2 || depth >= static_cast<int>(tokens.size())) break;
-      auto child = node->children.find(token);
-      if (child != node->children.end()) {
-        node = child->second.get();
-      } else if (!create) {
-        auto wildcard = node->children.find(kParam);
-        if (wildcard == node->children.end()) return nullptr;
-        node = wildcard->second.get();
-      } else {
-        const bool wildcard_exists = node->children.count(kParam) > 0;
-        std::string key = token;
-        if (has_digit(token) || token == kParam) key = kParam;
-        else if (wildcard_exists ? node->children.size() >= kMaxChildren : node->children.size() + 1 >= kMaxChildren) key = kParam;
-        auto& slot = node->children[key];
-        if (!slot) slot = std::make_unique<DrainNode>();
-        node = slot.get();
-      }
-      ++depth;
-    }
-    return node;
-  }
-
-  size_t best_match(const DrainNode& leaf, const std::vector<std::string>& tokens, bool force = false) const {
-    double best_similarity = -1;
-    int best_params = -1;
-    size_t best = SIZE_MAX;
-    for (size_t id : leaf.clusters) {
-      const Cluster& c = clusters_[id];
-      if (c.tokens.size() != tokens.size()) continue;
-      size_t same = 0;
-      int params = 0;
-      for (size_t i = 0; i < tokens.size(); ++i) {
-        if (c.tokens[i] == kParam) ++params;
-        else if (c.tokens[i] == tokens[i]) ++same;
-      }
-      const double similarity = tokens.empty() ? 1.0 : static_cast<double>(same) / static_cast<double>(tokens.size());
-      if (similarity > best_similarity || (similarity == best_similarity && params > best_params)) {
-        best_similarity = similarity;
-        best_params = params;
-        best = id;
-      }
-    }
-    return best_similarity >= kSimilarity || force ? best : SIZE_MAX;
-  }
-
-  DrainNode root_;
-  std::vector<Cluster> clusters_;
-};
-
-// The constant words of a template as a token search: "<*>" parts dropped,
-// "key=user:<*>" kept as the term "key=user:".
-std::string pattern_search_text(const std::vector<std::string>& tokens) {
-  std::string out;
-  size_t terms = 0;
-  for (const auto& token : tokens) {
-    size_t start = 0;
-    while (start <= token.size() && terms < kMaxTextTerms) {
-      const size_t at = token.find(kParam, start);
-      const std::string piece = token.substr(start, at == std::string::npos ? std::string::npos : at - start);
-      if (!split_tokens(piece).empty()) {
-        const bool needs_quotes = piece.find('"') == std::string::npos && piece.front() == '-';
-        if (!out.empty()) out.push_back(' ');
-        out += needs_quotes ? "\"" + piece + "\"" : piece;
-        ++terms;
-      }
-      if (at == std::string::npos) break;
-      start = at + kParam.size();
-    }
-  }
-  return out;
-}
-
-int severity_index(int number) {
-  if (number >= 17) return 0;
-  if (number >= 13) return 1;
-  if (number >= 9) return 2;
-  return 3;
 }
 
 } // namespace

@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_graph, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -11,24 +12,31 @@ def read(path: str) -> str:
 
 def test_graph_definition_route_stands_on_the_runner_acl_snapshot_and_runs_no_sql() -> None:
     server = read("src/server.cpp")
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     assert 'http_.Get("/api/explorer/graph/definition"' in server
-    handler = api[api.index("void Server::handle_explorer_graph_definition"):]
+    route = read_unit("api_explorer.cpp")
+    handler = route[route.index("void Server::handle_explorer_graph_definition"):]
     handler = handler[:handler.index("\n}\n")]
     # Same AllowedObjectSet boundary as the graph route, served from the
     # cached authorized graph: no caller-supplied SQL, no new query.
-    assert "explorer_graph_snapshot(req, res, host_id, graph, stale)" in handler
+    assert "explorer_service_.definition(" in handler
     assert ".Select(" not in handler and "try_select" not in handler
-    assert 'candidate.layer == "logical" && candidate.id == id' in handler
-    assert "unknown_object" in handler
-    assert "definition.target_visible && !definition.target_table.empty()" in handler
-    snapshot = api[api.index("bool Server::explorer_graph_snapshot"):]
+    service = read_unit("explorer_service.cpp")
+    definition = service[service.index("ExplorerService::definition("):]
+    definition = definition[:definition.index("\n}\n")]
+    # The graph snapshot is the one of the graph route; the object is found in it by its names, and nothing is read from ClickHouse.
+    assert "graph_snapshot(host, host_id, refresh)" in definition
+    assert 'candidate.layer == "logical" && candidate.database == database && candidate.name == table' in definition
+    assert "unknown_object" in definition
+    assert "connect_(" not in definition and ".Select(" not in definition and "try_select" not in definition
+    assert "definition.target_visible && !definition.target_table.empty()" in read_unit("explorer_json.cpp")
+    snapshot = service[service.index("ExplorerService::graph_snapshot"):service.index("ExplorerService::graph(")]
     assert "allowed = acl_.table_set(access);" in snapshot
-    assert "explorer_graph_cache_.get_revalidating" in snapshot
+    assert "stores_.graph.get_revalidating" in snapshot
 
 
 def test_graph_definitions_never_name_objects_outside_the_allowed_set() -> None:
-    graph = read("src/explorer_graph.cpp")
+    graph = read_graph()
     header = read("src/explorer_graph.hpp")
     assert "std::unordered_map<std::string, ExplorerGraphDefinition> definitions;" in header
     assert "definition.target_visible = allowed.allows_table(database, name);" in graph
@@ -42,10 +50,10 @@ def test_graph_definitions_never_name_objects_outside_the_allowed_set() -> None:
 
 
 def test_graph_expansions_are_bounded_and_only_grow_from_shown_anchors() -> None:
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     assert "constexpr size_t kMaxGraphExpansions = 64;" in api
     assert 'req.get_param_value_count("expand")' in api
-    assert "if (!included.count(anchor)) continue;" in api
+    assert "if (!out.included[anchor]) continue;" in api
     assert 'w.Key("hidden_upstream")' in api and 'w.Key("hidden_downstream")' in api
     app_api = read("src/static/app_api.js")
     assert 'query.append("expand", String(item))' in app_api

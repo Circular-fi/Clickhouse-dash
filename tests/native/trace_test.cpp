@@ -10,6 +10,8 @@
 // Run:   ./build/chdash_trace_test   (exit code 0 = every check passed)
 
 #include "api_error.hpp"
+#include "fake_executor.hpp"
+#include "native_check.hpp"
 #include "ch_error.hpp"
 #include "ch_executor.hpp"
 #include "trace_analytics.hpp"
@@ -43,32 +45,9 @@
 
 using namespace chdash;
 using namespace chdash::trace;
+using namespace nt;
 
 namespace {
-
-int g_failures = 0;
-int g_checks = 0;
-
-#define CHECK(cond)                                                                        \
-  do {                                                                                     \
-    ++g_checks;                                                                            \
-    if (!(cond)) {                                                                         \
-      ++g_failures;                                                                        \
-      std::cerr << __FILE__ << ":" << __LINE__ << ": CHECK failed: " #cond << std::endl;   \
-    }                                                                                      \
-  } while (0)
-
-#define CHECK_EQ(a, b)                                                                                   \
-  do {                                                                                                   \
-    ++g_checks;                                                                                          \
-    const auto va = (a);                                                                                 \
-    const auto vb = (b);                                                                                 \
-    if (!(va == vb)) {                                                                                   \
-      ++g_failures;                                                                                      \
-      std::cerr << __FILE__ << ":" << __LINE__ << ": CHECK_EQ failed: " #a " == " #b << "\n  left : " << va \
-                << "\n  right: " << vb << std::endl;                                                     \
-    }                                                                                                    \
-  } while (0)
 
 httplib::Request request(std::initializer_list<std::pair<const char*, const char*>> params) {
   httplib::Request req;
@@ -338,98 +317,6 @@ void test_buckets_and_grid() {
            std::string("toString(34567 + intDiv(toUnixTimestamp64Milli(trace_start) - 34567, 60000) * 60000)"));
 }
 
-// ---- a fake ClickHouse ----
-
-using Row = std::vector<std::string>;
-using Rows = std::vector<Row>;
-
-// A statement is answered by the first rule whose text it contains (a rule may answer a number of times only, or throw). Every
-// statement is kept, with its parameters.
-class FakeDb final : public ChExecutor {
- public:
-  struct Rule {
-    std::string contains;
-    std::function<Rows(const std::string&)> answer;
-    std::function<clickhouse::Block(const std::string&)> block;
-    std::function<void()> fail;
-    int remaining = -1;  // -1: always
-  };
-
-  std::vector<std::string> sqls;
-  std::vector<ChParams> params;
-  std::vector<Rule> rules;
-  int invalidated = 0, renewed = 0;
-  bool renew_ok = true;
-  BoundedRead bounded_result;  // what a bounded statement reports that it read
-
-  void on(const std::string& contains, Rows rows, int times = -1) {
-    rules.push_back(Rule{contains, [rows](const std::string&) { return rows; }, {}, {}, times});
-  }
-  void on_fn(const std::string& contains, std::function<Rows(const std::string&)> answer, int times = -1) {
-    rules.push_back(Rule{contains, std::move(answer), {}, {}, times});
-  }
-  void on_block(const std::string& contains, std::function<clickhouse::Block(const std::string&)> block) {
-    rules.push_back(Rule{contains, {}, std::move(block), {}, -1});
-  }
-  void fail_on(const std::string& contains, std::function<void()> thrower, int times = -1) {
-    rules.push_back(Rule{contains, {}, {}, std::move(thrower), times});
-  }
-
-  using ChExecutor::select;
-  using ChExecutor::bounded_select;
-
-  void select(const std::string& sql, const ChParams& sent, const OnBlock& on_block) override {
-    sqls.push_back(sql);
-    params.push_back(sent);
-    for (auto& rule : rules) {
-      if (rule.remaining == 0 || sql.find(rule.contains) == std::string::npos) continue;
-      if (rule.remaining > 0) --rule.remaining;
-      if (rule.fail) rule.fail();
-      if (rule.block) {
-        on_block(rule.block(sql));
-        return;
-      }
-      deliver(rule.answer(sql), on_block);
-      return;
-    }
-  }
-  BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block, const ChParams& sent) override {
-    select(sql, sent, on_block);
-    return bounded_result;
-  }
-  void invalidate() override { ++invalidated; }
-  bool renew(std::string* error) override {
-    ++renewed;
-    if (!renew_ok && error) *error = "no more connections";
-    return renew_ok;
-  }
-
-  size_t count(const std::string& text) const {
-    size_t n = 0;
-    for (const auto& sql : sqls) n += sql.find(text) != std::string::npos;
-    return n;
-  }
-
- private:
-  static void deliver(const Rows& rows, const OnBlock& on_block) {
-    if (rows.empty()) return;
-    clickhouse::Block block;
-    for (size_t c = 0; c < rows.front().size(); ++c) {
-      auto column = std::make_shared<clickhouse::ColumnString>();
-      for (const auto& row : rows) column->Append(row[c]);
-      block.AppendColumn("c" + std::to_string(c), column);
-    }
-    on_block(block);
-  }
-};
-
-clickhouse::ServerException server_error(int code, const std::string& text) {
-  auto exception = std::make_shared<clickhouse::Exception>();
-  exception->code = code;
-  exception->name = "DB::Exception";
-  exception->display_text = text;
-  return clickhouse::ServerException(exception);
-}
 
 // The golden text with its placeholders filled.
 std::string fill(std::string text, const std::map<std::string, std::string>& values) {
@@ -633,6 +520,7 @@ void test_index_without_filters_takes_the_newest_traces() {
   db.on("AS trace_bounds", summary_rows({"t1", "t2", "t3"}));
   const SearchOutcome out = search_with(db, a, false, 3);
   CHECK_EQ(out.search_path, std::string("trace_index"));
+  CHECK_EQ(out.rank_by, std::string("newest_index_row"));
   CHECK(out.fallback_reason.empty());
   CHECK_EQ(out.rows.size(), size_t(3));
   CHECK_EQ(out.rows[0].trace_id, std::string("t1"));
@@ -666,6 +554,7 @@ void test_a_filter_tests_the_traces_of_the_index_in_pages() {
   db.on("AS trace_bounds", summary_rows({"t2", "t4"}));
   const SearchOutcome out = search_with(db, service, true, 2);
   CHECK_EQ(out.search_path, std::string("trace_index_filtered"));
+  CHECK_EQ(out.rank_by, std::string("newest_index_row"));
   CHECK_EQ(out.rows.size(), size_t(2));
   // The page is every trace whose newest index row lies between the newest and the oldest start of the page.
   CHECK_EQ(db.count("AS batch_bounds"), size_t(1));
@@ -697,6 +586,7 @@ void test_the_scan_cap_gives_way_to_the_span_aggregation() {
   CHECK_EQ(db.count("AS batch_bounds"), size_t(5));
   CHECK_EQ(out.fallback_reason, std::string("index_scan_cap"));
   CHECK_EQ(out.search_path, std::string("span_aggregation"));
+  CHECK_EQ(out.rank_by, std::string("first_span"));
   CHECK_EQ(out.rows.size(), size_t(1));
   CHECK_EQ(out.rows[0].trace_id, std::string("s1"));
 }
@@ -711,6 +601,7 @@ void test_an_error_of_the_index_gives_way_to_the_span_aggregation() {
   // No filter, no duration: the index would have answered; the span aggregation did, and the answer says why.
   CHECK_EQ(out.fallback_reason, std::string("index_error"));
   CHECK_EQ(out.search_path, std::string("span_aggregation"));
+  CHECK_EQ(out.rank_by, std::string("first_span"));
   CHECK_EQ(out.rows.size(), size_t(2));
   CHECK_EQ(out.candidate_ms >= 0, true);
 }
@@ -752,6 +643,7 @@ void test_a_duration_bound_ranks_the_spans_and_reads_their_bounds() {
   db.on("ORDER BY min(Timestamp) DESC LIMIT 100", {{"t1", "1789207260000000000", "1789207261500000000"}, {"t2", "1789207300000000000", "1789207302000000000"}});
   const SearchOutcome out = search_with(db, both, true, 100);
   CHECK_EQ(out.search_path, std::string("span_duration_two_phase"));
+  CHECK_EQ(out.rank_by, std::string("first_span"));
   CHECK_EQ(db.sqls.size(), size_t(4));
   CHECK_EQ(db.sqls[0], std::string(golden::kBroadIndexCount));
   CHECK_EQ(db.sqls[1], std::string(golden::kBroadProbe));  // threshold: a quarter of 2,300 index rows, at least 1,000
@@ -987,23 +879,6 @@ void test_the_ranking_of_the_deltas() {
 
 
 // ---- the service ----
-
-// The service gets its connection from a function: here, always the same fake.
-class ForwardDb final : public ChExecutor {
- public:
-  explicit ForwardDb(FakeDb& db) : db_(db) {}
-  using ChExecutor::select;
-  using ChExecutor::bounded_select;
-  void select(const std::string& sql, const ChParams& params, const OnBlock& on_block) override { db_.select(sql, params, on_block); }
-  BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block, const ChParams& params) override {
-    return db_.bounded_select(sql, on_block, params);
-  }
-  void invalidate() override { db_.invalidate(); }
-  bool renew(std::string* error) override { return db_.renew(error); }
-
- private:
-  FakeDb& db_;
-};
 
 // The caches of a service of a test: its own, so nothing is shared between two tests.
 struct TestCaches {
@@ -1270,6 +1145,17 @@ void test_the_service_map_and_its_json() {
   CHECK(fallback.value->sampling.slices > 0);
 }
 
+void test_the_order_of_a_search_is_named_by_its_path() {
+  // The two orders (ARCH-B-083): the index ranks a trace by the Start of its newest index row, the spans by its first span. The paths name which.
+  CHECK_EQ(rank_by_of("trace_index"), std::string("newest_index_row"));
+  CHECK_EQ(rank_by_of("trace_index_filtered"), std::string("newest_index_row"));
+  CHECK_EQ(rank_by_of("trace_index_then_spans"), std::string("newest_index_row_then_first_span"));
+  CHECK_EQ(rank_by_of("span_aggregation"), std::string("first_span"));
+  CHECK_EQ(rank_by_of("span_duration_two_phase"), std::string("first_span"));
+  // A search that was never run says the order of the span paths (the default of the outcome).
+  CHECK_EQ(SearchOutcome{}.rank_by, std::string("first_span"));
+}
+
 void test_the_json_of_the_search() {
   FakeDb db;
   TestCaches cache;
@@ -1285,6 +1171,8 @@ void test_the_json_of_the_search() {
   CHECK(!doc.HasParseError());
   CHECK_EQ(doc["v"].GetInt(), 3);
   CHECK_EQ(std::string(doc["search_path"].GetString()), std::string("trace_index"));
+  // The answer says how its traces are ordered: by the newest index row of the window, not by the first span.
+  CHECK_EQ(std::string(doc["rank_by"].GetString()), std::string("newest_index_row"));
   CHECK(!doc.HasMember("fallback_reason"));
   CHECK_EQ(doc["rows"].Size(), rapidjson::SizeType(2));
   // The services of the rows are in a dictionary; a row holds their index.
@@ -2743,6 +2631,7 @@ void test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones(
   db.on("NOT IN {excluded:Array(String)}", {{"c1", "1789208000000000000", "0"}, {"c2", "1789207900000000000", "0"}, {"c3", "1789207800000000000", "0"}});
   const SearchOutcome out = search_traces(db, errors, false, 5, SearchBudget{}, 50);
   CHECK_EQ(out.search_path, std::string("trace_index_then_spans"));
+  CHECK_EQ(out.rank_by, std::string("newest_index_row_then_first_span"));
   CHECK_EQ(out.fallback_reason, std::string("index_scan_cap"));
   CHECK(!out.partial);
   CHECK_EQ(out.rows.size(), size_t(5));
@@ -2772,6 +2661,7 @@ void test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones(
   none.on("ORDER BY min(Timestamp) DESC LIMIT 5", {{"w1", "1789210000000000000", "0"}});
   const SearchOutcome whole = search_traces(none, errors, false, 5, SearchBudget{}, 50);
   CHECK_EQ(whole.search_path, std::string("span_aggregation"));
+  CHECK_EQ(whole.rank_by, std::string("first_span"));
   CHECK_EQ(whole.fallback_reason, std::string("index_scan_cap"));
   CHECK_EQ(whole.rows.size(), size_t(1));
   CHECK_EQ(none.count("NOT IN {excluded"), size_t(0));
@@ -2791,6 +2681,7 @@ void test_a_search_that_runs_out_of_time_answers_with_what_it_found() {
   CHECK(out.partial);
   CHECK_EQ(out.partial_reason, std::string("time_budget"));
   CHECK_EQ(out.search_path, std::string("trace_index_filtered"));
+  CHECK_EQ(out.rank_by, std::string("newest_index_row"));
   CHECK_EQ(out.rows.size(), size_t(1));
   CHECK_EQ(db.count("AS batch_bounds"), size_t(1));  // one page was tested
   // The traces that were found are summarized: the budget keeps the time for it.
@@ -2807,6 +2698,7 @@ void test_a_search_that_runs_out_of_time_answers_with_what_it_found() {
   CHECK(kept.partial);
   CHECK_EQ(kept.fallback_reason, std::string("index_scan_cap"));
   CHECK_EQ(kept.search_path, std::string("trace_index_filtered"));
+  CHECK_EQ(kept.rank_by, std::string("newest_index_row"));
   CHECK_EQ(capped.count("NOT IN {excluded"), size_t(0));
   CHECK_EQ(kept.rows.size(), size_t(1));
   // The budget is checked before each page: a route with no time left tests nothing and answers an empty partial list.
@@ -2867,16 +2759,6 @@ void test_the_ranking_of_the_older_part_is_exact_for_a_wide_window() {
 
 }  // namespace
 
-// A test that throws is a failure with its name (a sanitizer finding stops the run anyway).
-#define RUN(test)                                                                           \
-  do {                                                                                      \
-    try {                                                                                   \
-      test();                                                                               \
-    } catch (const std::exception& e) {                                                     \
-      ++g_failures;                                                                         \
-      std::cerr << #test << ": threw " << e.what() << std::endl;                            \
-    }                                                                                       \
-  } while (0)
 
 int main() {
   RUN(test_column_filters);
@@ -2917,6 +2799,7 @@ int main() {
   RUN(test_the_box_of_the_deltas_is_checked);
   RUN(test_the_deltas_compare_two_samples);
   RUN(test_the_service_map_and_its_json);
+  RUN(test_the_order_of_a_search_is_named_by_its_path);
   RUN(test_the_json_of_the_search);
   RUN(test_the_json_of_the_charts_and_the_heatmap);
   RUN(test_services_statements_are_unchanged);

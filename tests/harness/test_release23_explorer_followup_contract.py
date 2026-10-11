@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+from explorer_sources import read_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,7 +10,7 @@ def read(path: str) -> str:
 
 
 def test_buffer_lineage_is_reversed_for_destination_details() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     # Buffer routing, reverse dependencies_* and view as_select share one
     # server-wide system.tables scan.
     assert "if(engine = 'Buffer', toString(engine_full), '')" in catalog
@@ -18,7 +19,7 @@ def test_buffer_lineage_is_reversed_for_destination_details() -> None:
     assert "AND engine IN ('Buffer', 'View', 'MaterializedView', 'LiveView', 'WindowView')" in catalog
     assert "OR notEmpty(as_select)" not in catalog
     assert '"AND has(dependencies_table, " + tbl + ") "' in catalog
-    assert 'args.size() >= 2 && args[0] == database && args[1] == table' in catalog
+    assert 'args.size() >= 2 && args[0] == database_ && args[1] == table_' in catalog
     assert 'append_dependency(buffer_db, buffer_table, "upstream", "buffer")' in catalog
     assert '"Buffer reverse-lineage query failed: "' in catalog
 

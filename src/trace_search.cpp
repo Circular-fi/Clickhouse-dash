@@ -308,8 +308,30 @@ std::vector<std::string> complete_by_spans(ChExecutor& db, const TraceScope& sco
 
 }  // namespace
 
+std::string rank_by_of(const std::string& search_path) {
+  if (search_path == "trace_index" || search_path == "trace_index_filtered") return "newest_index_row";
+  if (search_path == "trace_index_then_spans") return "newest_index_row_then_first_span";
+  return "first_span";
+}
+
+namespace {
+
+SearchOutcome search_traces_unranked(ChExecutor& db, const TraceScope& scope, bool key_only_filters, size_t limit, const SearchBudget& budget,
+                                     size_t candidate_cap);
+
+}  // namespace
+
 SearchOutcome search_traces(ChExecutor& db, const TraceScope& scope, bool key_only_filters, size_t limit, const SearchBudget& budget,
                             size_t candidate_cap) {
+  SearchOutcome out = search_traces_unranked(db, scope, key_only_filters, limit, budget, candidate_cap);
+  out.rank_by = rank_by_of(out.search_path);
+  return out;
+}
+
+namespace {
+
+SearchOutcome search_traces_unranked(ChExecutor& db, const TraceScope& scope, bool key_only_filters, size_t limit, const SearchBudget& budget,
+                                     size_t candidate_cap) {
   SearchOutcome out;
   const bool has_candidate_filters = !scope.span_filters.empty();
   const bool needs_span_match = has_candidate_filters || !scope.all_services();
@@ -403,6 +425,8 @@ SearchOutcome search_traces(ChExecutor& db, const TraceScope& scope, bool key_on
   }
   return out;
 }
+
+}  // namespace
 
 }  // namespace trace
 }  // namespace chdash

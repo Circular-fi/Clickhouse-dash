@@ -165,13 +165,13 @@ ORDER BY service, metric, kind LIMIT 5001
  "services": [{"name": "api_service", "metrics": [
    {"name": "http.server.request.duration", "kind": "histogram", "unit": "s",
     "description": "Duration of HTTP server requests.", "temporality": "delta",
-    "monotonic": null, "points": 8641}]}],
+    "monotonic": null, "monotonic_mixed": null, "points": 8641}]}],
  "service_count": 12, "metric_count": 72, "truncated": false, "estimated": false, "limit": 5000,
  "kinds": ["gauge", "sum", "histogram", "exponential_histogram", "summary"],
  "timing_ms": {...}, "cache": {...}}
 ```
 
-`temporality` is `delta`, `cumulative`, `mixed` or `null` (gauges, summaries). `monotonic` is set for sums only.
+`temporality` is `delta`, `cumulative`, `mixed` or `null` (gauges, summaries). `monotonic` and `monotonic_mixed` are set for sums only. `monotonic` is true when at least one series of the metric is monotonic. `monotonic_mixed` is true when some series are monotonic and some are not: the aggregations that the metric offers then follow the monotonic series, and the others can show a rate that is not a rate.
 
 ### `GET /api/metrics/attributes`
 
@@ -198,14 +198,16 @@ Parameters:
 
 | Kind | Aggregations | Computation |
 | --- | --- | --- |
-| gauge | `avg`, `min`, `max`, `last`, `sum` | avg/min/max over every point of the group in the bucket. Per series (`cityHash64(Attributes, ResourceAttributes)`) the last value in the bucket (`argMax(Value, TimeUnix)`): `last` averages them, `sum` adds them. |
+| gauge | `avg`, `min`, `max`, `last`, `sum` | avg/min/max over every point of the group in the bucket. Per series (see "Series identity") the last value in the bucket (`argMax(Value, TimeUnix)`): `last` averages them, `sum` adds them. |
 | sum, monotonic | `rate`, `increase` | Per-point deltas (below), `increase` = their sum per bucket, `rate` = increase / seconds of the bucket inside the window. |
 | sum, not monotonic | `last`, `avg`, `min`, `max` (cumulative) or `sum`, `rate` (delta only) | Cumulative up/down counters are levels: gauge math. |
 | histogram | `p50`, `p90`, `p95`, `p99`, `avg`, `count_rate`, `count` | Bucket counts added per group and bucket, quantiles interpolated. `avg = sum(Sum) / sum(Count)`, `count = sum(Count)`, `count_rate = count / seconds of the bucket inside the window`. |
 | exponential_histogram | same as histogram | Exponential buckets merged, same quantile rule. |
 | summary | `p<q>` for every stored quantile (`p0`, `p50`, `p90`, `p99`, `p100`...), `avg`, `count_rate` | Quantiles per series only. `avg` / `count_rate` from `Count` / `Sum` deltas. |
 
-**Counter deltas and resets.** A delta point (`AggregationTemporality = 1`) contributes its value. A cumulative point (`2`) contributes its difference to the previous point of the same series. The backend finds the previous point with `lagInFrame(...) OVER (PARTITION BY cityHash64(Attributes, ResourceAttributes) ORDER BY TimeUnix)`. When the `StartTimeUnix` changed or the value decreased, it is a counter reset. The point then contributes its whole value, because the counter restarted from zero (Prometheus `increase()` rule). It does not contribute a negative jump. The first point of a series has no predecessor and no delta. For this reason, the scan starts `max(bucket, 15 min)` before `start_ms`, and the backend counts only the points inside the window. Deltas land in the bucket of the later point.
+**Series identity.** Two points belong to one series when they have the same `Attributes` and `ResourceAttributes` and the same `ScopeName` and `ScopeVersion`: the series is `cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion)`. Two instrumentation scopes can write the same metric with the same attributes. Without the scope, their points would be one series, and the differences between them would show false resets. A table that has no `ScopeName` or no `ScopeVersion` column (the backend reads this from `system.columns` with the kind tables, and keeps it for 60 s) has the series of `cityHash64(Attributes, ResourceAttributes)`.
+
+**Counter deltas and resets.** A delta point (`AggregationTemporality = 1`) contributes its value. A cumulative point (`2`) contributes its difference to the previous point of the same series. The backend finds the previous point with `lagInFrame(...) OVER (PARTITION BY <series> ORDER BY TimeUnix)`. When the `StartTimeUnix` changed or the value decreased, it is a counter reset. The point then contributes its whole value, because the counter restarted from zero (Prometheus `increase()` rule). It does not contribute a negative jump. The first point of a series has no predecessor and no delta. For this reason, the scan starts `max(bucket, 15 min)` before `start_ms`, and the backend counts only the points inside the window. Deltas land in the bucket of the later point.
 
 **Histogram differences.** The backend differences cumulative histogram points in the same way. It does this element by element on `BucketCounts` and on `Count` / `Sum`. A reset keeps the own counts of the point. These events are a reset:
 
@@ -215,7 +217,7 @@ Parameters:
 - A different bucket count.
 - Different `ExplicitBounds`.
 
-The backend then adds the differences with `sumForEach` for each group, bucket and bounds. If the series of a group use different bounds, the backend merges them in C++. It moves each source bucket to the target bucket that holds its upper bound. Metrics where all points are delta skip the window function entirely.
+The backend then adds the differences with `sumForEach` for each group, bucket and bounds. The rows are in the order of their bounds (`ORDER BY g, b, bstr`). If the series of a group use different bounds, the backend merges them in C++ onto the sorted union of all their bounds. Each source bucket goes to the bucket that has its upper bound, and a row with no bounds is one `+Inf` bucket. The result does not depend on the order of the rows. Metrics where all points are delta skip the window function entirely.
 
 **Quantiles** follow Prometheus `histogram_quantile`:
 
@@ -235,12 +237,12 @@ The backend then adds the differences with `sumForEach` for each group, bucket a
 - Min and max are kept.
 - Histogram buckets are merged before the quantile.
 
-Per-series summaries fold nothing (`truncated: true` only). ClickHouse returns at most 300000 (group, bucket) rows. Beyond that, `truncated_rows: true`.
+Per-series summaries fold nothing (`truncated: true` only). ClickHouse returns at most 300000 (group, bucket) rows, in the order of the group key. Beyond that, `truncated_rows: true`. The groups at the end of that order are then missing, and the top-K is the top-K of the groups that remain. When `truncated_rows` is true, narrow the window or add a filter, or group by fewer keys: the ranking is not exact.
 
 ```json
 {"v": 1, "source_host_id": "local", "kind": "histogram", "service": "api_service",
  "metric": "http.server.request.duration", "unit": "s", "description": "...",
- "temporality": "delta", "monotonic": null, "points": 8641,
+ "temporality": "delta", "monotonic": null, "monotonic_mixed": null, "points": 8641,
  "agg": "p95", "default_agg": "p50",
  "aggs": ["p50", "p90", "p95", "p99", "avg", "count_rate", "count"],
  "value_unit": "s", "range": [s, e], "bucket_ms": 900000, "bucket_origin_ms": 0,

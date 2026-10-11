@@ -151,7 +151,8 @@ def test_errors_map_to_per_panel_reasons_with_the_grant_hint():
             pending = []
     assert mapping == {
         "60": "disabled", "81": "disabled", "497": "not_granted", "16": "unsupported", "47": "unsupported",
-        "158": "window_too_large", "159": "window_too_large", "164": "readonly_account",
+        "158": "window_too_large", "159": "window_too_large", "241": "window_too_large", "396": "window_too_large",
+        "164": "readonly_account",
     }, mapping
     assert 'default:\n      return "failed";' in reasons
     assert 'return "GRANT SELECT ON system." + table + " TO " + name;' in source
@@ -271,7 +272,7 @@ def test_series_sql_is_three_fixed_passes_over_allowlisted_names():
     for column in ["ProfileEvents", "query,", "normalized_query_hash", "exception"]:
         assert column not in sql, column
     assert "window.span_s > window.query_log_max_span_s" in source
-    assert "steps{10, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 86400}" in source
+    assert "steps{10, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 86400, 2 * 86400}" in source
     assert "constexpr uint64_t kMonitorSeriesMaxPoints = 300;" in read("src/system_monitor.hpp")
 
 

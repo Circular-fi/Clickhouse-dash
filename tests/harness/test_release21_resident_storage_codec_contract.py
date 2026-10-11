@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_catalog, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -10,9 +11,11 @@ def read(path: str) -> str:
 
 
 def test_buffer_memory_and_dictionary_are_resident_not_disk_footprints() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     shell = modules.read_explorer()
-    assert 'summary.engine == "Buffer" || summary.engine == "Memory" || summary.engine == "Dictionary"' in catalog
+    assert "is_resident_memory_engine(summary.engine)" in catalog
+    # The resident engines are one rule, in explorer_rules.cpp.
+    assert 'return engine == "Buffer" || engine == "Memory" || engine == "Dictionary";' in read_unit("explorer_rules.cpp")
     assert "summary.resident_bytes = total_bytes;" in catalog
     assert "summary.logical_bytes.reset();" in catalog
     assert "summary.compressed_bytes.reset();" in catalog
@@ -29,10 +32,10 @@ def test_buffer_memory_and_dictionary_are_resident_not_disk_footprints() -> None
 
 
 def test_buffer_flush_target_is_a_normal_downstream_dependency() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
-    assert 'if (summary.engine == "Buffer") {' in catalog
-    assert 'sql::engine_arguments(summary.engine_full, "Buffer")' in catalog
+    assert 'if (summary_.engine == "Buffer") {' in catalog
+    assert 'sql::engine_arguments(summary_.engine_full, "Buffer")' in catalog
     assert 'append_dependency(args[0], args[1], "downstream", "buffer");' in catalog
     assert '"Flush target"' not in ui
     # About shows where a Buffer flushes (or an MV writes) as lineage chips.
@@ -40,9 +43,11 @@ def test_buffer_flush_target_is_a_normal_downstream_dependency() -> None:
 
 
 def test_tinylog_log_and_stripelog_are_disk_backed_without_system_parts() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     ui = read("src/static/app_explorer_detail.js")
-    assert 'summary.engine == "TinyLog" || summary.engine == "Log" || summary.engine == "StripeLog"' in catalog
+    assert "is_log_family(summary.engine)" in catalog
+    # The Log family is one rule, in explorer_rules.cpp.
+    assert 'return engine == "TinyLog" || engine == "Log" || engine == "StripeLog";' in read_unit("explorer_rules.cpp")
     assert "summary.physical_bytes = total_bytes;" in catalog
     assert "summary.data_paths = split_unit_separator" in catalog
     assert 'arrayStringConcat(data_paths, char(31))' in catalog
@@ -67,8 +72,8 @@ def test_lineage_chips_wrap_with_type_icon_and_short_in_database_names() -> None
 
 def test_column_default_codec_comes_from_active_parts_when_observable() -> None:
     header = read("src/explorer_catalog.hpp")
-    catalog = read("src/explorer_catalog.cpp")
-    api = read("src/api_explorer.cpp")
+    catalog = read_catalog()
+    api = read_api()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "std::vector<std::string> default_compression_codecs;" in header
     assert "groupUniqArray(default_compression_codec)" in catalog

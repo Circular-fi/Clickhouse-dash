@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_graph
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -55,7 +56,7 @@ def test_hidden_views_and_materialized_views_are_contracted_before_depth() -> No
 
 
 def test_storage_ttl_parser_builds_ordered_timeline_actions() -> None:
-    cpp = read("src/explorer_graph.cpp")
+    cpp = read_graph()
     assert 'std::optional<std::string> parse_ttl_destination' in cpp
     assert "if (text[pos] != '\\'') return parse_identifier(text, pos);" in cpp
     assert 'parse_table_ttl_rules' in cpp

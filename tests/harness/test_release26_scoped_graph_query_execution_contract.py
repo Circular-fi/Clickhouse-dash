@@ -1,4 +1,5 @@
 from pathlib import Path
+from explorer_sources import read_api
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -8,22 +9,23 @@ def read(path: str) -> str:
 
 
 def test_graph_api_is_server_scoped_to_focus_depth_and_mode() -> None:
-    cpp = read("src/api_explorer.cpp")
+    cpp = read_api()
     api = read("src/static/app_api.js")
 
-    assert "struct ExplorerGraphRequestScope" in cpp
+    assert "struct GraphScopeRequest" in cpp
     for token in ('"focus_database"', '"focus_table"', '"depth"', '"mode"', '"include_system"'):
         assert token in cpp
     assert "std::clamp<int64_t>(*depth, 0, 8)" in cpp and "parse_whole_i64(req.get_param_value(\"depth\"))" in cpp
     assert "ExplorerGraph scope_graph(" in cpp
-    assert "std::deque<std::string> queue" in cpp
+    assert "std::deque<uint32_t> queue" in cpp
     assert "const int next_depth = current_depth + cost;" in cpp
-    assert "if (next_depth > scope.depth) continue;" in cpp
-    assert 'scope.physical && storage_enabled' in cpp
-    assert '!scope.physical && lineage_enabled' in cpp
-    assert "const ExplorerGraph scoped_graph = scope_graph(" in cpp
-    assert "for (const auto& node : scoped_graph.nodes)" in cpp
-    assert "for (const auto& edge : scoped_graph.edges)" in cpp
+    assert "if (next_depth > scope_.depth) continue;" in cpp
+    assert 'scope_.physical && storage_' in cpp
+    assert '!scope_.physical && lineage_' in cpp
+    # The service cuts the graph to the scope once; the writer sends only what the scope kept.
+    assert "answer.scoped = scope_graph(*answer.graph, scope, lineage_enabled, storage_enabled, index);" in cpp
+    assert "for (const auto& node : scoped.nodes)" in cpp
+    assert "for (const auto& edge : scoped.edges)" in cpp
 
     assert 'query.set("focus_database", focusDatabase)' in api
     assert 'query.set("focus_table", focusTable)' in api
@@ -51,7 +53,7 @@ def test_focused_graph_requests_exact_depth_and_groups_databases() -> None:
     assert "function drawDatabaseGroups(ctx)" in graph
     assert "drawDatabaseGroups(ctx);" in graph
     assert "maxRowsPerSubcolumn = 6" in graph
-    assert "scope_has_more" in read("src/api_explorer.cpp")
+    assert "scope_has_more" in read_api()
     assert "model.graph?.scope_has_more === true" in graph
     assert "model.graph?.scope_focus_id === model.focusedId" in graph
     assert "model.scale < 0.23 && model.detailMode === \"logical\" && !model.focusedId" in graph
@@ -81,7 +83,7 @@ def test_focus_animation_cannot_escape_selected_table_edges() -> None:
 
 
 def test_logical_payload_retains_storage_availability_without_physical_batch() -> None:
-    cpp = read("src/api_explorer.cpp")
+    cpp = read_api()
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "logical_storage_available_ids" in cpp
     assert 'w.Key("storage_available")' in cpp

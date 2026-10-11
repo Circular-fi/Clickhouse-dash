@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -48,9 +49,9 @@ def test_trace_viewer_is_borderless_and_scrolls_only_the_body() -> None:
 
 
 def test_explorer_storage_and_fixtures_cover_projection_index_and_complex_types() -> None:
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     catalog_h = read("src/explorer_catalog.hpp")
-    catalog_cpp = read("src/explorer_catalog.cpp")
+    catalog_cpp = read_catalog()
     explorer = read("src/static/app_explorer_detail.js")
     fixtures = read("tests/clickhouse-init/02-frontend-fixtures.sql")
     formatted = read("tests/api/format/output/092_create_table_wide_types.sql")

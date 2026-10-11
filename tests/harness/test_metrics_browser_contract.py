@@ -1,7 +1,8 @@
-"""Source contract of the metrics browser API (src/api_metrics.cpp)."""
+"""Source contract of the metrics browser API (src/api_metrics.cpp and the units src/metrics_*.cpp)."""
 import modules
 import json
 from pathlib import Path
+from metrics_sources import read_metrics
 from trace_sources import read_traces, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,7 +31,9 @@ def test_routes_are_registered_only_when_metrics_are_enabled():
     assert 'http_.Get(R"(/observability/.*)", redirect_to_first_view);' in server
     assert 'if (cfg_.server.metrics) http_.Get("/metrics", [&](const auto& req, auto& res) { handle_metrics(req, res); });' in server
     assert 'http_.Get("/metrics", serve' not in server
-    assert "api_metrics.cpp" in read("src/CMakeLists.txt")
+    cmake = read("src/CMakeLists.txt")
+    for unit in ("api_metrics.cpp", "metrics_request.cpp", "metrics_sql.cpp", "metrics_aggregate.cpp", "metrics_service.cpp", "metrics_json.cpp"):
+        assert unit in cmake, unit
 
 
 def test_shared_service_allowlist_header():
@@ -38,24 +41,27 @@ def test_shared_service_allowlist_header():
     assert "inline std::string service_allowlist_predicate(const TraceSettings& cfg) {" in header
     assert '#include "otel_allowlist.hpp"' in read_unit("trace_service.cpp")
     assert "std::string service_allowlist_predicate(" not in read_traces()
-    api = read("src/api_metrics.cpp")
-    assert '#include "otel_allowlist.hpp"' in api
-    assert api.count("service_allowlist_predicate(host->otel.traces)") + api.count("service_allowlist_predicate(ctx.host->otel.traces)") >= 4
+    service = read_unit("metrics_service.cpp")
+    assert '#include "otel_allowlist.hpp"' in service
+    # Every route of the page passes the allowlist to its statements: the catalog, the attributes, the series and the exemplars.
+    assert service.count("service_allowlist_predicate(host.otel.traces)") >= 4
 
 
 def test_queries_use_the_primary_key_prefix_and_bounded_windows():
-    api = read("src/api_metrics.cpp")
+    api = read_metrics()
     # Catalog: one branch per existing kind table, TimeUnix window, grouped by the key prefix.
     assert '" UNION ALL "' in api
     assert '" PREWHERE " + window_sql + " WHERE " +' in api
     assert '" GROUP BY ServiceName, MetricName"' in api
     assert "constexpr size_t kCatalogLimit = 5000;" in api
+    assert "constexpr uint64_t kCatalogReadRowsCap = 200'000'000;" in api
     assert "constexpr auto kCatalogTtl = std::chrono::seconds(60);" in read("src/otel_caches.hpp")
     # Series / attributes / exemplars: ServiceName + MetricName + TimeUnix.
     # The service, the metric and the attribute values are query parameters ({pN:String}), never inside the SQL text.
     assert '"ServiceName = " + service + " AND MetricName = " + metric + " AND " + time_predicate(start_ms, end_ms);' in api
-    assert "metric_predicate(params.text(service), params.text(metric)," in api
-    assert '(key_op.second == "=" ? "IN (" : "NOT IN (") + params.texts(values) + ")"' in api
+    assert "const std::string service = params.text(request.service);" in api
+    assert "const std::string metric = params.text(request.metric);" in api
+    assert '(key_op.second == "=" ? "IN (" : "NOT IN (") + list + ")"' in api
     assert "quote_string(service)" not in api and "quote_string(values" not in api and "quote_string(key)" not in api
     assert '"TimeUnix >= fromUnixTimestamp64Milli("' in api
     assert 'constexpr const char* kQuerySettings = " SETTINGS max_execution_time = 30";' in api
@@ -64,9 +70,9 @@ def test_queries_use_the_primary_key_prefix_and_bounded_windows():
 
 
 def test_counter_and_histogram_math_is_reset_aware():
-    api = read("src/api_metrics.cpp")
+    api = read_metrics()
     assert "PARTITION BY \" + series_id" in api
-    assert 'const std::string series_id = "cityHash64(Attributes, ResourceAttributes)";' in api
+    assert '"cityHash64(Attributes, ResourceAttributes)"' in api
     assert "multiIf(temporality = 1, v1, rn = 1, nan, ps != StartTimeUnix OR" in api
     assert "lagInFrame(BucketCounts) OVER w AS pc" in api
     assert "sumForEach(dc)" in api
@@ -77,10 +83,10 @@ def test_counter_and_histogram_math_is_reset_aware():
 
 
 def test_exemplars_query_shape():
-    api = read("src/api_metrics.cpp")
+    api = read_metrics()
     assert "arrayJoin(arrayZip(`Exemplars.TimeUnix`, `Exemplars.Value`, `Exemplars.TraceId`, `Exemplars.SpanId`))" in api
     assert 'WHERE notEmpty(e.3) AND e.1 >= "' in api
-    assert '" ORDER BY e.2 DESC, e.1 LIMIT " + std::to_string(per_bucket) + " BY b LIMIT "' in api
+    assert '" ORDER BY e.2 DESC, e.1 LIMIT " + std::to_string(request.per_bucket) + " BY b LIMIT "' in api
 
 
 def test_docs_describe_the_browser_api():

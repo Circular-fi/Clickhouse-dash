@@ -101,7 +101,10 @@ def test_allowed_object_set_is_discovered_with_runner_not_system_grants() -> Non
     # The runner connection is the AclSource: SHOW, CHECK GRANT and zero-row probes as the runner.
     assert 'select_names(*client_, "SHOW DATABASES")' in source
     assert 'select_names(*client_, "SHOW TABLES FROM " + quote_ident(database))' in source
-    assert 'ch_select(client, "CHECK GRANT " + expression' in source
+    # CHECK GRANT reads through a ChExecutor; the clickhouse::Client form wraps its client in a BorrowedExecutor.
+    assert 'db.select("CHECK GRANT " + expression' in source
+    assert "std::optional<bool> select_check_grant(ChExecutor& db, const std::string& expression)" in source
+    assert "BorrowedExecutor db(client);" in source
     assert 'source.check_grant("SELECT ON " + target)' in source
     # ACCESS_DENIED (497) is the only "no"; another server error is about one object; a transport error is no answer.
     assert "if (error.GetCode() == kAccessDenied) throw AclDenied(error.what());" in source

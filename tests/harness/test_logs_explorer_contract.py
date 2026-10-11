@@ -60,18 +60,20 @@ def test_search_uses_keyset_cursors_progressive_windows_and_guards():
 
 def test_body_search_splits_tokens_before_hastoken():
     logs = read("src/api_logs.cpp")
-    assert "std::vector<std::string> split_tokens(std::string_view text)" in logs
-    assert 'parts.push_back("hasToken(" + body + ", " + params.text(token) + ")");' in logs
+    text = read("src/logs_text.cpp")  # the text search: pure functions (tests/native/logs_test.cpp)
+    assert "std::vector<std::string> split_tokens(std::string_view text)" in text
+    assert 'parts.push_back("hasToken(" + body + ", " + params.text(token) + ")");' in text
     # What the user wrote reaches ClickHouse as a query parameter ({pN:String}), never inside the SQL text.
     for written in ('" AND ServiceName IN (" + params.texts(services) + ")"', '" AND TraceId = " + params.text(trace_id)',
-                    '" = " + params.text(value)', 'params.text("%" + like_escape(term.text) + "%")'):
+                    '" = " + params.text(value)'):
         assert written in logs, written
-    assert "quote(services" not in logs and "quote(value)" not in logs and "quote(term.text)" not in logs
+    assert 'params.text("%" + like_escape(term.text) + "%")' in text
+    assert "quote(services" not in logs and "quote(value)" not in logs and "quote(term.text)" not in logs + text
     assert "q.params.list()" in logs and "r.query.params.key()" in logs
-    assert '"position(Body, "' in logs
+    assert '"position(Body, "' in text
     assert '"logs_body_search_disabled"' in logs
     assert "kSubstringWindowSeconds" in logs and '"logs_substring_range"' in logs
-    assert "ILIKE" in logs
+    assert "ILIKE" in text
 
 
 def test_histogram_context_and_patterns():
@@ -82,9 +84,9 @@ def test_histogram_context_and_patterns():
         assert f'"{preset}"' in logs, preset
     assert "ResourceAttributes['host.name'] = " in logs
     assert "cityHash64(_part, intDiv(_part_offset, 64)) % 1000000 < " in logs
-    assert "class Drain {" in logs
+    assert "class Drain {" in read("src/logs_drain.hpp")
     assert 'w.Key("noisy"); w.Bool(share > 0.10);' in logs
-    assert "std::string mask_body(std::string_view body)" in logs
+    assert "std::string mask_body(std::string_view body)" in read("src/logs_drain.cpp")
 
 
 def test_logs_view_follows_the_page_conventions():

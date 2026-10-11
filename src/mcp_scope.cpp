@@ -10,7 +10,7 @@ const std::vector<McpToolGroup>& mcp_tool_groups() {
   // What a person thinks of: the data, the Explorer page, the System page, Observability (traces, logs and metrics), the
   // Query page, and free SQL. A family has at least two tools, so no card is a lone check box.
   static const std::vector<McpToolGroup> groups = {
-      {"data", "Data", "hosts, databases, tables and columns, and the rows of a table that ChDash selects"},
+      {"data", "Data", "hosts, databases, tables and columns, and the rows of a table that ClickHouse Dash selects"},
       {"explorer", "Explorer", "the Explorer page: catalog, tables, functions, storage and lineage"},
       {"system", "System", "the System page: load, disks, top queries, activity and Keeper"},
       {"observability", "Observability", "traces, logs and metrics: the pages and the simple search tools"},

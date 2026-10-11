@@ -50,7 +50,8 @@ def test_activity_rows_pass_the_runner_show_boundary_and_are_bounded() -> None:
     replicas_sql = activity[activity.index('"replicas",'):activity.index("FROM system.replicas")]
     for column in ["log_max_index", "log_pointer", "total_replicas", "active_replicas", "zookeeper_exception", "replica_is_active"]:
         assert f"toString({column})" not in replicas_sql, column
-    assert "load_cached_replica_counts(system, caches, tables, &counts_error)" in activity
+    assert "load_cached_replica_counts(system_db, caches, tables, &counts_error)" in activity
+    assert "BorrowedExecutor system_db(system);" in activity
     for forbidden in ["SYSTEM ", "KILL ", "ALTER ", "INSERT ", "system.zookeeper "]:
         assert forbidden not in ops, forbidden
 

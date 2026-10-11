@@ -61,4 +61,10 @@ class SqlParams {
   List list_;
 };
 
+// A statement and the parameters that it needs (the arguments of ChExecutor::select).
+struct SqlStatement {
+  std::string sql;
+  SqlParams params;
+};
+
 }  // namespace chdash
