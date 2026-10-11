@@ -303,7 +303,7 @@ The statements and the connections of ChDash have C++ unit tests (`native/ch_que
 
 The path of a result to the browser has C++ unit tests (`native/result_path_test.cpp`, CMake option `CHDASH_BUILD_RESULT_TESTS`, target `chdash_result_path_test`): the JSON cell encoder against the generic algorithm (and a ratio budget for Map cells), and the thread that encodes the blocks. `harness/test_query_encoding_contract.py` runs the binary when `RESULT_PATH_TEST_BINARY` names it and holds the source contract. The performance phase has the case `select_weather_buffer_120k` (120,064 rows with nested columns), with a budget on the JSON encoding time that the `done` event reports (`timing_ms.encode`). `frontend/specs/streaming.spec.js` holds the budget of the stream reader (a ratio to `EventSource`) and the tests of the Elapsed tile.
 
-The store's C++ unit tests (`native/query_library_test.cpp`, CMake option `CHDASH_BUILD_QUERY_LIBRARY_TESTS`) run through `harness/test_query_library_contract.py` when `QUERY_LIBRARY_TEST_BINARY` names the built `chdash_query_library_test`.
+The C++ unit tests of the library (`native/query_library_test.cpp`, CMake option `CHDASH_BUILD_QUERY_LIBRARY_TESTS`) cover the store on a temporary file and the units below it without a file: the reading of a request, the rules of the tree and the import (`src/query_library_*.cpp`; `harness/library_sources.py` reads them for the contract tests). They run through `harness/test_query_library_contract.py` when `QUERY_LIBRARY_TEST_BINARY` names the built `chdash_query_library_test`.
 
 ### MCP
 

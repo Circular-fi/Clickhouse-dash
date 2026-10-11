@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import config_keys
+from library_sources import read_library, read_unit
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 
@@ -74,7 +75,7 @@ def test_mutations_share_the_cross_site_guard() -> None:
 
 def test_library_never_runs_sql_or_derives_paths_from_requests() -> None:
     api = read("src/api_query_library.cpp")
-    store = read("src/query_library.cpp")
+    store = read_library()
     for source in (api, store):
         for forbidden in ("client_pool_", "make_client", "Execute(", "QuerySession", "clickhouse/", "ch_client_pool"):
             assert forbidden not in source, forbidden
@@ -86,7 +87,7 @@ def test_library_never_runs_sql_or_derives_paths_from_requests() -> None:
 
 
 def test_logs_never_contain_sql() -> None:
-    store = read("src/query_library.cpp")
+    store = read_library()
     api = read("src/api_query_library.cpp")
     assert "std::cerr" not in api and "std::cout" not in api
     assert "std::cerr" not in store
@@ -98,8 +99,8 @@ def test_logs_never_contain_sql() -> None:
 
 
 def test_atomic_write_is_temp_fsync_rename_0600() -> None:
-    store = read("src/query_library.cpp")
-    body = block_after(store, "bool atomic_write_file(const std::string& path, std::string_view data, std::string* error) {")
+    store = read_library()
+    body = block_after(read_unit("query_library_file.cpp"), "bool atomic_write_file(const std::string& path, std::string_view data, std::string* error) {")
     assert "O_WRONLY | O_CREAT | O_EXCL" in body
     assert "O_NOFOLLOW" in body
     assert "::open(tmp.c_str(), flags, S_IRUSR | S_IWUSR)" in body
@@ -116,10 +117,10 @@ def test_atomic_write_is_temp_fsync_rename_0600() -> None:
 
 
 def test_malformed_file_is_never_overwritten() -> None:
-    store = read("src/query_library.cpp")
+    store = read_library()
     editable = block_after(store, "void QueryLibraryStore::require_editable_locked() const {")
     assert "load_error_.empty()" in editable
-    header = read("src/query_library.hpp")
+    header = read("src/query_library.hpp") + read("src/query_library_state.hpp")
     for symbol in ("QueryLibraryHistoryEntry", "append_history", "list_history", "clear_history", "delete_history_entry",
                    "history_on_server", "history_max_entries", "require_history_writable_locked", "state.history"):
         assert symbol not in store and symbol not in header, symbol
@@ -158,7 +159,7 @@ def test_config_docs_and_suite_registration() -> None:
     runner = read("tests/test-suite/run-all-tests.py")
     assert "'test_query_library.py'" in runner
     cmake = read("src/CMakeLists.txt")
-    assert "query_library.cpp" in cmake and "api_query_library.cpp" in cmake
+    assert "query_library.cpp" in cmake and "query_library_file.cpp" in cmake and "api_query_library.cpp" in cmake
     assert "CHDASH_BUILD_QUERY_LIBRARY_TESTS" in cmake
 
 
@@ -172,8 +173,8 @@ def test_native_unit_tests_pass_when_built() -> None:
 
 
 def test_no_tags_no_folder_description_and_history_is_never_removed() -> None:
-    header = read("src/query_library.hpp")
-    store = read("src/query_library.cpp")
+    header = read("src/query_library.hpp") + read("src/query_library_state.hpp")
+    store = read_library()
     api = read("src/api_query_library.cpp")
     front = read("src/static/app_query_library.js")
     # A query has a name, a description, its SQL and a place; a folder a name and a place.
