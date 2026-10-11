@@ -69,7 +69,7 @@ def test_a_long_routing_runs_in_a_worker_and_the_page_shows_it():
     # runSliced waits for a promise a generator yields, and a cancelled run closes the generator (the job stops its Worker).
     assert 'typeof step.value.then === "function"' in kit and "steps.return?.()" in kit
     assert "yield* kit.routeEdgesAuto(positions," in read("src/static/app_trace_map.js")
-    explorer = read("src/static/app_explorer_graph.js")
+    explorer = modules.read_explorer_graph()
     assert "kit.routeEdgesJob(layout, edges, options)" in explorer
     assert 'dom.explorerGraphStatus.textContent = "Routing edges\\u2026";' in explorer
     assert "model.routeJob?.cancel();" in explorer

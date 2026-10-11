@@ -32,18 +32,21 @@ The important invariant is this: `system_uri` is for enrichment only. It never a
 
 The Explorer shell has one nav row (48 px, `#explorerTopBar`). The nav row has one underline tab row (`#explorerNavTabs`) with the view tabs `Catalog | Functions`. On the Catalog only, it also has a divider and its `Browse | Graph` tabs (`#explorerModeTabs`, `?mode=graph`). These are the second-level sections of docs/ui-foundations.md ("Tabs"), like the Search / Services / Service map of Observability after Traces / Logs / Metrics. Each of the two rows is an `tabs` tablist (Left / Right / Home / End within it).
 
-The Explorer code is a controller and the modules under it. Each module imports what it uses. The pure modules have Node tests (`tests/frontend/model/explorer-model.test.cjs`).
+The Explorer code is two controllers (one for each page) and the modules under them. Each module imports what it uses. The pure modules have Node tests (`tests/frontend/model/explorer-model.test.cjs`, `explorer-detail-model.test.cjs`, `explorer-graph-model.test.cjs`).
 
 | Module | Content |
 | --- | --- |
-| `app_explorer.js` | the controller: the view and the mode on screen, the catalog of the host, the address, the start of the page |
+| `app_explorer.js` | the controller of the Catalog: the mode on screen, the catalog of the host, the address, the start of the page |
+| `app_explorer_functions_page.js` | the controller of the Functions page: its address, its load for the host, its search and kind chips. The page loads none of the Catalog |
 | `app_explorer_store.js` | the model, the address, the parts that the entry hands over, the error strip, and `actions` (what a module provides to the modules that cannot import it) |
 | `app_explorer_summary.js`, `app_explorer_route.js` | pure: what a catalog entry is (engine families, sizes, kinds), and the addresses of the Explorer |
 | `app_explorer_shell.js` | the view tabs, the Browse and Graph tabs, the side panels and their drawer on a phone |
 | `app_explorer_tree.js`, `app_explorer_data.js` | the object tree and its type chips, and the reads of the catalog and of a table card |
 | `app_explorer_database.js`, `app_explorer_table.js` | the databases overview and the page of a database, and the selection of a table |
 | `app_explorer_functions.js`, `app_explorer_doc.js` | the Functions page and the documentation of a function |
-| `app_explorer_detail.js`, `app_explorer_graph.js`, `app_explorer_storage.js`, `app_explorer_treemap.js` | the table card, the graph, the size views and the treemap (Catalog page only) |
+| `app_explorer_detail.js` and `app_explorer_detail_*.js` | the table card (Catalog page only): the tabs and the body, and a module for the header, About, Columns, Storage, Operations, Preview and the shared cells. `app_explorer_detail_model.js` is pure: the SQL expressions of the card, the rows of Columns, the split of the storage, the tabs of an object, the sections of Operations and the preview SELECT |
+| `app_explorer_graph.js` and `app_explorer_graph_*.js` | the graph (Catalog page only), in the layers below. Pure: `_model` (the request of a scope, the Lineage and Storage projections, the database groups, the neighborhood of a focus), `_text` (the labels), `_geometry` (the shapes of an edge), `_layout` (the positions of the cards). State: `_store` (the model, and `actions`: what a module provides to the modules below it), `_scene` (the caches, the visible set, the layout), `_viewport` (the camera). Canvas: `_nodes`, `_edges`, `_frame`, `_hit`. Then `_panel` (the chrome and the side panel) and `_focus` (the focus, the mode, the refresh). `app_explorer_graph.js` is the entry that the controller calls |
+| `app_explorer_storage.js`, `app_explorer_treemap.js` | the size views and the treemap (Catalog page only) |
 
 There is no breadcrumb. In the Catalog, the tree selection carries the location, and the card header names the object. On a narrow window, the row scrolls sideways with its edge cues, after the drawer button. It never wraps.
 
@@ -287,7 +290,7 @@ The lazy catalog for each database (`/api/explorer/catalog?database=<name>`) mar
 
 ### Table card
 
-The detail is a card (`app_explorer_detail.js`, created by the controller `app_explorer.js` with its model and shared helpers). It has these parts:
+The detail is a card (`app_explorer_detail.js` and the modules under it). It reads the store and calls the controller through `actions`. It has these parts:
 
 - **Header**: the object name, then chips: engine, health (dot), rows, size (`on disk` or `RAM`) and parts. The header does not show a size of 0 B. A replicated table gets a banner right under the header (`Replicated · 2/2 replicas active · queue 0 · delay 0 s`, colored by state). The banner has a link to the Operations tab.
 - **Tabs**, in this order and only when they have content: `Columns · Preview · Storage · Operations · Lineage · DDL`. The URL has `?tab=` (`?tab=lineage`; none for Columns). Storage (`?tab=storage`) merges the former Parts & disks tab and the table scope of the former Storage mode. Old routes keep working. A `/<tab>` path segment opens its tab. `/overview` and `/schema` open Columns. `/data` opens Preview. The address bar is rewritten to the new form.
@@ -450,7 +453,7 @@ For this reason, physical nodes do not accumulate on top of a lineage neighborho
 - Distributed tables use `system.clusters` to expose the shard → replica membership.
 - The user can increase or decrease the neighborhood depth down to focus-only.
 
-The graph is bounded. A Distributed table adds a node and an edge for each shard and for each replica of its cluster. The graph holds at most 20,000 nodes and 40,000 edges. When the topology of a Distributed table does not fit, the backend leaves it out. The table keeps its node and its `topology_badge` (`2S × 3R`) and its definition, and the answer has `"truncated": true`.
+The graph is bounded. The topology of a cluster is made once, whatever the number of Distributed tables that name it: a node for each shard (`physical:cluster:<cluster>:shard:<n>`) and for each replica (`...:replica:<n>`), with the edges from a shard to its replicas. Each of those tables has an edge to each shard. The nodes of a cluster belong to no database (`database` is empty). The Storage mode of a database shows the ones below its own tables. The graph holds at most 20,000 nodes and 40,000 edges. When the nodes of a cluster do not fit, or the shard edges of a table do not fit, the backend leaves that topology out. The table keeps its node and its `topology_badge` (`2S × 3R`) and its definition, and the answer has `"truncated": true`.
 
 A node id is `table:<database>.<table>`. When two objects would have one id (`a.b` + `c` and `a` + `b.c`), the later one has the suffix `#2`. The backend finds a node by the names of the object (`database` and `table` of the definition route, `focus_database` and `focus_table` of the graph route), never by cutting an id at a dot.
 

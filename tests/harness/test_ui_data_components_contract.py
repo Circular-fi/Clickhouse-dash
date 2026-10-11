@@ -82,7 +82,7 @@ def test_every_table_is_a_data_table():
 def test_one_sort_indicator_and_one_set_of_row_keys():
     # Sort state lives in aria-sort (ns.table), the glyph in CSS only.
     assert not offenders(r"dataset\.sort\s*=|data-sort=\"\$\{|resultTable__thSortable|sortMark\(")
-    assert not offenders(r"\\u25b[2c4e]", {"app_explorer_graph.js"})  # canvas group label only
+    assert not offenders(r"\\u25b[2c4e]", {"app_explorer_graph_nodes.js"})  # canvas group label only
     block = css_block("data table")
     assert 'th[aria-sort="ascending"] > .dataTable__sort::after' in block
     assert "th:hover > .dataTable__sort::after" in block
@@ -149,7 +149,7 @@ def test_one_copy_helper_and_one_feedback():
 
 
 def test_read_only_sql_is_the_sql_block():
-    for name in ["app_explorer_detail.js", "app_explorer_graph.js", "app_trace_services.js", "app_query_library.js", "app_system_activity.js"]:
+    for name in ["app_explorer_detail.js", "app_explorer_graph_panel.js", "app_trace_services.js", "app_query_library.js", "app_system_activity.js"]:
         assert "sqlBlock" in read(name), name
     # Highlighted SQL elsewhere: the editor, autocomplete and function docs.
     assert not offenders(r"ns\.highlight\.renderInto\(", {"app_explorer.js", "app_ui_sql.js"})
@@ -164,7 +164,7 @@ def test_read_only_sql_is_the_sql_block():
 
 def test_key_value_lists_are_the_shared_list():
     assert not offenders(r"traceKv__|traceJson__|logsField__|logsFieldAction|explorerGraphPanel__columnName")
-    for name in ["app_trace_inspector.js", "app_logs.js", "app_results_rowdetails.js", "app_explorer_graph.js"]:
+    for name in ["app_trace_inspector.js", "app_logs.js", "app_results_rowdetails.js", "app_explorer_graph_panel.js"]:
         text = read(name)
         assert "kv.list" in text or "kv.html" in text or "kv.bind" in text, name
     block = css_block("key/value")

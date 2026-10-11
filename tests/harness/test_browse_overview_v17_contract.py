@@ -10,7 +10,7 @@ def read(path: str) -> str:
 
 
 def test_storage_composition_is_one_stacked_bar_with_compact_legend() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     css = css_sources.text()
     assert 'explorerStorageStackedBar' in ui
     assert 'explorerStorageCompositionLegend' in ui
@@ -21,7 +21,7 @@ def test_storage_composition_is_one_stacked_bar_with_compact_legend() -> None:
 
 
 def test_storage_tables_are_separate_and_use_shared_query_sorting() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     results = modules.read_family("app_results")
     assert 'results?.createStaticResultTable?.({' in ui
     assert "tableMod.sortHeader(th, {" in results
@@ -32,7 +32,7 @@ def test_storage_tables_are_separate_and_use_shared_query_sorting() -> None:
 
 
 def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_removed() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     css = css_sources.text()
     # One byte format everywhere: one decimal from KB up, "0 B" for zero; the
     # storage helper keeps its name and delegates to it.
@@ -51,8 +51,8 @@ def test_storage_sizes_use_fixed_two_decimal_format_and_lineage_footnote_is_remo
 
 
 def test_storage_mode_cross_database_navigation_treats_missing_scope_as_unknown_not_blocked() -> None:
-    graph = read("src/static/app_explorer_graph.js")
-    block = graph[graph.index("function canUseStorageForTable"):graph.index("function rawStorageProjection")]
+    graph = modules.read_explorer_graph()
+    block = modules.function_text(graph, "canUseStorageForTable")
     assert 'const exists = (model.graph.nodes || []).some' in block
     assert 'if (!exists) return null;' in block
     assert 'return canUseStorageForId(id);' in block

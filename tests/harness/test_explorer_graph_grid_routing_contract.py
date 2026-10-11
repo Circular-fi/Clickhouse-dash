@@ -9,9 +9,9 @@ def read(path: str) -> str:
 
 
 def test_lineage_layout_uses_shared_row_grid_and_top_anchored_ports() -> None:
-    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    js = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'const LINEAGE_NODE_PORT_TOP_OFFSET = 36;' in js
-    assert 'const lineageRowPitch = model.detailMode === "logical"' in js
+    assert 'const lineageRowPitch = detailMode === "logical"' in js
     assert 'origin + gridRow * lineageRowPitch' in js and 'origin: 70,' in js
     assert 'const lineageRows = new Map();' in js
     assert 'const betweenRowYs = [];' in js
@@ -20,7 +20,7 @@ def test_lineage_layout_uses_shared_row_grid_and_top_anchored_ports() -> None:
 
 
 def test_materialized_views_keep_dashed_node_outline() -> None:
-    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    js = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     # The card outline is dashed for View / MV objects, focused or not: the focus is
     # the same outline, 2 px and in the accent.
     assert 'const viewLike = node.kind === "view" || node.kind === "materialized_view" || node.kind === "refreshable_materialized_view";' in js
@@ -30,8 +30,8 @@ def test_materialized_views_keep_dashed_node_outline() -> None:
 
 
 def test_visibility_toggles_lock_for_selected_system_or_non_storing_object() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     assert 'function visibilityRequirements()' in graph
     assert 'required.includeSystem || options.includeSystem === true' in graph
     assert 'const nextIncludeNonStoring = required.includeNonStoring || options.includeNonStoring !== false;' in graph
@@ -50,7 +50,7 @@ def test_visibility_toggles_lock_for_selected_system_or_non_storing_object() -> 
 
 
 def test_manual_graph_refresh_reflows_current_projection() -> None:
-    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    js = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'async function refresh(force = false, { reflow = false } = {})' in js
     assert 'computeLayout({ preserveExisting: hadLayout && !reflow });' in js
     assert 'refresh(true, { reflow: true })' in js
@@ -59,7 +59,7 @@ def test_manual_graph_refresh_reflows_current_projection() -> None:
 
 
 def test_lineage_routes_are_directionally_monotone_except_same_row_obstacles() -> None:
-    js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    js = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'const verticalDirection = verticalDelta < -0.001 ? -1 : (verticalDelta > 0.001 ? 1 : 0);' in js
     assert 'const sameRowNeedsDetour = verticalDirection === 0 && !clearSegment(sourceFan, targetFan);' in js
     # One relaxation rule (stepCost) for both grid searches of the kit router.

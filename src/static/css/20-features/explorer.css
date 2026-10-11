@@ -2229,7 +2229,7 @@ button.explorerStorageStrip__segment {
   display: none;
 }
 
-/* "All databases (8)" and "All functions (1,949)" (app_explorer.js rootRow):
+/* "All databases (8)" and "All functions (1,949)" (app_explorer_shell.js rootRow):
    a database row whose icon sits in the disclosure column; current while
    the overview shows. */
 .explorerWorkspace .explorerTreeRoot {
@@ -2257,7 +2257,7 @@ button.explorerStorageStrip__segment {
   font-variant-numeric: tabular-nums;
 }
 
-/* A tree name cut in the middle (app_explorer.js middleText): the head
+/* A tree name cut in the middle (app_explorer_tree.js middleText): the head
    shrinks to an ellipsis, the tail always shows. */
 .midTrunc {
   display: flex;

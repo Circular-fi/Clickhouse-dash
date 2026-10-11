@@ -1,3 +1,4 @@
+import modules
 from pathlib import Path
 import css_sources
 from explorer_sources import read_catalog, read_unit
@@ -30,7 +31,7 @@ def test_buffer_bytes_are_resident_memory_not_database_disk_footprint() -> None:
     assert "summary.resident_bytes = total_bytes;" in catalog
     assert "summary.logical_bytes.reset();" in catalog
     assert "db.bytes += table.logical_bytes.value_or(0);" in catalog
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert "renderResidentRuntime" not in ui
     assert '"Resident rows"' not in ui
     assert '"Resident memory"' not in ui
@@ -41,7 +42,7 @@ def test_buffer_bytes_are_resident_memory_not_database_disk_footprint() -> None:
 
 
 def test_storage_metric_unknown_values_render_as_one_dash_inside_tables() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert 'const DASH = format.EMPTY;' in ui
     assert 'item.compressed == null ? DASH : format.bytes(item.compressed)' in ui
     assert 'item.percent == null ? DASH : percentText(item.percent)' in ui
@@ -51,7 +52,7 @@ def test_storage_metric_unknown_values_render_as_one_dash_inside_tables() -> Non
 
 
 def test_lineage_has_one_normalized_two_direction_layout() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     css = css_sources.text()
     deps = ui[ui.index("function renderLineageTab"):ui.index("function previewLimit")]
     assert 'const matrix = h("div", { class: "explorerDependencyMatrix explorerLineage" });' in deps
@@ -62,7 +63,7 @@ def test_lineage_has_one_normalized_two_direction_layout() -> None:
 
 
 def test_graph_labels_buffer_rows_and_memory_as_ram() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = modules.read_explorer_graph()
     assert 'node.kind === "buffer" ? " buffered rows" : " rows"' in graph
     assert 'node.kind === "buffer" || node.kind === "memory" || node.kind === "dictionary"' in graph
     assert 'memoryResident ? " RAM" : " logical"' in graph

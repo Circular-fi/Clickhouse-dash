@@ -1,9 +1,9 @@
 // The Explorer page, Functions (functions.html, /explorer/functions[/<name>]): the list of the functions of the host and
-// the card of one. The controller of the Catalog (app_explorer.js) without the Catalog's parts (the graph, the size
-// views, the table card): see app_page_explorer.js.
+// the card of one, under a controller of their own (app_explorer_functions_page.js): the page loads none of the Catalog
+// (the tree, the database page, the table card, the graph, the size views).
 import "./app_common.js";
 import { boot } from "./app_boot.js";
-import { explorer } from "./app_explorer.js";
+import { functionsPage } from "./app_explorer_functions_page.js";
 import { header } from "./app_header.js";
 import { meta } from "./app_meta.js";
 
@@ -40,18 +40,14 @@ import * as h_api from "./app_api.js";
 import * as h_explorer_route from "./app_explorer_route.js";
 import * as h_explorer_summary from "./app_explorer_summary.js";
 import * as h_explorer_store from "./app_explorer_store.js";
-import * as h_explorer_data from "./app_explorer_data.js";
-import * as h_explorer_shell from "./app_explorer_shell.js";
-import * as h_explorer_tree from "./app_explorer_tree.js";
-import * as h_header from "./app_header.js";
-import * as h_explorer_database from "./app_explorer_database.js";
 import * as h_sql_lex from "./app_sql_lex.js";
 import * as h_highlight from "./app_highlight.js";
 import * as h_explorer_doc from "./app_explorer_doc.js";
+import * as h_explorer_shell from "./app_explorer_shell.js";
 import * as h_explorer_functions from "./app_explorer_functions.js";
-import * as h_explorer_table from "./app_explorer_table.js";
+import * as h_header from "./app_header.js";
 import * as h_meta from "./app_meta.js";
-import * as h_explorer from "./app_explorer.js";
+import * as h_explorer_functions_page from "./app_explorer_functions_page.js";
 h_loader.loader.expose([
   h_format,
   h_assets,
@@ -85,23 +81,19 @@ h_loader.loader.expose([
   h_explorer_route,
   h_explorer_summary,
   h_explorer_store,
-  h_explorer_data,
-  h_explorer_shell,
-  h_explorer_tree,
-  h_header,
-  h_explorer_database,
   h_sql_lex,
   h_highlight,
   h_explorer_doc,
+  h_explorer_shell,
   h_explorer_functions,
-  h_explorer_table,
+  h_header,
   h_meta,
-  h_explorer,
+  h_explorer_functions_page,
 ]);
 // handle:end
 
 boot(() => {
   header.init();
   meta.init();
-  explorer.init();
+  functionsPage.init();
 });

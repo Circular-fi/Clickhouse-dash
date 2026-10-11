@@ -322,7 +322,7 @@ function showError(message, retry = null) {
 
 // false when a newer read took its place (another host): the answer of the old host is never applied.
 async function loadMeta() {
-  const req = util.latest("metrics.meta");
+  const req = obsView.read("metrics.meta");
   try {
     const meta = await api.getMetricsMeta(hostParams(), { signal: req.signal }) || null;
     if (!req.isCurrent()) return false;
@@ -348,7 +348,7 @@ function syncServicePicker() {
 }
 
 async function loadCatalog() {
-  const req = util.latest("metrics.catalog");
+  const req = obsView.read("metrics.catalog");
   model.catalogLoading = true;
   model.catalogError = "";
   uiState.busy(byId("metricsSearchButton"), true);
@@ -723,7 +723,7 @@ function removePanel(panel) {
 async function loadPanel(panel) {
   if (!panel.metric || !panel.kind || !panel.service) return;
   // A new load supersedes the panel's series and exemplar requests.
-  const req = util.latest(`metrics.panel.${panel.id}`);
+  const req = obsView.read(`metrics.panel.${panel.id}`);
   util.latest.cancel(`metrics.exemplars.${panel.id}`);
   panel.loading = true;
   panel.error = "";
@@ -750,7 +750,7 @@ async function loadPanel(panel) {
 
 // The exemplars of the panel's current series (a new series load cancels them).
 async function loadExemplars(panel) {
-  const req = util.latest(`metrics.exemplars.${panel.id}`);
+  const req = obsView.read(`metrics.exemplars.${panel.id}`);
   try {
     const query = panelQuery(panel, { step_ms: panel.data?.bucket_ms, ...filterParams(panel) });
     const data = await api.getMetricsExemplars(query, { signal: req.signal });
@@ -772,7 +772,7 @@ async function ensureKeys(panel) {
   if (panel.keys) return panel.keys;
   if (!panel.keysPromise) {
     const gen = panel.gen;
-    const req = util.latest(`metrics.attrs.${panel.id}.keys`);
+    const req = obsView.read(`metrics.attrs.${panel.id}.keys`);
     const promise = api.getMetricsAttributes(panelQuery(panel), { signal: req.signal })
       .then((data) => {
         const keys = Array.isArray(data?.keys) ? data.keys : [];
@@ -795,7 +795,7 @@ async function ensureValues(panel, key) {
   if (panel.values.has(key)) return panel.values.get(key);
   const gen = panel.gen;
   const values = panel.values;
-  const req = util.latest(`metrics.attrs.${panel.id}.values.${key}`);
+  const req = obsView.read(`metrics.attrs.${panel.id}.values.${key}`);
   try {
     const data = await api.getMetricsAttributes(panelQuery(panel, { key }), { signal: req.signal });
     const list = Array.isArray(data?.values) ? data.values : [];

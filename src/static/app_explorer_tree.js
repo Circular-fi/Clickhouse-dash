@@ -305,7 +305,7 @@ function renderTableList() {
           button.append(icon, srKind, name);
           // Replicated tables carry the replica health dot (item 19); other
           // tables only show a dot when they are not healthy.
-          const replicaDot = parts.detailView?.replicaHealthDot?.(table);
+          const replicaDot = parts.detail?.replicaHealthDot?.(table);
           const health = String(table.health || "healthy");
           if (replicaDot) {
             button.appendChild(replicaDot);

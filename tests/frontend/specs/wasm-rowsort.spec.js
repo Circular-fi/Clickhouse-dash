@@ -35,7 +35,7 @@ async function compare(page, shapes) {
     const ns = window.ChDash;
     await window.ChDash.loader.loadGroup('wasm-rowsort');
     await ns.wasm.load('rowsort');
-    const t = ns.results.testing;
+    const t = { ...ns, setWasm: ns.setSortWasm, sortWasmMinRows: ns.SORT_WASM_MIN_ROWS };
     const gen = {
       mixed: (rand) => { const roll = rand(); return roll < 0.1 ? null : roll < 0.5 ? Math.floor(rand() * 1000) - 300 : roll < 0.8 ? ((rand() - 0.5) * 1e4).toFixed(2) : String(Math.floor(rand() * 1e6)); },
       ties: (rand) => (rand() < 0.1 ? null : Math.floor(rand() * 10)),
@@ -101,7 +101,7 @@ async function compareText(page, shapes) {
     const ns = window.ChDash;
     await ns.loader.loadGroup('wasm-rowsort');
     await ns.wasm.load('rowsort');
-    const t = ns.results.testing;
+    const t = { ...ns, setWasm: ns.setSortWasm, sortWasmMinRows: ns.SORT_WASM_MIN_ROWS };
     const gen = {
       words: (rand) => ['Alpha', 'beta', 'GAMMA', 'delta', 'Epsilon', 'zeta'][Math.floor(rand() * 6)] + '-' + Math.floor(rand() * 5000),
       unicode: (rand) => ['\u00e9t\u00e9', '\u00c9T\u00c9', '\u0130stanbul', 'stra\u00dfe', 'STRASSE', '\ud83d\ude00x', 'x\ud800', '\udc00y', '\u4e2d\u6587', 'ab', 'AB', '\u212a'][Math.floor(rand() * 12)] + (rand() < 0.5 ? '' : String(Math.floor(rand() * 20))),
@@ -161,7 +161,7 @@ test('performance budget: sorting 200,000 rows by a numeric column', async ({ pa
   await openApp(page);
   await page.evaluate(async () => { await window.ChDash.loader.loadGroup('wasm-rowsort'); await window.ChDash.wasm.load('rowsort'); });
   const result = await page.evaluate(() => {
-    const t = window.ChDash.results.testing;
+    const t = { ...window.ChDash, setWasm: window.ChDash.setSortWasm, sortWasmMinRows: window.ChDash.SORT_WASM_MIN_ROWS };
     let seed = 5;
     const rand = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
     const rows = [];

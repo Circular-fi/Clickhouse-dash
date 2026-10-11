@@ -367,6 +367,16 @@ function secretCell(key) {
   return h("div", { class: "mcpSecret" }, h("span", { class: "mcpSecret__text", title: why }, maskOf(key)));
 }
 
+// [label, kind, tier]: a column that matters less leaves the table when the window is narrower than its tier's breakpoint ("mid": 820 px;
+// table.css, "Priority columns", UI-130). A key opens its details under its row, and a phone draws the card with every field.
+const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Host", "hosts"], ["Tools", "tools", "mid"], ["Data", "data", "mid"], ["Limits", "limits", "mid"], ["Actions", "actions"]];
+
+// The classes of a column's header and cells: its kind, and its tier when it has one.
+const columnClass = (kind) => {
+  const tier = COLUMNS.find((column) => column[1] === kind)?.[2];
+  return `mcpCell--${kind}${tier ? ` is-${tier}` : ""}`;
+};
+
 function keyRow(key, meta, actions, reason) {
   const readOnly = key.source === "config";
   // A key that cannot be deleted (it comes from the config file, or the page is read-only) has no Delete icon: a lock stands
@@ -382,21 +392,19 @@ function keyRow(key, meta, actions, reason) {
   const open = h("button", { type: "button", class: "mcpKeyOpen", dataset: { action: "open" }, title: `${key.name}\n${SOURCE_TITLE[key.source]}\nShow its permissions`, "aria-label": `Details of key ${key.name}`, "aria-expanded": "false", "aria-controls": `mcpDetail-${key.id}` },
     icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("strong", { class: "mcpKeyName" }, key.name));
   open.addEventListener("click", () => actions.onOpen(key, open));
-  const nameCell = cell("Name", "mcpCell--name", open);
+  const nameCell = cell("Name", columnClass("name"), open);
   const lockTitle = readOnly ? SOURCE_TITLE.config : reason;
   const lock = locked ? h("span", { class: "mcpLock", title: lockTitle, role: "img", "aria-label": lockTitle }, icon.el("lock", { size: "sm" })) : null;
-  const actionsCell = cell("Actions", "mcpCell--actions", locked ? lock : deleteButton(key, actions.onDelete));
+  const actionsCell = cell("Actions", columnClass("actions"), locked ? lock : deleteButton(key, actions.onDelete));
   return h("tr", { role: "row", dataset: { keyId: key.id, source: key.source, find: `${key.name} ${key.source}`.toLowerCase() } },
     nameCell,
-    cell("Secret", "mcpCell--secret", secretCell(key)),
-    cell("Host", "mcpCell--hosts", hostCell(key, meta)),
-    cell("Tools", "mcpCell--tools", listCell(key.tools, meta.tools.length, "tools")),
-    cell("Data", "mcpCell--data", dataCell(key)),
-    cell("Limits", "mcpCell--limits", limitsCell(key, meta)),
+    cell("Secret", columnClass("secret"), secretCell(key)),
+    cell("Host", columnClass("hosts"), hostCell(key, meta)),
+    cell("Tools", columnClass("tools"), listCell(key.tools, meta.tools.length, "tools")),
+    cell("Data", columnClass("data"), dataCell(key)),
+    cell("Limits", columnClass("limits"), limitsCell(key, meta)),
     actionsCell);
 }
-
-const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Host", "hosts"], ["Tools", "tools"], ["Data", "data"], ["Limits", "limits"], ["Actions", "actions"]];
 
 // The page gives the details of a key (actions.keyDetails: app_mcp_form.js) and is told when they close
 // (actions.onDetailsClose: the "Data it reads" read of the key that closes stops with it).
@@ -427,7 +435,7 @@ function showDetails(tbody, key, meta, actions) {
 function keysTable(keys, meta, actions, view) {
   const reason = manageReason(meta);
   const head = h("tr", null, ...COLUMNS.map(([name, kind]) => {
-    const th = h("th", { class: `mcpCell--${kind}` }, name === "Actions" ? h("span", { class: "srOnly" }, name) : name);
+    const th = h("th", { class: columnClass(kind) }, name === "Actions" ? h("span", { class: "srOnly" }, name) : name);
     th.setAttribute("scope", "col");
     th.setAttribute("role", "columnheader");
     return th;

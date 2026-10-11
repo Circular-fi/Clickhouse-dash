@@ -11,6 +11,7 @@ import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { obsView } from "./app_obs_view.js";
 import { palette } from "./app_palette.js";
 import { timeRange } from "./app_timerange.js";
 import { chartMessage, mountChart, unmountChart, zoomSearchRange } from "./app_trace_charts.js";
@@ -159,7 +160,7 @@ async function run(filters, { force = false } = {}) {
     return;
   }
   view.key = key;
-  const req = util.latest("traces.services");
+  const req = obsView.read("traces.services");
   view.loading = true;
   view.error = "";
   render();
@@ -189,7 +190,7 @@ async function loadDetail() {
   const detail = view.detail;
   if (detail.key === key && (detail.payload || detail.loading)) { renderDetail(); return; }
   detail.key = key;
-  const req = util.latest("traces.services.detail");
+  const req = obsView.read("traces.services.detail");
   detail.loading = true;
   detail.error = "";
   detail.payload = null;
@@ -219,7 +220,7 @@ async function loadDb(params) {
   const key = keyOf(dbParams);
   if (db.key === key && (db.payload || db.loading)) return;
   db.key = key;
-  const req = util.latest("traces.services.db");
+  const req = obsView.read("traces.services.db");
   db.loading = true;
   db.error = "";
   db.payload = null;
@@ -300,8 +301,9 @@ function sparkline(points, field, cls, peakText) {
 }
 
 // A sortable header (ns.table): the sort state in aria-sort.
-function headerCell(key, label, title, numeric = true) {
-  return table.sortHeadHtml({ key, label, title, sort: view.sort, num: numeric, attrs: { "data-svc-sort": key } });
+// `tier`: "low", "mid" or "xs" for a column that leaves the table when the window is narrower than its breakpoint (UI-130, table.css).
+function headerCell(key, label, title, numeric = true, tier = "") {
+  return table.sortHeadHtml({ key, label, title, sort: view.sort, num: numeric, className: tier ? `is-${tier}` : "", attrs: { "data-svc-sort": key } });
 }
 
 function p99Cell(row, service, operation = "") {
@@ -318,16 +320,16 @@ function tableHtml(rows) {
         <th scope="row" class="traceSvcRow__name"><span class="traceSvcRow__cell"><i class="serviceSwatch" aria-hidden="true"></i><span class="traceSvcRow__label" title="${esc(row.name)}">${esc(row.name)}</span></span></th>
         <td class="num" data-svc-col="rate" title="${esc(`${fmt.count(row.spans)} entry spans`)}">${esc(rateText(row.rate))}</td>
         <td class="num${ERROR_CLASS[errorLevel(row.errorPct)]}" data-svc-col="errors" data-error-level="${errorLevel(row.errorPct)}" title="${esc(`${fmt.count(row.errors)} errors`)}">${esc(percentText(row.errorPct))}</td>
-        <td class="num" data-svc-col="p50">${esc(fmt.duration(row.p50))}</td>
+        <td class="num is-mid" data-svc-col="p50">${esc(fmt.duration(row.p50))}</td>
         <td class="num" data-svc-col="p95">${esc(fmt.duration(row.p95))}</td>
         <td class="num" data-svc-col="p99">${p99Cell(row, row.name)}</td>
         ${shareCell(row.share, percentText(row.share), `${fmt.duration(row.total)} in total`, ' data-svc-col="time"')}
-        <td class="traceSvcTrend" title="Requests over time, its own scale up to the peak shown (dots: the worst buckets, amber from 1 % errors, red from 5 %)">${sparkline(points, "spans", "traceSvcSpark--rate", (spans) => rateText(spans / bucketSeconds, rateUnit(row.rate)))}</td>
-        <td class="traceSvcTrend" title="P95 over time, its own scale up to the peak shown (dots: the highest buckets above twice the median)">${sparkline(points, "p95", "traceSvcSpark--p95", (value) => fmt.duration(value))}</td>
+        <td class="traceSvcTrend is-low" title="Requests over time, its own scale up to the peak shown (dots: the worst buckets, amber from 1 % errors, red from 5 %)">${sparkline(points, "spans", "traceSvcSpark--rate", (spans) => rateText(spans / bucketSeconds, rateUnit(row.rate)))}</td>
+        <td class="traceSvcTrend is-low" title="P95 over time, its own scale up to the peak shown (dots: the highest buckets above twice the median)">${sparkline(points, "p95", "traceSvcSpark--p95", (value) => fmt.duration(value))}</td>
       </tr>`;
   }).join("");
   return `<table class="traceSvcTable dataTable" aria-label="Services">
-      <thead><tr>${headerCell("name", "Service", "Sort by service name", false)}${headerCell("rate", "Requests", "Entry spans per second, minute or hour: the largest unit the rate reaches 1 in")}${headerCell("errors", "Errors", "Share of entry spans with StatusCode Error")}${headerCell("p50", "P50", "Median entry span duration")}${headerCell("p95", "P95", "95th percentile entry span duration")}${headerCell("p99", "P99", "99th percentile entry span duration; click one to search slower traces")}${headerCell("time", "Time share", "Share of the total time spent in entry spans (sum of Duration)", false)}<th scope="col" class="traceSvcTrend">Requests trend</th><th scope="col" class="traceSvcTrend">P95 trend</th></tr></thead>
+      <thead><tr>${headerCell("name", "Service", "Sort by service name", false)}${headerCell("rate", "Requests", "Entry spans per second, minute or hour: the largest unit the rate reaches 1 in")}${headerCell("errors", "Errors", "Share of entry spans with StatusCode Error")}${headerCell("p50", "P50", "Median entry span duration", true, "mid")}${headerCell("p95", "P95", "95th percentile entry span duration")}${headerCell("p99", "P99", "99th percentile entry span duration; click one to search slower traces")}${headerCell("time", "Time share", "Share of the total time spent in entry spans (sum of Duration)", false)}<th scope="col" class="traceSvcTrend is-low">Requests trend</th><th scope="col" class="traceSvcTrend is-low">P95 trend</th></tr></thead>
       <tbody>${body}</tbody></table>`;
 }
 

@@ -49,16 +49,13 @@ import * as h_explorer_shell from "./app_explorer_shell.js";
 import * as h_explorer_tree from "./app_explorer_tree.js";
 import * as h_header from "./app_header.js";
 import * as h_explorer_database from "./app_explorer_database.js";
-import * as h_sql_lex from "./app_sql_lex.js";
-import * as h_highlight from "./app_highlight.js";
-import * as h_explorer_doc from "./app_explorer_doc.js";
-import * as h_explorer_functions from "./app_explorer_functions.js";
 import * as h_explorer_table from "./app_explorer_table.js";
 import * as h_meta from "./app_meta.js";
 import * as h_explorer from "./app_explorer.js";
-import * as h_graph_kit from "./app_graph_kit.js";
-import * as h_explorer_graph from "./app_explorer_graph.js";
-import * as h_explorer_treemap from "./app_explorer_treemap.js";
+import * as h_sql_lex from "./app_sql_lex.js";
+import * as h_explorer_detail_model from "./app_explorer_detail_model.js";
+import * as h_highlight from "./app_highlight.js";
+import * as h_explorer_doc from "./app_explorer_doc.js";
 import * as h_results_values from "./app_results_values.js";
 import * as h_results_cells from "./app_results_cells.js";
 import * as h_results_rowdetails from "./app_results_rowdetails.js";
@@ -66,8 +63,31 @@ import * as h_results_sort from "./app_results_sort.js";
 import * as h_results_static from "./app_results_static.js";
 import * as h_results_table from "./app_results_table.js";
 import * as h_results from "./app_results.js";
-import * as h_explorer_storage from "./app_explorer_storage.js";
+import * as h_explorer_detail_cells from "./app_explorer_detail_cells.js";
+import * as h_explorer_detail_about from "./app_explorer_detail_about.js";
+import * as h_explorer_detail_columns from "./app_explorer_detail_columns.js";
+import * as h_explorer_detail_header from "./app_explorer_detail_header.js";
+import * as h_explorer_detail_operations from "./app_explorer_detail_operations.js";
+import * as h_explorer_detail_preview from "./app_explorer_detail_preview.js";
+import * as h_explorer_detail_storage from "./app_explorer_detail_storage.js";
 import * as h_explorer_detail from "./app_explorer_detail.js";
+import * as h_explorer_graph_model from "./app_explorer_graph_model.js";
+import * as h_graph_kit from "./app_graph_kit.js";
+import * as h_explorer_graph_store from "./app_explorer_graph_store.js";
+import * as h_explorer_graph_text from "./app_explorer_graph_text.js";
+import * as h_explorer_graph_geometry from "./app_explorer_graph_geometry.js";
+import * as h_explorer_graph_layout from "./app_explorer_graph_layout.js";
+import * as h_explorer_graph_scene from "./app_explorer_graph_scene.js";
+import * as h_explorer_graph_viewport from "./app_explorer_graph_viewport.js";
+import * as h_explorer_graph_nodes from "./app_explorer_graph_nodes.js";
+import * as h_explorer_graph_panel from "./app_explorer_graph_panel.js";
+import * as h_explorer_graph_focus from "./app_explorer_graph_focus.js";
+import * as h_explorer_graph_edges from "./app_explorer_graph_edges.js";
+import * as h_explorer_graph_frame from "./app_explorer_graph_frame.js";
+import * as h_explorer_graph_hit from "./app_explorer_graph_hit.js";
+import * as h_explorer_graph from "./app_explorer_graph.js";
+import * as h_explorer_treemap from "./app_explorer_treemap.js";
+import * as h_explorer_storage from "./app_explorer_storage.js";
 h_loader.loader.expose([
   h_format,
   h_assets,
@@ -106,16 +126,13 @@ h_loader.loader.expose([
   h_explorer_tree,
   h_header,
   h_explorer_database,
-  h_sql_lex,
-  h_highlight,
-  h_explorer_doc,
-  h_explorer_functions,
   h_explorer_table,
   h_meta,
   h_explorer,
-  h_graph_kit,
-  h_explorer_graph,
-  h_explorer_treemap,
+  h_sql_lex,
+  h_explorer_detail_model,
+  h_highlight,
+  h_explorer_doc,
   h_results_values,
   h_results_cells,
   h_results_rowdetails,
@@ -123,8 +140,31 @@ h_loader.loader.expose([
   h_results_static,
   h_results_table,
   h_results,
-  h_explorer_storage,
+  h_explorer_detail_cells,
+  h_explorer_detail_about,
+  h_explorer_detail_columns,
+  h_explorer_detail_header,
+  h_explorer_detail_operations,
+  h_explorer_detail_preview,
+  h_explorer_detail_storage,
   h_explorer_detail,
+  h_explorer_graph_model,
+  h_graph_kit,
+  h_explorer_graph_store,
+  h_explorer_graph_text,
+  h_explorer_graph_geometry,
+  h_explorer_graph_layout,
+  h_explorer_graph_scene,
+  h_explorer_graph_viewport,
+  h_explorer_graph_nodes,
+  h_explorer_graph_panel,
+  h_explorer_graph_focus,
+  h_explorer_graph_edges,
+  h_explorer_graph_frame,
+  h_explorer_graph_hit,
+  h_explorer_graph,
+  h_explorer_treemap,
+  h_explorer_storage,
 ]);
 // handle:end
 

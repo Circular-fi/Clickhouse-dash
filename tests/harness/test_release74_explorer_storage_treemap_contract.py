@@ -42,7 +42,7 @@ def test_treemap_keeps_the_s3_browser_grouping_and_layout_contract() -> None:
 
 
 def test_database_treemap_excludes_resident_memory_from_disk_area() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     block = ui[ui.index("function databaseStorageTree(database)"):ui.index("function renderDatabaseStorage(container, database, disksContainer = null)")]
     assert "if (isResidentMemorySummary(table)) {" in block
     assert "residentBytes += footprint;" in block
@@ -68,7 +68,7 @@ def test_the_former_storage_routes_open_the_storage_tabs_and_the_system_route_do
 def test_storage_drawings_are_bounded_treemaps_with_a_strip_fallback() -> None:
     storage = read("src/static/app_explorer_storage.js")
     treemap = read("src/static/app_explorer_treemap.js")
-    detail = read("src/static/app_explorer_detail.js")
+    detail = modules.read_explorer_detail()
     css = css_sources.text()
     assert "const TREEMAP_MIN_ITEMS = 3;" in storage
     # One size band (app_explorer_treemap.js band()): the treemap, the share

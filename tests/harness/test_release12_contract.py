@@ -20,10 +20,10 @@ def test_query_reload_does_not_mark_known_relation_unknown_before_metadata_arriv
 
 
 def test_graph_focus_freezes_camera_and_retained_node_coordinates_and_has_an_accent_border() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'function stabilizeLayoutPositions(' in graph
     assert 'item.x = previous.x;' in graph and 'item.y = previous.y;' in graph
-    set_focus = graph[graph.index('function setFocus('):graph.index('function defaultFocusId', graph.index('function setFocus('))]
+    set_focus = modules.function_text(graph, "setFocus")
     assert 'model.offsetX' not in set_focus and 'model.offsetY' not in set_focus and 'model.scale' not in set_focus
     # The focused card has a 2 px border in the graph accent (--graph-halo) and no
     # ring or glow around it.

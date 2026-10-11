@@ -47,7 +47,7 @@ def test_the_object_tree_reserves_no_scrollbar_gutter() -> None:
 
 def test_storage_is_a_table_card_tab_and_part_of_the_database_page() -> None:
     ui = modules.read_explorer()
-    detail = read("app_explorer_detail.js")
+    detail = modules.read_explorer_detail()
     # Two Catalog modes; Storage is a tab of the table card (merging the
     # former Parts & disks tab and Storage mode) and part of the database
     # page, which has no tabs (user, 2026-10-04): its size band (Tables by
@@ -61,7 +61,7 @@ def test_storage_is_a_table_card_tab_and_part_of_the_database_page() -> None:
     assert "const storage = renderDatabaseStorage(body, name, disks);\n  renderDatabaseObjects(body, name, tables);\n  body.appendChild(disks);" in page
     assert "dom.explorerDetailTabs.hidden = true;" in page
     # The partitions list keeps the former Storage mode's share column and map.
-    block = detail[detail.index("function renderPartitions("):detail.index("function structureItems(")]
+    block = modules.function_text(detail, "renderPartitions")
     assert 'label: "Share"' in block and "table.shareBar(td," in block
     assert 'id: "explorerPartitionTreemap",' in block
     # The database's disks come with its catalog branch.
@@ -71,7 +71,7 @@ def test_storage_is_a_table_card_tab_and_part_of_the_database_page() -> None:
 
 
 def test_columns_show_both_sizes_and_a_size_map() -> None:
-    detail = read("app_explorer_detail.js")
+    detail = modules.read_explorer_detail()
     columns = detail[detail.index("function renderColumnsTab("):detail.index("function structureCompressedBytes(")]
     assert 'label: "Compressed",' in columns and 'label: "Uncompressed",' in columns
     assert columns.index('label: "Compressed",') < columns.index('label: "Uncompressed",')
@@ -87,7 +87,7 @@ def test_columns_show_both_sizes_and_a_size_map() -> None:
 
 
 def test_keys_are_listed_one_element_per_line_with_their_position() -> None:
-    detail = read("app_explorer_detail.js")
+    detail = modules.read_explorer_detail()
     assert "function keyElements(expression) {" in detail
     assert "function keysTile(summary) {" in detail
     for label in ['["ORDER BY", sorting, "order_by"', '["PRIMARY KEY",', '["PARTITION BY",', '["SAMPLE BY",']:
@@ -98,7 +98,7 @@ def test_keys_are_listed_one_element_per_line_with_their_position() -> None:
 
 
 def test_expressions_use_the_shared_highlighter_and_repaint_with_the_function_list() -> None:
-    detail = read("app_explorer_detail.js")
+    detail = modules.read_explorer_detail()
     meta = read("app_meta.js")
     assert "renderHighlightedCode(code, code.dataset.sql || \"\");" in detail
     assert "highlight.renderInto" not in detail
@@ -124,7 +124,7 @@ def test_about_never_truncates() -> None:
     assert decls["white-space"] == "normal" and decls["overflow-wrap"] == "anywhere" and decls["text-overflow"] == "clip"
     assert ".explorerAboutTile__value" not in (STATIC / "css" / "10-components" / "stat.css").read_text(encoding="utf-8")
     assert css_sources.decls(".explorerAbout .explorerLineageChip__name")["white-space"] == "normal"
-    detail = read("app_explorer_detail.js")
+    detail = modules.read_explorer_detail()
     about = detail[detail.index("function aboutTile("):detail.index("function keysTile(")]
     assert ".length > 28" not in about and ".length > 36" not in about
 

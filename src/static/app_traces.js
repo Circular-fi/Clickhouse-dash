@@ -252,7 +252,7 @@ function invalidateDiscovery({ pairs = true } = {}) {
 async function prefill({ force = false } = {}) {
   if (!model.meta) await loadMeta().catch(() => null);
   if (!force && model.prefillPromise) return model.prefillPromise;
-  const req = util.latest("traces.prefill");
+  const req = obsView.read("traces.prefill");
   const run = (async () => {
     showError("");
     try {
@@ -335,7 +335,7 @@ async function loadAnalytics(filters) {
   }
   // The charts of this search: its counts, then its durations (a new
   // search or host cancels both, and the separate durations load).
-  const req = util.latest("traces.analytics");
+  const req = obsView.read("traces.analytics");
   util.latest.cancel("traces.durations");
   model.analytics = null;
   model.analyticsLoading = true;
@@ -392,7 +392,7 @@ async function loadAnalytics(filters) {
 async function loadDurations() {
   const filters = model.analyticsFilters;
   if (!filters || model.analytics?.has_durations || model.meta?.analytics_enabled !== true) { renderAnalytics(); return; }
-  const req = util.latest("traces.durations");
+  const req = obsView.read("traces.durations");
   model.durationsError = "";
   renderAnalytics();
   try {
@@ -425,7 +425,7 @@ async function search({ url = "push" } = {}) {
   }
   await ensurePrefillForFilters();
   // This search supersedes the previous one and its charts.
-  const req = util.latest("traces.search");
+  const req = obsView.read("traces.search");
   util.latest.cancel("traces.analytics");
   util.latest.cancel("traces.durations");
   let filters;

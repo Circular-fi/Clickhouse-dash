@@ -464,8 +464,9 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
   }
 
   // Expand Distributed cluster topology once in bulk. The cluster rows do not reveal table names and are only attached to already-authorized
-  // Distributed nodes which reference that cluster. A cluster of S shards and R replicas adds S + R nodes and S + R edges to each Distributed
-  // table that names it: the graph stays under kMaxGraphNodes and kMaxGraphEdges, and a table whose topology does not fit has none.
+  // Distributed nodes which reference that cluster. The topology of a cluster is made once and shared: a node for each shard and each replica,
+  // whatever the number of Distributed tables that name the cluster, and an edge from each of those tables to each shard. A cluster whose nodes do
+  // not fit the graph (kMaxGraphNodes, kMaxGraphEdges) has no topology, and a table whose shard edges do not fit has none: `truncated` says so.
   if (!referenced.empty()) {
     std::map<std::string, std::vector<const GraphTable*>> distributed_by_cluster;
     for (const GraphTable* table : raw) {
@@ -494,6 +495,40 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
       for (const GraphClusterRow* row : rows_it->second) shards.insert(row->shard);
       const size_t added = shards.size() + rows_it->second.size();
 
+      // The nodes of the cluster, once: the shards (in the order of the rows) and their replicas, with the edges between them.
+      std::vector<std::string> shard_ids;
+      const bool fits = out.nodes.size() + added <= kMaxGraphNodes && out.edges.size() + added <= kMaxGraphEdges;
+      if (fits) {
+        std::unordered_set<uint64_t> shard_created;
+        for (const GraphClusterRow* row_ptr : rows_it->second) {
+          const GraphClusterRow& row = *row_ptr;
+          const std::string shard_id = "physical:cluster:" + cluster + ":shard:" + std::to_string(row.shard);
+          if (shard_created.insert(row.shard).second) {
+            ExplorerGraphNode shard;
+            shard.id = shard_id;
+            shard.layer = "physical";
+            shard.kind = "shard";
+            shard.name = "shard-" + std::to_string(row.shard);
+            shard.label = shard.name;
+            shard.shard_num = row.shard;
+            out.nodes.push_back(shard);
+            shard_ids.push_back(shard_id);
+          }
+          ExplorerGraphNode replica;
+          replica.id = shard_id + ":replica:" + std::to_string(row.replica);
+          replica.layer = "physical";
+          replica.parent_id = shard_id;
+          replica.kind = "replica";
+          replica.name = row.host.empty() ? "replica-" + std::to_string(row.replica) : row.host;
+          replica.label = replica.name;
+          replica.shard_num = row.shard;
+          replica.replica_num = row.replica;
+          replica.host_name = row.host;
+          out.nodes.push_back(replica);
+          add_edge_unique(out, seen_edges, {{}, shard_id, replica.id, "contains", "replica", false});
+        }
+      }
+
       for (const GraphTable* table : tables) {
         const std::string parent = ids.of(table->database, table->name);
         const auto logical_it = logical_node_index.find(parent);
@@ -503,41 +538,11 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
         auto& definition = out.definitions[parent];
         definition.distributed_shards = max_shard;
         definition.distributed_replicas = max_replica;
-        if (out.nodes.size() + added > kMaxGraphNodes || out.edges.size() + added > kMaxGraphEdges) {
+        if (!fits || out.edges.size() + shard_ids.size() > kMaxGraphEdges) {
           out.truncated = true;
           continue;
         }
-        std::unordered_set<uint64_t> shard_created;
-        for (const GraphClusterRow* row_ptr : rows_it->second) {
-          const GraphClusterRow& row = *row_ptr;
-          const std::string shard_id = "physical:" + parent + ":shard:" + std::to_string(row.shard);
-          if (shard_created.insert(row.shard).second) {
-            ExplorerGraphNode shard;
-            shard.id = shard_id;
-            shard.layer = "physical";
-            shard.parent_id = parent;
-            shard.kind = "shard";
-            shard.database = table->database;
-            shard.name = "shard-" + std::to_string(row.shard);
-            shard.label = shard.name;
-            shard.shard_num = row.shard;
-            out.nodes.push_back(shard);
-            add_edge_unique(out, seen_edges, {{}, parent, shard_id, "contains", "shard", false});
-          }
-          ExplorerGraphNode replica;
-          replica.id = shard_id + ":replica:" + std::to_string(row.replica);
-          replica.layer = "physical";
-          replica.parent_id = shard_id;
-          replica.kind = "replica";
-          replica.database = table->database;
-          replica.name = row.host.empty() ? "replica-" + std::to_string(row.replica) : row.host;
-          replica.label = replica.name;
-          replica.shard_num = row.shard;
-          replica.replica_num = row.replica;
-          replica.host_name = row.host;
-          out.nodes.push_back(replica);
-          add_edge_unique(out, seen_edges, {{}, shard_id, replica.id, "contains", "replica", false});
-        }
+        for (const std::string& shard_id : shard_ids) add_edge_unique(out, seen_edges, {{}, parent, shard_id, "contains", "shard", false});
       }
     }
   }

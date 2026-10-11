@@ -13,9 +13,9 @@ import { util } from "./app_util.js";
 
 const { $ } = dom;
 
-function renderDetailHeader() { parts.detailView?.renderDetailHeader(); }
-function renderTabs() { parts.detailView?.renderTabs(); }
-function renderTabContent() { parts.detailView?.renderTabContent(); }
+function renderDetailHeader() { parts.detail?.renderDetailHeader(); }
+function renderTabs() { parts.detail?.renderTabs(); }
+function renderTabContent() { parts.detail?.renderTabContent(); }
 
 async function selectTable(database, table, force = false, { history = "push", graphOrigin = false } = {}) {
   if (model.mode === "graph" && parts.graph?.isStorageMode?.() && parts.graph?.canUseStorageForTable?.(database, table) === false) return;

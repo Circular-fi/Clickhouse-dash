@@ -131,7 +131,7 @@ def test_tab_rows_bind_through_the_component():
     # the Traces tabs), after a divider: an ns.tabs row, not a segmented control.
     assert 'tabs?.bind(shellEl("explorerModeTabs"), {' in modules.read_explorer()
     assert 'ns.segmented?.bind(shellEl("explorerModeTabs")' not in modules.read_explorer()
-    assert 'tabsMod?.bind(dom.explorerDetailTabs, { onSelect: (label) => { if (model.selectedKey) openTab(label); } });' in read("app_explorer_detail.js")
+    assert 'tabsMod?.bind(dom.explorerDetailTabs, { onSelect: (label) => { if (model.selectedKey) openTab(label); } });' in modules.read_explorer_detail()
     # The Observability view row is links to pages of their own: no component binds it.
     assert 'obsTabs' not in read("app_obs_page.js").replace('byId("obsTabs")', "")
     assert 'tabsMod?.bind(byId("tracesTabs"), { attr: "traceTab", onSelect: (id) => select(id) });' in read("app_trace_tabs.js")

@@ -56,7 +56,7 @@ async function loadTrace(traceId, { push = false } = {}) {
   if (!id) return;
   const pendingSpanId = model.pendingSpanId;
   model.pendingSpanId = "";
-  const req = util.latest("traces.detail");
+  const req = obsView.read("traces.detail");
   model.traceError = null;
   showError("");
   setView(true);

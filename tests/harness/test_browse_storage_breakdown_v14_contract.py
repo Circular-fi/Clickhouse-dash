@@ -11,7 +11,7 @@ def read(path: str) -> str:
 
 
 def test_browse_uses_flat_storage_breakdown_and_share_tile() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     css = css_sources.text()
     assert "explorerKvGrid" not in ui
     assert "explorerSchemaList" not in ui
@@ -48,7 +48,7 @@ def test_tuple_subcolumns_and_structure_sizes_are_loaded_from_clickhouse_metadat
 
 
 def test_create_statement_contextual_ddl_keywords_are_highlighted() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     highlighter = read("src/static/app_highlight.js")
     assert 'highlight.renderInto(codeEl, text);' in ui
     for keyword in ["index", "projection", "type", "granularity", "ttl", "codec"]:
@@ -60,7 +60,7 @@ def test_create_statement_contextual_ddl_keywords_are_highlighted() -> None:
 
 def test_wide_types_preview_reads_decimal_at_its_physical_width_and_open_query_crosses_documents() -> None:
     encoder = read("src/json_clickhouse.hpp")
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert "const size_t precision = d ? d->GetPrecision() : 38;" in encoder
     assert "precision <= 9" in encoder and "it.get<int32_t>()" in encoder
     assert "precision <= 18" in encoder and "it.get<int64_t>()" in encoder
@@ -72,7 +72,7 @@ def test_wide_types_preview_reads_decimal_at_its_physical_width_and_open_query_c
 
 
 def test_lineage_layout_allocates_global_rows_and_interrow_routing_lanes() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "const lineageRows = new Map();" in graph
     assert "const assignRows = (group) =>" in graph
     assert "for (let sweep = 0; sweep < 6; sweep += 1)" in graph

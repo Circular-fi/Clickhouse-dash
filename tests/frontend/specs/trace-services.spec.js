@@ -413,6 +413,33 @@ test('the service drawer opens under the search bar, a bottom sheet on a phone; 
   await expect(checkout).toBeFocused();
 });
 
+test('the services table loses its trends from 1279 px down and P50 from 820 px, and a hidden column is gone from every row (UI-130)', async ({ page }) => {
+  await mockTraceServices(page);
+  await mockTraceResults(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openServices(page);
+  const state = () => page.evaluate(() => {
+    const table = document.querySelector('.traceSvcTable:not(.traceSvcTable--compact)');
+    const shown = (list) => [...list].filter((el) => el.offsetParent !== null);
+    return {
+      heads: shown(table.querySelectorAll('thead th')).map((th) => th.textContent.trim()),
+      cells: shown(table.querySelectorAll('tbody tr:first-child > *')).length,
+    };
+  });
+  const full = ['Service', 'Requests', 'Errors', 'P50', 'P95', 'P99', 'Time share', 'Requests trend', 'P95 trend'];
+  let now = await state();
+  expect(now.heads).toEqual(full);
+  expect(now.cells).toBe(full.length);
+  await page.setViewportSize({ width: 1279, height: 900 });
+  now = await state();
+  expect(now.heads).toEqual(['Service', 'Requests', 'Errors', 'P50', 'P95', 'P99', 'Time share']);
+  expect(now.cells).toBe(7);
+  await page.setViewportSize({ width: 820, height: 900 });
+  now = await state();
+  expect(now.heads).toEqual(['Service', 'Requests', 'Errors', 'P95', 'P99', 'Time share']);
+  expect(now.cells).toBe(6);
+});
+
 test('a failed services request says what failed in a sentence, without the error code, and Retry loads it again', async ({ page }) => {
   await mockTraceServices(page);
   await mockTraceResults(page);

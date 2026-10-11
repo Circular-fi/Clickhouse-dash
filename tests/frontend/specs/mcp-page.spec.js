@@ -1093,6 +1093,38 @@ test('desktop: the page does not scroll sideways, in both themes', async ({ page
   expect(bgs[0]).toMatch(/^rgb/);
 });
 
+test('the keys table loses Tools, Data and Limits from 820 px down, and the box does not scroll; a phone keeps every field in its card (UI-130)', async ({ page }) => {
+  await open(page);
+  const state = () => page.evaluate(() => {
+    const wrap = document.querySelector('.mcpTableWrap');
+    const table = wrap.querySelector('table');
+    return {
+      over: wrap.scrollWidth - wrap.clientWidth,
+      heads: [...table.querySelectorAll('thead th')].filter((th) => th.offsetParent !== null).map((th) => th.textContent.trim()),
+      cells: [...table.querySelectorAll('tbody tr[data-key-id]:first-child td')].filter((td) => td.offsetParent !== null).map((td) => td.dataset.label),
+    };
+  });
+  await page.setViewportSize({ width: 1100, height: 900 });
+  expect((await state()).heads).toEqual(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
+  await page.setViewportSize({ width: 820, height: 900 });
+  let now = await state();
+  expect(now.heads).toEqual(['Name', 'Secret', 'Host', 'Actions']);
+  expect(now.cells).toEqual(['Name', 'Secret', 'Host', 'Actions']);
+  expect(now.over).toBeLessThanOrEqual(1);
+  // The details of a key show what left, under its row, inside the box.
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page)).toHaveCount(1);
+  await expect(details(page).first()).toContainText('Timeout');
+  expect((await state()).over).toBeLessThanOrEqual(1);
+  await page.setViewportSize({ width: 640, height: 900 });
+  expect((await state()).over).toBeLessThanOrEqual(1);
+  // A phone draws each key as a card with every field.
+  await page.setViewportSize({ width: 390, height: 800 });
+  now = await state();
+  expect(now.cells).toEqual(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+});
+
 test('a long list of keys has a filter that keeps its text and shows how many keys match', async ({ page }) => {
   const server = newServer();
   for (let index = 0; index < 10; index += 1) server.keys.push(key({ id: `ui_${String(index).padStart(12, '0')}`, name: index === 3 ? 'nightly-export' : `batch-${index}` }));
@@ -1437,8 +1469,8 @@ test.describe('tablet', () => {
     });
     expect(m.sideTop).toBeGreaterThanOrEqual(m.keysBottom);
     expect(m.hosts.left).toBeGreaterThanOrEqual(m.connect.right);
-    // The table is 49 rem wide at least (the whole secret fits its column): at 800 px it keeps its width and scrolls inside its box.
-    expect(m.wrapScrolls).toBe(true);
+    // Under 820 px Tools, Data and Limits leave the table (UI-130): what stays, with the whole secret in its column, fits the box.
+    expect(m.wrapScrolls).toBe(false);
     await screenshot(page, 'keys-tablet');
   });
 });

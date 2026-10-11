@@ -63,7 +63,7 @@ def test_trace_is_full_width_without_horizontal_scroll_and_keeps_resizable_split
 
 
 def test_graph_refresh_discards_stale_scope_and_replays_latest_request() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = modules.read_explorer_graph()
     assert "refreshSerial: 0" in graph
     assert "refreshQueued: false" in graph
     assert "const serial = ++model.refreshSerial;" in graph
@@ -121,7 +121,7 @@ def test_weather_fixture_contains_buffer_fanout_and_buffer_chain() -> None:
 def test_non_merge_tree_counts_and_graph_labels_are_engine_specific() -> None:
     catalog = read_catalog()
     graph_cpp = read_graph()
-    graph_js = read("src/static/app_explorer_graph.js")
+    graph_js = modules.read_explorer_graph()
     assert "system.dictionaries" in catalog and "element_count" in catalog
     assert "!is_log_family(target->engine)" in catalog
     # The Log family is one rule, in explorer_rules.cpp.
@@ -133,8 +133,8 @@ def test_non_merge_tree_counts_and_graph_labels_are_engine_specific() -> None:
     assert 'stripelog: "StripeLog"' in graph_js
 
 def test_graph_sidebar_missing_target_forces_fresh_graph_and_mode_trigger_is_single_bound() -> None:
-    graph = read("src/static/app_explorer_graph.js")
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    graph = modules.read_explorer_graph()
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     assert 'if (!exists) {' in graph
     assert 'if (model.active) refresh(false, { reflow: !!ensureVisible });' in graph
     assert 'model.refreshQueuedForce = true;' in graph

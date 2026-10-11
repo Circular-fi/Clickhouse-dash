@@ -1,7 +1,7 @@
 // The one SQL lexer of the page (ARCH-F-089). Everything on the page that has to tell the code of a statement from its
 // comments, its strings and its names reads the text through this module: the highlighter (app_highlight.js), the
 // autocomplete and its diagnostics (app_autocomplete.js), the cut of a script into statements (app_sql.js, app_run.js),
-// the types of a result column (app_results.js) and the SQL of the Explorer card (app_explorer_detail.js).
+// the types of a result column (app_results.js) and the SQL of the Explorer card (app_explorer_detail_model.js).
 //
 // It is the reference of the WebAssembly kernels. src/wasm/highlight.c and src/wasm/sqlscan.c read the text with the same
 // rules, byte for byte (tests/frontend/model/sql-lex-vectors.json holds cases that this module, the kernels and the native

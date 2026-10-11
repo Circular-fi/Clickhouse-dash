@@ -9,22 +9,22 @@ def read(path: str) -> str:
 
 
 def test_non_storing_toggle_is_required_for_non_storing_focus() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
-    graph = read("src/static/app_explorer_graph.js")
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
+    graph = modules.read_explorer_graph()
     assert "includeNonStoring: !!table && nonStoringSummary(table)" in ui
     assert "includeNonStoring: !!node && isNonStoringNode(node)" in graph
     assert "required.includeNonStoring || options.includeNonStoring !== false" in graph
 
 
 def test_storage_copy_and_extra_heading_are_removed() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     assert "Storage values are local-replica values. Capacity and paths are only exposed for disks used by this visible table." not in ui
-    storage = ui[ui.index("function renderStorageTab"):ui.index("function ingestionState")]
+    storage = modules.function_text(ui, "renderStorageTab")
     assert 'sectionTitle("Columns, indexes & projections")' not in storage
 
 
 def test_tuple_subcolumns_do_not_consume_row_numbers() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     results = modules.read_family("app_results")
     assert "let topLevelColumnPosition = 0;" in ui
     assert "position: c.is_subcolumn ? null : ++topLevelColumnPosition," in ui

@@ -272,6 +272,14 @@ body[data-page="mcp"] #mcpPanel {
   table-layout: fixed;
 }
 
+/* From 820 px down the Tools, Data and Limits columns leave (.is-mid, "Priority columns" of table.css, UI-130): the rest needs 34 rem, and the
+   details of a key show what left. */
+@media (max-width: 820px) {
+  .mcpTable {
+    min-width: 36rem;
+  }
+}
+
 .mcpTable > thead > tr > th {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -916,6 +924,10 @@ body[data-page="mcp"] #mcpPanel {
     overflow: visible;
     overflow-wrap: anywhere;
     white-space: normal;
+  }
+  /* The card shows every field: no column of lower priority leaves it. */
+  .mcpTable > tbody > tr > td.is-mid {
+    display: block;
   }
   .mcpTable > tbody > tr > td::before {
     content: attr(data-label);

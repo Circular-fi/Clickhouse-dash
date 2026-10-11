@@ -11,8 +11,8 @@ def read(rel: str) -> str:
 
 
 def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'const hasDepth = params.has("depth");' in ui
     assert 'const parsedDepth = hasDepth ? Number(params.get("depth")) : Number.NaN;' in ui
     assert ': 1;' in ui[ui.index('const graphDepth'):ui.index('if (path === "/explorer")')]
@@ -20,8 +20,9 @@ def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
 
 
 def test_graph_click_does_not_restart_catalog_and_route_intent_is_one_shot() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
-    assert 'if (model.section !== "tables") setSection("tables");' in ui
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
+    # The Catalog is one section: a click on the canvas switches nothing but the selection.
+    assert 'setSection' not in ui[ui.index('function openTableFromGraph'):ui.index('function init()', ui.index('function openTableFromGraph'))]
     assert 'selectTable(database, table, false, { graphOrigin: true });' in ui
     assert 'model.routeIntent = null;' in ui
     assert 'refreshCatalog(true)' not in ui[ui.index('function openTableFromGraph'):ui.index('function init()', ui.index('function openTableFromGraph'))]
@@ -30,7 +31,7 @@ def test_graph_click_does_not_restart_catalog_and_route_intent_is_one_shot() -> 
 
 def test_graph_has_no_hover_popup_and_camera_controls_are_inline_after_depth() -> None:
     html = read("src/static/explorer.html")
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'id="explorerGraphTooltip"' not in html
     assert 'explorerGraphTooltip' not in graph
     assert 'showTooltip(node' not in graph[graph.index('canvas.addEventListener("pointermove"'):graph.index('const endDrag')]
@@ -44,15 +45,15 @@ def test_graph_has_no_hover_popup_and_camera_controls_are_inline_after_depth() -
 
 
 def test_hidden_views_and_materialized_views_are_contracted_before_depth() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'function logicalProjection()' in graph
-    assert 'const projection = logicalProjection();' in graph
-    assert 'if (!model.includeNonStoring && isNonStoringNode(node) && node.id !== model.focusedId)' in graph
+    assert 'neighborhoodIds(logicalProjection(), model.focusedId, model.focusDepth)' in graph
+    assert 'if (!view.includeNonStoring && isNonStoringNode(node) && node.id !== view.focusedId)' in graph
     assert 'id: `collapsed:${source}:${target}:${kind}:${hidden.join(">")}`' in graph
     assert 'via hidden object' in graph
     assert 'resolveBufferRepresentative' in graph
     assert 'walkProjectedPath(representative, edge, [node.id]);' in graph
-    assert 'logicalNeighborhoodIds' in graph
+    assert 'function neighborhoodIds(' in graph
 
 
 def test_storage_ttl_parser_builds_ordered_timeline_actions() -> None:
@@ -90,7 +91,7 @@ def test_terminal_single_query_failure_never_reopens_result_table() -> None:
 
 
 def test_header_is_chips_and_about_is_value_context_tiles() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     chips = ui[ui.index("function headerChips"):ui.index("function replicationStatus")]
     assert 'metaChip(humanEngine(s.engine)' in chips
     # Audit 2 T-E7: rows, size and parts are a muted text line, not chips.
@@ -111,8 +112,9 @@ def test_analysis_modal_has_large_desktop_inset() -> None:
 
 
 def test_legacy_schema_rewrite_injects_default_browse_parameter() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     # ?view= and the other aliases are rewritten to the one Catalog scheme.
-    block = ui[ui.index('if (route.workspace === "explorer" && route.section === "tables") {\n    // Aliases'):ui.index('model.routeIntent = route;')]
+    start = ui.index('if (route.workspace === "explorer" && route.section === "tables") {\n    // Aliases')
+    block = ui[start:ui.index('model.routeIntent = route;', start)]
     assert "const canonical = appRoute(catalogPath({" in block
     assert 'router.replace(null, { href: canonical, view: "explorer" });' in block

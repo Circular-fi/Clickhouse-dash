@@ -10,6 +10,7 @@
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { obsView } from "./app_obs_view.js";
 import { palette } from "./app_palette.js";
 import { features, storage } from "./app_state.js";
 import { timeRange } from "./app_timerange.js";
@@ -142,7 +143,7 @@ function traceWindow(cache) {
 }
 
 async function load(trace) {
-  const req = util.latest("traces.logs");
+  const req = obsView.read("traces.logs");
   view.trace = trace || null;
   view.payload = null;
   view.records = [];

@@ -1,3 +1,4 @@
+import modules
 from pathlib import Path
 import css_sources
 
@@ -9,7 +10,7 @@ def read(path: str) -> str:
 
 
 def test_storage_places_buffer_above_targets_before_table_tier() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "const columnGap = 150;" in graph
     assert 'edge.kind === "buffer"' in graph
     assert "const maxSourceY = target.y - source.height - rowGap;" in graph
@@ -18,7 +19,7 @@ def test_storage_places_buffer_above_targets_before_table_tier() -> None:
 
 
 def test_lineage_has_single_input_output_port_and_perpendicular_fan_stubs() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "one output port (right edge, at a stable offset from" in graph
     assert "one input port (left edge, same offset)" in graph
     assert "current.a = port;" in graph
@@ -30,7 +31,7 @@ def test_lineage_has_single_input_output_port_and_perpendicular_fan_stubs() -> N
 
 
 def test_crossing_router_evaluates_multiple_global_route_orders() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "function segmentPairConflict(" in graph
     assert "function setScore(" in graph
     assert "function* buildRouteCandidate(" in graph
@@ -45,7 +46,7 @@ def test_crossing_router_evaluates_multiple_global_route_orders() -> None:
 def test_ttl_lifecycle_dash_is_documented_in_vertical_legend() -> None:
     html = read("src/static/explorer.html")
     css = css_sources.text()
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert "TTL lifecycle" in html
     ttl_row = html[html.index('id="explorerGraphLegendTtl"'):html.index("TTL lifecycle</span>")]
     assert "graphKitLegend__line--dashed graphKitLegend__line--edge" in ttl_row

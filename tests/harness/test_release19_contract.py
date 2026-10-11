@@ -10,7 +10,7 @@ def read(path: str) -> str:
 
 
 def test_lineage_routes_detour_around_cards_and_penalize_edge_crossings() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'function segmentHitsItem(' in graph
     assert 'function orthogonalSegmentConflict(' in graph
     assert 'function routeConflictPenalty(' in graph
@@ -22,23 +22,23 @@ def test_lineage_routes_detour_around_cards_and_penalize_edge_crossings() -> Non
 
 
 def test_logical_dependencies_never_animate_but_selected_dependency_gets_blue_dash_halo() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'function isLogicalDependencyEdge(edge)' in graph
     assert '["view", "dependency", "dictionary_source"]' in graph
     assert 'function drawSelectedLogicalDependencyHalo(' in graph
-    halo = graph[graph.index('function drawSelectedLogicalDependencyHalo('):graph.index('function drawEdge(')]
+    halo = modules.function_text(graph, "drawSelectedLogicalDependencyHalo")
     assert 'ctx.strokeStyle = graphColor("halo");' in halo
     assert 'ctx.shadowBlur = 7 / Math.max' in halo
     assert 'edge.from !== model.focusedId && edge.to !== model.focusedId' in halo
-    flow = graph[graph.index('function isInsertFlowEdge(edge)'):graph.index('function isStorageRouteEdge(edge)')]
+    flow = modules.function_text(graph, "isInsertFlowEdge")
     assert 'kind === "view"' not in flow
     assert 'kind === "dependency"' not in flow
 
 
 def test_flow_dot_emission_is_time_based_across_zoom_changes() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'flowMarkerState: new Map()' in graph
-    marker = graph[graph.index('function drawNormalizedFlowMarker('):graph.index('function drawStorageFlowMarker(')]
+    marker = modules.function_text(graph, "drawNormalizedFlowMarker")
     assert 'const newestAgeMs = (now + state.phaseOffsetMs) % FLOW_EMISSION_INTERVAL_MS;' in marker
     assert 'const markerCount = Math.min(' in marker
     assert 'const worldDistance = ageMs / 1000 * FLOW_SPEED_WORLD_PER_SECOND;' in marker
@@ -47,9 +47,9 @@ def test_flow_dot_emission_is_time_based_across_zoom_changes() -> None:
 
 
 def test_storage_includes_buffer_and_automatically_retains_flush_destination() -> None:
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    projection = graph[graph.index('function rawStorageProjection()'):graph.index('function storageProjection()')]
-    eligibility = graph[graph.index('function canUseStorageForId('):graph.index('function canUseStorageForTable(')]
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
+    projection = modules.function_text(graph, "rawStorageProjection")
+    eligibility = modules.function_text(graph, "canUseStorage")
     assert 'current.kind !== "buffer"' in eligibility
     assert 'edge.kind === "buffer" && visit(edge.to)' in eligibility
     assert 'const addBufferRoute = (bufferId' in projection
@@ -61,7 +61,7 @@ def test_storage_includes_buffer_and_automatically_retains_flush_destination() -
 
 
 def test_storage_sidebar_keeps_buffer_available_while_other_non_storing_objects_are_blocked() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert 'const storageBuffer = storageMode && engineKey(table) === "buffer";' in ui
     assert 'if (!model.includeNonStoring && nonStoringSummary(table) && !storageBuffer) return false;' in ui
     assert 'function storageCatalogEligible(summary)' in ui

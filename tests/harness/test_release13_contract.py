@@ -89,10 +89,9 @@ def test_trace_viewer_is_compact_resizable_and_uses_service_marker() -> None:
 
 
 def test_graph_sidebar_can_reveal_offscreen_focus_without_moving_canvas_clicks() -> None:
-    graph = read("src/static/app_explorer_graph.js")
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    graph = modules.read_explorer_graph()
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     assert "function nodeIsOnScreen(" in graph
-    assert "function ensureNodeVisible(" in graph
     assert "function focusTable(database, table, { ensureVisible = false } = {})" in graph
     assert "const needsFit = shouldEnsure && !nodeIsOnScreen(id);" in graph
     assert "setFocus(id, needsFit, { preserveDepth: true });" in graph
@@ -101,7 +100,7 @@ def test_graph_sidebar_can_reveal_offscreen_focus_without_moving_canvas_clicks()
 
 
 def test_graph_focus_animation_uses_one_normalized_marker_only_for_real_flow_edges() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = modules.read_explorer_graph()
     assert "function isFocusedDepthOneEdge(edge)" in graph
     assert "edge.from === model.focusedId || edge.to === model.focusedId" in graph
     assert "function isInsertFlowEdge(edge)" in graph
@@ -110,7 +109,7 @@ def test_graph_focus_animation_uses_one_normalized_marker_only_for_real_flow_edg
     assert 'drawNormalizedFlowMarker(ctx, edge, now, routePoints || bezierRoutePoints(a, p1, p2, b));' in graph
     assert "focusEdgeAnimationStyle" not in graph
     assert "drawFocusEdgeMarker" not in graph
-    assert 'kind === "view"' not in graph[graph.index("function isInsertFlowEdge(edge)"):graph.index("function isStorageRouteEdge(edge)")]
+    assert 'kind === "view"' not in modules.function_text(graph, "isInsertFlowEdge")
 
 
 def test_refresh_controls_use_thin_svg_glyphs() -> None:

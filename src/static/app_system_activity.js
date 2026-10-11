@@ -64,8 +64,14 @@ function progressCell(progress) {
   return td;
 }
 
+// A column that matters less names its tier (`priority`: "low", "mid" or "xs"): its header and its cells leave the table when the window is
+// narrower than the tier's breakpoint (table.css, "Priority columns"; UI-130). What stays fits; the box scrolls sideways for the rest.
 function activityTable(id, headers, rows) {
-  const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: header.num ? "num" : "", title: header.title || null }, header.label)));
+  const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: [header.num && "num", header.priority && `is-${header.priority}`], title: header.title || null }, header.label)));
+  headers.forEach((header, index) => {
+    if (!header.priority) return;
+    for (const row of rows) row.children[index]?.classList.add(`is-${header.priority}`);
+  });
   return table.scrollCues(h("div", { class: "dataTableWrap" },
     h("table", { class: "systemActivityTable dataTable dataTable--compact", id }, h("thead", null, head), h("tbody", null, rows))));
 }
@@ -113,9 +119,9 @@ function create({ openTable = null } = {}) {
       numCell(format.count(item.num_parts)),
       numCell(format.bytes(item.memory_usage))));
     el.appendChild(activityTable("systemActivityMerges", [
-      { label: "Table" }, { label: "Type" }, { label: "Partition" }, { label: "Progress" },
-      { label: "Elapsed", num: true }, { label: "Size", num: true, title: "Compressed size of the source parts" },
-      { label: "Parts", num: true }, { label: "Memory", num: true },
+      { label: "Table" }, { label: "Type", priority: "mid" }, { label: "Partition", priority: "low" }, { label: "Progress" },
+      { label: "Elapsed", num: true }, { label: "Size", num: true, priority: "mid", title: "Compressed size of the source parts" },
+      { label: "Parts", num: true, priority: "low" }, { label: "Memory", num: true, priority: "mid" },
     ], rows));
     return el;
   }
@@ -137,8 +143,8 @@ function create({ openTable = null } = {}) {
         messageCell(failed ? `${item.latest_failed_part ? `Part ${item.latest_failed_part}: ` : ""}${failed}` : ""));
     });
     el.appendChild(activityTable("systemActivityMutations", [
-      { label: "Table" }, { label: "Mutation" }, { label: "Command" }, { label: "Status" },
-      { label: "Parts to do", num: true }, { label: "Created" }, { label: "Latest failure" },
+      { label: "Table" }, { label: "Mutation", priority: "mid" }, { label: "Command" }, { label: "Status" },
+      { label: "Parts to do", num: true, priority: "mid" }, { label: "Created", priority: "low" }, { label: "Latest failure" },
     ], rows));
     return el;
   }
@@ -157,9 +163,9 @@ function create({ openTable = null } = {}) {
       textCell((item.types || []).join(", ")),
       messageCell(item.last_exception || item.postpone_reason)));
     el.appendChild(activityTable("systemActivityReplicationQueue", [
-      { label: "Table" }, { label: "Entries", num: true }, { label: "Executing", num: true },
-      { label: "Postponed", num: true }, { label: "Max tries", num: true }, { label: "Oldest entry" },
-      { label: "Types" }, { label: "Last exception / postpone reason" },
+      { label: "Table" }, { label: "Entries", num: true }, { label: "Executing", num: true, priority: "mid" },
+      { label: "Postponed", num: true }, { label: "Max tries", num: true, priority: "low" }, { label: "Oldest entry", priority: "mid" },
+      { label: "Types", priority: "low" }, { label: "Last exception / postpone reason" },
     ], rows));
     return el;
   }
@@ -181,8 +187,8 @@ function create({ openTable = null } = {}) {
         messageCell(item.last_queue_update_exception));
     });
     el.appendChild(activityTable("systemActivityReplicas", [
-      { label: "Table" }, { label: "Replica" }, { label: "Health" }, { label: "Active", num: true },
-      { label: "Delay", num: true }, { label: "Queue", num: true }, { label: "Last queue update" }, { label: "Last exception" },
+      { label: "Table" }, { label: "Replica", priority: "mid" }, { label: "Health" }, { label: "Active", num: true, priority: "mid" },
+      { label: "Delay", num: true }, { label: "Queue", num: true }, { label: "Last queue update", priority: "low" }, { label: "Last exception", priority: "mid" },
     ], rows));
     return el;
   }
@@ -204,8 +210,8 @@ function create({ openTable = null } = {}) {
         messageCell(item.last_exception));
     });
     el.appendChild(activityTable("systemActivityDistribution", [
-      { label: "Table" }, { label: "Path" }, { label: "State" }, { label: "Files", num: true },
-      { label: "Bytes", num: true }, { label: "Errors", num: true }, { label: "Broken", num: true }, { label: "Last exception" },
+      { label: "Table" }, { label: "Path", priority: "low" }, { label: "State" }, { label: "Files", num: true },
+      { label: "Bytes", num: true, priority: "mid" }, { label: "Errors", num: true, priority: "mid" }, { label: "Broken", num: true, priority: "low" }, { label: "Last exception" },
     ], rows));
     return el;
   }

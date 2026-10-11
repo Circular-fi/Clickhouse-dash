@@ -21,7 +21,7 @@ def test_ddl_preview_does_not_inherit_query_editor_height() -> None:
     css = css_sources.text()
     # The DDL is a read-only SQL block, not an .editorWrap: the editor's
     # initial height cannot reach it.
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     ddl = ui[ui.index("function renderDdl"):ui.index("function renderTabContent")]
     assert "editorWrap" not in ddl and "sqlBlock(" in ddl
     assert '.sqlBlock' in css
@@ -34,19 +34,19 @@ def test_data_settings_cog_has_no_select_caret() -> None:
 
 
 def test_collapsing_selected_database_switches_to_database_view_without_reopening() -> None:
-    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + modules.read_explorer_detail())
     assert 'function selectDatabase(database, { history = "push", expand = true } = {})' in ui
     assert 'selectDatabase(database, { expand: false });' in ui
     assert 'model.expandedDatabases.delete(name);' in ui
 
 
 def test_storage_vertical_stacks_use_equal_width_and_straight_overlap_route() -> None:
-    graph = read("src/static/app_explorer_graph.js")
+    graph = modules.read_explorer_graph()
     assert 'const logicalStackWidth = Math.max' in graph
     assert 'item.width = logicalStackWidth;' in graph
     assert 'const maxTierWidth = Math.max' in graph
     assert 'item.width = maxTierWidth;' in graph
-    route = graph[graph.index('function storageRouteGeometry'):graph.index('function storagePolylineMetric')]
+    route = modules.function_text(graph, "storageRouteGeometry")
     assert 'const overlapLeft = Math.max(from.x, to.x);' in route
     assert 'const x = (overlapLeft + overlapRight) / 2;' in route
     assert '{ x, y: from.y + from.height }' in route
@@ -54,7 +54,7 @@ def test_storage_vertical_stacks_use_equal_width_and_straight_overlap_route() ->
 
 
 def test_footprint_scope_is_one_readable_share_tile() -> None:
-    ui = read("src/static/app_explorer_detail.js")
+    ui = modules.read_explorer_detail()
     css = css_sources.text()
     about = ui[ui.index("function aboutTiles"):ui.index("function renderAbout")]
     assert 'aboutTile("Share", `${percentText(dbShare)} of ${database}`' in about

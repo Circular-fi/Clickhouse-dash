@@ -1,21 +1,18 @@
-// The controller of the Explorer, Catalog and Functions: the view and the mode on screen, the selection (a database, a table, a
-// function) and its address, the catalog of the host, and the start of the page. The tree, the database page, the Functions page, the
-// shell and the pure parts are the modules app_explorer_*.js under it; what they need from it is in `actions` (app_explorer_store.js).
+// The controller of the Explorer's Catalog: the mode on screen (Browse, Graph), the selection (a database or a table) and its address, the
+// catalog of the host, and the start of the page. The tree, the database page, the table card, the graph, the shell and the pure parts are the
+// modules app_explorer_*.js under it; what they need from it is in `actions` (app_explorer_store.js). The Functions page has its own
+// controller (app_explorer_functions_page.js).
 
 import { api } from "./app_api.js";
 import { dom, shell } from "./app_dom.js";
 import { catalogContainsTable, loadBranches, loadDatabaseTables } from "./app_explorer_data.js";
 import { destroyDatabaseTreemap, renderBrowseRoot, renderDatabaseDetail, renderNotFound, selectDatabase, showNotFound } from "./app_explorer_database.js";
-import { renderHighlightedCode } from "./app_explorer_doc.js";
-import { forgetFunctionsLoad, refreshFunctions, renderFunctionDetail, renderFunctionList, revealSelectedFunction } from "./app_explorer_functions.js";
 import { CATALOG_ROUTE_SEGMENT, DEFAULT_TAB, MODES, appRoute, catalogPath, parseExplorerRoute } from "./app_explorer_route.js";
 import { currentView, modeAvailability, setTreeDrawerOpen, sidePanel, syncModeTabs, syncViewTabs } from "./app_explorer_shell.js";
-import { actions, clear, clearSelection, explorerFeatures, model, parts, searches, selectionScope, setError, shellEl, showDetailState, syncExplorerUrl } from "./app_explorer_store.js";
-import { functionKey, healthLabel, humanEngine, isDictionarySummary, isDistributedSummary, isLogFamilySummary, isMergeTreeSummary, isResidentMemorySummary, isViewLikeSummary, quoteIdent, summaryFootprintBytes, summaryRowsLabel } from "./app_explorer_summary.js";
+import { actions, clearSelection, explorerFeatures, model, parts, searches, selectionScope, setError, shellEl, showDetailState, syncExplorerUrl } from "./app_explorer_store.js";
 import { renderTabContent, renderTabs, selectTable } from "./app_explorer_table.js";
 import { loadVisibilityOptions, renderTableList, syncVisibilityOptionLocks, toggleTypeFilter } from "./app_explorer_tree.js";
 import { header } from "./app_header.js";
-import { loader } from "./app_loader.js";
 import { meta } from "./app_meta.js";
 import { router } from "./app_router.js";
 import { features, state } from "./app_state.js";
@@ -42,18 +39,8 @@ function setView(view, { history = "push" } = {}) {
     model.databaseFocus = model.selectedKey ? "" : "storage";
     view = "browse";
   }
-  if (MODES.includes(view)) {
-    if (model.section !== "tables") {
-      model.mode = view;
-      setSection("tables");
-    } else {
-      setMode(view);
-    }
-  } else if (view === "functions") {
-    setSection("functions");
-  } else {
-    setSection("tables");
-  }
+  if (MODES.includes(view)) setMode(view);
+  else showTables();
   syncExplorerUrl(history);
 }
 
@@ -67,24 +54,11 @@ function openCatalogRoot({ history = "push" } = {}) {
   syncExplorerUrl(history);
 }
 
-// show: false only switches the panes; the caller applies the selection
+// The Catalog on screen: its panes, the mode, the tree. show: false only switches the panes; the caller applies the selection
 // (applyRouteFromLocation, openCard).
-function setSection(section, { show = true } = {}) {
-  const next = section === "functions" ? "functions" : "tables";
-  model.section = next;
-  const functions = next === "functions";
-
-  if (dom.explorerFunctionsPane) dom.explorerFunctionsPane.hidden = !functions;
+function showTables({ show = true } = {}) {
+  model.section = "tables";
   syncViewTabs();
-
-  if (functions) {
-    if (dom.explorerListView) dom.explorerListView.hidden = true;
-    parts.graph?.deactivate();
-    renderFunctionList();
-    if (model.active) refreshFunctions(false);
-    return;
-  }
-
   setMode(model.mode, { show });
   renderTableList();
   if (model.active) refreshCatalog(false);
@@ -109,7 +83,7 @@ function applyExplorerFeatures() {
 }
 
 // Switches the Catalog mode; the selection stays. show: false only
-// switches the panes (see setSection).
+// switches the panes (see showTables).
 function setMode(mode, { show = true } = {}) {
   const available = modeAvailability();
   const requested = mode === "list" ? "browse" : String(mode || "");
@@ -170,12 +144,7 @@ function showMode() {
 function openCard(database, table) {
   if (!database || !table) return;
   model.tab = DEFAULT_TAB;
-  if (model.section !== "tables") {
-    model.mode = "browse";
-    setSection("tables", { show: false });
-  } else {
-    setMode("browse", { show: false });
-  }
+  setMode("browse", { show: false });
   void selectTable(database, table, false, { history: "push" });
 }
 
@@ -202,11 +171,8 @@ function setWorkspace(name, { history = "push" } = {}) {
   if (window.location.pathname !== route) router.write(history, null, { href: route, view: explorer ? "explorer" : "query" });
 
   if (explorer) {
-    if (model.section === "functions") refreshFunctions(false);
-    else {
-      refreshCatalog(false);
-      if (model.mode === "graph") parts.graph?.activate(false);
-    }
+    refreshCatalog(false);
+    if (model.mode === "graph") parts.graph?.activate(false);
   } else {
     parts.graph?.deactivate();
   }
@@ -295,17 +261,6 @@ async function refreshCatalog(force) {
   return load.promise;
 }
 
-// Table detail (header, tabs and tab bodies) lives in app_explorer_detail.js.
-// The shell hands it the model and the helpers it shares with the tree.
-function createDetailView() {
-  return parts.detail?.create?.({
-    model, clear, appRoute, setError, quoteIdent, humanEngine,
-    healthLabel, summaryFootprintBytes, summaryRowsLabel, isViewLikeSummary, isMergeTreeSummary, isDictionarySummary,
-    isDistributedSummary, isLogFamilySummary, isResidentMemorySummary, renderHighlightedCode, destroyDatabaseTreemap, selectTable,
-    setMode, setWorkspace, syncExplorerUrl,
-  }) || null;
-}
-
 async function applyRouteFromLocation() {
   // Back / Forward in quick succession start several of these; the newest wins, the others stop at their next await.
   const gen = ++model.routeSerial;
@@ -333,30 +288,12 @@ async function applyRouteFromLocation() {
   }
 
   setWorkspace("explorer", { history: "none" });
-  if (route.section === "functions") {
-    setSection("functions");
-    if (model.functionsCatalog) {
-      if (route.functionName) {
-        const item = (model.functionsCatalog.functions || []).find((candidate) => candidate.name === route.functionName) || null;
-        model.selectedFunctionKey = item ? functionKey(item) : null;
-        renderFunctionList();
-        renderFunctionDetail();
-        revealSelectedFunction("center");
-      } else if (model.selectedFunctionKey) {
-        // Back to the Functions overview (All functions, then Back).
-        model.selectedFunctionKey = null;
-        renderFunctionList();
-      }
-      model.routeIntent = null;
-    }
-    return;
-  }
   parts.graph?.applyRouteState?.({ mode: route.graphType || "logical", depth: route.graphDepth ?? 1 });
   model.mode = route.mode;
   model.tab = route.tab || DEFAULT_TAB;
   model.databaseFocus = route.databaseFocus || "";
   // Panes only: the route's selection is shown below, once resolved.
-  setSection("tables", { show: false });
+  showTables({ show: false });
   if (route.database) {
     model.expandedDatabases.add(route.database);
   }
@@ -415,11 +352,8 @@ function resetForHost() {
   // the new host starts its own (ARCH-F-097, ARCH-F-140).
   util.latest.cancelPrefix("explorer.");
   catalogLoad = null;
-  forgetFunctionsLoad();
   model.loadingCatalog = false;
-  model.loadingFunctions = false;
   uiState.busy(dom.explorerRefreshButton, false);
-  uiState.busy(dom.explorerFunctionRefreshButton, false);
   model.routeSerial += 1;
   model.catalog = null;
   model.databaseTablesLoaded.clear();
@@ -445,21 +379,15 @@ function resetForHost() {
   showDetailState("loading", { label: "Loading databases\u2026" });
   if (dom.explorerDetail) dom.explorerDetail.hidden = true;
   renderTableList();
-  renderFunctionList();
   parts.graph?.onHostChanged();
   syncVisibilityOptionLocks();
-  if (model.active) {
-    if (model.section === "functions") refreshFunctions(false);
-    else refreshCatalog(false);
-  }
+  if (model.active) refreshCatalog(false);
 }
 
 function openTableFromGraph(database, table) {
   // Canvas clicks must never restart the catalog loader: doing so can replay
   // a stale route intent and snap focus back to the table that originally
-  // opened Explorer. Only switch section when we are actually leaving
-  // Functions.
-  if (model.section !== "tables") setSection("tables");
+  // opened Explorer.
   selectTable(database, table, false, { graphOrigin: true });
 }
 
@@ -490,38 +418,17 @@ function init() {
     chip.addEventListener("click", () => { if (chip.getAttribute("aria-disabled") !== "true") toggleTypeFilter(String(chip.dataset.filter || "")); });
   }
   sidePanel("explorerListPane");
-  sidePanel("explorerFunctionListPane");
   shellEl("explorerTreeToggle")?.addEventListener("click", () => setTreeDrawerOpen(!model.treeOpen));
   try {
     window.matchMedia(shell.mediaQuery("md")).addEventListener("change", (event) => { if (!event.matches) setTreeDrawerOpen(false); });
   } catch {}
   dom.explorerRefreshButton?.addEventListener("click", () => refreshCatalog(true));
-  dom.explorerFunctionRefreshButton?.addEventListener("click", () => refreshFunctions(true));
   // ns.search: the tree filter is cheap and follows every key. Graph focus
   // re-runs the layout, the fit and a scoped graph fetch, so it follows the
   // query once typing pauses (the one search delay) instead of once per
   // intermediate prefix.
   const graphSearch = util.debounce(() => parts.graph?.searchFocus());
   searches.tree = search.bind(dom.explorerSearchInput, () => { renderTableList(); graphSearch(); }, { debounceMs: 0 });
-  searches.functions = search.bind(dom.explorerFunctionSearchInput, () => renderFunctionList());
-  dom.explorerFunctionCategorySelect?.addEventListener("change", renderFunctionList);
-  // Function kind chips, like the tree's type chips: a filled chip is a
-  // kind the list shows (every chip filled when nothing narrows it). One
-  // kind at a time; pressing the only filled chip again lists every function.
-  const functionChips = [...($$(".explorerFilterChip[data-function-kind]", shellEl("explorerFunctionFilters")) || [])];
-  for (const chip of functionChips) {
-    chip.addEventListener("click", () => {
-      const kind = String(chip.dataset.functionKind || "");
-      const value = String(dom.explorerFunctionCategorySelect?.value || "") === kind ? "" : kind;
-      if (dom.explorerFunctionCategorySelect) dom.explorerFunctionCategorySelect.value = value;
-      for (const candidate of functionChips) {
-        const pressed = !value || String(candidate.dataset.functionKind || "") === value;
-        candidate.setAttribute("aria-pressed", String(pressed));
-        candidate.classList.toggle("is-on", pressed);
-      }
-      renderFunctionList();
-    });
-  }
   window.addEventListener("chdash:host-changed", resetForHost);
   // Escape on the tree drawer is ns.layers (ns.sidePanel).
   features.on(applyExplorerFeatures);
@@ -530,12 +437,12 @@ function init() {
   syncVisibilityOptionLocks({ propagate: true });
   applyExplorerFeatures();
   meta.ensureHighlighterData();
-  setSection(loader?.page?.name === "functions" ? "functions" : "tables");
+  showTables();
   void applyRouteFromLocation();
 }
 
 // The functions that the modules under this controller call (app_explorer_store.js, `actions`).
-Object.assign(actions, { openCatalogRoot, refreshCatalog, applyRouteFromLocation });
+Object.assign(actions, { openCatalogRoot, refreshCatalog, applyRouteFromLocation, setMode });
 
 // explorer.use({ graph, storage, detail, results }): the parts of the Catalog page (see `parts`).
 function use({ graph: graphView = null, storage: storageViews = null, detail = null, results = null } = {}) {
@@ -543,10 +450,10 @@ function use({ graph: graphView = null, storage: storageViews = null, detail = n
   parts.storage = storageViews;
   parts.detail = detail;
   parts.results = results;
-  parts.detailView = createDetailView();
+  parts.detail?.init();
 }
 
 export const explorer = {
-  use, init, setWorkspace, setSection, setMode, setView, currentView,
-  refreshCatalog, refreshFunctions, selectTable, selectDatabase,
+  use, init, setWorkspace, setMode, setView, currentView,
+  refreshCatalog, selectTable, selectDatabase,
 };

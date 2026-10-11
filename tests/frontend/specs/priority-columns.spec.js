@@ -70,3 +70,34 @@ test('a table that still overflows says so at the edge, and a hidden column is g
   const hiddenCells = await page.evaluate(() => [...document.querySelectorAll('#explorerDatabaseObjects tbody tr:first-child td')].filter((td) => td.offsetParent === null).length);
   expect(hiddenCells).toBeGreaterThan(0);
 });
+
+test('the Activity tables of the System page lose their low-priority columns as the window narrows, and a hidden column is gone from the rows', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/system');
+  const table = page.locator('#systemActivityReplicas');
+  await expect(table).toBeVisible({ timeout: 20_000 });
+  const state = () => page.evaluate(() => {
+    const el = document.querySelector('#systemActivityReplicas');
+    const wrap = el.closest('.dataTableWrap');
+    const shown = (list) => [...list].filter((node) => node.offsetParent !== null);
+    return {
+      over: wrap.scrollWidth - wrap.clientWidth,
+      heads: shown(el.querySelectorAll('thead th')).map((th) => th.textContent.trim()),
+      cells: shown(el.querySelectorAll('tbody tr:first-child td')).length,
+    };
+  });
+  const full = ['Table', 'Replica', 'Health', 'Active', 'Delay', 'Queue', 'Last queue update', 'Last exception'];
+  let now = await state();
+  expect(now.heads).toEqual(full);
+  expect(now.cells).toBe(8);
+  await page.setViewportSize({ width: 1279, height: 900 });
+  now = await state();
+  expect(now.heads).toEqual(['Table', 'Replica', 'Health', 'Active', 'Delay', 'Queue', 'Last exception']);
+  expect(now.cells).toBe(7);
+  expect(now.over).toBeLessThanOrEqual(1);
+  await page.setViewportSize({ width: 820, height: 900 });
+  now = await state();
+  expect(now.heads).toEqual(['Table', 'Health', 'Delay', 'Queue']);
+  expect(now.cells).toBe(4);
+  expect(now.over).toBeLessThanOrEqual(1);
+});

@@ -85,7 +85,7 @@ def test_data_preview_uses_runner_readable_columns_limit_and_no_count() -> None:
 
 def test_frontend_has_real_list_workspace_and_graph_mode() -> None:
     html = read("src/static/explorer.html")
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
 
     assert 'id="navQueryLink"' in html
     assert 'id="navExplorerLink"' in html
@@ -106,7 +106,7 @@ def test_frontend_has_real_list_workspace_and_graph_mode() -> None:
 def test_manual_catalog_refresh_invalidates_acl_and_metadata_caches() -> None:
     api = read_api()
     frontend_api = read("src/static/app_api.js")
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
     cache = read("src/ttl_cache.hpp")
 
     assert 'req.get_param_value("refresh") == "1"' in api
@@ -126,7 +126,7 @@ def test_manual_catalog_refresh_invalidates_acl_and_metadata_caches() -> None:
 def test_list_detail_exposes_storage_parts_topology_and_replication_without_cross_object_leak() -> None:
     catalog = read_catalog()
     api = read_api()
-    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + modules.read_explorer_detail())
 
     assert "FROM system.disks" in catalog
     assert "storage_by_name.find" in catalog
@@ -167,7 +167,7 @@ def test_information_schema_is_excluded_at_runner_discovery_boundary() -> None:
 
 def test_explorer_uses_the_sans_token_and_owns_no_document_scroll_on_desktop() -> None:
     css = css_sources.text()
-    graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
+    graph = (modules.read_explorer_graph() + read("src/static/app_graph_kit.js"))
     assert 'font-family: var(--font-sans);' in css
     assert '"Inter"' not in css
     assert 'const FONT = \'"IBM Plex Sans", ' in graph
