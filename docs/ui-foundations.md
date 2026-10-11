@@ -396,7 +396,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 - The header is the partial `src/shell/header.html`. It has the brand, the page switcher, the version badge, the host picker and the theme.
   - The page switcher is a nav of links (`nav#pageSelect`, `aria-label="Pages"`): Query, Explorer, Observability, System, and MCP when the server has it on. Every page is a document of its own, so each entry is an `a href`: a click opens the page, and a middle click or Ctrl+click opens it in a new tab. The current page has `aria-current="page"` (the partial writes `{{current.<page>}}`) and an underline of 2 px on the bottom border of the header. From 821 px the links are in the header. At 820 px and below they fold into a menu under a button that names the current page (`#pageSelectButton`). That menu keeps the current page in its list, with a check. The header script writes the base path in the links (`window.__chdashUrl`). It also shows or hides each link from the last answer of `/api/version` (`chdash.pageNav.v1`), so the links do not move when the API answers.
   - The host picker shows the name of the host in full, up to 28 rem. Under 1280 px the version and the ping leave the button: they stay in the menu. The menu lists every host and marks the current one (`aria-selected`, a check).
-  - The version badge follows the page switcher, so a longer version text moves nothing before it. At 820 px and below, the header is two rows: the brand and the version, then the host, the page menu and the theme.
+  - The version (the source of the page) is small muted text under the brand name, so a longer version text moves nothing beside it. At 820 px and below, the header is two rows: the brand and the version, then the host, the page menu and the theme.
   - The nav row of the page follows (`#obsNav`, `#explorerTopBar`, `.systemPage__nav`). It is one row. It has the Catalog modes of the Explorer and the controls of the System section on its right. The MCP page has no nav row, no bar and no strip. Its first row is the heading of the keys (title, filter, Refresh, New key).
   - The regions of the page follow, edge to edge, on the flat `--bg`.
   - There is no page card, no rounded inset and no outer shadow.
@@ -418,7 +418,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 - Use `--shell-top` for anything that you place under the chrome. `app_dom.js` sets it on every page to the bottom of the header and the nav row. Do not use a literal header height.
 - The first element of the page is the skip link (`a.skipLink`, in `src/shell/header.html`): the first stop of the Tab order, out of sight until it has the focus. It goes to the `main` of the page. `pages.<page>.main` of `src/static/modules.json` gives each shell the id of its `main`.
 - Headings: one `h1` for each page, the name of the page (`srOnly`: the page switcher shows it). It is the first child of the `main`, so that no text of the page is outside a landmark. Use one `h2` for each Observability view (`srOnly`, after the `h1`). Use one `h2` for the title of the Explorer card (`#explorerDetailName`, `#explorerFunctionDetailName`). The sections under it are `h3`.
-- The version badge of the header is a solid chip (`--pill-bg`, the muted text at full strength), 4.5:1 in both themes.
+- The version of the header is small muted text (`--fs-xs`, `--muted`) under the brand name, 4.5:1 in both themes.
 
 ## Touch and phones
 

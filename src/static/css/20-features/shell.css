@@ -61,16 +61,18 @@
   white-space: nowrap;
 }
 
-/* The backend version: a solid chip, the muted text at full strength (>= 4.5:1 in both themes). */
+/* The name and, under it, the backend version in small muted text (>= 4.5:1 in both themes): the source of the page. */
+.appBrand__text {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
 .versionBadge {
-  padding: 0 var(--space-6);
-  line-height: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--pill-bg);
   color: var(--muted);
   font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
+  line-height: 1.1;
   white-space: nowrap;
 }
 
@@ -370,11 +372,7 @@ body {
     flex: 0 0 auto;
     order: 0;
   }
-  .appHeader .versionBadge {
-    order: 1;
-    align-self: center;
-  }
-  /* The break after the brand and the version: the host, the page menu and the theme take the row under it. */
+  /* The break after the brand (its name and version): the host, the page menu and the theme take the row under it. */
   .appHeader::after {
     content: "";
     flex: 1 1 100%;
