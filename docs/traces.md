@@ -36,6 +36,22 @@ Each page loads only its own markup, modules and stylesheet. These rules apply:
 - `style.traces.css`, `style.logs.css` and `style.metrics.css` are the stylesheets. `tools/build_page_css.py` writes them from `src/static/css/` at build time.
 - A page that is not the Traces page never loads the trace modules, and the other way round.
 
+The Traces page is two views, and each has its own modules. They share a small set of modules and nothing else. Each module imports what it uses. No module receives its helpers in a bag.
+
+| Module | Content |
+| --- | --- |
+| `app_traces.js` | the controller of the search page: the search, the range, the results and the charts it starts |
+| `app_trace_detail.js` | the controller of the trace page (`trace.html`): it loads a trace and starts the views of the trace |
+| `app_trace_store.js` | the model, the address of the Traces page, the host, the error strip, and the `actions` that a view provides to the modules under it (search, open a trace, apply a range) |
+| `app_trace_model.js` | the pure functions: the span tree, the trace bounds, the critical path, the sort of the list, the parse of attributes, events and links. No DOM. `tests/frontend/model/trace-model.test.cjs` tests them in Node |
+| `app_trace_nav.js` | the way from a trace back to its search |
+| `app_trace_results.js`, `app_trace_analytics.js`, `app_trace_charts.js` | the result list and table, the two charts above them, and the chart helpers (search page only) |
+| `app_trace_waterfall.js`, `app_trace_inspector.js` | the waterfall of a trace and the span inspector |
+| `app_trace_views.js`, `app_trace_logs.js`, `app_trace_insights.js` | the views of a trace, its logs and its insights (trace page only; the insights also show the exceptions in the Spans panel) |
+| `app_trace_search.js`, `app_trace_heatmap.js`, `app_trace_spans.js`, `app_trace_tabs.js`, `app_trace_services.js`, `app_trace_map.js` | the search state and its URL, the duration heatmap, the Spans mode, the tab registry and its two tabs |
+
+A module that the other page lacks reaches the controller through `actions` in the store, or through `traceSearch.use()`, which the entry of the search page calls. In this way a module does not import the module that imports it.
+
 ## Configuration
 
 ```hcl
@@ -432,7 +448,7 @@ The measures used the local fixture (about 2.0 B spans, 7 days). They went throu
 
 ## Services view
 
-The Services tab sits between *Search* and *Service map* in the one tab registry of `app_trace_tabs.js`. The call is `register({ id, label, order, panelId, install, onSearch, onShow, onHide, available, params, writeParams, applyParams })`. `available(meta)` hides a tab that /api/traces/meta does not enable. `params` lists the view-only URL parameters of a tab. The search key leaves them out. The selected tab is in the URL (`?tab=services`) next to the search parameters. Every tab shares the search bar. The time range, the status / service / operation pickers and the filter chips apply to the Services view as well. The view needs `traces.analytics = true`, because it is a span aggregation like the analytics charts.
+The Services tab sits between *Search* and *Service map* in the one tab registry of `app_trace_tabs.js`. The call is `register({ id, label, order, panelId, init, onSearch, onShow, onHide, available, params, writeParams, applyParams })`. `available(meta)` hides a tab that /api/traces/meta does not enable. `params` lists the view-only URL parameters of a tab. The search key leaves them out. The selected tab is in the URL (`?tab=services`) next to the search parameters. Every tab shares the search bar. The time range, the status / service / operation pickers and the filter chips apply to the Services view as well. The view needs `traces.analytics = true`, because it is a span aggregation like the analytics charts.
 
 The view follows the services dashboard of HyperDX. It shows RED metrics of the **entry spans** of each service: `SpanKind IN ('Server', 'Consumer', 'SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = ''`. The OTel exporter writes `Server` / `Consumer`. The fixture has `Server` roots and `Consumer` children. *Root spans* (`ParentSpanId = ''`) is the cheaper alternative (`svc_scope=root`). The search filters describe these spans themselves. `min_duration_ms` / `max_duration_ms` bound the own `Duration` of the span.
 

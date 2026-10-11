@@ -67,7 +67,7 @@ def test_migrated_popovers_use_the_shell():
     views = read("src/static/app_trace_views.js")
     assert "popoverMod.open(marker, html, {" in views and "popoverMod.follow({" in views
     assert 'document.addEventListener("click", onDocClick, true);' not in views
-    traces = read("src/static/app_traces.js")
+    traces = modules.read_family("app_trace")
     assert "serviceTip = popover.tip(root, hiddenPills, {" in traces and "servicePopover" not in traces
     # The span columns popover and the click-to-filter menu are ns.menu
     # menus (app_ui_menu.js: a portal and a context menu on ns.layers).

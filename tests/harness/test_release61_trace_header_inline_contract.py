@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -8,7 +10,7 @@ def read(rel):
 
 def test_trace_stats_share_title_row_and_trace_id_is_not_duplicated():
     html = read("src/static/trace.html")
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     title_row = html.split('<div class="tracePageHeader__titleRow">', 1)[1].split('</div>\n          <div id="traceOverview"', 1)[0]
     assert 'id="traceDetailTitle"' in title_row
     assert 'id="traceDetailStats"' in title_row

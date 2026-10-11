@@ -261,9 +261,9 @@ def test_menus_go_through_the_component():
     # The Copy JSON splits (Query, results panels, trace, Logs) are copy.split
     # (app_ui_copy.js), whose menu is an ns.menu split.
     assert "const handle = menuMod.split(main, toggle, menu, { root });" in read("app_ui_copy.js")
-    for name in ["app_run.js", "app_results.js", "app_traces.js", "app_logs.js"]:
+    for name in ["app_run.js", "app_results.js", "app_trace_waterfall.js", "app_logs.js"]:
         assert re.search(r"\bcopy(?:Mod)?\.split\(\{", read(name)), name
-    assert "return menu?.select(select) || null;" in read("app_traces.js")
+    assert "return menu?.select(select) || null;" in modules.read_family("app_trace")
     logs = read("app_logs.js")
     assert logs.count("menuMod?.multi(...pickerParts(root), { root, onOpen:") == 2
     assert "menuMod?.select(level, {" in logs

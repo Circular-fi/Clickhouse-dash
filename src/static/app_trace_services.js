@@ -7,13 +7,16 @@
 // the database statements (/api/traces/services/db). The search bar's
 // range, pickers and chips apply here as span filters of the entry spans.
 
+import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { palette } from "./app_palette.js";
-import { router } from "./app_router.js";
-import { traceSearch } from "./app_trace_search.js";
 import { timeRange } from "./app_timerange.js";
+import { chartMessage, mountChart, unmountChart, zoomSearchRange } from "./app_trace_charts.js";
+import { bucketGrid, durationAxis } from "./app_trace_model.js";
+import { traceSearch } from "./app_trace_search.js";
+import { actions, address, currentHost, esc, model, spanTraceUrl } from "./app_trace_store.js";
 import { traceTabs } from "./app_trace_tabs.js";
 import { badge } from "./app_ui_badge.js";
 import { chartUi } from "./app_ui_chart.js";
@@ -31,9 +34,7 @@ const SORT_KEYS = ["name", "rate", "errors", "p50", "p95", "p99", "time"];
 const DEFAULT_SORT = { key: "time", dir: "desc" };
 const DETAIL_CHART_HEIGHT = 150;
 
-let ctx = null;
 let root = null;
-const esc = (value) => ctx.esc(value);
 const fmt = format;
 
 const view = {
@@ -126,7 +127,7 @@ function seriesOf(payload, name) {
 }
 
 function durationFilterEnabled() {
-  return ctx?.model?.meta?.features?.duration_filter !== false;
+  return model.meta?.features?.duration_filter !== false;
 }
 
 // ------------------------------------------------------------ requests
@@ -148,7 +149,7 @@ function keyOf(params) {
 // again even within the same minute.
 async function run(filters, { force = false } = {}) {
   view.filters = filters;
-  view.searchKey = traceSearch?.searchKey?.() || "";
+  view.searchKey = traceSearch.searchKey() || "";
   const params = requestFilters(filters);
   const key = keyOf(params);
   if (!force && key === view.key && (view.payload || view.loading)) {
@@ -162,7 +163,7 @@ async function run(filters, { force = false } = {}) {
   view.error = "";
   render();
   try {
-    const payload = await ctx.api.getTraceServices(ctx.currentHost(), params, { signal: req.signal });
+    const payload = await api.getTraceServices(currentHost(), params, { signal: req.signal });
     if (!req.isCurrent()) return;
     view.payload = payload;
     palette.registerServices((payload?.services || []).map((row) => row[0]));
@@ -194,7 +195,7 @@ async function loadDetail() {
   renderDetail();
   void loadDb(params);
   try {
-    const payload = await ctx.api.getTraceServices(ctx.currentHost(), params, { signal: req.signal });
+    const payload = await api.getTraceServices(currentHost(), params, { signal: req.signal });
     if (!req.isCurrent()) return;
     detail.payload = payload;
   } catch (error) {
@@ -222,7 +223,7 @@ async function loadDb(params) {
   db.error = "";
   db.payload = null;
   try {
-    const payload = await ctx.api.getTraceServicesDb(ctx.currentHost(), dbParams, { signal: req.signal });
+    const payload = await api.getTraceServicesDb(currentHost(), dbParams, { signal: req.signal });
     if (!req.isCurrent()) return;
     db.payload = payload;
   } catch (error) {
@@ -394,7 +395,7 @@ function render() {
 // sheet on narrow windows). Built once; renders fill them.
 let detailPanel = null;
 // svc= of the open detail (ns.router.panel).
-const svcParam = router.owner("traces").panel("svc");
+const svcParam = address.panel("svc");
 
 function skeleton() {
   let shell = $(":scope > .traceSvc", root);
@@ -425,9 +426,8 @@ let latencyHidden = ["p95"];
 const SUCCESS_COLOR = "var(--muted)";
 
 function detailChart(container, { start, end, bucketMs, points, series, type, axis, releases, footer, format, hidden = null, onHiddenChange = null }) {
-  const chart = ctx.chart;
-  if (!points.length) { chart.chartMessage(container, "No data in this range."); return; }
-  const grid = chart.bucketGrid(points.map((p) => [p.t]), bucketMs);
+  if (!points.length) { chartMessage(container, "No data in this range."); return; }
+  const grid = bucketGrid(points.map((p) => [p.t]), bucketMs);
   const n = grid.starts.length;
   const xs = new Float64Array(n);
   for (let i = 0; i < n; i += 1) xs[i] = grid.starts[i] + bucketMs / 2;
@@ -442,7 +442,7 @@ function detailChart(container, { start, end, bucketMs, points, series, type, ax
   let yAxis;
   if (axis === "duration") {
     yAxis = (yMin, yMax) => {
-      const scale = chart.durationAxis(yMin, yMax, 5);
+      const scale = durationAxis(yMin, yMax, 5);
       return { min: scale.axisMin, max: scale.axisMax, ticks: scale.values.map((t) => ({ v: t.value, label: t.label })) };
     };
   } else {
@@ -451,7 +451,7 @@ function detailChart(container, { start, end, bucketMs, points, series, type, ax
     yAxis = (yMin, yMax) => unitAxis(yMax, format);
   }
   const byIndex = new Map(points.map((p, k) => [grid.slot[k], p]));
-  chart.mountChart(container, "service", {
+  mountChart(container, "service", {
     height: DETAIL_CHART_HEIGHT, xKind: "time", xs, xDomain: [start, end], zoom: null,
     // The engine legend shows for the charts with several series.
     series: columns, type, stack: type === "bar", syncKey: "traces-service", tooltipNulls: false,
@@ -461,13 +461,13 @@ function detailChart(container, { start, end, bucketMs, points, series, type, ax
     formatValue: (v) => format(v),
     formatY: (v) => format(Math.max(0, v)),
     tooltipFooter: footer ? (i) => { const p = byIndex.get(i); return p ? footer(p) : ""; } : null,
-    onZoom: (range, fromUser) => { if (fromUser && range) chart.zoomSearchRange(range); },
+    onZoom: (range, fromUser) => { if (fromUser && range) zoomSearchRange(range); },
   });
 }
 
 // The detail's charts leave with it (their engine state is released).
 function releaseDetailCharts() {
-  $$("[data-svc-chart]", detailPanel?.el).forEach((el) => ctx.chart.unmountChart(el));
+  $$("[data-svc-chart]", detailPanel?.el).forEach((el) => unmountChart(el));
 }
 
 function drawDetailCharts() {
@@ -528,7 +528,7 @@ function slowestHtml(payload) {
   if (!rows.length) return emptyHtml("No spans in this range.");
   return `<ol class="traceSvcSlowest">${rows.map((row) => {
       const [traceId, spanId, operation, startMs, durationNs, status] = row;
-      const href = ctx.spanTraceUrl(String(traceId), String(spanId || ""));
+      const href = spanTraceUrl(String(traceId), String(spanId || ""));
       return `<li><a class="traceSvcSlowest__link" href="${esc(href)}" data-svc-trace="${esc(traceId)}" data-svc-span="${esc(spanId)}" title="Open trace ${esc(traceId)}"><b class="traceSvcSlowest__duration">${esc(fmt.duration(durationNs))}</b><span class="traceSvcSlowest__op">${esc(operation)}</span>${status === "Error" ? badge.statusHtml(status, { className: "traceSvcSlowest__error" }) : ""}<time class="traceSvcSlowest__time" title="${esc(fmt.timeTitle(Number(startMs)))}">${esc(fmt.time(Number(startMs)))}</time><code>${esc(String(traceId).slice(0, 12))}</code></a></li>`;
     }).join("")}</ol>`;
 }
@@ -651,12 +651,12 @@ function closeDetail({ fromPanel = false } = {}) {
   openDetail("", { push: false });
   let back = false;
   if (svcParam.get()) back = svcParam.close();
-  else router.owner("traces").replace();
+  else address.replace();
   if (fromPanel || !back) $(`[data-svc-row="${CSS.escape(name)}"]`, root)?.focus({ preventScroll: true });
 }
 
 function searchFor(spec) {
-  traceSearch?.applySearch?.(spec);
+  traceSearch.applySearch(spec);
   traceTabs.select("search");
 }
 
@@ -667,7 +667,7 @@ function onClick(event) {
   if (sort) {
     const key = sort.getAttribute("data-svc-sort");
     view.sort = view.sort.key === key ? { key, dir: view.sort.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "name" ? "asc" : "desc" };
-    router.owner("traces").replace();
+    address.replace();
     render();
     $(`[data-svc-sort="${key}"] .dataTable__sort`, root)?.focus({ preventScroll: true });
     return;
@@ -675,7 +675,7 @@ function onClick(event) {
   const scope = target.closest("[data-svc-scope]");
   if (scope) {
     const value = scope.getAttribute("data-svc-scope") === "root" ? "root" : "entry";
-    if (value !== view.scope) { view.scope = value; void ctx.runSearch({ url: "push" }); }
+    if (value !== view.scope) { view.scope = value; void actions.search({ url: "push" }); }
     return;
   }
   const retry = target.closest("[data-svc-retry]")?.getAttribute("data-svc-retry");
@@ -687,8 +687,8 @@ function onClick(event) {
     renderDetail();
     return;
   }
-  if (target.closest("[data-svc-exact]")) { view.exact = true; void ctx.runSearch({ url: "push" }); return; }
-  if (target.closest("[data-svc-sampled]")) { view.exact = false; void ctx.runSearch({ url: "push" }); return; }
+  if (target.closest("[data-svc-exact]")) { view.exact = true; void actions.search({ url: "push" }); return; }
+  if (target.closest("[data-svc-sampled]")) { view.exact = false; void actions.search({ url: "push" }); return; }
   const p99 = target.closest("[data-svc-p99]");
   if (p99) {
     event.stopPropagation();
@@ -703,8 +703,8 @@ function onClick(event) {
   if (trace) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
     event.preventDefault();
-    ctx.model.pendingSpanId = trace.getAttribute("data-svc-span") || "";
-    void ctx.loadTrace(trace.getAttribute("data-svc-trace"), { push: true });
+    model.pendingSpanId = trace.getAttribute("data-svc-span") || "";
+    void actions.loadTrace(trace.getAttribute("data-svc-trace"), { push: true });
     return;
   }
   const row = target.closest("[data-svc-row]");
@@ -739,8 +739,7 @@ function applyParams(params) {
   }
 }
 
-function mount(element, context) {
-  ctx = context;
+function mount(element) {
   root = element;
   root.addEventListener("click", onClick);
   // The database statements' inline SQL (string-built): one toggle.
@@ -754,8 +753,8 @@ function mount(element, context) {
 // Shown from a click or Back / Forward: the current search refreshes the
 // view unless it already shows it.
 function onShow() {
-  const key = traceSearch?.searchKey?.() || "";
-  if (key !== view.searchKey || (!view.payload && !view.loading)) void ctx.runSearch({ url: "none" });
+  const key = traceSearch.searchKey() || "";
+  if (key !== view.searchKey || (!view.payload && !view.loading)) void actions.search({ url: "none" });
   else render();
 }
 
@@ -765,7 +764,7 @@ traceTabs.register({
   order: 10,
   panelId: "traceServicesView",
   available: (meta) => meta?.analytics_enabled === true,
-  install: (context) => { const element = byId("traceServicesView"); if (element) mount(element, context); },
+  init: () => { const element = byId("traceServicesView"); if (element) mount(element); },
   onSearch: (filters, options) => run(filters, options),
   onShow,
   params: ["svc", "svc_sort"],

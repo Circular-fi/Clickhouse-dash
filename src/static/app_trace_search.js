@@ -3,13 +3,16 @@
 // plus excluded services / operations / statuses), the whole search in the
 // URL (shareable, Back / Forward, reload), click-to-filter menus on shown
 // values and the attribute facets sidebar (DBSearchPageFilters).
-// app_traces.js calls install(ctx) with its model and helpers at init.
+// The search page (app_traces.js) and the trace page (app_trace_detail.js) call init() once; the trace page keeps the
+// search as the context of its address and sends a filter to the search page.
 
+import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { router } from "./app_router.js";
 import { storage } from "./app_state.js";
 import { timeRange } from "./app_timerange.js";
+import { DETAIL_PAGE, SEARCH_ROUTE, actions, copyText, currentHost, model, route } from "./app_trace_store.js";
 import { badge } from "./app_ui_badge.js";
 import { lifecycle } from "./app_ui_layers.js";
 import { menu as menuMod } from "./app_ui_menu.js";
@@ -39,11 +42,9 @@ const SEARCH_PARAMS = ["from", "to", "status", "service", "operation", "limit", 
   "tag", "tag_not", "tag_exists", "tag_missing", "service_not", "operation_not", "status_not", "tab",
   "min_duration_ms", "max_duration_ms", "duration_view",
   "mode", "kind", "span_min_duration_ms", "span_max_duration_ms"];
-const SEARCH_ROUTE = "/observability/traces";
 const PIN_STORE_KEY = storage.KEYS.traceFacetPins;
 const COLLAPSED_STORE_KEY = storage.KEYS.traceFacetsCollapsed;
 
-let ctx = null;
 const { byId, $ } = dom;
 
 const search = {
@@ -216,7 +217,7 @@ function onChipsClick(event) {
   } else {
     return;
   }
-  void ctx.runSearch({ url: "push" });
+  void actions.search({ url: "push" });
 }
 
 // --------------------------------------------------------- tag input row
@@ -245,7 +246,7 @@ function tagOp() { return tagOpButton()?.dataset.op || "="; }
 // The Tag / Value inputs add a chip (on Search or Enter). Throws on a half
 // filled pair.
 function commitPendingTag() {
-  const pending = ctx.currentTag();
+  const pending = actions.currentTag();
   const op = tagOp();
   const valued = op === "=" || op === "!=";
   if (!pending.key && pending.value === "") return false;
@@ -281,7 +282,6 @@ function wantSelect(select, value) {
 }
 
 function currentParams() {
-  const { dom, model } = ctx;
   // The range only once the user picked one: the default follows the meta.
   const params = timeRange.url.write(new URLSearchParams(), model.timeRangeTouched ? model.timeRange : null);
   const status = String(dom.tracesStatus?.value || "");
@@ -321,8 +321,7 @@ function carriedParams() {
 // Spans side panel (span= names the trace's own span there), nor the search
 // page's tab and its view parameters (tab= names the trace's own tab).
 function contextQuery() {
-  if (!ctx) return "";
-  if (ctx.detail) return carriedParams().toString();
+  if (DETAIL_PAGE) return carriedParams().toString();
   const params = currentParams();
   params.delete("span");
   params.delete("tab");
@@ -348,7 +347,7 @@ function searchKey() {
 // module writes it through the same owner: ns.router.owner("traces")
 // .write(mode), mode "push" (a new search), "replace" (same entry, e.g.
 // the page-load search or a view toggle) or "none" (restored from history).
-router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) });
+router.owner("traces", { path: SEARCH_ROUTE, params: () => (DETAIL_PAGE ? null : currentParams()) });
 
 function hasSearchParams(params) {
   return SEARCH_PARAMS.some((name) => params.has(name)) || !!traceTabs?.hasParams?.(params);
@@ -357,7 +356,6 @@ function hasSearchParams(params) {
 // Controls, range and chips from URL parameters (the search page or a
 // trace detail URL carrying its search context).
 function applyParams(params, { initial = false } = {}) {
-  const { dom, model } = ctx;
   traceTabs?.applyParams?.(params, { initial });
   const tr = timeRange;
   const range = tr.url.read(params);
@@ -368,14 +366,14 @@ function applyParams(params, { initial = false } = {}) {
   } else if (!initial) {
     model.timeRangeTouched = false;
   }
-  ctx.syncRange();
+  actions.syncRange();
   const status = params.get("status") || "";
   setSelect(dom.tracesStatus, selectHas(dom.tracesStatus, status) ? status : "");
   const service = params.get("service") || "";
   const operation = params.get("operation") || "";
   wantSelect(dom.tracesService, service);
   wantSelect(dom.tracesOperation, operation);
-  ctx.refreshServiceOperationOptions();
+  actions.refreshOptions();
   // Back / Forward restore the entry's own choice (none included).
   setSelect(dom.tracesService, service);
   setSelect(dom.tracesOperation, operation);
@@ -384,8 +382,8 @@ function applyParams(params, { initial = false } = {}) {
   const sort = params.get("sort") || "recent";
   setSelect(dom.tracesSort, selectHas(dom.tracesSort, sort) ? sort : "recent");
   const results = params.get("results");
-  if (results === "table" || results === "list") ctx.setResultsView(results, { persist: false });
-  else if (!initial || hasSearchParams(params)) ctx.setResultsView("list", { persist: false });
+  if (results === "table" || results === "list") actions.setResultsView(results, { persist: false });
+  else if (!initial || hasSearchParams(params)) actions.setResultsView("list", { persist: false });
   traceSpans?.applyParams?.(params);
   search.chips = chipsFromParams(params);
   search.duration = durationFromParams(params);
@@ -394,7 +392,6 @@ function applyParams(params, { initial = false } = {}) {
 }
 
 function applyLocation({ initial = false } = {}) {
-  if (!ctx) return;
   const params = router.current().params;
   // A trace URL's tab= is the trace's tab (app_trace_views.js).
   if (onTracePath()) params.delete("tab");
@@ -470,17 +467,16 @@ function filterHref(field, value, action) {
     if (!params.getAll(name).includes(text)) params.append(name, text);
   }
   const query = params.toString();
-  return `${ctx.route(SEARCH_ROUTE)}${query ? `?${query}` : ""}`;
+  return `${route(SEARCH_ROUTE)}${query ? `?${query}` : ""}`;
 }
 
 // Applies one filter action and searches. On a trace page the search page
 // opens with the filter applied.
 function applyFilter(field, value, action) {
-  if (ctx.detail) {
+  if (DETAIL_PAGE) {
     window.location.assign(filterHref(field, value, action));
     return;
   }
-  const { dom } = ctx;
   if (action === "only") {
     search.chips = [];
     search.duration = null;
@@ -500,9 +496,9 @@ function applyFilter(field, value, action) {
     } else {
       const select = field.kind === "service" ? dom.tracesService : dom.tracesOperation;
       wantSelect(select, value);
-      ctx.refreshServiceOperationOptions();
+      actions.refreshOptions();
       setSelect(select, value);
-      ctx.syncServiceOperationPair(field.kind);
+      actions.syncServiceOperationPair(field.kind);
     }
     renderChips();
   } else {
@@ -513,7 +509,7 @@ function applyFilter(field, value, action) {
     }
     addChip({ kind: field.kind, op: "!=", scope: "any", key: field.kind, value });
   }
-  void ctx.runSearch({ url: "push" });
+  void actions.search({ url: "push" });
 }
 
 function onMenuClick(event) {
@@ -526,7 +522,7 @@ function onMenuClick(event) {
   const anchor = menuTarget;
   closeMenu();
   if (!field) return;
-  if (action === "copy") { ctx.copyText(value, anchor); return; }
+  if (action === "copy") { copyText(value, anchor); return; }
   applyFilter(field, value, action);
 }
 
@@ -617,10 +613,10 @@ function createFacets() {
     label: "attributes",
     noun: ["span", "spans"],
     scopes: { span: { label: "Span attributes", title: "Span attribute (SpanAttributes)" }, resource: { label: "Resource attributes", title: "Resource attribute (ResourceAttributes)" } },
-    enabled: () => ctx?.model?.meta?.tag_search_supported !== false,
+    enabled: () => model.meta?.tag_search_supported !== false,
     filterKey: facetFilterKey,
     fetchKeys: async (filters, { signal } = {}) => {
-      const payload = await ctx.api.getTraceFacets(ctx.currentHost(), facetFilterParams(filters), { signal });
+      const payload = await api.getTraceFacets(currentHost(), facetFilterParams(filters), { signal });
       return {
         supported: payload?.supported !== false,
         unsupportedText: "This trace table does not keep span attributes.",
@@ -631,7 +627,7 @@ function createFacets() {
       };
     },
     fetchValues: async (filters, scope, key, limit, { signal } = {}) => {
-      const payload = await ctx.api.getTraceFacetValues(ctx.currentHost(), { ...facetFilterParams(filters), scope, key, limit: String(limit) }, { signal });
+      const payload = await api.getTraceFacetValues(currentHost(), { ...facetFilterParams(filters), scope, key, limit: String(limit) }, { signal });
       return {
         values: (Array.isArray(payload?.values) ? payload.values : []).map((row) => ({ value: String(row?.[0] ?? ""), count: Number(row?.[1] || 0) })),
         estimated: payload?.estimated === true,
@@ -654,20 +650,19 @@ function createFacets() {
       const existing = search.chips.find((other) => chipMatches(other, scope, key, value, "="));
       if (checked && !existing) addChip({ kind: "tag", op: "=", scope, key, value });
       if (!checked && existing) removeChip(existing);
-      void ctx.runSearch({ url: "push" });
+      void actions.search({ url: "push" });
     },
     onExclude: (scope, key, value) => {
       const existing = search.chips.find((other) => chipMatches(other, scope, key, value, "!="));
       if (existing) removeChip(existing); else addChip({ kind: "tag", op: "!=", scope, key, value });
-      void ctx.runSearch({ url: "push" });
+      void actions.search({ url: "push" });
     },
   });
 }
 
 // ---------------------------------------------------------------- wiring
 
-function install(context) {
-  ctx = context;
+function init() {
   renderChips();
   setTagOp("=");
   byId("tracesFilterChips")?.addEventListener("click", onChipsClick);
@@ -682,9 +677,9 @@ function install(context) {
     scope.listen(document, "keydown", onDocumentKeydown, true);
     scope.add(() => closeMenu());
   });
-  if (!ctx.detail) facets = createFacets();
+  if (!DETAIL_PAGE) facets = createFacets();
   // A user's own service / operation choice replaces an applied one.
-  for (const select of [ctx.dom.tracesService, ctx.dom.tracesOperation]) {
+  for (const select of [dom.tracesService, dom.tracesOperation]) {
     select?.addEventListener("change", () => wantSelect(select, ""));
   }
 }
@@ -707,10 +702,9 @@ function notePrefillTags(params) {
 // least minDurationMs: the duration chip, min_duration_ms), e.g. from the
 // Services view; other filters stay.
 function applySearch({ service = "", operation = "", minDurationMs = 0 } = {}) {
-  const { dom } = ctx;
   wantSelect(dom.tracesService, service);
   wantSelect(dom.tracesOperation, operation);
-  ctx.refreshServiceOperationOptions();
+  actions.refreshOptions();
   setSelect(dom.tracesService, service);
   setSelect(dom.tracesOperation, operation);
   search.chips = search.chips.filter((chip) => !(chip.kind === "service" && chip.value === service) && !(chip.kind === "operation" && chip.value === operation));
@@ -724,19 +718,15 @@ function resetFacets() {
 
 // Filters beyond the time range: status, service, operation, chips, duration.
 function hasFilters() {
-  if (!ctx) return false;
-  const { dom } = ctx;
   return !!(dom.tracesStatus?.value || dom.tracesService?.value || dom.tracesOperation?.value || search.chips.length || search.duration);
 }
 
 // "Clear filters" of an empty result: the range, limit and sort stay.
 function clearFilters() {
-  if (!ctx) return;
-  const { dom } = ctx;
   setSelect(dom.tracesStatus, "");
   wantSelect(dom.tracesService, "");
   wantSelect(dom.tracesOperation, "");
-  ctx.refreshServiceOperationOptions();
+  actions.refreshOptions();
   setSelect(dom.tracesService, "");
   setSelect(dom.tracesOperation, "");
   search.chips = [];
@@ -746,7 +736,7 @@ function clearFilters() {
 
 export const traceSearch = {
   use,
-  install,
+  init,
   chipParams,
   applyFilter,
   commitPendingTag,

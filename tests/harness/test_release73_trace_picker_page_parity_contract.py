@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,7 +34,7 @@ def test_trace_picker_hover_and_close_motion_follow_page_selector():
 
 
 def test_custom_range_exposes_date_and_time_inputs():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     picker = read("src/static/app_timerange.js")
     # Date and time of day (hh:mm:ss) in From / To, plus a range calendar,
     # in the panel app_timerange.js builds for each view.
@@ -47,7 +49,7 @@ def test_custom_range_exposes_date_and_time_inputs():
 
 
 def test_service_and_operation_choices_are_bidirectionally_compatible():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     assert 'function updateServiceOptions()' in js
     assert 'filter((pair) => !operation || String(pair?.[1] || "") === operation)' in js
     assert 'filter((pair) => !service || String(pair?.[0] || "") === service)' in js

@@ -7,7 +7,7 @@
 // calls writeParams / applyParams), and the Search button runs the selected
 // tab's search.
 //
-//   register({ id, label, order, panelId, install(ctx), onSearch(filters, options), onShow(), onHide(),
+//   register({ id, label, order, panelId, init(), onSearch(filters, options), onShow(), onHide(),
 //              available(meta), params, writeParams(params), applyParams(params, { initial }) })
 //
 // onSearch replaces the result list search while the tab is selected;
@@ -19,13 +19,13 @@
 // tab's URL state while it is selected.
 
 import { dom, shell } from "./app_dom.js";
-import { router } from "./app_router.js";
+import { actions, address } from "./app_trace_store.js";
 import { tabs as tabsMod } from "./app_ui_tabs.js";
 
 const SEARCH_TAB = "search";
 const tabs = [{ id: SEARCH_TAB, label: "Search", order: 0, panelSelector: ".traceSearchBody" }];
 let current = SEARCH_TAB;
-let ctx = null;
+let started = false;
 let meta = null;
 
 const { byId, $ } = dom;
@@ -42,8 +42,8 @@ function register(tab) {
   if (!tab || !tab.id || find(tab.id)) return;
   tabs.push({ order: tabs.length * 10, ...tab });
   tabs.sort((a, b) => a.order - b.order);
-  if (ctx) {
-    find(tab.id).install?.(ctx);
+  if (started) {
+    find(tab.id).init?.();
     render();
   }
 }
@@ -78,7 +78,7 @@ function show(id) {
 }
 
 function activate(id) {
-  if (id === SEARCH_TAB) ctx?.showSearch?.();
+  if (id === SEARCH_TAB) actions.showSearch();
   else find(id)?.onShow?.();
 }
 
@@ -86,7 +86,7 @@ function activate(id) {
 // activate: false only switches the panels (a caller that searches next).
 function select(id, { url = "push", activate: run = true } = {}) {
   if (!show(id)) return;
-  router.owner("traces").write(url);
+  address.write(url);
   if (run) activate(current);
 }
 
@@ -110,7 +110,7 @@ function onMeta(value) {
   meta = value || null;
   if (current !== SEARCH_TAB && !available(find(current))) {
     show(SEARCH_TAB);
-    router.owner("traces").replace();
+    address.replace();
   }
   render();
 }
@@ -129,17 +129,17 @@ function activeSearch() {
   return current === SEARCH_TAB ? null : find(current)?.onSearch || null;
 }
 
-function install(context) {
-  ctx = context;
+function init() {
+  started = true;
   // Click, arrows, Home / End: the shared tab behaviour (app_ui_tabs.js).
   tabsMod?.bind(byId("tracesTabs"), { attr: "traceTab", onSelect: (id) => select(id) });
-  for (const tab of tabs) tab.install?.(ctx);
+  for (const tab of tabs) tab.init?.();
   render();
 }
 
 export const traceTabs = {
   register,
-  install,
+  init,
   select,
   applyParams,
   writeParams,
@@ -148,5 +148,4 @@ export const traceTabs = {
   viewParams,
   hasParams,
   current: () => current,
-  context: () => ctx,
 };

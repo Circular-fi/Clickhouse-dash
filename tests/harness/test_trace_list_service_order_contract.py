@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import modules
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -15,7 +17,7 @@ def test_trace_list_orders_services_by_first_span_start():
     assert '"minMap([toString(ServiceName)], [toUnixTimestamp64Nano(Timestamp)])"' in search
     assert "toString(stat.4 - toUnixTimestamp64Nano(min(Timestamp)))" in search
     assert "w.Uint64(stat.first_span_ns);" in search
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     assert "service_stats: orderByFirstSpan(" in js
     assert "first_span_ns: Number(stat?.[3] || 0)" in js
     assert "(a.first_span_ns - b.first_span_ns) || (a.service < b.service ? -1 : a.service > b.service ? 1 : 0)" in js

@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -7,7 +9,7 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 def test_service_filter_toggle_is_contextual_and_names_are_not_error_badges():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     css = css_sources.text()
     assert 'const toggleLabel = allSelected ? "Deselect all" : "Select all"' in js
     assert 'data-trace-toggle-all' in js
@@ -17,7 +19,7 @@ def test_service_filter_toggle_is_contextual_and_names_are_not_error_badges():
     assert '.badge.traceServiceFilter[aria-pressed="false"]' in css
 
 def test_analytics_axes_use_nice_round_ticks_and_more_time_labels():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     engine = read("src/static/app_chart_core.js")
     assert 'function durationAxis(' in js
     assert 'durationScaleAxis.values.map' in js

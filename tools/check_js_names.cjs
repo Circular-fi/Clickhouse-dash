@@ -124,7 +124,12 @@ for (const file of process.argv.slice(2)) {
     walk.simple(node, { VariableDeclaration(d) { if (d.kind === 'var') for (const x of d.declarations) declare(fnScope, x.id); } }, { ...walk.base, FunctionDeclaration() {}, FunctionExpression() {}, ArrowFunctionExpression() {} });
   }
   function ref(name, scope, node) {
-    if (imported.has(name)) used.add(name);
+    // An import is used by a read that reaches the module scope: a local of the same name shadows it.
+    if (imported.has(name)) {
+      let s = scope;
+      while (s && !s.names.has(name)) s = s.parent;
+      if (s === root) used.add(name);
+    }
     if (scope.has(name) || GLOBALS.has(name)) { return; }
     bad++;
     console.log(`${file}:${node.loc.start.line}: undefined ${name}`);

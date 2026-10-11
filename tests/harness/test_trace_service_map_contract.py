@@ -53,7 +53,7 @@ def test_service_map_tab_is_registered_and_lives_in_the_url():
     tabs = read("src/static/app_trace_tabs.js")
     mapjs = read("src/static/app_trace_map.js")
     search = read("src/static/app_trace_search.js")
-    traces = read("src/static/app_traces.js")
+    traces = modules.read_family("app_trace")
     html = read("src/static/traces.html")
     api = read("src/static/app_api.js")
     # The map imports the tab registry and the search; the entry registers the map by importing it.
@@ -66,8 +66,8 @@ def test_service_map_tab_is_registered_and_lives_in_the_url():
     assert "traceTabs?.applyParams?.(params, { initial });" in search
     assert 'params.delete("tab");' in search  # the tab is not part of the search identity
     assert "applyFilter," in search
-    assert "const tabSearch = traceTabs?.activeSearch?.();" in traces
-    assert "traceTabs?.install?.({" in traces
+    assert "const tabSearch = traceTabs.activeSearch();" in traces
+    assert "traceTabs.init();" in traces
     assert "api/traces/service_map?" in api
     for element in ('id="tracesTabs"', 'id="traceMapView"', 'id="traceMapCanvas"', 'id="traceMapSampled"', 'id="traceMapPanel"',
                     'id="traceMapFit"', 'id="traceMapMinimap"', 'role="tablist"', "chdash-trace-tab-"):

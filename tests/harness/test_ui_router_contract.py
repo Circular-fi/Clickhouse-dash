@@ -116,7 +116,7 @@ def test_every_writer_is_an_owner_or_a_panel():
     owners = {
         "app_logs.js": 'router.owner("logs", { path: "/observability/logs", params: () => urlParams() })',
         "app_metrics.js": 'router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() })',
-        "app_trace_search.js": 'router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) })',
+        "app_trace_search.js": 'router.owner("traces", { path: SEARCH_ROUTE, params: () => (DETAIL_PAGE ? null : currentParams()) })',
         "app_explorer.js": 'router.owner("explorer", { view: () => model.active })',
         "app_query_ui.js": 'router.owner("query", { view: null }).replace({ saved: savedId, sql })',
     }
@@ -124,9 +124,9 @@ def test_every_writer_is_an_owner_or_a_panel():
         assert owner in read(f"src/static/{name}"), name
     panels = {
         "app_logs.js": 'address.panel("log")',
-        "app_trace_spans.js": 'router.owner("traces").panel("span")',
-        "app_trace_map.js": 'router.owner("traces").panel("node")',
-        "app_trace_services.js": 'router.owner("traces").panel("svc")',
+        "app_trace_spans.js": 'address.panel("span")',
+        "app_trace_map.js": 'address.panel("node")',
+        "app_trace_services.js": 'address.panel("svc")',
     }
     for name, panel in panels.items():
         assert panel in read(f"src/static/{name}"), name

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import modules
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -92,7 +94,7 @@ def test_trace_explorer_is_config_gated_and_uses_otel_clickhouse_schema():
 
 def test_trace_search_is_bounded_and_trace_detail_prefers_aux_index():
     api = read("src/api_traces.cpp")
-    trace_ui = read("src/static/app_traces.js")
+    trace_ui = modules.read_family("app_trace")
     trace_html = read("src/static/trace.html")
 
     assert "Timestamp >= fromUnixTimestamp64Milli" in api

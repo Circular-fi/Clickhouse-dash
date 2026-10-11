@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -8,7 +10,7 @@ def read(rel):
 
 def test_strict_trace_ranges_and_selection_only_prefill_pickers():
     html = read('src/static/traces.html')
-    js = read('src/static/app_traces.js')
+    js = modules.read_family("app_trace")
     picker = read('src/static/app_timerange.js')
     # A short list of quick ranges (it never scrolls) is offered only when
     # their width fits traces.max_lookback_minutes; any other window is typed
@@ -28,7 +30,7 @@ def test_strict_trace_ranges_and_selection_only_prefill_pickers():
 
 def test_analytics_count_matching_traces_and_dense_quantiles():
     cpp = read('src/api_traces.cpp')
-    js = read('src/static/app_traces.js')
+    js = modules.read_family("app_trace")
     assert 'trace_count_chart' in cpp
     assert 'choose_trace_quantile_bucket_seconds' in cpp
     assert '/ 120' in cpp
@@ -38,7 +40,7 @@ def test_analytics_count_matching_traces_and_dense_quantiles():
     assert 'returned traces' not in js
 
 def test_inline_multi_span_inspectors_and_compact_error_badges():
-    js = read('src/static/app_traces.js')
+    js = modules.read_family("app_trace")
     css = css_sources.text()
     assert 'openSpanIds: new Set()' in js
     assert 'traceSpanInspectorRow' in js

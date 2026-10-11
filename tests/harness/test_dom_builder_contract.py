@@ -52,7 +52,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "app_query_ui.js": (1, "the library dialog's loading blocks (ns.uiState)"),
     "app_timerange.js": (4, "the time range panel: static skeleton, calendar grid of numbers, quick ranges escaped"),
     # Observability string renderers.
-    "app_traces.js": (14, "trace list, table, overview, header and the waterfall rows, every value escaped; the waterfall is " + HOT),
+    "app_trace_waterfall.js": (11, "trace overview, header and the waterfall rows, every value escaped; the waterfall is " + HOT),
+    "app_trace_results.js": (2, "the trace list and table rows and their states, every value escaped: " + HOT),
+    "app_trace_charts.js": (1, "the message that takes the place of a chart (loading, empty, error with Retry), every value escaped"),
     "app_trace_views.js": (10, "statistics, spans table, flame graph and graph panel: escaped string renderers of up to thousands of rows"),
     "app_trace_spans.js": (6, "the span list rows, its panel and states: " + HOT),
     "app_trace_logs.js": (10, "trace log rows inline in the waterfall and the logs panel, every value escaped: " + HOT),

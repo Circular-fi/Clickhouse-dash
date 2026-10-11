@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -52,7 +54,7 @@ def test_stylesheet_is_parser_inserted_so_it_blocks_first_paint():
 
 def test_trace_pickers_ship_in_their_final_markup():
     html = read("src/static/traces.html")
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     for select_id in ["tracesRangeUnit", "tracesStatus", "tracesService", "tracesOperation", "tracesLimit", "tracesSort"]:
         start = html.index(f'<select id="{select_id}"')
         root = html.rindex('<div class="themeSelect tracePicker', 0, start)

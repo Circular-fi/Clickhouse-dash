@@ -88,12 +88,12 @@ def test_one_sort_indicator_and_one_set_of_row_keys():
     assert "th:hover > .dataTable__sort::after" in block
     # Row keys: ns.table.rovingRows, not a local ArrowUp / ArrowDown handler.
     local = offenders(r"event\.key === \"ArrowDown\" \|\| event\.key === \"ArrowUp\"|event\.key !== \"ArrowDown\" && event\.key !== \"ArrowUp\"",
-                      files={"app_logs.js", "app_trace_spans.js", "app_trace_services.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_results.js", "app_results_static.js", "app_results_rowdetails.js"})
+                      files={"app_logs.js", "app_trace_spans.js", "app_trace_services.js", "app_trace_results.js", "app_trace_views.js", "app_trace_insights.js", "app_results.js", "app_results_static.js", "app_results_rowdetails.js"})
     # The span panel's own Up / Down (previous / next span while the panel has
     # focus) is panel navigation, not a table's row keys.
     local = [line for line in local if not line.startswith("app_trace_spans.js:") or "select(index + (event.key" not in "\n".join(read("app_trace_spans.js").splitlines()[int(line.split(":")[1]) - 1:int(line.split(":")[1]) + 3])]
     assert not local, local
-    for name in ["app_logs.js", "app_trace_spans.js", "app_trace_services.js", "app_traces.js", "app_trace_views.js", "app_trace_insights.js", "app_results_rowdetails.js"]:
+    for name in ["app_logs.js", "app_trace_spans.js", "app_trace_services.js", "app_trace_results.js", "app_trace_views.js", "app_trace_insights.js", "app_results_rowdetails.js"]:
         assert "rovingRows(" in read(name), name
 
 
@@ -141,7 +141,7 @@ def test_one_copy_helper_and_one_feedback():
     assert not offenders(r"navigator\.clipboard|execCommand\(\"copy\"\)", {"app_ui_copy.js"})
     assert not offenders(r"flashButtonText|copyTextToClipboard|copyJsonToast|classList\.add\(\"is-copied\"\)", {"app_ui_copy.js"})
     assert "copyJsonToast" not in read("query.html")
-    for name in ["app_run.js", "app_traces.js", "app_logs.js"]:
+    for name in ["app_run.js", "app_trace_waterfall.js", "app_logs.js"]:
         assert "copy.split({" in read(name), name
     assert not offenders(r"function (open|close)(Trace)?CopyMenu")
     css = css_sources.text()
@@ -164,7 +164,7 @@ def test_read_only_sql_is_the_sql_block():
 
 def test_key_value_lists_are_the_shared_list():
     assert not offenders(r"traceKv__|traceJson__|logsField__|logsFieldAction|explorerGraphPanel__columnName")
-    for name in ["app_traces.js", "app_logs.js", "app_results_rowdetails.js", "app_explorer_graph.js"]:
+    for name in ["app_trace_inspector.js", "app_logs.js", "app_results_rowdetails.js", "app_explorer_graph.js"]:
         text = read(name)
         assert "kv.list" in text or "kv.html" in text or "kv.bind" in text, name
     block = css_block("key/value")
@@ -190,7 +190,7 @@ def test_charts_share_the_card_legend_readout_and_sparkline():
     assert '(!!opts.legend && opts.series.length > 1)' in engine
     assert 'opts.legend === "totals"' in engine and "format.range(start, start + Number(opts.bucketMs))" in engine
     assert 'id="logsLegend"' not in read("logs.html")
-    for name in ["app_traces.js", "app_trace_services.js", "app_logs.js", "app_metrics.js", "app_trace_heatmap.js"]:
+    for name in ["app_trace_analytics.js", "app_trace_services.js", "app_logs.js", "app_metrics.js", "app_trace_heatmap.js"]:
         assert "bucketMs" in read(name), name
         assert "xReadout: (i) => fmt.range" not in read(name), name
     for name, needle in [("traces.html", 'class="traceAnalyticsCard chartCard"'), ("app_metrics.js", '"metricsPanel chartCard"'),

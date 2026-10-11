@@ -25,7 +25,7 @@ def read(name: str) -> str:
 
 def observability_modules() -> list[str]:
     """The page controller and the view modules it loads, minus the shared engines."""
-    names = sorted({name for view in ("traces", "logs", "metrics") for name in modules.page_modules(view)})
+    names = sorted({name for view in ("trace", "traces", "logs", "metrics") for name in modules.page_modules(view)})
     own = [n for n in names if re.match(r"app_(traces|trace_[a-z]+|logs|metrics)\.js$", n)]
     return ["app_obs_page.js", *own]
 
@@ -57,7 +57,7 @@ GEOMETRY_AFTER_TOFIXED = re.compile(r'\}(?:%["\x27;]|px|,|"|`)')
 TOFIXED_ALLOWED = {
     # Waterfall ticks of a deep zoom: the decimals adjacent ticks need to differ
     # ("50.003 ms", "50.005 ms"), after fmt.duration's own text.
-    ("app_traces.js", "`${(ns / factor).toFixed(needed)} ${match[3]}`"),
+    ("app_trace_model.js", "`${(ns / factor).toFixed(needed)} ${match[3]}`"),
     # Metric axis ticks: one decimal count for every tick of an axis.
     ("app_metrics.js", "const text = (value / formatter.factor).toFixed(decimals);"),
 }
@@ -71,7 +71,7 @@ def lines(name: str):
 
 
 def test_observability_modules_are_listed():
-    assert {"app_traces.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_services.js", "app_trace_insights.js",
+    assert {"app_traces.js", "app_trace_detail.js", "app_trace_store.js", "app_trace_model.js", "app_trace_waterfall.js", "app_trace_inspector.js", "app_trace_results.js", "app_trace_analytics.js", "app_trace_search.js", "app_trace_spans.js", "app_trace_services.js", "app_trace_insights.js",
             "app_trace_logs.js", "app_trace_heatmap.js", "app_trace_views.js", "app_trace_map.js", "app_trace_tabs.js",
             "app_logs.js", "app_metrics.js", "app_obs_page.js"} <= set(MODULES)
 
@@ -113,10 +113,9 @@ def test_no_raw_colours_or_palette_copies_in_observability_modules():
 
 
 def test_trace_helpers_no_longer_share_formats_and_colours_through_ctx():
-    traces = read("app_traces.js")
-    init = traces[traces.index("function init() {"):]
-    for name in ("formatDuration", "serviceColor", "registerServiceColors", "bucketRangeLabel", "dayLabel", "clockLabel"):
-        assert not re.search(rf"\b{name}\b", init), name
+    traces = modules.read_family("app_trace")
+    # No module is given its helpers in a bag any more: each imports what it uses (ARCH-F-155).
+    assert not re.search(r"\.install\(\{", traces) and not re.search(r"\bctx\.(?:model|esc|currentHost)\b", traces)
     for name in MODULES:
         assert not re.search(r"ctx\??\.(?:formatDuration|serviceColor|registerServiceColors|bucketRangeLabel)\b", read(name)), name
     for name in ("app_traces.js", "app_logs.js", "app_metrics.js"):
@@ -150,7 +149,7 @@ def test_observability_only_css_rules_use_tokens():
     builder = css_sources.builder()
     query = builder.page_corpus("query")
     explorer = builder.page_corpus("explorer")
-    observability = [builder.page_corpus(view) for view in ("traces", "logs", "metrics")]
+    observability = [builder.page_corpus(view) for view in ("trace", "traces", "logs", "metrics")]
     offenders, checked = [], 0
     for name, rule in source_rules():
         # Token definitions (:root, html[data-theme]) are where raw values belong.

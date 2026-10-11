@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 import config_keys
 
@@ -30,7 +32,7 @@ def test_search_route_never_runs_graph_analytics():
 
 def test_time_range_change_prefills_automatically_and_manual_prefill_button_is_gone():
     html = read("src/static/traces.html")
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     api = read("src/static/app_api.js")
     assert 'id="tracesPrefillButton"' not in html
     assert 'id="tracesTagsButton"' not in html
@@ -80,7 +82,7 @@ def test_status_and_results_are_fixed_120px_and_search_button_is_fixed():
 
 def test_result_limit_hides_values_above_server_limit():
     html = read("src/static/traces.html")
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     assert '<option value="250" hidden disabled>250</option>' in html
     assert '<option value="500" hidden disabled>500</option>' in html
     assert 'option.hidden = unavailable;' in js
@@ -89,7 +91,7 @@ def test_result_limit_hides_values_above_server_limit():
 
 def test_analytics_is_hidden_until_meta_explicitly_enables_it():
     html = read("src/static/traces.html")
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     css = css_sources.text()
     assert 'id="traceAnalyticsGrid" class="traceAnalyticsGrid" aria-label="Trace analytics" hidden' in html
     assert 'const enabled = model.meta?.analytics_enabled === true;' in js

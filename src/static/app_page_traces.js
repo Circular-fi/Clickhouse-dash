@@ -3,7 +3,6 @@
 // without these parts.
 import "./app_common.js";
 import { boot } from "./app_boot.js";
-import { chartCore } from "./app_chart_core.js";
 import { facetPanel } from "./app_facet_panel.js";
 import { startObservabilityPage } from "./app_obs_page.js";
 import { traceHeatmap } from "./app_trace_heatmap.js";
@@ -42,24 +41,28 @@ import * as h_ui_stat from "./app_ui_stat.js";
 import * as h_ui_chart from "./app_ui_chart.js";
 import * as h_common from "./app_common.js";
 import * as h_boot from "./app_boot.js";
-import * as h_chart_core from "./app_chart_core.js";
 import * as h_facet_panel from "./app_facet_panel.js";
 import * as h_api from "./app_api.js";
 import * as h_header from "./app_header.js";
 import * as h_timerange from "./app_timerange.js";
 import * as h_ui_filterbar from "./app_ui_filterbar.js";
 import * as h_obs_page from "./app_obs_page.js";
+import * as h_chart_core from "./app_chart_core.js";
+import * as h_obs_view from "./app_obs_view.js";
+import * as h_trace_model from "./app_trace_model.js";
+import * as h_trace_store from "./app_trace_store.js";
+import * as h_trace_charts from "./app_trace_charts.js";
 import * as h_trace_search from "./app_trace_search.js";
 import * as h_trace_heatmap from "./app_trace_heatmap.js";
 import * as h_graph_kit from "./app_graph_kit.js";
 import * as h_trace_tabs from "./app_trace_tabs.js";
 import * as h_trace_map from "./app_trace_map.js";
 import * as h_trace_services from "./app_trace_services.js";
+import * as h_trace_inspector from "./app_trace_inspector.js";
 import * as h_trace_insights from "./app_trace_insights.js";
+import * as h_trace_analytics from "./app_trace_analytics.js";
+import * as h_trace_results from "./app_trace_results.js";
 import * as h_trace_spans from "./app_trace_spans.js";
-import * as h_obs_view from "./app_obs_view.js";
-import * as h_trace_logs from "./app_trace_logs.js";
-import * as h_trace_views from "./app_trace_views.js";
 import * as h_traces from "./app_traces.js";
 h_loader.loader.expose([
   h_format,
@@ -89,30 +92,33 @@ h_loader.loader.expose([
   h_ui_chart,
   h_common,
   h_boot,
-  h_chart_core,
   h_facet_panel,
   h_api,
   h_header,
   h_timerange,
   h_ui_filterbar,
   h_obs_page,
+  h_chart_core,
+  h_obs_view,
+  h_trace_model,
+  h_trace_store,
+  h_trace_charts,
   h_trace_search,
   h_trace_heatmap,
   h_graph_kit,
   h_trace_tabs,
   h_trace_map,
   h_trace_services,
+  h_trace_inspector,
   h_trace_insights,
+  h_trace_analytics,
+  h_trace_results,
   h_trace_spans,
-  h_obs_view,
-  h_trace_logs,
-  h_trace_views,
   h_traces,
 ]);
 // handle:end
 
 boot(() => {
   traceSearch.use({ facetPanel, traceHeatmap, traceSpans, traceTabs });
-  traces.use({ chartCore, traceHeatmap, traceSpans, traceTabs });
   return startObservabilityPage("traces", traces);
 });

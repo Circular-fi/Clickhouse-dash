@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,7 +13,7 @@ def test_trace_search_supports_ranges_prefill_exact_sets_tags_and_compact_rows()
     cpp = read('src/api_traces.cpp')
     server = read('src/server.cpp')
     api = read('src/static/app_api.js')
-    ui = read('src/static/app_traces.js')
+    ui = modules.read_family("app_trace")
 
     assert 'http_.Get("/api/traces/prefill"' in server
     assert 'http_.Get("/api/traces/tags"' not in server
@@ -44,7 +46,7 @@ def test_trace_search_supports_ranges_prefill_exact_sets_tags_and_compact_rows()
 
 
 def test_trace_results_show_full_id_and_per_service_span_error_counts():
-    ui = read('src/static/app_traces.js')
+    ui = modules.read_family("app_trace")
     html = read('src/static/traces.html')
     css = css_sources.text()
 

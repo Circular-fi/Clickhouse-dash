@@ -47,19 +47,19 @@ def test_deltas_compare_two_stable_bounded_samples():
 def test_heatmap_module_is_wired_to_the_duration_chart_and_the_search():
     traces_files = modules.page_files("traces")  # the modules of the page, dependencies first
     js = read("src/static/app_trace_heatmap.js")
-    traces = read("src/static/app_traces.js")
+    traces = modules.read_family("app_trace")
     search = read("src/static/app_trace_search.js")
     html = read("src/static/traces.html")
     # The heatmap imports the search (it applies a filter and a duration to it); the page's entry hands the heatmap to both.
     assert traces_files.index("app_trace_search.js") < traces_files.index("app_trace_heatmap.js")
     assert "traceSearch.use({ facetPanel, traceHeatmap, traceSpans, traceTabs });" in read("src/static/app_page_traces.js")
     assert 'data-duration-view="heatmap"' in html and 'id="traceDeltaPanel"' in html
-    assert "if (traceHeatmap?.active?.()) { traceHeatmap.render(); return; }" in traces
-    assert "traceHeatmap?.onSearch?.(analyticsFilters);" in traces
+    assert "if (traceHeatmap.active()) { traceHeatmap.render(); return; }" in traces
+    assert "traceHeatmap.onSearch(analyticsFilters);" in traces
     assert "traceHeatmap?.writeParams?.(params);" in search
     assert '"min_duration_ms", "max_duration_ms", "duration_view"' in search
     assert "filter: (field, value) => applyFilter(field, value, \"include\")" in search
-    assert "traceSearch?.filter?.(field, hit.value.value)" in js
-    assert "traceSearch?.setDuration?.(" in js
+    assert "traceSearch.filter(field, hit.value.value)" in js
+    assert "traceSearch.setDuration(" in js
     assert 'const modePref = () => storage.pref(storage.KEYS.traceDurationView, "percentiles", { allowed: MODES });' in js
     assert 'traceDurationView: "chdash.traceDurationView.v1",' in read("src/static/app_state.js")

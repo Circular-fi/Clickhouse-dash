@@ -37,7 +37,7 @@ def test_time_range_panel_ships_grafana_layout_in_the_range_picker():
 
 
 def test_ranges_resolve_per_request_in_browser_local_time():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     picker = read("src/static/app_timerange.js")
     # The views check a range through the picker's module: one resolver, one pair of sentences (checkRange).
     assert 'timeRange.resolveBounded(model.timeRange, maxRangeMinutes(), "server setting traces.max_lookback_minutes")' in js
@@ -56,5 +56,5 @@ def test_recent_ranges_are_kept_per_browser_and_bounded():
 
 
 def test_default_window_follows_meta_until_the_user_picks_one():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     assert 'if (!model.timeRangeTouched && model.meta) model.timeRange = { from: `now-${tr.minutesToSpan(fallbackMinutes)}`, to: "now" };' in js

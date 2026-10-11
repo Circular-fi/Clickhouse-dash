@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,7 +15,7 @@ def test_trace_header_searches_removed_and_custom_range_does_not_reflow():
     assert 'traceSpanSearch' not in html
     # No in-trace span search or trace id lookup left anywhere: no DOM
     # handles, wiring, match state or styles.
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     dom = read("src/static/app_dom.js")
     for source in (js, dom, css):
         for dead in ('traceSpanSearch', 'traceIdLookup', 'spanSearchText', 'is-search-match', 'tracePageFind'):
@@ -25,7 +27,7 @@ def test_trace_header_searches_removed_and_custom_range_does_not_reflow():
     assert '.themeSelect__menu {\n  position: absolute;' in css
 
 def test_trace_graphs_have_hover_tooltips_and_one_minute_floor():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     cpp = read("src/api_traces.cpp")
     # The charts draw on the shared canvas engine: its tooltip reads the
     # bucket (count and percentile charts) or the picked trace (scatter).
@@ -38,7 +40,7 @@ def test_trace_graphs_have_hover_tooltips_and_one_minute_floor():
     assert 'range_ms / 1000 / 120' in cpp
 
 def test_span_inspector_preview_table_tint_and_resizable_waterfall():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     css = css_sources.text()
     assert 'renderAttributePreview' in js
     assert 'renderAttributeTable' in js
@@ -51,7 +53,7 @@ def test_span_inspector_preview_table_tint_and_resizable_waterfall():
     assert '--trace-depth-x' in css
 
 def test_selection_picker_closes_menu():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     menu = read("src/static/app_ui_menu.js")
     # A pick fires the select's change and closes the list (ns.menu.select).
     assert 'if (changed) selectEl.dispatchEvent(new Event("change", { bubbles: true }));' in menu

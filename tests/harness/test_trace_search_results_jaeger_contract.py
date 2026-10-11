@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,12 +16,12 @@ def test_search_reports_missing_parent_spans_per_trace():
     assert '"service_stats", "missing_parents"' in cpp
     # With a restricted allowlist a parent may be missing because it is hidden: the count is not reported then.
     assert 'w.Uint64(visibility == "1" ? row.missing_parents : 0);' in cpp
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     assert "missing_parents: Number(row?.[8] || 0)" in js
 
 
 def test_result_items_follow_jaeger_result_item():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     css = css_sources.text()
     assert "traceResultItem__durationBar" in js and ".traceResultItem__durationBar" in css
     assert "color-mix(in srgb, var(--accentBorder) 15%, transparent)" in css
@@ -35,7 +37,7 @@ def test_result_items_follow_jaeger_result_item():
 
 
 def test_results_have_a_sortable_table_view_remembered_per_browser():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     html = read("src/static/traces.html")
     assert 'data-results-view="list"' in html and 'data-results-view="table"' in html
     assert "const RESULTS_VIEW_KEY = storage.KEYS.traceResultsView;" in js
@@ -48,7 +50,7 @@ def test_results_have_a_sortable_table_view_remembered_per_browser():
 
 
 def test_duration_chart_plots_listed_traces_over_a_padded_axis():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     css = css_sources.text()
     assert "function durationAxis(minNsValue, maxNsValue, targetIntervals = 7)" in js
     assert "const pad = hi > lo ? (hi - lo) * 0.05 : Math.max(1, hi * 0.1);" in js

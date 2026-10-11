@@ -40,7 +40,7 @@ def test_traces_tabs_registry_and_services_view_are_wired():
     html = read("src/static/traces.html")
     tabs = read("src/static/app_trace_tabs.js")
     view = read("src/static/app_trace_services.js")
-    traces = read("src/static/app_traces.js")
+    traces = modules.read_family("app_trace")
     search = read("src/static/app_trace_search.js")
     # One registry: Search | Services | Service map, static buttons for the first paint.
     assert boot.index("app_trace_tabs.js") < boot.index("app_trace_services.js") and boot.index("app_trace_tabs.js") < boot.index("app_trace_map.js")
@@ -53,7 +53,7 @@ def test_traces_tabs_registry_and_services_view_are_wired():
     assert "function onMeta(value)" in tabs and "function viewParams()" in tabs
     assert "traceTabs.register({" in view and 'id: "services"' in view and 'panelId: "traceServicesView"' in view
     assert 'params: ["svc", "svc_sort"]' in view and "available: (meta) => meta?.analytics_enabled === true" in view
-    assert "const tabSearch = traceTabs?.activeSearch?.();" in traces and "traceTabs?.onMeta?.(meta);" in traces
+    assert "const tabSearch = traceTabs.activeSearch();" in traces and "traceTabs.onMeta(meta);" in traces
     assert "for (const name of traceTabs?.viewParams?.() || []) params.delete(name);" in search
     # P99 links reuse the duration filter chip (min_duration_ms).
     assert "setDuration(ms > 0 ? { min: Math.round(ms * 1000) / 1000, max: 0 } : null);" in search

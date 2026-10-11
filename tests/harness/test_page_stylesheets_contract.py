@@ -106,7 +106,8 @@ def test_observability_page_sheets_hold_their_view_and_the_shell():
         assert "a.contentTabs__tab" in css, view
     assert ".logsTable__viewport" in rules["logs"] and ".logsTable__viewport" not in rules["traces"]
     assert ".metricsPanels" in rules["metrics"] and ".metricsPanels" not in rules["logs"]
-    assert ".traceWaterfall" in rules["traces"] and ".traceWaterfall" not in rules["metrics"]
+    # The waterfall is the trace page's: the search page does not load it, so its sheet has no waterfall rules.
+    assert ".traceWaterfall" in sheets["style.trace.css"] and ".traceWaterfall" not in rules["traces"] and ".traceWaterfall" not in rules["metrics"]
 
 
 def test_query_and_explorer_skip_the_modules_they_never_run():

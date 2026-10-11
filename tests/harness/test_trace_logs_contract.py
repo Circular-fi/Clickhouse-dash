@@ -71,18 +71,18 @@ def test_trace_logs_config_keys():
 
 
 def test_trace_page_loads_logs_after_the_trace_and_hooks_them_into_the_waterfall():
-    traces = read("src/static/app_traces.js")
+    traces = modules.read_family("app_trace")
     logs = read("src/static/app_trace_logs.js")
     html = read("src/static/trace.html")
     api = read("src/static/app_api.js")
-    # The trace page and the Traces page both import the logs module through app_traces.js.
-    for page in ("trace", "traces"):
-        assert "app_trace_logs.js" in modules.page_files(page) and "app_trace_logs.js" in modules.imports("app_traces.js"), page
+    # Only the trace page has logs: its view (app_trace_detail.js) imports the module, the search page does not load it.
+    assert "app_trace_logs.js" in modules.page_files("trace") and "app_trace_logs.js" in modules.imports("app_trace_detail.js")
+    assert "app_trace_logs.js" not in modules.page_files("traces")
     assert 'id="traceLogsPanel"' in html
     assert "async function getTraceLogs(" in api and "api/traces/logs?" in api
     # The logs request starts once the trace has rendered.
-    load = traces.split("async function loadTrace(", 1)[1].split("function backToSearch(", 1)[0]
-    assert load.index("renderTrace();") < load.index("void traceLogs?.load?.(trace);")
+    load = read("src/static/app_trace_detail.js").split("async function loadTrace(", 1)[1].split("// The cycle of the page", 1)[0]
+    assert load.index("renderTrace();") < load.index("void traceLogs.load(trace);")
     for hook in ("headerItemHtml", "spanBadgeHtml", "spanMarkersHtml", "inlineRowHtml", "inlineHeight", "inspectorSectionHtml"):
         assert f"traceLogs?.{hook}?.(" in traces or f"logs?.{hook}?.(" in traces, hook
         assert f"{hook}," in logs or f"{hook}(" in logs, hook
@@ -91,7 +91,7 @@ def test_trace_page_loads_logs_after_the_trace_and_hooks_them_into_the_waterfall
     assert 'return features.get("logs.enabled", true);' in logs
     assert "logs: { enabled: bool(src.logs?.enabled, d.logs.enabled)" in read("src/static/app_state.js")
     # A log opens its span through the ?span= deep link.
-    assert "ctx.focusSpanInTimeline(id, { push: true });" in logs
+    assert "focusSpanInTimeline(id, { push: true });" in logs
     # Spans sharing a SpanId: containment, else the nearest span.
     assert "record.ns < start ? start - record.ns : record.ns > end ? record.ns - end : 0" in logs
 

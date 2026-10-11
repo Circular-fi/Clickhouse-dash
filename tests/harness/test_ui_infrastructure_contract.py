@@ -208,12 +208,12 @@ def test_frame_coalescing_uses_util_raf_once():
     """One animation-frame coalescer (util.rafOnce): no hand-written
     `if (!frame) frame = requestAnimationFrame(...)` in the migrated modules."""
     code = sources()
-    for name, needle in (("app_logs.js", "util.rafOnce(() => renderWindow())"), ("app_traces.js", "util.rafOnce(() => renderWaterfall())"),
-                         ("app_traces.js", "util.rafOnce(() => updateVirtualWindow())"), ("app_trace_views.js", "util.rafOnce(() => markFocusedSpan())"),
+    for name, needle in (("app_logs.js", "util.rafOnce(() => renderWindow())"), ("app_trace_waterfall.js", "util.rafOnce(() => renderWaterfall())"),
+                         ("app_trace_waterfall.js", "util.rafOnce(() => updateVirtualWindow())"), ("app_trace_views.js", "util.rafOnce(() => markFocusedSpan())"),
                          ("app_trace_spans.js", "util.rafOnce(() => updateWindow())"), ("app_chart_core.js", "util.rafOnce(() => drawOverlay())"),
                          ("app_chart_core.js", "util.rafOnce((p) => updateBox(p))"), ("app_pipeline_viewer.js", "util.rafOnce(() => { if (root.isConnected) mountRows(); })")):
         assert needle in code[name], (name, needle)
-    for name in ("app_logs.js", "app_traces.js", "app_trace_views.js", "app_trace_spans.js", "app_chart_core.js", "app_pipeline_viewer.js"):
+    for name in ("app_logs.js", "app_trace_waterfall.js", "app_trace_views.js", "app_trace_spans.js", "app_chart_core.js", "app_pipeline_viewer.js"):
         assert not re.search(r"if \(!\w+\) \w+ = requestAnimationFrame\(\(\) => \{ \w+ = 0;", code[name]), name
         assert not re.search(r"= requestAnimationFrame\(\(\) => \{\s*\w+(Frame|Raf) = 0;", code[name]), name
 

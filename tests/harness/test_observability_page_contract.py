@@ -112,12 +112,14 @@ def test_one_history_listener_drives_the_page():
     for name, module in (("traces", "app_traces.js"), ("logs", "app_logs.js"), ("metrics", "app_metrics.js")):
         source = read(f"src/static/{module}")
         assert '"popstate"' not in source and "ownsUrl" not in source, module
-        assert f'router.owner("{name}"' in source, module
+        # The Traces owner is the store's: the search page and the trace page share it (app_trace_store.js).
+        owner = read("src/static/app_trace_store.js") if name == "traces" else source
+        assert f'router.owner("{name}"' in owner, module
         exported = source[source.index(f"export const {name} = {{"):]
         for hook in ("init", "onLocation", "getContext", "applyContext"):
             assert re.search(rf"\b{hook}\b", exported[:exported.index("}")]), (module, hook)
     assert 'router.owner("traces", { path: SEARCH_ROUTE' in read("src/static/app_trace_search.js")
-    assert 'const address = router.owner("traces");' in read("src/static/app_trace_views.js")
+    assert 'const address = router.owner("traces");' in read("src/static/app_trace_store.js")
 
 
 def test_time_range_and_service_follow_from_page_to_page_and_other_filters_stay_per_view():

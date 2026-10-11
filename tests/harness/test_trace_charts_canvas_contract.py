@@ -24,26 +24,27 @@ def section(text, start, end):
 
 
 def test_traces_view_loads_the_canvas_engine_before_its_charts():
-    # The page's entry hands the engine to the search module; the engine is part of the Traces page and not of the trace page.
+    # The engine loads before the charts that mount on it; it is part of the Traces page and not of the trace page.
     traces = modules.page_files("traces")
-    assert traces.index("app_chart_core.js") < traces.index("app_page_traces.js") and "app_chart_core.js" not in modules.page_files("trace")
-    assert "traces.use({ chartCore, traceHeatmap, traceSpans, traceTabs });" in read("src/static/app_page_traces.js")
+    assert traces.index("app_chart_core.js") < traces.index("app_trace_charts.js") < traces.index("app_page_traces.js")
+    assert "app_chart_core.js" not in modules.page_files("trace")
+    assert "traceSearch.use({ facetPanel, traceHeatmap, traceSpans, traceTabs });" in read("src/static/app_page_traces.js")
     # The views that can load the engine keep its rules.
     for view in ("traces", "logs", "metrics"):
         assert ".chartCore__overlay" in css_sources.sheets()[f"style.{view}.css"], view
 
 
 def test_trace_charts_draw_on_the_engine_without_svg():
-    traces = read("src/static/app_traces.js")
+    traces = modules.read_family("app_trace")
     heatmap = read("src/static/app_trace_heatmap.js")
     services = read("src/static/app_trace_services.js")
-    charts = section(traces, "function renderServiceChart()", "function rememberAnalyticsEnabled(")
+    charts = section(read("src/static/app_trace_analytics.js"), "function renderServiceChart()", "function rememberAnalyticsEnabled(")
     assert "<svg" not in charts and "<rect" not in charts and "<circle" not in charts
     # Drag on a time chart searches that range.
     assert "onZoom: (zoomed, fromUser) => { if (fromUser && zoomed) zoomSearchRange(zoomed); }," in charts
-    assert 'void applyCustomRange({ from: format(from), to: format(to) }, "chart");' in traces
+    assert 'void actions.applyRange({ from: format(from), to: format(to) }, "chart");' in read("src/static/app_trace_charts.js")
     # A scatter dot opens its trace.
-    assert "onPick: (hit) => { const trace = traceAt(hit); if (trace) loadTrace(trace.trace_id, { push: true }); }," in charts
+    assert "onPick: (hit) => { const trace = traceAt(hit); if (trace) actions.loadTrace(trace.trace_id, { push: true }); }," in charts
     # The heatmap: canvas cells on a log axis, a 2-D brush, DOM regions.
     render = section(heatmap, "function render()", "// ------------------------------------------------------- hit testing")
     assert "<svg" not in render and "<rect" not in render
@@ -52,7 +53,7 @@ def test_trace_charts_draw_on_the_engine_without_svg():
     assert "chart.setRegions(regions());" in heatmap
     # Services detail: rate bars (stacked), error-rate and latency lines, releases as annotations.
     detail = section(services, "function detailChart(", "function endpointsHtml(")
-    assert "<svg" not in detail and "chart.mountChart(container, \"service\", {" in detail
+    assert "<svg" not in detail and "mountChart(container, \"service\", {" in detail
     assert 'className: "traceSvcRelease"' in detail
     # The row sparklines stay static SVG (two per row, no interaction): the
     # shared chartUi.sparkline.

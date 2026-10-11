@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -7,7 +9,7 @@ def read(rel):
     return (ROOT / rel).read_text()
 
 def test_custom_range_validation_rejects_inverted_and_too_wide_ranges():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     picker = read("src/static/app_timerange.js")
     # Validated on Apply with inline errors instead of input min / max, so
     # the start of an older window is never bounded by the current end.

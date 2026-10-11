@@ -108,7 +108,7 @@ def test_views_bind_their_global_listeners_while_shown():
     assert "lifecycle?.enter(next);" in explorer and "lifecycle?.leave(lifecycleName);" in explorer
     # (The Explorer graph has no global listener left: its Lineage | Storage
     # choice is a segmented control, not a menu.)
-    for module, view in (("app_traces.js", "traces"), ("app_trace_spans.js", "traces"), ("app_trace_search.js", "traces")):
+    for module, view in (("app_trace_waterfall.js", "traces"), ("app_trace_spans.js", "traces"), ("app_trace_search.js", "traces")):
         assert f'lifecycle.bind("{view}", (scope) =>' in read(f"src/static/{module}"), module
     for module in ("app_logs.js", "app_metrics.js", "app_trace_services.js", "app_trace_map.js", "app_trace_views.js", "app_trace_insights.js", "app_explorer_detail.js"):
         text = read(f"src/static/{module}")

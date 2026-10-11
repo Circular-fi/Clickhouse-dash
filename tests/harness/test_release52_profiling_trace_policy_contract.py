@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import modules
+
 ROOT = Path(__file__).resolve().parents[2]
 
 def read(path: str) -> str:
@@ -47,6 +49,6 @@ def test_direct_trace_url_lookup_is_not_bounded_by_search_lookback():
     assert 'WHERE TraceId = trace AND' in detail
     assert "trace_index_lookup_failed" in detail
     assert "max_lookback_minutes" not in detail
-    ui = read("src/static/app_traces.js")
+    ui = modules.read_family("app_trace")
     assert r"pathname.match(/\/observability\/traces\/([^/]+)\/?$/)" in ui
     assert "await loadTrace(id, { push: false })" in ui

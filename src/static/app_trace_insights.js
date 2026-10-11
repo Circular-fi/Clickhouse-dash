@@ -2,12 +2,15 @@
 // highlighted attributes in the trace header, spans of other traces that
 // link to a span ("linked from", /api/traces/linked_from) and the
 // surrounding context of a span (/api/traces/context, a side panel).
-// app_traces.js calls install(ctx) with its model and helpers at init.
+// app_trace_detail.js calls init() once.
 
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { palette } from "./app_palette.js";
+import { renderAttributeTable, sectionOpen, setSectionOpen } from "./app_trace_inspector.js";
+import { attributeEntries, parseStructuredValue, spanEventList, traceJsonExactStartNs } from "./app_trace_model.js";
+import { actions, activeTraceCache, copyText, currentHost, esc, model, spanTraceUrl } from "./app_trace_store.js";
 import { badge } from "./app_ui_badge.js";
 import { icon } from "./app_ui_icon.js";
 import { layers } from "./app_ui_layers.js";
@@ -17,8 +20,6 @@ import { util } from "./app_util.js";
 
 const { byId, $, $$ } = dom;
 
-let ctx = null;
-const esc = (value) => ctx.esc(value);
 const fmt = format;
 
 // ------------------------------------------------------------ exceptions
@@ -31,7 +32,7 @@ const EXCEPTION_ICON = icon("bolt", { size: "sm" });
 const exceptionsBySpan = new WeakMap();
 
 function attrObject(raw) {
-  const value = raw && typeof raw === "object" ? raw : ctx.parseStructuredValue(raw);
+  const value = raw && typeof raw === "object" ? raw : parseStructuredValue(raw);
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
@@ -63,7 +64,7 @@ function spanExceptions(span) {
   if (list) return list;
   list = [];
   if (mayHaveException(span)) {
-    for (const event of ctx.spanEventList(span)) {
+    for (const event of spanEventList(span)) {
       if (event.name !== "exception") continue;
       const found = exceptionFrom(attrObject(event.attributes), "event", event);
       list.push(found || { type: "", message: "", stacktrace: "", source: "event", escaped: null, ns: event.ns, time: event.time, stack: null });
@@ -181,8 +182,8 @@ function frameHtml(row, hidden) {
 function stackHtml(item, spanId, index) {
   const stack = item.stack;
   if (!stack) return "";
-  const showAll = ctx.sectionOpen(spanId, `exception-all:${index}`);
-  const raw = ctx.sectionOpen(spanId, `exception-raw:${index}`) || !stack.frames;
+  const showAll = sectionOpen(spanId, `exception-all:${index}`);
+  const raw = sectionOpen(spanId, `exception-raw:${index}`) || !stack.frames;
   const frameIndexes = stack.rows.map((row, i) => (row.kind === "frame" ? i : -1)).filter((i) => i >= 0);
   const keep = new Set(stack.innermostLast ? frameIndexes.slice(-EXCEPTION_FRAMES_SHOWN) : frameIndexes.slice(0, EXCEPTION_FRAMES_SHOWN));
   const hiddenCount = frameIndexes.length - keep.size;
@@ -281,7 +282,7 @@ function lookupAttribute(span, key) {
 }
 
 function traceHighlights(cache) {
-  const keys = Array.isArray(ctx.model.meta?.highlighted_attributes) ? ctx.model.meta.highlighted_attributes : [];
+  const keys = Array.isArray(model.meta?.highlighted_attributes) ? model.meta.highlighted_attributes : [];
   const cached = highlightCache.get(cache);
   if (cached && cached.keys === keys) return cached.list;
   const root = cache.tree.roots[0]?.span || null;
@@ -319,7 +320,7 @@ const linkedFromState = new Map();
 const linkKey = (traceId, spanId) => `${traceId}\u001f${spanId}`;
 
 function linksEnabled() {
-  return ctx.model.meta?.features?.links !== false;
+  return model.meta?.features?.links !== false;
 }
 
 function linkedFromRemoteHtml(span, cache) {
@@ -327,7 +328,7 @@ function linkedFromRemoteHtml(span, cache) {
   const traceId = String(cache.trace?.trace_id || "");
   const spanId = String(span.span_id || "");
   const state = linkedFromState.get(linkKey(traceId, spanId));
-  if ((!state || state.status === "idle") && ctx.sectionOpen(spanId, "references")) queueMicrotask(() => { void loadLinkedFrom(spanId); });
+  if ((!state || state.status === "idle") && sectionOpen(spanId, "references")) queueMicrotask(() => { void loadLinkedFrom(spanId); });
   return `<div class="traceLinkedFrom" data-linked-from-span="${esc(spanId)}">${linkedFromBodyHtml(state, cache)}</div>`;
 }
 
@@ -337,7 +338,7 @@ function windowText(range) {
 }
 
 function linkedFromBodyHtml(state, cache) {
-  const margin = Number(ctx.model.meta?.linked_from_margin_minutes || 60);
+  const margin = Number(model.meta?.linked_from_margin_minutes || 60);
   const head = (extra = "") => `<div class="traceLinkedFrom__head"><b>Linked from (other traces)</b>${extra}</div>`;
   if (!state || state.status === "idle") {
     return `${head()}<p class="traceLinkedFrom__note">Spans of other traces whose links point to this span, searched within ±${fmt.duration.fromSeconds(margin * 60)} of this trace. <button type="button" class="traceLinkedFrom__load" data-linked-from-load>Search</button></p>`;
@@ -350,19 +351,19 @@ function linkedFromBodyHtml(state, cache) {
   const scope = `between ${windowText(state.range)} (±${fmt.duration.fromSeconds(Number(state.margin || margin) * 60)} around this trace)`;
   if (!rows.length) return `${head('<span class="traceJaegerGroup__count">(0)</span>')}<p class="traceLinkedFrom__note" data-linked-from-empty>No span of another trace links here ${esc(scope)}.</p>`;
   const items = rows.map((row) => {
-    const attrs = ctx.parseStructuredValue(row.link_attributes);
-    const attrTable = Array.isArray(attrs) && attrs.some((a) => ctx.attributeEntries(a).length)
-      ? `<div class="traceSpanRefs__attrs">${attrs.map((a) => ctx.renderAttributeTable(a, "")).join("")}</div>` : "";
+    const attrs = parseStructuredValue(row.link_attributes);
+    const attrTable = Array.isArray(attrs) && attrs.some((a) => attributeEntries(a).length)
+      ? `<div class="traceSpanRefs__attrs">${attrs.map((a) => renderAttributeTable(a, "")).join("")}</div>` : "";
     const whenMs = Math.floor(Number(row.start_ns) / 1e6);
     const error = String(row.status_code || "").toLowerCase() === "error";
-    return `<li class="traceLinkedFrom__item" data-linked-from-trace="${esc(row.trace_id)}">${badge.html("linked from", { tone: "accent", shape: "pill", className: "traceSpanRefs__kind traceSpanRefs__kind--linked-from" })}<span class="traceSpanRefs__main"><span class="traceSpanRefs__svc" style="--trace-service-color:${palette.service(row.service_name)}">${esc(row.service_name || "unknown")}</span><small class="traceSpanRefs__op">${esc(row.span_name || "span")}</small>${error ? badge.statusHtml("Error") : ""}<small class="traceSpanRefs__ids"><span>TraceID: <code>${esc(row.trace_id)}</code></span><span>SpanID: <code>${esc(row.span_id)}</code></span><span><time title="${esc(fmt.timeTitle(whenMs))}">${esc(fmt.time(whenMs))}</time> · ${esc(fmt.duration(row.duration_ns))}</span></small></span><a class="traceSpanRefs__open traceJaegerLink__trace" href="${esc(ctx.spanTraceUrl(row.trace_id, row.span_id))}" data-linked-trace="${esc(row.trace_id)}" data-linked-span="${esc(row.span_id)}" title="Open the linking span in its trace">Open linked trace</a>${attrTable}</li>`;
+    return `<li class="traceLinkedFrom__item" data-linked-from-trace="${esc(row.trace_id)}">${badge.html("linked from", { tone: "accent", shape: "pill", className: "traceSpanRefs__kind traceSpanRefs__kind--linked-from" })}<span class="traceSpanRefs__main"><span class="traceSpanRefs__svc" style="--trace-service-color:${palette.service(row.service_name)}">${esc(row.service_name || "unknown")}</span><small class="traceSpanRefs__op">${esc(row.span_name || "span")}</small>${error ? badge.statusHtml("Error") : ""}<small class="traceSpanRefs__ids"><span>TraceID: <code>${esc(row.trace_id)}</code></span><span>SpanID: <code>${esc(row.span_id)}</code></span><span><time title="${esc(fmt.timeTitle(whenMs))}">${esc(fmt.time(whenMs))}</time> · ${esc(fmt.duration(row.duration_ns))}</span></small></span><a class="traceSpanRefs__open traceJaegerLink__trace" href="${esc(spanTraceUrl(row.trace_id, row.span_id))}" data-linked-trace="${esc(row.trace_id)}" data-linked-span="${esc(row.span_id)}" title="Open the linking span in its trace">Open linked trace</a>${attrTable}</li>`;
   }).join("");
   const more = state.truncated ? `<p class="traceLinkedFrom__note">Showing the newest ${fmt.count(rows.length)} linking spans.</p>` : "";
   return `${head(`<span class="traceJaegerGroup__count">(${rows.length}${state.truncated ? "+" : ""})</span>`)}<ul class="traceSpanRefs__list traceLinkedFrom__list">${items}</ul>${more}`;
 }
 
 function patchLinkedFrom(spanId) {
-  const cache = ctx.activeTraceCache();
+  const cache = activeTraceCache();
   const traceId = String(cache.trace?.trace_id || "");
   const state = linkedFromState.get(linkKey(traceId, spanId));
   $$(".traceLinkedFrom[data-linked-from-span]").forEach((el) => {
@@ -372,7 +373,7 @@ function patchLinkedFrom(spanId) {
 
 async function loadLinkedFrom(spanId, { force = false } = {}) {
   if (!linksEnabled()) return;
-  const cache = ctx.activeTraceCache();
+  const cache = activeTraceCache();
   const traceId = String(cache.trace?.trace_id || "");
   if (!traceId || !spanId) return;
   const key = linkKey(traceId, spanId);
@@ -388,16 +389,16 @@ async function loadLinkedFrom(spanId, { force = false } = {}) {
   }
   // One read for each span of a trace on this host: cut when the host changes (install), so the answer of the old host
   // never lands under the same trace and span of the new one.
-  const req = util.latest(`traces.linked.${ctx.currentHost()}\u0000${key}`);
+  const req = util.latest(`traces.linked.${currentHost()}\u0000${key}`);
   try {
-    const payload = await api.getTraceLinkedFrom(ctx.currentHost(), params, { signal: req.signal });
+    const payload = await api.getTraceLinkedFrom(currentHost(), params, { signal: req.signal });
     if (!req.isCurrent()) return;
     linkedFromState.set(key, { status: "done", rows: payload?.rows || [], truncated: !!payload?.truncated, range: payload?.range, margin: payload?.margin_minutes });
   } catch (error) {
     if (!req.isCurrent() || util.isAbort(error)) return;
     linkedFromState.set(key, { status: "error", error: util.errorText(error) });
   }
-  if (String(ctx.activeTraceCache().trace?.trace_id || "") === traceId) patchLinkedFrom(spanId);
+  if (String(activeTraceCache().trace?.trace_id || "") === traceId) patchLinkedFrom(spanId);
 }
 
 // Loads when the References section opens (a section rendered open loads
@@ -462,7 +463,7 @@ function panel() {
 function anchorAttributes(span) {
   const out = [];
   for (const [scope, column] of [["span", "span_attributes"], ["resource", "resource_attributes"]]) {
-    for (const [key, value] of ctx.attributeEntries(span[column])) {
+    for (const [key, value] of attributeEntries(span[column])) {
       const valueText = text(value);
       if (valueText.length > 4096) continue;
       out.push({ scope, key, value: valueText });
@@ -472,7 +473,7 @@ function anchorAttributes(span) {
 }
 
 function openContext(spanId, trigger = null) {
-  const cache = ctx.activeTraceCache();
+  const cache = activeTraceCache();
   const span = cache.nodeById.get(String(spanId || ""))?.span;
   if (!span) return;
   const resource = attrObject(span.resource_attributes);
@@ -482,7 +483,7 @@ function openContext(spanId, trigger = null) {
     service: String(span.service_name || ""),
     name: String(span.span_name || ""),
     timestamp: String(span.timestamp || ""),
-    ns: ctx.exactStartNs(span),
+    ns: exactStartNs(span),
     host: text(resource["host.name"]),
     pod: text(resource["k8s.pod.name"]),
     attributes: anchorAttributes(span),
@@ -553,7 +554,7 @@ async function loadContext(direction) {
   context.error = "";
   renderContext();
   try {
-    const payload = await api.getTraceContext(ctx.currentHost(), params, { signal: req.signal });
+    const payload = await api.getTraceContext(currentHost(), params, { signal: req.signal });
     if (!req.isCurrent()) return;
     const rows = payload?.rows || [];
     if (direction === "older") context.rows = context.rows.concat(rows);
@@ -656,9 +657,9 @@ function openContextRow(row) {
   const traceId = String(row.getAttribute("data-context-trace") || "");
   const spanId = String(row.getAttribute("data-context-span") || "");
   if (!traceId || !spanId) return;
-  if (traceId === String(ctx.model.activeTrace?.trace_id || "") && ctx.focusSpanInTimeline(spanId, { push: true })) return;
-  ctx.model.pendingSpanId = spanId;
-  void ctx.loadTrace(traceId, { push: true });
+  if (traceId === String(model.activeTrace?.trace_id || "") && actions.focusSpan(spanId, { push: true })) return;
+  model.pendingSpanId = spanId;
+  void actions.loadTrace(traceId, { push: true });
 }
 
 function onPanelClick(event) {
@@ -695,12 +696,12 @@ function onPanelChange(event) {
 
 function copyStack(button) {
   const card = button.closest("[data-inspector-span]");
-  const span = ctx.activeTraceCache().nodeById.get(String(card?.getAttribute("data-inspector-span") || ""))?.span;
+  const span = activeTraceCache().nodeById.get(String(card?.getAttribute("data-inspector-span") || ""))?.span;
   const item = spanExceptions(span)[Number(button.getAttribute("data-stack-copy"))];
   if (!item) return;
   const header = exceptionTitle(item);
   const body = item.stacktrace && !item.stacktrace.includes(item.type || "\u0000") ? `${header}\n${item.stacktrace}` : (item.stacktrace || header);
-  ctx.copyText(body, button);
+  copyText(body, button);
 }
 
 // Clicks inside the inline span inspector; true when handled.
@@ -728,11 +729,11 @@ function handleInspectorClick(event, target) {
     event.stopPropagation();
     const card = toggle.closest("[data-inspector-span]");
     const spanId = String(card?.getAttribute("data-inspector-span") || "");
-    const span = ctx.activeTraceCache().nodeById.get(spanId)?.span;
+    const span = activeTraceCache().nodeById.get(spanId)?.span;
     const raw = toggle.hasAttribute("data-stack-raw");
     const index = Number(toggle.getAttribute(raw ? "data-stack-raw" : "data-stack-toggle"));
     const key = `${raw ? "exception-raw" : "exception-all"}:${index}`;
-    ctx.setSectionOpen(spanId, key, !ctx.sectionOpen(spanId, key));
+    setSectionOpen(spanId, key, !sectionOpen(spanId, key));
     const item = spanExceptions(span)[index];
     const holder = toggle.closest(".traceStack");
     if (item && holder) {
@@ -750,18 +751,20 @@ function handleHeaderClick(event) {
   const exceptions = target.closest("[data-trace-exceptions]");
   if (exceptions) {
     event.preventDefault();
-    ctx.focusSpanInTimeline(String(exceptions.getAttribute("data-trace-exceptions") || ""), { push: true });
+    actions.focusSpan(String(exceptions.getAttribute("data-trace-exceptions") || ""), { push: true });
     return;
   }
   const chip = target.closest("[data-trace-highlight]");
   if (chip) {
     event.preventDefault();
-    ctx.copyText(chip.getAttribute("data-highlight-value") || "", chip);
+    copyText(chip.getAttribute("data-highlight-value") || "", chip);
   }
 }
 
-function install(appCtx) {
-  ctx = appCtx;
+// The start of a span in nanoseconds, as exactly as the JSON of the trace holds it.
+const exactStartNs = (span) => traceJsonExactStartNs(span) || String(Math.round(Number(span.start_ns || 0)));
+
+function init() {
   byId("traceDetailHeader")?.addEventListener("click", handleHeaderClick);
   // The highlighted attributes sit beside the view bar, no longer in the header.
   byId("traceHighlights")?.addEventListener("click", handleHeaderClick);
@@ -773,7 +776,7 @@ function install(appCtx) {
 }
 
 export const traceInsights = {
-  install,
+  init,
   parseStackTrace,
   spanExceptions,
   exceptionSectionHtml,

@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,7 +32,7 @@ def test_count_only_requests_read_the_trace_index_and_durations_stay_on_spans():
 
 def test_buckets_follow_the_browser_origin_grid():
     analytics = analytics_handler()
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     assert 'parse_i64_param(req, "bucket_origin_ms", &bucket_origin_ms)' in analytics
     assert "grid_floor(q_bucket_ms, bucket_ms, count_origin_ms)" in analytics
     assert 'w.Key("bucket_origin_ms")' in analytics
@@ -39,7 +41,7 @@ def test_buckets_follow_the_browser_origin_grid():
 
 
 def test_charts_load_counts_first_and_surface_errors():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     assert 'charts: "counts"' in js and 'charts: "durations"' in js
     assert "model.durationsError = message(error)" in js
     # A failed chart is an error state with Retry (ns.uiState), not an empty one.
@@ -48,7 +50,7 @@ def test_charts_load_counts_first_and_surface_errors():
 
 
 def test_charts_are_drawn_at_pixel_size_and_hover_snaps_to_the_nearest_point():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     engine = read("src/static/app_chart_core.js")
     assert 'preserveAspectRatio="none"' not in js
     # Canvas charts at their pixel width, resized by the engine; the cursor
@@ -59,7 +61,7 @@ def test_charts_are_drawn_at_pixel_size_and_hover_snaps_to_the_nearest_point():
 
 
 def test_durations_use_whole_units_and_results_flag_errors_by_the_title():
-    js = read("src/static/app_traces.js")
+    js = modules.read_family("app_trace")
     css = css_sources.text()
     assert "const DURATION_AXIS_STEPS_NS" in js
     # Whole units ("8 min 30 s") are ns.format.duration's, which Traces uses.

@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,7 +20,7 @@ def test_trace_detail_serializes_otel_structures_as_json_for_readable_inspector(
 
 
 def test_trace_duration_label_switches_side_and_waterfall_has_no_horizontal_scroll():
-    ui = read('src/static/app_traces.js')
+    ui = modules.read_family("app_trace")
     css = css_sources.text()
     # Audit 2 I-O3: a bar reaching the right edge labels before or inside itself.
     assert 'const labelLeft = !labelInside && (barEnd > BAR_LABEL_EDGE || left + (width / 2) >= 62);' in ui
@@ -31,7 +33,7 @@ def test_trace_duration_label_switches_side_and_waterfall_has_no_horizontal_scro
 
 
 def test_trace_inspector_formats_tags_process_and_events_like_jaeger_rows():
-    ui = read('src/static/app_traces.js')
+    ui = modules.read_family("app_trace")
     css = css_sources.text()
     assert 'renderJaegerAttributes' in ui
     assert 'renderJaegerAttributes("Process", span.resource_attributes, ' in ui

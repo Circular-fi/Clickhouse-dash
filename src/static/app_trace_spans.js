@@ -8,16 +8,20 @@
 //   * a row opens a side panel with the span (attributes with
 //     click-to-filter, events, exceptions, links) and "Open in trace";
 //   * Up / Down move through the rows, Enter opens, Escape closes.
-// app_traces.js calls install(ctx) at init and hands searches over to
+// app_traces.js calls init() once and hands searches over to
 // search() while the mode is "spans".
 
+import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { palette } from "./app_palette.js";
-import { router } from "./app_router.js";
 import { storage } from "./app_state.js";
 import { traceInsights } from "./app_trace_insights.js";
+import { absoluteTimeText, eventItemHtml, renderAttributeTable, renderJaegerAttributes, spanDetailClick } from "./app_trace_inspector.js";
+import { attributeEntries, spanEventList, spanKindLabel, spanLinkList } from "./app_trace_model.js";
+import { noResultsHtml } from "./app_trace_results.js";
 import { traceSearch } from "./app_trace_search.js";
+import { actions, address, copyText, currentHost, enhanceTraceSelect, esc, model, spanTraceUrl } from "./app_trace_store.js";
 import { badge } from "./app_ui_badge.js";
 import { copy } from "./app_ui_copy.js";
 import { icon as iconMod } from "./app_ui_icon.js";
@@ -45,9 +49,7 @@ const columnsPref = () => storage.pref(storage.KEYS.traceSpanColumns, []);
 // OTel span kinds; both spellings exporters write are sent.
 const KINDS = ["Server", "Client", "Producer", "Consumer", "Internal"];
 
-let ctx = null;
 const { byId, $ } = dom;
-const esc = (value) => ctx.esc(value);
 
 const state = {
   mode: "traces",
@@ -112,7 +114,7 @@ function saveColumns() {
 function active() { return state.mode === "spans"; }
 
 // span= of the side panel on the search page (ns.router.panel).
-const spanParam = router.owner("traces").panel("span");
+const spanParam = address.panel("span");
 
 // Spans mode and its own filters as search URL parameters.
 function urlParams(params) {
@@ -185,7 +187,7 @@ function syncControls() {
     kind.dispatchEvent(new Event("tracepicker-refresh"));
   }
   const duration = $(".traceSpanTools__duration");
-  if (duration) duration.hidden = ctx?.model?.meta?.features?.duration_filter === false;
+  if (duration) duration.hidden = model.meta?.features?.duration_filter === false;
   const min = byId("traceSpanMinDuration");
   const max = byId("traceSpanMaxDuration");
   if (min && document.activeElement !== min) min.value = state.minMs;
@@ -200,7 +202,7 @@ function setMode(mode) {
   state.mode = next;
   if (!active()) closePanel({ focus: false });
   syncControls();
-  void ctx.runSearch({ url: "push" });
+  void actions.search({ url: "push" });
 }
 
 // ------------------------------------------------------------ requests
@@ -210,7 +212,7 @@ const FILTER_KEYS = ["start_ms", "end_ms", "service", "operation", "status", "se
 
 function requestQuery(base, cursor) {
   const query = new URLSearchParams();
-  const host = ctx.currentHost();
+  const host = currentHost();
   if (host) query.set("host_id", host);
   for (const key of FILTER_KEYS) {
     const value = base?.[key];
@@ -224,7 +226,7 @@ function requestQuery(base, cursor) {
     query.append("kind", state.kind);
     query.append("kind", `SPAN_KIND_${state.kind.toUpperCase()}`);
   }
-  if (ctx.model.meta?.features?.duration_filter !== false) {
+  if (model.meta?.features?.duration_filter !== false) {
     if (state.minMs) query.set("min_duration_ms", state.minMs);
     if (state.maxMs) query.set("max_duration_ms", state.maxMs);
   }
@@ -255,7 +257,7 @@ async function search(filters) {
   state.searched = true;
   state.latencyMs = NaN;
   closePanel({ focus: false, url: "none" });
-  if (ctx.dom.tracesSearchView) ctx.dom.tracesSearchView.scrollTop = 0;
+  if (dom.tracesSearchView) dom.tracesSearchView.scrollTop = 0;
   await loadPage({ first: true });
 }
 
@@ -270,7 +272,7 @@ async function loadPage({ first = false } = {}) {
   const started = performance.now();
   let payload = null;
   try {
-    payload = await ctx.api.searchTraceSpans(requestQuery(state.base, first ? "" : state.cursor), { signal: req.signal });
+    payload = await api.searchTraceSpans(requestQuery(state.base, first ? "" : state.cursor), { signal: req.signal });
   } catch (error) {
     if (!req.isCurrent()) return;
     state.loading = false;
@@ -300,7 +302,7 @@ async function loadPage({ first = false } = {}) {
     const index = state.rows.findIndex((row) => String(row.span_id) === span);
     state.pendingSpan = "";
     if (index >= 0) select(index, { open: true, url: "none" });
-    else router.owner("traces").replace();
+    else address.replace();
   }
 }
 
@@ -309,7 +311,7 @@ async function loadPage({ first = false } = {}) {
 // "Sep 19 12:59:59.999" in local time from the exact UTC text, and its
 // tooltip (fmt.timeTitle, to the nanosecond): computed once per row.
 function localTime(row) {
-  if (row._time == null) row._time = ctx.absoluteTimeText(Number(row.start_ns), row.timestamp, { withRaw: false });
+  if (row._time == null) row._time = absoluteTimeText(Number(row.start_ns), row.timestamp, { withRaw: false });
   return row._time;
 }
 
@@ -322,7 +324,7 @@ function timeHtml(text) {
 }
 
 function timeTitle(row) {
-  if (row._timeTitle == null) row._timeTitle = ctx.absoluteTimeText(Number(row.start_ns), row.timestamp);
+  if (row._timeTitle == null) row._timeTitle = absoluteTimeText(Number(row.start_ns), row.timestamp);
   return row._timeTitle;
 }
 
@@ -414,7 +416,7 @@ function rowHtml(row, index) {
     + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--operation" role="gridcell">${filterValueHtml("operation", row.span_name || "", row.span_name || "span")}</span>`
     + `<span class="dataList__cell num cellBar traceSpanListRow__cell traceSpanListRow__cell--duration" role="gridcell" title="${esc(duration)}" style="${tableMod.cellBarStyle(percent, "var(--trace-service-color)")}">${esc(duration)}</span>`
     + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--status" role="gridcell">${statusHtml(row.status_code)}</span>`
-    + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--kind" role="gridcell">${esc(ctx.spanKindLabel(row.span_kind))}</span>`
+    + `<span class="dataList__cell traceSpanListRow__cell traceSpanListRow__cell--kind" role="gridcell">${esc(spanKindLabel(row.span_kind))}</span>`
     + attrs
     + "</div>";
 }
@@ -438,10 +440,10 @@ function footHtml() {
   return `<div class="traceSpanTable__foot is-end" data-span-end>End of results · ${fmt.count(state.rows.length)} span${state.rows.length === 1 ? "" : "s"}.${esc(capped)}</div>`;
 }
 
-// The result list's "nothing found" (app_traces.js noResultsHtml).
+// The result list's "nothing found" (app_trace_results.js noResultsHtml).
 function emptyHtml() {
   const range = state.base ? { start: Number(state.base.start_ms), end: Number(state.base.end_ms) } : null;
-  return ctx.noResultsHtml("spans", range, { "data-span-empty": "" });
+  return noResultsHtml("spans", range, { "data-span-empty": "" });
 }
 
 function renderCount() {
@@ -458,10 +460,10 @@ function renderCount() {
 // The results area: the table shell (header, sized body, footer); the
 // rows in view are drawn by updateWindow().
 function render() {
-  if (!active() || !ctx) return;
+  if (!active()) return;
   syncControls();
   renderCount();
-  const root = ctx.dom.tracesResults;
+  const root = dom.tracesResults;
   if (!root) return;
   root.classList.add("tracesResults--spans");
   if (!state.searched) {
@@ -497,14 +499,14 @@ function render() {
 
 // The sticky search bar's height: the table header sticks below it.
 function stickyTop() {
-  const bar = ctx.dom.tracesForm;
+  const bar = dom.tracesForm;
   return bar ? Math.round(bar.getBoundingClientRect().height) : 0;
 }
 
 function updateWindow(force = false) {
   const table = byId("traceSpanTable");
   const body = $(".traceSpanTable__body", table);
-  const view = ctx.dom.tracesSearchView;
+  const view = dom.tracesSearchView;
   if (!body || !view || view.hidden) return;
   const offset = body.getBoundingClientRect().top - view.getBoundingClientRect().top;
   const first = Math.max(0, Math.floor(-offset / ROW_HEIGHT) - OVERSCAN);
@@ -534,14 +536,14 @@ function onScroll() {
 // --------------------------------------------------------- selection
 
 function rowTopInView(index) {
-  const view = ctx.dom.tracesSearchView;
+  const view = dom.tracesSearchView;
   const body = $(".traceSpanTable__body", byId("traceSpanTable"));
   if (!view || !body) return null;
   return body.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop + index * ROW_HEIGHT;
 }
 
 function ensureVisible(index) {
-  const view = ctx.dom.tracesSearchView;
+  const view = dom.tracesSearchView;
   const top = rowTopInView(index);
   if (!view || top == null) return;
   const head = $(".traceSpanTable__head", byId("traceSpanTable"));
@@ -582,7 +584,7 @@ function onTableClick(event) {
     void loadPage();
     return;
   }
-  // (Zoom out: the results' own click handler in app_traces.js.)
+  // (Zoom out: the results' own click handler in app_trace_results.js.)
   const row = target.closest("[data-span-index]");
   if (!row) return;
   const index = Number(row.getAttribute("data-span-index"));
@@ -597,7 +599,7 @@ function bindTableKeys(table) {
   tableMod.rovingRows(table, {
     count: () => (eventOnGrid ? state.rows.length : 0),
     current: () => (eventOnGrid ? (state.selected < 0 ? -1 : state.selected) : -1),
-    page: () => Math.max(1, Math.floor((ctx.dom.tracesSearchView?.clientHeight || 600) / ROW_HEIGHT) - 3),
+    page: () => Math.max(1, Math.floor((dom.tracesSearchView?.clientHeight || 600) / ROW_HEIGHT) - 3),
     onMove: (index) => select(index),
     onOpen: (index) => select(index, { open: true }),
   });
@@ -628,7 +630,7 @@ function panelApi() {
   if (detail) return detail;
   detail = detailPanel.create({
     // Inside the Search tab's panel: another Traces tab hides it with it.
-    host: $(".traceSearchBody") || ctx.dom.tracesSearchView || document.body,
+    host: $(".traceSearchBody") || dom.tracesSearchView || document.body,
     id: "traceSpanPanel",
     className: "uiDetail--sticky traceSpanPanel",
     closeLabel: "Close span details",
@@ -667,7 +669,7 @@ function openPanel(index) {
   const seq = ++state.detailSeq;
   // The panel shows one span: opening another aborts this read (and a host change does, through "traces.").
   const req = util.latest("traces.span");
-  ctx.api.getTraceSpan(ctx.currentHost(), { traceId: row.trace_id, spanId: row.span_id, timestampNs: row.start_ns }, { signal: req.signal }).then((payload) => {
+  api.getTraceSpan(currentHost(), { traceId: row.trace_id, spanId: row.span_id, timestampNs: row.start_ns }, { signal: req.signal }).then((payload) => {
     entry.status = "ready";
     entry.span = payload?.span || null;
   }).catch((error) => {
@@ -702,18 +704,18 @@ function copyButton(value, label) {
 }
 
 function eventsHtml(span, startNs) {
-  const events = ctx.spanEventList(span);
+  const events = spanEventList(span);
   if (!events.length) return "";
-  const items = events.map((event) => ctx.eventItemHtml(event, startNs, { open: events.length <= 3 })).join("");
+  const items = events.map((event) => eventItemHtml(event, startNs, { open: events.length <= 3 })).join("");
   return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanEvents" data-span-section="events" open><summary><b>Events</b><span class="traceJaegerGroup__count">(${events.length})</span></summary><div class="traceJaegerGroup__body"><div class="traceSpanEvents__list">${items}</div><small class="traceSpanEvents__note">Event times are relative to the start of this span.</small></div></details>`;
 }
 
 function linksHtml(span) {
-  const links = ctx.spanLinkList(span);
+  const links = spanLinkList(span);
   if (!links.length) return "";
   const items = links.map((link) => {
-    const href = ctx.spanTraceUrl(link.traceId, link.spanId);
-    const attrs = ctx.attributeEntries(link.attributes).length ? `<div class="traceSpanRefs__attrs">${ctx.renderAttributeTable(link.attributes, "")}</div>` : "";
+    const href = spanTraceUrl(link.traceId, link.spanId);
+    const attrs = attributeEntries(link.attributes).length ? `<div class="traceSpanRefs__attrs">${renderAttributeTable(link.attributes, "")}</div>` : "";
     return `<li class="traceSpanRefs__item">${badge.html("follows from", { tone: "accent", shape: "pill", className: "traceSpanRefs__kind traceSpanRefs__kind--follows-from" })}<span class="traceSpanRefs__main"><small class="traceSpanRefs__ids"><span>TraceID: <code>${esc(link.traceId)}</code></span><span>SpanID: <code>${esc(link.spanId)}</code></span></small></span><a class="traceSpanRefs__open" href="${esc(href)}" data-span-open-link="${esc(link.traceId)}" data-span-open-link-span="${esc(link.spanId)}">Open linked trace</a>${attrs}</li>`;
   }).join("");
   return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanRefs" data-span-section="references"><summary><b>Links</b><span class="traceJaegerGroup__count">(${links.length})</span></summary><div class="traceJaegerGroup__body"><ul class="traceSpanRefs__list">${items}</ul></div></details>`;
@@ -727,7 +729,7 @@ function panelBodyHtml(row, entry) {
   const summary = [
     ["Start", `<time title="${esc(timeTitle(row))}">${esc(localTime(row))}</time>`],
     ["Duration", `<b>${esc(fmt.duration(span.duration_ns))}</b>`],
-    ["Kind", esc(ctx.spanKindLabel(span.span_kind))],
+    ["Kind", esc(spanKindLabel(span.span_kind))],
     ["Status", statusHtml(status, fmt.EMPTY)],
     ["Trace ID", `<code>${esc(row.trace_id)}</code>${copyButton(row.trace_id, "Trace ID")}`],
     ["Span ID", `<code>${esc(row.span_id)}</code>${copyButton(row.span_id, "Span ID")}`],
@@ -741,9 +743,9 @@ function panelBodyHtml(row, entry) {
   } else if (!entry.span) {
     details = '<div class="traceSpanPanel__status">The span is no longer available.</div>';
   } else {
-    details = `${traceInsights?.exceptionSectionHtml?.(span, { start: startNs }) || ""}
-        ${ctx.renderJaegerAttributes("Tags", span.span_attributes, { open: true, filterScope: "span" })}
-        ${ctx.attributeEntries(span.resource_attributes).length ? ctx.renderJaegerAttributes("Process", span.resource_attributes, { open: true, filterScope: "resource" }) : ""}
+    details = `${traceInsights.exceptionSectionHtml(span, { start: startNs }) || ""}
+        ${renderJaegerAttributes("Tags", span.span_attributes, { open: true, filterScope: "span" })}
+        ${attributeEntries(span.resource_attributes).length ? renderJaegerAttributes("Process", span.resource_attributes, { open: true, filterScope: "resource" }) : ""}
         ${eventsHtml(span, startNs)}
         ${linksHtml(span)}`;
   }
@@ -756,7 +758,7 @@ function renderPanel(row) {
   const panel = panelEl();
   const index = Number(panel.dataset.spanIndex);
   const entry = state.details.get(detailKey(row));
-  const href = ctx.spanTraceUrl(row.trace_id, row.span_id);
+  const href = spanTraceUrl(row.trace_id, row.span_id);
   // A re-render keeps the focus on the same panel control.
   const focusedNav = panel.contains(document.activeElement) ? document.activeElement?.getAttribute?.("data-span-panel-nav") : "";
   const api = panelApi();
@@ -779,10 +781,10 @@ function renderPanel(row) {
 }
 
 function openInTrace(row) {
-  const view = ctx.dom.tracesSearchView;
+  const view = dom.tracesSearchView;
   state.savedScrollTop = view ? view.scrollTop : 0;
-  ctx.model.pendingSpanId = String(row.span_id || "");
-  void ctx.loadTrace(String(row.trace_id || ""), { push: true });
+  model.pendingSpanId = String(row.span_id || "");
+  void actions.loadTrace(String(row.trace_id || ""), { push: true });
 }
 
 function onPanelClick(event) {
@@ -803,21 +805,21 @@ function onPanelClick(event) {
   if (link) {
     if (event.ctrlKey || event.metaKey || event.shiftKey) return;
     event.preventDefault();
-    const view = ctx.dom.tracesSearchView;
+    const view = dom.tracesSearchView;
     state.savedScrollTop = view ? view.scrollTop : 0;
-    ctx.model.pendingSpanId = String(link.getAttribute("data-span-open-link-span") || "");
-    void ctx.loadTrace(String(link.getAttribute("data-span-open-link") || ""), { push: true });
+    model.pendingSpanId = String(link.getAttribute("data-span-open-link-span") || "");
+    void actions.loadTrace(String(link.getAttribute("data-span-open-link") || ""), { push: true });
     return;
   }
   const copy = target.closest("[data-span-copy]");
-  if (copy) { event.preventDefault(); ctx.copyText(copy.getAttribute("data-span-copy") || "", copy); return; }
+  if (copy) { event.preventDefault(); copyText(copy.getAttribute("data-span-copy") || "", copy); return; }
   if (target.closest("[data-span-panel-retry]") && row) {
     state.details.delete(detailKey(row));
     openPanel(index);
     return;
   }
   // Attribute copy buttons, "show more" events and exception stacks.
-  ctx.spanDetailClick(event);
+  spanDetailClick(event);
 }
 
 // The open panel when it is on screen (not under a hidden tab or view).
@@ -833,7 +835,7 @@ function editable(element) {
 // Up / Down walk the rows while the panel is open (focus in the panel or
 // on the page, not in a field or a menu).
 function onDocumentKeydown(event) {
-  if (!active() || !state.panelOpen || ctx.dom.tracesSearchView?.hidden || shownPanel() === null) return;
+  if (!active() || !state.panelOpen || dom.tracesSearchView?.hidden || shownPanel() === null) return;
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
   const target = event.target instanceof Element ? event.target : null;
   if (target === byId("traceSpanTable") || editable(target)) return;
@@ -856,7 +858,7 @@ function closeColumns() {
 }
 
 function columnSuggestions() {
-  const keys = traceSearch?.facetKeys?.() || [];
+  const keys = traceSearch.facetKeys() || [];
   const taken = new Set(state.columns.map(columnLabel));
   return keys.map((item) => columnLabel({ scope: item.scope, key: item.key })).filter((label) => !taken.has(label)).slice(0, 200);
 }
@@ -951,7 +953,7 @@ function onToolsChange(event) {
   const target = event.target;
   if (target?.id === "traceSpanKind") {
     state.kind = KINDS.includes(target.value) ? target.value : "";
-    void ctx.runSearch({ url: "push" });
+    void actions.search({ url: "push" });
   }
 }
 
@@ -961,7 +963,7 @@ function commitDuration(input) {
   input.value = value;
   if (value === state[key]) return;
   state[key] = value;
-  void ctx.runSearch({ url: "push" });
+  void actions.search({ url: "push" });
 }
 
 // ---------------------------------------------------------------- hooks
@@ -970,7 +972,7 @@ function commitDuration(input) {
 // selection as when the trace was opened.
 function onShown() {
   if (!active()) return;
-  const view = ctx.dom.tracesSearchView;
+  const view = dom.tracesSearchView;
   requestAnimationFrame(() => {
     if (view && state.savedScrollTop) view.scrollTop = state.savedScrollTop;
     render();
@@ -979,15 +981,14 @@ function onShown() {
   });
 }
 
-function install(context) {
-  ctx = context;
+function init() {
   // Traces | Spans: the shared segmented control (app_ui_segmented.js).
   segmented?.bind($(".traceModeToggle"), { attr: "resultsMode", onChange: (mode) => { setMode(mode); return false; } });
-  const root = ctx.dom.tracesResults;
+  const root = dom.tracesResults;
   root?.addEventListener("click", (event) => { if (active()) onTableClick(event); });
   // Capture: the grid's own row keys (bindTableKeys) read eventOnGrid.
   root?.addEventListener("keydown", (event) => { if (active()) onTableKeydown(event); }, true);
-  ctx.dom.tracesSearchView?.addEventListener("scroll", onScroll, { passive: true });
+  dom.tracesSearchView?.addEventListener("scroll", onScroll, { passive: true });
   // While Traces shows (ns.lifecycle): the window resize and the panel's
   // Up / Down keys.
   lifecycle.bind("traces", (scope) => {
@@ -996,7 +997,7 @@ function install(context) {
   });
   const tools = byId("traceSpanTools");
   const kind = byId("traceSpanKind");
-  if (kind) ctx.enhanceTraceSelect(kind);
+  if (kind) enhanceTraceSelect(kind);
   tools?.addEventListener("change", onToolsChange);
   for (const input of [byId("traceSpanMinDuration"), byId("traceSpanMaxDuration")]) {
     input?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); commitDuration(input); } });
@@ -1007,7 +1008,7 @@ function install(context) {
 }
 
 export const traceSpans = {
-  install,
+  init,
   active,
   search,
   render,
@@ -1018,5 +1019,5 @@ export const traceSpans = {
   onTabShown: () => { if (active()) render(); else closeColumns(); },
   onTabHidden: () => closeColumns(),
   hasResults: () => state.searched && !!state.base,
-  leave: () => { ctx?.dom?.tracesResults?.classList.remove("tracesResults--spans"); closeColumns(); },
+  leave: () => { dom.tracesResults?.classList.remove("tracesResults--spans"); closeColumns(); },
 };

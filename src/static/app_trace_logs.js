@@ -4,15 +4,19 @@
 // badges and log markers on span rows, the logs of a span listed under its
 // row, and a Logs group in the span inspector. Clicking a log opens its
 // span (?span=). Logs load after the trace has rendered, from
-// GET /api/traces/logs. app_traces.js calls install(ctx) at init, load()
+// GET /api/traces/logs. app_trace_detail.js calls init() once, load()
 // after each trace load, and the *Html hooks while rendering.
 
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { palette } from "./app_palette.js";
-import { features, state, storage } from "./app_state.js";
+import { features, storage } from "./app_state.js";
 import { timeRange } from "./app_timerange.js";
+import { absoluteTimeText, renderAttributeTable, spanDetailClick } from "./app_trace_inspector.js";
+import { parseStructuredValue } from "./app_trace_model.js";
+import { activeTraceCache, currentHost, enhanceTraceSelect, esc, model } from "./app_trace_store.js";
+import { focusSpanInTimeline, renderWaterfall, waterfallContext } from "./app_trace_waterfall.js";
 import { badge } from "./app_ui_badge.js";
 import { icon } from "./app_ui_icon.js";
 import { search } from "./app_ui_search.js";
@@ -31,7 +35,6 @@ const SEVERITIES = ["fatal", "error", "warn", "info", "debug", "trace", "unset"]
 const SEVERITY_LABELS = { fatal: "FATAL", error: "ERROR", warn: "WARN", info: "INFO", debug: "DEBUG", trace: "TRACE", unset: "UNSET" };
 const LOG_ICON = icon("file-text", { size: "sm" });
 
-let ctx = null;
 const view = {
   trace: null,
   // idle | loading | ready | error | unavailable | disabled
@@ -51,7 +54,6 @@ const view = {
 };
 
 const { byId, $, $$ } = dom;
-const esc = (value) => ctx.esc(value);
 const cssEscape = (value) => (window.CSS?.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&"));
 
 function readPanelOpen() {
@@ -69,7 +71,7 @@ function logsFeatureEnabled() {
 
 // Logs of the trace on screen (none while another trace loads).
 function current() {
-  const trace = ctx?.model?.activeTrace;
+  const trace = model.activeTrace;
   return trace && view.trace === trace ? view : null;
 }
 
@@ -154,7 +156,7 @@ async function load(trace) {
   view.shown = PANEL_PAGE;
   if (!trace?.spans?.length) { view.status = "idle"; renderPanel(); return; }
   if (!logsFeatureEnabled()) { view.status = "disabled"; renderPanel(); return; }
-  const cache = ctx.activeTraceCache();
+  const cache = activeTraceCache();
   const win = traceWindow(cache);
   if (!win) { view.status = "idle"; renderPanel(); return; }
   view.status = "loading";
@@ -166,7 +168,7 @@ async function load(trace) {
   const servicesChars = services.reduce((sum, name) => sum + encodeURIComponent(name).length + 9, 0);
   if (services.length > 1000 || servicesChars > MAX_SERVICES_QUERY_CHARS) services = [];
   try {
-    const payload = await api.getTraceLogs(ctx.currentHost(), { traceId: trace.trace_id, startNs: win.startNs, endNs: win.endNs, services }, { signal: req.signal });
+    const payload = await api.getTraceLogs(currentHost(), { traceId: trace.trace_id, startNs: win.startNs, endNs: win.endNs, services }, { signal: req.signal });
     if (!req.isCurrent()) return;
     view.payload = payload;
     if (payload?.enabled === false) {
@@ -190,27 +192,27 @@ async function load(trace) {
 function afterLoad() {
   updateHeaderItem();
   renderPanel();
-  if (ctx.model.activeTrace && view.status === "ready" && view.bySpan.size) rerenderWaterfall();
+  if (model.activeTrace && view.status === "ready" && view.bySpan.size) rerenderWaterfall();
 }
 
 function rerenderWaterfall() {
   const root = byId("traceWaterfall");
   const focusedId = document.activeElement?.closest?.("#traceWaterfall [data-span-id]")?.getAttribute("data-span-id") || "";
-  ctx.renderWaterfall();
+  renderWaterfall();
   if (focusedId && root) $(`.traceSpanRow[data-span-id="${cssEscape(focusedId)}"]`, root)?.focus({ preventScroll: true });
 }
 
 // ------------------------------------------------------------ formatting
 
 function offsetText(record) {
-  const start = Number(ctx.activeTraceCache().bounds.start);
+  const start = Number(activeTraceCache().bounds.start);
   const delta = record.ns - start;
   if (!Number.isFinite(delta)) return fmt.EMPTY;
   return `${delta < 0 ? "\u2212" : "+"}${fmt.duration(Math.abs(delta))}`;
 }
 
 function absoluteText(record) {
-  return ctx.absoluteTimeText(record.ns, record.timestamp);
+  return absoluteTimeText(record.ns, record.timestamp);
 }
 
 function severityCounts(records) {
@@ -232,7 +234,7 @@ function countLabel(n) {
 }
 
 function parseAttributes(raw) {
-  const value = ctx.parseStructuredValue(raw);
+  const value = parseStructuredValue(raw);
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
@@ -274,9 +276,9 @@ function detailsHtml(record, mode) {
     `<span>SpanID: <code>${esc(record.span_id || "none")}</code>${record.span_id && !span ? " <small>(not in this trace)</small>" : ""}</span>`,
   ].join("");
   const resource = Object.keys(resourceAttrs).length
-    ? `<details class="traceLog__resource"><summary>Resource <small>(${Object.keys(resourceAttrs).length})</small></summary>${ctx.renderAttributeTable(resourceAttrs, "No attributes")}</details>`
+    ? `<details class="traceLog__resource"><summary>Resource <small>(${Object.keys(resourceAttrs).length})</small></summary>${renderAttributeTable(resourceAttrs, "No attributes")}</details>`
     : "";
-  return `<div class="traceLog__details">${bodyDetailHtml(record)}<div class="traceLog__meta">${meta}${openSpan}</div><div class="traceLog__attrs"><b>Attributes</b>${ctx.renderAttributeTable(logAttrs, "No attributes")}</div>${resource}</div>`;
+  return `<div class="traceLog__details">${bodyDetailHtml(record)}<div class="traceLog__meta">${meta}${openSpan}</div><div class="traceLog__attrs"><b>Attributes</b>${renderAttributeTable(logAttrs, "No attributes")}</div>${resource}</div>`;
 }
 
 // The shared severity badge (ns.badge.severityHtml), as on the Logs page.
@@ -384,7 +386,7 @@ function windowText(v) {
 // (a link: the trace is a page of its own, so the browser opens that page).
 function logsViewUrl(v) {
   const w = v.payload?.window;
-  const traceId = String(ctx?.model?.activeTrace?.trace_id || "");
+  const traceId = String(model.activeTrace?.trace_id || "");
   const from = Number(w?.from_s);
   const to = Number(w?.to_s);
   if (!traceId || !Number.isFinite(from) || !Number.isFinite(to) || !timeRange || !api) return "";
@@ -462,7 +464,7 @@ function renderPanel() {
   }
   panel.innerHTML = `${panelToolbarHtml(v)}<div data-trace-logs-notice-slot>${panelNoticeHtml(v)}</div><div class="traceLogsPanel__list" data-trace-logs-list role="list" aria-label="Trace logs">${panelListHtml(v)}</div>`;
   const select = $("#traceLogsService", panel);
-  if (select) ctx.enhanceTraceSelect(select);
+  if (select) enhanceTraceSelect(select);
 }
 
 // Filters only redraw the list (the text box keeps its focus).
@@ -579,7 +581,7 @@ function spanRowFor(target) {
 
 function toggleInline(row) {
   const id = String(row.getAttribute("data-span-id") || "");
-  const cache = ctx.activeTraceCache();
+  const cache = activeTraceCache();
   const opening = !view.inline.has(id);
   if (opening) view.inline.add(id); else view.inline.delete(id);
   const node = cache.nodeById.get(id);
@@ -588,7 +590,7 @@ function toggleInline(row) {
   let anchor = row;
   if (anchor.nextElementSibling?.classList.contains("traceSpanInspectorRow")) anchor = anchor.nextElementSibling;
   if (anchor.nextElementSibling?.classList.contains("traceSpanLogsRow")) anchor.nextElementSibling.remove();
-  if (opening) anchor.insertAdjacentHTML("afterend", inlineRowHtml(node, ctx.waterfallWindow()));
+  if (opening) anchor.insertAdjacentHTML("afterend", inlineRowHtml(node, waterfallContext(activeTraceCache())));
   for (const badge of $$(".traceSpanLogsBadge", row)) badge.setAttribute("aria-expanded", opening ? "true" : "false");
 }
 
@@ -598,7 +600,7 @@ function inspectorSectionHtml(span) {
   const records = spanLogs(span);
   if (!records.length) return "";
   const id = String(span.span_id || "");
-  const open = !!ctx.model.spanSections.get(id)?.has("logs");
+  const open = !!model.spanSections.get(id)?.has("logs");
   const counts = severityCounts(records);
   const summary = SEVERITIES.filter((sev) => counts.get(sev)).map((sev) => badge.severityHtml(sev, `${SEVERITY_LABELS[sev]} ${fmt.count(counts.get(sev))}`, { className: "traceSpanLogs__sev" })).join("");
   return `<details class="traceJaegerGroup traceJaegerGroup--summary traceSpanLogs" data-span-section="logs"${open ? " open" : ""}><summary><b>Logs</b><span class="traceJaegerGroup__count">(${fmt.count(records.length)})</span><span class="traceSpanLogs__summary">${summary}</span></summary><div class="traceJaegerGroup__body"><div class="traceSpanLogs__list">${records.map((record) => logItemHtml(record, "inspector")).join("")}</div><small class="traceSpanEvents__note">Log timestamps are relative to the start time of the full trace.</small></div></details>`;
@@ -628,11 +630,11 @@ function toggleDetails(item, record, mode) {
 function openSpan(spanId, record) {
   const id = String(spanId || "");
   if (!id) return;
-  let sections = ctx.model.spanSections.get(id);
-  if (!sections) { sections = new Set(); ctx.model.spanSections.set(id, sections); }
+  let sections = model.spanSections.get(id);
+  if (!sections) { sections = new Set(); model.spanSections.set(id, sections); }
   sections.add("logs");
   view.target = record ? record.index : -1;
-  ctx.focusSpanInTimeline(id, { push: true });
+  focusSpanInTimeline(id, { push: true });
   if (record) {
     const target = $(`.traceSpanInspectorRow .traceLog[data-log-index="${record.index}"]`, byId("traceWaterfall"));
     target?.scrollIntoView?.({ block: "nearest" });
@@ -654,7 +656,7 @@ function handleLogClick(event, mode) {
       return true;
     }
     // Attribute tables: copy buttons and JSON trees are the inspector's.
-    if (mode === "panel") ctx.spanDetailClick(event);
+    if (mode === "panel") spanDetailClick(event);
     else event.stopPropagation();
     return true;
   }
@@ -728,7 +730,7 @@ function onPanelClick(event) {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
   if (target.closest("[data-trace-logs-toggle]")) { closePanelToToggle(); return; }
-  if (target.closest("[data-trace-logs-retry]")) { void load(ctx.model.activeTrace); return; }
+  if (target.closest("[data-trace-logs-retry]")) { void load(model.activeTrace); return; }
   if (target.closest("[data-trace-logs-clear]")) {
     view.filters = { severities: new Set(), service: "", text: "" };
     renderPanel();
@@ -746,8 +748,7 @@ function onPanelClick(event) {
   handleLogClick(event, "panel");
 }
 
-function install(context) {
-  ctx = context;
+function init() {
   const waterfall = byId("traceWaterfall");
   // Capture phase: before the row's own click (which toggles the inspector).
   waterfall?.addEventListener("click", onWaterfallClick, true);
@@ -785,6 +786,6 @@ function install(context) {
 }
 
 export const traceLogs = {
-  install, load, headerItemHtml, spanBadgeHtml, spanMarkersHtml, inlineRowHtml, inlineHeight, inspectorSectionHtml,
+  init, load, headerItemHtml, spanBadgeHtml, spanMarkersHtml, inlineRowHtml, inlineHeight, inspectorSectionHtml,
   severityOf, attach,
 };

@@ -65,7 +65,7 @@ def test_trace_insight_settings_are_configured_validated_and_documented():
 
 def test_trace_page_loads_the_insights_module():
     trace_page = modules.page_files("trace")
-    traces = read("src/static/app_traces.js")
+    traces = modules.read_family("app_trace")
     insights = read("src/static/app_trace_insights.js")
     html = read("src/static/trace.html")
     assert "app_trace_views.js" in trace_page and "app_trace_insights.js" in trace_page

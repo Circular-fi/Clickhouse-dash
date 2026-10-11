@@ -1,8 +1,7 @@
 // Trace page views after Jaeger's TracePage view switcher: Trace Timeline
-// (the waterfall, app_traces.js), Trace Graph, Trace Statistics, Trace
+// (the waterfall, app_trace_waterfall.js), Trace Graph, Trace Statistics, Trace
 // Spans Table and Trace Flamegraph; plus the ?span= / ?tab= location and
-// the span-bar event marker popover. app_traces.js calls install(ctx) with
-// its model and helpers at init.
+// the span-bar event marker popover. app_trace_detail.js calls init() once.
 
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -10,6 +9,10 @@ import { graphKit as graphKitMod } from "./app_graph_kit.js";
 import { palette } from "./app_palette.js";
 import { router } from "./app_router.js";
 import { storage } from "./app_state.js";
+import { eventItemHtml, spanDetailClick } from "./app_trace_inspector.js";
+import { parseStructuredValue, spanEventList, spanKindLabel } from "./app_trace_model.js";
+import { activeTraceCache, address, enhanceTraceSelect, esc, model } from "./app_trace_store.js";
+import { focusSpanInTimeline } from "./app_trace_waterfall.js";
 import { badge } from "./app_ui_badge.js";
 import { icon } from "./app_ui_icon.js";
 import { popover as popoverMod } from "./app_ui_popover.js";
@@ -28,7 +31,6 @@ const FLAME_MIN_RATIO = 0.0005;
 // The service colour's share of a flamegraph frame's fill (the rest is the surface).
 const FLAME_FILL_PCT = 40;
 
-let ctx = null;
 let lastCache = null;
 const view = {
   current: "timeline",
@@ -42,11 +44,10 @@ const view = {
 const derivedByCache = new WeakMap();
 
 const { byId, $, $$ } = dom;
-const esc = (value) => ctx.esc(value);
 const fmt = format;
 
 function derived() {
-  const cache = ctx.activeTraceCache();
+  const cache = activeTraceCache();
   let entry = derivedByCache.get(cache);
   if (!entry) {
     entry = { cache };
@@ -79,9 +80,8 @@ function detailEntryState(state) {
 // The trace's own parameters (?tab=, ?span=) on its URL, through the
 // Traces owner of ns.router (nothing while another view shows).
 function updateParams(mutate, { push = false } = {}) {
-  const address = router.owner("traces");
   const href = router.href();
-  // A pushed entry keeps the count of steps back to the search (app_traces.js).
+  // A pushed entry keeps the count of steps back to the search (app_trace_nav.js).
   if (push) address.push(mutate, { href, state: detailEntryState(router.state()) });
   else address.replace(mutate, { href });
 }
@@ -135,8 +135,8 @@ function spanAttributes(span) {
   if (!entry.attrs) entry.attrs = new Map();
   let attrs = entry.attrs.get(span);
   if (!attrs) {
-    const own = ctx.parseStructuredValue(span.span_attributes);
-    const resource = ctx.parseStructuredValue(span.resource_attributes);
+    const own = parseStructuredValue(span.span_attributes);
+    const resource = parseStructuredValue(span.resource_attributes);
     attrs = {
       ...(resource && typeof resource === "object" && !Array.isArray(resource) ? resource : {}),
       ...(own && typeof own === "object" && !Array.isArray(own) ? own : {}),
@@ -192,7 +192,7 @@ function toolsFor(name, build) {
     box.dataset.viewTools = name;
     box.innerHTML = build();
     host.appendChild(box);
-    $$("select", box).forEach((select) => ctx.enhanceTraceSelect(select));
+    $$("select", box).forEach((select) => enhanceTraceSelect(select));
   }
   return box;
 }
@@ -263,27 +263,25 @@ function viewFromLocation() {
 // After a trace load and on popstate within the trace: the view and the
 // deep-linked span of the URL.
 function applyLocation() {
-  if (!ctx) return;
   const params = router.current().params;
   // ?view=<tab> (the former name) and a tab= that is not a trace tab (the
   // search page's, carried by former trace URLs) take the canonical form.
   if (params.has("view") || (params.has("tab") && !VIEWS.includes(params.get("tab")))) {
     const tab = tabParam(params);
-    router.owner("traces").replace({ view: null, tab: tab === "timeline" ? null : tab }, { href: router.href() });
+    address.replace({ view: null, tab: tab === "timeline" ? null : tab }, { href: router.href() });
   }
   const target = viewFromLocation();
   const explicit = !!tabParam(params);
   setView(target, { url: explicit || target === "timeline" ? null : "replace", persist: explicit || !params.get("span") });
   const spanId = params.get("span");
   if (spanId && target === "timeline") {
-    if (!ctx.focusSpanInTimeline(spanId, { replace: false })) ctx.model.focusedSpanId = "";
+    if (!focusSpanInTimeline(spanId, { replace: false })) model.focusedSpanId = "";
   }
 }
 
 function render() {
-  if (!ctx) return;
   const alt = byId("traceAltView");
-  const cache = ctx.activeTraceCache();
+  const cache = activeTraceCache();
   if (cache !== lastCache) {
     // Another trace: its flamegraph starts unzoomed, no popover survives.
     lastCache = cache;
@@ -292,7 +290,7 @@ function render() {
   }
   showTools();
   if (!alt || view.current === "timeline") return;
-  const spans = ctx.model.activeTrace?.spans || [];
+  const spans = model.activeTrace?.spans || [];
   if (!spans.length) {
     alt.innerHTML = uiState.emptyHtml({ body: "This trace has no spans." });
     return;
@@ -305,8 +303,8 @@ function render() {
 
 // Opening a span in the waterfall points the URL at it (?span=).
 function onSpanToggled(spanId, opening) {
-  if (ctx.model.focusedSpanId && ctx.model.focusedSpanId !== spanId) {
-    ctx.model.focusedSpanId = "";
+  if (model.focusedSpanId && model.focusedSpanId !== spanId) {
+    model.focusedSpanId = "";
     markFocusedSpan();
   }
   const current = router.current().params.get("span");
@@ -315,9 +313,9 @@ function onSpanToggled(spanId, opening) {
 }
 
 function markFocusedSpan() {
-  const root = ctx?.model && byId("traceWaterfall");
+  const root = model && byId("traceWaterfall");
   if (!root) return;
-  const id = String(ctx.model.focusedSpanId || "");
+  const id = String(model.focusedSpanId || "");
   for (const row of $$(".traceSpanRow.is-deep-linked", root)) {
     if (row.getAttribute("data-span-id") !== id) row.classList.remove("is-deep-linked");
   }
@@ -535,7 +533,7 @@ function renderSpansTable(alt) {
   const bodyHtml = shown.map((span) => {
     const status = String(span.status_code || "Unset");
     const name = span.span_name || "span";
-    return `<tr class="traceSpansTable__row${isError(span) ? " is-error" : ""}" data-table-span="${esc(span.span_id)}" tabindex="-1" title="Show in the timeline"><td data-col="service" style="--trace-service-color:${palette.service(span.service_name)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(span.service_name || "unknown")}</td><td data-col="operation" title="${esc(name)}">${esc(name)}</td><td class="num" data-col="duration">${esc(fmt.duration(spanDuration(span)))}</td><td class="num" data-col="start">${esc(fmt.duration(Math.max(0, spanStart(span) - traceStart)))}</td><td data-col="status">${badge.statusHtml(status)}</td><td data-col="kind">${esc(ctx.spanKindLabel(span.span_kind))}</td><td class="mono" data-col="id">${esc(span.span_id)}</td></tr>`;
+    return `<tr class="traceSpansTable__row${isError(span) ? " is-error" : ""}" data-table-span="${esc(span.span_id)}" tabindex="-1" title="Show in the timeline"><td data-col="service" style="--trace-service-color:${palette.service(span.service_name)}"><i class="serviceSwatch" aria-hidden="true"></i>${esc(span.service_name || "unknown")}</td><td data-col="operation" title="${esc(name)}">${esc(name)}</td><td class="num" data-col="duration">${esc(fmt.duration(spanDuration(span)))}</td><td class="num" data-col="start">${esc(fmt.duration(Math.max(0, spanStart(span) - traceStart)))}</td><td data-col="status">${badge.statusHtml(status)}</td><td data-col="kind">${esc(spanKindLabel(span.span_kind))}</td><td class="mono" data-col="id">${esc(span.span_id)}</td></tr>`;
   }).join("");
   const moreHtml = rows.length > shown.length ? `<div class="traceSpansTable__more">Showing the first ${shown.length} of ${rows.length} spans: refine the filter to see the others.</div>` : "";
   alt.innerHTML = `<div class="traceSpansTable"><table class="traceSpansTable__table dataTable dataTable--compact"><thead>${headHtml}</thead><tbody>${bodyHtml || `<tr><td colspan="${SPAN_COLUMNS.length}" class="traceSpansTable__empty">No spans match these filters.</td></tr>`}</tbody></table>${moreHtml}</div>`;
@@ -970,7 +968,7 @@ function graphPane() {
     + '<aside id="traceGraphPanel" class="graphKitPanel" aria-label="Call path details" hidden></aside>';
   graphUi.pane = pane;
   const select = $("#traceGraphMode", pane);
-  ctx.enhanceTraceSelect(select);
+  enhanceTraceSelect(select);
   select.addEventListener("change", () => {
     view.graph.mode = GRAPH_MODES.some(([value]) => value === select.value) ? select.value : "service";
     renderGraphLegend();
@@ -1397,7 +1395,7 @@ function onGraphActionClick(event) {
   const span = target.closest("[data-graph-span]");
   if (span) {
     const id = String(span.getAttribute("data-graph-span") || "");
-    if (id) ctx.focusSpanInTimeline(id, { push: true });
+    if (id) focusSpanInTimeline(id, { push: true });
     return;
   }
   const select = target.closest("[data-graph-select]");
@@ -1525,7 +1523,7 @@ export const traceGraph = { inspect: inspectGraph, state: () => graphUi };
 // draw one marker per group.
 function eventGroups(span, viewStartNs, viewTotalNs) {
   const groups = new Map();
-  for (const event of ctx.spanEventList(span)) {
+  for (const event of spanEventList(span)) {
     if (!Number.isFinite(event.ns)) continue;
     const ratio = (event.ns - viewStartNs) / Math.max(1, viewTotalNs);
     const key = Math.round(ratio * 500) / 500;
@@ -1536,9 +1534,9 @@ function eventGroups(span, viewStartNs, viewTotalNs) {
 }
 
 function waterfallWindow() {
-  const cache = ctx.activeTraceCache();
+  const cache = activeTraceCache();
   const total = Math.max(1, cache.extent.end - cache.extent.start);
-  const range = Array.isArray(ctx.model.traceViewRange) ? ctx.model.traceViewRange : [0, 1];
+  const range = Array.isArray(model.traceViewRange) ? model.traceViewRange : [0, 1];
   const lo = Math.max(0, Math.min(1, Number(range[0] || 0)));
   const hi = Math.max(lo + 0.005, Math.min(1, Number(range[1] == null ? 1 : range[1])));
   return { start: cache.extent.start + total * lo, total: Math.max(1, total * (hi - lo)) };
@@ -1557,7 +1555,7 @@ function closeEventPopover() {
 
 function openEventPopover(marker) {
   const row = marker.closest("[data-span-id]");
-  const cache = ctx.activeTraceCache();
+  const cache = activeTraceCache();
   const node = row ? cache.nodeById.get(String(row.getAttribute("data-span-id") || "")) : null;
   if (!node) return;
   const win = waterfallWindow();
@@ -1569,7 +1567,7 @@ function openEventPopover(marker) {
     || groups.reduce((best, g) => (Math.abs(g.ratio - markerRatio) < Math.abs(best.ratio - markerRatio) ? g : best), groups[0]);
   closeEventPopover();
   const count = group.events.length;
-  const html = `<header class="traceEventPopover__head"><b>${count} event${count === 1 ? "" : "s"}</b><span>${ctx.esc(node.span.service_name || "unknown")} · ${ctx.esc(node.span.span_name || "span")}</span><button type="button" class="closeCross closeCross--sm traceEventPopover__close" data-event-popover-close aria-label="Close" title="Close (Esc)">${icon("x")}</button></header><div class="traceEventPopover__list">${group.events.map((event) => ctx.eventItemHtml(event, cache.bounds.start, { open: count <= 3 })).join("")}</div><small class="traceSpanEvents__note">Event timestamps are relative to the start time of the full trace.</small>`;
+  const html = `<header class="traceEventPopover__head"><b>${count} event${count === 1 ? "" : "s"}</b><span>${esc(node.span.service_name || "unknown")} · ${esc(node.span.span_name || "span")}</span><button type="button" class="closeCross closeCross--sm traceEventPopover__close" data-event-popover-close aria-label="Close" title="Close (Esc)">${icon("x")}</button></header><div class="traceEventPopover__list">${group.events.map((event) => eventItemHtml(event, cache.bounds.start, { open: count <= 3 })).join("")}</div><small class="traceSpanEvents__note">Event timestamps are relative to the start time of the full trace.</small>`;
   const open = popoverMod.open(marker, html, {
     className: "traceEventPopover",
     label: "Span events",
@@ -1581,7 +1579,7 @@ function openEventPopover(marker) {
   open.el.style.setProperty("--trace-service-color", palette.service(node.span.service_name));
   open.el.addEventListener("click", (event) => {
     if (event.target instanceof Element && event.target.closest("[data-event-popover-close]")) { open.close(); return; }
-    ctx.spanDetailClick(event);
+    spanDetailClick(event);
   });
 }
 
@@ -1611,7 +1609,7 @@ function initAltViewEvents() {
     }
     const spanRow = target.closest("[data-table-span]");
     if (spanRow) {
-      ctx.focusSpanInTimeline(String(spanRow.getAttribute("data-table-span") || ""), { push: true });
+      focusSpanInTimeline(String(spanRow.getAttribute("data-table-span") || ""), { push: true });
       return;
     }
     const frame = target.closest("[data-flame-key]");
@@ -1624,7 +1622,7 @@ function initAltViewEvents() {
   });
   // Spans table rows: Up / Down move, Enter / Space show the span in the
   // timeline (ns.table.rovingRows).
-  if (alt) table.rovingRows(alt, { rows: "tr[data-table-span]", onOpen: (row) => ctx.focusSpanInTimeline(String(row.getAttribute("data-table-span") || ""), { push: true }) });
+  if (alt) table.rovingRows(alt, { rows: "tr[data-table-span]", onOpen: (row) => focusSpanInTimeline(String(row.getAttribute("data-table-span") || ""), { push: true }) });
   alt?.addEventListener("mousemove", (event) => {
     const frame = event.target instanceof Element ? event.target.closest("[data-flame-key]") : null;
     if (!frame) { hideFlameTip(); return; }
@@ -1659,15 +1657,14 @@ let flameTip = null;
 function showFlameTip(frame, x, y) {
   flameTip = flameTip || popoverMod.follow({ className: "traceFlame__tip", side: "bottom", align: "start", offset: 16 });
   const count = Number(frame.getAttribute("data-flame-count") || 1);
-  flameTip.show({ x: x + 12, y }, `<b>${ctx.esc(frame.getAttribute("data-flame-name"))}</b><span>Duration: <strong>${ctx.esc(frame.getAttribute("data-flame-duration"))}</strong></span><span>${fmt.count(count)} span${count === 1 ? "" : "s"} · ${ctx.esc(frame.getAttribute("data-flame-share"))} of the trace</span>`, { html: true });
+  flameTip.show({ x: x + 12, y }, `<b>${esc(frame.getAttribute("data-flame-name"))}</b><span>Duration: <strong>${esc(frame.getAttribute("data-flame-duration"))}</strong></span><span>${fmt.count(count)} span${count === 1 ? "" : "s"} · ${esc(frame.getAttribute("data-flame-share"))} of the trace</span>`, { html: true });
 }
 function hideFlameTip() { flameTip?.hide(); }
 
-function install(context) {
-  ctx = context;
+function init() {
   const select = byId("traceViewSelect");
   if (select) {
-    ctx.enhanceTraceSelect(select);
+    enhanceTraceSelect(select);
     select.addEventListener("change", () => setView(select.value, { url: "replace" }));
   }
   viewTabs = tabs?.bind(byId("traceViewTabs"), { onSelect: (name) => { if (name !== view.current) setView(name, { url: "replace" }); } }) || null;
@@ -1690,11 +1687,11 @@ function install(context) {
   if (waterfall && typeof MutationObserver === "function") {
     const mark = util.rafOnce(() => markFocusedSpan());
     new MutationObserver(() => {
-      if (ctx.model.focusedSpanId) mark();
+      if (model.focusedSpanId) mark();
     }).observe(waterfall, { childList: true, subtree: true });
   }
   const detail = byId("traceDetail");
   if (detail) detail.dataset.traceView = "timeline";
 }
 
-export const traceViews = { install, applyLocation, detailEntryState, render, setView, showTimeline, onSpanToggled, markFocusedSpan, eventGroups, openEventPopover, closeEventPopover, selfTimeOf };
+export const traceViews = { init, applyLocation, detailEntryState, render, setView, showTimeline, onSpanToggled, markFocusedSpan, eventGroups, openEventPopover, closeEventPopover, selfTimeOf };

@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,7 +13,7 @@ def read(rel):
 def test_trace_search_layout_tracks_jaeger_structure():
     html = read('src/static/traces.html')
     css = css_sources.text()
-    js = read('src/static/app_traces.js')
+    js = modules.read_family("app_trace")
 
     for token in (
         'id="tracesRangeUnit"',

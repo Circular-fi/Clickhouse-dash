@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,7 +20,7 @@ def test_trace_analytics_buckets_cast_datetime_to_datetime64_before_millis_conve
 
 
 def test_trace_selectors_reuse_custom_dropdown_visual_language():
-    ui = read('src/static/app_traces.js')
+    ui = modules.read_family("app_trace")
     menu = read('src/static/app_ui_menu.js')
     css = css_sources.text()
     assert 'enhanceTraceSelect' in ui
@@ -30,7 +32,7 @@ def test_trace_selectors_reuse_custom_dropdown_visual_language():
 
 def test_trace_detail_has_jaeger_style_overview_and_dense_timeline():
     html = read('src/static/trace.html')
-    ui = read('src/static/app_traces.js')
+    ui = modules.read_family("app_trace")
     css = css_sources.text()
     assert 'tracePageHeader__titleRow' in html
     assert 'traceSpanSearch' not in html

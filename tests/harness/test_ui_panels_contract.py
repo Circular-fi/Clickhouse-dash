@@ -194,13 +194,13 @@ def test_entity_panels_write_one_url_parameter():
     assert 'const logParam = address.panel("log");' in logs
     spans = read("src/static/app_trace_spans.js")
     assert 'if (span) params.set("span", span);' in spans
-    assert 'const spanParam = router.owner("traces").panel("span");' in spans
+    assert 'const spanParam = address.panel("span");' in spans
     search = read("src/static/app_trace_search.js")
     # span= is the panel's, never part of the search key or a trace URL's context.
     assert search.count('params.delete("span");') == 2
     trace_map = read("src/static/app_trace_map.js")
-    assert 'params: ["node"],' in trace_map and 'const nodeParam = router.owner("traces").panel("node");' in trace_map
+    assert 'params: ["node"],' in trace_map and 'const nodeParam = address.panel("node");' in trace_map
     services = read("src/static/app_trace_services.js")
-    assert 'const svcParam = router.owner("traces").panel("svc");' in services
+    assert 'const svcParam = address.panel("svc");' in services
     for source in (logs, spans, trace_map, services):
         assert "history.state" not in source and '"detail:' not in source

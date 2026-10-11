@@ -7,16 +7,19 @@
 // sampled traces having a span with each value. A value click applies it as
 // a filter chip (app_trace_search.js); "Search traces in this box" sets the
 // range and the trace duration filter and searches.
-// app_traces.js calls install(ctx) with its model and chart helpers.
+// app_traces.js calls init() once.
 
+import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { palette } from "./app_palette.js";
-import { router } from "./app_router.js";
 import { storage } from "./app_state.js";
 import { timeRange } from "./app_timerange.js";
+import { CHART_SYNC_KEY, chartMessage, mountChart, unmountChart } from "./app_trace_charts.js";
+import { durationAxis } from "./app_trace_model.js";
 import { traceSearch } from "./app_trace_search.js";
+import { actions, address, currentHost, esc, model } from "./app_trace_store.js";
 import { icon } from "./app_ui_icon.js";
 import { segmented } from "./app_ui_segmented.js";
 import { uiState } from "./app_ui_state.js";
@@ -27,7 +30,6 @@ const MODES = ["percentiles", "heatmap"];
 const HEAT_LEVELS = 8;
 const { byId, $ } = dom;
 
-let ctx = null;
 let geo = null;
 let chart = null;
 const hm = {
@@ -53,7 +55,6 @@ function storeMode(mode) {
   modePref().set(mode);
 }
 
-const esc = (value) => ctx.esc(value);
 const fmt = format;
 const active = () => hm.mode === "heatmap";
 
@@ -65,7 +66,7 @@ function filtersKey(filters) {
 
 function syncToggle() {
   segmented?.set($(".traceDurationViews"), hm.mode, "durationView");
-  const chart = ctx?.dom?.traceDurationChart;
+  const chart = dom.traceDurationChart;
   if (!chart) return;
   if (active()) {
     chart.setAttribute("tabindex", "0");
@@ -86,13 +87,13 @@ function setMode(mode, { persist = true, url = true } = {}) {
   hm.mode = next;
   syncToggle();
   hideTooltip();
-  if (url && !/\/observability\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) router.owner("traces").replace();
+  if (url && !/\/observability\/traces\/[^/]+\/?$/.test(String(window.location.pathname || ""))) address.replace();
   if (active()) {
     if (hm.filters && hm.dataKey !== filtersKey(hm.filters)) void load();
     else render();
   } else {
     renderPanel();
-    ctx.loadDurations();
+    actions.loadDurations();
   }
 }
 
@@ -101,7 +102,6 @@ function setMode(mode, { persist = true, url = true } = {}) {
 function applyParams(params, { initial = false } = {}) {
   const value = params.get("duration_view");
   const mode = MODES.includes(value) ? value : initial ? readMode() : "percentiles";
-  if (!ctx) { hm.mode = mode; return; }
   if (initial) { hm.mode = mode; syncToggle(); return; }
   setMode(mode, { persist: false, url: false });
 }
@@ -121,7 +121,7 @@ function onSearch(filters) {
 }
 
 async function load() {
-  if (!hm.filters || !ctx) return;
+  if (!hm.filters) return;
   const req = util.latest("traces.heatmap");
   const key = filtersKey(hm.filters);
   hm.loading = true;
@@ -130,7 +130,7 @@ async function load() {
   hm.dataKey = key;
   render();
   try {
-    const data = await ctx.api.getTraceHeatmap(ctx.currentHost(), hm.filters, { signal: req.signal });
+    const data = await api.getTraceHeatmap(currentHost(), hm.filters, { signal: req.signal });
     if (!req.isCurrent()) return;
     hm.data = data;
   } catch (error) {
@@ -149,7 +149,7 @@ async function load() {
 
 function niceLogTicks(lo, hi) {
   if (hi / lo >= 8) return chartCore.logTicks(lo, hi);
-  const axis = ctx.durationAxis(lo, hi, 4);
+  const axis = durationAxis(lo, hi, 4);
   return axis.values.map((tick) => tick.value).filter((value) => value >= lo && value <= hi);
 }
 
@@ -179,32 +179,32 @@ const PALETTE = Array.from({ length: HEAT_LEVELS }, (_, i) => palette.sequential
 // edges, the engine's 2-D brush for the box and DOM regions for the
 // selection and the keyboard cursor, moved without redrawing.
 function render() {
-  const container = ctx?.dom?.traceDurationChart;
+  const container = dom.traceDurationChart;
   if (!container || !active()) return;
   syncToggle();
-  const meta = ctx.dom.traceDurationChartMeta;
+  const meta = dom.traceDurationChartMeta;
   const data = hm.data;
   geo = null;
   chart = null;
   if (hm.loading || (!data && !hm.error && hm.filters)) {
-    ctx.chartMessage(container, "Loading duration heatmap\u2026");
+    chartMessage(container, "Loading duration heatmap\u2026");
     if (meta) meta.textContent = "Traces per cell";
     renderPanel();
     return;
   }
   if (hm.error) {
-    ctx.unmountChart(container);
+    unmountChart(container);
     container.innerHTML = uiState.errorHtml({ body: hm.error, compact: true, retry: { attrs: { "data-heatmap-retry": "" } } });
     $("[data-heatmap-retry]", container)?.addEventListener("click", () => { void load(); });
     renderPanel();
     return;
   }
-  if (!data) { ctx.chartMessage(container, "Search to load the duration heatmap."); renderPanel(); return; }
+  if (!data) { chartMessage(container, "Search to load the duration heatmap."); renderPanel(); return; }
   const cells = (Array.isArray(data.cells) ? data.cells : []).map((cell) => cell.map(Number));
   const edges = (Array.isArray(data.y_edges_ns) ? data.y_edges_ns : []).map(Number);
   const rows = Math.max(0, Number(data.rows || 0));
   if (!cells.length || rows < 1 || edges.length !== rows + 1) {
-    ctx.chartMessage(container, "No trace durations in this range.");
+    chartMessage(container, "No trace durations in this range.");
     if (meta) meta.textContent = "Traces per cell";
     renderPanel();
     return;
@@ -236,9 +236,9 @@ function render() {
   const xs = new Float64Array(cols);
   for (let col = 0; col < cols; col += 1) xs[col] = colStart(col) + bucketMs / 2;
   const ticks = niceLogTicks(lo, hi).map((value) => ({ v: value, label: fmt.duration(value) }));
-  chart = ctx.mountChart(container, "heatmap", {
+  chart = mountChart(container, "heatmap", {
     xKind: "time", xs, xDomain: [xMin, xMax], zoom: null, series: [], type: "line", legend: false,
-    syncKey: ctx.CHART_SYNC_KEY, keyboard: false, zoomable: false,
+    syncKey: CHART_SYNC_KEY, keyboard: false, zoomable: false,
     yScale: "log", yAxis: () => ({ min: lo, max: hi, ticks }),
     cells: box,
     bucketMs, bucketAlign: "center",
@@ -315,7 +315,7 @@ function regions() {
 function drawSelection() {
   if (!chart || !geo) return;
   chart.setRegions(regions());
-  ctx.dom.traceDurationChart?.classList.toggle("has-selection", !!hm.selection);
+  dom.traceDurationChart?.classList.toggle("has-selection", !!hm.selection);
 }
 
 const drawCursor = drawSelection;
@@ -344,12 +344,12 @@ function boxTooltip(box) {
 // ------------------------------------------------------- keys
 
 function announce(text) {
-  const live = $(".traceHeatLive", ctx.dom.traceDurationChart);
+  const live = $(".traceHeatLive", dom.traceDurationChart);
   if (live) live.textContent = text;
 }
 
 function onKeydown(event) {
-  if (!active() || !geo || !chart || event.target !== ctx.dom.traceDurationChart) return;
+  if (!active() || !geo || !chart || event.target !== dom.traceDurationChart) return;
   const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
   if (moves[event.key]) {
     event.preventDefault();
@@ -435,7 +435,7 @@ async function loadDeltas() {
   deltas.data = null;
   renderPanel();
   try {
-    const data = await ctx.api.getTraceDeltas(ctx.currentHost(), {
+    const data = await api.getTraceDeltas(currentHost(), {
       ...hm.filters,
       t0: String(Math.round(sel.t0)), t1: String(Math.round(sel.t1)),
       d0: String(sel.d0 / 1e6), d1: String(sel.d1 / 1e6),
@@ -465,12 +465,12 @@ function roundMs(ms, up) {
 function searchInBox() {
   const sel = hm.selection;
   if (!sel) return;
-  if (ctx.model.meta?.features?.duration_filter !== false) {
-    traceSearch?.setDuration?.({ min: roundMs(sel.d0 / 1e6, false), max: roundMs(sel.d1 / 1e6, true) });
+  if (model.meta?.features?.duration_filter !== false) {
+    traceSearch.setDuration({ min: roundMs(sel.d0 / 1e6, false), max: roundMs(sel.d1 / 1e6, true) });
   }
   const format = timeRange?.formatDateTime;
   if (!format) return;
-  void ctx.applyRange({ from: format(Math.floor(sel.t0 / 1000) * 1000), to: format(Math.ceil(sel.t1 / 1000) * 1000) });
+  void actions.applyRange({ from: format(Math.floor(sel.t0 / 1000) * 1000), to: format(Math.ceil(sel.t1 / 1000) * 1000) }, "heatmap");
 }
 
 // ------------------------------------------------------- comparison panel
@@ -528,14 +528,14 @@ function sampleText(data) {
 
 function renderPanel() {
   const panel = byId("traceDeltaPanel");
-  if (!panel || !ctx) return;
+  if (!panel) return;
   const sel = hm.selection;
-  const show = active() && !!sel && ctx.model.meta?.analytics_enabled === true;
+  const show = active() && !!sel && model.meta?.analytics_enabled === true;
   panel.hidden = !show;
   if (!show) { panel.replaceChildren(); return; }
   const when = fmt.range(sel.t0, sel.t0 + Math.max(1, sel.t1 - sel.t0));
   const duration = sel.d0 > 0 ? `${fmt.duration(sel.d0)} \u2013 ${fmt.duration(sel.d1)}` : `\u2264 ${fmt.duration(sel.d1)}`;
-  const durationFilter = ctx.model.meta?.features?.duration_filter !== false;
+  const durationFilter = model.meta?.features?.duration_filter !== false;
   panel.innerHTML = `<header class="traceDeltaPanel__head"><div class="traceDeltaPanel__title"><strong>Selection vs baseline</strong><span>Traces starting <b>${esc(when)}</b> lasting <b>${esc(duration)}</b></span></div>`
     + `<div class="traceDeltaPanel__actions"><label class="traceDeltaPanel__baseline"><span>Baseline</span><select data-delta-baseline aria-label="Baseline traces"><option value="outside"${deltas.baseline === "outside" ? " selected" : ""}>Other traces of that time</option><option value="all"${deltas.baseline === "all" ? " selected" : ""}>All traces of that time</option></select></label>`
     + `<button type="button" class="button button--small traceDeltaPanel__search" data-delta-search title="${esc(durationFilter ? "Search this time range with this trace duration range" : "Search this time range (duration filters are disabled)")}">Search traces in this box</button>`
@@ -560,13 +560,13 @@ function onPanelClick(event) {
     const hit = valueAt((filter || exclude).getAttribute(filter ? "data-delta-filter" : "data-delta-exclude"));
     if (!hit) return;
     const field = fieldOf(hit.item);
-    if (filter) traceSearch?.filter?.(field, hit.value.value);
-    else traceSearch?.exclude?.(field, hit.value.value);
+    if (filter) traceSearch.filter(field, hit.value.value);
+    else traceSearch.exclude(field, hit.value.value);
   } else if (target.closest("[data-delta-search]")) {
     searchInBox();
   } else if (target.closest("[data-delta-clear]")) {
     clearSelection();
-    ctx.dom.traceDurationChart?.focus?.({ preventScroll: true });
+    dom.traceDurationChart?.focus?.({ preventScroll: true });
   } else if (target.closest("[data-delta-retry]")) {
     void loadDeltas();
   }
@@ -581,21 +581,20 @@ function onPanelChange(event) {
 
 // ---------------------------------------------------------------- wiring
 
-function install(context) {
-  ctx = context;
+function init() {
   // Percentiles | Heatmap: the shared segmented control (app_ui_segmented.js).
   segmented?.bind($(".traceDurationViews"), { attr: "durationView", onChange: (mode) => { setMode(mode); return false; } });
-  ctx.dom.traceDurationChart?.addEventListener("keydown", onKeydown);
+  dom.traceDurationChart?.addEventListener("keydown", onKeydown);
   // The canvas keeps the pointer: a press focuses the card for the keys.
-  ctx.dom.traceDurationChart?.addEventListener("pointerdown", () => { if (active()) ctx.dom.traceDurationChart.focus({ preventScroll: true }); });
-  ctx.dom.traceDurationChart?.addEventListener("blur", () => { if (hm.cursor && !hm.selection) { hm.cursor = null; hm.anchor = null; drawCursor(); } hideTooltip(); });
+  dom.traceDurationChart?.addEventListener("pointerdown", () => { if (active()) dom.traceDurationChart.focus({ preventScroll: true }); });
+  dom.traceDurationChart?.addEventListener("blur", () => { if (hm.cursor && !hm.selection) { hm.cursor = null; hm.anchor = null; drawCursor(); } hideTooltip(); });
   byId("traceDeltaPanel")?.addEventListener("click", onPanelClick);
   byId("traceDeltaPanel")?.addEventListener("change", onPanelChange);
   syncToggle();
 }
 
 export const traceHeatmap = {
-  install,
+  init,
   active,
   setMode,
   applyParams,

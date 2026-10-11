@@ -1,5 +1,7 @@
 import re
 from pathlib import Path
+
+import modules
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -35,7 +37,7 @@ def _hue(color):
 
 
 def test_service_colours_are_the_categorical_palette_without_red_in_first_seen_order():
-    js = read('src/static/app_traces.js')
+    js = modules.read_family("app_trace")
     css = css_sources.text()
     # The assignment is ns.palette's (app_palette.js), shared with Logs and Metrics.
     shared = read('src/static/app_palette.js')
@@ -61,7 +63,7 @@ def test_service_colours_are_the_categorical_palette_without_red_in_first_seen_o
 
 
 def test_error_bars_keep_service_colour_and_collapsed_errors_get_a_hollow_marker():
-    js = read('src/static/app_traces.js')
+    js = modules.read_family("app_trace")
     css = css_sources.text()
     assert 'const childError = !error && collapsed && cache.errorBelow.has(node);' in js
     # The hollow marker is the shared error badge without its fill.
@@ -72,7 +74,7 @@ def test_error_bars_keep_service_colour_and_collapsed_errors_get_a_hollow_marker
 
 
 def test_waterfall_has_jaeger_tree_ticks_critical_path_and_virtual_rows():
-    js = read('src/static/app_traces.js')
+    js = modules.read_family("app_trace")
     assert 'function treeOffsetHtml(node, cache)' in js
     assert 'const MIN_TICK_LABEL_SPACING_PX = 130;' in js
     assert 'function wallClockLabel(startNs, offsetNs = 0, stepNs = Infinity)' in js

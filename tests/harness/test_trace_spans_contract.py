@@ -79,13 +79,13 @@ def test_spans_mode_page_wiring():
     for name in ('"mode"', '"kind"', '"span_min_duration_ms"', '"span_max_duration_ms"'):
         assert name in params
     assert "traceSpans?.urlParams?.(params)" in search and "traceSpans?.applyParams?.(params)" in search
-    traces = read("src/static/app_traces.js")
+    traces = modules.read_family("app_trace")
     assert "await traceSpans.search(filters)" in traces
     assert "traceSpans.hasResults()" in traces
     spans = read("src/static/app_trace_spans.js")
     api = read("src/static/app_api.js")
     assert "api/traces/spans?" in api and "api/traces/span?" in api
-    assert "ctx.api.searchTraceSpans(" in spans and "ctx.api.getTraceSpan(" in spans
+    assert "api.searchTraceSpans(" in spans and "api.getTraceSpan(" in spans
     assert "`api/traces/span" not in spans
     assert "storage.KEYS.traceSpanColumns" in spans
     assert 'traceSpanColumns: "chdash.traceSpanColumns.v1",' in read("src/static/app_state.js")

@@ -15,12 +15,13 @@
 // kit's keyboard access (arrows, Enter, the live region) is the accessible
 // path.
 
+import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { graphKit } from "./app_graph_kit.js";
 import { palette } from "./app_palette.js";
-import { router } from "./app_router.js";
 import { traceSearch } from "./app_trace_search.js";
+import { actions, address, currentHost, esc } from "./app_trace_store.js";
 import { traceTabs } from "./app_trace_tabs.js";
 import { stat } from "./app_ui_stat.js";
 import { uiState } from "./app_ui_state.js";
@@ -47,10 +48,8 @@ const NAME_CHARS = 22;
 const KIND_DASH = { sync: kit.DASH.solid, async: kit.DASH.message, db: kit.DASH.dotted };
 const KIND_LABELS = { sync: "Synchronous calls", async: "Asynchronous messages", db: "Database / cache calls" };
 
-let ctx = null;
 let ctl = null;
 const { byId, $ } = dom;
-const esc = (value) => ctx.esc(value);
 const fmt = format;
 
 const map = {
@@ -626,7 +625,7 @@ function describeNode(id) {
 // pushed when the panel opens on a service, replaced when the selection
 // moves, and Back closes the panel (ns.router.panel("node"): closePanel
 // goes Back when the entry is the panel's own).
-const nodeParam = router.owner("traces").panel("node");
+const nodeParam = address.panel("node");
 let pendingNode = "";
 const selectedNode = () => (map.selected?.kind === "node" ? map.selected.id : "");
 
@@ -670,7 +669,7 @@ function closePanel({ url = "clear" } = {}) {
   panelShell()?.hide();
   if (previous && url === "clear" && shown()) {
     if (nodeParam.get() === previous) nodeParam.close();
-    else router.owner("traces").replace();
+    else address.replace();
   }
   byId("traceMapPane")?.classList.remove("graphKitPane--panel");
   ctl?.scheduleDraw();
@@ -758,9 +757,9 @@ function renderPanel() {
 // Search tab with the service filter (and status=Error): the search module
 // applies it and runs the search, which writes the URL (tab=search).
 function searchService(service, { errors = false, stay = false } = {}) {
-  if (!service || !traceSearch?.applyFilter) return;
+  if (!service || !traceSearch.applyFilter) return;
   if (!stay) traceTabs.select("search", { url: "none", activate: false });
-  const status = ctx.dom.tracesStatus;
+  const status = dom.tracesStatus;
   if (status && errors) {
     status.value = "Error";
     status.dispatchEvent(new Event("tracepicker-refresh"));
@@ -793,7 +792,7 @@ function onActionClick(event) {
 // ---------------------------------------------------------------- loading
 
 async function load(filters, { force = false } = {}) {
-  const key = traceSearch?.searchKey?.() || "";
+  const key = traceSearch.searchKey() || "";
   if (!force && key === map.key && (map.loading || map.data)) return;
   const req = util.latest("traces.map");
   map.key = key;
@@ -801,7 +800,7 @@ async function load(filters, { force = false } = {}) {
   map.error = "";
   renderState();
   try {
-    const payload = await ctx.api.getTraceServiceMap(ctx.currentHost(), filters, { signal: req.signal });
+    const payload = await api.getTraceServiceMap(currentHost(), filters, { signal: req.signal });
     if (!req.isCurrent()) return;
     const previous = map.selected;
     map.data = normalize(payload);
@@ -821,7 +820,7 @@ async function load(filters, { force = false } = {}) {
     const dropped = pendingNode && !map.selected;
     pendingNode = "";
     if (map.selected) renderPanel(); else closePanel({ url: "none" });
-    if (dropped || (previous?.kind === "node" && !map.selected)) router.owner("traces").replace();
+    if (dropped || (previous?.kind === "node" && !map.selected)) address.replace();
     fit();
   } catch (error) {
     if (!req.isCurrent()) return;
@@ -841,14 +840,13 @@ async function load(filters, { force = false } = {}) {
 // Shown from a click or Back / Forward: the current search refreshes the
 // map unless it already shows it.
 function onShow() {
-  const key = traceSearch?.searchKey?.() || "";
-  if (key !== map.key || (!map.data && !map.loading)) void ctx.runSearch({ url: "none" });
+  const key = traceSearch.searchKey() || "";
+  if (key !== map.key || (!map.data && !map.loading)) void actions.search({ url: "none" });
   else if (map.layout && map.fitted) requestAnimationFrame(fit);
   else ctl?.scheduleDraw();
 }
 
-function install(context) {
-  ctx = context;
+function init() {
   const element = canvas();
   if (!element) return;
   ctl = kit.mount({
@@ -889,7 +887,7 @@ function install(context) {
   byId("traceMapPanel")?.addEventListener("click", onActionClick);
   byId("traceMapState")?.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
-    if (event.target.closest("[data-map-retry]")) void ctx.runSearch({ url: "none" });
+    if (event.target.closest("[data-map-retry]")) void actions.search({ url: "none" });
     else if (event.target.closest("[data-map-zoom-out]")) byId("tracesRangeZoomOut")?.click();
   });
   renderLegend();
@@ -955,7 +953,7 @@ traceTabs.register({
   label: "Service map",
   order: 20,
   panelId: "traceMapView",
-  install,
+  init,
   onSearch: (filters, options) => load(filters, options),
   onShow,
   onHide: () => { map.hovered = null; },

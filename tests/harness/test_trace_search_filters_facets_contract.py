@@ -61,7 +61,7 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
 
 def test_search_state_lives_in_the_url_and_the_facets_sidebar_is_bounded():
     js = read("src/static/app_trace_search.js")
-    traces = read("src/static/app_traces.js")
+    traces = modules.read_family("app_trace")
     html = read("src/static/traces.html")
     boot = modules.page_files("traces")  # the modules of the page, dependencies first
     assert "app_trace_search.js" in boot and "app_trace_search.js" in modules.imports("app_traces.js")
@@ -69,9 +69,9 @@ def test_search_state_lives_in_the_url_and_the_facets_sidebar_is_bounded():
                  '"tag"', '"tag_not"', '"tag_exists"', '"tag_missing"', '"service_not"', '"operation_not"', '"status_not"'):
         assert name in js[js.index("const SEARCH_PARAMS"):js.index("const PIN_STORE_KEY")]
     # The search page's address: the Traces owner of ns.router.
-    assert 'router.owner("traces", { path: SEARCH_ROUTE, params: () => (ctx && !ctx.detail ? currentParams() : null) });' in js
-    assert "traceSearch?.applyLocation?.({ initial: true });" in traces
-    assert "traceSearch?.contextQuery?.()" in traces  # trace URLs keep the search context
+    assert 'router.owner("traces", { path: SEARCH_ROUTE, params: () => (DETAIL_PAGE ? null : currentParams()) });' in js
+    assert "traceSearch.applyLocation({ initial: true });" in traces
+    assert "traceSearch.contextQuery()" in traces  # trace URLs keep the search context
     # The sidebar is the facets panel shared with the Logs Fields panel.
     panel = read("src/static/app_facet_panel.js")
     assert 'const VALUE_LIMITS = [10, 50, 200, 500];' in panel

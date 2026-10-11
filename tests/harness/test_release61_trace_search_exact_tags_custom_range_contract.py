@@ -1,12 +1,14 @@
 from pathlib import Path
 
+import modules
+
 ROOT = Path(__file__).resolve().parents[2]
 
 def read(rel):
     return (ROOT / rel).read_text()
 
 def test_duration_ticks_helper_exists_for_trace_overview_and_waterfall():
-    ui = read("src/static/app_traces.js")
+    ui = modules.read_family("app_trace")
     assert "function durationTicks(" in ui
     assert "durationTicks(bounds.duration, 5)" in ui
     assert "durationTicks(total, TIMELINE_TICKS, offset)" in ui
@@ -25,7 +27,7 @@ def test_service_operation_are_selection_only_and_status_labels_uppercase():
 
 def test_tag_filter_is_free_form_and_exact_across_attribute_maps():
     html = read("src/static/traces.html")
-    ui = read("src/static/app_traces.js")
+    ui = modules.read_family("app_trace")
     cpp = read("src/api_traces.cpp")
     assert 'id="tracesTagKey"' in html and 'type="text"' in html
     assert 'id="tracesTagValue"' in html and 'type="text"' in html
@@ -40,7 +42,7 @@ def test_tag_filter_is_free_form_and_exact_across_attribute_maps():
     assert '] = ' in cpp
 
 def test_custom_range_inputs_take_dates_or_expressions_and_update_picker_label():
-    ui = read("src/static/app_traces.js")
+    ui = modules.read_family("app_trace")
     picker = read("src/static/app_timerange.js")
     html = read("src/static/traces.html")
     # Free text From / To (absolute dates or Grafana expressions such as
