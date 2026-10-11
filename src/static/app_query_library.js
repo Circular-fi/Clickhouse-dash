@@ -3,8 +3,9 @@
 // app_ui_dialog.js; app_ui.js builds it, this module adds the preview pane).
 //
 // app_ui.js loads this module the first time the dialog opens (or Ctrl+S is
-// used) and drives it through ns.queryLibrary. Its prompts (forms, confirms)
-// are ns.dialog dialogs stacked over the library.
+// used) and drives it through ns.queryLibrary. Save and Edit are a form in
+// the preview pane (createPaneForm); Move, Remove and the other prompts are
+// ns.dialog dialogs stacked over the library.
 //
 // Saved queries, folders and History are per host: the dialog shows the
 // selected host's only and follows a host switch (chdash:host-changed).
@@ -28,7 +29,8 @@
 //
 // The list on the left only selects; every action of the selected item
 // (edit, move, remove...) is an icon button of the preview pane's head on
-// the right, and its foot holds one action: "Load". History is the browser's
+// the right, and its foot holds one action: "Load" (Save and Edit take the
+// pane over with their form until they are saved or cancelled). History is the browser's
 // record of what ran: it cannot be edited, and entries are never removed.
 
 import { api } from "./app_api.js";
@@ -681,6 +683,8 @@ const ctl = {
   closedRoots: new Set(Array.isArray(uiPrefs.closedRoots) ? uiPrefs.closedRoots.filter((x) => STORES.includes(x)) : []),
   // The name being typed in a row: { mode, ... }.
   editing: null,
+  // The Save / Edit form shown in the pane in place of the preview (createPaneForm), or null.
+  form: null,
   // The highlighted item of each tab (its data-key), shown in the preview.
   selection: { saved: "", history: "" },
   search: "",
@@ -778,6 +782,7 @@ function onHostChanged() {
   ctl.selection = { saved: "", history: "" };
   ctl.opened = null;
   ctl.editing = null;
+  ctl.form = null;
   setPreviewStep(false);
   const historyShown = ctl.historyState.loaded || ctl.rendered.history;
   ctl.historyState = freshHistoryState(ctl.historyState.q);
@@ -1082,10 +1087,9 @@ function sqlPreview(sql, max = PROMPT_SQL_CHARS, { pane = false } = {}) {
   return sqlBlock({ sql: clipped, wrap: !gutter, gutter, copy: pane, label: "Query", className: "qlSql" });
 }
 
-// The selected place in Saved, as a default target: the selected root or
-// folder, a selected query's folder.
-function selectedLoc() {
-  const sel = parseKey(ctl.selection.saved);
+// The place of a Saved row: a root, a folder, or a query's folder.
+function locOfKey(key) {
+  const sel = parseKey(key);
   if (!sel || !storeOf(sel.store)) return null;
   const lib = storeOf(sel.store).library;
   if (sel.kind === "root") return { store: sel.store, folderId: null };
@@ -1094,6 +1098,10 @@ function selectedLoc() {
   return null;
 }
 
+// The selected place in Saved, as a default target: the selected root or
+// folder, a selected query's folder.
+const selectedLoc = () => locOfKey(ctl.selection.saved);
+
 // The saved query the editor holds (Ctrl+S updates it): { store, query }.
 function openedQuery() {
   const store = ctl.opened ? storeOf(ctl.opened.store) : null;
@@ -1101,10 +1109,279 @@ function openedQuery() {
   return query ? { store: store.kind, query } : null;
 }
 
-// Save the editor (or a History entry) as a library query, in either
+// ------------------------------------------------------- the pane's form
+
+// Save and Edit are one form in the right pane of the library (no prompt over the dialog): the
+// pane shows it in place of the preview while ctl.form holds it. The form is built once and the
+// pane only attaches it again, so a render of the tree or the pane never loses what was typed.
+// Its folder follows the place that is selected in the tree. Escape drops it (the preview
+// is back), then the dialog closes as usual.
+
+// The server's field names, as the form's fields.
+const FORM_FIELD_OF = { name: "name", description: "description", folder_id: "folder_id", parent_id: "folder_id", target: "folder_id" };
+
+function formField(name, label, control) {
+  const wrap = h("div", { class: "uiField", dataset: { wrap: name } });
+  control.id = `qlForm-${name}`;
+  const error = h("div", { class: "uiField__error", id: `qlFormError-${name}`, role: "alert", hidden: true });
+  wrap.append(h("label", { class: "uiField__label", for: control.id }, label), control, error);
+  return wrap;
+}
+
+const folderSignature = (select) => [...select.options].map((o) => `${o.parentElement?.label || ""}|${o.value}|${o.textContent}|${o.disabled || o.parentElement?.disabled ? 1 : 0}`).join("\n");
+
+// mode "save": rawText (the editor's or the History run's) and fromHistory; "edit": sqlText, shown only.
+// `submit(action, values)` ("submit" or "new") makes the change: true when it is done (it has closed the form),
+// false when it stays (the toast said why); it throws what the form shows (a LibraryError, under its field).
+function createPaneForm({ mode, key, title, name = "", description = "", where = null, rawText = "", fromHistory = null, sqlText = "", submitLabel = "Save", extraLabel = "", fromButton = false, submit }) {
+  const form = h("form", { class: "qlPaneForm" });
+  form.noValidate = true;
+  const session = { mode, key, el: form, host: ctl.host, title, busy: false, fromButton, store: "", queryId: "", folder: null };
+  const head = h("div", { class: "qlPreview__head" });
+  const back = h("button", { class: "qlIconButton qlPreview__back" });
+  back.type = "button";
+  back.dataset.action = "back";
+  back.setAttribute("aria-label", "Back to the list");
+  back.title = "Back to the list";
+  back.appendChild(icon("back"));
+  const heading = h("h3", { class: "qlPreview__title", id: "qlFormTitle" }, title);
+  heading.title = title;
+  head.append(back, heading);
+  form.setAttribute("aria-labelledby", heading.id);
+
+  const nameInput = textInput("name", name, { placeholder: "e.g. Largest tables" });
+  const descriptionInput = textArea("description", description, "What it answers, when to use it (optional)");
+  const folderOf = (loc) => {
+    const select = folderSelect("folder_id", loc);
+    select.id = "qlForm-folder_id";
+    return select;
+  };
+  const folder = folderOf(where);
+  const fields = h("div", { class: "uiForm qlPaneForm__fields" });
+  const nameWrap = formField("name", "Name", nameInput);
+  const descriptionWrap = formField("description", "Description", descriptionInput);
+  const folderWrap = formField("folder_id", "Folder", folder);
+  fields.append(nameWrap, descriptionWrap, folderWrap);
+
+  // The SQL: Save writes it as the formatter does unless "Save raw" keeps it as typed. A History run that was formatted
+  // has its text; the others wait for the formatter (a script it rejects is saved as typed, the box is ticked and locked).
+  const sqlBox = h("div", { class: "uiField qlForm__sql" });
+  sqlBox.setAttribute("role", "group");
+  const sqlLabel = h("span", { class: "uiField__label", id: "qlFormSqlLabel" });
+  sqlBox.setAttribute("aria-labelledby", sqlLabel.id);
+  const sqlBody = h("div", { class: "qlForm__sqlBody" });
+  sqlBox.append(sqlLabel, sqlBody);
+  let raw = null;
+  let formattedText = fromHistory?.formatted ? String(fromHistory.sql || "") : null;
+  let formatting = null;
+  const chosen = () => (mode !== "save" ? sqlText : raw.checked || !formattedText ? rawText : formattedText);
+  const drawSql = () => {
+    if (mode === "save") {
+      const source = fromHistory ? "from History" : "from the editor";
+      sqlLabel.textContent = `SQL (${source}${raw.checked || !formattedText ? (formatting ? ", formatting\u2026" : "") : ", formatted"})`;
+    } else {
+      sqlLabel.textContent = "SQL";
+    }
+    sqlBody.replaceChildren(sqlPreview(chosen()));
+  };
+  if (mode === "save") {
+    raw = h("input", { type: "checkbox", name: "raw", id: "qlSaveRaw" });
+    const rawNote = h("span", { class: "uiCheck__note" }, "Keep the query as typed, without formatting.");
+    sqlBox.appendChild(h("label", { class: "uiCheck", for: "qlSaveRaw" }, raw, h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label" }, "Save raw"), rawNote)));
+    raw.addEventListener("change", drawSql);
+    if (!formattedText) {
+      formatting = sqlMod.formatText(ctl.host, rawText).then(
+        (text) => { formattedText = text || null; },
+        () => {
+          formattedText = null;
+          raw.checked = true;
+          raw.disabled = true;
+          rawNote.textContent = "The formatter does not accept this query: it is saved as typed.";
+        },
+      ).then(() => {
+        formatting = null;
+        drawSql();
+      });
+    }
+  }
+  drawSql();
+
+  const content = h("div", { class: "qlPreview__content" }, head, fields, sqlBox);
+  const formError = h("div", { class: "uiField__error qlPaneForm__error", role: "alert", hidden: true });
+  const foot = h("div", { class: "qlPreview__foot" });
+  foot.setAttribute("role", "group");
+  foot.setAttribute("aria-label", mode === "save" ? "Save this query" : "Save the changes");
+  const cancel = h("button", { class: "button" }, "Cancel");
+  cancel.type = "button";
+  cancel.dataset.formAction = "cancel";
+  const extra = extraLabel ? h("button", { class: "button" }, extraLabel) : null;
+  if (extra) {
+    extra.type = "button";
+    extra.dataset.formAction = "new";
+  }
+  const primary = h("button", { class: "button button--primary" }, submitLabel);
+  primary.type = "submit";
+  primary.dataset.formAction = "submit";
+  primary.title = `${submitLabel} (${util.modifierKeyLabel()}+Enter)`;
+  foot.append(cancel, ...(extra ? [extra] : []), primary);
+  form.append(content, formError, foot);
+
+  const fieldError = (field, message, { focus = true } = {}) => {
+    const wrap = $(`[data-wrap="${field}"]`, form);
+    if (!wrap) return false;
+    const error = $(".uiField__error", wrap);
+    error.textContent = message;
+    error.hidden = !message;
+    const control = $("[data-field]", wrap);
+    if (control) {
+      control.setAttribute("aria-invalid", message ? "true" : "false");
+      if (message) control.setAttribute("aria-describedby", error.id);
+      else control.removeAttribute("aria-describedby");
+      if (message && focus) control.focus();
+    }
+    return true;
+  };
+  const clearErrors = () => {
+    for (const field of ["name", "description", "folder_id"]) fieldError(field, "", { focus: false });
+    for (const control of $$("[data-field]", form)) control.removeAttribute("aria-invalid");
+    formError.textContent = "";
+    formError.hidden = true;
+  };
+  const showError = (err) => {
+    const message = err instanceof LibraryError ? err.message : util.errorText(err, "The change failed.");
+    if (!fieldError(FORM_FIELD_OF[err?.field] || "", message)) {
+      formError.textContent = message;
+      formError.hidden = false;
+    }
+  };
+  nameInput.addEventListener("input", () => fieldError("name", "", { focus: false }));
+  descriptionInput.addEventListener("input", () => fieldError("description", "", { focus: false }));
+  folder.addEventListener("change", () => fieldError("folder_id", "", { focus: false }));
+
+  const send = async (action) => {
+    if (session.busy) return;
+    clearErrors();
+    session.busy = true;
+    form.setAttribute("aria-busy", "true");
+    try {
+      if (formatting) await formatting;
+      const done = await submit(action, { name: nameInput.value, description: descriptionInput.value, folder: folder.value, sql: chosen(), session });
+      if (done) return;
+    } catch (err) {
+      showError(err);
+    } finally {
+      session.busy = false;
+      form.removeAttribute("aria-busy");
+    }
+  };
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    void send("submit");
+  });
+  extra?.addEventListener("click", () => void send("new"));
+  cancel.addEventListener("click", () => cancelForm());
+  form.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && !ev.altKey) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void send("submit");
+    }
+  });
+
+  // The folders of the tree changed (a folder made while saving): the list is built again with the same choice.
+  session.refreshFolders = () => {
+    const next = folderOf(parseLoc(session.folder.value));
+    if (folderSignature(next) === folderSignature(session.folder)) return;
+    const hadFocus = document.activeElement === session.folder;
+    session.folder.replaceWith(next);
+    session.folder = next;
+    next.addEventListener("change", () => fieldError("folder_id", "", { focus: false }));
+    if (hadFocus) next.focus();
+  };
+  // The place picked in the tree is the folder (a root or folder of a read-only storage is not offered).
+  session.pickFolder = (loc) => {
+    if (!loc) return;
+    const option = [...session.folder.options].find((o) => o.value === locValue(loc));
+    if (!option || option.disabled || option.parentElement?.disabled) return;
+    session.folder.value = option.value;
+    fieldError("folder_id", "", { focus: false });
+  };
+  session.focus = () => {
+    nameInput.focus({ preventScroll: true });
+    nameInput.select();
+  };
+  session.folder = folder;
+  return session;
+}
+
+// Shows the form in the pane: the Saved tab, the form attached, its name field focused (a phone: the pane step).
+async function openForm(session) {
+  ctl.editing = null;
+  ctl.form = session;
+  await queryUi.openQueryLibrary("saved", { focus: false });
+  if (ctl.form !== session) return;
+  renderPreview();
+  if (isPhone()) setPreviewStep(true);
+  session.focus();
+}
+
+// The form is there again (the same one), its name field focused.
+function revealForm() {
+  if (ctl.shown !== "saved") void queryUi.openQueryLibrary("saved", { focus: false }).then(() => revealForm());
+  else {
+    renderPreview();
+    if (isPhone()) setPreviewStep(true);
+    if (ctl.form && !ctl.form.el.contains(document.activeElement)) ctl.form.focus();
+  }
+}
+
+// The form is dropped: the preview of the selection is back, the focus on the button that opened it (the foot's "Save query")
+// or on the selected row (a phone goes back to the list).
+function closeForm() {
+  const session = ctl.form;
+  if (!session) return;
+  ctl.form = null;
+  if (ctl.shown === "saved") renderPreview();
+  if (isPhone()) setPreviewStep(false);
+  const button = libraryEls.save;
+  if (session.fromButton && button && !button.disabled && !button.hidden) button.focus({ preventScroll: true });
+  else focusSelected();
+}
+
+function cancelForm() {
+  if (ctl.form && !ctl.form.busy) closeForm();
+}
+
+// The tree changed: a vanished query ends its Edit; the folder list follows the folders.
+function syncForm() {
+  const session = ctl.form;
+  if (!session) return;
+  if (session.host !== ctl.host || (session.mode === "edit" && !queryById(storeOf(session.store)?.library || emptyLibrary(), session.queryId))) {
+    ctl.form = null;
+    if (ctl.shown === "saved") renderPreview();
+    return;
+  }
+  session.refreshFolders();
+}
+
+// Escape: the form first (focus anywhere in the dialog), then the dialog closes as usual.
+function onDialogKeydown(ev) {
+  if (ev.key !== "Escape" || ev.defaultPrevented || ev.isComposing || !ctl.form || ctl.shown !== "saved" || rowMenu) return;
+  if (ev.target instanceof Element && ev.target.closest("dialog") !== dom.queryLibraryMenu) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  cancelForm();
+}
+
+// The tree selection (a click, the arrows, a new folder) is the form's Folder.
+function formFollows(key) {
+  ctl.form?.pickFolder(locOfKey(key));
+}
+
+// Save the editor (or a History run) as a library query, in either
 // root. When the editor holds a query opened from an editable root, the
-// dialog offers to update it.
-async function saveDialog({ sql = null, fromHistory = null } = {}) {
+// form also offers to update it ("Update", and "Save as new").
+async function beginSave({ sql = null, fromHistory = null, fromButton = false } = {}) {
   await start();
   if (!ctl.host) {
     toast(new NoHostError().message, "error");
@@ -1120,62 +1397,30 @@ async function saveDialog({ sql = null, fromHistory = null } = {}) {
     dom.queryTextArea?.focus();
     return;
   }
+  const key = fromHistory ? `save:history:${fromHistory.id}` : "save:editor";
+  if (ctl.form?.key === key && ctl.form.host === ctl.host) {
+    revealForm();
+    return;
+  }
   const held = sql == null ? openedQuery() : null;
   const opened = held && editableStore(storeOf(held.store)) ? held : null;
   const where = opened ? { store: opened.store, folderId: opened.query.folder_id } : selectedLoc();
-  const body = h("div", { class: "uiForm qlForm--split" });
-  const fields = h("div", { class: "qlForm__fields" });
-  const name = textInput("name", opened ? opened.query.name : "", { placeholder: "e.g. Largest tables", autofocus: true });
-  const description = textArea("description", opened ? opened.query.description : "", "What it answers, when to use it (optional)");
-  const folder = folderSelect("folder_id", where);
-  fields.append(field("Name", name), field("Description", description), field("Folder", folder));
-  // The query is saved as the formatter writes it, unless "Save raw" keeps it as typed. A History
-  // entry that was formatted has its text; the others wait for the formatter (a script it rejects
-  // is saved as typed, and the box is ticked and locked).
-  const raw = h("input", { type: "checkbox", name: "raw", id: "qlSaveRaw" });
-  const rawNote = h("span", { class: "uiCheck__note" }, "Keep the query as typed, without formatting.");
-  const rawBox = h("label", { class: "uiCheck", for: "qlSaveRaw" }, raw, h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label" }, "Save raw"), rawNote));
-  const preview = h("div", { class: "uiField qlForm__sql" });
-  const previewLabel = h("span", { class: "uiField__label" });
-  const previewSql = h("div", { class: "qlForm__sqlBody" });
-  preview.append(previewLabel, previewSql, rawBox);
-  let formattedText = fromHistory?.formatted ? String(fromHistory.sql || "") : null;
-  let formatting = null;
-  const chosen = () => (raw.checked || !formattedText ? rawText : formattedText);
-  const drawPreview = () => {
-    const source = fromHistory ? "from History" : "from the editor";
-    previewLabel.textContent = `SQL (${source}${raw.checked || !formattedText ? (formatting ? ", formatting\u2026" : "") : ", formatted"})`;
-    previewSql.replaceChildren(sqlPreview(chosen()));
-  };
-  raw.addEventListener("change", drawPreview);
-  if (!formattedText) {
-    formatting = sqlMod.formatText(ctl.host, rawText).then(
-      (text) => { formattedText = text || null; },
-      () => {
-        formattedText = null;
-        raw.checked = true;
-        raw.disabled = true;
-        rawNote.textContent = "The formatter does not accept this query: it is saved as typed.";
-      },
-    ).then(() => {
-      formatting = null;
-      drawPreview();
-    });
-  }
-  drawPreview();
-  body.append(fields, preview);
-  await openDialog({
+  const session = createPaneForm({
+    mode: "save",
+    key,
     title: opened ? `Save \u201c${opened.query.name}\u201d` : "Save to library",
-    body,
+    name: opened ? opened.query.name : "",
+    description: opened ? opened.query.description : "",
+    where,
+    rawText,
+    fromHistory,
     submitLabel: opened ? "Update" : "Save",
-    extraButtons: opened ? [{ label: "Save as new", value: "new" }] : [],
-    wide: true,
-    onSubmit: async (action) => {
-      const target = parseLoc(folder.value);
+    extraLabel: opened ? "Save as new" : "",
+    fromButton,
+    submit: async (action, values) => {
+      const target = parseLoc(values.folder);
       if (!target) throw validation("folder_id", "Pick a folder.");
-      if (formatting) await formatting;
-      const text = chosen();
-      const input = { folder_id: target.folderId, name: validName(name.value), description: validDescription(description.value), sql: text };
+      const input = { folder_id: target.folderId, name: validName(values.name), description: validDescription(values.description), sql: values.sql };
       const update = opened && action !== "new";
       let savedId = "";
       if (update && target.store !== opened.store) {
@@ -1193,35 +1438,44 @@ async function saveDialog({ sql = null, fromHistory = null } = {}) {
         savedId = update ? opened.query.id : result.id;
       }
       if (sql == null && savedId) ctl.opened = { store: target.store, id: savedId, sql: rawText };
-      // The tree opens the folder it went into, the query highlighted.
+      // The tree opens the folder it went into, the query highlighted; the pane shows it.
       ctl.search = "";
       if (libraryEls.input) libraryEls.input.value = "";
       ctl.selection.saved = savedId ? keyOf("query", target.store, savedId) : "";
       expandPath(target.store, target.folderId);
+      ctl.form = null;
       renderLibrary({ keepFocus: false });
+      closeAfter();
       return true;
     },
   });
+  await openForm(session);
 }
 
-async function editQueryDialog(storeKind, query) {
-  const body = h("div", { class: "uiForm qlForm--split" });
-  const fields = h("div", { class: "qlForm__fields" });
-  const name = textInput("name", query.name, { autofocus: true });
-  const description = textArea("description", query.description, "What it answers, when to use it (optional)");
-  const folder = folderSelect("folder_id", { store: storeKind, folderId: query.folder_id });
-  fields.append(field("Name", name), field("Description", description), field("Folder", folder));
-  const preview = h("div", { class: "uiField qlForm__sql" });
-  preview.appendChild(h("span", { class: "uiField__label" }, "SQL"));
-  preview.appendChild(sqlPreview(query.sql));
-  body.append(fields, preview);
-  await openDialog({
+// After a change: the tree row of the query has the focus (a phone: the preview of it).
+function closeAfter() {
+  if (isPhone()) enterPreview();
+  else focusSelected();
+}
+
+// Edit (a query's name, description and folder; its SQL is only shown): the same form.
+async function beginEdit(storeKind, query) {
+  const key = `edit:${storeKind}:${query.id}`;
+  if (ctl.form?.key === key) {
+    revealForm();
+    return;
+  }
+  const session = createPaneForm({
+    mode: "edit",
+    key,
     title: "Edit query",
-    body,
-    wide: true,
-    onSubmit: async () => {
-      const target = parseLoc(folder.value) || { store: storeKind, folderId: query.folder_id };
-      const patch = { name: validName(name.value), description: description.value, folder_id: target.folderId };
+    name: query.name,
+    description: query.description,
+    where: { store: storeKind, folderId: query.folder_id },
+    sqlText: query.sql,
+    submit: async (action, values) => {
+      const target = parseLoc(values.folder) || { store: storeKind, folderId: query.folder_id };
+      const patch = { name: validName(values.name), description: values.description, folder_id: target.folderId };
       if (target.store !== storeKind) {
         if (!(await moveAcross({ kind: "query", store: storeKind, id: query.id }, target, { inDialog: true, patch }))) return false;
       } else {
@@ -1229,11 +1483,15 @@ async function editQueryDialog(storeKind, query) {
         if (!result) return false;
       }
       expandPath(target.store, target.folderId);
+      ctl.form = null;
       renderLibrary({ keepFocus: false });
+      closeAfter();
       return true;
     },
   });
-  focusSelected();
+  session.store = storeKind;
+  session.queryId = query.id;
+  await openForm(session);
 }
 
 // Moves one or several items into one folder of either root.
@@ -1484,7 +1742,7 @@ function buildLibraryShell(root) {
     const loc = selectedLoc() || { store: defaultStore(), folderId: null };
     startNewFolder({ store: loc.store, parentId: loc.folderId });
   });
-  save.addEventListener("click", () => saveDialog());
+  save.addEventListener("click", () => void beginSave({ fromButton: true }));
 
   tree.addEventListener("click", onTreeClick);
   tree.addEventListener("dblclick", onTreeDoubleClick);
@@ -1512,6 +1770,7 @@ function renderLibrary({ keepFocus = false } = {}) {
   libraryEls.wrap.classList.toggle("is-readonly", !canEdit);
   renderNotice();
   renderFoot();
+  syncForm();
   renderTree({ keepFocus });
 }
 
@@ -1700,6 +1959,7 @@ function newFolderRow(level) {
       if (!result) return;
       ctl.editing = null;
       renderLibrary({ keepFocus: false });
+      formFollows(ctl.selection.saved);
       focusSelected();
     },
   });
@@ -1902,6 +2162,7 @@ function toggleFolder(li, open) {
   else ctl.expanded.delete(key);
   saveUiPrefs();
   ctl.selection.saved = li.dataset.key;
+  formFollows(li.dataset.key);
   renderTree({ keepFocus: true });
 }
 
@@ -2162,12 +2423,12 @@ function onTreeKeydown(ev) {
   }
 }
 
-// A folder is renamed in its row; a query has its dialog (name, description, folder, SQL).
+// A folder is renamed in its row; a query has its form in the pane (name, description, folder, SQL).
 function editItem(li) {
   const entity = entityOf(li);
   if (!entity) return;
   if (li.dataset.kind === "folder") startRename(li);
-  else if (li.dataset.kind === "query") editQueryDialog(li.dataset.store, entity);
+  else if (li.dataset.kind === "query") void beginEdit(li.dataset.store, entity);
 }
 
 // ---------------------------------------------------------- drag and drop
@@ -2303,6 +2564,7 @@ function markSelection(tab) {
 function select(tab, item, { focus = true } = {}) {
   if (!item) return;
   ctl.selection[tab] = item.dataset.key;
+  if (tab === "saved") formFollows(item.dataset.key);
   markSelection(tab);
   if (focus) item.focus({ preventScroll: true });
   item.scrollIntoView({ block: "nearest" });
@@ -2332,6 +2594,11 @@ function loadSelection() {
 // (or the first tool). On a phone the pane replaces the list
 // (.is-previewing).
 function enterPreview() {
+  if (ctl.form && ctl.shown === "saved") {
+    if (isPhone()) setPreviewStep(true);
+    ctl.form.focus();
+    return;
+  }
   const model = selectionPreview();
   if (!model) return;
   if (isPhone()) setPreviewStep(true);
@@ -2385,6 +2652,7 @@ function previewPane() {
     pane.addEventListener("click", onPreviewClick);
     pane.addEventListener("keydown", onPreviewKeydown);
     viewsEl.appendChild(pane);
+    dom.queryLibraryMenu?.addEventListener("keydown", onDialogKeydown);
   }
   return pane;
 }
@@ -2400,6 +2668,8 @@ function onPreviewClick(ev) {
 }
 
 function onPreviewKeydown(ev) {
+  // The form has its own keys (Enter, Ctrl+Enter, and Escape on the dialog).
+  if (ctl.form && ctl.shown === "saved") return;
   if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && !ev.altKey) {
     ev.preventDefault();
     loadSelection();
@@ -2475,7 +2745,7 @@ function savedPreview(key) {
     facts: [],
     sql: query.sql,
     tools: canEdit ? [
-      { label: "Edit", icon: "edit", action: "edit", run: () => editQueryDialog(store.kind, query) },
+      { label: "Edit", icon: "edit", action: "edit", run: () => beginEdit(store.kind, query) },
       { label: "Move to\u2026", icon: "move", action: "move", run: () => moveDialog([item]) },
       { label: "Remove", icon: "remove", action: "delete", danger: true, run: () => deleteItems([item]) },
     ] : [],
@@ -2518,7 +2788,7 @@ function historyPreview(key) {
   // A query longer than the History keeps is stored cut: Load would put a shorter text in the editor.
   if (entry.truncated) facts.push(["Text", `Cut at ${format.count(history.LIMITS.sqlChars)} characters`]);
   const tools = [];
-  if (anyEditable()) tools.push({ label: "Save to library\u2026", icon: "save", action: "save", run: () => saveDialog({ sql: entry.sql, fromHistory: entry }) });
+  if (anyEditable()) tools.push({ label: "Save to library\u2026", icon: "save", action: "save", run: () => beginSave({ sql: entry.sql, fromHistory: entry }) });
   if (!entry.formatted) {
     // The formatted text replaces the shown one once it arrives, unless the user has begun to read (scrolled the block).
     void ensureHistoryFormatted(entry).then(() => {
@@ -2547,6 +2817,15 @@ function historyPreview(key) {
 function renderPreview() {
   const pane = previewPane();
   if (!pane) return;
+  // Save and Edit: the form (built once) is the pane's content.
+  if (ctl.form && ctl.shown === "saved") {
+    paneModel = null;
+    pane.setAttribute("aria-label", ctl.form.title);
+    pane.parentElement?.classList.remove("is-empty");
+    if (pane.firstElementChild !== ctl.form.el || pane.childElementCount !== 1) pane.replaceChildren(ctl.form.el);
+    return;
+  }
+  pane.setAttribute("aria-label", "Preview");
   const active = pane.contains(document.activeElement) ? document.activeElement : null;
   const refocus = active ? active.dataset.action || "" : null;
   const model = selectionPreview();
@@ -2884,6 +3163,7 @@ async function openSaved(id) {
 
 // The dialog closed: nothing of it stays on screen.
 function hidden() {
+  ctl.form = null;
   setPreviewStep(false);
   ctl.shown = "";
 }
@@ -2894,7 +3174,7 @@ export const queryLibrary = {
   hidden,
   openedId,
   openSaved,
-  saveCurrent: () => saveDialog(),
+  saveCurrent: () => beginSave(),
   historyChanged,
   // For tests and diagnostics.
   get mode() { return ctl.stores.server ? "server" : "local"; },

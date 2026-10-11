@@ -47,7 +47,7 @@ Both tabs have the same layout:
 - The list is below the search.
 - A foot line is below the list. In Saved, the primary button **Save query** is at the bottom left of the foot. The count and the host are at the right.
 
-The list on the left selects an item (with a click or the arrow keys). The pane on the right shows the selected item. The head of the pane is one line. It shows the title, then its meta, then the tools of the item as icon buttons. The meta is the *Updated ...* of a saved query or a folder, or the time and the status of a run. Each tool has its label as `aria-label` and as tooltip. The foot of the pane holds one action, **Load**, at the bottom right. You can also press Ctrl/Cmd+Enter in the list or in the pane. The action puts the SQL in the editor and closes the dialog. A click never loads a query by itself.
+The list on the left selects an item (with a click or the arrow keys). The pane on the right shows the selected item. The head of the pane is one line. It shows the title, then its meta, then the tools of the item as icon buttons. The meta is the *Updated ...* of a saved query or a folder, or the time and the status of a run. Each tool has its label as `aria-label` and as tooltip. The foot of the pane holds one action, **Load**, at the bottom right (while the pane shows the save form, it holds the form's buttons instead: see *Save*). You can also press Ctrl/Cmd+Enter in the list or in the pane. The action puts the SQL in the editor and closes the dialog. A click never loads a query by itself.
 
 The highlighted SQL has its own copy button. It also has the line-number gutter of the editor when *Line numbers* is on in the editor options (`chdash.editor.line_numbers.enabled`). Its lines then scroll sideways. They do not wrap.
 
@@ -63,7 +63,7 @@ On a phone, the list and the preview are two steps. Tap a row to see its pane. A
   - The user renames a folder in its row (F2, Rename).
   - Each row has a "..." menu. It shows on hover, on focus and on the highlighted row. A right click and Shift+F10 also open it. The menu has these items:
     - Load, or Open/Close for a folder (Enter).
-    - Edit..., or Rename for a folder (F2). The Edit window changes the name, the description and the folder of a query. It shows the SQL but does not change it: to replace the SQL, load the query, change it in the editor and press Ctrl/Cmd+S (*Update*).
+    - Edit..., or Rename for a folder (F2). Edit shows the same form as Save in the right pane (no window over the dialog). It changes the name, the description and the folder of a query. It shows the SQL but does not change it: to replace the SQL, load the query, change it in the editor and press Ctrl/Cmd+S (*Update*).
     - Move to... (Ctrl/Cmd+M).
     - Export as JSON (a folder only, also in a read-only storage). It saves the folder and everything in it as a file named after the folder. The file has the body of `POST /api/query-library/import` (`host_id`, `folders`, `queries`). A copy-mode import can read it again.
     - Remove (Delete).
@@ -76,17 +76,24 @@ On a phone, the list and the preview are two steps. Tap a row to see its pane. A
   - A folder with everything in it is created in the browser at once. On the server, it is created with one all-or-nothing `POST /api/query-library/import` in copy mode (below).
   - The dashboard refuses a name that the target folder already holds. It does this before anything changes.
   - If the copy is in but the source cannot remove its item, the dashboard tells the user. The item is then in both storages.
-- **Save** (the Save query button, Ctrl+S, or *Save to library...* of a run) saves the query as the formatter writes it. The preview of the dialog shows the text that will be saved. The check box **Save raw** is not ticked by default. When the user ticks it, the preview shows the text as typed and the query is saved as typed. If the formatter does not accept the query, the box is ticked and locked and the query is saved as typed.
+- **Save** (the Save query button, Ctrl+S, or *Save to library...* of a run) opens no window over the dialog. The library opens (or stays open) on **Saved**, and the right pane shows the save form in place of the preview of the selection. The tree stays on the left and works as usual (search, open and close folders, the *New folder* button).
+  - The form is labelled by its title (*Save to library*, or *Save "name"* when the editor holds a saved query). Its fields are **Name**, **Description** and **Folder**. Under them is the SQL that will be saved, with its label (*SQL (from the editor, formatted)*, *from History*, *formatting...*) and the check box **Save raw**. The foot has **Cancel** and **Save**. When the editor holds a query that was opened from a storage that can be written, the foot has **Update** and **Save as new** instead (Update changes that query, Save as new creates another one). The keyboard focus moves to Name. Enter in Name saves. Ctrl/Cmd+Enter saves from any field of the form.
+  - The query is saved as the formatter writes it. The check box **Save raw** is not ticked by default. When the user ticks it, the text shown is the text as typed and the query is saved as typed. If the formatter does not accept the query, the box is ticked and locked and the query is saved as typed.
+  - **Folder** starts at the place that is selected in the tree (the folder of a selected query, the storage for a selected storage), or at the folder of the opened query when the form updates it. While the form is open, a click on a folder or a storage in the tree (or the arrow keys on it) sets the Folder field, so the user picks the target in the tree. The Folder list always offers every folder of both storages, as in the other pickers. A new folder made with the *New folder* button while the form is open is added to the list and chosen. The form keeps what the user typed when the tree is drawn again.
+  - A name that is empty, too long or already used in the folder, a description that is too long and a folder that cannot be used show their message under the field (`role="alert"`, the field has `aria-invalid`), and the focus goes to the field. Any other refusal (a conflict, a read-only storage, a failed request) shows its message above the buttons. The form stays open and nothing is lost. The guards of the library are the same as before: with no host, with a library that is read-only, and with an empty editor, no form opens and a toast says why.
+  - **Escape** drops the form and shows the preview of the selection again, wherever the focus is in the dialog. A second Escape closes the dialog. The focus goes back to *Save query* when the button opened the form, else to the selected row. Closing the dialog, another host and a removed query (for Edit) also end the form. A second *Save query* or Ctrl+S with the same form open only focuses it. If the user switches to **History**, the form stays and comes back with **Saved**.
+  - After a save, the toast says *Query saved.* (or *Query updated.*), the tree opens the folder of the query and selects it, and the pane shows its normal preview.
+  - On a phone, the form is the step of the pane. The back button of its head returns to the list and keeps the form (*Save query* brings it back). A tap on a folder or a query of the list sets the Folder and returns to the form. Cancel and Escape drop the form and show the list.
 - **History**: shows the runs of the current host, grouped by day. Each run has the status (ok / error / cancelled), the elapsed time and the rows. There is a search.
   - The preview of a run has the SQL as its title, with its time and status beside it. Then it shows the elapsed time, the rows, the server error of a failed run and the SQL.
   - Its tool is *Save to library...*.
   - A run is kept formatted. The entry holds the text as typed (`sql_raw`) and the text of the formatter (`sql_formatted`, with `formatted: true`). When the query was not formatted at run time, the dashboard asks the formatter in the background and writes the answer into the entry. The same happens for older entries, when they are looked at: the dashboard formats an entry that has no formatted text when the user selects it (the preview then shows the formatted text, unless the user has already scrolled it), loads it or saves it. The list shows each query on one line and does not change. A script that the formatter does not accept stays as typed, and the dashboard does not ask for it again while the page lives.
   - The user cannot edit or remove a run in History. There is no *Clear history*. The browser keeps the 50 most recent runs of each host (and at most 2 MiB of SQL for each host), and older runs fall off. A busy host does not push out the runs of the others. The same SQL on the same host is one entry: it moves to the top.
   - A text longer than 256K characters is stored cut. The entry has `truncated: true`, and the preview says *Cut at 262,144 characters*, so that *Load* does not hide that the text is shorter.
-- The folder pickers (Save, Edit, Move) list each storage as a group. Each folder is written in the same way as in the preview: `/` for its top level, then `/Operations`, `/Operations/Merges`. The group of a read-only storage is disabled.
+- The folder pickers (the Folder field of Save and Edit, and the Move dialog) list each storage as a group. Each folder is written in the same way as in the preview: `/` for its top level, then `/Operations`, `/Operations/Merges`. The group of a read-only storage is disabled.
 - A switch of the host in the header shows the storages and the History of that host at once. This is also true while the dialog is open.
 
-Ctrl/Cmd+S saves the editor into one of the storages (the server storage by default when it is writable). It can also update the saved query that the editor holds.
+Ctrl/Cmd+S opens the save form (above) for the editor. It saves into one of the storages (the server storage by default when it is writable). It can also update the saved query that the editor holds.
 
 The library is fully keyboard driven. The focus moves into the dialog and stays there. These keys work:
 
@@ -244,11 +251,11 @@ Errors have the body of every ChDash error (`error_code`, `message`, `retryable`
 
   Build the `chdash_query_library_test` target with `-DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON`. `tests/harness/test_native_unit_tests.py` runs it when `QUERY_LIBRARY_TEST_BINARY` points at it.
 - `tests/backend-functional/test_query_library.py`: HTTP tests against dedicated instances. Refer to "Query library" in [`tests/README.md`](../tests/README.md).
-- `tests/frontend/specs/query-library.spec.js`: tests of the library dialog of the Query page. The dialog uses the shared modal of the profiling dialog: shell, geometry, focus, Escape and backdrop, and stacked confirms. The spec runs on a phone and in both themes. It has these parts:
+- `tests/frontend/specs/query-library.spec.js`: tests of the library dialog of the Query page. The dialog uses the shared modal of the profiling dialog: shell, geometry, focus, Escape and backdrop, and the confirms and prompts (Move, Remove) stacked over it. The spec runs on a phone and in both themes. It has these parts:
   - It tests the browser storage alone. It covers these items:
     - The purge of entries without a host.
     - Folders named and renamed in their row, moved and removed.
-    - Save / edit / move, and the wide Save window.
+    - Save / edit / move. Save and Edit are the form of the right pane: no stacked dialog, the Folder that follows the tree, Escape in two steps, the errors under the fields, update and *Save as new*, a read-only storage, the phone.
     - `/` paths in the pickers.
     - Search and Show in folder.
     - The menu of a row and the right click.
