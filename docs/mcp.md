@@ -599,7 +599,7 @@ Use HTTPS when the client is not on the same machine. Put ChDash behind a revers
 ## Tests
 
 - `tests/native/mcp_test.cpp` (CMake option `CHDASH_BUILD_MCP_TESTS`, target `chdash_mcp_test`): scopes, keys and the file, the rate limit, the SQL splitter and builder, the protocol with a fake backend, the tools with a fake database, and the seven startup errors with the real configuration loader.
-- `tests/harness/test_mcp_contract.py`: source contracts. It runs the native binary when `MCP_TEST_BINARY` names it.
+- `tests/harness/test_native_unit_tests.py` runs the native binary when `MCP_TEST_BINARY` names it. The structural rules that concern MCP (it is unreachable from the other routes and never uses the runner identity) are in `tests/harness/test_backend_code_rules.py`.
 - `tests/backend-functional/test_mcp.py`: the endpoint, the scopes, `readonly`, the caps, the keys, and the startup errors with the real binary, against a real ClickHouse. `tests/README.md` has the instances and the variables.
 
 ## Decisions

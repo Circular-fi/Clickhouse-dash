@@ -71,3 +71,14 @@ def test_the_foundations_doc_lists_every_export_of_format_and_palette_and_every_
     assert not missing, f"docs/ui-foundations.md does not list {missing}"
     missing_tokens = [token for token in SEMANTIC_TOKENS if f"`{token}`" not in doc]
     assert not missing_tokens, missing_tokens
+
+
+def test_every_test_file_a_document_names_exists():
+    # Why: the documents send a reader to a test; a renamed or retired file leaves a pointer to nothing (this cleanup left a dozen).
+    tests = ROOT / "tests"
+    present = {path.name for pattern in ("test_*.py", "*.spec.js", "*.test.cjs", "*_test.cpp") for path in tests.rglob(pattern) if "node_modules" not in path.parts}
+    missing = []
+    for doc, line, name in cited(r"\b(test_[a-z0-9_]+\.py|[a-z0-9-]+\.spec\.js|[a-z0-9-]+\.test\.cjs|[a-z0-9_]+_test\.cpp)\b"):
+        if name not in present:
+            missing.append((doc, line, name))
+    assert missing == [], missing

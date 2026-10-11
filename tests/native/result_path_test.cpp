@@ -12,7 +12,7 @@
 //        cmake --build build --target chdash_result_path_test
 // Run:   ./build/chdash_result_path_test   (exit code 0 = every check passed)
 //        ./build/chdash_result_path_test --bench   (prints the time of 100000 map cells)
-// The Python harness (test_query_encoding_contract.py) runs it when RESULT_PATH_TEST_BINARY points at it.
+// The Python harness (test_native_unit_tests.py) runs it when RESULT_PATH_TEST_BINARY points at it.
 
 #include "block_encoder.hpp"
 #include "json_clickhouse.hpp"

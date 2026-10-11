@@ -5,7 +5,7 @@
 //          -DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON
 //        cmake --build build --target chdash_query_library_test
 // Run:   ./build/chdash_query_library_test   (exit code 0 = every check passed)
-// The Python harness runs it when QUERY_LIBRARY_TEST_BINARY points at it.
+// The Python harness (test_native_unit_tests.py) runs it when QUERY_LIBRARY_TEST_BINARY points at it.
 
 #include "query_library.hpp"
 #include "query_library_import.hpp"

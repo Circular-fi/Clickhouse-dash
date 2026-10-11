@@ -5,8 +5,8 @@ import { fetchedModules } from '../helpers/modules.js';
 // loader (loader), the state component (ns.uiState), feature flags
 // (ns.features), superseded requests (util.latest + api {signal}), browser
 // storage (storage.pref), search fields (ns.search) and the live-region
-// conventions. Source contracts: tests/harness/test_ui_infrastructure_contract.py
-// and test_page_manifest_contract.py.
+// conventions. The structural rules of the sources (no local copy of a shared
+// component) are tests/harness/test_frontend_code_rules.py.
 
 const PAGES = [
   { path: '/query', name: 'query' },

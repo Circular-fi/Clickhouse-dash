@@ -162,7 +162,6 @@ The confirmation names what the action touches: the hosts of the key. After the 
 | `src/static/css/10-components/form.css`, `part.css` | The form kit and the part heading that the page shares with other pages. |
 | `src/static/css/20-features/mcp.css` | The styles of this page only (`style.mcp.css` is generated from it). |
 | `tests/frontend/specs/mcp-page.spec.js` | The Playwright spec, with a mocked API. |
-| `tests/harness/test_mcp_page_contract.py` | The source contract. |
 
 ## Decisions
 

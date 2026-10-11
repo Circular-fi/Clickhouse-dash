@@ -1,5 +1,5 @@
 // Unit checks of format (app_format.js) and palette (app_palette.js),
-// run by test_ui_foundations_contract.py under several TZ values:
+// run by test_frontend_unit_scripts.py under several TZ values:
 //   TZ=Europe/Paris node --experimental-vm-modules ui_foundations_unit.js <repo root>
 // Prints a JSON list of failures (empty when every check passes).
 "use strict";

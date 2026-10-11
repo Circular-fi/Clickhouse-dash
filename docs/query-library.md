@@ -242,7 +242,7 @@ Errors have the body of every ChDash error (`error_code`, `message`, `retryable`
   - `host_mismatch`.
   - The migration from version 1 to 2 on a writable file and on a read-only file.
 
-  Build the `chdash_query_library_test` target with `-DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON`. `tests/harness/test_query_library_contract.py` runs it when `QUERY_LIBRARY_TEST_BINARY` points at it.
+  Build the `chdash_query_library_test` target with `-DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON`. `tests/harness/test_native_unit_tests.py` runs it when `QUERY_LIBRARY_TEST_BINARY` points at it.
 - `tests/backend-functional/test_query_library.py`: HTTP tests against dedicated instances. Refer to "Query library" in [`tests/README.md`](../tests/README.md).
 - `tests/frontend/specs/query-library.spec.js`: tests of the library dialog of the Query page. The dialog uses the shared modal of the profiling dialog: shell, geometry, focus, Escape and backdrop, and stacked confirms. The spec runs on a phone and in both themes. It has these parts:
   - It tests the browser storage alone. It covers these items:

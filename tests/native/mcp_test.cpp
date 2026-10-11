@@ -7,7 +7,7 @@
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_MCP_TESTS=ON
 //        cmake --build build --target chdash_mcp_test
 // Run:   ./build/chdash_mcp_test   (exit code 0 = every check passed)
-// The Python harness (test_mcp_contract.py) runs it when MCP_TEST_BINARY points at it.
+// The Python harness (test_native_unit_tests.py) runs it when MCP_TEST_BINARY points at it.
 
 #include "config.hpp"
 #include "health_runner.hpp"

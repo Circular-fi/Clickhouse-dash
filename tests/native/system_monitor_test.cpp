@@ -9,7 +9,7 @@
 // Run:   ./build/chdash_system_monitor_test   (exit code 0 = every check passed)
 //        ./build/chdash_system_monitor_test --print-growth-sql
 //          prints the growth SQL of both metric forms (to try them on a server)
-// The Python harness runs it when SYSTEM_MONITOR_TEST_BINARY points at it.
+// The Python harness (test_native_unit_tests.py) runs it when SYSTEM_MONITOR_TEST_BINARY points at it.
 
 #include "acl_service.hpp"
 #include "fake_executor.hpp"

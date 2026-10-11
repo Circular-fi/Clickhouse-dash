@@ -1,7 +1,7 @@
 // Unit checks of the Explorer card's SQL expression helpers
 // (app_explorer_detail_model.js: splitTopLevel, keyElements, expressionIdentifiers,
 // keyColumnPositions) and of the shared highlighter on key expressions
-// (app_highlight.js), run by test_explorer_card_contract.py:
+// (app_highlight.js), run by test_frontend_unit_scripts.py:
 //   node --experimental-vm-modules explorer_card_unit.js <repo root>
 // Prints {"checks": n, "failures": [...]}.
 "use strict";

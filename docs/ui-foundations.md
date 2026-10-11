@@ -254,7 +254,7 @@ Surfaces are flat: no top sheen, no gradient on buttons. Only what opens over th
 
 ## Observability
 
-Traces (`app_traces.js` for the search page, `app_trace_detail.js` for the trace page, and the `app_trace_*.js` modules under them; `docs/traces.md` lists them), Logs (`app_logs.js`), Metrics (`app_metrics.js`) and the page controller (`app_obs_page.js`) use only the foundations. The three views share two more modules. `app_obs_view.js` has the selected host, `hostCycle()` and `read(slot)`. `hostCycle()` is the cycle of a view with its host: a change of host empties the model, stops the `util.latest` slots of the old host and loads for the new one. The host change and the feature flags that arrive together make one reload. `read(slot)` is the one guard of a stale answer: a `util.latest` read that is also stale when the selected host is not the host it began with. Every read of the three views and of the trace page uses it (`const req = obsView.read("logs.search")`, then `req.signal` and `req.isCurrent()`). `app_timerange.js` has `checkRange()` and `resolveBounded()`, which check a range against the widest range of the server and give the same two sentences on every page, `sameRange()`, `localMidnight()` and `minuteKey()`. The last one is the key of a range in minutes: a search in the same minute has the same key, so the facets, the Services view and the Logs fields reuse the answer. `tests/harness/test_observability_foundations_contract.py` fails in these cases:
+Traces (`app_traces.js` for the search page, `app_trace_detail.js` for the trace page, and the `app_trace_*.js` modules under them; `docs/traces.md` lists them), Logs (`app_logs.js`), Metrics (`app_metrics.js`) and the page controller (`app_obs_page.js`) use only the foundations. The three views share two more modules. `app_obs_view.js` has the selected host, `hostCycle()` and `read(slot)`. `hostCycle()` is the cycle of a view with its host: a change of host empties the model, stops the `util.latest` slots of the old host and loads for the new one. The host change and the feature flags that arrive together make one reload. `read(slot)` is the one guard of a stale answer: a `util.latest` read that is also stale when the selected host is not the host it began with. Every read of the three views and of the trace page uses it (`const req = obsView.read("logs.search")`, then `req.signal` and `req.isCurrent()`). `app_timerange.js` has `checkRange()` and `resolveBounded()`, which check a range against the widest range of the server and give the same two sentences on every page, `sameRange()`, `localMidnight()` and `minuteKey()`. The last one is the key of a range in minutes: a search in the same minute has the same key, so the facets, the Services view and the Logs fields reuse the answer. `tests/harness/test_frontend_format_colour_rules.py` fails in these cases:
 
 - A local formatter: `toLocaleString()`, an `Intl` formatter, a `toFixed()` that is not a CSS length or an SVG coordinate, `pad2`, `"\u2014"`.
 - A hex, `rgb()` or `hsl()` color.
@@ -334,7 +334,7 @@ The styles are in `src/static/css/`, one file for each role. `src/static/css/ind
 
 A later layer wins over an earlier one, whatever the specificity. For this reason, a feature restyles a component without a fight about specificity, and nothing needs `!important` to beat a component. Inside a layer, specificity and source order decide as usual (the files of a layer in `index.css` order).
 
-Rules of thumb, which `tests/harness/test_css_layers_contract.py` enforces:
+Rules of thumb, which `tests/harness/test_css_rules.py` enforces:
 
 - **One rule per selector list.** Write a selector list once for each layer and `@media` context. Add a declaration to its rule. Do not add a second rule.
 - **No dead rule.** Every selector can match something that a page creates (`python3 tools/build_page_css.py --report-dead` lists those that cannot).
@@ -353,7 +353,7 @@ The sheets are build outputs. CMake stages `src/static` without the sources and 
 
 ## Spacing, labels and selected states
 
-`tests/harness/test_css_layers_contract.py` and `tests/harness/test_type_scale_contract.py` fail in these cases:
+`tests/harness/test_css_rules.py` and `tests/harness/test_type_scale_contract.py` fail in these cases:
 
 - A `padding`, `margin` or `gap` has a length that is not a step of the spacing scale.
 - A media query has a width that is not a breakpoint (see "Page shell").
@@ -406,7 +406,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 - A table in a part sits in `.dataTableWrap`: a hairline box that scrolls sideways when the columns are wider than the box. A box that scrolls on one axis scrolls on the other, so the head of a table inside the scroller of the page never sticks. A table that has many rows (System > Queries) therefore gives its box the height that the panel leaves it (`.systemQueries__wrap`): the box is the one scroller under the tiles, and the head stays over the rows.
 - `--gutter` (12 px, 10 px at 820 px and below) insets the content of every region and the header. `--nav-row-h` (48 px) is the height of a nav row. `--shell-border` (1 px `--border`) separates regions and rows.
 - The `--z-*` scale names every stacking level ("Type, shape, motion and stacking"). The shell and what opens over it use `--z-nav`, `--z-drawer`, `--z-header`, `--z-dropdown`, `--z-modal` and `--z-tooltip`.
-- `--bp-sm` (600 px), `--bp-tab` (760 px), `--bp-md` (820 px), `--bp-lg` (1100 px) and `--bp-xl` (1279 px: from 1280 px a window is wide) are the only widths at which a layout changes. A `max-width` query names one of them. A `min-width` query names the pixel above one (601, 761, 821, 1101, 1280). `tests/harness/test_css_layers_contract.py` refuses any other width. Media queries cannot read custom properties, so they repeat the numbers. Scripts use `shell.BREAKPOINTS`, `shell.isAtMost("md")` and `shell.mediaQuery("md")` from `app_dom.js`.
+- `--bp-sm` (600 px), `--bp-tab` (760 px), `--bp-md` (820 px), `--bp-lg` (1100 px) and `--bp-xl` (1279 px: from 1280 px a window is wide) are the only widths at which a layout changes. A `max-width` query names one of them. A `min-width` query names the pixel above one (601, 761, 821, 1101, 1280). `tests/harness/test_css_rules.py` refuses any other width. Media queries cannot read custom properties, so they repeat the numbers. Scripts use `shell.BREAKPOINTS`, `shell.isAtMost("md")` and `shell.mediaQuery("md")` from `app_dom.js`.
 - Scroll model: html and body never scroll. The content region of each page is its only scroller. These are the scrollers:
   - `#queryWorkspace`.
   - The detail, graph and storage panes of the Explorer.
@@ -490,12 +490,12 @@ The pages meet WCAG 2.2 AA in both themes. `tests/frontend/specs/a11y-contract.s
 
 **Forced colors** (Windows high contrast). The block `@media (forced-colors: active)` at the end of `30-overrides.css` says again what the browser would lose. The browser replaces colours by the system palette, drops the box shadows and the background images, and draws every background in Canvas.
 
-- An icon drawn by a mask (the chevrons, the sort arrows) is a background colour: it takes `CanvasText`. A contract test (`tests/harness/test_accessibility_contract.py`) fails when a rule that draws a mask is not in this list.
+- An icon drawn by a mask (the chevrons, the sort arrows) is a background colour: it takes `CanvasText`. A rule test (`tests/harness/test_accessibility_rules.py`) fails when a rule that draws a mask is not in this list.
 - A selected or pressed state is an outline in `Highlight`. A focused element keeps the focus ring.
 - A mark that encodes data (a status dot, a service swatch, a span bar, a cell bar, a legend swatch) opts out of the forcing (`forced-color-adjust: none`), or says its colour in system colours (a cell bar is `Highlight` on `Canvas`). Without this, all series, statuses and sizes would be one colour.
 - The colour probes (`palette.resolve` and the chart engine's) opt out too: a canvas chart keeps its series colours. Its axes, labels and grid take `CanvasText` and `GrayText`.
 
-**Tests.** `a11y-contract.spec.js` measures the token contrasts in both themes, the edge and the placeholder of every field on seven pages, the focus ring of a primary button, axe on the states, the skip link, the landmarks of the twelve page shells, the ARIA of the views above and the forced-colors rules. `state-truth.spec.js` keeps the findings about states and data. `tests/harness/test_accessibility_colour_contract.py` keeps the colour rules in the sources (the tokens, the fields, no opacity on text, the placeholder). `tests/harness/test_accessibility_contract.py` keeps the skip link, the landmarks and the forced-colors block.
+**Tests.** `a11y-contract.spec.js` measures the token contrasts in both themes, the edge and the placeholder of every field on seven pages, the focus ring of a primary button, axe on the states, the skip link, the landmarks of the twelve page shells, the ARIA of the views above and the forced-colors rules. `state-truth.spec.js` keeps the findings about states and data. `tests/harness/test_accessibility_rules.py` keeps what a browser cannot see in the sources: the colour rules (the tokens, the fields, no opacity on text, the placeholder), the skip link, the landmarks, the forced-colors block and the one focus ring.
 
 ## Icons
 
@@ -576,7 +576,7 @@ Three modules load right after `app_dom.js` on every page (they are imported by 
 
 ## Components: tabs, segmented controls and menus
 
-Every navigation control or choice control is one of three components. Each loads on every page (`app_common.js` imports them after `app_dom.js`). Each keeps its CSS in its own file, `src/static/css/10-components/<name>.css`. `tests/harness/test_ui_tabs_menus_contract.py` fails when a local copy of a family comes back.
+Every navigation control or choice control is one of three components. Each loads on every page (`app_common.js` imports them after `app_dom.js`). Each keeps its CSS in its own file, `src/static/css/10-components/<name>.css`. `tests/harness/test_frontend_code_rules.py` fails when a local copy of a family comes back (a tab row, a menu motion, a modal of its own).
 
 ### Tabs: `tabs` (`app_ui_tabs.js`)
 
@@ -713,7 +713,7 @@ A dialog form or a settings block uses one kit. The Query library prompts and th
 
 ## Page infrastructure
 
-There is one way to do each of these. `tests/harness/test_ui_infrastructure_contract.py` and `test_page_manifest_contract.py` fail on a local copy.
+There is one way to do each of these. `tests/harness/test_frontend_code_rules.py` fails on a local copy.
 
 - **Modules**: every script of `src/static/app_*.js` is an ES module. It imports what it needs (`import { format } from "./app_format.js";`) and exports its API by name (`export const format = ...`). The import names the sibling file exactly. There is no bundler. A page is its entry module, `app_page_<page>.js`: it imports `app_common.js` (the foundations and the components that every page uses, in the order they need), the modules of the page, and `app_boot.js`. The browser loads the modules that the entry imports in dependency order. Nothing else lists them. `src/static/modules.json` holds the entry of each page and its lazy groups (see below).
   - **Rules** (`python3 tools/module_graph.py`, run by `tools/build_page_css.py --check` and the harness): an import has the exact name `./app_x.js`. The imports have no cycle. Every script is on a page. A lazy module is not imported by the page that loads it lazily. No module but `app_loader.js` calls `import()` (the Worker script does too), and no module but `app_loader.js` reads or writes `window.ChDash`.
@@ -729,7 +729,7 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
   - `busy(el, on)`: `is-loading`, `aria-busy`, the spinner of a button.
   - `announce(text)`: the one polite live region.
 
-  No pane is `aria-live`, and no module or shell marks a region of its own: `#uiLiveStatus` is the only element with `aria-live` (`test_only_the_announce_region_is_live` and `protocol-items.spec.js` check it). A widget says its event through `announce`: the node that the keyboard reached on a graph, the cell or box on the trace heatmap, the range of the pipeline viewer after a control moved it, the month and the step of the time range calendar, the result of a Logs search or of a Metrics catalog load, the note of the MCP host choice and the list of the data that a key reads. A status that changes with every key typed or every row loaded (the Logs status line, the Metrics summary) is not announced each time. Hover readouts are `role="tooltip"`. Lists and trees (the Explorer tree, the query library) use `compact` blocks. A search that finds nothing offers "Clear the search". A refresh button is `busy` while it reloads.
+  No pane is `aria-live`, and no module or shell marks a region of its own: `#uiLiveStatus` is the only element with `aria-live` (`test_only_the_announce_region_is_live_and_hover_tooltips_are_not_status` in `test_frontend_code_rules.py` and `live-region.spec.js` check it). A widget says its event through `announce`: the node that the keyboard reached on a graph, the cell or box on the trace heatmap, the range of the pipeline viewer after a control moved it, the month and the step of the time range calendar, the result of a Logs search or of a Metrics catalog load, the note of the MCP host choice and the list of the data that a key reads. A status that changes with every key typed or every row loaded (the Logs status line, the Metrics summary) is not announced each time. Hover readouts are `role="tooltip"`. Lists and trees (the Explorer tree, the query library) use `compact` blocks. A search that finds nothing offers "Clear the search". A refresh button is `busy` while it reloads.
 - **Feature flags** (`features`, `app_state.js`): `get(path, fallback)`, `known()`, `ready`, `on(fn)`. `FEATURE_DEFAULTS` is the table of defaults of the server (`server.hpp`). `fallback` applies only before `/api/version` answers.
 - **Requests** (`app_api.js`): every route is a named endpoint there (`api.searchTraceSpans`, `api.getMetricsSeries`...). No module builds an `api/...` URL. The exceptions are the hosts `EventSource` and the REST adapter of the query library.
   - Every call goes through `request()` and takes a last `{ signal }`.
@@ -750,7 +750,7 @@ There is one way to do each of these. `tests/harness/test_ui_infrastructure_cont
 
 ## Routes
 
-`router` (`src/static/app_router.js`, imported by `app_common.js` right after `app_dom.js`) owns the address bar and the session history. No other script calls `history.pushState`, `replaceState`, `back` or `go`, or listens to `popstate`. `tests/harness/test_ui_router_contract.py` fails on a copy.
+`router` (`src/static/app_router.js`, imported by `app_common.js` right after `app_dom.js`) owns the address bar and the session history. No other script calls `history.pushState`, `replaceState`, `back` or `go`, or listens to `popstate`. `tests/harness/test_frontend_code_rules.py` fails on a copy.
 
 - **Reading**: `router.current()` gives `{ path, params, hash, state }` (`path` without the base path, `params` a copy). `router.url(path)` adds the base path. `router.path(pathname)` removes it. `router.href()` is the current address.
 - **Writing**: `router.push(update, opts)` and `router.replace(update, opts)`.
@@ -824,7 +824,7 @@ With `system.enabled = false`, they open the Explorer Catalog (`/explorer/catalo
 
 ## Data display components
 
-There are seven modules. They load on every page (`app_common.js` imports them after `app_util.js`). Each has one file in `src/static/css/10-components/` (`table`, `badge`, `copy`, `sql`, `kv`, `stat`, `chart`). `tests/harness/test_ui_data_components_contract.py` fails when a local copy comes back.
+There are seven modules. They load on every page (`app_common.js` imports them after `app_util.js`). Each has one file in `src/static/css/10-components/` (`table`, `badge`, `copy`, `sql`, `kv`, `stat`, `chart`). `tests/harness/test_frontend_code_rules.py` fails when a local copy comes back.
 
 | Module | API | What it draws |
 | --- | --- | --- |

@@ -1,5 +1,5 @@
 // Unit checks of the chart engine's time axis labels (app_chart_core.js:
-// timeTicks and layoutXLabels), run by test_chart_axis_labels_contract.py
+// timeTicks and layoutXLabels), run by test_frontend_unit_scripts.py
 // under several TZ values (browser-local time is the display zone):
 //   TZ=Europe/Paris node --experimental-vm-modules chart_axis_unit.js <repo root>
 // Prints { zone, checks, failures }.
