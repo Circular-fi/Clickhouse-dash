@@ -156,3 +156,25 @@ def test_text_uses_the_two_font_tokens():
     assert css.count("ui-monospace") == 1, "write font stacks as var(--font-mono) / var(--font-sans)"
     assert '--font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;' in css
     assert '--font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;' in css
+
+
+SEMANTIC_TOKENS = [
+    "--danger", "--danger-bg", "--warning", "--warning-bg", "--success", "--success-bg", "--info", "--info-bg",
+    "--sev-fatal", "--sev-error", "--sev-warn", "--sev-info", "--sev-debug", "--sev-trace",
+    "--accent-fill", "--selected-bg", "--accent-text",
+    "--kind-table", "--kind-view", "--kind-mv", "--kind-dict", "--kind-buffer", "--kind-distributed",
+    "--pct-p50", "--pct-p90", "--pct-p95", "--pct-p99",
+    "--json-string", "--json-number", "--json-bool", "--json-null",
+]
+
+
+def test_the_semantic_tokens_are_defined_in_every_theme_block_and_forced_themes_equal_the_os_themes():
+    # Why: the status, severity, object-kind and JSON colours must exist whatever the theme; a token missing from one block falls back to nothing.
+    root, light_media, light_guard, dark_attr, light_attr = palettes()
+    blocks = {"root": root, "light-media": light_media, "dark": dark_attr, "light": light_attr}
+    for name, tokens in blocks.items():
+        missing = [token for token in SEMANTIC_TOKENS if token not in tokens]
+        assert not missing, f"{name} lacks {missing}"
+    for token in SEMANTIC_TOKENS:
+        assert dark_attr[token] == root[token], token
+        assert light_attr[token] == light_media[token], token

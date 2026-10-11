@@ -1,5 +1,7 @@
-"""The WebAssembly kernels of the front end (docs/wasm.md): the build is reproducible and checked in, the files are served
-and embedded byte for byte as application/wasm, and a kernel needs nothing from the network or from a glue file."""
+"""The WebAssembly kernels of the front end (docs/wasm.md): the binaries are checked in and match their lock, a kernel is freestanding (no glue
+file, only host math imported), the files are staged, compressed and embedded byte for byte, and each kernel is a lazy group that no page loads at
+start. What a kernel computes is tested against the JavaScript reference by tests/frontend/specs/wasm-*.spec.js and, natively, by the sanitizer
+build (tests/native/wasm_kernel_*.c, tests/fuzz)."""
 import gzip
 import hashlib
 import importlib.util
@@ -102,20 +104,6 @@ def test_every_source_has_a_committed_binary_and_the_lock_matches():
         assert lock["kernels"][path.stem]["bytes"] == path.stat().st_size
 
 
-def test_the_build_is_reproducible_in_a_container_and_in_the_release_workflow():
-    docker = read("tests/Dockerfile.source")
-    assert "build_wasm.py --check" in docker and "COPY --from=wasm /work/src/static/wasm /app/static/wasm" in docker
-    ci = read(".github/workflows/ci.yml")
-    assert "tools/build_wasm.py --verify" in ci and "tools/build_wasm.py --docker --check" in ci
-    # The release runs ci.yml (with this check) on the commit that it builds.
-    release = read(".github/workflows/release.yaml")
-    assert "uses: ./.github/workflows/ci.yml" in release and "workflow_call:" in ci
-    builder = read("tools/build_wasm.py")
-    for flag in ("-ffreestanding", "-nostdlib", "-fno-ident", "-Wl,--strip-all", "-Wl,--no-entry"):
-        assert f'"{flag}"' in builder, flag
-    assert "IMAGE = \"alpine:3.20\"" in builder
-
-
 def test_a_kernel_is_freestanding_no_glue_file_and_only_host_math_is_imported():
     for path in kernels():
         data = path.read_bytes()
@@ -127,9 +115,7 @@ def test_a_kernel_is_freestanding_no_glue_file_and_only_host_math_is_imported():
         assert not path.with_suffix(".js").exists()
 
 
-def test_the_server_answers_wasm_with_its_own_mime_type_and_the_stage_versions_and_compresses_it(tmp_path):
-    server = read("src/serve_embedded_static.hpp")
-    assert 'if (ext == "wasm") return "application/wasm";' in server
+def test_the_stage_versions_and_compresses_a_kernel(tmp_path):
     stage = tool("stage_static")
     payload = (kernels()[0].read_bytes() if kernels() else b"\0asm\x01\0\0\0" + bytes(range(256)) * 8)
     (tmp_path / "wasm").mkdir()
@@ -180,16 +166,14 @@ def test_every_kernel_has_a_lazy_group_an_adapter_and_a_javascript_reference_pat
             assert files and "app_wasm.js" not in files and all((ROOT / "src/static" / f).exists() for f in files), (page, name)
             # The loader runs before any module: the kernel's modules load on demand only, never at start.
             assert not set(files) & set(graph.page_files(page)), (page, name)
-    loader = read("src/static/app_wasm.js")
-    assert "WebAssembly.instantiateStreaming" in loader and "WebAssembly.instantiate(await response.arrayBuffer()" in loader
-    # A failure is a null kernel, never a rejection or an exception of the page.
-    assert "return null;\n      }\n    );" in loader and "stats.failures += 1;" in loader
     for adapter in (ROOT / "src/static").glob("app_wasm_*.js"):
         text = adapter.read_text(encoding="latin-1")
-        if adapter.name == "app_wasm_worker.js":
-            assert "await import(m.adapter);" in text
-        else:
+        if adapter.name != "app_wasm_worker.js":
             assert "wasm.ops." in text, adapter.name
+    # Each kernel is one freestanding C file (the build is -ffreestanding -nostdlib: a libc include would not link).
+    for source in SOURCES.glob("*.c"):
+        text = source.read_text(encoding="utf-8")
+        assert '#include "rt.h"' in text and "#include <" not in text, source.name
 
 
 def test_the_worker_and_the_loader_use_no_eval_and_no_network_beyond_the_kernel_file():

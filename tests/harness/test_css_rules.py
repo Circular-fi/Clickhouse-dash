@@ -1,4 +1,4 @@
-"""The stylesheet sources: one file per layer role, cascade layers, one rule per selector.
+"""The stylesheet sources: one file per layer role, cascade layers, one rule per selector, and the rules that keep a page cheap and legible.
 
 src/static/css/index.css declares the layers (tokens, base, components,
 features, overrides) and imports every source file into its layer, layer by
@@ -235,3 +235,70 @@ def test_spacing_is_the_scale_a_hairline_or_an_overlapping_margin():
                     offenders.append(f"{rel(path)}:{rule.line} {rule.prelude[:60]} {{{decl.name}: {decl.value.strip()}}}")
                     break
     assert not offenders, "use var(--space-N) (N: 2 4 6 8 10 12 16 20 24 32 40 48 64 80):\n" + "\n".join(offenders)
+
+
+# ---- breakpoints, motion, contrast --------------------------------------------------------------------------------------------------
+
+
+def test_the_breakpoints_of_the_scripts_are_the_tokens_of_the_stylesheet():
+    # Why: a layout that changes at 820 px in CSS and at 800 px in a script shows a half-switched page between the two.
+    tokens = css_sources.tokens()
+    css = {name: int(value) for name, value in re.findall(r"--bp-(sm|tab|md|lg|xl):\s*(\d+)px;", tokens)}
+    assert set(css) == {"sm", "tab", "md", "lg", "xl"}
+    assert {value for value in css.values()} == BREAKPOINTS
+    for name in css:
+        assert tokens.count(f"--bp-{name}:") == 1, name
+    dom = (css_sources.ROOT / "src/static/app_dom.js").read_text(encoding="utf-8")
+    script = dict(re.findall(r"(\w+): (\d+)", re.search(r"const BREAKPOINTS = Object\.freeze\(\{([^}]*)\}\);", dom).group(1)))
+    assert {key: int(value) for key, value in script.items()} == css
+
+
+def test_no_infinite_animation_runs_on_a_property_that_repaints_or_relayouts_every_frame():
+    # Why: a page at rest must cost nothing (idle CPU): an endless animation of box-shadow or of a box size repaints on the main thread
+    # every frame (the host dot once cost 7 to 20 % of a core on every page).
+    css = css_sources.text()
+    used = set()
+    for match in re.finditer(r"animation(?:-name)?:([^;]*);", css):
+        if re.search(r"\binfinite\b", match.group(1)):
+            used.update(re.findall(r"\b([A-Za-z][\w-]*)\b", match.group(1)))
+    keyframes = {}
+    for name, body in re.findall(r"@keyframes\s+([\w-]+)\s*\{(.*?\})\s*\}", css, flags=re.S):
+        keyframes[name] = body
+    checked = 0
+    for name in sorted(used & set(keyframes)):
+        props = set(re.findall(r"([a-z-]+)\s*:", keyframes[name]))
+        assert not props & {"box-shadow", "width", "height", "top", "left", "right", "bottom", "margin", "padding", "filter"}, (name, props)
+        checked += 1
+    assert checked >= 3
+
+
+def _luminance(value: str) -> float:
+    value = value.lstrip("#")
+    channels = [int(value[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _ratio(a: str, b: str) -> float:
+    la, lb = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def test_the_categorical_colours_keep_three_to_one_on_the_panel_and_the_page_in_each_theme():
+    # Why: a series that is hard to tell from the surface under it is lost (WCAG 1.4.11 asks 3:1 for the marks of a graphic).
+    tokens = css_sources.tokens()
+    starts = [m.start() for m in re.finditer(r'^(?::root|@media \(prefers-color-scheme: light\)|html\[data-theme="(?:dark|light)"\]) \{', tokens, flags=re.M)]
+    assert len(starts) >= 4
+    checked = 0
+    for index, start in enumerate(starts):
+        body = tokens[start:starts[index + 1] if index + 1 < len(starts) else len(tokens)]
+        values = dict(re.findall(r"--(qchart-\d+|panel|bg):\s*(#[0-9a-fA-F]{6});", body))
+        if "panel" not in values:
+            continue
+        for name, value in values.items():
+            if not name.startswith("qchart"):
+                continue
+            for surface in ("panel", "bg"):
+                assert _ratio(value, values[surface]) >= 3, (body[:40], name, surface)
+            checked += 1
+    assert checked >= 4 * 18

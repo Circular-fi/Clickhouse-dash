@@ -49,3 +49,25 @@ def test_the_component_and_feature_files_of_the_foundations_table_are_the_files_
     assert components == {path.stem for path in (STATIC / "css/10-components").glob("*.css")}
     features = set(re.findall(r"`([a-z-]+)`", row("| `20-features/<name>.css`").split("| features |", 1)[1]))
     assert features == {path.stem for path in (STATIC / "css/20-features").glob("*.css")}
+
+
+def test_the_foundations_doc_lists_every_export_of_format_and_palette_and_every_semantic_token():
+    # Why: docs/ui-foundations.md is the reference of ns.format and ns.palette; an export that it does not list is one that nobody knows to use.
+    from test_css_tokens_contract import SEMANTIC_TOKENS
+
+    doc = (ROOT / "docs/ui-foundations.md").read_text(encoding="utf-8")
+
+    def exported(source: str, namespace: str) -> list[str]:
+        block = re.search(rf"export const {namespace} = Object\.freeze\(\{{(.*?)\}}\);", source, re.S).group(1)
+        return re.findall(r"^\s*(\w+),?$", block, re.M)
+
+    fmt_source = (STATIC / "app_format.js").read_text(encoding="utf-8")
+    fmt = exported(fmt_source, "format")
+    pal = exported((STATIC / "app_palette.js").read_text(encoding="utf-8"), "palette")
+    assert {"duration", "count", "compact", "bytes", "percent", "time", "range"} <= set(fmt) and {"categorical", "service", "severity"} <= set(pal)
+    adapters = re.findall(r"^\s*duration\.(\w+) = ", fmt_source, re.M)
+    names = [f"format.{n}" for n in fmt] + [f"format.duration.{n}" for n in adapters] + [f"palette.{n}" for n in pal]
+    missing = [name for name in names if f"`{name}" not in doc]
+    assert not missing, f"docs/ui-foundations.md does not list {missing}"
+    missing_tokens = [token for token in SEMANTIC_TOKENS if f"`{token}`" not in doc]
+    assert not missing_tokens, missing_tokens

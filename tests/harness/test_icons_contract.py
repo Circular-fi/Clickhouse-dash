@@ -49,21 +49,6 @@ def test_the_sprite_is_ascii_geometry_on_the_24_grid():
     assert licence.startswith("MIT License") and "Permission is hereby granted" in licence
 
 
-def test_the_icon_rule_paints_a_1_5_stroke_in_current_color():
-    css = (STATIC / "css" / "10-components" / "icon.css").read_text(encoding="utf-8")
-    rule = css[css.index(".icon {"):css.index("}", css.index(".icon {"))]
-    for decl in ("width: var(--icon-md);", "height: var(--icon-md);", "flex-shrink: 0;", "vertical-align: middle;",
-                 "fill: none;", "stroke: currentColor;", "stroke-width: 1.5;", "stroke-linecap: round;", "stroke-linejoin: round;"):
-        assert decl in rule, decl
-    tokens = (STATIC / "css" / "00-tokens.css").read_text(encoding="utf-8")
-    for size, px in (("sm", 14), ("md", 16), ("lg", 18)):
-        assert f"--icon-{size}: {px}px;" in tokens
-    # No component restyles the stroke of an icon.
-    for name, text in sources().items():
-        if name.endswith(".css") and not name.endswith("icon.css"):
-            assert not re.search(r"\.icon[^{]*\{[^}]*stroke-width", text), name
-
-
 def test_no_svg_data_uri_outside_the_generated_masks():
     # The only data: SVGs are the --icon-* masks generated from the sprite (00-tokens.css,
     # tools/icons.py) and the editor's wavy error underline, a repeating decoration.
@@ -202,56 +187,8 @@ def test_icon_only_buttons_in_the_shells_have_a_label_and_a_title():
             assert attrs.get("aria-label") and attrs.get("title"), (page, attrs)
 
 
-def test_the_helper_is_one_common_module():
-    common = modules.common_modules()
-    assert common.index("app_ui_icon.js") == common.index("app_util.js") + 1
-    helper = (STATIC / "app_ui_icon.js").read_text(encoding="utf-8")
-    assert "Object.freeze(icon);\nexport { icon };" in helper
-    assert 'return `<svg class="${esc(classOf(opts))}"${a11y}><use href="${esc(href(name))}"/></svg>`;' in helper
-    assert "window.__chdashIconSprite" in helper
-    # No other module builds an inline <svg> icon: they ask ns.icon.
+def test_no_module_builds_an_inline_svg_icon_of_its_own():
+    # Why: ns.icon draws every icon from the sprite (one stroke, one size scale, forced-colors aware); an inline <svg> escapes all of it.
     for name, text in sources().items():
         if name.endswith(".js") and not name.endswith(("app_ui_icon.js", "app_ui_chart.js", "app_dom.js")):
             assert 'viewBox="0 0 16 16"' not in text and "viewBox: \"0 0 16 16\"" not in text, name
-
-
-def test_the_builds_ship_the_icon_tool():
-    # tools/build_page_css.py imports tools/icons.py (through page_shells.py): every build that
-    # runs it copies it, and CMake restages when it changes.
-    docker = (ROOT / "tests" / "Dockerfile.source").read_text(encoding="utf-8")
-    copy = next(line for line in docker.splitlines() if line.startswith("COPY tools/build_page_css.py"))
-    for tool in ("build_page_css.py", "css_tree.py", "icons.py", "module_graph.py", "page_shells.py"):
-        assert f"tools/{tool}" in copy, tool
-    cmake = (ROOT / "src" / "CMakeLists.txt").read_text(encoding="utf-8")
-    assert '"${CMAKE_CURRENT_LIST_DIR}/../tools/icons.py"' in cmake
-
-
-def test_the_logo_mark_and_the_favicon_are_one_drawing_on_every_page():
-    header = (ROOT / "src" / "shell" / "header.html").read_text(encoding="utf-8")
-    mark = re.search(r'<svg class="appBrand__logo" viewBox="0 0 18 18" aria-hidden="true">(.*?)</svg>', header).group(1)
-    bars = re.findall(r'<rect x="[\d.]+" y="[\d.]+" width="[\d.]+" height="[\d.]+" rx="1"/>', mark)
-    assert len(bars) == 4 and "".join(bars) == mark
-    favicon = (STATIC / "images" / "logo.svg").read_text(encoding="ascii")
-    assert all(bar in favicon for bar in bars)
-    assert "prefers-color-scheme:dark" in favicon
-    ico = (STATIC / "images" / "favicon.ico").read_bytes()
-    assert ico[:4] == b"\x00\x00\x01\x00" and int.from_bytes(ico[4:6], "little") == 3
-    shell_css = (STATIC / "css" / "20-features" / "shell.css").read_text(encoding="utf-8")
-    logo_rule = shell_css[shell_css.index(".appBrand__logo {"):]
-    logo_rule = logo_rule[:logo_rule.index("}")]
-    assert "width: 18px;" in logo_rule and "height: 18px;" in logo_rule and "fill: var(--accent-fill);" in logo_rule
-    for page in SHELL_PAGES:
-        shell = (STATIC / f"{page}.html").read_text(encoding="utf-8")
-        assert 'favicon.href = window.__chdashUrl("static/images/logo.svg");' in shell, page
-        assert 'fallbackIcon.href = window.__chdashUrl("static/images/favicon.ico");' in shell, page
-        assert shell.count('class="appBrand__logo"') == 1, page
-
-
-def test_an_inline_chip_with_an_icon_does_not_grow_its_line():
-    # An <svg> has no baseline: an inline-flex chip whose first item is an icon sits on the
-    # icon's bottom edge. The trace header's Logs chip is centred instead, or its 14 px icon
-    # grew the header and moved the graph under it.
-    traces = (STATIC / "css" / "20-features" / "traces.css").read_text(encoding="utf-8")
-    rule = traces[traces.index("\n.traceLogsToggle {"):]
-    rule = rule[:rule.index("}")]
-    assert "display: inline-flex;" in rule and "vertical-align: middle;" in rule

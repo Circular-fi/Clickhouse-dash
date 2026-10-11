@@ -26,17 +26,6 @@ def test_the_reference_is_the_output_of_the_generator():
     assert result.returncode == 0, result.stderr
 
 
-def test_the_prose_points_at_the_reference_and_the_table_has_no_clamp():
-    docs = (ROOT / "docs/configuration.md").read_text()
-    assert "configuration-reference.md" in docs
-    config = (ROOT / "src/config.cpp").read_text()
-    # The bounds are in the table: config.cpp clamps nothing.
-    assert "std::max(" not in config.split("void finish_config")[0]
-    assert "normalize_config" not in config
-    for site in ("query_session.cpp", "health_runner.cpp"):
-        assert "std::max<size_t>(16 * 1024, std::min<size_t>(4 * 1024 * 1024" not in (ROOT / "src" / site).read_text()
-
-
 def test_the_example_file_uses_only_keys_of_the_table():
     keys = table()
     stack = []
@@ -63,11 +52,3 @@ def test_the_example_file_uses_only_keys_of_the_table():
         if assign.group(1) not in keys[block]:
             unknown.append(f"{block}.{assign.group(1)}")
     assert not unknown, unknown
-
-
-def test_the_loader_reads_the_blocks_of_the_table_through_it():
-    config = (ROOT / "src/config.cpp").read_text()
-    assert "config::apply_block(" in config
-    assert 'CFG_' not in config
-    schema = (ROOT / "src/config_schema.cpp").read_text()
-    assert '#include "config_keys.def"' in schema

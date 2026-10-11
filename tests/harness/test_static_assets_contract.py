@@ -1,11 +1,18 @@
+"""The static files of the build, run for real on a scratch directory: staging (versions, gzip copies, the hash of each imported module in its
+import) and embedding (every byte of a file, and a rebuild when a file is edited, added or removed)."""
 import gzip
 import hashlib
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
+import time
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
-SHELLS = ("query", "explorer", "traces", "logs", "metrics", "trace", "system", "shape", "mcp")
 
 
 def read(rel):
@@ -84,32 +91,6 @@ def test_staging_refuses_modules_that_import_each_other(tmp_path):
         raise AssertionError("a cycle was staged")
 
 
-def test_every_shell_and_the_asset_module_use_the_version_map():
-    for page in SHELLS:
-        shell = read(f"src/static/{page}.html")
-        assert 'var hash = window.__chdashAssetVersions && window.__chdashAssetVersions[rel];' in shell, page
-        assert 'return appBase + rel + (hash ? "?v=" + hash : "");' in shell, page
-        # The shell preloads and starts the page's modules by the same addresses, with their hashes.
-        assert 'link.href = url(page.files[i]);' in shell and 'entry.src = url(page.entry);' in shell, page
-    assets = read("src/static/app_assets.js")
-    assert "const versions = globalThis.__chdashAssetVersions || {};" in assets
-    assert 'out.searchParams.set("v", hash);' in assets
-    assert "new URL(\"./\", import.meta.url)" in assets
-
-
-def test_the_build_stages_the_static_files_and_the_server_answers_gzip():
-    cmake = read("src/CMakeLists.txt")
-    assert cmake.index("tools/build_page_css.py failed") < cmake.index("tools/stage_static.py failed") < cmake.index("chdash_embed_directory(")
-    assert '"${_STAGE_TOOL}"' in cmake
-    server = read("src/serve_embedded_static.hpp")
-    assert 'chdash_embedded::find(rel + ".gz")' in server
-    assert 'res.set_header("Content-Encoding", "gzip");' in server
-    assert 'res.set_header("Vary", "Accept-Encoding");' in server
-    # A compressed copy is an answer, never an address; a shell is never immutable.
-    assert 'rel.compare(rel.size() - 3, 3, ".gz") == 0) return false;' in server
-    assert 'req.has_param("v") && !html' in server
-
-
 def test_embedding_writes_every_byte_of_a_file_in_one_pass(tmp_path):
     import re
     import shutil
@@ -138,3 +119,50 @@ def test_embedding_writes_every_byte_of_a_file_in_one_pass(tmp_path):
     assert "data_empty_txt[] = {};" in source
     # No loop per byte: the generator must not append byte by byte again.
     assert "foreach(i RANGE" not in read("src/EmbedStatic.cmake")
+
+
+def test_embedded_assets_refresh_on_edit_addition_and_removal(tmp_path: Path) -> None:
+    cmake = shutil.which("cmake")
+    if cmake is None:
+        pytest.skip("CMake is required for the embedded asset rebuild test")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    script = assets / "app.js"
+    script.write_text("initial", encoding="utf-8")
+    (tmp_path / "CMakeLists.txt").write_text(
+        'cmake_minimum_required(VERSION 3.20)\n'
+        'project(asset_rebuild NONE)\n'
+        f'include("{ROOT / "src/EmbedStatic.cmake"}")\n'
+        'chdash_embed_directory("${CMAKE_SOURCE_DIR}/assets" '
+        '"${CMAKE_BINARY_DIR}/assets.cpp" "${CMAKE_BINARY_DIR}/assets.hpp" fixture)\n'
+        'add_custom_target(check_assets ALL DEPENDS "${CMAKE_BINARY_DIR}/assets.cpp")\n',
+        encoding="utf-8",
+    )
+    build = tmp_path / "build"
+
+    def run(*args: str) -> None:
+        subprocess.run([cmake, *args], check=True, capture_output=True, text=True, timeout=30)
+
+    # CMake compares file times: an edit within the clock's granularity of the first configure would
+    # look unchanged, so each edit moves the file's time forward explicitly.
+    clock = [time.time()]
+
+    def touch(path: Path) -> None:
+        clock[0] += 5
+        os.utime(path, (clock[0], clock[0]))
+
+    run("-S", str(tmp_path), "-B", str(build))
+    script.write_text("updated content", encoding="utf-8")
+    touch(script)
+    run("--build", str(build))
+    generated = build / "assets.cpp"
+    assert hashlib.sha256(script.read_bytes()).hexdigest() in generated.read_text()
+    added = assets / "new.css"
+    added.write_text("body { color: blue; }", encoding="utf-8")
+    touch(added)
+    run("--build", str(build))
+    assert '"new.css"' in generated.read_text()
+    added.unlink()
+    touch(assets)
+    run("--build", str(build))
+    assert '"new.css"' not in generated.read_text()

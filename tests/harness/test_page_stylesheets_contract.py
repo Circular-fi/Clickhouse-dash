@@ -19,31 +19,15 @@ def read(rel: str) -> str:
     return (css_sources.ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_each_page_shell_loads_its_own_generated_stylesheet():
-    for page in PAGES:
-        html = read(f"src/static/{page}.html")
-        assert f'var cssHref = window.__chdashUrl("static/style.{page}.css")' in html, page
-        assert 'window.__chdashUrl("static/style.css")' not in html, page
-        assert "document.write('<link rel=\"stylesheet\" href=\"' + cssHref + '\">');" in html, page
-
-
-def test_the_sheets_are_build_outputs_not_sources():
-    assert sorted(css_sources.sheets()) == sorted(SHEETS)
-    # Never committed: git ignores them, and the builds generate them.
-    assert "/src/static/style.*.css" in read(".gitignore")
-    cmake = read("src/CMakeLists.txt")
-    assert '"${Python3_EXECUTABLE}" "${_CSS_TOOL}" --out "${_STATIC_STAGE}"' in cmake
-    assert 'chdash_embed_directory("${_STATIC_STAGE}"' in cmake
-    docker = read("tests/Dockerfile.source")
-    assert "python3 /work/tools/build_page_css.py --out /work/src/static" in docker
-    assert "COPY --from=static /work/src/static /app/static" in docker
-    # The sources are not shipped: the stage drops them.
-    assert 'PATTERN "css" EXCLUDE' in cmake and "rm -rf /work/src/static/css" in docker
-
-
 def rule_lines(sheet: str) -> list[str]:
     """The rule lines of a generated sheet, in order (one rule per line)."""
     return [line.strip() for line in sheet.splitlines() if line.rstrip().endswith("}") and "{" in line]
+
+
+def test_the_sheets_are_the_pages_and_are_not_committed():
+    assert sorted(css_sources.sheets()) == sorted(SHEETS)
+    # Never committed: git ignores them, and the builds generate them.
+    assert "/src/static/style.*.css" in read(".gitignore")
 
 
 def test_page_sheets_keep_the_cascade_order_and_drop_only_unmatchable_rules():

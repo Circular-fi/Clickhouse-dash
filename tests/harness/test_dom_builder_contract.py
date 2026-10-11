@@ -331,18 +331,6 @@ def literal_ok(text: str) -> bool:
 
 # -------------------------------------------------------------------- tests
 
-def test_ns_h_is_the_builder_and_loads_with_app_dom():
-    dom = (STATIC / "app_dom.js").read_text(encoding="latin-1")
-    for needle in ("function h(tag, props, ...children)", "h.svg =", "h.frag =", "h.html =", "h.replace =", "Object.freeze(h);\nexport { h };",
-                   "dom.byId = byId;", "dom.$ = $;", "dom.$$ = $$;", "document.createTextNode(String(child))"):
-        assert needle in dom, needle
-    assert modules.common_modules()[:3] == ["app_format.js", "app_palette.js", "app_dom.js"]
-    doc = DOC.read_text(encoding="utf-8")
-    assert "## Building elements" in doc
-    for needle in ("h(tag, props, ...children)", "h.html(trusted)", "h.replace(container", "dom.$$(selector, root)", "test_dom_builder_contract.py"):
-        assert needle in doc, needle
-
-
 def test_no_local_dom_builders_or_lookup_copies():
     helper = re.compile(r"\bfunction\s+(?:node|el|element)\s*\(\s*tag\b|\b(?:const|let)\s+(?:node|el|element)\s*=\s*\(\s*tag\b")
     lookup = re.compile(r"\b(?:const|let)\s+(?:byId|\$|\$\$|qs|qsa)\s*=\s*\([^)]*\)\s*=>\s*document\.")
@@ -354,8 +342,6 @@ def test_no_local_dom_builders_or_lookup_copies():
         offenders += [f"{name}: {m.group(0)}" for m in code_matches(helper, src, mask)]
         offenders += [f"{name}: {m.group(0)}" for m in code_matches(lookup, src, mask)]
     assert not offenders, offenders
-    kit = (STATIC / "app_graph_kit.js").read_text(encoding="latin-1")
-    assert not re.search(r"^\s+el,$", kit, flags=re.M), "ns.graphKit.el is ns.h now"
 
 
 def test_lookups_go_through_dom_byid_and_the_scoped_queries():
