@@ -56,6 +56,7 @@ The release workflow builds Linux amd64/arm64 and macOS amd64/arm64. It uses iso
 The release chain follows these rules:
 
 - The release runs the CI workflow (`ci.yml`) on the commit that it builds. The build starts only when the tests pass.
+- The tests do not run on a push or a pull request: they are long. `ci.yml` runs when a release is asked for (it is called by `release.yaml`) and on request (Actions > CI > Run workflow). The sanitizers (`sanitize.yml`), clang-tidy and the release smoke test run on request only; CodeQL runs once a week.
 - Each action has a pin to a commit SHA, with the version in a comment. Dependabot updates the pins.
 - No release job restores a cache. Each checkout uses `persist-credentials: false`.
 - Only the publish job can write to the repository. It runs in the `release` environment. Set a required reviewer for this environment in the repository settings. The `gh` CLI publishes the release. No third-party action gets the write token.
@@ -110,7 +111,7 @@ tests/tools/clang-tidy.sh                    # all of src/*.cpp, in Docker (abou
 tests/tools/clang-tidy.sh src/api_logs.cpp   # some files
 ```
 
-Fix a finding in the code. To silence one line, write `// NOLINT(<check>)` and the reason. The `clang-tidy.yml` workflow runs on each pull request. It checks only the changed `.cpp` files, unless a header, a build file or `.clang-tidy` changes.
+Fix a finding in the code. To silence one line, write `// NOLINT(<check>)` and the reason. The `clang-tidy.yml` workflow runs on request (Actions > run workflow). It checks only the changed `.cpp` files, unless a header, a build file or `.clang-tidy` changes.
 
 ### Sanitizers
 
@@ -158,7 +159,7 @@ python3 tests/smoke/release_smoke.py --binary out/chdash            # run it as 
 python3 tests/smoke/release_smoke.py --binary out/chdash --scratch  # run it in a FROM scratch container
 ```
 
-The Dockerfile builds the binary like `.github/workflows/release.yaml` does (Zig, musl, static-pie, hardened). The release workflow runs the script on each binary before it publishes. The `release-smoke.yml` workflow runs it on each pull request.
+The Dockerfile builds the binary like `.github/workflows/release.yaml` does (Zig, musl, static-pie, hardened). The release workflow runs the script on each binary before it publishes. The `release-smoke.yml` workflow runs it on request.
 
 The backend tests can also run against the release binary:
 

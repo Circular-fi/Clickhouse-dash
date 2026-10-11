@@ -1,11 +1,8 @@
 name: CodeQL
 
+# Code scanning, not a test: once a week and on request, no longer on every push and pull request.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-  pull_request:
   schedule:
     - cron: '20 4 * * 1'
 

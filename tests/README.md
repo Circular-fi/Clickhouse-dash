@@ -465,7 +465,7 @@ These checks find defects that the functional tests do not see: a dangling refer
 
 The script stops the server with SIGTERM after the tests. It fails in three cases. A test fails. The server log holds `AddressSanitizer`, `LeakSanitizer` or `runtime error:`. The server exits with a code other than 0. On a shared host set `CHDASH_SANITIZE_PREFIX` (the names of the image and the container), `CHDASH_SANITIZE_PORT` and `CHDASH_FIXTURE_RESET=never`. The variables are in the header of the script.
 
-The `sanitize.yml` workflow runs `native`, `backend` and `frontend` on each pull request, every night and on request. It starts the ClickHouse services of `docker-compose.yml` and keeps the server log as the `sanitize-logs` artifact. The backend and harness run takes about 2 minutes on a server that is not loaded. The Playwright subset takes about 2 minutes. Both fit in a pull request run.
+The `sanitize.yml` workflow runs `native`, `backend` and `frontend` on request. It starts the ClickHouse services of `docker-compose.yml` and keeps the server log as the `sanitize-logs` artifact. The backend and harness run takes about 2 minutes on a server that is not loaded. The Playwright subset takes about 2 minutes. Both fit in a pull request run.
 
 ### ThreadSanitizer
 

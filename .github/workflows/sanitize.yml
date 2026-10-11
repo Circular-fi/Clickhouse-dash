@@ -4,12 +4,9 @@ name: Sanitizers
 # them under tests/backend-functional and tests/harness, then a Playwright subset.
 # ThreadSanitizer: the native unit tests, the backend tests and a concurrent load (tests/sanitize/load.py).
 # Fuzzing: every libFuzzer target of tests/fuzz for one minute.
-# Runs on every pull request, every night and on request. A finding fails the job.
+# Runs on request only (Actions > run workflow), before a release when you want them. A finding fails the job.
 on:
   workflow_dispatch:
-  pull_request:
-  schedule:
-    - cron: '15 2 * * *'
 
 permissions:
   contents: read
@@ -50,8 +47,7 @@ jobs:
       - name: Backend and harness tests on the sanitized server
         run: tests/tools/sanitize.sh backend
 
-      # The browser traffic of a few specs that cover many routes. It takes a few minutes: it runs on
-      # every pull request.
+      # The browser traffic of a few specs that cover many routes. It takes a few minutes.
       - name: Playwright subset on the sanitized server
         run: tests/tools/sanitize.sh frontend
 
