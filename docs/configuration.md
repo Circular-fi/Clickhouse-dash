@@ -178,7 +178,7 @@ The audit has a thread of its own and a budget of 60 seconds for each host: it n
 ChDash has no end-user login, no Bearer authentication and no RBAC for each user. The credentials of the configured host define fully the access to ClickHouse:
 
 - `runner_uri` is the ClickHouse authorization boundary. It is the **only** connection on which the dashboard can run panel-supplied SQL.
-- `system_uri` is a technical connection of the backend. The backend uses it only for the metadata queries and log queries that it generates, and for cancellation.
+- `system_uri` is a technical connection of the backend. The backend uses it only for the metadata queries and log queries that it generates, and for cancellation. The cancel of a run, of an export and of a Deep Analyze job (and the stop of the server) send their `KILL QUERY` through it.
 
 Every caller who can reach a given panel and host therefore has the same ClickHouse permissions. These are the permissions of its `runner_uri`. If you need different sets of permissions, expose different deployments or hosts that use different runners. Do this outside ChDash.
 

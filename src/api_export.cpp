@@ -179,12 +179,14 @@ std::shared_ptr<clickhouse::Client> make_export_client(const std::string& runner
       error);
 }
 
-// KILL QUERY for one exported statement, as the runner (a user may stop its own queries).
+// KILL QUERY for one exported statement, through the system account like the cancel of a run (docs/configuration.md,
+// "Authorization model"): the runner has no KILL QUERY grant, and the statement is stopped by the account that holds it.
 void cancel_export_best_effort(
     const HostSpec& host,
     const std::string& query_id) {
   if (query_id.empty()) return;
-  kill_queries(host.runner_uri, "query_id = " + sql::quote_string(query_id), false);
+  const std::string& uri = host.system_uri.empty() ? host.runner_uri : host.system_uri;
+  kill_queries(uri, "query_id = " + sql::quote_string(query_id), false);
 }
 
 // While an exported statement runs, a thread checks the download every second. A
@@ -367,7 +369,7 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
       return json_error(
           res,
           403,
-          "cancel_requires_token",
+          "sql_forbidden",
           "Direct KILL QUERY is disabled in export SQL; use the query cancel capability.");
     }
     total_sql_bytes += sql.size();
@@ -422,19 +424,32 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
   writer.Key("export_id"); write_json_text(writer, job.export_id);
   writer.Key("format"); writer.String(export_format_name(format));
   writer.Key("expires_in_ms"); writer.Int(cfg_.export_settings.token_ttl_ms);
-  const std::string url = "api/export/stream?token=" + token;
-  writer.Key("download_url"); write_json_text(writer, url);
+  // The stream starts with a POST that carries the token in its JSON body. The token is in no address: no log, no history of a
+  // browser, no Referer and no proxy keeps it.
+  writer.Key("stream_url"); writer.String("api/export/stream");
+  writer.Key("token"); write_json_text(writer, token);
   writer.EndObject();
   res.status = 200;
   res.set_header("Cache-Control", "no-store");
   res.set_content(buffer.GetString(), "application/json");
 }
 
+// GET never starts an export: the stream runs the SQL of the export, which can be a command, so a method that a browser or a proxy
+// sends on its own (a prefetch, an <img>) must not reach it.
+void Server::handle_export_stream_not_allowed(const httplib::Request&, httplib::Response& res) {
+  res.set_header("Allow", "POST");
+  json_error(res, 405, "method_not_allowed", "Start the export stream with POST api/export/stream and the token in the JSON body.");
+}
+
 void Server::handle_export_stream(const httplib::Request& req, httplib::Response& res) {
-  if (!req.has_param("token")) {
-    return json_error(res, 400, "missing_export_token", "Missing export download token.");
+  rapidjson::Document doc;
+  if (!parse_json_body(req, doc)) {
+    return json_error(res, 400, "invalid_json", "Invalid JSON request body.");
   }
-  const std::string token = req.get_param_value("token");
+  if (!doc.HasMember("token") || !doc["token"].IsString() || doc["token"].GetStringLength() == 0) {
+    return json_error(res, 400, "missing_export_token", "Missing export token: send {\"token\": ...} in the JSON body.");
+  }
+  const std::string token(doc["token"].GetString(), doc["token"].GetStringLength());
   const auto claims = jwt_.verify_export_token(token, now_unix_sec());
   if (!claims) return json_error(res, 404, "export_not_found", "Export is unavailable or expired.");
 
@@ -585,6 +600,9 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
                   disconnected = true;
                   return false;
                 }
+                // A command answers with a block that has no column (its header): it opens no member, the synthetic status
+                // member below stands for it.
+                if (block.GetColumnCount() == 0) return true;
                 if (!result_entry_open) {
                   if (!zip.begin_entry(result_name)) {
                     disconnected = true;

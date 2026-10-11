@@ -208,7 +208,7 @@ For this reason, a failure of the system account does not mark a host as down wh
   `/api/explorer/ops/keeper` of v2.14.0 stay as aliases.
 - `POST /mcp` the MCP endpoint (only when `mcp.enabled`). It needs `Authorization: Bearer <key>`. `/api/mcp/meta` and `/api/mcp/keys` serve the MCP page. Refer to [`docs/mcp.md`](docs/mcp.md).
 - `POST /api/export/run` prepare a direct-download request and issue a short-lived one-time export token.
-- `GET /api/export/stream?token=...` stream a ZIP64 archive directly from ClickHouse with bounded memory and no temporary file of the size of the result.
+- `POST /api/export/stream` with `{"token": ...}` in the JSON body: stream a ZIP64 archive directly from ClickHouse with bounded memory and no temporary file of the size of the result. The token is never in an address, and `GET` on this route starts nothing (`405`). [`docs/massive-export.md`](docs/massive-export.md) has the details.
 
 [`docs/explorer.md`](docs/explorer.md) describes the Explorer List and Graph behavior, the security filtering, the edge semantics and the scope of the metrics. [`docs/system.md`](docs/system.md) describes the System page. [`docs/query-analysis.md`](docs/query-analysis.md) describes the query profiling, the on-demand analysis and Deep Analyze.
 [`docs/mcp.md`](docs/mcp.md) describes the MCP server, its keys, its tools and the grants of its ClickHouse user.

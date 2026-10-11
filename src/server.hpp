@@ -400,6 +400,7 @@ private:
 
   void handle_export_run(const httplib::Request& req, httplib::Response& res);
   void handle_export_stream(const httplib::Request& req, httplib::Response& res);
+  void handle_export_stream_not_allowed(const httplib::Request& req, httplib::Response& res);
 
   void handle_explorer_catalog(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_table(const httplib::Request& req, httplib::Response& res);

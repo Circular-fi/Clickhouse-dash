@@ -65,7 +65,7 @@ A failure of a ClickHouse statement gets its status from the **code that ClickHo
 | Any other refusal of ClickHouse | 503 | the code of the route (`trace_search_failed`) | no |
 | A fault of ChDash itself | 500 | the code of the route | no |
 
-`<page>` is `logs`, `trace`, `metrics` or `signal`. A request that is wrong (a bad parameter, a bad JSON body) answers 400 with a code of its own. A route whose host is unknown answers 404 `unknown_host`.
+`<page>` is `logs`, `trace`, `metrics` or `signal`. A request that is wrong (a bad parameter, a bad JSON body) answers 400 with a code of its own. A route whose host is unknown answers 404 `unknown_host`. A statement that ChDash refuses to run (a `KILL QUERY` in the SQL of a run or of an export) answers 403 `sql_forbidden`.
 
 A route with a short, fixed list of parameters (the System page, `/api/system/...`) refuses any other name: 400 `unknown_parameter`. A number in a parameter is the whole text of the value: `123abc`, ` 12` and `1e3` are not integers. The trace and metrics routes read a bad `start_ms` or `end_ms` as 400. For the other numbers of the Traces routes (`limit`, `lookback_minutes`, the duration bounds), a text that is not a number gives the default, and a number outside the bounds gives the nearest bound.
 

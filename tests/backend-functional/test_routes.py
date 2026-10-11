@@ -53,6 +53,12 @@ def parse_sse(response: requests.Response, stop_events: set[str] | None = None) 
     return events
 
 
+def export_stream(handshake: dict, **kwargs):
+    """The download of an export: POST the token of the handshake to its stream address (the token is never in an address)."""
+    return SESSION.post(urljoin(BASE_URL + "/", handshake["stream_url"]), json={"token": handshake["token"]},
+                        timeout=kwargs.pop("timeout", 60), **kwargs)
+
+
 def run_sql(sql: str, *, alias: bool = False, mode: str = "normal") -> tuple[dict, list[dict]]:
     route = "/api/query" if alias else "/api/query/run"
     r = post(route, json={"host_id": "local", "sql": sql, "mode": mode})
@@ -293,7 +299,7 @@ def test_direct_kill_query_is_refused_whatever_space_separates_its_words():
                             ("/api/export/run", {"host_id": "local", "format": "json", "queries": [sql]})):
             response = post(route, json=body)
             assert response.status_code == 403, (route, repr(sql), response.status_code, response.text[:200])
-            assert response.json().get("error_code") == "cancel_requires_token", (route, repr(sql))
+            assert response.json().get("error_code") == "sql_forbidden", (route, repr(sql))
 
 
 
@@ -960,8 +966,7 @@ def test_export_routes_produce_downloadable_zip():
     response = post("/api/export/run", json={"host_id": "local", "format": "json", "queries": ["SELECT 42 AS answer"]})
     assert response.status_code == 200, response.text
     payload = response.json()
-    download = urljoin(BASE_URL + "/", payload["download_url"])
-    archive = SESSION.get(download, timeout=60)
+    archive = export_stream(payload)
     assert archive.status_code == 200, archive.text
     assert zipfile.is_zipfile(io.BytesIO(archive.content))
     with zipfile.ZipFile(io.BytesIO(archive.content)) as zf:
@@ -983,7 +988,7 @@ TYPED_EXPORT_SQL = (
 def export_files(fmt: str, sql: str) -> dict[str, str]:
     response = post("/api/export/run", json={"host_id": "local", "format": fmt, "queries": [sql]})
     assert response.status_code == 200, response.text
-    archive = SESSION.get(urljoin(BASE_URL + "/", response.json()["download_url"]), timeout=60)
+    archive = export_stream(response.json())
     assert archive.status_code == 200, archive.text
     with zipfile.ZipFile(io.BytesIO(archive.content)) as zf:
         return {name: zf.read(name).decode("utf-8") for name in zf.namelist()}
@@ -1022,7 +1027,7 @@ def test_csv_export_serializes_narrow_decimals_date32_and_shortest_floats():
     # abort the whole CSV export.
     response = post("/api/export/run", json={"host_id": "local", "format": "csv", "queries": [TYPED_EXPORT_SQL]})
     assert response.status_code == 200, response.text
-    archive = SESSION.get(urljoin(BASE_URL + "/", response.json()["download_url"]), timeout=60)
+    archive = export_stream(response.json())
     assert archive.status_code == 200, archive.text
     with zipfile.ZipFile(io.BytesIO(archive.content)) as zf:
         assert "results.csv" in zf.namelist(), zf.namelist()
@@ -1067,8 +1072,7 @@ def test_multiquery_export_stops_at_first_failed_statement_with_explicit_error()
         },
     )
     assert response.status_code == 200, response.text
-    download = urljoin(BASE_URL + "/", response.json()["download_url"])
-    archive = SESSION.get(download, timeout=60)
+    archive = export_stream(response.json())
     assert archive.status_code == 200, archive.text
     assert zipfile.is_zipfile(io.BytesIO(archive.content))
 

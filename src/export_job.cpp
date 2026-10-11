@@ -47,8 +47,13 @@ bool ExportJobStore::put(ExportJob job, std::string* error) {
 
   job.created_at = now;
   job.expires_at = now + ttl_;
+  // The counter follows the entry: an id that is already there (the emplace does not replace it) keeps its own bytes.
+  const std::string id = job.export_id;
+  if (!jobs_.emplace(id, std::move(job)).second) {
+    if (error) *error = "export id already pending";
+    return false;
+  }
   retained_sql_bytes_ += bytes;
-  jobs_.emplace(job.export_id, std::move(job));
   if (error) error->clear();
   return true;
 }

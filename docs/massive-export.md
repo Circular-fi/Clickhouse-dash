@@ -10,16 +10,51 @@ The client prepares the export with this request:
 
 ```http
 POST api/export/run
+Content-Type: application/json
+
+{"host_id": "local", "format": "csv", "queries": ["SELECT 1", "SELECT 2"]}
 ```
 
 The request contains `host_id`, `format` and the ordered SQL statements. The backend validates the host. It stores only a bounded and short-lived description of the pending export.
-It returns a signed capability URL:
+It answers with a signed capability:
 
-```text
-api/export/stream?token=...
+```json
+{"export_id": "...", "format": "csv", "expires_in_ms": 120000, "stream_url": "api/export/stream", "token": "eyJ..."}
 ```
 
-The short token belongs to the export and to the host. It expires quickly. The backend consumes the pending export atomically on the first accepted stream. The token is an internal one-time capability. It is not a token for user authentication.
+The client then starts the download with a `POST`. The token is in the JSON body, never in an address:
+
+```http
+POST api/export/stream
+Content-Type: application/json
+
+{"token": "eyJ..."}
+```
+
+A token in an address ends in the access logs, in the history of a browser, in a `Referer` header and in the logs of a proxy. A body does not. For the same reason, `GET api/export/stream` starts nothing. It answers `405 method_not_allowed` with `Allow: POST`, and it does not use the token. The stream runs the SQL of the export, and that SQL can be a command (`CREATE`, `ALTER`, `INSERT`). A method that a browser or a proxy sends on its own (a prefetch, an `<img>`) must not reach it. Like every write of ChDash, the `POST` needs `Content-Type: application/json` (`415 unsupported_media_type`) and refuses a request from another site (`403 cross_site_request`).
+
+The short token belongs to the export and to the host. It expires quickly. The backend consumes the pending export atomically on the first accepted stream. A second `POST` with the same token answers `404 export_not_found`. The token is an internal one-time capability. It is not a token for user authentication.
+
+Example for a script:
+
+```sh
+curl -s -X POST -H 'Content-Type: application/json' \
+  -d '{"host_id":"local","format":"csv","queries":["SELECT 1"]}' http://localhost:8080/api/export/run > handshake.json
+curl -X POST -H 'Content-Type: application/json' \
+  -d "{\"token\": \"$(jq -r .token handshake.json)\"}" -o export.zip http://localhost:8080/api/export/stream
+```
+
+The errors of the handshake and of the stream have the one JSON shape of [operations.md](operations.md#errors):
+
+| Status | `error_code` | When |
+|---|---|---|
+| 400 | `invalid_json`, `missing_host_id`, `missing_format`, `missing_queries`, `invalid_format`, `invalid_queries`, `missing_export_token` | The request is wrong. |
+| 403 | `sql_forbidden` | A statement is a `KILL QUERY`. Cancellation goes through the cancel capability of ChDash, not through SQL. |
+| 404 | `unknown_host`, `export_not_found` | The host or the export is not known, or the token expired or was used. |
+| 405 | `method_not_allowed` | `GET api/export/stream`. |
+| 413 | `too_many_queries`, `sql_too_large`, `export_sql_too_large` | A bound of the handshake. |
+| 429 | `export_queue_full`, `export_capacity` | Too many pending handshakes, or `export.max_concurrent` streams run. |
+| 503 | `host_down`, `export_metadata_unavailable` | The host is down, or the metadata of the archive cannot be read. |
 
 Execution metadata is a **required** part of this export contract. Before the backend accepts the handshake, it does these checks:
 
@@ -91,7 +126,7 @@ The same rule to stop on an error applies in this case: the SQL succeeds, but th
 
 `DataSink::write` of `cpp-httplib` is synchronous with the HTTP stream. A slow browser therefore slows the producer naturally. One write waits at most `server.write_timeout_ms` (default 120 seconds) for a client that does not read, for example a paused download. Past that time, the export stops. Each export owns a dedicated native ClickHouse connection. The backend never returns this connection to the interactive connection pool.
 
-The ClickHouse query uses `Query::OnDataCancelable`. If the HTTP sink is not writable any more, the callback returns `false`. This causes `clickhouse-cpp` to send a native Cancel packet. The progress callback also checks the sink. A statement can send no row and no progress for a long time (a long DDL, `OPTIMIZE ... FINAL`, a mutation with `mutations_sync`). For this case, a watchdog thread checks the download every second while the statement runs. When the download is closed, the watchdog runs `KILL QUERY ... ASYNC` in the runner context. The export then gives its slot of `export.max_concurrent` back at once.
+The ClickHouse query uses `Query::OnDataCancelable`. If the HTTP sink is not writable any more, the callback returns `false`. This causes `clickhouse-cpp` to send a native Cancel packet. The progress callback also checks the sink. A statement can send no row and no progress for a long time (a long DDL, `OPTIMIZE ... FINAL`, a mutation with `mutations_sync`). For this case, a watchdog thread checks the download every second while the statement runs. When the download is closed, the watchdog runs `KILL QUERY ... ASYNC` with the system account (`system_uri`, as the cancel of a run does: the runner has no `KILL QUERY` grant, see [Authorization model](configuration.md#authorization-model)). The export then gives its slot of `export.max_concurrent` back at once.
 
 Each statement carries `log_comment = 'chdash-export'`, and `max_execution_time` and `max_memory_usage` when `export.max_execution_time_s` and `export.max_memory_usage` set them (0, the default, leaves them to the profile of the runner). A statement that sends nothing for `export.receive_timeout_ms` (default 10 minutes, 0 = no limit) fails. The connection uses TCP keepalive, so a peer that is gone is found sooner.
 

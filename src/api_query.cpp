@@ -61,7 +61,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
     return json_error(
         res,
         403,
-        "cancel_requires_token",
+        "sql_forbidden",
         "Direct KILL QUERY is disabled in panel SQL; use the query cancel capability.");
   }
   const std::string host_id = doc["host_id"].GetString();

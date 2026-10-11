@@ -119,8 +119,8 @@ class Load:
                                                                "queries": [rng.choice(QUERIES[:4])]})
         if status != 200:
             return
-        url = json.loads(payload)["download_url"]
-        with self.request("GET", "/" + url.lstrip("/"), timeout=60) as download:
+        handshake = json.loads(payload)
+        with self.request("POST", "/" + handshake["stream_url"].lstrip("/"), {"token": handshake["token"]}, timeout=60) as download:
             if rng.random() < 0.5:
                 download.read()
             else:

@@ -217,7 +217,7 @@ void Server::handle_metrics(const httplib::Request&, httplib::Response& res) {
   prom_sample(out, "chdash_query_streams", {}, static_cast<double>(active_query_streams_.load(std::memory_order_relaxed)));
   prom_family(out, "chdash_host_streams", "gauge", "Open host status streams (GET /api/hosts/stream).");
   prom_sample(out, "chdash_host_streams", {}, static_cast<double>(active_host_streams_.load(std::memory_order_relaxed)));
-  prom_family(out, "chdash_exports_active", "gauge", "Exports that stream (GET /api/export/stream).");
+  prom_family(out, "chdash_exports_active", "gauge", "Exports that stream (POST /api/export/stream).");
   prom_sample(out, "chdash_exports_active", {}, static_cast<double>(active_exports_.load(std::memory_order_relaxed)));
 
   // The admission of the heavy work: the places in use, the requests that wait, the ones that were refused.

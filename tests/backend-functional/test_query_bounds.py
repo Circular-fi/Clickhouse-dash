@@ -181,8 +181,9 @@ def test_an_abandoned_export_gives_its_slot_back_while_its_statement_sends_nothi
                "AND query NOT LIKE '%system.processes%'")
     handshake = SESSION.post(f"{BASE_URL}/api/export/run", json={"host_id": "local", "format": "csv", "queries": [sql]}, timeout=30)
     assert handshake.status_code == 200, handshake.text
-    download = urljoin(BASE_URL + "/", handshake.json()["download_url"])
-    stream = SESSION.get(download, stream=True, timeout=(10, 120))
+    handshake_json = handshake.json()
+    stream = SESSION.post(urljoin(BASE_URL + "/", handshake_json["stream_url"]), json={"token": handshake_json["token"]},
+                          stream=True, timeout=(10, 120))
     assert stream.status_code == 200, stream.text
     next(stream.iter_content(chunk_size=64))  # the archive has started: query.sql is written first
     assert wait_for(lambda: ch(running).strip() != "0")
@@ -195,7 +196,7 @@ def test_an_abandoned_export_gives_its_slot_back_while_its_statement_sends_nothi
         probe = SESSION.post(f"{BASE_URL}/api/export/run",
                              json={"host_id": "local", "format": "csv", "queries": ["SELECT 1"]}, timeout=30)
         assert probe.status_code == 200, probe.text
-        archive = SESSION.get(urljoin(BASE_URL + "/", probe.json()["download_url"]), timeout=60)
+        archive = SESSION.post(urljoin(BASE_URL + "/", probe.json()["stream_url"]), json={"token": probe.json()["token"]}, timeout=60)
         return archive.status_code == 200
     assert wait_for(slot_free, timeout=10), "the export slot is still held"
     assert time.monotonic() - started < 30

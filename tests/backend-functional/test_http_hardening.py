@@ -27,6 +27,7 @@ WRITES = [
     ("POST", "/api/query/deep-analysis", {"query_id": "x", "host_id": "local"}),
     ("POST", "/api/query/deep-analysis/cancel", {"job_id": "x", "host_id": "local"}),
     ("POST", "/api/export/run", {"queries": ["SELECT 1"], "host_id": "local"}),
+    ("POST", "/api/export/stream", {"token": "x"}),
     ("POST", "/api/explorer/table/data", {"host_id": "local", "database": "system", "table": "one"}),
     ("POST", "/api/mcp/keys", {"name": "x"}),
     ("DELETE", "/api/mcp/keys/x", None),

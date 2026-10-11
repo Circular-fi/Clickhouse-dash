@@ -515,7 +515,8 @@ Server::Server(AppConfig cfg, bool start_background)
   http_.Get("/api/query/execution", scoped([&](const auto& req, auto& res) { handle_query_execution(req, res); }));
 
   http_.Post("/api/export/run", scoped([&](const auto& req, auto& res) { handle_export_run(req, res); }));
-  http_.Get("/api/export/stream", scoped([&](const auto& req, auto& res) { handle_export_stream(req, res); }));
+  http_.Post("/api/export/stream", scoped([&](const auto& req, auto& res) { handle_export_stream(req, res); }));
+  http_.Get("/api/export/stream", scoped([&](const auto& req, auto& res) { handle_export_stream_not_allowed(req, res); }));
 
   if (cfg_.traces_on()) {
     http_.Get("/api/traces/meta", scoped([&](const auto& req, auto& res) { handle_traces_meta(req, res); }));

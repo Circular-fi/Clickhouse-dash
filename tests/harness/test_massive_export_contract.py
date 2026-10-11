@@ -16,11 +16,17 @@ def test_massive_export_uses_two_phase_one_time_capability() -> None:
     jwt = read("src/jwt.cpp")
 
     assert 'Post("/api/export/run"' in server
-    assert 'Get("/api/export/stream"' in server
+    # The stream starts with a POST that carries the token in its JSON body; a GET only says 405 (it starts nothing).
+    assert 'Post("/api/export/stream"' in server
+    assert 'Get("/api/export/stream", scoped([&](const auto& req, auto& res) { handle_export_stream_not_allowed(req, res); }));' in server
     assert "authenticate_request" not in api
     assert "jwt_.sign_export_token(claims)" in api
     assert "jwt_.verify_export_token(token" in api
     assert "export_jobs_->consume(" in api
+    # The token is in no address (ARCH-B-067): not in the handshake answer, not read from the query string.
+    assert "download_url" not in api and "get_param_value" not in api and "has_param" not in api
+    assert 'writer.Key("stream_url"); writer.String("api/export/stream");' in api
+    assert 'writer.Key("token"); write_json_text(writer, token);' in api
     assert "jobs_.erase(it)" in store
     assert 'payload.AddMember("purpose", "export", pa)' in jwt
 

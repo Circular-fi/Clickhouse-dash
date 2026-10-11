@@ -8,6 +8,7 @@
 
 #include "admission.hpp"
 #include "deep_analysis_jobs.hpp"
+#include "export_job.hpp"
 #include "request_context.hpp"
 #include "routed_server.hpp"
 
@@ -414,6 +415,35 @@ void test_deep_jobs_many_threads() {
   CHECK(jobs.size() <= 8);
 }
 
+// ---- the pending exports (src/export_job.hpp) ----
+
+void test_export_store_counts_the_bytes_of_the_entries_it_holds() {
+  ExportJobStore store(std::chrono::minutes(1), 4, 1024);
+  const auto job = [](const std::string& id, const std::string& sql) {
+    ExportJob out;
+    out.export_id = id;
+    out.host_id = "h";
+    out.queries = {sql};
+    return out;
+  };
+  CHECK(store.put(job("a", std::string(100, 'x'))));
+  CHECK_EQ(store.retained_sql_bytes(), size_t(100));
+  // An id that is already pending is refused, and its bytes are not counted (the counter followed the emplace before).
+  std::string error;
+  CHECK(!store.put(job("a", std::string(50, 'y')), &error));
+  CHECK(!error.empty());
+  CHECK_EQ(store.retained_sql_bytes(), size_t(100));
+  CHECK_EQ(store.size(), size_t(1));
+  // The one-time capability: a second consume finds nothing, and the bytes go with the job.
+  CHECK(store.consume("a", "h").has_value());
+  CHECK(!store.consume("a", "h").has_value());
+  CHECK_EQ(store.retained_sql_bytes(), size_t(0));
+  // Another host cannot consume it.
+  CHECK(store.put(job("b", "select 1")));
+  CHECK(!store.consume("b", "other").has_value());
+  CHECK(store.consume("b", "h").has_value());
+}
+
 int main() {
   test_admission_limits_each_key();
   test_admission_zero_is_no_limit();
@@ -424,6 +454,7 @@ int main() {
   test_the_context_does_not_cross_threads();
   test_a_route_runs_in_the_process();
   test_the_handler_sees_the_context_of_the_caller();
+  test_export_store_counts_the_bytes_of_the_entries_it_holds();
   test_deep_jobs_run_end_and_are_read_by_their_host();
   test_deep_jobs_cancel();
   test_deep_jobs_are_bounded();
