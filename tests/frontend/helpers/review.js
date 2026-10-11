@@ -31,6 +31,12 @@ export async function stabilizePage(page) {
   }).catch(() => undefined);
 }
 
+// One screenshot and one audit of the page as it is. The audit has two kinds of fields:
+// - rules: horizontalOverflow and outsideViewport fail the capture below (a control that escapes the viewport is a bug);
+// - signals: clippedText, smallControls, overlappingControls and the style token counts are counted per state in the
+//   design report (scripts/build-report.mjs) for a person to read. They are heuristics, not rules: a calendar open over
+//   the facets overlaps by design, a text with an ellipsis is clipped by design. Rules of the same ideas that can fail
+//   have their own specs (touch targets: ui-foundations.spec.js, labels and names: a11y-contract.spec.js).
 export async function captureState(page, testInfo, state) {
   await stabilizePage(page);
   const project = safeName(testInfo.project.name);
@@ -88,16 +94,17 @@ export async function captureState(page, testInfo, state) {
       }
     }
 
+    // Sorted by left edge: a control is compared with the ones that start before its right edge only.
     const overlapPairs = [];
-    for (let i = 0; i < controls.length; i += 1) {
-      for (let j = i + 1; j < controls.length; j += 1) {
-        const a = controls[i], b = controls[j];
+    const byLeft = controls.slice().sort((a, b) => a.x - b.x);
+    for (let i = 0; i < byLeft.length && overlapPairs.length < 80; i += 1) {
+      const a = byLeft[i];
+      for (let j = i + 1; j < byLeft.length && byLeft[j].x < a.x + a.width && overlapPairs.length < 80; j += 1) {
+        const b = byLeft[j];
         const x = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
         const y = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
         if (x * y > 16) overlapPairs.push({ a: a.selector, b: b.selector, overlapArea: x * y });
-        if (overlapPairs.length >= 80) break;
       }
-      if (overlapPairs.length >= 80) break;
     }
 
     const styleTargets = Array.from(document.querySelectorAll('body, header, main, .panel, button, input, textarea, select, table, th, td, [role="dialog"]')).filter(visible);

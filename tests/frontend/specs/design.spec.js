@@ -20,6 +20,8 @@ test.afterEach(async ({ page }, testInfo) => {
   const obs = observers.get(page);
   if (!obs) return;
   await obs.flush(testInfo, testInfo.title);
+  // A capture of a page whose script threw proves little about the page.
+  expect(obs.pageErrors).toEqual([]);
 });
 
 test('query workspace loads cleanly', async ({ page }, testInfo) => {
