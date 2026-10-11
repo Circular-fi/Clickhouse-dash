@@ -29,12 +29,8 @@ RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCHDASH_EMBED_STATIC=OFF \
  && cmake --build /work/build --target clickhouse-cpp-lib
 
-FROM toolchain AS builder
-ARG CHDASH_SEMVER
-ARG CHDASH_GIT_SHA
-ARG CHDASH_BUILD_TIME
-ARG SOURCE_CMAKE_BUILD_TYPE
-ARG SOURCE_WERROR
+# The C++ sources, shared by the two builds below.
+FROM toolchain AS sources
 COPY --from=deps /work/build /work/build
 COPY src/CMakeLists.txt /work/src/
 COPY src/EmbedStatic.cmake /work/src/
@@ -43,10 +39,44 @@ COPY src/PatchRapidJSON.cmake /work/src/
 COPY src/*.cpp /work/src/
 COPY src/*.hpp src/*.def /work/src/
 
+# The default build: the binary reads ./static from the disk (CHDASH_EMBED_STATIC=OFF), so a change of a script or a
+# stylesheet needs no C++ rebuild. The browser tests run on it.
+FROM sources AS builder
+ARG CHDASH_SEMVER
+ARG CHDASH_GIT_SHA
+ARG CHDASH_BUILD_TIME
+ARG SOURCE_CMAKE_BUILD_TYPE
+ARG SOURCE_WERROR
 RUN cmake -S /work/src -B /work/build -G Ninja \
       -DCMAKE_BUILD_TYPE=${SOURCE_CMAKE_BUILD_TYPE} \
       -DCHDASH_BUILD_APP=ON \
       -DCHDASH_EMBED_STATIC=OFF \
+      -DCHDASH_WERROR=${SOURCE_WERROR} \
+      -DCHDASH_SEMVER_VALUE="${CHDASH_SEMVER}" \
+      -DCHDASH_GIT_SHA_VALUE="${CHDASH_GIT_SHA}" \
+      -DCHDASH_BUILD_TIME_VALUE="${CHDASH_BUILD_TIME}" \
+      -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld" \
+ && cmake --build /work/build --target chdash -j$(nproc) \
+ && cp /work/build/chdash /work/chdash
+
+# The production asset path: the same build with the files embedded (CHDASH_EMBED_STATIC=ON, as the release builds
+# it). CMake stages src/static with the tools of tools/ (stylesheets, versions in the shells, .gz copies) and compiles
+# the result into the binary, which then serves nothing from the disk. Target `runtime-embedded` runs the browser
+# tests on it (the `embedded` profile of tests/docker-compose.yml). Keep the configure line as the one above.
+FROM sources AS builder-embedded
+ARG CHDASH_SEMVER
+ARG CHDASH_GIT_SHA
+ARG CHDASH_BUILD_TIME
+ARG SOURCE_CMAKE_BUILD_TYPE
+ARG SOURCE_WERROR
+RUN apk add --no-cache python3
+COPY tools/build_page_css.py tools/css_tree.py tools/icons.py tools/module_graph.py tools/page_shells.py tools/stage_static.py /work/tools/
+COPY src/shell /work/src/shell
+COPY src/static /work/src/static
+RUN cmake -S /work/src -B /work/build -G Ninja \
+      -DCMAKE_BUILD_TYPE=${SOURCE_CMAKE_BUILD_TYPE} \
+      -DCHDASH_BUILD_APP=ON \
+      -DCHDASH_EMBED_STATIC=ON \
       -DCHDASH_WERROR=${SOURCE_WERROR} \
       -DCHDASH_SEMVER_VALUE="${CHDASH_SEMVER}" \
       -DCHDASH_GIT_SHA_VALUE="${CHDASH_GIT_SHA}" \
@@ -77,6 +107,18 @@ COPY src/wasm /work/src/wasm
 COPY src/static/wasm /work/src/static/wasm
 RUN python3 /work/tools/build_wasm.py --check
 
+# The embedded build as an image: the binary alone, no ./static, so a page that is not embedded is a 404.
+FROM alpine:3.20 AS runtime-embedded
+RUN apk add --no-cache ca-certificates libstdc++ libgcc
+WORKDIR /app
+COPY --from=builder-embedded /work/chdash /app/chdash
+COPY tests/entrypoints/source-entrypoint.sh /usr/local/bin/chdash-source-entrypoint
+RUN chmod +x /usr/local/bin/chdash-source-entrypoint
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD ["/usr/local/bin/chdash-source-entrypoint", "--health"]
+ENTRYPOINT ["/usr/local/bin/chdash-source-entrypoint"]
+
+# The default target (the last stage): the build that reads ./static from the disk.
 FROM alpine:3.20 AS runtime
 RUN apk add --no-cache ca-certificates libstdc++ libgcc
 WORKDIR /app
