@@ -30,7 +30,7 @@ The important invariant is this: `system_uri` is for enrichment only. It never a
 
 ## Shell and navigation
 
-The Explorer shell has one nav row (48 px, `#explorerTopBar`). The nav row has one underline tab row (`#explorerNavTabs`) with the view tabs `Catalog | Functions`. On the Catalog only, it also has a divider and its `Browse | Graph` tabs (`#explorerModeTabs`, `?mode=graph`). These are the second-level sections of docs/ui-foundations.md ("Tabs"), like the Search / Services / Service map of Observability after Traces / Logs / Metrics. Each of the two rows is an `tabs` tablist (Left / Right / Home / End within it).
+The Explorer shell has one nav row (40 px, `#explorerTopBar`). The nav row has one underline tab row (`#explorerNavTabs`) with the view tabs `Catalog | Functions`. On the Catalog only, it also has a divider and its `Browse | Graph` tabs (`#explorerModeTabs`, `?mode=graph`). These are the second-level sections of docs/ui-foundations.md ("Tabs"), like the Search / Services / Service map of Observability after Traces / Logs / Metrics. Each of the two rows is an `tabs` tablist (Left / Right / Home / End within it).
 
 The Explorer code is two controllers (one for each page) and the modules under them. Each module imports what it uses. The pure modules have Node tests (`tests/frontend/model/explorer-model.test.cjs`, `explorer-detail-model.test.cjs`, `explorer-graph-model.test.cjs`).
 

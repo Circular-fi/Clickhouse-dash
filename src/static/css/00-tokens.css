@@ -340,7 +340,7 @@
   --explorer-section-title-gap: 8px;
   --explorer-meta-font: var(--fs-sm);
   --gutter: 12px;
-  --nav-row-h: 48px;
+  --nav-row-h: 40px;
   --shell-border: 1px solid var(--border);
   /* The five widths at which a layout changes (tests/harness/test_css_layers_contract.py lists them: a media query
      names one of them, or the pixel above it for a min-width; from 1280 px a window is wide). Media queries cannot read custom properties, so they
