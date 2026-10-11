@@ -79,6 +79,7 @@ export default defineConfig({
   snapshotPathTemplate: `${process.cwd()}/snapshots/{projectName}/{testFilePath}/{arg}{ext}`,
   reporter: [
     ['line'],
+    ['./helpers/skip-reporter.js'],
     ['json', { outputFile: `${artifactsRoot}/playwright-results.json` }],
     ['html', { outputFolder: `${artifactsRoot}/playwright-report`, open: 'never' }],
   ],
