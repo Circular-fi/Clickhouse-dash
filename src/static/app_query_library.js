@@ -1144,8 +1144,8 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
   back.setAttribute("aria-label", "Back to the list");
   back.title = "Back to the list";
   back.appendChild(icon("back"));
-  const heading = h("h3", { class: "qlPreview__title", id: "qlFormTitle" }, title);
-  heading.title = title;
+  // The title names the form for a screen reader; it is not drawn (the Folder, Name and SQL say what the form is).
+  const heading = h("h3", { class: "qlPreview__title srOnly", id: "qlFormTitle" }, title);
   head.append(back, heading);
   form.setAttribute("aria-labelledby", heading.id);
 

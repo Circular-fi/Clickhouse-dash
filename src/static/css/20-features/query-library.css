@@ -843,6 +843,11 @@
   flex-direction: column;
 }
 
+/* No title line on a wide window (the heading is for a screen reader); a phone keeps the line for its Back button. */
+.qlPaneForm .qlPreview__head {
+  display: none;
+}
+
 .qlPaneForm__fields {
   flex: 0 0 auto;
 }
@@ -929,6 +934,9 @@
 }
 
 @media (max-width: 760px) {
+  .qlPaneForm .qlPreview__head {
+    display: flex;
+  }
   /* The library dialog is full-screen (.uiDialog--lg), in two steps: the
      list, then the preview of the selected item (.is-previewing), with a
      Back button. */
