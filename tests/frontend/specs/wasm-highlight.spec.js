@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp } from '../helpers/app.js';
-import { sqlCorpus, fuzzSql } from '../helpers/wasm.js';
+import { sqlCorpus, fuzzSql, loadKernel as loadKernelOf } from '../helpers/wasm.js';
 
 // The SQL syntax colouring on WebAssembly (src/wasm/highlight.c, docs/wasm.md): the kernel gives the tokens of the
 // JavaScript lexer (app_highlight.js, lexAllJs) byte for byte, on the repository's SQL files and on seeded
@@ -19,13 +19,7 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(obs.pageErrors).toEqual([]);
 });
 
-async function loadKernel(page) {
-  await page.evaluate(() => window.ChDash.loader.loadGroup('wasm-highlight'));
-  return page.evaluate(async () => {
-    const kernel = await window.ChDash.highlight.ready();
-    return { loaded: !!kernel, fallbacks: window.ChDash.wasm.stats.streamingFallbacks };
-  });
-}
+const loadKernel = (page) => loadKernelOf(page, 'wasm-highlight', "window.ChDash.highlight.ready()");
 
 // The host's keyword and function sets the highlighter reads, replaced for the call.
 const META_VARIANTS = ['none', 'keywords', 'functions', 'both'];

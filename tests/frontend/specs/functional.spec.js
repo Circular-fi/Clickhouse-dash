@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
-import { enableExecutionStats, expandExplorerDatabase, horizontalOverflow, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch, setFlattenTuple } from '../helpers/app.js';
+import { enableExecutionStats, expandExplorerDatabase, horizontalOverflow, openApp, openExplorer, openExplorerDatabase, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch, setFlattenTuple, settleAnimations } from '../helpers/app.js';
 import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
 import { canvasPixel, chartCore, chartJson, plotBox, xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
+import { captureCopies } from '../helpers/clipboard.js';
+import { otelRows } from '../helpers/clickhouse.js';
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -344,7 +346,6 @@ test('query execution renders rows and terminal status', async ({ page }) => {
 
 test('result values stay raw, a SQL NULL is the shared NULL token, and the metric rail uses the shared formats', async ({ page }) => {
   await openApp(page);
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   // Decision 45: no grouping, no reformatting of result values in the table
   // or its copies; timestamps stay as ClickHouse returned them.
   // Two rows: a single row would open the vertical one-row view.
@@ -365,19 +366,7 @@ test('result values stay raw, a SQL NULL is the shared NULL token, and the metri
   await expect(cells.nth(5)).toHaveText('null');
   await expect(cells.nth(5).locator('.nullToken')).toHaveCount(0);
   // Copy cell keeps the raw value too.
-  await page.evaluate(() => {
-    window.__chdashTestCopiedText = '';
-    document.addEventListener('copy', () => {
-      const active = document.activeElement;
-      if (active && typeof active.value === 'string') window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
-    }, true);
-  });
-  const readClipboard = () => page.evaluate(async () => {
-    if (window.isSecureContext && navigator.clipboard) {
-      try { return await navigator.clipboard.readText(); } catch (_) {}
-    }
-    return window.__chdashTestCopiedText || '';
-  });
+  const readClipboard = await captureCopies(page, { clipboard: true });
   for (const [index, expected] of [[1, '1234567'], [3, '2026-09-12T16:29:57Z']]) {
     await cells.nth(index).click({ button: 'right' });
     await page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Copy cell' }).click();
@@ -1347,16 +1336,7 @@ test('database object table handles hundreds of tables and empty databases', asy
 
 test('multiquery exposes global copy JSON and raw JSON download without clearing results', async ({ page }) => {
   await openApp(page);
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.evaluate(() => {
-    window.__chdashTestCopiedText = '';
-    document.addEventListener('copy', () => {
-      const active = document.activeElement;
-      if (active && typeof active.value === 'string' && Number.isInteger(active.selectionStart) && Number.isInteger(active.selectionEnd)) {
-        window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
-      }
-    }, true);
-  });
+  const readCopied = await captureCopies(page, { clipboard: true });
   await page.locator('#runSettingsButton').click();
   await page.locator('#runOptMultiQuery').click();
   await expect(page.locator('#runOptMultiQuery')).toHaveAttribute('aria-checked', 'true');
@@ -1368,12 +1348,7 @@ test('multiquery exposes global copy JSON and raw JSON download without clearing
   await expect(page.locator('#copySplit')).toBeVisible();
   await expect(page.locator('#copyJsonButton')).toBeEnabled();
   await page.locator('#copyJsonButton').click();
-  const copied = await page.evaluate(async () => {
-    if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
-      try { return await navigator.clipboard.readText(); } catch (_) {}
-    }
-    return window.__chdashTestCopiedText || '';
-  });
+  const copied = await readCopied();
   const copiedPayload = JSON.parse(copied);
   expect(copiedPayload.queries).toHaveLength(2);
   expect(copiedPayload.queries[0].data[0]).toMatchObject({ id: 1, label: 'first' });
@@ -1662,28 +1637,13 @@ test('right-click Details expands a result row inline, under the row, and closes
 
 test('row menu Details on another row replaces the open detail, and copies a cell, the row or the column', async ({ page }) => {
   await openApp(page);
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   // Enough rows for the page to scroll past an open detail.
   await runSuccessfulQuery(page, rowDetailsQuery.replace('numbers(6)', 'numbers(60)'));
   const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
   await expect(rows.nth(5)).toBeVisible();
   // Outside a secure context the app copies through a hidden textarea:
   // capture what that copy selects (or read the clipboard when available).
-  await page.evaluate(() => {
-    window.__chdashTestCopiedText = '';
-    document.addEventListener('copy', () => {
-      const active = document.activeElement;
-      if (active && typeof active.value === 'string') {
-        window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
-      }
-    }, true);
-  });
-  const readClipboard = () => page.evaluate(async () => {
-    if (window.isSecureContext && navigator.clipboard) {
-      try { return await navigator.clipboard.readText(); } catch (_) {}
-    }
-    return window.__chdashTestCopiedText || '';
-  });
+  const readClipboard = await captureCopies(page, { clipboard: true });
 
   // The menu offers Details, Copy cell, Copy row and Copy column, with no
   // hint line, in compact items; the row shows its accent bar meanwhile.
@@ -2053,23 +2013,6 @@ async function closeTraceRowMenu(page) {
 
 // Outside a secure context the app copies through a hidden textarea:
 // capture what that copy selects (or read the clipboard when available).
-async function captureCopies(page) {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.evaluate(() => {
-    window.__chdashTestCopiedText = '';
-    document.addEventListener('copy', () => {
-      const active = document.activeElement;
-      if (active && typeof active.value === 'string') window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
-    }, true);
-  });
-  return () => page.evaluate(async () => {
-    if (window.isSecureContext && navigator.clipboard) {
-      try { return await navigator.clipboard.readText(); } catch (_) {}
-    }
-    return window.__chdashTestCopiedText || '';
-  });
-}
-
 async function setTracesFeature(page, enabled) {
   await page.route('**/api/version', async (route) => {
     const response = await route.fetch();
@@ -2174,7 +2117,7 @@ test('row menu: one entry for a trace id found in several columns; the span pair
 test('row menu: several distinct trace ids make Open trace and Copy trace link submenus, keyboard driven; a link opens a new tab and keeps the results', async ({ page }) => {
   await setTracesFeature(page, true);
   await openApp(page);
-  const readClipboard = await captureCopies(page);
+  const readClipboard = await captureCopies(page, { clipboard: true });
   const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
   await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS TraceId, '${SPAN_A}' AS SpanId, toFixedString('${TRACE_B}', 32) AS parent_trace_id, ' ${TRACE_C} ' AS LinkedTraceId FROM numbers(3)`);
   await expect(rows).toHaveCount(3);
@@ -2628,25 +2571,11 @@ test('traces: the trace header copies or downloads the whole trace as JSON with 
 
   // Outside a secure context the app copies through a hidden textarea:
   // capture what that copy selects (or read the clipboard when available).
-  await page.evaluate(() => {
-    window.__chdashTestCopiedText = '';
-    document.addEventListener('copy', () => {
-      const active = document.activeElement;
-      if (active && typeof active.value === 'string') {
-        window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
-      }
-    }, true);
-  });
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const readCopied = await captureCopies(page, { clipboard: true });
   await button.click();
   // Same feedback as the results control.
   await expect(button).toHaveText('Copied');
-  const copied = await page.evaluate(async () => {
-    if (window.isSecureContext && navigator.clipboard) {
-      try { return await navigator.clipboard.readText(); } catch (_) {}
-    }
-    return window.__chdashTestCopiedText || '';
-  });
+  const copied = await readCopied();
   const doc = JSON.parse(copied);
   // Indented by 2 spaces (start_ns digits aside, which JS numbers round).
   const anyStart = (text) => text.replace(/"start_ns": \d+/g, '"start_ns": 0');
@@ -2695,23 +2624,10 @@ test('traces: the trace header copies or downloads the whole trace as JSON with 
 
   // The header's Trace ID copy button also copies outside secure contexts
   // (shared clipboard helper with the textarea fallback).
-  await page.evaluate(() => { window.__chdashTestCopiedText = ''; });
+  const readTraceId = await captureCopies(page, { clipboard: true, consume: true });
   await page.locator('#traceDetailTitle [data-copy-active-trace]').click();
-  await expect.poll(() => page.evaluate(async () => {
-    if (window.isSecureContext && navigator.clipboard) {
-      try { return await navigator.clipboard.readText(); } catch (_) {}
-    }
-    return window.__chdashTestCopiedText || '';
-  })).toBe(traceId);
+  await expect.poll(readTraceId).toBe(traceId);
 });
-
-async function otelRows(request, sql) {
-  const base = (process.env.CLICKHOUSE_URL || 'http://clickhouse:8123').replace(/\/$/, '');
-  const auth = Buffer.from(`${process.env.CLICKHOUSE_USER || 'test'}:${process.env.CLICKHOUSE_PASSWORD || 'test'}`).toString('base64');
-  const response = await request.post(`${base}/`, { data: `${sql} FORMAT TSV`, headers: { Authorization: `Basic ${auth}` }, timeout: 60_000 });
-  expect(response.ok(), await response.text()).toBe(true);
-  return (await response.text()).split('\n').filter(Boolean).map((line) => line.split('\t'));
-}
 
 const byCodePoint = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -3856,7 +3772,7 @@ for (const theme of ['light', 'dark']) {
     await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
     await page.locator('#queryTextArea').fill('SELECT 1');
     await expect(page.locator('#editorCopyButton')).toBeEnabled();
-    await page.waitForTimeout(500); // the colour transition of the theme switch
+    await settleAnimations(page); // the colour transition of the theme switch
     const rest = await page.evaluate(() => {
       const muted = (() => {
         const probe = document.createElement('span');
@@ -3909,7 +3825,8 @@ test('Format writes the commands of an ALTER TABLE without parentheses or indent
     ');',
   ].join('\n'));
   const unknownFunctions = () => page.locator('.editorDiagnostic--unknown_function').allTextContents();
-  await page.waitForTimeout(1200);
+  // The pass of the editor checks has run on this text (data-diagnostics): only then does "no mark" mean something.
+  await expect(editor).toHaveAttribute('data-diagnostics', 'checked');
   expect(await unknownFunctions()).toEqual([]);
   await page.locator('#formatButton').click();
   await expect.poll(() => editor.inputValue()).toContain('\tactive UInt8,'); // the input is indented with spaces: this is the formatted text
@@ -3918,14 +3835,16 @@ test('Format writes the commands of an ALTER TABLE without parentheses or indent
   expect(formatted.startsWith('ALTER TABLE analytics.transactions\nMODIFY COLUMN `bundle` Tuple(\n\tactive UInt8,\n')).toBe(true);
   expect(formatted).not.toMatch(/^\s*\($/m);
   expect(formatted.trimEnd().endsWith('\n)')).toBe(true);
-  await page.waitForTimeout(1200);
+  // The pass of the editor checks has run on this text (data-diagnostics): only then does "no mark" mean something.
+  await expect(editor).toHaveAttribute('data-diagnostics', 'checked');
   expect(await unknownFunctions()).toEqual([]);
   // The formatted text is a fixed point: the button has nothing left to do.
   await expect(page.locator('#formatButton')).toBeDisabled();
   expect(await editor.inputValue()).toBe(formatted);
   // An ALTER is still checked: a misspelt function or type is reported, a right one is not.
   await editor.fill('ALTER TABLE t ADD COLUMN types Array(LowCardinality(String)) DEFAULT toString(1)');
-  await page.waitForTimeout(1200);
+  // The pass of the editor checks has run on this text (data-diagnostics): only then does "no mark" mean something.
+  await expect(editor).toHaveAttribute('data-diagnostics', 'checked');
   expect(await unknownFunctions()).toEqual([]);
   await editor.fill('ALTER TABLE t ADD COLUMN types Array(LowCardinality(String)) DEFAULT toStrin(1)');
   await expect.poll(unknownFunctions).toEqual(['toStrin']);
@@ -3940,7 +3859,7 @@ for (const theme of ['light', 'dark']) {
   test(`${theme} theme: the Run menu chevron is light on the blue fill`, async ({ page }) => {
     await openApp(page);
     await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
-    await page.waitForTimeout(400);
+    await settleAnimations(page);
     const toggle = page.locator('#runMenuButton');
     await expect(toggle).toBeVisible();
     const paint = () => toggle.evaluate((el) => ({

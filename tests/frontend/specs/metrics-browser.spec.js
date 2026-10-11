@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { captureState } from '../helpers/review.js';
+import { stamp } from '../helpers/time.js';
 
 // Metrics browser (/metrics) on the OTel fixture metrics (otel.otel_metrics_*,
 // derived from the stored spans: see docs/metrics.md). The window comes from
@@ -16,13 +17,6 @@ test.afterEach(async ({ page }, testInfo) => {
   // Navigating away (exemplar click) may abort in-flight chart requests.
   expect(obs.failedRequests.filter((r) => !/ERR_ABORTED|NS_BINDING_ABORTED/.test(String(r.error || '')))).toEqual([]);
 });
-
-const pad = (value) => String(value).padStart(2, '0');
-// Browser-local (the config pins timezoneId UTC) "YYYY-MM-DD HH:mm:ss".
-function stamp(ms) {
-  const d = new Date(ms);
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-}
 
 let bounds = null;
 async function metricBounds(request) {

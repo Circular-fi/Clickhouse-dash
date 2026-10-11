@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp } from '../helpers/app.js';
-import { sqlCorpus, fuzzSql } from '../helpers/wasm.js';
+import { sqlCorpus, fuzzSql, loadKernel as loadKernelOf } from '../helpers/wasm.js';
 import { metaSpec, corpusMeta, fuzzScripts } from '../helpers/wasm-sql.js';
 
 // The editor diagnostics on WebAssembly (src/wasm/sqlscan.c, docs/wasm.md): the unknown table, column and function
@@ -20,13 +20,7 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(obs.pageErrors).toEqual([]);
 });
 
-async function loadKernel(page) {
-  await page.evaluate(() => window.ChDash.loader.loadGroup('wasm-sqlscan'));
-  return page.evaluate(async () => {
-    const kernel = await window.ChDash.autocomplete.wasmReady();
-    return { loaded: !!kernel, fallbacks: window.ChDash.wasm.stats.streamingFallbacks };
-  });
-}
+const loadKernel = (page) => loadKernelOf(page, 'wasm-sqlscan', "window.ChDash.autocomplete.wasmReady()");
 
 // Builds the host metadata of a spec (the shapes of app_meta.js) in the page, with the column lists the editor reads
 // through ns.meta.getTableColumns; returns it, and restores the page's own functions with restore().

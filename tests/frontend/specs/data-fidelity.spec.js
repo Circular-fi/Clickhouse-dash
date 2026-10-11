@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp, runSuccessfulQuery } from '../helpers/app.js';
+import { captureCopies } from '../helpers/clipboard.js';
 
 // The screen, the copies and the downloads show exactly the values that ClickHouse stores
 // (docs/telemetry.md, "Result values"). The 2.17 page rounded every integer above 2^53
@@ -96,28 +97,6 @@ const CSV_FIRST_ROW = '10577349846663553072,18446744073709551615,-92233720368547
 
 const dataRows = 'tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)';
 
-// Outside a secure context the app copies through a hidden textarea: capture what that copy selects.
-async function captureCopies(page) {
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.evaluate(() => {
-    window.__chdashTestCopiedText = '';
-    document.addEventListener('copy', () => {
-      const active = document.activeElement;
-      if (active && typeof active.value === 'string') window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
-    }, true);
-  });
-  return async () => {
-    const text = await page.evaluate(async () => {
-      if (window.isSecureContext && navigator.clipboard) {
-        try { return await navigator.clipboard.readText(); } catch (_) { /* fall back */ }
-      }
-      return window.__chdashTestCopiedText || '';
-    });
-    await page.evaluate(() => { window.__chdashTestCopiedText = ''; });
-    return text;
-  };
-}
-
 async function downloadText(page, click) {
   const pending = page.waitForEvent('download');
   await click();
@@ -144,7 +123,7 @@ test('the table shows every value as ClickHouse stores it: 64-bit and wider inte
 
 test('Copy cell, Copy row and the row details keep the value: no number from a string, no second unescape', async ({ page }) => {
   await openApp(page);
-  const copied = await captureCopies(page);
+  const copied = await captureCopies(page, { clipboard: true, consume: true });
   await runSuccessfulQuery(page, rows(2));
   const first = page.locator(`#resultTableBody ${dataRows}`).first();
   const cells = first.locator('td');
@@ -191,7 +170,7 @@ test('one row: the vertical view shows the same values', async ({ page }) => {
 
 test('Copy JSON equals Download JSON, Copy CSV equals Download CSV, and both keep every value', async ({ page }) => {
   await openApp(page);
-  const copied = await captureCopies(page);
+  const copied = await captureCopies(page, { clipboard: true, consume: true });
   await runSuccessfulQuery(page, rows(2));
 
   await page.locator('#copyJsonButton').click();
@@ -224,7 +203,7 @@ test('Copy JSON equals Download JSON, Copy CSV equals Download CSV, and both kee
 
 test('a multiquery panel copies its rows with the same serializer, column names included', async ({ page }) => {
   await openApp(page);
-  const copied = await captureCopies(page);
+  const copied = await captureCopies(page, { clipboard: true, consume: true });
   await page.locator('#runSettingsButton').click();
   await page.locator('#runOptMultiQuery').click();
   await expect(page.locator('#runOptMultiQuery')).toHaveAttribute('aria-checked', 'true');
@@ -252,7 +231,7 @@ test('a multiquery panel copies its rows with the same serializer, column names 
 
 test('a JSON column keeps its big integers and the order of its keys', async ({ page }) => {
   await openApp(page);
-  const copied = await captureCopies(page);
+  const copied = await captureCopies(page, { clipboard: true, consume: true });
   await runSuccessfulQuery(page, `SELECT CAST('{"id": 12345678901234567890, "b": {"10": 1, "2": 2}, "x": 0.5}' AS JSON) AS doc, toUInt256('115792089237316195423570985008687907853269984665640564039457584007913129639935') AS u256, [toDecimal256('1.5', 3)] AS d256, number AS n FROM numbers(2)`);
   const cells = page.locator(`#resultTableBody ${dataRows}`).first().locator('td');
   await expect(cells.nth(1)).toContainText('"id":12345678901234567890');

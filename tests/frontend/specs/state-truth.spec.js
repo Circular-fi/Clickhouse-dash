@@ -3,16 +3,11 @@ import AxeBuilder from '@axe-core/playwright';
 import { runSuccessfulQuery } from '../helpers/app.js';
 import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 import { canvasPixel, plotBox } from '../helpers/charts.js';
+import { stamp } from '../helpers/time.js';
 
 // States and data that tell the truth (design review, Lot 1): a panel with a metric and no service asks for one, a
 // click on a metric names it, the critical path does not strike a span's label, a stop of the data breaks the line,
 // a shortened range is said, and a dashed series is dashed in its legend.
-
-const pad = (value) => String(value).padStart(2, '0');
-const stamp = (ms) => {
-  const d = new Date(ms);
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-};
 
 async function metricsWindow(request) {
   const meta = await (await request.get('/api/metrics/meta')).json();

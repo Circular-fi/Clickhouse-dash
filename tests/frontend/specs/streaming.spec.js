@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
-import { openApp, runSuccessfulQuery, enableExecutionStats } from '../helpers/app.js';
+import { openApp, runSuccessfulQuery, enableExecutionStats, nextFrames } from '../helpers/app.js';
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -173,23 +173,32 @@ test('the Elapsed tile says what it measures, and the run ends before the System
 
 test('the System figure of an earlier run never lands on the tile of the next run', async ({ page }) => {
   let calls = 0;
+  let lateAnswerSent;
+  let lateRequest = null;
+  const lateAnswer = new Promise((resolve) => { lateAnswerSent = resolve; });
   await page.route('**/api/query/execution**', async (route) => {
     calls += 1;
     if (calls === 1) {
+      lateRequest = route.request();
       await new Promise((resolve) => setTimeout(resolve, 2500));
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ available: true, duration_ms: 111111 }) });
+      lateAnswerSent();
       return;
     }
     await route.continue();
   });
+  const finished = new Set();
+  page.on('requestfinished', (request) => finished.add(request));
   await openApp(page);
   await enableExecutionStats(page);
   await runSuccessfulQuery(page, 'SELECT 1');
   await runSuccessfulQuery(page, 'SELECT 2');
   await expect(page.locator('#clickhouseElapsedWrap')).toBeVisible({ timeout: 10_000 });
   await expect.poll(() => calls).toBe(2);
-  // Let the first (late) answer arrive: it is dropped.
-  await page.waitForTimeout(3000);
+  // The first (late) answer arrives: it is dropped. The page has had it (the request ended) and two frames to show it.
+  await lateAnswer;
+  await expect.poll(() => finished.has(lateRequest)).toBe(true);
+  await nextFrames(page);
   await expect(page.locator('#clickhouseElapsedText')).not.toHaveText(/1 min 51|111/);
   await expect(page.locator('#clickhouseElapsedText')).toHaveText(/^(?:\d+(?:\.\d+)? (?:\u00b5s|ms|s)|0 ns)$/);
 });

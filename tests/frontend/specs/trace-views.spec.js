@@ -4,6 +4,8 @@ import { largeTrace, routeTrace } from '../helpers/trace-mocks.js';
 import {
   settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, expectClearOfChrome, freeArea, visibleArea, expectCentred, measureFrames, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail,
 } from '../helpers/graph-kit.js';
+import { captureCopies, copiedText as lastCopy } from '../helpers/clipboard.js';
+import { stampNs } from '../helpers/time.js';
 
 // Span detail inspector (Jaeger's SpanDetail) and the alternative trace views
 // (Trace Graph / Statistics / Spans Table / Flamegraph) on a mocked trace:
@@ -29,13 +31,7 @@ const BASE_MS = Date.UTC(2026, 8, 19, 12, 0, 0);
 const ID = { A: 'a000000000000001', B: 'a000000000000002', C: 'a000000000000003', D: 'a000000000000004', E: 'a000000000000005', F: 'a000000000000006', C2: 'a000000000000007', G: 'a000000000000008', H: 'a000000000000009' };
 
 // "2026-09-19 12:00:00.010000000" for an offset in ms from BASE_MS.
-function stamp(offsetMs) {
-  const totalNs = BigInt(BASE_MS) * 1000000n + BigInt(Math.round(offsetMs * 1e6));
-  const ms = Number(totalNs / 1000000n);
-  const iso = new Date(ms).toISOString();
-  const fraction = String(totalNs % 1000000000n).padStart(9, '0');
-  return `${iso.slice(0, 10)} ${iso.slice(11, 19)}.${fraction}`;
-}
+const stamp = (offsetMs) => stampNs(BASE_MS, offsetMs);
 
 function span({ id, parent = '', service, name, start, dur, kind = 'Internal', status = 'Unset', message = '', attrs = {}, resource = {}, events = [], links = [], traceId = TRACE_ID }) {
   return {
@@ -125,16 +121,6 @@ const row = (page, id) => page.locator(`#traceWaterfall .traceSpanRow[data-span-
 const openSpan = (page, id) => row(page, id).locator('.traceSpanRow__name').click();
 const inspector = (page, id) => page.locator(`#traceWaterfall [data-inspector-span="${id}"]`);
 
-async function captureCopies(page) {
-  await page.evaluate(() => {
-    window.__copies = [];
-    document.addEventListener('copy', () => {
-      const active = document.activeElement;
-      if (active && typeof active.value === 'string') window.__copies.push(active.value.slice(active.selectionStart, active.selectionEnd));
-    }, true);
-  });
-}
-const lastCopy = (page) => page.evaluate(() => window.__copies[window.__copies.length - 1] || '');
 
 // The trace views are a tab row (Timeline | Graph | Statistics | Spans |
 // Flamegraph); below 820 px the "View" dropdown stands in for it.

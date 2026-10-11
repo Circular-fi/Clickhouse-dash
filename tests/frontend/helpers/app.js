@@ -9,6 +9,24 @@ export async function openApp(page) {
   await expect(page.locator('#runButton')).toBeEnabled();
 }
 
+// Every CSS transition and animation of the page has ended (the colours of a theme switch). getAnimations() makes the
+// style recalculation that starts them, so none begins after this has looked.
+export function settleAnimations(page) {
+  return page.evaluate(() => Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => null))).then(() => document.getAnimations().length));
+}
+
+// Two frames have rendered what the page was doing (not usable under page.clock: its animation frames are fake).
+export function nextFrames(page) {
+  return page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+// A round trip to the page: every request its code issued before this call, in the microtasks that already ran, has
+// been reported to the test (the page and the test speak through one ordered channel). The check of "nothing was
+// sent" needs it, and needs no waiting time.
+export function roundTrip(page) {
+  return page.evaluate(() => 0);
+}
+
 export async function runQuery(page, sql, options = {}) {
   const editor = page.locator('#queryTextArea');
   await editor.fill(sql);

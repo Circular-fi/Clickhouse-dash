@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { horizontalOverflow, smallTouchTargets } from '../helpers/app.js';
+import { horizontalOverflow, roundTrip, smallTouchTargets } from '../helpers/app.js';
 import { fetchedModules } from '../helpers/modules.js';
 import { xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
+import { captureCopies, copiedText } from '../helpers/clipboard.js';
 
 // The System page (docs/system.md): its entry in the page switcher, its
 // underlined section tabs (Overview, Queries, Disks), its addresses and Back /
@@ -319,18 +320,19 @@ test('no live refresh: no Live / Auto-refresh control, and no request fires on a
   await expect(bar.locator('[id^="systemAutoRefresh"], [id^="systemLive"], .obsFilterBar__secondary, .obsFilterBar__toggleDot')).toHaveCount(0);
   await expect(bar).not.toContainText(/auto-refresh|live/i);
   expect(await page.evaluate(() => localStorage.getItem('chdash.system.autoRefresh'))).toBeNull();
-  await page.waitForTimeout(500);
-  // Five minutes on the clock, the tab visible, then hidden and back: nothing reads.
+  await roundTrip(page);
+  // Five minutes on the clock, the tab visible, then hidden and back: nothing reads. A timer that read would have
+  // sent its request inside runFor; the round trip after it reports every request sent by then.
   const before = { ...counts };
   for (let i = 0; i < 10; i++) {
     await page.clock.runFor(30_000);
-    await page.waitForTimeout(60);
+    await roundTrip(page);
   }
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
-  await page.waitForTimeout(300);
+  await roundTrip(page);
   expect(counts).toEqual(before);
-  // The refresh button reads every part again.
+  // The refresh button reads every part again (the counters do count).
   await page.locator('#systemRefresh-overview').click();
   await expect.poll(() => counts.overview).toBeGreaterThan(before.overview);
   await expect.poll(() => counts.series).toBeGreaterThan(before.series);
@@ -1104,22 +1106,13 @@ test('Open in Query puts the example or the history in the editor without runnin
   await expect(editor).toHaveValue(new RegExp(`normalized_query_hash = ${hash}`));
   await expect(editor).toHaveValue(/FROM system\.query_log/);
   await expect(editor).toHaveValue(/event_time >= now\(\) - INTERVAL 1 HOUR/);
-  await page.waitForTimeout(500);
+  // The editor has its text; a run, if the page started one, was sent before this round trip reports.
+  await roundTrip(page);
   expect(runs).toEqual([]);
 });
 
 // The text the last copy put on the clipboard (http origins have no async
 // clipboard to read: copy.text selects a textarea and runs the copy command).
-async function captureCopies(page) {
-  await page.evaluate(() => {
-    window.__sqCopied = '';
-    document.addEventListener('copy', (ev) => {
-      const el = ev.target instanceof HTMLTextAreaElement ? ev.target : document.activeElement;
-      if (el && typeof el.value === 'string') window.__sqCopied = el.value.slice(el.selectionStart, el.selectionEnd);
-    }, true);
-  });
-}
-const copiedText = (page) => page.evaluate(() => window.__sqCopied);
 
 // Order by: the server's allowlist, in this order; the header each one sorts.
 const ORDER_BY = [
@@ -1468,10 +1461,12 @@ test('a long shape SQL scrolls inside its block (no "Show all N lines"), and Raw
 test('a shape\'s SQL the formatter cannot parse stays as logged', async ({ page }) => {
   await page.route(/\/api\/format$/, (route) => route.fulfill({ status: 422, json: { error_code: 'format_failed', message: 'Syntax error' } }));
   await openQueries(page, '?sort=calls');
+  const refused = page.waitForResponse((response) => /\/api\/format$/.test(response.url()));
   await queryRows(page).first().click();
   const wrap = page.locator('#systemQuerySql');
   await expect(wrap).toBeVisible({ timeout: 20_000 });
-  await page.waitForTimeout(500);
+  // The formatter was asked and refused: only now does "as logged" mean the page kept the text.
+  expect((await refused).status()).toBe(422);
   await expect(wrap).toHaveAttribute('data-formatted', '0');
   await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
   const hash = shapeHash(page);

@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { captureState } from '../helpers/review.js';
+import { otelRows } from '../helpers/clickhouse.js';
+import { stamp } from '../helpers/time.js';
 
 // Spans mode of the trace search page (HyperDX's row search): the mode in
 // the URL, the virtualised span table with its column picker, infinite
@@ -16,20 +18,6 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(obs.pageErrors).toEqual([]);
   expect(obs.failedRequests.filter((r) => !/net::ERR_ABORTED/.test(r.error || ''))).toEqual([]);
 });
-
-const pad = (n) => String(n).padStart(2, '0');
-function stamp(ms) {
-  const d = new Date(ms);
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-}
-
-async function otelRows(request, sql) {
-  const base = (process.env.CLICKHOUSE_URL || 'http://clickhouse:8123').replace(/\/$/, '');
-  const auth = Buffer.from(`${process.env.CLICKHOUSE_USER || 'test'}:${process.env.CLICKHOUSE_PASSWORD || 'test'}`).toString('base64');
-  const response = await request.post(`${base}/`, { data: `${sql} FORMAT TSV`, headers: { Authorization: `Basic ${auth}` }, timeout: 60_000 });
-  expect(response.ok(), await response.text()).toBe(true);
-  return (await response.text()).split('\n').filter(Boolean).map((line) => line.split('\t'));
-}
 
 // Five minutes of the rich fixture day (2026-09-12 10:00-10:05,
 // tests/README.md "Rich OTel dataset") as from / to: ~1.8 k spans of nine

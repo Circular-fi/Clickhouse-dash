@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
-import { rng } from '../helpers/wasm.js';
+import { rng, loadKernel as loadKernelOf } from '../helpers/wasm.js';
 
 // The colour arithmetic on WebAssembly (src/wasm/color.c, docs/wasm.md): normalize, readable text, hash slots, sequential and
 // categorical slots (ns.palette.batch), mixColorBatch (the graph kit), parseColors and rgbaBatch (the chart engine). Each batch
@@ -22,13 +22,7 @@ async function openTraces(page) {
   await page.waitForFunction(() => !!(window.ChDash && window.ChDash.palette && window.ChDash.graphKit && window.ChDash.chartCore));
 }
 
-async function loadKernel(page) {
-  await page.evaluate(() => window.ChDash.loader.loadGroup('wasm-color'));
-  return page.evaluate(async () => {
-    const kernel = await window.ChDash.wasm.load('color');
-    return { loaded: !!kernel, fallbacks: window.ChDash.wasm.stats.streamingFallbacks };
-  });
-}
+const loadKernel = (page) => loadKernelOf(page, 'wasm-color', "window.ChDash.wasm.load('color')");
 
 const NUM = ['0', '1', '7', '12', '127.5', '255', '256', '300', '0.5', '.5', '5.', '0.123456', '99.9', '1e3', '-1', '1.2.3', '.', '0.0005', '0.9995', '0.001', '0.0015', '0.9994999', '12345678901234567890'];
 const WS = [' ', '  ', '', '\t', ' ', ' ', ','];

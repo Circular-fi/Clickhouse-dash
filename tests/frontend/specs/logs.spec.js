@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { roundTrip } from '../helpers/app.js';
 
 // Logs explorer (/logs) against the otel_fixture logs. Ranges come from
 // /api/logs/meta time_bounds; the Playwright browser runs in UTC, so the
@@ -469,14 +470,14 @@ test('logs: no live tail: no Live control, and no request fires on a timer after
   await expect(page.locator('#logsForm .obsFilterBar__actions > :only-child')).toHaveId('logsSearchButton');
   await expect(page.locator('#logsLiveButton')).toHaveCount(0);
   await expect(page.locator('#logsStatus')).not.toContainText(/live/i);
-  await page.waitForTimeout(500);
+  await roundTrip(page);
   const before = { ...calls };
   for (let i = 0; i < 10; i++) {
     await page.clock.runFor(30_000);
-    await page.waitForTimeout(60);
+    await roundTrip(page);
   }
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
-  await page.waitForTimeout(300);
+  await roundTrip(page);
   expect(calls).toEqual(before);
   // Search reads again.
   await page.locator('#logsSearchButton').click();

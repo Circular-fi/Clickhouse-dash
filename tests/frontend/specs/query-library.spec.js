@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
-import { openApp, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
+import { nextFrames, openApp, roundTrip, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
 import { historyRecords } from '../helpers/history.js';
+import { captureCopies, copiedText } from '../helpers/clipboard.js';
 
 // Query library: the toolbar book button (between Format and the run settings
 // cog) opens it in the shared modal dialog of the profiling (app_ui_dialog.js:
@@ -184,16 +185,6 @@ async function pickHost(page, id) {
 
 // The text the last copy put on the clipboard (http origins have no async
 // clipboard to read: copy.text selects a textarea and runs the copy command).
-async function captureCopies(page) {
-  await page.evaluate(() => {
-    window.__qlCopied = '';
-    document.addEventListener('copy', (ev) => {
-      const el = ev.target instanceof HTMLTextAreaElement ? ev.target : document.activeElement;
-      if (el && typeof el.value === 'string') window.__qlCopied = el.value.slice(el.selectionStart, el.selectionEnd);
-    }, true);
-  });
-}
-const copiedText = (page) => page.evaluate(() => window.__qlCopied);
 
 // A History run carries no menu and no button: every action is in the preview, and none removes it.
 async function expectNoItemMenu(page, item) {
@@ -511,11 +502,16 @@ test('History keeps a run formatted: a run typed unformatted, and an older entry
   await showPanel(page, 'history');
   await items.filter({ hasText: '(((' }).click();
   await expect.poll(() => calls.length).toBeGreaterThan(0);
-  await page.waitForTimeout(500);
+  await expect(preview(page).locator('.qlSql .sqlBlock__code')).toContainText('(((');
   const before = calls.length;
   await items.filter({ hasText: 'numbers' }).click();
+  await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT number\nFROM system.numbers\nLIMIT 3');
   await items.filter({ hasText: '(((' }).click();
-  await page.waitForTimeout(500);
+  // The preview shows the script again (the selection ran); two frames and a round trip later, the request that a
+  // second look would send is in the list.
+  await expect(preview(page).locator('.qlSql .sqlBlock__code')).toContainText('(((');
+  await nextFrames(page);
+  await roundTrip(page);
   expect(calls.length).toBe(before);
   expect((await historyState(page)).find((h) => h.sql_raw === 'select ((( from').formatted).not.toBe(true);
 });

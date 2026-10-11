@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
+import { loadKernel as loadKernelOf } from '../helpers/wasm.js';
 
 // The treemap layout on WebAssembly (src/wasm/treemap.c, docs/wasm.md): the kernel places the nodes of a group with the
 // numbers of the JavaScript layout (app_explorer_treemap.js, layoutNodesJs), and the page keeps working without it.
@@ -19,13 +20,7 @@ async function openMap(page) {
   await page.waitForFunction(() => !!(window.ChDash && window.ChDash.explorerTreemap));
 }
 
-async function loadKernel(page) {
-  await page.evaluate(() => window.ChDash.loader.loadGroup('wasm-treemap'));
-  return page.evaluate(async () => {
-    const kernel = await window.ChDash.explorerTreemap.ready();
-    return { loaded: !!kernel, fallbacks: window.ChDash.wasm.stats.streamingFallbacks };
-  });
-}
+const loadKernel = (page) => loadKernelOf(page, 'wasm-treemap', "window.ChDash.explorerTreemap.ready()");
 
 // Seeded groups of nodes: ties, a dominant node, tiny and huge sizes, fractions, "Others", zero and unusable sizes.
 function makeGroups(seed, count) {

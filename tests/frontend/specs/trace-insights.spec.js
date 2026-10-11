@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
+import { captureCopies, copiedText as lastCopy } from '../helpers/clipboard.js';
+import { stampNs } from '../helpers/time.js';
 
 // Span insights on the trace page (app_trace_insights.js): exceptions with
 // parsed stack traces, highlighted attributes in the trace header, spans of
@@ -25,11 +27,7 @@ const BASE_MS = Date.UTC(2026, 8, 19, 12, 0, 0);
 const ID = { R: 'e000000000000001', P: 'e000000000000002', Q: 'e000000000000003', S: 'e000000000000004' };
 
 const exactNs = (offsetMs) => BigInt(BASE_MS) * 1000000n + BigInt(Math.round(offsetMs * 1e6));
-function stamp(offsetMs) {
-  const totalNs = exactNs(offsetMs);
-  const iso = new Date(Number(totalNs / 1000000n)).toISOString();
-  return `${iso.slice(0, 10)} ${iso.slice(11, 19)}.${String(totalNs % 1000000000n).padStart(9, '0')}`;
-}
+const stamp = (offsetMs) => stampNs(BASE_MS, offsetMs);
 
 function span({ id, parent = '', service, name, start, dur, status = 'Unset', attrs = {}, resource = {}, events = [], traceId = TRACE_ID }) {
   return {
@@ -146,16 +144,6 @@ const row = (page, id) => page.locator(`#traceWaterfall .traceSpanRow[data-span-
 const openSpan = (page, id) => row(page, id).locator('.traceSpanRow__name').click();
 const inspector = (page, id) => page.locator(`#traceWaterfall [data-inspector-span="${id}"]`);
 
-async function captureCopies(page) {
-  await page.evaluate(() => {
-    window.__copies = [];
-    document.addEventListener('copy', () => {
-      const active = document.activeElement;
-      if (active && typeof active.value === 'string') window.__copies.push(active.value.slice(active.selectionStart, active.selectionEnd));
-    }, true);
-  });
-}
-const lastCopy = (page) => page.evaluate(() => window.__copies[window.__copies.length - 1] || '');
 
 test('stack traces parse into frames for Java, Python, Go, JavaScript, .NET and Ruby', async ({ page }) => {
   await openTrace(page);

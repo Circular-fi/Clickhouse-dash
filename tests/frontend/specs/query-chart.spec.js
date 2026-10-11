@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch } from '../helpers/app.js';
 import { chartJson, xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
+import { captureCopies } from '../helpers/clipboard.js';
 
 // Query result Table / Chart view: the chart is drawn client-side from the
 // rows a result panel received, per panel (main and every multiquery panel),
@@ -600,21 +601,9 @@ test('view choice persists across results and reloads; clear resets the panel', 
   await expect(mainToggle(page).locator('[data-view="chart"]')).toHaveAttribute('aria-pressed', 'true');
 
   // Copy JSON still copies the rows from the chart view.
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.evaluate(() => {
-    window.__chdashTestCopiedText = '';
-    document.addEventListener('copy', () => {
-      const active = document.activeElement;
-      if (active && typeof active.value === 'string') window.__chdashTestCopiedText = active.value.slice(active.selectionStart, active.selectionEnd);
-    }, true);
-  });
+  const readCopied = await captureCopies(page, { clipboard: true });
   await page.locator('#copyJsonButton').click();
-  await expect.poll(() => page.evaluate(async () => {
-    if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
-      try { return await navigator.clipboard.readText(); } catch (_) { /* fall back */ }
-    }
-    return window.__chdashTestCopiedText || '';
-  }).then((text) => { try { return JSON.parse(text).length; } catch (_) { return -1; } })).toBe(120);
+  await expect.poll(() => readCopied().then((text) => { try { return JSON.parse(text).length; } catch (_) { return -1; } })).toBe(120);
 
   await page.locator('#clearResultsButton').click();
   await expect(page.locator('#resultsPanel')).toBeHidden();

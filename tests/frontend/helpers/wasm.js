@@ -6,16 +6,34 @@ import path from 'node:path';
 // same inputs and compares the answers.
 
 // The SQL files of the repository: the formatter corpus (tests/api/format/input) and the fixtures, when the test
-// image has them (WASM_SQL_DIRS, colon separated, replaces the list).
+// image has them (WASM_SQL_DIRS, colon separated, replaces the list; an empty WASM_SQL_DIRS asks for no corpus). A
+// corpus that is missing or small is an error, not a quieter run: the comparisons would pass on the generated texts
+// alone and say nothing of the real SQL of the repository.
+export const MIN_CORPUS_FILES = 50;
+
 export function sqlCorpus() {
-  const dirs = (process.env.WASM_SQL_DIRS || '/tests/api/format/input:/tests/clickhouse-init:/work/sql').split(':');
+  const explicit = process.env.WASM_SQL_DIRS;
+  const dirs = (explicit ?? '/tests/api/format/input:/tests/clickhouse-init:/work/sql').split(':').filter(Boolean);
   const out = [];
   for (const dir of dirs) {
     let names = [];
     try { names = fs.readdirSync(dir).filter((name) => name.endsWith('.sql')).sort(); } catch (error) { continue; }
     for (const name of names) out.push({ name: path.join(path.basename(dir), name), sql: fs.readFileSync(path.join(dir, name), 'utf8') });
   }
+  if (explicit !== '' && out.length < MIN_CORPUS_FILES) {
+    throw new Error(`the SQL corpus has ${out.length} files (at least ${MIN_CORPUS_FILES} are needed) in ${dirs.join(', ')}: mount tests/api/format/input or set WASM_SQL_DIRS`);
+  }
   return out;
+}
+
+// Loads a kernel group in the page and waits for its kernel: `ready` is the expression that answers with the kernel
+// (the module's own ready()). Answers { loaded, fallbacks } (streaming compile fallbacks of the loader).
+export async function loadKernel(page, group, ready) {
+  await page.evaluate((name) => window.ChDash.loader.loadGroup(name), group);
+  return page.evaluate(`(async () => {
+    const kernel = await (${ready});
+    return { loaded: !!kernel, fallbacks: window.ChDash.wasm.stats.streamingFallbacks };
+  })()`);
 }
 
 // A small deterministic generator (LCG): the same numbers on every run and machine.
