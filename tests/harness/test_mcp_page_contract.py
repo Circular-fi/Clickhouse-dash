@@ -113,8 +113,9 @@ def test_the_secret_is_never_kept_by_the_browser():
     # A key is never changed: no edit, no switch, no rotation in the page.
     for gone in ("editKey", "toggleKey", "rotateKey", "updateMcpKey", "rotateMcpKey", "onEdit", "onToggle", "onRotate"):
         assert gone not in page + read("src/static/app_mcp_view.js"), gone
-    # The announcement never carries the secret.
-    assert "announce(" not in code("src/static/app_mcp_form.js")
+    # The announcement never carries the secret: the form says its notes (the host's, the data that a key reads), nothing else.
+    form = code("src/static/app_mcp_form.js")
+    assert "secret" not in "".join(re.findall(r"announce\([^;]*;", form)).lower()
 
 
 def test_the_page_follows_the_ui_foundations():

@@ -12,6 +12,7 @@ import { storage } from "./app_state.js";
 import { icon as iconMod } from "./app_ui_icon.js";
 import { menu as menuMod } from "./app_ui_menu.js";
 import { search } from "./app_ui_search.js";
+import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
 const { $, $$ } = dom;
@@ -320,7 +321,7 @@ function mountPicker(el, options) {
       <div class="timeCalendar__header">
         <button type="button" class="timeCalendar__nav" data-cal-nav="-12" aria-label="Previous year" title="Previous year">${ICONS.prevYear}</button>
         <button type="button" class="timeCalendar__nav" data-cal-nav="-1" aria-label="Previous month" title="Previous month">${ICONS.prevMonth}</button>
-        <strong class="timeCalendar__title" aria-live="polite"></strong>
+        <strong class="timeCalendar__title"></strong>
         <button type="button" class="timeCalendar__nav" data-cal-nav="1" aria-label="Next month" title="Next month">${ICONS.nextMonth}</button>
         <button type="button" class="timeCalendar__nav" data-cal-nav="12" aria-label="Next year" title="Next year">${ICONS.nextYear}</button>
       </div>
@@ -398,7 +399,12 @@ function mountPicker(el, options) {
     if (mode !== "end") cal.hover = null;
     fields.from?.classList.toggle("is-active", mode === "start");
     fields.to?.classList.toggle("is-active", mode === "end");
-    if (hint) hint.textContent = mode === "end" ? `Pick the end date · max ${formatMinutes(options.getMaxMinutes())}` : "Pick the start date";
+    if (hint) {
+      const text = mode === "end" ? `Pick the end date · max ${formatMinutes(options.getMaxMinutes())}` : "Pick the start date";
+      // The step of the range that changes (the start is picked, the end comes next) is said through the page's one live region.
+      if (hint.textContent && hint.textContent !== text) uiState.announce(text);
+      hint.textContent = text;
+    }
     paintGrid();
   }
 
@@ -638,6 +644,8 @@ function mountPicker(el, options) {
       addMonths(target, step);
       cal.focus = midnight(target.getTime());
       showMonth(cal.focus);
+      // The month that the buttons reached is said through the page's one live region.
+      uiState.announce(title.textContent);
       return;
     }
     const day = event.target.closest("[data-day]");
@@ -724,7 +732,7 @@ function panelHtml(p) {
         <div class="timeRangePanel__body">
           <section id="${p}CustomRange" class="timeRangePanel__absolute" aria-labelledby="${p}AbsoluteRangeTitle">
             <p id="${p}AbsoluteRangeTitle" class="timeRangePanel__title">Absolute time range</p>${field("Start", "From", "YYYY-MM-DD hh:mm:ss or now-6h")}${field("End", "To", "YYYY-MM-DD hh:mm:ss or now")}
-            <div id="${p}TimeCalendarHint" class="timeCalendar__hint" aria-live="polite">Pick the start date</div>
+            <div id="${p}TimeCalendarHint" class="timeCalendar__hint">Pick the start date</div>
             <div id="${p}TimeCalendar" class="timeCalendar"></div>
             <div id="${p}RangeError" class="timeRangePanel__error" role="alert" hidden></div>
             <button id="${p}CustomRangeApply" class="button button--primary timeRangePanel__apply" type="button">Apply time range</button>

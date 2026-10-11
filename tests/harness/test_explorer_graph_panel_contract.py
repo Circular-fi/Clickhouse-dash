@@ -80,7 +80,8 @@ def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
     # impact list (keyboard access and the live region stay).
     for gone in ("renderImpactList", "impactRows", "viewSwitch", "graphKitList", "currentViewMode"):
         assert gone not in js, gone
-    assert 'live.setAttribute("aria-live", "polite");' in js
+    # ... and the node that the keyboard reached is said through the page's one live region, not through a region of the kit.
+    assert "uiState.announce(described)" in js and "aria-live" not in js
     assert "model.openCard(node.database, node.name)" in js
     # Canvas colours come from graph tokens defined for both themes.
     for token in ("--graph-muted", "--graph-accent-text", "--graph-halo", "--graph-edge"):

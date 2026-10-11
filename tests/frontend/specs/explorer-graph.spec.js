@@ -468,7 +468,7 @@ test('keyboard: the canvas takes the focus, arrows move between cards, Enter sel
   const from = state.nodes.find((node) => node.id === first);
   const to = state.nodes.find((node) => node.id === state.keyboardId);
   expect(to.x).toBeGreaterThan(from.x);
-  await expect(page.locator('#explorerGraphPane [aria-live="polite"]')).toContainText(to.name);
+  await expect(page.locator('#uiLiveStatus')).toContainText(to.name);
   const chosen = state.keyboardId;
   await page.keyboard.press('Enter');
   await expect(page.locator('#explorerGraphPanel')).toBeVisible();

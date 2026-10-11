@@ -646,24 +646,25 @@ function render(container, options = {}) {
   }
 
   const controls = h("div", { class: "pipelineViewer__controls" });
-  const setView = (start, finish) => {
+  // `say`: a control moved the view, and the new range is said through the page's one live region (uiState.announce).
+  const setView = (start, finish, say = false) => {
     view = selectWindow(model, start, finish);
     drawTimelines();
+    if (say) uiState.announce(rangeLabel.textContent);
   };
-  const shift = (direction) => setView(view.start + direction * view.width * 0.75, view.finish + direction * view.width * 0.75);
+  const shift = (direction) => setView(view.start + direction * view.width * 0.75, view.finish + direction * view.width * 0.75, true);
   const zoom = (factor) => {
     const width = Math.min(model.window, Math.max(1, view.width * factor));
-    setView(view.start + (view.width - width) / 2, view.start + (view.width + width) / 2);
+    setView(view.start + (view.width - width) / 2, view.start + (view.width + width) / 2, true);
   };
   // Every control says what it does (glyph and word).
-  const reset = button("Full query", "Show the complete query", () => setView(0, model.window));
+  const reset = button("Full query", "Show the complete query", () => setView(0, model.window, true));
   const back = button("Earlier", "Move to earlier activity", () => shift(-1), "chevron-left");
   const zoomOut = button("Zoom out", "Zoom out", () => zoom(2), "zoom-out");
   const zoomIn = button("Zoom in", "Zoom in", () => zoom(0.5), "zoom-in");
   const forward = button("Later", "Move to later activity", () => shift(1), "chevron-right", true);
-  const end = button("Last 1%", "Inspect the last one percent of the query", () => setView(model.window * 0.99, model.window));
-  const rangeLabel = h("output", { class: "pipelineViewer__range" });
-  rangeLabel.setAttribute("aria-live", "polite");
+  const end = button("Last 1%", "Inspect the last one percent of the query", () => setView(model.window * 0.99, model.window, true));
+  const rangeLabel = h("span", { class: "pipelineViewer__range" });
   // The stage order: a mode of the table (ns.segmented), not a native select.
   const sort = h("div", { class: "pipelineViewer__sort" });
   segmented.render(sort, [

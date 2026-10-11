@@ -131,7 +131,7 @@ function buildForm(meta) {
   });
   if (!meta.hosts.length) hostList.appendChild(h("p", { class: "mcpNote" }, "No host has an mcp_uri in the config: a key cannot read data."));
   // What the MCP user of the chosen host cannot do: said once, under the choice; the tools say it each.
-  const hostNote = h("p", { class: "mcpNote mcpHostNote", "aria-live": "polite" });
+  const hostNote = h("p", { class: "mcpNote mcpHostNote" });
   const hostsField = fieldWrap("hosts", "Host", [hostList, hostNote], { group: true });
 
   // Data: the patterns, one per line. * alone is every database and table.
@@ -251,9 +251,12 @@ function buildForm(meta) {
     hostNote.hidden = !host;
     if (host) {
       const lost = gaps.size;
-      hostNote.textContent = host.mcp.state === "ok"
+      const note = host.mcp.state === "ok"
         ? `Tools run as ${host.mcp.user || "the MCP user"}.${lost ? ` ${lost} ${lost === 1 ? "tool needs" : "tools need"} a grant that this user lacks: ${lost === 1 ? "it is" : "they are"} greyed.` : ""}`
         : "The MCP user of this host is not checked yet.";
+      // A note that changes after the choice of another host is said (the first one is read with the form).
+      if (hostNote.textContent && hostNote.textContent !== note) uiState.announce(note);
+      hostNote.textContent = note;
     }
     const lockText = (members) => {
       const locked = members.filter((box) => box.input.disabled);
@@ -428,7 +431,7 @@ const reachCache = new Map();
 // What the MCP ClickHouse user of each host may read, cut by the patterns of the key, as databases that open on
 // their tables. A table that the user reads only in part says "some columns".
 function reachSection(key) {
-  const body = h("div", { class: "mcpReach__body", "aria-live": "polite" });
+  const body = h("div", { class: "mcpReach__body" });
   const refresh = h("button", { type: "button", class: "button button--small mcpReach__refresh", title: "Check the grants of the MCP user again" }, "Check again");
   const section = h("section", { class: "mcpReach", dataset: { reach: key.id }, "aria-label": `Data that ${key.name} reads` },
     h("h3", { class: "mcpDetails__title" }, "Data it reads", refresh), body);
@@ -449,6 +452,7 @@ function reachSection(key) {
       if (!req.isCurrent()) return;
       reachCache.set(key.id, { at: Date.now(), access });
       body.replaceChildren(reachBody(access));
+      uiState.announce(`The data that ${key.name} reads is listed.`);
     } catch (error) {
       if (req.isCurrent() && !util.isAbort(error)) uiState.error(body, { title: "The data of this key cannot be listed", body: util.errorText(error), compact: true });
     } finally {

@@ -234,7 +234,7 @@
           <svg class="icon icon--sm obsFilterBar__searchIcon" aria-hidden="true"><use href="/static/icons.svg?v=2972138764#i-search"/></svg>
           <input id="metricsSearch" class="obsFilterBar__input" type="search" autocomplete="off" spellcheck="false" placeholder="Search metrics or services" aria-label="Search metrics" />
         </label>
-        <span id="metricsRangeInfo" class="obsFilterBar__option obsFilterBar__info metricsToolbar__info" aria-live="polite"></span>
+        <span id="metricsRangeInfo" class="obsFilterBar__option obsFilterBar__info metricsToolbar__info"></span>
         <div class="obsFilterBar__actions">
           <button id="metricsAddPanelButton" class="button obsFilterBar__secondary" type="button" title="Add a chart panel">Add panel</button>
           <button id="metricsSearchButton" class="button button--primary obsFilterBar__submit traceSearchSubmit" type="submit" title="Search: reload the catalog and the charts for the range"><span class="uiSpin" aria-hidden="true"></span><span>Search</span></button>
@@ -246,7 +246,7 @@
       <div class="uiSide__head metricsSidebar__head">
         <div class="uiSide__bar">
           <button id="metricsSidebarToggle" class="uiSide__toggle" type="button" aria-expanded="true" aria-controls="metricsSidebar" title="Hide metrics"><svg class="icon icon--sm" aria-hidden="true"><use href="/static/icons.svg?v=2972138764#i-chart-bar"/></svg><span>Metrics</span></button>
-          <span id="metricsCatalogSummary" class="uiSide__meta metricsSidebar__summary" aria-live="polite">Loading metrics…</span>
+          <span id="metricsCatalogSummary" class="uiSide__meta metricsSidebar__summary">Loading metrics…</span>
         </div>
         <div id="metricsCatalogBy" class="segmented segmented--compact metricsCatalogBy" role="group" aria-label="Group the catalog by">
           <button type="button" class="segmented__option" data-catalog-by="metric" aria-pressed="true" title="Each metric once, the services sending it under it">By metric</button>

@@ -95,6 +95,14 @@ def test_live_regions_are_small_and_tooltips_are_not_status():
         assert not re.search(r"""tip\.setAttribute\("role", "status"\)|role="status"[^>]*Tip|Tip[^>]*role="status\"""", code[name]), name
 
 
+def test_only_the_announce_region_is_live():
+    # UI-126: the page has one polite live region, #uiLiveStatus (ns.uiState.announce). No module or shell marks a region of its own.
+    for path in sorted((ROOT / "src/static").glob("*.js")) + sorted((ROOT / "src/static").glob("*.html")):
+        if path.name == "app_ui_state.js":
+            continue
+        assert "aria-live" not in path.read_text(encoding="utf-8"), path.name
+
+
 def test_feature_flags_are_read_through_ns_features():
     state = read("src/static/app_state.js")
     assert "const FEATURE_DEFAULTS = Object.freeze({" in state

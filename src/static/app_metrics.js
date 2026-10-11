@@ -393,6 +393,9 @@ async function loadCatalog() {
   }
   if (alone.length) address.replace();
   renderCatalog();
+  // The result of the load is said once (the summary line changes with every filter typed, and is not a live region).
+  const summary = dom.metricsCatalogSummary?.textContent;
+  if (summary) uiState.announce(summary);
   renderPanels();
   for (const panel of alone) loadPanel(panel);
 }

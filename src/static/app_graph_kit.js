@@ -18,6 +18,7 @@ import { palette } from "./app_palette.js";
 import { storage } from "./app_state.js";
 import { icon } from "./app_ui_icon.js";
 import { detailPanel } from "./app_ui_panel.js";
+import { uiState } from "./app_ui_state.js";
 import { wasm } from "./app_wasm.js";
 
 const { $ } = dom;
@@ -3252,12 +3253,8 @@ function mount(options) {
   const canvas = options.canvas;
   const view = options.view;
   const control = { frame: 0, drag: null, pinch: null, hovered: null, keyboardId: null, animation: 0, follow: null, settleFrame: 0, watched: null };
-  const live = document.createElement("p");
-  live.className = "srOnly";
-  live.setAttribute("aria-live", "polite");
-  canvas.parentElement?.append(live);
   canvas.classList.add("graphKit__canvas");
-  // What mount() installs (the listeners of the canvas and the toolbar, the observers, the live region) goes with destroy().
+  // What mount() installs (the listeners of the canvas and the toolbar, the observers) goes with destroy().
   const lifetime = new AbortController();
   const { signal } = lifetime;
 
@@ -3530,7 +3527,9 @@ function mount(options) {
     if (control.follow && control.follow.id !== id) unfollow();
     setHover(options.target?.(id) || null);
     if (!boxOnScreen(node)) centerOn(node);
-    live.textContent = options.describe?.(id) || "";
+    // The node that the keyboard reached is said through the page's one live region (uiState.announce).
+    const described = options.describe?.(id);
+    if (described) uiState.announce(described);
     scheduleDraw();
   }
 
@@ -3673,7 +3672,6 @@ function mount(options) {
     unfollow();
     if (control.frame) cancelAnimationFrame(control.frame);
     control.frame = 0;
-    live.remove();
     canvas.classList.remove("graphKit__canvas");
   }
 

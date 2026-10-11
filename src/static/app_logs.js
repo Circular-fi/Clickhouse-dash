@@ -552,6 +552,8 @@ async function search({ push = false } = {}) {
     model.lastPayload = payload;
     renderTable();
     renderStatus();
+    // The result of the search is said once through the page's live region (the status line is not one: it changes as rows load).
+    if (model.status) uiState.announce(model.status);
     if (model.selectedId && !model.rowIds.has(model.selectedId)) closeSidePanel({ url: pendingLogId ? "none" : "clear" });
     openPendingSidePanel();
   } catch (error) {

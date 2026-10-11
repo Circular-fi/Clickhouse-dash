@@ -255,10 +255,7 @@ function render() {
   if (!legend) {
     legend = document.createElement("div");
     legend.className = "traceChartLegend traceHeatLegend";
-    const live = document.createElement("div");
-    live.className = "srOnly traceHeatLive";
-    live.setAttribute("aria-live", "polite");
-    container.append(legend, live);
+    container.append(legend);
   }
   const rampHtml = Array.from({ length: HEAT_LEVELS }, (_, i) => `<i class="lvl-${i + 1}" style="background:${PALETTE[i]}"></i>`).join("");
   legend.innerHTML = `<span class="traceHeatLegend__label">Traces per cell</span><span class="traceHeatLegend__scale"><span>1</span><span class="traceHeatLegend__ramp" aria-hidden="true">${rampHtml}</span><span data-heat-max>${esc(fmt.count(maxCount))}</span></span><span class="traceHeatLegend__hint">Drag a box to compare its traces</span>`;
@@ -343,9 +340,9 @@ function boxTooltip(box) {
 
 // ------------------------------------------------------- keys
 
+// The cell or box that the keyboard reached, through the page's one live region.
 function announce(text) {
-  const live = $(".traceHeatLive", dom.traceDurationChart);
-  if (live) live.textContent = text;
+  uiState.announce(text);
 }
 
 function onKeydown(event) {

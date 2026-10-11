@@ -50,7 +50,8 @@ test('graphKit.mount().destroy() removes the listeners, the observers and the li
     pane.remove();
     return result;
   });
-  expect(out.liveBefore).toBe(1);
+  // The kit makes no live region of its own: what the keyboard reaches is said through uiState.announce.
+  expect(out.liveBefore).toBe(0);
   expect(out.liveAfter).toBe(0);
   expect(out.zoomedBefore).toBe(true);
   expect(out.zoomedAfterDestroy).toBe(false);
