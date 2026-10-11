@@ -12,11 +12,14 @@ import { stabilizePage } from '../helpers/review.js';
 const enabled = process.env.VISUAL_COMPARE !== '0';
 
 // What changes from one run to the next: the timings, the rates, the identifier and the ping. A mask would still
-// change its width with the text under it, so the text itself is replaced by a fixed one.
+// change its width with the text under it, so the text itself is replaced by a fixed one. The version badge names the
+// build of the instance under test ("source-tests (local)" in the compose stack), so it is fixed to the text of the baselines.
 async function freezeVolatile(page) {
   await page.evaluate(() => {
     const selectors = ['#queryIdentifierText', '#elapsedSecondsText', '#hostPickerPing', '#runStatsTiles .statTile__value', '#runStatsTiles .statTile__sub', '#resultSummaryText'];
     for (const el of document.querySelectorAll(selectors.join(','))) el.textContent = '0';
+    const badge = document.getElementById('versionBadge');
+    if (badge) badge.textContent = 'source (local)';
   });
 }
 
