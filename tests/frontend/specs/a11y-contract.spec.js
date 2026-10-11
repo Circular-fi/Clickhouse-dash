@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { runSuccessfulQuery } from '../helpers/app.js';
 import { appReady } from '../helpers/modules.js';
+import { requireInstance } from '../helpers/instances.js';
 import { mockTraceResults, SYNTHETIC_TRACES } from '../helpers/traces.js';
 
 // Accessibility contract (docs/ui-foundations.md, "Accessibility"): in both themes, the colours that carry
@@ -262,10 +263,11 @@ for (const theme of THEMES) {
   }
 }
 
-test('axe (dark): the MCP page has no violation', async ({ page, request }) => {
-  const features = (await (await request.get('/api/version')).json()).features || {};
-  test.skip(!features.mcp?.enabled, 'MCP is off on this instance');
-  await page.goto('/mcp-integration');
+// The MCP page needs a server with MCP on (the instance of mcp-contract.spec.js).
+test('axe (dark): the MCP page has no violation', async ({ page }) => {
+  const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
+  requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
+  await page.goto(`${base}/mcp-integration`);
   await expect(page.locator('#mcpWorkspace')).toBeVisible();
   await page.waitForTimeout(1500);
   expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);

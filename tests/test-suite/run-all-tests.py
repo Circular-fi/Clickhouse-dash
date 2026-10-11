@@ -284,6 +284,9 @@ def main() -> int:
     ff_env = base_env.copy()
     ff_env['FRONTEND_ARTIFACTS_DIR'] = str(frontend_functional_dir)
     ff_env['PW_PERF'] = 'skip'
+    # No spec of these phases skips on this stack (its instances and its fixtures are all there): a skip is a missing
+    # instance or dataset, and the run says so (helpers/skip-reporter.js). CHDASH_MAX_SKIPS raises the bound on purpose.
+    ff_env.setdefault('CHDASH_MAX_SKIPS', '0')
     statuses['frontend_functional'] = run_phase(
         'frontend-functional',
         ['npx', 'playwright', 'test', *FUNCTIONAL_SPECS, '--project=desktop-1440'],
@@ -312,6 +315,7 @@ def main() -> int:
         embedded_env['FRONTEND_BASE_URL'] = embedded_url
         embedded_env['API_BASE_URL'] = embedded_url
         embedded_env['PW_PERF'] = 'skip'
+        embedded_env.setdefault('CHDASH_MAX_SKIPS', '0')
         statuses['frontend_embedded'] = run_phase(
             'frontend-embedded',
             ['npx', 'playwright', 'test', *(PRODUCTION_PATH_SPECS if quick else FUNCTIONAL_SPECS), '--project=desktop-1440'],

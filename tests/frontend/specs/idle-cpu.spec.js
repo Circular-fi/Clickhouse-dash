@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
+import { requireInstance } from '../helpers/instances.js';
 
 // A page at rest does no work. Two things used to keep every page busy with no one touching it
 // (7 to 20 % of a core in Chrome's Performance Monitor, against about 1 % for a static page):
@@ -78,10 +79,11 @@ for (const path of PAGES) {
   });
 }
 
-test('the MCP page at rest: the same', async ({ page, request }) => {
-  const features = (await (await request.get('/api/version')).json()).features || {};
-  test.skip(!features.mcp?.enabled, 'MCP is off on this instance');
-  await page.goto('/mcp-integration');
+test('the MCP page at rest: the same', async ({ page }) => {
+  // The MCP page needs a server with MCP on (the instance of mcp-contract.spec.js).
+  const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
+  requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
+  await page.goto(`${base}/mcp-integration`);
   expectAtRest(await restingWindow(page, '/mcp-integration'), '/mcp-integration');
 });
 
