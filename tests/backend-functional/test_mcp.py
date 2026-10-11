@@ -348,10 +348,11 @@ def test_origin_check():
 def test_structured_content_is_sent_only_to_a_protocol_that_has_it():
     # content[0].text holds the JSON of the tool for every client. structuredContent, the same JSON again, only for the clients of
     # 2025-06-18 and later, and for a request without the header (ARCH-B-073): the older ones do not read it.
+    # The key of the second host: the calls of the others count on the rate limit of the all-data key (120 a minute).
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_databases", "arguments": {}}}
     answers = {}
     for version in (None, "2025-06-18", "2025-03-26", "2024-11-05"):
-        response = post_mcp(MCP_URL, ALL, body, headers={"MCP-Protocol-Version": version} if version else None)
+        response = post_mcp(MCP_URL, SECOND, body, headers={"MCP-Protocol-Version": version} if version else None)
         assert response.status_code == 200, (version, response.text)
         answers[version] = response.json()["result"]
     for version in (None, "2025-06-18"):
@@ -362,7 +363,7 @@ def test_structured_content_is_sent_only_to_a_protocol_that_has_it():
         assert json.loads(answers[version]["content"][0]["text"]) == answers[None]["structuredContent"], version
     # The same for a failed tool: the code and the message are in the text for every client.
     refused = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "describe_table", "arguments": {"database": "nope", "table": "nope"}}}
-    old = post_mcp(MCP_URL, ALL, refused, headers={"MCP-Protocol-Version": "2024-11-05"}).json()["result"]
+    old = post_mcp(MCP_URL, SECOND, refused, headers={"MCP-Protocol-Version": "2024-11-05"}).json()["result"]
     assert old["isError"] is True and "structuredContent" not in old and "error" in json.loads(old["content"][0]["text"]), old
 
 
