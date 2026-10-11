@@ -375,9 +375,14 @@ function beginMultiqueryPanel({ index = 0, total = 1, autoToggle = true } = {}) 
   let errorText = "";
   let table = null;
 
+  // The panel's Copy JSON / Copy CSV: the same serializer as the single result and the downloads; a statement that failed
+  // without rows copies its error.
+  const errorWithoutRows = () => (errorText && !table.rowCount() ? errorText : "");
+  const copyText = (format) => errorWithoutRows()
+    || (format === "csv" ? resultCsvText : resultJsonText)(table.columns(), table.typeAsts(), table.rows());
   const copyCtrl = createCopySplitSmall({
-    getJsonText: () => buildCopyText("json"),
-    getCsvText: () => buildCopyText("csv"),
+    getJsonText: () => copyText("json"),
+    getCsvText: () => copyText("csv"),
   });
   right.appendChild(copyCtrl.el);
 
@@ -424,11 +429,6 @@ function beginMultiqueryPanel({ index = 0, total = 1, autoToggle = true } = {}) 
   table = createLiveTable({ wrap, host: { metaChanged: updateMetaText, rowsChanged: updateMetaText } });
   resultsStackDisposers.push(() => table.destroy());
 
-  // The panel's Copy JSON / Copy CSV: the same serializer as the single result and the downloads; a statement that failed
-  // without rows copies its error.
-  const errorWithoutRows = () => (errorText && !table.rowCount() ? errorText : "");
-  const copyText = (format) => errorWithoutRows()
-    || (format === "csv" ? resultCsvText : resultJsonText)(table.columns(), table.typeAsts(), table.rows());
   const updateCopyEnabled = () => copyCtrl.setDisabled(!(errorText || table.rowCount() > 0));
 
   // Each panel keeps its own Table / Chart view and chart settings.
@@ -514,48 +514,6 @@ function endMultiqueryPanel(sink, { expandedByDefault = false, metaText = null }
   if (sink && typeof sink.setMetaText === "function" && metaText != null) sink.setMetaText(metaText);
   if (sink && typeof sink.finalize === "function") sink.finalize({ expandedByDefault });
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 function mountMainChart() {
   if (!(queryChart && mainTable && dom.resultsPanel && dom.liveResultsWrap)) return;
