@@ -12,6 +12,12 @@
 //   cycle.start();     // in init(): binds chdash:host-changed and the feature flags, and loads when a host is selected
 //   cycle.reload();    // Retry: the same cycle (a reload of the same host that is loading joins it)
 //
+// Every read of a view goes through read(slot), the one guard of a stale answer (ARCH-F-158):
+//
+//   const req = obsView.read("logs.search");
+//   const payload = await api.getLogs("search", params, { signal: req.signal });
+//   if (!req.isCurrent()) return;     // a newer read of the slot, a cancel, or another host: the answer is dropped
+//
 // reset() runs first, synchronously: it empties the model of the old host. load(stale) is async: stale() is true once the
 // host differs from the one of this load. loaded() tells whether the view has data of a host (default: a load started);
 // the feature flags start a load only when it is false.
@@ -20,6 +26,14 @@ import { features, state } from "./app_state.js";
 import { util } from "./app_util.js";
 
 const currentHost = () => String(state.selectedHostId || "");
+
+// The read of a slot of util.latest (a newer read of the slot, or a cancel of it, aborts this one and makes it stale) that is also stale once
+// the selected host is not the host it began with, whatever slot prefixes the view's host cycle cancels.
+function read(slot) {
+  const host = currentHost();
+  const req = util.latest(slot);
+  return Object.freeze({ signal: req.signal, isCurrent: () => req.isCurrent() && currentHost() === host });
+}
 
 function hostCycle({ feature, cancel = [], reset = null, load, loaded = null }) {
   let started = false;
@@ -52,4 +66,4 @@ function hostCycle({ feature, cancel = [], reset = null, load, loaded = null }) 
   return Object.freeze({ reload, start });
 }
 
-export const obsView = Object.freeze({ currentHost, hostCycle });
+export const obsView = Object.freeze({ currentHost, hostCycle, read });

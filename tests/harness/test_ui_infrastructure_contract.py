@@ -150,12 +150,16 @@ def test_requests_go_through_api_and_superseded_ones_are_aborted():
     assert "util.latest(`${LIBRARY_REQUEST}:${store.kind}`)" in library and "util.latest(HISTORY_REQUEST)" in library
     util = read("src/static/app_util.js")
     assert "function latest(key) {" in util and "latestByKey.get(key)?.controller.abort();" in util
-    # The views' stale-answer guards are util.latest, not hand-rolled sequences.
+    # The views' stale-answer guard is one: obsView.read(slot), a util.latest read that is also stale once the host changed (ARCH-F-158), not
+    # a hand-rolled sequence and not a bare util.latest.
     code = sources()
-    for name in ("app_logs.js", "app_metrics.js", "app_traces.js", "app_trace_logs.js", "app_trace_heatmap.js", "app_trace_map.js",
+    assert "function read(slot) {" in code["app_obs_view.js"] and "const req = util.latest(slot);" in code["app_obs_view.js"]
+    for name in ("app_logs.js", "app_metrics.js", "app_traces.js", "app_trace_detail.js", "app_trace_logs.js", "app_trace_heatmap.js", "app_trace_map.js",
                  "app_trace_services.js", "app_trace_insights.js", "app_facet_panel.js"):
         assert not re.search(r"\bconst seq = \+\+", code[name]), name
-        assert "util.latest(" in code[name], name
+        assert "obsView.read(" in code[name], name
+        assert "= util.latest(" not in code[name], name
+    assert "obsView.read(" in code["app_trace_spans.js"] and "= util.latest(" not in code["app_trace_spans.js"]
 
 
 def test_browser_storage_goes_through_storage_pref():

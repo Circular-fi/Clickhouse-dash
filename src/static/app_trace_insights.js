@@ -7,6 +7,7 @@
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { obsView } from "./app_obs_view.js";
 import { palette } from "./app_palette.js";
 import { renderAttributeTable, sectionOpen, setSectionOpen } from "./app_trace_inspector.js";
 import { attributeEntries, parseStructuredValue, spanEventList, traceJsonExactStartNs } from "./app_trace_model.js";
@@ -389,7 +390,7 @@ async function loadLinkedFrom(spanId, { force = false } = {}) {
   }
   // One read for each span of a trace on this host: cut when the host changes (install), so the answer of the old host
   // never lands under the same trace and span of the new one.
-  const req = util.latest(`traces.linked.${currentHost()}\u0000${key}`);
+  const req = obsView.read(`traces.linked.${currentHost()}\u0000${key}`);
   try {
     const payload = await api.getTraceLinkedFrom(currentHost(), params, { signal: req.signal });
     if (!req.isCurrent()) return;
@@ -540,7 +541,7 @@ async function loadContext(direction) {
   const paging = direction === "older" || direction === "newer";
   const edge = paging ? (direction === "older" ? context.rows[context.rows.length - 1] : context.rows[0]) : null;
   if (paging && !edge) return;
-  const req = util.latest("traces.context");
+  const req = obsView.read("traces.context");
   const params = { ...contextParams(), direction, limit: CONTEXT_PAGE };
   if (paging) {
     params.cursor_ns = edge.start_ns_text;

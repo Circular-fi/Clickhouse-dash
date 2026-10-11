@@ -19,6 +19,7 @@ import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { graphKit } from "./app_graph_kit.js";
+import { obsView } from "./app_obs_view.js";
 import { palette } from "./app_palette.js";
 import { traceSearch } from "./app_trace_search.js";
 import { actions, address, currentHost, esc } from "./app_trace_store.js";
@@ -799,7 +800,7 @@ function onActionClick(event) {
 async function load(filters, { force = false } = {}) {
   const key = traceSearch.searchKey() || "";
   if (!force && key === map.key && (map.loading || map.data)) return;
-  const req = util.latest("traces.map");
+  const req = obsView.read("traces.map");
   map.key = key;
   map.loading = true;
   map.error = "";

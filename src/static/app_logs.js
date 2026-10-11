@@ -274,7 +274,7 @@ function initServicePicker() {
 const scheduleFilterSearch = util.debounce(() => { void search({ push: true }); });
 
 async function loadServiceChoices(range) {
-  const req = util.latest("logs.services");
+  const req = obsView.read("logs.services");
   try {
     const params = new URLSearchParams();
     if (currentHost()) params.set("host_id", currentHost());
@@ -524,7 +524,7 @@ async function search({ push = false } = {}) {
   renderChips();
   syncLegend();
   // A new search supersedes the previous one and its next page.
-  const req = util.latest("logs.search");
+  const req = obsView.read("logs.search");
   util.latest.cancel("logs.more");
   model.loadingMore = false;
   model.lastSearch = range;
@@ -582,7 +582,7 @@ async function loadMore() {
   if (model.loadingMore || model.searching || !model.nextCursor || !model.lastSearch) return;
   if (model.rows.length >= MAX_ROWS) return;
   model.loadingMore = true;
-  const req = util.latest("logs.more");
+  const req = obsView.read("logs.more");
   renderTable();
   try {
     const params = filterParams(model.lastSearch);
@@ -911,7 +911,7 @@ const HISTOGRAM_HEIGHT = 150;
 let histogramChart = null;
 
 async function loadHistogram(range) {
-  const req = util.latest("logs.histogram");
+  const req = obsView.read("logs.histogram");
   model.histogramLoading = true;
   model.histogramError = "";
   renderHistogram();
@@ -1064,7 +1064,7 @@ async function loadPatterns() {
   const key = patternsKey(range);
   if (key === model.patternsKey && (model.patterns || model.patternsLoading)) { renderPatterns(); return; }
   model.patternsKey = key;
-  const req = util.latest("logs.patterns");
+  const req = obsView.read("logs.patterns");
   model.patternsLoading = true;
   model.patternsError = "";
   renderPatterns();
@@ -1380,7 +1380,7 @@ async function loadContext() {
   if (model.side.preset === "service") params.set("service", row.service);
   if (model.side.preset === "host") params.set("host", row.resource_attributes["host.name"]);
   if (model.side.preset === "trace") params.set("trace_id", row.trace_id);
-  const req = util.latest("logs.context");
+  const req = obsView.read("logs.context");
   model.side.contextLoading = true;
   model.side.contextError = "";
   model.side.anchorId = row.id;
@@ -1481,7 +1481,7 @@ function initSidePanel() {
 async function loadMeta() {
   const params = new URLSearchParams();
   if (currentHost()) params.set("host_id", currentHost());
-  const req = util.latest("logs.meta");
+  const req = obsView.read("logs.meta");
   try {
     const meta = await api.getLogs("meta", params, { signal: req.signal });
     if (!req.isCurrent()) return false;

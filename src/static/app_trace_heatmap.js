@@ -13,6 +13,7 @@ import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { obsView } from "./app_obs_view.js";
 import { palette } from "./app_palette.js";
 import { storage } from "./app_state.js";
 import { timeRange } from "./app_timerange.js";
@@ -122,7 +123,7 @@ function onSearch(filters) {
 
 async function load() {
   if (!hm.filters) return;
-  const req = util.latest("traces.heatmap");
+  const req = obsView.read("traces.heatmap");
   const key = filtersKey(hm.filters);
   hm.loading = true;
   hm.error = "";
@@ -426,7 +427,7 @@ function clearSelection({ render: redraw = true } = {}) {
 async function loadDeltas() {
   const sel = hm.selection;
   if (!sel || !hm.filters) return;
-  const req = util.latest("traces.deltas");
+  const req = obsView.read("traces.deltas");
   deltas.loading = true;
   deltas.error = "";
   deltas.data = null;

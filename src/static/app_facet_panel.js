@@ -9,6 +9,7 @@
 
 import { dom, shell } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { obsView } from "./app_obs_view.js";
 import { storage } from "./app_state.js";
 import { icon } from "./app_ui_icon.js";
 import { sidePanel } from "./app_ui_panel.js";
@@ -53,7 +54,7 @@ function create(options) {
   const o = options;
   const part = (name) => dom.byId(o.ids[name]);
   const [one, many] = o.noun;
-  // util.latest keys: this panel's keys request, and one per expanded key.
+  // obsView.read slots (util.latest keys): this panel's keys request, and one per expanded key.
   const latestKey = `facets.${o.ids.panel}`;
   const state = {
     filterKey: "",
@@ -113,7 +114,7 @@ function create(options) {
     if (panel) panel.hidden = !enabled;
     if (!enabled || collapsed()) return;
     state.filterKey = o.filterKey(filters);
-    const req = util.latest(latestKey);
+    const req = obsView.read(latestKey);
     state.loading = true;
     state.error = "";
     render();
@@ -148,7 +149,7 @@ function create(options) {
     const entry = state.expanded.get(id);
     if (!entry || !state.filters) return;
     // The entry check stays: a key folded and opened again is a new entry.
-    const req = util.latest(`${latestKey}.values.${id}`);
+    const req = obsView.read(`${latestKey}.values.${id}`);
     const current = () => req.isCurrent() && state.expanded.get(id) === entry;
     entry.loading = true;
     entry.error = "";

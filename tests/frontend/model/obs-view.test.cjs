@@ -11,6 +11,19 @@ async function load() {
   const slots = [];
   const flags = [];
   const state = { selectedHostId: 'a' };
+  // util.latest: the newest read of a slot is current; a newer one or a cancel makes the older stale.
+  const tokens = new Map();
+  const latest = (slot) => {
+    const controller = new AbortController();
+    const token = { signal: controller.signal, controller, isCurrent: () => tokens.get(slot) === token };
+    tokens.get(slot)?.controller.abort();
+    tokens.set(slot, token);
+    return token;
+  };
+  latest.cancelPrefix = (prefix) => {
+    slots.push(prefix);
+    for (const [slot, token] of [...tokens]) if (slot.startsWith(prefix)) { tokens.delete(slot); token.controller.abort(); }
+  };
   const window = {
     sessionStorage: esm.memoryStorage(),
     localStorage: esm.memoryStorage(),
@@ -18,7 +31,7 @@ async function load() {
   };
   const run = await esm.load({ root, window, stubs: {
     'app_state.js': { state, features: { on: (fn) => flags.push(fn), get: () => undefined }, storage: { pref: () => ({ get: () => [], set() {} }), KEYS: {} } },
-    'app_util.js': { util: { latest: { cancelPrefix: (prefix) => slots.push(prefix) }, escapeHtml: String } },
+    'app_util.js': { util: { latest, escapeHtml: String } },
     'app_router.js': { router: { current: () => ({ params: new URLSearchParams() }) } },
     'app_format.js': { format: { setRangeNamer() {} } },
     'app_dom.js': { dom: { $: () => null, $$: () => [], byId: () => null } },
@@ -28,6 +41,30 @@ async function load() {
   const { timeRange } = await run.import('app_timerange.js');
   return { obsView, timeRange, listeners, slots, flags, state };
 }
+
+test('a read is stale once a newer read of its slot began, its slot was cancelled, or the host changed', async () => {
+  const { obsView, listeners, state } = await load();
+  const first = obsView.read('logs.search');
+  assert.equal(first.isCurrent(), true);
+  const second = obsView.read('logs.search');
+  assert.equal(first.isCurrent(), false, 'a newer read of the slot');
+  assert.equal(first.signal.aborted, true);
+  assert.equal(second.isCurrent(), true);
+  const other = obsView.read('logs.histogram');
+  assert.equal(second.isCurrent(), true, 'another slot is not touched');
+  // The host changes without the view's cycle cancelling the slot (a slot outside its prefixes): the read still stops.
+  state.selectedHostId = 'b';
+  assert.equal(other.isCurrent(), false, 'another host');
+  assert.equal(second.isCurrent(), false);
+  assert.equal(obsView.read('logs.search').isCurrent(), true, 'a read that began on the new host');
+  // The cycle's cancel of a prefix makes every read of it stale at once.
+  const cycle = obsView.hostCycle({ feature: 'logs', cancel: ['logs.'], load: () => {} });
+  const before = obsView.read('logs.more');
+  cycle.start();
+  state.selectedHostId = 'c';
+  listeners.get('chdash:host-changed')();
+  assert.equal(before.isCurrent(), false);
+});
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 

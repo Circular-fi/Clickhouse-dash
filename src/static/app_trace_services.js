@@ -11,6 +11,7 @@ import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { obsView } from "./app_obs_view.js";
 import { palette } from "./app_palette.js";
 import { timeRange } from "./app_timerange.js";
 import { chartMessage, mountChart, unmountChart, zoomSearchRange } from "./app_trace_charts.js";
@@ -159,7 +160,7 @@ async function run(filters, { force = false } = {}) {
     return;
   }
   view.key = key;
-  const req = util.latest("traces.services");
+  const req = obsView.read("traces.services");
   view.loading = true;
   view.error = "";
   render();
@@ -189,7 +190,7 @@ async function loadDetail() {
   const detail = view.detail;
   if (detail.key === key && (detail.payload || detail.loading)) { renderDetail(); return; }
   detail.key = key;
-  const req = util.latest("traces.services.detail");
+  const req = obsView.read("traces.services.detail");
   detail.loading = true;
   detail.error = "";
   detail.payload = null;
@@ -219,7 +220,7 @@ async function loadDb(params) {
   const key = keyOf(dbParams);
   if (db.key === key && (db.payload || db.loading)) return;
   db.key = key;
-  const req = util.latest("traces.services.db");
+  const req = obsView.read("traces.services.db");
   db.loading = true;
   db.error = "";
   db.payload = null;

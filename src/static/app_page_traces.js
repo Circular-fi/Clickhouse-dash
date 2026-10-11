@@ -42,6 +42,7 @@ import * as h_ui_chart from "./app_ui_chart.js";
 import * as h_common from "./app_common.js";
 import * as h_route_notice from "./app_route_notice.js";
 import * as h_boot from "./app_boot.js";
+import * as h_obs_view from "./app_obs_view.js";
 import * as h_facet_panel from "./app_facet_panel.js";
 import * as h_api from "./app_api.js";
 import * as h_header from "./app_header.js";
@@ -49,7 +50,6 @@ import * as h_timerange from "./app_timerange.js";
 import * as h_ui_filterbar from "./app_ui_filterbar.js";
 import * as h_obs_page from "./app_obs_page.js";
 import * as h_chart_core from "./app_chart_core.js";
-import * as h_obs_view from "./app_obs_view.js";
 import * as h_trace_model from "./app_trace_model.js";
 import * as h_trace_store from "./app_trace_store.js";
 import * as h_trace_charts from "./app_trace_charts.js";
@@ -94,6 +94,7 @@ h_loader.loader.expose([
   h_common,
   h_route_notice,
   h_boot,
+  h_obs_view,
   h_facet_panel,
   h_api,
   h_header,
@@ -101,7 +102,6 @@ h_loader.loader.expose([
   h_ui_filterbar,
   h_obs_page,
   h_chart_core,
-  h_obs_view,
   h_trace_model,
   h_trace_store,
   h_trace_charts,

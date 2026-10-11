@@ -14,6 +14,7 @@
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { obsView } from "./app_obs_view.js";
 import { palette } from "./app_palette.js";
 import { storage } from "./app_state.js";
 import { traceInsights } from "./app_trace_insights.js";
@@ -264,7 +265,7 @@ async function search(filters) {
 async function loadPage({ first = false } = {}) {
   if (!state.base) return;
   if (!first && (state.loading || !state.cursor || !state.req)) return;
-  const req = first ? util.latest("traces.spans") : state.req;
+  const req = first ? obsView.read("traces.spans") : state.req;
   state.req = req;
   state.loading = true;
   state.error = "";
@@ -668,7 +669,7 @@ function openPanel(index) {
   state.details.set(key, entry);
   const seq = ++state.detailSeq;
   // The panel shows one span: opening another aborts this read (and a host change does, through "traces.").
-  const req = util.latest("traces.span");
+  const req = obsView.read("traces.span");
   api.getTraceSpan(currentHost(), { traceId: row.trace_id, spanId: row.span_id, timestampNs: row.start_ns }, { signal: req.signal }).then((payload) => {
     entry.status = "ready";
     entry.span = payload?.span || null;
