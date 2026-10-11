@@ -4,6 +4,7 @@
 #include "error_envelope.hpp"
 #include "ch_uri.hpp"
 #include "format_clickhouse.hpp"
+#include "format_pooled_port.hpp"
 #include "format_service.hpp"
 #include "host_util.hpp"
 #include "http_json.hpp"
@@ -35,95 +36,12 @@ int requested_line_width(const rapidjson::Document& doc) {
   return std::max(40, std::min(200, width));
 }
 
-// What the health check of the host knows of its server (the host of an MCP identity, <host>\x1fmcp, is the host that it is for).
-struct FormatterHost {
-  // formatQuery may answer another layout after an upgrade, so the version is part of the key of the cache.
-  std::string version;
-  // max_query_size: the longest text that ClickHouse parses (0 when the check did not read it).
-  size_t max_query_size = 0;
-};
-
-FormatterHost formatter_host(const HealthRunner* health, const std::string& host_id) {
-  FormatterHost out;
-  if (!health) return out;
-  const std::string base = host_id.substr(0, host_id.find('\x1f'));
-  const HostsSnapshot snap = health->snapshot();
-  for (const auto& h : snap.hosts) {
-    if (h.id != base) continue;
-    out.version = h.clickhouse_version;
-    out.max_query_size = h.clickhouse_max_query_size;
-  }
-  return out;
-}
-
 void set_format_cache_header(httplib::Response& res, size_t hits, size_t misses) {
   const char* value = "miss";
   if (hits > 0 && misses == 0) value = "hit";
   else if (hits > 0) value = "partial";
   res.set_header("X-Chdash-Format-Cache", value);
 }
-
-// formatQuery on a pooled connection of the host. Each text takes a connection when it needs ClickHouse (a text with comments never
-// does) and gives it back at once, or closes it when it is no longer good, so a batch holds no connection between two texts (a client
-// that failed while idle is reconnected once, format_query_with_client). The host is checked once, and a connection that cannot be
-// opened is not tried again in the same request: the other texts fail at once with the same error instead of waiting for it again.
-class PooledFormatPort final : public FormatQueryPort {
-public:
-  PooledFormatPort(const std::shared_ptr<ClickHouseClientPool>& pool, const HealthRunner* health, const HostSpec& host, std::string host_id)
-      : pool_(pool), health_(health), host_(host), host_id_(std::move(host_id)) {}
-
-  FormatQueryResult format_query(const std::string& sql, size_t max_bytes) override {
-    return run(sql, max_bytes, format_query_with_client);
-  }
-  FormatQueryResult explain_ast(const std::string& sql, size_t max_bytes) override {
-    return run(sql, max_bytes, explain_ast_with_client);
-  }
-
-  // The host is down (its health check): the answer is the one of every other route, not a transport error.
-  bool host_down() const { return host_down_; }
-  bool reconnect_attempted() const { return reconnect_attempted_; }
-
-private:
-  using Call = FormatQueryResult (*)(clickhouse::Client&, const std::string&, size_t);
-
-  FormatQueryResult run(const std::string& sql, size_t max_bytes, Call call) {
-    FormatQueryResult result;
-    auto client = connect();
-    if (!client) {
-      result.failure = FormatQueryFailureKind::transport;
-      result.message = connect_error_.empty() ? "Failed to connect to ClickHouse for formatQuery." : connect_error_;
-      return result;
-    }
-    result = call(*client, sql, max_bytes);
-    reconnect_attempted_ = reconnect_attempted_ || result.reconnect_attempted;
-    if (!result.connection_reusable && pool_) pool_->invalidate(client);
-    return result;
-  }
-
-  std::shared_ptr<clickhouse::Client> connect() {
-    if (connect_failed_) return {};
-    if (!is_host_healthy(health_, host_id_)) {
-      connect_error_ = "Selected host is down.";
-      host_down_ = true;
-      connect_failed_ = true;
-      return {};
-    }
-    const auto timeout = std::chrono::seconds(5);
-    auto client = pool_ ? pool_->acquire(host_.runner_uri, timeout, timeout, timeout, &connect_error_)
-                        : make_client_from_uri(host_.runner_uri, timeout, timeout, timeout, &connect_error_);
-    if (!client) connect_failed_ = true;
-    return client;
-  }
-
-  std::shared_ptr<ClickHouseClientPool> pool_;
-  const HealthRunner* health_;
-  const HostSpec& host_;
-  std::string host_id_;
-  std::string connect_error_;
-  bool connect_failed_ = false;
-  bool reconnect_attempted_ = false;
-  bool host_down_ = false;
-};
 
 // The status and the code of a failure (docs/operations.md, "Errors"): a text that ClickHouse refuses is the user's (422);
 // a connection that fails is 502; a time that runs out is 504; a ClickHouse that cannot do it is 503.

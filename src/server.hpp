@@ -400,6 +400,8 @@ private:
   // The connections of the System service: the system account of a host, and its runner account for the Queries.
   std::unique_ptr<ChExecutor> open_system_executor(const HostSpec& host, std::string* error);
   std::unique_ptr<ChExecutor> open_system_runner_executor(const HostSpec& host, std::string* error);
+  // The formatter of a shape's text (system_query_format.hpp): the masked text on the runner account of the host, in the scope of the request.
+  system_page::ShapeFormatReply format_shape_sql(const HostSpec& host, const std::string& masked_sql);
 
   void handle_traces_meta(const httplib::Request& req, httplib::Response& res);
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
@@ -628,6 +630,13 @@ private:
       std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::queries)};
   TtlCache<std::string, SystemMonitorQuery> system_monitor_query_cache_{cache_options<SystemMonitorQuery>(
       std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::query)};
+  // The formatted text of a shape: the layout depends on the text, the host and its version only, so 10 min per host and text, whatever the
+  // window; a text that cannot be formatted is kept the same time (a failure of the host is not: it is asked again after 2 s).
+  TtlCache<std::string, system_page::ShapeFormatted> system_shape_format_cache_{[this] {
+    auto options = cache_options<system_page::ShapeFormatted>(std::chrono::minutes(10), {}, 512, 16u << 20, cache_size::shape_format);
+    options.wait = std::chrono::seconds(20);
+    return options;
+  }()};
   // Disks: 60 s per host; their growth 5 min per host and aligned window.
   TtlCache<std::string, SystemMonitorDisks> system_monitor_disks_cache_{cache_options<SystemMonitorDisks>(
       std::chrono::minutes(1), {}, 256, 16u << 20)};
@@ -646,9 +655,10 @@ private:
               counts[key] = SystemReplicaCounts{value.total, value.active};
             }
             return counts;
-          }},
+          },
+          [this](const HostSpec& host, const std::string& masked_sql) { return format_shape_sql(host, masked_sql); }},
       system_page::SystemCaches{system_monitor_caps_cache_, system_monitor_overview_cache_, system_monitor_series_cache_,
-                                system_monitor_queries_cache_, system_monitor_query_cache_, system_monitor_disks_cache_,
+                                system_monitor_queries_cache_, system_monitor_query_cache_, system_shape_format_cache_, system_monitor_disks_cache_,
                                 system_monitor_growth_cache_, system_activity_cache_, system_keeper_cache_},
       acl_};
   trace::PrefillCache trace_prefill_cache_{cache_options<trace::Prefill>(

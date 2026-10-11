@@ -9,6 +9,8 @@
 #include "api_error.hpp"
 #include "ch_executor.hpp"
 #include "ch_uri.hpp"
+#include "format_pooled_port.hpp"
+#include "format_service.hpp"
 #include "host_util.hpp"
 #include "system_json.hpp"
 #include "system_request.hpp"
@@ -87,6 +89,31 @@ std::unique_ptr<ChExecutor> Server::open_system_runner_executor(const HostSpec& 
       client_pool_, [this, uri](std::string* reason) { return acquire_system_client(client_pool_, uri, std::chrono::seconds(30), reason); }, error);
 }
 
+// The masked text of a shape on the runner account of the host, by the formatter of the Query page (format_service.hpp: its check of the
+// meaning and its limits apply; its own cache is not used, the service keeps the final text). The statements carry the scope of the request
+// (its label chdash-system, its deadline, the stop of a caller that went away). A failure that is not the text's (the host is down, the time ran
+// out, ClickHouse refused, the connection broke) is transient: it is not kept.
+system_page::ShapeFormatReply Server::format_shape_sql(const HostSpec& host, const std::string& masked_sql) {
+  system_page::ShapeFormatReply reply;
+  const FormatterHost formatter = formatter_host(health_.get(), host.id);
+  FormatSettings settings;
+  settings.use_cache = false;
+  settings.cache_scope = host.id + '\x1f' + formatter.version;
+  settings.clickhouse_max_query_size = formatter.max_query_size;
+  settings.max_sql_bytes = 5 * system_page::kShapeFormatMaxInputBytes;  // a stand-in is five bytes for a placeholder of one
+  PooledFormatPort port(client_pool_, health_.get(), host, host.id);
+  FormatBatch batch(nullptr, settings, port);
+  const FormatOutcome outcome = batch.format(masked_sql);
+  if (outcome.ok()) {
+    // A warning: the formatter could not lay the text out without changing its meaning, and gave it back as it was written.
+    if (!outcome.warning) reply.text = *outcome.formatted;
+    return reply;
+  }
+  reply.transient = port.host_down() || (outcome.failure != FormatQueryFailureKind::server && outcome.failure != FormatQueryFailureKind::input &&
+                                         outcome.failure != FormatQueryFailureKind::empty_result);
+  return reply;
+}
+
 // GET /api/system/overview
 void Server::handle_system_overview(const httplib::Request& req, httplib::Response& res) {
   system_page::HostRequest request;
@@ -147,7 +174,8 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
 }
 
 // GET /api/system/queries/<hash>: one query shape: its timeline over the window and its 20 slowest, latest or largest runs, with the latest run's
-// text. Runner account, as the list.
+// text and that text formatted (`normalized_formatted`, null when it cannot be: the page then shows `normalized`). Runner account, as the list; the
+// formatter runs on it too, once for a text (SystemService::shape_text_formatted).
 void Server::handle_system_query(const httplib::Request& req, httplib::Response& res) {
   system_page::QueryRequest request;
   ApiError error;
@@ -156,7 +184,8 @@ void Server::handle_system_query(const httplib::Request& req, httplib::Response&
   const HostSpec* host = usable_host(cfg_, health_.get(), req, request.host_id, res);
   if (!host) return;
   send_system_result(res, system_service_.query(current_request_context(), *host, request), [&](const auto& cached) {
-    return system_page::query_json(request.host_id, request.from_ms, request.to_ms, *cached.value, cached.stale, cfg_.system);
+    const auto formatted = cached.value->status == "ok" ? system_service_.shape_text_formatted(current_request_context(), *host, cached.value->normalized) : nullptr;
+    return system_page::query_json(request.host_id, request.from_ms, request.to_ms, *cached.value, cached.stale, cfg_.system, formatted.get());
   });
 }
 

@@ -650,7 +650,7 @@ std::string queries_json(const std::string& host_id, uint64_t from_ms, uint64_t 
 }
 
 std::string query_json(const std::string& host_id, uint64_t from_ms, uint64_t to_ms, const SystemMonitorQuery& data, bool stale,
-                        const SystemSettings& settings) {
+                        const SystemSettings& settings, const std::string* normalized_formatted) {
   rapidjson::StringBuffer sb(nullptr, 32 * 1024);
   rapidjson::Writer<rapidjson::StringBuffer> w(sb);
   w.StartObject();
@@ -692,6 +692,10 @@ std::string query_json(const std::string& host_id, uint64_t from_ms, uint64_t to
   w.EndObject();
   write_string(w, "kind", data.kind);
   write_string(w, "normalized", data.normalized);
+  // The same text laid out by the formatter, with its placeholders; null when it could not be (the page shows `normalized`).
+  w.Key("normalized_formatted");
+  if (normalized_formatted) write_string_value(w, *normalized_formatted);
+  else w.Null();
   w.Key("example");
   w.StartObject();
   write_string(w, "text", data.example);

@@ -28,8 +28,9 @@ std::string growth_json(const std::string& host_id, const SeriesRequest& request
 std::string disks_json(const std::string& host_id, const SystemMonitorDisks& data, bool stale, const SystemSettings& settings);
 std::string queries_json(const std::string& host_id, uint64_t from_ms, uint64_t to_ms, const SystemMonitorQueries& data, bool stale,
                          const SystemSettings& settings);
+// `normalized_formatted`: the formatted text of data.normalized (SystemService::shape_text_formatted), null when there is none.
 std::string query_json(const std::string& host_id, uint64_t from_ms, uint64_t to_ms, const SystemMonitorQuery& data, bool stale,
-                       const SystemSettings& settings);
+                       const SystemSettings& settings, const std::string* normalized_formatted = nullptr);
 std::string activity_json(const std::string& host_id, const SystemActivity& ops, bool stale);
 std::string keeper_json(const std::string& host_id, const SystemKeeperStatus& keeper, bool stale);
 

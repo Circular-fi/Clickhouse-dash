@@ -1032,6 +1032,8 @@ test('a shape\'s SQL has line numbers and the Query editor\'s colours (keywords,
     const response = await route.fetch();
     const json = await response.json();
     json.normalized = 'SELECT count() AS calls, toDate(now()) AS day, sum(bytes) FROM db.events WHERE id IN (?..) AND ts > ? GROUP BY day ORDER BY calls DESC LIMIT ?';
+    // The server formats it (normalized_formatted); the page draws what it is given.
+    json.normalized_formatted = 'SELECT\n    count() AS calls,\n    toDate(now()) AS day,\n    sum(bytes)\nFROM db.events\nWHERE (id IN (?..)) AND (ts > ?)\nGROUP BY day\nORDER BY calls DESC\nLIMIT ?';
     await route.fulfill({ response, json });
   });
   await page.goto(`/system/queries/${hash}?sort=calls`);
@@ -1353,9 +1355,13 @@ test('a database or table name with quotes, backslashes and dots goes to the ser
   await plain;
 });
 
-test('a shape\'s SQL is formatted by the Query page\'s formatter; copy gives the formatted text', async ({ page }) => {
+test('a shape\'s SQL is formatted by the server (normalized_formatted), with no call to /api/format; copy gives the formatted text', async ({ page }) => {
   const formats = [];
-  page.on('request', (request) => { if (request.url().includes('/api/format')) formats.push(JSON.parse(request.postData() || '{}')); });
+  page.on('request', (request) => { if (request.url().includes('/api/format')) formats.push(request.url()); });
+  const details = [];
+  page.on('response', async (response) => {
+    if (/\/api\/system\/queries\/\d+\?/.test(response.url())) details.push(response.json().catch(() => null));
+  });
   await openQueries(page, '?sort=calls&kind=Select');
   // A shape with a FROM clause and literals (normalized to ?).
   const index = await queryRows(page).evaluateAll((rows) => rows.findIndex((row) => {
@@ -1374,34 +1380,62 @@ test('a shape\'s SQL is formatted by the Query page\'s formatter; copy gives the
   expect(shown).toMatch(/\n\s*FROM\b/);
   // The normalized placeholders are back: no numeric stand-in left.
   expect(shown).not.toMatch(/\b9\d{4}\b/);
-  // The formatter got numeric literals, never normalizeQuery's ? (no SQL parses it).
-  expect(formats.length).toBeGreaterThan(0);
-  const sent = formats[formats.length - 1].sqls[0];
-  expect(sent).not.toContain('?');
-  // The same text, whitespace aside, as the normalized query (the formatter
-  // may spell a keyword in capitals or add ASC).
-  const raw = await page.evaluate(async (hash) => {
-    const host = window.ChDash.state.selectedHostId;
-    const response = await fetch(`/api/system/queries/${hash}?host_id=${encodeURIComponent(host)}`);
-    return (await response.json()).normalized;
-  }, shapeHash(page));
+  // What is shown is what the server answered: normalized_formatted, and nothing went to the formatter from the page.
+  const answer = await details[details.length - 1];
+  expect(answer.normalized_formatted).toBe(shown);
+  expect(formats).toEqual([]);
+  // The same placeholders, in the same order, as the normalized query.
   const placeholders = (text) => (text.match(/\?(\.\.)?/g) || []).join(' ');
-  expect(placeholders(shown)).toBe(placeholders(raw));
+  expect(placeholders(shown)).toBe(placeholders(answer.normalized));
   // Copy gives the formatted text; no other copy button (the raw text is not offered).
   await captureCopies(page);
   await wrap.locator('.sqlBlock__copy').click();
   await expect.poll(() => copiedText(page)).toBe(shown.replace(/\s+$/, ''));
   await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
+  // Still no call to the formatter after the Raw / Formatted switch.
+  await page.locator('#systemQueryView').getByRole('button', { name: 'Raw' }).click();
+  await expect(wrap).toHaveAttribute('data-raw', '1');
+  await page.locator('#systemQueryView').getByRole('button', { name: 'Formatted' }).click();
+  await expect(wrap).toHaveAttribute('data-formatted', '1');
+  expect(formats).toEqual([]);
 });
 
-test('a shape\'s INSERT with many columns is laid out by the formatter: the columns break, FORMAT has its line', async ({ page }) => {
+test('opening a shape\'s page makes no request to /api/format, whatever the server could format', async ({ page }) => {
+  const formats = [];
+  page.on('request', (request) => { if (request.url().includes('/api/format')) formats.push(request.url()); });
   await openQueries(page, '?sort=calls');
   const hash = await queryRows(page).first().getAttribute('data-hash');
-  const columns = Array.from({ length: 18 }, (_, i) => `\`column_${i}\``).join(', ');
+  // The page of the shape, opened as an address, then from the list, then with the field null.
+  await page.goto(`/system/queries/${hash}?sort=calls`);
+  await expect(page.locator('#systemQuerySql')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#systemQueryRuns tbody tr').first()).toBeVisible({ timeout: 20_000 });
+  await page.locator('#systemQueryBack').click();
+  await expect(queryRows(page).first()).toBeVisible();
+  await queryRows(page).first().click();
+  await expect(page.locator('#systemQuerySql')).toBeVisible({ timeout: 30_000 });
   await page.route(new RegExp(`/api/system/queries/${hash}\\?`), async (route) => {
     const response = await route.fetch();
     const json = await response.json();
-    json.normalized = `INSERT INTO db.events (${columns}) FORMAT Native`;
+    json.normalized_formatted = null;
+    await route.fulfill({ response, json });
+  });
+  await page.goto(`/system/queries/${hash}?sort=calls&runs=latest`);
+  await expect(page.locator('#systemQuerySql')).toHaveAttribute('data-formatted', '0', { timeout: 30_000 });
+  // The page waits for nothing: after the settling of its network, still no call.
+  await page.waitForLoadState('networkidle');
+  expect(formats).toEqual([]);
+});
+
+test('a shape\'s formatted INSERT is drawn as the server laid it out: one column to a line, FORMAT on its line', async ({ page }) => {
+  await openQueries(page, '?sort=calls');
+  const hash = await queryRows(page).first().getAttribute('data-hash');
+  const columns = Array.from({ length: 18 }, (_, i) => `\`column_${i}\``);
+  await page.route(new RegExp(`/api/system/queries/${hash}\\?`), async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.normalized = `INSERT INTO db.events (${columns.join(', ')}) FORMAT Native`;
+    // The layout itself is the formatter's (tests/backend-functional/test_system.py runs a real INSERT through it).
+    json.normalized_formatted = ['INSERT INTO db.events', '(', ...columns.map((name, i) => `    ${name}${i < columns.length - 1 ? ',' : ''}`), ')', 'FORMAT Native'].join('\n');
     await route.fulfill({ response, json });
   });
   await page.goto(`/system/queries/${hash}?sort=calls`);
@@ -1411,6 +1445,7 @@ test('a shape\'s INSERT with many columns is laid out by the formatter: the colu
   expect(lines[0]).toBe('INSERT INTO db.events');
   expect(lines.length).toBe(18 + 4);
   expect(lines.at(-1)).toBe('FORMAT Native');
+  expect((await wrap.locator('.sqlBlock__gutter').textContent()).trim().split('\n').length).toBe(18 + 4);
 });
 
 test('a long shape SQL scrolls inside its block (no "Show all N lines"), and Raw shows the normalized text', async ({ page }) => {
@@ -1422,6 +1457,7 @@ test('a long shape SQL scrolls inside its block (no "Show all N lines"), and Raw
     const response = await route.fetch();
     const json = await response.json();
     json.normalized = normalized;
+    json.normalized_formatted = `SELECT\n${columns.split(', ').map((name) => `    ${name}`).join(',\n')}\nFROM db.events\nWHERE (id IN (?..)) AND (ts > ?)\nLIMIT ?`;
     await route.fulfill({ response, json });
   });
   await page.goto(`/system/queries/${hash}?sort=calls`);
@@ -1458,48 +1494,32 @@ test('a long shape SQL scrolls inside its block (no "Show all N lines"), and Raw
   expect((await wrap.locator('.sqlBlock__code').textContent()).split('\n').length).toBeGreaterThan(40);
 });
 
-test('a shape\'s SQL the formatter cannot parse stays as logged', async ({ page }) => {
-  await page.route(/\/api\/format$/, (route) => route.fulfill({ status: 422, json: { error_code: 'format_failed', message: 'Syntax error' } }));
+test('a shape\'s SQL that the server could not format (normalized_formatted null) stays as logged, with no call to the formatter', async ({ page }) => {
+  const formats = [];
+  page.on('request', (request) => { if (request.url().includes('/api/format')) formats.push(request.url()); });
   await openQueries(page, '?sort=calls');
-  const refused = page.waitForResponse((response) => /\/api\/format$/.test(response.url()));
-  await queryRows(page).first().click();
+  const hash = await queryRows(page).first().getAttribute('data-hash');
+  let seen = null;
+  await page.route(new RegExp(`/api/system/queries/${hash}\\?`), async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    json.normalized_formatted = null;
+    seen = json.normalized;
+    await route.fulfill({ response, json });
+  });
+  await page.goto(`/system/queries/${hash}?sort=calls`);
   const wrap = page.locator('#systemQuerySql');
   await expect(wrap).toBeVisible({ timeout: 20_000 });
-  // The formatter was asked and refused: only now does "as logged" mean the page kept the text.
-  expect((await refused).status()).toBe(422);
   await expect(wrap).toHaveAttribute('data-formatted', '0');
   await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
-  const hash = shapeHash(page);
-  const raw = await page.evaluate(async (h) => {
-    const host = window.ChDash.state.selectedHostId;
-    return (await (await fetch(`/api/system/queries/${h}?host_id=${encodeURIComponent(host)}`)).json()).normalized;
-  }, hash);
-  expect((await wrap.locator('.sqlBlock__code').textContent()).replace(/\s+$/, '')).toBe(raw.replace(/\s+$/, ''));
-});
-
-test('the placeholder mask leaves quoted text alone and keeps the AS column aligned', async ({ page }) => {
-  await openQueries(page);
-  const out = await page.evaluate(() => {
-    const { maskPlaceholders, restorePlaceholders } = window.ChDash.systemQuerySql;
-    const a = maskPlaceholders("SELECT `a?b`, \"c?\", '?' AS q, x IN (?..), [?..], ? -- why?\nFROM t /* ? */ LIMIT ?");
-    const formatted = 'SELECT\n    sleepEachRow(90900)  AS `s`,\n    number               AS `n`\nFROM numbers(90901)';
-    return {
-      masked: a.sql,
-      marks: a.marks,
-      restored: restorePlaceholders(formatted, ['?', '?']),
-      missing: restorePlaceholders('SELECT 90900', ['?', '?']),
-      twice: restorePlaceholders('SELECT 90900, 90900', ['?']),
-      collision: maskPlaceholders('SELECT 91234, ?'),
-      ident: restorePlaceholders('SELECT x90900, 90900', ['?']),
-    };
-  });
-  expect(out.masked).toBe("SELECT `a?b`, \"c?\", '?' AS q, x IN (90900), [90901], 90902 -- why?\nFROM t /* ? */ LIMIT 90903");
-  expect(out.marks).toEqual(['?..', '?..', '?', '?']);
-  expect(out.restored).toBe('SELECT\n    sleepEachRow(?)      AS `s`,\n    number               AS `n`\nFROM numbers(?)');
-  expect(out.missing).toBeNull();
-  expect(out.twice).toBeNull();
-  expect(out.collision).toBeNull();
-  expect(out.ident).toBe('SELECT x90900, ?');
+  expect(seen).toBeTruthy();
+  expect((await wrap.locator('.sqlBlock__code').textContent()).replace(/\s+$/, '')).toBe(seen.replace(/\s+$/, ''));
+  // Raw and Formatted show the same text, the formatted one being the raw one.
+  await page.locator('#systemQueryView').getByRole('button', { name: 'Raw' }).click();
+  await expect(wrap).toHaveAttribute('data-raw', '1');
+  await page.locator('#systemQueryView').getByRole('button', { name: 'Formatted' }).click();
+  await expect(wrap).toHaveAttribute('data-formatted', '0');
+  expect(formats).toEqual([]);
 });
 
 test('a runner without the grant sees the GRANT; a disabled query_log says how to enable it', async ({ page }) => {

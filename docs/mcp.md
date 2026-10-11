@@ -322,7 +322,7 @@ How they work:
 | `system_series` | `GET /api/system/series` | Time series of the server (performance panels, disk growth). |
 | `system_disks` | `GET /api/system/disks` | Disks, free space and the size of the databases and tables on them. |
 | `system_queries` | `GET /api/system/queries` | The queries of the server grouped by their normalized text, with count, time, rows, bytes and errors. |
-| `system_query` | `GET /api/system/queries/{hash}` | One group of queries by its hash: the normalized text, the runs, the slowest and the failed ones. |
+| `system_query` | `GET /api/system/queries/{hash}` | One group of queries by its hash: the normalized text and the same text formatted (`normalized_formatted`, null when it cannot be), the runs, the slowest and the failed ones. |
 | `system_activity` | `GET /api/system/activity` | What the server does now: running queries, merges, mutations, fetches. |
 | `system_keeper` | `GET /api/system/keeper` | The ClickHouse Keeper (ZooKeeper) state: sessions, nodes, replication queues. |
 

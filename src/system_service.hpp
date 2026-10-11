@@ -19,6 +19,7 @@
 #include "system_disks.hpp"
 #include "system_monitor.hpp"
 #include "system_overview.hpp"
+#include "system_query_format.hpp"
 #include "system_queries.hpp"
 #include "system_request.hpp"
 #include "system_series.hpp"
@@ -46,6 +47,8 @@ struct SystemCaches {
   TtlCache<std::string, SystemMonitorSeries>& series;
   TtlCache<std::string, SystemMonitorQueries>& queries;
   TtlCache<std::string, SystemMonitorQuery>& query;
+  // The formatted text of a shape, by host and text (not by window: every window of a shape has the same text).
+  TtlCache<std::string, ShapeFormatted>& shape_format;
   TtlCache<std::string, SystemMonitorDisks>& disks;
   TtlCache<std::string, SystemMonitorDiskGrowth>& growth;
   TtlCache<std::string, SystemActivity>& activity;
@@ -66,6 +69,9 @@ class SystemService {
     std::function<AclAccess(const HostSpec&)> runner_access;
     // The total and active replicas of tables (one Keeper request for each, kept by the Explorer).
     ReplicaCountsFn replica_counts;
+    // The formatter of a host (the runner account of the host, inside the scope of the request): the masked text of a shape in, its formatted
+    // text out. Not set: a shape has no formatted text.
+    std::function<ShapeFormatReply(const HostSpec& host, const std::string& masked_sql)> format;
   };
 
   SystemService(Ports ports, SystemCaches caches, AclService& acl) : ports_(std::move(ports)), caches_(caches), acl_(acl) {}
@@ -80,6 +86,10 @@ class SystemService {
   Result<Cached<SystemMonitorDisks>> disks(const RequestContext& context, const HostSpec& host, const HostRequest& request) const;
   Result<Cached<SystemMonitorQueries>> queries(const RequestContext& context, const HostSpec& host, const QueriesRequest& request) const;
   Result<Cached<SystemMonitorQuery>> query(const RequestContext& context, const HostSpec& host, const QueryRequest& request) const;
+  // The normalized text of a shape, formatted (system_query_format.hpp), or null when it cannot be: a text that the formatter refuses, too
+  // large a text, a host that is down. Kept by host and text, so a second request of the shape (another window, another order) does not ask
+  // ClickHouse again. It never fails the route: the answer is the raw text.
+  std::shared_ptr<const std::string> shape_text_formatted(const RequestContext& context, const HostSpec& host, const std::string& normalized) const;
   Result<Cached<SystemActivity>> activity(const RequestContext& context, const HostSpec& host, const HostRequest& request) const;
   Result<Cached<SystemKeeperStatus>> keeper(const RequestContext& context, const HostSpec& host, const HostRequest& request) const;
 
@@ -88,6 +98,10 @@ class SystemService {
   SystemCaches caches_;
   AclService& acl_;
 };
+
+// The longest normalized text that is formatted, and the longest formatted text that an answer carries.
+constexpr size_t kShapeFormatMaxInputBytes = 64 * 1024;
+constexpr size_t kShapeFormatMaxOutputBytes = 256 * 1024;
 
 // The rows that every System page lists: at most this many rows for each kind of the Activity.
 constexpr size_t kSystemActivityRowLimit = 200;
