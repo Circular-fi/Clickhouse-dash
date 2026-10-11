@@ -80,6 +80,30 @@
               var shown = nav ? { navExplorerLink: nav.explorer !== false, navObservabilityLink: nav.traces === true || nav.logs === true || nav.metrics === true, navSystemLink: nav.system !== false, navMcpLink: nav.mcp === true }[links[j].id] : undefined;
               if (shown !== undefined && links[j].getAttribute("aria-current") !== "page") links[j].hidden = !shown;
             }
+            // The version and the selected host as the last page showed them, so a reload does not blink "--" and "Host"
+            // until /api/version and the hosts stream answer (the key of storage.saveHeader).
+            var last = JSON.parse(localStorage.getItem("chdash.header.v1") || "null");
+            if (last) {
+              var badge = document.getElementById("versionBadge");
+              if (badge && last.version) {
+                badge.textContent = last.version;
+                if (last.title) badge.title = last.title;
+              }
+              var host = last.host;
+              if (host && host.id === localStorage.getItem("chdash.selectedHost")) {
+                var hostText = document.getElementById("hostPickerText");
+                if (hostText) hostText.textContent = host.label;
+                var hostVersion = document.getElementById("hostPickerVersion");
+                if (hostVersion) hostVersion.textContent = host.version || "";
+                var hostDot = document.getElementById("hostPickerDot");
+                if (hostDot && host.good) {
+                  hostDot.classList.remove("hostDot--bad");
+                  hostDot.classList.add("hostDot--good");
+                }
+                var hostButton = document.getElementById("hostPickerButton");
+                if (hostButton) hostButton.title = host.version ? host.label + "\nClickHouse " + host.version : host.label;
+              }
+            }
             var trigger = document.getElementById("themeSelectButton");
             if (trigger) trigger.setAttribute("aria-label", "Theme: " + mode);
             var menu = document.getElementById("themeSelectMenu");

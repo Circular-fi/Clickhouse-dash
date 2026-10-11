@@ -6,6 +6,9 @@ const EDITOR_STORAGE_KEY = "chdash.editorSql.v1";
 // Last page availability reported by /api/version, read by each page's head
 // script so the Query / Explorer / Traces switcher is settled at first paint.
 const PAGE_NAV_STORAGE_KEY = "chdash.pageNav.v1";
+// What the header last showed (the version, the selected host's name, version and health), read by each page's head script
+// so a reload paints them at first paint instead of "--" and "Host" until /api/version and the hosts stream answer.
+const HEADER_STORAGE_KEY = "chdash.header.v1";
 const EDITOR_HEIGHT_PREFIX = "chdash.editorHeight.v1";
 const META_PREFIX = "chdash.meta.v1.";
 const META_HOSTS_KEY = `${META_PREFIX}hosts`;
@@ -24,6 +27,7 @@ const KEYS = Object.freeze({
   runOptions: RUN_OPTIONS_STORAGE_KEY,
   editorSql: EDITOR_STORAGE_KEY,
   pageNav: PAGE_NAV_STORAGE_KEY,
+  header: HEADER_STORAGE_KEY,
   editorHeight: EDITOR_HEIGHT_PREFIX,
   metaPrefix: META_PREFIX,
   // Session: the SQL the Explorer hands to the Query editor ("Open in Query").
@@ -143,6 +147,7 @@ function pref(key, fallback, options = {}) {
 const themePref = pref(KEYS.theme, "system", { allowed: ["light", "dark", "system"] });
 const hostPref = pref(KEYS.selectedHost, "");
 const pageNavPref = pref(KEYS.pageNav, null, { json: true });
+const headerPref = pref(KEYS.header, null, { json: true });
 const runOptionsPref = pref(KEYS.runOptions, null, { json: true });
 const editorSqlPref = pref(KEYS.editorSql, "");
 // The editor / results split is remembered across sessions; older builds kept it per tab (sessionStorage), still read as a fallback.
@@ -219,6 +224,15 @@ const storage = {
 
   savePageNav(nav) {
     pageNavPref.set({ explorer: nav?.explorer !== false, system: nav?.system !== false, traces: nav?.traces === true, logs: nav?.logs === true, metrics: nav?.metrics === true, mcp: nav?.mcp === true });
+  },
+
+  loadHeader() {
+    const obj = headerPref.get();
+    return obj && typeof obj === "object" ? obj : null;
+  },
+
+  saveHeader(value) {
+    headerPref.set(value);
   },
 
   getStoredHostId() {

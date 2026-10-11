@@ -29,6 +29,18 @@ const { $$ } = dom;
   else if (mode === "system") delete dom.root.dataset.theme;
 })();
 
+// What the header shows, kept for the next load (the head script of the shell paints it before any module runs): the version
+// text and its title, and the selected host's id, name, ClickHouse version and health. Written only when it changed.
+const headerCache = { version: "", title: "", host: null, ...(storage.loadHeader() || {}) };
+let headerSaved = JSON.stringify(headerCache);
+
+function rememberHeader() {
+  const text = JSON.stringify(headerCache);
+  if (text === headerSaved) return;
+  headerSaved = text;
+  storage.saveHeader(headerCache);
+}
+
 function safelyParseJson(text) {
   try {
     return JSON.parse(text);
@@ -64,6 +76,9 @@ async function loadMeta() {
     badge.textContent = text;
     // The badge is as wide as the name above it and cuts a longer text: the title has all of it.
     badge.title = `Backend version\n${text}${build ? `\nBuild: ${build}` : ""}`;
+    headerCache.version = text;
+    headerCache.title = badge.title;
+    rememberHeader();
   } catch {
     if (badge) badge.textContent = "meta: offline";
   }
@@ -144,6 +159,10 @@ function applyHostPickerUi() {
 
   setText(dom.hostPickerText, apiOnline ? label : `${label} (API offline)`);
   setText(dom.hostPickerVersion, hostVersion || "");
+  if (selected && apiOnline) {
+    headerCache.host = { id: String(selected.id), label, version: hostVersion, good: healthy };
+    rememberHeader();
+  }
 
   if (dom.hostPickerDot) {
     const good = apiOnline && healthy;
