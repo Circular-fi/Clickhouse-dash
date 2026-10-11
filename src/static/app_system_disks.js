@@ -595,21 +595,21 @@ function createDisks(ctx) {
           h("td", { class: "systemDiskDb__name" }, h("span", { class: "systemDiskDb__cell" }, databaseLink(row.database))),
           h("td", { class: "num" }, format.bytes(row.bytes)),
           shareCell,
-          h("td", { class: "num is-mid", title: Number(row.compact_parts) ? `${format.count(row.compact_parts)} compact` : null }, format.count(row.parts)));
+          h("td", { class: "num is-xs", title: Number(row.compact_parts) ? `${format.count(row.compact_parts)} compact` : null }, format.count(row.parts)));
       });
       if (others > 0 || othersCount > 0) {
         const shareCell = h("td", { class: "systemDiskDb__share" });
         tableMod.shareBar(shareCell, share(others) * 100, format.percent(share(others)));
         tableRows.push(h("tr", { class: "is-other" },
           h("td", { class: "systemDiskDb__name" }, h("span", { class: "systemDiskDb__cell" }, `Others (${format.countLabel(othersCount, "database")})`)),
-          h("td", { class: "num" }, format.bytes(others)), shareCell, h("td", { class: "num is-mid" }, DASH)));
+          h("td", { class: "num" }, format.bytes(others)), shareCell, h("td", { class: "num is-xs" }, DASH)));
       }
       const table = h("table", { class: "dataTable dataTable--compact systemTable systemDiskDb__table", id: `systemDiskDb-${disk.replace(/[^A-Za-z0-9_-]/g, "_")}` },
         h("thead", null, h("tr", null,
           h("th", { scope: "col" }, "Database"),
           h("th", { scope: "col", class: "num" }, "Size"),
           h("th", { scope: "col", class: "systemDiskDb__share" }, "Share of the disk"),
-          h("th", { scope: "col", class: "num is-mid" }, "Parts"))),
+          h("th", { scope: "col", class: "num is-xs" }, "Parts"))),
         h("tbody", null, tableRows));
       return h("div", { class: "systemDiskDb", dataset: { disk } },
         h("div", { class: "systemDiskDb__head" },
@@ -649,10 +649,10 @@ function createDisks(ctx) {
           h("td", { class: "mono systemDiskPolicy__policy" }, index === 0 ? policy.name : ""),
           h("td", { class: "mono" }, volume.name, h("span", { class: "systemDiskPolicy__priority" }, ` #${format.count(volume.priority)}`)),
           h("td", { class: "mono systemDiskPolicy__disks" }, (volume.disks || []).join(", ") || DASH),
-          h("td", { class: "is-mid" }, volume.volume_type || DASH),
-          h("td", { class: "num is-mid", title: "max_data_part_size: larger parts go to the next volume (0: no limit)" }, volume.max_data_part_size == null ? DASH : Number(volume.max_data_part_size) > 0 ? format.bytes(volume.max_data_part_size) : "No limit"),
-          h("td", { class: "num is-mid", title: "move_factor: parts move to the next volume when the free share falls under it" }, volume.move_factor == null ? DASH : format.percent(volume.move_factor)),
-          h("td", { class: "is-mid", title: volume.prefer_not_to_merge ? "prefer_not_to_merge: merges avoid this volume" : null }, volume.prefer_not_to_merge ? "Avoided" : DASH)));
+          h("td", { class: "is-xs" }, volume.volume_type || DASH),
+          h("td", { class: "num is-xs", title: "max_data_part_size: larger parts go to the next volume (0: no limit)" }, volume.max_data_part_size == null ? DASH : Number(volume.max_data_part_size) > 0 ? format.bytes(volume.max_data_part_size) : "No limit"),
+          h("td", { class: "num is-xs", title: "move_factor: parts move to the next volume when the free share falls under it" }, volume.move_factor == null ? DASH : format.percent(volume.move_factor)),
+          h("td", { class: "is-xs", title: volume.prefer_not_to_merge ? "prefer_not_to_merge: merges avoid this volume" : null }, volume.prefer_not_to_merge ? "Avoided" : DASH)));
       });
     }
     const table = h("table", { class: "dataTable dataTable--compact systemTable systemDiskPolicy__table", id: "systemDiskPolicyTable" },
@@ -660,10 +660,10 @@ function createDisks(ctx) {
         h("th", { scope: "col" }, "Policy"),
         h("th", { scope: "col", title: "Volumes in priority order" }, "Volume"),
         h("th", { scope: "col" }, "Disks"),
-        h("th", { scope: "col", class: "is-mid" }, "Type"),
-        h("th", { scope: "col", class: "num is-mid" }, "Max part"),
-        h("th", { scope: "col", class: "num is-mid" }, "Move factor"),
-        h("th", { scope: "col", class: "is-mid", title: "prefer_not_to_merge" }, "Merging"))),
+        h("th", { scope: "col", class: "is-xs" }, "Type"),
+        h("th", { scope: "col", class: "num is-xs" }, "Max part"),
+        h("th", { scope: "col", class: "num is-xs" }, "Move factor"),
+        h("th", { scope: "col", class: "is-xs", title: "prefer_not_to_merge" }, "Merging"))),
       h("tbody", null, rows));
     const note = data.policies_truncated ? h("p", { class: "systemCard__note" }, `The first ${format.count(data.limits?.policy_row_limit || 500)} volumes.`) : null;
     h.replace(policies, head, tableMod.scrollCues(h("div", { class: "dataTableWrap" }, table)), note);

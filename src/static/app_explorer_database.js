@@ -64,6 +64,8 @@ function renderBrowseRoot() {
     className: "explorerResultTable explorerDatabasesTable",
     compact: true,
     nullsLast: true,
+    // On a phone the table keeps the database, its size and its share of the server.
+    priorities: [null, "xs", "xs"],
     decorateHeader: (th, ctx) => {
       th.title = { 1: "Tables, views, dictionaries and other objects", 2: "Rows of the tables that report them", 3: "On-disk bytes of active parts", 4: "Share of the on-disk bytes of the databases listed" }[ctx.columnIndex] || "";
     },
@@ -342,6 +344,9 @@ function renderDatabaseObjects(container, database, tables) {
     className: "explorerResultTable explorerDatabaseObjectsTable",
     compact: true,
     nullsLast: true,
+    // Name, Rows, Size, % database and Modified stay as long as they fit; Engine, Compressed, Ratio and Parts go first (Ratio keeps the
+    // figures of the two in its tooltip, and the Engine is in the card of the object), then Modified, then Rows.
+    priorities: [null, "low", "xs", null, "low", "low", null, "low", "mid"],
     decorateHeader: (th, ctx) => {
       th.title = {
         2: "Rows (buffered rows for Buffer)",

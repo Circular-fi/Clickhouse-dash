@@ -21,6 +21,7 @@ function createStaticResultTable({
   nullsLast = false,
   compact = false,
   bars = true,
+  priorities = [],
 } = {}) {
   const safeColumns = Array.isArray(columns) ? columns.map((value) => String(value ?? "")) : [];
   const safeTypes = Array.isArray(types) ? types.map((value) => String(value ?? "")) : [];
@@ -52,6 +53,13 @@ function createStaticResultTable({
       }
     }
   }
+
+  // A column of lower priority leaves the table when its box is narrower than the columns need (table.css: .is-low from 1279 px
+  // down, .is-mid from 820, .is-xs from 600); the box scrolls sideways for what is left (tableMod.scrollCues).
+  const markPriority = (cell, index) => {
+    const tier = priorities[index];
+    if (tier === "low" || tier === "mid" || tier === "xs") cell.classList.add(`is-${tier}`);
+  };
 
   const wrap = document.createElement("div");
   wrap.className = `tableWrap ${String(className || "").trim()}`.trim();
@@ -160,6 +168,7 @@ function createStaticResultTable({
           columnIndex: index,
         });
       }
+      markPriority(th, index);
       head.appendChild(th);
     });
     thead.appendChild(head);
@@ -220,6 +229,7 @@ function createStaticResultTable({
               setDisplayCell(td, entry.row[index], formatCellForDisplayWithTypes(entry.row[index], index, typeAsts));
             }
           }
+          markPriority(td, index);
           tr.appendChild(td);
         }
       } else {

@@ -380,3 +380,25 @@ th[aria-sort="descending"] > .dataTable__sort::after {
     opacity: 1;
   }
 }
+
+/* Priority columns (UI-130). A column that matters less carries .is-low, .is-mid or .is-xs on its header and its cells, and leaves
+   the table when the window is narrower than a breakpoint: .is-low from --bp-xl (1279 px) down, .is-mid from --bp-md (820 px), .is-xs
+   from --bp-sm (600 px). What stays is wide enough to read, and the box scrolls sideways for the rest (shell.edgeCues fades the
+   side that hides columns). Media queries cannot read custom properties, so they repeat the numbers. */
+@media (max-width: 1279px) {
+  .dataTable .is-low {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .dataTable .is-mid {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .dataTable .is-xs {
+    display: none;
+  }
+}

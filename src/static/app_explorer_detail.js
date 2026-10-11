@@ -259,6 +259,7 @@ function create(ctx) {
   // The shared Query result table with column specs instead of positional
   // renderers: { label, type, value(item), render(td, item, value), head }.
   // Row numbers always start at 1 per table.
+  // A spec's `priority` ("low", "mid" or "xs") names the width below which its column leaves the table (table.css, "Priority columns").
   function staticTable({ className, specs, items, rowIndexValue = null, decorateRow = null, rowDetails = false }) {
     const rows = items.map((item) => {
       const row = specs.map((spec) => spec.value(item));
@@ -273,6 +274,7 @@ function create(ctx) {
       compact: true,
       indexSortable: false,
       nullsLast: true,
+      priorities: specs.map((spec) => spec.priority || null),
       rowDetails,
       rowIndexValue: rowIndexValue ? (row) => rowIndexValue(row?.__explorerItem) : null,
       decorateHeader: (th, headCtx) => {
@@ -1073,6 +1075,7 @@ function create(ctx) {
     });
     if (hasCodec) specs.push({
       label: "Codec",
+      priority: "low",
       value: (item) => item.codec || "",
       render: (td, item) => {
         td.classList.add("explorerColumns__codec");
@@ -1095,6 +1098,7 @@ function create(ctx) {
       });
       specs.push({
         label: "Uncompressed",
+        priority: "low",
         type: "Float64",
         numeric: true,
         head: "Uncompressed bytes of the column data (system.columns data_uncompressed_bytes; bar: share of the largest column)",
@@ -1110,6 +1114,7 @@ function create(ctx) {
       });
       specs.push({
         label: "% table",
+        priority: "mid",
         type: "Float64",
         numeric: true,
         head: "Compressed bytes / table bytes on disk",
@@ -1360,8 +1365,8 @@ function create(ctx) {
           label: "Size", type: "UInt64", numeric: true, value: (disk) => optionalNumber(disk.bytes),
           render: (td, disk) => gaugeCell(td, disk.bytes, max, disk.bytes == null ? DASH : format.bytes(disk.bytes)),
         },
-        { label: "Rows", type: "UInt64", numeric: true, value: (disk) => optionalNumber(disk.rows) },
-        parts && { label: "Parts", type: "UInt64", numeric: true, value: (disk) => optionalNumber(disk.parts) },
+        { label: "Rows", priority: "mid", type: "UInt64", numeric: true, value: (disk) => optionalNumber(disk.rows) },
+        parts && { label: "Parts", priority: "low", type: "UInt64", numeric: true, value: (disk) => optionalNumber(disk.parts) },
         {
           label: "Free", type: "UInt64", numeric: true, head: "Free space on the disk", value: (disk) => optionalNumber(disk.free_space),
           render: (td, disk) => numericCell(td, disk.free_space == null ? DASH : format.bytes(disk.free_space)),
@@ -1389,9 +1394,9 @@ function create(ctx) {
           label: "Bytes", type: "UInt64", numeric: true, head: "Bytes on disk", value: (part) => optionalNumber(part.bytes),
           render: (td, part) => gaugeCell(td, part.bytes, max, format.bytes(part.bytes)),
         },
-        { label: "Marks", type: "UInt64", numeric: true, value: (part) => optionalNumber(part.marks) },
-        { label: "Files", type: "UInt64", numeric: true, value: (part) => optionalNumber(part.files) },
-        { label: "Level", type: "UInt64", numeric: true, head: "Merge level (0: never merged)", value: (part) => optionalNumber(part.level) },
+        { label: "Marks", priority: "low", type: "UInt64", numeric: true, value: (part) => optionalNumber(part.marks) },
+        { label: "Files", priority: "low", type: "UInt64", numeric: true, value: (part) => optionalNumber(part.files) },
+        { label: "Level", priority: "mid", type: "UInt64", numeric: true, head: "Merge level (0: never merged)", value: (part) => optionalNumber(part.level) },
         {
           label: "Age", type: "UInt64", numeric: true, head: "Time since the part was written", value: (part) => optionalNumber(part.age_seconds),
           render: (td, part) => { numericCell(td, format.duration.fromSeconds(part.age_seconds)); td.title = `${format.count(part.age_seconds)} s`; },
@@ -1462,7 +1467,7 @@ function create(ctx) {
           },
         },
         { label: "Rows", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.rows) },
-        { label: "Parts", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.parts) },
+        { label: "Parts", priority: "mid", type: "UInt64", numeric: true, value: (p) => optionalNumber(p.parts) },
       ],
     }));
     if (partitions.length >= 1000) body.appendChild(emptyNote("Only the 1,000 most recently modified partitions are listed."));
@@ -1508,11 +1513,11 @@ function create(ctx) {
         render: (td, item) => gaugeCell(td, item.compressed, max, item.compressed == null ? DASH : format.bytes(item.compressed)),
       },
       {
-        label: "Uncompressed", type: "Float64", numeric: true, value: (item) => item.uncompressed,
+        label: "Uncompressed", priority: "low", type: "Float64", numeric: true, value: (item) => item.uncompressed,
         render: (td, item) => numericCell(td, item.uncompressed == null ? DASH : format.bytes(item.uncompressed)),
       },
       {
-        label: "% table", type: "Float64", numeric: true, value: (item) => item.percent,
+        label: "% table", priority: "mid", type: "Float64", numeric: true, value: (item) => item.percent,
         render: (td, item) => { td.classList.add("explorerStoragePercentCell"); numericCell(td, item.percent == null ? DASH : percentText(item.percent)); },
       },
     );

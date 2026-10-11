@@ -708,20 +708,12 @@
 }
 
 @media (max-width: 1279px) {
-  .systemQueries__table .is-low,
-  .systemQuery__table .is-low {
-    display: none;
-  }
   .systemQuery__tiles {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 820px) {
-  .systemQueries__table .is-mid,
-  .systemQuery__table .is-mid {
-    display: none;
-  }
   .systemQueries__meta {
     display: flex;
   }
@@ -1093,12 +1085,8 @@
   }
 }
 
-/* Phones: the policies and databases keep their key columns. */
+/* Phones: the policies and databases keep their key columns (their .is-xs columns leave, table.css). */
 @media (max-width: 600px) {
-  .systemDiskDb__table .is-mid,
-  .systemDiskPolicy__table .is-mid {
-    display: none;
-  }
   .systemDiskDb__table th.systemDiskDb__share,
   .systemDiskDb__table td.systemDiskDb__share {
     min-width: 6rem;
