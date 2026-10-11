@@ -19,7 +19,7 @@ option(CHDASH_BUILD_ERROR_TESTS "Build the unit tests of the error answer: the e
 option(CHDASH_BUILD_CONFIG_TESTS "Build the unit tests of the configuration file: the table of keys, the bounds, the URIs, the HCL parser" OFF)
 option(CHDASH_BUILD_SQL_TESTS "Build the unit tests of the SQL text: literals, lexer, policy, structure" OFF)
 option(CHDASH_BUILD_EXPLORER_TESTS "Build the unit tests of the Explorer: the SQL, the rules, the readers on a fake executor, the TTL, the graph (no ClickHouse needed)" OFF)
-option(CHDASH_BUILD_LOGS_TESTS "Build the unit tests of the pure parts of the logs routes: the text search and the patterns (no ClickHouse needed)" OFF)
+option(CHDASH_BUILD_LOGS_TESTS "Build the unit tests of the Logs page below its routes: the filters, the statements, the patterns and the service on a fake executor (no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_METRICS_TESTS "Build the unit tests of the Metrics page: the request, the SQL, the aggregation of the rows, the service (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_TRACE_TESTS "Build the unit tests of the Traces page: the request, the filters, the SQL, the search strategies (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
@@ -122,10 +122,16 @@ if (CHDASH_BUILD_EXPLORER_TESTS)
 endif()
 
 if (CHDASH_BUILD_LOGS_TESTS)
-  # The pure parts of the logs routes: the text search (tokens, terms, SQL of a term) and the patterns (masking, Drain).
-  add_executable(chdash_logs_test ../tests/native/logs_test.cpp logs_text.cpp logs_drain.cpp)
+  # The Logs page below its routes: the text search, the patterns, the parsing of a request, the filters, the statements, and the service
+  # on a fake executor with its JSON.
+  add_executable(chdash_logs_test ../tests/native/logs_test.cpp
+    logs_text.cpp logs_drain.cpp logs_patterns.cpp logs_request.cpp logs_filters.cpp logs_sql.cpp logs_service.cpp logs_json.cpp allowed_objects.cpp
+    ch_query.cpp ch_client_pool.cpp ch_uri.cpp ch_error.cpp api_error.cpp error_envelope.cpp request_context.cpp log.cpp jwt.cpp secure_random.cpp)
   target_include_directories(chdash_logs_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-  target_include_directories(chdash_logs_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+  target_include_directories(chdash_logs_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_logs_test PRIVATE clickhouse-cpp-lib Threads::Threads)
   chdash_configure_target(chdash_logs_test)
 endif()
 
@@ -364,6 +370,12 @@ if (CHDASH_BUILD_APP)
     api_logs.cpp
     logs_text.cpp
     logs_drain.cpp
+    logs_patterns.cpp
+    logs_request.cpp
+    logs_filters.cpp
+    logs_sql.cpp
+    logs_service.cpp
+    logs_json.cpp
     api_metrics.cpp
     metrics_aggregate.cpp
     metrics_json.cpp

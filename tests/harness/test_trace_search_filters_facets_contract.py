@@ -1,4 +1,5 @@
 from pathlib import Path
+from logs_sources import read_unit as read_logs_unit
 from trace_sources import read_traces, read_unit
 import modules
 import css_sources
@@ -92,24 +93,26 @@ def test_search_state_lives_in_the_url_and_the_facets_sidebar_is_bounded():
 def test_logs_fields_panel_reuses_the_facets_panel_and_the_trace_caps():
     """Logs Fields: /api/logs/facets and facet_values on the facet caps, the
     allowlist and the logs guards; the panel is the Traces Attributes one."""
-    cpp = read("src/api_logs.cpp")
+    service = read_logs_unit("logs_service.cpp")
+    sql = read_logs_unit("logs_sql.cpp")
+    request = read_logs_unit("logs_request.cpp")
     server = read("src/server.cpp")
     assert '"/api/logs/facets"' in server and '"/api/logs/facet_values"' in server
-    assert '#include "facet_limits.hpp"' in cpp
-    facets = cpp[cpp.index("void Server::handle_logs_facets"):]
-    # Filters (allowlist included) and range limits come from open_request.
-    assert facets.count("open_request(cfg_, client_pool_,") == 2
-    assert "service_allowlist_predicate(otel.traces)" in cpp[cpp.index("bool build_filters"):cpp.index("std::string time_predicate")]
-    assert facets.count("std::to_string(kFacetSampleRows)") == 2
-    assert "facet_settings_sql(kFacetReadRowsCap, false)" in facets and "facet_settings_sql(kFacetReadRowsCap, true)" in facets
-    assert "log_facet_keys_cache_.get(" in facets and "log_facet_values_cache_.get(" in facets
+    assert '#include "facet_limits.hpp"' in sql
+    facets = service[service.index("LogsService::facets"):]
+    # Filters (allowlist included) and range limits come from build_filters, after the schema of the table is known.
+    assert facets.count("build_filters(host.otel, o.schema, request.filter,") == 2
+    assert "otel::service_allowlist_predicate(otel.traces)" in read_logs_unit("logs_filters.cpp")
+    assert sql.count("std::to_string(kFacetSampleRows)") == 2
+    assert "facet_settings_sql(kFacetReadRowsCap, false)" in sql and "facet_settings_sql(kFacetReadRowsCap, true)" in sql
+    assert "caches_.facet_keys.get(" in facets and "caches_.facet_values.get(" in facets
     # The values of the filters are query parameters: they are part of the key of the cache with the text of the filters.
-    assert "sha256_hex(r.query.where + '\\0' + r.query.params.key())" in facets
-    assert "sha256_hex(key + '\\0' + r.query.where + '\\0' + r.query.params.key())" in facets
+    assert "sha256_hex(q.where + '\\0' + q.params.key())" in facets
+    assert "sha256_hex(key + '\\0' + q.where + '\\0' + q.params.key())" in facets
     assert "if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);" in facets
-    assert "without_own_filters(req, scope, key)" in facets  # a field's values ignore its own filters
-    assert "facet_column_known(key)" in facets  # a column facet names a known column only
-    assert "params.text(key)" in facets and "quote_ident(key)" in facets
+    assert "drop_own_filters(&request.filter, request.scope, request.key)" in request  # a field's values ignore its own filters
+    assert "facet_column_known(key)" not in facets and 'request.key != "ServiceName"' in request  # a column facet names a known column only
+    assert "statement.params.text(key)" in sql and "quote_ident(key)" in sql
     js = read("src/static/app_logs.js")
     html = read("src/static/logs.html")
     assert "fields = facetPanel.create({" in js and 'api.getLogs("facets"' in js and 'api.getLogs("facet_values"' in js

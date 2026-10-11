@@ -8,6 +8,7 @@
 #include "explorer_catalog.hpp"
 #include "explorer_graph.hpp"
 #include "explorer_service.hpp"
+#include "logs_service.hpp"
 #include "metrics_service.hpp"
 #include "system_monitor.hpp"
 #include "system_activity.hpp"
@@ -443,6 +444,7 @@ private:
   // The connection of the Traces service to the trace source of a host (the system account); null with the reason in *error.
   std::unique_ptr<ChExecutor> open_trace_executor(const HostSpec& host, std::string* error);
   std::unique_ptr<ChExecutor> open_metrics_executor(const HostSpec& host, std::string* error);
+  std::unique_ptr<ChExecutor> open_logs_executor(const HostSpec& host, std::string* error);
   // Span-level search (keyset pages over newest-first time slices) and one
   // span by its row key, for the search page's Spans mode.
   void handle_traces_spans(const httplib::Request& req, httplib::Response& res);
@@ -514,25 +516,6 @@ private:
     uint64_t updated_at_ms = 0;
     std::string credential_scope;
     std::vector<MetaCatalogItem> items;
-  };
-
-  // The facets of the Logs search page (api_logs.cpp): the most frequent keys of a sample, and the top values of one key. A value keeps
-  // kFacetMaxKeys + 1 keys at most. (The ones of the Traces page are in trace_facets.hpp.)
-  struct LogFacetKeys {
-    struct Key { std::string scope, key; uint64_t count = 0; };
-    std::vector<Key> keys;
-    uint64_t sampled = 0;
-    bool estimated = false;
-    bool timed_out = false;
-    uint64_t query_ms = 0;
-  };
-  struct LogFacetValues {
-    std::vector<std::pair<std::string, uint64_t>> values;
-    uint64_t with_key = 0;
-    uint64_t distinct_values = 0;
-    bool estimated = false;
-    bool timed_out = false;
-    uint64_t query_ms = 0;
   };
 
   AppConfig cfg_;
@@ -685,12 +668,12 @@ private:
   trace::FacetValuesCache trace_facet_values_cache_{cache_options<trace::FacetValues>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 1024, 16u << 20,
       [](const trace::FacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
-  TtlCache<std::string, LogFacetKeys> log_facet_keys_cache_{cache_options<LogFacetKeys>(
+  logs::FacetKeysCache log_facet_keys_cache_{cache_options<logs::LogFacetKeys>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 512, 16u << 20,
-      [](const LogFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
-  TtlCache<std::string, LogFacetValues> log_facet_values_cache_{cache_options<LogFacetValues>(
+      [](const logs::LogFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
+  logs::FacetValuesCache log_facet_values_cache_{cache_options<logs::LogFacetValues>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 1024, 16u << 20,
-      [](const LogFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
+      [](const logs::LogFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
 
   // The catalog of the Metrics page: per host, source and minute-aligned window.
   metrics::CatalogCache metrics_catalog_cache_{cache_options<metrics::CatalogSnapshot>(
@@ -701,6 +684,10 @@ private:
   LogsSchemaCache logs_schema_cache_{logs_schema_cache_options()};
   LogColumnsCache log_columns_cache_{log_columns_cache_options()};
   KindTablesCache kind_tables_cache_{kind_tables_cache_options()};
+
+  // The Logs service (logs_service.hpp): the schema of the table and the facets are its caches.
+  logs::LogsService logs_service_{[this](const HostSpec& host, std::string* error) { return open_logs_executor(host, error); },
+                                  logs::LogsCaches{logs_schema_cache_, log_facet_keys_cache_, log_facet_values_cache_}};
 
   // The Metrics service (metrics_service.hpp): the catalog and the kind tables are its caches.
   metrics::MetricsService metrics_service_{[this](const HostSpec& host, std::string* error) { return open_metrics_executor(host, error); },
