@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+import modules
 from pathlib import Path
 import css_sources
 
@@ -60,7 +61,7 @@ def test_one_state_component_and_no_local_state_markup():
                  ".explorerEmptyState", ".traceButtonSpinner", "traceSpin", "metricsSpin", "traceDeltaSpin", "traceSpanSpin"):
         assert gone not in css, gone
     # The Explorer tree and lists, the System activity and the query library use it too.
-    explorer = read("src/static/app_explorer.js")
+    explorer = modules.read_explorer()
     assert 'return uiState.block(kind, kind === "loading" ? { label: text, compact: true } : { body: text, compact: true, retry, action });' in explorer
     assert 'label: "Clear the search"' in explorer
     # A failed database load waits for Retry: no reload on every render.

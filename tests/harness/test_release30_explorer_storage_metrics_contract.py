@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,14 +10,14 @@ def read(path: str) -> str:
 
 
 def test_finalize_hint_uses_svg_not_text_i() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     block = ui[ui.index("function appendFinalizePreviewInfo"):ui.index("function persistFlattenTuple")]
     assert 'iconMod.el("info-circle", { size: "sm", className: "explorerFinalizeInfo__icon" })' in block
     assert 'node("span", "explorerFinalizeInfo__icon", "i")' not in block
 
 
 def test_non_storing_toggle_filters_sidebar_objects() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "function sidebarObjectVisible(table)" in ui
     assert "!model.includeNonStoring && nonStoringSummary(table)" in ui
     # Tables are grouped per database once per catalog payload; the visibility
@@ -27,7 +28,7 @@ def test_non_storing_toggle_filters_sidebar_objects() -> None:
 
 
 def test_non_storing_toggle_is_locked_while_selected_object_is_non_storing() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     graph = read("src/static/app_explorer_graph.js")
     assert "includeNonStoring: !!table && nonStoringSummary(table)" in ui
     assert "const nextIncludeNonStoring = required.includeNonStoring || options.includeNonStoring !== false;" in graph

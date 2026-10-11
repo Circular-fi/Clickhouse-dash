@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -10,7 +11,7 @@ def read(path: str) -> str:
 
 def test_buffer_memory_and_dictionary_are_resident_not_disk_footprints() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    shell = read("src/static/app_explorer.js")
+    shell = modules.read_explorer()
     assert 'summary.engine == "Buffer" || summary.engine == "Memory" || summary.engine == "Dictionary"' in catalog
     assert "summary.resident_bytes = total_bytes;" in catalog
     assert "summary.logical_bytes.reset();" in catalog
@@ -29,7 +30,7 @@ def test_buffer_memory_and_dictionary_are_resident_not_disk_footprints() -> None
 
 def test_buffer_flush_target_is_a_normal_downstream_dependency() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert 'if (summary.engine == "Buffer") {' in catalog
     assert 'sql::engine_arguments(summary.engine_full, "Buffer")' in catalog
     assert 'append_dependency(args[0], args[1], "downstream", "buffer");' in catalog
@@ -68,7 +69,7 @@ def test_column_default_codec_comes_from_active_parts_when_observable() -> None:
     header = read("src/explorer_catalog.hpp")
     catalog = read("src/explorer_catalog.cpp")
     api = read("src/api_explorer.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "std::vector<std::string> default_compression_codecs;" in header
     assert "groupUniqArray(default_compression_codec)" in catalog
     assert 'w.Key("default_compression_codecs");' in api

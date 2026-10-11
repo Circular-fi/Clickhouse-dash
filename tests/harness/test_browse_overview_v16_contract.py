@@ -44,7 +44,7 @@ def test_storage_breakdown_reuses_query_sorting_and_numeric_alignment() -> None:
 
 def test_buffer_rows_are_normalized_to_resident_rows() -> None:
     catalog = read("src/explorer_catalog.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "void normalize_buffer_runtime_rows" in catalog
     assert 'sql::engine_arguments(table.engine_full, "Buffer")' in catalog
     assert "std::unordered_map<std::string, std::optional<uint64_t>> raw_rows;" in catalog

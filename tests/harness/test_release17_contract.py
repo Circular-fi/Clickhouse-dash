@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,7 +25,7 @@ def test_storage_topology_controls_are_grouped_and_storage_select_can_lock() -> 
 
 def test_non_storing_toggle_now_covers_buffers_and_can_reflow_around_focus() -> None:
     frontend = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
 
     assert '"buffer"' in frontend
     assert '"buffer"].includes(String(node?.kind || ""))' in frontend
@@ -119,7 +120,7 @@ def test_storage_tiers_group_disks_and_render_ttl_lifecycle_where_it_happens() -
 
 
 def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> None:
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     css = css_sources.text()
 

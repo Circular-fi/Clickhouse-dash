@@ -117,7 +117,7 @@ def test_every_writer_is_an_owner_or_a_panel():
         "app_logs.js": 'router.owner("logs", { path: "/observability/logs", params: () => urlParams() })',
         "app_metrics.js": 'router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() })',
         "app_trace_search.js": 'router.owner("traces", { path: SEARCH_ROUTE, params: () => (DETAIL_PAGE ? null : currentParams()) })',
-        "app_explorer.js": 'router.owner("explorer", { view: () => model.active })',
+        "app_explorer_store.js": 'router.owner("explorer", { view: () => model.active })',
         "app_query_ui.js": 'router.owner("query", { view: null }).replace({ saved: savedId, sql })',
     }
     for name, owner in owners.items():
@@ -133,7 +133,7 @@ def test_every_writer_is_an_owner_or_a_panel():
     # Back / Forward handlers: the Observability controller, the Explorer and
     # the query result's row details.
     assert 'router.on("/observability", () => viewModule()?.onLocation?.());' in read("src/static/app_obs_page.js")
-    assert 'router.on("/explorer", () => { void applyRouteFromLocation(); });' in read("src/static/app_explorer.js")
+    assert 'router.on("/explorer", () => { void applyRouteFromLocation(); });' in modules.read_explorer()
     assert 'disposers.push(router.on("", () => closeRowDetails()));' in modules.read_family("app_results")
 
 

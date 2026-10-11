@@ -9,7 +9,7 @@ def read(path: str) -> str:
 
 
 def test_non_storing_toggle_is_required_for_non_storing_focus() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     graph = read("src/static/app_explorer_graph.js")
     assert "includeNonStoring: !!table && nonStoringSummary(table)" in ui
     assert "includeNonStoring: !!node && isNonStoringNode(node)" in graph

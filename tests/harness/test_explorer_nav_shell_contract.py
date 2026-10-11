@@ -12,7 +12,7 @@ def read(rel: str) -> str:
 
 def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() -> None:
     html = read("src/static/explorer.html")
-    ui = read("src/static/app_explorer.js")
+    ui = modules.read_explorer()
     # Catalog | Functions are two pages of their own (explorer.html, functions.html): links, one current.
     functions = read("src/static/functions.html")
     for page, current in ((html, "explorerCatalogTab"), (functions, "explorerFunctionsTab")):
@@ -40,7 +40,7 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
     assert '<span id="explorerModeSep" class="contentTabs__sep" aria-hidden="true"></span>' in top
     assert 'id="explorerModeTabs" class="contentTabs contentTabs--nav explorerModeTabs" role="tablist" aria-label="Catalog views"' in top
     assert 'class="segmented' not in top
-    assert 'tabsMod?.bind(shellEl("explorerModeTabs"), {' in ui
+    assert 'tabs?.bind(shellEl("explorerModeTabs"), {' in ui
     assert 'shell?.edgeCues?.(shellEl("explorerNavTabs"));' in ui
     # Browse | Graph and their divider show on the Catalog only: the Functions page has neither.
     assert 'const hidden = shown < 2 || currentView() !== "catalog";' in ui
@@ -96,7 +96,7 @@ def test_the_explorer_loads_no_system_module() -> None:
 
 
 def test_catalog_urls_use_one_scheme_and_keep_the_old_ones_as_aliases() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = modules.read_explorer()
     assert "function catalogPath({ database = \"\", table = \"\", tab = DEFAULT_TAB, mode = \"browse\", graphRoute = null } = {}) {" in ui
     assert 'if (mode !== "browse") params.set("mode", mode);' in ui
     # Only a table card names its tab: a database page has none, and its
@@ -114,7 +114,7 @@ def test_catalog_urls_use_one_scheme_and_keep_the_old_ones_as_aliases() -> None:
 
 
 def test_one_number_format_is_shared_with_every_explorer_module() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = modules.read_explorer()
     util = read("src/static/app_util.js")
     format = read("src/static/app_format.js")
     # Every Explorer module formats through ns.format (app_format.js), shared
@@ -130,7 +130,7 @@ def test_one_number_format_is_shared_with_every_explorer_module() -> None:
 
 
 def test_tree_rows_chips_and_drawer() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = modules.read_explorer()
     css = css_sources.text()
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
     # Sizes are plain figures (no bar), names are cut in the middle with a title.
@@ -171,7 +171,7 @@ def test_shared_bar_and_typography_tokens() -> None:
 
 
 def test_database_objects_table_fits_and_formats_numbers() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = modules.read_explorer()
     assert 'const DATABASE_OBJECT_COLUMNS = ["Name", "Engine", "Rows", "Size", "Compressed", "Ratio", "% database", "Parts", "Modified"];' in ui
     block = ui[ui.index("function renderDatabaseObjects"):ui.index("function selectDatabase(")]
     assert 'setBar(td, value, maxima[ctx.columnIndex], format.count(value));' in block

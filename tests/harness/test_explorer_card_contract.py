@@ -7,6 +7,7 @@ The splitting and highlighting unit checks live in explorer_card_unit.js (Node
 loads app_explorer_detail.js and app_highlight.js in a bare window).
 """
 import json
+import modules
 import re
 import os
 import shutil
@@ -44,7 +45,7 @@ def test_the_object_tree_reserves_no_scrollbar_gutter() -> None:
 
 
 def test_storage_is_a_table_card_tab_and_part_of_the_database_page() -> None:
-    ui = read("app_explorer.js")
+    ui = modules.read_explorer()
     detail = read("app_explorer_detail.js")
     # Two Catalog modes; Storage is a tab of the table card (merging the
     # former Parts & disks tab and Storage mode) and part of the database
@@ -109,7 +110,7 @@ def test_expressions_use_the_shared_highlighter_and_repaint_with_the_function_li
     meta_js = read("app_meta.js")
     assert 'const missing = ["functions", "keywords"].filter((type) => !host?.[type]);' in meta_js
     assert "if (missing.length) void fetchAndStore(hostId, missing);" in meta_js
-    assert "meta.ensureHighlighterData();" in read("app_explorer.js")
+    assert "meta.ensureHighlighterData();" in modules.read_explorer()
     # No colour of its own: the expressions take the .tok-* rules.
     css = css_sources.text()
     assert ".explorerExpr .tok-" not in css
@@ -128,7 +129,7 @@ def test_about_never_truncates() -> None:
 
 
 def test_all_databases_heads_the_tree_and_the_root_draws_the_databases_as_a_treemap() -> None:
-    ui = read("app_explorer.js")
+    ui = modules.read_explorer()
     # The tree's first row: the Catalog root, current while nothing is selected,
     # with the count of the databases shown ("All databases (8)"); the
     # Functions list's "All functions (1,949)" is the same row (rootRow).
@@ -141,7 +142,7 @@ def test_all_databases_heads_the_tree_and_the_root_draws_the_databases_as_a_tree
     assert 'icon: "function", label: "All functions"' in row and "openFunctionsOverview()" in row
     assert "dom.explorerFunctionList.appendChild(functionRootRow(items.length));" in ui
     # The root's treemap: the System Overview's component through the storage band.
-    root = ui[ui.index("function renderBrowseRoot() {"):ui.index("function browseRootShown() {")]
+    root = ui[ui.index("function renderBrowseRoot() {"):ui.index("function destroyDatabaseTreemap(")]
     assert "renderDatabasesTreemap(section, rows);" in root
     assert "explorerSectionCount" not in root
     assert 'id: "explorerDatabasesTreemap",' in root and 'kind: "database",' in root

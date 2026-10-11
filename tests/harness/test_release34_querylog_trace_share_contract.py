@@ -36,7 +36,7 @@ def test_browse_share_ui_is_reworked_and_tuple_names_have_no_angle_wrappers() ->
     assert "`<${item.name}>`" not in ui
 
 def test_storage_static_tables_do_not_sort_the_row_number_column() -> None:
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     results = modules.read_family("app_results")
     assert "indexSortable: false" in explorer
     assert "indexSortable = true" in results

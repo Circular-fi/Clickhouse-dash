@@ -104,7 +104,7 @@ def test_no_new_local_escape_or_click_outside_handler():
 
 def test_views_bind_their_global_listeners_while_shown():
     # Observability views and the Explorer modes: ns.lifecycle scopes.
-    explorer = read("src/static/app_explorer.js")
+    explorer = modules.read_explorer()
     assert "lifecycle?.enter(next);" in explorer and "lifecycle?.leave(lifecycleName);" in explorer
     # (The Explorer graph has no global listener left: its Lineage | Storage
     # choice is a segmented control, not a menu.)

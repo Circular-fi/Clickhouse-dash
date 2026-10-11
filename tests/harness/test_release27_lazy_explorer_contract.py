@@ -1,4 +1,5 @@
 from pathlib import Path
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -66,8 +67,8 @@ def test_table_summary_queries_are_scoped_to_requested_object() -> None:
 
 
 def test_graph_focus_does_not_fetch_browse_detail_until_browse_is_visible() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
-    select = ui[ui.index("async function selectTable"):ui.index("async function applyRouteFromLocation")]
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
+    select = read("src/static/app_explorer_table.js")
     show_mode = ui[ui.index("function showMode()"):ui.index("function openCard(")]
 
     # Graph and Storage keep the selection only; Browse loads the card.
@@ -79,13 +80,13 @@ def test_graph_focus_does_not_fetch_browse_detail_until_browse_is_visible() -> N
 
 
 def test_table_list_renders_stats_only_for_lazily_loaded_database_branch() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     tree = ui[ui.index("function renderTableList"):ui.index("function catalogContainsTable")]
     assert 'model.databaseTablesLoaded.has(database)' in tree
     assert 'loadDatabaseTables(database)' in tree
     # One line per object: the size badge and the tooltip carry the stats.
     assert 'treeBadge(table)' in tree and 'treeObjectTitle(table)' in tree
-    badge = ui[ui.index("function treeBadge"):ui.index("function renderTableList")]
+    badge = ui[ui.index("function treeBadge"):][:1600]
     assert 'summaryRowsLabel(table' in badge
     assert 'summaryFootprintBytes(table)' in badge
     assert "explorerTreeHealthDot" not in tree

@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 import config_keys
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,7 +31,7 @@ def test_functions_explorer_is_runner_scoped_and_version_matched() -> None:
 
 def test_functions_frontend_has_search_filter_and_safe_text_rendering() -> None:
     html = read("src/static/functions.html")
-    js = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    js = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     api = read("src/static/app_api.js")
 
     assert 'id="explorerFunctionsTab"' in html and 'data-view="functions"' in html
@@ -55,7 +56,7 @@ def test_table_operational_metadata_includes_storage_compression_weight_and_dist
     header = read("src/explorer_catalog.hpp")
     catalog = read("src/explorer_catalog.cpp")
     api = read("src/api_explorer.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
 
     assert "storage_policy" in header
     assert "compressed_bytes" in header and "uncompressed_bytes" in header
@@ -233,7 +234,7 @@ def test_function_aliases_are_resolved_server_side_with_cycle_and_depth_guards()
     header = read("src/explorer_catalog.hpp")
     catalog = read("src/explorer_catalog.cpp")
     api = read("src/api_explorer.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
 
     assert "ExplorerFunctionAliasDocument" in header
     assert "alias_documents" in header

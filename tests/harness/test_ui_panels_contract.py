@@ -113,7 +113,7 @@ def test_the_left_lists_are_side_panel_shells():
     for page, search, refresh in ((explorer, "explorerSearchInput", "explorerRefreshButton"), (functions, "explorerFunctionSearchInput", "explorerFunctionRefreshButton")):
         row = page[page.index(f'<input id="{search}"'):]
         assert row.index(f'id="{refresh}"') < row.index("</div>"), refresh
-    panels = read("src/static/app_explorer.js")
+    panels = modules.read_explorer()
     mount = panels[panels.index("sidePanels[id] = sidePanelMod.mount(pane, {"):panels.index("return sidePanels[id];")]
     assert "collapse:" not in mount and "explorerTreeCollapsed" not in panels and "explorerFunctionsCollapsed" not in panels
 
@@ -132,7 +132,7 @@ def test_disclosures_are_the_sprite_chevron_never_the_filled_triangle():
     facets = read("src/static/app_facet_panel.js")
     assert "const side = sidePanel.mount(part(\"panel\"), {" in facets
     assert "sidePanel.mount(byId(\"metricsSidebar\"), {" in read("src/static/app_metrics.js")
-    assert "sidePanels[id] = sidePanelMod.mount(pane, {" in read("src/static/app_explorer.js")
+    assert "sidePanels[id] = sidePanelMod.mount(pane, {" in modules.read_explorer()
     css = css_sources.text()
     # The former per-panel frames are gone.
     for gone in (".traceFacets {\n  position: sticky;", ".metricsSidebar {\n  min-width: 0;", ".explorerSidebarToolbar",

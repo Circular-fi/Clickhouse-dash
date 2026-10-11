@@ -32,7 +32,7 @@ def test_virtual_results_are_jump_safe_and_ingest_cooperatively() -> None:
 
 def test_explorer_data_static_numeric_columns_get_gauges() -> None:
     results = modules.read_family("app_results")
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "const staticNumericCols = typeAsts.map(isScalarNumericType);" in results
     assert "setGaugeCell(td, entry.row[index], index, text, staticMax, staticMin, safeColumns[index]);" in results
     assert "createStaticResultTable" in explorer
@@ -55,7 +55,7 @@ def test_hidden_non_storing_nodes_cost_zero_semantic_depth() -> None:
 def test_sidebar_loads_database_names_then_only_expanded_database_tables_with_stats() -> None:
     api_cpp = read("src/api_explorer.cpp")
     catalog_cpp = read("src/explorer_catalog.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "acl_.databases(access)" in api_cpp
     assert "acl_.objects(access, database_filter)" in api_cpp
     assert 'w.Key("rows")' in api_cpp

@@ -1,4 +1,5 @@
 from pathlib import Path
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,10 +43,10 @@ def test_projection_colors_and_route_scoring_are_cached_or_pruned() -> None:
 
 
 def test_explorer_search_debounces_graph_focus() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     # The tree filter follows every key; the graph focus waits for the one
     # search delay (util.debounce, util.SEARCH_DEBOUNCE_MS = 200 ms).
-    assert "const graphSearch = util.debounce(() => graph?.searchFocus());" in ui
+    assert "const graphSearch = util.debounce(() => parts.graph?.searchFocus());" in ui
     assert "search.bind(dom.explorerSearchInput, () => { renderTableList(); graphSearch(); }, { debounceMs: 0 });" in ui
     assert "const SEARCH_DEBOUNCE_MS = 200;" in read("src/static/app_util.js")
 

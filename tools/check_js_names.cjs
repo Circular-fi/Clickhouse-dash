@@ -1,5 +1,5 @@
 // Static check of the ES modules of src/static: a name that is read and declared nowhere (a function that a refactor moved or
-// removed), and an import that nothing uses. It parses with the acorn that Node ships, so it needs
+// removed), an import that nothing uses, and an import of a name that the module does not export. It parses with the acorn that Node ships, so it needs
 //   node --expose-internals tools/check_js_names.cjs src/static/app_*.js
 // Exit code 1 and one line per finding. tests/harness/test_js_names_contract.py runs it.
 // Undefined identifiers and unused imports of ES modules: node --expose-internals undef.cjs file.js...
@@ -9,6 +9,27 @@ const fs = require('fs');
 // What a browser gives a module besides the language: the names that the sources use.
 const GLOBALS = new Set(['window','document','console','Math','JSON','Number','String','Object','Array','Map','Set','WeakMap','WeakSet','Promise','Symbol','Error','TypeError','RangeError','Date','RegExp','Intl','BigInt','Boolean','parseInt','parseFloat','isNaN','isFinite','undefined','NaN','Infinity','globalThis','setTimeout','clearTimeout','setInterval','clearInterval','requestAnimationFrame','cancelAnimationFrame','queueMicrotask','performance','navigator','location','history','localStorage','sessionStorage','fetch','URL','URLSearchParams','AbortController','AbortSignal','Event','CustomEvent','KeyboardEvent','MouseEvent','PointerEvent','Element','HTMLElement','HTMLDialogElement','HTMLInputElement','HTMLTextAreaElement','HTMLSelectElement','HTMLButtonElement','HTMLCanvasElement','Node','NodeList','MutationObserver','ResizeObserver','IntersectionObserver','TextEncoder','TextDecoder','Uint8Array','Uint16Array','Uint32Array','Int8Array','Int16Array','Int32Array','Float32Array','Float64Array','ArrayBuffer','DataView','Blob','File','FileReader','FormData','Image','WebAssembly','Worker','Response','Request','Headers','Reflect','Proxy','encodeURIComponent','decodeURIComponent','encodeURI','decodeURI','getComputedStyle','matchMedia','reportError','CSS','DOMParser','XMLSerializer','requestIdleCallback','cancelIdleCallback','structuredClone','atob','btoa','crypto','alert','confirm','prompt','screen','scrollTo','innerHeight','innerWidth','DOMException','ClipboardItem','CompressionStream','DecompressionStream','ReadableStream','WritableStream','TransformStream','Intl','arguments','Selection','Range','DocumentFragment','HTMLTemplateElement','SVGElement','CanvasRenderingContext2D','Path2D','OffscreenCanvas','ImageData','BroadcastChannel','MessageChannel','EventTarget','EventSource','Audio','PerformanceObserver','Option','CSSStyleSheet','StorageEvent','InputEvent','WheelEvent','FocusEvent','TouchEvent','DragEvent','ClipboardEvent','HTMLTableElement','HTMLAnchorElement','HTMLFormElement','Text','Comment','AggregateError','NodeFilter','DOMMatrix','IDBKeyRange','HTMLDetailsElement','SyntaxError','EvalError','URIError','ReferenceError','Function','Atomics','SharedArrayBuffer','BigInt64Array','BigUint64Array','Uint8ClampedArray','WeakRef','FinalizationRegistry','Iterator','escape','unescape','eval','isSecureContext','visualViewport','getSelection','open','close','print','focus','blur','postMessage','self','top','parent','frames','name','status','length','event']);
 let bad = 0;
+// The names that a module exports (an import of another name fails in the browser, at load).
+const exportsCache = new Map();
+function exportsOf(path) {
+  if (exportsCache.has(path)) return exportsCache.get(path);
+  let names = null;
+  try {
+    const tree = acorn.parse(fs.readFileSync(path, 'utf8'), { ecmaVersion: 'latest', sourceType: 'module' });
+    names = new Set();
+    for (const node of tree.body) {
+      if (node.type === 'ExportAllDeclaration') { names = null; break; }
+      if (node.type !== 'ExportNamedDeclaration') continue;
+      for (const sp of node.specifiers || []) names.add(sp.exported.name);
+      const d = node.declaration;
+      if (!d) continue;
+      if (d.id) names.add(d.id.name);
+      else for (const x of d.declarations || []) { const stack = [x.id]; while (stack.length) { const p = stack.pop(); if (!p) continue; if (p.type === 'Identifier') names.add(p.name); else if (p.type === 'ObjectPattern') p.properties.forEach((q) => stack.push(q.type === 'RestElement' ? q.argument : q.value)); else if (p.type === 'ArrayPattern') p.elements.forEach((q) => stack.push(q)); else if (p.type === 'AssignmentPattern') stack.push(p.left); } }
+    }
+  } catch (e) { names = null; }
+  exportsCache.set(path, names);
+  return names;
+}
 for (const file of process.argv.slice(2)) {
   const src = fs.readFileSync(file, 'utf8');
   let ast;
@@ -28,7 +49,14 @@ for (const file of process.argv.slice(2)) {
   };
   const imported = new Map();
   for (const node of ast.body) {
-    if (node.type === 'ImportDeclaration') for (const s of node.specifiers) { root.names.add(s.local.name); imported.set(s.local.name, 0); }
+    if (node.type !== 'ImportDeclaration') continue;
+    const target = String(node.source.value).startsWith('./') ? require('path').join(require('path').dirname(file), node.source.value) : null;
+    const known = target && fs.existsSync(target) ? exportsOf(target) : null;
+    for (const s of node.specifiers) {
+      root.names.add(s.local.name);
+      imported.set(s.local.name, 0);
+      if (known && s.type === 'ImportSpecifier' && !known.has(s.imported.name)) { bad++; console.log(`${file}:${s.loc.start.line}: ${s.imported.name} is not exported by ${node.source.value}`); }
+    }
   }
   const used = new Set();
   // hoist var/function declarations per function scope; let/const/class per block scope
@@ -99,6 +127,12 @@ for (const file of process.argv.slice(2)) {
       case 'LabeledStatement': visit(node.body, scope, fnScope); return;
       case 'BreakStatement': case 'ContinueStatement': case 'MetaProperty': return;
       case 'ImportDeclaration': return;
+      case 'AssignmentExpression': case 'UpdateExpression': {
+        const target = node.type === 'UpdateExpression' ? node.argument : node.left;
+        if (target.type === 'Identifier' && imported.has(target.name)) { let s = scope; while (s && !s.names.has(target.name)) s = s.parent; if (s === root) { bad++; console.log(`${file}:${node.loc.start.line}: assignment to the import ${target.name}`); } }
+        for (const k of ['left', 'right', 'argument']) if (node[k]) visit(node[k], scope, fnScope);
+        return;
+      }
       case 'ExportNamedDeclaration':
         if (node.declaration) visit(node.declaration, scope, fnScope);
         for (const sp of node.specifiers || []) if (!node.source) ref(sp.local.name, scope, sp.local);

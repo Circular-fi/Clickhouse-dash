@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -12,7 +13,7 @@ def test_dictionary_reports_allocated_size_without_pretending_it_is_compressed()
     catalog = read("src/explorer_catalog.cpp")
     header = read("src/explorer_catalog.hpp")
     api = read("src/api_explorer.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "bytes_allocated" in catalog
     assert "resident_bytes" in header
     assert 'w.Key("resident_bytes")' in api
@@ -37,7 +38,7 @@ def test_lineage_is_a_conditional_tab_and_about_summarises_keys_and_ttl() -> Non
 
 def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> None:
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "function canUseStorageForId" in graph
     assert 'model.detailMode === "physical" && !canUseStorageForId(id)' in graph
     assert 'node.storage_disabled === true' in graph
@@ -50,7 +51,7 @@ def test_storage_mode_rejects_non_storage_focus_but_keeps_disabled_context() -> 
 
 
 def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
-    ui = read("src/static/app_explorer.js")
+    ui = modules.read_explorer()
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     # Browse is the default Catalog mode; Graph and Storage are ?mode=.
     assert 'if (mode !== "browse") params.set("mode", mode);' in ui
@@ -65,7 +66,7 @@ def test_explorer_url_persists_view_graph_type_depth_and_subpage() -> None:
 
 def test_table_visibility_cog_controls_system_and_non_storing_objects() -> None:
     html = read("src/static/explorer.html")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     # Release 15's settings cog became object-type chips under the search.
     assert 'id="explorerTableSettingsButton"' not in html
     for chip in ['explorerFilterTables', 'explorerFilterViews', 'explorerFilterMv', 'explorerFilterDict', 'explorerFilterSystem']:
@@ -137,7 +138,7 @@ def test_log_family_storage_uses_data_paths_instead_of_parts() -> None:
 
 
 def test_legacy_schema_canonicalization_preserves_explorer_query_state() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     # Canonical rewrites keep the mode and the graph type / depth.
     assert "graphRoute: { mode: route.graphType, depth: route.graphDepth }," in ui
     assert 'const mode = MODES.includes(modeParam) ? modeParam : (params.get("view") === "graph" ? "graph" : "browse");' in ui

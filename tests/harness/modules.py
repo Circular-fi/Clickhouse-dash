@@ -42,3 +42,15 @@ PAGES = tuple(graph.manifest()["pages"])  # the one list of pages: src/static/mo
 def read_family(prefix: str) -> str:
     """The text of the modules that one module was split into (app_results.js, app_results_values.js, ...), for a contract on the family."""
     return "\n".join(path.read_text(encoding="utf-8") for path in sorted(STATIC.glob(f"{prefix}*.js")))
+
+
+# The modules of the Explorer controller family, in the order of the former app_explorer.js (the card, the graph, the storage views and the
+# treemap are modules of their own and are not part of it).
+EXPLORER_CORE = ("app_explorer_summary.js", "app_explorer_route.js", "app_explorer_store.js", "app_explorer_shell.js", "app_explorer_doc.js",
+                 "app_explorer_functions.js", "app_explorer_tree.js", "app_explorer_data.js", "app_explorer_database.js", "app_explorer_table.js",
+                 "app_explorer.js")
+
+
+def read_explorer() -> str:
+    """The text of the Explorer controller and of the modules it was split into, for a contract on the Explorer as one unit."""
+    return "\n".join((STATIC / name).read_text(encoding="utf-8") for name in EXPLORER_CORE)

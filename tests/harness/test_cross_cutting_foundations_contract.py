@@ -17,6 +17,7 @@ The browser side of the same rules: tests/frontend/specs/ui-guards.spec.js.
 from __future__ import annotations
 
 import re
+import modules
 from pathlib import Path
 
 import css_sources
@@ -59,7 +60,7 @@ def test_one_size_band_and_one_colour_rule():
     assert "hashName" not in treemap and "databaseColor" not in treemap
     assert 'return node?.kind === "column" ? columnFamily(node.type).color : "";' in treemap
     # Its four users.
-    assert "storageView.renderTreemap(container, {" in read("app_explorer.js")
+    assert "storageView.renderTreemap(container, {" in modules.read_explorer()
     assert "const band = treemap.band(container, {" in read("app_explorer_storage.js")
     assert "explorerTreemap.band(treemapHost, {" in read("app_system_overview.js")
     assert "explorerTreemap?.band(strip, {" in read("app_system_disks.js")

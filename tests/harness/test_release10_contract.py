@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -26,7 +27,7 @@ def test_aggregate_function_preview_is_explicitly_marked_as_finalized() -> None:
     header = read("src/explorer_catalog.hpp")
     catalog = read("src/explorer_catalog.cpp")
     api = read("src/api_explorer.cpp")
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "bool finalized_for_preview = false;" in header
     assert 'out.columns[i].finalized_for_preview = declared_type.rfind("AggregateFunction(", 0) == 0;' in catalog
     assert 'w.Key("finalized_for_preview")' in api

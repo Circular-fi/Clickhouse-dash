@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -88,5 +89,5 @@ def test_graph_frontend_has_panel_groups_list_and_readable_fit() -> None:
     assert "--graph-grid" in css_sources.decls('html[data-theme="light"]')
     # No colour literal in the canvas code: every colour is a --graph-* token.
     assert "graphColor(role) {\n  return kit.color(role);" in js
-    ui = read("src/static/app_explorer.js")
+    ui = modules.read_explorer()
     assert "openCard: openTableCardFromGraph" in ui

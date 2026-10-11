@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,7 +34,7 @@ def test_data_settings_cog_has_no_select_caret() -> None:
 
 
 def test_collapsing_selected_database_switches_to_database_view_without_reopening() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert 'function selectDatabase(database, { history = "push", expand = true } = {})' in ui
     assert 'selectDatabase(database, { expand: false });' in ui
     assert 'model.expandedDatabases.delete(name);' in ui

@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -47,7 +48,7 @@ def test_profiling_label_and_function_description_alignment() -> None:
 def test_database_catalog_includes_only_database_level_size_summaries() -> None:
     api = read("src/api_explorer.cpp")
     catalog = read("src/explorer_catalog.cpp")
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     handler = api[api.index("void Server::handle_explorer_catalog"):api.index("void Server::handle_explorer_table")]
     assert "load_explorer_database_summaries" in handler
     assert 'w.Key("database_summaries")' in handler
@@ -60,7 +61,7 @@ def test_database_catalog_includes_only_database_level_size_summaries() -> None:
 
 
 def test_data_settings_is_portalled_and_storage_tuple_geometry_is_stable() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     css = css_sources.text()
     menu = read("src/static/app_ui_menu.js")
     assert 'menuMod?.bind(button, menu, { root, portal: true, portalAlign: "end", closeOnSelect: true })' in ui

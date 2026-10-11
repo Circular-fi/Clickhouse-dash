@@ -94,7 +94,9 @@ def referenced_icons() -> dict[str, set[str]]:
     icon.el("name") (a module may import icon under another name), and the icon tables that feed icon a variable."""
     out: dict[str, set[str]] = {}
     tables = {
-        "src/static/app_explorer.js": r"icon: \"([a-z0-9-]+)\", label:",
+        "src/static/app_explorer_summary.js": r"icon: \"([a-z0-9-]+)\", label:",
+        "src/static/app_explorer_tree.js": r"icon: \"([a-z0-9-]+)\", label:",
+        "src/static/app_explorer_functions.js": r"icon: \"([a-z0-9-]+)\", label:",
         "src/static/app_explorer_detail.js": r"(?:table|view|mv|dictionary|buffer|distributed|unknown): \"([a-z0-9-]+)\"",
         "src/static/app_query_library.js": r"\b(?:search|lock|folder|folderOpen|folderPlus|query|plus|back|server|local|edit|move|remove|save): \"([a-z0-9-]+)\"",
         "src/static/app_pipeline_viewer.js": r"\(\) => [^,]+, \"([a-z0-9-]+)\"(?:, true)?\);",

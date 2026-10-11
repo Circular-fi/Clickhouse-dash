@@ -1,4 +1,5 @@
 import re
+import modules
 from pathlib import Path
 import css_sources
 
@@ -9,7 +10,7 @@ def read(path: str) -> str:
 
 
 def test_explorer_and_results_modules_import_every_namespace_they_use() -> None:
-    explorer = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
+    explorer = (modules.read_explorer() + read('src/static/app_explorer_detail.js'))
     results = read('src/static/app_results.js')
     # Each module imports what it uses (a name that is not imported is a ReferenceError the moment it runs).
     for name in ('dom', 'h'):
@@ -23,8 +24,8 @@ def test_explorer_and_results_modules_import_every_namespace_they_use() -> None:
 
 
 def test_page_selector_navigation_pushes_real_query_and_explorer_routes() -> None:
-    explorer = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
-    block = explorer[explorer.index('function setWorkspace('):explorer.index('function visibleTables()', explorer.index('function setWorkspace('))]
+    explorer = (modules.read_explorer() + read('src/static/app_explorer_detail.js'))
+    block = explorer[explorer.index('function setWorkspace('):explorer.index('let catalogLoad = null;', explorer.index('function setWorkspace('))]
     assert 'appRoute(`/explorer/${CATALOG_ROUTE_SEGMENT}`)' in block
     assert 'appRoute("/query")' in block
     # The address goes through ns.router (push, replace or none).
@@ -41,7 +42,7 @@ def test_materialized_view_target_is_added_as_downstream_and_select_sources_rema
 
 
 def test_create_statement_uses_editor_copy_icon_gutter_and_highlighting() -> None:
-    ui = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
+    ui = (modules.read_explorer() + read('src/static/app_explorer_detail.js'))
     css = css_sources.text()
     render = ui[ui.index('function renderDdl('):ui.index('function renderTabContent', ui.index('function renderDdl('))]
     # The shared SQL block: gutter, copy button (its icon) and highlighting.
@@ -52,7 +53,7 @@ def test_create_statement_uses_editor_copy_icon_gutter_and_highlighting() -> Non
 
 
 def test_engine_specific_explorer_surfaces_do_not_assume_mergetree() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     catalog = read('src/explorer_catalog.cpp')
     assert 'isDictionarySummary' in ui
     assert 'isMemorySummary' in ui
@@ -69,7 +70,7 @@ def test_engine_specific_explorer_surfaces_do_not_assume_mergetree() -> None:
 def test_ttl_uses_version_stable_describe_metadata_and_table_ddl() -> None:
     catalog = read('src/explorer_catalog.cpp')
     api = read('src/api_explorer.cpp')
-    ui = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
+    ui = (modules.read_explorer() + read('src/static/app_explorer_detail.js'))
     assert 'toString(ttl_expression)' not in catalog
     assert 'DESCRIBE TABLE ' in catalog
     assert 'describe_include_subcolumns = 0' in catalog
@@ -85,7 +86,7 @@ def test_ttl_uses_version_stable_describe_metadata_and_table_ddl() -> None:
 def test_graph_click_updates_browser_selection_and_reset_focus_is_gone() -> None:
     html = read('src/static/query.html')
     graph = read('src/static/app_explorer_graph.js')
-    explorer = (read('src/static/app_explorer.js') + read('src/static/app_explorer_detail.js'))
+    explorer = (modules.read_explorer() + read('src/static/app_explorer_detail.js'))
     assert 'explorerGraphClearFocusButton' not in html
     assert 'function resetFocus()' not in graph
     assert 'model.openTable(node.database, node.name);' in graph
@@ -96,7 +97,7 @@ def test_graph_click_updates_browser_selection_and_reset_focus_is_gone() -> None
 
 
 def test_function_navigation_is_grouped_by_merged_category_with_counts_and_one_line_items() -> None:
-    ui = read('src/static/app_explorer.js')
+    ui = modules.read_explorer()
     render = ui[ui.index('function renderFunctionList()'):ui.index('async function refreshFunctions', ui.index('function renderFunctionList()'))]
     detail = ui[ui.index('function renderFunctionDetail()'):ui.index('function renderFunctionList()', ui.index('function renderFunctionDetail()'))]
     category = ui[ui.index('function functionCategory(item)'):ui.index('function functionKindBadge(item, category)')]

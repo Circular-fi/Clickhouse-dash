@@ -9,6 +9,7 @@ the CSS ones.
 from __future__ import annotations
 
 import re
+import modules
 from pathlib import Path
 import css_sources
 
@@ -45,7 +46,7 @@ def test_layout_tokens_and_breakpoints_are_defined_once():
     dom = read("src/static/app_dom.js")
     assert "const BREAKPOINTS = Object.freeze({ sm: 600, md: 820, lg: 1100 });" in dom
     assert "shell = Object.freeze({ BREAKPOINTS, mediaQuery, isAtMost, trackShellTop, edgeCues, revealInRow });" in dom
-    explorer = read("src/static/app_explorer.js")
+    explorer = modules.read_explorer()
     assert 'return !!shell?.isAtMost("md");' in explorer
     assert 'window.matchMedia(shell.mediaQuery("md"))' in explorer
     assert '"(max-width: 820px)"' not in explorer

@@ -75,7 +75,7 @@ def test_graph_refresh_discards_stale_scope_and_replays_latest_request() -> None
 
 
 def test_legacy_tab_routes_are_canonicalized_to_their_new_tab() -> None:
-    explorer = read("src/static/app_explorer.js")
+    explorer = modules.read_explorer()
     functional = read("tests/frontend/specs/functional.spec.js")
     assert '["overview", "Columns"], ["schema", "Columns"], ["data", "Preview"]' in explorer
     # A former slug resolves to its tab; the address takes the canonical form.
@@ -132,13 +132,13 @@ def test_non_merge_tree_counts_and_graph_labels_are_engine_specific() -> None:
 
 def test_graph_sidebar_missing_target_forces_fresh_graph_and_mode_trigger_is_single_bound() -> None:
     graph = read("src/static/app_explorer_graph.js")
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert 'if (!exists) {' in graph
     assert 'if (model.active) refresh(false, { reflow: !!ensureVisible });' in graph
     assert 'model.refreshQueuedForce = true;' in graph
     assert 'queueMicrotask(() => refresh(queuedForce, { reflow: queuedReflow }));' in graph
     # Catalog | Functions are links to two pages: nothing binds them; Browse | Graph are bound once at init.
     assert 'explorerViewTabs' not in explorer.replace('shellEl("explorerViewTabs")', "")
-    assert explorer.count('tabsMod?.bind(shellEl("explorerModeTabs"), {') == 1
+    assert explorer.count('tabs?.bind(shellEl("explorerModeTabs"), {') == 1
     assert 'dom.explorerModeSelectButton?.addEventListener("click"' not in explorer
 

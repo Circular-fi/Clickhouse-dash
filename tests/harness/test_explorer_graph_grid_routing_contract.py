@@ -1,4 +1,5 @@
 from pathlib import Path
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -30,7 +31,7 @@ def test_materialized_views_keep_dashed_node_outline() -> None:
 
 def test_visibility_toggles_lock_for_selected_system_or_non_storing_object() -> None:
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert 'function visibilityRequirements()' in graph
     assert 'required.includeSystem || options.includeSystem === true' in graph
     assert 'const nextIncludeNonStoring = required.includeNonStoring || options.includeNonStoring !== false;' in graph

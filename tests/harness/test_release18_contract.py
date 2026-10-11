@@ -1,4 +1,5 @@
 from pathlib import Path
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,7 +46,7 @@ def test_flow_marker_scales_size_and_apparent_speed_with_zoom() -> None:
 
 
 def test_storage_sidebar_disables_virtual_system_engines_from_catalog_signals() -> None:
-    explorer = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "function storageCatalogEligible(summary)" in explorer
     eligibility = explorer[explorer.index("function storageCatalogEligible"):explorer.index("function summaryFootprintBytes")]
     assert "isBufferSummary(summary)" in eligibility

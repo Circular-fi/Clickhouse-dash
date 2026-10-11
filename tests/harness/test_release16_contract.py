@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+import modules
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,7 +10,7 @@ def read(rel: str) -> str:
 
 
 def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'const hasDepth = params.has("depth");' in ui
     assert 'const parsedDepth = hasDepth ? Number(params.get("depth")) : Number.NaN;' in ui
@@ -18,7 +19,7 @@ def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
 
 
 def test_graph_click_does_not_restart_catalog_and_route_intent_is_one_shot() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert 'if (model.section !== "tables") setSection("tables");' in ui
     assert 'selectTable(database, table, false, { graphOrigin: true });' in ui
     assert 'model.routeIntent = null;' in ui
@@ -67,7 +68,7 @@ def test_storage_ttl_parser_builds_ordered_timeline_actions() -> None:
 
 def test_function_kind_filter_uses_the_tree_filter_chips() -> None:
     html = read("src/static/functions.html")
-    ui = read("src/static/app_explorer.js")
+    ui = modules.read_explorer()
     # The former cog menu became chips like the object tree's type chips.
     assert 'id="explorerFunctionSettings"' not in html
     assert 'id="explorerFunctionFilters" class="uiSide__chips explorerTreeFilters" role="group" aria-label="Function kinds"' in html
@@ -109,7 +110,7 @@ def test_analysis_modal_has_large_desktop_inset() -> None:
 
 
 def test_legacy_schema_rewrite_injects_default_browse_parameter() -> None:
-    ui = (read("src/static/app_explorer.js") + read("src/static/app_explorer_detail.js"))
+    ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     # ?view= and the other aliases are rewritten to the one Catalog scheme.
     block = ui[ui.index('if (route.workspace === "explorer" && route.section === "tables") {\n    // Aliases'):ui.index('model.routeIntent = route;')]
     assert "const canonical = appRoute(catalogPath({" in block

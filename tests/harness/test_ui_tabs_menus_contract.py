@@ -126,11 +126,11 @@ def test_old_tab_families_are_gone():
 
 def test_tab_rows_bind_through_the_component():
     # Catalog | Functions are links to two pages: no component binds them.
-    assert 'ns.tabs?.bind(shellEl("explorerViewTabs")' not in read("app_explorer.js")
+    assert 'ns.tabs?.bind(shellEl("explorerViewTabs")' not in modules.read_explorer()
     # The Catalog's Browse | Graph are second-level tabs of the nav row (as
     # the Traces tabs), after a divider: an ns.tabs row, not a segmented control.
-    assert 'tabsMod?.bind(shellEl("explorerModeTabs"), {' in read("app_explorer.js")
-    assert 'ns.segmented?.bind(shellEl("explorerModeTabs")' not in read("app_explorer.js")
+    assert 'tabs?.bind(shellEl("explorerModeTabs"), {' in modules.read_explorer()
+    assert 'ns.segmented?.bind(shellEl("explorerModeTabs")' not in modules.read_explorer()
     assert 'tabsMod?.bind(dom.explorerDetailTabs, { onSelect: (label) => { if (model.selectedKey) openTab(label); } });' in read("app_explorer_detail.js")
     # The Observability view row is links to pages of their own: no component binds it.
     assert 'obsTabs' not in read("app_obs_page.js").replace('byId("obsTabs")', "")
