@@ -126,22 +126,63 @@ std::string tools_list_result(const McpKey& key) {
   return std::string(sb.GetString(), sb.GetSize());
 }
 
-std::string tool_result(const McpToolOutcome& outcome) {
-  rapidjson::StringBuffer sb;
-  Writer w(sb);
+// An output stream of rapidjson that writes into a std::string, so that a response is built in place and moved to the answer: no
+// StringBuffer, no copy of it. A tool result can be as large as max_result_bytes (up to 256 MiB), and a copy is that much memory
+// for each call that runs at once.
+class StringStream {
+public:
+  using Ch = char;
+  void Put(char c) { text_.push_back(c); }
+  void Flush() {}
+  void reserve(size_t bytes) { text_.reserve(bytes); }
+  std::string take() { return std::move(text_); }
+
+private:
+  std::string text_;
+};
+// The Writer asks for room for each string before it writes it, for the worst case (six bytes for each byte): the caller reserves
+// once, for the likely size, so this does nothing.
+inline void PutReserve(StringStream&, size_t) {}
+
+using StreamWriter = rapidjson::Writer<StringStream>;
+
+// The protocol version after which a tool result has structuredContent (the 2025-06-18 specification, "Tools", "Structured
+// Content"). A client of an older version does not read it: it reads content[].text.
+bool protocol_has_structured_content(std::string_view version) {
+  // Dates in the form YYYY-MM-DD compare as text. No header: the latest version (the stateless endpoint has no initialize
+  // to remember; the clients of 2025-06-18 send the header, and a script that sends none reads either field).
+  return version.empty() || version >= std::string_view("2025-06-18");
+}
+
+// The whole JSON-RPC response of tools/call, written once. `text` carries the JSON of the result as text for every client (the
+// specification asks a tool that returns structured content to also return it as text, and most clients show the model the text,
+// not structuredContent); `structuredContent` is the same JSON for the clients that read it, so only for a protocol that has it.
+std::string tool_call_body(const rapidjson::Value& id, const McpToolOutcome& outcome, bool structured) {
+  StringStream out;
+  // The text copy escapes its quotes (about 15 % more than the JSON); the room is reserved once, as untouched memory that the writes fill.
+  out.reserve(outcome.json.size() * (structured ? 23 : 13) / 10 + 1024);
+  StreamWriter w(out);
+  w.StartObject();
+  w.Key("jsonrpc"); w.String("2.0");
+  w.Key("id");
+  id.Accept(w);
+  w.Key("result");
   w.StartObject();
   w.Key("content");
   w.StartArray();
   w.StartObject();
   w.Key("type"); w.String("text");
-  w.Key("text"); put(w, outcome.json);
+  w.Key("text"); write_json_text(w, outcome.json);
   w.EndObject();
   w.EndArray();
-  w.Key("structuredContent");
-  w.RawValue(outcome.json.data(), outcome.json.size(), rapidjson::kObjectType);
+  if (structured) {
+    w.Key("structuredContent");
+    w.RawValue(outcome.json.data(), outcome.json.size(), rapidjson::kObjectType);
+  }
   w.Key("isError"); w.Bool(outcome.is_error);
   w.EndObject();
-  return std::string(sb.GetString(), sb.GetSize());
+  w.EndObject();
+  return out.take();
 }
 
 } // namespace
@@ -296,7 +337,7 @@ const char* mcp_tool_input_schema(std::string_view tool) {
 }
 
 McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToolBackend& backend,
-                                const McpServerInfo& info, int64_t now) {
+                                const McpServerInfo& info, int64_t now, std::string_view protocol_version) {
   rapidjson::Document doc;
   parse_json_bounded<rapidjson::kParseValidateEncodingFlag>(doc, body);
   if (doc.HasParseError()) return rpc_error(nullptr, kRpcParseError, "the body is not valid JSON", 400);
@@ -391,7 +432,7 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
         result.outcome = mcp_tool_error("internal_error", "the tool failed; see the ChDash log");
       }
     }
-    result.body = result_body(*id, tool_result(result.outcome));
+    result.body = tool_call_body(*id, result.outcome, protocol_has_structured_content(protocol_version));
     return result;
   }
   return rpc_error(id, kRpcMethodNotFound, "method not found: " + name);

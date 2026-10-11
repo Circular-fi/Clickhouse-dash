@@ -57,7 +57,7 @@ clickhouse {
 | `manage_from_ui` | `true` | `false`: the page is read-only. Every key write answers 403 `manage_disabled`. |
 | `auth_header` | `"Authorization"` | The request header that carries the key. `Authorization` takes `Bearer <key>`. Use another name when a proxy in front of ChDash already uses `Authorization` (for example `X-ChDash-Key`): that header takes the key alone, or `Bearer <key>`. The name is letters, digits and hyphens, and not one that the request needs (`Content-Type`, `Host`, `Origin`, `Accept`, `Cookie`, `Mcp-Session-Id` and others). The MCP page shows the name in its commands. |
 | `max_rows` | `1000` | Rows in one result (1 to 1,000,000). |
-| `max_result_bytes` | `1048576` | Bytes in one result (1 KiB to 256 MiB). ChDash counts the JSON text of the cells. A tool answer holds the result twice (`content[0].text` and `structuredContent`), so the body of a response is about twice this size, and the memory of calls that run at once (`admission.mcp_max`) is a multiple of it. Keep it as low as the clients need. |
+| `max_result_bytes` | `1048576` | Bytes in one result (1 KiB to 256 MiB). ChDash counts the JSON text of the cells. A tool answer holds the result as text (`content[0].text`) for every client, and again in `structuredContent` for a client of protocol 2025-06-18 or later (see "Decisions"). The body of a response is up to about twice this size, and the memory of calls that run at once (`admission.mcp_max`) is a multiple of it. Keep it as low as the clients need. |
 | `query_timeout_seconds` | `30` | Time limit of one query (1 to 3600). |
 | `max_sql_bytes` | `65536` | Size of the SQL of `run_query` and `explain_query` (256 bytes to 4 MiB). |
 | `max_memory_bytes` | `1073741824` | `max_memory_usage` of each query (16 MiB or more). |
@@ -243,7 +243,7 @@ The two sources add up. A name or a secret cannot exist twice, in either source.
 
 ## Tools
 
-Each tool has a JSON Schema in `tools/list`. A tool failure comes back as a result with `isError: true`. The text content and `structuredContent` both hold `{"error": "<code>", "message": "<sentence>"}`.
+Each tool has a JSON Schema in `tools/list`. A tool failure comes back as a result with `isError: true`. The text content (and `structuredContent`, for a client that gets it) holds `{"error": "<code>", "message": "<sentence>"}`.
 
 Example of a call:
 
@@ -618,7 +618,7 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **Page keys.** At most 1000 keys in the file.
 - **Order of checks of `POST /mcp`.** Origin, key, rate limit, content type, protocol header, body size. An early refusal closes the connection.
 - **Body size.** 2 times `max_sql_bytes` plus 16 KiB, because JSON escapes can double the SQL.
-- **`structuredContent`.** A tool result always has `structuredContent` and the same JSON as text. Older clients read the text.
+- **`structuredContent`.** The specification of 2025-06-18 says that a tool which returns structured content should also return the serialized JSON in a text content block, for the clients that do not read `structuredContent`. Most clients of MCP show the model the text content and ignore `structuredContent`. For this reason, ChDash does not replace the text with a summary. The text is the JSON of the tool, always. `structuredContent` is the same JSON again, and ChDash sends it only when the client can read it: for a request with `MCP-Protocol-Version: 2025-06-18` (or later), and for a request without this header. A request with an older version (`2025-03-26`, `2024-11-05`) gets the text only, so its response is half the size. The endpoint has no session, so the header of each request is the protocol version. The tools declare no `outputSchema`, so no client needs `structuredContent` to validate a result. The response is written once into one buffer and moved to the answer: the copies of the result in memory are the JSON of the tool and the body of the response. The cap of the size of a result is `mcp.max_result_bytes` (1 MiB by default), and an administrator who wants a smaller body lowers it.
 - **Not allowed or unknown tool.** A tool that exists but that the key cannot use is a tool error `tool_not_allowed`. A name that does not exist is the JSON-RPC error -32602.
 - **Truncation.** `truncated` is true only when a cap cut the result. A `limit` that you chose below the cap is not a cap. `query_table` asks for one row more than the cap to know. For `run_query`, ClickHouse breaks at `max_rows` + 1 rows. A result that exactly fits is not truncated.
 - **Bytes.** ChDash counts the JSON text of the cells. It also estimates the size that ClickHouse counts (a number has its width in bytes), because `max_result_bytes` with `break` cuts there. If either reaches the cap, `truncated` is true.

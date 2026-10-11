@@ -514,12 +514,13 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   // 5. The message.
   McpServerInfo info;
   info.version = cfg_.version_semver;
-  const McpRpcResult result = mcp_handle_message(body, key, *mcp_tools_, info, now);
+  McpRpcResult result = mcp_handle_message(body, key, *mcp_tools_, info, now, version_header);
   res.status = result.http_status;
   if (result.http_status == 202) {
     res.set_content("", 0, "application/json");
   } else {
-    res.set_content(result.body, "application/json");
+    // The body can be as large as max_result_bytes: it moves into the answer.
+    res.set_content(std::move(result.body), "application/json");
   }
   std::string what = result.method.empty() ? "request" : result.method;
   if (result.tool_called) what = "tools/call:" + result.tool;

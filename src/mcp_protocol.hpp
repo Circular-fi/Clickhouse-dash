@@ -33,7 +33,7 @@ struct McpServerInfo {
 
 // What a tool returns. `json` is one JSON object: the payload on success,
 // {"error": code, "message": text} on failure. It is sent as the text content
-// and as structuredContent.
+// and, for a client that reads it, as structuredContent.
 struct McpToolOutcome {
   bool is_error = false;
   std::string json;
@@ -68,7 +68,10 @@ struct McpRpcResult {
 // The JSON Schema of a tool's arguments, as JSON text.
 const char* mcp_tool_input_schema(std::string_view tool);
 
+// `protocol_version` is the MCP-Protocol-Version header of the request ("" when it has none). A tool result always has the JSON of
+// the tool as text (content[0].text); structuredContent, the same JSON again, only for a client of 2025-06-18 or later and for a
+// request without the header (docs/mcp.md, "Decisions").
 McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToolBackend& backend,
-                                const McpServerInfo& info, int64_t now);
+                                const McpServerInfo& info, int64_t now, std::string_view protocol_version = {});
 
 } // namespace chdash

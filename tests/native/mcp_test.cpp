@@ -971,6 +971,31 @@ void test_protocol() {
     CHECK_EQ(std::string(doc["result"]["content"][0]["text"].GetString()), std::string(R"({"hosts":[]})"));
     CHECK(doc["result"]["structuredContent"]["hosts"].IsArray());
   }
+  // structuredContent is the same JSON again: only for a client of 2025-06-18 or later, and for a request without the protocol header.
+  // The text content is there for every client (ARCH-B-073).
+  {
+    const std::string call = rpc("tools/call", R"({"name":"list_hosts","arguments":{}})");
+    for (const char* version : {"", "2025-06-18"}) {
+      const auto doc = parse(mcp_handle_message(call, all, backend, info, now, version).body);
+      CHECK(doc["result"].HasMember("structuredContent"));
+      CHECK_EQ(std::string(doc["result"]["content"][0]["text"].GetString()), std::string(R"({"hosts":[]})"));
+    }
+    for (const char* version : {"2025-03-26", "2024-11-05"}) {
+      const auto r = mcp_handle_message(call, all, backend, info, now, version);
+      const auto doc = parse(r.body);
+      CHECK(!doc["result"].HasMember("structuredContent"));
+      CHECK(!doc["result"]["isError"].GetBool());
+      CHECK_EQ(std::string(doc["result"]["content"][0]["text"].GetString()), std::string(R"({"hosts":[]})"));
+      CHECK_EQ(r.outcome.rows, uint64_t(3));
+      CHECK_EQ(std::string(doc["jsonrpc"].GetString()), std::string("2.0"));
+      CHECK_EQ(doc["id"].GetInt(), 1);
+    }
+    // A failure keeps its code and message in the text for the older protocol too.
+    const auto failed = parse(mcp_handle_message(rpc("tools/call", R"({"name":"query_table","arguments":{"fail":1}})"), all, backend, info, now, "2024-11-05").body);
+    CHECK(failed["result"]["isError"].GetBool());
+    CHECK(!failed["result"].HasMember("structuredContent"));
+    CHECK_EQ(std::string(parse(failed["result"]["content"][0]["text"].GetString())["error"].GetString()), std::string("query_failed"));
+  }
   // A tool failure is a result with isError, not a JSON-RPC error.
   {
     const auto r = mcp_handle_message(rpc("tools/call", R"({"name":"query_table","arguments":{"fail":1}})"), all, backend, info, now);
