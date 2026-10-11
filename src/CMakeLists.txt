@@ -71,8 +71,14 @@ if (CHDASH_BUILD_CODEC_TESTS)
   chdash_configure_target(chdash_processor_codec_test)
 endif()
 
+# The tools of MCP: the dispatch, what the tools share, and the tools by family.
+set(CHDASH_MCP_TOOL_SOURCES mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp)
+
+# The query library: the store, the file format, the rules of the tree, the import, the reading of a request.
+set(CHDASH_QUERY_LIBRARY_SOURCES query_library.cpp query_library_file.cpp query_library_import.cpp query_library_request.cpp query_library_rules.cpp)
+
 if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
-  add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp query_library.cpp error_envelope.cpp secure_random.cpp log.cpp)
+  add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} error_envelope.cpp secure_random.cpp log.cpp)
   target_include_directories(chdash_query_library_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_query_library_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
   chdash_configure_target(chdash_query_library_test)
@@ -83,8 +89,8 @@ if (CHDASH_BUILD_MCP_TESTS)
   # and the startup errors of the mcp { } block (no ClickHouse server needed). Also the HTTP hardening
   # (the guard of the writes, the page policy, the asset versions), the random source and the log lines.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
-    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
-    error_envelope.cpp request_context.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp query_library.cpp ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
+    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp ${CHDASH_MCP_TOOL_SOURCES}
+    error_envelope.cpp request_context.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -94,9 +100,9 @@ if (CHDASH_BUILD_MCP_TESTS)
 endif()
 
 if (CHDASH_BUILD_RESULT_TESTS)
-  # The path of a result to the browser: the JSON cell encoder (Query page, exports, MCP rows) and the
-  # thread that encodes the blocks (no ClickHouse needed).
-  add_executable(chdash_result_path_test ../tests/native/result_path_test.cpp)
+  # The path of a result to the browser: the JSON cell encoder (Query page, exports, MCP rows), the thread that encodes the blocks, the plan
+  # of the columns, the events of a result and the cost that a run reports (no ClickHouse needed).
+  add_executable(chdash_result_path_test ../tests/native/result_path_test.cpp query_result_plan.cpp query_result_events.cpp query_run_profile.cpp)
   target_include_directories(chdash_result_path_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_result_path_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -210,7 +216,7 @@ endif()
 if (CHDASH_BUILD_CONFIG_TESTS)
   # The configuration file: the table of keys and their bounds, the errors, the derived values, the URIs, the HCL parser.
   add_executable(chdash_config_test ../tests/native/config_test.cpp
-    config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ch_query.cpp error_envelope.cpp mcp_keys.cpp mcp_scope.cpp mcp_api_tools.cpp mcp_identity.cpp query_library.cpp jwt.cpp
+    config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ch_query.cpp error_envelope.cpp mcp_keys.cpp mcp_scope.cpp mcp_api_tools.cpp mcp_identity.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} jwt.cpp
     secure_random.cpp log.cpp health_runner.cpp ch_client_pool.cpp)
   target_include_directories(chdash_config_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_config_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
@@ -316,6 +322,10 @@ if (CHDASH_BUILD_APP)
     api_query_stream.cpp
     api_analysis.cpp
     query_session.cpp
+    query_session_kill.cpp
+    query_result_plan.cpp
+    query_result_events.cpp
+    query_run_profile.cpp
     hcl.cpp
     jwt.cpp
     query_registry.cpp
@@ -390,7 +400,7 @@ if (CHDASH_BUILD_APP)
     metrics_request.cpp
     metrics_service.cpp
     metrics_sql.cpp
-    query_library.cpp
+    ${CHDASH_QUERY_LIBRARY_SOURCES}
     api_query_library.cpp
     mcp_scope.cpp
     mcp_identity.cpp
@@ -399,7 +409,7 @@ if (CHDASH_BUILD_APP)
     mcp_keys.cpp
     mcp_sql.cpp
     mcp_protocol.cpp
-    mcp_tools.cpp
+    ${CHDASH_MCP_TOOL_SOURCES}
     api_mcp.cpp
     ch_uri.cpp
     ch_query.cpp

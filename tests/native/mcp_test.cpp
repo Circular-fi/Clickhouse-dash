@@ -23,6 +23,7 @@
 #include "mcp_sql.hpp"
 #include "request_context.hpp"
 #include "sql_literal.hpp"
+#include "mcp_tool_support.hpp"
 #include "mcp_tools.hpp"
 #include "metrics.hpp"
 #include "secure_random.hpp"
@@ -1964,6 +1965,110 @@ clickhouse {
 
 const char* kSecret24 = "01234567-89ab-4def-8123-456789abcdef";
 
+// What the tools share (mcp_tool_support.cpp): the context of a call, the host, the arguments, the cells.
+void test_tool_support() {
+  using namespace mcp_tools;
+  struct NoDatabase : McpDatabase {
+    McpDbResult run(const std::string&, const std::string&, const McpDbLimits&) override { throw McpDbError("host_unavailable", "down"); }
+    std::optional<bool> host_healthy(const std::string&) override { return std::nullopt; }
+  } database;
+  McpToolsConfig config;
+  config.hosts = {{"prod", "Prod"}, {"stage", "Stage"}};
+  config.max_rows = 500;
+  config.query_timeout_seconds = 30;
+  config.max_result_bytes = 2000;
+  McpKey key = a_key({"*"}, {"*"});
+  key.hosts = {"prod", "stage"};
+  key.max_rows = 100;
+  key.timeout_seconds = 5;
+
+  // The limits: the key may only lower them; the schema tools read more rows than the key shows; the OpenTelemetry tools run as the system user.
+  Ctx ctx = make_ctx(key, config, database);
+  CHECK_EQ(ctx.max_rows, int64_t{100});
+  CHECK_EQ(ctx.user_limits.max_rows, int64_t{100});
+  CHECK_EQ(ctx.user_limits.timeout_seconds, int64_t{5});
+  CHECK_EQ(ctx.user_limits.key_id, std::string("k1"));
+  CHECK(!ctx.user_limits.as_system && ctx.system_limits.as_system && ctx.system_schema_limits.as_system && !ctx.schema_limits.as_system);
+  CHECK_EQ(ctx.schema_limits.max_rows, kMcpSchemaReadRows);
+  CHECK_EQ(ctx.schema_limits.max_bytes, kMcpSchemaReadBytes);
+  key.max_rows.reset();
+  key.timeout_seconds.reset();
+  CHECK_EQ(make_ctx(key, config, database).max_rows, int64_t{500});
+
+  // The host: named, or the only one; several hosts need a choice.
+  const auto resolve = [&](const char* json, const McpKey& k) {
+    rapidjson::Document args;
+    args.Parse(json);
+    Ctx c = make_ctx(k, config, database);
+    try {
+      resolve_host(c, args);
+    } catch (const ToolFailure& f) {
+      return f.code;
+    }
+    return std::string("ok:") + c.host;
+  };
+  CHECK_EQ(resolve("{\"host\":\"stage\"}", key), std::string("ok:stage"));
+  CHECK_EQ(resolve("{\"host\":\"other\"}", key), std::string("host_not_allowed"));
+  CHECK_EQ(resolve("{}", key), std::string("host_required"));
+  McpKey one = key;
+  one.hosts = {"prod"};
+  CHECK_EQ(resolve("{}", one), std::string("ok:prod"));
+  McpKey none = key;
+  none.hosts = {"nowhere"};
+  CHECK_EQ(resolve("{}", none), std::string("no_host"));
+
+  // A failed statement is a failure of the tool with the code of the database.
+  Ctx failing = make_ctx(key, config, database);
+  failing.host = "prod";
+  try {
+    run(failing, "SELECT 1", failing.user_limits);
+    CHECK(false);
+  } catch (const ToolFailure& f) {
+    CHECK_EQ(f.code, std::string("host_unavailable"));
+  }
+
+  // The arguments.
+  rapidjson::Document args;
+  args.Parse("{\"a\":\"text\",\"b\":true,\"c\":3,\"n\":null}");
+  const auto code_of = [&](const std::function<void()>& fn) {
+    try {
+      fn();
+    } catch (const ToolFailure& f) {
+      return f.code + ":" + f.message;
+    }
+    return std::string("ok");
+  };
+  CHECK_EQ(*opt_string(args, "a"), std::string("text"));
+  CHECK(!opt_string(args, "n") && !opt_string(args, "missing"));
+  CHECK_EQ(code_of([&] { opt_string(args, "c"); }), std::string("invalid_argument:c must be a string"));
+  CHECK_EQ(code_of([&] { opt_string(args, "a", 2); }), std::string("invalid_argument:a is too long"));
+  CHECK_EQ(code_of([&] { req_string(args, "missing"); }), std::string("invalid_argument:missing is required"));
+  CHECK(*opt_bool(args, "b"));
+  CHECK_EQ(code_of([&] { opt_bool(args, "a"); }), std::string("invalid_argument:a must be true or false"));
+  CHECK_EQ(code_of([&] { reject_unknown(args, {"a", "b", "c", "n"}); }), std::string("ok"));
+  CHECK_EQ(code_of([&] { reject_unknown(args, {"a"}); }), std::string("invalid_argument:unknown argument b"));
+
+  // Cells are JSON text: a string loses its quotes, null is empty, a number stays.
+  CHECK_EQ(cell_text("\"a\\\"b\""), std::string("a\"b"));
+  CHECK_EQ(cell_text("null"), std::string());
+  CHECK_EQ(cell_text("42"), std::string("42"));
+  CHECK_EQ(cell_u64("\"18446744073709551\""), uint64_t{18446744073709551ULL});
+  CHECK_EQ(cell_u64("12x"), uint64_t{0});
+  CHECK_EQ(cell_u64("12345678901234567890"), uint64_t{0});
+  McpDbResult res;
+  res.columns = {{"a", "UInt8"}, {"b", "String"}};
+  res.rows = {{"1", "\"x\""}, {"", "null"}};
+  rapidjson::StringBuffer sb;
+  Writer w(sb);
+  w.StartObject();
+  write_columns(w, res);
+  write_rows(w, res);
+  w.EndObject();
+  CHECK_EQ(finish(sb), std::string("{\"columns\":[{\"name\":\"a\",\"type\":\"UInt8\"},{\"name\":\"b\",\"type\":\"String\"}],\"rows\":[[1,\"x\"],[null,null]],\"row_count\":2}"));
+  CHECK_EQ(glob_conditions("name", {"a*", "b_"}), std::string("name LIKE 'a%' OR name LIKE 'b\\\\_'"));
+  CHECK_EQ(describe_table_filter("d'b", "t", "name"), std::string("database = 'd\\'b' AND name = 't'"));
+}
+
 void test_config(const std::string& dir) {
   const std::string hosts = kHosts;
   // No mcp block: off, and the existing configs keep working.
@@ -2672,6 +2777,7 @@ int main() {
   test_tools();
   test_observability();
   test_api_tools();
+  test_tool_support();
   test_config(dir);
   test_observability_config(dir);
   test_grants(make_temp_dir());

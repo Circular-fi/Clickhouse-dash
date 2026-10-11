@@ -1,5 +1,6 @@
 from pathlib import Path
 from explorer_sources import read_unit
+from session_sources import read_session
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,7 +19,7 @@ def test_parameterized_view_without_system_columns_is_not_fatal() -> None:
 
 
 def test_int256_native_decode_failure_retries_with_describe() -> None:
-    source = (ROOT / "src" / "query_session.cpp").read_text(encoding="utf-8")
+    source = read_session()
     scan = (ROOT / "src" / "sql_scan.hpp").read_text(encoding="utf-8")
 
     assert 'icontains(msg, "unsupported type")' in source

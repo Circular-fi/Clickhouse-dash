@@ -1,5 +1,6 @@
 from pathlib import Path
 import config_keys
+from session_sources import read_session
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,7 +15,7 @@ def test_deep_analysis_is_a_separate_explicit_endpoint() -> None:
     header = read("src/server.hpp")
     api = read("src/api_analysis.cpp")
     query_api = read("src/api_query.cpp")
-    session = read("src/query_session.cpp")
+    session = read_session()
 
     assert 'Post("/api/query/deep-analysis"' in server
     assert 'Get("/api/query/deep-analysis"' in server

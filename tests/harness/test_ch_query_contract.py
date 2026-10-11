@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
+from session_sources import read_session
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 SRC = ROOT / "src"
@@ -94,7 +95,7 @@ def test_every_api_route_runs_in_a_query_scope():
     assert 'const auto activity = limited(' in server and 'const auto keeper = limited(' in server
     # The MCP endpoint, the run, the export and Deep Analyze open scopes of their own.
     assert "RequestScope scope(make_context(req, false));" in read("src/api_mcp.cpp")
-    assert 'limits.log_comment = "chdash-run";' in read("src/query_session.cpp")
+    assert 'limits.log_comment = "chdash-run";' in read_session()
     assert 'limits.log_comment = "chdash-export";' in read("src/api_export.cpp")
     # Deep Analyze is a job: its thread opens the scope with the limits of a run, and a cancel of the job (not the end of the
     # request that started it) is what stops its statements.
@@ -116,7 +117,7 @@ def test_request_limits_label_and_bound_the_generated_queries():
 
 
 def test_the_preview_limit_is_a_cancel_packet_not_a_kill():
-    session = read("src/query_session.cpp")
+    session = read_session()
     assert "q.OnDataCancelable([&](const clickhouse::Block& block) -> bool {" in session
     assert 'throw std::runtime_error("result_limit_reached")' not in session
     assert "if (!(limit_reached && (error.GetCode() == 394 || error.GetCode() == 735))) throw;" in session

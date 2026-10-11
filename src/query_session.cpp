@@ -5,7 +5,9 @@
 #include "log.hpp"
 #include "ch_uri.hpp"
 #include "block_encoder.hpp"
-#include "json_clickhouse.hpp"
+#include "query_result_events.hpp"
+#include "query_result_plan.hpp"
+#include "query_run_profile.hpp"
 #include "sql_scan.hpp"
 #include "json_text.hpp"
 #include "sql_literal.hpp"
@@ -39,77 +41,6 @@ namespace chdash {
 namespace {
 using sql::quote_ident;
 using sql::quote_string;
-}
-
-// ClickHouse may pretty-print complex types returned by DESCRIBE with newlines/indentation.
-// This produces noisy JSON ("\n    ") in result_meta. Normalize it to a single-line form
-// while keeping the type parseable for the frontend.
-static std::string normalize_type_string(std::string s) {
-  std::string out;
-  out.reserve(s.size());
-
-  bool space_pending = false;
-  bool in_squote = false;
-  bool in_btick = false;
-
-  auto is_ws = [](unsigned char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
-  };
-
-  for (size_t i = 0; i < s.size(); ++i) {
-    const char ch = s[i];
-    const char prev = (i > 0) ? s[i - 1] : '\0';
-
-    // Preserve content inside quotes/backticks (best-effort).
-    if (!in_btick && ch == '\'' && prev != '\\') {
-      in_squote = !in_squote;
-      space_pending = false;
-      out.push_back(ch);
-      continue;
-    }
-    if (!in_squote && ch == '`') {
-      in_btick = !in_btick;
-      space_pending = false;
-      out.push_back(ch);
-      continue;
-    }
-    if (in_squote || in_btick) {
-      out.push_back(ch);
-      continue;
-    }
-
-    if (is_ws(static_cast<unsigned char>(ch))) {
-      space_pending = true;
-      continue;
-    }
-
-    if (!out.empty() && (ch == ')' || ch == ']' || ch == '}' || ch == ',')) {
-      while (!out.empty() && out.back() == ' ') out.pop_back();
-    }
-
-    if (space_pending) {
-      const char last = out.empty() ? '\0' : out.back();
-      const bool no_space_before = (ch == ')' || ch == ']' || ch == '}' || ch == ',');
-      const bool no_space_after = (last == '(' || last == '[' || last == '{' || last == ',');
-      if (!no_space_before && !no_space_after && last != ' ' && last != '\0') {
-        out.push_back(' ');
-      }
-      space_pending = false;
-    }
-
-    out.push_back(ch);
-    if (ch == ',') {
-      out.push_back(' ');
-    }
-  }
-
-  // Trim.
-  while (!out.empty() && out.back() == ' ') out.pop_back();
-  size_t start = 0;
-  while (start < out.size() && out[start] == ' ') start++;
-  if (start > 0) out.erase(0, start);
-
-  return out;
 }
 
 static int64_t ms_since(const std::chrono::steady_clock::time_point& start,
@@ -254,37 +185,6 @@ std::string QuerySession::latest_native_query_id() const {
   return native_query_ids_.empty() ? query_id_ : native_query_ids_.back();
 }
 
-KillOutcome kill_queries(const std::string& uri, const std::string& where, bool synchronous) {
-  KillOutcome out;
-  // The statement is not stopped by the cancel of the run it stops (the scope of
-  // that run says "canceled" by then).
-  ChQueryLimits limits;
-  limits.log_comment = "chdash:cancel";
-  ChQueryScope scope(std::move(limits));
-  std::string error;
-  auto client = make_client_from_uri(
-      uri,
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      std::chrono::seconds(5),
-      &error);
-  if (!client) {
-    out.error = error.empty() ? "Cannot connect to ClickHouse." : error;
-    return out;
-  }
-  try {
-    ch_select(*client, "KILL QUERY WHERE " + where + (synchronous ? " SYNC" : " ASYNC"),
-              [&out](const clickhouse::Block& block) { out.matched += block.GetRowCount(); });
-    out.sent = true;
-  } catch (const std::exception& e) {
-    // A missing grant or a lost connection: the cancel stays best effort, and says so (the answer of the cancel route
-    // carries `kill_error`, and the log the same text).
-    out.error = e.what();
-    log_event(LogLevel::Warn, "query.kill_failed", {{"error", out.error.substr(0, 300)}});
-  }
-  return out;
-}
-
 KillOutcome QuerySession::cancel_native_query_ids_best_effort(
   const std::vector<std::string>& query_ids,
   bool synchronous
@@ -349,11 +249,11 @@ SessionSnapshot QuerySession::snapshot() const {
   s.result_bytes_emitted = result_bytes_emitted_;
   s.written_rows_total = written_rows_total_;
   s.written_bytes_total = written_bytes_total_;
-  s.user_time_us_total = user_time_us_total_;
-  s.system_time_us_total = system_time_us_total_;
-  s.cpu_time_available = cpu_time_available_;
-  s.current_mem_bytes = current_mem_bytes_;
-  s.peak_mem_bytes = peak_mem_bytes_;
+  s.user_time_us_total = profile_.user_time_us_total;
+  s.system_time_us_total = profile_.system_time_us_total;
+  s.cpu_time_available = profile_.cpu_time_available;
+  s.current_mem_bytes = profile_.current_mem_bytes;
+  s.peak_mem_bytes = profile_.peak_mem_bytes;
   s.elapsed_ms = ms_since(started_at_, finished_at_);
   s.receive_ms = receive_ns_ / 1000000;
   s.encode_ms = encode_ns_ / 1000000;
@@ -557,13 +457,13 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
   // One fully busy CPU core is 100.00%. Parallel ClickHouse queries may
   // legitimately exceed 100% because the value is based on native query-group
   // user and system CPU counters.
-  const int64_t cpu_total_us = user_time_us_total_ + system_time_us_total_;
+  const int64_t cpu_total_us = profile_.user_time_us_total + profile_.system_time_us_total;
   int64_t cpu_centi = -1;
   if (last_sample_cpu_at_.time_since_epoch().count() != 0) {
     const auto dt_us = std::chrono::duration_cast<std::chrono::microseconds>(
         now - last_sample_cpu_at_).count();
     const int64_t delta_cpu_us = cpu_total_us - last_sample_cpu_total_us_;
-    if (cpu_time_available_ && dt_us > 0 && delta_cpu_us >= 0) {
+    if (profile_.cpu_time_available && dt_us > 0 && delta_cpu_us >= 0) {
       cpu_centi = static_cast<int64_t>(
           static_cast<__int128>(delta_cpu_us) * 10000 / dt_us);
     }
@@ -578,343 +478,9 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
       written_rows_total_,
       written_bytes_total_,
       cpu_centi,
-      current_mem_bytes_,
+      profile_.current_mem_bytes,
   });
   while (samples_.size() > 512) samples_.pop_front();
-}
-
-
-static bool icontains(std::string_view hay, std::string_view needle) {
-  if (needle.empty()) return true;
-  for (size_t i = 0; i + needle.size() <= hay.size(); ++i) {
-    bool ok = true;
-    for (size_t j = 0; j < needle.size(); ++j) {
-      char a = hay[i + j];
-      char b = needle[j];
-      if (a >= 'A' && a <= 'Z') a = char(a - 'A' + 'a');
-      if (b >= 'A' && b <= 'Z') b = char(b - 'A' + 'a');
-      if (a != b) { ok = false; break; }
-    }
-    if (ok) return true;
-  }
-  return false;
-}
-
-static bool iequals_ascii(std::string_view a, std::string_view b) {
-  if (a.size() != b.size()) return false;
-  for (size_t i = 0; i < a.size(); ++i) {
-    char x = a[i];
-    char y = b[i];
-    if (x >= 'A' && x <= 'Z') x = char(x - 'A' + 'a');
-    if (y >= 'A' && y <= 'Z') y = char(y - 'A' + 'a');
-    if (x != y) return false;
-  }
-  return true;
-}
-
-static std::string trim_copy(std::string s) {
-  auto is_ws = [](char ch) {
-    return ch == ' ' || ch == 9 || ch == 10 || ch == 13;
-  };
-  while (!s.empty() && is_ws(s.front())) s.erase(s.begin());
-  while (!s.empty() && is_ws(s.back())) s.pop_back();
-  return s;
-}
-
-static std::string strip_trailing_semicolon_copy(std::string s) {
-  s = trim_copy(std::move(s));
-  if (!s.empty() && s.back() == ';') {
-    s.pop_back();
-    s = trim_copy(std::move(s));
-  }
-  return s;
-}
-
-enum class ResultTransportMode {
-  Passthrough,
-  Stringify,
-  Opaque,
-};
-
-struct ResultColumnPlan {
-  std::string original_type;
-  std::string transport_type;
-  ResultTransportMode mode = ResultTransportMode::Passthrough;
-};
-
-
-using ResultPlan = std::vector<std::pair<std::string, ResultColumnPlan>>;
-
-struct CachedDescribePlan {
-  ResultPlan plan;
-  std::chrono::steady_clock::time_point expires_at{};
-  uint64_t access_sequence = 0;
-};
-
-struct DescribePlanCache::Impl {
-  std::mutex mu;
-  std::unordered_map<std::string, CachedDescribePlan> plans;
-  uint64_t sequence = 0;
-};
-
-DescribePlanCache::DescribePlanCache() : impl(std::make_unique<Impl>()) {}
-DescribePlanCache::~DescribePlanCache() = default;
-
-static uint64_t fnv1a64(std::string_view value, uint64_t seed) {
-  uint64_t hash = seed;
-  for (const unsigned char ch : value) {
-    hash ^= ch;
-    hash *= UINT64_C(1099511628211);
-  }
-  return hash;
-}
-
-static std::string describe_cache_key(
-    std::string_view host_id,
-    std::string_view database,
-    std::string_view sql
-) {
-  // Keep cache keys small even for multi-hundred-kilobyte editor buffers. Two
-  // independently seeded 64-bit hashes plus the SQL length make accidental
-  // collisions negligible for this process-local, short-lived cache.
-  const uint64_t hash_a = fnv1a64(sql, UINT64_C(14695981039346656037));
-  const uint64_t hash_b = fnv1a64(sql, UINT64_C(7809847782465536322));
-  std::string key;
-  key.reserve(host_id.size() + database.size() + 64);
-  key.append(host_id.data(), host_id.size());
-  key.push_back('\x1f');
-  key.append(database.data(), database.size());
-  key.push_back('\x1f');
-  key += std::to_string(sql.size());
-  key.push_back(':');
-  key += std::to_string(hash_a);
-  key.push_back(':');
-  key += std::to_string(hash_b);
-  return key;
-}
-
-static std::optional<ResultPlan> get_cached_describe_plan(
-    DescribePlanCache* cache,
-    const std::string& key,
-    const QuerySessionOptions& options
-) {
-  if (!cache || options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return std::nullopt;
-  const auto now = std::chrono::steady_clock::now();
-  auto& state = *cache->impl;
-  std::lock_guard<std::mutex> lk(state.mu);
-  auto it = state.plans.find(key);
-  if (it == state.plans.end()) return std::nullopt;
-  if (it->second.expires_at <= now) {
-    state.plans.erase(it);
-    return std::nullopt;
-  }
-  it->second.access_sequence = ++state.sequence;
-  return it->second.plan;
-}
-
-static void put_cached_describe_plan(
-    DescribePlanCache* cache,
-    const std::string& key,
-    ResultPlan plan,
-    const QuerySessionOptions& options
-) {
-  if (!cache || key.empty() || plan.empty() || options.describe_cache_entries == 0 || options.describe_cache_ttl_ms <= 0) return;
-  const auto now = std::chrono::steady_clock::now();
-  auto& state = *cache->impl;
-  std::lock_guard<std::mutex> lk(state.mu);
-
-  for (auto it = state.plans.begin(); it != state.plans.end();) {
-    if (it->second.expires_at <= now) it = state.plans.erase(it);
-    else ++it;
-  }
-
-  CachedDescribePlan entry;
-  entry.plan = std::move(plan);
-  entry.expires_at = now + std::chrono::milliseconds(options.describe_cache_ttl_ms);
-  entry.access_sequence = ++state.sequence;
-  state.plans[key] = std::move(entry);
-
-  while (state.plans.size() > options.describe_cache_entries) {
-    auto victim = state.plans.begin();
-    for (auto it = std::next(state.plans.begin()); it != state.plans.end(); ++it) {
-      if (it->second.access_sequence < victim->second.access_sequence) victim = it;
-    }
-    state.plans.erase(victim);
-  }
-}
-
-static void invalidate_cached_describe_plan(DescribePlanCache* cache, const std::string& key) {
-  if (!cache || key.empty()) return;
-  std::lock_guard<std::mutex> lk(cache->impl->mu);
-  cache->impl->plans.erase(key);
-}
-
-static const char* transport_mode_name(ResultTransportMode mode) {
-  switch (mode) {
-    case ResultTransportMode::Passthrough: return "passthrough";
-    case ResultTransportMode::Stringify: return "stringify";
-    case ResultTransportMode::Opaque: return "opaque";
-  }
-  return "passthrough";
-}
-
-static bool unwrap_outer_type(std::string_view type, std::string_view outer_name, std::string_view* inner_out) {
-  if (type.size() <= outer_name.size() + 2) return false;
-  if (!iequals_ascii(type.substr(0, outer_name.size()), outer_name)) return false;
-  if (type[outer_name.size()] != '(' || type.back() != ')') return false;
-
-  int depth = 0;
-  for (size_t i = outer_name.size(); i < type.size(); ++i) {
-    const char ch = type[i];
-    if (ch == '(') depth++;
-    else if (ch == ')') {
-      depth--;
-      if (depth == 0 && i != type.size() - 1) return false;
-    }
-  }
-  if (depth != 0) return false;
-
-  if (inner_out) {
-    *inner_out = type.substr(outer_name.size() + 1, type.size() - outer_name.size() - 2);
-  }
-  return true;
-}
-
-static bool is_top_level_nullable_type(std::string_view type) {
-  std::string_view inner;
-  return unwrap_outer_type(type, "Nullable", &inner);
-}
-
-static bool has_json_like_type(std::string_view type) {
-  return icontains(type, "JSON") || icontains(type, "Dynamic") || icontains(type, "Object(");
-}
-
-static bool has_256_bit_int_type(std::string_view type) {
-  return icontains(type, "UInt256") || icontains(type, "Int256");
-}
-
-// clickhouse-cpp reads Decimal32/64/128 (a precision up to 38) natively, and the cell encoder writes
-// them at their scale. Only a wider Decimal (Decimal256: DESCRIBE prints Decimal(76, S)) needs text.
-static bool has_wide_decimal_type(std::string_view type) {
-  if (icontains(type, "Decimal256")) return true;
-  for (size_t at = 0; at + 8 < type.size(); ++at) {
-    if (!iequals_ascii(type.substr(at, 8), "Decimal(")) continue;
-    size_t i = at + 8;
-    while (i < type.size() && type[i] == ' ') ++i;
-    int precision = 0;
-    bool digits = false;
-    while (i < type.size() && type[i] >= '0' && type[i] <= '9' && precision < 1000) {
-      precision = precision * 10 + (type[i] - '0');
-      digits = true;
-      ++i;
-    }
-    if (digits && precision > 38) return true;
-  }
-  return false;
-}
-
-// A type with a structure (Array, Map, Tuple, Nested, JSON, Dynamic, Variant) is sent as the JSON text
-// of toJSONString(); a scalar as the text of toString(), which is exact (toJSONString() drops the
-// trailing zeros of a Decimal).
-static bool is_structured_type(std::string_view type) {
-  std::string_view inner = type;
-  for (int guard = 0; guard < 4; ++guard) {
-    std::string_view next;
-    if (unwrap_outer_type(inner, "Nullable", &next) || unwrap_outer_type(inner, "LowCardinality", &next)) {
-      inner = next;
-      continue;
-    }
-    break;
-  }
-  for (const std::string_view outer : {"Array(", "Map(", "Tuple(", "Nested(", "Variant("}) {
-    if (inner.size() >= outer.size() && iequals_ascii(inner.substr(0, outer.size()), outer)) return true;
-  }
-  return has_json_like_type(inner);
-}
-
-static bool is_bool_type_name(std::string_view type) {
-  std::string_view inner;
-  if (unwrap_outer_type(type, "Nullable", &inner)) type = inner;
-  return iequals_ascii(type, "Bool");
-}
-
-static bool has_aggregate_function_type(std::string_view type) {
-  return icontains(type, "AggregateFunction(");
-}
-
-static ResultTransportMode classify_result_transport(std::string_view type) {
-  if (has_aggregate_function_type(type)) return ResultTransportMode::Opaque;
-  if (has_256_bit_int_type(type) || has_json_like_type(type) || has_wide_decimal_type(type)) {
-    return ResultTransportMode::Stringify;
-  }
-  return ResultTransportMode::Passthrough;
-}
-
-
-static bool should_retry_with_describe_after_direct_path_error(std::string_view msg) {
-  return icontains(msg, "unimplemented") ||
-         icontains(msg, "unsupported column type") ||
-         icontains(msg, "unsupported type") ||
-         icontains(msg, "unsupported custom serialization") ||
-         icontains(msg, "unsupported json serialization version") ||
-         icontains(msg, "output_format_native_write_json_as_string") ||
-         icontains(msg, "cannot create column") ||
-         icontains(msg, "cannot read data") ||
-         icontains(msg, "cannot parse type");
-}
-
-static std::string build_projected_expr(const std::string& col_name, const ResultColumnPlan& plan) {
-  const std::string ref = std::string("_q.") + quote_ident(col_name);
-  const std::string alias = quote_ident(col_name);
-  const bool nullable = is_top_level_nullable_type(plan.original_type);
-
-  if (plan.mode == ResultTransportMode::Passthrough) {
-    return ref + " AS " + alias;
-  }
-
-  std::string converted;
-  if (plan.mode == ResultTransportMode::Opaque || !is_structured_type(plan.original_type)) {
-    converted = "toString(" + ref + ")";
-  } else {
-    converted = "toJSONString(" + ref + ")";
-  }
-
-  if (nullable) {
-    converted = "if(isNull(" + ref + "), CAST(NULL AS Nullable(String)), " + converted + ")";
-  }
-  return converted + " AS " + alias;
-}
-
-static std::string build_transport_wrapper_sql(
-  const std::string& original_sql,
-  const std::vector<std::pair<std::string, ResultColumnPlan>>& columns,
-  bool* used_wrapper_out = nullptr
-) {
-  bool needs_wrapper = false;
-  for (const auto& kv : columns) {
-    if (kv.second.mode != ResultTransportMode::Passthrough) {
-      needs_wrapper = true;
-      break;
-    }
-  }
-  if (used_wrapper_out) *used_wrapper_out = needs_wrapper;
-  if (!needs_wrapper || columns.empty()) {
-    return original_sql;
-  }
-
-  std::string out;
-  out.reserve(original_sql.size() + columns.size() * 64 + 32);
-  out += "SELECT\n";
-  for (size_t i = 0; i < columns.size(); ++i) {
-    out += "    ";
-    out += build_projected_expr(columns[i].first, columns[i].second);
-    if (i + 1 < columns.size()) out.push_back(',');
-    out.push_back('\n');
-  }
-  out += "FROM\n(\n";
-  out += strip_trailing_semicolon_copy(original_sql);
-  out += "\n) AS _q";
-  return out;
 }
 
 
@@ -954,13 +520,7 @@ void QuerySession::run_query() {
     result_bytes_emitted_ = 0;
     written_rows_total_ = 0;
     written_bytes_total_ = 0;
-        user_time_us_total_ = 0;
-    system_time_us_total_ = 0;
-    cpu_time_available_ = false;
-    current_mem_bytes_ = -1;
-    peak_mem_bytes_ = -1;
-    memory_usage_by_host_.clear();
-    peak_memory_usage_by_host_.clear();
+        profile_.reset();
     samples_.clear();
     receive_ns_ = 0;
     encode_ns_ = 0;
@@ -1074,9 +634,20 @@ void QuerySession::run_query() {
       return;
     }
 
-    bool meta_sent = false;
     bool result_limit_reached = false;
-    uint64_t rows_returned = 0;
+    ResultEventLimits event_limits;
+    event_limits.row_limit = result_preview_row_limit_ > 0 ? static_cast<size_t>(result_preview_row_limit_) : std::numeric_limits<size_t>::max();
+    event_limits.max_rows_per_event = static_cast<size_t>(std::max(1, options_.result_rows_batch_size));
+    event_limits.max_bytes_per_event = std::max<size_t>(16 * 1024, options_.result_rows_batch_bytes);
+    event_limits.max_result_cell_bytes = options_.max_result_cell_bytes;
+    ResultEventWriter writer(
+        query_id_, event_limits,
+        [this](std::string_view event, std::string_view json) { push_sse_json_event(event, json); },
+        [this](size_t rows, size_t bytes) {
+          std::lock_guard<std::mutex> lk(mu_);
+          result_rows_emitted_ += rows;
+          result_bytes_emitted_ += bytes;
+        });
     const std::string plan_cache_key = describe_cache_key(host_id_, database_, sql_);
     bool attempt_used_cached_plan = false;
 
@@ -1097,7 +668,7 @@ void QuerySession::run_query() {
 
       if (use_describe && is_wrappable_select) {
         if (allow_cached_plan) {
-          if (auto cached = get_cached_describe_plan(describe_cache_.get(), plan_cache_key, options_)) {
+          if (auto cached = get_cached_describe_plan(describe_cache_.get(), plan_cache_key, options_.describe_cache_entries, options_.describe_cache_ttl_ms)) {
             result_plan = std::move(*cached);
             attempt_used_cached_plan = true;
           }
@@ -1106,37 +677,7 @@ void QuerySession::run_query() {
         if (result_plan.empty()) {
           const std::string ds = strip_trailing_semicolon_copy(sql_);
           clickhouse::Query dq("DESCRIBE (" + ds + ")");
-          dq.OnData([&](const clickhouse::Block& b) {
-            if (b.GetRowCount() == 0 || b.GetColumnCount() < 2) return;
-
-            int idx_name = -1;
-            int idx_type = -1;
-            for (size_t i = 0; i < b.GetColumnCount(); ++i) {
-              const auto& cn = b.GetColumnName(i);
-              if (cn == "name") idx_name = static_cast<int>(i);
-              else if (cn == "type") idx_type = static_cast<int>(i);
-            }
-            if (idx_name < 0) idx_name = 0;
-            if (idx_type < 0) idx_type = 1;
-
-            auto c_name = b[idx_name]->As<clickhouse::ColumnString>();
-            auto c_type = b[idx_type]->As<clickhouse::ColumnString>();
-            if (!c_name || !c_type) return;
-
-            for (size_t r = 0; r < b.GetRowCount(); ++r) {
-              const std::string_view n = c_name->At(r);
-              const std::string normalized_type = normalize_type_string(std::string(c_type->At(r)));
-              ResultColumnPlan plan;
-              plan.original_type = normalized_type;
-              plan.mode = classify_result_transport(normalized_type);
-              plan.transport_type = (plan.mode == ResultTransportMode::Passthrough)
-                ? normalized_type
-                : (is_top_level_nullable_type(normalized_type)
-                    ? std::string("Nullable(String)")
-                    : std::string("String"));
-              result_plan.emplace_back(std::string(n), std::move(plan));
-            }
-          });
+          dq.OnData([&](const clickhouse::Block& b) { add_described_columns(b, &result_plan); });
           ch_execute(*client_query_, dq);
           cache_new_plan_after_success = !result_plan.empty();
         }
@@ -1147,6 +688,8 @@ void QuerySession::run_query() {
       if (use_describe && is_wrappable_select && !result_plan.empty()) {
         effective_sql = build_transport_wrapper_sql(sql_, result_plan, &used_transport_wrapper);
       }
+
+      writer.begin_attempt(&result_plan, used_transport_wrapper, use_describe, attempt_used_cached_plan);
 
       const std::string native_query_id = begin_native_query_attempt();
       {
@@ -1188,96 +731,11 @@ void QuerySession::run_query() {
       // not inferred or exposed.
       q.OnProfileEvents([self = shared_from_this()](const clickhouse::Block& block) -> bool {
         if (self->cancel_requested_.load(std::memory_order_relaxed)) return false;
-        if (block.GetRowCount() == 0) return true;
-
-        auto column_index = [&](std::string_view expected) -> int {
-          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-            if (block.GetColumnName(i) == expected) return static_cast<int>(i);
-          }
-          return -1;
-        };
-
-        const int host_index = column_index("host_name");
-        const int thread_index = column_index("thread_id");
-        const int type_index = column_index("type");
-        const int name_index = column_index("name");
-        const int value_index = column_index("value");
-        if (host_index < 0 || thread_index < 0 || type_index < 0 ||
-            name_index < 0 || value_index < 0) {
-          return true;
-        }
-
-        const auto hosts = block[static_cast<size_t>(host_index)]->As<clickhouse::ColumnString>();
-        const auto threads = block[static_cast<size_t>(thread_index)]->As<clickhouse::ColumnUInt64>();
-        const auto types = block[static_cast<size_t>(type_index)]->As<clickhouse::ColumnEnum8>();
-        const auto names = block[static_cast<size_t>(name_index)]->As<clickhouse::ColumnString>();
-        const auto values_i64 = block[static_cast<size_t>(value_index)]->As<clickhouse::ColumnInt64>();
-        const auto values_u64 = block[static_cast<size_t>(value_index)]->As<clickhouse::ColumnUInt64>();
-        if (!hosts || !threads || !types || !names || (!values_i64 && !values_u64)) return true;
-
-        auto saturating_add = [](int64_t current, int64_t increment) {
-          if (increment <= 0) return current;
-          if (current > std::numeric_limits<int64_t>::max() - increment) {
-            return std::numeric_limits<int64_t>::max();
-          }
-          return current + increment;
-        };
-        auto sum_gauges = [](const std::unordered_map<std::string, int64_t>& gauges) {
-          __int128 total = 0;
-          for (const auto& item : gauges) total += std::max<int64_t>(0, item.second);
-          if (total > std::numeric_limits<int64_t>::max()) {
-            return std::numeric_limits<int64_t>::max();
-          }
-          return static_cast<int64_t>(total);
-        };
-
         const auto now = std::chrono::steady_clock::now();
         std::lock_guard<std::mutex> lock(self->mu_);
-        for (size_t row = 0; row < block.GetRowCount(); ++row) {
-          if (threads->At(row) != 0) continue;
-
-          const std::string_view event_type = types->NameAt(row);
-          const std::string_view event_name = names->At(row);
-          int64_t value = 0;
-          if (values_i64) {
-            value = values_i64->At(row);
-          } else {
-            const uint64_t unsigned_value = values_u64->At(row);
-            value = unsigned_value > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())
-              ? std::numeric_limits<int64_t>::max()
-              : static_cast<int64_t>(unsigned_value);
-          }
-
-          if (event_type == "increment") {
-            if (event_name == "UserTimeMicroseconds") {
-              self->cpu_time_available_ = true;
-              self->user_time_us_total_ = saturating_add(self->user_time_us_total_, value);
-            } else if (event_name == "SystemTimeMicroseconds") {
-              self->cpu_time_available_ = true;
-              self->system_time_us_total_ = saturating_add(self->system_time_us_total_, value);
-            }
-            continue;
-          }
-
-          if (event_type != "gauge") continue;
-          const std::string_view host_view = hosts->At(row);
-          const std::string host(host_view.data(), host_view.size());
-          const int64_t gauge_value = std::max<int64_t>(0, value);
-          if (event_name == "MemoryTrackerUsage") {
-            self->memory_usage_by_host_[host] = gauge_value;
-            self->current_mem_bytes_ = sum_gauges(self->memory_usage_by_host_);
-          } else if (event_name == "MemoryTrackerPeakUsage") {
-            self->peak_memory_usage_by_host_[host] = gauge_value;
-            self->peak_mem_bytes_ = sum_gauges(self->peak_memory_usage_by_host_);
-          }
-        }
-
-        self->maybe_record_sample_locked(now);
+        if (self->profile_.apply(block)) self->maybe_record_sample_locked(now);
         return true;
       });
-
-      std::vector<const ResultColumnPlan*> resolved_column_plans;
-      size_t resolved_column_count = 0;
 
       // The time of the callbacks, to split the time of Select() into what the
       // native client spent (receive) and what ChDash spent (encode).
@@ -1297,163 +755,7 @@ void QuerySession::run_query() {
           throw std::runtime_error("canceled");
         }
 
-        if (resolved_column_count != block.GetColumnCount()) {
-          resolved_column_plans.assign(block.GetColumnCount(), nullptr);
-          if (result_plan.size() == block.GetColumnCount()) {
-            for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-              resolved_column_plans[i] = &result_plan[i].second;
-            }
-          } else if (!result_plan.empty()) {
-            // Defensive fallback for servers that reorder DESCRIBE metadata.
-            for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-              const auto& block_name = block.GetColumnName(i);
-              for (const auto& item : result_plan) {
-                if (item.first == block_name) {
-                  resolved_column_plans[i] = &item.second;
-                  break;
-                }
-              }
-            }
-          }
-          resolved_column_count = block.GetColumnCount();
-        }
-        const auto& column_plans = resolved_column_plans;
-
-        if (!meta_sent && block.GetColumnCount() > 0) {
-          rapidjson::StringBuffer sb(nullptr, 1024);
-          rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-          w.StartObject();
-          w.Key("query_id"); write_json_text(w, query_id_);
-          w.Key("columns");
-          w.StartArray();
-          for (size_t i = 0; i < block.GetColumnCount(); ++i) write_json_text(w, block.GetColumnName(i));
-          w.EndArray();
-          w.Key("types");
-          w.StartArray();
-          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-            if (column_plans[i]) {
-              const auto& tn = column_plans[i]->transport_type;
-              write_json_text(w, tn);
-            } else {
-              const auto& tn = block[i]->Type()->GetName();
-              write_json_text(w, tn);
-            }
-          }
-          w.EndArray();
-          w.Key("original_types");
-          w.StartArray();
-          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-            if (column_plans[i]) {
-              const auto& tn = column_plans[i]->original_type;
-              write_json_text(w, tn);
-            } else {
-              const auto& tn = block[i]->Type()->GetName();
-              write_json_text(w, tn);
-            }
-          }
-          w.EndArray();
-          w.Key("transport_modes");
-          w.StartArray();
-          for (size_t i = 0; i < block.GetColumnCount(); ++i) {
-            w.String(column_plans[i] ? transport_mode_name(column_plans[i]->mode) : "passthrough");
-          }
-          w.EndArray();
-          w.Key("used_transport_wrapper"); w.Bool(used_transport_wrapper);
-          w.Key("describe_mode"); w.String(use_describe ? "described" : "direct");
-          w.Key("describe_cache_hit"); w.Bool(attempt_used_cached_plan);
-          w.EndObject();
-          push_sse_json_event("result_meta", std::string_view(sb.GetString(), sb.GetSize()));
-          meta_sent = true;
-        }
-
-        if (block.GetRowCount() == 0) return;
-
-        const size_t row_limit = result_preview_row_limit_ > 0
-          ? static_cast<size_t>(result_preview_row_limit_)
-          : std::numeric_limits<size_t>::max();
-        const size_t max_rows_per_event = static_cast<size_t>(std::max(1, options_.result_rows_batch_size));
-        const size_t max_bytes_per_event = std::max<size_t>(16 * 1024, options_.result_rows_batch_bytes);
-        size_t row = 0;
-
-        // Resolve column handles once per block: Block::operator[] returns a
-        // shared_ptr by value, which would otherwise cost atomic refcount
-        // traffic for every single cell.
-        std::vector<clickhouse::ColumnRef> columns;
-        columns.reserve(block.GetColumnCount());
-        for (size_t c = 0; c < block.GetColumnCount(); ++c) columns.push_back(block[c]);
-        // One encoder per column of the block: the nested structure of a column
-        // (Nullable, Array, Tuple, Map) is resolved once instead of per cell.
-        std::vector<detail::CellEncoder> encoders;
-        encoders.reserve(columns.size());
-        for (const auto& column : columns) encoders.emplace_back(column);
-        // The declared type of a DESCRIBE plan: an opaque aggregate state, or a Bool that clickhouse-cpp
-        // reads as UInt8 (write_cell_json_declared() writes it true or false, as ClickHouse prints it).
-        std::vector<char> use_declared(columns.size(), 0);
-        for (size_t c = 0; c < columns.size(); ++c) {
-          const ResultColumnPlan* plan = column_plans[c];
-          use_declared[c] = plan && (plan->mode == ResultTransportMode::Opaque || is_bool_type_name(plan->original_type)) ? 1 : 0;
-        }
-
-        // One event buffer per block, cleared (capacity kept) between events,
-        // so a multi-event block grows it once instead of once per event.
-        rapidjson::StringBuffer sb(nullptr, std::min<size_t>(max_bytes_per_event, 64 * 1024));
-        while (row < block.GetRowCount() && rows_returned < row_limit) {
-          sb.Clear();
-          rapidjson::Writer<rapidjson::StringBuffer> w(sb);
-          w.StartObject();
-          w.Key("query_id"); write_json_text(w, query_id_);
-          w.Key("rows");
-          w.StartArray();
-
-          size_t rows_in_event = 0;
-          while (row < block.GetRowCount() &&
-                 rows_in_event < max_rows_per_event &&
-                 rows_returned < row_limit) {
-            w.StartArray();
-            for (size_t c = 0; c < columns.size(); ++c) {
-              // Compatibility projections are already String columns: the text of
-              // toString() for a scalar (Int256, Decimal256), the JSON text of
-              // toJSONString() for a structure (JSON, Dynamic, Array(Int256), ...).
-              // Opaque aggregate states additionally get a valid-UTF8/hex safety guard.
-              //
-              // Cells are serialized straight into the event buffer: a
-              // per-cell StringBuffer+Writer costs several heap allocations and
-              // an extra copy per cell. The cell size is the buffer delta (it
-              // includes at most one separator byte).
-              const size_t cell_start = sb.GetSize();
-              if (use_declared[c]) {
-                write_cell_json_declared(w, columns[c], row, column_plans[c]->original_type);
-              } else {
-                encoders[c].write(w, row);
-              }
-              const size_t cell_bytes = sb.GetSize() - cell_start;
-              if (cell_bytes > options_.max_result_cell_bytes) {
-                throw std::runtime_error(
-                    "result_cell_too_large: Result cell exceeds query.max_result_cell_bytes (" +
-                    std::to_string(options_.max_result_cell_bytes) + " bytes).");
-              }
-            }
-            w.EndArray();
-            ++row;
-            ++rows_in_event;
-            ++rows_returned;
-
-            // Batch-size target: hard safety is enforced separately by
-            // max_result_cell_bytes and max_result_event_bytes.
-            if (rows_in_event > 0 && sb.GetSize() >= max_bytes_per_event) break;
-          }
-
-          w.EndArray();
-          w.EndObject();
-          push_sse_json_event("result_rows", std::string_view(sb.GetString(), sb.GetSize()));
-
-          {
-            std::lock_guard<std::mutex> lk(mu_);
-            result_rows_emitted_ += rows_in_event;
-            result_bytes_emitted_ += sb.GetSize();
-          }
-        }
-
+        writer.write(block);
       };
 
       // The first block with rows is encoded in the receiving thread: most
@@ -1532,7 +834,7 @@ void QuerySession::run_query() {
         encode_ns_ = std::max<int64_t>(0, encode_busy_ns - backpressure_ns_);
       }
       if (cache_new_plan_after_success) {
-        put_cached_describe_plan(describe_cache_.get(), plan_cache_key, result_plan, options_);
+        put_cached_describe_plan(describe_cache_.get(), plan_cache_key, result_plan, options_.describe_cache_entries, options_.describe_cache_ttl_ms);
       }
     };
 
@@ -1553,7 +855,7 @@ void QuerySession::run_query() {
       // for JSON serialization compatibility). Retrying is still safe as long as
       // no result row has reached the client: a second result_meta simply replaces
       // the provisional schema before any rows are appended.
-      const bool can_retry_without_emitted_rows = rows_returned == 0 &&
+      const bool can_retry_without_emitted_rows = writer.rows_returned() == 0 &&
           msg != "canceled" &&
           !cancel_requested_.load(std::memory_order_relaxed);
 
@@ -1569,8 +871,7 @@ void QuerySession::run_query() {
         acquire_query_connection();
         apply_database();
         reset_stats_for_compat_retry();
-        meta_sent = false;
-        rows_returned = 0;
+        writer.restart();
         execute_select_attempt(true, false);
       } else if (allow_describe_retry && can_retry_without_emitted_rows &&
                  should_retry_with_describe_after_direct_path_error(msg)) {
@@ -1583,8 +884,7 @@ void QuerySession::run_query() {
         acquire_query_connection();
         apply_database();
         reset_stats_for_compat_retry();
-        meta_sent = false;
-        rows_returned = 0;
+        writer.restart();
         execute_select_attempt(true, true);
       } else {
         throw;

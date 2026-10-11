@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import config_keys
+from session_sources import read_session, read_session_header
 
 
 ROOT = Path(
@@ -40,8 +41,8 @@ def test_reused_clients_are_validated_only_after_a_configurable_idle_period() ->
 
 
 def test_compatibility_retries_use_distinct_native_query_ids() -> None:
-    header = read("src/query_session.hpp")
-    source = read("src/query_session.cpp")
+    header = read_session_header()
+    source = read_session()
 
     assert "std::vector<std::string> native_query_ids_;" in header
     assert 'native_id += "-attempt-";' in source
@@ -54,8 +55,8 @@ def test_compatibility_retries_use_distinct_native_query_ids() -> None:
 
 
 def test_cancel_targets_every_native_attempt_owned_by_the_session() -> None:
-    header = read("src/query_session.hpp")
-    session_source = read("src/query_session.cpp")
+    header = read_session_header()
+    session_source = read_session()
     api_source = read("src/api_query.cpp")
 
     assert "std::vector<std::string> native_query_ids() const;" in header
@@ -126,9 +127,9 @@ def test_native_clients_enable_kernel_keepalive_without_ping_before_every_query(
     assert "SetPingBeforeQuery" not in source
 
 def test_json_native_serialization_mismatch_is_retryable_in_auto_mode() -> None:
-    source = read("src/query_session.cpp")
+    source = read_session()
     assert 'icontains(msg, "unsupported json serialization version")' in source
     assert 'icontains(msg, "output_format_native_write_json_as_string")' in source
     assert "should_retry_with_describe_after_direct_path_error(msg)" in source
-    assert "const bool can_retry_without_emitted_rows = rows_returned == 0" in source
-    assert "meta_sent = false;" in source
+    assert "const bool can_retry_without_emitted_rows = writer.rows_returned() == 0" in source
+    assert "writer.restart();" in source

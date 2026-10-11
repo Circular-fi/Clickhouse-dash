@@ -1,4 +1,5 @@
-// Unit tests of the query library store (src/query_library.cpp).
+// Unit tests of the query library: the store (src/query_library.cpp), and below it the units that it calls without a file: the reading of a
+// request (query_library_request.cpp), the rules of the tree (query_library_rules.cpp) and the import (query_library_import.cpp).
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF
 //          -DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON
@@ -7,6 +8,10 @@
 // The Python harness runs it when QUERY_LIBRARY_TEST_BINARY points at it.
 
 #include "query_library.hpp"
+#include "query_library_import.hpp"
+#include "query_library_json.hpp"
+#include "query_library_request.hpp"
+#include "query_library_rules.hpp"
 
 #include <rapidjson/document.h>
 
@@ -670,6 +675,160 @@ void test_migration(const std::string& dir) {
   CHECK(captured.str().find("SELECT") == std::string::npos);  // SQL is never logged
 }
 
+// ---- the units below the store: no file ----
+
+chdash::QueryLibraryState small_state() {
+  chdash::QueryLibraryState state;
+  const auto folder = [&](const char* id, const char* host, const char* parent, const char* name) {
+    chdash::QueryLibraryFolder f;
+    f.id = id;
+    f.host_id = host;
+    if (parent) f.parent_id = std::string(parent);
+    f.name = name;
+    state.folders.push_back(f);
+  };
+  folder("f1", "local", nullptr, "Ops");
+  folder("f2", "local", "f1", "Daily");
+  folder("f3", "local", "f2", "Deep");
+  folder("f4", "other", nullptr, "ops");
+  chdash::QueryLibraryQuery q;
+  q.id = "q1";
+  q.host_id = "local";
+  q.folder_id = std::string("f2");
+  q.name = "Top";
+  q.sql = "SELECT 1";
+  state.queries.push_back(q);
+  return state;
+}
+
+template <typename Fn>
+std::string refused_with(Fn&& fn) {
+  try {
+    fn();
+  } catch (const chdash::qlib::LibraryError& e) {
+    return e.code + "/" + e.field + "/" + e.reason;
+  }
+  return "accepted";
+}
+
+rapidjson::Document parsed(const char* text) {
+  rapidjson::Document d;
+  d.Parse(text);
+  return d;
+}
+
+void test_the_rules_of_the_tree() {
+  using namespace chdash::qlib;
+  const auto state = small_state();
+  const std::string f1_id = "f1";
+  CHECK(find_folder(state, "f2") != nullptr && find_folder(state, "nope") == nullptr);
+  CHECK(folder_depth(state, std::nullopt) == 0);
+  CHECK(folder_depth(state, std::string("f3")) == 3);
+  CHECK(folder_depth(state, std::string("f4")) == 1);
+  const auto subtree = folder_subtree(state, "f1");
+  CHECK(subtree.size() == 3 && subtree[0].second == 1 && subtree[2].first == "f3" && subtree[2].second == 3);
+  // A name is free per host and folder, and compared without the case of ASCII letters.
+  CHECK(folder_name_taken(state, "local", std::nullopt, "OPS", nullptr));
+  CHECK(!folder_name_taken(state, "local", std::nullopt, "OPS", &f1_id));
+  CHECK(folder_name_taken(state, "other", std::nullopt, "OPS", nullptr));
+  CHECK(!folder_name_taken(state, "local", std::string("f1"), "Ops", nullptr));
+  CHECK(query_name_taken(state, "local", std::string("f2"), "top", nullptr));
+  CHECK(!query_name_taken(state, "other", std::string("f2"), "top", nullptr));
+  CHECK(unique_query_name(state, "local", std::string("f2"), "Top") == "Top (2)");
+  CHECK(unique_query_name(state, "local", std::string("f2"), "Free") == "Free");
+  // The depth that a move or a create would reach.
+  CHECK(refused_with([&] { ensure_depth(state, std::string("f3"), 5, "parent_id"); }) == "accepted");
+  CHECK(refused_with([&] { ensure_depth(state, std::string("f3"), 6, "parent_id"); }) == "validation/parent_id/depth");
+  // A folder reference names a folder of the same host.
+  const auto doc = parsed("{\"parent_id\":\"f4\",\"gone\":\"zz\",\"top\":null,\"ok\":\"f1\"}");
+  CHECK(refused_with([&] { existing_folder_ref(state, member(doc, "parent_id"), "parent_id", "local"); }) == "validation/parent_id/host_mismatch");
+  CHECK(refused_with([&] { existing_folder_ref(state, member(doc, "gone"), "gone", "local"); }) == "validation/gone/not_found");
+  CHECK(!existing_folder_ref(state, member(doc, "top"), "top", "local").has_value());
+  CHECK(existing_folder_ref(state, member(doc, "ok"), "ok", "local") == std::string("f1"));
+  // An import compares name + SQL, ignoring the suffix that an earlier import added.
+  CHECK(import_key("Top (2)", "S") == import_key("Top", "S"));
+  CHECK(import_key("Top (x)", "S") != import_key("Top", "S"));
+  CHECK(import_key("Top", "S") != import_key("Top", "T"));
+}
+
+void test_the_fields_of_a_request() {
+  using namespace chdash::qlib;
+  const auto doc = parsed("{\"name\":\"  Daily  \",\"empty\":\"  \",\"ctl\":\"a\\u0001\",\"num\":5,\"sql\":\"SELECT 1\","
+                          "\"neg\":-1,\"float\":2.6,\"big\":1e300,\"d\":\"x\\u0000y\"}");
+  CHECK(read_name(member(doc, "name"), "name") == "Daily");
+  CHECK(refused_with([&] { read_name(nullptr, "name"); }) == "validation/name/required");
+  CHECK(refused_with([&] { read_name(member(doc, "empty"), "empty"); }) == "validation/empty/required");
+  CHECK(refused_with([&] { read_name(member(doc, "ctl"), "ctl"); }) == "validation/ctl/invalid");
+  CHECK(refused_with([&] { read_name(member(doc, "num"), "num"); }) == "validation/num/type");
+  CHECK(refused_with([&] { read_sql(member(doc, "sql"), "sql", 3); }) == "too_large/sql/");
+  CHECK(read_sql(member(doc, "sql"), "sql", 100) == "SELECT 1");
+  CHECK(refused_with([&] { read_description(member(doc, "d"), "d"); }) == "validation/d/invalid");
+  CHECK(read_description(nullptr, "d").empty());
+  CHECK(read_opt_int(member(doc, "num"), "num") == 5);
+  CHECK(read_opt_int(member(doc, "float"), "float") == 3);
+  CHECK(!read_opt_int(nullptr, "none").has_value());
+  CHECK(refused_with([&] { read_opt_int(member(doc, "neg"), "neg"); }) == "validation/neg/range");
+  CHECK(refused_with([&] { read_opt_int(member(doc, "big"), "big"); }) == "validation/big/range");
+  CHECK(refused_with([&] { parse_body("[1]"); }) == "validation/body/invalid_json");
+  CHECK(refused_with([&] { parse_body("{"); }) == "validation/body/invalid_json");
+  CHECK(parse_if_match_revision("W/\"7\"") == 7);
+  CHECK(!parse_if_match_revision("*").has_value());
+  CHECK(refused_with([&] { parse_if_match_revision("seven"); }) == "validation/If-Match/invalid");
+  CHECK(trim_ascii(" \t x \n") == "x");
+  CHECK(fold_ascii("AbC-\xC3\x89") == "abc-\xC3\x89");
+  CHECK(truncate_utf8("a\xC3\xA9" "b", 2) == "a");
+  // The error answer: the one envelope, with what a client reads to fix the call.
+  LibraryError e = validation("name", "duplicate", "taken");
+  e.revision = 9;
+  const auto answer = render_error(e);
+  CHECK(answer.status == 400 && answer.body.find("\"field\":\"name\"") != std::string::npos && answer.body.find("\"revision\":9") != std::string::npos);
+}
+
+void test_the_import_into_a_state() {
+  using namespace chdash::qlib;
+  auto state = small_state();
+  int next = 0;
+  const NewId new_id = [&](char prefix, const chdash::QueryLibraryState&) { return std::string(1, prefix) + "_n" + std::to_string(++next); };
+  // The payload: a folder under one of its own (by import id), one that exists (merged), a query twice, one of them known.
+  const auto doc = parsed(
+      "{\"folders\":[{\"id\":\"a\",\"name\":\"Mine\"},{\"id\":\"b\",\"parent_id\":\"a\",\"name\":\"Inner\"},{\"name\":\"ops\"}],"
+      "\"queries\":[{\"name\":\"Q\",\"sql\":\"SELECT 2\",\"folder_id\":\"b\"},{\"name\":\"Q\",\"sql\":\"SELECT 2\",\"folder_id\":\"b\"},"
+      "{\"name\":\"Top\",\"sql\":\"SELECT 1\",\"folder_id\":\"f2\"},{\"name\":\"Top\",\"sql\":\"SELECT 9\",\"folder_id\":\"f2\"}]}");
+  const auto out = import_into(state, doc, "local", 1000, new_id, 1234);
+  CHECK(out.imported_folders == 2 && out.merged_folders == 1);
+  CHECK(out.imported_queries == 2 && out.skipped_queries == 2);
+  CHECK(out.changed());
+  CHECK(out.folder_ids.size() == 2 && out.folder_ids[0].first == "a" && out.folder_ids[0].second == "f_n1" && out.folder_ids[1].second == "f_n2");
+  // The merged folder has no id in the payload, so it is not listed. The clash of "Top" is renamed.
+  CHECK(state.folders.size() == 6 && state.folders[5].parent_id == std::string("f_n1") && state.folders[5].created_at_ms == 1234);
+  bool renamed = false;
+  for (const auto& q : state.queries) renamed |= q.name == "Top (2)" && q.sql == "SELECT 9" && q.id == "q_n4";
+  CHECK(renamed);
+  // The same payload again is a no-op.
+  auto again = state;
+  const auto repeat = import_into(again, doc, "local", 1000, new_id, 1234);
+  CHECK(!repeat.changed() && repeat.skipped_queries == 4 && repeat.merged_folders == 3 && again.queries.size() == state.queries.size());
+  // A copy refuses a folder that its parent already holds, and writes nothing that the caller keeps.
+  auto copied = small_state();
+  const auto clash = parsed("{\"copy\":true,\"folders\":[{\"name\":\"ops\"}]}");
+  CHECK(refused_with([&] { import_into(copied, clash, "local", 1000, new_id, 1); }) == "validation/folders[0].name/duplicate");
+  // Refusals of the payload.
+  const auto run = [&](const char* text) {
+    auto s = small_state();
+    const auto d = parsed(text);
+    return refused_with([&] { import_into(s, d, "local", 12, new_id, 1); });
+  };
+  CHECK(run("{\"folders\":3}") == "validation/folders/type");
+  CHECK(run("{\"queries\":{}}") == "validation/queries/type");
+  CHECK(run("{\"copy\":\"yes\"}") == "validation/copy/type");
+  CHECK(run("{\"folders\":[{\"id\":\"a\",\"parent_id\":\"b\",\"name\":\"A\"},{\"id\":\"b\",\"parent_id\":\"a\",\"name\":\"B\"}]}") == "validation/folders/cycle");
+  CHECK(run("{\"folders\":[{\"id\":\"a\",\"name\":\"A\"},{\"id\":\"a\",\"name\":\"B\"}]}") == "validation/folders[1].id/duplicate");
+  CHECK(run("{\"queries\":[{\"name\":\"Q\",\"sql\":\"SELECT 1000000000000\"}]}") == "too_large/queries[0].sql/");
+  CHECK(run("{\"queries\":[3]}") == "validation/queries[0]/type");
+  // Nothing to import changes nothing.
+  CHECK(run("{}") == "accepted");
+}
+
 } // namespace
 
 int main() {
@@ -683,6 +842,9 @@ int main() {
   test_file_limit(dir);
   test_per_host(dir);
   test_migration(dir);
+  test_the_rules_of_the_tree();
+  test_the_fields_of_a_request();
+  test_the_import_into_a_state();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

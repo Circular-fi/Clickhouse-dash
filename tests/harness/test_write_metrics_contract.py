@@ -1,4 +1,5 @@
 from pathlib import Path
+from session_sources import read_session, read_session_header
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -6,8 +7,8 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 def test_result_payload_and_clickhouse_writes_are_distinct() -> None:
-    header = read("src/query_session.hpp")
-    source = read("src/query_session.cpp")
+    header = read_session_header()
+    source = read_session()
     stream = read("src/api_query_stream.cpp")
 
     assert "result_rows_emitted" in header
