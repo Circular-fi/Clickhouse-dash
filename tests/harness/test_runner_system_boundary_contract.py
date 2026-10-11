@@ -1,6 +1,7 @@
 from pathlib import Path
 import config_keys
 import modules
+from session_sources import read_session, read_session_header
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,7 +49,7 @@ def test_query_registry_is_host_scoped_and_has_no_user_identity() -> None:
     header = read("src/query_registry.hpp")
     registry = read("src/query_registry.cpp")
     query_api = read("src/api_query.cpp")
-    session = read("src/query_session.cpp")
+    session = read_session()
 
     assert "std::string host_id;" in header
     assert "subject" not in header
@@ -64,7 +65,7 @@ def test_query_registry_is_host_scoped_and_has_no_user_identity() -> None:
 
 def test_user_sql_execution_is_runner_only_and_system_is_technical_only() -> None:
     run = read("src/api_query.cpp")
-    session = read("src/query_session.cpp")
+    session = read_session()
     deep_api = read("src/api_analysis.cpp")
     deep = read("src/deep_analysis.cpp")
     export = read("src/api_export.cpp")
@@ -118,8 +119,8 @@ def test_allowed_object_set_is_discovered_with_runner_not_system_grants() -> Non
 
 
 def test_interactive_result_cell_and_event_limits_are_32_mib_by_default() -> None:
-    header = read("src/query_session.hpp")
-    session = read("src/query_session.cpp")
+    header = read_session_header()
+    session = read_session()
     config = read("src/config.cpp")
     example = read("config.example.hcl")
 
@@ -127,7 +128,7 @@ def test_interactive_result_cell_and_event_limits_are_32_mib_by_default() -> Non
     assert "max_result_event_bytes = 32 * 1024 * 1024" in header
     assert "result_cell_too_large" in session
     assert "result_event_too_large" in session
-    assert "cell_bytes > options_.max_result_cell_bytes" in session
+    assert "cell_bytes > limits_.max_result_cell_bytes" in session
     assert "chunk.size() > options_.max_result_event_bytes" in session
     assert config_keys.row("query", "max_result_cell_bytes")["default"] == str(32 * 1024 * 1024)
     assert config_keys.row("query", "max_result_event_bytes")["default"] == str(32 * 1024 * 1024)

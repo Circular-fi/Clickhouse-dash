@@ -1,5 +1,7 @@
 #pragma once
 
+#include "query_result_plan.hpp"
+#include "query_run_profile.hpp"
 #include "worker_group.hpp"
 
 #include <clickhouse/client.h>
@@ -36,18 +38,6 @@ enum class QueryDescribeMode {
   Auto,    // direct path: run immediately, retry once with DESCRIBE+wrapper before streaming any rows
   Always,  // old behavior: DESCRIBE before every SELECT/WITH
   Never,   // lowest overhead, but complex ClickHouse types may be degraded or fail
-};
-
-// The recent DESCRIBE plans of complex SELECTs, shared by the sessions that one server runs (Server owns it). The plan type is
-// private to query_session.cpp.
-class DescribePlanCache {
- public:
-  DescribePlanCache();
-  ~DescribePlanCache();
-  DescribePlanCache(const DescribePlanCache&) = delete;
-  DescribePlanCache& operator=(const DescribePlanCache&) = delete;
-  struct Impl;
-  std::unique_ptr<Impl> impl;
 };
 
 struct QuerySessionOptions {
@@ -263,14 +253,8 @@ private:
   uint64_t written_rows_total_ = 0;
   uint64_t written_bytes_total_ = 0;
 
-  int64_t user_time_us_total_ = 0;
-  int64_t system_time_us_total_ = 0;
-  bool cpu_time_available_ = false;
-
-  int64_t current_mem_bytes_ = -1;
-  int64_t peak_mem_bytes_ = -1;
-  std::unordered_map<std::string, int64_t> memory_usage_by_host_;
-  std::unordered_map<std::string, int64_t> peak_memory_usage_by_host_;
+  // The CPU time and the memory that the ProfileEvents packets report (query_run_profile.hpp). Guarded by mu_.
+  RunProfile profile_;
 
   // High-frequency samples embedded in the legacy-compatible tick payload.
   std::deque<SamplePoint> samples_;

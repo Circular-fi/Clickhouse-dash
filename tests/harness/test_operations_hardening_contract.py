@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from trace_sources import read_traces, read_unit
+from session_sources import read_session
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -97,7 +98,7 @@ def test_the_stop_drains_streams_exports_and_query_threads():
     dtor = server.split("Server::~Server() {", 1)[1].split("\n}\n", 1)[0]
     assert "query_workers_->close_and_wait(" in dtor and "std::_Exit(1);" in dtor
     assert "session->set_worker_group(query_workers_);" in read("src/api_query.cpp")
-    session = read("src/query_session.cpp")
+    session = read_session()
     start = session.split("void QuerySession::start() {", 1)[1].split("\n}\n", 1)[0]
     assert "self.reset();\n      if (group) group->leave();" in start
     stream = read("src/api_query_stream.cpp")

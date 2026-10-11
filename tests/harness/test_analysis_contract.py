@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+from session_sources import read_session, read_session_header
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,7 +10,7 @@ def read(path: str) -> str:
 
 def test_run_with_profiling_is_explicit_and_query_scoped() -> None:
     api = read("src/api_query.cpp")
-    session = read("src/query_session.cpp")
+    session = read_session()
     assert 'QueryRunMode run_mode = QueryRunMode::Normal;' in api
     assert 'mode == "profiling"' in api
     assert 'authenticate_request' not in api
@@ -27,7 +28,7 @@ def test_run_with_profiling_is_explicit_and_query_scoped() -> None:
 
 def test_normal_run_does_not_implicitly_invoke_analysis() -> None:
     api = read("src/api_query.cpp")
-    session = read("src/query_session.cpp")
+    session = read_session()
     assert 'QueryRunMode::Normal' in api
     config = read("src/config.cpp")
     assert 'collect_query_analysis' not in api
@@ -124,8 +125,8 @@ def test_analysis_exposes_session_elapsed_separately_from_clickhouse_duration() 
     registry_h = read("src/query_registry.hpp")
     registry_cpp = read("src/query_registry.cpp")
     query_api = read("src/api_query.cpp")
-    session_h = read("src/query_session.hpp")
-    session_cpp = read("src/query_session.cpp")
+    session_h = read_session_header()
+    session_cpp = read_session()
     analysis_api = read("src/api_analysis.cpp")
     analysis_ui = read("src/static/app_analysis.js")
 
@@ -182,7 +183,7 @@ def test_profiling_trace_uses_real_clickhouse_otel_wall_clock_spans() -> None:
     analysis = read("src/static/app_analysis.js")
     css = css_sources.text()
     collector = read("src/query_analysis.cpp")
-    session = read("src/query_session.cpp")
+    session = read_session()
 
     assert 'set_bool("opentelemetry_trace_processors")' in session
     assert 'set_bool("opentelemetry_start_trace_probability")' in session

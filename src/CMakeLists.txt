@@ -100,9 +100,9 @@ if (CHDASH_BUILD_MCP_TESTS)
 endif()
 
 if (CHDASH_BUILD_RESULT_TESTS)
-  # The path of a result to the browser: the JSON cell encoder (Query page, exports, MCP rows) and the
-  # thread that encodes the blocks (no ClickHouse needed).
-  add_executable(chdash_result_path_test ../tests/native/result_path_test.cpp)
+  # The path of a result to the browser: the JSON cell encoder (Query page, exports, MCP rows), the thread that encodes the blocks, the plan
+  # of the columns, the events of a result and the cost that a run reports (no ClickHouse needed).
+  add_executable(chdash_result_path_test ../tests/native/result_path_test.cpp query_result_plan.cpp query_result_events.cpp query_run_profile.cpp)
   target_include_directories(chdash_result_path_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_result_path_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -321,6 +321,10 @@ if (CHDASH_BUILD_APP)
     api_query_stream.cpp
     api_analysis.cpp
     query_session.cpp
+    query_session_kill.cpp
+    query_result_plan.cpp
+    query_result_events.cpp
+    query_run_profile.cpp
     hcl.cpp
     jwt.cpp
     query_registry.cpp

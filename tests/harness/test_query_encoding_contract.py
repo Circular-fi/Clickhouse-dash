@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from session_sources import read_session, read_session_header
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -32,7 +33,7 @@ def test_the_cell_encoder_reads_nested_cells_in_place():
 
 
 def test_the_hot_paths_build_one_encoder_per_column_of_a_block():
-    session = read("src/query_session.cpp")
+    session = read_session()
     assert "std::vector<detail::CellEncoder> encoders;" in session
     assert "for (const auto& column : columns) encoders.emplace_back(column);" in session
     assert "encoders[c].write(w, row);" in session
@@ -46,7 +47,7 @@ def test_the_hot_paths_build_one_encoder_per_column_of_a_block():
 def test_the_result_path_has_native_unit_tests():
     cmake = read("src/CMakeLists.txt")
     assert 'option(CHDASH_BUILD_RESULT_TESTS "Build the result path unit tests (JSON cell encoder, block encoder)" OFF)' in cmake
-    assert "add_executable(chdash_result_path_test ../tests/native/result_path_test.cpp)" in cmake
+    assert "add_executable(chdash_result_path_test ../tests/native/result_path_test.cpp query_result_plan.cpp query_result_events.cpp query_run_profile.cpp)" in cmake
     test = read("tests/native/result_path_test.cpp")
     # Every case is checked against the exact JSON text and against the generic algorithm.
     assert "reference_write(" in test and "check_column(" in test
@@ -67,7 +68,7 @@ def test_native_result_path_tests_pass_when_built():
 
 
 def test_a_large_result_is_decoded_and_encoded_at_the_same_time():
-    session = read("src/query_session.cpp")
+    session = read_session()
     # A block waits for the encoder thread in a bounded queue; the first block with rows is
     # encoded in the receiving thread, so the usual one-block result starts no thread.
     encoder_header = read("src/block_encoder.hpp")
@@ -88,9 +89,9 @@ def test_the_done_event_splits_the_elapsed_time():
     assert 'writer.Key("timing_ms");' in stream
     for part in ("receive", "encode", "backpressure"):
         assert f'writer.Key("{part}"); writer.Int64(snapshot.{part}_ms);' in stream, part
-    header = read("src/query_session.hpp")
+    header = read_session_header()
     assert "int64_t receive_ms = 0;" in header and "int64_t encode_ms = 0;" in header and "int64_t backpressure_ms = 0;" in header
-    session = read("src/query_session.cpp")
+    session = read_session()
     # The wait for a slow browser is the time spent in the SSE queue wait, measured where the event is queued.
     assert "backpressure_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(" in session
     assert "receive_ns_ = std::max<int64_t>(0, select_ns - on_data_ns);" in session

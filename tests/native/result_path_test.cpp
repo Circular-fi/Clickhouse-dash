@@ -1,5 +1,7 @@
-// Unit tests of the path of a result to the browser: the JSON cell encoder (src/json_clickhouse.hpp)
-// and the thread that encodes the blocks (src/block_encoder.hpp). The Query page rows, the exports,
+// Unit tests of the path of a result to the browser: the JSON cell encoder (src/json_clickhouse.hpp),
+// the thread that encodes the blocks (src/block_encoder.hpp), and what a run builds on them: the plan of
+// the columns and the SQL that wraps a statement (src/query_result_plan.cpp), the events of a result
+// (src/query_result_events.cpp) and the cost that the ProfileEvents packets report (src/query_run_profile.cpp). The Query page rows, the exports,
 // the MCP rows and the Explorer preview all write their cells with the cell encoder, which resolves the
 // nested structure of a column once, so a row costs no dynamic_cast, no shared_ptr copy and no
 // allocation. Each case checks the exact JSON text, and the same text from a reference encoder that
@@ -14,10 +16,15 @@
 
 #include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
+#include "query_result_events.hpp"
+#include "query_result_plan.hpp"
+#include "query_run_profile.hpp"
 
 #include <clickhouse/columns/bool.h>
 #include <clickhouse/columns/date.h>
 #include <clickhouse/columns/decimal.h>
+#include <clickhouse/columns/enum.h>
+#include <clickhouse/columns/string.h>
 #include <clickhouse/columns/factory.h>
 #include <clickhouse/columns/ip4.h>
 #include <clickhouse/columns/uuid.h>
@@ -554,6 +561,271 @@ int bench() {
 
 } // namespace
 
+// ---- the plan of the columns ----
+
+void test_the_transport_of_a_type() {
+  CHECK(classify_result_transport("UInt64") == ResultTransportMode::Passthrough);
+  CHECK(classify_result_transport("Array(String)") == ResultTransportMode::Passthrough);
+  CHECK(classify_result_transport("UInt256") == ResultTransportMode::Stringify);
+  CHECK(classify_result_transport("Array(Int256)") == ResultTransportMode::Stringify);
+  CHECK(classify_result_transport("JSON") == ResultTransportMode::Stringify);
+  CHECK(classify_result_transport("Nullable(Dynamic)") == ResultTransportMode::Stringify);
+  CHECK(classify_result_transport("Decimal(76, 5)") == ResultTransportMode::Stringify);
+  CHECK(classify_result_transport("Decimal(38, 5)") == ResultTransportMode::Passthrough);
+  CHECK(classify_result_transport("Decimal256(3)") == ResultTransportMode::Stringify);
+  CHECK(classify_result_transport("AggregateFunction(sum, UInt64)") == ResultTransportMode::Opaque);
+  CHECK_EQ(std::string(transport_mode_name(ResultTransportMode::Opaque)), std::string("opaque"));
+
+  std::string_view inner;
+  CHECK(unwrap_outer_type("Nullable(Array(Int8))", "Nullable", &inner) && inner == "Array(Int8)");
+  CHECK(!unwrap_outer_type("Nullable(Int8) ", "Nullable", &inner));
+  CHECK(!unwrap_outer_type("Tuple(Nullable(Int8), Int8)", "Nullable", &inner));
+  CHECK(is_top_level_nullable_type("nullable(String)") && !is_top_level_nullable_type("Array(Nullable(String))"));
+  CHECK(is_structured_type("Array(UInt8)") && is_structured_type("LowCardinality(Nullable(JSON))") && is_structured_type("Map(String, Int8)"));
+  CHECK(!is_structured_type("Nullable(Decimal(76, 2))") && !is_structured_type("String"));
+  CHECK(is_bool_type_name("Bool") && is_bool_type_name("Nullable(Bool)") && !is_bool_type_name("Array(Bool)"));
+
+  // DESCRIBE may print a type over several lines.
+  CHECK_EQ(normalize_type_string("Tuple(\n    a Int8,\n    b  String\n)"), std::string("Tuple(a Int8, b String)"));
+  CHECK_EQ(normalize_type_string("Enum8('a b' = 1,\n 'c' = 2)"), std::string("Enum8('a b' = 1, 'c' = 2)"));
+  CHECK(icontains("Unsupported Column Type x", "column type") && !icontains("abc", "abd") && icontains("abc", ""));
+  CHECK(iequals_ascii("JsOn", "jSoN") && !iequals_ascii("a", "ab"));
+  CHECK_EQ(strip_trailing_semicolon_copy("  SELECT 1 ;\n"), std::string("SELECT 1"));
+  // What makes a run try again with DESCRIBE.
+  CHECK(should_retry_with_describe_after_direct_path_error("Code: 48. Unsupported column type: Variant"));
+  CHECK(should_retry_with_describe_after_direct_path_error("Cannot parse type Foo"));
+  CHECK(!should_retry_with_describe_after_direct_path_error("Table x does not exist"));
+}
+
+ResultColumnPlan plan_of(const std::string& type) {
+  ResultColumnPlan plan;
+  plan.original_type = type;
+  plan.mode = classify_result_transport(type);
+  plan.transport_type = plan.mode == ResultTransportMode::Passthrough ? type : (is_top_level_nullable_type(type) ? "Nullable(String)" : "String");
+  return plan;
+}
+
+void test_the_wrapper_of_a_statement() {
+  const std::vector<std::pair<std::string, ResultColumnPlan>> plain = {{"a", plan_of("UInt8")}, {"b", plan_of("String")}};
+  bool used = true;
+  CHECK_EQ(build_transport_wrapper_sql("SELECT 1;", plain, &used), std::string("SELECT 1;"));
+  CHECK(!used);
+  const std::vector<std::pair<std::string, ResultColumnPlan>> mixed = {
+      {"a", plan_of("UInt8")}, {"w", plan_of("UInt256")}, {"n", plan_of("Nullable(Decimal(76, 2))")}, {"j", plan_of("Array(Int256)")},
+      {"s", plan_of("AggregateFunction(sum, UInt64)")}, {"we`ird", plan_of("JSON")}};
+  CHECK_EQ(build_transport_wrapper_sql("SELECT x FROM t ;", mixed, &used),
+           std::string("SELECT\n"
+                       "    _q.`a` AS `a`,\n"
+                       "    toString(_q.`w`) AS `w`,\n"
+                       "    if(isNull(_q.`n`), CAST(NULL AS Nullable(String)), toString(_q.`n`)) AS `n`,\n"
+                       "    toJSONString(_q.`j`) AS `j`,\n"
+                       "    toString(_q.`s`) AS `s`,\n"
+                       "    toJSONString(_q.`we\\`ird`) AS `we\\`ird`\n"
+                       "FROM\n(\nSELECT x FROM t\n) AS _q"));
+  CHECK(used);
+  CHECK_EQ(build_transport_wrapper_sql("SELECT 1", {}, &used), std::string("SELECT 1"));
+  CHECK(!used);
+}
+
+clickhouse::Block block_of(const std::vector<std::pair<std::string, ColumnRef>>& columns) {
+  clickhouse::Block block;
+  for (const auto& [name, column] : columns) block.AppendColumn(name, column);
+  return block;
+}
+
+std::shared_ptr<clickhouse::ColumnString> strings(const std::vector<std::string>& values) {
+  auto column = std::make_shared<clickhouse::ColumnString>();
+  for (const auto& v : values) column->Append(v);
+  return column;
+}
+
+void test_the_answer_of_describe_is_a_plan() {
+  ResultPlan plan;
+  add_described_columns(block_of({{"name", strings({"id", "big", "doc"})}, {"type", strings({"UInt8", "UInt256", "Nullable(JSON)"})}, {"default_type", strings({"", "", ""})}}), &plan);
+  CHECK_EQ(plan.size(), size_t(3));
+  CHECK_EQ(plan[1].first, std::string("big"));
+  CHECK(plan[1].second.mode == ResultTransportMode::Stringify && plan[1].second.transport_type == "String");
+  CHECK(plan[2].second.transport_type == "Nullable(String)" && plan[2].second.original_type == "Nullable(JSON)");
+  // The columns are found by their names, then by their places; a block with fewer than two columns says nothing.
+  ResultPlan swapped;
+  add_described_columns(block_of({{"type", strings({"UInt8"})}, {"name", strings({"x"})}}), &swapped);
+  CHECK(swapped.size() == 1 && swapped[0].first == "x" && swapped[0].second.original_type == "UInt8");
+  ResultPlan none;
+  add_described_columns(block_of({{"name", strings({"x"})}}), &none);
+  add_described_columns(block_of({{"name", strings({})}, {"type", strings({})}}), &none);
+  CHECK(none.empty());
+
+  // The plan of the columns of a result: by position when the counts agree, else by name.
+  const auto result = block_of({{"id", std::make_shared<clickhouse::ColumnUInt8>()}, {"big", strings({})}, {"doc", strings({})}});
+  auto by_position = resolve_column_plans(result, plan);
+  CHECK(by_position.size() == 3 && by_position[1] == &plan[1].second);
+  const auto fewer = block_of({{"doc", strings({})}, {"nope", strings({})}});
+  auto by_name = resolve_column_plans(fewer, plan);
+  CHECK(by_name[0] == &plan[2].second && by_name[1] == nullptr);
+  CHECK(resolve_column_plans(result, ResultPlan{})[0] == nullptr);
+}
+
+void test_recent_plans_are_kept_for_a_while() {
+  DescribePlanCache cache;
+  ResultPlan plan = {{"a", plan_of("UInt256")}};
+  const std::string key = describe_cache_key("host", "db", "SELECT 1");
+  CHECK(key != describe_cache_key("host", "db", "SELECT 2") && key != describe_cache_key("host", "other", "SELECT 1") && key != describe_cache_key("host2", "db", "SELECT 1"));
+  CHECK(!get_cached_describe_plan(&cache, key, 4, 1000).has_value());
+  put_cached_describe_plan(&cache, key, plan, 4, 1000);
+  const auto got = get_cached_describe_plan(&cache, key, 4, 1000);
+  CHECK(got && got->size() == 1 && (*got)[0].second.mode == ResultTransportMode::Stringify);
+  // No cache, no room, no time, or an empty plan: nothing is kept.
+  CHECK(!get_cached_describe_plan(nullptr, key, 4, 1000).has_value());
+  CHECK(!get_cached_describe_plan(&cache, key, 0, 1000).has_value());
+  CHECK(!get_cached_describe_plan(&cache, key, 4, 0).has_value());
+  DescribePlanCache other;
+  put_cached_describe_plan(&other, key, ResultPlan{}, 4, 1000);
+  put_cached_describe_plan(&other, "", plan, 4, 1000);
+  put_cached_describe_plan(&other, key, plan, 0, 1000);
+  CHECK(!get_cached_describe_plan(&other, key, 4, 1000).has_value());
+  // The oldest use leaves first.
+  DescribePlanCache small;
+  put_cached_describe_plan(&small, "a", plan, 2, 1000);
+  put_cached_describe_plan(&small, "b", plan, 2, 1000);
+  CHECK(get_cached_describe_plan(&small, "a", 2, 1000).has_value());
+  put_cached_describe_plan(&small, "c", plan, 2, 1000);
+  CHECK(get_cached_describe_plan(&small, "a", 2, 1000).has_value());
+  CHECK(!get_cached_describe_plan(&small, "b", 2, 1000).has_value());
+  invalidate_cached_describe_plan(&small, "a");
+  CHECK(!get_cached_describe_plan(&small, "a", 2, 1000).has_value());
+  invalidate_cached_describe_plan(&small, "");
+  invalidate_cached_describe_plan(nullptr, "a");
+  // A plan expires.
+  DescribePlanCache expiring;
+  put_cached_describe_plan(&expiring, "k", plan, 4, 1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  CHECK(!get_cached_describe_plan(&expiring, "k", 4, 1).has_value());
+}
+
+// ---- the events of a result ----
+
+struct Events {
+  std::vector<std::pair<std::string, std::string>> list;
+  size_t rows = 0, bytes = 0;
+  ResultEventWriter writer;
+  Events(ResultEventLimits limits)
+      : writer("q1", limits, [this](std::string_view e, std::string_view j) { list.emplace_back(std::string(e), std::string(j)); },
+               [this](size_t r, size_t b) { rows += r; bytes += b; }) {}
+};
+
+void test_a_result_is_meta_then_rows() {
+  ResultEventLimits limits;
+  limits.max_rows_per_event = 2;
+  Events out(limits);
+  const ResultPlan plan = {{"n", plan_of("UInt8")}, {"big", plan_of("UInt256")}};
+  out.writer.begin_attempt(&plan, true, true, false);
+  auto numbers = std::make_shared<clickhouse::ColumnUInt8>();
+  for (int i = 0; i < 5; ++i) numbers->Append(static_cast<uint8_t>(i));
+  auto texts = strings({"0", "1", "2", "3", "4"});
+  out.writer.write(block_of({{"n", numbers}, {"big", texts}}));
+  CHECK_EQ(out.list.size(), size_t(4));
+  CHECK_EQ(out.list[0].first, std::string("result_meta"));
+  CHECK_EQ(out.list[0].second,
+           std::string("{\"query_id\":\"q1\",\"columns\":[\"n\",\"big\"],\"types\":[\"UInt8\",\"String\"],\"original_types\":[\"UInt8\",\"UInt256\"],"
+                       "\"transport_modes\":[\"passthrough\",\"stringify\"],\"used_transport_wrapper\":true,\"describe_mode\":\"described\",\"describe_cache_hit\":false}"));
+  CHECK_EQ(out.list[1].first, std::string("result_rows"));
+  CHECK_EQ(out.list[1].second, std::string("{\"query_id\":\"q1\",\"rows\":[[0,\"0\"],[1,\"1\"]]}"));
+  CHECK_EQ(out.list[3].second, std::string("{\"query_id\":\"q1\",\"rows\":[[4,\"4\"]]}"));
+  CHECK_EQ(out.rows, size_t(5));
+  CHECK_EQ(out.writer.rows_returned(), uint64_t(5));
+  size_t total_bytes = 0;
+  for (size_t i = 1; i < out.list.size(); ++i) total_bytes += out.list[i].second.size();
+  CHECK_EQ(out.bytes, total_bytes);
+  // The meta event is sent once; a block with no rows sends none; the next block of rows goes on.
+  out.writer.write(block_of({{"n", std::make_shared<clickhouse::ColumnUInt8>()}, {"big", strings({})}}));
+  CHECK_EQ(out.list.size(), size_t(4));
+  // After a restart (the run goes again with another plan) the meta event is sent again, and the count starts from 0.
+  out.writer.restart();
+  CHECK_EQ(out.writer.rows_returned(), uint64_t(0));
+  out.writer.begin_attempt(nullptr, false, false, true);
+  auto one = std::make_shared<clickhouse::ColumnUInt8>();
+  one->Append(7);
+  out.writer.write(block_of({{"n", one}}));
+  CHECK_EQ(out.list.size(), size_t(6));
+  CHECK(out.list[4].second.find("\"describe_mode\":\"direct\",\"describe_cache_hit\":true") != std::string::npos);
+  CHECK(out.list[4].second.find("\"types\":[\"UInt8\"]") != std::string::npos);
+}
+
+void test_a_result_stops_at_its_row_limit_and_its_cell_limit() {
+  ResultEventLimits limits;
+  limits.row_limit = 3;
+  Events out(limits);
+  out.writer.begin_attempt(nullptr, false, false, false);
+  auto numbers = std::make_shared<clickhouse::ColumnUInt16>();
+  for (int i = 0; i < 10; ++i) numbers->Append(static_cast<uint16_t>(i));
+  out.writer.write(block_of({{"n", numbers}}));
+  CHECK_EQ(out.rows, size_t(3));
+  CHECK_EQ(out.list.back().second, std::string("{\"query_id\":\"q1\",\"rows\":[[0],[1],[2]]}"));
+  // Rows that have more bytes than a cell may hold fail the run, with the name of the setting.
+  ResultEventLimits tight;
+  tight.max_result_cell_bytes = 4;
+  Events small(tight);
+  small.writer.begin_attempt(nullptr, false, false, false);
+  std::string message;
+  try {
+    small.writer.write(block_of({{"s", strings({"a longer text"})}}));
+  } catch (const std::runtime_error& e) {
+    message = e.what();
+  }
+  CHECK(message.find("result_cell_too_large") == 0 && message.find("query.max_result_cell_bytes (4 bytes)") != std::string::npos);
+  // A Bool that clickhouse-cpp reads as UInt8, or an opaque state, is written as its plan declares it.
+  Events declared(ResultEventLimits{});
+  const ResultPlan plan = {{"b", plan_of("Bool")}};
+  declared.writer.begin_attempt(&plan, false, true, false);
+  auto flags = std::make_shared<clickhouse::ColumnUInt8>();
+  flags->Append(1);
+  flags->Append(0);
+  declared.writer.write(block_of({{"b", flags}}));
+  CHECK_EQ(declared.list.back().second, std::string("{\"query_id\":\"q1\",\"rows\":[[true],[false]]}"));
+}
+
+// ---- the cost that a run reports ----
+
+clickhouse::Block profile_block(const std::vector<std::string>& hosts, const std::vector<uint64_t>& threads, const std::vector<std::string>& types,
+                                const std::vector<std::string>& names, const std::vector<int64_t>& values) {
+  auto type_column = std::make_shared<clickhouse::ColumnEnum8>(clickhouse::Type::CreateEnum8({{"increment", 1}, {"gauge", 2}}));
+  for (const auto& t : types) type_column->Append(t);
+  auto thread_column = std::make_shared<clickhouse::ColumnUInt64>();
+  for (const auto t : threads) thread_column->Append(t);
+  auto value_column = std::make_shared<clickhouse::ColumnInt64>();
+  for (const auto v : values) value_column->Append(v);
+  return block_of({{"host_name", strings(hosts)}, {"current_time", strings(hosts)}, {"thread_id", thread_column}, {"type", type_column}, {"name", strings(names)}, {"value", value_column}});
+}
+
+void test_the_profile_events_of_a_run() {
+  RunProfile profile;
+  CHECK(!profile.cpu_time_available && profile.current_mem_bytes == -1 && profile.peak_mem_bytes == -1);
+  // Only the aggregate of the query group (thread 0) counts: increments add up, gauges are the last value of a host.
+  CHECK(profile.apply(profile_block({"a", "a", "a", "a", "b"}, {0, 0, 5, 0, 0}, {"increment", "increment", "increment", "gauge", "gauge"},
+                                    {"UserTimeMicroseconds", "SystemTimeMicroseconds", "UserTimeMicroseconds", "MemoryTrackerUsage", "MemoryTrackerUsage"},
+                                    {100, 30, 9999, 1000, 500})));
+  CHECK(profile.cpu_time_available);
+  CHECK_EQ(profile.user_time_us_total, int64_t{100});
+  CHECK_EQ(profile.system_time_us_total, int64_t{30});
+  CHECK_EQ(profile.current_mem_bytes, int64_t{1500});
+  CHECK_EQ(profile.peak_mem_bytes, int64_t{-1});
+  CHECK(profile.apply(profile_block({"a", "b", "a"}, {0, 0, 0}, {"gauge", "gauge", "increment"}, {"MemoryTrackerUsage", "MemoryTrackerPeakUsage", "UserTimeMicroseconds"}, {700, 4000, 50})));
+  CHECK_EQ(profile.current_mem_bytes, int64_t{1200});  // a: 700 (replaced), b: 500
+  CHECK_EQ(profile.peak_mem_bytes, int64_t{4000});
+  CHECK_EQ(profile.user_time_us_total, int64_t{150});
+  // A negative gauge is 0, a negative increment adds nothing, an increment saturates, another event is ignored.
+  CHECK(profile.apply(profile_block({"a", "a", "a"}, {0, 0, 0}, {"gauge", "increment", "increment"}, {"MemoryTrackerUsage", "UserTimeMicroseconds", "Other"}, {-5, -7, 1})));
+  CHECK_EQ(profile.current_mem_bytes, int64_t{500});
+  CHECK_EQ(profile.user_time_us_total, int64_t{150});
+  CHECK(profile.apply(profile_block({"a"}, {0}, {"increment"}, {"UserTimeMicroseconds"}, {std::numeric_limits<int64_t>::max()})));
+  CHECK_EQ(profile.user_time_us_total, std::numeric_limits<int64_t>::max());
+  // A block without rows, or without the columns of the packet, is not read.
+  CHECK(!profile.apply(profile_block({}, {}, {}, {}, {})));
+  CHECK(!profile.apply(block_of({{"x", strings({"y"})}})));
+  profile.reset();
+  CHECK(!profile.cpu_time_available && profile.user_time_us_total == 0 && profile.current_mem_bytes == -1 && profile.memory_usage_by_host.empty());
+}
+
 int main(int argc, char** argv) {
   if (argc > 1 && std::strcmp(argv[1], "--bench") == 0) return bench();
   test_scalars();
@@ -571,6 +843,13 @@ int main(int argc, char** argv) {
   test_block_encoder_failure_reaches_the_receiving_thread();
   test_block_encoder_cancel_stops_a_waiting_submit();
   test_block_encoder_destructor_drops_what_waits();
+  test_the_transport_of_a_type();
+  test_the_wrapper_of_a_statement();
+  test_the_answer_of_describe_is_a_plan();
+  test_recent_plans_are_kept_for_a_while();
+  test_a_result_is_meta_then_rows();
+  test_a_result_stops_at_its_row_limit_and_its_cell_limit();
+  test_the_profile_events_of_a_run();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }
