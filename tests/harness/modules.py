@@ -47,7 +47,7 @@ def read_family(prefix: str) -> str:
 # The modules of the Explorer controller family, in the order of the former app_explorer.js (the card, the graph, the storage views and the
 # treemap are modules of their own and are not part of it).
 EXPLORER_CORE = ("app_explorer_summary.js", "app_explorer_route.js", "app_explorer_store.js", "app_explorer_shell.js", "app_explorer_doc.js",
-                 "app_explorer_functions.js", "app_explorer_tree.js", "app_explorer_data.js", "app_explorer_database.js", "app_explorer_table.js",
+                 "app_explorer_functions.js", "app_explorer_functions_page.js", "app_explorer_tree.js", "app_explorer_data.js", "app_explorer_database.js", "app_explorer_table.js",
                  "app_explorer.js")
 
 

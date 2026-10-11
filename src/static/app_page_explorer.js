@@ -49,14 +49,13 @@ import * as h_explorer_shell from "./app_explorer_shell.js";
 import * as h_explorer_tree from "./app_explorer_tree.js";
 import * as h_header from "./app_header.js";
 import * as h_explorer_database from "./app_explorer_database.js";
-import * as h_sql_lex from "./app_sql_lex.js";
-import * as h_highlight from "./app_highlight.js";
-import * as h_explorer_doc from "./app_explorer_doc.js";
-import * as h_explorer_functions from "./app_explorer_functions.js";
 import * as h_explorer_table from "./app_explorer_table.js";
 import * as h_meta from "./app_meta.js";
 import * as h_explorer from "./app_explorer.js";
+import * as h_sql_lex from "./app_sql_lex.js";
 import * as h_explorer_detail_model from "./app_explorer_detail_model.js";
+import * as h_highlight from "./app_highlight.js";
+import * as h_explorer_doc from "./app_explorer_doc.js";
 import * as h_results_values from "./app_results_values.js";
 import * as h_results_cells from "./app_results_cells.js";
 import * as h_results_rowdetails from "./app_results_rowdetails.js";
@@ -127,14 +126,13 @@ h_loader.loader.expose([
   h_explorer_tree,
   h_header,
   h_explorer_database,
-  h_sql_lex,
-  h_highlight,
-  h_explorer_doc,
-  h_explorer_functions,
   h_explorer_table,
   h_meta,
   h_explorer,
+  h_sql_lex,
   h_explorer_detail_model,
+  h_highlight,
+  h_explorer_doc,
   h_results_values,
   h_results_cells,
   h_results_rowdetails,

@@ -82,7 +82,7 @@ def test_view_tabs_are_catalog_and_functions_and_catalog_modes_share_the_tree() 
         assert gone not in ui, gone
     for gone in ["monitoringAvailable", "showMonitoringView", "ns.explorerMonitor", "ns.explorerOps", "monitorQuery", "operationsAvailable", "showOperationsView"]:
         assert gone not in ui, gone
-    assert 'init, setWorkspace, setSection, setMode, setView, currentView,' in ui and "storageScope" not in ui
+    assert 'init, setWorkspace, setMode, setView, currentView,' in ui and "storageScope" not in ui
 
 
 def test_the_explorer_loads_no_system_module() -> None:

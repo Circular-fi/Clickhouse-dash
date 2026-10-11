@@ -175,7 +175,7 @@ def test_search_fields_share_one_helper_one_delay_and_one_look():
     assert "search = Object.freeze({ bind, within });" in search
     assert "debounceMs = util.SEARCH_DEBOUNCE_MS" in search
     code = sources()
-    for name, needle in (("app_explorer.js", "search.bind(dom.explorerFunctionSearchInput"), ("app_metrics.js", "searchMod.bind(search,"),
+    for name, needle in (("app_explorer_functions_page.js", "search.bind(dom.explorerFunctionSearchInput"), ("app_metrics.js", "searchMod.bind(search,"),
                          ("app_facet_panel.js", 'search.bind(part("search")'), ("app_timerange.js", "search.bind(quickSearch"),
                          ("app_trace_views.js", 'search.within(tools, "#traceSpansFilter"'), ("app_trace_logs.js", 'search.within(panel, "#traceLogsFilter"'),
                          ("app_query_library.js", "search.bind(input,")):

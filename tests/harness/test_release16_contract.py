@@ -21,7 +21,8 @@ def test_default_graph_depth_is_one_when_url_parameter_is_absent() -> None:
 
 def test_graph_click_does_not_restart_catalog_and_route_intent_is_one_shot() -> None:
     ui = (modules.read_explorer() + modules.read_explorer_detail())
-    assert 'if (model.section !== "tables") setSection("tables");' in ui
+    # The Catalog is one section: a click on the canvas switches nothing but the selection.
+    assert 'setSection' not in ui[ui.index('function openTableFromGraph'):ui.index('function init()', ui.index('function openTableFromGraph'))]
     assert 'selectTable(database, table, false, { graphOrigin: true });' in ui
     assert 'model.routeIntent = null;' in ui
     assert 'refreshCatalog(true)' not in ui[ui.index('function openTableFromGraph'):ui.index('function init()', ui.index('function openTableFromGraph'))]
@@ -113,6 +114,7 @@ def test_analysis_modal_has_large_desktop_inset() -> None:
 def test_legacy_schema_rewrite_injects_default_browse_parameter() -> None:
     ui = (modules.read_explorer() + modules.read_explorer_detail())
     # ?view= and the other aliases are rewritten to the one Catalog scheme.
-    block = ui[ui.index('if (route.workspace === "explorer" && route.section === "tables") {\n    // Aliases'):ui.index('model.routeIntent = route;')]
+    start = ui.index('if (route.workspace === "explorer" && route.section === "tables") {\n    // Aliases')
+    block = ui[start:ui.index('model.routeIntent = route;', start)]
     assert "const canonical = appRoute(catalogPath({" in block
     assert 'router.replace(null, { href: canonical, view: "explorer" });' in block
