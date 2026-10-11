@@ -852,19 +852,35 @@
   padding: 0 var(--space-16);
 }
 
+/* The SQL takes all the room that the fields leave, down to the foot (a long description gives it less), so a query that
+   fits has no scrollbar; only the body of the block scrolls when the room is smaller than the query. */
 .qlPaneForm .qlForm__sql {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 8rem;
+}
+
+.qlForm__sqlBody {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
 }
 
 .qlPaneForm .qlSql {
-  max-height: 16rem;
-  overflow: auto;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.qlForm__sqlBody {
-  min-width: 0;
+.qlPaneForm .qlSql .sqlBlock__body {
+  flex: 1 1 auto;
   min-height: 0;
+  overflow: auto;
 }
 
 /* The SQL's heading with the quiet "Save raw" option at its end: small, muted, a native check box. */
@@ -906,9 +922,6 @@
 }
 
 @media (max-width: 760px) {
-  .qlPaneForm .qlSql {
-    max-height: 11rem;
-  }
   /* The library dialog is full-screen (.uiDialog--lg), in two steps: the
      list, then the preview of the selected item (.is-previewing), with a
      Back button. */
