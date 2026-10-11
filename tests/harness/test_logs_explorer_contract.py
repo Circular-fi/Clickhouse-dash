@@ -2,6 +2,7 @@
 import modules
 import json
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,7 +29,7 @@ def test_logs_routes_are_registered_only_when_logs_are_enabled():
 
 def test_service_allowlist_predicate_is_shared_by_traces_and_logs():
     header = read("src/otel_allowlist.hpp")
-    traces = read("src/api_traces.cpp")
+    traces = read_unit("trace_service.cpp")
     logs = read("src/api_logs.cpp")
     assert "inline std::string service_allowlist_predicate(const TraceSettings& cfg)" in header
     assert "inline std::string service_pattern_predicate(std::string_view pattern)" in header
@@ -60,7 +61,13 @@ def test_search_uses_keyset_cursors_progressive_windows_and_guards():
 def test_body_search_splits_tokens_before_hastoken():
     logs = read("src/api_logs.cpp")
     assert "std::vector<std::string> split_tokens(std::string_view text)" in logs
-    assert 'parts.push_back("hasToken(" + body + ", " + quote(token) + ")");' in logs
+    assert 'parts.push_back("hasToken(" + body + ", " + params.text(token) + ")");' in logs
+    # What the user wrote reaches ClickHouse as a query parameter ({pN:String}), never inside the SQL text.
+    for written in ('" AND ServiceName IN (" + params.texts(services) + ")"', '" AND TraceId = " + params.text(trace_id)',
+                    '" = " + params.text(value)', 'params.text("%" + like_escape(term.text) + "%")'):
+        assert written in logs, written
+    assert "quote(services" not in logs and "quote(value)" not in logs and "quote(term.text)" not in logs
+    assert "q.params.list()" in logs and "r.query.params.key()" in logs
     assert '"position(Body, "' in logs
     assert '"logs_body_search_disabled"' in logs
     assert "kSubstringWindowSeconds" in logs and '"logs_substring_range"' in logs

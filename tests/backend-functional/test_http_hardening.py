@@ -46,7 +46,7 @@ def error_code(response: requests.Response) -> str:
 
 
 def test_every_answer_carries_the_security_headers():
-    for path in ("/api/version", "/api/hosts", "/static/app.js", "/no-such-path", "/livez"):
+    for path in ("/api/version", "/api/hosts", "/static/app_common.js", "/no-such-path", "/livez"):
         response = get(path)
         headers = response.headers
         assert headers["X-Content-Type-Options"] == "nosniff", path
@@ -164,16 +164,16 @@ def test_an_error_of_the_http_layer_is_json():
 
 
 def test_a_versioned_asset_is_immutable_only_with_its_own_version():
-    body = get("/static/app.js").content
+    body = get("/static/app_common.js").content
     version = hashlib.sha256(body).hexdigest()[:12]
-    own = get(f"/static/app.js?v={version}")
+    own = get(f"/static/app_common.js?v={version}")
     assert own.status_code == 200
     assert own.headers["Cache-Control"] == "public, max-age=31536000, immutable"
     for other in ("0123456789ab", "x", "", version.upper()):
-        stale = get(f"/static/app.js?v={other}")
+        stale = get(f"/static/app_common.js?v={other}")
         assert stale.status_code == 200 and stale.content == body
         assert stale.headers["Cache-Control"] == "no-store", other
-    assert get("/static/app.js").headers["Cache-Control"] == "public, max-age=0, must-revalidate"
+    assert get("/static/app_common.js").headers["Cache-Control"] == "public, max-age=0, must-revalidate"
     # The icon sprite of the shells (tools/icons.py: ten digits).
     sprite = get("/static/icons.svg").content
     assert get(f"/static/icons.svg?v={hashlib.sha256(sprite).hexdigest()[:10]}").headers["Cache-Control"].endswith("immutable")

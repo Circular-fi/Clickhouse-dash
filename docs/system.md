@@ -423,7 +423,7 @@ The growth is `GET /api/system/series?host_id=<id>&panel=disk_growth[&from_ms=&t
 
 1. `system.disks` (names, free space and capacity).
 2. `system.asynchronous_metric_log` once: the largest `DiskUsed_<disk>` sample of each bucket, with the disk names quoted from `system.disks`, and `TotalBytesOfMergeTreeTables`.
-3. `system.part_log`: `sumIf(size_in_bytes, event_type = 'NewPart')`, the same for `MovePart`, and the move count for each bucket. It uses `database IN (<runner-visible databases>)`, summed over them (no database is named).
+3. `system.part_log`: `sumIf(size_in_bytes, event_type = 'NewPart')`, the same for `MovePart`, and the move count for each bucket. It uses `database IN (<runner-visible databases>)`, summed over them (no database is named). The names of the databases (here, in the Activity section and in the disk usage) are query parameters, one String for each name. A database with a quote mark or a backslash in its name is a plain value.
 
 **ClickHouse 26.8** adds a `key` column. It logs the metric of each disk as `metric = 'DiskUsed'` with the disk in `key`. This does not apply when `asynchronous_metrics_key_values_mode` is `legacy_names` or `both`. When the column exists, the predicate is `(metric = 'TotalBytesOfMergeTreeTables' OR metric IN ('DiskUsed_<d>', …) OR (metric = 'DiskUsed' AND key IN ('<d>', …)))`. The disk is `if(metric = 'DiskUsed', key, substring(metric, 10))`. For this reason, either form, or both, read the same (`disk_metric_form`: `names` or `key`).
 

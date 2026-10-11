@@ -11,6 +11,8 @@
 // without a time range is rejected: a TraceId lookup over the whole table
 // would read every part.
 #include "server.hpp"
+#include "otel_caches.hpp"
+#include "sql_params.hpp"
 
 #include "api_error.hpp"
 #include "api_params.hpp"
@@ -44,8 +46,6 @@ using sql::quote_ident;
 
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 
-constexpr auto kLogColumnsCacheTtl = std::chrono::seconds(60);
-constexpr size_t kLogColumnsCacheMaxEntries = 256;
 constexpr int kTraceLogsMaxExecutionSeconds = 10;
 constexpr size_t kMaxTraceIdBytes = 256;
 constexpr size_t kMaxSpanIdBytes = 128;
@@ -55,34 +55,6 @@ constexpr size_t kMaxServiceBytes = 512;
 constexpr int kMaxBodyBytes = 64 * 1024;
 
 using otel::allowlist_quote_string;
-
-// Schema facts the query depends on, from one system.columns read.
-struct LogColumns {
-  bool exists = false;
-  bool timestamp_time = false;
-  bool trace_id = false;
-  bool span_id = false;
-  bool scope_name = false;
-  bool event_name = false;
-  std::string log_attributes_type;
-  std::string resource_attributes_type;
-  std::vector<std::string> missing;
-};
-
-// One read per source at a time (single-flight), kept kLogColumnsCacheTtl. A missing table is not kept: the exporter
-// may create it any time. The key comes from the configuration only.
-TtlCache<std::string, LogColumns>& log_columns_cache() {
-  static TtlCache<std::string, LogColumns> cache([] {
-    TtlCache<std::string, LogColumns>::Options options;
-    options.ttl = kLogColumnsCacheTtl;
-    options.max_entries = kLogColumnsCacheMaxEntries;
-    options.ttl_of = [](const LogColumns& columns) -> std::chrono::milliseconds {
-      return columns.exists ? std::chrono::milliseconds(kLogColumnsCacheTtl) : std::chrono::milliseconds(0);
-    };
-    return options;
-  }());
-  return cache;
-}
 
 bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
@@ -133,13 +105,13 @@ LogColumns load_log_columns(clickhouse::Client& client, const LogSettings& logs)
   return out;
 }
 
-LogColumns cached_log_columns(clickhouse::Client& client, const HostSpec& host, const LogSettings& logs) {
+LogColumns cached_log_columns(LogColumnsCache& cache, clickhouse::Client& client, const HostSpec& host, const LogSettings& logs) {
   const std::string key = host.system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
-  const auto result = log_columns_cache().get(key, [&](LogColumns& columns, std::string&, std::string&) {
+  const auto result = cache.get(key, [&](LogColumns& columns, std::string&, std::string&) {
     columns = load_log_columns(client, logs);
     return true;
   });
-  return *TtlCache<std::string, LogColumns>::value_or_throw(result);
+  return *LogColumnsCache::value_or_throw(result);
 }
 
 bool parse_i64(const httplib::Request& req, const char* name, int64_t* out) {
@@ -259,7 +231,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
 
   LogColumns columns;
   try {
-    columns = cached_log_columns(*client, *host, logs);
+    columns = cached_log_columns(log_columns_cache_, *client, *host, logs);
   } catch (const std::exception& e) {
     return send_error(res, error_from_clickhouse(e, "logs", "logs_schema_failed"));
   }
@@ -283,17 +255,11 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   const std::string time_range = columns.timestamp_time
       ? "TimestampTime BETWEEN toDateTime(" + std::to_string(from_s) + ") AND toDateTime(" + std::to_string(to_s) + ")"
       : "Timestamp BETWEEN toDateTime64(" + std::to_string(from_s) + ", 9) AND toDateTime64(" + std::to_string(to_s) + ", 9)";
+  SqlParams params;
   std::string where;
-  if (!services.empty()) {
-    where += "ServiceName IN (";
-    for (size_t i = 0; i < services.size(); ++i) {
-      if (i) where += ", ";
-      where += allowlist_quote_string(services[i]);
-    }
-    where += ") AND ";
-  }
-  where += "TraceId = " + allowlist_quote_string(trace_id);
-  if (!span_id.empty()) where += " AND SpanId = " + allowlist_quote_string(span_id);
+  if (!services.empty()) where += "ServiceName IN (" + params.texts(services) + ") AND ";
+  where += "TraceId = " + params.text(trace_id);
+  if (!span_id.empty()) where += " AND SpanId = " + params.text(span_id);
   where += " AND " + otel::service_allowlist_predicate(host->otel.traces);
 
   const std::string sql =
@@ -319,7 +285,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   };
   std::vector<Record> records;
   try {
-    ch_select(*client, sql, [&](const clickhouse::Block& block) {
+    ch_select(*client, sql, params.list(), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         Record r;
         r.timestamp_ns = ch_block_text_at(block, 0, row);

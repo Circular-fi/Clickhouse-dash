@@ -1,6 +1,6 @@
 from pathlib import Path
-
 import modules
+from trace_sources import read_traces, read_unit
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,7 +11,7 @@ def read(rel):
 
 
 def test_trace_detail_serializes_otel_structures_as_json_for_readable_inspector():
-    cpp = read('src/api_traces.cpp')
+    cpp = read_traces()
     assert 'toJSONString(SpanAttributes)' in cpp
     assert 'toJSONString(ResourceAttributes)' in cpp
     assert 'toJSONString(Events.Timestamp)' in cpp

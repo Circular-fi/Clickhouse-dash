@@ -138,8 +138,8 @@ void load_builtin_keywords(std::vector<std::string>& out) {
 void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res) {
   if (!health_) return json_error(res, 500, "no_runner", "health runner not initialized");
 
-  std::string host_id = "default";
-  if (req.has_param("host_id")) host_id = req.get_param_value("host_id");
+  const std::string host_id = req.has_param("host_id") ? req.get_param_value("host_id") : std::string{};
+  if (host_id.empty()) return json_error(res, 400, "missing_host_id", "Missing host_id.");
 
   std::string types_csv = "keywords";
   if (req.has_param("types")) types_csv = req.get_param_value("types");

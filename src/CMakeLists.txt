@@ -18,6 +18,7 @@ option(CHDASH_BUILD_REQUEST_TESTS "Build the unit tests of the way a request is 
 option(CHDASH_BUILD_ERROR_TESTS "Build the unit tests of the error answer: the envelope, the classification of ClickHouse failures" OFF)
 option(CHDASH_BUILD_CONFIG_TESTS "Build the unit tests of the configuration file: the table of keys, the bounds, the URIs, the HCL parser" OFF)
 option(CHDASH_BUILD_SQL_TESTS "Build the unit tests of the SQL text: literals, lexer, policy, structure" OFF)
+option(CHDASH_BUILD_TRACE_TESTS "Build the unit tests of the Traces page: the request, the filters, the SQL, the search strategies (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
@@ -185,6 +186,20 @@ if (CHDASH_BUILD_SQL_TESTS)
   chdash_configure_target(chdash_sql_test)
 endif()
 
+if (CHDASH_BUILD_TRACE_TESTS)
+  # The Traces page below its routes: the parsing of a request, the span filters and the statements, and the strategies of
+  # the search and of the analytics on a fake executor.
+  add_executable(chdash_trace_test ../tests/native/trace_test.cpp
+    trace_analytics.cpp trace_attributes.cpp trace_detail.cpp trace_facets.cpp trace_filters.cpp trace_json.cpp trace_request.cpp trace_search.cpp trace_service.cpp trace_services.cpp trace_spans.cpp trace_sql.cpp
+    ch_query.cpp ch_client_pool.cpp ch_uri.cpp ch_error.cpp api_error.cpp error_envelope.cpp request_context.cpp log.cpp jwt.cpp secure_random.cpp)
+  target_include_directories(chdash_trace_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_trace_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_trace_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_trace_test)
+endif()
+
 if (CHDASH_BUILD_FUZZERS)
   # The libFuzzer targets of tests/fuzz: the parsers that read what a client, a config file or a pasted text
   # sends, and the WebAssembly kernels of the page built natively. Build them with clang and
@@ -275,6 +290,18 @@ if (CHDASH_BUILD_APP)
     api_system_activity.cpp
     api_system.cpp
     api_traces.cpp
+    trace_analytics.cpp
+    trace_attributes.cpp
+    trace_detail.cpp
+    trace_facets.cpp
+    trace_filters.cpp
+    trace_json.cpp
+    trace_request.cpp
+    trace_search.cpp
+    trace_service.cpp
+    trace_services.cpp
+    trace_spans.cpp
+    trace_sql.cpp
     api_otel_signals.cpp
     api_trace_logs.cpp
     api_logs.cpp

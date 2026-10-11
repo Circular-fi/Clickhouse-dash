@@ -170,7 +170,7 @@ FAKE_SERVER = textwrap.dedent('''\
     BROKEN = {broken}
     port = int(re.search(r"listen_port = (\\d+)", open(sys.argv[2]).read()).group(1))
     JS = b"console.log('chdash');" * 100
-    SCRIPT = b'window.__chdashAssetVersions={{"static/app.js":"0123456789ab","static/wasm/highlight.wasm":"ba9876543210"}}'
+    SCRIPT = b'window.__chdashAssetVersions={{"static/app_common.js":"0123456789ab","static/wasm/highlight.wasm":"ba9876543210"}}'
     PAGE = b'<html><head><script>' + SCRIPT + b'</script><title>ChDash</title></head></html>'
     POLICY = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-" + base64.b64encode(hashlib.sha256(SCRIPT).digest()).decode() + "'; frame-ancestors 'none'"
     SECURITY = [("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "DENY"), ("Referrer-Policy", "same-origin")]
@@ -212,7 +212,7 @@ FAKE_SERVER = textwrap.dedent('''\
                 return self.send(302, headers=[("Location", "explorer/catalog")])
             if path == "/system/zzz":
                 return self.send(302, headers=[("Location", "../system")])
-            if path == "/static/app.js":
+            if path == "/static/app_common.js":
                 accepts = "gzip" in self.headers.get("Accept-Encoding", "")
                 headers = [("Cache-Control", "public, max-age=31536000, immutable" if query == "v=0123456789ab" else "no-store")]
                 if accepts:
@@ -287,7 +287,7 @@ def test_release_smoke_probes_every_route_of_the_brief() -> None:
                   "/livez", "/readyz", "/metrics"):
         assert f'("{route}", ' in script, route
     assert "def check_security(port: int) -> str:" in script and "def graceful_stop(self) -> str:" in script
-    assert '"/static/app.js?v=000000000000"' in script
+    assert '"/static/app_common.js?v=000000000000"' in script
     assert "Accept-Encoding" in script and "immutable" in script and "?v=" in script and "__chdashAssetVersions" in script
     assert "--scratch" in script and "FROM scratch" in script
 

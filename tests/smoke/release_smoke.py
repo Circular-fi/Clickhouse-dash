@@ -75,7 +75,7 @@ PROBES = [
     ("/api/metrics/meta", (200, 503), {"type": "application/json"}),
 ]
 FEATURES = ["explorer", "system", "traces", "logs", "metrics", "query_library", "mcp"]
-# The staged shells carry the version of every script and stylesheet: window.__chdashAssetVersions={"static/app.js":"<hash>",...}
+# The staged shells carry the version of every script and stylesheet: window.__chdashAssetVersions={"static/app_common.js":"<hash>",...}
 VERSIONS = re.compile(r"window\.__chdashAssetVersions=(\{[^}]*\})")
 INLINE_SCRIPTS = re.compile(r"<script(\s[^>]*)?>(.*?)</script", re.DOTALL | re.IGNORECASE)
 
@@ -286,7 +286,7 @@ def check_assets(port: int) -> int:
     versions = json.loads(match.group(1)) if match else {}
     if not versions:
         raise Failure("/query: no window.__chdashAssetVersions in the page (the embedded files carry no version)")
-    found = [f"{name}?v={version}" for name, version in sorted(versions.items())[:3]] + [f"static/app.js?v={versions['static/app.js']}"]
+    found = [f"{name}?v={version}" for name, version in sorted(versions.items())[:3]] + [f"static/app_common.js?v={versions['static/app_common.js']}"]
     for asset in sorted(set(found)):
         path = "/" + asset
         code, headers, body = get(port, path, {"Accept-Encoding": "gzip"})
@@ -301,7 +301,7 @@ def check_assets(port: int) -> int:
         if code != 200 or "content-encoding" in headers or plain != packed:
             raise Failure(f"{path}: the plain copy differs from the gzip copy or carries Content-Encoding")
     # An address whose ?v= is not the version of the bytes (a tab older than the binary) is never kept.
-    stale = "/static/app.js?v=000000000000"
+    stale = "/static/app_common.js?v=000000000000"
     code, headers, _ = get(port, stale)
     if code != 200 or headers.get("cache-control") != "no-store":
         raise Failure(f"{stale}: status {code}, Cache-Control {headers.get('cache-control')!r}, expected no-store")

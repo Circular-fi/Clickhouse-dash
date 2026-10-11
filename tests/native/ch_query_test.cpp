@@ -14,6 +14,7 @@
 
 #include "ch_client_pool.hpp"
 #include "ch_query.hpp"
+#include "sql_params.hpp"
 
 #include <clickhouse/columns/numeric.h>
 #include <clickhouse/columns/string.h>
@@ -383,6 +384,32 @@ void test_a_passed_deadline_or_a_cancel_stops_before_sending(const std::string& 
   CHECK(select_u64(*client, "SELECT toString(9)") == 9);
 }
 
+// A name that a user chose (a database with a quote mark or a backslash) is a value of an IN list, one String parameter each.
+void test_names_go_through_string_parameters_as_they_are(const std::string& uri) {
+  auto pool = std::make_shared<ClickHouseClientPool>(4);
+  auto client = lease(pool, uri);
+  const std::vector<std::string> names = {"plain", "o'brien", "back\\slash", "tab\tx", "new\nline", "say \"hi\"", "100%"};
+  const std::string all =
+      "SELECT toString(count()) FROM (SELECT arrayJoin(['plain', 'o\\'brien', 'back\\\\slash', 'tab\\tx', 'new\\nline', 'say \"hi\"', '100%']) "
+      "AS database) WHERE database IN (";
+  const auto count = [&](const std::vector<std::string>& values) {
+    SqlParams params;
+    const std::string sql = all + params.texts(values) + ")";
+    uint64_t found = 0;
+    ch_select(*client, sql, params.list(), [&](const clickhouse::Block& block) {
+      if (block.GetRowCount()) found = std::stoull(std::string((*block[0]->As<clickhouse::ColumnString>())[0]));
+    });
+    return found;
+  };
+  CHECK(count(names) == names.size());
+  CHECK(count({"o'brien"}) == 1);
+  CHECK(count({"back\\slash"}) == 1);
+  CHECK(count({"tab\tx", "new\nline"}) == 2);
+  CHECK(count({"o'brien' OR '1'='1"}) == 0);  // an SQL tail is one more value, not SQL
+  CHECK(count({"back\\"}) == 0);
+  CHECK(count({}) == 0);  // an empty list matches no row
+}
+
 void test_the_pool_bounds_its_leases(const std::string& uri) {
   auto pool = std::make_shared<ClickHouseClientPool>(4, std::chrono::seconds(60), std::chrono::seconds(15),
                                                      std::chrono::seconds(5), 1, std::chrono::milliseconds(200));
@@ -418,6 +445,7 @@ int main() {
       test_the_scope_settings_reach_clickhouse(uri);
       test_a_passed_deadline_or_a_cancel_stops_before_sending(uri);
       test_the_pool_bounds_its_leases(uri);
+      test_names_go_through_string_parameters_as_they_are(uri);
     } catch (const std::exception& e) {
       ++g_failures;
       std::cerr << "unexpected exception: " << e.what() << std::endl;

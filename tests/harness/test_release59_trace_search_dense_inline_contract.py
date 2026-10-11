@@ -1,6 +1,6 @@
 from pathlib import Path
-
 import modules
+from trace_sources import read_traces, read_unit
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,13 +29,13 @@ def test_strict_trace_ranges_and_selection_only_prefill_pickers():
     assert 'align_buckets' in js
 
 def test_analytics_count_matching_traces_and_dense_quantiles():
-    cpp = read('src/api_traces.cpp')
+    cpp = read_traces()
     js = modules.read_family("app_trace")
     assert 'trace_count_chart' in cpp
-    assert 'choose_trace_quantile_bucket_seconds' in cpp
+    assert 'choose_quantile_bucket_seconds' in cpp
     assert '/ 120' in cpp
     assert '/ 60' in cpp
-    assert 'analytics_end_ms' in cpp and 'bucket_ms - 1' in cpp
+    assert 'range_end_ms' in cpp and 'bucket_ms - 1' in cpp
     assert 'trace_count_chart' in js
     assert 'returned traces' not in js
 

@@ -9,6 +9,7 @@
 // bucket merging and the top-K + "other" folding are documented in
 // docs/metrics.md ("Metrics browser API").
 #include "server.hpp"
+#include "otel_caches.hpp"
 #include "json_parse.hpp"
 
 #include "allowed_objects.hpp"
@@ -23,6 +24,7 @@
 #include "otel_request.hpp"
 #include "json_text.hpp"
 #include "sql_literal.hpp"
+#include "sql_params.hpp"
 
 #include <clickhouse/client.h>
 #include <rapidjson/document.h>
@@ -60,8 +62,6 @@ constexpr int64_t kMaxRangeMs = 90LL * 24 * 60 * 60 * 1000;
 // The window of the catalog when the request names none: the catalog groups every point of its window, so the default is a day.
 constexpr int64_t kCatalogDefaultRangeMs = 24LL * 60 * 60 * 1000;
 constexpr size_t kCatalogLimit = 5000;
-constexpr auto kCatalogTtl = std::chrono::seconds(60);
-constexpr size_t kCatalogCacheMaxEntries = 256;
 // The catalog groups every point of its window: past this many rows read, the scan stops and the counts are
 // estimates (`estimated: true`).
 constexpr uint64_t kCatalogReadRowsCap = 200'000'000;
@@ -232,8 +232,8 @@ std::vector<AttributeFilter> parse_filters(const httplib::Request& req) {
   return out;
 }
 
-// Same key and operator: "=" values become IN (OR), "!=" values NOT IN.
-std::string filters_sql(const std::vector<AttributeFilter>& filters, const std::string& skip_key = {}) {
+// Same key and operator: "=" values become IN (OR), "!=" values NOT IN. The keys and the values are parameters of the statement.
+std::string filters_sql(const std::vector<AttributeFilter>& filters, SqlParams& params, const std::string& skip_key = {}) {
   std::map<std::pair<std::string, std::string>, std::vector<std::string>> grouped;
   for (const auto& f : filters) {
     if (!skip_key.empty() && f.key == skip_key) continue;
@@ -241,12 +241,7 @@ std::string filters_sql(const std::vector<AttributeFilter>& filters, const std::
   }
   std::string out;
   for (const auto& [key_op, values] : grouped) {
-    std::string list;
-    for (size_t i = 0; i < values.size(); ++i) {
-      if (i) list += ", ";
-      list += quote_string(values[i]);
-    }
-    out += " AND Attributes[" + quote_string(key_op.first) + "] " + (key_op.second == "=" ? "IN (" : "NOT IN (") + list + ")";
+    out += " AND Attributes[" + params.text(key_op.first) + "] " + (key_op.second == "=" ? "IN (" : "NOT IN (") + params.texts(values) + ")";
   }
   return out;
 }
@@ -277,18 +272,6 @@ std::shared_ptr<clickhouse::Client> acquire_metrics_client(
   return otel::acquire_client(host, pool, "OTel metrics", std::chrono::seconds(60), error);
 }
 
-// The kind tables of a source, one read per source at a time (single-flight), kept like the catalog. The key comes
-// from the configuration only.
-TtlCache<std::string, std::set<std::string>>& kind_tables_cache() {
-  static TtlCache<std::string, std::set<std::string>> cache([] {
-    TtlCache<std::string, std::set<std::string>>::Options options;
-    options.ttl = kCatalogTtl;
-    options.max_entries = kCatalogCacheMaxEntries;
-    return options;
-  }());
-  return cache;
-}
-
 std::set<std::string> read_existing_kinds(clickhouse::Client& client, const MetricSettings& metrics) {
   std::string names = "(";
   for (size_t i = 0; i < std::size(kKinds); ++i) {
@@ -310,13 +293,13 @@ std::set<std::string> read_existing_kinds(clickhouse::Client& client, const Metr
 }
 
 // Kinds whose table exists (one system.tables read, cached like the catalog).
-std::set<std::string> existing_kinds(clickhouse::Client& client, const HostSpec& host, const MetricSettings& metrics) {
+std::set<std::string> existing_kinds(KindTablesCache& cache, clickhouse::Client& client, const HostSpec& host, const MetricSettings& metrics) {
   const std::string key = host.system_uri + '\x1f' + metrics.database + '\x1f' + metrics.table_prefix;
-  const auto result = kind_tables_cache().get(key, [&](std::set<std::string>& kinds, std::string&, std::string&) {
+  const auto result = cache.get(key, [&](std::set<std::string>& kinds, std::string&, std::string&) {
     kinds = read_existing_kinds(client, metrics);
     return true;
   });
-  return *TtlCache<std::string, std::set<std::string>>::value_or_throw(result);
+  return *KindTablesCache::value_or_throw(result);
 }
 
 std::string kind_table(const MetricSettings& metrics, const std::string& kind) {
@@ -328,9 +311,9 @@ std::string time_predicate(int64_t start_ms, int64_t end_ms) {
          std::to_string(end_ms) + ")";
 }
 
+// `service` and `metric` are the placeholders of the parameters that hold them (SqlParams::text).
 std::string metric_predicate(const std::string& service, const std::string& metric, int64_t start_ms, int64_t end_ms) {
-  return "ServiceName = " + quote_string(service) + " AND MetricName = " + quote_string(metric) + " AND " +
-         time_predicate(start_ms, end_ms);
+  return "ServiceName = " + service + " AND MetricName = " + metric + " AND " + time_predicate(start_ms, end_ms);
 }
 
 // ---------------------------------------------------------------------------
@@ -601,7 +584,8 @@ std::string temporality_name(const MetricInfo& info) {
 }
 
 MetricInfo load_metric_info(clickhouse::Client& client, const std::string& table, const std::string& kind,
-                            const std::string& prewhere, const std::string& where, int64_t* query_ms) {
+                            const std::string& prewhere, const std::string& where, const SqlParams::List& params,
+                            int64_t* query_ms) {
   const bool has_temporality = kind == "sum" || kind == "histogram" || kind == "exponential_histogram";
   const std::string sql =
       "SELECT any(MetricUnit), any(MetricDescription), " +
@@ -614,7 +598,7 @@ MetricInfo load_metric_info(clickhouse::Client& client, const std::string& table
       " FROM " + table + " PREWHERE " + prewhere + " WHERE " + where + kQuerySettings;
   MetricInfo info;
   const auto started = Clock::now();
-  ch_select(client, sql, [&](const clickhouse::Block& block) {
+  ch_select(client, sql, params, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
       info.unit = ch_block_text_at(block, 0, row);
       info.description = ch_block_text_at(block, 1, row);
@@ -692,9 +676,9 @@ bool open_context(const AppConfig& cfg, const std::shared_ptr<ClickHouseClientPo
   return true;
 }
 
-void require_kind_table(clickhouse::Client& client, const HostSpec& host, const MetricSettings& metrics,
+void require_kind_table(KindTablesCache& cache, clickhouse::Client& client, const HostSpec& host, const MetricSettings& metrics,
                         const std::string& kind) {
-  if (!existing_kinds(client, host, metrics).count(kind)) {
+  if (!existing_kinds(cache, client, host, metrics).count(kind)) {
     if (const auto grant = missing_select_grant(client, metrics.database, metrics.table_prefix + "_" + kind)) {
       const auto user = parse_clickhouse_uri(host.system_uri, nullptr);
       throw NotGranted("metrics_table_not_granted", user ? user->user : std::string(), *grant,
@@ -755,7 +739,7 @@ void Server::handle_metrics_catalog(const httplib::Request& req, httplib::Respon
 
         int64_t query_ms = 0;
         const auto kinds_started = Clock::now();
-        const std::set<std::string> kinds = existing_kinds(*client, *host, metrics);
+        const std::set<std::string> kinds = existing_kinds(kind_tables_cache_, *client, *host, metrics);
         query_ms += elapsed_ms(kinds_started);
 
         struct Entry {
@@ -914,9 +898,10 @@ void Server::handle_metrics_attributes(const httplib::Request& req, httplib::Res
   if (!open_context(cfg_, client_pool_, req, res, &ctx)) return;
 
   run_guarded(res, [&] {
-    require_kind_table(*ctx.client, *ctx.host, ctx.host->otel.metrics, kind);
+    require_kind_table(kind_tables_cache_, *ctx.client, *ctx.host, ctx.host->otel.metrics, kind);
     const std::string table = kind_table(ctx.host->otel.metrics, kind);
-    const std::string prewhere = metric_predicate(service, metric, window.start_ms, window.end_ms);
+    SqlParams params;
+    const std::string prewhere = metric_predicate(params.text(service), params.text(metric), window.start_ms, window.end_ms);
     const std::string visibility = service_allowlist_predicate(ctx.host->otel.traces);
     int64_t query_ms = 0;
     rapidjson::StringBuffer sb;
@@ -929,10 +914,10 @@ void Server::handle_metrics_attributes(const httplib::Request& req, httplib::Res
     if (key.empty()) {
       std::vector<std::string> keys;
       const std::string sql = "SELECT DISTINCT toString(arrayJoin(mapKeys(Attributes))) AS k FROM " + table +
-                              " PREWHERE " + prewhere + " WHERE " + visibility + filters_sql(filters) + " LIMIT " +
+                              " PREWHERE " + prewhere + " WHERE " + visibility + filters_sql(filters, params) + " LIMIT " +
                               std::to_string(kAttributeKeyLimit + 1) + kQuerySettings;
       const auto query_started = Clock::now();
-      ch_select(*ctx.client, sql, [&](const clickhouse::Block& block) {
+      ch_select(*ctx.client, sql, params.list(), [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) keys.push_back(ch_block_text_at(block, 0, row));
       });
       query_ms += elapsed_ms(query_started);
@@ -947,12 +932,13 @@ void Server::handle_metrics_attributes(const httplib::Request& req, httplib::Res
     } else {
       if (key.size() > 256) throw BadRequest("key is too long.");
       std::vector<std::pair<std::string, int64_t>> values;
-      const std::string sql = "SELECT v, toString(n) FROM (SELECT Attributes[" + quote_string(key) + "] AS v, count() AS n FROM " +
+      const std::string key_param = params.text(key);
+      const std::string sql = "SELECT v, toString(n) FROM (SELECT Attributes[" + key_param + "] AS v, count() AS n FROM " +
                               table + " PREWHERE " + prewhere + " WHERE " + visibility + " AND mapContains(Attributes, " +
-                              quote_string(key) + ")" + filters_sql(filters, key) + " GROUP BY v ORDER BY n DESC, v LIMIT " +
+                              key_param + ")" + filters_sql(filters, params, key) + " GROUP BY v ORDER BY n DESC, v LIMIT " +
                               std::to_string(kAttributeValueLimit + 1) + ")" + kQuerySettings;
       const auto query_started = Clock::now();
-      ch_select(*ctx.client, sql, [&](const clickhouse::Block& block) {
+      ch_select(*ctx.client, sql, params.list(), [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           values.emplace_back(ch_block_text_at(block, 0, row), text_to_i64(ch_block_text_at(block, 1, row)));
         }
@@ -1010,20 +996,22 @@ void Server::handle_metrics_series(const httplib::Request& req, httplib::Respons
   if (!open_context(cfg_, client_pool_, req, res, &ctx)) return;
 
   run_guarded(res, [&] {
-    require_kind_table(*ctx.client, *ctx.host, ctx.host->otel.metrics, kind);
+    require_kind_table(kind_tables_cache_, *ctx.client, *ctx.host, ctx.host->otel.metrics, kind);
     const std::string table = kind_table(ctx.host->otel.metrics, kind);
     const std::string visibility = service_allowlist_predicate(ctx.host->otel.traces);
-    const std::string where = visibility + filters_sql(filters);
-    const std::string window_prewhere = metric_predicate(service, metric, window.start_ms, window.end_ms);
+    SqlParams params;
+    const std::string where = visibility + filters_sql(filters, params);
+    const std::string service_param = params.text(service), metric_param = params.text(metric);
+    const std::string window_prewhere = metric_predicate(service_param, metric_param, window.start_ms, window.end_ms);
     // Per-series differences need each series' previous point: the scan
     // starts earlier, only points inside the window contribute.
     const int64_t scan_start_ms = std::max<int64_t>(0, window.start_ms - std::max(grid.size_ms, kLagLookbackMinMs));
-    const std::string lag_prewhere = metric_predicate(service, metric, scan_start_ms, window.end_ms);
+    const std::string lag_prewhere = metric_predicate(service_param, metric_param, scan_start_ms, window.end_ms);
     const std::string in_window = "TimeUnix >= fromUnixTimestamp64Milli(" + std::to_string(window.start_ms) + ")";
     const double bucket_seconds = static_cast<double>(grid.size_ms) / 1000.0;
     int64_t query_ms = 0;
 
-    const MetricInfo info = load_metric_info(*ctx.client, table, kind, window_prewhere, where, &query_ms);
+    const MetricInfo info = load_metric_info(*ctx.client, table, kind, window_prewhere, where, params.list(), &query_ms);
     const bool any_cumulative = info.temporality_max >= 2 || kind == "summary";
     const bool all_delta = info.temporality_min == 1 && info.temporality_max == 1;
 
@@ -1065,7 +1053,7 @@ void Server::handle_metrics_series(const httplib::Request& req, httplib::Respons
       group_expr = "arrayStringConcat([";
       for (size_t i = 0; i < group_by.size(); ++i) {
         if (i) group_expr += ", ";
-        group_expr += "Attributes[" + quote_string(group_by[i]) + "]";
+        group_expr += "Attributes[" + params.text(group_by[i]) + "]";
       }
       group_expr += "], char(31))";
     }
@@ -1174,7 +1162,7 @@ void Server::handle_metrics_series(const httplib::Request& req, httplib::Respons
     size_t rows = 0;
     bool truncated_rows = false;
     const auto query_started = Clock::now();
-    ch_select(*ctx.client, sql, [&](const clickhouse::Block& block) {
+    ch_select(*ctx.client, sql, params.list(), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         if (rows >= kMaxSeriesRows) {
           truncated_rows = true;
@@ -1438,16 +1426,18 @@ void Server::handle_metrics_exemplars(const httplib::Request& req, httplib::Resp
   if (!open_context(cfg_, client_pool_, req, res, &ctx)) return;
 
   run_guarded(res, [&] {
-    require_kind_table(*ctx.client, *ctx.host, ctx.host->otel.metrics, kind);
+    require_kind_table(kind_tables_cache_, *ctx.client, *ctx.host, ctx.host->otel.metrics, kind);
     const std::string table = kind_table(ctx.host->otel.metrics, kind);
     const std::string visibility = service_allowlist_predicate(ctx.host->otel.traces);
     const std::string start = "fromUnixTimestamp64Milli(" + std::to_string(window.start_ms) + ")";
     const std::string end = "fromUnixTimestamp64Milli(" + std::to_string(window.end_ms) + ")";
+    SqlParams params;
     const std::string sql =
         "SELECT toString(" + grid.sql("e.1") + ") AS b, toString(toUnixTimestamp64Milli(e.1)), toString(e.2), e.3, e.4, attrs "
         "FROM (SELECT arrayJoin(arrayZip(`Exemplars.TimeUnix`, `Exemplars.Value`, `Exemplars.TraceId`, `Exemplars.SpanId`)) AS e, "
         "toJSONString(Attributes) AS attrs FROM " + table + " PREWHERE " +
-        metric_predicate(service, metric, window.start_ms, window.end_ms) + " WHERE " + visibility + filters_sql(filters) +
+        metric_predicate(params.text(service), params.text(metric), window.start_ms, window.end_ms) + " WHERE " + visibility +
+        filters_sql(filters, params) +
         " AND notEmpty(`Exemplars.TraceId`)) WHERE notEmpty(e.3) AND e.1 >= " + start + " AND e.1 <= " + end +
         " ORDER BY e.2 DESC, e.1 LIMIT " + std::to_string(per_bucket) + " BY b LIMIT " + std::to_string(limit + 1) + kQuerySettings;
 
@@ -1458,7 +1448,7 @@ void Server::handle_metrics_exemplars(const httplib::Request& req, httplib::Resp
     };
     std::vector<Exemplar> exemplars;
     const auto query_started = Clock::now();
-    ch_select(*ctx.client, sql, [&](const clickhouse::Block& block) {
+    ch_select(*ctx.client, sql, params.list(), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
         exemplars.push_back(Exemplar{text_to_i64(ch_block_text_at(block, 1, row)), text_to_double(ch_block_text_at(block, 2, row)),
                                      ch_block_text_at(block, 3, row), ch_block_text_at(block, 4, row),

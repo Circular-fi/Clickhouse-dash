@@ -2,6 +2,7 @@
 (time slices, consistent trace sampling, hashed parent join, time budget) and
 its page wiring (tab registry, ?tab= in the URL, search hand-off)."""
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import modules
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,24 +20,31 @@ def handler(api: str, name: str) -> str:
 
 def test_service_map_sql_is_bounded_sampled_and_allowlisted():
     api = read("src/api_traces.cpp")
-    body = handler(api, "handle_traces_service_map")
+    adapter = handler(api, "handle_traces_service_map")
+    sql = read_unit("trace_sql.cpp")
+    body = sql[sql.index("ServiceMapSampling service_map_sampling"):] + read_unit("trace_analytics.cpp")
     assert 'http_.Get("/api/traces/service_map"' in read("src/server.cpp")
     assert "void handle_traces_service_map(" in read("src/server.hpp")
     # Same filters, validation and allowlist as search.
-    window = api[api.index("bool trace_window_request("):api.index("void Server::handle_traces_search")]
-    assert "trace_window_request(cfg_, client_pool_, req, res, &scope, /*analytics_required=*/false)" in body
-    for text in ("feature_param_rejected(traces, req", "trace_time_range(traces, req", "parse_trace_filters(req, &out->filters",
-                 "trace_filters_sql(*out->client, *out->host, traces, out->filters", "service_allowlist_predicate(traces)"):
+    assert "trace::parse_service_map(req, route.host->otel.traces, &request, &error)" in adapter
+    request = read_unit("trace_request.cpp")
+    assert "parse_window(req, traces, /*analytics_required=*/false, &out->window, error)" in request[request.index("bool parse_service_map"):]
+    window = request[request.index("bool parse_window"):request.index("bool parse_analytics")]
+    for text in ("feature_param_rejected(traces, req", "trace_time_range(traces, req", "parse_trace_filters(req, &out->filters"):
         assert text in window, text
+    service = read_unit("trace_service.cpp")
+    for text in ("tag_filters_sql(request.filters.tags", "service_allowlist_predicate(traces)"):
+        assert text in service, text
     # Both join sides read the same allowlisted, sliced, sampled scan.
-    assert 'const std::string scan = " FROM " + table + " PREWHERE " + time_predicate + sample_sql + " WHERE " + visibility;' in body
+    assert 'const std::string scan = " FROM " + scope.table + " PREWHERE " + sampling.time_predicate + sample_sql + " WHERE " + scope.visibility;' in body
     assert body.count("+ side +") == 2
     # Budgets: EXPLAIN ESTIMATE rows -> time slices; consistent trace sampling.
     assert '"EXPLAIN ESTIMATE SELECT 1 FROM "' in body
-    assert "constexpr uint64_t kServiceMapReadRows = 12000000;" in api
-    assert "constexpr uint64_t kServiceMapJoinRows = 3000000;" in api
-    assert "constexpr int kServiceMapMaxSlices = 48;" in api
-    assert '" AND cityHash64(TraceId) % " + std::to_string(trace_factor) + " = 0"' in body
+    header = read_unit("trace_sql.hpp")
+    assert "constexpr uint64_t kServiceMapReadRows = 12000000;" in header
+    assert "constexpr uint64_t kServiceMapJoinRows = 3000000;" in header
+    assert "constexpr int kServiceMapMaxSlices = 48;" in header
+    assert '" AND cityHash64(TraceId) % " + std::to_string(sampling.trace_factor) + " = 0"' in body
     assert "max_execution_time = \" + std::to_string(kServiceMapTimeBudgetSeconds)" in body
     # Parent lookup on a 64-bit key, one parent per child, both result levels in one query.
     assert "if(ParentSpanId = '', 0, cityHash64(TraceId, ParentSpanId)) AS pk" in body
@@ -44,8 +52,9 @@ def test_service_map_sql_is_bounded_sampled_and_allowlisted():
     assert "ANY LEFT JOIN" in body
     assert "GROUP BY GROUPING SETS ((if(p.parent_service != c.service, p.parent_service, '') AS caller, service), (service))" in body
     # The estimate is reported.
+    json = read_unit("trace_json.cpp")
     for key in ('w.Key("sampled")', 'w.Key("sample_factor")', 'w.Key("trace_factor")', 'w.Key("time_coverage")', 'w.Key("slices")'):
-        assert key in body, key
+        assert key in json, key
 
 
 def test_service_map_tab_is_registered_and_lives_in_the_url():

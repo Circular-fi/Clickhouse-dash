@@ -2,6 +2,7 @@
 import modules
 import json
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,8 +36,8 @@ def test_routes_are_registered_only_when_metrics_are_enabled():
 def test_shared_service_allowlist_header():
     header = read("src/otel_allowlist.hpp")
     assert "inline std::string service_allowlist_predicate(const TraceSettings& cfg) {" in header
-    assert '#include "otel_allowlist.hpp"' in read("src/api_traces.cpp")
-    assert "std::string service_allowlist_predicate(" not in read("src/api_traces.cpp")
+    assert '#include "otel_allowlist.hpp"' in read_unit("trace_service.cpp")
+    assert "std::string service_allowlist_predicate(" not in read_traces()
     api = read("src/api_metrics.cpp")
     assert '#include "otel_allowlist.hpp"' in api
     assert api.count("service_allowlist_predicate(host->otel.traces)") + api.count("service_allowlist_predicate(ctx.host->otel.traces)") >= 4
@@ -49,9 +50,13 @@ def test_queries_use_the_primary_key_prefix_and_bounded_windows():
     assert '" PREWHERE " + window_sql + " WHERE " +' in api
     assert '" GROUP BY ServiceName, MetricName"' in api
     assert "constexpr size_t kCatalogLimit = 5000;" in api
-    assert "constexpr auto kCatalogTtl = std::chrono::seconds(60);" in api
+    assert "constexpr auto kCatalogTtl = std::chrono::seconds(60);" in read("src/otel_caches.hpp")
     # Series / attributes / exemplars: ServiceName + MetricName + TimeUnix.
-    assert '"ServiceName = " + quote_string(service) + " AND MetricName = " + quote_string(metric) + " AND " +' in api
+    # The service, the metric and the attribute values are query parameters ({pN:String}), never inside the SQL text.
+    assert '"ServiceName = " + service + " AND MetricName = " + metric + " AND " + time_predicate(start_ms, end_ms);' in api
+    assert "metric_predicate(params.text(service), params.text(metric)," in api
+    assert '(key_op.second == "=" ? "IN (" : "NOT IN (") + params.texts(values) + ")"' in api
+    assert "quote_string(service)" not in api and "quote_string(values" not in api and "quote_string(key)" not in api
     assert '"TimeUnix >= fromUnixTimestamp64Milli("' in api
     assert 'constexpr const char* kQuerySettings = " SETTINGS max_execution_time = 30";' in api
     assert "DISTINCT toString(arrayJoin(mapKeys(Attributes)))" in api

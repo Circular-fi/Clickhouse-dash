@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -108,12 +109,12 @@ def test_the_stop_drains_streams_exports_and_query_threads():
 
 
 def test_every_span_serialization_hides_a_hidden_parent():
-    traces = read("src/api_traces.cpp")
+    traces = read_traces()
     writes = traces.count('w.Key("parent_span_id");')
     assert writes == 4
     assert len(re.findall(r'const std::string_view parent = visible_parent\(', traces)) == 3
     assert 'span.parent_span_id = std::string(visible_parent(span.parent_span_id, visibility == "1", &visible_span_ids));' in traces
-    assert 'w.Uint64(visibility == "1" ? row.missing_parents : 0);' in traces
+    assert 'w.Uint64(answer.all_services ? row.missing_parents : 0);' in read_unit("trace_json.cpp")
     assert '(all_services ? "" : " AND has(visible_targets, s)")' in traces
 
 

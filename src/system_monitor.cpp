@@ -7,6 +7,7 @@
 #include "ch_query.hpp"
 #include "facet_limits.hpp"
 #include "sql_literal.hpp"
+#include "sql_params.hpp"
 
 #include <clickhouse/exceptions.h>
 
@@ -491,7 +492,7 @@ bool load_system_monitor_overview(
       const std::string sql =
           "SELECT toString(database), toString(`table`), toString(is_readonly), toString(is_session_expired), "
           "toString(absolute_delay), toString(queue_size), toString(inserts_in_queue), toString(merges_in_queue), "
-          "toString(future_parts), toString(parts_to_check) FROM system.replicas WHERE database IN {databases:Array(String)} LIMIT " + std::to_string(kMonitorReplicaRowLimit + 1) +
+          "toString(future_parts), toString(parts_to_check) FROM system.replicas WHERE database IN (" + monitor_databases_list(visibility.databases()) + ") LIMIT " + std::to_string(kMonitorReplicaRowLimit + 1) +
           monitor_settings_sql(5, 100000, kMonitorReplicaRowLimit + 1);
       // Read first, then checked against the runner's boundary (which may ask ClickHouse as the runner: never
       // inside the callback of another read).
@@ -1416,11 +1417,18 @@ std::string monitor_storage_policies_sql(const MonitorCapabilities& caps) {
          std::to_string(kMonitorPolicyRowLimit + 1) + monitor_settings_sql(kDisksTimeBudgetSeconds, 100000, kMonitorPolicyRowLimit + 1);
 }
 
-ChParams monitor_databases_params(const std::vector<std::string>& databases) {
-  return {{"databases", sql::quote_array(databases)}};
+std::string monitor_databases_list(const std::vector<std::string>& databases) {
+  SqlParams params;
+  return params.texts(databases);
 }
 
-std::string monitor_disk_usage_sql() {
+ChParams monitor_databases_params(const std::vector<std::string>& databases) {
+  SqlParams params;
+  params.texts(databases);
+  return params.list();
+}
+
+std::string monitor_disk_usage_sql(const std::string& databases_list) {
   // The disk's totals over every listed database are window functions: they
   // run after the GROUP BY and before the LIMIT, so a cut list still knows
   // what it leaves out.
@@ -1428,7 +1436,7 @@ std::string monitor_disk_usage_sql() {
          "toString(count()), toString(countIf(part_type = 'Compact')), "
          "toString(sum(sum(bytes_on_disk)) OVER (PARTITION BY disk_name)), toString(sum(count()) OVER (PARTITION BY disk_name)), "
          "toString(count() OVER (PARTITION BY disk_name)) "
-         "FROM system.parts WHERE active AND database IN {databases:Array(String)}"
+         "FROM system.parts WHERE active AND database IN (" + databases_list + ")"
          " GROUP BY disk_name, database ORDER BY sum(bytes_on_disk) DESC, disk_name, database LIMIT " +
          std::to_string(kMonitorDiskUsageRowLimit + 1) +
          monitor_settings_sql(kDiskUsageTimeBudgetSeconds, kDiskUsageReadRowsCap, kMonitorDiskUsageRowLimit + 1);
@@ -1523,7 +1531,7 @@ bool load_system_monitor_disks(clickhouse::Client& system, AclView& runner_acl, 
   try {
     const std::vector<std::string> databases = runner_acl.databases();
     if (!databases.empty()) {
-      ch_select(system, monitor_disk_usage_sql(), monitor_databases_params(databases), [&](const clickhouse::Block& block) {
+      ch_select(system, monitor_disk_usage_sql(monitor_databases_list(databases)), monitor_databases_params(databases), [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
           if (out.usage.size() >= kMonitorDiskUsageRowLimit) {
             out.usage_truncated = true;
@@ -1634,14 +1642,14 @@ std::string monitor_disk_growth_sql(const MonitorSeriesWindow& window, const std
          monitor_settings_sql(kGrowthTimeBudgetSeconds, kGrowthReadRowsCap, rows);
 }
 
-std::string monitor_disk_written_sql(const MonitorSeriesWindow& window) {
+std::string monitor_disk_written_sql(const MonitorSeriesWindow& window, const std::string& databases_list) {
   const uint64_t rows = series_bucket_count(window) + 2;
   // New parts (inserts) and part moves (TTL and policy moves) of the
   // runner-visible databases, summed over them: no database is named.
   return "SELECT " + growth_bucket_sql(window) +
          ", toFloat64(sumIf(size_in_bytes, event_type = 'NewPart')), toFloat64(sumIf(size_in_bytes, event_type = 'MovePart')), "
          "toFloat64(countIf(event_type = 'MovePart')) FROM system.part_log WHERE " + series_time_predicate(window) +
-         " AND database IN {databases:Array(String)} AND event_type IN ('NewPart', 'MovePart') GROUP BY t ORDER BY t" +
+         " AND database IN (" + databases_list + ") AND event_type IN ('NewPart', 'MovePart') GROUP BY t ORDER BY t" +
          monitor_settings_sql(kGrowthTimeBudgetSeconds, kGrowthReadRowsCap, rows);
 }
 
@@ -1753,7 +1761,7 @@ void load_system_monitor_disk_growth(clickhouse::Client& system, AclView& runner
         const std::vector<std::string> databases = runner_acl.databases();
         for (const char* name : kNames) out.series[name].assign(count, std::nan(""));
         if (!databases.empty()) {
-          read_growth(system, monitor_disk_written_sql(window), window, count, source,
+          read_growth(system, monitor_disk_written_sql(window, monitor_databases_list(databases)), window, count, source,
                       [&](const clickhouse::Block& block, size_t row, size_t index) {
                         // Columns: t, written, moved, moves.
                         for (size_t k = 0; k < 3; ++k) out.series[kNames[k]][index] = f64_at(block, k + 1, row);

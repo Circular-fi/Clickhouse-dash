@@ -1,5 +1,6 @@
 """Logs in the trace detail page: GET /api/traces/logs and its UI hooks."""
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import config_keys
 import modules
 
@@ -26,9 +27,11 @@ def test_trace_logs_query_is_bounded_on_every_side():
     assert '" PREWHERE " + time_range' in source
     assert '"TimestampTime BETWEEN toDateTime("' in source
     assert '"Timestamp BETWEEN toDateTime64("' in source
-    assert 'where += "ServiceName IN ("' in source
-    assert 'where += "TraceId = " + allowlist_quote_string(trace_id);' in source
-    assert 'where += " AND SpanId = " + allowlist_quote_string(span_id);' in source
+    # The services, the trace id and the span id are query parameters, never inside the SQL text.
+    assert 'where += "ServiceName IN (" + params.texts(services) + ") AND ";' in source
+    assert 'where += "TraceId = " + params.text(trace_id);' in source
+    assert 'where += " AND SpanId = " + params.text(span_id);' in source
+    assert "params.list()" in source
     assert 'where += " AND " + otel::service_allowlist_predicate(host->otel.traces);' in source
     assert '" ORDER BY Timestamp LIMIT " + std::to_string(limit + 1)' in source
     assert "max_execution_time = " in source
@@ -40,7 +43,8 @@ def test_trace_logs_query_is_bounded_on_every_side():
     # Exact timestamps as text; Map / JSON attributes detected per table.
     assert "toString(toUnixTimestamp64Nano(Timestamp))" in source
     assert 'starts_with(type, "Map(")' in source and 'starts_with(type, "JSON")' in source
-    assert "kLogColumnsCacheTtl = std::chrono::seconds(60)" in source
+    assert "kLogColumnsCacheTtl = std::chrono::seconds(60)" in read("src/otel_caches.hpp")
+    assert "log_columns_cache_" in source
     # Disabled / missing / mismatched sources answer 200 with a reason, never 500.
     for code in ("logs_disabled", "logs_table_missing", "logs_schema_mismatch", "logs_trace_correlation_unavailable"):
         assert f'"{code}"' in source, code
@@ -50,12 +54,12 @@ def test_trace_logs_query_is_bounded_on_every_side():
 
 def test_service_allowlist_predicate_is_shared_by_traces_and_logs():
     allowlist = read("src/otel_allowlist.hpp")
-    traces = read("src/api_traces.cpp")
+    traces = read_traces()
     logs = read("src/api_trace_logs.cpp")
     assert "inline std::string service_allowlist_predicate(const std::vector<std::string>& allowlist)" in allowlist
-    assert "using otel::service_allowlist_predicate;" in traces
+    assert "otel::service_allowlist_predicate(traces)" in traces
     assert "std::string service_pattern_predicate(" not in traces
-    assert '#include "otel_allowlist.hpp"' in traces and '#include "otel_allowlist.hpp"' in logs
+    assert '#include "otel_allowlist.hpp"' in read_unit("trace_service.cpp") and '#include "otel_allowlist.hpp"' in logs
 
 
 def test_trace_logs_config_keys():

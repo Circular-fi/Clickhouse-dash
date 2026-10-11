@@ -1,6 +1,6 @@
 from pathlib import Path
-
 import modules
+from trace_sources import read_traces, read_unit
 import css_sources
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,8 +36,8 @@ def test_trace_graphs_have_hover_tooltips_and_one_minute_floor():
     assert 'bucketMs, bucketAlign: "center",' in js
     assert 'bucketMs: qBucketMs, bucketAlign: "center",' in js
     assert "pickTooltip: (hit) => {" in js
-    assert 'range_ms / 1000 / 60' in cpp
-    assert 'range_ms / 1000 / 120' in cpp
+    assert 'range_ms / 1000 / 60' in read_traces()
+    assert 'range_ms / 1000 / 120' in read_traces()
 
 def test_span_inspector_preview_table_tint_and_resizable_waterfall():
     js = modules.read_family("app_trace")

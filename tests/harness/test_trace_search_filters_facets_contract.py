@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import modules
 import css_sources
 
@@ -10,13 +11,15 @@ def read(rel):
 
 
 def test_tag_filters_are_parsed_server_side_and_quoted():
-    cpp = read("src/api_traces.cpp")
-    parse = cpp[cpp.index("bool parse_trace_filters"):cpp.index("struct AttributeColumns")]
+    cpp = read_traces()
+    request_unit = read_unit("trace_request.cpp")
+    parse = request_unit[request_unit.index("bool parse_trace_filters"):request_unit.index("bool parse_window")]
     for param in ('"tag", TagOp::Eq', '"tag_not", TagOp::Ne', '"tag_exists", TagOp::Exists', '"tag_missing", TagOp::Missing',
                   '"service_not"', '"operation_not"', '"status_not"'):
         assert param in parse
     assert "kMaxTagFilters" in parse and "kMaxTagKeyBytes" in parse
-    tags = cpp[cpp.index("bool tag_filters_sql"):cpp.index("std::string span_filters_sql")]
+    filters_unit = read_unit("trace_filters.cpp")
+    tags = filters_unit[filters_unit.index("bool tag_filters_sql"):filters_unit.index("std::string span_filters_sql")]
     # Values reach SQL only through quote_string; one key's values are ORed.
     assert "quote_string(group.key)" in tags
     assert "map_values_predicate(c, group.key, group.eq)" in tags
@@ -26,19 +29,21 @@ def test_tag_filters_are_parsed_server_side_and_quoted():
 
 
 def test_facet_queries_are_capped_allowlisted_and_cached():
-    cpp = read("src/api_traces.cpp")
+    cpp = read_traces()
     limits = read("src/facet_limits.hpp")
     server = read("src/server.cpp")
     assert '"/api/traces/facets"' in server and '"/api/traces/facet_values"' in server
-    facets = cpp[cpp.index("void Server::handle_traces_facets"):cpp.index("// What the routes that read a window of spans")]
+    sql = read_unit("trace_facets.cpp")
+    service = read_unit("trace_service.cpp")
+    facets = service[service.index("TraceService::facet_keys"):service.index("TraceService::trace_detail")]
     assert facets.count("service_allowlist_predicate(traces)") == 2
-    assert facets.count("std::to_string(kFacetSampleRows)") == 2
-    assert "SpanAttributes.keys AS sk" in facets and "ResourceAttributes.keys AS rk" in facets
-    assert "facet_settings_sql(read_cap, false)" in facets and "read_rows_limit_param(req, kFacetReadRowsCap)" in facets
-    assert "facet_settings_sql(read_cap, true)" in facets
-    assert "&key_scope, &key" in facets  # a facet's values ignore its own filters
+    assert sql.count("std::to_string(kFacetSampleRows)") == 2
+    assert "SpanAttributes.keys AS sk" in sql and "ResourceAttributes.keys AS rk" in sql
+    assert "facet_settings_sql(read_cap, false)" in sql and "read_rows_limit_param(req, kFacetReadRowsCap)" in read_unit("trace_request.cpp")
+    assert "facet_settings_sql(read_cap, true)" in sql
+    assert "&request.key_scope, &request.key" in facets  # a facet's values ignore its own filters
     # One set of caps for the trace and log facets (facet_limits.hpp).
-    assert '#include "facet_limits.hpp"' in cpp and "std::string facet_settings_sql" not in cpp
+    assert '#include "facet_limits.hpp"' in read_unit("trace_facets.hpp") and "std::string facet_settings_sql" not in cpp
     settings = limits[limits.index("inline std::string facet_settings_sql"):limits.index("inline bool timed_out")]
     for fragment in ("timeout_overflow_mode = 'break'", "max_rows_to_read = ", "read_overflow_mode = 'break'",
                      "max_rows_to_group_by = ", "group_by_overflow_mode = 'any'", "max_execution_time = "):
@@ -46,16 +51,17 @@ def test_facet_queries_are_capped_allowlisted_and_cached():
     assert "constexpr uint64_t kFacetTtlMs = 60 * 1000;" in limits
     # Server-owned caches (single-flight); the client's text enters the keys as a digest, and a value keeps the served
     # keys only (kFacetMaxKeys + 1, ordered and cut in SQL too).
-    assert "trace_facet_keys_cache_.get(" in facets and "trace_facet_values_cache_.get(" in facets
-    assert "sha256_hex(span_filters)" in facets and "sha256_hex(key + '\\0' + span_filters)" in facets
-    assert '" ORDER BY t.3 DESC, t.2 ASC, t.1 DESC LIMIT " + std::to_string(kFacetMaxKeys + 1)' in facets
-    assert "if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);" in facets
+    assert "facet_keys_.get(" in facets and "facet_values_.get(" in facets
+    assert "trace_facet_keys_cache_" in read("src/server.hpp") and "trace_facet_values_cache_" in read("src/server.hpp")
+    assert "sha256_hex(span_filters)" in facets and "sha256_hex(request.key + '\\0' + span_filters)" in facets
+    assert '" ORDER BY t.3 DESC, t.2 ASC, t.1 DESC LIMIT " + std::to_string(kFacetMaxKeys + 1)' in sql
+    assert "if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);" in sql
     # Estimated when a bound stopped the scan (the read cap reached, the
     # sample full, the time budget), never from total_rows_to_read, which
     # counts the granules the skip indexes drop afterwards.
     assert "bool capped(uint64_t read_rows_cap) const { return read_rows_cap > 0 && read_rows >= read_rows_cap; }" in limits
     assert "partial()" not in cpp and "partial()" not in limits
-    assert "value.sampled_spans >= kFacetSampleRows || read.capped(read_cap) || value.timed_out" in cpp
+    assert "value.sampled_spans >= kFacetSampleRows || read.capped(read_cap) || value.timed_out" in sql
     assert 'w.Key("estimated")' in cpp
 
 
@@ -97,11 +103,13 @@ def test_logs_fields_panel_reuses_the_facets_panel_and_the_trace_caps():
     assert facets.count("std::to_string(kFacetSampleRows)") == 2
     assert "facet_settings_sql(kFacetReadRowsCap, false)" in facets and "facet_settings_sql(kFacetReadRowsCap, true)" in facets
     assert "log_facet_keys_cache_.get(" in facets and "log_facet_values_cache_.get(" in facets
-    assert "sha256_hex(r.query.where)" in facets and "sha256_hex(key + '\\0' + r.query.where)" in facets
+    # The values of the filters are query parameters: they are part of the key of the cache with the text of the filters.
+    assert "sha256_hex(r.query.where + '\\0' + r.query.params.key())" in facets
+    assert "sha256_hex(key + '\\0' + r.query.where + '\\0' + r.query.params.key())" in facets
     assert "if (value.keys.size() > kFacetMaxKeys + 1) value.keys.resize(kFacetMaxKeys + 1);" in facets
     assert "without_own_filters(req, scope, key)" in facets  # a field's values ignore its own filters
     assert "facet_column_known(key)" in facets  # a column facet names a known column only
-    assert "quote(key)" in facets and "quote_ident(key)" in facets
+    assert "params.text(key)" in facets and "quote_ident(key)" in facets
     js = read("src/static/app_logs.js")
     html = read("src/static/logs.html")
     assert "fields = facetPanel.create({" in js and 'api.getLogs("facets"' in js and 'api.getLogs("facet_values"' in js

@@ -2,6 +2,7 @@
 linked-from lookups, surrounding context) keep their bounded, allowlisted SQL
 and their configuration and page wiring."""
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import modules
 import re
 import config_keys
@@ -23,34 +24,38 @@ def test_linked_from_and_context_sql_is_bounded_and_allowlisted():
     api = read("src/api_traces.cpp")
     server = read("src/server.cpp")
     assert '"/api/traces/linked_from"' in server and '"/api/traces/context"' in server
+    sql = read_unit("trace_sql.cpp")
+    service = read_unit("trace_service.cpp")
 
-    linked = handler(api, "handle_traces_linked_from")
+    linked_sql = sql[sql.index("std::string linked_from_sql"):sql.index("std::string context_filter_sql")]
+    linked = service[service.index("TraceService::linked_from"):service.index("TraceService::context")]
     assert "service_allowlist_predicate(traces)" in linked
-    assert "trace_time_predicate(lo_ms, hi_ms)" in linked
+    assert "time_predicate(lo_ms, hi_ms)" in linked_sql
     assert "linked_from_margin_minutes" in linked
-    assert 'PREWHERE has(Links.TraceId, trace)' in linked
-    assert "arrayExists((t, s) -> " in linked
-    assert "TraceId != trace" in linked
-    assert "LIMIT \" + std::to_string(kLinkedFromLimit + 1)" in linked
-    assert "max_execution_time" in linked
+    assert 'PREWHERE has(Links.TraceId, trace)' in linked_sql
+    assert "arrayExists((t, s) -> " in linked_sql
+    assert "TraceId != trace" in linked_sql
+    assert "LIMIT \" + std::to_string(kLinkedFromLimit + 1)" in linked_sql
+    assert "max_execution_time" in linked_sql
     assert "features.links" in linked
     assert "max_lookback_minutes" in linked
 
-    context = handler(api, "handle_traces_context")
+    context_sql = sql[sql.index("std::string context_filter_sql"):sql.index("// ---- the span search ----")]
+    context = service[service.index("TraceService::context"):service.index("TraceService::spans")]
     assert "service_allowlist_predicate(traces)" in context
-    assert "Timestamp >= \" + ns_time(lo_ns) + \" AND Timestamp <= \" + ns_time(hi_ns)" in context
-    assert "kContextWindowsMs" in context
-    assert "max_execution_time" in context
-    assert "int_param(req, \"limit\", 50, 1, 200)" in context
-    assert "ORDER BY Timestamp DESC, SpanId DESC" in context and "ORDER BY Timestamp ASC, SpanId ASC" in context
+    assert "Timestamp >= \" + ns_time(lo_ns) + \" AND Timestamp <= \" + ns_time(hi_ns)" in context_sql
+    assert "kContextWindowsMs" in read_unit("trace_request.cpp")
+    assert "max_execution_time" in context_sql
+    assert "int_param(req, \"limit\", 50, 1, 200)" in read_unit("trace_request.cpp")
+    assert "ORDER BY Timestamp DESC, SpanId DESC" in context_sql and "ORDER BY Timestamp ASC, SpanId ASC" in context_sql
     assert "features.resource_attributes" in context and "features.span_attributes" in context
-    assert re.search(r"kContextWindowsMs\[\] = \{1000, 10000, 60000, 300000\}", api)
+    assert re.search(r"kContextWindowsMs\[\] = \{1000, 10000, 60000, 300000\}", read_unit("trace_sql.hpp"))
 
 
 def test_trace_insight_settings_are_configured_validated_and_documented():
     header = read("src/otel_settings.hpp")
     config = read("src/config.cpp")
-    api = read("src/api_traces.cpp")
+    api = read_traces()
     example = read("config.example.hcl")
     docs = read("docs/traces.md")
     assert "highlighted_attributes" in header and "linked_from_margin_minutes = 60" in header

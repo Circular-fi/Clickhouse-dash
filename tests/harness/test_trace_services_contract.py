@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 import modules
 import css_sources
 
@@ -13,26 +14,34 @@ def test_services_endpoints_are_routed_bounded_and_allowlisted():
     server = read("src/server.cpp")
     cpp = read("src/api_traces.cpp")
     assert '"/api/traces/services"' in server and '"/api/traces/services/db"' in server
-    services = cpp[cpp.index("void Server::handle_traces_services("):cpp.index("void Server::handle_traces_services_db(")]
-    db = cpp[cpp.index("void Server::handle_traces_services_db("):cpp.index("// Spans of OTHER traces whose Links")]
+    assert "trace_service_.services(" in cpp and "trace_service_.services_db(" in cpp
+    sql = read_unit("trace_sql.cpp")
+    header = read_unit("trace_sql.hpp")
+    run = read_unit("trace_services.cpp")
+    service = read_unit("trace_service.cpp")
+    services = sql[sql.index("std::string services_sql"):sql.index("std::string services_slowest_sql")]
+    db = sql[sql.index("std::string services_db_sql"):]
     # Entry spans: Server / Consumer in both spellings, or root spans.
-    assert "SpanKind IN ('Server', 'Consumer', 'SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = ''" in cpp
+    assert "SpanKind IN ('Server', 'Consumer', 'SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = ''" in header
     assert "quantilesTDigestState(0.5, 0.95, 0.99)(Duration)" in services
     assert "GROUP BY GROUPING SETS ((svc), (svc, b), (svc, op))" in services
-    assert "services_settings_sql()" in services and "estimate_window_rows" in services
-    assert "service_allowlist_predicate(traces)" in services and "service_allowlist_predicate(traces)" in db
-    assert "ResourceAttributes['service.version']" in services
-    assert "facet_settings_sql(kServicesReleaseReadRowsCap, true)" in services
+    assert "services_settings_sql()" in services and "estimate_window_rows" in run
+    # One allowlist for the two routes: the query that they share (open_services).
+    assert service[service.index("TraceService::open_services"):service.index("TraceService::services(")].count("service_allowlist_predicate(traces)") == 1
+    assert "ResourceAttributes['service.version']" in sql
+    assert "facet_settings_sql(kServicesReleaseReadRowsCap, true)" in sql
     assert "coalesce(nullif(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement'])" in db
     assert "facet_settings_sql(kServicesDbReadRowsCap, true)" in db
-    settings = cpp[cpp.index("std::string services_settings_sql"):cpp.index("struct ServiceStats")]
+    settings = sql[sql.index("std::string services_settings_sql"):sql.index("std::string services_from")]
     for fragment in ("max_execution_time = ", "timeout_overflow_mode = 'break'", "max_rows_to_group_by = ", "group_by_overflow_mode = 'any'"):
         assert fragment in settings
     # Large windows are sampled by time, never silently truncated.
-    assert "constexpr uint64_t kServicesExactRows = 150000000;" in cpp
-    assert 'w.Key("estimated"); w.Bool(window.sampled);' in services
-    assert 'w.Key("partial"); w.Bool(partial);' in services
-    assert "traces.analytics" in cpp[cpp.index("bool services_scope"):cpp.index("struct ServicesWindow")]
+    assert "constexpr uint64_t kServicesExactRows = 150000000;" in header
+    json = read_unit("trace_json.cpp")
+    assert 'w.Key("estimated"); w.Bool(out.window.sampled);' in json
+    assert 'w.Key("partial"); w.Bool(out.partial);' in json
+    request = read_unit("trace_request.cpp")
+    assert "traces.analytics" in request[request.index("bool parse_services"):request.index("bool parse_prefill")]
 
 
 def test_traces_tabs_registry_and_services_view_are_wired():

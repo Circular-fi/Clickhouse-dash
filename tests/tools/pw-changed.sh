@@ -52,7 +52,7 @@ specs_for() {
       grep -l "helpers/$(basename "$1")" "$specs_dir"/*.spec.js | xargs -r -n1 basename | sed 's/\.spec\.js$//' ;;
     tests/frontend/playwright.config.js|tests/frontend/package.json|tests/Dockerfile.tests) echo ALL ;;
     src/static/app_trace_heatmap.js) echo trace-heatmap ;;
-    src/api_traces.cpp) echo trace-heatmap trace-insights trace-search-filters trace-services trace-spans trace-views functional ;;
+    src/api_traces.cpp|src/trace_*.cpp|src/trace_*.hpp) echo trace-heatmap trace-insights trace-search-filters trace-services trace-spans trace-views functional ;;
     src/static/app_trace_insights.js) echo trace-insights ;;
     src/static/app_trace_logs.js|src/api_trace_logs.cpp) echo trace-logs ;;
     src/static/app_trace_map.js) echo trace-service-map ;;

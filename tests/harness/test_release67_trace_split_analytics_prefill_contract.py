@@ -1,6 +1,6 @@
 from pathlib import Path
-
 import modules
+from trace_sources import read_traces, read_unit
 import css_sources
 import config_keys
 
@@ -13,7 +13,7 @@ def test_trace_analytics_can_be_disabled_and_has_own_route():
     cfg = read("src/config.cpp")
     server_h = read("src/server.hpp")
     server = read("src/server.cpp")
-    cpp = read("src/api_traces.cpp")
+    cpp = read_traces()
     example = read("config.example.hcl")
     assert "bool analytics = false;" in read("src/otel_settings.hpp")
     assert config_keys.row("observability.traces", "analytics")["default"] == "false"

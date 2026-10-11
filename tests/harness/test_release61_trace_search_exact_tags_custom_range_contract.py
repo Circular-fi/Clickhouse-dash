@@ -1,4 +1,5 @@
 from pathlib import Path
+from trace_sources import read_traces, read_unit
 
 import modules
 
@@ -35,6 +36,7 @@ def test_tag_filter_is_free_form_and_exact_across_attribute_maps():
     assert 'return { scope: "any", rest: raw };' in read("src/static/app_trace_search.js")
     assert "function currentTag()" in ui
     # No scope prefix (and the legacy tag_scope=any) searches both maps.
+    cpp = read_traces()
     assert 'tag_scope != "any"' in cpp and 'return "any";' in cpp
     assert 'group.scope != "resource"' in cpp and 'group.scope != "span"' in cpp
     assert '"SpanAttributes"' in cpp and '"ResourceAttributes"' in cpp

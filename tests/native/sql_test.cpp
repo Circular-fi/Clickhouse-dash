@@ -10,6 +10,7 @@
 #include "mcp_sql.hpp"
 #include "sql_lexer.hpp"
 #include "sql_literal.hpp"
+#include "sql_params.hpp"
 #include "sql_scan.hpp"
 #include "sql_structure.hpp"
 #include "user_sql_policy.hpp"
@@ -80,6 +81,41 @@ std::string dump(const std::vector<std::string>& items) {
   std::string out = "[";
   for (const auto& item : items) out += (out.size() > 1 ? ", " : "") + dump(item);
   return out + "]";
+}
+
+// ---- sql_params.hpp ----
+
+void test_params() {
+  SqlParams params;
+  CHECK(params.list().empty());
+  CHECK_EQ(params.key(), std::string());
+  // The value stays out of the text: only the placeholder is written, and the value is kept as it is.
+  CHECK_EQ(params.text("o'rei\\lly"), std::string("{p1:String}"));
+  CHECK_EQ(params.texts({"a", "b'c"}), std::string("{p2:String}, {p3:String}"));
+  CHECK_EQ(params.texts({}), std::string("''"));
+  CHECK_EQ(params.list().size(), static_cast<size_t>(3));
+  CHECK_EQ(params.list()[0].first, std::string("p1"));
+  CHECK_EQ(params.list()[0].second, std::string("o'rei\\lly"));
+  CHECK_EQ(params.list()[1].second, std::string("a"));
+  CHECK_EQ(params.list()[2].second, std::string("b'c"));
+  // A copy goes on from the same number, so a route can add to the parameters of its filters.
+  SqlParams copy = params;
+  CHECK_EQ(copy.text("x"), std::string("{p4:String}"));
+  CHECK_EQ(params.list().size(), static_cast<size_t>(3));
+  // The key tells two requests with the same text and other values apart.
+  SqlParams one, two;
+  one.text("a");
+  two.text("b");
+  CHECK(one.key() != two.key());
+  SqlParams again;
+  again.text("a");
+  CHECK_EQ(one.key(), again.key());
+  // A value with a separator cannot make two lists look alike.
+  SqlParams joined, split;
+  joined.text(std::string("a\0p2\0b", 6));
+  split.text("a");
+  split.text("b");
+  CHECK(joined.key() != split.key());
 }
 
 // ---- sql_literal.hpp ----
@@ -773,6 +809,7 @@ void test_the_vectors_of_the_page() {
 
 int main() {
   test_literals();
+  test_params();
   test_lexer_rules();
   test_scan_follows_the_lexer();
   test_kill_policy();

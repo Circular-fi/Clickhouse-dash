@@ -6,6 +6,7 @@
 #include "ch_query.hpp"
 #include "explorer_catalog.hpp"
 #include "sql_literal.hpp"
+#include "sql_params.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -160,9 +161,10 @@ bool load_system_activity(
   // Rows of databases the runner cannot SHOW are excluded inside ClickHouse,
   // so they never consume the bounded LIMIT; table-level visibility is then
   // checked per row before anything is kept.
-  // The names go as a query parameter: a list of hundreds of databases is data, not SQL text.
-  const std::string in_databases = "database IN {databases:Array(String)}";
-  const ChParams database_params = {{"databases", sql::quote_array(visibility.databases())}};
+  // The names go as query parameters, one String for each: a name with a quote mark or a backslash is a plain value.
+  SqlParams names;
+  const std::string in_databases = "database IN (" + names.texts(visibility.databases()) + ")";
+  const ChParams& database_params = names.list();
   const std::string limit = " LIMIT " + std::to_string(out.row_limit + 1);
 
   load_section(system, visibility, "merges",
