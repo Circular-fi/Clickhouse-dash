@@ -886,6 +886,28 @@ test('the headers sort and the kind and Hide ChDash filter, through the address'
   await expect(page.locator('.systemQueries__kindPicker .tracePicker__button')).toHaveText('Kind \u00b7 All');
 });
 
+test('the charts of a shape are built once: a series hidden in a legend stays hidden when the runs are ordered again', async ({ page }) => {
+  await openQueries(page, '?sort=calls');
+  const hash = await queryRows(page).first().getAttribute('data-hash');
+  await page.goto(`/system/queries/${hash}`);
+  const calls = page.locator('#systemQueryChart-calls .chartCore');
+  await expect(calls).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+  await calls.evaluate((root) => { root.__built = 'once'; });
+  const failed = page.locator('#systemQueryChart-calls .chartCore__legendItem', { hasText: 'Failed' });
+  await expect(failed).toHaveAttribute('aria-pressed', 'true');
+  await failed.click();
+  await expect(failed).toHaveAttribute('aria-pressed', 'false');
+  // Another order reads the shape again and draws the view again.
+  const answer = page.waitForResponse((response) => /\/api\/system\/queries\/\d+\?/.test(response.url()) && response.request().method() === 'GET');
+  await page.locator('#systemQueryRunsOrder [data-order="latest"]').click();
+  await answer;
+  await expect(page.locator('#systemQueryRunsOrder [data-order="latest"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#systemQueryRuns tbody tr').first()).toBeVisible({ timeout: 20_000 });
+  await expect(calls).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/);
+  expect(await calls.evaluate((root) => root.__built)).toBe('once');
+  await expect(failed).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('a row opens its shape as a page of its own: timeline, runs, deep link and Back', async ({ page }) => {
   await openQueries(page, '?sort=calls');
   const row = queryRows(page).first();

@@ -304,8 +304,9 @@ function createQueries(ctx) {
     drillKey: "",
     drillError: null,
     drillLoading: false,
-    // The drill-down's grid of charts (systemCharts.grid), when it shows.
+    // The drill-down's grid of charts (systemCharts.grid) and its element, while a shape is open.
     charts: null,
+    chartsEl: null,
     // host|hash|text -> "pending" | { text } (formatted, "" when the
     // formatter could not parse it).
     formatted: new Map(),
@@ -579,7 +580,10 @@ function createQueries(ctx) {
     state.drillKey = key;
     state.host = host;
     state.drillLoading = true;
-    if (state.drill && state.drill.hash !== hash) state.drill = null;
+    if (state.drill && state.drill.hash !== hash) {
+      state.drill = null;
+      destroyCharts();
+    }
     render();
     let data = null;
     let failure = null;
@@ -960,16 +964,20 @@ function createQueries(ctx) {
   function destroyCharts() {
     state.charts?.destroy();
     state.charts = null;
+    state.chartsEl = null;
   }
 
-  // The grid of the drill-down's charts; the view is rebuilt at each render, so are the charts.
+  // The grid of the drill-down's charts. The view is rebuilt at each render, the charts are not: they are built once for a
+  // shape and drawn again with each answer (setData), so a series that the reader hid in a legend stays hidden.
   function drillCharts() {
+    if (state.charts && state.chartsEl) return state.chartsEl;
     destroyCharts();
     const el = h("div", { class: "systemQuery__charts", id: "systemQueryCharts" });
     // A drag over a chart narrows the section's window, as on Performance.
     state.charts = systemCharts.grid({
       root: el, specs: CHARTS, idPrefix: "systemQueryChart", syncKey: SYNC_KEY, height: PLOT_HEIGHT, onZoom: range.zoom, hidden: false,
     });
+    state.chartsEl = el;
     return el;
   }
 
