@@ -89,12 +89,12 @@ Every picker returns a `var()` reference. For this reason, DOM colors follow the
 | `--panel` | `#13161a` | `#ffffff` | panels, menus, dialogs |
 | `--raised` | `#191d22` | `#ffffff` | buttons, graph cards |
 | `--border` | `rgba(255, 255, 255, 0.08)` | `rgba(15, 18, 25, 0.1)` | hairlines |
-| `--controlBorder` | `rgba(255, 255, 255, 0.4)` | `rgba(15, 18, 25, 0.54)` | the edge of a field: 3.46 / 3.74 on the surface it sits on (WCAG 1.4.11) |
-| `--controlBorderHover` | `rgba(255, 255, 255, 0.58)` | `rgba(15, 18, 25, 0.72)` | the edge of a field under the pointer: 6.09 / 7.07 |
+| `--control-border` | `rgba(255, 255, 255, 0.4)` | `rgba(15, 18, 25, 0.54)` | the edge of a field: 3.46 / 3.74 on the surface it sits on (WCAG 1.4.11) |
+| `--control-border-hover` | `rgba(255, 255, 255, 0.58)` | `rgba(15, 18, 25, 0.72)` | the edge of a field under the pointer: 6.09 / 7.07 |
 | `--text` | `#e6e8eb` | `#15181d` | body text: 14.78 / 16.60 |
 | `--muted` | `#959ba5` | `#5b6270` | secondary text: 6.49 / 5.72 (6.06 / 6.13 on `--raised`) |
 
-`--border` and `--buttonBorder` stay for rules and for buttons, whose label names them. A field (a text input, a search box, a picker, the editor frame) draws its edge with `--controlBorder`: a field with the edge of a button is a white box on a white panel in the light theme.
+`--border` and `--button-border` stay for rules and for buttons, whose label names them. A field (a text input, a search box, a picker, the editor frame) draws its edge with `--control-border`: a field with the edge of a button is a white box on a white panel in the light theme.
 
 The contrast column gives the lowest ratio on `--panel` and `--bg`. For status text, it also covers the own `-bg` tint of the token over those surfaces. Text tokens need 4.5:1. Fills (marks, icons, swatches, lines) need 3:1.
 
@@ -116,7 +116,7 @@ The contrast column gives the lowest ratio on `--panel` and `--bg`. For status t
 | `--sev-trace` | `#7d8590` | `#66727f` | 4.86 / 4.58 | dimmer gray |
 | `--accent-fill` | `#356fe6` | `#2558d9` | 3.95 / 5.64 (`--on-fill` text on it 4.60 / 6.04) | solid accent: primary buttons, selected marks, the editor's focus border |
 | `--accent-fill-hover` | `#2c62d4` | `#1e49bd` | `--on-fill` text 5.52 / 7.66 | a hovered primary button |
-| `--accent-tint` | `rgba(53, 111, 230, 0.16)` | `rgba(37, 88, 217, 0.1)` | surface | selected / active backgrounds |
+| `--selected-bg` | `rgba(53, 111, 230, 0.22)` | `rgba(37, 88, 217, 0.12)` | surface | the fill of every selected, pressed or chosen state (with a `--selected-edge` border: `--accent-fill`) |
 | `--accent-text` | `#93b4ff` | `#1d4ed8` | 8.82 / 6.25 (on tint 7.52 / 5.42) | links, active facets |
 | `--danger-fill` | `#dc2626` | same | 3.76 / 4.51 (`--on-fill` text 4.83) | a destructive primary action |
 | `--danger-fill-hover` | `#c21f1f` | same | `--on-fill` text 5.98 | |
@@ -139,7 +139,7 @@ The contrast column gives the lowest ratio on `--panel` and `--bg`. For status t
 | `--graph-muted` | `#a4aab3` | `#4b515c` | 7.76 / 7.45 (4.62 on the hottest dark trace-graph heat) | canvas secondary text |
 | `--graph-edge-muted` | `#8d939c` | `#6b717c` | 5.86 / 4.58 | canvas edges |
 
-The categorical slots follow, with their lowest contrast on `--bg`, `--panel` and `--raised`. `--qchart-other` stays `#898781`, the neutral "Other" group:
+The categorical slots follow, with their lowest contrast on `--bg`, `--panel` and `--raised`. `--qchart-other` is the neutral "Other" group: `#898781` in dark and `#6f6d68` in light (about 5:1 on `--bg`; the dark gray was 3.35:1 there):
 
 | Slot | Dark | Light | Contrast dark / light | Hue |
 | --- | --- | --- | --- | --- |
@@ -162,14 +162,14 @@ The categorical slots follow, with their lowest contrast on `--bg`, `--panel` an
 | `--qchart-17` | `#8e8945` | `#656019` | 4.69 / 6.05 | khaki |
 | `--qchart-18` | `#85e2ed` | `#03464c` | 11.37 / 9.87 | aqua / deep teal |
 
-The keyboard ring (`--focusRingColor`) is `#3b82f6` / `#2563eb`: 4.60 on the lightest dark surface, 4.82 on the light page (`--bg`). On a solid fill (the primary and danger buttons, the first and last day of a range) the ring sits 2 px off the control (`outline-offset: 2px`). Drawn on the edge, it would be 1.25:1 against the blue fill. The graph accent (`--graph-halo`, the border of a focused or hovered card) is `#7c9cff` / `#2558d9`: 6.50 on a dark card, 6.04 on white.
+The keyboard ring (`--focus-ring-color`) is `#3b82f6` / `#2563eb`: 4.60 on the lightest dark surface, 4.82 on the light page (`--bg`). On a solid fill (the primary and danger buttons, the first and last day of a range) the ring sits 2 px off the control (`outline-offset: 2px`). Drawn on the edge, it would be 1.25:1 against the blue fill. The graph accent (`--graph-halo`, the border of a focused or hovered card) is `#7c9cff` / `#2558d9`: 6.50 on a dark card, 6.04 on white.
 
 Kind tokens are graphics (icons, swatches, card accents), so 3:1 applies. Text in a kind color mixes it with `--text`.
 
 These are the origins of the tokens:
 
-- **Status and severity** reuse the former Logs `--log-sev-*`, `--exd-*` and `--graph-error`. The light values are darker where those failed 4.5:1, on the surface or on their own tint. These values are `--sev-warn`, `--sev-debug` and `--sev-trace` in light, `--sev-trace` in dark, and `--danger`, `--warning`, `--success` and `--info` in light.
-- **Accent**: one solid fill for each theme, with `--on-fill` text, for the primary button in both themes (no light override for each button). The design pass asked for `#3d7cf5` in dark. White text on it is 3.89:1. For this reason, the fill is `#356fe6`, the lightest step of that hue that keeps 4.5:1. Light is `#2558d9`. `--accentBorder` names the fill. The former `--accent` (a solid fill in dark, a tint in light) is gone. Its callers name `--accent-fill` or `--accent-tint`.
+- **Status and severity** replace the former Logs `--log-sev-*` and the copies of the status colours of the Explorer and the graphs (`--exd-*`, `--graph-warn`, `--graph-error`). The light values are darker where those failed 4.5:1, on the surface or on their own tint. These values are `--sev-warn`, `--sev-debug` and `--sev-trace` in light, `--sev-trace` in dark, and `--danger`, `--warning`, `--success` and `--info` in light.
+- **Accent**: one solid fill for each theme, with `--on-fill` text, for the primary button in both themes (no light override for each button). The design pass asked for `#3d7cf5` in dark. White text on it is 3.89:1. For this reason, the fill is `#356fe6`, the lightest step of that hue that keeps 4.5:1. Light is `#2558d9`. `--accent-fill` names the fill. The former `--accent` (a solid fill in dark, a tint in light) is gone. Its callers name `--accent-fill` or `--selected-bg`.
 - **Kinds** are the Explorer lineage icon colors: a base hue mixed into `--text`, resolved for each theme. The Explorer tree swaps dictionary (teal) and buffer (amber). The tokens settle on dictionary amber and buffer teal.
 - **Percentiles** are one blue-violet ramp: p50 recedes, p99 stands out. Each step keeps 3:1 on `--panel` (the table) and on `--bg`. The charts show P50 and P99 by default. P90 and P95 are one legend click away.
 - **Categorical** (`--qchart-1` … `--qchart-18`): one palette for chart series and services.
@@ -178,18 +178,18 @@ These are the origins of the tokens:
   - No slot is red, because a red service or series would read as an error.
   - Every slot keeps 3:1 on `--bg`, `--panel` and `--raised`: 3.81 at worst in dark, 3.55 in light (the table above).
 - **JSON** values use the `--json-*` colors (the key / value tree, `kv`). They are 22 % of a hue (`#22c55e`, `#f59e0b`, `#a78bfa`) mixed into `--text`. Null is 70 % `--muted` into `--text`. They are recomputed for the graphite `--text`.
-- **SQL** (`--sqlString`, `--sqlKeyword`, `--sqlFunction`, `--sqlNumber`, `--sqlNull`, `--sqlType`; `--sqlComment` is `--muted`). In dark they mix a bright hue into `--text` (7.4:1 and more on every surface). In light the same mixes were 3.0 to 3.5:1 on white, so light has its own values, 4.5:1 and more on the white editor, `--bg` and the Graph group fill:
+- **SQL** (`--sql-string`, `--sql-keyword`, `--sql-function`, `--sql-number`, `--sql-null`, `--sql-type`; `--sql-comment` is `--muted`). In dark they mix a bright hue into `--text` (7.4:1 and more on every surface). In light the same mixes were 3.0 to 3.5:1 on white, so light has its own values, 4.5:1 and more on the white editor, `--bg` and the Graph group fill:
 
   | Token | Light | Contrast |
   | --- | --- | --- |
-  | `--sqlString` | `#9a3412` | 6.82 |
-  | `--sqlKeyword` | the blue mixed 60 % into `--text` | 4.97 |
-  | `--sqlFunction` | `#6d28d9` | 6.63 |
-  | `--sqlNumber` | `#047857` | 5.12 |
-  | `--sqlNull` | `#b91c1c` | 6.04 |
-  | `--sqlType` | `#0f766e` | 5.11 |
+  | `--sql-string` | `#9a3412` | 6.82 |
+  | `--sql-keyword` | the blue mixed 60 % into `--text` | 4.97 |
+  | `--sql-function` | `#6d28d9` | 6.63 |
+  | `--sql-number` | `#047857` | 5.12 |
+  | `--sql-null` | `#b91c1c` | 6.04 |
+  | `--sql-type` | `#0f766e` | 5.11 |
 
-Aliases: `--error-bg`, `--accentText` and `--graph-error` are `var()` references to the token with the same value in both themes. `--exd-*` keeps its values until its callers move to the semantic tokens.
+There is one name for one value: no token only repeats another (`--panel`, not `--panelBg`; `--accent-fill`, not `--accentBorder`). Every custom property is kebab-case (`--button-bg`, `--border-strong`, `--row-hover`). `--graph-heat` differs between the themes on purpose: it is the colour that the heat of a card mixes into the card fill (up to 45 %), chosen so that the text on it keeps 4.5:1 in each theme.
 
 The literal colors that rules used to write inline (the 33 `--c-*` tokens) are gone. Each use now names a semantic token (`--on-fill`, `--success`, `--warning`, `--danger`, `--shadow-overlay`, `--backdrop`). Or it names one of the few component colors that `00-tokens.css` names: `--dot-ring` (the hairline inside a status dot) and `--hatch` (the Others of the size bands, the text color at 14 %).
 
@@ -236,7 +236,7 @@ The canvas modules use the same families, weights and sizes. `kit.FONT` in `app_
 
 Surfaces are flat: no top sheen, no gradient on buttons. Only what opens over the page casts a shadow, `--shadow-overlay` (menus, popovers, tooltips, dialogs, side drawers and sheets, toasts). Inset rules, rings and spread-only outlines draw marks, not elevation. The backdrop of a modal is `--backdrop`, `rgba(0, 0, 0, 0.5)`, without a blur. A focused graph card has a border of 2 px `--graph-halo` and no ring around it. The frame of the Query editor takes an `--accent-fill` border while the caret is inside (`.editorWrap:focus-within`). Its textarea is left out of the global `:focus-visible` ring.
 
-**Motion.** `--dur-quick` (120 ms) is for hover and color changes. `--dur-base` (160 ms) is for menus, panels and dialogs. There is one easing, `--ease` (`cubic-bezier(0.2, 0, 0, 1)`). The `CLOSE_MS` of `menu` is `--dur-base`. Under `prefers-reduced-motion: reduce`, every infinite animation stops. These are the autocomplete label marquee, the indeterminate progress band, the host and Explorer health pulses, and the running query pulse and bar. The spinner stands still.
+**Motion.** `--dur-quick` (120 ms) is for hover and color changes. `--dur-base` (160 ms) is for menus, panels and dialogs. There is one easing, `--ease` (`cubic-bezier(0.2, 0, 0, 1)`). The `CLOSE_MS` of `menu` is `--dur-base`. A loop or a long one-shot names its own token (the test refuses a literal duration in `animation`): `--dur-spin` (800 ms, the spinner), `--dur-pulse` (1 s, the running pulse), `--dur-band` (1.1 s, the running band), `--dur-sweep` (1.2 s, an indeterminate bar), `--dur-flash` (1.4 s, a deep link) and `--dur-settle` (1.8 s, the ring of a healthy dot). Under `prefers-reduced-motion: reduce`, every infinite animation stops. These are the indeterminate progress band, the host and Explorer health pulses, and the running query pulse and bar. The spinner stands still.
 
 **Stacking.** Every `z-index` names a step:
 
@@ -351,21 +351,62 @@ Rules of thumb, which `tests/harness/test_css_layers_contract.py` enforces:
 
 The sheets are build outputs. CMake stages `src/static` without the sources and generates the sheets into the stage that it embeds. The Docker images run the script. Git ignores the sheets. To serve `src/static` from the file system, run the script once.
 
+## Spacing, labels and selected states
+
+`tests/harness/test_css_layers_contract.py` and `tests/harness/test_type_scale_contract.py` fail in these cases:
+
+- A `padding`, `margin` or `gap` has a length that is not a step of the spacing scale.
+- A media query has a width that is not a breakpoint (see "Page shell").
+- A custom property is not written in kebab-case.
+
+**Spacing.** There is one scale, in `00-tokens.css`, named by the pixels it is:
+
+| Token | Value | For |
+| --- | --- | --- |
+| `--space-2` / `--space-4` | 2 / 4 px | the gap inside a control, between an icon and its label |
+| `--space-6` / `--space-8` | 6 / 8 px | the padding of a chip, a row, a small card; the gap of a toolbar |
+| `--space-10` / `--space-12` | 10 / 12 px | the padding of a control and a panel; `--gutter` is 12 px |
+| `--space-16` / `--space-20` | 16 / 20 px | the gap between two parts of a card |
+| `--space-24` / `--space-32` | 24 / 32 px | the gap between sections |
+| `--space-40` / `--space-48` / `--space-64` / `--space-80` | 40 to 80 px | an empty state, the room of an icon inside a control |
+
+Every positive length of a `padding`, `margin` or `gap` is `var(--space-N)`. The only literals are `0`, `auto`, a hairline of `1px`, and a negative margin on the scale (`-2px`, `-4px`: the overlap of two borders, an icon pulled into its control). A value that a function computes (`calc()`, `min()`, a percentage, an `em`) is not a step. There is no 3, 5, 7 or 9 px, and no half pixel: the rhythm of a page comes from the scale and not from the habit of its author. The values of the former pages that were not on the scale went to the nearest step (3 to 4, 5 to 6, 7 to 8, 9 to 10, 14 to 16, 18 to 20, and a value in `rem` to the step of its pixels).
+
+**Labels.** There are two kinds of text over a value. Their looks are not mixed.
+
+- A label of a field or a pill (`.uiField__label`, the Status and Query ID pills of the Query page, `.timeRangeField__label`, the label of a `.statTile`) is sentence case, 12 px (`--fs-sm`), `--fw-medium`, `--muted`. It is the name of one value ("Name", "Query ID", "Elapsed").
+- An eyebrow is the small heading of a group of things (`.mcpSection__title`, `.timeRangePanel__title`, `.timeRangeList__heading`, `.qhDay`, the group titles of the editor menu, the weekdays of the calendar). It is upper case, 11 px (`--fs-xs`), `--fw-semibold`, `--muted`, with `letter-spacing: var(--ls-eyebrow)` (0.04em). A new `text-transform: uppercase` is an eyebrow, with these values.
+
+**Case.** Every label, title and button is in sentence case ("Trace start", "Total spans", "Download debug", "Query analysis", "Sort · Most recent"). A product name, a ClickHouse name (`MergeTree`, `MaterializedView`), an acronym (ID, SQL) and a value of the data keep their case. The product is "ClickHouse Dash" in every text of the interface. A status is a word of the interface: it starts with a capital ("Idle", "Finished", "Healthy", "Connected", "Down"). `ns.badge.statusLabel` gives "OK", "Error" and "Unset" for a span. A log level is upper case, as OpenTelemetry writes it (`ERROR`, `WARN`).
+
+**Selected and pressed.** A chosen option, a pressed toggle, a selected row and the current item of a menu look the same everywhere:
+
+| Part | Look |
+| --- | --- |
+| Fill | `--selected-bg` |
+| Edge | 1 px `--selected-edge` (`--accent-fill`). A box has it as its border. A row that cannot have a border has it as an inset ring (`box-shadow: inset 0 0 0 1px`). A table row has it above and below. |
+| Mark | A check (`--icon-check`, 14 px) on a menu option, a pressed filter chip (`button.badge`) and a finished Progress tile. The state is then not told by colour alone. |
+
+The focus ring (`--ring`) is not a state of the item. It stays on top of it. A bar at the left of a row is the channel of its severity (a log level, a span error): a selection never uses it. Segmented controls, filter chips, the tree and the lists of the Explorer, the time ranges, the query library, the trace results and the rows of every table use these two tokens. Tabs are not options: a tab that is current has an underline (`aria-current` or `.is-active`).
+
 ## Page shell
 
 Query, Explorer, Observability and System share one full-bleed page chrome. It is written once in `src/static/css/20-features/shell.css` (its tokens in `00-tokens.css`):
 
-- The header is the partial `src/shell/header.html`. It has the host picker, the page switcher (a dropdown of Query / Explorer / Observability / System, and MCP when the server has it on) and the theme.
+- The header is the partial `src/shell/header.html`. It has the brand, the page switcher, the version badge, the host picker and the theme.
+  - The page switcher is a nav of links (`nav#pageSelect`, `aria-label="Pages"`): Query, Explorer, Observability, System, and MCP when the server has it on. Every page is a document of its own, so each entry is an `a href`: a click opens the page, and a middle click or Ctrl+click opens it in a new tab. The current page has `aria-current="page"` (the partial writes `{{current.<page>}}`) and an underline of 2 px on the bottom border of the header. From 821 px the links are in the header. At 820 px and below they fold into a menu under a button that names the current page (`#pageSelectButton`). That menu keeps the current page in its list, with a check. The header script writes the base path in the links (`window.__chdashUrl`). It also shows or hides each link from the last answer of `/api/version` (`chdash.pageNav.v1`), so the links do not move when the API answers.
+  - The host picker shows the name of the host in full, up to 28 rem. Under 1280 px the version and the ping leave the button: they stay in the menu. The menu lists every host and marks the current one (`aria-selected`, a check).
+  - The version badge follows the page switcher, so a longer version text moves nothing before it. At 820 px and below, the header is two rows: the brand and the version, then the host, the page menu and the theme.
   - The nav row of the page follows (`#obsNav`, `#explorerTopBar`, `.systemPage__nav`). It is one row. It has the Catalog modes of the Explorer and the controls of the System section on its right. The MCP page has no nav row, no bar and no strip. Its first row is the heading of the keys (title, filter, Refresh, New key).
   - The regions of the page follow, edge to edge, on the flat `--bg`.
   - There is no page card, no rounded inset and no outer shadow.
   - The switcher hides an entry whose page `/api/version` turns off. The MCP entry ships hidden and shows when `features.mcp.enabled` is true. The switcher hides itself when only Query remains.
 - A page of stacked parts (System, MCP) uses one frame. `.systemWorkspace` and `.mcpWorkspace` fill the window. `.systemPage` and `.mcpPage` are a column of bar rows (System) and one panel. `.systemPage__panel` and `.mcpPage__panel` are the scroller. The rules are in `shell.css`.
 - A part of such a page is `.pagePart` (`10-components/part.css`): a head with the title (`.pagePart__title`, an `h2`) and a count (`.pagePart__count`), then the body (`.pagePart__body`). Parts follow each other with a gap of 28 px.
-- A table in a part sits in `.dataTableWrap`: a hairline box that scrolls sideways when the columns are wider than the box.
+- A table in a part sits in `.dataTableWrap`: a hairline box that scrolls sideways when the columns are wider than the box. A box that scrolls on one axis scrolls on the other, so the head of a table inside the scroller of the page never sticks. A table that has many rows (System > Queries) therefore gives its box the height that the panel leaves it (`.systemQueries__wrap`): the box is the one scroller under the tiles, and the head stays over the rows.
 - `--gutter` (12 px, 10 px at 820 px and below) insets the content of every region and the header. `--nav-row-h` (48 px) is the height of a nav row. `--shell-border` (1 px `--border`) separates regions and rows.
 - The `--z-*` scale names every stacking level ("Type, shape, motion and stacking"). The shell and what opens over it use `--z-nav`, `--z-drawer`, `--z-header`, `--z-dropdown`, `--z-modal` and `--z-tooltip`.
-- `--bp-sm` (600 px), `--bp-md` (820 px) and `--bp-lg` (1100 px) are the shell breakpoints. Media queries cannot read custom properties, so they repeat the numbers. Scripts use `shell.BREAKPOINTS`, `shell.isAtMost("md")` and `shell.mediaQuery("md")` from `app_dom.js`.
+- `--bp-sm` (600 px), `--bp-tab` (760 px), `--bp-md` (820 px), `--bp-lg` (1100 px) and `--bp-xl` (1279 px: from 1280 px a window is wide) are the only widths at which a layout changes. A `max-width` query names one of them. A `min-width` query names the pixel above one (601, 761, 821, 1101, 1280). `tests/harness/test_css_layers_contract.py` refuses any other width. Media queries cannot read custom properties, so they repeat the numbers. Scripts use `shell.BREAKPOINTS`, `shell.isAtMost("md")` and `shell.mediaQuery("md")` from `app_dom.js`.
 - Scroll model: html and body never scroll. The content region of each page is its only scroller. These are the scrollers:
   - `#queryWorkspace`.
   - The detail, graph and storage panes of the Explorer.
@@ -377,7 +418,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 - Use `--shell-top` for anything that you place under the chrome. `app_dom.js` sets it on every page to the bottom of the header and the nav row. Do not use a literal header height.
 - The first element of the page is the skip link (`a.skipLink`, in `src/shell/header.html`): the first stop of the Tab order, out of sight until it has the focus. It goes to the `main` of the page. `pages.<page>.main` of `src/static/modules.json` gives each shell the id of its `main`.
 - Headings: one `h1` for each page, the name of the page (`srOnly`: the page switcher shows it). It is the first child of the `main`, so that no text of the page is outside a landmark. Use one `h2` for each Observability view (`srOnly`, after the `h1`). Use one `h2` for the title of the Explorer card (`#explorerDetailName`, `#explorerFunctionDetailName`). The sections under it are `h3`.
-- The version badge of the header is a solid chip (`--pillBg`, the muted text at full strength), 4.5:1 in both themes.
+- The version badge of the header is a solid chip (`--pill-bg`, the muted text at full strength), 4.5:1 in both themes.
 
 ## Touch and phones
 
@@ -406,7 +447,7 @@ Query, Explorer, Observability and System share one full-bleed page chrome. It i
 
 - A `.foldSummary` (one line, with a chevron that turns while the region is open) stands for a folded region. It is used in these places:
   - Each filter bar of Observability and System ("2026-09-12 12:30 -> 13:30 . 2 filters"). The action (Search or refresh) folds it again. Its chips fold with it (`filterBar.mountSummary`, `app_ui_filterbar.js`).
-  - The Query run stats ("7 ms . 120,064 rows . 1.9 MB read . CPU 87.7% . 1.8 MB memory", `app_run.js`).
+  - The Query run stats ("7 ms . 120,064 rows . 1.9 MB read . CPU 87.7% . 1.8 MB memory", `app_run.js`). Under 1100 px they fold into this line (`#runStatsSummary`), as on a phone, so the results start above the fold.
 
   The overview charts (`[data-phone-fold]`: Matching traces, Trace duration, the Logs histogram) start folded to their head (`.chartCard__fold`). The folds work only at that width: their rules are in `max-width: 600px` blocks.
 - Logs records are two-line cards, `--row-card` (52 px) tall: Time, Level and Service, then the Body.
@@ -423,7 +464,7 @@ The pages meet WCAG 2.2 AA in both themes. `tests/frontend/specs/a11y-contract.s
 
 - Text is 4.5:1 and more on every surface it can sit on. The tokens are measured on `--bg`, `--panel`, `--raised` and the editor surface, never on one of them only. Muted text is `--muted`, whole. Do not dim text with `opacity` or with a `color-mix()` into `transparent`: the ratio then depends on the surface behind it. `opacity` is for disabled controls and for loading states. A state that needs a quieter text uses `--muted`; a state that needs more says it with a border, an icon or a line style.
 - A placeholder is `--muted` at full opacity (`01-base.css`, `::placeholder`). Guidance that a user needs while typing (the syntax of the Logs search) also goes in `aria-describedby` text, because a placeholder disappears.
-- A field draws its edge with `--controlBorder` (3:1). This covers `.uiInput`, `.uiSearch`, `.obsFilterBar__input`, the time range fields, `.tracePicker__button`, the Metrics filter fields and the editor frame.
+- A field draws its edge with `--control-border` (3:1). This covers `.uiInput`, `.uiSearch`, `.obsFilterBar__input`, the time range fields, `.tracePicker__button`, the Metrics filter fields and the editor frame.
 - A selected or pressed state is not told by a tint alone: it has a border, a weight or an outline too.
 
 **Focus.** The ring is the global `:focus-visible` outline ("Semantic color tokens"). A scrolling region that has no focusable content takes the keyboard through `util.scrollFocus(el, { label })` (`app_util.js`). While its content overflows, the element is a region with `tabindex="0"` and a name. When it fits, it is neither. The SQL blocks and the Explorer detail pane use it.
@@ -539,7 +580,7 @@ Every navigation control or choice control is one of three components. Each load
 
 ### Tabs: `tabs` (`app_ui_tabs.js`)
 
-**Sections are underline tabs; modes are segmented controls.** Every row of sections has one look, `.contentTabs` / `.contentTabs__tab`. The labels are muted, 13 px, semibold. The selected label is in the text color over an underline of 2 px `--accentBorder`. There is no fill, no frame and no radius (the pill tier, `.viewTabs`, is gone).
+**Sections are underline tabs; modes are segmented controls.** Every row of sections has one look, `.contentTabs` / `.contentTabs__tab`. The labels are muted, 13 px, semibold. The selected label is in the text color over an underline of 2 px `--accent-fill`. There is no fill, no frame and no radius (the pill tier, `.viewTabs`, is gone).
 
 In the nav row of a page, the row is `.contentTabs--nav`. It is as tall as the row, and its underline stands on the bottom border of the row. On a narrow window, it shrinks and scrolls sideways (`shell.edgeCues`). These are the users:
 
@@ -589,7 +630,7 @@ A segmented control is a short row of exclusive choices that switch a view in pl
 **Segmented = modes, underline = sections.** A segmented control shows the same scope in another way (a mode). Underlined tabs are the sections of one thing. Examples are the views of a page, the Columns, Preview and Storage of a card, and the views of a trace.
 
 - **ARIA pattern**: `role=group`, named by `aria-label`, that holds toggle buttons with `aria-pressed`.
-- **Look**: `.segmented` / `.segmented__option`. The pressed option sits on `--seg-active-bg`, which every theme block defines, with an `--accentBorder` edge.
+- **Look**: `.segmented` / `.segmented__option`. The pressed option sits on `--selected-bg`, which every theme block defines, with an `--accent-fill` edge.
 - **Sizes**: 28 px by default. 24 px with `.segmented--compact` (in card headers and dense toolbars).
 
 The API:
@@ -634,7 +675,9 @@ The entry points:
 | `context(menu, { x, y, anchor, returnFocus })` | a menu at a point or under a value |
 | `submenu(item, list, { parent, onOpen })` | a nested menu: Right / Enter / click / hover open it, Left / Escape close it back on its item |
 
-Every label sits inside the control. For example, `Status · All`, `Sort · Most Recent`, `Aggregation · Rate` and `X axis · Auto`. The depth stepper of the graph reads `- Depth 1 +`. There is no outside label.
+Every label sits inside the control. For example, `Status · All`, `Sort · Most recent`, `Aggregation · Rate` and `X axis · Auto`. The depth stepper of the graph reads `- Depth 1 +`. There is no outside label.
+
+A select menu is a list of all its options. The option that is the current value stays in the list: it has `aria-selected="true"`, the selected look and a check, and the list opens on it. A menu that leaves out its current value breaks the convention of a native select (the value to go back to is not there) and no option is announced as selected. This holds for the header menus (host, page, theme) and for every picker.
 
 ### Filter bar: `filterBar` (`app_ui_filterbar.js`)
 
@@ -784,7 +827,7 @@ There are seven modules. They load on every page (`app_common.js` imports them a
 
 | Module | API | What it draws |
 | --- | --- | --- |
-| `app_ui_table.js` | `table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `shareBar(el, percent, text)` / `shareBarHtml` (a share's figure beside a bar on its own track, never under the text: Logs patterns, Explorer Storage list), `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--theadBg`, sticky. Rows are `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px). `.num` (right, tabular, not mono). `.mono` for ids only. `tr.is-selected` (accent bar and `--rowHover`). `.dataTable__rowNum` (results, previews). One sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar. It is never on identifier or signed columns, except in Query results. There, every numeric value has one, from the lowest value of the column (`(v - min) / (max - min)`), drawn once the stream has ended. A table that can be narrower than its columns (the span table beside the docked span panel) drops its columns of lowest priority. It does not clip them. |
+| `app_ui_table.js` | `table.sortHeader(th, {key, dir, onSort})`, `sortHeadHtml`, `bindSort`, `setSort`, `cellBar(td, percent)`, `cellBarStyle`, `shareBar(el, percent, text)` / `shareBarHtml` (a share's figure beside a bar on its own track, never under the text: Logs patterns, Explorer Storage list), `barEligible({name, min})`, `copyCellHtml` / `copyCell`, `rowHeight(density)`, `ns.rovingRows(container, options)` | `<table class="dataTable">`: 12 px / 600 muted sentence-case headers on `--thead-bg`, sticky. Rows are `--row-regular` (32 px) or `.dataTable--compact` (`--row-compact`, 26 px). `.num` (right, tabular, not mono). `.mono` for ids only. `tr.is-selected` (accent bar and `--row-hover`). `.dataTable__rowNum` (results, previews). One sort glyph from `aria-sort`, idle on hover only. `.dataList` gives virtual div grids (spans, Logs) the same tokens. `.cellBar` is the one in-cell bar. It is never on identifier or signed columns, except in Query results. There, every numeric value has one, from the lowest value of the column (`(v - min) / (max - min)`), drawn once the stream has ended. A table that can be narrower than its columns (the span table beside the docked span panel) drops its columns of lowest priority. It does not clip them. |
 | `app_ui_badge.js` | `badge.html(text, {tone, size, shape, solid, color, swatch})`, `el`, `statusLabel` (`OK`, `Error`, `Unset`) / `statusHtml` (an Error chip, OK text, Unset nothing), `severityHtml` (ERROR / FATAL chips, other levels text), `chipHtml`, `clearHtml`, `swatchHtml` | `.badge`: `sm` 18 px / `md` 22 px, r4 or `pill`. Tones: neutral, accent, ok, warn, error, category (`--badge-color`), estimate, key. `.badge--solid` counts. `.chips` / `.chip` filter chips. `.serviceSwatch` (dot) and `.serviceSwatch--bar` (rows, chips). |
 | `app_ui_copy.js` | `copy.text(text, control)`, `copyButton(button, getText)`, `copyButtonHtml`, `copySplit({root, getText, items})`, `downloadText(name, text)` | One clipboard path and one feedback: `.is-copied` for 1.2 s. A text button reads "Copied". An icon button shows the check and an announced `popover.flash` tip. The Query, trace and Logs "Copy JSON" splits. The split menu is an `menu.split`. |
 | `app_ui_sql.js` | `sqlBlock({sql, gutter, copy, maxLines, expand, inline, wrap})`, `sqlBlockHtml` + `sqlBind(root)` (the inline toggle of string-built blocks) | Read-only SQL on the highlighter of the editor (loaded on demand where the page lacks it): DDL, graph panel SELECT, Services statements (inline, click to expand), mutation commands, library preview. |
@@ -848,7 +891,7 @@ One component draws where the bytes are. It draws these items:
   - The Disks rows always use it (`strip: "always"`).
 
   The databases of All databases and of the System Overview are always the treemap (`strip: "never"`), for any distribution. One dominant database is a large cell beside the others. Others is a hatched strip.
-- **One color rule**: a cell is the accent tint (`--accentBorder` at 22 % over the panel, an edge of 55 %), with the text color on it. An expanded database is a paler frame. No color comes from a name. Only the Columns map gives its cells a hue. It is the hue of their type family (`--qchart-N`), and its legend names them. Others (the cells under 1 %) is the panel hatched in `--hatch` (the text at 14 %). Its label is on a solid chip. It is an item of the legend with its member count and size.
+- **One color rule**: a cell is the accent tint (`--accent-fill` at 22 % over the panel, an edge of 55 %), with the text color on it. An expanded database is a paler frame. No color comes from a name. Only the Columns map gives its cells a hue. It is the hue of their type family (`--qchart-N`), and its legend names them. Others (the cells under 1 %) is the panel hatched in `--hatch` (the text at 14 %). Its label is on a solid chip. It is an item of the legend with its member count and size.
 - **Legend and footnote** are under the band. The legend shows the families and Others. In strip mode, it shows each segment with its size and share. It is `legend: false` when a table under the band names them (Disks). The footnote says what the band measures.
 - Labels keep 4.5:1 in both themes. `ui-guards.spec.js` measures them, and the version badge of the header, over what they are drawn on.
 - A database or table cell opens its card (`onOpen`). On a touch screen, the cells are as large as their share, and the table under the band holds the links.

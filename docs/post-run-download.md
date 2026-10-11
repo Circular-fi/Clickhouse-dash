@@ -4,7 +4,7 @@ The Run menu has three explicit download modes: CSV, JSON and Debug. The result 
 
 ## Debug execution
 
-`Run → Download Debug` runs the selected statement with profiling enabled. If multiquery is enabled, the dashboard runs every statement in profiling mode. Each statement gets its own diagnostic directory. The profiling modal does not open during this download. The dashboard writes the collected analysis to the archive instead.
+`Run → Download debug` runs the selected statement with profiling enabled. If multiquery is enabled, the dashboard runs every statement in profiling mode. Each statement gets its own diagnostic directory. The profiling modal does not open during this download. The dashboard writes the collected analysis to the archive instead.
 
 The browser builds the ZIP file locally. It uses the rows that it already received and the metadata that it fetches after the run. A bundle for one query has this structure:
 

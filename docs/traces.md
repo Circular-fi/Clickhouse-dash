@@ -264,6 +264,11 @@ An id inside a longer text does not count. The menu lowers upper case. The trace
 
 The Traces view has tabs in the tab row above the search bar, after the view links. They are *Search* (the result list) and *Service map*. The URL has `?tab=map` next to the search parameters. Other modules add tabs through `ChDash.traceTabs.register`. Every tab shares the time range, the filters and the chips. The Search button runs the search of the selected tab.
 
+A row of the result list (and of the table) reads like this:
+
+- Under its title, the row has a rule of 3 px. Its width is the duration of the trace against the longest trace of the page, from 0. The count above the list names that longest duration (`· bars up to 190 ms`).
+- The row names its three most costly services (the services with errors first, then the most spans), in the order of their first span. The other services are behind a `+N` chip. The list and the table do this at any width: the table gives its Services column the room for three chips, and a column that cannot hold them shows fewer.
+
 `GET /api/traces/service_map` (same parameters as search, plus an optional `sample_factor`) returns the services of the traces that match the filters. A trace is on the map when one of its visible spans matches, as in the result list. The response also returns the calls between the services:
 
 - An **edge** `A -> B` counts the spans of service `B` whose parent span (same `TraceId`) belongs to another service `A`. It gives the error rate and the p50 / p95 / p99 of those child spans. This covers the Client -> Server and Producer -> Consumer instrumentation (HyperDX joins those kinds). It also covers flat traces where the direct children of the root span run in other services. The OTel fixture has no Client span above a Server span, so a join by kind finds nothing there. Calls inside one service are not edges.
@@ -291,8 +296,8 @@ Error rates and durations come from the sampled spans. An edge whose parent span
 
 The shared canvas graph kit (`app_graph_kit.js`) draws the map, like the Explorer graph. They share the same dot grid, cards, orthogonal edges, labels, toolbar, legend, status line, minimap, side panel and keyboard. They also share the same Fit and level of detail (see [Explorer, Graph rendering](explorer.md#graph-rendering)). These rules apply to the map:
 
-- The map opens whole when it is readable as a whole. Otherwise, it opens at the readable scale on the selected service (or the entry point, the first service that nobody calls), with the minimap. Compact cards shrink to their title row.
-- It is a layered left-to-right graph (`kit.layered`). A DFS breaks cycles for the columns. The order is barycentre ordering. One global row grid keeps the orthogonal routes straight. A call against the column order is routed from the left side of the callee back into the right side of the caller.
+- The map opens whole when it is readable as a whole, or a little smaller. Otherwise, it opens at the readable scale on the selected service (or the entry point, the first service that nobody calls), with the minimap. A compact card writes the name of its service over two lines.
+- It is a layered left-to-right graph (`kit.layered`). A DFS breaks cycles for the columns. The order is barycentre ordering. One global row grid keeps the orthogonal routes straight. A column of more than six services (`maxPerColumn`) is drawn as side-by-side columns of at most six: a service that calls eleven others is a block of two columns, not a tower that a fit would shrink to a map of titles. A call against the column order is routed from the left side of the callee back into the right side of the caller.
 - Each service is a card with its name, `spans · error %` and `p95`. The card has a left strip in its Traces color (the color of the result list). It has a health dot from 0.1 % errors (a red border from 5 %).
 - Edges are solid for synchronous calls, dashed for asynchronous messages and dotted for database / cache calls (`kind: "db"`, when a source provides it). They are gray, amber from 1 % and red from 5 % errors. They are slightly thicker with their calls. Every edge carries a `calls · p95` label.
 - A hover outlines a service and its calls.
@@ -591,7 +596,7 @@ The measures used the local fixture (about 2.0 B spans over 7 days). They are se
 
 The views of a trace are a tab row above the waterfall: *Timeline | Graph | Statistics | Spans | Flamegraph*. The row uses the in-content tab component (`app_ui_tabs.js`, with the look of the Logs *Results | Patterns* tabs). Arrow keys, Home and End move between the tabs. The view is the `?tab=` of the URL (omitted for the timeline; the former `?view=` is an alias, which the page rewrites on load). The page remembers the last view. Below 820 px, a *View* dropdown replaces the tabs.
 
-The *Graph* view draws one card for each call path with the graph kit. The card shows these items: service, operation, `count / errors · avg`, and `time (% of the trace) · self`. The view opens like the service map, on the root call path (or the selected one). A compact card reads `service · operation` and the time of the path. It never shows the service alone.
+The *Graph* view draws one card for each call path with the graph kit. The card shows these items: service, operation, `count / errors · avg`, and `time (% of the trace) · self`. The view opens like the service map, on the root call path (or the selected one). A compact card has two lines: the service, then the operation with the time of the path at its right. It never shows the service alone.
 
 The detail page derives these items once for each loaded trace: the span tree, the trace bounds, the counts for each service, the overview bars ordered by start, and the parsed event markers. These rules apply to updates:
 

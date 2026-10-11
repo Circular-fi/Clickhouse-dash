@@ -239,7 +239,7 @@ The backend caches both answers for each host for `min(explorer.cache_ttl_ms, 5 
   - A table of another database is dropped when the database changes.
   - A shape is kept whole when one of its runs involved it.
 - **Order by**. It is an order, not a filter. For this reason, the summary on a phone does not count it. From 1,279 px down, the pickers from Database on take the second row of the bar.
-- **Hide ChDash**, a toggle chip (pressed by default).
+- **Hide internal reads**, a toggle chip (pressed by default).
 - The refresh button.
 
 There is no Auto-refresh. The page of a shape hides the filters. A log or a grant that the runner lacks also hides them. The range and the button stay. Under the bar, the page shows the tiles of the window and the top 50. The tiles are queries, shapes, total time, errors and their share, and bytes read. They count all the filtered shapes. The Shapes tile says "the top 50 listed" when there are more.
@@ -288,7 +288,7 @@ Two actions put SQL in the editor of the Query page. Both actions work in this w
 - Nothing runs. The query runs only when the user presses **Run** there. It runs with the runner account, like any query that the user types.
 
 - **Open example in Query** puts the full text of the **latest run** of the shape in the window in the editor. It is the real statement with its literals, not the normalized `?` form.
-  - The text is `system.query_log.query` of the most recent finished or failed initial run by `event_time_microseconds`. The filters are the same as on the page of the shape: Hide ChDash, and never the own reads of the System page.
+  - The text is `system.query_log.query` of the most recent finished or failed initial run by `event_time_microseconds`. The filters are the same as on the page of the shape: Hide internal reads, and never the own reads of the System page.
   - The page first sends the text to `/api/format` (the formatter of the Query page). When the formatter cannot parse it (an `INSERT` with inline data, for example), the text goes in as logged.
   - The button is disabled when the shape has no example. It is also disabled when the text is longer than 256K characters (the text was cut).
 - **Open history in Query** puts a ready-made `SELECT` over `system.query_log` in the editor. It lists the runs of this shape, so that the user can filter or extend it. The text is as written (not formatted):
@@ -310,7 +310,7 @@ Two actions put SQL in the editor of the Query page. Both actions work in this w
   LIMIT 100
   ```
 
-  The window follows the picker. A relative range that ends now (`now-15m`, `now-1h`, `now-7d`, `now-2w`) is written as `now() - INTERVAL n UNIT`. When the user runs it later, it reads the last n units at that time. Any other range (absolute, or zoomed by a drag on a chart) is written as the instants `toDateTime(<start>)` .. `event_time < toDateTime(<end>)`. The comment has the range in the time zone of the user. Unlike the page of the shape, it lists up to 100 runs, newest first. It does not leave out the queries of the system account (Hide ChDash) or the own reads of the System page.
+  The window follows the picker. A relative range that ends now (`now-15m`, `now-1h`, `now-7d`, `now-2w`) is written as `now() - INTERVAL n UNIT`. When the user runs it later, it reads the last n units at that time. Any other range (absolute, or zoomed by a drag on a chart) is written as the instants `toDateTime(<start>)` .. `event_time < toDateTime(<end>)`. The comment has the range in the time zone of the user. Unlike the page of the shape, it lists up to 100 runs, newest first. It does not leave out the queries of the system account (Hide internal reads) or the own reads of the System page.
 
 `GET /api/system/queries?host_id=<id>[&from_ms=&to_ms=][&sort=][&kind=][&errors=all|with|without][&user=][&database=][&table=][&hide_chdash=1|0][&refresh=1]` and `GET /api/system/queries/<hash>?host_id=<id>[&from_ms=&to_ms=][&order=duration|latest|memory][&hide_chdash=][&refresh=1]` (routes present while `system.top_queries`) read `system.query_log` with the **runner** account. The ClickHouse grants decide. The runner can already read the same rows in the Query page. These rules apply to the parameters:
 
@@ -347,7 +347,7 @@ The answer for a shape is three reads `PREWHERE normalized_query_hash = <hash>`:
 - The 20 runs.
 - The text of the latest run (256K characters).
 
-Each SELECT has the System `SETTINGS` with `query_log_max_rows` (50 M) as its read cap, and 15 s (phase 1) or 10 s. The backend caches the answers for 60 s. The cache key has these parts: the minute-aligned window, sort, kind, errors, Hide ChDash, user, database and table. There is one read in flight for each key. A second request of the same key waits for that read: it does not fail. `refresh=1` asks for a read that starts after the request. A read in progress is waited for first, and every request that asked meanwhile shares the next read. Thus a loop of `refresh=1` never runs two reads of one key at a time. The answers carry `phases` (or `reads`: `status`, `rows_read`, `bytes_read`, `elapsed_ms`).
+Each SELECT has the System `SETTINGS` with `query_log_max_rows` (50 M) as its read cap, and 15 s (phase 1) or 10 s. The backend caches the answers for 60 s. The cache key has these parts: the minute-aligned window, sort, kind, errors, Hide internal reads, user, database and table. There is one read in flight for each key. A second request of the same key waits for that read: it does not fail. `refresh=1` asks for a read that starts after the request. A read in progress is waited for first, and every request that asked meanwhile shares the next read. Thus a loop of `refresh=1` never runs two reads of one key at a time. The answers carry `phases` (or `reads`: `status`, `rows_read`, `bytes_read`, `elapsed_ms`).
 
 The degraded states are `status`, and `unavailable_panels` in the shape above:
 
