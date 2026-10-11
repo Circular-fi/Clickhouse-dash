@@ -438,7 +438,7 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   await expect(toolbar.locator('#explorerFunctionRefreshButton')).toBeVisible();
   await expect(page.locator('#explorerFunctionSettingsButton')).toHaveCount(0);
   const chips = page.locator('#explorerFunctionFilters .explorerFilterChip');
-  await expect(chips).toHaveText(['Functions', 'Aggregate', 'Table', 'UDF']);
+  await expect(chips).toHaveText(['Scalar', 'Aggregate', 'Table', 'UDF']);
   const width = (selector) => page.locator(selector).evaluate((el) => Math.round(el.getBoundingClientRect().width));
   // The two pages' side panels are the same width.
   const functionsWidth = await width('#explorerFunctionListPane');

@@ -347,13 +347,13 @@ test('spans: the side panel opens under the search bar; on a phone, a bottom she
   const form = await page.locator('#tracesForm').boundingBox();
   const side = await panel(page).boundingBox();
   expect(Math.abs(side.y - (form.y + form.height))).toBeLessThanOrEqual(1);
-  // Phone: the header wraps to two rows; the panel is a bottom sheet under
+  // Phone: the header is one row; the panel is a bottom sheet under
   // the page chrome, full width.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(async () => Math.round((await panel(page).boundingBox()).width)).toBe(390);
   const nav = await page.locator('#obsNav').boundingBox();
   const header = await page.locator('body > .appHeader').boundingBox();
-  expect(header.height).toBeGreaterThan(60);
+  expect(header.height).toBeLessThan(60);
   await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--shell-top'))).toBe(`${Math.round(nav.y + nav.height)}px`);
   const sheet = await panel(page).boundingBox();
   expect(sheet.x).toBe(0);

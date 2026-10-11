@@ -93,7 +93,9 @@ for (const width of [1440, 390, 360]) {
           const accent = getComputedStyle(probe).color;
           probe.remove();
           return {
-            w: box.width, h: box.height, beforeName: box.right <= name.getBoundingClientRect().left,
+            w: box.width, h: box.height,
+            // Up to 600 px the logo stands for the name: the name stays for a screen reader, clipped to a pixel.
+            beforeName: innerWidth <= 600 ? name.getBoundingClientRect().width <= 1 : box.right <= name.getBoundingClientRect().left,
             centred: Math.abs((box.top + box.bottom) / 2 - (name.getBoundingClientRect().top + name.getBoundingClientRect().bottom) / 2) <= 2,
             fill: getComputedStyle(mark.querySelector('rect')).fill, accent,
             overflow: Math.max(header.scrollWidth - header.clientWidth, document.documentElement.scrollWidth - innerWidth),

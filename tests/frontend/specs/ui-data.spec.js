@@ -176,7 +176,7 @@ test.describe('badge', () => {
     });
   }
 
-  test('status reads OK / Error / Unset and a metric kind is muted mono text', async ({ page }) => {
+  test('status reads OK / Error / Unset and a metric kind is muted text in words', async ({ page }) => {
     await openApp(page);
     const labels = await page.evaluate(() => ['Ok', 'STATUS_CODE_ERROR', 'Unset', 2, 'ok'].map((code) => window.ChDash.badge.statusLabel(code)));
     expect(labels).toEqual(['OK', 'Error', 'Unset', 'Error', 'OK']);
@@ -225,7 +225,7 @@ test.describe('badge', () => {
     await page.goto(`/observability/metrics?from=${encodeURIComponent(isoSecond(end - 6 * 3600000))}&to=${encodeURIComponent(isoSecond(end))}`);
     const hist = page.locator('.metricsCatalog .metricsBadge--histogram').first();
     await expect(hist).toBeVisible({ timeout: 30_000 });
-    // Kind and unit: muted mono text, no fill and no border.
+    // Kind and unit: muted text in words (Histogram, not hist), no fill and no border.
     for (const meta of [hist, page.locator('.metricsCatalog .metricsBadge--unit').first()]) {
       const look = await meta.evaluate((el) => {
         const probe = document.createElement('i');
@@ -236,7 +236,7 @@ test.describe('badge', () => {
         const cs = getComputedStyle(el);
         return { muted: cs.color === muted, mono: /Plex Mono|monospace/i.test(cs.fontFamily), fill: cs.backgroundColor, border: cs.borderTopWidth };
       });
-      expect(look).toEqual({ muted: true, mono: true, fill: 'rgba(0, 0, 0, 0)', border: '0px' });
+      expect(look).toEqual({ muted: true, mono: false, fill: 'rgba(0, 0, 0, 0)', border: '0px' });
     }
   });
 });

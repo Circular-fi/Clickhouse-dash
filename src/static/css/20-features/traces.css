@@ -1558,7 +1558,11 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceSvcPills.is-empty { color: var(--muted); }
 
-.traceSvcPills > .traceSvcPill:first-child { flex-shrink: 1; }
+/* A pill alone can be wider than the cell (the first one is shown even then): its service name is cut with an ellipsis,
+   and the "+N" chip keeps its room. The others fit by the measure, so they do not shrink. */
+.traceSvcPills > .traceSvcPill { flex-shrink: 1; min-width: 0; }
+
+.traceSvcPills > .traceSvcPill > b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .traceSvcPills.is-measuring > .traceSvcPill { flex-shrink: 0; }
 

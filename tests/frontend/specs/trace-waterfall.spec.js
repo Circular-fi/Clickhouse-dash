@@ -432,7 +432,8 @@ test('trace detail: method and a status under 400 are muted mono text with no ch
       fill: cs.backgroundColor !== 'rgba(0, 0, 0, 0)',
       mono: /Plex Mono|monospace/i.test(cs.fontFamily),
       muted: cs.color === resolve('--muted'),
-      warn: cs.color === resolve('--warning'),
+      // The amber text is mixed with a fifth of the text colour: 4.5:1 on its tint in the light theme too.
+      warn: cs.color === (() => { probe.style.color = 'color-mix(in srgb, var(--warning) 80%, var(--text))'; return getComputedStyle(probe).color; })(),
       danger: cs.color === resolve('--danger'),
     };
     probe.remove();

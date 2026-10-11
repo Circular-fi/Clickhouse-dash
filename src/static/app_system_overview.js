@@ -273,7 +273,7 @@ function createOverview(ctx) {
     if (!multi.length) {
       el.appendChild(uiState.block("empty", {
         title: "Single server, no multi-replica cluster",
-        body: single.length ? `system.clusters lists ${single.map((name) => `"${name}"`).join(", ")}: this server only.` : "system.clusters lists no cluster.",
+        body: single.length ? `The ${single.length === 1 ? "cluster" : "clusters"} ${single.map((name) => `"${name}"`).join(", ")} ${single.length === 1 ? "has" : "have"} only this server.` : "system.clusters lists no cluster.",
         compact: true,
       }));
       return el;

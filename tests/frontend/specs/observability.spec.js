@@ -502,10 +502,11 @@ test('observability: on a phone the tab row scrolls sideways and keeps one row',
     const b = await page.locator(`#tracesTab-${lastId}`).boundingBox();
     return b.x >= -0.5 && b.x + b.width <= 390.5;
   }).toBe(true);
-  // The header holds the brand, then host / page / theme, like the Explorer.
+  // The header is one row on a phone: the logo, then host / page / theme, like the Explorer.
   const brand = await page.locator('.appBrand').boundingBox();
   const host = await page.locator('#hostPicker').boundingBox();
-  expect(host.y).toBeGreaterThan(brand.y + brand.height - 1);
+  expect(host.x).toBeGreaterThanOrEqual(brand.x + brand.width - 1);
+  expect(Math.abs((host.y + host.height / 2) - (brand.y + brand.height / 2))).toBeLessThanOrEqual(host.height);
 });
 
 // --- Shared formats (docs/ui-foundations.md) --------------------------------

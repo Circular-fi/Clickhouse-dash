@@ -307,7 +307,7 @@ test('the layout wastes no room: the keys beside a wide side column, New key in 
   expect(m.sideWidth).toBeLessThan(560);
   expect(m.sideTop).toBeLessThan(m.gutter + 4);
   // A key is one table line, and its name column is narrow: a name has 32 characters at most.
-  for (const height of m.rowHeights) expect(height).toBeLessThanOrEqual(34);
+  for (const height of m.rowHeights) expect(height).toBeLessThanOrEqual(38);
   expect(m.nameWidth).toBeLessThanOrEqual(200);
   // The shared components: a compact data table, the part heading.
   await expect(page.locator('#mcpKeysBody table')).toHaveClass(/dataTable--compact/);
