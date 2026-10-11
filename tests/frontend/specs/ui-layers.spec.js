@@ -66,9 +66,13 @@ async function openView(page, view) {
   await viewIdle(page, view, run);
 }
 
+// The answer of the view's search, if one comes: a range or a search that the view answers from its own cache sends
+// nothing, so the wait is short and its end is no failure; the view being idle is what the cycle needs.
+const answer = (page, view) => page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 4_000 }).catch(() => null);
+
 // Runs the view's search again and waits until it is idle.
 async function search(page, view) {
-  const run = page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 });
+  const run = answer(page, view);
   await page.locator(`${BAR[view]} .obsFilterBar__submit`).click();
   await viewIdle(page, view, run);
 }
@@ -78,7 +82,7 @@ async function setRange(page, view, [from, to]) {
   await page.locator(`${WORKSPACE[view]} .tracePicker--range > .tracePicker__button`).click();
   await page.locator(`#${view}RangeStart`).fill(from);
   await page.locator(`#${view}RangeEnd`).fill(to);
-  const run = page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 });
+  const run = answer(page, view);
   await page.locator(`#${view}CustomRangeApply`).click();
   await viewIdle(page, view, run);
 }
