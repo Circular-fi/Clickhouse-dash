@@ -19,6 +19,7 @@ option(CHDASH_BUILD_ERROR_TESTS "Build the unit tests of the error answer: the e
 option(CHDASH_BUILD_CONFIG_TESTS "Build the unit tests of the configuration file: the table of keys, the bounds, the URIs, the HCL parser" OFF)
 option(CHDASH_BUILD_SQL_TESTS "Build the unit tests of the SQL text: literals, lexer, policy, structure" OFF)
 option(CHDASH_BUILD_EXPLORER_TESTS "Build the unit tests of the Explorer: the SQL, the rules, the readers on a fake executor, the TTL, the graph (no ClickHouse needed)" OFF)
+option(CHDASH_BUILD_LOGS_TESTS "Build the unit tests of the pure parts of the logs routes: the text search and the patterns (no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_METRICS_TESTS "Build the unit tests of the Metrics page: the request, the SQL, the aggregation of the rows, the service (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_TRACE_TESTS "Build the unit tests of the Traces page: the request, the filters, the SQL, the search strategies (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
@@ -118,6 +119,14 @@ if (CHDASH_BUILD_EXPLORER_TESTS)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_explorer_test PRIVATE clickhouse-cpp-lib Threads::Threads)
   chdash_configure_target(chdash_explorer_test)
+endif()
+
+if (CHDASH_BUILD_LOGS_TESTS)
+  # The pure parts of the logs routes: the text search (tokens, terms, SQL of a term) and the patterns (masking, Drain).
+  add_executable(chdash_logs_test ../tests/native/logs_test.cpp logs_text.cpp logs_drain.cpp)
+  target_include_directories(chdash_logs_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_logs_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+  chdash_configure_target(chdash_logs_test)
 endif()
 
 if (CHDASH_BUILD_METRICS_TESTS)
@@ -352,6 +361,8 @@ if (CHDASH_BUILD_APP)
     api_otel_signals.cpp
     api_trace_logs.cpp
     api_logs.cpp
+    logs_text.cpp
+    logs_drain.cpp
     api_metrics.cpp
     metrics_aggregate.cpp
     metrics_json.cpp
