@@ -325,7 +325,7 @@ std::optional<FormatWarning> FormatBatch::check_meaning(const std::string& befor
     if (tree_after.failure != FormatQueryFailureKind::server || tree_after.message.find("max_query_size") != std::string::npos) return std::nullopt;
     return changed();
   }
-  if (*tree_before.formatted_sql != *tree_after.formatted_sql) return changed();
+  if (tree_before.formatted_sql != tree_after.formatted_sql) return changed();
   return std::nullopt;
 }
 
