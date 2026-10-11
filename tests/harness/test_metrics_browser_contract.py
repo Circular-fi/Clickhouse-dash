@@ -67,6 +67,10 @@ def test_queries_use_the_primary_key_prefix_and_bounded_windows():
     assert 'constexpr const char* kQuerySettings = " SETTINGS max_execution_time = 30";' in api
     assert "DISTINCT toString(arrayJoin(mapKeys(Attributes)))" in api
     assert "constexpr size_t kMaxSeriesRows = 300000;" in api
+    # The statements that group and rank the points of a window bound their memory; the groups are ranked in ClickHouse (ARCH-B-025).
+    assert "max_memory_usage = 2000000000, max_bytes_before_external_group_by = 1000000000" in api
+    assert "SeriesStatements::ranking(" in api and 'sumKahanIf(abs(v), isFinite(v)) AS score' in api
+    assert "ORDER BY score DESC, g LIMIT" in api and "kOtherGroupKey" in api
 
 
 def test_counter_and_histogram_math_is_reset_aware():

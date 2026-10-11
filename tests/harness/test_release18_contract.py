@@ -1,3 +1,4 @@
+from format_sources import read_formatter
 from pathlib import Path
 import modules
 
@@ -58,7 +59,7 @@ def test_storage_sidebar_disables_virtual_system_engines_from_catalog_signals() 
 
 
 def test_long_enums_and_nested_map_enums_are_structured_multiline() -> None:
-    formatter = read("src/format_postprocess.cpp")
+    formatter = read_formatter()
     expected = read("tests/api/format/output/093_create_table_long_enums.sql")
     assert "format_long_enum_type_lines" in formatter
     assert 'starts_with_ci(item, "Enum8(")' in formatter

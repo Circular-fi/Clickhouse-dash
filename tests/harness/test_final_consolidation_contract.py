@@ -3,6 +3,7 @@ import css_sources
 import modules
 import config_keys
 from explorer_sources import read_api, read_catalog, read_graph, read_unit
+from session_sources import read_session
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -222,7 +223,7 @@ def test_clickhouse_text_decoder_handles_lowcardinality_metadata_without_empty_s
 
 
 def test_query_database_scope_never_fails_open_to_default_database() -> None:
-    session = read("src/query_session.cpp")
+    session = read_session()
     run_query = session[session.index("void QuerySession::run_query()"): ]
     assert 'if (!database_.empty()) ch_execute(*client_query_, "USE " + quote_ident(database_));' in run_query
     assert "apply_database_best_effort" not in run_query

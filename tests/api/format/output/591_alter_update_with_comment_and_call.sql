@@ -1,0 +1,6 @@
+ALTER TABLE db.t
+UPDATE
+    a = 1,
+    b = today()
+WHERE
+    c = 3 -- the comma in the list is no new command

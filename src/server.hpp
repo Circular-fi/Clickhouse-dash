@@ -8,8 +8,15 @@
 #include "explorer_catalog.hpp"
 #include "explorer_graph.hpp"
 #include "explorer_service.hpp"
+#include "logs_service.hpp"
 #include "metrics_service.hpp"
+#include "system_disks.hpp"
 #include "system_monitor.hpp"
+#include "system_overview.hpp"
+#include "system_queries.hpp"
+#include "system_series.hpp"
+#include "system_service.hpp"
+#include "system_settings.hpp"
 #include "system_activity.hpp"
 #include "deep_analysis_jobs.hpp"
 #include "export_job.hpp"
@@ -68,35 +75,6 @@ struct ExplorerSettings {
   // default. When enabled, the browser still accepts only ClickHouse-relative
   // references (/... or ./...) and strips every arbitrary external URL.
   bool function_markdown_links = false;
-};
-
-// The System page (docs/system.md): the selected server, not a database
-// or a table. Overview (server tiles, databases, topology, Keeper,
-// replication, the performance history and the background activity),
-// Queries (system.query_log) and Disks. Every read is a fixed, bounded
-// system-table SELECT.
-struct SystemSettings {
-  bool enabled = true;
-  // The Activity part of the Overview (merges, mutations, replication and
-  // Distributed queues: /api/system/activity). v2.14.0's
-  // explorer.operations.enabled sets it too.
-  bool activity = true;
-  // The Keeper / ZooKeeper session (/api/system/keeper); v2.14.0's
-  // explorer.operations.keeper sets it too.
-  bool keeper = true;
-  // The Queries section (top queries of system.query_log, runner context).
-  bool top_queries = true;
-  // clusterAllReplicas() views; needs GRANT REMOTE for the system account.
-  bool cluster_fanout = false;
-  // Time windows and caps of the history parts.
-  int default_lookback_minutes = 60;
-  int max_lookback_days = 30;
-  int query_log_max_lookback_hours = 7 * 24;
-  uint64_t query_log_max_rows = 50'000'000;
-  int disk_growth_days = 7;
-  bool activity_enabled() const { return enabled && activity; }
-  bool keeper_enabled() const { return enabled && keeper; }
-  bool top_queries_enabled() const { return enabled && top_queries; }
 };
 
 // Server-side query library (folders + saved queries), persisted in one JSON
@@ -419,12 +397,9 @@ private:
   void handle_system_queries(const httplib::Request& req, httplib::Response& res);
   void handle_system_query(const httplib::Request& req, httplib::Response& res);
   void handle_system_disks(const httplib::Request& req, httplib::Response& res);
-  void system_monitor_disk_growth(const httplib::Request& req, httplib::Response& res, const HostSpec& host,
-                                    const std::string& system_uri, const std::shared_ptr<const MonitorCapabilities>& caps,
-                                    const MonitorSeriesWindow& window, uint64_t from_ms, uint64_t to_ms);
-  bool system_monitor_queries_window(const httplib::Request& req, httplib::Response& res, uint64_t now_ms,
-                                       uint64_t& from_ms, uint64_t& to_ms);
-  std::shared_ptr<const MonitorCapabilities> system_monitor_capabilities(const std::string& host_id, const std::string& system_uri);
+  // The connections of the System service: the system account of a host, and its runner account for the Queries.
+  std::unique_ptr<ChExecutor> open_system_executor(const HostSpec& host, std::string* error);
+  std::unique_ptr<ChExecutor> open_system_runner_executor(const HostSpec& host, std::string* error);
 
   void handle_traces_meta(const httplib::Request& req, httplib::Response& res);
   void handle_traces_search(const httplib::Request& req, httplib::Response& res);
@@ -443,6 +418,7 @@ private:
   // The connection of the Traces service to the trace source of a host (the system account); null with the reason in *error.
   std::unique_ptr<ChExecutor> open_trace_executor(const HostSpec& host, std::string* error);
   std::unique_ptr<ChExecutor> open_metrics_executor(const HostSpec& host, std::string* error);
+  std::unique_ptr<ChExecutor> open_logs_executor(const HostSpec& host, std::string* error);
   // Span-level search (keyset pages over newest-first time slices) and one
   // span by its row key, for the search page's Spans mode.
   void handle_traces_spans(const httplib::Request& req, httplib::Response& res);
@@ -514,25 +490,6 @@ private:
     uint64_t updated_at_ms = 0;
     std::string credential_scope;
     std::vector<MetaCatalogItem> items;
-  };
-
-  // The facets of the Logs search page (api_logs.cpp): the most frequent keys of a sample, and the top values of one key. A value keeps
-  // kFacetMaxKeys + 1 keys at most. (The ones of the Traces page are in trace_facets.hpp.)
-  struct LogFacetKeys {
-    struct Key { std::string scope, key; uint64_t count = 0; };
-    std::vector<Key> keys;
-    uint64_t sampled = 0;
-    bool estimated = false;
-    bool timed_out = false;
-    uint64_t query_ms = 0;
-  };
-  struct LogFacetValues {
-    std::vector<std::pair<std::string, uint64_t>> values;
-    uint64_t with_key = 0;
-    uint64_t distinct_values = 0;
-    bool estimated = false;
-    bool timed_out = false;
-    uint64_t query_ms = 0;
   };
 
   AppConfig cfg_;
@@ -676,6 +633,24 @@ private:
       std::chrono::minutes(1), {}, 256, 16u << 20)};
   TtlCache<std::string, SystemMonitorDiskGrowth> system_monitor_growth_cache_{cache_options<SystemMonitorDiskGrowth>(
       std::chrono::minutes(5), {}, 64, 16u << 20, cache_size::growth)};
+  // The System service (system_service.hpp): the caches above are its caches.
+  system_page::SystemService system_service_{
+      system_page::SystemService::Ports{
+          [this](const HostSpec& host, std::string* error) { return open_system_executor(host, error); },
+          [this](const HostSpec& host, std::string* error) { return open_system_runner_executor(host, error); },
+          [this](const HostSpec& host) { return runner_access(host); },
+          [this](ChExecutor& db, const std::vector<std::pair<std::string, std::string>>& tables) {
+            std::string error;
+            std::unordered_map<std::string, SystemReplicaCounts> counts;
+            for (const auto& [key, value] : load_cached_replica_counts(db, explorer_caches_, tables, &error)) {
+              counts[key] = SystemReplicaCounts{value.total, value.active};
+            }
+            return counts;
+          }},
+      system_page::SystemCaches{system_monitor_caps_cache_, system_monitor_overview_cache_, system_monitor_series_cache_,
+                                system_monitor_queries_cache_, system_monitor_query_cache_, system_monitor_disks_cache_,
+                                system_monitor_growth_cache_, system_activity_cache_, system_keeper_cache_},
+      acl_};
   trace::PrefillCache trace_prefill_cache_{cache_options<trace::Prefill>(
       std::chrono::minutes(1), {}, 256, 64u << 20,
       [](const trace::Prefill& v) { return sizeof(v) + cache_size::pairs(v.pairs); })};
@@ -685,12 +660,12 @@ private:
   trace::FacetValuesCache trace_facet_values_cache_{cache_options<trace::FacetValues>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 1024, 16u << 20,
       [](const trace::FacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
-  TtlCache<std::string, LogFacetKeys> log_facet_keys_cache_{cache_options<LogFacetKeys>(
+  logs::FacetKeysCache log_facet_keys_cache_{cache_options<logs::LogFacetKeys>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 512, 16u << 20,
-      [](const LogFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
-  TtlCache<std::string, LogFacetValues> log_facet_values_cache_{cache_options<LogFacetValues>(
+      [](const logs::LogFacetKeys& v) { return sizeof(v) + 96 * v.keys.size(); })};
+  logs::FacetValuesCache log_facet_values_cache_{cache_options<logs::LogFacetValues>(
       std::chrono::milliseconds(kFacetTtlMs), {}, 1024, 16u << 20,
-      [](const LogFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
+      [](const logs::LogFacetValues& v) { return sizeof(v) + cache_size::counted(v.values); })};
 
   // The catalog of the Metrics page: per host, source and minute-aligned window.
   metrics::CatalogCache metrics_catalog_cache_{cache_options<metrics::CatalogSnapshot>(
@@ -701,6 +676,10 @@ private:
   LogsSchemaCache logs_schema_cache_{logs_schema_cache_options()};
   LogColumnsCache log_columns_cache_{log_columns_cache_options()};
   KindTablesCache kind_tables_cache_{kind_tables_cache_options()};
+
+  // The Logs service (logs_service.hpp): the schema of the table and the facets are its caches.
+  logs::LogsService logs_service_{[this](const HostSpec& host, std::string* error) { return open_logs_executor(host, error); },
+                                  logs::LogsCaches{logs_schema_cache_, log_facet_keys_cache_, log_facet_values_cache_}};
 
   // The Metrics service (metrics_service.hpp): the catalog and the kind tables are its caches.
   metrics::MetricsService metrics_service_{[this](const HostSpec& host, std::string* error) { return open_metrics_executor(host, error); },

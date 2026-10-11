@@ -1,13 +1,14 @@
 #pragma once
 
-#include "explorer_catalog.hpp"
-
-#include <clickhouse/client.h>
+#include "ch_query.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace chdash {
@@ -139,12 +140,23 @@ struct SystemKeeperStatus {
 };
 
 class AclView;
+class ChExecutor;
+
+// The total and the active replicas of a replicated table, read from Keeper (one request for each table), and what the Explorer keeps of
+// them (explorer_catalog.hpp, load_cached_replica_counts). The Activity asks for the counts of the tables of its replicas.
+struct SystemReplicaCounts {
+  uint64_t total = 0;
+  uint64_t active = 0;
+};
+// By "database" NUL "table"; a table whose lookup failed is absent.
+using ReplicaCountsFn = std::function<std::unordered_map<std::string, SystemReplicaCounts>(
+    ChExecutor& system, const std::vector<std::pair<std::string, std::string>>& tables)>;
 
 // Activity rows are kept only when the runner reads the object (`runner_acl`).
 // At most `row_limit` rows are returned per section.
 bool load_system_activity(
-    clickhouse::Client& system,
-    ExplorerCaches& caches,
+    ChExecutor& system,
+    const ReplicaCountsFn& replica_counts,
     AclView& runner_acl,
     size_t row_limit,
     SystemActivity& out,
@@ -152,7 +164,7 @@ bool load_system_activity(
 
 // Server-level Keeper session state; contains no object names.
 bool load_system_keeper_status(
-    clickhouse::Client& system,
+    ChExecutor& system,
     SystemKeeperStatus& out,
     std::string* error);
 

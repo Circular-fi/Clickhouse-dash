@@ -81,14 +81,6 @@ std::string changed_info(std::string golden, bool sum) {
   return golden;
 }
 
-std::string changed_histogram(std::string golden) {
-  const std::string old_order = "GROUP BY g, b, bstr ORDER BY g, b LIMIT";
-  const size_t at = golden.find(old_order);
-  CHECK(at != std::string::npos);
-  golden.replace(at, old_order.size(), "GROUP BY g, b, bstr ORDER BY g, b, bstr LIMIT");
-  return golden;
-}
-
 MetricSettings settings() {
   MetricSettings metrics;
   metrics.enabled = true;
@@ -296,77 +288,138 @@ void test_the_attribute_statements_are_unchanged() {
 }
 
 void test_the_series_statements_are_unchanged() {
-  const auto window = std::vector<std::pair<const char*, const char*>>{};
-  (void)window;
+  // The groups that a ranking kept, which a grouped request reads (the others are one group, folded in the statement).
+  const std::vector<std::string> kept_summary = {"16723269243102733365"};
+  const std::vector<std::string> kept_grouped = {"SPAN_KIND_CLIENT\x1fSTATUS_CODE_OK", "SPAN_KIND_CLIENT\x1fSTATUS_CODE_ERROR"};
+  const std::vector<std::string> kept_none;
+  const std::vector<std::string> kept_name = {"session.lookup"};
+  const std::vector<std::string> kept_hosts = {"api-service-2", "api-service-0", "api-service-1"};
   const auto gauge = series_request({{"kind", "gauge"}, {"service", "api_service"}, {"metric", "queue.depth"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
-  SeriesStatements gauge_statements(gauge, table_of("gauge"), "1", false);
+  SeriesStatements gauge_statements(gauge, table_of("gauge"), "1", true);
   CHECK_EQ(inlined(gauge_statements.info()), changed_info(golden::kInfoGauge, false));
   CHECK_EQ(inlined(gauge_statements.series(Mode::Gauge, false, "")), std::string(golden::kSeriesGauge));
 
   const auto sum = series_request({{"kind", "sum"}, {"service", "auth_service"}, {"metric", "traces.span.metrics.calls"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
-  SeriesStatements sum_statements(sum, table_of("sum"), "1", false);
+  SeriesStatements sum_statements(sum, table_of("sum"), "1", true);
   CHECK_EQ(inlined(sum_statements.info()), changed_info(golden::kInfoSum, true));
   CHECK_EQ(inlined(sum_statements.series(Mode::Delta, false, "")), std::string(golden::kSeriesSumCumulative));
 
   const auto histogram_delta = series_request({{"kind", "histogram"}, {"service", "api_service"}, {"metric", "http.server.request.duration"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
-  SeriesStatements delta_statements(histogram_delta, table_of("histogram"), "1", false);
+  SeriesStatements delta_statements(histogram_delta, table_of("histogram"), "1", true);
   CHECK_EQ(inlined(delta_statements.info()), changed_info(golden::kInfoHistogram, false));
-  CHECK_EQ(inlined(delta_statements.series(Mode::Histogram, true, "")), changed_histogram(golden::kSeriesHistogramDelta));
+  CHECK_EQ(inlined(delta_statements.series(Mode::Histogram, true, "")), std::string(golden::kSeriesHistogramDelta));
   const auto histogram_cumulative = series_request({{"kind", "histogram"}, {"service", "auth_service"}, {"metric", "http.server.request.duration"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
-  SeriesStatements cumulative_statements(histogram_cumulative, table_of("histogram"), "1", false);
-  CHECK_EQ(inlined(cumulative_statements.series(Mode::Histogram, false, "")), changed_histogram(golden::kSeriesHistogramCumulative));
+  SeriesStatements cumulative_statements(histogram_cumulative, table_of("histogram"), "1", true);
+  CHECK_EQ(inlined(cumulative_statements.series(Mode::Histogram, false, "")), std::string(golden::kSeriesHistogramCumulative));
 
   const auto exponential = series_request({{"kind", "exponential_histogram"}, {"service", "api_service"}, {"metric", "span.duration.exponential"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
-  SeriesStatements exponential_statements(exponential, table_of("exponential_histogram"), "1", false);
+  SeriesStatements exponential_statements(exponential, table_of("exponential_histogram"), "1", true);
   CHECK_EQ(inlined(exponential_statements.info()), changed_info(golden::kInfoExponential, false));
   CHECK_EQ(inlined(exponential_statements.series(Mode::Exponential, true, "")), std::string(golden::kSeriesExponentialDelta));
 
   const auto summary = series_request({{"kind", "summary"}, {"service", "auth_service"}, {"metric", "span.duration.summary"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
-  SeriesStatements summary_statements(summary, table_of("summary"), "1", false);
+  SeriesStatements summary_statements(summary, table_of("summary"), "1", true);
   CHECK_EQ(inlined(summary_statements.info()), changed_info(golden::kInfoSummary, false));
-  CHECK_EQ(inlined(summary_statements.series(Mode::SummaryQuantile, false, "0.5")), std::string(golden::kSeriesSummaryQuantile));
+  CHECK_EQ(inlined(summary_statements.series(Mode::SummaryQuantile, false, "0.5", &kept_summary)), std::string(golden::kSeriesSummaryQuantile));
   const auto summary_delta = series_request({{"kind", "summary"}, {"service", "auth_service"}, {"metric", "span.duration.summary"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
-  SeriesStatements summary_delta_statements(summary_delta, table_of("summary"), "1", false);
+  SeriesStatements summary_delta_statements(summary_delta, table_of("summary"), "1", true);
   CHECK_EQ(inlined(summary_delta_statements.series(Mode::SummaryDelta, false, "")), std::string(golden::kSeriesSummaryDelta));
 
   // Grouping, filters, a grid that the request chose, and a user's quote marks.
   const auto grouped = series_request({{"kind", "sum"}, {"service", "auth_service"}, {"metric", "traces.span.metrics.calls"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()},
                                        {"group_by", "span.kind,status.code"}, {"limit", "3"}});
-  SeriesStatements grouped_statements(grouped, table_of("sum"), "1", false);
-  CHECK_EQ(inlined(grouped_statements.series(Mode::Delta, false, "")), std::string(golden::kSeriesGrouped));
+  SeriesStatements grouped_statements(grouped, table_of("sum"), "1", true);
+  CHECK_EQ(inlined(grouped_statements.series(Mode::Delta, false, "", &kept_grouped)), std::string(golden::kSeriesGrouped));
   const auto filters = series_request({{"kind", "sum"}, {"service", "auth_service"}, {"metric", "traces.span.metrics.calls"}, {"start_ms", kStart6h.c_str()}, {"end_ms", kEndText.c_str()},
                                        {"group_by", "span.kind"}, {"filter", "span.kind=SERVER"}, {"filter", "span.kind=CLIENT"}});
-  SeriesStatements filter_statements(filters, table_of("sum"), "1", false);
+  SeriesStatements filter_statements(filters, table_of("sum"), "1", true);
   CHECK_EQ(inlined(filter_statements.info()), changed_info(golden::kInfoFiltered, true));
-  CHECK_EQ(inlined(filter_statements.series(Mode::Delta, false, "")), std::string(golden::kSeriesFiltered));
+  CHECK_EQ(inlined(filter_statements.series(Mode::Delta, false, "", &kept_none)), std::string(golden::kSeriesFiltered));
   const auto filter_not = series_request({{"kind", "sum"}, {"service", "auth_service"}, {"metric", "traces.span.metrics.calls"}, {"start_ms", kStart6h.c_str()}, {"end_ms", kEndText.c_str()},
                                           {"group_by", "span.name"}, {"filter_not", "span.kind=SERVER"}, {"step_ms", "600000"}});
-  SeriesStatements filter_not_statements(filter_not, table_of("sum"), "1", false);
-  CHECK_EQ(inlined(filter_not_statements.series(Mode::Delta, false, "")), std::string(golden::kSeriesFilterNot));
+  SeriesStatements filter_not_statements(filter_not, table_of("sum"), "1", true);
+  CHECK_EQ(inlined(filter_not_statements.series(Mode::Delta, false, "", &kept_name)), std::string(golden::kSeriesFilterNot));
   const auto gauge_group = series_request({{"kind", "gauge"}, {"service", "api_service"}, {"metric", "process.cpu.utilization"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()},
                                            {"group_by", "host.name"}, {"agg", "max"}});
-  SeriesStatements gauge_group_statements(gauge_group, table_of("gauge"), "1", false);
-  CHECK_EQ(inlined(gauge_group_statements.series(Mode::Gauge, false, "")), std::string(golden::kSeriesGaugeGrouped));
+  SeriesStatements gauge_group_statements(gauge_group, table_of("gauge"), "1", true);
+  CHECK_EQ(inlined(gauge_group_statements.series(Mode::Gauge, false, "", &kept_hosts)), std::string(golden::kSeriesGaugeGrouped));
   const auto aligned = series_request({{"kind", "gauge"}, {"service", "api_service"}, {"metric", "queue.depth"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()},
                                        {"bucket_origin_ms", "1234567"}, {"step_ms", "90000"}});
-  SeriesStatements aligned_statements(aligned, table_of("gauge"), "1", false);
+  SeriesStatements aligned_statements(aligned, table_of("gauge"), "1", true);
   CHECK_EQ(inlined(aligned_statements.series(Mode::Gauge, false, "")), std::string(golden::kSeriesGaugeAligned));
   const auto quote = series_request({{"kind", "gauge"}, {"service", "a'b"}, {"metric", "m\\n"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}, {"filter", "k'=v'"}});
-  SeriesStatements quote_statements(quote, table_of("gauge"), "1", false);
+  SeriesStatements quote_statements(quote, table_of("gauge"), "1", true);
   CHECK_EQ(inlined(quote_statements.info()), changed_info(golden::kInfoQuote, false));
   CHECK_EQ(inlined(quote_statements.series(Mode::Gauge, false, "")), std::string(golden::kSeriesQuote));
   CHECK(quote_statements.info().sql.find("a'b") == std::string::npos);
 
   // The kinds that have no capture of their own: the statement of a delta sum is the plain sum, and a cumulative exponential histogram
   // differences each of its arrays with the point before it.
-  SeriesStatements plain_sum(sum, table_of("sum"), "1", false);
+  SeriesStatements plain_sum(sum, table_of("sum"), "1", true);
   const std::string delta_sum = plain_sum.series(Mode::Delta, true, "").sql;
   CHECK(delta_sum.find("lagInFrame") == std::string::npos && delta_sum.find("sum(Value)") != std::string::npos);
-  SeriesStatements cumulative_exponential(exponential, table_of("exponential_histogram"), "1", false);
+  SeriesStatements cumulative_exponential(exponential, table_of("exponential_histogram"), "1", true);
   const std::string exp_sql = cumulative_exponential.series(Mode::Exponential, false, "").sql;
   CHECK(exp_sql.find("lagInFrame(PositiveBucketCounts) OVER w AS ppos") != std::string::npos && exp_sql.find("Scale != pscale") != std::string::npos);
   // Every statement of a series carries its own time bound and the cap of its rows.
-  CHECK(exp_sql.find("LIMIT 300001 SETTINGS max_execution_time = 30") != std::string::npos);
+  CHECK(exp_sql.find("LIMIT 300001 SETTINGS max_execution_time = 30, max_memory_usage = 2000000000") != std::string::npos);
+}
+
+
+// ---- the ranking of the groups in ClickHouse (ARCH-B-025) ----
+
+void test_the_ranking_statements_are_the_ones_that_were_sent() {
+  const auto window = [&](const char* kind, const char* service, const char* metric, const char* group_by, const char* agg) {
+    return series_request({{"kind", kind}, {"service", service}, {"metric", metric}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()},
+                           {"group_by", group_by}, {"agg", agg}, {"limit", "2"}});
+  };
+  const auto seconds = [](const SeriesRequest& request) { return static_cast<double>(request.grid.size_ms) / 1000.0; };
+  const auto gauge_avg = window("gauge", "api_service", "process.cpu.utilization", "host.name", "avg");
+  SeriesStatements gauge_avg_statements(gauge_avg, table_of("gauge"), "1", true);
+  CHECK_EQ(inlined(gauge_avg_statements.ranking(Mode::Gauge, false, "", "avg", seconds(gauge_avg), 2)), std::string(golden::kRankingGauge));
+  const std::vector<std::string> hosts = {"api-service-2", "api-service-1"};
+  CHECK_EQ(inlined(gauge_avg_statements.series(Mode::Gauge, false, "", &hosts)), std::string(golden::kSeriesKeepGauge));
+  const auto gauge_last = window("gauge", "api_service", "process.cpu.utilization", "host.name", "last");
+  SeriesStatements gauge_last_statements(gauge_last, table_of("gauge"), "1", true);
+  CHECK_EQ(inlined(gauge_last_statements.ranking(Mode::Gauge, false, "", "last", seconds(gauge_last), 2)), std::string(golden::kRankingGaugeLast));
+  const auto rate = window("sum", "auth_service", "traces.span.metrics.calls", "span.name", "rate");
+  SeriesStatements rate_statements(rate, table_of("sum"), "1", true);
+  CHECK_EQ(inlined(rate_statements.ranking(Mode::Delta, false, "", "rate", seconds(rate), 2)), std::string(golden::kRankingDelta));
+  const auto increase = window("sum", "auth_service", "traces.span.metrics.calls", "span.name", "increase");
+  SeriesStatements increase_statements(increase, table_of("sum"), "1", true);
+  CHECK_EQ(inlined(increase_statements.ranking(Mode::Delta, false, "", "increase", seconds(increase), 2)), std::string(golden::kRankingDeltaIncrease));
+  const auto p99 = window("histogram", "api_service", "http.server.request.duration", "span.name", "p99");
+  SeriesStatements p99_statements(p99, table_of("histogram"), "1", true);
+  CHECK_EQ(inlined(p99_statements.ranking(Mode::Histogram, true, "", "p99", seconds(p99), 2)), std::string(golden::kRankingHistogramQuantile));
+  const std::vector<std::string> routes = {"request.validate"};
+  CHECK_EQ(inlined(p99_statements.series(Mode::Histogram, true, "", &routes)), std::string(golden::kSeriesKeepHistogram));
+  const auto average = window("histogram", "api_service", "http.server.request.duration", "span.name", "avg");
+  SeriesStatements average_statements(average, table_of("histogram"), "1", true);
+  CHECK_EQ(inlined(average_statements.ranking(Mode::Histogram, true, "", "avg", seconds(average), 2)), std::string(golden::kRankingHistogramAverage));
+  const auto count_rate = window("histogram", "api_service", "http.server.request.duration", "span.name", "count_rate");
+  SeriesStatements count_rate_statements(count_rate, table_of("histogram"), "1", true);
+  CHECK_EQ(inlined(count_rate_statements.ranking(Mode::Histogram, true, "", "count_rate", seconds(count_rate), 2)), std::string(golden::kRankingHistogramCountRate));
+  const auto exponential = window("exponential_histogram", "api_service", "span.duration.exponential", "span.name", "count");
+  SeriesStatements exponential_statements(exponential, table_of("exponential_histogram"), "1", true);
+  CHECK_EQ(inlined(exponential_statements.ranking(Mode::Exponential, true, "", "count", seconds(exponential), 2)), std::string(golden::kRankingExponentialCount));
+  const auto quantile = window("summary", "api_service", "span.duration.summary", "span.name", "p50");
+  SeriesStatements quantile_statements(quantile, table_of("summary"), "1", true);
+  CHECK_EQ(inlined(quantile_statements.ranking(Mode::SummaryQuantile, false, "0.5", "p50", seconds(quantile), 2)), std::string(golden::kRankingSummaryQuantile));
+  const std::vector<std::string> series_ids = {"4574312782914746434"};
+  CHECK_EQ(inlined(quantile_statements.series(Mode::SummaryQuantile, false, "0.5", &series_ids)), std::string(golden::kSeriesKeepSummary));
+  const auto summary_delta = window("summary", "api_service", "span.duration.summary", "span.name", "avg");
+  SeriesStatements summary_delta_statements(summary_delta, table_of("summary"), "1", true);
+  CHECK_EQ(inlined(summary_delta_statements.ranking(Mode::SummaryDelta, false, "", "avg", seconds(summary_delta), 2)), std::string(golden::kRankingSummaryDelta));
+
+  // The kept groups are parameters, and an empty list reads no group.
+  const std::vector<std::string> none;
+  const std::string empty = gauge_avg_statements.series(Mode::Gauge, false, "", &none).sql;
+  CHECK(empty.find("IN ('')") != std::string::npos);
+  // Without a list, the statement is the one that reads every group, and the others are not folded.
+  CHECK(gauge_avg_statements.series(Mode::Gauge, false, "").sql.find("__other__") == std::string::npos);
+  // The ranking and the series carry the memory settings, the other statements only the time.
+  CHECK(gauge_avg_statements.series(Mode::Gauge, false, "").sql.find("max_memory_usage = 2000000000") != std::string::npos);
+  CHECK(gauge_avg_statements.info().sql.find("max_memory_usage") == std::string::npos);
 }
 
 void test_the_exemplars_statement_is_unchanged() {
@@ -1095,8 +1148,11 @@ void test_a_gauge_series_and_its_json() {
   db.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
   db.on("SELECT any(MetricUnit)", {{"%", "CPU use", "0", "0", "0", "30", ""}});
   // g, bucket, sum, count, min, max, last, series
+  // The ranking comes first: the key of the best group, the number of groups, its score, and the sum of the scores. Then the series of the best
+  // group and of "other", the group that ClickHouse folds the others into.
+  db.on("toString(count() OVER ())", {{"host-b", "2", "10", "14"}});
   db.on("SELECT g, toString(b), toString(sum(s_sum))", {
-    {"host-a", "60000", "2", "2", "1", "1", "1", "1"}, {"host-a", "120000", "6", "2", "2", "4", "4", "1"},
+    {"__other__", "60000", "2", "2", "1", "1", "1", "1"}, {"__other__", "120000", "6", "2", "2", "4", "4", "1"},
     {"host-b", "60000", "30", "3", "10", "10", "10", "1"}});
   const auto service = service_over(db, caches);
   RequestContext context;
@@ -1104,7 +1160,11 @@ void test_a_gauge_series_and_its_json() {
                                        {"group_by", "host"}, {"limit", "1"}, {"agg", "max"}});
   const auto answer = service.series(context, metrics_host(), "local", request);
   CHECK(answer);
-  CHECK_EQ(db.count("SELECT g, toString(b)"), size_t(1));
+  CHECK_EQ(db.count("toString(count() OVER ())"), size_t(1));
+  CHECK_EQ(db.count("LIMIT 300001"), size_t(1));
+  // The series statement reads the kept group by its key, as a parameter.
+  CHECK(db.sqls.back().find("IN ({p4:String}), Attributes") != std::string::npos || db.sqls.back().find("IN ({p4:String})") != std::string::npos);
+  CHECK_EQ(db.params.back().back().second, std::string("host-b"));
   const auto doc = parse(series_json(*answer.value));
   CHECK_EQ(std::string(doc["kind"].GetString()), std::string("gauge"));
   CHECK_EQ(std::string(doc["unit"].GetString()), std::string("%"));
@@ -1126,6 +1186,8 @@ void test_a_gauge_series_and_its_json() {
   CHECK_EQ(doc["series"][1]["labels"].MemberCount(), 0u);
   CHECK_EQ(doc["other_series_count"].GetInt(), 1);
   CHECK_EQ(doc["group_count"].GetInt(), 2);
+  // The score of "other" is what the best group leaves of the sum of the scores.
+  CHECK_EQ(doc["series"][1]["total"].GetDouble(), 4.0);
   CHECK(doc["truncated"].GetBool());
   CHECK(!doc["truncated_rows"].GetBool());
   CHECK(!doc["per_series"].GetBool());
@@ -1181,7 +1243,7 @@ void test_a_histogram_series() {
   db.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
   db.on("SELECT any(MetricUnit)", {{"s", "", "1", "1", "0", "20", ""}});
   // g, bucket, bounds, counts, count, sum
-  db.on("SELECT g, toString(b), bstr", {{"", "60000", "1,2", "10,10,0", "20", "30"}, {"", "60000", "1,2,4", "0,0,0,5", "5", "40"}});
+  db.on("SELECT g, toString(b) AS bt, bstr", {{"", "60000", "1,2", "10,10,0", "20", "30"}, {"", "60000", "1,2,4", "0,0,0,5", "5", "40"}});
   const auto service = service_over(db, caches);
   RequestContext context;
   const auto answer = service.series(context, metrics_host(), "local",
@@ -1207,7 +1269,8 @@ void test_a_summary_is_read_per_series() {
   TestCaches caches;
   db.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
   db.on("SELECT any(MetricUnit)", {{"ms", "", "0", "0", "0", "9", "0.5,0.99"}});
-  db.on("SELECT toString(sid), any(attrs)", {{"11", "{\"route\":\"/a\",\"n\":3}", "60000", "7.5"}, {"22", "{\"route\":\"/b\"}", "60000", "9.5"}});
+  db.on("toString(count() OVER ())", {{"22", "2", "9.5", "17"}, {"11", "2", "7.5", "17"}});
+  db.on("SELECT toString(sid) AS g, any(attrs)", {{"11", "{\"route\":\"/a\",\"n\":3}", "60000", "7.5"}, {"22", "{\"route\":\"/b\"}", "60000", "9.5"}});
   const auto service = service_over(db, caches);
   RequestContext context;
   const auto answer = service.series(context, metrics_host(), "local",
@@ -1229,6 +1292,48 @@ void test_a_summary_is_read_per_series() {
   CHECK(db.sqls.back().find("route") == std::string::npos);
 }
 
+
+void test_a_grouped_request_reads_the_groups_that_ClickHouse_ranked() {
+  FakeDb db;
+  TestCaches caches;
+  db.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
+  db.on("SELECT any(MetricUnit)", {{"1", "", "2", "2", "1", "10", ""}});
+  // 40,000 groups: the ranking keeps the two best and says how many there are and what the sum of their scores is.
+  db.on("toString(count() OVER ())", {{"u39999", "40000", "39999", "800000000"}, {"u39998", "40000", "39998", "800000000"}});
+  // g, bucket, sum of the deltas, sum of the counts: the two groups and the others.
+  db.on("SELECT g, toString(b), toString(sum(d1))", {{"u39999", "60000", "6", "0"}, {"u39998", "60000", "5", "0"}, {"__other__", "60000", "100", "0"}});
+  const auto service = service_over(db, caches);
+  RequestContext context;
+  const auto answer = service.series(context, metrics_host(), "local",
+                                     series_request({{"kind", "sum"}, {"service", "api"}, {"metric", "calls"}, {"start_ms", "60000"}, {"end_ms", "119999"},
+                                                     {"group_by", "user"}, {"limit", "2"}, {"agg", "increase"}}));
+  CHECK(answer);
+  CHECK_EQ(answer.value->group_count, size_t(40000));
+  CHECK_EQ(answer.value->other_count, size_t(39998));
+  CHECK_EQ(answer.value->series.size(), size_t(2));
+  CHECK_EQ(answer.value->series[0].key, std::string("u39999"));
+  CHECK_EQ(answer.value->other.key, std::string("__other__"));
+  CHECK_EQ(answer.value->other.score, 800000000.0 - 39999.0 - 39998.0);
+  CHECK(!answer.value->truncated_rows);
+  // The statements: the information, the ranking, then the series of the kept groups, whose keys are parameters.
+  CHECK_EQ(db.count("toString(count() OVER ())"), size_t(1));
+  CHECK(db.sqls.back().find("'__other__'") != std::string::npos);
+  CHECK_EQ(db.params.back().back().second, std::string("u39998"));
+  const auto doc = parse(series_json(*answer.value));
+  CHECK_EQ(doc["group_count"].GetInt(), 40000);
+  CHECK_EQ(doc["other_series_count"].GetInt(), 39998);
+  CHECK(doc["truncated"].GetBool());
+  // A ranking that fails is the error of the route (a limit of memory).
+  FakeDb memory;
+  TestCaches memory_caches;
+  memory.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
+  memory.on("SELECT any(MetricUnit)", {{"", "", "0", "0", "0", "1", ""}});
+  memory.fail_on("toString(count() OVER ())", [] { throw server_error(241, "Memory limit exceeded"); });
+  const auto failed = service_over(memory, memory_caches).series(context, metrics_host(), "local",
+      series_request({{"kind", "gauge"}, {"service", "api"}, {"metric", "cpu"}, {"start_ms", "60000"}, {"end_ms", "119999"}, {"group_by", "user"}}));
+  CHECK_EQ(failed.error.code, std::string("metrics_memory_limit"));
+}
+
 void test_the_rows_of_a_series_are_capped() {
   FakeDb db;
   TestCaches caches;
@@ -1244,6 +1349,8 @@ void test_the_rows_of_a_series_are_capped() {
   const auto answer = service.series(context, metrics_host(), "local",
                                      series_request({{"kind", "gauge"}, {"service", "api"}, {"metric", "cpu"}, {"start_ms", "60000"}, {"end_ms", "119999"}, {"limit", "3"}}));
   CHECK(answer);
+  // No grouping: nothing to rank.
+  CHECK_EQ(db.count("toString(count() OVER ())"), size_t(0));
   CHECK(answer.value->truncated_rows);
   CHECK_EQ(answer.value->group_count, kMaxSeriesRows);
   CHECK_EQ(answer.value->series.size(), size_t(3));
@@ -1359,6 +1466,7 @@ int main() {
   RUN(test_the_catalog_statements_are_unchanged);
   RUN(test_the_attribute_statements_are_unchanged);
   RUN(test_the_series_statements_are_unchanged);
+  RUN(test_the_ranking_statements_are_the_ones_that_were_sent);
   RUN(test_the_exemplars_statement_is_unchanged);
   RUN(test_a_series_is_told_apart_by_its_scope_when_the_table_has_one);
   RUN(test_the_merge_of_histograms_does_not_depend_on_the_order_of_the_rows);
@@ -1384,6 +1492,7 @@ int main() {
   RUN(test_the_temporality_and_the_aggregation_of_a_sum);
   RUN(test_a_histogram_series);
   RUN(test_a_summary_is_read_per_series);
+  RUN(test_a_grouped_request_reads_the_groups_that_ClickHouse_ranked);
   RUN(test_the_rows_of_a_series_are_capped);
   RUN(test_a_failed_series_statement_is_the_error_of_the_route);
   RUN(test_the_exemplars_and_their_json);

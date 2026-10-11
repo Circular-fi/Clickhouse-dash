@@ -1,3 +1,4 @@
+from format_sources import read_formatter
 from pathlib import Path
 import css_sources
 import modules
@@ -109,7 +110,7 @@ def test_graph_camera_controls_are_separate_and_buffer_ttl_metadata_is_exposed()
 
 
 def test_formatter_multilines_ttl_and_aligns_settings_when_comma_separated() -> None:
-    formatter = read("src/format_postprocess.cpp")
+    formatter = read_formatter()
     assert "format_comma_clause_body" in formatter
     assert 'poses[i].second == "TTL"' in formatter
     assert 'format_comma_clause_body(body, true)' in formatter

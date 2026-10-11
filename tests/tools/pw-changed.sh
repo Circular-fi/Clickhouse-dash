@@ -110,7 +110,7 @@ specs_for() {
     src/static/app_trace_views.js) echo trace-views ;;
     src/static/app_trace_viewer.js|src/static/app_trace_tabs.js) echo trace-waterfall trace-views trace-insights ;;
     src/static/app_traces.js|src/otel_allowlist.hpp) echo functional trace-search-filters trace-views trace-waterfall observability ;;
-    src/static/app_logs.js|src/api_logs.cpp|src/api_otel_signals.cpp) echo logs observability trace-logs ;;
+    src/static/app_logs.js|src/api_logs.cpp|src/logs_*|src/api_otel_signals.cpp) echo logs observability trace-logs ;;
     src/static/app_metrics.js|src/api_metrics.cpp|src/metrics_*) echo metrics-browser observability ;;
     src/static/app_timerange.js) echo obs-filterbar observability design ;;
     src/static/app_obs_page.js|src/static/traces.html|src/static/logs.html|src/static/metrics.html|src/static/css/20-features/observability.css)

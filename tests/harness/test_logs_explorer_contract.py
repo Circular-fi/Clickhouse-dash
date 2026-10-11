@@ -2,7 +2,8 @@
 import modules
 import json
 from pathlib import Path
-from trace_sources import read_traces, read_unit
+from logs_sources import read_logs, read_unit
+from trace_sources import read_traces
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,64 +30,88 @@ def test_logs_routes_are_registered_only_when_logs_are_enabled():
 
 def test_service_allowlist_predicate_is_shared_by_traces_and_logs():
     header = read("src/otel_allowlist.hpp")
-    traces = read_unit("trace_service.cpp")
-    logs = read("src/api_logs.cpp")
+    traces = read_traces()
+    filters = read_unit("logs_filters.cpp")
     assert "inline std::string service_allowlist_predicate(const TraceSettings& cfg)" in header
     assert "inline std::string service_pattern_predicate(std::string_view pattern)" in header
-    for source in (traces, logs):
+    for source in (traces, filters):
         assert '#include "otel_allowlist.hpp"' in source
     assert "std::string service_allowlist_predicate(const TraceSettings& cfg) {" not in traces
-    assert "service_allowlist_predicate(otel.traces)" in logs
-    assert "service_allowlist_predicate(r.host->otel.traces)" in logs
+    # The filters of every route but the context, and the preset of the context.
+    assert filters.count("otel::service_allowlist_predicate(otel.traces)") == 2
 
 
 def test_search_uses_keyset_cursors_progressive_windows_and_guards():
-    logs = read("src/api_logs.cpp")
+    service = read_unit("logs_service.hpp")
+    sql = read_unit("logs_sql.cpp")
+    logs = read_logs()
     assert " OFFSET " not in logs
-    assert "constexpr int64_t kSearchWindowsSeconds[] = {15 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60};" in logs
-    assert 'std::string out = "cityHash64(ServiceName";' in logs
-    assert '" ORDER BY Timestamp DESC, " + tie + " DESC LIMIT "' in logs
-    assert "std::string keyset_predicate(const std::string& tie_expr, const Cursor& c, bool older)" in logs
-    assert "max_execution_time = " in logs and "max_rows_to_read = " in logs
-    assert "read_overflow_mode = 'throw'" in logs
+    assert "constexpr int64_t kSearchWindowsSeconds[] = {15 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60};" in service
+    assert 'std::string out = "cityHash64(ServiceName";' in sql
+    assert '" ORDER BY Timestamp DESC, " + tie' in sql and '" DESC LIMIT "' in sql
+    assert "std::string keyset_predicate(const std::string& tie_expr, const Cursor& cursor, bool older)" in sql
+    assert "max_execution_time = " in sql and "max_rows_to_read = " in sql
+    assert "read_overflow_mode = 'throw'" in sql
     # A failure is an answer by its ClickHouse code (error_from_clickhouse, api_error.cpp): <area>_scan_limit and <area>_timeout.
     error = read("src/api_error.cpp")
     assert 'name + "_scan_limit"' in error and 'name + "_timeout"' in error
-    assert 'error_from_clickhouse(error, "logs", fallback_code)' in logs
+    assert 'error_from_clickhouse(e, "logs", "logs_search_failed")' in read_unit("logs_service.cpp")
     # Coarse TimestampTime bound (primary key) plus the exact Timestamp one.
-    assert '"TimestampTime >= toDateTime("' in logs
-    assert "r.host->otel.logs.search_limit" in logs
+    assert '"TimestampTime >= toDateTime("' in sql
+    assert "host.otel.logs.search_limit" in read_unit("logs_service.cpp")
 
 
 def test_body_search_splits_tokens_before_hastoken():
-    logs = read("src/api_logs.cpp")
+    filters = read_unit("logs_filters.cpp")
     text = read("src/logs_text.cpp")  # the text search: pure functions (tests/native/logs_test.cpp)
+    service = read_unit("logs_service.cpp")
+    logs = read_logs()
     assert "std::vector<std::string> split_tokens(std::string_view text)" in text
     assert 'parts.push_back("hasToken(" + body + ", " + params.text(token) + ")");' in text
     # What the user wrote reaches ClickHouse as a query parameter ({pN:String}), never inside the SQL text.
-    for written in ('" AND ServiceName IN (" + params.texts(services) + ")"', '" AND TraceId = " + params.text(trace_id)',
+    for written in ('" AND ServiceName IN (" + params.texts(input.services) + ")"', '" AND TraceId = " + params.text(input.trace_id)',
                     '" = " + params.text(value)'):
-        assert written in logs, written
+        assert written in filters, written
     assert 'params.text("%" + like_escape(term.text) + "%")' in text
     assert "quote(services" not in logs and "quote(value)" not in logs and "quote(term.text)" not in logs + text
-    assert "q.params.list()" in logs and "r.query.params.key()" in logs
+    # Every statement sends the values of its filters, and the key of a cache holds them.
+    assert logs.count("statement.params = query.params;") >= 7 and "statement.params.list()" in service
+    assert "q.params.key()" in service
     assert '"position(Body, "' in text
-    assert '"logs_body_search_disabled"' in logs
-    assert "kSubstringWindowSeconds" in logs and '"logs_substring_range"' in logs
+    assert '"logs_body_search_disabled"' in filters
+    assert "kSubstringWindowSeconds" in service and '"logs_substring_range"' in service
     assert "ILIKE" in text
 
 
 def test_histogram_context_and_patterns():
-    logs = read("src/api_logs.cpp")
-    assert 'parse_i64(param(req, "bucket_origin_ms"), &origin);' in logs
-    assert "countIf(SeverityNumber >= 17)" in logs
+    sql = read_unit("logs_sql.cpp")
+    request = read_unit("logs_request.cpp")
+    assert 'out.bucket_origin_ms = int_param(req, "bucket_origin_ms");' in request
+    assert "countIf(SeverityNumber >= 17)" in sql
+    context = read_unit("logs_filters.cpp")
     for preset in ("anything", "service", "host", "trace"):
-        assert f'"{preset}"' in logs, preset
-    assert "ResourceAttributes['host.name'] = " in logs
-    assert "cityHash64(_part, intDiv(_part_offset, 64)) % 1000000 < " in logs
+        assert f'"{preset}"' in context, preset
+    assert "ResourceAttributes['host.name'] = " in context
+    assert "cityHash64(_part, intDiv(_part_offset, " in sql and "% 1000000 < " in sql
     assert "class Drain {" in read("src/logs_drain.hpp")
-    assert 'w.Key("noisy"); w.Bool(share > 0.10);' in logs
+    assert "pattern.noisy = pattern.share > 0.10;" in read_unit("logs_patterns.cpp")
     assert "std::string mask_body(std::string_view body)" in read("src/logs_drain.cpp")
+
+
+def test_logs_routes_are_adapters_over_the_service():
+    routes = read("src/api_logs.cpp")
+    for route, call in (("search", "search"), ("histogram", "histogram"), ("context", "context"), ("patterns", "patterns"),
+                        ("services", "services"), ("facets", "facets"), ("facet_values", "facet_values")):
+        body = routes[routes.index(f"void Server::handle_logs_{route}("):]
+        body = body[:body.index("\n}\n")]
+        assert f"logs_service_.{call}(current_request_context()" in body, route
+        assert "ch_select" not in body and "SELECT" not in body, route
+    # No ClickHouse client and no SQL in the adapters.
+    assert "clickhouse::Client" not in routes and "ch_select" not in routes and "SELECT" not in routes
+    # The service has no HTTP in it.
+    for name in ("logs_service.cpp", "logs_service.hpp", "logs_sql.cpp", "logs_filters.cpp", "logs_patterns.cpp"):
+        assert "httplib::Response" not in read_unit(name), name
+    assert "logs_service.cpp" in read("src/CMakeLists.txt") and "logs_json.cpp" in read("src/CMakeLists.txt")
 
 
 def test_logs_view_follows_the_page_conventions():

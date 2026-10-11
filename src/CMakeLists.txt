@@ -19,7 +19,7 @@ option(CHDASH_BUILD_ERROR_TESTS "Build the unit tests of the error answer: the e
 option(CHDASH_BUILD_CONFIG_TESTS "Build the unit tests of the configuration file: the table of keys, the bounds, the URIs, the HCL parser" OFF)
 option(CHDASH_BUILD_SQL_TESTS "Build the unit tests of the SQL text: literals, lexer, policy, structure" OFF)
 option(CHDASH_BUILD_EXPLORER_TESTS "Build the unit tests of the Explorer: the SQL, the rules, the readers on a fake executor, the TTL, the graph (no ClickHouse needed)" OFF)
-option(CHDASH_BUILD_LOGS_TESTS "Build the unit tests of the pure parts of the logs routes: the text search and the patterns (no ClickHouse needed)" OFF)
+option(CHDASH_BUILD_LOGS_TESTS "Build the unit tests of the Logs page below its routes: the filters, the statements, the patterns and the service on a fake executor (no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_METRICS_TESTS "Build the unit tests of the Metrics page: the request, the SQL, the aggregation of the rows, the service (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_TRACE_TESTS "Build the unit tests of the Traces page: the request, the filters, the SQL, the search strategies (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
@@ -71,8 +71,14 @@ if (CHDASH_BUILD_CODEC_TESTS)
   chdash_configure_target(chdash_processor_codec_test)
 endif()
 
+# The tools of MCP: the dispatch, what the tools share, and the tools by family.
+set(CHDASH_MCP_TOOL_SOURCES mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp)
+
+# The query library: the store, the file format, the rules of the tree, the import, the reading of a request.
+set(CHDASH_QUERY_LIBRARY_SOURCES query_library.cpp query_library_file.cpp query_library_import.cpp query_library_request.cpp query_library_rules.cpp)
+
 if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
-  add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp query_library.cpp error_envelope.cpp secure_random.cpp log.cpp)
+  add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} error_envelope.cpp secure_random.cpp log.cpp)
   target_include_directories(chdash_query_library_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_query_library_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
   chdash_configure_target(chdash_query_library_test)
@@ -83,8 +89,8 @@ if (CHDASH_BUILD_MCP_TESTS)
   # and the startup errors of the mcp { } block (no ClickHouse server needed). Also the HTTP hardening
   # (the guard of the writes, the page policy, the asset versions), the random source and the log lines.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
-    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
-    error_envelope.cpp request_context.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp query_library.cpp ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
+    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp ${CHDASH_MCP_TOOL_SOURCES}
+    error_envelope.cpp request_context.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -94,9 +100,9 @@ if (CHDASH_BUILD_MCP_TESTS)
 endif()
 
 if (CHDASH_BUILD_RESULT_TESTS)
-  # The path of a result to the browser: the JSON cell encoder (Query page, exports, MCP rows) and the
-  # thread that encodes the blocks (no ClickHouse needed).
-  add_executable(chdash_result_path_test ../tests/native/result_path_test.cpp)
+  # The path of a result to the browser: the JSON cell encoder (Query page, exports, MCP rows), the thread that encodes the blocks, the plan
+  # of the columns, the events of a result and the cost that a run reports (no ClickHouse needed).
+  add_executable(chdash_result_path_test ../tests/native/result_path_test.cpp query_result_plan.cpp query_result_events.cpp query_run_profile.cpp)
   target_include_directories(chdash_result_path_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_result_path_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -121,11 +127,21 @@ if (CHDASH_BUILD_EXPLORER_TESTS)
   chdash_configure_target(chdash_explorer_test)
 endif()
 
+# The SQL formatter (format_postprocess.hpp): the entry and the units of its passes. The service, the cache and the transport are not in it.
+set(CHDASH_FORMATTER_SOURCES format_postprocess.cpp format_text.cpp format_scan.cpp format_align.cpp format_arith.cpp format_calls.cpp
+  format_statement.cpp format_expression.cpp format_ddl.cpp format_insert.cpp format_layout.cpp)
+
 if (CHDASH_BUILD_LOGS_TESTS)
-  # The pure parts of the logs routes: the text search (tokens, terms, SQL of a term) and the patterns (masking, Drain).
-  add_executable(chdash_logs_test ../tests/native/logs_test.cpp logs_text.cpp logs_drain.cpp)
+  # The Logs page below its routes: the text search, the patterns, the parsing of a request, the filters, the statements, and the service
+  # on a fake executor with its JSON.
+  add_executable(chdash_logs_test ../tests/native/logs_test.cpp
+    logs_text.cpp logs_drain.cpp logs_patterns.cpp logs_request.cpp logs_filters.cpp logs_sql.cpp logs_service.cpp logs_json.cpp allowed_objects.cpp
+    ch_query.cpp ch_client_pool.cpp ch_uri.cpp ch_error.cpp api_error.cpp error_envelope.cpp request_context.cpp log.cpp jwt.cpp secure_random.cpp)
   target_include_directories(chdash_logs_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-  target_include_directories(chdash_logs_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+  target_include_directories(chdash_logs_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_logs_test PRIVATE clickhouse-cpp-lib Threads::Threads)
   chdash_configure_target(chdash_logs_test)
 endif()
 
@@ -145,13 +161,22 @@ endif()
 
 if (CHDASH_BUILD_FORMAT_TESTS)
   # The bounded JSON parse and the depth guard of the formatter, on 128 KiB thread stacks (no ClickHouse needed).
-  add_executable(chdash_format_depth_test ../tests/native/format_depth_test.cpp format_postprocess.cpp)
+  add_executable(chdash_format_depth_test ../tests/native/format_depth_test.cpp ${CHDASH_FORMATTER_SOURCES})
   target_include_directories(chdash_format_depth_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_format_depth_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_format_depth_test PRIVATE Threads::Threads)
   chdash_configure_target(chdash_format_depth_test)
+
+  # The formatter as a service on a fake ClickHouse: the check of the meaning, the place of an error, the limits and the properties of
+  # the layout (tests/native/format_test.cpp).
+  add_executable(chdash_format_test ../tests/native/format_test.cpp format_service.cpp format_cache.cpp ${CHDASH_FORMATTER_SOURCES} jwt.cpp
+    secure_random.cpp)
+  target_include_directories(chdash_format_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_format_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+  target_link_libraries(chdash_format_test PRIVATE Threads::Threads)
+  chdash_configure_target(chdash_format_test)
 endif()
 
 if (CHDASH_BUILD_CH_QUERY_TESTS)
@@ -204,7 +229,7 @@ endif()
 if (CHDASH_BUILD_CONFIG_TESTS)
   # The configuration file: the table of keys and their bounds, the errors, the derived values, the URIs, the HCL parser.
   add_executable(chdash_config_test ../tests/native/config_test.cpp
-    config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ch_query.cpp error_envelope.cpp mcp_keys.cpp mcp_scope.cpp mcp_api_tools.cpp mcp_identity.cpp query_library.cpp jwt.cpp
+    config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ch_query.cpp error_envelope.cpp mcp_keys.cpp mcp_scope.cpp mcp_api_tools.cpp mcp_identity.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} jwt.cpp
     secure_random.cpp log.cpp health_runner.cpp ch_client_pool.cpp)
   target_include_directories(chdash_config_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_config_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
@@ -220,7 +245,7 @@ if (CHDASH_BUILD_SQL_TESTS)
   # them and the lexer on one corpus.
   enable_language(C)
   add_executable(chdash_sql_test ../tests/native/sql_test.cpp ../tests/native/wasm_kernel_highlight.c ../tests/native/wasm_kernel_sqlscan.c
-    sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp format_service.cpp format_postprocess.cpp format_cache.cpp jwt.cpp secure_random.cpp)
+    sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp format_service.cpp ${CHDASH_FORMATTER_SOURCES} format_cache.cpp jwt.cpp secure_random.cpp)
   target_link_libraries(chdash_sql_test PRIVATE m)
   target_include_directories(chdash_sql_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_sql_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
@@ -262,7 +287,7 @@ if (CHDASH_BUILD_FUZZERS)
     set(CHDASH_FUZZERS ${CHDASH_FUZZERS} ${name} PARENT_SCOPE)
   endfunction()
   chdash_add_fuzzer(chdash_fuzz_json_parse ${_FUZZ_DIR}/fuzz_json_parse.cpp)
-  chdash_add_fuzzer(chdash_fuzz_format ${_FUZZ_DIR}/fuzz_format.cpp format_postprocess.cpp)
+  chdash_add_fuzzer(chdash_fuzz_format ${_FUZZ_DIR}/fuzz_format.cpp format_service.cpp format_cache.cpp ${CHDASH_FORMATTER_SOURCES} jwt.cpp secure_random.cpp)
   chdash_add_fuzzer(chdash_fuzz_mcp_sql ${_FUZZ_DIR}/fuzz_mcp_sql.cpp mcp_sql.cpp)
   chdash_add_fuzzer(chdash_fuzz_user_sql_policy ${_FUZZ_DIR}/fuzz_user_sql_policy.cpp user_sql_policy.cpp)
   chdash_add_fuzzer(chdash_fuzz_hcl ${_FUZZ_DIR}/fuzz_hcl.cpp hcl.cpp)
@@ -276,10 +301,11 @@ endif()
 
 if (CHDASH_BUILD_SYSTEM_TESTS)
   # The System page SQL builders and the disk forecast (no ClickHouse needed).
-  add_executable(chdash_system_monitor_test ../tests/native/system_monitor_test.cpp system_monitor.cpp allowed_objects.cpp acl_service.cpp
-    ch_query.cpp ch_client_pool.cpp ch_uri.cpp jwt.cpp)
+  add_executable(chdash_system_monitor_test ../tests/native/system_monitor_test.cpp system_monitor_caps.cpp system_overview.cpp system_series.cpp system_queries.cpp system_disks.cpp
+    system_activity.cpp system_service.cpp system_request.cpp system_json.cpp allowed_objects.cpp acl_service.cpp
+    ch_query.cpp ch_client_pool.cpp ch_uri.cpp ch_error.cpp api_error.cpp error_envelope.cpp request_context.cpp log.cpp jwt.cpp secure_random.cpp)
   target_include_directories(chdash_system_monitor_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
-  target_include_directories(chdash_system_monitor_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  target_include_directories(chdash_system_monitor_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_system_monitor_test PRIVATE clickhouse-cpp-lib Threads::Threads)
@@ -303,12 +329,16 @@ if (CHDASH_BUILD_APP)
     format_clickhouse.cpp
     format_service.cpp
     format_cache.cpp
-    format_postprocess.cpp
+    ${CHDASH_FORMATTER_SOURCES}
     api_query.cpp
     user_sql_policy.cpp
     api_query_stream.cpp
     api_analysis.cpp
     query_session.cpp
+    query_session_kill.cpp
+    query_result_plan.cpp
+    query_result_events.cpp
+    query_run_profile.cpp
     hcl.cpp
     jwt.cpp
     query_registry.cpp
@@ -342,7 +372,14 @@ if (CHDASH_BUILD_APP)
     explorer_ttl.cpp
     sql_structure.cpp
     system_activity.cpp
-    system_monitor.cpp
+    system_monitor_caps.cpp
+    system_overview.cpp
+    system_series.cpp
+    system_queries.cpp
+    system_disks.cpp
+    system_service.cpp
+    system_request.cpp
+    system_json.cpp
     api_explorer.cpp
     api_system_activity.cpp
     api_system.cpp
@@ -364,13 +401,19 @@ if (CHDASH_BUILD_APP)
     api_logs.cpp
     logs_text.cpp
     logs_drain.cpp
+    logs_patterns.cpp
+    logs_request.cpp
+    logs_filters.cpp
+    logs_sql.cpp
+    logs_service.cpp
+    logs_json.cpp
     api_metrics.cpp
     metrics_aggregate.cpp
     metrics_json.cpp
     metrics_request.cpp
     metrics_service.cpp
     metrics_sql.cpp
-    query_library.cpp
+    ${CHDASH_QUERY_LIBRARY_SOURCES}
     api_query_library.cpp
     mcp_scope.cpp
     mcp_identity.cpp
@@ -379,7 +422,7 @@ if (CHDASH_BUILD_APP)
     mcp_keys.cpp
     mcp_sql.cpp
     mcp_protocol.cpp
-    mcp_tools.cpp
+    ${CHDASH_MCP_TOOL_SOURCES}
     api_mcp.cpp
     ch_uri.cpp
     ch_query.cpp

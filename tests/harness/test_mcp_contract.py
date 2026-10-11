@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import config_keys
+from mcp_tool_sources import read_tools, read_unit
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 
@@ -56,7 +57,7 @@ def test_the_endpoint_exists_only_when_mcp_is_enabled() -> None:
 
 def test_mcp_code_is_not_reachable_from_other_routes_and_never_uses_other_identities() -> None:
     for path in sorted((ROOT / "src").glob("*.cpp")):
-        if path.name in ("api_mcp.cpp", "server.cpp", "mcp_tools.cpp", "mcp_protocol.cpp", "config.cpp", "main.cpp"):
+        if path.name in ("api_mcp.cpp", "server.cpp", "mcp_protocol.cpp", "config.cpp", "main.cpp") or path.name.startswith(("mcp_tools", "mcp_tool_")):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         assert "McpTools" not in text and "mcp_tools_" not in text and "handle_mcp_post" not in text, path.name
@@ -252,8 +253,9 @@ def test_every_api_tool_is_one_row_that_names_a_route_of_the_server() -> None:
         verb = "Get" if method == "GET" else "Post"
         assert re.search(r'http_\.' + verb + r'\(R?"\(?' + re.escape(static), server), (name, method, path)
     # The wrapper is one function: no tool of the table has its own branch in the dispatcher.
-    tools = read("src/mcp_tools.cpp")
-    dispatch = tools[tools.index("McpToolOutcome McpTools::call_tool"):]
+    dispatch_source = read("src/mcp_tools.cpp")
+    tools = read_tools()
+    dispatch = dispatch_source[dispatch_source.index("McpToolOutcome McpTools::call_tool"):]
     assert "if (info && info->api) json = tool_api(ctx, *info, arguments);" in dispatch
     for name in names:
         assert f'tool == "{name}"' not in dispatch, name
@@ -261,8 +263,8 @@ def test_every_api_tool_is_one_row_that_names_a_route_of_the_server() -> None:
 
 
 def test_the_api_tools_run_no_query_of_their_own_and_are_documented() -> None:
-    wrapper = read("src/mcp_tools.cpp")
-    wrapper = wrapper[wrapper.index("std::string tool_api("):wrapper.index("McpToolOutcome McpTools::call_tool")]
+    wrapper = read_unit("mcp_tools_api.cpp")
+    wrapper = wrapper[wrapper.index("std::string tool_api("):]
     # An API tool reads through the API of ChDash: no SQL here, no ClickHouse identity here.
     assert "ctx.db" not in wrapper and "run(ctx" not in wrapper and "runner_uri" not in wrapper and "system_uri" not in wrapper
     # The server answers the call itself, in the process (no socket, no second login), with a bounded number of calls at once.
@@ -273,7 +275,7 @@ def test_the_api_tools_run_no_query_of_their_own_and_are_documented() -> None:
     assert "http_.dispatch(req, res)" in server and "admission_.acquire(" in server and "cfg_.admission.mcp_max" in server
     assert "RequestContext::Caller::Mcp" in server
     # A tool of the API says in its row (McpApiScope) how the patterns of a key apply, and the one wrapper checks it.
-    assert "check_api_scope(ctx, api, args)" in read("src/mcp_tools.cpp")
+    assert "check_api_scope(ctx, api, args)" in read_unit("mcp_tools_api.cpp")
     docs = read("docs/mcp.md")
     for name, *_ in api_tool_rows():
         assert f"`{name}`" in docs, name

@@ -69,7 +69,7 @@ A failure of a ClickHouse statement gets its status from the **code that ClickHo
 
 A route with a short, fixed list of parameters (the System page, `/api/system/...`) refuses any other name: 400 `unknown_parameter`. A number in a parameter is the whole text of the value: `123abc`, ` 12` and `1e3` are not integers. The trace and metrics routes read a bad `start_ms` or `end_ms` as 400. For the other numbers of the Traces routes (`limit`, `lookback_minutes`, the duration bounds), a text that is not a number gives the default, and a number outside the bounds gives the nearest bound.
 
-A batch of statements (`POST /api/format` with `sqls`) answers 200 with a status for each statement. The error of a statement is in its entry, with the same members and the member `index`.
+A batch of statements (`POST /api/format` with `sqls`) answers 200 with a status for each statement. The error of a statement is in its entry, with the same members and the member `index`. A statement that the formatter would have changed in meaning is `formatted`, with the text as it was written and a `warning` (`format_meaning_changed`). The `clickhouse` member of a refused statement says where ClickHouse stopped, counted in the text that the client sent. A text that is longer than the limit answers 422, and the message gives the limit ([formatter.md](formatter.md)).
 
 MCP keeps two shapes that its protocol defines: the JSON-RPC error of `POST /mcp` (`{"error": {"code", "message"}}`), and the result of a failed tool (`isError: true`, `{"error", "message"}` in `structuredContent`, [mcp.md](mcp.md)). The HTTP errors of `POST /mcp` and of the `/api/mcp` routes have the body above.
 

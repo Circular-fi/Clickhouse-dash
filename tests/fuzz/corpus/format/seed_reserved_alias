@@ -1,0 +1,2 @@
+…select 1 as from, 2 as `to`, $$a long heredoc 'x'$$ as h, 'one
+two' as m, @ -- c

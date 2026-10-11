@@ -135,7 +135,7 @@ Common parameters: `host_id` (optional with one host) and `start_ms` / `end_ms` 
 - `503 metrics_source_unavailable`.
 - `503 metrics_query_failed` (ClickHouse error text).
 
-Every query carries `SETTINGS max_execution_time = 30`. Every response has `timing_ms: {query, total}`.
+Every query carries `SETTINGS max_execution_time = 30`. The statements that read or rank the series add `max_memory_usage = 2000000000`, `max_bytes_before_external_group_by = 1000000000` and `max_bytes_before_external_sort = 1000000000`. Every response has `timing_ms: {query, total}`.
 
 The service, the metric, the attribute keys and the attribute values of a request are not part of the SQL text. They go to ClickHouse as query parameters (`{p1:String}`, `{p2:String}`, ...), apart from the text. A quote mark, a backslash or a new line in a value is a plain character. The same is true for the logs of a trace (`GET /api/traces/logs`: the trace id, the span id and the services).
 
@@ -237,7 +237,9 @@ The backend then adds the differences with `sumForEach` for each group, bucket a
 - Min and max are kept.
 - Histogram buckets are merged before the quantile.
 
-Per-series summaries fold nothing (`truncated: true` only). ClickHouse returns at most 300000 (group, bucket) rows, in the order of the group key. Beyond that, `truncated_rows: true`. The groups at the end of that order are then missing, and the top-K is the top-K of the groups that remain. When `truncated_rows` is true, narrow the window or add a filter, or group by fewer keys: the ranking is not exact.
+ClickHouse does the ranking when the request groups by attributes (and for the series of a summary). The route sends two statements. The first one wraps the statement of the buckets: it computes the score of each group with the formula of the aggregation, orders the groups by score and then by key, and returns the keys of the `limit` best ones, the number of groups, and the sum of the scores. The second statement reads the cells of those groups. It folds every other group into the group `__other__` in the SQL, so ClickHouse sends at most `limit + 1` groups, and the number of groups (and of buckets) of the window does not change the rows that come back. The keys of the best groups are query parameters. `group_count` is the number of groups of the window, and `other_series_count` the number that the other series folds. The `total` of the other series is the part of the sum of the scores that the best groups leave. A request that does not group (and is not a summary) has one group and does not rank. Both statements have `max_memory_usage = 2 GB`; a grouping or a sort over 1 GB goes to disk. A limit of memory is a 422 `metrics_memory_limit`.
+
+Per-series summaries fold nothing (`truncated: true` only). A statement of the series returns at most 300000 (group, bucket) rows. Beyond that, `truncated_rows: true` (the ranking keeps this for a window with more buckets than that for the kept groups, which is not possible with the bounds of a request).
 
 ```json
 {"v": 1, "source_host_id": "local", "kind": "histogram", "service": "api_service",

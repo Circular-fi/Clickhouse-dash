@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 import config_keys
+from system_sources import read_monitor, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,8 +41,9 @@ def test_the_page_is_gated_by_its_config_block_and_advertised():
     assert 'serve_view_shell("queries.html")(req, res);' in server
     assert 'http_.Get(R"(/system/.*)", redirect_to_system_overview);' in server
     assert 'w.Key("system");' in server
-    assert "struct SystemSettings {" in header and "bool cluster_fanout = false;" in header
-    assert "bool activity_enabled() const { return enabled && activity; }" in header
+    settings = read("src/system_settings.hpp")
+    assert "struct SystemSettings {" in settings and "bool cluster_fanout = false;" in settings
+    assert "bool activity_enabled() const { return enabled && activity; }" in settings
     assert '"traces", "logs", "metrics", "explorer", "system", "analysis", "export", "clickhouse", "query_library"' in config
     for key in ["enabled", "activity", "keeper", "top_queries", "cluster_fanout", "default_lookback_minutes", "max_lookback_days",
                 "query_log_max_lookback_hours", "query_log_max_rows", "disk_growth_days"]:
@@ -82,14 +84,14 @@ def builder_body(source: str, name: str) -> str:
 
 
 def test_every_select_is_fixed_bounded_read_only_and_tagged():
-    source = read("src/system_monitor.cpp")
+    source = read_monitor()
     settings = source[source.index("std::string monitor_settings_sql("):source.index("std::string monitor_reason_of(")]
     for part in ["readonly = 2", "max_execution_time = ", "timeout_overflow_mode = 'throw'", "max_rows_to_read = ",
                  "read_overflow_mode = 'throw'", "max_result_rows = ", "result_overflow_mode = 'throw'",
                  "log_comment = 'chdash-system'"]:
         assert part in settings, part
     assert "'break'" not in source
-    selects = source.count("ch_select(")
+    selects = len(re.findall(r"\b(?:system|runner)\.select\(", source))
     assert selects >= 8, selects
     series = source.count("monitor_settings_sql(kSeriesTimeBudgetSeconds, ")
     assert series == 3, series
@@ -97,7 +99,7 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
     assert queries == 5, queries
     disks = sum(builder_body(source, name).count("monitor_settings_sql(") for name in DISK_BUILDERS)
     assert disks == 5, disks
-    builder_selects = sum(source.count(f"ch_select(system, {name}(") for name in DISK_BUILDERS)
+    builder_selects = sum(source.count(f"system.select({name}(") for name in DISK_BUILDERS)
     assert builder_selects == 3, builder_selects
     assert source.count("bounded_select(") == 3
     assert source.count("monitor_settings_sql(") - 1 == selects - builder_selects + series + queries + disks, (selects, series, queries, disks, source.count("monitor_settings_sql("))
@@ -110,35 +112,43 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
 
 def test_the_overview_handler_reads_the_host_and_refresh_only():
     api = read("src/api_system.cpp")
+    request = read_unit("system_request.cpp")
+    service = read_unit("system_service.cpp")
     handler = api[api.index("void Server::handle_system_overview("):api.index("void Server::handle_system_series(")]
-    params = set(re.findall(r'get_param_value\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
-    assert params == {"host_id", "refresh"}, params
-    assert 'json_error(res, 400, "missing_host_id"' in handler and 'json_error(res, 404, "unknown_host"' in handler
-    assert 'res.set_header("Cache-Control", "private, no-store");' in handler
+    parse = request[request.index("bool parse_host_request("):request.index("bool parse_series_request(")]
+    params = set(re.findall(r'get_param_value\("([a-z_]+)"\)', parse)) | set(re.findall(r'param\(req, "([a-z_]+)"\)', parse))
+    assert params == {"host_id"} and "refresh_of(req)" in parse, params
+    assert 'unknown_param_error(req, {"host_id", "refresh"})' in parse
+    assert 'fail(error, 400, "missing_host_id", "Missing host_id.")' in parse
+    assert 'json_error(res, 404, "unknown_host"' in api
+    assert 'res.set_header("Cache-Control", "private, no-store");' in api
     # The capabilities: 10 min, 1 min while a log table is missing; a failed detection is not kept.
     assert "cache_options<MonitorCapabilities>(std::chrono::minutes(10), {}, 256, 8u << 20)" in api
     assert "return std::chrono::minutes(1);" in api
     server = read("src/server.hpp")
     assert "std::max(1000, std::min(cfg_.explorer.cache_ttl_ms, 5000))" in server
     # Served at once past its TTL while one refresh runs; refresh=1 reads the runner's privileges again.
-    assert "system_monitor_overview_cache_.get_revalidating(" in handler
-    assert "if (refresh) acl_.invalidate(access);" in handler
+    overview = service[service.index("SystemService::overview("):service.index("SystemService::series(")]
+    assert "caches_.overview.get_revalidating(" in overview
+    assert "if (request.refresh) acl_.invalidate(access);" in overview
+    assert "system_service_.overview(current_request_context()" in handler
 
 
 def test_replication_counts_pass_the_runner_show_boundary():
-    source = read("src/system_monitor.cpp")
+    source = read_unit("system_overview.cpp")
     replication = source[source.index("VisibleTables visibility(runner_acl);"):source.index("out.replication = summary;")]
     # Checked after the read: the boundary may ask ClickHouse as the runner, never inside another read's callback.
     assert "if (!visibility.visible(cells[0], cells[1])) continue;" in replication
-    assert "const std::vector<std::string>& databases() { return acl_.databases(); }" in source
-    assert "return acl_.visible(database, table);" in source
+    internal = read_unit("system_monitor_internal.hpp")
+    assert "const std::vector<std::string>& databases() { return acl_.databases(); }" in internal
+    assert "return acl_.visible(database, table);" in internal
     sql = replication[:replication.index("FROM system.replicas")]
     for column in ["log_max_index", "log_pointer", "total_replicas", "active_replicas", "zookeeper_exception", "replica_is_active"]:
         assert column not in sql, column
 
 
 def test_errors_map_to_per_panel_reasons_with_the_grant_hint():
-    source = read("src/system_monitor.cpp")
+    source = read_monitor()
     reasons = source[source.index("std::string monitor_reason_of("):source.index("std::string monitor_grant_hint(")]
     mapping, pending = {}, []
     for line in reasons.splitlines():
@@ -239,28 +249,31 @@ def test_the_overview_merges_its_parts_in_order_without_repeating_a_figure():
 
 def test_the_series_handler_reads_allowlisted_parameters_only():
     api = read("src/api_system.cpp")
-    handler = api[api.index("void Server::handle_system_series("):api.index("bool Server::system_monitor_queries_window(")]
-    assert 'refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"})' in handler
-    assert "refuse_unknown_params(" in handler
-    params = set(re.findall(r'param\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
+    request = read_unit("system_request.cpp")
+    handler = api[api.index("void Server::handle_system_series("):api.index("void Server::handle_system_disks(")]
+    parse = request[request.index("bool parse_series_request("):request.index("bool parse_queries_request(")]
+    assert 'unknown_param_error(\n          req, {"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"})' in parse or \
+        'unknown_param_error(req, {"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"})' in parse
+    params = set(re.findall(r'param\(req, "([a-z_]+)"\)', parse)) | set(re.findall(r'has_param\("([a-z_]+)"\)', parse))
     assert params <= {"host_id", "from_ms", "to_ms", "panel", "scope", "refresh"}, params
-    assert 'if (panel != "performance" && panel != "disk_growth") {' in handler and '"invalid_panel"' in handler
-    assert '"cluster_fanout_disabled"' in handler and "cfg_.system.cluster_fanout" in handler
-    assert 'json_error(res, 400, "range_too_large"' in handler and 'json_error(res, 400, "invalid_range"' in handler
-    assert "to_ms = std::min(to_ms, now_ms);" in handler
-    assert "std::all_of(text.begin(), text.end(), [](char ch) { return ch >= '0' && ch <= '9'; })" in api
-    assert "window.step_s = monitor_series_step_seconds(" in handler
-    assert "window.from_s = from_ms / 1000 / window.step_s * window.step_s;" in handler
+    assert 'if (panel != "performance" && panel != "disk_growth")' in parse and '"invalid_panel"' in parse
+    assert '"cluster_fanout_disabled"' in parse and "settings.cluster_fanout" in parse
+    assert 'fail(error, 400, "range_too_large"' in parse and 'fail(error, 400, "invalid_range"' in parse
+    assert "to_ms = std::min(to_ms, now_ms);" in parse
+    assert "std::all_of(text.begin(), text.end(), [](char ch) { return ch >= '0' && ch <= '9'; })" in request
+    assert "window.step_s = monitor_series_step_seconds(" in parse
+    assert "window.from_s = from_ms / 1000 / window.step_s * window.step_s;" in parse
     server = read("src/server.hpp")
     assert "system_monitor_series_cache_{cache_options<SystemMonitorSeries>(\n      std::chrono::seconds(15)," in server
     # A window nobody asks for again leaves with its age or the LRU: the cache is never emptied at once.
-    assert "system_monitor_series_cache_.get(" in handler and ".clear()" not in handler
-    assert 'res.set_header("Cache-Control", "private, no-store");' in handler
+    service = read_unit("system_service.cpp")
+    assert "caches_.series.get(" in service and ".clear()" not in service
+    assert 'res.set_header("Cache-Control", "private, no-store");' in api
+    assert "if (request.growth) {" in handler
 
 
 def test_series_sql_is_three_fixed_passes_over_allowlisted_names():
-    source = read("src/system_monitor.cpp")
-    source = source[:source.index("// Queries: top query shapes and one shape's drill-down")]
+    source = read_unit("system_series.cpp") + read_unit("system_monitor_caps.cpp")
     assert source.count('" FROM system.metric_log WHERE "') == 1
     assert source.count("FROM system.asynchronous_metric_log WHERE metric IN ") == 1
     assert source.count('" FROM system.query_log WHERE "') == 1
@@ -273,7 +286,7 @@ def test_series_sql_is_three_fixed_passes_over_allowlisted_names():
         assert column not in sql, column
     assert "window.span_s > window.query_log_max_span_s" in source
     assert "steps{10, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 86400, 2 * 86400}" in source
-    assert "constexpr uint64_t kMonitorSeriesMaxPoints = 300;" in read("src/system_monitor.hpp")
+    assert "constexpr uint64_t kMonitorSeriesMaxPoints = 300;" in read("src/system_series.hpp")
 
 
 def test_performance_draws_on_the_shared_chart_engine_and_time_range():
@@ -304,45 +317,52 @@ def test_performance_draws_on_the_shared_chart_engine_and_time_range():
 
 def test_the_queries_handlers_read_allowlisted_parameters_with_the_runner():
     api = read("src/api_system.cpp")
-    handlers = api[api.index("bool Server::system_monitor_queries_window("):]
-    listing = handlers[handlers.index("void Server::handle_system_queries("):handlers.index("void Server::handle_system_query(")]
-    drill = handlers[handlers.index("void Server::handle_system_query("):]
-    assert 'refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"})' in listing
+    request = read_unit("system_request.cpp")
+    service = read_unit("system_service.cpp")
+    listing_parse = request[request.index("bool parse_queries_request("):request.index("bool parse_query_request(")]
+    drill_parse = request[request.index("bool parse_query_request("):]
+    listing = api[api.index("void Server::handle_system_queries("):api.index("void Server::handle_system_query(")]
+    drill = api[api.index("void Server::handle_system_query("):]
+    assert '"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "hide_chdash", "refresh"' in listing_parse
     # The database and table filters: validated, in the key, bound (never spliced).
-    assert 'return json_error(res, 400, "invalid_database",' in listing and 'return json_error(res, 400, "invalid_table",' in listing
-    assert 'std::to_string(database.size()) + ":" + database + "|" +' in listing
-    assert 'refuse_unknown_params(req, res, {"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"})' in drill
-    for handler in (listing, drill):
-        assert "refuse_unknown_params(" in handler
-        params = set(re.findall(r'param\("([a-z_]+)"\)', handler)) | set(re.findall(r'has_param\("([a-z_]+)"\)', handler))
+    assert 'fail(error, 400, "invalid_database",' in listing_parse and 'fail(error, 400, "invalid_table",' in listing_parse
+    flat = re.sub(r"\s+", " ", service)
+    assert 'std::to_string(query.database.size()) + ":" + query.database + "|" +' in flat
+    assert 'unknown_param_error(req, {"host_id", "from_ms", "to_ms", "order", "hide_chdash", "refresh"})' in drill_parse
+    for parse in (listing_parse, drill_parse):
+        assert "unknown_param_error(" in parse
+        params = set(re.findall(r'param\(req, "([a-z_]+)"\)', parse)) | set(re.findall(r'has_param\("([a-z_]+)"\)', parse))
         assert params <= {"host_id", "from_ms", "to_ms", "sort", "kind", "errors", "user", "database", "table", "order", "hide_chdash", "refresh"}, params
-        assert "acquire_queries_client(client_pool_, host->runner_uri, &error)" in handler
-        assert "acquire_monitor_client(" not in handler
-        assert 'res.set_header("Cache-Control", "private, no-store");' in handler
-    assert '"invalid_sort"' in listing and '"invalid_kind"' in listing and '"invalid_hide_chdash"' in listing
-    assert '"invalid_errors"' in listing and '"invalid_user"' in listing
-    assert "if (!user.empty() && !monitor_queries_user_valid(user)) {" in listing
+    for handler in (listing, drill):
+        assert 'res.set_header("Cache-Control", "private, no-store");' in api
+        assert "system_service_." in handler
+    # The Queries read with the runner account, never the system one.
+    for method in ("SystemService::queries(", "SystemService::query("):
+        body = service[service.index(method):]
+        body = body[:body.index("\n}\n")]
+        assert "ports_.runner(host, &error)" in body and "ports_.system(" not in body
+    assert '"invalid_sort"' in listing_parse and '"invalid_kind"' in listing_parse and '"invalid_hide_chdash"' in listing_parse
+    assert '"invalid_errors"' in listing_parse and '"invalid_user"' in listing_parse
+    assert "if (!user.empty() && !monitor_queries_user_valid(user)) {" in listing_parse
     # Every filter is part of the cache key; the user length-prefixed.
-    assert '"|" + sort + "|" + kind + "|" + errors + "|" + hide + "|" +' in listing
-    assert 'std::to_string(user.size()) + ":" + user + "|" +' in listing
-    assert '"invalid_hash"' in drill and '"invalid_order"' in drill
-    assert "if (!parse_hash(hash_text, hash))" in drill
-    assert 'static const std::string kMax = "18446744073709551615";' in api
-    window = handlers[:handlers.index("void Server::handle_system_queries(")]
-    assert "cfg_.system.query_log_max_lookback_hours" in window and '"range_too_large"' in window
+    assert '"|" + query.sort + "|" + query.kind + "|" + query.errors + "|" + hide + "|" +' in flat
+    assert 'std::to_string(query.user.size()) + ":" + query.user + "|" +' in flat
+    assert '"invalid_hash"' in drill_parse and '"invalid_order"' in drill_parse
+    assert "if (!parse_hash(hash_text, hash))" in drill_parse
+    assert 'static const std::string kMax = "18446744073709551615";' in request
+    assert "settings.query_log_max_lookback_hours" in request and '"range_too_large"' in request
     server = read("src/server.hpp")
     assert "system_monitor_queries_cache_{cache_options<SystemMonitorQueries>(\n      std::chrono::minutes(1)," in server
-    assert "request.from_s = from_ms / 60'000 * 60;" in listing
-    assert "system_monitor_queries_cache_.get(" in listing and "system_monitor_query_cache_.get(" in drill
-    assert ".clear()" not in listing and ".clear()" not in drill
+    assert "q.from_s = from_ms / 60'000 * 60;" in listing_parse
+    assert "caches_.queries.get(" in service and "caches_.query.get(" in service
+    assert ".clear()" not in service
     server = read("src/server.cpp")
     assert "if (cfg_.system.top_queries_enabled()) {" in server
     assert 'http_.Get(R"(/api/system/queries/([^/]+))"' in server
 
 
 def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
-    source = read("src/system_monitor.cpp")
-    queries = source[source.index("// Queries: top query shapes and one shape's drill-down"):]
+    queries = read_unit("system_queries.cpp")
     assert "\" AND log_comment != 'chdash-system'\"" in queries
     assert 'sql += " AND NOT startsWith(log_comment, \'chdash:\')";' in queries
     assert 'if (!r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);' in queries
@@ -365,7 +385,7 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
     for column in ["argMax(query", "ProfileEvents", "exception"]:
         assert column not in top, column
     assert '" GROUP BY normalized_query_hash" + queries_having_sql(r, true) +' in top
-    monitor = read("src/system_monitor.cpp")
+    monitor = queries
     assert 'conditions.push_back(std::string("countIf(has(databases, {") + kQueriesDatabaseParam + ":String})) > 0");' in monitor
     assert 'conditions.push_back(std::string("countIf(has(tables, {") + kQueriesTableParam + ":String})) > 0");' in monitor
     assert '" ORDER BY " + expression_of(queries_sort_expressions(), r.sort) +' in top
@@ -375,13 +395,13 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
     assert "max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'" in queries
     text = queries[queries.index("std::string monitor_queries_text_sql("):queries.index("std::string monitor_query_timeline_sql(")]
     assert "PREWHERE normalized_query_hash IN (" in text and "substringUTF8(argMax(query, event_time), 1, " in text
-    assert "constexpr size_t kMonitorTopQueries = 50;" in read("src/system_monitor.hpp")
+    assert "constexpr size_t kMonitorTopQueries = 50;" in read("src/system_queries.hpp")
     for builder in ["monitor_query_timeline_sql(", "monitor_query_runs_sql(", "monitor_query_example_sql("]:
         body = queries[queries.index(f"std::string {builder}"):]
         body = body[:body.index("\n}\n")]
         assert "PREWHERE normalized_query_hash = \" + std::to_string(r.hash)" in body, builder
     assert '{"duration", "query_duration_ms"},' in queries and '{"latest", "event_time_microseconds"},' in queries
-    assert 'if (out.status == "not_granted") out.hint = monitor_grant_hint("query_log", r.runner_user);' in queries
+    assert 'if (out.status == "not_granted") out.hint = monitor_grant_hint("query_log", r.runner_user, "runner user");' in queries
     assert "out.suggested_span_s = monitor_queries_suggested_span(" in queries
 
 
@@ -412,22 +432,22 @@ def test_queries_section_draws_sql_as_text_and_opens_it_in_query_unrun():
 
 def test_the_disks_handler_reads_the_host_only_and_growth_is_a_series_panel():
     api = read("src/api_system.cpp")
-    handler = api[api.index("void Server::handle_system_disks("):api.index("bool Server::system_monitor_queries_window(")]
-    assert 'refuse_unknown_params(req, res, {"host_id", "refresh"})' in handler
-    assert "refuse_unknown_params(" in handler
-    assert 'res.set_header("Cache-Control", "private, no-store");' in handler
+    service = read_unit("system_service.cpp")
+    handler = api[api.index("void Server::handle_system_disks("):api.index("void Server::handle_system_queries(")]
+    assert "parse_host_request(req, &request, &error)" in handler
+    assert 'res.set_header("Cache-Control", "private, no-store");' in api
     server = read("src/server.hpp")
     assert "system_monitor_disks_cache_{cache_options<SystemMonitorDisks>(\n      std::chrono::minutes(1)," in server
     assert "system_monitor_growth_cache_{cache_options<SystemMonitorDiskGrowth>(\n      std::chrono::minutes(5)," in server
-    assert "system_monitor_growth_cache_.get(" in api and "system_monitor_growth_cache_.clear()" not in api
-    series = api[api.index("void Server::handle_system_series("):api.index("void Server::system_monitor_disk_growth(")]
-    assert "cfg_.system.disk_growth_days" in series
-    assert "if (growth) return system_monitor_disk_growth(" in series
+    assert "caches_.growth.get(" in service and ".clear()" not in service
+    series = api[api.index("void Server::handle_system_series("):api.index("void Server::handle_system_disks(")]
+    assert "settings.disk_growth_days" in read_unit("system_request.cpp")
+    assert "if (request.growth) {" in series and "system_service_.disk_growth(" in series
 
 
 def test_disks_sql_names_runner_visible_databases_and_both_disk_metric_forms():
-    source = read("src/system_monitor.cpp")
-    disks = source[source.index("// Disks: system.disks, system.storage_policies"):]
+    disks = read_unit("system_disks.cpp")
+    source = read_monitor()
     assert "const std::vector<std::string> databases = runner_acl.databases();" in disks
     assert "if (!std::binary_search(databases.begin(), databases.end(), usage.database)) continue;" in disks
     # The names of the databases are query parameters (one String for each), never SQL text.
@@ -440,7 +460,7 @@ def test_disks_sql_names_runner_visible_databases_and_both_disk_metric_forms():
     assert 'out.key_column = caps.has_column("asynchronous_metric_log", "key");' in disks
     assert "\" OR (metric = 'DiskUsed' AND key IN \" + in_list(disks)" in disks
     assert "if(metric = 'DiskUsed', toString(key), substring(toString(metric), 10))" in disks
-    header = read("src/system_monitor.hpp")
+    header = read("src/system_disks.hpp")
     assert "constexpr size_t kMonitorDiskTrendMinPoints = 6;" in header
     assert "constexpr uint64_t kMonitorDiskTrendMinSpanSeconds = 6 * 3600;" in header
     assert 'out.status = "not_enough_history";' in disks and 'out.status = "not_growing";' in disks

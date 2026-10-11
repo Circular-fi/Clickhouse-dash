@@ -1,4 +1,5 @@
 from pathlib import Path
+from session_sources import read_session
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -30,7 +31,7 @@ def test_the_export_kills_its_statements_through_the_system_account_like_a_run()
 
 def test_cancel_backend_still_uses_system_side_uri():
     query_api = (ROOT / "src/api_query.cpp").read_text()
-    session = (ROOT / "src/query_session.cpp").read_text()
+    session = read_session()
     assert "host->system_uri.empty() ? host->runner_uri : host->system_uri" in query_api
     assert "stats_uri_.empty() ? runner_uri_ : stats_uri_" in session
     assert 'std::string where = "query_id IN (";' in session

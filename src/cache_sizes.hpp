@@ -3,7 +3,11 @@
 #include "explorer_catalog.hpp"
 #include "explorer_graph.hpp"
 #include "system_activity.hpp"
+#include "system_disks.hpp"
 #include "system_monitor.hpp"
+#include "system_overview.hpp"
+#include "system_queries.hpp"
+#include "system_series.hpp"
 
 #include <cstddef>
 #include <string>

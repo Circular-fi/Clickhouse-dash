@@ -8,6 +8,8 @@ tables of the first one.
 import re
 from pathlib import Path
 
+from mcp_tool_sources import read_tools
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -59,5 +61,5 @@ def test_the_access_audit_and_the_mcp_tools_follow_the_host():
     assert "otel_system_reads(host.otel)" in health
     api = read("src/api_mcp.cpp")
     assert "observability_by_host[host.id] = mcp_observability_config(host.otel)" in api
-    tools = read("src/mcp_tools.cpp")
+    tools = read_tools()
     assert "observability_by_host.find(ctx.host)" in tools

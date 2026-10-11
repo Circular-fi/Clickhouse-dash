@@ -1,3 +1,4 @@
+from format_sources import read_formatter
 from pathlib import Path
 import css_sources
 import modules
@@ -149,7 +150,7 @@ def test_storage_mode_disables_and_greys_non_storing_objects_everywhere() -> Non
 
 
 def test_create_table_tuple_closers_and_index_columns_are_aligned() -> None:
-    formatter = read("src/format_postprocess.cpp")
+    formatter = read_formatter()
     formatted = read("tests/api/format/output/092_create_table_wide_types.sql")
 
     assert 'align_multiline_tuple_closers' in formatter

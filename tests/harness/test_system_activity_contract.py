@@ -21,7 +21,7 @@ def test_activity_routes_are_gated_by_the_system_config() -> None:
     assert "if (cfg_.system.keeper_enabled()) {" in server
     assert 'http_.Get("/api/system/keeper", keeper);' in server
     assert 'w.Key("activity"); w.Bool(cfg_.system.activity_enabled());' in server
-    assert "bool activity = true;" in header and "bool keeper = true;" in header
+    assert "bool activity = true;" in read("src/system_settings.hpp") and "bool keeper = true;" in read("src/system_settings.hpp")
     # v2.14.0's explorer.operations block still reads.
     assert 'validate_object(*operations, "explorer.operations", {"enabled", "keeper"}, {});' in config
     block = example[example.index("\nsystem {"):]
@@ -30,7 +30,7 @@ def test_activity_routes_are_gated_by_the_system_config() -> None:
 
 def test_activity_rows_pass_the_runner_show_boundary_and_are_bounded() -> None:
     ops = read("src/system_activity.cpp")
-    api = read("src/api_system_activity.cpp")
+    service = read("src/system_service.cpp")
     activity = ops[ops.index("bool load_system_activity("):ops.index("bool load_system_keeper_status(")]
     assert "RunnerVisibility visibility(runner_acl);" in activity
     # The rows are checked after the read (the boundary may ask ClickHouse: never inside another read's callback).
@@ -38,7 +38,7 @@ def test_activity_rows_pass_the_runner_show_boundary_and_are_bounded() -> None:
     assert "const std::vector<std::string>& databases() { return acl_.databases(); }" in ops
     assert "return acl_.visible(database, table);" in ops
     # refresh=1 reads the runner's privileges again too.
-    assert "if (refresh) acl_.invalidate(access);" in api
+    assert "if (request.refresh) acl_.invalidate(access);" in service[service.index("SystemService::activity("):]
     assert 'const std::string in_databases = "database IN (" + names.texts(visibility.databases()) + ")";' in activity
     assert "const ChParams& database_params = names.list();" in activity
     assert "quote_array" not in activity and "Array(String)" not in activity
@@ -46,12 +46,13 @@ def test_activity_rows_pass_the_runner_show_boundary_and_are_bounded() -> None:
         assert f"FROM {table}" in activity, table
     assert activity.count("+ limit,") == 5
     assert 'const std::string limit = " LIMIT " + std::to_string(out.row_limit + 1);' in activity
-    assert "constexpr size_t kSystemActivityRowLimit = 200;" in api
+    assert "constexpr size_t kSystemActivityRowLimit = 200;" in read("src/system_service.hpp")
     replicas_sql = activity[activity.index('"replicas",'):activity.index("FROM system.replicas")]
     for column in ["log_max_index", "log_pointer", "total_replicas", "active_replicas", "zookeeper_exception", "replica_is_active"]:
         assert f"toString({column})" not in replicas_sql, column
-    assert "load_cached_replica_counts(system_db, caches, tables, &counts_error)" in activity
-    assert "BorrowedExecutor system_db(system);" in activity
+    # The counts come through a function that the server gives (the Explorer's cache of Keeper reads).
+    assert "const auto counts = replica_counts(system, tables);" in activity
+    assert "load_cached_replica_counts(db, explorer_caches_, tables, &error)" in read("src/server.hpp")
     for forbidden in ["SYSTEM ", "KILL ", "ALTER ", "INSERT ", "system.zookeeper "]:
         assert forbidden not in ops, forbidden
 

@@ -97,7 +97,7 @@ size_t insert_format_name_end(std::string_view sql) {
   return std::string_view::npos;
 }
 
-std::string quote_reserved_aliases_for_format_query(std::string_view sql) {
+std::string quote_reserved_aliases_for_format_query(std::string_view sql, std::vector<std::pair<size_t, size_t>>* quoted) {
   static const std::unordered_set<std::string> reserved_aliases = {
       "all", "alter", "and", "array", "as", "asc", "by", "case",
       "cross", "desc", "distinct", "else", "end", "except", "exists",
@@ -151,6 +151,10 @@ std::string quote_reserved_aliases_for_format_query(std::string_view sql) {
     ranges.push_back({alias->begin, alias->end});
   }
 
+  if (quoted) {
+    quoted->clear();
+    for (const auto& range : ranges) quoted->emplace_back(range.begin, range.end);
+  }
   if (ranges.empty()) return std::string(sql);
   std::string out;
   out.reserve(sql.size() + ranges.size() * 2);
@@ -166,8 +170,164 @@ std::string quote_reserved_aliases_for_format_query(std::string_view sql) {
   return out;
 }
 
+size_t offset_in_user_text(size_t sent_offset, const std::vector<std::pair<size_t, size_t>>& quoted, const SqlHeredocMask& masks,
+                           std::string_view masked) {
+  // The words written between backticks: each added two bytes, one before the word and one after it.
+  size_t added = 0;
+  for (size_t i = 0; i < quoted.size(); ++i) {
+    const size_t open = quoted[i].first + 2 * i;
+    const size_t close = quoted[i].second + 2 * i + 1;
+    if (sent_offset > open) ++added;
+    if (sent_offset > close) ++added;
+  }
+  size_t pos = sent_offset >= added ? sent_offset - added : 0;
+  if (masks.heredocs.empty()) return pos;
+  // The placeholders are undone in the reverse order of their making, each where it stands in the text. A placeholder that ends before
+  // `pos` moves it by the difference of the two spellings; a `pos` inside one goes to its start. A text with very many placeholders is
+  // not worth this work: its offset stays as it is.
+  if (masks.heredocs.size() * masked.size() > 64u * 1024 * 1024) return pos;
+  std::string text(masked);
+  for (size_t i = masks.heredocs.size(); i-- > 0;) {
+    const auto& [placeholder, spelling] = masks.heredocs[i];
+    const size_t at = text.find(placeholder);
+    if (at == std::string::npos) continue;
+    if (pos >= at + placeholder.size()) pos = pos - placeholder.size() + spelling.size();
+    else if (pos > at) pos = at;
+    text.replace(at, placeholder.size(), spelling);
+  }
+  return pos;
+}
+
+std::string rebase_error_position(std::string message, std::string_view text, size_t offset) {
+  int line = 1, col = 1;
+  sql_line_col(text, offset, line, col);
+  const auto replace_number = [&](size_t from, size_t number_at, const std::string& value) -> size_t {
+    (void)from;
+    size_t end = number_at;
+    while (end < message.size() && std::isdigit(static_cast<unsigned char>(message[end]))) ++end;
+    if (end == number_at) return number_at;
+    message.replace(number_at, end - number_at, value);
+    return number_at + value.size();
+  };
+  const size_t position = message.find("position ");
+  if (position == std::string::npos) return message;
+  replace_number(position, position + 9, std::to_string(offset + 1));
+  if (const size_t at = message.find("(line ", position); at != std::string::npos) {
+    const size_t after_line = replace_number(at, at + 6, std::to_string(line));
+    if (const size_t col_at = message.find("col ", after_line); col_at != std::string::npos) replace_number(col_at, col_at + 4, std::to_string(col));
+  }
+  return message;
+}
+
+bool values_rows_unchanged(std::string_view before, std::string_view after) {
+  // The significant tokens (no blank, no comment) after the VALUES of the top level.
+  const auto rows = [](std::string_view sql) {
+    std::vector<std::string> out;
+    const auto tokens = sql::lex(sql);
+    const auto words = top_level_words(tokens, sql);
+    size_t from = tokens.size();
+    for (const TopWord& word : words) {
+      if (word.lower == "values") {
+        from = word.token + 1;
+        break;
+      }
+    }
+    // The rows may follow each other with a comma or without one (`(1, 2)(3, 4)`): a comma between two rows is no part of the data.
+    int depth = 0;
+    for (size_t i = from; i < tokens.size(); ++i) {
+      if (sql::is_trivia(tokens[i].kind)) continue;
+      const std::string_view text = tokens[i].text(sql);
+      if (tokens[i].kind == sql::TokenKind::Punct && text.size() == 1) {
+        if (text[0] == '(' || text[0] == '[' || text[0] == '{') ++depth;
+        else if ((text[0] == ')' || text[0] == ']' || text[0] == '}') && depth > 0) --depth;
+        else if (text[0] == ',' && depth == 0) continue;
+      }
+      out.emplace_back(text);
+    }
+    return out;
+  };
+  return rows(before) == rows(after);
+}
+
 FormatBatch::FormatBatch(FormatCache* cache, FormatSettings settings, FormatQueryPort& port)
     : cache_(cache), settings_(std::move(settings)), port_(port) {}
+
+namespace {
+
+// The work on one text: what it is made of, step by step.
+struct Work {
+  std::string text;     // the text of the user, without the blanks around it
+  size_t leading = 0;   // the bytes of blank that were taken off its start (the offsets of an error count from the start of the user's text)
+  std::string head;     // the statement: `text` without the payload of an INSERT ... FORMAT
+  std::string payload;  // the payload, with the blank before it
+  SqlHeredocMask masks; // `head` with its heredocs and its literals on many lines swapped for placeholders
+};
+
+// Inline INSERT payloads are data, not SQL: keep them byte-for-byte after the formatted statement, on their own line when they started on
+// one.
+void split_insert_payload(Work& work) {
+  work.head = work.text;
+  if (const size_t name_end = insert_format_name_end(work.head); name_end != std::string::npos) {
+    size_t data = name_end;
+    while (data < work.head.size() && (work.head[data] == ' ' || work.head[data] == '\t' || work.head[data] == '\n' || work.head[data] == '\r')) ++data;
+    if (data < work.head.size()) {
+      const bool own_line = work.head.find_first_of("\r\n", name_end) < data;
+      size_t end = work.head.size();
+      while (end > data && (work.head[end - 1] == '\n' || work.head[end - 1] == '\r')) --end;
+      work.payload = (own_line ? "\n" : " ") + work.head.substr(data, end - data);
+      work.head.resize(name_end);
+    }
+  }
+}
+
+// Heredoc literals ($$...$$) are swapped for same-width placeholders so neither formatQuery (which re-quotes them) nor the local scanners
+// see their bodies; the exact spelling is put back at the end, like other literal spellings.
+void mask_literals(Work& work) {
+  work.masks = mask_sql_heredocs(work.head);
+  // Placeholders use private-use code points: never mask SQL that already contains them (same guard as mask_sql_heredocs).
+  if (work.head.find('\xEE') == std::string::npos) mask_sql_multiline_literals(work.masks);
+}
+
+// formatQuery and the local post-processor intentionally normalize many identifiers to backticks. Keep formatting deterministic while
+// restoring the exact spelling of identifiers that the user explicitly quoted, as well as the original spelling of string literals.
+std::string restore_spelling(std::string pretty, const Work& work) {
+  const std::string& source = work.masks.sql;
+  pretty = restore_sql_quoted_identifiers(std::move(pretty), source);
+  pretty = unquote_call_identifiers_written_unquoted(std::move(pretty), source);
+  pretty = restore_sql_single_quoted_literals(std::move(pretty), source);
+  return restore_sql_heredocs(std::move(pretty), work.masks);
+}
+
+} // namespace
+
+// Does ClickHouse read the formatted statement as it reads the one that was written? It compares the trees (EXPLAIN AST), which are the same
+// for two layouts of one statement and for a text with and without its comments: formatQuery is not used for this, because it prints the
+// parentheses that the text had. The rows of an INSERT ... VALUES are data that ClickHouse does not parse, so their tokens are compared.
+// A statement that ClickHouse cannot parse, a text that it will not read (too long), or a connection that fails cannot be judged: the layout
+// stays, as before this check existed.
+std::optional<FormatWarning> FormatBatch::check_meaning(const std::string& before, const std::string& after) {
+  const auto changed = [] {
+    return FormatWarning{"format_meaning_changed",
+                         "The formatter could not lay this statement out without changing what ClickHouse reads from it. The statement is returned as it was written."};
+  };
+  if (has_top_level_values_insert(before) && !values_rows_unchanged(before, after)) return changed();
+  const std::string sent_before = quote_reserved_aliases_for_format_query(before);
+  const std::string sent_after = quote_reserved_aliases_for_format_query(after);
+  const size_t limit = settings_.clickhouse_max_query_size ? std::min(settings_.max_sql_bytes, settings_.clickhouse_max_query_size)
+                                                           : settings_.max_sql_bytes;
+  if (sent_before.size() + 16 > limit || sent_after.size() + 16 > limit) return std::nullopt;
+  const FormatQueryResult tree_before = port_.explain_ast(sent_before, limit);
+  if (!tree_before) return std::nullopt;
+  const FormatQueryResult tree_after = port_.explain_ast(sent_after, limit);
+  if (!tree_after) {
+    // The statement that was written is understood and the formatted one is not: that is a change. A connection that failed is not, and
+    // neither is a text that grew past what ClickHouse reads (the message names max_query_size).
+    if (tree_after.failure != FormatQueryFailureKind::server || tree_after.message.find("max_query_size") != std::string::npos) return std::nullopt;
+    return changed();
+  }
+  if (tree_before.formatted_sql != tree_after.formatted_sql) return changed();
+  return std::nullopt;
+}
 
 FormatOutcome FormatBatch::format(std::string sql_raw) {
   FormatOutcome outcome;
@@ -177,86 +337,98 @@ FormatOutcome FormatBatch::format(std::string sql_raw) {
     return outcome;
   };
 
+  Work work;
+  while (work.leading < sql_raw.size() && (sql_raw[work.leading] == ' ' || sql_raw[work.leading] == '\n' || sql_raw[work.leading] == '\r' ||
+                                           sql_raw[work.leading] == '\t')) {
+    ++work.leading;
+  }
+  // What an error is counted in: the blanks that the text starts with, then the text.
+  const std::string leading_blanks = sql_raw.substr(0, work.leading);
   std::string sql = trim_sql(std::move(sql_raw));
   if (sql.empty()) return fail(FormatQueryFailureKind::input, "Missing SQL text.");
-  if (sql.size() > settings_.max_sql_bytes) return fail(FormatQueryFailureKind::input, "SQL text is too large to format.");
+  if (sql.size() > settings_.max_sql_bytes) {
+    return fail(FormatQueryFailureKind::input, "SQL text is too large to format: the limit is " + std::to_string(settings_.max_sql_bytes) + " bytes.");
+  }
 
   const std::string key = format_cache_key(settings_.cache_scope, settings_.line_width, sql);
   if (auto local = request_results_.find(key); local != request_results_.end()) {
     ++stats_.deduplicated;
-    outcome.formatted = local->second;
-    return outcome;
+    return local->second;
   }
   const bool cached = cache_ && settings_.use_cache;
   if (cached) {
     if (auto hit = cache_->get(key, sql)) {
       ++stats_.cache_hits;
-      request_results_.emplace(key, hit);
       outcome.formatted = std::move(hit);
+      request_results_.emplace(key, outcome);
       return outcome;
     }
   }
   ++stats_.cache_misses;
-  // The text of the key, kept for the cache entry (`sql` loses its INSERT payload below).
-  const std::string input = cached ? sql : std::string();
-
-  // Inline INSERT payloads are data, not SQL: keep them byte-for-byte after
-  // the formatted statement, on their own line when they started on one.
-  std::string insert_payload;
-  if (const size_t name_end = insert_format_name_end(sql); name_end != std::string::npos) {
-    size_t data = name_end;
-    while (data < sql.size() && (sql[data] == ' ' || sql[data] == '\t' || sql[data] == '\n' || sql[data] == '\r')) ++data;
-    if (data < sql.size()) {
-      const bool own_line = sql.find_first_of("\r\n", name_end) < data;
-      size_t end = sql.size();
-      while (end > data && (sql[end - 1] == '\n' || sql[end - 1] == '\r')) --end;
-      insert_payload = (own_line ? "\n" : " ") + sql.substr(data, end - data);
-      sql.resize(name_end);
-    }
-  }
-
-  // Heredoc literals ($$...$$) are swapped for same-width placeholders so
-  // neither formatQuery (which re-quotes them) nor the local scanners see
-  // their bodies; the exact spelling is put back at the end, like other literal spellings.
-  SqlHeredocMask heredocs = mask_sql_heredocs(sql);
-  // Placeholders use private-use code points: never mask SQL that already contains them (same guard as mask_sql_heredocs).
-  if (sql.find('\xEE') == std::string::npos) mask_sql_multiline_literals(heredocs);
-  const std::string& source_sql = heredocs.sql;
+  work.text = std::move(sql);
+  split_insert_payload(work);
+  mask_literals(work);
+  const std::string& source_sql = work.masks.sql;
 
   std::string pretty;
+  bool local_layout = false;
   const auto masked = mask_sql_surface(source_sql);
   if (masked.has_comments || has_top_level_values_insert(source_sql)) {
-    // ClickHouse formatQuery removes or restructures these surfaces. The local
-    // post-processor preserves comments and VALUES payloads byte-for-byte.
-    pretty = postprocess_format_query(source_sql, static_cast<size_t>(settings_.line_width));
+    // ClickHouse formatQuery removes or restructures these surfaces. The local post-processor preserves comments and VALUES payloads
+    // byte-for-byte.
+    local_layout = true;
+    pretty = unwrap_alter_table_commands(postprocess_format_query(source_sql, static_cast<size_t>(settings_.line_width)));
   } else {
-    const std::string parseable_sql = quote_reserved_aliases_for_format_query(source_sql);
-    FormatQueryResult format_result = port_.format_query(parseable_sql, settings_.max_sql_bytes);
-    if (!format_result.formatted_sql) {
-      return fail(format_result.failure == FormatQueryFailureKind::none ? FormatQueryFailureKind::client : format_result.failure,
-                  format_result.message.empty() ? "Failed to format query." : format_result.message);
+    std::vector<std::pair<size_t, size_t>> quoted;
+    const std::string parseable_sql = quote_reserved_aliases_for_format_query(source_sql, &quoted);
+    // ClickHouse reads at most max_query_size bytes of the text that it is given (the text with its quoted words).
+    if (settings_.clickhouse_max_query_size && parseable_sql.size() > settings_.clickhouse_max_query_size) {
+      return fail(FormatQueryFailureKind::input, "SQL text is too large to format: ClickHouse reads at most " +
+                                                     std::to_string(settings_.clickhouse_max_query_size) +
+                                                     " bytes (max_query_size), and this text is " + std::to_string(parseable_sql.size()) +
+                                                     " bytes once its reserved words are quoted.");
     }
-    // formatQuery may normalize literal escaping. Restore the user's exact literal spelling, including doubled SQL quotes,
-    // before line wrapping.
+    FormatQueryResult format_result = port_.format_query(parseable_sql, std::max(settings_.max_sql_bytes, parseable_sql.size()));
+    if (!format_result.formatted_sql) {
+      const FormatQueryFailureKind kind = format_result.failure == FormatQueryFailureKind::none ? FormatQueryFailureKind::client : format_result.failure;
+      std::string message = format_result.message.empty() ? "Failed to format query." : format_result.message;
+      if (kind == FormatQueryFailureKind::server) {
+        // ClickHouse counts from the start of the text that it was sent: say where it stopped in the text that the user wrote.
+        if (const size_t at = message.find("position "); at != std::string::npos) {
+          size_t end = at + 9;
+          size_t number = 0;
+          while (end < message.size() && std::isdigit(static_cast<unsigned char>(message[end])) && number < 100000000) number = number * 10 + (message[end++] - '0');
+          if (end > at + 9 && number > 0) {
+            const size_t offset = std::min(offset_in_user_text(number - 1, quoted, work.masks, source_sql), work.text.size()) + work.leading;
+            outcome.error_offset = offset;
+            message = rebase_error_position(std::move(message), leading_blanks + work.text, offset);
+          }
+        }
+      }
+      return fail(kind, std::move(message));
+    }
+    // formatQuery may normalize literal escaping. Restore the user's exact literal spelling, including doubled SQL quotes, before line
+    // wrapping.
     pretty = unwrap_alter_table_commands(postprocess_format_query(
         restore_sql_single_quoted_literals(*format_result.formatted_sql, source_sql), static_cast<size_t>(settings_.line_width)));
   }
 
-  // formatQuery and the local post-processor intentionally normalize many identifiers to backticks. Keep formatting
-  // deterministic while restoring the exact spelling of identifiers that the user explicitly quoted, as well as the
-  // original spelling of string literals.
-  pretty = restore_sql_quoted_identifiers(std::move(pretty), source_sql);
-  pretty = unquote_call_identifiers_written_unquoted(std::move(pretty), source_sql);
-  pretty = restore_sql_single_quoted_literals(std::move(pretty), source_sql);
-  pretty = restore_sql_heredocs(std::move(pretty), heredocs);
-  pretty += insert_payload;
+  pretty = restore_spelling(std::move(pretty), work);
+  if (local_layout) outcome.warning = check_meaning(work.head, pretty);
+  if (outcome.warning) {
+    // The statement as it was written. It is not kept in the cache: the next request checks it again.
+    outcome.formatted = std::make_shared<const std::string>(work.text);
+    request_results_.emplace(key, outcome);
+    return outcome;
+  }
+  pretty += work.payload;
 
   auto value = std::make_shared<const std::string>(std::move(pretty));
-  request_results_.emplace(key, value);
+  outcome.formatted = value;
+  request_results_.emplace(key, outcome);
   // Only the text that was formatted is a key: the output is not stored as a key of its own, so formatting a formatted text runs
   // the formatter again and a layout that is not idempotent shows.
-  if (cached) cache_->put(key, input, value);
-  outcome.formatted = std::move(value);
+  if (cached) cache_->put(key, work.text, std::move(value));
   return outcome;
 }
 

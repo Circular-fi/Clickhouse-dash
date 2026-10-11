@@ -5,7 +5,6 @@
 #include "ch_block_value.hpp"
 #include "ch_query.hpp"
 #include "ch_executor.hpp"
-#include "explorer_catalog.hpp"
 #include "sql_literal.hpp"
 #include "sql_params.hpp"
 
@@ -76,9 +75,9 @@ std::string object_key(const std::string& database, const std::string& table) {
 }
 
 template <typename Fn>
-bool try_select(clickhouse::Client& client, const std::string& sql, Fn&& fn, std::string* error, const ChParams& params = {}) {
+bool try_select(ChExecutor& db, const std::string& sql, Fn&& fn, std::string* error, const ChParams& params = {}) {
   try {
-    ch_select(client, sql, params, std::forward<Fn>(fn));
+    db.select(sql, params, std::forward<Fn>(fn));
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();
@@ -103,7 +102,7 @@ private:
 // count() query. Returns false when the system table is unavailable.
 template <typename Row, typename Parse>
 bool load_section(
-    clickhouse::Client& system,
+    ChExecutor& system,
     RunnerVisibility& visibility,
     const std::string& name,
     const std::string& sql,
@@ -132,12 +131,12 @@ bool load_section(
     if (activity.unavailable_detail.empty()) activity.unavailable_detail = section_error;
     return false;
   }
+  // The read stopped at row_limit + 1 rows, and the rows of a table that the runner cannot see are dropped after it. A read that came back full
+  // is cut whatever is left of it once they are dropped: the rows past it were never looked at, and some of them may be visible.
+  truncated = rows.size() > row_limit;
   for (auto& item : rows) {
     if (!visibility.visible(item.database, item.table)) continue;
-    if (out.size() >= row_limit) {
-      truncated = true;
-      continue;
-    }
+    if (out.size() >= row_limit) continue;
     out.push_back(std::move(item));
   }
   if (truncated) activity.truncated_sections.push_back(name);
@@ -147,8 +146,8 @@ bool load_section(
 } // namespace
 
 bool load_system_activity(
-    clickhouse::Client& system,
-    ExplorerCaches& caches,
+    ChExecutor& system,
+    const ReplicaCountsFn& replica_counts,
     AclView& runner_acl,
     size_t row_limit,
     SystemActivity& out,
@@ -270,9 +269,7 @@ bool load_system_activity(
     std::vector<std::pair<std::string, std::string>> tables;
     tables.reserve(out.replicas.size());
     for (const auto& replica : out.replicas) tables.emplace_back(replica.database, replica.table);
-    std::string counts_error;
-    BorrowedExecutor system_db(system);
-    const auto counts = load_cached_replica_counts(system_db, caches, tables, &counts_error);
+    const auto counts = replica_counts(system, tables);
     for (auto& replica : out.replicas) {
       const auto it = counts.find(object_key(replica.database, replica.table));
       if (it == counts.end()) continue;
@@ -311,7 +308,7 @@ bool load_system_activity(
 }
 
 bool load_system_keeper_status(
-    clickhouse::Client& system,
+    ChExecutor& system,
     SystemKeeperStatus& out,
     std::string* error) {
   out = SystemKeeperStatus{};
