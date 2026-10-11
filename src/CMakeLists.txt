@@ -71,6 +71,9 @@ if (CHDASH_BUILD_CODEC_TESTS)
   chdash_configure_target(chdash_processor_codec_test)
 endif()
 
+# The tools of MCP: the dispatch, what the tools share, and the tools by family.
+set(CHDASH_MCP_TOOL_SOURCES mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp)
+
 # The query library: the store, the file format, the rules of the tree, the import, the reading of a request.
 set(CHDASH_QUERY_LIBRARY_SOURCES query_library.cpp query_library_file.cpp query_library_import.cpp query_library_request.cpp query_library_rules.cpp)
 
@@ -86,7 +89,7 @@ if (CHDASH_BUILD_MCP_TESTS)
   # and the startup errors of the mcp { } block (no ClickHouse server needed). Also the HTTP hardening
   # (the guard of the writes, the page policy, the asset versions), the random source and the log lines.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
-    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp mcp_tools.cpp
+    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_sql.cpp mcp_protocol.cpp ${CHDASH_MCP_TOOL_SOURCES}
     error_envelope.cpp request_context.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
@@ -394,7 +397,7 @@ if (CHDASH_BUILD_APP)
     mcp_keys.cpp
     mcp_sql.cpp
     mcp_protocol.cpp
-    mcp_tools.cpp
+    ${CHDASH_MCP_TOOL_SOURCES}
     api_mcp.cpp
     ch_uri.cpp
     ch_query.cpp
