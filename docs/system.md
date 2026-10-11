@@ -76,7 +76,7 @@ A panel that cannot be read degrades on its own. It is listed in `unavailable_pa
 - `disabled`: the table does not exist (ClickHouse codes 60, 81).
 - `not_granted`: ClickHouse code 497. `hint` is the statement to run, `GRANT SELECT ON system.<table> TO <system user>`. The page shows it with a copy button.
 - `unsupported`: a column that this version does not have (16, 47).
-- `window_too_large`: the time budget or the read cap (159, 158).
+- `window_too_large`: the time budget or the read cap (159, 158, and the limits of memory and of rows or bytes, 241 and 396).
 - `readonly_account`: 164. A `readonly = 1` profile cannot set the limits.
 - `failed`.
 
@@ -164,7 +164,7 @@ Assume that `metric_log` and `asynchronous_metric_log` are not available. Then t
 - `from_ms >= to_ms` is a 400 `invalid_range`.
 - A window over `max_lookback_days` is a 400 `range_too_large`.
 
-The server picks the step. The steps are 10 s, 30 s, 1 min, 5 min, 15 min, 30 min, 1 h, 3 h, 6 h and 1 d. The server uses the smallest step that gives at most 300 buckets (1 h: 30 s, 24 h: 5 min, 7 d: 1 h, 30 d: 3 h). It aligns the window to the step. For this reason, every request of one aligned window shares a cache entry of 15 s (one read in flight for each window). The server runs three SELECTs through the system context. Each SELECT uses one pass:
+The server picks the step. The steps are 10 s, 30 s, 1 min, 5 min, 15 min, 30 min, 1 h, 3 h, 6 h, 1 d and 2 d. The server uses the smallest step that gives at most 300 buckets (1 h: 30 s, 24 h: 5 min, 7 d: 1 h, 30 d: 3 h, 365 d: 2 d, so the window of the longest lookback has 183 buckets). It aligns the window to the step. For this reason, every request of one aligned window shares a cache entry of 15 s (one read in flight for each window). The server runs three SELECTs through the system context. Each SELECT uses one pass:
 
 - `system.metric_log`: the allowlisted columns that this server has (detected with the other capabilities).
   - `ProfileEvent_*` are deltas for each sample. A rate is their sum over the seconds that the bucket covers (for the bucket still in progress: up to its last sample).

@@ -11,10 +11,14 @@
 
 #include "system_monitor.hpp"
 
+#include <clickhouse/exceptions.h>
+
 #include <cmath>
 #include <cstring>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -301,6 +305,36 @@ void queries_order_and_error_filters_are_fixed_clauses() {
 
 } // namespace
 
+std::string reason_of_code(int code) {
+  auto exception = std::make_shared<clickhouse::Exception>();
+  exception->code = code;
+  exception->name = "DB::Exception";
+  return monitor_reason_of(clickhouse::ServerException(exception));
+}
+
+// ARCH-B-087: the limits of memory (241) and of rows or bytes (396) are a window that is too large, as the limits of rows (158) and of time (159).
+void reasons_follow_the_error_code() {
+  CHECK(reason_of_code(60) == "disabled");
+  CHECK(reason_of_code(497) == "not_granted");
+  CHECK(reason_of_code(158) == "window_too_large");
+  CHECK(reason_of_code(159) == "window_too_large");
+  CHECK(reason_of_code(241) == "window_too_large");
+  CHECK(reason_of_code(396) == "window_too_large");
+  CHECK(reason_of_code(164) == "readonly_account");
+  CHECK(reason_of_code(1) == "failed");
+  CHECK(monitor_reason_of(std::runtime_error("x")) == "failed");
+}
+
+// The longest lookback (365 days) fits in the points that the page draws.
+void series_steps_keep_the_longest_window_within_the_points() {
+  for (const uint64_t days : {1, 7, 30, 90, 365}) {
+    const uint32_t step = monitor_series_step_seconds(days * 86400);
+    CHECK((days * 86400 + step - 1) / step <= kMonitorSeriesMaxPoints);
+  }
+  CHECK(monitor_series_step_seconds(365 * 86400) == 2 * 86400);
+  CHECK(monitor_series_step_seconds(3600) == 30);
+}
+
 int main(int argc, char** argv) {
   if (argc > 1 && std::strcmp(argv[1], "--print-growth-sql") == 0) {
     std::cout << monitor_disk_growth_sql(week(), {"default", "fixture_hot"}, false) << "\n";
@@ -319,6 +353,8 @@ int main(int argc, char** argv) {
   queries_user_filter_is_a_bound_parameter();
   queries_database_and_table_filters_are_bound_parameters();
   queries_order_and_error_filters_are_fixed_clauses();
+  reasons_follow_the_error_code();
+  series_steps_keep_the_longest_window_within_the_points();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

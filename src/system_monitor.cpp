@@ -293,6 +293,8 @@ std::string monitor_reason_of(const std::exception& error) {
       return "unsupported";
     case 158:  // TOO_MANY_ROWS
     case 159:  // TIMEOUT_EXCEEDED
+    case 241:  // MEMORY_LIMIT_EXCEEDED
+    case 396:  // TOO_MANY_ROWS_OR_BYTES
       return "window_too_large";
     case 164:  // READONLY
       return "readonly_account";
@@ -544,7 +546,7 @@ bool load_system_monitor_overview(
 // Performance series
 
 const std::vector<uint32_t>& monitor_series_steps() {
-  static const std::vector<uint32_t> steps{10, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 86400};
+  static const std::vector<uint32_t> steps{10, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 86400, 2 * 86400};
   return steps;
 }
 
