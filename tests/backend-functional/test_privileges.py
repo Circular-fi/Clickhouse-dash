@@ -111,7 +111,8 @@ ROUTES = {
     "logs.meta": ("GET", "/api/logs/meta", {}, None),
     "logs.search": ("GET", "/api/logs/search", WINDOW, None),
     "metrics.meta": ("GET", "/api/metrics/meta", {}, None),
-    "format": ("POST", "/api/format", {}, {"sqls": ["select 1"]}),
+    # The single-statement form keeps its HTTP error; a batch answers 200 with a status for each statement (test_format_batch.py, ARCH-B-124).
+    "format": ("POST", "/api/format", {}, {"sql": "select 1"}),
 }
 
 

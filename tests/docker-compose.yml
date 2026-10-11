@@ -251,6 +251,100 @@ services:
       retries: 120
       start_period: 2s
 
+  # One server of the test image for each file of backend-functional that needs a configuration of its own (tests/README.md, "Backend
+  # functional"): the hosts of the OpenTelemetry overrides, the allowlist of the trace services, the privilege matrix (its MCP keys are
+  # written to a volume of its own) and the two degraded System configurations. The `tests` service names them by variable.
+  chdash_otel_hosts:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-otel-hosts
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on: &instance_depends
+      clickhouse:
+        condition: service_healthy
+        restart: false
+      chdash_source:
+        condition: service_healthy
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/otel-hosts.hcl
+        target: /config/chdash.hcl
+        read_only: true
+    healthcheck: &instance_health
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/version | grep -q '\"name\":\"clickhouse-dash\"'"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
+  chdash_traces_allowlist:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-traces-allowlist
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on: *instance_depends
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/traces-allowlist.hcl
+        target: /config/chdash.hcl
+        read_only: true
+    healthcheck: *instance_health
+
+  chdash_privileges:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-privileges
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on: *instance_depends
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/privileges.hcl
+        target: /config/chdash.hcl
+        read_only: true
+      - privileges_data:/data
+    healthcheck: *instance_health
+
+  chdash_system_disabled:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-system-disabled
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on: *instance_depends
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/system-disabled.hcl
+        target: /config/chdash.hcl
+        read_only: true
+    healthcheck: *instance_health
+
+  chdash_system_limits:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-system-limits
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on: *instance_depends
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/system-limits.hcl
+        target: /config/chdash.hcl
+        read_only: true
+    healthcheck: *instance_health
+
   # The same server built with the files embedded in the binary (CHDASH_EMBED_STATIC=ON, the way the release is built):
   # no ./static, a map of versions in every page, .gz copies, long-lived caching of a versioned file. chdash_source
   # reads its files from the disk and never takes this path. The browser tests run on both (the `tests` service:
@@ -318,6 +412,16 @@ services:
         condition: service_healthy
       chdash_qlib:
         condition: service_healthy
+      chdash_otel_hosts:
+        condition: service_healthy
+      chdash_traces_allowlist:
+        condition: service_healthy
+      chdash_privileges:
+        condition: service_healthy
+      chdash_system_disabled:
+        condition: service_healthy
+      chdash_system_limits:
+        condition: service_healthy
       otel_fixture:
         condition: service_healthy
     environment:
@@ -330,6 +434,11 @@ services:
       EMBEDDED_BASE_URL: http://chdash_embedded:8080
       MCP_CONTRACT_BASE_URL: http://chdash_mcp:8080
       QUERY_LIBRARY_LIVE_URL: http://chdash_qlib:8080
+      OTEL_HOSTS_BASE_URL: http://chdash_otel_hosts:8080
+      TRACES_ALLOWLIST_BASE_URL: http://chdash_traces_allowlist:8080
+      PRIVILEGES_BASE_URL: http://chdash_privileges:8080
+      SYSTEM_DISABLED_BASE_URL: http://chdash_system_disabled:8080
+      SYSTEM_LIMITS_BASE_URL: http://chdash_system_limits:8080
       CHDASH_REQUIRE_FIXTURES: "1"
       TEST_ARTIFACTS_ROOT: /artifacts
       PERF_RUNS: "${PERF_RUNS:-20}"
@@ -353,4 +462,5 @@ volumes:
   clickhouse_data:
   clickhouse_replica_data:
   mcp_data:
+  privileges_data:
   qlib_data:

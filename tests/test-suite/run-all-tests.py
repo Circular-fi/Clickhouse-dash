@@ -249,27 +249,11 @@ def main() -> int:
             sys.executable, '-m', 'pytest', '-q',
             str(ROOT / 'api' / 'format' / 'check_format.py'),
             str(ROOT / 'api' / 'query_types' / 'check_query_types.py'),
-            str(ROOT / 'backend-functional' / 'test_routes.py'),
-            str(ROOT / 'backend-functional' / 'test_trace_span_insights.py'),
-            str(ROOT / 'backend-functional' / 'test_logs_explorer.py'),
-            str(ROOT / 'backend-functional' / 'test_metrics_browser.py'),
-            str(ROOT / 'backend-functional' / 'test_trace_heatmap.py'),
-            str(ROOT / 'backend-functional' / 'test_rich_fixture.py'),
-            str(ROOT / 'backend-functional' / 'test_trace_spans.py'),
-            str(ROOT / 'backend-functional' / 'test_explorer_graph_panel.py'),
-            # The System page: the instance-dependent checks (System
-            # off, the limits config) skip unless SYSTEM_*_BASE_URL point
-            # at dedicated instances (tests/README.md).
-            str(ROOT / 'backend-functional' / 'test_system.py'),
-            # Query library: the disabled checks run against chdash_source; the
-            # writable/read-only checks skip unless QUERY_LIBRARY_* point at
-            # dedicated instances (tests/README.md, "Query library").
-            str(ROOT / 'backend-functional' / 'test_query_library.py'),
-            # MCP (docs/mcp.md): the disabled checks run against chdash_source; the
-            # instance checks skip unless MCP_* point at dedicated instances (tests/README.md, "MCP").
-            str(ROOT / 'backend-functional' / 'test_mcp.py'),
-            # The production asset path: the build with the files embedded (EMBEDDED_BASE_URL; skipped without it).
-            str(ROOT / 'backend-functional' / 'test_embedded_static.py'),
+            # The whole directory: every file runs (a file that is not named here is one that never runs). The files that need an
+            # instance of their own find it in the environment of the `tests` service (tests/docker-compose.yml): with
+            # CHDASH_REQUIRE_FIXTURES=1 a missing one stops the phase (backend-functional/conftest.py) instead of skipping its tests.
+            # The checks that need a command on the host (the *_CMD and *_DATA_DIR variables of tests/README.md) skip in the container.
+            str(ROOT / 'backend-functional'),
             '/repo/tests/harness',
             '--junitxml', str(backend_dir / 'junit.xml'),
         ],

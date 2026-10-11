@@ -31,3 +31,25 @@ def test_every_performance_budget_names_a_case_and_every_case_has_one():
         median, p95 = ("encode_median_ms_max", "encode_p95_ms_max") if name == "select_weather_buffer_120k" else ("median_ms_max", "p95_ms_max")
         assert limits[median] > 0
         assert limits[p95] >= limits[median]
+
+
+def test_the_backend_phase_runs_the_whole_directory_and_the_stack_provides_the_instances_it_needs():
+    # Why: a file that run-all-tests.py does not name never runs in CI (19 of the 30 once did not). The phase takes the directory, and a
+    # test that needs an instance of its own must find it in the environment of the `tests` service, or the phase stops (conftest.py).
+    runner = read("tests/test-suite/run-all-tests.py")
+    assert "str(ROOT / 'backend-functional')," in runner
+    assert not re.search(r"'backend-functional' / 'test_", runner)
+    conftest = read("tests/backend-functional/conftest.py")
+    instances = re.search(r"STACK_INSTANCES = \((.*?)\)\n", conftest, re.S).group(1)
+    names = re.findall(r'"([A-Z_]+_BASE_URL)"', instances)
+    assert len(names) >= 6
+    compose = read("tests/docker-compose.yml")
+    tests_env = compose.split("\n  tests:\n", 1)[1].split("\nvolumes:\n", 1)[0]
+    for name in names:
+        assert re.search(rf"^      {name}: http://(\w+):8080$", tests_env, re.M), f"{name} is not in the environment of the tests service"
+    for service in re.findall(r"^      (\w+_BASE_URL): http://(\w+):8080$", tests_env, re.M):
+        assert re.search(rf"^  {service[1]}:$", compose, re.M), f"{service[0]} names a service that does not exist: {service[1]}"
+    # Every skipif on a stack instance names a variable that the list covers.
+    for path in (ROOT / "tests/backend-functional").glob("test_*.py"):
+        for variable in re.findall(r'reason="([A-Z_]+_BASE_URL) is not set', path.read_text(encoding="utf-8")):
+            assert variable in names or variable.startswith(("MCP_", "QUERY_LIBRARY_")), f"{path.name}: {variable} is not a stack instance and not listed as optional"

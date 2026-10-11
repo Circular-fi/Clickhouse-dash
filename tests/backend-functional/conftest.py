@@ -218,3 +218,28 @@ def reset_clickhouse_integration_fixture() -> None:
         marker = _expected_marker(scripts, state)
         _query(session, base_url, user, password, f"ALTER DATABASE {MARKER_DATABASE} MODIFY COMMENT '{marker}'")
         print(f"[fixtures] reset applied ({scripts}/{state})", flush=True)
+
+
+# The instances that the test stack provides for the files that need a configuration of their own (tests/docker-compose.yml, the
+# environment of the `tests` service; tests/README.md says what each one is). In the official run (CHDASH_REQUIRE_FIXTURES=1) a test
+# that would skip for want of one of them stops the run instead: a green run that never ran the test is the failure that
+# this list prevents. Without the variable (a run by hand against one instance) they skip as before.
+STACK_INSTANCES = (
+    "EMBEDDED_BASE_URL", "OTEL_HOSTS_BASE_URL", "TRACES_ALLOWLIST_BASE_URL", "PRIVILEGES_BASE_URL",
+    "SYSTEM_DISABLED_BASE_URL", "SYSTEM_LIMITS_BASE_URL",
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    if os.environ.get("CHDASH_REQUIRE_FIXTURES") != "1":
+        return
+    missing: dict[str, set[str]] = {}
+    for item in items:
+        for marker in item.iter_markers("skipif"):
+            reason = str(marker.kwargs.get("reason", ""))
+            variable = reason.split(" ", 1)[0]
+            if variable in STACK_INSTANCES and marker.args and marker.args[0]:
+                missing.setdefault(variable, set()).add(item.path.name)
+    if missing:
+        listing = "; ".join(f"{name} ({', '.join(sorted(files))})" for name, files in sorted(missing.items()))
+        raise pytest.UsageError(f"the test stack must start the instances that these tests run against (tests/docker-compose.yml): {listing}")
