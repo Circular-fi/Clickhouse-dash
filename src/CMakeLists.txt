@@ -121,6 +121,10 @@ if (CHDASH_BUILD_EXPLORER_TESTS)
   chdash_configure_target(chdash_explorer_test)
 endif()
 
+# The SQL formatter (format_postprocess.hpp): the entry and the units of its passes. The service, the cache and the transport are not in it.
+set(CHDASH_FORMATTER_SOURCES format_postprocess.cpp format_text.cpp format_scan.cpp format_align.cpp format_arith.cpp format_calls.cpp
+  format_statement.cpp format_expression.cpp format_ddl.cpp format_insert.cpp format_layout.cpp)
+
 if (CHDASH_BUILD_LOGS_TESTS)
   # The pure parts of the logs routes: the text search (tokens, terms, SQL of a term) and the patterns (masking, Drain).
   add_executable(chdash_logs_test ../tests/native/logs_test.cpp logs_text.cpp logs_drain.cpp)
@@ -145,7 +149,7 @@ endif()
 
 if (CHDASH_BUILD_FORMAT_TESTS)
   # The bounded JSON parse and the depth guard of the formatter, on 128 KiB thread stacks (no ClickHouse needed).
-  add_executable(chdash_format_depth_test ../tests/native/format_depth_test.cpp format_postprocess.cpp)
+  add_executable(chdash_format_depth_test ../tests/native/format_depth_test.cpp ${CHDASH_FORMATTER_SOURCES})
   target_include_directories(chdash_format_depth_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_format_depth_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -220,7 +224,7 @@ if (CHDASH_BUILD_SQL_TESTS)
   # them and the lexer on one corpus.
   enable_language(C)
   add_executable(chdash_sql_test ../tests/native/sql_test.cpp ../tests/native/wasm_kernel_highlight.c ../tests/native/wasm_kernel_sqlscan.c
-    sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp format_service.cpp format_postprocess.cpp format_cache.cpp jwt.cpp secure_random.cpp)
+    sql_structure.cpp user_sql_policy.cpp mcp_sql.cpp format_service.cpp ${CHDASH_FORMATTER_SOURCES} format_cache.cpp jwt.cpp secure_random.cpp)
   target_link_libraries(chdash_sql_test PRIVATE m)
   target_include_directories(chdash_sql_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_sql_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
@@ -262,7 +266,7 @@ if (CHDASH_BUILD_FUZZERS)
     set(CHDASH_FUZZERS ${CHDASH_FUZZERS} ${name} PARENT_SCOPE)
   endfunction()
   chdash_add_fuzzer(chdash_fuzz_json_parse ${_FUZZ_DIR}/fuzz_json_parse.cpp)
-  chdash_add_fuzzer(chdash_fuzz_format ${_FUZZ_DIR}/fuzz_format.cpp format_postprocess.cpp)
+  chdash_add_fuzzer(chdash_fuzz_format ${_FUZZ_DIR}/fuzz_format.cpp ${CHDASH_FORMATTER_SOURCES})
   chdash_add_fuzzer(chdash_fuzz_mcp_sql ${_FUZZ_DIR}/fuzz_mcp_sql.cpp mcp_sql.cpp)
   chdash_add_fuzzer(chdash_fuzz_user_sql_policy ${_FUZZ_DIR}/fuzz_user_sql_policy.cpp user_sql_policy.cpp)
   chdash_add_fuzzer(chdash_fuzz_hcl ${_FUZZ_DIR}/fuzz_hcl.cpp hcl.cpp)
@@ -303,7 +307,7 @@ if (CHDASH_BUILD_APP)
     format_clickhouse.cpp
     format_service.cpp
     format_cache.cpp
-    format_postprocess.cpp
+    ${CHDASH_FORMATTER_SOURCES}
     api_query.cpp
     user_sql_policy.cpp
     api_query_stream.cpp
