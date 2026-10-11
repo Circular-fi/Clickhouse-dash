@@ -37,7 +37,7 @@ def test_default_stack_skips_otel_fixture_and_builds_fresh_source():
 def test_test_profile_enables_fixture_and_single_test_runner():
     compose = read("tests/docker-compose.yml")
     services = compose.split("services:\n", 1)[1].split("\nvolumes:\n", 1)[0]
-    assert set(re.findall(r"^  ([A-Za-z0-9_]+):$", services, re.MULTILINE)) == {"clickhouse", "clickhouse_replica", "otel_fixture", "chdash_source", "tests"}
+    assert set(re.findall(r"^  ([A-Za-z0-9_]+):$", services, re.MULTILINE)) == {"clickhouse", "clickhouse_replica", "otel_fixture", "chdash_source", "chdash_embedded", "tests"}
     fixture = service_block(compose, "otel_fixture")
     assert 'profiles: ["otel", "test"]' in fixture
     tests = service_block(compose, "tests")
@@ -52,9 +52,31 @@ def test_test_profile_enables_fixture_and_single_test_runner():
     assert "clickhouse_history:" not in compose
 
 
-def test_single_test_container_runs_four_explicit_categories_and_builds_one_archive():
+def test_the_embedded_build_is_a_service_of_the_test_profile_and_a_phase_of_the_runner():
+    compose = read("tests/docker-compose.yml")
+    embedded = service_block(compose, "chdash_embedded")
+    # The production asset path: a target of the same Dockerfile, built with the files embedded and no ./static.
+    assert 'profiles: ["test", "embedded"]' in embedded
+    assert "dockerfile: ./tests/Dockerfile.source" in embedded and "target: runtime-embedded" in embedded
+    assert "chdash-tests-embedded:local" in embedded
+    dockerfile = read("tests/Dockerfile.source")
+    stage = dockerfile.split("FROM alpine:3.20 AS runtime-embedded", 1)[1].split("\nFROM ", 1)[0]
+    assert "COPY --from=builder-embedded /work/chdash /app/chdash" in stage and "/app/static" not in stage
+    # The two builds differ in the embedded flag and in the static inputs only.
+    builds = re.findall(r"-DCHDASH_BUILD_APP=ON.*?cp /work/build/chdash /work/chdash", dockerfile, re.S)
+    assert len(builds) == 2
+    assert builds[0].replace("-DCHDASH_EMBED_STATIC=OFF", "-DCHDASH_EMBED_STATIC=ON") == builds[1]
+    tests = service_block(compose, "tests")
+    assert "chdash_embedded:" in tests and "EMBEDDED_BASE_URL: http://chdash_embedded:8080" in tests
     runner = read("tests/test-suite/run-all-tests.py")
-    for category in ["backend-functional", "frontend-functional", "performance", "design"]:
+    assert "'frontend-embedded'" in runner and "embedded_env['FRONTEND_BASE_URL'] = embedded_url" in runner
+    # The timing budgets run alone after the other browser tests (PW_PERF, playwright.config.js).
+    assert "ff_env['PW_PERF'] = 'skip'" in runner and "timing_env['PW_PERF'] = 'only'" in runner
+
+
+def test_single_test_container_runs_its_categories_and_builds_one_archive():
+    runner = read("tests/test-suite/run-all-tests.py")
+    for category in ["backend-functional", "frontend-functional", "frontend-timing", "performance", "design"]:
         assert category in runner
     assert "chdash-test-review.zip" in runner
     assert "build_archive" in runner
@@ -87,3 +109,12 @@ def test_performance_expected_baseline_is_configured_after_first_feedback():
     assert '"insert_1000_rows"' in cases
     assert '"select_weather_buffer_120k"' in cases and "encode_median_ms" in runner
     assert "expected_baseline_configured" in runner
+
+
+def test_every_playwright_spec_is_run_by_the_official_runner():
+    """A spec that no phase names never runs in CI: twelve of them once did not."""
+    runner = read("tests/test-suite/run-all-tests.py")
+    named = set(re.findall(r"specs/([a-z0-9-]+)\.spec\.js", runner))
+    on_disk = {path.name[: -len(".spec.js")] for path in (ROOT / "tests/frontend/specs").glob("*.spec.js")}
+    assert on_disk - named == set(), sorted(on_disk - named)
+    assert named - on_disk == set(), sorted(named - on_disk)

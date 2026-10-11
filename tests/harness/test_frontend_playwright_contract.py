@@ -110,6 +110,8 @@ def test_fast_default_keeps_a_full_mode_and_a_shared_host_mode():
     assert "base_env['PW_ALL_PROJECTS'] = '1'" in runner
     assert "PW_SHARED_HOST" not in runner
     assert "'--project=desktop-1440'" in runner
+    # PW_PERF=skip | only | with: the official run measures the timing budgets alone, after the other tests.
+    assert "PW_PERF" in config and "'only'" in config
     assert "backend_env['CHDASH_FIXTURES_FRESH'] = '1'" in runner
     assert (ROOT / "tests/tools/pw-changed.sh").is_file()
     assert "## Running tests quickly" in readme and "PW_ALL_PROJECTS=1" in readme

@@ -154,12 +154,14 @@ docker compose --profile test up -d --build
 
 The command remains detached. The `test` profile also activates `otel_fixture`, waits for its healthcheck, and then runs **one single one-shot container named `tests`**. There is no test UI and no separate frontend/performance/aggregation service.
 
-The `tests` container executes four categories sequentially:
+The `tests` container executes these categories sequentially:
 
-1. **backend-functional** — live query formatting and API route/function flows;
-2. **frontend-functional** — Playwright functionality tests at the canonical 1440x900 viewport;
-3. **performance** — hardcoded query/DDL/INSERT timing scenarios (`PERF_RUNS`, 20 by default, measured runs after `PERF_WARMUP`; the p95 limits of `expected.json` are the second slowest of twenty, not the maximum of five);
-4. **design** — Playwright screenshots at 1920x1080, 1440x900 and 1280x800 plus layout/accessibility audits.
+1. **backend-functional** — live query formatting and API route/function flows, and the harness (the contract tests and the Node unit tests of the pure frontend modules, `tests/frontend/model`);
+2. **frontend-functional** — Playwright functionality tests at the canonical 1440x900 viewport, without the timing-budget tests;
+3. **frontend-timing** — the timing-budget tests of the same specs, alone, after the others (`PW_PERF=only`): no other browser test loads the host while a budget is measured;
+4. **frontend-embedded** — the same Playwright specs against `chdash_embedded`, the server built with the files embedded in the binary (see "Embedded build" below); `--quick` runs the specs that read the production asset path most (`PRODUCTION_PATH_SPECS` of the runner);
+5. **performance** — hardcoded query/DDL/INSERT timing scenarios (`PERF_RUNS`, 20 by default, measured runs after `PERF_WARMUP`; the p95 limits of `expected.json` are the second slowest of twenty, not the maximum of five);
+6. **design** — Playwright screenshots at 1920x1080, 1440x900 and 1280x800 plus layout/accessibility audits.
 
 It always attempts to produce:
 
@@ -167,7 +169,7 @@ It always attempts to produce:
 tests/artifacts/chdash-test-review.zip
 ```
 
-and then exits. `Exited (0)` means all four technical phases completed successfully. `Exited (1)` means at least one phase failed; the ZIP is still attempted so the diagnostics can be reviewed.
+and then exits. `Exited (0)` means all the phases completed successfully. `Exited (1)` means at least one phase failed; the ZIP is still attempted so the diagnostics can be reviewed.
 
 Check status/logs with:
 
@@ -184,11 +186,25 @@ chdash-test-review/
 ├── README.md
 ├── backend-functional/
 ├── frontend-functional/
+├── frontend-timing/
+├── frontend-embedded/
 ├── performance/
 └── design/
 ```
 
 Upload that single ZIP for review.
+
+## Embedded build
+
+`chdash_source` (target `runtime` of `tests/Dockerfile.source`) reads `./static` from the disk, as a build with `CHDASH_EMBED_STATIC=OFF` does. A release does not: it serves the files compiled into the binary, after `tools/stage_static.py` has versioned them (`?v=<hash>` in every shell and import, the map `__chdashAssetVersions`, `.gz` copies, long-lived caching of a versioned file). A bug of that path (a module loaded outside `loader.url`, a `.wasm` without its version) breaks no test on `chdash_source`. Service `chdash_embedded` is the same server built the release way (target `runtime-embedded`: no `./static` in the image, so a file that is not embedded is a 404), and the `frontend-embedded` phase runs the Playwright specs on it. To run it alone:
+
+```bash
+docker compose -f tests/docker-compose.yml --profile embedded up -d --build --wait chdash_embedded
+tests/tools/pw-changed.sh -t chdash-tests-embedded     # the specs of the changed files
+docker build -f tests/Dockerfile.source --target runtime-embedded -t chdash-mine:embedded .   # an image of this tree
+```
+
+`tests/smoke/Dockerfile.release` builds the release binary itself (Zig, static-pie); the embedded test image is the GCC build with the same embedding step, quick to build next to the test stack.
 
 ## Running tests quickly
 
@@ -199,10 +215,11 @@ Upload that single ZIP for review.
 | default | layout specs (`accessibility`, `design`, `explorer-nav`, `obs-filterbar`, `page-chrome`, `ui-*`, `visual-regression`) on `desktop-1920`, `desktop-1440` and `laptop-1280`; behavioural specs on `desktop-1440`, plus their viewport-sensitive tests (titles matching `LAYOUT_TITLES`: overflow, fits the viewport, captures, ...) on the other two; the timing-budget tests (`PERF_TITLES`) last, one at a time |
 | `PW_ALL_PROJECTS=1` | every test on every viewport: the pre-release run |
 | `PW_SHARED_HOST=1` | leaves the timing-budget tests out and defaults to one worker; for runs on a host other runs share (budgets measure the host then, not the code) |
+| `PW_PERF=skip\|only\|with` | `skip`: no timing-budget tests; `only`: those tests alone (no other test, one worker); `with` (default): queued after the others, but a worker of the others may still be running. The official run does `skip`, then `only` |
 
 Projects of one viewport share its name, so `--project=desktop-1440` selects its behavioural tests and its timing-budget tests, and snapshots and reports keep the viewport name. `PW_WORKERS=<n>` sets the worker count (default 2, 1 with `PW_SHARED_HOST=1`); the tests of a file spread over the workers (`fullyParallel`), and a failed test is retried at the end, alone (`retryStrategy: 'isolated'`). Videos and traces are recorded on the first retry only (`CI=1` retries once); a failure without retry keeps its screenshot and `error-context.md`. `PW_ARTIFACTS=full` records them for every failing test as before.
 
-**Specs of the changed files.** `tests/tools/pw-changed.sh` maps the files changed since the merge base with `main` (`-b <ref>` for another base; uncommitted and untracked files included) to their specs through a table of source modules, then runs them on `desktop-1440` with `PW_SHARED_HOST=1` in the `chdash-tests-all:local` image against `chdash_source` (`-t <container>` for another instance). `-n` prints the selection, `-a` runs the three viewports, arguments after `--` go to Playwright.
+**Specs of the changed files.** `tests/tools/pw-changed.sh` maps the files changed since the merge base with `main` (`-b <ref>` for another base; uncommitted and untracked files included) to their specs through a table of source modules (a script that the table does not name gets the specs of the pages that load it, from `modules.json` and the imports; a foundation module of six pages or more gets the general set), then runs them on `desktop-1440` with `PW_SHARED_HOST=1` in the `chdash-tests-all:local` image against `chdash_source` (`-t <container>` for another instance). `-n` prints the selection, `-a` runs the three viewports, arguments after `--` go to Playwright.
 
 ```bash
 tests/tools/pw-changed.sh -n                      # which specs

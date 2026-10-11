@@ -6,15 +6,19 @@ const artifactsRoot = process.env.FRONTEND_ARTIFACTS_DIR || '/artifacts/frontend
 // Run modes (tests/README.md, "Running tests quickly"):
 // - default: layout specs run on the three desktop viewports, behavioural specs
 //   on desktop-1440 only, plus their viewport-sensitive tests (LAYOUT_TITLES) on
-//   the other two; timing-budget tests run last, one at a time.
+//   the other two; timing-budget tests are queued last, one at a time (a worker of the others may still be running:
+//   PW_PERF=only runs them alone, once the others have ended, as run-all-tests.py does).
 // - PW_ALL_PROJECTS=1: every test on every viewport (the pre-release run).
 // - PW_SHARED_HOST=1: leaves the timing-budget tests out (they measure the host,
 //   not the code, when other runs share it) and defaults to one worker.
+// - PW_PERF=skip|only|with: the timing-budget tests are left out, run alone (no other test, one worker) or queued last
+//   (default; skip with PW_SHARED_HOST=1). The official run is a "skip" run, then an "only" run.
 // - PW_WORKERS=<n>: worker count. PW_ARTIFACTS=full: video and trace of every
 //   failure, as before, instead of only on the first retry.
 const env = process.env;
 const ALL_PROJECTS = env.PW_ALL_PROJECTS === '1';
 const SHARED_HOST = env.PW_SHARED_HOST === '1';
+const PERF = ['skip', 'only', 'with'].includes(env.PW_PERF) ? env.PW_PERF : (SHARED_HOST ? 'skip' : 'with');
 const FULL_ARTIFACTS = env.PW_ARTIFACTS === 'full';
 const WORKERS = Number(env.PW_WORKERS) || (SHARED_HOST ? 1 : 2);
 
@@ -49,13 +53,15 @@ const perfProjects = [];
 for (const { name, viewport } of VIEWPORTS) {
   const use = { viewport, deviceScaleFactor: 1 };
   const everything = ALL_PROJECTS || name === CANONICAL;
-  if (everything) {
+  if (PERF === 'only') {
+    // Only the timing-budget tests: no main project.
+  } else if (everything) {
     mainProjects.push({ name, use, grepInvert: PERF_TITLES });
   } else {
     mainProjects.push({ name, use, testMatch: LAYOUT_SPECS, grepInvert: PERF_TITLES });
     mainProjects.push({ name, use, testIgnore: LAYOUT_SPECS, grep: LAYOUT_TITLES, grepInvert: PERF_TITLES });
   }
-  if (!SHARED_HOST && everything) perfProjects.push({ name, use, grep: PERF_TITLES, workers: 1 });
+  if (PERF !== 'skip' && everything) perfProjects.push({ name, use, grep: PERF_TITLES, workers: 1 });
 }
 
 export default defineConfig({

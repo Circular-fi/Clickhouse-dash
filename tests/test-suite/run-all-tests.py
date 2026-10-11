@@ -17,6 +17,20 @@ ARTIFACTS_ROOT = Path(os.environ.get('TEST_ARTIFACTS_ROOT', '/artifacts'))
 RUN_ROOT = ARTIFACTS_ROOT / 'test-run'
 ZIP_PATH = ARTIFACTS_ROOT / 'chdash-test-review.zip'
 
+# The specs of the frontend-functional phase, every one at the canonical viewport.
+FUNCTIONAL_SPECS = ['specs/functional.spec.js', 'specs/explorer-storage.spec.js', 'specs/explorer-nav.spec.js', 'specs/system.spec.js', 'specs/ui-consistency.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', 'specs/query-library.spec.js', 'specs/trace-insights.spec.js', 'specs/trace-search-filters.spec.js', 'specs/trace-logs.spec.js', 'specs/logs.spec.js', 'specs/metrics-browser.spec.js', 'specs/trace-service-map.spec.js', 'specs/trace-heatmap.spec.js', 'specs/trace-services.spec.js', 'specs/trace-spans.spec.js', 'specs/trace-page.spec.js', 'specs/page-per-view.spec.js', 'specs/http-security.spec.js', 'specs/mcp-page.spec.js', 'specs/idle-cpu.spec.js', 'specs/explorer-graph.spec.js', 'specs/observability.spec.js', 'specs/obs-filterbar.spec.js', 'specs/ui-foundations.spec.js', 'specs/wasm-highlight.spec.js', 'specs/wasm-sql.spec.js', 'specs/wasm-chartprep.spec.js', 'specs/wasm-rowsort.spec.js', 'specs/wasm-color.spec.js', 'specs/wasm-treemap.spec.js', 'specs/wasm-layout.spec.js', 'specs/wasm-worker.spec.js', 'specs/wasm-autoload.spec.js', 'specs/query-long-sql.spec.js', 'specs/query-run-lifecycle.spec.js', 'specs/async-lifecycle.spec.js', 'specs/history-storage.spec.js', 'specs/data-fidelity.spec.js',
+    # Specs that were never listed here (a new spec is named here or in the design phase: tests/harness/test_docker_test_profile_contract.py).
+    'specs/a11y-contract.spec.js', 'specs/dom-builder.spec.js', 'specs/export-protocol.spec.js', 'specs/format-batch.spec.js',
+    'specs/leak-tracker.spec.js', 'specs/live-region.spec.js', 'specs/mount-destroy.spec.js', 'specs/navigation-readability.spec.js',
+    'specs/observers.spec.js', 'specs/priority-columns.spec.js', 'specs/results-one-table.spec.js', 'specs/state-truth.spec.js',
+]
+# The specs that read the production asset path most: the page shells and their versions, the loader, the Worker and
+# the kernels, the security headers, the first paint. The quick run of the embedded phase runs only these.
+PRODUCTION_PATH_SPECS = [
+    'specs/page-per-view.spec.js', 'specs/ui-infrastructure.spec.js', 'specs/http-security.spec.js', 'specs/route-notice.spec.js',
+    'specs/wasm-autoload.spec.js', 'specs/wasm-worker.spec.js', 'specs/functional.spec.js',
+]
+
 
 def utc_now() -> str:
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
@@ -262,16 +276,49 @@ def main() -> int:
         output_dir=backend_dir,
     )
 
+    # The browser phases of the official run: the behavioural specs without the timing-budget tests (PW_PERF=skip),
+    # then those tests alone, so that no other test loads the host while a budget is measured; then the same specs on
+    # the build with the files embedded, the production asset path (tests/docker-compose.yml, chdash_embedded), when
+    # the container knows it. docs: tests/README.md, "Embedded build".
     frontend_functional_dir = RUN_ROOT / 'frontend-functional'
     ff_env = base_env.copy()
     ff_env['FRONTEND_ARTIFACTS_DIR'] = str(frontend_functional_dir)
+    ff_env['PW_PERF'] = 'skip'
     statuses['frontend_functional'] = run_phase(
         'frontend-functional',
-        ['npx', 'playwright', 'test', 'specs/functional.spec.js', 'specs/explorer-storage.spec.js', 'specs/explorer-nav.spec.js', 'specs/system.spec.js', 'specs/ui-consistency.spec.js', 'specs/streaming.spec.js', 'specs/trace-waterfall.spec.js', 'specs/trace-views.spec.js', 'specs/query-chart.spec.js', 'specs/query-library.spec.js', 'specs/trace-insights.spec.js', 'specs/trace-search-filters.spec.js', 'specs/trace-logs.spec.js', 'specs/logs.spec.js', 'specs/metrics-browser.spec.js', 'specs/trace-service-map.spec.js', 'specs/trace-heatmap.spec.js', 'specs/trace-services.spec.js', 'specs/trace-spans.spec.js', 'specs/trace-page.spec.js', 'specs/page-per-view.spec.js', 'specs/http-security.spec.js', 'specs/mcp-page.spec.js', 'specs/idle-cpu.spec.js', 'specs/explorer-graph.spec.js', 'specs/observability.spec.js', 'specs/obs-filterbar.spec.js', 'specs/ui-foundations.spec.js', 'specs/wasm-highlight.spec.js', 'specs/wasm-sql.spec.js', 'specs/wasm-chartprep.spec.js', 'specs/wasm-rowsort.spec.js', 'specs/wasm-color.spec.js', 'specs/wasm-treemap.spec.js', 'specs/wasm-layout.spec.js', 'specs/wasm-worker.spec.js', 'specs/wasm-autoload.spec.js', 'specs/query-long-sql.spec.js', 'specs/query-run-lifecycle.spec.js', 'specs/async-lifecycle.spec.js', 'specs/history-storage.spec.js', 'specs/data-fidelity.spec.js', '--project=desktop-1440'],
+        ['npx', 'playwright', 'test', *FUNCTIONAL_SPECS, '--project=desktop-1440'],
         cwd=FRONTEND,
         env=ff_env,
         output_dir=frontend_functional_dir,
     )
+
+    frontend_timing_dir = RUN_ROOT / 'frontend-timing'
+    timing_env = base_env.copy()
+    timing_env['FRONTEND_ARTIFACTS_DIR'] = str(frontend_timing_dir)
+    timing_env['PW_PERF'] = 'only'
+    statuses['frontend_timing'] = run_phase(
+        'frontend-timing',
+        ['npx', 'playwright', 'test', *FUNCTIONAL_SPECS, '--project=desktop-1440'],
+        cwd=FRONTEND,
+        env=timing_env,
+        output_dir=frontend_timing_dir,
+    )
+
+    embedded_url = base_env.get('EMBEDDED_BASE_URL', '')
+    if embedded_url:
+        frontend_embedded_dir = RUN_ROOT / 'frontend-embedded'
+        embedded_env = base_env.copy()
+        embedded_env['FRONTEND_ARTIFACTS_DIR'] = str(frontend_embedded_dir)
+        embedded_env['FRONTEND_BASE_URL'] = embedded_url
+        embedded_env['API_BASE_URL'] = embedded_url
+        embedded_env['PW_PERF'] = 'skip'
+        statuses['frontend_embedded'] = run_phase(
+            'frontend-embedded',
+            ['npx', 'playwright', 'test', *(PRODUCTION_PATH_SPECS if quick else FUNCTIONAL_SPECS), '--project=desktop-1440'],
+            cwd=FRONTEND,
+            env=embedded_env,
+            output_dir=frontend_embedded_dir,
+        )
 
     performance_dir = RUN_ROOT / 'performance'
     perf_env = base_env.copy()
@@ -298,6 +345,10 @@ def main() -> int:
         'specs/ui-panels.spec.js',
         'specs/ui-components.spec.js',
         'specs/ui-data.spec.js',
+        'specs/ui-guards.spec.js',
+        'specs/ui-icons.spec.js',
+        'specs/ui-router.spec.js',
+        'specs/ui-infrastructure.spec.js',
     ]
     if quick:
         design_cmd.append('--project=desktop-1440')
@@ -332,6 +383,8 @@ def main() -> int:
         'categories': {
             'backend-functional': statuses['backend_functional'],
             'frontend-functional': statuses['frontend_functional'],
+            'frontend-timing': statuses['frontend_timing'],
+            **({'frontend-embedded': statuses['frontend_embedded']} if 'frontend_embedded' in statuses else {}),
             'performance': {
                 **statuses['performance'],
                 'expected_baseline_configured': bool(perf_actual.get('expected_baseline_configured')),
@@ -341,13 +394,15 @@ def main() -> int:
         'archive_layout': {
             'backend-functional': 'backend-functional/',
             'frontend-functional': 'frontend-functional/',
+            'frontend-timing': 'frontend-timing/',
+            **({'frontend-embedded': 'frontend-embedded/'} if 'frontend_embedded' in statuses else {}),
             'performance': 'performance/',
             'design': 'design/',
         },
         'analysis_hint': 'Upload this ZIP for separate backend functional, frontend functional, performance and design review.',
     }
     (RUN_ROOT / 'manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding='utf-8')
-    readme = f'''# ChDash test review\n\nGenerated: {manifest['generated_at']}\n\nOverall success: **{overall}**\n\nThe archive contains exactly four test categories:\n\n- `backend-functional/`: query formatting and live API route/function flows.\n- `frontend-functional/`: Playwright interaction/functionality tests at the canonical desktop viewport.\n- `performance/`: hardcoded SELECT/DDL/INSERT scenarios and their timings. `expected.json` contains the approved first-run performance envelope.\n- `design/`: multi-viewport screenshots, layout heuristics and accessibility findings.\n\nThe Docker test runner has no web UI and exits after this archive is produced.\n'''
+    readme = f'''# ChDash test review\n\nGenerated: {manifest['generated_at']}\n\nOverall success: **{overall}**\n\nThe archive contains these test categories:\n\n- `backend-functional/`: query formatting and live API route/function flows.\n- `frontend-functional/`: Playwright interaction/functionality tests at the canonical desktop viewport.\n- `frontend-timing/`: the timing-budget tests of the same specs, run alone after the others.\n- `frontend-embedded/` (when the container knows the embedded build): the same Playwright tests against the build with the files embedded, the production asset path.\n- `performance/`: hardcoded SELECT/DDL/INSERT scenarios and their timings. `expected.json` contains the approved first-run performance envelope.\n- `design/`: multi-viewport screenshots, layout heuristics and accessibility findings.\n\nThe Docker test runner has no web UI and exits after this archive is produced.\n'''
     (RUN_ROOT / 'README.md').write_text(readme, encoding='utf-8')
     build_archive(manifest)
 

@@ -193,8 +193,52 @@ services:
       retries: 120
       start_period: 2s
 
-  # Single one-shot test container. It runs four explicit phases then exits:
-  # backend-functional, frontend-functional, performance and design.
+  # The same server built with the files embedded in the binary (CHDASH_EMBED_STATIC=ON, the way the release is built):
+  # no ./static, a map of versions in every page, .gz copies, long-lived caching of a versioned file. chdash_source
+  # reads its files from the disk and never takes this path. The browser tests run on both (the `tests` service:
+  # the frontend-embedded phase of run-all-tests.py). Run alone: `docker compose --profile embedded up -d --wait
+  # chdash_embedded`, then Playwright with FRONTEND_BASE_URL=http://localhost:${EMBEDDED_PORT}.
+  chdash_embedded:
+    profiles: ["test", "embedded"]
+    image: chdash-tests-embedded:local
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: ./tests/Dockerfile.source
+      target: runtime-embedded
+      args:
+        CHDASH_SEMVER: "${SOURCE_SEMVER:-source-tests}"
+        CHDASH_GIT_SHA: "${SOURCE_GIT_SHA:-local}"
+        CHDASH_BUILD_TIME: "${SOURCE_BUILD_TIME:-docker-compose}"
+        SOURCE_CMAKE_BUILD_TYPE: "${SOURCE_CMAKE_BUILD_TYPE:-Release}"
+    container_name: chdash-tests-embedded
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+    environment:
+      CHDASH_CONFIG_FILE: /config/CH_HOSTS.hcl
+    volumes:
+      - type: bind
+        source: ${CH_HOSTS_SOURCE_CONFIG:-./config/CH_HOSTS.local.hcl}
+        target: /config/CH_HOSTS.hcl
+        read_only: true
+    ports:
+      - "${EMBEDDED_PORT:-18081}:8080"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O - http://127.0.0.1:8080/api/version | grep -q '"name":"clickhouse-dash"'
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
+  # Single one-shot test container. It runs these phases, then exits: backend-functional, frontend-functional,
+  # frontend-timing, frontend-embedded (the same browser tests on chdash_embedded), performance and design.
   tests:
     image: chdash-tests-all:local
     profiles: ["test"]
@@ -210,6 +254,8 @@ services:
         condition: service_healthy
       chdash_source:
         condition: service_healthy
+      chdash_embedded:
+        condition: service_healthy
       otel_fixture:
         condition: service_healthy
     environment:
@@ -219,6 +265,7 @@ services:
       CLICKHOUSE_USER: "${CLICKHOUSE_USER:-test}"
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-test}"
       FRONTEND_BASE_URL: http://chdash_source:8080
+      EMBEDDED_BASE_URL: http://chdash_embedded:8080
       TEST_ARTIFACTS_ROOT: /artifacts
       PERF_RUNS: "${PERF_RUNS:-20}"
       PERF_WARMUP: "${PERF_WARMUP:-1}"
