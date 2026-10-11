@@ -11,6 +11,15 @@ Rule: inside a function body, a lambda with a reference capture (`[&]`, `[&, x]`
 use a name that the enclosing function declares (a local or a parameter), unless the lambda captures
 that name by value (`[&, x]`, `[x]`). Members (`cfg_`, ...) are fine: `this` is captured.
 
+Scope, and what the script does not see: every route is registered in Server::Server (src/server.cpp, the
+handlers themselves are member functions of the api_*.cpp units and capture `this` only), so that file and that
+function are the one place the CI job checks. Declarations are found by a regular expression (a structured binding
+`auto [a, b]` or an unusual template type is missed) and only the lambdas written directly in the function are
+examined, not the ones inside another lambda. A route registered in another function or file needs
+`--function <name>` and the file on the command line. Read a clean run as "no known pattern", not as a proof;
+a check on the syntax tree (a clang-tidy matcher on a by-reference lambda passed to httplib::Server::Get/Post)
+would be the complete answer.
+
 Usage: check_handler_captures.py [--function Server::Server] FILE...
 Exit status: 0 when clean, 1 when a lambda dangles. To accept a line on purpose (the lambda runs
 before the function returns), end the lambda's first line with `// handler-capture-ok: <reason>`.
