@@ -34,6 +34,7 @@ import * as h_ui_kv from "./app_ui_kv.js";
 import * as h_ui_stat from "./app_ui_stat.js";
 import * as h_ui_chart from "./app_ui_chart.js";
 import * as h_common from "./app_common.js";
+import * as h_route_notice from "./app_route_notice.js";
 import * as h_boot from "./app_boot.js";
 import * as h_api from "./app_api.js";
 import * as h_explorer_route from "./app_explorer_route.js";
@@ -78,6 +79,7 @@ h_loader.loader.expose([
   h_ui_stat,
   h_ui_chart,
   h_common,
+  h_route_notice,
   h_boot,
   h_api,
   h_explorer_route,

@@ -319,7 +319,10 @@ def test_observability_serves_each_view_as_a_page_of_its_own_and_the_old_pages_a
     for path, query in (("/observability", ""), ("/observability/", ""), ("/observability?from=now-6h&to=now", "?from=now-6h&to=now"), ("/observability/nope", "")):
         response = get(path, allow_redirects=False)
         assert response.status_code == 302, (path, response.status_code)
-        assert response.headers["Location"].endswith("traces" + query), (path, response.headers["Location"])
+        # An address that has no page carries the marker that the page turns into a notice (UI-008); the bare /observability does not.
+        marker = "redirected_from=%2Fobservability%2Fnope" if path == "/observability/nope" else ""
+        expected = "traces" + query + (("?" if not query else "&") + marker if marker else "")
+        assert response.headers["Location"].endswith(expected), (path, response.headers["Location"])
         assert response.headers.get("Cache-Control") == "no-store", path
     # The former pages answer like any unknown path (the shell files are not the old pages' shell).
     for path in ["/traces", "/traces/0123456789abcdef0123456789abcdef", "/logs", "/metrics/x",
@@ -353,7 +356,8 @@ def test_system_sections_and_explorer_views_are_pages_of_their_own():
     # An unknown System section is the Overview, the query string kept.
     response = get("/system/no-such-section?from=now-6h", allow_redirects=False)
     if response.status_code != 404:
-        assert response.status_code == 302 and response.headers["Location"].endswith("system?from=now-6h"), (response.status_code, response.headers)
+        assert response.status_code == 302 and response.headers["Location"].endswith(
+            "system?from=now-6h&redirected_from=%2Fsystem%2Fno-such-section"), (response.status_code, response.headers)
 
 
 def test_trace_page_is_its_own_page():

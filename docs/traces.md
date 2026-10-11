@@ -28,7 +28,7 @@ The **time range** and the **selected service** follow the user from page to pag
 
 A range that is wider than `traces.max_lookback_minutes` (a link for `now-30d` when the limit is 7 days) is shortened to the widest quick range that fits. The page says so in an info banner above the results, with the range that was asked for and the setting. The banner stays until the user applies another range.
 
-`traces.enabled`, `logs.enabled` and `metrics.enabled` each turn a view on. `/observability` is a `302` to the first enabled view, and it keeps the query string. When no view is on, it is `404`. The links to the other views are hidden. The address of a view that is off is a `302` to the first enabled view in the same way. The former pages `/traces`, `/logs` and `/metrics` are gone (`404`). The `/api/*` routes are unchanged.
+`traces.enabled`, `logs.enabled` and `metrics.enabled` each turn a view on. `/observability` is a `302` to the first enabled view, and it keeps the query string. When no view is on, it is `404`. The links to the other views are hidden. The address of a view that is off, and any other address below `/observability/`, is a `302` to the first enabled view in the same way. The redirect adds `redirected_from=<the path asked for>`. The page takes this mark off the address and shows a notice ("/observability/nope is not a page of this server. Traces is shown instead."). The former pages `/traces`, `/logs` and `/metrics` are gone (`404`). The `/api/*` routes are unchanged.
 
 Each page loads only its own markup, modules and stylesheet. These rules apply:
 

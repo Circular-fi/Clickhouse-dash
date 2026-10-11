@@ -44,6 +44,7 @@ import * as h_pipeline_viewer from "./app_pipeline_viewer.js";
 import * as h_trace_viewer from "./app_trace_viewer.js";
 import * as h_ui_dialog from "./app_ui_dialog.js";
 import * as h_analysis from "./app_analysis.js";
+import * as h_route_notice from "./app_route_notice.js";
 import * as h_boot from "./app_boot.js";
 import * as h_sql_lex from "./app_sql_lex.js";
 import * as h_results_values from "./app_results_values.js";
@@ -96,6 +97,7 @@ h_loader.loader.expose([
   h_trace_viewer,
   h_ui_dialog,
   h_analysis,
+  h_route_notice,
   h_boot,
   h_sql_lex,
   h_results_values,

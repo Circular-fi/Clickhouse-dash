@@ -76,6 +76,32 @@ static std::string query_shape_location(const std::string& target, const std::st
   return "queries/" + hash + rest;
 }
 
+// The query-string parameter that says a redirect was not a move but an address that has no page: the page shows a notice with the
+// address that was asked for (app_route_notice.js) and takes the parameter off the address bar. The path is cut and percent-encoded.
+static std::string redirected_from_parameter(const std::string& path) {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  std::string out = "redirected_from=";
+  for (const unsigned char ch : path.substr(0, 200)) {
+    const bool plain = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' || ch == '~';
+    if (plain) {
+      out.push_back(static_cast<char>(ch));
+    } else {
+      out.push_back('%');
+      out.push_back(kHex[ch >> 4]);
+      out.push_back(kHex[ch & 0x0f]);
+    }
+  }
+  return out;
+}
+
+// `location` with the query string of the request kept, and the marker added.
+static std::string with_query_and_marker(std::string location, const httplib::Request& req) {
+  if (const auto mark = req.target.find('?'); mark != std::string::npos) location += req.target.substr(mark);
+  location += location.find('?') == std::string::npos ? '?' : '&';
+  location += redirected_from_parameter(req.path);
+  return location;
+}
+
 #ifdef CHDASH_EMBED_STATIC
 // A build with embedded assets serves only them: no file of the disk is ever an answer.
 static bool try_serve_fs(const httplib::Request&, httplib::Response&, FsStaticCache&) { return false; }
@@ -320,6 +346,7 @@ Server::Server(AppConfig cfg, bool start_background)
     std::string location;
     static const std::string marker = "/observability/";
     const auto at = req.path.find(marker);
+    bool no_page = false;  // an address that has no page: a view that is turned off, a name that is not one
     if (at == std::string::npos) {
       location = "observability/" + view;  // the bare /observability
     } else {
@@ -329,8 +356,14 @@ Server::Server(AppConfig cfg, bool start_background)
         if (c == '/') location += "../";
       }
       location += view;
+      no_page = !below.empty();
     }
-    if (const auto mark = req.target.find('?'); mark != std::string::npos) location += req.target.substr(mark);
+    // The bare /observability is a move, not a mistake; the other addresses carry the marker (UI-008).
+    if (no_page) {
+      location = with_query_and_marker(location, req);
+    } else if (const auto mark = req.target.find('?'); mark != std::string::npos) {
+      location += req.target.substr(mark);
+    }
     res.status = 302;
     res.set_header("Location", location);
     res.set_header("Cache-Control", "no-store");
@@ -369,7 +402,8 @@ Server::Server(AppConfig cfg, bool start_background)
       }
     }
     location += "system";
-    if (const auto mark = req.target.find('?'); mark != std::string::npos) location += req.target.substr(mark);
+    // /system/<name> is an address that has no page: the marker says so (UI-008).
+    location = with_query_and_marker(location, req);
     res.status = 302;
     res.set_header("Location", location);
     res.set_header("Cache-Control", "no-store");
