@@ -1050,49 +1050,6 @@ body[data-page="mcp"] #mcpPanel {
   font-size: var(--fs-xs);
 }
 
-/* A family with sections (Observability: Traces, Logs, Metrics): the tools under sub-headings. In the form, the body holds
-   the sections one under the other, each with the two columns of tools. */
-.mcpGroup__body:has(> .mcpSection) {
-  display: block;
-}
-
-.mcpGroup__body > .mcpSection + .mcpSection,
-.mcpSections > .mcpSection + .mcpSection {
-  margin-top: var(--space-8);
-}
-
-.mcpGroup__body > .mcpSection {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4) var(--space-16);
-}
-
-.mcpSection__title {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-8);
-  margin: 0;
-  padding-bottom: var(--space-2);
-  border-bottom: 1px solid var(--border);
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  letter-spacing: var(--ls-eyebrow);
-  text-transform: uppercase;
-}
-
-/* In the details of a key the tools of a section sit 10 px in from the card: the heading follows them. */
-.mcpSections > .mcpSection > .mcpSection__title {
-  padding-inline: var(--space-10);
-}
-
-.mcpSection__count {
-  font-family: var(--font-mono);
-  font-weight: var(--fw-regular);
-  letter-spacing: 0;
-}
-
 /* The data of a key: "3 dbs · 12 tables". Muted until the count is known; in the warning colour when the key reaches nothing. */
 .mcpDataCell {
   display: block;
