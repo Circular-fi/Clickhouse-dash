@@ -847,6 +847,13 @@
   flex: 0 0 auto;
 }
 
+/* The description can be made taller by its handle, but only up to this height: the SQL under it keeps its room, so the pane
+   never gets a scrollbar of its own. */
+.qlPaneForm .uiInput--area {
+  max-height: 8rem;
+  resize: vertical;
+}
+
 .qlPaneForm__error {
   flex: 0 0 auto;
   padding: 0 var(--space-16);
