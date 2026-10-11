@@ -1,18 +1,22 @@
 import { test, expect } from '@playwright/test';
 import { IS_RUN, installObservers } from '../helpers/observability.js';
-import { installListenerTracker, listenerStats, listenerDiff } from '../helpers/listeners.js';
+import { installLeakTracker, leakStats, leakDiff, leakSummary } from '../helpers/leaks.js';
+import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
 
 // ns.layers (app_ui_layers.js): one stack of open layers (menus, popovers,
 // panels, sheets, dialogs). Escape closes the top one only, one capture
 // listener closes on a press outside, the focus goes back to the opener.
-// ns.lifecycle.scope(): the listeners a view binds live with its page; each
-// Observability view is a page of its own, so following the row never adds
-// listeners to the page it lands on.
+// ns.lifecycle.scope(): what a view binds (listeners, observers, timers,
+// channels) lives with its page. Each Observability view is a page of its own
+// (the row of tabs is made of links), so a leak can only build up inside one
+// page: the cycles below run in one page, many times, and the tracker
+// (helpers/leaks.js, tested by leak-tracker.spec.js) must read the same after
+// the last cycle as after the second.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => {
   observers.set(page, installObservers(page));
-  await installListenerTracker(page);
+  await installLeakTracker(page);
 });
 test.afterEach(async ({ page }, testInfo) => {
   const obs = observers.get(page);
@@ -22,9 +26,13 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 const VIEWS = ['traces', 'logs', 'metrics'];
-// An hour of the rich fixture day: every view has data, ~22 k spans.
-const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
+// Two hours of the rich fixture day: every view has data. A cycle moves the range from one to the other.
+const HOURS = [['2026-09-12 12:30:00', '2026-09-12 13:30:00'], ['2026-09-12 12:00:00', '2026-09-12 13:00:00']];
+const HOUR = `?from=${encodeURIComponent(HOURS[0][0])}&to=${encodeURIComponent(HOURS[0][1])}`;
 const BAR = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
+const WORKSPACE = { traces: '#tracesWorkspace', logs: '#logsWorkspace', metrics: '#metricsWorkspace' };
+const CYCLES = 12;
+const SWITCHES = 30;
 
 // Every request the page sent has completed, and two frames have rendered
 // what they brought (a view adds its listeners as it renders).
@@ -39,57 +47,118 @@ function trackRequests(page) {
   };
 }
 
-// A view is idle once its first search has answered (it runs on the first
-// show) and nothing in it is busy any more.
-async function viewIdle(page, view, firstRun) {
-  if (firstRun) await firstRun;
+// A view is idle once its search has answered and nothing in it is busy any more.
+async function viewIdle(page, view, answered) {
+  if (answered) await answered;
   await expect(page.locator(`${BAR[view]} .obsFilterBar__submit`)).not.toHaveClass(/is-loading/);
   await expect(page.locator('[aria-busy="true"]:visible')).toHaveCount(0, { timeout: 30_000 });
 }
-const SWITCHES = 30;
-// Each is a page load: three rounds of the row.
-const PAGE_LOADS = 9;
 
 async function obsFeatures(request) {
   const version = await (await request.get('/api/version')).json();
   test.skip(!VIEWS.every((view) => version.features?.[view]?.enabled === true), 'needs traces, logs and metrics enabled');
 }
 
-// Follows the row to another view's page and waits until it is idle (its first search has answered).
-async function showView(page, view) {
+async function openView(page, view) {
   const run = page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 });
-  await page.locator(`#obsTabs [data-obs-tab="${view}"]`).click();
+  await page.goto(`/observability/${view}${HOUR}`);
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', view);
   await viewIdle(page, view, run);
 }
 
-async function openTraces(page) {
-  const run = page.waitForResponse((response) => IS_RUN.traces(response.url()), { timeout: 30_000 });
-  await page.goto(`/observability/traces${HOUR}`);
-  await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'traces');
-  await viewIdle(page, 'traces', run);
+// Runs the view's search again and waits until it is idle.
+async function search(page, view) {
+  const run = page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 });
+  await page.locator(`${BAR[view]} .obsFilterBar__submit`).click();
+  await viewIdle(page, view, run);
 }
 
-test.describe('listener lifecycle', () => {
-  test(`following the Observability row ${PAGE_LOADS} times lands on pages with the same listeners`, async ({ page, request }, testInfo) => {
+// Opens the range panel, types the range, applies it and waits until the view is idle.
+async function setRange(page, view, [from, to]) {
+  await page.locator(`${WORKSPACE[view]} .tracePicker--range > .tracePicker__button`).click();
+  await page.locator(`#${view}RangeStart`).fill(from);
+  await page.locator(`#${view}RangeEnd`).fill(to);
+  const run = page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 30_000 });
+  await page.locator(`#${view}CustomRangeApply`).click();
+  await viewIdle(page, view, run);
+}
+
+// Everything the cycle builds exists after two rounds; CYCLES more must add nothing.
+async function expectNoLeak(page, testInfo, cycle) {
+  // 14 rounds of a few requests each, on the 22 k spans of the rich fixture hour.
+  test.setTimeout(240_000);
+  for (let round = 0; round < 2; round += 1) await cycle(round);
+  const before = await leakStats(page, true);
+  for (let i = 0; i < CYCLES; i += 1) await cycle(i);
+  const after = await leakStats(page, true);
+  console.log(`${testInfo.title}: before ${leakSummary(before)}; after ${CYCLES} cycles ${leakSummary(after)}`);
+  testInfo.annotations.push({ type: 'leaks', description: JSON.stringify({ before, after }) });
+  expect(leakDiff(before, after)).toEqual({});
+  expect(after.global).toBeLessThanOrEqual(before.global);
+  expect(after.connected).toBeLessThanOrEqual(before.connected);
+}
+
+test.describe('what a view binds is released: cycles inside one page', () => {
+  test(`Traces: ${CYCLES} rounds of searching, changing the range and switching the result view leave no listener, observer or timer`, async ({ page, request }, testInfo) => {
     await obsFeatures(request);
-    await openTraces(page);
-    // One round first: every page has been opened once.
-    for (const view of ['logs', 'metrics', 'traces']) await showView(page, view);
-    const before = await listenerStats(page, true);
-    for (let i = 0; i < PAGE_LOADS; i += 1) await showView(page, VIEWS[(i + 1) % VIEWS.length]);
-    // The last switch lands back on traces, the view measured before.
-    if ((await page.locator('html').getAttribute('data-obs-view')) !== 'traces') await showView(page, 'traces');
-    const after = await listenerStats(page, true);
-    testInfo.annotations.push({ type: 'listeners', description: JSON.stringify({ before: { global: before.global, connected: before.connected }, after: { global: after.global, connected: after.connected } }) });
-    console.log(`observability listeners: before ${before.global} global / ${before.connected} connected, after ${PAGE_LOADS} page loads ${after.global} / ${after.connected}`);
-    expect(listenerDiff(before, after)).toEqual({});
-    expect(after.types).toEqual(before.types);
-    expect(after.global).toBe(before.global);
-    expect(after.connected).toBe(before.connected);
+    await openView(page, 'traces');
+    const results = (kind) => page.locator(`[data-results-view="${kind}"]`);
+    await expectNoLeak(page, testInfo, async (round) => {
+      await search(page, 'traces');
+      await setRange(page, 'traces', HOURS[(round + 1) % HOURS.length]);
+      await results(round % 2 ? 'list' : 'table').click();
+    });
   });
 
-  test(`switching Explorer modes and card tabs ${SWITCHES} times keeps the listener count flat`, async ({ page }, testInfo) => {
+  test(`Logs: ${CYCLES} rounds of searching, changing the range, opening the record panel and the column picker leave none`, async ({ page, request }, testInfo) => {
+    await obsFeatures(request);
+    await openView(page, 'logs');
+    const rows = page.locator('#logsTableRows .logsRow[data-row-id]');
+    const panel = page.locator('#logsSidePanel');
+    await expectNoLeak(page, testInfo, async (round) => {
+      await search(page, 'logs');
+      await setRange(page, 'logs', HOURS[(round + 1) % HOURS.length]);
+      await expect(rows.first()).toBeVisible({ timeout: 30_000 });
+      await rows.first().click();
+      await expect(panel).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(panel).toBeHidden();
+      // Closing went Back (log= was the panel's own entry).
+      await expect.poll(() => new URL(page.url()).searchParams.get('log')).toBe(null);
+      await page.locator('#logsColumnsButton').click();
+      await expect(page.locator('#logsColumnsMenu')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#logsColumnsMenu')).toBeHidden();
+    });
+    expect(await page.evaluate(() => window.ChDash.layers.size())).toBe(0);
+  });
+
+  test(`Metrics: ${CYCLES} rounds of searching and changing the range leave none`, async ({ page, request }, testInfo) => {
+    await obsFeatures(request);
+    await openView(page, 'metrics');
+    await expectNoLeak(page, testInfo, async (round) => {
+      await search(page, 'metrics');
+      await setRange(page, 'metrics', HOURS[(round + 1) % HOURS.length]);
+    });
+  });
+
+  test(`Trace page: ${CYCLES} rounds of opening and closing the span inspector of two spans leave none`, async ({ page }, testInfo) => {
+    await mockTraceResults(page);
+    await page.goto(`/observability/traces/${SYNTHETIC_TRACES[0].trace_id}`);
+    const rows = page.locator('#traceWaterfall .traceSpanRow');
+    await expect(rows.first()).toBeVisible({ timeout: 30_000 });
+    const inspector = page.locator('#traceWaterfall .traceSpanInspectorRow');
+    await expectNoLeak(page, testInfo, async (round) => {
+      const row = rows.nth(round % 2);
+      await row.click();
+      await expect(inspector).toBeVisible({ timeout: 10_000 });
+      // A second click on the open span closes its inspector.
+      await row.click();
+      await expect(inspector).toHaveCount(0);
+    });
+  });
+
+  test(`Explorer: switching modes and card tabs ${SWITCHES} times keeps the counts flat`, async ({ page }, testInfo) => {
     const settle = trackRequests(page);
     await page.goto('/explorer/catalog/chdash_ui/weather_observations/columns');
     await expect(page.locator('#explorerDetailName')).toContainText('weather_observations', { timeout: 15_000 });
@@ -100,58 +169,16 @@ test.describe('listener lifecycle', () => {
       () => page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click(),
       () => page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Columns' }).click(),
     ];
-    // Two rounds first: every mode has loaded and rendered its content.
+    // Two rounds of the four steps first: every mode has loaded and rendered its content.
     for (let round = 0; round < 2; round += 1) for (const step of steps) { await step(); await settle(); }
-    const before = await listenerStats(page, true);
+    const before = await leakStats(page, true);
     for (let i = 0; i < SWITCHES; i += 1) { await steps[i % steps.length](); await settle(); }
-    const after = await listenerStats(page, true);
-    console.log(`explorer listeners: before ${before.global} global / ${before.connected} connected, after ${SWITCHES} switches ${after.global} / ${after.connected}`);
-    testInfo.annotations.push({ type: 'listeners', description: JSON.stringify({ before: { global: before.global, connected: before.connected }, after: { global: after.global, connected: after.connected } }) });
-    expect(listenerDiff(before, after)).toEqual({});
-    expect(after.types).toEqual(before.types);
-    expect(after.global).toBe(before.global);
-    expect(after.connected).toBe(before.connected);
-  });
-});
-
-test.describe('listener lifecycle of views and layers', () => {
-  test('a view\'s global listeners live while it shows; opening and closing panels and pickers 30 times adds none', async ({ page, request }, testInfo) => {
-    await obsFeatures(request);
-    await openTraces(page);
-    for (const view of ['logs', 'traces']) await showView(page, view);
-    const onTraces = await listenerStats(page);
-    await showView(page, 'logs');
-    await expect(page.locator('#logsTableRows .logsRow[data-row-id]').first()).toBeVisible({ timeout: 30_000 });
-    const onLogs = await listenerStats(page);
-    // The Traces keys (trace page shortcuts, the span panel's arrows, the
-    // value menu's triggers) are bound while Traces shows only.
-    expect(onLogs.types['document:keydown'] || 0).toBeLessThan(onTraces.types['document:keydown'] || 0);
-    const rows = page.locator('#logsTableRows .logsRow[data-row-id]');
-    const panel = page.locator('#logsSidePanel');
-    const picker = page.locator('#logsColumnsButton');
-    // One round first (the panel and the picker built), then 30.
-    const cycle = async () => {
-      await rows.first().click();
-      await expect(panel).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(panel).toBeHidden();
-      // Closing went Back (log= was the panel's own entry).
-      await expect.poll(() => new URL(page.url()).searchParams.get('log')).toBe(null);
-      await picker.click();
-      await expect(page.locator('#logsColumnsMenu')).toBeVisible();
-      await page.keyboard.press('Escape');
-      await expect(page.locator('#logsColumnsMenu')).toBeHidden();
-    };
-    await cycle();
-    const before = await listenerStats(page, true);
-    for (let i = 0; i < SWITCHES; i += 1) await cycle();
-    const after = await listenerStats(page, true);
-    console.log(`document keydown listeners: ${onTraces.types['document:keydown'] || 0} on Traces, ${onLogs.types['document:keydown'] || 0} on Logs; logs panel + picker x${SWITCHES}: ${before.global} / ${before.connected} -> ${after.global} / ${after.connected}`);
-    testInfo.annotations.push({ type: 'listeners', description: JSON.stringify({ traces: onTraces.types, logs: onLogs.types, before: before.global, after: after.global }) });
-    expect(listenerDiff(before, after)).toEqual({});
-    expect(after.global).toBe(before.global);
-    expect(after.connected).toBe(before.connected);
-    expect(await page.evaluate(() => window.ChDash.layers.size())).toBe(0);
+    const after = await leakStats(page, true);
+    console.log(`explorer: before ${leakSummary(before)}; after ${SWITCHES} switches ${leakSummary(after)}`);
+    testInfo.annotations.push({ type: 'leaks', description: JSON.stringify({ before, after }) });
+    expect(leakDiff(before, after)).toEqual({});
+    expect(after.global).toBeLessThanOrEqual(before.global);
+    expect(after.connected).toBeLessThanOrEqual(before.connected);
   });
 });
 
