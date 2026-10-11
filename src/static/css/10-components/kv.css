@@ -20,12 +20,12 @@
 /* Lines as tall as the one-row view's (a 32 px table row). */
 .rowDetails__list > .kvList__row > .kvList__key,
 .rowDetails__list > .kvList__row > .kvList__value {
-  padding-top: 7px;
-  padding-bottom: 7px;
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-8);
 }
 
 .rowDetails__list > .kvList__row:first-child > .kvList__value {
-  padding-right: 9rem;
+  padding-right: var(--space-80);
 }
 
 .kvList {
@@ -59,8 +59,8 @@
 .kvList__key {
   min-width: 0;
   margin: 0;
-  padding: 3px 8px;
-  padding-right: 12px;
+  padding: var(--space-4) var(--space-8);
+  padding-right: var(--space-12);
   overflow: hidden;
   color: var(--muted);
   text-overflow: ellipsis;
@@ -70,7 +70,7 @@
 .kvList__value {
   min-width: 0;
   margin: 0;
-  padding: 3px 8px;
+  padding: var(--space-4) var(--space-8);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -86,7 +86,7 @@
 .kvList__row--tree > .kvList__value {
   grid-column: 1 / -1;
   padding-top: 1px;
-  padding-bottom: 4px;
+  padding-bottom: var(--space-4);
 }
 
 .kvList__row.is-mono > .kvList__value {
@@ -110,8 +110,8 @@
 .kvList__actions {
   float: right;
   display: inline-flex;
-  gap: 2px;
-  margin: -2px 0 0 8px;
+  gap: var(--space-2);
+  margin: -2px 0 0 var(--space-8);
   opacity: 0;
 }
 
@@ -162,13 +162,13 @@
 
 @media (pointer: coarse) {
   .kvList__row { min-height: var(--hit); }
-  .kvList__actions:has(> .kvList__more) { margin: -3px -8px -3px 8px; }
+  .kvList__actions:has(> .kvList__more) { margin: -4px -8px -4px var(--space-8); }
   .kvList__actions:has(> .kvList__more) > .kvList__action { display: none; }
   .kvList__more { display: inline-grid; }
 }
 
 .kvList__empty {
-  margin: 4px 0;
+  margin: var(--space-4) 0;
   color: var(--muted);
   font-size: var(--fs-sm);
 }
@@ -233,7 +233,7 @@
 
 .kvTree__count {
   color: var(--muted);
-  margin-left: 6px;
+  margin-left: var(--space-6);
   font-size: var(--fs-xs);
   font-style: italic;
 }
@@ -244,8 +244,8 @@
 }
 
 .kvTree__body {
-  margin-left: 4px;
-  padding-left: 12px;
+  margin-left: var(--space-4);
+  padding-left: var(--space-12);
   border-left: 1px dotted color-mix(in srgb, var(--muted) 45%, transparent);
 }
 
@@ -263,7 +263,7 @@
 }
 
 .kvTree__colon {
-  margin-right: 5px;
+  margin-right: var(--space-6);
   color: var(--muted);
 }
 

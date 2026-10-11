@@ -30,22 +30,22 @@
   min-height: 420px;
 }
 
-.traceGraph__color { gap: 4px; padding: 4px 4px 4px 9px; }
+.traceGraph__color { gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-4) var(--space-10); }
 
 .traceGraphPanel__path {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   width: 100%;
-  padding: 3px 0;
+  padding: var(--space-4) 0;
 }
 
 .traceGraphPanel__span {
   display: grid;
   grid-template-columns: minmax(64px, 1fr) auto auto;
-  gap: 10px;
+  gap: var(--space-10);
   width: 100%;
-  padding: 4px 6px;
+  padding: var(--space-4) var(--space-6);
   border: 0;
   border-radius: var(--r-md);
   background: transparent;
@@ -64,8 +64,8 @@
   display: grid;
   grid-template-columns: 9px minmax(0, 1fr) auto auto auto;
   align-items: center;
-  gap: 7px;
-  padding: 4px 5px;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-6);
   border: 0;
   border-radius: var(--r-md);
   background: transparent;
@@ -111,7 +111,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--space-8);
   pointer-events: none;
 }
 
@@ -120,9 +120,9 @@
 .graphKitGroup {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   min-height: 32px;
-  padding: 4px 6px;
+  padding: var(--space-4) var(--space-6);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--graph-surface);
@@ -131,7 +131,7 @@
   font-size: var(--fs-sm);
 }
 
-.graphKitTools { gap: 2px; }
+.graphKitTools { gap: var(--space-2); }
 
 .graphKitTool {
   display: inline-flex;
@@ -139,7 +139,7 @@
   justify-content: center;
   min-width: 26px;
   height: 24px;
-  padding: 0 5px;
+  padding: 0 var(--space-6);
   border: 0;
   border-radius: var(--r-md);
   background: transparent;
@@ -165,7 +165,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-6);
   max-width: calc(100% - 220px);
   pointer-events: none;
 }
@@ -173,8 +173,8 @@
 .graphKitLegend {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 5px;
-  padding: 8px 10px;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-10);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--graph-surface);
@@ -188,7 +188,7 @@
 .graphKitLegend__row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   white-space: nowrap;
 }
 
@@ -240,10 +240,10 @@
 .graphKitStatus {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   max-width: 100%;
   min-width: 0;
-  padding: 5px 9px;
+  padding: var(--space-6) var(--space-10);
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
   background: var(--graph-surface);
@@ -314,20 +314,20 @@
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 12px 14px 16px;
+  padding: var(--space-12) var(--space-16) var(--space-16);
 }
 
 .graphKitPanel__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: var(--space-6);
+  margin-bottom: var(--space-12);
 }
 
-.graphKitPanel__section { margin-top: 14px; }
+.graphKitPanel__section { margin-top: var(--space-16); }
 
 .graphKitPanel__sectionTitle {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-6);
   font-size: var(--fs-md);
   font-weight: var(--fw-semibold);
 }
@@ -339,7 +339,7 @@
 }
 
 .graphKitPanel__subTitle {
-  margin: 10px 0 4px;
+  margin: var(--space-10) 0 var(--space-4);
   color: var(--graph-muted);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
@@ -348,7 +348,7 @@
 .graphKitPanel__facts {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 12px;
+  gap: var(--space-4) var(--space-12);
   margin: 0;
 }
 
@@ -361,12 +361,12 @@
 }
 
 .graphKitPanel__note {
-  margin: 4px 0;
+  margin: var(--space-4) 0;
   color: var(--graph-muted);
   font-size: var(--fs-sm);
 }
 
-.graphKitPanel__note--block { margin-top: 12px; }
+.graphKitPanel__note--block { margin-top: var(--space-12); }
 
 .graphKitPanel__link {
   max-width: 100%;
@@ -395,7 +395,7 @@
   .graphKitBar {
     left: 8px;
     right: 8px;
-    gap: 6px;
+    gap: var(--space-6);
   }
   .graphKitLegend,
   .graphKitLegendToggle { display: none; }

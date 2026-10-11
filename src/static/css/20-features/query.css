@@ -2,9 +2,9 @@
 
 .statusPill {
   display: inline-flex;
-  gap: 0.5rem;
+  gap: var(--space-8);
   align-items: center;
-  padding: 0.45rem 0.7rem;
+  padding: var(--space-8) var(--space-12);
   border: 1px solid var(--border);
   border-radius: var(--r-pill);
   background: var(--pillBg);
@@ -38,7 +38,7 @@
   min-height: calc(100% - 3.25rem);
   resize: none;
   box-sizing: border-box;
-  padding: 14px;
+  padding: var(--space-16);
   border-radius: var(--r-lg);
   border: 1px solid var(--controlBorder);
   background: var(--inputBg);
@@ -68,7 +68,7 @@
   width: var(--gutterW);
   margin: 0;
   box-sizing: border-box;
-  padding: 14px 9px;
+  padding: var(--space-16) var(--space-10);
   border-radius: var(--r-lg) 0 0 var(--r-lg);
   overflow: hidden;
   user-select: none;
@@ -93,8 +93,8 @@
   inset: 0;
   margin: 0;
   box-sizing: border-box;
-  padding: 14px;
-  padding-right: 84px;
+  padding: var(--space-16);
+  padding-right: var(--space-80);
   padding-left: calc(14px + var(--gutterW));
   border-radius: var(--r-lg);
   color: var(--text);
@@ -145,7 +145,7 @@
   background: transparent;
   border: 0;
   color: transparent;
-  padding-right: 52px;
+  padding-right: var(--space-48);
   padding-left: calc(14px + var(--gutterW));
 }
 
@@ -185,7 +185,7 @@
   top: 34px;
   right: 0;
   min-width: 9.8rem;
-  padding: 0.28rem;
+  padding: var(--space-4);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-lg);
   background: var(--panelBg);
@@ -198,7 +198,7 @@
 }
 
 .editorAutocompleteControl__title {
-  padding: 0.34rem 0.48rem 0.24rem;
+  padding: var(--space-6) var(--space-8) var(--space-4);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
@@ -210,11 +210,11 @@
 .editorAutocompleteControl__opt {
   display: flex;
   align-items: center;
-  gap: 0.46rem;
+  gap: var(--space-8);
   width: 100%;
   border: 0;
   border-radius: var(--r-md);
-  padding: 0.42rem 0.52rem;
+  padding: var(--space-6) var(--space-8);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -263,24 +263,24 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .panel_bottom {
-  margin-top: 0.9rem;
+  margin-top: var(--space-16);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--space-12);
   flex-wrap: wrap;
   flex: 0 0 auto;
 }
 
 .statusBlock {
   display: flex;
-  gap: 0.625rem;
+  gap: var(--space-10);
   flex-wrap: wrap;
 }
 
 .queryActions {
   display: flex;
-  gap: 0.625rem;
+  gap: var(--space-10);
   flex-wrap: wrap;
   margin-left: auto;
 }
@@ -334,11 +334,11 @@ html.is-ready #queryTextArea::placeholder {
   border: 1px solid var(--buttonBorder);
   background-color: var(--buttonBg);
   box-shadow: var(--shadow-overlay);
-  padding: 0.35rem;
+  padding: var(--space-6);
   padding-left: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: var(--space-2);
   font-size: var(--fs-sm);
   opacity: 0;
   z-index: var(--z-sticky-top);
@@ -360,12 +360,12 @@ html.is-ready #queryTextArea::placeholder {
 .runMenu__opt {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: var(--space-8);
   width: 100%;
   border: 0;
   background: transparent;
   color: var(--text);
-  padding: 0.55rem 0.65rem;
+  padding: var(--space-8) var(--space-10);
   border-radius: var(--r-md);
   cursor: pointer;
   font: inherit;
@@ -423,8 +423,8 @@ html.is-ready #queryTextArea::placeholder {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
+  gap: var(--space-12);
+  padding: var(--space-10) var(--space-12);
   border-bottom: 1px solid var(--border);
   font-weight: var(--fw-semibold);
   font-size: var(--fs-sm);
@@ -433,7 +433,7 @@ html.is-ready #queryTextArea::placeholder {
 .resultsStack__right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 /* A multiquery panel's stats: secondary text, sans with tabular figures. */
@@ -445,13 +445,13 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .resultsStack__body > .tableWrap {
-  margin-top: 0px;
+  margin-top: 0;
   border-radius: 0;
   border: none;
   box-shadow: none;
 }
 
-.resultsViewToggle { margin-right: 0.4rem; }
+.resultsViewToggle { margin-right: var(--space-6); }
 
 .resultsStack__right .resultsViewToggle { margin-right: 0; }
 
@@ -474,15 +474,15 @@ html.is-ready #queryTextArea::placeholder {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
 }
 
 .queryChart__seriesOpt {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-6);
   border-radius: var(--r-md);
   cursor: pointer;
   white-space: nowrap;
@@ -492,13 +492,13 @@ html.is-ready #queryTextArea::placeholder {
 
 .queryChart__seriesOpt input { margin: 0; accent-color: var(--accentBorder); }
 
-.queryChart__seriesOpt small { margin-left: auto; padding-left: 12px; color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.queryChart__seriesOpt small { margin-left: auto; padding-left: var(--space-12); color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 
 .queryChart__seriesOpt.is-unavailable { cursor: not-allowed; color: var(--muted); }
 
 .queryChart__seriesOpt.is-unavailable:hover { background: transparent; }
 
-.queryChart__seriesEmpty { padding: 4px 6px; color: var(--muted); }
+.queryChart__seriesEmpty { padding: var(--space-4) var(--space-6); color: var(--muted); }
 
 /* The toolbar starts where the chart's caption under it starts (the chart
    type icons are not the card's right-hand actions here). */
@@ -539,11 +539,11 @@ html.is-ready #queryTextArea::placeholder {
   flex-wrap: wrap;
   align-content: center;
   justify-content: center;
-  gap: 16px 40px;
-  padding: 12px;
+  gap: var(--space-16) var(--space-40);
+  padding: var(--space-12);
 }
 
-.queryChart__number { display: grid; justify-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.queryChart__number { display: grid; justify-items: center; gap: var(--space-6); min-width: 0; max-width: 100%; }
 
 .queryChart__numberLabel { color: var(--muted); font-size: var(--fs-md); font-weight: var(--fw-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 
@@ -554,9 +554,9 @@ html.is-ready #queryTextArea::placeholder {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 12px;
+  gap: var(--space-4) var(--space-12);
   min-height: 1.5rem;
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-4);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
@@ -565,9 +565,9 @@ html.is-ready #queryTextArea::placeholder {
 
 .queryChart__rangeText { min-width: 0; overflow-wrap: anywhere; }
 
-.queryChart__rangeText b { margin-right: 4px; color: var(--text); font-weight: var(--fw-semibold); }
+.queryChart__rangeText b { margin-right: var(--space-4); color: var(--text); font-weight: var(--fw-semibold); }
 
-.queryChart__rangeText span { margin-left: 6px; }
+.queryChart__rangeText span { margin-left: var(--space-6); }
 
 .queryChart__rangeHint { margin-left: auto; color: var(--muted); }
 
@@ -576,7 +576,7 @@ html.is-ready #queryTextArea::placeholder {
 .queryChart__resetZoom,
 .queryChart__gaps {
   height: 1.5rem;
-  padding: 0 0.6rem;
+  padding: 0 var(--space-10);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-md);
   background: var(--buttonBg);
@@ -601,7 +601,7 @@ html.is-ready #queryTextArea::placeholder {
 .metricColumn {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: var(--space-12);
 }
 
 .metricColumn > .metricCompact {
@@ -645,7 +645,7 @@ html.is-ready #queryTextArea::placeholder {
   min-height: 4.5rem;
   /* Label, value and a sub row ("Avg ...", "System ...") fit with room under the last line for a
      descender: the tile is 72 px, so the spacing between them is tight rather than the tile taller. */
-  padding: .45rem .75rem .4rem;
+  padding: var(--space-8) var(--space-12) var(--space-6);
 }
 
 .metricCompact__content {
@@ -670,7 +670,7 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .metricCompact__label {
-  margin-bottom: 0.25rem;
+  margin-bottom: var(--space-4);
 }
 
 /* Stable layout when value is split into number + unit (set by JS) */
@@ -692,14 +692,14 @@ html.is-ready #queryTextArea::placeholder {
 }
 
 .metricCompact__sub {
-  margin-top: 0.1rem;
+  margin-top: var(--space-2);
   color: var(--text);
   text-align: right;
 }
 
 /* "Now" while the query runs, "Avg" once it ended (app_run.js setRailPhase). */
 .metricCompact__subLabel {
-  margin-right: 0.25rem;
+  margin-right: var(--space-4);
   color: var(--muted);
   font-weight: var(--fw-regular);
 }
@@ -744,8 +744,8 @@ html.is-ready #queryTextArea::placeholder {
 
 .copyMenu .runMenu__opt,
 #copyMenu .runMenu__opt {
-  margin-top: -0.5rem;
-  margin-left: 0.2rem;
+  margin-top: -8px;
+  margin-left: var(--space-4);
 }
 
 .copyMenu .runMenu__opt .runMenu__optText,
@@ -758,7 +758,7 @@ html.is-ready #queryTextArea::placeholder {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: var(--space-12);
 }
 
 .panel__title {
@@ -771,14 +771,14 @@ html.is-ready #queryTextArea::placeholder {
 .metaItem {
   color: var(--muted);
   font-size: var(--fs-sm);
-  margin-right: 0.4rem;
+  margin-right: var(--space-6);
   font-weight: var(--fw-semibold);
 }
 
 .panel__meta { display: inline; }
 
 .tableWrap {
-  margin-top: 10px;
+  margin-top: var(--space-10);
   border-radius: var(--r-lg);
   border: 1px solid var(--border);
   background: var(--tableBg);
@@ -857,8 +857,8 @@ html.is-ready #queryTextArea::placeholder {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-top: 6px;
-  padding-bottom: 6px;
+  padding-top: var(--space-6);
+  padding-bottom: var(--space-6);
   vertical-align: top;
   color: var(--muted);
   font-size: var(--dt-head-font);
@@ -920,7 +920,7 @@ html.is-ready #queryTextArea::placeholder {
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--muted) 14%, transparent) transparent;
-  padding: 0.24rem;
+  padding: var(--space-4);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-lg);
   background: var(--buttonBg);
@@ -951,13 +951,13 @@ html.is-ready #queryTextArea::placeholder {
   display: grid;
   grid-template-columns: 2.55rem minmax(0, 1fr) max-content;
   align-items: center;
-  gap: 0.28rem;
+  gap: var(--space-4);
   width: 100%;
   border: 0;
   border-radius: var(--r-md);
   background: transparent;
   color: var(--text);
-  padding: 0.2rem 0.24rem;
+  padding: var(--space-4) var(--space-4);
   min-height: 1.48rem;
   cursor: pointer;
   font: inherit;
@@ -994,7 +994,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
 .autocompleteItem__labelText {
   display: inline-block;
   min-width: max-content;
-  padding-right: 2rem;
+  padding-right: var(--space-32);
   transform: translateX(0);
 }
 
@@ -1004,7 +1004,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
 
 .autocompleteItem__source {
   display: inline;
-  margin-left: 0.42rem;
+  margin-left: var(--space-6);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
@@ -1016,7 +1016,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
 
 .autocompleteItem__label.is-overflowing .autocompleteItem__labelText::after {
   content: attr(data-marquee);
-  padding-left: 2rem;
+  padding-left: var(--space-32);
 }
 
 .autocompleteItem:hover .autocompleteItem__label.is-overflowing .autocompleteItem__labelText,
@@ -1028,7 +1028,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.18rem;
+  gap: var(--space-2);
   min-width: 0;
   max-width: min(24rem, 42vw);
   overflow: hidden;
@@ -1065,7 +1065,7 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
   min-inline-size: 2.2rem;
   max-inline-size: 16rem;
   flex: 0 1 auto;
-  padding-inline: 0.42rem;
+  padding-inline: var(--space-6);
   --ac-badge-color: var(--muted);
 }
 
@@ -1128,8 +1128,8 @@ html[data-theme="light"] .autocompleteItem[aria-selected="true"] {
 .autocompleteMore {
   position: sticky;
   bottom: 0;
-  margin: 0.16rem -0.24rem -0.24rem;
-  padding: 0.24rem 0.66rem 0.24rem;
+  margin: var(--space-2) -4px -4px;
+  padding: var(--space-4) var(--space-10) var(--space-4);
   border-top: 1px solid color-mix(in srgb, var(--buttonBorder) 70%, transparent);
   background: var(--buttonBg);
   box-shadow: 0 -0.35rem 0.55rem var(--buttonBg);
@@ -1244,7 +1244,7 @@ html[data-theme="light"] .autocompleteItem__badge {
 
 .editorWrap.is-line-numbers-hidden .editorHighlight,
 .editorWrap.is-line-numbers-hidden #queryTextArea.editorInput {
-  padding-left: 14px;
+  padding-left: var(--space-16);
 }
 
 .editorAutocompleteControl__button.has-disabled-autocomplete:hover,
@@ -1256,14 +1256,14 @@ html.chdash-line-numbers-hidden .editorWrap { --gutterW: 0px; }
 
 html.chdash-line-numbers-hidden .editorHighlight,
 html.chdash-line-numbers-hidden #queryTextArea.editorInput {
-  padding-left: 14px;
+  padding-left: var(--space-16);
 }
 
 .editorAutocompleteControl__submenu {
   display: grid;
-  gap: 0.06rem;
-  margin: -0.02rem 0 0.18rem 0;
-  padding: 0 0 0 1.34rem;
+  gap: 1px;
+  margin: -1px 0 var(--space-2) 0;
+  padding: 0 0 0 var(--space-20);
   border-left: 0;
 }
 
@@ -1273,7 +1273,7 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
 }
 
 .editorAutocompleteControl__subtitle {
-  padding: 0.16rem 0.42rem 0.1rem;
+  padding: var(--space-2) var(--space-6) var(--space-2);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
@@ -1287,15 +1287,15 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
   font-size: var(--fs-sm);
   line-height: 1.15;
   min-height: 1.34rem;
-  padding-top: 0.28rem;
-  padding-bottom: 0.28rem;
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
   padding-left: 0;
-  padding-right: 0.58rem;
+  padding-right: var(--space-10);
 }
 
 /* Editor autocomplete nested option as a compact dropdown row. */
 .editorAutocompleteControl__opt--parent {
-  padding-right: 0.58rem;
+  padding-right: var(--space-10);
   font-size: var(--fs-sm);
   line-height: 1.15;
 }
@@ -1340,8 +1340,8 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
   position: absolute;
   inset: 0;
   box-sizing: border-box;
-  padding: 14px;
-  padding-right: 84px;
+  padding: var(--space-16);
+  padding-right: var(--space-80);
   padding-left: calc(14px + var(--gutterW));
   border-radius: var(--r-lg);
   font-family: var(--font-mono);
@@ -1401,12 +1401,12 @@ html.chdash-line-numbers-hidden #queryTextArea.editorInput {
 
 .editorWrap.is-line-numbers-hidden .editorDiagnosticsLayer,
 html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
-  padding-left: 14px;
+  padding-left: var(--space-16);
 }
 
 .runMenu__divider {
   height: 1px;
-  margin: 0.2rem 0.35rem;
+  margin: var(--space-4) var(--space-6);
   background: var(--border);
 }
 
@@ -1419,9 +1419,9 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 0.1rem;
-  margin: 0.1rem 0 0;
-  padding-top: 0.2rem;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding-top: var(--space-4);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
@@ -1446,7 +1446,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 .panel__title--withAction {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 #runMenuButton[hidden] {
@@ -1518,7 +1518,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 }
 
 .resultsClearButton {
-  margin-left: 2px;
+  margin-left: var(--space-2);
 }
 
 /* Run settings reuses the editor-options trigger language and sits after Queries. */
@@ -1586,14 +1586,14 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   right: auto;
   min-width: 9.5rem;
   border-radius: var(--r-lg);
-  padding: 0.25rem;
+  padding: var(--space-4);
   z-index: var(--z-menu);
   transform-origin: top left;
 }
 
 /* Compact items: a context menu, not a toolbar. */
 .rowDetailsMenu .runMenu__opt {
-  padding: 0.3rem 0.55rem;
+  padding: var(--space-4) var(--space-8);
   border-radius: var(--r-md);
   font-size: var(--fs-sm);
   line-height: 1.25;
@@ -1718,7 +1718,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   right: 0.4rem;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: var(--space-4);
 }
 
 .rowDetails__valueContent {
@@ -1728,7 +1728,7 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 }
 
 .explorerCard .explorerPreviewTable .resultTable thead th.has-finalize-info {
-  padding-right: 16px;
+  padding-right: var(--space-16);
 }
 
 /* Preview headers carry the column type on a second line, whole: the line
@@ -1736,16 +1736,16 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
    ("LowCardinality(String)", never "LowC\2026"); the header's title repeats it. */
 .explorerCard .explorerPreviewTable .resultTable thead th {
   height: auto;
-  padding-top: 4px;
-  padding-bottom: 4px;
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
   vertical-align: top;
 }
 
 .explorerCard .explorerPreviewTable .resultTable thead th[data-type]::after {
   content: attr(data-type);
   display: block;
-  margin-top: 2px;
-  padding: 0 8px;
+  margin-top: var(--space-2);
+  padding: 0 var(--space-8);
   color: var(--muted);
   font: var(--fw-medium) var(--fs-xs)/1.2 var(--font-mono);
   white-space: nowrap;
@@ -1755,14 +1755,14 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
 /* -- Toolbar hierarchy: Run, then the secondary actions --------------------- */
 .panel--query .queryActions {
   align-items: center;
-  gap: 0.45rem;
+  gap: var(--space-8);
 }
 
 /* -- Running state: status dot and a moving bar on the editor --------------- */
 #queryStatusText {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: var(--space-6);
 }
 
 #queryStatusText::before {
@@ -1832,8 +1832,8 @@ html.chdash-line-numbers-hidden .editorDiagnosticsLayer {
   grid-column: 1 / -1;
   display: grid;
   justify-items: center;
-  gap: 0.8rem;
-  padding: 2.2rem 1rem;
+  gap: var(--space-12);
+  padding: var(--space-32) var(--space-16);
   border: 1px dashed var(--border);
   border-radius: var(--r-lg);
   color: var(--muted);
@@ -1870,7 +1870,7 @@ html:not(.is-ready) .queryEmptyState {
     min-height: 12rem;
   }
   .panel--query .panel_bottom {
-    gap: 0.5rem;
+    gap: var(--space-8);
   }
   .panel--query .statusBlock {
     min-width: 0;
@@ -1909,7 +1909,7 @@ html:not(.is-ready) .queryEmptyState {
     white-space: normal;
   }
   .queryEmptyState {
-    padding: 1.2rem 0.75rem;
+    padding: var(--space-20) var(--space-12);
   }
 }
 
@@ -1929,7 +1929,7 @@ html:not(.is-ready) .queryEmptyState {
   .panel--metrics.is-folded > .metricColumn { display: none; }
   .panel--results > .panel__header {
     flex-wrap: wrap;
-    row-gap: 4px;
+    row-gap: var(--space-4);
   }
   .panel--results > .panel__header > .panel__title { margin-right: auto; }
   .panel--results > .panel__header > .panel__meta { display: contents; }
@@ -1939,7 +1939,7 @@ html:not(.is-ready) .queryEmptyState {
   }
   .resultsStack__header {
     flex-wrap: wrap;
-    row-gap: 6px;
+    row-gap: var(--space-6);
   }
   .resultsStack__header > :first-child { margin-right: auto; }
   .resultsStack__right { display: contents; }

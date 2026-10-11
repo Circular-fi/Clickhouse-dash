@@ -11,7 +11,7 @@
   font-size: var(--fs-md);
   outline: none;
   max-width: 220px;
-  padding: 0 30px 0 9px;
+  padding: 0 var(--space-32) 0 var(--space-10);
 }
 
 .explorerSelect:focus {
@@ -25,7 +25,7 @@
   min-height: 0;
   flex: 1 1 auto;
   overflow: auto;
-  padding: 5px 6px 10px;
+  padding: var(--space-6) var(--space-6) var(--space-10);
   overscroll-behavior: contain;
 }
 
@@ -34,7 +34,7 @@
   border: 1px solid var(--border);
   white-space: nowrap;
   font-weight: var(--fw-semibold);
-  padding: 5px 9px;
+  padding: var(--space-6) var(--space-10);
   font-size: var(--fs-xs);
 }
 
@@ -64,7 +64,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-12);
   min-height: 38px;
 }
 
@@ -78,7 +78,7 @@
 }
 
 .explorerDetailMeta {
-  margin-top: 4px;
+  margin-top: var(--space-4);
   color: var(--muted);
   font-size: var(--fs-sm);
   font-family: var(--font-sans);
@@ -86,12 +86,12 @@
 
 .explorerWarnings {
   display: grid;
-  gap: 6px;
-  margin-top: 10px;
+  gap: var(--space-6);
+  margin-top: var(--space-10);
 }
 
 .explorerWarning {
-  padding: 8px 10px;
+  padding: var(--space-8) var(--space-10);
   border-radius: var(--r-lg);
   border: 1px solid color-mix(in srgb, var(--warning) 24%, transparent);
   background: var(--warning-bg);
@@ -103,7 +103,7 @@
 .explorerSummaryCards {
   display: grid;
   grid-template-columns: repeat(4, minmax(110px, 1fr));
-  margin-top: 10px;
+  margin-top: var(--space-10);
   gap: 0;
   border-top: 1px solid var(--border);
   border-left: 1px solid var(--border);
@@ -113,7 +113,7 @@
 
 /* The Explorer table card's row: under the card header, on its own rule. */
 .explorerDetailTabs {
-  margin-top: 12px;
+  margin-top: var(--space-12);
   overflow-x: auto;
   scrollbar-width: none;
   border-bottom: 1px solid var(--border);
@@ -122,8 +122,8 @@
 /* Reserve scrollbar space on every persistent scroll surface so content does
    not shift when a scrollbar appears. */
 .explorerDetailContent {
-  padding: 12px 0 4px;
-  padding-top: 10px;
+  padding: var(--space-12) 0 var(--space-4);
+  padding-top: var(--space-10);
   scrollbar-gutter: stable;
   container: explorerCard / inline-size;
 }
@@ -132,15 +132,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: var(--space-12);
+  margin-bottom: var(--space-10);
   position: relative;
   z-index: var(--z-popover);
   overflow: visible;
 }
 
 .explorerSectionTitle {
-  margin: 14px 0 7px;
+  margin: var(--space-16) 0 var(--space-8);
   color: var(--text);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
@@ -152,7 +152,7 @@
 }
 
 .explorerFunctionFilters {
-  padding: 8px 10px;
+  padding: var(--space-8) var(--space-10);
   border-bottom: 1px solid var(--border);
 }
 
@@ -170,7 +170,7 @@
 
 /* Rendered/sanitized function documentation, not a preformatted text blob. */
 .explorerFunctionDescription {
-  margin: 14px 0 0;
+  margin: var(--space-16) 0 0;
   color: var(--text);
   overflow-wrap: anywhere;
   min-height: 0;
@@ -187,17 +187,17 @@
 
 /* Database > object file-tree. */
 .explorerTreeGroup + .explorerTreeGroup {
-  margin-top: 3px;
+  margin-top: var(--space-4);
 }
 
 .explorerTreeDatabase {
   width: 100%;
   display: grid;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-6);
   border: 0;
   border-radius: var(--r-md);
-  padding: 4px 6px;
+  padding: var(--space-4) var(--space-6);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -205,7 +205,7 @@
   cursor: pointer;
   grid-template-columns: minmax(0, 1fr) auto;
   min-height: 31px;
-  padding-left: 4px;
+  padding-left: var(--space-4);
 }
 
 .explorerTreeDatabase:hover { background: var(--rowHover); }
@@ -236,8 +236,8 @@
 
 .explorerTreeChildren {
   position: relative;
-  margin-left: 11px;
-  padding-left: 9px;
+  margin-left: var(--space-12);
+  padding-left: var(--space-10);
 }
 
 .explorerTreeChildren::before {
@@ -256,11 +256,11 @@
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) 10px;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   margin: 1px 0;
   border: 1px solid transparent;
   border-radius: var(--r-md);
-  padding: 4px 6px;
+  padding: var(--space-4) var(--space-6);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -320,7 +320,7 @@
 }
 
 .functionDoc__section {
-  padding: 12px 0;
+  padding: var(--space-12) 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -330,7 +330,7 @@
 
 .functionDoc__sectionTitle,
 .functionDoc__heading {
-  margin: 0 0 7px;
+  margin: 0 0 var(--space-8);
   color: var(--text);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
@@ -348,7 +348,7 @@
   color: color-mix(in srgb, var(--text) 88%, var(--muted));
   font-size: var(--fs-sm);
   line-height: 1.58;
-  padding-left: 18px;
+  padding-left: var(--space-20);
 }
 
 .functionDoc__markdown {
@@ -360,14 +360,14 @@
 
 .functionDoc__paragraph + .functionDoc__paragraph,
 .functionDoc__list + .functionDoc__paragraph {
-  margin-top: 7px;
+  margin-top: var(--space-8);
 }
 
 .functionDoc__code {
   margin: 0;
   max-width: 100%;
   overflow: auto;
-  padding: 9px 10px;
+  padding: var(--space-10) var(--space-10);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--editorSolidBg);
@@ -378,7 +378,7 @@
 }
 
 .functionDoc__inlineCode {
-  padding: 1px 4px;
+  padding: 1px var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: var(--editorSolidBg);
@@ -416,7 +416,7 @@
 
 .functionDoc__alias {
   border-left: 2px solid color-mix(in srgb, var(--accentBorder) 60%, transparent);
-  padding-left: 12px;
+  padding-left: var(--space-12);
 }
 
 @media (max-width: 820px) {
@@ -465,8 +465,8 @@
 /* Database detail object table: the shared Query result table; only the name
    cell becomes a link-like button that opens the object. */
 .explorerDatabaseObjectsTable {
-  margin-top: 8px;
-  margin-bottom: 12px;
+  margin-top: var(--space-8);
+  margin-bottom: var(--space-12);
 }
 
 .explorerDatabaseObjectsTable__open {
@@ -510,7 +510,7 @@
   height: var(--sizemap-h);
   flex-direction: column;
   box-sizing: border-box;
-  padding: 3px;
+  padding: var(--space-4);
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -618,8 +618,8 @@ button.explorerStorageStrip__segment:focus-visible {
   min-width: 0;
   flex-direction: column;
   justify-content: flex-start;
-  gap: .08rem;
-  padding: .26rem .34rem;
+  gap: 1px;
+  padding: var(--space-4) var(--space-6);
   overflow: hidden;
   color: var(--text);
   font-size: var(--fs-sm);
@@ -630,7 +630,7 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerTreemap__node.is-database > .explorerTreemap__label {
   height: var(--treemap-header, 100%);
-  padding: 2px 5px;
+  padding: var(--space-2) var(--space-6);
 }
 
 /* Others' label sits on a solid chip over the hatch. */
@@ -683,7 +683,7 @@ button.explorerStorageStrip__segment:focus-visible {
   display: flex;
   min-width: 0;
   align-items: baseline;
-  gap: .28rem;
+  gap: var(--space-4);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -707,12 +707,12 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerTreemap__meta:not([hidden])::before {
   content: "·";
-  margin-right: .28rem;
+  margin-right: var(--space-4);
 }
 
 .explorerTreemap__label.is-compact {
-  gap: .06rem;
-  padding: .18rem .28rem;
+  gap: 1px;
+  padding: var(--space-2) var(--space-4);
   font-size: var(--fs-xs);
 }
 
@@ -725,8 +725,8 @@ button.explorerStorageStrip__segment:focus-visible {
 }
 
 .explorerTreemap__label.is-tiny {
-  gap: .02rem;
-  padding: .1rem .18rem;
+  gap: 1px;
+  padding: var(--space-2) var(--space-2);
   font-size: var(--fs-xs);
   line-height: 1.05;
 }
@@ -738,8 +738,8 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-inline {
   flex-direction: row;
   align-items: center;
-  gap: .28rem;
-  padding: .08rem .3rem;
+  gap: var(--space-4);
+  padding: 1px var(--space-4);
   font-size: var(--fs-xs);
   line-height: 1;
   white-space: nowrap;
@@ -764,13 +764,13 @@ button.explorerStorageStrip__segment:focus-visible {
 
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact {
   gap: 0;
-  padding: .08rem .2rem;
+  padding: 1px var(--space-4);
   font-size: var(--fs-xs);
   line-height: 1;
 }
 
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact .explorerTreemap__details {
-  gap: .18rem;
+  gap: var(--space-2);
 }
 
 .explorerTreemap__node.is-other > .explorerTreemap__label.is-other-compact .explorerTreemap__size,
@@ -792,8 +792,8 @@ button.explorerStorageStrip__segment:focus-visible {
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 4px 14px;
-  margin-top: 6px;
+  gap: var(--space-4) var(--space-16);
+  margin-top: var(--space-6);
   color: var(--muted);
   font-size: var(--fs-xs);
   line-height: 1.35;
@@ -802,13 +802,13 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerTreemapLegend {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: var(--space-4) var(--space-12);
 }
 
 .explorerTreemapLegend__item {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-6);
   white-space: nowrap;
 }
 
@@ -843,13 +843,13 @@ button.explorerStorageStrip__segment:focus-visible {
   flex-direction: column;
 }
 
-.explorerTreemapBand + .explorerTable { margin-top: 10px; }
+.explorerTreemapBand + .explorerTable { margin-top: var(--space-10); }
 
 /* The database card: the Storage tab's sections (tables by size, disks). */
 .explorerDatabaseStorage {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 18px;
+  gap: var(--space-20);
   min-width: 0;
 }
 
@@ -859,14 +859,14 @@ button.explorerStorageStrip__segment:focus-visible {
 
 /* The Columns tab's size map, above the columns table (the size band first): its measure
    switch on the section title row. */
-.explorerColumnSizes { margin-bottom: 18px; }
+.explorerColumnSizes { margin-bottom: var(--space-20); }
 
 .explorerColumnSizes > .explorerSectionHead {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 6px 12px;
+  gap: var(--space-6) var(--space-12);
 }
 
 /* The share strip: one bar split by cell, used instead of the treemap when
@@ -874,7 +874,7 @@ button.explorerStorageStrip__segment:focus-visible {
 .explorerStorageStrip {
   display: flex;
   height: 24px;
-  gap: 2px;
+  gap: var(--space-2);
   overflow: hidden;
   border-radius: var(--r-sm);
 }
@@ -888,7 +888,7 @@ button.explorerStorageStrip__segment:focus-visible {
   flex: 1 1 0;
   align-items: center;
   overflow: hidden;
-  padding: 0 7px;
+  padding: 0 var(--space-8);
   border-radius: var(--r-sm);
   color: var(--text);
   font-size: var(--fs-xs);
@@ -907,7 +907,7 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerStorageStrip__segment.is-other > .explorerStorageStrip__label {
-  padding: 2px 4px;
+  padding: var(--space-2) var(--space-4);
   border-radius: var(--r-sm);
   background: var(--panelBg);
 }
@@ -919,7 +919,7 @@ button.explorerStorageStrip__segment {
   transform: rotate(180deg);
   flex-direction: row;
   align-items: flex-end;
-  padding: .3rem .1rem;
+  padding: var(--space-4) var(--space-2);
   font-size: var(--fs-xs);
 }
 
@@ -941,8 +941,8 @@ button.explorerStorageStrip__segment {
 .explorerTreemap__label.is-single-line {
   flex-direction: row;
   align-items: center;
-  gap: .3rem;
-  padding: 0 .3rem;
+  gap: var(--space-4);
+  padding: 0 var(--space-4);
   white-space: nowrap;
 }
 
@@ -956,9 +956,9 @@ button.explorerStorageStrip__segment {
   min-height: 26px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   margin: 0;
-  padding: 3px 8px 3px 30px;
+  padding: var(--space-4) var(--space-8) var(--space-4) var(--space-32);
 }
 
 .explorerFunctionObject__name {
@@ -976,9 +976,9 @@ button.explorerStorageStrip__segment {
   min-height: 0;
   place-content: start stretch;
   justify-items: stretch;
-  gap: 18px;
-  margin: 8px auto 0;
-  padding: 12px 6px;
+  gap: var(--space-20);
+  margin: var(--space-8) auto 0;
+  padding: var(--space-12) var(--space-6);
   text-align: left;
   color: var(--text);
   font-size: var(--explorer-table-font);
@@ -986,7 +986,7 @@ button.explorerStorageStrip__segment {
 
 .explorerFunctionOverview__header {
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .explorerFunctionOverview__title {
@@ -998,7 +998,7 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerFunctionOverview__heading {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-8);
   font-size: var(--explorer-section-title-size);
   font-weight: var(--fw-semibold);
 }
@@ -1006,7 +1006,7 @@ button.explorerStorageStrip__segment {
 .explorerFunctionOverview__chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .explorerFunctionOverview__chip {
@@ -1016,7 +1016,7 @@ button.explorerStorageStrip__segment {
   color: var(--text);
   font: inherit;
   cursor: pointer;
-  padding: 3px 9px;
+  padding: var(--space-4) var(--space-10);
   font-size: var(--fs-sm);
 }
 
@@ -1027,7 +1027,7 @@ button.explorerStorageStrip__segment {
 .explorerFunctionOverview__categories {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .explorerFunctionOverview__category {
@@ -1040,8 +1040,8 @@ button.explorerStorageStrip__segment {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px;
+  gap: var(--space-10);
+  padding: var(--space-6) var(--space-10);
   text-align: left;
 }
 
@@ -1078,7 +1078,7 @@ button.explorerStorageStrip__segment {
 .explorerDependencyMatrix {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--space-12);
   align-items: stretch;
 }
 
@@ -1086,8 +1086,8 @@ button.explorerStorageStrip__segment {
   display: grid;
   grid-template-rows: auto 1fr;
   align-content: start;
-  gap: 6px;
-  margin: 8px 0 12px;
+  gap: var(--space-6);
+  margin: var(--space-8) 0 var(--space-12);
   min-width: 0;
 }
 
@@ -1098,14 +1098,14 @@ button.explorerStorageStrip__segment {
 .explorerGraphDepthControls {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .explorerStorageComposition {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
 }
 
 @media (max-width: 980px) {
@@ -1114,8 +1114,8 @@ button.explorerStorageStrip__segment {
 
 .explorerStorageComposition--stacked {
   display: block;
-  padding: 9px 10px 10px;
-  margin-top: 8px;
+  padding: var(--space-10) var(--space-10) var(--space-10);
+  margin-top: var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--panelBg);
@@ -1123,7 +1123,7 @@ button.explorerStorageStrip__segment {
 
 .explorerStorageComposition--stacked.is-embedded {
   padding: 0;
-  margin-top: 6px;
+  margin-top: var(--space-6);
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1137,12 +1137,12 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend {
-  margin-top: 8px;
-  gap: 5px 12px;
+  margin-top: var(--space-8);
+  gap: var(--space-6) var(--space-12);
 }
 
 .explorerStorageComposition--stacked.is-embedded .explorerStorageCompositionLegend__item {
-  gap: 4px;
+  gap: var(--space-4);
   grid-template-columns: 7px auto auto;
   font-size: var(--fs-xs);
 }
@@ -1182,15 +1182,15 @@ button.explorerStorageStrip__segment {
 .explorerStorageCompositionLegend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 18px;
+  gap: var(--space-8) var(--space-20);
   align-items: center;
-  margin-top: 8px;
+  margin-top: var(--space-8);
 }
 
 .explorerStorageCompositionLegend__item {
   display: inline-grid;
   grid-template-columns: 9px auto auto;
-  gap: 6px;
+  gap: var(--space-6);
   align-items: center;
   min-width: 0;
 }
@@ -1248,7 +1248,7 @@ button.explorerStorageStrip__segment {
   z-index: var(--z-float);
   display: none;
   width: 270px;
-  padding: 7px 9px;
+  padding: var(--space-8) var(--space-10);
   border: 1px solid var(--borderStrong);
   border-radius: var(--r-md);
   background: var(--panelBg);
@@ -1273,7 +1273,7 @@ button.explorerStorageStrip__segment {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .explorerDataSettings {
@@ -1291,7 +1291,7 @@ button.explorerStorageStrip__segment {
   min-width: 16px;
   height: 18px;
   padding: 0;
-  margin-right: 4px;
+  margin-right: var(--space-4);
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -1307,7 +1307,7 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerStorageTupleName--child {
-  padding-left: 20px;
+  padding-left: var(--space-20);
   color: color-mix(in srgb, var(--text) 82%, var(--muted));
 }
 
@@ -1340,7 +1340,7 @@ button.explorerStorageStrip__segment {
 
 .explorerStorageCompositionCard {
   min-width: 0;
-  padding: 11px 12px 12px;
+  padding: var(--space-12) var(--space-12) var(--space-12);
   border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
 
@@ -1361,8 +1361,8 @@ button.explorerStorageStrip__segment {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 7px;
+  gap: var(--space-10);
+  margin-bottom: var(--space-8);
 }
 
 @media (max-width: 980px) {
@@ -1374,7 +1374,7 @@ button.explorerStorageStrip__segment {
 
 /* Header: name, then one row of chips instead of a dotted sentence. */
 #explorerDetail .explorerDetailMeta {
-  margin-top: 6px;
+  margin-top: var(--space-6);
   font-size: var(--fs-sm);
 }
 
@@ -1382,7 +1382,7 @@ button.explorerStorageStrip__segment {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 /* Rows, size and parts: a muted line of text after the engine and health
@@ -1395,7 +1395,7 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerMetaFacts {
-  margin-left: 4px;
+  margin-left: var(--space-4);
   color: var(--muted);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
@@ -1415,7 +1415,7 @@ button.explorerStorageStrip__segment {
   display: inline-block;
   width: 7px;
   height: 7px;
-  margin-left: 6px;
+  margin-left: var(--space-6);
   vertical-align: middle;
 }
 
@@ -1428,7 +1428,7 @@ button.explorerStorageStrip__segment {
 /* Replication banner: first thing under the header of a replicated table. */
 .explorerSummaryCards.explorerSummaryCards--banner {
   display: block;
-  margin-top: 10px;
+  margin-top: var(--space-10);
 }
 
 .explorerReplicaBanner {
@@ -1436,8 +1436,8 @@ button.explorerStorageStrip__segment {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
-  padding: 7px 10px;
+  gap: var(--space-4) var(--space-10);
+  padding: var(--space-8) var(--space-10);
   border: 1px solid color-mix(in srgb, var(--exd-state) 38%, var(--border));
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--exd-state) 8%, transparent);
@@ -1464,7 +1464,7 @@ button.explorerStorageStrip__segment {
   font: inherit;
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
-  padding: 2px 9px;
+  padding: var(--space-2) var(--space-10);
   cursor: pointer;
 }
 
@@ -1473,7 +1473,7 @@ button.explorerStorageStrip__segment {
 .explorerCard {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 248px;
-  gap: 16px;
+  gap: var(--space-16);
   align-items: start;
 }
 
@@ -1481,14 +1481,14 @@ button.explorerStorageStrip__segment {
 
 .explorerAbout {
   min-width: 0;
-  padding: 10px 12px 12px;
+  padding: var(--space-10) var(--space-12) var(--space-12);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--tableBg) 82%, transparent);
 }
 
 .explorerAbout__title {
-  margin: 0 0 6px;
+  margin: 0 0 var(--space-6);
   font-size: var(--explorer-section-title-size);
   font-weight: var(--explorer-section-title-weight);
 }
@@ -1496,12 +1496,12 @@ button.explorerStorageStrip__segment {
 .explorerAbout__tiles {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .explorerAboutTile {
   min-width: 0;
-  padding-top: 8px;
+  padding-top: var(--space-8);
   border-top: 1px solid var(--border);
 }
 
@@ -1517,7 +1517,7 @@ button.explorerStorageStrip__segment {
   white-space: normal;
 }
 
-.explorerAboutTile__label + .explorerAboutTile__value { margin-top: 2px; }
+.explorerAboutTile__label + .explorerAboutTile__value { margin-top: var(--space-2); }
 
 .explorerAboutTile__value.is-code {
   font-family: var(--font-mono);
@@ -1543,12 +1543,12 @@ button.explorerStorageStrip__segment {
 /* Engine arguments (Keeper path, replica name...) under the engine name. */
 .explorerAboutTile__expr {
   display: block;
-  margin-top: 3px;
+  margin-top: var(--space-4);
   font-size: var(--fs-sm);
 }
 
 .explorerAboutTile__settings {
-  margin: 4px 0 0;
+  margin: var(--space-4) 0 0;
   padding: 0;
   list-style: none;
   font-size: var(--fs-sm);
@@ -1559,8 +1559,8 @@ button.explorerStorageStrip__segment {
    after its position in the key. */
 .explorerKeys {
   display: grid;
-  gap: 8px;
-  margin-top: 2px;
+  gap: var(--space-8);
+  margin-top: var(--space-2);
 }
 
 .explorerKeys__name {
@@ -1570,14 +1570,14 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerKeys__note {
-  margin-left: 6px;
+  margin-left: var(--space-6);
   font-weight: var(--fw-regular);
 }
 
 .explorerKeys__list {
   display: grid;
   gap: 1px;
-  margin: 2px 0 0;
+  margin: var(--space-2) 0 0;
   padding: 0;
   list-style: none;
 }
@@ -1585,7 +1585,7 @@ button.explorerStorageStrip__segment {
 .explorerKeys__item {
   display: grid;
   grid-template-columns: 2.2ch minmax(0, 1fr);
-  gap: 6px;
+  gap: var(--space-6);
   align-items: baseline;
   line-height: 1.45;
 }
@@ -1619,8 +1619,8 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerAboutTile__rules {
-  margin: 4px 0 0;
-  padding-left: 18px;
+  margin: var(--space-4) 0 0;
+  padding-left: var(--space-20);
   color: var(--text);
   font: var(--fs-sm)/1.45 var(--font-mono);
   overflow-wrap: anywhere;
@@ -1633,15 +1633,15 @@ button.explorerStorageStrip__segment {
 .explorerAboutTile__replicas {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
-  margin-top: 4px;
+  gap: var(--space-4) var(--space-10);
+  margin-top: var(--space-4);
   font-size: var(--fs-sm);
 }
 
 .explorerReplicaChip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-6);
 }
 
 .explorerAboutTile__link {
@@ -1649,7 +1649,7 @@ button.explorerStorageStrip__segment {
   border: 0;
   background: none;
   padding: 0;
-  margin-top: 3px;
+  margin-top: var(--space-4);
   color: var(--accentBorder);
   font: inherit;
   font-size: var(--fs-sm);
@@ -1668,29 +1668,29 @@ button.explorerStorageStrip__segment {
   font-weight: var(--fw-semibold);
   cursor: pointer;
   display: none;
-  margin-top: 8px;
+  margin-top: var(--space-8);
 }
 
 .explorerAboutTile__link:hover,
 .explorerAbout__toggle:hover { text-decoration: underline; }
 
-.explorerAboutTile .explorerLineageChip { margin-top: 4px; }
+.explorerAboutTile .explorerLineageChip { margin-top: var(--space-4); }
 
 .explorerAboutTile__chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 6px;
+  gap: 0 var(--space-6);
 }
 
 @container explorerCard (max-width: 960px) {
   .explorerCard {
     grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
+    gap: var(--space-16);
   }
   /* The tab's content first (what the tab was opened for), About under it. */
   .explorerAbout__tiles {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 8px 14px;
+    gap: var(--space-8) var(--space-16);
   }
   .explorerAboutTile--wide { grid-column: 1 / -1; }
   .explorerAbout.is-collapsed .explorerAboutTile:nth-child(n+5) { display: none; }
@@ -1702,35 +1702,35 @@ button.explorerStorageStrip__segment {
   color: var(--muted);
   font-size: var(--fs-md);
   line-height: 1.45;
-  padding: 4px 0;
+  padding: var(--space-4) 0;
 }
 
 .explorerIdleLine {
   color: var(--muted);
   font-size: var(--fs-md);
   line-height: 1.45;
-  padding: 4px 0;
-  margin-top: 14px;
-  padding-top: 10px;
+  padding: var(--space-4) 0;
+  margin-top: var(--space-16);
+  padding-top: var(--space-10);
   border-top: 1px dashed var(--border);
 }
 
 .explorerCard__main > .explorerIdleLine:first-child,
 .explorerStorageCompositionCard + .explorerIdleLine {
   margin-top: 0;
-  padding-top: 4px;
+  padding-top: var(--space-4);
   border-top: 0;
 }
 
 /* Collapsible sections (Storage, Operations): title + count above the table. */
-.explorerSection + .explorerSection { margin-top: 16px; }
+.explorerSection + .explorerSection { margin-top: var(--space-16); }
 
 .explorerSection__summary {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 0;
-  margin-bottom: 6px;
+  gap: var(--space-8);
+  padding: var(--space-2) 0;
+  margin-bottom: var(--space-6);
   color: var(--text);
   font-size: var(--explorer-section-title-size);
   font-weight: var(--explorer-section-title-weight);
@@ -1762,7 +1762,7 @@ button.explorerStorageStrip__segment {
   justify-content: center;
   min-width: 20px;
   height: 18px;
-  padding: 0 6px;
+  padding: 0 var(--space-6);
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--border) 80%, transparent);
   color: var(--muted);
@@ -1778,7 +1778,7 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerSection__facts {
-  margin-top: 8px;
+  margin-top: var(--space-8);
   color: var(--muted);
   font-size: var(--fs-sm);
 }
@@ -1798,7 +1798,7 @@ button.explorerStorageStrip__segment {
 .explorerColumns__expr {
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
-  margin-left: 6px;
+  margin-left: var(--space-6);
 }
 
 .explorerCard .explorerTable .resultTable tbody td.explorerColumns__type {
@@ -1827,7 +1827,7 @@ button.explorerStorageStrip__segment {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  margin-top: 2px;
+  margin-top: var(--space-2);
 }
 
 .explorerColumns__comment {
@@ -1848,7 +1848,7 @@ button.explorerStorageStrip__segment {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: var(--space-2);
   vertical-align: middle;
 }
 
@@ -1866,12 +1866,12 @@ button.explorerStorageStrip__segment {
 
 .explorerCard .explorerTable .resultTable tbody td.explorerCell--message { max-width: 26rem; }
 
-.explorerBadge + .explorerBadge { margin-left: 4px; }
+.explorerBadge + .explorerBadge { margin-left: var(--space-4); }
 
 /* Storage tab: composition card above the sections. */
 .explorerCard .explorerStorageCompositionCard {
-  margin-bottom: 14px;
-  padding: 10px 12px 12px;
+  margin-bottom: var(--space-16);
+  padding: var(--space-10) var(--space-12) var(--space-12);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--tableBg) 82%, transparent);
@@ -1890,8 +1890,8 @@ button.explorerStorageStrip__segment {
 }
 
 .explorerIngestionTable tbody > tr > td {
-  padding-top: 4px;
-  padding-bottom: 4px;
+  padding-top: var(--space-4);
+  padding-bottom: var(--space-4);
 }
 
 .explorerIngestionTable tbody > tr > th {
@@ -1908,7 +1908,7 @@ button.explorerStorageStrip__segment {
 .explorerKeyValues {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 18px;
+  gap: var(--space-4) var(--space-20);
   margin: 0;
   font-size: var(--fs-md);
 }
@@ -1926,7 +1926,7 @@ button.explorerStorageStrip__segment {
   font-size: var(--fs-sm);
 }
 
-.explorerReplicaList { margin-top: 10px; }
+.explorerReplicaList { margin-top: var(--space-10); }
 
 /* Lineage: wrapping chips with an object-type icon; short name in-database. */
 .explorerLineageToolbar {
@@ -1934,8 +1934,8 @@ button.explorerStorageStrip__segment {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px 12px;
-  margin-bottom: 12px;
+  gap: var(--space-8) var(--space-12);
+  margin-bottom: var(--space-12);
 }
 
 .explorerLineageToolbar__note {
@@ -1946,7 +1946,7 @@ button.explorerStorageStrip__segment {
 .explorerCard .explorerLineage {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: var(--space-16);
   align-items: start;
 }
 
@@ -1962,8 +1962,8 @@ button.explorerStorageStrip__segment {
 .explorerLineage__title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 0 8px;
+  gap: var(--space-8);
+  margin: 0 0 var(--space-8);
   font-size: var(--explorer-section-title-size);
   font-weight: var(--explorer-section-title-weight);
 }
@@ -1972,16 +1972,16 @@ button.explorerStorageStrip__segment {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .explorerLineageChip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   max-width: 100%;
   min-height: 28px;
-  padding: 3px 10px;
+  padding: var(--space-4) var(--space-10);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-md);
   background: var(--buttonBg);
@@ -2043,7 +2043,7 @@ button.explorerStorageStrip__segment {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
+  gap: var(--space-6) var(--space-10);
   font-size: var(--fs-md);
 }
 
@@ -2070,10 +2070,10 @@ button.explorerStorageStrip__segment {
 
 .explorerGraphDepthControls__name { color: var(--graph-muted); }
 
-.explorerGraphScopeControls { gap: 6px; }
+.explorerGraphScopeControls { gap: var(--space-6); }
 
 .explorerGraphIsolatedToggle {
-  gap: 6px;
+  gap: var(--space-6);
   color: var(--graph-text);
   font-size: var(--fs-sm);
   cursor: pointer;
@@ -2088,14 +2088,14 @@ button.explorerStorageStrip__segment {
 .explorerGraphPanel__lineageRow {
   display: grid;
   grid-template-columns: 84px minmax(0, 1fr);
-  gap: 8px;
-  padding: 4px 0;
+  gap: var(--space-8);
+  padding: var(--space-4) 0;
 }
 
 .explorerGraphPanel__lineageValues {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: var(--space-4) var(--space-8);
   min-width: 0;
 }
 
@@ -2105,14 +2105,14 @@ button.explorerStorageStrip__segment {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .explorerGraphPanel__routeGroup { font-weight: var(--fw-semibold); }
 
 .explorerGraphPanel__members {
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2122,7 +2122,7 @@ button.explorerStorageStrip__segment {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .explorerGraphPanel__memberKind {
@@ -2134,7 +2134,7 @@ button.explorerStorageStrip__segment {
    Tables 13px, headers 12px semibold, section titles 13.5px semibold above
    their table; monospace only for DDL/SQL and identifiers. */
 .explorerWorkspace .explorerSectionTitle {
-  margin: 18px 0 var(--explorer-section-title-gap);
+  margin: var(--space-20) 0 var(--explorer-section-title-gap);
   color: var(--text);
   font-size: var(--explorer-section-title-size);
   font-weight: var(--explorer-section-title-weight);
@@ -2144,7 +2144,7 @@ button.explorerStorageStrip__segment {
 
 .explorerWorkspace .explorerDetailContent > .explorerSectionTitle:first-child,
 .explorerWorkspace .explorerDetailContent > section:first-child .explorerSectionTitle:first-child {
-  margin-top: 4px;
+  margin-top: var(--space-4);
 }
 
 .explorerWorkspace .explorerDetailMeta {
@@ -2202,9 +2202,9 @@ button.explorerStorageStrip__segment {
 
 .explorerWorkspace .explorerTreeDatabase {
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
+  gap: var(--space-8);
   min-height: 28px;
-  padding: 2px 6px 2px 4px;
+  padding: var(--space-2) var(--space-6) var(--space-2) var(--space-4);
 }
 
 .explorerWorkspace .explorerTreeDatabase__name {
@@ -2222,7 +2222,7 @@ button.explorerStorageStrip__segment {
 .explorerWorkspace .explorerTreeDatabase__size,
 .explorerWorkspace .explorerTreeObject__size {
   min-width: 62px;
-  padding: 1px 5px;
+  padding: 1px var(--space-6);
   border-radius: var(--r-sm);
   color: var(--muted);
   font-size: var(--fs-sm);
@@ -2282,16 +2282,16 @@ button.explorerStorageStrip__segment {
 .midTrunc__tail { flex: 0 0 auto; }
 
 .explorerWorkspace .explorerTreeChildren {
-  margin-left: 11px;
-  padding-left: 8px;
+  margin-left: var(--space-12);
+  padding-left: var(--space-8);
 }
 
 .explorerWorkspace .explorerTreeObject {
   grid-template-columns: 16px minmax(0, 1fr) auto auto;
-  gap: 6px;
+  gap: var(--space-6);
   min-height: 25px;
   margin: 0;
-  padding: 1px 6px 1px 4px;
+  padding: 1px var(--space-6) 1px var(--space-4);
   border-radius: var(--r-md);
 }
 
@@ -2351,8 +2351,8 @@ button.explorerStorageStrip__segment {
 .explorerSectionHead {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin: 18px 0 var(--explorer-section-title-gap);
+  gap: var(--space-8);
+  margin: var(--space-20) 0 var(--explorer-section-title-gap);
 }
 
 .explorerWorkspace .explorerSectionHead > .explorerSectionTitle {

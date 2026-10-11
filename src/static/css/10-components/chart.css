@@ -5,9 +5,9 @@
    details and the switch back); an error-hidden table hides the chart too. */
 .queryChart {
   display: none;
-  margin-top: 10px;
+  margin-top: var(--space-10);
   min-width: 0;
-  padding: 10px 12px 8px;
+  padding: var(--space-10) var(--space-12) var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--tableBg);
@@ -17,8 +17,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 14px;
-  margin-bottom: 6px;
+  gap: var(--space-8) var(--space-16);
+  margin-bottom: var(--space-6);
   font-size: var(--fs-xs);
 }
 
@@ -48,11 +48,11 @@
 
 .chartCore__select { background: color-mix(in srgb, var(--accentBorder) 16%, transparent); border-inline: 1px solid color-mix(in srgb, var(--accentBorder) 70%, transparent); }
 
-.chartCore__dot { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border: 2px solid var(--panel); border-radius: 50%; box-sizing: border-box; }
+.chartCore__dot { width: 9px; height: 9px; margin: -4px 0 0 -4px; border: 2px solid var(--panel); border-radius: 50%; box-sizing: border-box; }
 
-.chartCore__dot.is-nearest { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; }
+.chartCore__dot.is-nearest { width: 11px; height: 11px; margin: -6px 0 0 -6px; }
 
-.chartCore__badge { padding: 0 5px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--text) 92%, transparent); color: var(--panel); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.chartCore__badge { padding: 0 var(--space-6); border-radius: var(--r-sm); background: color-mix(in srgb, var(--text) 92%, transparent); color: var(--panel); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .chartCore__overlay:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accentBorder) 60%, transparent); border-radius: var(--r-sm); }
 
@@ -64,10 +64,10 @@
   left: 0;
   z-index: var(--z-float);
   display: grid;
-  gap: 3px;
+  gap: var(--space-4);
   min-width: 160px;
   max-width: 340px;
-  padding: 7px 9px;
+  padding: var(--space-8) var(--space-10);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-md);
   background: var(--panel);
@@ -80,11 +80,11 @@
   will-change: transform;
 }
 
-.chartCore__tooltip strong { padding-bottom: 2px; font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chartCore__tooltip strong { padding-bottom: var(--space-2); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .chartCore__tooltip small { color: var(--muted); font-size: var(--fs-xs); }
 
-.chartCore__tipRow { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 7px; }
+.chartCore__tipRow { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: var(--space-8); }
 
 .chartCore__tipRow i { width: 10px; height: 3px; border-radius: var(--r-sm); }
 
@@ -97,18 +97,18 @@
 
 .chartCore__tipRow.is-empty b { color: var(--muted); }
 
-.chartCore__tipRow--total { padding-top: 3px; border-top: 1px solid var(--border); }
+.chartCore__tipRow--total { padding-top: var(--space-4); border-top: 1px solid var(--border); }
 
-.chartCore__legend { display: flex; align-items: flex-start; gap: 6px; padding-top: 6px; }
+.chartCore__legend { display: flex; align-items: flex-start; gap: var(--space-6); padding-top: var(--space-6); }
 
-.chartCore__legendList { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 2px 4px; min-width: 0; }
+.chartCore__legendList { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: var(--space-2) var(--space-4); min-width: 0; }
 
 .chartCore__legendTableWrap { flex: 1 1 auto; min-width: 0; max-height: 14rem; overflow: auto; }
 
 .chartCore__legendTable { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 
 .chartCore__legendTable th,
-.chartCore__legendTable td { padding: 1px 8px; text-align: right; white-space: nowrap; }
+.chartCore__legendTable td { padding: 1px var(--space-8); text-align: right; white-space: nowrap; }
 
 .chartCore__legendTable th:first-child { width: 100%; padding-left: 0; text-align: left; }
 
@@ -119,9 +119,9 @@
 .chartCore__legendItem {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   max-width: 22rem;
-  padding: 2px 7px;
+  padding: var(--space-2) var(--space-8);
   border: 1px solid transparent;
   border-radius: var(--r-md);
   background: transparent;
@@ -132,7 +132,7 @@
   cursor: pointer;
 }
 
-.chartCore__legendTable .chartCore__legendItem { max-width: 100%; padding-left: 2px; }
+.chartCore__legendTable .chartCore__legendItem { max-width: 100%; padding-left: var(--space-2); }
 
 .chartCore__legendItem:hover { border-color: var(--buttonBorder); }
 
@@ -152,7 +152,7 @@
 .chartCore__legendMode {
   flex: 0 0 auto;
   height: 1.4rem;
-  padding: 0 0.5rem;
+  padding: 0 var(--space-8);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-md);
   background: transparent;
@@ -176,7 +176,7 @@
 
 .chartCore__markers { position: absolute; inset: 0; z-index: var(--z-raised); overflow: hidden; pointer-events: none; contain: strict; }
 
-.chartCore__marker { position: absolute; display: grid; place-items: center; width: 13px; height: 13px; margin: -6.5px 0 0 -6.5px; outline: none; cursor: pointer; pointer-events: auto; }
+.chartCore__marker { position: absolute; display: grid; place-items: center; width: 13px; height: 13px; margin: -6px 0 0 -6px; outline: none; cursor: pointer; pointer-events: auto; }
 
 .chartCore__marker > i {
   display: none;
@@ -210,11 +210,11 @@
 
 .chartCore__annotation[hidden] { display: none; }
 
-.chartCore__annotation > span { position: absolute; top: -15px; left: 3px; padding: 0 4px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 14px; white-space: nowrap; pointer-events: auto; cursor: default; }
+.chartCore__annotation > span { position: absolute; top: -15px; left: 3px; padding: 0 var(--space-4); border-radius: var(--r-sm); background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text); font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 14px; white-space: nowrap; pointer-events: auto; cursor: default; }
 
 .traceChart {
   min-height: 235px;
-  padding: 4px 6px 5px;
+  padding: var(--space-4) var(--space-6) var(--space-6);
   overflow: hidden;
   position: relative;
 }
@@ -227,7 +227,7 @@
 
 .logsHistogram__chart.is-loading .chartCore__canvas { opacity: .55; transition: opacity var(--dur-quick) var(--ease); }
 
-.metricsPanel__titleRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.metricsPanel__titleRow { display: flex; align-items: center; gap: var(--space-8); min-width: 0; }
 
 .metricsPanel__name {
   min-width: 0;
@@ -252,7 +252,7 @@
   cursor: pointer;
 }
 
-.metricsChart { padding: 0 10px 10px; min-width: 0; }
+.metricsChart { padding: 0 var(--space-10) var(--space-10); min-width: 0; }
 
 .metricsChart.is-loading .chartCore__canvas { opacity: .45; transition: opacity var(--dur-quick) var(--ease); }
 
@@ -288,9 +288,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 10px;
+  gap: var(--space-4) var(--space-10);
   min-width: 0;
-  padding: 8px 12px 4px;
+  padding: var(--space-8) var(--space-12) var(--space-4);
 }
 
 .chartCard__title {
@@ -313,18 +313,18 @@
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   margin-left: auto;
 }
 
 .chartCard__body {
   position: relative;
   min-width: 0;
-  padding: 0 8px 8px;
+  padding: 0 var(--space-8) var(--space-8);
 }
 
 .chartCard__legend {
-  padding: 0 12px 8px;
+  padding: 0 var(--space-12) var(--space-8);
 }
 
 /* An overview chart on a phone (600 px and below, [data-phone-fold], app_obs_page.js)
@@ -347,7 +347,7 @@
     color: var(--muted);
     cursor: pointer;
   }
-  .chartCard__actions + .chartCard__fold { margin-left: 4px; }
+  .chartCard__actions + .chartCard__fold { margin-left: var(--space-4); }
   .chartCard__fold .icon { transition: transform var(--dur-base) var(--ease); }
   .chartCard__fold[aria-expanded="true"] .icon { transform: rotate(180deg); }
   .chartCard.is-folded {
@@ -358,7 +358,7 @@
   .chartCard.is-folded .chartCard__actions { display: none; }
   .chartCard.is-folded > .chartCard__head {
     flex-wrap: nowrap;
-    padding-bottom: 8px;
+    padding-bottom: var(--space-8);
   }
   .chartCard.is-folded .chartCard__title { white-space: nowrap; }
 }

@@ -94,6 +94,22 @@
   --r-md: 6px;
   --r-lg: 8px;
   --r-pill: 999px;
+  /* Spacing: one scale for every padding, margin and gap (tests/harness/test_css_layers_contract.py), named by its px. A
+     hairline (1px) and a negative margin that overlaps two borders are the only literals. */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --space-48: 48px;
+  --space-64: 64px;
+  --space-80: 80px;
   /* Controls (buttons, pickers): one height, one small height. On a coarse pointer (touch) both
      are --hit, the smallest touch target (docs/ui-foundations.md, "Touch"). */
   --control-h: 28px;
@@ -246,10 +262,6 @@
   --qchart-17: #8e8945;
   --qchart-18: #85e2ed;
   --qchart-other: #898781;
-  --ui-gap-1: 4px;
-  --ui-gap-2: 8px;
-  --ui-gap-3: 12px;
-  --ui-gap-4: 16px;
   /* Status dots: the hairline ring inside a coloured dot. */
   --dot-ring: rgba(255, 255, 255, 0.22);
   /* Size bands (app_explorer_treemap.js band(), explorer.css "Size band"): the height of a

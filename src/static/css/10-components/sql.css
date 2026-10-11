@@ -50,7 +50,7 @@
   min-height: 0;
   margin: 0;
   overflow: hidden;
-  padding: 0.5rem 0.6rem;
+  padding: var(--space-8) var(--space-10);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--editorSolidBg);
@@ -95,12 +95,12 @@
 
 .sqlBlock__gutter {
   margin: 0;
-  padding: 8px 10px;
+  padding: var(--space-8) var(--space-10);
   font: inherit;
   line-height: var(--sql-line);
   flex: 0 0 auto;
   min-width: var(--sql-gutter, 3ch);
-  padding-right: 8px;
+  padding-right: var(--space-8);
   border-right: 1px solid var(--border);
   color: var(--muted);
   text-align: right;
@@ -109,7 +109,7 @@
 
 .sqlBlock__pre {
   margin: 0;
-  padding: 8px 10px;
+  padding: var(--space-8) var(--space-10);
   font: inherit;
   line-height: var(--sql-line);
   flex: 1 1 auto;
@@ -125,7 +125,7 @@
 
 /* The copy button sits left of the body's scrollbar (about 15 px), not over it. */
 .sqlBlock--copy .sqlBlock__pre {
-  padding-right: 52px;
+  padding-right: var(--space-48);
 }
 
 .sqlBlock__copy {
@@ -138,7 +138,7 @@
 .sqlBlock__expand {
   display: block;
   width: 100%;
-  padding: 4px 10px;
+  padding: var(--space-4) var(--space-10);
   border: 0;
   border-top: 1px solid var(--border);
   background: transparent;
@@ -157,7 +157,7 @@
   display: block;
   width: 100%;
   max-width: 100%;
-  padding: 2px 6px;
+  padding: var(--space-2) var(--space-6);
   border-color: transparent;
   background: transparent;
   font-size: var(--fs-sm);

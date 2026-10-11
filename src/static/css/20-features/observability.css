@@ -34,8 +34,8 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-content: start;
-  gap: 8px;
-  padding: 12px;
+  gap: var(--space-8);
+  padding: var(--space-12);
 }
 
 .timeRangePanel__title {
@@ -51,7 +51,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 .timeRangeField {
   min-width: 0;
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
   align-content: start;
 }
 
@@ -71,7 +71,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   width: 100%;
   min-width: 0;
   height: 31px;
-  padding: 0 9px;
+  padding: 0 var(--space-10);
   border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   outline: none;
@@ -107,7 +107,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   font-size: var(--fs-xs);
   line-height: 1.3;
   grid-column: 1 / -1;
-  padding: 7px 9px;
+  padding: var(--space-8) var(--space-10);
   border: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border));
   border-radius: var(--r-md);
   background: var(--error-bg);
@@ -118,14 +118,14 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 
 .timeCalendar__hint {
   grid-column: 1 / -1;
-  margin-top: 2px;
+  margin-top: var(--space-2);
   color: var(--muted);
   font-size: var(--fs-xs);
 }
 
 .timeCalendar {
   grid-column: 1 / -1;
-  padding: 8px;
+  padding: var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: color-mix(in srgb, var(--inputBg) 55%, transparent);
@@ -135,7 +135,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   display: grid;
   grid-template-columns: 26px 26px minmax(0, 1fr) 26px 26px;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-6);
 }
 
 .timeCalendar__title {
@@ -178,7 +178,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   cursor: default;
 }
 
-.timeCalendar__grid { display: grid; gap: 2px; }
+.timeCalendar__grid { display: grid; gap: var(--space-2); }
 
 .timeCalendar__row {
   display: grid;
@@ -186,7 +186,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 }
 
 .timeCalendar__weekday {
-  padding: 2px 0 4px;
+  padding: var(--space-2) 0 var(--space-4);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
@@ -222,7 +222,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   bottom: 3px;
   width: 3px;
   height: 3px;
-  margin-left: -1.5px;
+  margin-left: -2px;
   border-radius: 50%;
   background: currentColor;
   opacity: .7;
@@ -267,7 +267,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   justify-self: end;
   height: 31px;
   min-height: 31px;
-  padding: 0 14px;
+  padding: 0 var(--space-16);
   border-radius: var(--r-md);
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
 }
@@ -275,9 +275,9 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 .timeRangePanel__quick {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-8);
   min-height: 0;
-  padding: 12px 8px 12px 12px;
+  padding: var(--space-12) var(--space-8) var(--space-12) var(--space-12);
   border-left: 1px solid var(--border);
 }
 
@@ -287,12 +287,12 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: var(--space-4);
   scrollbar-width: thin;
 }
 
 .timeRangeList__heading {
-  padding: 8px 8px 4px;
+  padding: var(--space-8) var(--space-8) var(--space-4);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
@@ -308,7 +308,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   display: block;
   width: 100%;
   min-height: 27px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   overflow: hidden;
   border-radius: var(--r-md);
   background: transparent;
@@ -332,7 +332,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 }
 
 .timeRangeList__empty {
-  padding: 6px 8px;
+  padding: var(--space-6) var(--space-8);
   color: var(--muted);
 }
 
@@ -340,8 +340,8 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 5px 8px 5px 12px;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-8) var(--space-6) var(--space-12);
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: var(--fs-xs);
@@ -354,7 +354,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   white-space: nowrap;
 }
 
-.timeRangePanel__nav { display: flex; gap: 2px; flex: 0 0 auto; }
+.timeRangePanel__nav { display: flex; gap: var(--space-2); flex: 0 0 auto; }
 
 @media (max-width: 680px) {
   .timeRangePanel__body { grid-template-columns: minmax(0, 1fr); }
@@ -420,7 +420,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   width: 100%;
   height: var(--obsBarControl);
   min-width: 0;
-  padding: 0 9px;
+  padding: 0 var(--space-10);
   border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   outline: none;
@@ -433,7 +433,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 
 .obsFilterBar .obsFilterBar__input:disabled { opacity: .6; cursor: not-allowed; }
 
-.obsFilterBar__search > .obsFilterBar__input { padding-left: 28px; }
+.obsFilterBar__search > .obsFilterBar__input { padding-left: var(--space-32); }
 
 .obsFilterBar__searchIcon {
   position: absolute;
@@ -455,13 +455,13 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
 .obsFilterBar .obsFilterBar__secondary,
 .obsFilterBar .obsFilterBar__submit {
   box-sizing: border-box;
-  padding: 0 12px;
+  padding: 0 var(--space-12);
   border-radius: var(--r-md);
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
   white-space: nowrap;
 }
 
-.obsFilterBar__toggle { gap: 6px; }
+.obsFilterBar__toggle { gap: var(--space-6); }
 
 /* A toggle chip among the filters (System Queries' Hide ChDash, ns.filterBar chip()): the
    pickers' height and font; pressed, the selected look of a segmented option. */
@@ -470,7 +470,7 @@ html:not([data-obs-view="traces"]) .obsNav:has(> .obsNav__views[hidden]),
   justify-content: center;
   height: var(--obsBarControl);
   min-height: var(--obsBarControl);
-  padding: 0 10px;
+  padding: 0 var(--space-10);
   border-radius: var(--r-md);
   color: var(--muted);
   font: var(--obsBarFont);

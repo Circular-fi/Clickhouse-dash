@@ -69,7 +69,7 @@ def test_finalize_info_does_not_displace_sort_marker() -> None:
     # pushed the Explorer database table past its pane at 1280 px.
     sort = css_sources.decls(".dataTable__sort::after")
     assert sort["width"] == "1em" and sort["height"] == "1em" and sort["font-size"] == "var(--fs-xs)"
-    assert ".explorerCard .explorerPreviewTable .resultTable thead th.has-finalize-info {\n  padding-right: 16px;\n}" in css
+    assert ".explorerCard .explorerPreviewTable .resultTable thead th.has-finalize-info {\n  padding-right: var(--space-16);\n}" in css
 
 
 def test_graph_animation_is_topological_without_background_activity_polling() -> None:

@@ -63,8 +63,8 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 7px 10px 6px;
+  gap: var(--space-16);
+  padding: var(--space-8) var(--space-10) var(--space-6);
   border-bottom: 1px solid var(--border);
 }
 
@@ -80,7 +80,7 @@
 }
 
 .uiDialog__subtitle {
-  margin-top: 3px;
+  margin-top: var(--space-4);
   color: var(--muted);
   font-size: var(--fs-xs);
   line-height: 1.4;
@@ -90,7 +90,7 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .uiDialog__close {
@@ -104,7 +104,7 @@
 .uiDialog__tabs {
   flex: 0 0 auto;
   align-items: end;
-  padding: 4px 8px 0;
+  padding: var(--space-4) var(--space-8) 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -116,7 +116,7 @@
   min-height: 50px;
   padding-top: 0;
   padding-bottom: 0;
-  padding-left: 6px;
+  padding-left: var(--space-6);
 }
 
 .uiDialog__head--tabs > .uiDialog__tabs {
@@ -142,19 +142,19 @@
 }
 
 .uiDialog--sm .uiDialog__body {
-  padding: 0.7rem 0.9rem 0.6rem;
+  padding: var(--space-12) var(--space-16) var(--space-10);
 }
 
 .uiDialog__message {
-  margin: 0.1rem 0 0.3rem;
+  margin: var(--space-2) 0 var(--space-4);
   font-size: var(--fs-md);
   line-height: 1.5;
 }
 
 .uiDialog__error {
   flex: 0 0 auto;
-  margin: 0 0.9rem 0.5rem;
-  padding: 0.45rem 0.6rem;
+  margin: 0 var(--space-16) var(--space-8);
+  padding: var(--space-8) var(--space-10);
   border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
   border-radius: var(--r-lg);
   background: var(--error-bg);
@@ -165,8 +165,8 @@
   flex: 0 0 auto;
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  padding: 0.65rem 0.9rem 0.75rem;
+  gap: var(--space-8);
+  padding: var(--space-10) var(--space-16) var(--space-12);
   border-top: 1px solid var(--border);
 }
 

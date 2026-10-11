@@ -12,7 +12,7 @@
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
-  gap: 8px 16px;
+  gap: var(--space-8) var(--space-16);
   min-width: 0;
   min-height: var(--nav-row-h);
   padding: 0 var(--gutter);
@@ -34,20 +34,20 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 28px;
+  gap: var(--space-32);
 }
 
 .systemOverview__server {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 /* Databases: the size band (app_explorer_treemap.js band(), explorer.css "Size band"). */
 .systemDatabases__notes {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .systemDatabases__notes[hidden],
@@ -63,14 +63,14 @@
 .systemCard {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .systemCard__head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: var(--space-4) var(--space-8);
   margin: 0;
 }
 
@@ -96,7 +96,7 @@
 
 .systemCard .uiState--compact {
   justify-items: start;
-  padding: 10px 12px;
+  padding: var(--space-10) var(--space-12);
   border: 1px dashed var(--border);
   border-radius: var(--r-md);
   text-align: left;
@@ -118,27 +118,27 @@
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   align-items: start;
-  gap: 18px 24px;
+  gap: var(--space-20) var(--space-24);
 }
 
 .systemGrid__main,
 .systemGrid__side {
   display: grid;
   min-width: 0;
-  gap: 18px;
+  gap: var(--space-20);
 }
 
 .systemCluster {
   display: grid;
   min-width: 0;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .systemCluster__head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 10px;
+  gap: var(--space-4) var(--space-10);
 }
 
 .systemCluster__name {
@@ -151,7 +151,7 @@
 }
 
 .systemTable__local {
-  margin-left: 6px;
+  margin-left: var(--space-6);
   vertical-align: middle;
 }
 
@@ -167,15 +167,15 @@
   /* One column no wider than the view: a wide table scrolls in its own
      wrap instead of widening the page (phones). */
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--space-16);
 }
 
 .systemActivitySection__head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 10px;
-  margin-bottom: 6px;
+  gap: var(--space-4) var(--space-10);
+  margin-bottom: var(--space-6);
 }
 
 .systemActivitySection__title {
@@ -201,7 +201,7 @@
   display: inline-block;
   width: 7px;
   height: 7px;
-  margin-right: 6px;
+  margin-right: var(--space-6);
   border-radius: 50%;
   background: var(--warning);
 }
@@ -257,7 +257,7 @@
 
 .systemActivity__quiet {
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
   color: var(--muted);
   font-size: var(--fs-sm);
 }
@@ -276,8 +276,8 @@
 .systemIssue {
   display: grid;
   min-width: 0;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: var(--space-6);
+  padding: var(--space-10) var(--space-12);
   border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
   border-radius: var(--r-md);
 }
@@ -290,19 +290,19 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
+  gap: var(--space-6) var(--space-8);
 }
 
 .systemIssue__hint {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .systemIssue__code {
   min-width: 0;
-  padding: 2px 6px;
+  padding: var(--space-2) var(--space-6);
   border-radius: var(--r-sm);
   background: var(--theadBg);
   font-family: var(--font-mono);
@@ -317,19 +317,19 @@
 .systemPerf {
   display: grid;
   min-width: 0;
-  gap: 14px;
+  gap: var(--space-16);
 }
 
 .systemPerf__notes {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .systemPerf__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .systemChart .chartCard__head {
@@ -385,8 +385,8 @@
 }
 
 .systemChart__flat {
-  margin: 0 0 6px;
-  padding: 0 12px;
+  margin: 0 0 var(--space-6);
+  padding: 0 var(--space-12);
   color: var(--muted);
   font-size: var(--fs-sm);
 }
@@ -400,8 +400,8 @@
 .systemChart__empty .uiState--compact {
   align-content: center;
   justify-items: start;
-  margin: 4px 4px 2px;
-  padding: 10px 12px;
+  margin: var(--space-4) var(--space-4) var(--space-2);
+  padding: var(--space-10) var(--space-12);
   border: 1px dashed var(--border);
   border-radius: var(--r-md);
   text-align: left;
@@ -422,7 +422,7 @@
 .systemQueries {
   display: grid;
   min-width: 0;
-  gap: 14px;
+  gap: var(--space-16);
 }
 
 /* A shape's page (shape.html) shows its one view: no gap for the list's and notes' empty rows. */
@@ -439,7 +439,7 @@
 .systemQueries__notes {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .systemQueries__narrow {
@@ -449,7 +449,7 @@
 .systemQueries__list {
   display: grid;
   min-width: 0;
-  gap: 14px;
+  gap: var(--space-16);
 }
 
 .systemQueries__tiles {
@@ -510,8 +510,8 @@
   display: none;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px 8px;
-  margin-top: 2px;
+  gap: var(--space-2) var(--space-8);
+  margin-top: var(--space-2);
   color: var(--muted);
   font-size: var(--fs-xs);
 }
@@ -541,14 +541,14 @@
      a reason to widen it. */
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
-  gap: 14px;
+  gap: var(--space-16);
 }
 
 .systemQuery__head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px 14px;
+  gap: var(--space-12) var(--space-16);
 }
 
 /* A shape's time range and refresh button, in its head: the filter bar's controls
@@ -573,7 +573,7 @@
 .systemQuery__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-8);
   margin-left: auto;
 }
 
@@ -602,7 +602,7 @@
 .systemQuery__top {
   display: grid;
   min-width: 0;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 /* A wide screen has room right of the query: the figures take that side, two to a row, level with
@@ -631,13 +631,13 @@
 .systemQuery__charts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .systemQuery__runs > .systemCard__head {
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: var(--space-4) var(--space-8);
   margin: 0;
 }
 
@@ -656,7 +656,7 @@
 
 .systemQuery__exception {
   display: block;
-  margin-top: 2px;
+  margin-top: var(--space-2);
   overflow: hidden;
   color: var(--muted);
   font-size: var(--fs-xs);
@@ -754,14 +754,14 @@
 .systemDisks {
   display: grid;
   min-width: 0;
-  gap: 18px;
+  gap: var(--space-20);
 }
 
 .systemDisks__notes,
 .systemDisks__growthNotes {
   display: grid;
   min-width: 0;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .systemDisks__tiles {
@@ -780,15 +780,15 @@
 .systemDisks__cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .systemDisk {
   display: grid;
   min-width: 0;
   align-content: start;
-  gap: 8px;
-  padding: 12px;
+  gap: var(--space-8);
+  padding: var(--space-12);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--panelBg);
@@ -798,7 +798,7 @@
   display: grid;
   min-width: 0;
   align-content: start;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 /* Disks on one filesystem: one card on its own row, the filesystem on the
@@ -806,7 +806,7 @@
 .systemDisk.is-group {
   grid-column: 1 / -1;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: 12px 24px;
+  gap: var(--space-12) var(--space-24);
 }
 
 .systemDisk__group {
@@ -818,16 +818,16 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
   align-content: start;
-  gap: 12px;
+  gap: var(--space-12);
   min-width: 0;
 }
 
 .systemDisk__member {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
-  padding-left: 12px;
+  padding-left: var(--space-12);
   border-left: 1px solid var(--border);
 }
 
@@ -856,7 +856,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: var(--space-4) var(--space-8);
 }
 
 .systemDisk__name {
@@ -870,7 +870,7 @@
 .systemDisk__flags {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .systemDisk__meter .shareBar__text {
@@ -915,7 +915,7 @@
 .systemDisk__facts {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 12px;
+  gap: var(--space-4) var(--space-12);
   margin: 0;
   font-size: var(--fs-sm);
 }
@@ -946,7 +946,7 @@
 }
 
 .systemDisk__sub {
-  margin-left: 6px;
+  margin-left: var(--space-6);
   color: var(--muted);
   font-weight: var(--fw-regular);
 }
@@ -959,15 +959,15 @@
 .systemDiskDb {
   display: grid;
   min-width: 0;
-  gap: 6px;
-  margin-top: 6px;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
 }
 
 .systemDiskDb__head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 10px;
+  gap: var(--space-4) var(--space-10);
 }
 
 .systemDiskDb__disk {
@@ -995,7 +995,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .systemDiskDb__link {
@@ -1003,7 +1003,7 @@
   min-width: 0;
   max-width: 100%;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-6);
   padding: 0;
   border: 0;
   background: none;

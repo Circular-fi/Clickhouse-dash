@@ -194,7 +194,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  gap: 4px;
+  gap: var(--space-4);
   box-sizing: border-box;
   width: 100%;
   min-height: var(--dt-row);
@@ -313,7 +313,7 @@ th[aria-sort="descending"] > .dataTable__sort::after {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .shareBar__text {
@@ -354,7 +354,7 @@ th[aria-sort="descending"] > .dataTable__sort::after {
 
 /* One hover copy button per cell. */
 .dataTable .dataTable__copy {
-  margin-left: 4px;
+  margin-left: var(--space-4);
   vertical-align: middle;
   opacity: 0;
 }

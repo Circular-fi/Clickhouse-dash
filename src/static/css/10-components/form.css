@@ -5,13 +5,13 @@
 
 .uiForm {
   display: grid;
-  gap: 0.7rem;
+  gap: var(--space-12);
   min-width: 0;
 }
 
 .uiField {
   display: grid;
-  gap: 0.3rem;
+  gap: var(--space-4);
   min-width: 0;
   min-inline-size: 0;
   margin: 0;
@@ -31,7 +31,7 @@
 
 /* A fieldset's legend sits outside the field's grid: it keeps the grid's gap itself. */
 legend.uiField__label {
-  margin-bottom: 0.3rem;
+  margin-bottom: var(--space-4);
 }
 
 .uiField__hint {
@@ -54,7 +54,7 @@ legend.uiField__label {
 .uiField__row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
 }
 
@@ -65,7 +65,7 @@ legend.uiField__label {
 .uiInput {
   width: 100%;
   min-width: 0;
-  padding: 0.5rem 0.6rem;
+  padding: var(--space-8) var(--space-10);
   border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   background: var(--inputBg);
@@ -106,13 +106,13 @@ legend.uiField__label {
 
 .uiChecks {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .uiCheck {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
   cursor: pointer;
 }

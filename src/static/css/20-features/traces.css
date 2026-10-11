@@ -1,7 +1,7 @@
 /* Traces: search, results, the trace detail (waterfall, graph, statistics, flamegraph), spans,
    services and the service map. */
 
-.tracesSearchButton { height: 32px; min-height: 32px; padding: 0 12px; white-space: nowrap; }
+.tracesSearchButton { height: 32px; min-height: 32px; padding: 0 var(--space-12); white-space: nowrap; }
 
 .tracesResults {
   min-height: 0;
@@ -16,8 +16,8 @@
   min-height: 90px;
   display: grid;
   grid-template-columns: 84px minmax(0, 1fr);
-  gap: 12px;
-  padding: 14px 12px;
+  gap: var(--space-12);
+  padding: var(--space-16) var(--space-12);
   border: 0;
   border-bottom: 1px solid var(--rowDivider);
   border-left: 0;
@@ -36,15 +36,15 @@
 .traceDetailHeader {
   flex: 0 0 auto;
   min-height: 54px;
-  padding: 8px 12px;
+  padding: var(--space-8) var(--space-12);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-12);
   border-bottom: 1px solid var(--border);
 }
 
-.traceDetailHeader > div { min-width: 0; display: grid; gap: 2px; }
+.traceDetailHeader > div { min-width: 0; display: grid; gap: var(--space-2); }
 
 .traceDetailHeader strong { font-size: var(--fs-sm); }
 
@@ -73,10 +73,10 @@
   flex: 0 0 auto;
   display: flex;
   grid-auto-flow: column;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
-.traceDetailHeader__stats span { padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--r-sm); }
+.traceDetailHeader__stats span { padding: var(--space-4) var(--space-6); border: 1px solid var(--border); border-radius: var(--r-sm); }
 
 /* scroll-padding-top: a row scrolled into view (keyboard focus, a click on a
    row half under it) lands below the sticky head, not under it. */
@@ -106,7 +106,7 @@
 .traceSpanRow__label {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-6);
   position: relative;
   min-width: 0;
   padding: 0;
@@ -168,9 +168,9 @@
 
 .traceInspector { min-width: 0; min-height: 0; overflow: auto; background: color-mix(in srgb, var(--panelBg) 96%, var(--bg)); scrollbar-gutter: stable; }
 
-.traceInspectorHead { padding: 10px; display: flex; align-items: start; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--border); }
+.traceInspectorHead { padding: var(--space-10); display: flex; align-items: start; justify-content: space-between; gap: var(--space-8); border-bottom: 1px solid var(--border); }
 
-.traceInspectorHead > div { min-width: 0; display: grid; gap: 3px; }
+.traceInspectorHead > div { min-width: 0; display: grid; gap: var(--space-4); }
 
 .traceInspectorHead strong { overflow: hidden; text-overflow: ellipsis; font: var(--fw-semibold) var(--fs-sm) var(--font-mono); }
 
@@ -187,7 +187,7 @@
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--border);
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .traceSearchResults__toolbar h2 {
@@ -200,14 +200,14 @@
 .traceResultsSort {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-8);
   color: var(--muted);
   font-size: var(--fs-xs);
 }
 
 .traceResultsSort select {
   height: 29px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-sm);
   background: var(--inputBg);
@@ -230,16 +230,16 @@
 
 .traceDetailHeader--jaeger {
   min-height: 62px;
-  padding: 9px 14px;
+  padding: var(--space-10) var(--space-16);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .traceBackButton {
   flex: 0 0 auto;
   height: 30px;
-  padding: 0 9px;
+  padding: 0 var(--space-10);
   border-radius: var(--r-sm);
   font-size: var(--fs-xs);
 }
@@ -248,7 +248,7 @@
   flex: 1 1 auto;
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: var(--space-4);
 }
 
 .traceDetailHeader--jaeger .traceDetailHeader__title strong {
@@ -274,11 +274,11 @@
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .traceDetailHeader--jaeger .traceDetailHeader__stats span {
-  padding: 3px 6px;
+  padding: var(--space-4) var(--space-6);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   color: var(--muted);
@@ -329,8 +329,8 @@
   align-items: center;
   border-right: 1px solid var(--border);
   justify-content: space-between;
-  gap: 8px;
-  padding: 0 8px;
+  gap: var(--space-8);
+  padding: 0 var(--space-8);
 }
 
 .traceWaterfallHead__timeline { position: relative; overflow: hidden; }
@@ -401,7 +401,7 @@
   max-height: 34%;
   border-top: 1px solid var(--border);
   overflow-x: hidden;
-  padding-bottom: 3px;
+  padding-bottom: var(--space-4);
 }
 
 .traceInspectorHead--jaeger span:not(:where(.badge.badge--md.badge--key)) { font-size: var(--fs-xs); }
@@ -434,15 +434,15 @@
   z-index: var(--z-panel);
   display: grid;
   grid-template-columns: minmax(160px, 1.1fr) 92px minmax(150px, 1fr) minmax(160px, 1.15fr) minmax(250px, 1.5fr) 76px auto;
-  gap: 7px;
-  padding: 8px 12px 7px;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12) var(--space-8);
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
   box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 50%, transparent);
   align-items: center;
   min-height: 52px;
-  padding-top: 7px;
-  padding-bottom: 6px;
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-6);
 }
 
 .traceSearchField > input {
@@ -466,7 +466,7 @@
   background: var(--inputBg);
   color: var(--text);
   font: var(--fs-xs) var(--font-sans);
-  padding: 0 6px;
+  padding: 0 var(--space-6);
 }
 
 .traceSearchField > input:focus,
@@ -479,16 +479,16 @@
 .traceSearchSubmit {
   height: 29px;
   min-height: 29px;
-  padding: 0 9px;
+  padding: 0 var(--space-10);
   border-radius: var(--r-sm);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   white-space: nowrap;
 }
 
-.traceTagSearch__label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.traceTagSearch__label { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); }
 
-.traceMiniButton { height: 15px; padding: 0 4px; border: 0; background: transparent; color: var(--accentText); cursor: pointer; font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+.traceMiniButton { height: 15px; padding: 0 var(--space-4); border: 0; background: transparent; color: var(--accentText); cursor: pointer; font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 
 .traceMiniButton:disabled { color: var(--muted); cursor: default; opacity: .55; }
 
@@ -505,22 +505,22 @@
 .traceAnalyticsGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  padding: 8px 12px 0;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12) 0;
 }
 
-.traceChartLegend { min-height: 25px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 9px; padding: 2px 4px 0; color: var(--muted); font-size: var(--fs-xs); }
+.traceChartLegend { min-height: 25px; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4) var(--space-10); padding: var(--space-2) var(--space-4) 0; color: var(--muted); font-size: var(--fs-xs); }
 
-.traceChartLegend > span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.traceChartLegend > span { display: inline-flex; align-items: center; gap: var(--space-4); white-space: nowrap; }
 
 .traceChartLegend i { width: 7px; height: 7px; border-radius: var(--r-sm); }
 
-.traceResultsSection { padding: 8px 12px 20px; }
+.traceResultsSection { padding: var(--space-8) var(--space-12) var(--space-20); }
 
 .traceResultsSection .traceSearchResults__toolbar {
   min-height: 35px;
   flex-wrap: wrap;
-  row-gap: 6px;
+  row-gap: var(--space-6);
 }
 
 .traceResultsSection .traceSearchResults__toolbar h2 { font-size: var(--fs-md); }
@@ -531,20 +531,20 @@
   width: 100%;
   display: grid;
   grid-template-columns: 1fr;
-  gap: 4px;
+  gap: var(--space-4);
   border: 0;
   border-bottom: 1px solid var(--rowDivider);
   background: transparent;
   color: var(--text);
   cursor: pointer;
   min-height: 54px;
-  padding: 7px 6px 6px;
+  padding: var(--space-8) var(--space-6) var(--space-6);
 }
 
 .traceResult.traceResult--wide:hover,
 .traceResult.traceResult--wide:focus-visible { background: var(--rowHover); }
 
-.traceResult__line { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.traceResult__line { min-width: 0; display: flex; align-items: center; gap: var(--space-8); }
 
 .traceResult__line--main { min-height: 20px; }
 
@@ -581,14 +581,14 @@
   color: var(--muted);
   font-size: var(--fs-xs);
   align-items: center;
-  gap: 14px;
+  gap: var(--space-16);
 }
 
 .traceResult__right b { color: var(--text); font: var(--fw-semibold) var(--fs-sm) var(--font-sans); font-variant-numeric: tabular-nums; }
 
 .traceResult__line--stats {
   color: var(--muted);
-  gap: 10px;
+  gap: var(--space-10);
   font-size: var(--fs-xs);
 }
 
@@ -608,8 +608,8 @@
 .tracePageHeader__titleRow {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 10px;
+  gap: var(--space-10);
+  padding: var(--space-6) var(--space-10);
   min-width: 0;
   min-height: 44px;
   flex-wrap: nowrap;
@@ -621,7 +621,7 @@
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   overflow: hidden;
 }
 
@@ -638,7 +638,7 @@
 .tracePageHeader__title strong > span { font-weight: var(--fw-semibold); }
 
 .tracePageHeader__title strong > small {
-  margin-left: 5px;
+  margin-left: var(--space-6);
   color: var(--muted);
   font: var(--fw-medium) var(--fs-xs) var(--font-mono);
 }
@@ -647,7 +647,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-4);
   color: var(--muted);
 }
 
@@ -693,16 +693,16 @@
 .tracePageOverviewDivider {
   width: 1px;
   background: var(--border);
-  margin: 6px 0;
+  margin: var(--space-6) 0;
 }
 
 /* Overview: one row per span (SpanGraph render-into-canvas), 60..200 px. */
 .traceOverview {
   position: relative;
-  padding: 0 10px 6px;
+  padding: 0 var(--space-10) var(--space-6);
   border-top: 1px solid var(--rowDivider);
-  padding-left: 10px;
-  padding-right: 10px;
+  padding-left: var(--space-10);
+  padding-right: var(--space-10);
   height: auto;
 }
 
@@ -777,7 +777,7 @@
 }
 
 .tracePageOverviewItem:first-child {
-  padding-left: 9px;
+  padding-left: var(--space-10);
   min-width: 145px;
 }
 
@@ -815,7 +815,7 @@
   flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 5px;
+  gap: var(--space-6);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -825,7 +825,7 @@
   font-weight: var(--fw-regular);
   display: inline-flex;
   align-items: baseline;
-  gap: 3px;
+  gap: var(--space-4);
   white-space: nowrap;
   font-size: var(--fs-xs);
 }
@@ -841,11 +841,11 @@
 .traceInspectorStatusMessage {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-8);
   border-top: 1px solid var(--rowDivider);
   color: var(--muted);
   font-size: var(--fs-xs);
-  padding: 3px 10px;
+  padding: var(--space-4) var(--space-10);
 }
 
 .traceInspectorStatusMessage b { color: var(--text); }
@@ -859,14 +859,14 @@
 
 .traceJaegerGroup > summary {
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   color: var(--text);
   font-weight: var(--fw-semibold);
   cursor: pointer;
   list-style: none;
   user-select: none;
   min-height: 24px;
-  padding: 0 10px;
+  padding: 0 var(--space-10);
   font-size: var(--fs-xs);
 }
 
@@ -891,7 +891,7 @@
 }
 
 .traceJaegerGroup__body {
-  padding: 2px 10px 7px 24px;
+  padding: var(--space-2) var(--space-10) var(--space-8) var(--space-24);
 }
 
 .traceJaegerEmpty {
@@ -915,9 +915,9 @@
   flex-wrap: wrap;
   color: var(--muted);
   align-items: center;
-  padding: 1px 10px 3px 24px;
+  padding: 1px var(--space-10) var(--space-4) var(--space-24);
   justify-content: flex-start;
-  gap: 4px 14px;
+  gap: var(--space-4) var(--space-16);
   font-size: var(--fs-xs);
 }
 
@@ -929,7 +929,7 @@
 @media (max-width: 980px) {
   .traceInspectorHead--jaeger {
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-6);
     align-items: flex-start;
   }
 }
@@ -940,10 +940,10 @@
   z-index: var(--z-sticky-top);
   justify-content: space-between;
   display: flex;
-  gap: 12px;
+  gap: var(--space-12);
   white-space: nowrap;
   min-height: 31px;
-  padding: 4px 10px;
+  padding: var(--space-4) var(--space-10);
   background: transparent;
   flex-direction: row;
   align-items: center;
@@ -986,11 +986,11 @@
   position: relative;
   z-index: var(--z-raised);
   min-width: 0;
-  padding-right: 8px;
+  padding-right: var(--space-8);
   display: flex;
   align-items: center;
   overflow: hidden;
-  gap: 5px;
+  gap: var(--space-6);
   min-height: 24px;
   height: 24px;
 }
@@ -1008,7 +1008,7 @@
   min-height: 0;
   border-top: 3px solid var(--trace-service-color);
   margin: 0;
-  padding: 0 0 3px;
+  padding: 0 0 var(--space-4);
   background: transparent;
 }
 
@@ -1025,8 +1025,8 @@
   .traceInspector--inline .traceInspectorHead--jaeger {
     flex-direction: column;
     align-items: stretch;
-    gap: 4px;
-    padding: 6px 10px;
+    gap: var(--space-4);
+    padding: var(--space-6) var(--space-10);
     white-space: normal;
   }
   .traceInspector--inline .traceInspectorHead--jaeger > strong {
@@ -1038,7 +1038,7 @@
     align-items: flex-start;
     justify-content: flex-start;
     margin-left: 0;
-    gap: 2px;
+    gap: var(--space-2);
     max-width: none;
     overflow: visible;
     white-space: normal;
@@ -1049,8 +1049,8 @@
     overflow-wrap: anywhere;
   }
   .traceInspector--inline .traceInspectorHead__meta > i { display: none; }
-  .traceInspector--inline .traceInspectorIdentity { padding-left: 10px; }
-  .traceInspector--inline .traceJaegerGroup__body { padding-left: 10px; }
+  .traceInspector--inline .traceInspectorIdentity { padding-left: var(--space-10); }
+  .traceInspector--inline .traceJaegerGroup__body { padding-left: var(--space-10); }
 }
 
 .traceResult__when {
@@ -1138,7 +1138,7 @@
 .traceJaegerGroup--summary > summary {
   height: 24px;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-6);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -1149,8 +1149,8 @@
   height: auto;
   min-height: 24px;
   flex-wrap: wrap;
-  row-gap: 2px;
-  padding-bottom: 4px;
+  row-gap: var(--space-2);
+  padding-bottom: var(--space-4);
 }
 
 .traceJaegerGroup__count {
@@ -1165,8 +1165,8 @@
   overflow: visible;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 4px 16px;
-  padding-left: 15px;
+  gap: var(--space-4) var(--space-16);
+  padding-left: var(--space-16);
   white-space: normal;
 }
 
@@ -1223,7 +1223,7 @@
   font-weight: var(--fw-regular);
 }
 
-.traceJaegerSummaryPreview > span { margin-right: 9px; }
+.traceJaegerSummaryPreview > span { margin-right: var(--space-10); }
 
 .traceJaegerSummaryPreview b { color: color-mix(in srgb, var(--text) 78%, var(--muted)); font-weight: var(--fw-medium); }
 
@@ -1245,7 +1245,7 @@
 .tracePageHeader__traceId {
   display: inline-flex !important;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-4);
   color: var(--muted);
   flex: 0 0 auto;
   max-width: 250px;
@@ -1313,7 +1313,7 @@
   min-width: max-content;
   display: inline-flex;
   align-items: baseline;
-  gap: 4px;
+  gap: var(--space-4);
   white-space: nowrap;
   color: var(--muted);
   font: var(--fs-xs) var(--font-sans);
@@ -1387,8 +1387,8 @@
 
 .traceTagSearch__inputs .traceMiniButton {
   height: 31px;
-  padding: 0 8px;
-  margin-left: 4px;
+  padding: 0 var(--space-8);
+  margin-left: var(--space-4);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-md);
   background: var(--buttonBg);
@@ -1405,11 +1405,11 @@
 .traceServiceFilters {
   min-width: 0;
   min-height: 30px;
-  padding: 4px 10px 3px;
+  padding: var(--space-4) var(--space-10) var(--space-4);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 6px;
+  gap: var(--space-4) var(--space-6);
   border-top: 1px solid var(--rowDivider);
   background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
   align-content: flex-start;
@@ -1475,7 +1475,7 @@
 
 /* v9 free-form exact tag inputs */
 .traceTagSearch__inputs > input {
-  padding: 0 9px;
+  padding: 0 var(--space-10);
   border: 1px solid var(--buttonBorder);
   outline: none;
   background: var(--buttonBg);
@@ -1508,13 +1508,13 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .tracesResultCount__latency { color: var(--muted); font-weight: var(--fw-medium); }
 
 /* List item */
-.traceResult.traceResultItem { gap: 5px; padding: 6px 6px 7px; }
+.traceResult.traceResultItem { gap: var(--space-6); padding: var(--space-6) var(--space-6) var(--space-8); }
 
 .traceResultItem__title {
   position: relative;
   isolation: isolate;
   min-height: 26px;
-  padding: 3px 7px;
+  padding: var(--space-4) var(--space-8);
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--text) 4%, transparent);
   overflow: hidden;
@@ -1540,7 +1540,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceResultItem .traceResult__right b { font-size: var(--fs-md); }
 
-.traceResultItem .traceResult__line--stats { gap: 8px; padding: 0 1px 0 7px; }
+.traceResultItem .traceResult__line--stats { gap: var(--space-8); padding: 0 1px 0 var(--space-8); }
 
 .traceResultItem .traceResult__when { flex: 0 0 auto; margin-left: auto; }
 
@@ -1551,7 +1551,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 4px;
+  gap: var(--space-4);
   overflow: hidden;
 }
 
@@ -1572,7 +1572,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 /* Table view (the Query page's result table look) */
 .tracesResults--table { border-top: 0; }
 
-.traceTableWrap { margin-top: 8px; }
+.traceTableWrap { margin-top: var(--space-8); }
 
 .traceTable__col--name { width: 27%; }
 
@@ -1587,7 +1587,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceTable__startToggle {
   width: 20px;
   height: 20px;
-  margin-left: 6px;
+  margin-left: var(--space-6);
   display: inline-grid;
   place-items: center;
   padding: 0;
@@ -1603,7 +1603,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceTable__nameText { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
 
-.traceTable__name .traceTag--incomplete { margin-left: 6px; vertical-align: middle; }
+.traceTable__name .traceTag--incomplete { margin-left: var(--space-6); vertical-align: middle; }
 
 .traceTable__name:has(.traceTag--incomplete) .traceTable__nameText { max-width: calc(100% - 104px); }
 
@@ -1644,7 +1644,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceWaterfall--jaeger .traceWaterfallHead__operation {
   min-width: 0;
-  gap: 6px;
+  gap: var(--space-6);
   overflow: hidden;
 }
 
@@ -1681,7 +1681,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceWaterfallHead__sep {
   width: 1px;
   height: 14px;
-  margin: 0 3px;
+  margin: 0 var(--space-4);
   background: var(--border);
 }
 
@@ -1739,8 +1739,8 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 /* Name column: tree offset (SpanTreeOffset), icons, pills. */
 .traceWaterfall--jaeger .traceSpanRow__labelContent {
-  gap: 5px;
-  padding-left: 4px;
+  gap: var(--space-6);
+  padding-left: var(--space-4);
 }
 
 .traceTreeOffset {
@@ -1789,7 +1789,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceTreeOffset__guide.is-guide-hovered .traceTreeOffset__elbow {
   height: 2px;
-  margin-top: -.5px;
+  margin-top: -1px;
   background: currentColor;
 }
 
@@ -1798,7 +1798,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceTreeOffset__box {
   min-width: 18px;
   height: 16px;
-  padding: 0 2px;
+  padding: 0 var(--space-2);
   flex: 0 0 auto;
   display: inline-grid;
   place-items: center;
@@ -1926,24 +1926,24 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   display: inline-block;
   width: 7px;
   height: 7px;
-  margin-right: 4px;
+  margin-right: var(--space-4);
   border-radius: var(--r-sm);
   background: var(--trace-service-color, var(--accentBorder));
 }
 
 .traceInspectorHead__abs {
-  margin-left: 4px;
+  margin-left: var(--space-4);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
 
-.traceInspectorIdentity > span { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
+.traceInspectorIdentity > span { display: inline-flex; align-items: center; gap: var(--space-4); min-width: 0; }
 
 .traceInspectorIdentity__deepLink {
   margin-left: auto;
   height: 20px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: transparent;
@@ -1957,7 +1957,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 /* Events (Jaeger's AccordionEvents). */
 .traceSpanEvents__list,
-.traceEventPopover__list { display: grid; gap: 3px; }
+.traceEventPopover__list { display: grid; gap: var(--space-4); }
 
 .traceSpanEvent {
   min-width: 0;
@@ -1968,10 +1968,10 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceSpanEvent > summary {
   min-height: 22px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   overflow: hidden;
   white-space: nowrap;
   list-style: none;
@@ -1999,10 +1999,10 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceSpanEvent[open] > summary .traceJaegerSummaryPreview { display: none; }
 
-.traceSpanEvent__body { padding: 0 6px 6px 22px; }
+.traceSpanEvent__body { padding: 0 var(--space-6) var(--space-6) var(--space-24); }
 
 .traceSpanEvents__more {
-  margin: 4px 0 0;
+  margin: var(--space-4) 0 0;
   padding: 0;
   border: 0;
   background: none;
@@ -2013,25 +2013,25 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceSpanEvents__more:hover { text-decoration: underline; }
 
-.traceSpanEvents__note { display: block; margin-top: 4px; color: var(--muted); font-size: var(--fs-xs); font-style: italic; }
+.traceSpanEvents__note { display: block; margin-top: var(--space-4); color: var(--muted); font-size: var(--fs-xs); font-style: italic; }
 
 /* References (Jaeger's AccordionLinks / AccordianReferences). */
-.traceSpanRefs__list { margin: 0; padding: 0; display: grid; gap: 3px; list-style: none; }
+.traceSpanRefs__list { margin: 0; padding: 0; display: grid; gap: var(--space-4); list-style: none; }
 
 .traceSpanRefs__item {
   min-width: 0;
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 4px 10px;
+  gap: var(--space-4) var(--space-10);
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--panelBg) 70%, transparent);
   font-size: var(--fs-xs);
 }
 
-.traceSpanRefs__main { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; }
+.traceSpanRefs__main { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--space-2) var(--space-8); }
 
 .traceSpanRefs__svc { font-weight: var(--fw-semibold); }
 
@@ -2040,7 +2040,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   display: inline-block;
   width: 7px;
   height: 7px;
-  margin-right: 4px;
+  margin-right: var(--space-4);
   border-radius: var(--r-sm);
   background: var(--trace-service-color, var(--muted));
 }
@@ -2051,13 +2051,13 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceSpanRefs__op { color: var(--text); }
 
-.traceSpanRefs__ids { display: inline-flex; flex-wrap: wrap; gap: 2px 10px; color: var(--muted); font-size: var(--fs-xs); }
+.traceSpanRefs__ids { display: inline-flex; flex-wrap: wrap; gap: var(--space-2) var(--space-10); color: var(--muted); font-size: var(--fs-xs); }
 
 .traceSpanRefs__ids code { color: var(--text); font-size: var(--fs-xs); }
 
 .traceSpanRefs__open {
   height: 20px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--border);
@@ -2090,12 +2090,12 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   max-height: min(420px, calc(100vh - 16px));
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 8px 10px;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-10);
   border-top: 2px solid var(--trace-service-color, var(--accentBorder));
 }
 
-.traceEventPopover__head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
+.traceEventPopover__head { display: flex; align-items: center; gap: var(--space-8); font-size: var(--fs-sm); }
 
 .traceEventPopover__head > span { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--fs-xs); }
 
@@ -2115,17 +2115,17 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 34px;
-  padding: 4px 10px;
+  padding: var(--space-4) var(--space-10);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  gap: var(--space-4) var(--space-16);
 }
 
 /* The Timeline's services panel is folded until this opens it. */
 .traceServicesToggle {
-  gap: 4px;
-  padding-left: 6px;
+  gap: var(--space-4);
+  padding-left: var(--space-6);
 }
 
 .traceServicesToggle__count {
@@ -2136,7 +2136,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceViewBar__picker {
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   display: none;
 }
 
@@ -2144,14 +2144,14 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .traceViewBar__label { color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); white-space: nowrap; }
 
 .traceViewBar__tools { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; }
 
-.traceViewBar__group { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.traceViewBar__group { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4) var(--space-12); }
 
 .traceViewBar__input {
   width: 230px;
@@ -2190,7 +2190,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 /* Trace Statistics and Trace Spans Table. */
 .traceStats,
-.traceSpansTable { min-width: 0; padding: 10px; }
+.traceSpansTable { min-width: 0; padding: var(--space-10); }
 
 .traceStats__table tbody th {
   max-width: 420px;
@@ -2201,7 +2201,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceStats__table tbody th:not(:where(.dataTable > tbody > tr > th)) { font-weight: var(--fw-semibold); }
 
 .traceStats__row.has-service > th:not(:where(.dataTable > thead > tr > th.is-sortable)) {
-  padding-left: 12px;
+  padding-left: var(--space-12);
 }
 
 .traceStats__row.has-service > th:not(:where(.dataTable > tbody > tr.is-selected > :first-child)) {
@@ -2210,7 +2210,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceStats__row--detail > th {
   color: color-mix(in srgb, var(--text) 85%, var(--muted));
-  padding-left: 28px;
+  padding-left: var(--space-32);
   font-weight: var(--fw-regular);
 }
 
@@ -2232,10 +2232,10 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   text-align: center;
 }
 
-.traceSpansTable__more { padding: 8px 10px; color: var(--muted); font-size: var(--fs-xs); }
+.traceSpansTable__more { padding: var(--space-8) var(--space-10); color: var(--muted); font-size: var(--fs-xs); }
 
 /* Trace Flamegraph (icicle: width = duration). */
-.traceFlame { min-width: 0; padding: 10px; }
+.traceFlame { min-width: 0; padding: var(--space-10); }
 
 .traceFlame__canvas { position: relative; min-width: 0; overflow: hidden; }
 
@@ -2243,7 +2243,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   position: absolute;
   height: 19px;
   box-sizing: border-box;
-  padding: 0 4px;
+  padding: 0 var(--space-4);
   overflow: hidden;
   border-top: 2px solid var(--trace-service-color, var(--muted));
   border-right: 1px solid var(--panelBg);
@@ -2284,7 +2284,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   display: grid;
   justify-self: start;
   gap: 1px;
-  padding: 4px 9px 5px 9px;
+  padding: var(--space-4) var(--space-10) var(--space-6) var(--space-10);
   border: 1px solid var(--graph-node-border);
   border-left: 4px solid var(--graph-muted);
   border-radius: var(--r-md);
@@ -2299,11 +2299,11 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceGraphLegend__anatomy b + span { color: var(--graph-text); }
 
-.traceGraphLegend__kinds > span + i { margin-left: 6px; }
+.traceGraphLegend__kinds > span + i { margin-left: var(--space-6); }
 
 .traceGraphLegend__label {
   flex: 0 0 auto;
-  padding: 0 6px;
+  padding: 0 var(--space-6);
   border: 1px solid var(--graph-node-border);
   border-radius: var(--r-sm);
   background: var(--graph-label-bg);
@@ -2373,10 +2373,10 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 /* Exceptions: type and message in red, then the parsed stack trace. */
 .traceException {
-  margin: 4px 10px 6px 24px;
-  padding: 6px 10px 8px;
+  margin: var(--space-4) var(--space-10) var(--space-6) var(--space-24);
+  padding: var(--space-6) var(--space-10) var(--space-8);
   display: grid;
-  gap: 8px;
+  gap: var(--space-8);
   border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
   border-left: 3px solid var(--danger);
   border-radius: var(--r-sm);
@@ -2384,13 +2384,13 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   font-size: var(--fs-xs);
 }
 
-.traceException__head { display: flex; align-items: baseline; gap: 4px; color: var(--danger); font-size: var(--fs-xs); }
+.traceException__head { display: flex; align-items: baseline; gap: var(--space-4); color: var(--danger); font-size: var(--fs-xs); }
 
-.traceException__item { min-width: 0; display: grid; gap: 4px; }
+.traceException__item { min-width: 0; display: grid; gap: var(--space-4); }
 
-.traceException__item + .traceException__item { padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.traceException__item + .traceException__item { padding-top: var(--space-8); border-top: 1px dashed color-mix(in srgb, var(--danger) 35%, var(--border)); }
 
-.traceException__title { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.traceException__title { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-8); }
 
 .traceException__title > .icon {
   flex: 0 0 auto;
@@ -2415,11 +2415,11 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 }
 
 .traceStack__bar {
-  padding: 3px 6px;
+  padding: var(--space-4) var(--space-6);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
+  gap: var(--space-4) var(--space-6);
   border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 
@@ -2427,7 +2427,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceStack__button {
   height: 20px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: transparent;
@@ -2442,17 +2442,17 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceStack__rows {
   max-height: 360px;
   margin: 0;
-  padding: 4px 0;
+  padding: var(--space-4) 0;
   overflow: auto;
   list-style: none;
   font: var(--fs-xs)/1.45 var(--font-mono);
 }
 
-.traceStack__row { padding: 0 8px; overflow-wrap: anywhere; }
+.traceStack__row { padding: 0 var(--space-8); overflow-wrap: anywhere; }
 
 .traceStack__row[hidden] { display: none; }
 
-.traceStack__frame { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.traceStack__frame { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-10); }
 
 .traceStack__frame:hover { background: var(--rowHover); }
 
@@ -2460,23 +2460,23 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceStack__loc { color: color-mix(in srgb, var(--accentBorder) 70%, var(--muted)); }
 
-.traceStack__code { flex-basis: 100%; padding-left: 14px; color: var(--muted); font: inherit; white-space: pre-wrap; }
+.traceStack__code { flex-basis: 100%; padding-left: var(--space-16); color: var(--muted); font: inherit; white-space: pre-wrap; }
 
 .traceStack__frame.is-library .traceStack__fn,
 .traceStack__frame.is-library .traceStack__loc { color: var(--muted); font-weight: var(--fw-regular); }
 
 .traceStack__row--text { color: var(--muted); }
 
-.traceStack__row--cause { margin-top: 3px; color: var(--danger); font-weight: var(--fw-semibold); }
+.traceStack__row--cause { margin-top: var(--space-4); color: var(--danger); font-weight: var(--fw-semibold); }
 
 .traceStack__row--omitted { color: var(--muted); font-style: italic; }
 
-.traceStack__hidden { display: block; padding: 0 8px 4px; color: var(--muted); font-size: var(--fs-xs); font-style: italic; }
+.traceStack__hidden { display: block; padding: 0 var(--space-8) var(--space-4); color: var(--muted); font-size: var(--fs-xs); font-style: italic; }
 
 .traceStack__raw {
   max-height: 360px;
   margin: 0;
-  padding: 6px 8px;
+  padding: var(--space-6) var(--space-8);
   overflow: auto;
   color: var(--text);
   font: var(--fs-xs)/1.45 var(--font-mono);
@@ -2487,7 +2487,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceSpanRow__exception {
   width: 14px;
   height: 14px;
-  margin-right: 2px;
+  margin-right: var(--space-2);
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -2496,7 +2496,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 }
 
 .tracePageHeader__exceptions {
-  margin: 0 4px 0 8px;
+  margin: 0 var(--space-4) 0 var(--space-8);
   align-self: center;
 }
 
@@ -2506,14 +2506,14 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 .traceHighlights {
   min-width: 0;
   max-width: 100%;
-  padding: 0 10px 0 0;
+  padding: 0 var(--space-10) 0 0;
   margin-left: auto;
   display: flex;
   flex: 0 1 auto;
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
-  gap: 4px 6px;
+  gap: var(--space-4) var(--space-6);
 }
 
 .traceHighlights > * { flex: 0 0 auto; }
@@ -2536,7 +2536,7 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 }
 
 .traceHighlight__key {
-  padding: 0 6px;
+  padding: 0 var(--space-6);
   display: inline-flex;
   align-items: center;
   border-right: 1px solid var(--border);
@@ -2545,17 +2545,17 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
   white-space: nowrap;
 }
 
-.traceHighlight__value { min-width: 0; padding: 0 7px; display: inline-flex; align-items: center; overflow: hidden; font-weight: var(--fw-semibold); white-space: nowrap; text-overflow: ellipsis; }
+.traceHighlight__value { min-width: 0; padding: 0 var(--space-8); display: inline-flex; align-items: center; overflow: hidden; font-weight: var(--fw-semibold); white-space: nowrap; text-overflow: ellipsis; }
 
 .traceHighlight:hover,
 .traceHighlight:focus-visible { border-color: var(--accentBorder); }
 
 /* Linked from other traces (References section). */
-.traceLinkedFrom { margin-top: 6px; display: grid; gap: 4px; }
+.traceLinkedFrom { margin-top: var(--space-6); display: grid; gap: var(--space-4); }
 
-.traceSpanRefs__list + .traceLinkedFrom { padding-top: 6px; border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent); }
+.traceSpanRefs__list + .traceLinkedFrom { padding-top: var(--space-6); border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent); }
 
-.traceLinkedFrom__head { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-xs); }
+.traceLinkedFrom__head { display: flex; align-items: baseline; gap: var(--space-6); font-size: var(--fs-xs); }
 
 .traceLinkedFrom__status { color: var(--muted); font-size: var(--fs-xs); font-style: italic; }
 
@@ -2565,8 +2565,8 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceLinkedFrom__load {
   height: 18px;
-  margin-left: 4px;
-  padding: 0 7px;
+  margin-left: var(--space-4);
+  padding: 0 var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: transparent;
@@ -2579,11 +2579,11 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceLinkedFrom__item {
   min-width: 0;
-  padding: 4px 8px;
+  padding: var(--space-4) var(--space-8);
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 4px 10px;
+  gap: var(--space-4) var(--space-10);
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--panelBg) 70%, transparent);
@@ -2609,9 +2609,9 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceContextPanel__title b { color: var(--text); }
 
-.traceContextPanel__controls { padding: 8px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-bottom: 1px solid var(--border); }
+.traceContextPanel__controls { padding: var(--space-8) var(--space-16); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-12); border-bottom: 1px solid var(--border); }
 
-.traceContextPanel__attr { min-width: 0; flex: 1 1 260px; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-xs); }
+.traceContextPanel__attr { min-width: 0; flex: 1 1 260px; display: flex; align-items: center; gap: var(--space-6); color: var(--muted); font-size: var(--fs-xs); }
 
 .traceContextPanel__attr select {
   min-width: 0;
@@ -2626,21 +2626,21 @@ html.chdash-trace-analytics .traceAnalyticsGrid[hidden] {
 
 .traceContextPanel__status {
   margin: 0;
-  padding: 6px 16px;
+  padding: var(--space-6) var(--space-16);
   color: var(--muted);
   font-size: var(--fs-xs);
 }
 
 .traceContextPanel__error {
   margin: 0;
-  padding: 6px 16px;
+  padding: var(--space-6) var(--space-16);
   font-size: var(--fs-xs);
   color: var(--danger);
 }
 
-.traceContextPanel__body { min-height: 0; flex: 1 1 auto; padding: 0 8px 12px; overflow: auto; }
+.traceContextPanel__body { min-height: 0; flex: 1 1 auto; padding: 0 var(--space-8) var(--space-12); overflow: auto; }
 
-.traceContextPanel__more { margin: 6px 8px; }
+.traceContextPanel__more { margin: var(--space-6) var(--space-8); }
 
 .traceContextRow { cursor: pointer; }
 
@@ -2691,7 +2691,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   min-width: 190px;
   max-width: min(360px, calc(100vw - 16px));
   display: grid;
-  padding: 4px;
+  padding: var(--space-4);
   border: 1px solid var(--borderStrong, var(--border));
   border-radius: var(--r-md);
   background: var(--panelBg);
@@ -2705,11 +2705,11 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceFilterMenu__title {
   min-width: 0;
   display: flex;
-  gap: 6px;
+  gap: var(--space-6);
   align-items: baseline;
-  padding: 4px 7px 6px;
+  padding: var(--space-4) var(--space-8) var(--space-6);
   border-bottom: 1px solid var(--border);
-  margin-bottom: 3px;
+  margin-bottom: var(--space-4);
   color: var(--muted);
 }
 
@@ -2719,7 +2719,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 
 .traceFilterMenu__item {
   height: 26px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;
@@ -2744,13 +2744,13 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 
 /* The Attributes / Fields sidebar: an ns.sidePanel shell (.uiSide,
    Components: panels); its list scrolls in the shell's body. */
-.traceFacets__list { padding: 2px 0 8px; }
+.traceFacets__list { padding: var(--space-2) 0 var(--space-8); }
 
 .traceFacet__status.is-error { color: var(--danger); }
 
-.traceFacets__group--pinned { padding-bottom: 3px; margin-bottom: 3px; border-bottom: 1px solid var(--border); }
+.traceFacets__group--pinned { padding-bottom: var(--space-4); margin-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
 
-.traceFacet__head { display: flex; align-items: center; min-width: 0; padding: 0 4px 0 2px; }
+.traceFacet__head { display: flex; align-items: center; min-width: 0; padding: 0 var(--space-4) 0 var(--space-2); }
 
 .traceFacet__expand {
   flex: 1 1 auto;
@@ -2758,8 +2758,8 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   height: 25px;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 4px;
+  gap: var(--space-6);
+  padding: 0 var(--space-4);
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;
@@ -2781,7 +2781,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 /* A scope's keys under its name (Record, Log attributes, Resource
    attributes...): the words, not letter badges. */
 .traceFacets__groupTitle {
-  padding: 8px 8px 3px;
+  padding: var(--space-8) var(--space-8) var(--space-4);
   color: var(--muted);
   font-size: var(--fs-xs);
   font-weight: var(--fw-medium);
@@ -2818,11 +2818,11 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceFacet__pin:hover,
 .traceFacetValue__exclude:hover { background: var(--rowHover); color: var(--text); }
 
-.traceFacet__values { padding: 0 6px 5px 22px; }
+.traceFacet__values { padding: 0 var(--space-6) var(--space-6) var(--space-24); }
 
-.traceFacetValue { min-width: 0; display: flex; align-items: center; gap: 4px; min-height: 22px; }
+.traceFacetValue { min-width: 0; display: flex; align-items: center; gap: var(--space-4); min-height: 22px; }
 
-.traceFacetValue__label { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: var(--fs-xs); }
+.traceFacetValue__label { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--space-6); cursor: pointer; font-size: var(--fs-xs); }
 
 .traceFacetValue__label input { flex: 0 0 auto; width: 12px; height: 12px; margin: 0; accent-color: var(--accentBorder); }
 
@@ -2830,11 +2830,11 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 
 .traceFacetValue.is-excluded .traceFacetValue__text { color: var(--danger); text-decoration: line-through; }
 
-.traceFacet__status { padding: 3px 0; color: var(--muted); font-size: var(--fs-xs); }
+.traceFacet__status { padding: var(--space-4) 0; color: var(--muted); font-size: var(--fs-xs); }
 
 .traceFacet__more {
   height: 22px;
-  padding: 0 4px;
+  padding: 0 var(--space-4);
   border: 0;
   background: transparent;
   color: var(--accentText);
@@ -2845,14 +2845,14 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 
 .traceFacets__more {
   height: 22px;
-  padding: 0 4px;
+  padding: 0 var(--space-4);
   border: 0;
   background: transparent;
   color: var(--accentText);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   cursor: pointer;
-  margin: 4px 8px 0;
+  margin: var(--space-4) var(--space-8) 0;
 }
 
 .traceFacet__more:hover,
@@ -2863,11 +2863,11 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
    icon would otherwise grow the line it sits on (the trace header's Logs tile). */
 .traceLogsToggle {
   height: 17px;
-  padding: 0 6px 0 4px;
+  padding: 0 var(--space-6) 0 var(--space-4);
   display: inline-flex;
   vertical-align: middle;
   align-items: center;
-  gap: 3px;
+  gap: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: color-mix(in srgb, var(--sev-info) 10%, transparent);
@@ -2883,7 +2883,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceLogsToggle.is-open { border-color: color-mix(in srgb, var(--sev-info) 70%, transparent); background: color-mix(in srgb, var(--sev-info) 20%, transparent); }
 
 .traceLogsToggle__errors {
-  margin-left: 3px;
+  margin-left: var(--space-4);
   color: var(--danger);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
@@ -2908,18 +2908,18 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   flex: 0 0 auto;
   min-width: 0;
   min-height: 32px;
-  padding: 3px 10px;
+  padding: var(--space-4) var(--space-10);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: var(--space-4) var(--space-10);
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--theadBg) 40%, var(--panelBg));
 }
 
-.traceLogsPanel__title { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.traceLogsPanel__title { display: inline-flex; align-items: center; gap: var(--space-6); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 
-.traceLogsPanel__chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.traceLogsPanel__chips { display: inline-flex; flex-wrap: wrap; gap: var(--space-4); }
 
 .traceLogsPanel__bar > .traceLogsPanel__service { width: auto; flex: 0 0 auto; position: relative; }
 
@@ -2935,7 +2935,7 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
   height: 22px;
   display: inline-flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-md);
   background: var(--buttonBg);
@@ -2950,10 +2950,10 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceLogsPanel__open:focus-visible { border-color: var(--buttonBorderHover); }
 
 .traceLogsPanel__notice {
-  padding: 3px 10px;
+  padding: var(--space-4) var(--space-10);
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 14px;
+  gap: var(--space-2) var(--space-16);
   border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-size: var(--fs-xs);
@@ -2967,31 +2967,31 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 
 .traceLogsPanel__more {
   height: 22px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: transparent;
   color: var(--muted);
   font: var(--fw-semibold) var(--fs-xs) var(--font-sans);
   cursor: pointer;
-  margin: 6px 10px;
+  margin: var(--space-6) var(--space-10);
 }
 
 .traceSpanLogsRow__more {
   height: 22px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: transparent;
   color: var(--muted);
   font: var(--fw-semibold) var(--fs-xs) var(--font-sans);
   cursor: pointer;
-  margin: 3px 0 4px 36px;
+  margin: var(--space-4) 0 var(--space-4) var(--space-40);
 }
 
 .traceLog__openSpan {
   height: 22px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   background: transparent;
@@ -3011,11 +3011,11 @@ button.traceFilterChip__op:hover { background: var(--rowHover); color: var(--tex
 .traceLog__row {
   min-width: 0;
   height: 24px;
-  padding: 0 10px 0 4px;
+  padding: 0 var(--space-10) 0 var(--space-4);
   display: grid;
   grid-template-columns: 16px 50px 76px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   box-shadow: inset 2px 0 0 var(--sev-color);
   font-size: var(--fs-sm);
   cursor: pointer;
@@ -3095,9 +3095,9 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
 }
 
 .traceLog__details {
-  padding: 6px 10px 8px 30px;
+  padding: var(--space-6) var(--space-10) var(--space-8) var(--space-32);
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
   background: color-mix(in srgb, var(--theadBg) 30%, transparent);
   box-shadow: inset 2px 0 0 var(--sev-color);
   font-size: var(--fs-xs);
@@ -3107,7 +3107,7 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
 .traceLog__fullBody {
   max-height: 240px;
   margin: 0;
-  padding: 6px 8px;
+  padding: var(--space-6) var(--space-8);
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -3120,7 +3120,7 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
 
 .traceLog__cut { color: var(--warning); }
 
-.traceLog__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 14px; color: var(--muted); }
+.traceLog__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4) var(--space-16); color: var(--muted); }
 
 .traceLog__meta b { color: var(--text); font-weight: var(--fw-semibold); }
 
@@ -3128,7 +3128,7 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
 
 .traceLog__meta .traceLog__openSpan { margin-left: auto; }
 
-.traceLog__attrs { display: grid; gap: 3px; }
+.traceLog__attrs { display: grid; gap: var(--space-4); }
 
 .traceLog__attrs > b {
   color: var(--muted);
@@ -3143,7 +3143,7 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
   cursor: pointer;
 }
 
-.traceLog__resource[open] > summary { margin-bottom: 3px; }
+.traceLog__resource[open] > summary { margin-bottom: var(--space-4); }
 
 /* Span rows: log count badge (label) and log markers (timeline). */
 .traceSpanLogsBadge {
@@ -3165,7 +3165,7 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
   bottom: 2px;
   width: 5px;
   height: 5px;
-  margin-left: -2.5px;
+  margin-left: -2px;
   border-radius: 50%;
   background: var(--sev-color);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--panelBg) 80%, transparent);
@@ -3194,10 +3194,10 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
   min-width: 0;
   height: 100%;
   box-sizing: border-box;
-  padding-right: 8px;
+  padding-right: var(--space-8);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   border-right: 1px solid var(--border);
 }
 
@@ -3220,7 +3220,7 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
   top: 50%;
   width: 7px;
   height: 7px;
-  margin: -3.5px 0 0 -3.5px;
+  margin: -4px 0 0 -4px;
   transform: rotate(45deg);
   border-radius: var(--r-sm);
   background: var(--sev-color);
@@ -3240,10 +3240,10 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
 
 .traceLogLine__offset.is-outside { left: 8px; transform: translateY(-50%); font-style: italic; }
 
-.traceLog--inline > .traceLog__details { padding-left: 48px; }
+.traceLog--inline > .traceLog__details { padding-left: var(--space-48); }
 
 /* Inspector Logs group. */
-.traceSpanLogs__summary { min-width: 0; display: inline-flex; gap: 6px; overflow: hidden; }
+.traceSpanLogs__summary { min-width: 0; display: inline-flex; gap: var(--space-6); overflow: hidden; }
 
 .traceSpanLogs[open] > summary .traceSpanLogs__summary { display: none; }
 
@@ -3270,10 +3270,10 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
   position: static;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-8);
   min-height: 0;
   box-shadow: none;
-  padding: 4px 12px 8px;
+  padding: var(--space-4) var(--space-12) var(--space-8);
   border-bottom: 0;
   background: transparent;
   align-items: end;
@@ -3294,7 +3294,7 @@ button.traceLog__span:hover { color: var(--text); text-decoration: underline; }
   gap: var(--obsBarGap);
   min-width: 0;
   min-height: 0;
-  padding: 8px 12px;
+  padding: var(--space-8) var(--space-12);
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--panelBg) 98%, var(--bg));
   box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 50%, transparent);
@@ -3352,8 +3352,8 @@ html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
 
 .traceMap__notice {
   align-self: start;
-  margin-top: 56px;
-  padding: 5px 10px;
+  margin-top: var(--space-64);
+  padding: var(--space-6) var(--space-10);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--graph-surface);
@@ -3371,7 +3371,7 @@ html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
 
 .traceMapPanel__edges {
   display: grid;
-  gap: 2px;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3384,9 +3384,9 @@ html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
 
 .traceChart--heatmap:focus-visible { outline: 2px solid var(--accentBorder); outline-offset: -2px; }
 
-.traceHeatLegend { justify-content: flex-start; gap: 4px 10px; }
+.traceHeatLegend { justify-content: flex-start; gap: var(--space-4) var(--space-10); }
 
-.traceHeatLegend__scale { display: inline-flex; align-items: center; gap: 4px; }
+.traceHeatLegend__scale { display: inline-flex; align-items: center; gap: var(--space-4); }
 
 .traceHeatLegend__ramp { display: inline-flex; height: 7px; border-radius: var(--r-sm); overflow: hidden; }
 
@@ -3398,11 +3398,11 @@ html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
 
 .traceHeatLegend__hint { margin-left: auto; }
 
-.traceDeltaPanel { margin: 8px 12px 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--panelBg); min-width: 0; }
+.traceDeltaPanel { margin: var(--space-8) var(--space-12) 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--panelBg); min-width: 0; }
 
-.traceDeltaPanel__head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 7px 9px; border-bottom: 1px solid var(--border); }
+.traceDeltaPanel__head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-6) var(--space-12); padding: var(--space-8) var(--space-10); border-bottom: 1px solid var(--border); }
 
-.traceDeltaPanel__title { min-width: 0; flex: 1 1 260px; display: grid; gap: 2px; }
+.traceDeltaPanel__title { min-width: 0; flex: 1 1 260px; display: grid; gap: var(--space-2); }
 
 .traceDeltaPanel__title strong { font-size: var(--fs-xs); }
 
@@ -3410,41 +3410,41 @@ html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
 
 .traceDeltaPanel__title b { color: var(--text); font-weight: var(--fw-semibold); }
 
-.traceDeltaPanel__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.traceDeltaPanel__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-6); }
 
-.traceDeltaPanel__baseline { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: var(--fs-xs); }
+.traceDeltaPanel__baseline { display: inline-flex; align-items: center; gap: var(--space-6); color: var(--muted); font-size: var(--fs-xs); }
 
-.traceDeltaPanel__baseline select { height: 24px; max-width: 190px; padding: 0 6px; border: 1px solid var(--buttonBorder); border-radius: var(--r-md); background: var(--inputBg, var(--panelBg)); color: var(--text); font: inherit; font-size: var(--fs-xs); }
+.traceDeltaPanel__baseline select { height: 24px; max-width: 190px; padding: 0 var(--space-6); border: 1px solid var(--buttonBorder); border-radius: var(--r-md); background: var(--inputBg, var(--panelBg)); color: var(--text); font: inherit; font-size: var(--fs-xs); }
 
-.traceDeltaPanel__meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; padding: 5px 9px 0; color: var(--muted); font-size: var(--fs-xs); }
+.traceDeltaPanel__meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4) var(--space-16); padding: var(--space-6) var(--space-10) 0; color: var(--muted); font-size: var(--fs-xs); }
 
-.traceDeltaLegend { display: inline-flex; gap: 10px; }
+.traceDeltaLegend { display: inline-flex; gap: var(--space-10); }
 
-.traceDeltaLegend > span { display: inline-flex; align-items: center; gap: 4px; }
+.traceDeltaLegend > span { display: inline-flex; align-items: center; gap: var(--space-4); }
 
 .traceDeltaLegend > span::before { content: ""; width: 9px; height: 7px; border-radius: var(--r-sm); background: var(--trace-delta-baseline); }
 
 .traceDeltaLegend > .is-selection::before { background: var(--trace-delta-selection); }
 
-.traceDeltaPanel__body { padding: 7px 9px 9px; }
+.traceDeltaPanel__body { padding: var(--space-8) var(--space-10) var(--space-10); }
 
-.traceDeltaGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 7px; }
+.traceDeltaGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: var(--space-8); }
 
-.traceDeltaCard { min-width: 0; border: 1px solid var(--border); border-radius: var(--r-sm); padding: 6px 7px 5px; }
+.traceDeltaCard { min-width: 0; border: 1px solid var(--border); border-radius: var(--r-sm); padding: var(--space-6) var(--space-8) var(--space-6); }
 
-.traceDeltaCard > header { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 4px; }
+.traceDeltaCard > header { display: flex; align-items: center; gap: var(--space-6); min-width: 0; margin-bottom: var(--space-4); }
 
 .traceDeltaCard > header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--fw-semibold) var(--fs-xs) var(--font-mono); }
 
-.traceDeltaCard__scope { flex: 0 0 auto; padding: 0 4px; border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); font-size: var(--fs-xs); line-height: 13px; }
+.traceDeltaCard__scope { flex: 0 0 auto; padding: 0 var(--space-4); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); font-size: var(--fs-xs); line-height: 13px; }
 
 .traceDeltaCard__score { flex: 0 0 auto; margin-left: auto; color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; }
 
-.traceDeltaCard__values { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.traceDeltaCard__values { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
 
-.traceDeltaRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(56px, 34%) auto 18px; align-items: center; gap: 6px; min-height: 20px; }
+.traceDeltaRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(56px, 34%) auto 18px; align-items: center; gap: var(--space-6); min-height: 20px; }
 
-.traceDeltaRow__value { min-width: 0; padding: 1px 3px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: var(--fs-xs) var(--font-mono); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.traceDeltaRow__value { min-width: 0; padding: 1px var(--space-4); border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text); font: var(--fs-xs) var(--font-mono); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 
 .traceDeltaRow__value:hover {
   background: var(--rowHover, color-mix(in srgb, var(--text) 8%, transparent));
@@ -3457,7 +3457,7 @@ html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
   box-shadow: 0 0 0 2px var(--accentBorder);
 }
 
-.traceDeltaRow__bars { display: grid; gap: 2px; }
+.traceDeltaRow__bars { display: grid; gap: var(--space-2); }
 
 .traceDeltaRow__bars i { display: block; height: 5px; min-width: 1px; border-radius: 0 var(--r-sm) var(--r-sm) 0; background: var(--trace-delta-baseline); }
 
@@ -3481,7 +3481,7 @@ html.chdash-trace-tab-map #traceMapView[hidden] { display: flex !important; }
 }
 
 @media (max-width: 760px) {
-  .traceDeltaPanel { margin: 8px 8px 0; }
+  .traceDeltaPanel { margin: var(--space-8) var(--space-8) 0; }
   .traceHeatLegend__hint { display: none; }
 }
 
@@ -3495,7 +3495,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 /* The list (.traceSvc__main) and the service detail docked beside it. */
 .traceSvc { display: flex; align-items: flex-start; min-width: 0; }
 
-.traceSvc__main { flex: 1 1 auto; min-width: 0; padding: 0 12px 16px; }
+.traceSvc__main { flex: 1 1 auto; min-width: 0; padding: 0 var(--space-12) var(--space-16); }
 
 .traceSvc.is-loading .traceSvc__table { opacity: .6; transition: opacity var(--dur-base) var(--ease); }
 
@@ -3504,7 +3504,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
+  gap: var(--space-6) var(--space-12);
   border-bottom: 1px solid var(--border);
 }
 
@@ -3512,13 +3512,13 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSvc__meta { color: var(--muted); font-size: var(--fs-xs); }
 
-.traceSvc__status { flex: 1 1 auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.traceSvc__status { flex: 1 1 auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-6); min-width: 0; }
 
-.traceSvc__error { margin: 8px 0 0; color: var(--danger); font-size: var(--fs-sm); }
+.traceSvc__error { margin: var(--space-8) 0 0; color: var(--danger); font-size: var(--fs-sm); }
 
 .traceSvcAction {
   height: 22px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-sm);
   background: var(--inputBg);
@@ -3538,7 +3538,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSvcRow { cursor: pointer; }
 
-.traceSvcRow__cell { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.traceSvcRow__cell { display: flex; align-items: center; gap: var(--space-8); min-width: 0; }
 
 .traceSvcRow__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
@@ -3546,7 +3546,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSvcTrend { width: 118px; }
 
-.traceSvcTrend__cell { display: flex; align-items: center; gap: 4px; }
+.traceSvcTrend__cell { display: flex; align-items: center; gap: var(--space-4); }
 
 .traceSvcTrend__peak { flex: 0 0 auto; min-width: 40px; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 
@@ -3558,23 +3558,23 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSvcLink:hover { color: var(--accentBorder); text-decoration-style: solid; }
 
-.traceSvcStat { padding: 7px 10px; background: var(--panelBg); }
+.traceSvcStat { padding: var(--space-8) var(--space-10); background: var(--panelBg); }
 
-.traceSvcNote { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: color-mix(in srgb, var(--warning) 75%, var(--text)); font-size: var(--fs-sm); }
+.traceSvcNote { display: flex; align-items: center; gap: var(--space-8); margin-bottom: var(--space-8); color: color-mix(in srgb, var(--warning) 75%, var(--text)); font-size: var(--fs-sm); }
 
-.traceSvcCharts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.traceSvcCharts { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-8); }
 
 .traceSvcChart { min-height: 158px; }
 
-.traceSvcSection { margin-top: 14px; }
+.traceSvcSection { margin-top: var(--space-16); }
 
-.traceSvcSection h4 { margin: 0 0 6px; font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.traceSvcSection h4 { margin: 0 0 var(--space-6); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 
 .traceSvcSlowest { margin: 0; padding: 0; list-style: none; }
 
 .traceSvcSlowest li { border-bottom: 1px solid var(--rowDivider); }
 
-.traceSvcSlowest__link { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto auto auto; align-items: center; gap: 10px; padding: 5px 4px; color: inherit; font-size: var(--fs-sm); text-decoration: none; }
+.traceSvcSlowest__link { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto auto auto; align-items: center; gap: var(--space-10); padding: var(--space-6) var(--space-4); color: inherit; font-size: var(--fs-sm); text-decoration: none; }
 
 .traceSvcSlowest__link:hover { background: var(--rowHover); }
 
@@ -3588,9 +3588,9 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSvcSlowest code { color: var(--muted); font-size: var(--fs-xs); }
 
-.traceSvcReleases { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.traceSvcReleases { display: flex; flex-wrap: wrap; gap: var(--space-6); margin: 0; padding: 0; list-style: none; }
 
-.traceSvcReleases li { display: inline-flex; gap: 6px; padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: var(--fs-xs); }
+.traceSvcReleases li { display: inline-flex; gap: var(--space-6); padding: var(--space-4) var(--space-8); border: 1px solid var(--border); border-radius: var(--r-sm); font-size: var(--fs-xs); }
 
 .traceSvcReleases li span { color: var(--muted); }
 
@@ -3604,20 +3604,20 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 .traceResultsSection.is-spanMode .traceResultsSort,
 .traceResultsSection.is-spanMode .traceResultsViewToggle { display: none; }
 
-.traceSpanTools { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.traceSpanTools { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--space-8); }
 
 .traceSpanTools[hidden] { display: none; }
 
 .traceSpanTools__kind { flex: 0 0 auto; }
 
-.traceSpanTools__duration { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: var(--fs-xs); }
+.traceSpanTools__duration { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--fs-xs); }
 
 .traceSpanTools__duration[hidden] { display: none; }
 
 .traceSpanTools__duration input {
   width: 68px;
   height: 27px;
-  padding: 0 7px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-sm);
   background: var(--inputBg);
@@ -3635,7 +3635,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSpanTable {
   position: relative;
-  margin-top: 8px;
+  margin-top: var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
   outline: none;
@@ -3672,8 +3672,8 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: var(--space-10);
+  padding: var(--space-8) var(--space-10);
   color: var(--muted);
   font-size: var(--fs-sm);
 }
@@ -3684,7 +3684,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSpanPanel__card.traceInspector { max-height: none; min-height: 0; margin: 0; overflow: visible; border: 0; background: transparent; }
 
-.traceSpanPanel__status { padding: 12px 0; color: var(--muted); font-size: var(--fs-sm); }
+.traceSpanPanel__status { padding: var(--space-12) 0; color: var(--muted); font-size: var(--fs-sm); }
 
 .traceSpanPanel__status.is-error { color: var(--danger); }
 
@@ -3696,17 +3696,17 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 /* The span column picker: a .uiPopover (ns.popover.open). */
 .traceSpanColumns {
   width: 360px;
-  padding: 10px;
+  padding: var(--space-10);
   font-size: var(--fs-sm);
 }
 
-.traceSpanColumns__title { margin-bottom: 6px; font-weight: var(--fw-semibold); }
+.traceSpanColumns__title { margin-bottom: var(--space-6); font-weight: var(--fw-semibold); }
 
-.traceSpanColumns__list { max-height: 240px; margin: 0 0 8px; padding: 0; overflow: auto; list-style: none; }
+.traceSpanColumns__list { max-height: 240px; margin: 0 0 var(--space-8); padding: 0; overflow: auto; list-style: none; }
 
-.traceSpanColumns__item { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.traceSpanColumns__item { display: flex; align-items: center; gap: var(--space-6); padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
 
-.traceSpanColumns__scope { flex: 0 0 auto; padding: 1px 5px; border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); font-size: var(--fs-xs); }
+.traceSpanColumns__scope { flex: 0 0 auto; padding: 1px var(--space-6); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--muted); font-size: var(--fs-xs); }
 
 .traceSpanColumns__key { flex: 1 1 auto; min-width: 0; overflow: hidden; font-family: var(--font-mono); white-space: nowrap; text-overflow: ellipsis; }
 
@@ -3727,15 +3727,15 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSpanColumns__move:disabled { opacity: .4; cursor: default; }
 
-.traceSpanColumns__empty { padding: 6px 0; color: var(--muted); }
+.traceSpanColumns__empty { padding: var(--space-6) 0; color: var(--muted); }
 
-.traceSpanColumns__add { display: flex; gap: 6px; }
+.traceSpanColumns__add { display: flex; gap: var(--space-6); }
 
 .traceSpanColumns__add input {
   flex: 1 1 auto;
   min-width: 0;
   height: 27px;
-  padding: 0 7px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-sm);
   background: var(--inputBg);
@@ -3745,7 +3745,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 
 .traceSpanColumns__add input:focus { border-color: var(--accentBorder); box-shadow: var(--ring); }
 
-.traceSpanColumns__note { display: block; margin-top: 6px; color: var(--muted); font-size: var(--fs-xs); }
+.traceSpanColumns__note { display: block; margin-top: var(--space-6); color: var(--muted); font-size: var(--fs-xs); }
 
 @keyframes traceDeepLinkFlash { from { background-color: color-mix(in srgb, var(--accentBorder) 38%, transparent); } to { background-color: color-mix(in srgb, var(--accentBorder) 14%, transparent); } }
 
@@ -3758,7 +3758,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 @media (max-width: 600px) {
   #traceDetailHeader .tracePageHeader__titleRow {
     flex-wrap: wrap;
-    row-gap: 2px;
+    row-gap: var(--space-2);
   }
   #traceDetailHeader .tracePageHeader__title {
     flex: 1 1 0;
@@ -3797,7 +3797,7 @@ html.chdash-trace-tab-services #traceServicesView[hidden] { display: block !impo
 /* Formerly in 30-overrides.css: they win by their place at the end of the file. */
 
 .traceJaegerGroup--summary .traceJaegerGroup__body {
-  padding: 0 10px 5px 24px;
+  padding: 0 var(--space-10) var(--space-6) var(--space-24);
 }
 
 .traceSpanRow.is-active .traceSpanRow__serviceDot {

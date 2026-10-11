@@ -20,7 +20,7 @@
 /* One button: --control-h high, 13 px medium, --r-md corners, flat. The primary action sits on
    --accent-fill and a destructive one on --danger-fill, with --on-fill text, in both themes. */
 .button {
-  padding: 0 12px;
+  padding: 0 var(--space-12);
   border-radius: var(--r-md);
   border: 1px solid var(--buttonBorder);
   background: var(--buttonBg);
@@ -79,12 +79,12 @@ button.button--danger:not(:disabled):hover {
 #copyJsonButton,
 .resultsStack__copy {
   min-inline-size: 5.5rem;
-  padding-right: 0rem;
+  padding-right: 0;
 }
 
 .button--small {
   height: var(--control-h-sm);
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   font-size: var(--fs-sm);
 }
 
@@ -176,10 +176,10 @@ button.button--danger:not(:disabled):hover {
 .foldSummary {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   width: 100%;
   min-height: var(--control-h);
-  padding: 0 10px;
+  padding: 0 var(--space-10);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-md);
   background: var(--buttonBg);
@@ -252,11 +252,11 @@ button.button--danger:not(:disabled):hover {
 
 .traceLogsPanel__bar > .traceLogsPanel__title + .closeCross { margin-left: auto; }
 
-.metricsFilterForm .button { padding: 0 11px; }
+.metricsFilterForm .button { padding: 0 var(--space-12); }
 
 .obsFilterBar__toggle[aria-pressed="true"] { border-color: color-mix(in srgb, var(--success) 55%, var(--buttonBorder)); }
 
-.traceDeltaPanel__actions .button--small { padding: 0 9px; }
+.traceDeltaPanel__actions .button--small { padding: 0 var(--space-10); }
 
 /* A destructive tool (Delete, Remove) reads in the danger colour, without the
    filled look of the confirm's own Delete. */

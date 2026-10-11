@@ -61,7 +61,7 @@ body[data-page="mcp"] #mcpPanel {
 }
 
 .mcpNewKey {
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 /* The keys beside the side column. A key is narrow (a name of 32 characters, a UUID), so the side column
@@ -71,7 +71,7 @@ body[data-page="mcp"] #mcpPanel {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 14px 16px;
+  gap: var(--space-16) var(--space-16);
 }
 
 .mcpLayout[hidden] {
@@ -103,9 +103,9 @@ body[data-page="mcp"] #mcpPanel {
 .mcpBlock {
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
-  padding: 12px;
+  padding: var(--space-12);
 }
 
 .mcpBlock + .mcpBlock {
@@ -125,7 +125,7 @@ body[data-page="mcp"] #mcpPanel {
 .mcpBlock__title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-8);
   margin: 0;
   color: var(--text);
   font-size: var(--fs-md);
@@ -135,7 +135,7 @@ body[data-page="mcp"] #mcpPanel {
 
 .mcpHostList {
   display: grid;
-  gap: 4px;
+  gap: var(--space-4);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -144,7 +144,7 @@ body[data-page="mcp"] #mcpPanel {
 .mcpHostRow {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
   min-height: 24px;
 }
@@ -170,7 +170,7 @@ body[data-page="mcp"] #mcpPanel {
 .mcpLimits {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 3px 12px;
+  gap: var(--space-4) var(--space-12);
   margin: 0;
 }
 
@@ -189,7 +189,7 @@ body[data-page="mcp"] #mcpPanel {
 /* The client snippets: one block at a time under a row of tabs (the side column and the secret panel). */
 .mcpClients {
   display: grid;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
 }
 
@@ -201,7 +201,7 @@ body[data-page="mcp"] #mcpPanel {
 
 .mcpClients__panel {
   display: grid;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
 }
 
@@ -220,7 +220,7 @@ body[data-page="mcp"] #mcpPanel {
   max-width: 100%;
   max-height: 14rem;
   margin: 0;
-  padding: 10px 40px 10px 12px;
+  padding: var(--space-10) var(--space-40) var(--space-10) var(--space-12);
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
@@ -251,11 +251,11 @@ body[data-page="mcp"] #mcpPanel {
 .mcpKeys__filter {
   width: min(18rem, 100%);
   margin-left: auto;
-  padding-block: 0.25rem;
+  padding-block: var(--space-4);
 }
 
 .mcpKeys__none {
-  padding: 12px;
+  padding: var(--space-12);
 }
 
 /* The containing block of the visually hidden labels of the actions: they stay inside the table's
@@ -280,7 +280,7 @@ body[data-page="mcp"] #mcpPanel {
 
 .mcpTable > tbody > tr > td {
   height: 2rem;
-  padding-block: 3px;
+  padding-block: var(--space-4);
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: middle;
@@ -302,7 +302,7 @@ body[data-page="mcp"] #mcpPanel {
 .mcpKeyOpen {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   max-width: 100%;
   margin: 0;
   padding: 0;
@@ -349,7 +349,7 @@ body[data-page="mcp"] #mcpPanel {
 .mcpSecret {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
 }
 
@@ -364,11 +364,11 @@ body[data-page="mcp"] #mcpPanel {
 }
 
 .mcpAction {
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 26px;
   height: 24px;
   min-height: 0;
-  padding: 0 5px;
+  padding: 0 var(--space-6);
   border-color: transparent;
   background: transparent;
   color: var(--muted);
@@ -408,7 +408,7 @@ body[data-page="mcp"] #mcpPanel {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-8);
   margin-left: auto;
 }
 
@@ -445,7 +445,7 @@ body[data-page="mcp"] #mcpPanel {
   grid-template-columns: 19rem minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   align-items: stretch;
-  gap: 8px 18px;
+  gap: var(--space-8) var(--space-20);
   min-height: 0;
 }
 
@@ -453,14 +453,14 @@ body[data-page="mcp"] #mcpPanel {
 .mcpKeyForm__perms {
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: var(--space-8);
   min-width: 0;
   min-height: 0;
   overflow: auto;
 }
 
 .mcpKeyForm .uiField {
-  gap: 3px;
+  gap: var(--space-4);
 }
 
 .mcpKeyForm .uiField__hint {
@@ -471,7 +471,7 @@ body[data-page="mcp"] #mcpPanel {
 .mcpFieldRow {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--space-10);
   align-items: start;
 }
 
@@ -482,14 +482,14 @@ body[data-page="mcp"] #mcpPanel {
 /* The hosts, one under the other. */
 .mcpHostChecks {
   display: grid;
-  gap: 5px;
+  gap: var(--space-6);
 }
 
 /* The permissions: one card for each family of tools, set apart by its border and its head. The check
    box of the head is the whole family; the arrow opens its tools. */
 .mcpGroups {
   display: grid;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .mcpGroup {
@@ -506,9 +506,9 @@ body[data-page="mcp"] #mcpPanel {
 .mcpGroup__head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
-  padding: 5px 6px 5px 10px;
+  padding: var(--space-6) var(--space-6) var(--space-6) var(--space-10);
 }
 
 .mcpGroup__head .uiCheck {
@@ -561,8 +561,8 @@ body[data-page="mcp"] #mcpPanel {
 .mcpGroup__body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px 14px;
-  padding: 8px 10px 10px;
+  gap: var(--space-4) var(--space-16);
+  padding: var(--space-8) var(--space-10) var(--space-10);
   border-top: 1px solid var(--border);
 }
 
@@ -577,7 +577,7 @@ body[data-page="mcp"] #mcpPanel {
 
 .mcpGroup__tip {
   flex: 1 0 100%;
-  padding-left: 24px;
+  padding-left: var(--space-24);
   text-align: justify;
   hyphens: auto;
   color: var(--muted);
@@ -587,7 +587,7 @@ body[data-page="mcp"] #mcpPanel {
 
 /* A family of one tool has no arrow: its head holds the tool's own check box. */
 .mcpGroup--single .mcpGroup__head {
-  padding-right: 32px;
+  padding-right: var(--space-32);
 }
 
 /* The details of a key open in a row under it, one at a time: its facts at the left, its permissions at
@@ -598,7 +598,7 @@ body[data-page="mcp"] #mcpPanel {
 
 .mcpTable > tbody > tr.mcpDetailRow > td {
   height: auto;
-  padding: 10px 12px 14px;
+  padding: var(--space-10) var(--space-12) var(--space-16);
   overflow: visible;
   white-space: normal;
 }
@@ -607,14 +607,14 @@ body[data-page="mcp"] #mcpPanel {
   display: grid;
   grid-template-columns: 16rem minmax(0, 1fr);
   align-items: start;
-  gap: 12px 20px;
+  gap: var(--space-12) var(--space-20);
 }
 
 /* The data that the key reaches: one block for each host, the databases opening on their tables. */
 .mcpReach {
   grid-column: 1 / -1;
   min-width: 0;
-  padding-top: 10px;
+  padding-top: var(--space-10);
   border-top: 1px solid var(--border);
 }
 
@@ -624,7 +624,7 @@ body[data-page="mcp"] #mcpPanel {
 
 .mcpReachHosts {
   display: grid;
-  gap: 12px;
+  gap: var(--space-12);
 }
 
 .mcpReachHost {
@@ -635,12 +635,12 @@ body[data-page="mcp"] #mcpPanel {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 10px;
-  margin-bottom: 4px;
+  gap: var(--space-4) var(--space-10);
+  margin-bottom: var(--space-4);
 }
 
 .mcpReachHost__why {
-  margin-bottom: 6px;
+  margin-bottom: var(--space-6);
 }
 
 .mcpReachHost__error {
@@ -651,7 +651,7 @@ body[data-page="mcp"] #mcpPanel {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
   align-items: start;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .mcpReachDb {
@@ -665,8 +665,8 @@ body[data-page="mcp"] #mcpPanel {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
-  padding: 5px 10px;
+  gap: var(--space-10);
+  padding: var(--space-6) var(--space-10);
   cursor: pointer;
   font-size: var(--fs-sm);
 }
@@ -675,7 +675,7 @@ body[data-page="mcp"] #mcpPanel {
   display: grid;
   max-height: 14rem;
   margin: 0;
-  padding: 2px 10px 8px;
+  padding: var(--space-2) var(--space-10) var(--space-8);
   overflow: auto;
   border-top: 1px solid var(--border);
   list-style: none;
@@ -685,7 +685,7 @@ body[data-page="mcp"] #mcpPanel {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-8);
   padding-block: 1px;
   font-size: var(--fs-xs);
 }
@@ -693,7 +693,7 @@ body[data-page="mcp"] #mcpPanel {
 .mcpAbout {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px 12px;
+  gap: var(--space-8) var(--space-12);
   margin: 0;
 }
 
@@ -711,11 +711,11 @@ body[data-page="mcp"] #mcpPanel {
 .mcpChips {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 .mcpChip {
-  padding: 1px 6px;
+  padding: 1px var(--space-6);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   font-family: var(--font-mono);
@@ -725,8 +725,8 @@ body[data-page="mcp"] #mcpPanel {
 .mcpDetails__title {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin: 0 0 4px;
+  gap: var(--space-8);
+  margin: 0 0 var(--space-4);
   font-size: var(--fs-md);
   font-weight: var(--fw-semibold);
 }
@@ -735,14 +735,14 @@ body[data-page="mcp"] #mcpPanel {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 8px;
+  gap: var(--space-8);
 }
 
 .mcpGrantCol {
   container: mcpGrantCol / inline-size;
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
 }
 
@@ -763,8 +763,8 @@ body[data-page="mcp"] #mcpPanel {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 10px;
-  padding: 5px 10px;
+  gap: var(--space-10);
+  padding: var(--space-6) var(--space-10);
 }
 
 .mcpGrantGroup__title {
@@ -780,7 +780,7 @@ body[data-page="mcp"] #mcpPanel {
 .mcpGrants {
   display: grid;
   margin: 0;
-  padding: 0 10px 6px;
+  padding: 0 var(--space-10) var(--space-6);
   list-style: none;
 }
 
@@ -788,8 +788,8 @@ body[data-page="mcp"] #mcpPanel {
   display: grid;
   grid-template-columns: minmax(0, 10rem) minmax(0, 1fr);
   align-items: baseline;
-  gap: 8px;
-  padding-block: 2px;
+  gap: var(--space-8);
+  padding-block: var(--space-2);
 }
 
 /* A narrow column puts what the tool does under its name. */
@@ -797,7 +797,7 @@ body[data-page="mcp"] #mcpPanel {
   .mcpGrant {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
-    padding-block: 3px;
+    padding-block: var(--space-4);
   }
 }
 
@@ -823,7 +823,7 @@ body[data-page="mcp"] #mcpPanel {
 
 .mcpReveal {
   display: grid;
-  gap: 14px;
+  gap: var(--space-16);
   min-width: 0;
 }
 
@@ -835,7 +835,7 @@ body[data-page="mcp"] #mcpPanel {
   margin: 0;
   text-align: justify;
   hyphens: auto;
-  padding: 6px 10px;
+  padding: var(--space-6) var(--space-10);
   border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
   border-radius: var(--r-md);
   background: var(--warning-bg);
@@ -888,13 +888,13 @@ body[data-page="mcp"] #mcpPanel {
   }
   .mcpTable > tbody {
     display: grid;
-    gap: 10px;
+    gap: var(--space-10);
   }
   .mcpTable > tbody > tr {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 12px;
-    padding: 10px 12px;
+    gap: var(--space-8) var(--space-12);
+    padding: var(--space-10) var(--space-12);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
     background: var(--tableBg);
@@ -941,7 +941,7 @@ body[data-page="mcp"] #mcpPanel {
     grid-column: 1 / -1;
   }
   .mcpTable > tbody > tr > td.mcpCell--secret::before {
-    margin-bottom: 2px;
+    margin-bottom: var(--space-2);
   }
   .mcpTable > tbody > tr > td.mcpCell--name::before,
   .mcpTable > tbody > tr > td.mcpCell--actions::before {
@@ -950,7 +950,7 @@ body[data-page="mcp"] #mcpPanel {
   .mcpAction {
     justify-content: center;
     min-height: var(--hit);
-    padding: 0 10px;
+    padding: 0 var(--space-10);
   }
   .mcpAction--danger {
     color: var(--danger);
@@ -969,7 +969,7 @@ body[data-page="mcp"] #mcpPanel {
     min-height: var(--hit);
   }
   .mcpDialog .uiCheck {
-    padding-block: 4px;
+    padding-block: var(--space-4);
   }
   .mcpEndpoint__copy {
     width: var(--hit);
@@ -997,7 +997,7 @@ body[data-page="mcp"] #mcpPanel {
 }
 
 .mcpLostCount {
-  margin-left: 8px;
+  margin-left: var(--space-8);
   font-size: var(--fs-xs);
   font-weight: var(--fw-medium);
 }
@@ -1018,7 +1018,7 @@ body[data-page="mcp"] #mcpPanel {
 }
 
 .mcpHostNote {
-  margin-top: 6px;
+  margin-top: var(--space-6);
 }
 
 .mcpHostNote[hidden] {
@@ -1039,22 +1039,22 @@ body[data-page="mcp"] #mcpPanel {
 
 .mcpGroup__body > .mcpSection + .mcpSection,
 .mcpSections > .mcpSection + .mcpSection {
-  margin-top: 8px;
+  margin-top: var(--space-8);
 }
 
 .mcpGroup__body > .mcpSection {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px 14px;
+  gap: var(--space-4) var(--space-16);
 }
 
 .mcpSection__title {
   grid-column: 1 / -1;
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: var(--space-8);
   margin: 0;
-  padding-bottom: 2px;
+  padding-bottom: var(--space-2);
   border-bottom: 1px solid var(--border);
   color: var(--muted);
   font-size: var(--fs-xs);
@@ -1065,7 +1065,7 @@ body[data-page="mcp"] #mcpPanel {
 
 /* In the details of a key the tools of a section sit 10 px in from the card: the heading follows them. */
 .mcpSections > .mcpSection > .mcpSection__title {
-  padding-inline: 10px;
+  padding-inline: var(--space-10);
 }
 
 .mcpSection__count {

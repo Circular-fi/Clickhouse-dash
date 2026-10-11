@@ -42,7 +42,7 @@ def test_profiling_label_and_function_description_alignment() -> None:
     assert "margin-left: auto;" in desc and "margin-right: auto;" in desc
     overview = css[css.index(".explorerFunctionOverview {"):]
     overview = overview[:overview.index("}")]
-    assert "margin: 8px auto 0;" in overview
+    assert "margin: var(--space-8) auto 0;" in overview
 
 
 def test_database_catalog_includes_only_database_level_size_summaries() -> None:

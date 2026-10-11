@@ -46,7 +46,7 @@ def test_analysis_has_two_profiling_tabs_and_uses_nearly_full_viewport() -> None
     assert 'width: min(1460px, calc(100vw - 144px));' in css
     assert 'height: calc(100vh - 192px);' in css
     content = css_sources.decls('.analysisModal__content')
-    assert content['min-height'] == '0' and content['flex'] == '1 1 auto' and content['padding'] == '6px 8px 8px'
+    assert content['min-height'] == '0' and content['flex'] == '1 1 auto' and content['padding'] == 'var(--space-6) var(--space-8) var(--space-8)'
 
 
 def test_trace_is_full_width_without_horizontal_scroll_and_keeps_resizable_split() -> None:

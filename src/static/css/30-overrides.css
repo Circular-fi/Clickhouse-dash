@@ -185,7 +185,7 @@
 
 .pipelineViewer__metricsHead { padding: 0; }
 
-.pipelineViewer__timelineHead { padding-bottom: 10px; }
+.pipelineViewer__timelineHead { padding-bottom: var(--space-10); }
 
 /* ---- 20-features/explorer.css ---- */
 
@@ -230,7 +230,7 @@
 
 .traceJaegerGroup--summary > summary {
   min-height: 24px;
-  padding: 0 10px;
+  padding: 0 var(--space-10);
   font-size: var(--fs-xs);
   font-weight: var(--fw-regular);
 }
@@ -295,8 +295,8 @@
     display: inline-flex;
     align-items: center;
     align-self: stretch;
-    margin-block: -3px;
-    padding-block: 3px;
+    margin-block: -4px;
+    padding-block: var(--space-4);
   }
 
   /* Click-to-filter values in a row or a title: flex items as tall as the line (--hit). */
@@ -406,11 +406,11 @@
   .chips,
   .traceServiceFilters,
   .traceHighlights,
-  .chartCore__legendList { row-gap: 8px; }
+  .chartCore__legendList { row-gap: var(--space-8); }
 
   .chip {
     min-height: 32px;
-    padding-right: 10px;
+    padding-right: var(--space-10);
   }
 
   .chartCore__legendItem {

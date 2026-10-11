@@ -41,7 +41,7 @@ def test_trace_inspector_formats_tags_process_and_events_like_jaeger_rows():
     assert 'traceInspectorIdentity' in ui
     assert '.traceJaegerTags' not in css  # matched nothing: removed
     assert '.traceJaegerGroup' in css
-    assert css_sources.decls('.traceInspector--jaeger')['padding-bottom'] == '3px'
+    assert css_sources.decls('.traceInspector--jaeger')['padding-bottom'] == 'var(--space-4)'
 
 
 def test_trace_pickers_keep_explorer_connected_dropdown_language():

@@ -18,8 +18,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px 4px;
+  gap: var(--space-6);
+  padding: var(--space-6) var(--space-10) var(--space-4);
   border: 0;
   background: transparent;
   color: var(--text);
@@ -49,8 +49,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px 4px 24px;
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-10) var(--space-4) var(--space-24);
   border: 0;
   border-left: 2px solid transparent;
   background: transparent;
@@ -73,7 +73,7 @@
 .metricsCatalog__name mark,
 .metricsCatalog__serviceName mark { background: color-mix(in srgb, var(--warning) 36%, transparent); color: inherit; border-radius: var(--r-sm); }
 
-.metricsCatalog__badges { flex: 0 0 auto; display: inline-flex; gap: 6px; }
+.metricsCatalog__badges { flex: 0 0 auto; display: inline-flex; gap: var(--space-6); }
 
 /* By metric: the metric is the group head (mono, an identifier), its
    services the rows under it, with their color and point count. */
@@ -96,7 +96,7 @@
 
 .metricsCatalog__group > .metricsCatalog__serviceHead > .metricsCatalog__count { grid-area: count; }
 
-.metricsCatalog__metric--service .metricsCatalog__name { display: inline-flex; align-items: center; gap: 6px; }
+.metricsCatalog__metric--service .metricsCatalog__name { display: inline-flex; align-items: center; gap: var(--space-6); }
 
 .metricsCatalog__points { flex: 0 0 auto; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 
@@ -121,8 +121,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-content: start;
-  gap: 12px;
-  padding: 12px 14px 20px;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-16) var(--space-20);
 }
 
 .metricsPanel {
@@ -131,17 +131,17 @@
 
 .metricsPanels > .metricsPanel.is-active:not(:only-child) { border-color: color-mix(in srgb, var(--accentBorder) 60%, var(--border)); }
 
-.metricsPanel__header { display: grid; gap: 3px; padding: 9px 12px 6px; min-width: 0; }
+.metricsPanel__header { display: grid; gap: var(--space-4); padding: var(--space-10) var(--space-12) var(--space-6); min-width: 0; }
 
-.metricsPanel__badges { display: flex; align-items: center; gap: 4px 10px; min-width: 0; flex: 1 1 auto; flex-wrap: wrap; }
+.metricsPanel__badges { display: flex; align-items: center; gap: var(--space-4) var(--space-10); min-width: 0; flex: 1 1 auto; flex-wrap: wrap; }
 
-.metricsPanel__service { color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); margin-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metricsPanel__service { color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); margin-left: var(--space-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .metricsPanel__remove:hover { border-color: var(--buttonBorder); color: var(--text); }
 
 .metricsPanel__description { margin: 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.35; overflow-wrap: anywhere; }
 
-.metricsControl { display: grid; gap: 3px; min-width: 0; }
+.metricsControl { display: grid; gap: var(--space-4); min-width: 0; }
 
 .metricsControl--agg { width: 190px; }
 
@@ -152,9 +152,9 @@
 .metricsControl--exemplars {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   height: 31px;
-  padding: 0 4px;
+  padding: 0 var(--space-4);
   color: var(--text);
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
@@ -163,14 +163,14 @@
 
 .metricsControl--exemplars input { margin: 0; accent-color: var(--accentBorder); }
 
-.metricsPicker__hint { padding: 8px 9px; color: var(--muted); font-size: var(--fs-xs); }
+.metricsPicker__hint { padding: var(--space-8) var(--space-10); color: var(--muted); font-size: var(--fs-xs); }
 
 .metricsPicker__check {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-8);
   min-height: 28px;
-  padding: 0 9px;
+  padding: 0 var(--space-10);
   border-radius: var(--r-md);
   font: var(--fw-semibold) var(--fs-xs)/1.2 var(--font-sans);
   cursor: pointer;
@@ -182,19 +182,19 @@
 
 .metricsPicker__check span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.metricsFilters { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-height: 31px; min-width: 0; }
+.metricsFilters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-6); min-height: 31px; min-width: 0; }
 
 .metricsFilters__chips { display: contents; }
 
-.metricsFilters__add { height: 27px; min-height: 27px; padding: 0 10px; font-size: var(--fs-xs); }
+.metricsFilters__add { height: 27px; min-height: 27px; padding: 0 var(--space-10); font-size: var(--fs-xs); }
 
 .metricsFilterForm {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  margin: 0 12px 8px;
-  padding: 8px;
+  gap: var(--space-6);
+  margin: 0 var(--space-12) var(--space-8);
+  padding: var(--space-8);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: color-mix(in srgb, var(--panelBg) 92%, var(--bg));
@@ -206,7 +206,7 @@
   width: 210px;
   max-width: 100%;
   height: var(--control-h);
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   outline: none;
@@ -220,9 +220,9 @@
 
 .metricsPanel__note {
   display: grid;
-  gap: 2px;
-  margin: 0 12px 6px;
-  padding: 5px 8px;
+  gap: var(--space-2);
+  margin: 0 var(--space-12) var(--space-6);
+  padding: var(--space-6) var(--space-8);
   border-left: 2px solid color-mix(in srgb, var(--warning) 70%, var(--border));
   background: color-mix(in srgb, var(--warning) 8%, transparent);
   color: var(--text);
@@ -230,7 +230,7 @@
   line-height: 1.4;
 }
 
-.metricsChart__axisTitle { min-height: 14px; padding: 0 2px 2px; color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metricsChart__axisTitle { min-height: 14px; padding: 0 var(--space-2) var(--space-2); color: var(--muted); font-size: var(--fs-xs); font-weight: var(--fw-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .metricsChart__plot { position: relative; min-width: 0; min-height: 280px; }
 
@@ -240,7 +240,7 @@
   z-index: var(--z-control);
   display: grid;
   place-items: center;
-  padding: 16px;
+  padding: var(--space-16);
   color: var(--muted);
   font-size: var(--fs-sm);
   text-align: center;

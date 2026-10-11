@@ -3,12 +3,12 @@
 .traceSearchField,
 .traceSearchBar__range,
 .traceTagSearch {
-  gap: 4px;
+  gap: var(--space-4);
   min-width: 0;
   display: block;
 }
 
-.traceSearchField > input { padding: 0 8px; }
+.traceSearchField > input { padding: 0 var(--space-8); }
 
 /* Status and page-size pickers are exactly 120px, including their dropdowns. */
 .traceSearchField--status {

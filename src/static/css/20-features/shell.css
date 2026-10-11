@@ -8,7 +8,7 @@
   top: 8px;
   left: 8px;
   z-index: var(--z-toast);
-  padding: 9px 14px;
+  padding: var(--space-10) var(--space-16);
   border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
   background: var(--panel);
@@ -23,20 +23,20 @@
 .appHeader__left {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: var(--space-20);
   min-width: 0;
 }
 
 .appHeader__right {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
 }
 
 .appBrand {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
 }
 
@@ -59,7 +59,7 @@
 
 /* The backend version: a solid chip, the muted text at full strength (>= 4.5:1 in both themes). */
 .versionBadge {
-  padding: 0 5px;
+  padding: 0 var(--space-6);
   line-height: 12px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
@@ -80,7 +80,7 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
   min-height: var(--nav-row-h);
   padding: 0 var(--gutter);
@@ -271,8 +271,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px var(--gutter);
+  gap: var(--space-16);
+  padding: var(--space-12) var(--gutter);
   border-bottom: var(--shell-border);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
 }
@@ -280,8 +280,8 @@ body {
 @media (max-width: 820px) {
   .appHeader {
     flex-wrap: wrap;
-    row-gap: 8px;
-    padding: 8px var(--gutter);
+    row-gap: var(--space-8);
+    padding: var(--space-8) var(--gutter);
   }
   .appHeader__left {
     flex: 1 1 auto;
@@ -290,7 +290,7 @@ body {
     flex: 1 1 100%;
     min-width: 0;
     justify-content: flex-end;
-    gap: 6px;
+    gap: var(--space-6);
   }
   .appHeader__right .picker {
     flex: 1 1 auto;
@@ -308,8 +308,8 @@ body {
    page picker is just wide enough for "Observability". */
 @media (max-width: 600px) {
   .appHeader__right .picker__button {
-    column-gap: 6px;
-    padding-right: 2rem;
+    column-gap: var(--space-6);
+    padding-right: var(--space-32);
     grid-template-columns: 0.6rem minmax(1.5rem, 1fr) auto;
   }
   .appHeader__right .hostVersion {
@@ -320,7 +320,7 @@ body {
   .pageSelect .pageSelect__button {
     width: 8rem;
     min-width: 8rem;
-    padding-right: 2rem;
+    padding-right: var(--space-32);
   }
   .pageSelect__menu {
     width: 8rem;
@@ -351,7 +351,7 @@ body {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
   min-height: var(--nav-row-h);
   padding: 0 var(--gutter);
@@ -366,7 +366,7 @@ body {
   align-self: stretch;
   display: flex;
   align-items: stretch;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -376,9 +376,9 @@ body {
 .explorerTopBar__tabs::-webkit-scrollbar { display: none; }
 
 @media (max-width: 820px) {
-  .obsNav { gap: 8px; }
+  .obsNav { gap: var(--space-8); }
   .explorerTopBar,
-  .explorerTopBar__tabs { gap: 8px; }
+  .explorerTopBar__tabs { gap: var(--space-8); }
 }
 
 /* -- Query: editor | metric rail, then the results, one scroller ------------ */
@@ -435,7 +435,7 @@ body {
 
 .panel--results > .panel__header {
   min-height: var(--nav-row-h);
-  padding: 4px var(--gutter);
+  padding: var(--space-4) var(--gutter);
   border-bottom: var(--shell-border);
 }
 

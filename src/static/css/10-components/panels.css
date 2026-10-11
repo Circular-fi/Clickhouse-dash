@@ -4,14 +4,14 @@
 .explorerFunctionToolbar {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--space-8);
   white-space: nowrap;
 }
 
 /* The catalog tree: the body of the ns.sidePanel shell. */
 .metricsCatalog {
   overflow-x: hidden;
-  padding: 4px 0 12px;
+  padding: var(--space-4) 0 var(--space-12);
 }
 
 /* The service detail: a docked, sticky .uiDetail (app_ui_panel.js). */
@@ -21,7 +21,7 @@
    the results; the head carries the service colour. */
 .traceSpanPanel .uiDetail__head { border-top: 3px solid var(--trace-service-color); }
 
-.traceSpanPanel .uiDetail__eyebrow { display: flex; align-items: center; gap: 5px; }
+.traceSpanPanel .uiDetail__eyebrow { display: flex; align-items: center; gap: var(--space-6); }
 
 /* The side panel: a floating .uiDetail (Components: panels) under the
    toolbar; its head is the shell's (graphKitPanel__* names kept for the
@@ -32,7 +32,7 @@
 .explorerTreeFilters {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-4);
 }
 
 /* -- Side panel ------------------------------------------------------------ */
@@ -54,8 +54,8 @@
 .uiSide__head {
   flex: 0 0 auto;
   display: grid;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: var(--space-6);
+  padding: var(--space-8) var(--space-10);
   border-bottom: var(--shell-border);
 }
 
@@ -71,7 +71,7 @@
   min-height: 24px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .uiSide__title {
@@ -91,9 +91,9 @@
   height: 24px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-6);
   margin-left: -6px;
-  padding: 0 6px;
+  padding: 0 var(--space-6);
   border: 0;
   border-radius: var(--r-sm);
   background: transparent;
@@ -119,13 +119,13 @@
 
 /* A head without a bar (the Explorer's tree and Functions list): the search,
    then its refresh icon button at the right end of the same line. */
-.uiSide__searchRow { min-width: 0; display: flex; align-items: center; gap: 4px; }
+.uiSide__searchRow { min-width: 0; display: flex; align-items: center; gap: var(--space-4); }
 
 .uiSide__searchRow > .uiSide__search { flex: 1 1 auto; min-width: 0; }
 
 .uiSide__searchRow > .refreshButton { flex: 0 0 auto; }
 
-.uiSide__chips { min-width: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.uiSide__chips { min-width: 0; display: flex; flex-wrap: wrap; gap: var(--space-4); }
 
 .uiSide__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 
@@ -149,7 +149,7 @@
   :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__head > :not(.uiSide__bar),
   :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__bar > :not(.uiSide__toggle),
   :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__toggle > span { display: none; }
-  :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__head { justify-items: center; padding: 4px 0; border-bottom: 0; }
+  :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__head { justify-items: center; padding: var(--space-4) 0; border-bottom: 0; }
   :is(.uiSide.is-collapsed, html.chdash-trace-facets-collapsed #traceFacets, html.chdash-logs-facets-collapsed #logsFacets, html.chdash-metrics-catalog-collapsed #metricsSidebar) .uiSide__toggle { width: 26px; justify-content: center; margin: 0; padding: 0; }
 }
 
@@ -173,8 +173,8 @@
     visibility: visible;
     transition: transform var(--dur-base) var(--ease);
   }
-  .uiSide__drawerBar { display: flex; align-items: center; gap: 8px; padding: 6px var(--gutter) 0; }
-  .uiSide__drawerToggle { display: inline-flex; align-items: center; gap: 6px; }
+  .uiSide__drawerBar { display: flex; align-items: center; gap: var(--space-8); padding: var(--space-6) var(--gutter) 0; }
+  .uiSide__drawerToggle { display: inline-flex; align-items: center; gap: var(--space-6); }
   .uiSide__backdrop:not([hidden]) {
     display: block;
     position: fixed;
@@ -230,12 +230,12 @@
   min-width: 0;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: var(--space-8);
+  padding: var(--space-10) var(--space-12);
   border-bottom: var(--shell-border);
 }
 
-.uiDetail__titles { flex: 1 1 auto; min-width: 0; display: grid; gap: 2px; }
+.uiDetail__titles { flex: 1 1 auto; min-width: 0; display: grid; gap: var(--space-2); }
 
 .uiDetail__eyebrow {
   min-width: 0;
@@ -261,7 +261,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 6px;
+  gap: var(--space-4) var(--space-6);
   margin: 0;
   overflow-wrap: anywhere;
   font-size: var(--fs-lg);
@@ -278,7 +278,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--space-6);
 }
 
 .uiDetail__position { color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -302,9 +302,9 @@
 
 .uiDetail__close { flex: 0 0 auto; width: 28px; height: 28px; margin: -2px -4px 0 0; }
 
-.uiDetail__actions .button--small { padding: 0 10px; text-decoration: none; }
+.uiDetail__actions .button--small { padding: 0 var(--space-10); text-decoration: none; }
 
-.uiDetail__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 12px 18px; }
+.uiDetail__body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--space-10) var(--space-12) var(--space-20); }
 
 @media (max-width: 820px) {
   .uiDetail--docked {
@@ -334,7 +334,7 @@
     max-height: 72%;
     border-radius: var(--r-lg) var(--r-lg) var(--r-lg) var(--r-lg);
   }
-  .uiDetail__head { position: relative; padding-top: 16px; }
+  .uiDetail__head { position: relative; padding-top: var(--space-16); }
   .uiDetail__head::before {
     content: "";
     position: absolute;

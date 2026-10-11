@@ -4,7 +4,7 @@
 
 .contentTabs {
   display: flex;
-  gap: 2px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
@@ -16,7 +16,7 @@
 .contentTabs__tab {
   flex: 0 0 auto;
   height: 28px;
-  padding: 0 12px;
+  padding: 0 var(--space-12);
   border: 0;
   border-bottom: 2px solid transparent;
   background: transparent;
@@ -87,6 +87,6 @@ a.contentTabs__tab {
     flex: 1 1 0;
   }
   .contentTabs--nav > .contentTabs__tab {
-    padding: 0 8px;
+    padding: 0 var(--space-8);
   }
 }

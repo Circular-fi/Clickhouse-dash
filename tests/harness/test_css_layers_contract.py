@@ -176,3 +176,39 @@ def test_every_page_sheet_declares_the_layers_once_and_keeps_them_in_order():
         assert body.startswith("@layer tokens, base, components, features, overrides;\n"), name
         blocks = re.findall(r"^@layer (\w+) \{$", body, flags=re.M)
         assert blocks == sorted(blocks, key=list(LAYER_DIRS).index) and len(blocks) == len(set(blocks)), (name, blocks)
+
+
+SPACES = {2, 4, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64, 80}
+SPACING = re.compile(r"(padding|margin|gap|row-gap|column-gap)(-(top|right|bottom|left|inline|block)(-(start|end))?)?")
+
+
+def test_spacing_is_the_scale_a_hairline_or_an_overlapping_margin():
+    tokens = css_sources.tokens()
+    for size in SPACES:
+        assert f"  --space-{size}: {size}px;" in tokens and tokens.count(f"  --space-{size}:") == 1, size
+    assert "--ui-gap-" not in css_sources.text()
+    offenders = []
+    for path, layer, nodes in sources():
+        if layer in ("tokens", "base"):
+            continue
+        for ctx, rule in walk(nodes):
+            for decl in rule.decls:
+                if not SPACING.fullmatch(decl.name):
+                    continue
+                value = " ".join(decl.value.split())
+                # What a length function or a relative unit computes is not a step of the scale.
+                if re.search(r"calc\(|min\(|max\(|clamp\(|%|\d(ch|em)\b|env\(", value):
+                    continue
+                for part in value.replace("!important", "").split():
+                    token = re.fullmatch(r"var\(--space-(\d+)\)", part)
+                    if part in ("0", "auto", "inherit", "initial", "unset", "1px", "-1px") or part.startswith("var(") and not token:
+                        continue
+                    if token and int(token.group(1)) in SPACES:
+                        continue
+                    # A negative margin on the scale (the overlap of two borders, a pulled-in icon).
+                    negative = re.fullmatch(r"-(\d+)px", part)
+                    if negative and int(negative.group(1)) in SPACES:
+                        continue
+                    offenders.append(f"{rel(path)}:{rule.line} {rule.prelude[:60]} {{{decl.name}: {decl.value.strip()}}}")
+                    break
+    assert not offenders, "use var(--space-N) (N: 2 4 6 8 10 12 16 20 24 32 40 48 64 80):\n" + "\n".join(offenders)

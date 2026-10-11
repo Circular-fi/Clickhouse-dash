@@ -212,7 +212,7 @@ def test_analysis_has_pipeline_first_trace_second_and_modal_uses_nearly_full_vie
     large = css[css.index(".uiDialog--lg {"):css.index("}", css.index(".uiDialog--lg {"))]
     assert 'width: min(1460px, calc(100vw - 144px));' in large
     assert 'height: calc(100vh - 192px);' in large
-    assert 'padding: 6px 8px 8px;' in css
+    assert 'padding: var(--space-6) var(--space-8) var(--space-8);' in css
 
 
 def test_trace_uses_real_otel_wall_clock_without_processor_counter_reconstruction() -> None:

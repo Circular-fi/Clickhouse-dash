@@ -3,9 +3,9 @@
 .resultsStack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 12px;
-  margin-top: 12px;
+  gap: var(--space-12);
+  margin-bottom: var(--space-12);
+  margin-top: var(--space-12);
 }
 
 /* The detail pane's state when no object is shown (ns.uiState). */
@@ -18,11 +18,11 @@
 /* A trace that could not be loaded (app_traces.js unavailableHtml): the
    message and its actions in place of the waterfall; the trace's own
    controls (service filters, overview, view bar) have nothing to show. */
-.traceWaterfall > .uiState { padding-block: 48px; }
+.traceWaterfall > .uiState { padding-block: var(--space-48); }
 
 .traceLogsToggle .uiSpin { margin: 0; width: 8px; height: 8px; border-width: 1.5px; }
 
-.metricsCatalog .uiState__action { height: auto; min-height: var(--control-h); padding: 6px 12px; line-height: 1.3; white-space: normal; }
+.metricsCatalog .uiState__action { height: auto; min-height: var(--control-h); padding: var(--space-6) var(--space-12); line-height: 1.3; white-space: normal; }
 
 .metricsPanel__empty > .uiState { min-height: 220px; }
 
@@ -31,7 +31,7 @@
 /* The map's state (ns.uiState) is a card over the canvas. */
 .traceMap__state > .uiState {
   max-width: 420px;
-  padding: 14px 18px;
+  padding: var(--space-16) var(--space-20);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--graph-surface);
@@ -52,16 +52,16 @@
    (.uiBanner--verbatim, Components: state). A result of the stack keeps
    its error under its header. */
 .resultsStack .uiBanner--verbatim {
-  margin-top: 0.75rem;
+  margin-top: var(--space-12);
 }
 
 .uiState {
   display: grid;
   justify-items: center;
   align-content: center;
-  gap: 6px;
+  gap: var(--space-6);
   min-width: 0;
-  padding: 32px 16px;
+  padding: var(--space-32) var(--space-16);
   color: var(--muted);
   font-size: var(--fs-sm);
   line-height: 1.45;
@@ -74,13 +74,13 @@
 
 .uiState__body { max-width: 62ch; margin: 0; overflow-wrap: anywhere; }
 
-.uiState__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
+.uiState__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-8); margin-top: var(--space-4); }
 
-.uiState__action { display: inline-flex; align-items: center; gap: 6px; }
+.uiState__action { display: inline-flex; align-items: center; gap: var(--space-6); }
 
-.uiState--compact { gap: 4px; padding: 12px; }
+.uiState--compact { gap: var(--space-4); padding: var(--space-12); }
 
-.uiState--loading { grid-auto-flow: column; justify-content: center; align-items: center; gap: 8px; }
+.uiState--loading { grid-auto-flow: column; justify-content: center; align-items: center; gap: var(--space-8); }
 
 .uiState--error .uiState__title,
 .uiState--error .uiState__body:first-child { color: var(--danger); }
@@ -91,9 +91,9 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-10);
   min-width: 0;
-  padding: 8px var(--gutter);
+  padding: var(--space-8) var(--gutter);
   border-bottom: 1px solid color-mix(in srgb, var(--danger) 32%, var(--border));
   background: var(--danger-bg);
   color: color-mix(in srgb, var(--danger) 70%, var(--text));
@@ -122,7 +122,7 @@
 
 /* Inside a padded view (the Explorer Storage view): a box, not a strip. */
 .uiBanner--inset {
-  padding: 6px 10px;
+  padding: var(--space-6) var(--space-10);
   border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
   border-radius: var(--r-md);
 }
@@ -135,7 +135,7 @@
 .uiBanner--verbatim {
   position: relative;
   display: block;
-  padding: 10px 12px 10px 2.2rem;
+  padding: var(--space-10) var(--space-12) var(--space-10) var(--space-32);
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-radius: var(--r-lg);
   color: var(--text);
@@ -146,13 +146,13 @@
   word-break: break-word;
 }
 
-.uiBanner__details { margin-top: 6px; }
+.uiBanner__details { margin-top: var(--space-6); }
 
 .uiBanner__summary {
   width: fit-content;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-4);
   list-style: none;
   color: var(--muted);
   font-family: var(--font-sans);
@@ -180,7 +180,7 @@
 
 .uiBanner__more {
   max-height: 12rem;
-  margin-top: 4px;
+  margin-top: var(--space-4);
   overflow: auto;
   color: var(--muted);
   font-size: var(--fs-xs);
@@ -220,7 +220,7 @@
 button > .uiSpin {
   width: 10px;
   height: 10px;
-  margin-right: 5px;
+  margin-right: var(--space-6);
   border-width: 1.5px;
   border-color: currentColor;
   border-right-color: transparent;

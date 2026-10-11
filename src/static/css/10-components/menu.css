@@ -48,7 +48,7 @@
 
 .themeSelect__button {
   position: relative;
-  padding-right: 2.35rem;
+  padding-right: var(--space-40);
   width: 6rem;
   z-index: var(--z-sticky);
 }
@@ -94,7 +94,7 @@
   margin-top: -1px;
   /* chevauche pile la bordure du bouton */
   z-index: var(--z-dropdown);
-  padding: 0.05rem 0.35rem 0.35rem 0.35rem;
+  padding: 1px var(--space-6) var(--space-6) var(--space-6);
   border-radius: var(--r-lg);
   border: 1px solid var(--borderStrong);
   border-top: 0;
@@ -119,7 +119,7 @@
   justify-content: flex-start;
 
   height: 2rem;
-  padding: 0 0.9rem;
+  padding: 0 var(--space-16);
 
   border-radius: var(--r-md);
   border: 1px solid transparent;
@@ -206,12 +206,12 @@
   display: grid;
   grid-template-columns: 0.6rem minmax(0, 1fr) 6rem 3.5rem;
   align-items: center;
-  column-gap: 10px;
+  column-gap: var(--space-10);
   white-space: nowrap;
   width: 18.6rem;
   min-width: 18.6rem;
   max-width: 18.6rem;
-  padding: 0 2.35rem 0 0.8rem;
+  padding: 0 var(--space-40) 0 var(--space-12);
   transition: border-radius var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 
@@ -220,10 +220,10 @@
   display: grid;
   grid-template-columns: 0.6rem minmax(0, 1fr) 6rem 3.5rem;
   align-items: center;
-  column-gap: 10px;
+  column-gap: var(--space-10);
   margin-left: -1px;
   height: 2.2rem;
-  padding: 0.56rem 2.35rem 0.56rem 0.8rem;
+  padding: var(--space-8) var(--space-40) var(--space-8) var(--space-12);
   border-radius: var(--r-md);
   border: 1px solid transparent;
   background: transparent;
@@ -277,7 +277,7 @@
   border-color: var(--buttonBorder);
   background: transparent;
   box-shadow: none;
-  padding-right: 0.8rem;
+  padding-right: var(--space-12);
 }
 
 .picker.is-static .picker__button:hover {
@@ -304,7 +304,7 @@
   width: 100%;
   text-align: left;
   justify-self: start;
-  padding-left: 0.5rem;
+  padding-left: var(--space-8);
 }
 
 .picker__menu {
@@ -379,14 +379,14 @@
   border-radius: var(--r-lg);
   grid-auto-flow: row;
   justify-items: center;
-  gap: 2px;
+  gap: var(--space-2);
   left: 0;
   right: auto;
   top: 100%;
   width: 34px;
   min-width: 34px;
   margin-top: -1px;
-  padding: 3px 2px 4px;
+  padding: var(--space-4) var(--space-2) var(--space-4);
   border-top: 0;
   border-top-left-radius: 0;
   border-top-right-radius: 0;
@@ -452,7 +452,7 @@
   left: auto;
   width: 11.5rem;
   min-width: 11.5rem;
-  padding: .28rem;
+  padding: var(--space-4);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-lg);
   background: var(--panelBg);
@@ -474,7 +474,7 @@
   left: auto;
   min-width: 168px;
   width: max-content;
-  padding: 5px;
+  padding: var(--space-6);
   z-index: var(--z-menu);
 }
 
@@ -573,7 +573,7 @@ body > .explorerDataSettings__menu.is-open {
   min-width: 0;
   height: 30px;
   min-height: 30px;
-  padding: 0 2.15rem 0 .72rem;
+  padding: 0 var(--space-32) 0 var(--space-12);
   justify-content: flex-start;
   border: 1px solid var(--controlBorder);
   border-radius: var(--r-md);
@@ -606,7 +606,7 @@ body > .explorerDataSettings__menu.is-open {
   min-width: 100%;
   max-height: 300px;
   margin-top: -1px;
-  padding: .05rem .35rem .35rem;
+  padding: 1px var(--space-6) var(--space-6);
   overflow-y: auto;
   overflow-x: hidden;
   border: 1px solid var(--borderStrong);
@@ -620,7 +620,7 @@ body > .explorerDataSettings__menu.is-open {
 .tracePicker__option {
   width: 100%;
   min-width: 0;
-  padding: 0 .9rem;
+  padding: 0 var(--space-16);
   font-weight: var(--fw-semibold);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -745,7 +745,7 @@ body > .explorerDataSettings__menu.is-open {
   display: none;
 }
 
-.tracePicker.is-empty .tracePicker__button { padding-right: 8px; }
+.tracePicker.is-empty .tracePicker__button { padding-right: var(--space-8); }
 
 /* Status and page-size pickers are exactly 120px, including their dropdowns. */
 .traceSearchField--status > .tracePicker {
@@ -756,8 +756,8 @@ body > .explorerDataSettings__menu.is-open {
 .traceSearchField--status > .tracePicker .tracePicker__button {
   height: 27px;
   min-height: 27px;
-  padding-left: 6px;
-  padding-right: 21px;
+  padding-left: var(--space-6);
+  padding-right: var(--space-20);
   font-size: var(--fs-xs);
   width: 100px;
 }
@@ -774,7 +774,7 @@ body > .explorerDataSettings__menu.is-open {
 }
 
 .traceSearchBar .tracePicker__button {
-  padding: 0 28px 0 10px;
+  padding: 0 var(--space-32) 0 var(--space-10);
   border: 1px solid var(--controlBorder);
   color: var(--text);
   box-sizing: border-box;
@@ -800,7 +800,7 @@ body > .explorerDataSettings__menu.is-open {
   min-width: 100%;
   max-width: 100%;
   margin-top: -1px;
-  padding: 0.05rem 0.35rem 0.35rem 0.35rem;
+  padding: 1px var(--space-6) var(--space-6) var(--space-6);
   border: 1px solid var(--borderStrong);
   border-top: 0;
   border-radius: var(--r-lg);
@@ -814,7 +814,7 @@ body > .explorerDataSettings__menu.is-open {
 
 .traceSearchBar .tracePicker__option {
   min-height: 28px;
-  padding: 0 9px;
+  padding: 0 var(--space-10);
   font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
 }
 
@@ -855,7 +855,7 @@ body > .explorerDataSettings__menu.is-open {
   min-width: 100%;
   max-width: 100%;
   margin-top: -1px;
-  padding: 0.05rem 0.35rem 0.35rem 0.35rem;
+  padding: 1px var(--space-6) var(--space-6) var(--space-6);
   border: 1px solid var(--borderStrong);
   border-top: 0;
   border-radius: var(--r-lg);
@@ -966,7 +966,7 @@ body > .explorerDataSettings__menu.is-open {
 .graphKitGroup.traceGraph__color .tracePicker__button {
   height: 24px;
   min-width: 104px;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 0;
   border-radius: var(--r-md);
   background: transparent;
@@ -982,7 +982,7 @@ body > .explorerDataSettings__menu.is-open {
   height: 31px;
   min-width: 34px;
   margin-left: -1px;
-  padding: 0 7px;
+  padding: 0 var(--space-8);
   border: 1px solid var(--controlBorder);
   border-radius: 0;
   background: var(--buttonBg);
@@ -996,7 +996,7 @@ body > .explorerDataSettings__menu.is-open {
 
 .logsMultiPicker__menu {
   min-width: 240px;
-  padding: 4px 0;
+  padding: var(--space-4) 0;
 }
 
 .logsColumnsPicker .tracePicker__button { height: 28px; min-height: 28px; font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans); text-align: left; }

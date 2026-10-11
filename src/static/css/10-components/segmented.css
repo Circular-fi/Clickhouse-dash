@@ -6,8 +6,8 @@
   align-items: stretch;
   box-sizing: border-box;
   height: 28px;
-  padding: 2px;
-  gap: 2px;
+  padding: var(--space-2);
+  gap: var(--space-2);
   border: 1px solid var(--buttonBorder);
   border-radius: var(--r-md);
   background: var(--inputBg);
@@ -29,9 +29,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: var(--space-6);
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 var(--space-8);
   border: 1px solid transparent;
   border-radius: var(--r-sm);
   background: transparent;
@@ -42,7 +42,7 @@
 }
 
 .segmented--compact .segmented__option {
-  padding: 0 7px;
+  padding: 0 var(--space-8);
   border-radius: var(--r-sm);
   font-size: var(--fs-xs);
 }
@@ -50,12 +50,12 @@
 /* An icon alone (Table | Chart): square, the icon a little larger. */
 .segmented__option--icon {
   min-width: 26px;
-  padding: 0 5px;
+  padding: 0 var(--space-6);
 }
 
 .segmented--compact .segmented__option--icon {
   min-width: 22px;
-  padding: 0 4px;
+  padding: 0 var(--space-4);
 }
 
 .segmented__option:hover:not(:disabled, [aria-disabled="true"]) {
