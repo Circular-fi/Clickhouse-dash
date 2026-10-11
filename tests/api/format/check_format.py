@@ -632,11 +632,19 @@ def post_format_payload(payload: dict) -> requests.Response:
     return response
 
 
+def formatted_of(payload: dict) -> list[str]:
+    """The formatted texts of a batch answer ({"results": [{"status": "formatted", "formatted_sql"} | {"status": "error", ...}]})."""
+    failed = [item for item in payload["results"] if item["status"] != "formatted"]
+    assert not failed, failed
+    return [item["formatted_sql"] for item in payload["results"]]
+
+
 def test_format_batch_deduplicates_identical_statements() -> None:
     sql = f"SELECT 1 AS cache_probe_{time.time_ns()}"
     response = post_format_payload({"sqls": [sql, sql]})
     payload = response.json()
-    assert payload["formatted_sqls"][0] == payload["formatted_sqls"][1]
+    formatted = formatted_of(payload)
+    assert formatted[0] == formatted[1]
     assert payload["cache"]["deduplicated"] >= 1
     assert response.headers.get("X-Chdash-Format-Cache") in {"hit", "partial"}
 
@@ -733,7 +741,7 @@ def test_expected_format_fixtures_are_idempotent_in_batch() -> None:
             raise AssertionError(
                 f"formatter idempotence batch offset={offset}, fixtures=[{names}]\n{exc}"
             ) from exc
-        actual = [normalize_sql_file_content(value) for value in payload["formatted_sqls"]]
+        actual = [normalize_sql_file_content(value) for value in formatted_of(payload)]
         mismatches = [
             path.name
             for path, wanted, got in zip(batch, expected, actual)
@@ -768,8 +776,8 @@ WHERE
 
     response = post_format_payload({"sqls": [sql]})
     payload = response.json()
-    assert len(payload["formatted_sqls"]) == 1
-    formatted = payload["formatted_sqls"][0]
+    assert len(payload["results"]) == 1
+    formatted = formatted_of(payload)[0]
     assert formatted.count(signature) == 2
     assert "WITH" in formatted
     assert "FROM analytics.transactions" in formatted

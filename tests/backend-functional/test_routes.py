@@ -909,7 +909,9 @@ MODIFY COLUMN `bundle` Tuple(
 def format_sql(sql: str) -> str:
     response = post("/api/format", json={"host_id": "local", "sqls": [sql]})
     assert response.status_code == 200, response.text
-    return response.json()["formatted_sqls"][0]
+    item = response.json()["results"][0]
+    assert item["status"] == "formatted", item
+    return item["formatted_sql"]
 
 
 def test_format_writes_the_commands_of_an_alter_table_plainly():

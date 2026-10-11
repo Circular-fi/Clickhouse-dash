@@ -821,12 +821,16 @@ async function formatEditorSql(hostId = getSelectedHostId(), { signal } = {}) {
   const statements = sql.splitSqlStatements(trimmed);
   if (!statements.length) throw new Error("Nothing to format.");
 
-  const formatted = await api.formatSqls(hostId, statements, { signal });
-  if (!Array.isArray(formatted) || formatted.length !== statements.length) {
+  // The server answers a status for each statement: the ones that formatted replace their text, the one that did not stays as
+  // typed (its failure is reported once the others are in the editor).
+  const items = await api.formatSqlsEach(hostId, statements, { signal });
+  if (!Array.isArray(items) || items.length !== statements.length) {
     const err = new Error("format_failed: Invalid format response.");
     err.code = "format_failed";
     throw err;
   }
+  const failedItem = items.find((item) => item.status !== "formatted");
+  const formatted = items.map((item, i) => (item.status === "formatted" ? item.formatted : statements[i]));
 
   const normalized = formatted.map(sql.normalizeStatementText).filter(Boolean);
   // The editor changed while the server formatted: what was typed since is not replaced. The formatted statements
@@ -927,6 +931,18 @@ async function formatEditorSql(hostId = getSelectedHostId(), { signal } = {}) {
   }
 
   queryUi.clearEditorError();
+
+  if (failedItem) {
+    // Some statements are formatted and one is not: the text is not "formatted" as a whole, a next Format asks again, and the
+    // failure is the one of the first statement that did not format. A run goes on with `statements` (the text as it now stands).
+    state.lastFormatOk = false;
+    state.lastFormatHostId = null;
+    state.lastFormatEditorValue = null;
+    updateActionButtons();
+    const err = api.formatFailure(failedItem);
+    err.statements = normalized;
+    throw err;
+  }
 
   // Format writes no History entry: a run does (handleRun), with the formatted text when the editor held it.
   state.lastFormatOk = true;
@@ -1227,7 +1243,8 @@ async function formattedOrTyped(statements, hostId, signal) {
     state.lastFormatOk = false;
     state.lastFormatHostId = null;
     state.lastFormatEditorValue = null;
-    return statements;
+    // Some statements formatted and one did not: the run takes the text as the editor now holds it.
+    return Array.isArray(error?.statements) ? error.statements : statements;
   }
 }
 

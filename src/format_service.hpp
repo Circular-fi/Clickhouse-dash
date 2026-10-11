@@ -12,11 +12,14 @@
 #include "format_cache.hpp"
 #include "format_clickhouse.hpp"
 
+#include <chrono>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace chdash {
 
@@ -65,6 +68,27 @@ private:
   FormatStats stats_;
   std::unordered_map<std::string, FormatCache::ValuePtr> request_results_;
 };
+
+// A batch gives one answer for each text. A text that fails does not fail the others, and the texts that come after the time of the
+// batch or after a stop get no work: they are Skipped (the client has their text, and asks again for them).
+enum class FormatItemStatus { Formatted, Error, Skipped };
+
+struct FormatItem {
+  FormatItemStatus status = FormatItemStatus::Skipped;
+  // Formatted: `formatted`. Error: `failure` and `error`. Skipped: `skipped_for_stop` says why: true when `stop` ended it
+  // (the caller went away or the server stops), false when the time of the batch ran out.
+  FormatOutcome outcome;
+  bool skipped_for_stop = false;
+};
+
+struct FormatBatchLimits {
+  // The texts that start after it are Skipped. A text that runs has its own bound (postprocess_format_query, formatQuery).
+  std::chrono::steady_clock::time_point deadline{};
+  // True when the caller went away or the server stops: the rest is Skipped (asked before each text).
+  std::function<bool()> stop;
+};
+
+std::vector<FormatItem> format_texts(FormatBatch& batch, const std::vector<std::string>& texts, const FormatBatchLimits& limits);
 
 // The steps of the text that need no ClickHouse (public for the tests).
 

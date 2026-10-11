@@ -540,6 +540,57 @@ void test_format_service() {
     CHECK(FormatBatch(nullptr, small, fresh).format("select 1, 2, 3, 4, 5").failure == FormatQueryFailureKind::input);
     CHECK_EQ(fresh.calls.size(), size_t(0));
   }
+  // A batch answers one status for each text (ARCH-B-124): a text that fails does not fail the others.
+  {
+    // formatQuery refuses the text that holds "bad", and answers the others.
+    class PickyPort final : public FormatQueryPort {
+    public:
+      FormatQueryResult format_query(const std::string& sql, size_t) override {
+        ++calls;
+        FormatQueryResult result;
+        if (sql.find("bad") != std::string::npos) {
+          result.failure = FormatQueryFailureKind::server;
+          result.message = "Syntax error near bad";
+        } else {
+          result.formatted_sql = sql;
+        }
+        return result;
+      }
+      int calls = 0;
+    };
+    PickyPort port;
+    FormatBatch batch(nullptr, settings, port);
+    FormatBatchLimits limits;
+    limits.deadline = std::chrono::steady_clock::now() + std::chrono::minutes(1);
+    const std::vector<FormatItem> items = format_texts(batch, {"select 1 from t", "select bad from t", "select 3 from t", "  "}, limits);
+    CHECK_EQ(items.size(), size_t(4));
+    CHECK(items[0].status == FormatItemStatus::Formatted && items[0].outcome.ok());
+    CHECK(items[1].status == FormatItemStatus::Error);
+    CHECK(items[1].outcome.failure == FormatQueryFailureKind::server);
+    CHECK_EQ(items[1].outcome.error, std::string("Syntax error near bad"));
+    CHECK(items[2].status == FormatItemStatus::Formatted);  // after the failure: still formatted
+    CHECK(items[3].status == FormatItemStatus::Error && items[3].outcome.failure == FormatQueryFailureKind::input);
+    CHECK_EQ(port.calls, 3);  // the empty text never reached ClickHouse
+    // A text that starts after the time of the batch is skipped, and asks nothing of ClickHouse.
+    PickyPort late_port;
+    FormatBatch late(nullptr, settings, late_port);
+    FormatBatchLimits expired;
+    expired.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    for (const FormatItem& item : format_texts(late, {"select 1 from t", "select 2 from t"}, expired)) {
+      CHECK(item.status == FormatItemStatus::Skipped && !item.skipped_for_stop);
+    }
+    CHECK_EQ(late_port.calls, 0);
+    // The caller goes away after the first text: the rest is skipped for that reason.
+    PickyPort stop_port;
+    FormatBatch stopped(nullptr, settings, stop_port);
+    FormatBatchLimits leaving = limits;
+    leaving.stop = [&] { return stop_port.calls >= 1; };
+    const auto left = format_texts(stopped, {"select 1 from t", "select 2 from t", "select 3 from t"}, leaving);
+    CHECK(left[0].status == FormatItemStatus::Formatted);
+    CHECK(left[1].status == FormatItemStatus::Skipped && left[1].skipped_for_stop);
+    CHECK(left[2].status == FormatItemStatus::Skipped && left[2].skipped_for_stop);
+    CHECK_EQ(stop_port.calls, 1);
+  }
   // The scans that need no ClickHouse.
   CHECK(has_top_level_values_insert("INSERT INTO t VALUES (1), (2)"));
   CHECK(!has_top_level_values_insert("INSERT INTO t SELECT * FROM (VALUES (1))"));

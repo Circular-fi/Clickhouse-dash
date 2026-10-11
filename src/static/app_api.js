@@ -408,13 +408,17 @@ async function getExplorerFunctions(hostId, refresh = false, { signal } = {}) {
   return getJson(`api/explorer/functions?${query.toString()}`, { signal });
 }
 
-async function formatSqls(hostId, sqls, { signal } = {}) {
+// One entry for each text of `sqls` (POST api/format answers a status for each statement, so one that fails does not fail the
+// others): { status: "formatted", formatted } or { status: "error" | "skipped", error }, `error` the payload of the API's error
+// ({ error_code, message, index, clickhouse }, util.normalizeApiErrorPayload). A request that fails as a whole (an unknown host,
+// a body that is refused, the network) rejects.
+async function formatSqlsEach(hostId, sqls, { signal } = {}) {
   if (!hostId) throw new Error("No host selected.");
   if (!Array.isArray(sqls)) throw new Error("formatSqls expects an array.");
 
   const payload = await postJson("api/format", { host_id: hostId, sqls }, { signal });
 
-  if (!payload || !Array.isArray(payload.formatted_sqls)) {
+  if (!payload || !Array.isArray(payload.results) || payload.results.length !== sqls.length) {
     const norm = util.normalizeApiErrorPayload(payload, { error_code: "invalid_json", message: "Invalid format response." });
     const msg = util.buildApiErrorText(norm, "Invalid format response.");
     const err = new Error(msg);
@@ -423,7 +427,28 @@ async function formatSqls(hostId, sqls, { signal } = {}) {
     throw err;
   }
 
-  return payload.formatted_sqls.map((s) => String(s || ""));
+  return payload.results.map((item, index) => {
+    if (item && item.status === "formatted") return { status: "formatted", formatted: String(item.formatted_sql || "") };
+    const status = item && item.status === "skipped" ? "skipped" : "error";
+    return { status, error: util.normalizeApiErrorPayload(item && item.error, { error_code: "format_failed", message: "Format failed.", index }) };
+  });
+}
+
+// The Error of a statement that was not formatted: the message, the code and the payload of the API, which `index` places in the text.
+function formatFailure(item) {
+  const norm = item.error;
+  const err = new Error(util.buildApiErrorText(norm, "Format failed."));
+  err.code = norm.error_code;
+  err.payload = norm;
+  return err;
+}
+
+// The formatted texts, in order. It rejects with the first statement that was not formatted (the others of the batch were).
+async function formatSqls(hostId, sqls, { signal } = {}) {
+  const items = await formatSqlsEach(hostId, sqls, { signal });
+  const failed = items.find((item) => item.status !== "formatted");
+  if (failed) throw formatFailure(failed);
+  return items.map((item) => item.formatted);
 }
 
 async function runSql(hostId, sql, mode = "normal", { signal } = {}) {
@@ -895,7 +920,7 @@ function humanizeErrors() {
 
 // Every call takes a last { signal } (AbortSignal, e.g. util.latest).
 export const api = { resolveUrl, request, getJson, postJson, getHosts, getVersion,
-  setApiOnline, formatSqls, runSql, openEventStream, analyzeQuery, getQueryExecution, cancelQuery, getMeta,
+  setApiOnline, formatSqls, formatSqlsEach, formatFailure, runSql, openEventStream, analyzeQuery, getQueryExecution, cancelQuery, getMeta,
   getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,
   getSystemActivity, getSystemKeeper, getSystemOverview, getSystemSeries,
   getSystemQueries, getSystemQuery, getSystemDisks, getSystemDiskGrowth,

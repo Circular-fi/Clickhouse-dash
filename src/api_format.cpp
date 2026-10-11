@@ -1,6 +1,7 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "error_envelope.hpp"
 #include "ch_uri.hpp"
 #include "format_clickhouse.hpp"
 #include "format_service.hpp"
@@ -53,9 +54,10 @@ void set_format_cache_header(httplib::Response& res, size_t hits, size_t misses)
   res.set_header("X-Chdash-Format-Cache", value);
 }
 
-// formatQuery on the pooled connection of the host: one connection for the whole request, taken at the first text that needs ClickHouse
-// (a text with comments never does), and given back, or closed when it is no longer good. A connection that failed while
-// idle is reconnected once (format_query_with_client).
+// formatQuery on a pooled connection of the host. Each text takes a connection when it needs ClickHouse (a text with comments never
+// does) and gives it back at once, or closes it when it is no longer good, so a batch holds no connection between two texts (a client
+// that failed while idle is reconnected once, format_query_with_client). The host is checked once, and a connection that cannot be
+// opened is not tried again in the same request: the other texts fail at once with the same error instead of waiting for it again.
 class PooledFormatPort final : public FormatQueryPort {
 public:
   PooledFormatPort(const std::shared_ptr<ClickHouseClientPool>& pool, const HealthRunner* health, const HostSpec& host, std::string host_id)
@@ -81,27 +83,26 @@ public:
 
 private:
   std::shared_ptr<clickhouse::Client> connect() {
-    if (client_) return client_;
-    if (attempted_) return {};
-    attempted_ = true;
+    if (connect_failed_) return {};
     if (!is_host_healthy(health_, host_id_)) {
       connect_error_ = "Selected host is down.";
       host_down_ = true;
+      connect_failed_ = true;
       return {};
     }
     const auto timeout = std::chrono::seconds(5);
-    client_ = pool_ ? pool_->acquire(host_.runner_uri, timeout, timeout, timeout, &connect_error_)
-                    : make_client_from_uri(host_.runner_uri, timeout, timeout, timeout, &connect_error_);
-    return client_;
+    auto client = pool_ ? pool_->acquire(host_.runner_uri, timeout, timeout, timeout, &connect_error_)
+                        : make_client_from_uri(host_.runner_uri, timeout, timeout, timeout, &connect_error_);
+    if (!client) connect_failed_ = true;
+    return client;
   }
 
   std::shared_ptr<ClickHouseClientPool> pool_;
   const HealthRunner* health_;
   const HostSpec& host_;
   std::string host_id_;
-  std::shared_ptr<clickhouse::Client> client_;
   std::string connect_error_;
-  bool attempted_ = false;
+  bool connect_failed_ = false;
   bool reconnect_attempted_ = false;
   bool host_down_ = false;
 };
@@ -179,38 +180,74 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     if (arr.Size() > kMaxBatchItems) {
       return json_error(res, 413, "too_many_sqls", "Too many SQL statements in one format request.");
     }
+    std::vector<std::string> texts;
+    texts.reserve(arr.Size());
     for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
       if (!arr[i].IsString()) {
         return json_error(res, 400, "invalid_sqls", "sqls must be an array of strings.");
       }
+      texts.emplace_back(arr[i].GetString(), arr[i].GetStringLength());
     }
 
-    std::vector<FormatCache::ValuePtr> formatted_sqls;
-    formatted_sqls.reserve(arr.Size());
-    // One statement gives up after 2 s (postprocess_format_query); a batch gives up after kMaxFormatBatchTime: the statements
-    // left come back as written rather than holding a worker thread for minutes.
-    const auto batch_deadline = std::chrono::steady_clock::now() + kMaxFormatBatchTime;
-    for (rapidjson::SizeType i = 0; i < arr.Size(); ++i) {
-      const std::string text(arr[i].GetString(), arr[i].GetStringLength());
-      if (std::chrono::steady_clock::now() > batch_deadline) {
-        formatted_sqls.push_back(std::make_shared<const std::string>(trim_sql(text)));
-        continue;
-      }
-      FormatOutcome outcome = batch.format(text);
-      if (!outcome.ok()) {
-        const int index = static_cast<int>(i);
-        return fail(text, outcome, &index);
-      }
-      formatted_sqls.push_back(std::move(outcome.formatted));
-    }
+    // One text gives up after 2 s (postprocess_format_query). The batch has a time of its own (kMaxFormatBatchTime): the texts that
+    // start after it are skipped, and so are the ones that follow a caller that went away or a server that stops. A text that fails
+    // fails alone: every other text has its own answer.
+    FormatBatchLimits limits;
+    limits.deadline = std::chrono::steady_clock::now() + kMaxFormatBatchTime;
+    limits.stop = [this, &req] { return stopping() || (req.is_connection_closed && req.is_connection_closed()); };
+    const std::vector<FormatItem> items = format_texts(batch, texts, limits);
 
+    size_t formatted = 0, failed = 0, skipped = 0;
     rapidjson::StringBuffer sb(nullptr, 4096);
     rapidjson::Writer<rapidjson::StringBuffer> w(sb);
     w.StartObject();
-    w.Key("formatted_sqls");
+    w.Key("results");
     w.StartArray();
-    for (const auto& pretty : formatted_sqls) write_json_text(w, *pretty);
+    for (size_t i = 0; i < items.size(); ++i) {
+      const FormatItem& item = items[i];
+      const int index = static_cast<int>(i);
+      w.StartObject();
+      w.Key("index"); w.Int(index);
+      if (item.status == FormatItemStatus::Formatted) {
+        ++formatted;
+        w.Key("status"); w.String("formatted");
+        w.Key("formatted_sql"); write_json_text(w, *item.outcome.formatted);
+      } else {
+        ApiError error;
+        error.index = index;
+        if (item.status == FormatItemStatus::Skipped) {
+          ++skipped;
+          w.Key("status"); w.String("skipped");
+          error.status = item.skipped_for_stop ? 503 : 504;
+          error.code = item.skipped_for_stop ? "canceled" : "format_timeout";
+          error.message = item.skipped_for_stop ? "This statement was not formatted: the request was stopped."
+                                                : "This statement was not formatted: the time of the request ran out. Format it again.";
+        } else {
+          ++failed;
+          w.Key("status"); w.String("error");
+          const std::string trimmed = trim_sql(texts[i]);
+          const auto loc = parse_clickhouse_error_location(item.outcome.error, trimmed);
+          if (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) error.clickhouse = loc;
+          if (port.host_down() && is_format_transport_failure(item.outcome.failure)) {
+            error.status = 503;
+            error.code = "host_unavailable";
+            error.message = "Selected host is down.";
+          } else {
+            error.status = format_error_status(item.outcome.failure);
+            error.code = format_error_code(item.outcome.failure);
+            error.message = item.outcome.error;
+          }
+        }
+        const std::string json = error_json(error);
+        w.Key("error");
+        w.RawValue(json.data(), json.size(), rapidjson::kObjectType);
+      }
+      w.EndObject();
+    }
     w.EndArray();
+    w.Key("formatted"); w.Uint64(formatted);
+    w.Key("failed"); w.Uint64(failed);
+    w.Key("skipped"); w.Uint64(skipped);
     write_cache_meta(w);
     w.EndObject();
 

@@ -260,4 +260,22 @@ FormatOutcome FormatBatch::format(std::string sql_raw) {
   return outcome;
 }
 
+std::vector<FormatItem> format_texts(FormatBatch& batch, const std::vector<std::string>& texts, const FormatBatchLimits& limits) {
+  std::vector<FormatItem> items(texts.size());
+  bool stopped = false;
+  for (size_t i = 0; i < texts.size(); ++i) {
+    FormatItem& item = items[i];
+    // Once the caller is gone or the server stops, nothing else is asked (the answer reaches nobody, or the process ends).
+    if (!stopped && limits.stop && limits.stop()) stopped = true;
+    if (stopped) {
+      item.skipped_for_stop = true;
+      continue;
+    }
+    if (std::chrono::steady_clock::now() > limits.deadline) continue;
+    item.outcome = batch.format(texts[i]);
+    item.status = item.outcome.ok() ? FormatItemStatus::Formatted : FormatItemStatus::Error;
+  }
+  return items;
+}
+
 } // namespace chdash

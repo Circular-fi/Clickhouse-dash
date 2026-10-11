@@ -221,7 +221,8 @@ const std::vector<McpApiTool>& mcp_api_tools() {
       // ---- Query helpers: functions of ChDash that read no data ---------------------------------------
       {"format_sql", "query", "Format SQL",
        "Format SQL text like the Format button of the Query page (it reads the ClickHouse version of the "
-       "host to parse it). Body: `sql` (required) or `sqls` (a list), `line_width`.",
+       "host to parse it). Body: `sql` (required) or `sqls` (a list: the answer has a status for each statement), "
+       "`line_width`.",
        "POST", "/api/format", McpApiScope::Free},
   };
   return tools;
