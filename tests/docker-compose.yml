@@ -193,6 +193,64 @@ services:
       retries: 120
       start_period: 2s
 
+  # Two more servers of the test image, each with the configuration that a spec needs. The browser specs that run on
+  # them name them by MCP_CONTRACT_BASE_URL and QUERY_LIBRARY_LIVE_URL: without them those specs would skip, and the run
+  # would be green with a contract unchecked (CHDASH_REQUIRE_FIXTURES=1 turns a missing instance into a failure).
+  # Each writes its files to a volume of its own; the specs delete what they make.
+  chdash_mcp:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-mcp
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+      chdash_source:
+        condition: service_healthy
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/mcp.hcl
+        target: /config/chdash.hcl
+        read_only: true
+      - mcp_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/version | grep -q '\"name\":\"clickhouse-dash\"'"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
+  chdash_qlib:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-qlib
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+      chdash_source:
+        condition: service_healthy
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/query-library.writable.hcl
+        target: /config/chdash.hcl
+        read_only: true
+      - qlib_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/version | grep -q '\"name\":\"clickhouse-dash\"'"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
   # The same server built with the files embedded in the binary (CHDASH_EMBED_STATIC=ON, the way the release is built):
   # no ./static, a map of versions in every page, .gz copies, long-lived caching of a versioned file. chdash_source
   # reads its files from the disk and never takes this path. The browser tests run on both (the `tests` service:
@@ -256,6 +314,10 @@ services:
         condition: service_healthy
       chdash_embedded:
         condition: service_healthy
+      chdash_mcp:
+        condition: service_healthy
+      chdash_qlib:
+        condition: service_healthy
       otel_fixture:
         condition: service_healthy
     environment:
@@ -266,6 +328,9 @@ services:
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-test}"
       FRONTEND_BASE_URL: http://chdash_source:8080
       EMBEDDED_BASE_URL: http://chdash_embedded:8080
+      MCP_CONTRACT_BASE_URL: http://chdash_mcp:8080
+      QUERY_LIBRARY_LIVE_URL: http://chdash_qlib:8080
+      CHDASH_REQUIRE_FIXTURES: "1"
       TEST_ARTIFACTS_ROOT: /artifacts
       PERF_RUNS: "${PERF_RUNS:-20}"
       PERF_WARMUP: "${PERF_WARMUP:-1}"
@@ -287,3 +352,5 @@ services:
 volumes:
   clickhouse_data:
   clickhouse_replica_data:
+  mcp_data:
+  qlib_data:

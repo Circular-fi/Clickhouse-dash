@@ -3,6 +3,7 @@ import { installObservers } from '../helpers/observability.js';
 import { nextFrames, openApp, roundTrip, runQuery, runSuccessfulQuery, waitForTerminal } from '../helpers/app.js';
 import { historyRecords } from '../helpers/history.js';
 import { captureCopies, copiedText } from '../helpers/clipboard.js';
+import { requireInstance } from '../helpers/instances.js';
 
 // Query library: the toolbar book button (between Format and the run settings
 // cog) opens it in the shared modal dialog of the profiling (app_ui_dialog.js:
@@ -22,7 +23,7 @@ import { captureCopies, copiedText } from '../helpers/clipboard.js';
 // both; a move between them copies, then removes. Saved queries, folders and
 // History are per host: the dialog shows the selected host's and follows a
 // host switch. The server is a small in-memory server behind page.route,
-// writable or read-only, plus one live check when QUERY_LIBRARY_BASE_URL
+// writable or read-only, plus one live check when QUERY_LIBRARY_LIVE_URL
 // names a real instance. History is the browser's record of what ran:
 // nothing in it can be removed.
 
@@ -2273,10 +2274,10 @@ test('themes: panel, tree and preview (tools and SQL) follow dark and light', as
 
 // --- Live server (optional) -------------------------------------------------
 
-const LIVE = process.env.QUERY_LIBRARY_BASE_URL || '';
+const LIVE = process.env.QUERY_LIBRARY_LIVE_URL || '';
 
 test('live server library: both roots; create, save, move within and across the roots, reload and remove against a real instance', async ({ page }) => {
-  test.skip(!LIVE, 'QUERY_LIBRARY_BASE_URL names a writable query library instance (tests/README.md).');
+  requireInstance(test, 'QUERY_LIBRARY_LIVE_URL', LIVE);
   const stamp = `pw-${Date.now().toString(36)}`;
   await page.goto(`${LIVE.replace(/\/+$/, '')}/query`);
   await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
@@ -2289,10 +2290,11 @@ test('live server library: both roots; create, save, move within and across the 
 
   await selectItem(page, SERVER_ROOT);
   await previewTool(page, 'new-subfolder').click();
-  expect(await dialog(page).locator('[name="parent_id"]').inputValue()).toBe('server:');
-  await fillDialog(page, { name: `${stamp} folder` });
-  await dialog(page).getByRole('button', { name: 'Create' }).click();
+  await expect(newFolderInput(page)).toBeFocused();
+  await newFolderInput(page).fill(`${stamp} folder`);
+  await page.keyboard.press('Enter');
   await expect(node(page, `${stamp} folder`)).toBeVisible();
+  await expect(node(page, `${stamp} folder`)).toHaveAttribute('data-store', 'server');
 
   await closePanel(page);
   await page.locator('#queryTextArea').fill(`SELECT '${stamp}' AS stamp`);
@@ -2337,7 +2339,7 @@ test('live server library: both roots; create, save, move within and across the 
   await expect(node(page, `${stamp} folder`)).toHaveAttribute('data-store', 'server');
   library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
   const folder = library.folders.find((f) => f.name === `${stamp} folder`);
-  expect(library.queries.find((q) => q.name === `${stamp} query`)).toMatchObject({ folder_id: folder.id, sql: `SELECT '${stamp}' AS stamp` });
+  expect(library.queries.find((q) => q.name === `${stamp} query`)).toMatchObject({ folder_id: folder.id, sql: `SELECT '${stamp}' AS \`stamp\`` });
   expect((await libraryState(page)).folders.some((f) => f.name === `${stamp} folder`)).toBe(false);
 
   await selectItem(page, `${stamp} folder`);
