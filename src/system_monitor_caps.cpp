@@ -67,13 +67,13 @@ std::string monitor_reason_of(const std::exception& error) {
   }
 }
 
-std::string monitor_grant_hint(const std::string& table, const std::string& user) {
+std::string monitor_grant_hint(const std::string& table, const std::string& user, const std::string& account) {
   std::string name = user;
   const bool plain = !name.empty() && std::all_of(name.begin(), name.end(), [](char ch) {
     return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_';
   });
   if (name.empty()) {
-    name = "<system user>";
+    name = "<" + account + ">";
   } else if (!plain) {
     std::string quoted = "`";
     for (const char ch : name) {

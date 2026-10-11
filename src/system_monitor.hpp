@@ -74,7 +74,9 @@ struct MonitorPanelIssue {
 
 // The reason of an exception thrown by a System SELECT.
 std::string monitor_reason_of(const std::exception& error);
-// "GRANT SELECT ON system.<table> TO <user>" (the user quoted when needed).
-std::string monitor_grant_hint(const std::string& table, const std::string& user);
+// "GRANT SELECT ON system.<table> TO <user>" (the user quoted when needed). `user` is the account that did the read: the system account for
+// every panel but the Queries, which read with the runner account. When the user is not known, `account` names it in the statement
+// ("<system user>", "<runner user>").
+std::string monitor_grant_hint(const std::string& table, const std::string& user, const std::string& account = "system user");
 
 } // namespace chdash

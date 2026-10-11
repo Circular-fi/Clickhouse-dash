@@ -20,16 +20,27 @@
 
 namespace chdash {
 
-// True after it wrote the 400 `unknown_parameter` answer: the request holds a parameter that is not in `allowed`.
-inline bool refuse_unknown_params(const httplib::Request& req, httplib::Response& res, std::initializer_list<const char*> allowed) {
+// The 400 `unknown_parameter` error when the request holds a parameter that is not in `allowed`.
+inline std::optional<ApiError> unknown_param_error(const httplib::Request& req, std::initializer_list<const char*> allowed) {
   for (const auto& item : req.params) {
     bool known = false;
     for (const char* name : allowed) known = known || item.first == name;
     if (known) continue;
-    json_error(res, 400, "unknown_parameter", "Unknown parameter: " + item.first + ".");
-    return true;
+    ApiError error;
+    error.status = 400;
+    error.code = "unknown_parameter";
+    error.message = "Unknown parameter: " + item.first + ".";
+    return error;
   }
-  return false;
+  return std::nullopt;
+}
+
+// True after it wrote the 400 `unknown_parameter` answer: the request holds a parameter that is not in `allowed`.
+inline bool refuse_unknown_params(const httplib::Request& req, httplib::Response& res, std::initializer_list<const char*> allowed) {
+  const auto error = unknown_param_error(req, allowed);
+  if (!error) return false;
+  json_error(res, error->status, error->code, error->message);
+  return true;
 }
 
 // A decimal integer with an optional sign, nothing else, that fits in 64 bits.

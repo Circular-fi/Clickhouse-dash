@@ -74,7 +74,7 @@ The page detects once for each host what a server exposes, and keeps the result 
 A panel that cannot be read degrades on its own. It is listed in `unavailable_panels` (`panel`, `table`, `reason`, `message`, `hint`). It is never a page error. The reasons are:
 
 - `disabled`: the table does not exist (ClickHouse codes 60, 81).
-- `not_granted`: ClickHouse code 497. `hint` is the statement to run, `GRANT SELECT ON system.<table> TO <system user>`. The page shows it with a copy button.
+- `not_granted`: ClickHouse code 497. `hint` is the statement to run, `GRANT SELECT ON system.<table> TO <user>`. The user is the account that did the read: the system account for each panel, and the runner account for Queries (which read `system.query_log` as the runner). When the account is not known, the statement names it `<system user>` or `<runner user>`. The page shows it with a copy button.
 - `unsupported`: a column that this version does not have (16, 47).
 - `window_too_large`: the time budget or the read cap (159, 158, and the limits of memory and of rows or bytes, 241 and 396).
 - `readonly_account`: 164. A `readonly = 1` profile cannot set the limits.
@@ -169,6 +169,7 @@ The server picks the step. The steps are 10 s, 30 s, 1 min, 5 min, 15 min, 30 mi
 - `system.metric_log`: the allowlisted columns that this server has (detected with the other capabilities).
   - `ProfileEvent_*` are deltas for each sample. A rate is their sum over the seconds that the bucket covers (for the bucket still in progress: up to its last sample).
   - `CurrentMetric_*` are gauges (average, or maximum for a peak).
+  - `avg_query_ms` is the time of the queries over their number. ClickHouse adds the time of a query when it ends, and counts it (`ProfileEvent_Query`) when it starts. The server therefore counts the queries that ended in the bucket: the started ones, less the growth of `CurrentMetric_Query` since the end of the bucket before. The first bucket of a window counts the started ones.
   - The server reads a `metric_log` in the transposed layout (no `ProfileEvent_*` column) as no `metric_log` (`unsupported`).
 - `system.asynchronous_metric_log`: `metric IN (<allowlist>)` first (the key of the table). The value is the average for each bucket (maximum for the load, the parts for each partition and the replica delay).
 - `system.query_log`: the key, `type`, `is_initial_query` and `query_duration_ms` only (`quantilesTDigest`). The server skips it (`out_of_range`, not an error) when the window is wider than `query_log_max_lookback_hours`.
@@ -176,7 +177,7 @@ The server picks the step. The steps are 10 s, 30 s, 1 min, 5 min, 15 min, 30 mi
 Each SELECT has the System `SETTINGS` (10 s, 50 M rows read, or `query_log_max_rows` for `query_log`, and a result cap of the bucket count). The answer has these fields:
 
 - `timestamps` (bucket starts, ms).
-- `series` (name to one value or `null` for each bucket).
+- `series` (name to one value or `null` for each bucket). A value has six significant digits. From one million up, it is a whole number with all its digits, so a size in bytes is not rounded.
 - `sources` (`status`, `message`, `hint`, `rows_read`, `elapsed_ms`, `missing` columns for each log).
 - `unavailable_panels`.
 - `step_seconds`.
@@ -209,7 +210,7 @@ The kinds with a problem come first. Then the kinds with rows follow. The part f
 
 Each query is restricted to `database IN (<databases the runner reads>)` inside ClickHouse. The route then keeps every row only when the runner reads that object (the runner ACL, resolved lazily for the databases that actually appear, after the read). An object that is hidden from the runner never reaches the browser. Its rows never use the bound.
 
-Each kind reads at most 201 rows and returns 200 (`row_limit`). The answer lists a full kind in `truncated_sections` and an unreadable kind in `unavailable_sections`. The `system.replicas` read selects only in-memory columns. `log_max_index`, `log_pointer`, `total_replicas`, `active_replicas`, `zookeeper_exception` and `replica_is_active` cost one Keeper request for each table. The route does not select them. The replica counts come from the same cache of 60 s for each server as the catalog (see [Explorer](explorer.md#replication-metadata-and-keeper-load)).
+Each kind reads at most 201 rows and returns 200 (`row_limit`). The server reads the rows with the system account. After the read, it drops the rows of a table that the runner cannot see. A read that comes back with 201 rows is cut, even when few rows remain after that: the rows past it were not looked at. The answer lists such a kind in `truncated_sections` and an unreadable kind in `unavailable_sections`. The `system.replicas` read selects only in-memory columns. `log_max_index`, `log_pointer`, `total_replicas`, `active_replicas`, `zookeeper_exception` and `replica_is_active` cost one Keeper request for each table. The route does not select them. The replica counts come from the same cache of 60 s for each server as the catalog (see [Explorer](explorer.md#replication-metadata-and-keeper-load)).
 
 `GET /api/system/keeper?host_id=<id>[&refresh=1]` reads these items:
 

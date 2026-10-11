@@ -182,7 +182,7 @@ void queries_failed(ChExecutor& runner, const MonitorQueriesRequest& r, const cl
   out.message = error.what();
   read.status = out.status;
   read.message = out.message;
-  if (out.status == "not_granted") out.hint = monitor_grant_hint("query_log", r.runner_user);
+  if (out.status == "not_granted") out.hint = monitor_grant_hint("query_log", r.runner_user, "runner user");
   if (out.status != "window_too_large") return;
   uint64_t rows = 0;
   try {
