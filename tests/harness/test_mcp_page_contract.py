@@ -177,8 +177,10 @@ def test_the_page_is_built_from_the_shared_components_and_owns_no_copy_of_them()
 def test_the_spec_and_the_docs_are_registered():
     runner = read("tests/test-suite/run-all-tests.py")
     assert "specs/mcp-page.spec.js" in runner
-    spec = read("tests/frontend/specs/mcp-page.spec.js")
+    # The fake server of the page spec lives in a helper that the contract spec also runs against the real server.
+    spec = read("tests/frontend/specs/mcp-page.spec.js") + read("tests/frontend/helpers/mcp-fake.js")
     assert "/api/mcp/**" in spec and "route.continue" in spec
+    assert "specs/mcp-contract.spec.js" in runner
     foundations = read("docs/ui-foundations.md")
     assert "| `/mcp-integration` |" in foundations and "docs/mcp-integration-page.md" in foundations
     doc = read("docs/mcp-integration-page.md")
