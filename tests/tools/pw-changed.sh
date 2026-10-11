@@ -89,7 +89,7 @@ specs_for() {
     src/static/app_page_functions.js|src/static/functions.html) echo explorer-nav page-chrome ;;
     src/static/app_wasm_highlight.js|src/wasm/highlight.c|src/static/wasm/highlight.wasm|src/static/app_highlight.js) echo wasm-highlight wasm-autoload functional ;;
     src/static/app_wasm_sqlscan.js|src/wasm/sqlscan.c|src/static/wasm/sqlscan.wasm|src/static/app_autocomplete.js|src/static/app_sql.js|src/static/app_sql_lex.js)
-      echo wasm-sql wasm-autoload functional ;;
+      echo wasm-sql wasm-autoload functional editor-completion-keys ;;
     src/static/app_wasm_rowsort.js|src/wasm/rowsort.c|src/static/wasm/rowsort.wasm|src/static/app_results_sort.js) echo wasm-rowsort wasm-autoload functional ;;
     src/static/app_wasm_chartprep.js|src/wasm/chartprep.c|src/static/wasm/chartprep.wasm) echo wasm-chartprep query-chart ;;
     src/static/app_wasm_color.js|src/wasm/color.c|src/static/wasm/color.wasm|src/static/app_palette.js) echo wasm-color ui-foundations ;;
