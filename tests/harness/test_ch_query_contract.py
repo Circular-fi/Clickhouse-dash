@@ -112,7 +112,7 @@ def test_request_limits_label_and_bound_the_generated_queries():
     assert "limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;" in body
     assert "req.is_connection_closed()" in body
     # System > Queries leaves the generated reads out with hide_chdash.
-    assert "AND NOT startsWith(log_comment, 'chdash:')" in read("src/system_monitor.cpp")
+    assert "AND NOT startsWith(log_comment, 'chdash:')" in read("src/system_queries.cpp")
 
 
 def test_the_preview_limit_is_a_cancel_packet_not_a_kill():

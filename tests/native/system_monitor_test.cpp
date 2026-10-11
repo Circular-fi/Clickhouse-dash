@@ -9,7 +9,11 @@
 //          prints the growth SQL of both metric forms (to try them on a server)
 // The Python harness runs it when SYSTEM_MONITOR_TEST_BINARY points at it.
 
+#include "system_disks.hpp"
 #include "system_monitor.hpp"
+#include "system_overview.hpp"
+#include "system_queries.hpp"
+#include "system_series.hpp"
 
 #include <clickhouse/exceptions.h>
 

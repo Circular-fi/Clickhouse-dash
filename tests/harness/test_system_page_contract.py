@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 import config_keys
+from system_sources import read_monitor, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -82,14 +83,14 @@ def builder_body(source: str, name: str) -> str:
 
 
 def test_every_select_is_fixed_bounded_read_only_and_tagged():
-    source = read("src/system_monitor.cpp")
+    source = read_monitor()
     settings = source[source.index("std::string monitor_settings_sql("):source.index("std::string monitor_reason_of(")]
     for part in ["readonly = 2", "max_execution_time = ", "timeout_overflow_mode = 'throw'", "max_rows_to_read = ",
                  "read_overflow_mode = 'throw'", "max_result_rows = ", "result_overflow_mode = 'throw'",
                  "log_comment = 'chdash-system'"]:
         assert part in settings, part
     assert "'break'" not in source
-    selects = source.count("ch_select(")
+    selects = len(re.findall(r"\b(?:system|runner)\.select\(", source))
     assert selects >= 8, selects
     series = source.count("monitor_settings_sql(kSeriesTimeBudgetSeconds, ")
     assert series == 3, series
@@ -97,7 +98,7 @@ def test_every_select_is_fixed_bounded_read_only_and_tagged():
     assert queries == 5, queries
     disks = sum(builder_body(source, name).count("monitor_settings_sql(") for name in DISK_BUILDERS)
     assert disks == 5, disks
-    builder_selects = sum(source.count(f"ch_select(system, {name}(") for name in DISK_BUILDERS)
+    builder_selects = sum(source.count(f"system.select({name}(") for name in DISK_BUILDERS)
     assert builder_selects == 3, builder_selects
     assert source.count("bounded_select(") == 3
     assert source.count("monitor_settings_sql(") - 1 == selects - builder_selects + series + queries + disks, (selects, series, queries, disks, source.count("monitor_settings_sql("))
@@ -126,19 +127,20 @@ def test_the_overview_handler_reads_the_host_and_refresh_only():
 
 
 def test_replication_counts_pass_the_runner_show_boundary():
-    source = read("src/system_monitor.cpp")
+    source = read_unit("system_overview.cpp")
     replication = source[source.index("VisibleTables visibility(runner_acl);"):source.index("out.replication = summary;")]
     # Checked after the read: the boundary may ask ClickHouse as the runner, never inside another read's callback.
     assert "if (!visibility.visible(cells[0], cells[1])) continue;" in replication
-    assert "const std::vector<std::string>& databases() { return acl_.databases(); }" in source
-    assert "return acl_.visible(database, table);" in source
+    internal = read_unit("system_monitor_internal.hpp")
+    assert "const std::vector<std::string>& databases() { return acl_.databases(); }" in internal
+    assert "return acl_.visible(database, table);" in internal
     sql = replication[:replication.index("FROM system.replicas")]
     for column in ["log_max_index", "log_pointer", "total_replicas", "active_replicas", "zookeeper_exception", "replica_is_active"]:
         assert column not in sql, column
 
 
 def test_errors_map_to_per_panel_reasons_with_the_grant_hint():
-    source = read("src/system_monitor.cpp")
+    source = read_monitor()
     reasons = source[source.index("std::string monitor_reason_of("):source.index("std::string monitor_grant_hint(")]
     mapping, pending = {}, []
     for line in reasons.splitlines():
@@ -259,8 +261,7 @@ def test_the_series_handler_reads_allowlisted_parameters_only():
 
 
 def test_series_sql_is_three_fixed_passes_over_allowlisted_names():
-    source = read("src/system_monitor.cpp")
-    source = source[:source.index("// Queries: top query shapes and one shape's drill-down")]
+    source = read_unit("system_series.cpp") + read_unit("system_monitor_caps.cpp")
     assert source.count('" FROM system.metric_log WHERE "') == 1
     assert source.count("FROM system.asynchronous_metric_log WHERE metric IN ") == 1
     assert source.count('" FROM system.query_log WHERE "') == 1
@@ -273,7 +274,7 @@ def test_series_sql_is_three_fixed_passes_over_allowlisted_names():
         assert column not in sql, column
     assert "window.span_s > window.query_log_max_span_s" in source
     assert "steps{10, 30, 60, 300, 900, 1800, 3600, 3 * 3600, 6 * 3600, 86400, 2 * 86400}" in source
-    assert "constexpr uint64_t kMonitorSeriesMaxPoints = 300;" in read("src/system_monitor.hpp")
+    assert "constexpr uint64_t kMonitorSeriesMaxPoints = 300;" in read("src/system_series.hpp")
 
 
 def test_performance_draws_on_the_shared_chart_engine_and_time_range():
@@ -341,8 +342,7 @@ def test_the_queries_handlers_read_allowlisted_parameters_with_the_runner():
 
 
 def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
-    source = read("src/system_monitor.cpp")
-    queries = source[source.index("// Queries: top query shapes and one shape's drill-down"):]
+    queries = read_unit("system_queries.cpp")
     assert "\" AND log_comment != 'chdash-system'\"" in queries
     assert 'sql += " AND NOT startsWith(log_comment, \'chdash:\')";' in queries
     assert 'if (!r.system_user.empty()) sql += " AND user != " + quote_string(r.system_user);' in queries
@@ -365,7 +365,7 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
     for column in ["argMax(query", "ProfileEvents", "exception"]:
         assert column not in top, column
     assert '" GROUP BY normalized_query_hash" + queries_having_sql(r, true) +' in top
-    monitor = read("src/system_monitor.cpp")
+    monitor = queries
     assert 'conditions.push_back(std::string("countIf(has(databases, {") + kQueriesDatabaseParam + ":String})) > 0");' in monitor
     assert 'conditions.push_back(std::string("countIf(has(tables, {") + kQueriesTableParam + ":String})) > 0");' in monitor
     assert '" ORDER BY " + expression_of(queries_sort_expressions(), r.sort) +' in top
@@ -375,7 +375,7 @@ def test_queries_sql_is_two_phase_and_never_lists_its_own_reads():
     assert "max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'" in queries
     text = queries[queries.index("std::string monitor_queries_text_sql("):queries.index("std::string monitor_query_timeline_sql(")]
     assert "PREWHERE normalized_query_hash IN (" in text and "substringUTF8(argMax(query, event_time), 1, " in text
-    assert "constexpr size_t kMonitorTopQueries = 50;" in read("src/system_monitor.hpp")
+    assert "constexpr size_t kMonitorTopQueries = 50;" in read("src/system_queries.hpp")
     for builder in ["monitor_query_timeline_sql(", "monitor_query_runs_sql(", "monitor_query_example_sql("]:
         body = queries[queries.index(f"std::string {builder}"):]
         body = body[:body.index("\n}\n")]
@@ -426,8 +426,8 @@ def test_the_disks_handler_reads_the_host_only_and_growth_is_a_series_panel():
 
 
 def test_disks_sql_names_runner_visible_databases_and_both_disk_metric_forms():
-    source = read("src/system_monitor.cpp")
-    disks = source[source.index("// Disks: system.disks, system.storage_policies"):]
+    disks = read_unit("system_disks.cpp")
+    source = read_monitor()
     assert "const std::vector<std::string> databases = runner_acl.databases();" in disks
     assert "if (!std::binary_search(databases.begin(), databases.end(), usage.database)) continue;" in disks
     # The names of the databases are query parameters (one String for each), never SQL text.
@@ -440,7 +440,7 @@ def test_disks_sql_names_runner_visible_databases_and_both_disk_metric_forms():
     assert 'out.key_column = caps.has_column("asynchronous_metric_log", "key");' in disks
     assert "\" OR (metric = 'DiskUsed' AND key IN \" + in_list(disks)" in disks
     assert "if(metric = 'DiskUsed', toString(key), substring(toString(metric), 10))" in disks
-    header = read("src/system_monitor.hpp")
+    header = read("src/system_disks.hpp")
     assert "constexpr size_t kMonitorDiskTrendMinPoints = 6;" in header
     assert "constexpr uint64_t kMonitorDiskTrendMinSpanSeconds = 6 * 3600;" in header
     assert 'out.status = "not_enough_history";' in disks and 'out.status = "not_growing";' in disks

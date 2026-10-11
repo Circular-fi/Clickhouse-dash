@@ -1,6 +1,7 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "ch_executor.hpp"
 #include "api_params.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
@@ -38,6 +39,10 @@ std::shared_ptr<clickhouse::Client> acquire_monitor_client(
     std::string* error) {
   return pool ? pool->acquire(uri, std::chrono::seconds(5), std::chrono::seconds(15), std::chrono::seconds(15), error)
               : make_client_from_uri(uri, std::chrono::seconds(5), std::chrono::seconds(15), std::chrono::seconds(15), error);
+}
+
+std::unique_ptr<BorrowedExecutor> borrowed_executor(const std::shared_ptr<clickhouse::Client>& client) {
+  return std::make_unique<BorrowedExecutor>(*client);
 }
 
 void write_string(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* key, const std::string& value) {
@@ -191,7 +196,7 @@ std::shared_ptr<const MonitorCapabilities> Server::system_monitor_capabilities(c
           message = error.empty() ? "Cannot connect to the system context." : error;
           return false;
         }
-        if (!detect_monitor_capabilities(*system, value, &error)) {
+        if (!detect_monitor_capabilities(*borrowed_executor(system), value, &error)) {
           code = "system_monitor_detection_failed";
           message = error.empty() ? "The server's system tables could not be listed." : error;
           return false;
@@ -231,7 +236,7 @@ void Server::handle_system_overview(const httplib::Request& req, httplib::Respon
         }
         try {
           AclView acl(acl_, access);
-          if (!load_system_monitor_overview(*system, acl, *caps, value, &error)) {
+          if (!load_system_monitor_overview(*borrowed_executor(system), acl, *caps, value, &error)) {
             code = "system_monitor_failed";
             message = error.empty() ? "The server overview is unavailable." : error;
             return false;
@@ -433,7 +438,7 @@ void Server::handle_system_series(const httplib::Request& req, httplib::Response
           message = error.empty() ? "Cannot connect to the system context." : error;
           return false;
         }
-        load_system_monitor_series(*system, *caps, window, value);
+        load_system_monitor_series(*borrowed_executor(system), *caps, window, value);
         // A source that failed outside ClickHouse (a broken connection)
         // leaves the client in an unknown state.
         if (client_pool_) {
@@ -560,7 +565,7 @@ void Server::system_monitor_disk_growth(const httplib::Request& req, httplib::Re
           return false;
         }
         AclView acl(acl_, access);
-        load_system_monitor_disk_growth(*system, acl, *caps, window, value);
+        load_system_monitor_disk_growth(*borrowed_executor(system), acl, *caps, window, value);
         // A source that failed outside ClickHouse (a broken connection)
         // leaves the client in an unknown state.
         if (client_pool_) {
@@ -714,7 +719,7 @@ void Server::handle_system_disks(const httplib::Request& req, httplib::Response&
         }
         try {
           AclView acl(acl_, access);
-          if (!load_system_monitor_disks(*system, acl, *caps, value, &error)) {
+          if (!load_system_monitor_disks(*borrowed_executor(system), acl, *caps, value, &error)) {
             code = "system_monitor_failed";
             message = error.empty() ? "The disks are unavailable." : error;
             return false;
@@ -1031,7 +1036,7 @@ void Server::handle_system_queries(const httplib::Request& req, httplib::Respons
           return false;
         }
         AclView acl(acl_, access);
-        if (!load_system_monitor_queries(*runner, acl, *caps, request, value, &error)) {
+        if (!load_system_monitor_queries(*borrowed_executor(runner), acl, *caps, request, value, &error)) {
           if (client_pool_) client_pool_->invalidate(runner);
           code = "system_monitor_failed";
           message = error.empty() ? "The top queries are unavailable." : error;
@@ -1206,7 +1211,7 @@ void Server::handle_system_query(const httplib::Request& req, httplib::Response&
           message = error.empty() ? "Cannot connect to the runner context." : error;
           return false;
         }
-        if (!load_system_monitor_query(*runner, *caps, request, value, &error)) {
+        if (!load_system_monitor_query(*borrowed_executor(runner), *caps, request, value, &error)) {
           if (client_pool_) client_pool_->invalidate(runner);
           code = "system_monitor_failed";
           message = error.empty() ? "The query's history is unavailable." : error;
