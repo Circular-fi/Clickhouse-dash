@@ -650,7 +650,7 @@ private:
       system_page::SystemCaches{system_monitor_caps_cache_, system_monitor_overview_cache_, system_monitor_series_cache_,
                                 system_monitor_queries_cache_, system_monitor_query_cache_, system_monitor_disks_cache_,
                                 system_monitor_growth_cache_, system_activity_cache_, system_keeper_cache_},
-      acl_, cfg_.system};
+      acl_};
   trace::PrefillCache trace_prefill_cache_{cache_options<trace::Prefill>(
       std::chrono::minutes(1), {}, 256, 64u << 20,
       [](const trace::Prefill& v) { return sizeof(v) + cache_size::pairs(v.pairs); })};

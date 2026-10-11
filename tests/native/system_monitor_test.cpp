@@ -441,7 +441,7 @@ struct ServiceRig {
       for (const auto& [database, table] : tables) out[database + std::string(1, '\0') + table] = SystemReplicaCounts{3, 2};
       return out;
     };
-    service = std::make_unique<SystemService>(std::move(ports), caches.refs(), acl.service, settings);
+    service = std::make_unique<SystemService>(std::move(ports), caches.refs(), acl.service);
   }
 
   // The capability detection: the system account is `system_account`, every optional log exists, no versioned column.

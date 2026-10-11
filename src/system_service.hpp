@@ -68,8 +68,7 @@ class SystemService {
     ReplicaCountsFn replica_counts;
   };
 
-  SystemService(Ports ports, SystemCaches caches, AclService& acl, const SystemSettings& settings)
-      : ports_(std::move(ports)), caches_(caches), acl_(acl), settings_(settings) {}
+  SystemService(Ports ports, SystemCaches caches, AclService& acl) : ports_(std::move(ports)), caches_(caches), acl_(acl) {}
 
   // What a server exposes (its optional system logs and versioned columns): kept 10 minutes, 1 minute while an optional log table is missing
   // (ClickHouse creates it at its first flush). A failed detection is not kept: the panels then read their base columns and let ClickHouse answer.
@@ -88,7 +87,6 @@ class SystemService {
   Ports ports_;
   SystemCaches caches_;
   AclService& acl_;
-  const SystemSettings& settings_;
 };
 
 // The rows that every System page lists: at most this many rows for each kind of the Activity.
