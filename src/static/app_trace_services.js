@@ -142,7 +142,8 @@ function requestFilters(filters) {
 // Relative ranges resolve anew for every search: within the same minute
 // the answer is reused (Back from a trace, tab switches).
 function keyOf(params) {
-  return JSON.stringify({ ...params, start_ms: Math.floor(Number(params.start_ms) / 60000), end_ms: Math.floor(Number(params.end_ms) / 60000) });
+  const { start_ms: startMs, end_ms: endMs, ...rest } = params;
+  return JSON.stringify({ ...rest, minutes: timeRange.minuteKey(startMs, endMs) });
 }
 
 // force: an explicit search (Search button, scope / exact toggles) asks

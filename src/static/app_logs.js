@@ -415,7 +415,7 @@ function fieldFilterKeyOf(filters) {
   params.delete("start_ms");
   params.delete("end_ms");
   // Minute-aligned like the server's cache: a re-search within the minute does not refetch.
-  return `${Math.floor(filters.range.start_ms / 60000)}|${Math.ceil(filters.range.end_ms / 60000)}|${params.toString()}`;
+  return `${timeRange.minuteKey(filters.range.start_ms, filters.range.end_ms)}|${params.toString()}`;
 }
 
 function initFields() {

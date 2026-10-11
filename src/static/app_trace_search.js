@@ -595,7 +595,8 @@ function facetFilterKey(filters) {
   const params = facetFilterParams(filters);
   // Minute-aligned like the server's cache: a re-search within the minute
   // does not refetch.
-  return JSON.stringify({ ...params, start_ms: Math.floor(Number(params.start_ms) / 60000), end_ms: Math.ceil(Number(params.end_ms) / 60000) });
+  const { start_ms: startMs, end_ms: endMs, ...rest } = params;
+  return JSON.stringify({ ...rest, minutes: timeRange.minuteKey(startMs, endMs) });
 }
 
 function chipMatches(chip, scope, key, value, op) {

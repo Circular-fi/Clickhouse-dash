@@ -162,6 +162,13 @@ function localMidnight(ms) {
   return date.getTime();
 }
 
+// The range as the minutes that it touches: "<start minute>|<end minute>". A relative range resolves anew for each search, so two
+// searches in the same minute have the same key and the answer of the first is reused (facets, Services, Logs fields). The end is
+// rounded up, so a range that ends later in a minute never shares a key with one that ends in the next.
+function minuteKey(startMs, endMs) {
+  return `${Math.floor(Number(startMs) / 60000)}|${Math.ceil(Number(endMs) / 60000)}`;
+}
+
 // --- Quick ranges (Grafana DateTimePickers/options.ts) --------------------
 
 // Kept short enough that the list never scrolls next to the calendar, with
@@ -811,6 +818,7 @@ export const timeRange = {
   checkRange,
   resolveBounded,
   localMidnight,
+  minuteKey,
   sameRange,
   isRelative,
   describeRange,

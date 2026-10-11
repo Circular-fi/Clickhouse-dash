@@ -133,3 +133,13 @@ test('sameRange compares both sides as text, localMidnight is the start of the l
   assert.equal(timeRange.localMidnight(noon), new Date(2026, 9, 10).getTime());
   assert.equal(timeRange.localMidnight(String(noon)), new Date(2026, 9, 10).getTime());
 });
+
+test('the key of a range is its minutes: searches in one minute share it, the end is rounded up', async () => {
+  const { timeRange } = await load();
+  const minute = 60000;
+  const start = 100 * minute;
+  assert.equal(timeRange.minuteKey(start + 5, start + 30 * minute + 1000), timeRange.minuteKey(start + 40000, start + 30 * minute + 59000));
+  assert.notEqual(timeRange.minuteKey(start, start + 30 * minute), timeRange.minuteKey(start, start + 30 * minute + 1));
+  assert.notEqual(timeRange.minuteKey(start, start + 30 * minute), timeRange.minuteKey(start + minute, start + 30 * minute));
+  assert.equal(timeRange.minuteKey('6000000', '7800000'), '100|130');
+});
