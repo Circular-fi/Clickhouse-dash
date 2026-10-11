@@ -265,8 +265,9 @@ function initQueryLibrary() {
     if (ev.defaultPrevented || ev.isComposing) return;
     const key = String(ev.key || "").toLowerCase();
     if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && key === "s") {
-      // Never the browser's "Save page". Over the library the save prompt
-      // stacks on it; over another dialog (a prompt, profiling) it waits.
+      // Never the browser's "Save page". The library opens (or stays) on Saved
+      // with the save form in its pane; over another dialog (a prompt,
+      // profiling) it waits.
       ev.preventDefault();
       const top = layers.host();
       if (top && top !== document.body && top !== dom.queryLibraryMenu) return;

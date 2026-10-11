@@ -703,7 +703,7 @@ Observability ships its bars in `observability.html` and mounts the summary (`fi
 
 ### Form kit: `.uiForm` (`css/10-components/form.css`)
 
-A dialog form or a settings block uses one kit. The Query library prompts and the MCP key form use it.
+A dialog form, a settings block or a form in a pane uses one kit. The Query library (its Save and Edit form in the preview pane, and its Move prompt) and the MCP key form use it.
 
 - `.uiForm` is a grid of fields.
 - `.uiField` is one field. It can be a `<label>`, a `<div>` or a `<fieldset>`. Its parts are `.uiField__label` (a `<label>` or a `<legend>`), the controls, `.uiField__hint` and `.uiField__error`. A field that is a group of controls (check boxes, a radio set) is a `<fieldset>`.

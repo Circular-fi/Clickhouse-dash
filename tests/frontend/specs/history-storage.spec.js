@@ -256,8 +256,8 @@ test('a library write that the browser refuses drops the metadata cache first, t
   await page.locator('#queryLibraryButton').click();
   await page.locator('#queryLibraryViewSaved').waitFor();
   await page.getByRole('button', { name: /save query/i }).first().click();
-  await page.locator('dialog.qlDialog[open] input').first().fill('Saved when full');
-  await page.locator('dialog.qlDialog[open] button.button--primary, dialog.qlDialog[open] .uiDialog__submit').last().click();
+  await page.locator('#queryLibraryPreview form.qlPaneForm [name="name"]').fill('Saved when full');
+  await page.locator('#queryLibraryPreview form.qlPaneForm button[type="submit"]').click();
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryLibrary.v2') || 'null')?.queries?.some((q) => q.name === 'Saved when full') === true), { timeout: 10_000 }).toBe(true);
   expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => /^chdash\.meta\.v1\.local\./.test(k)).length)).toBe(0);
 });
