@@ -85,6 +85,8 @@ struct HostHealth {
   std::string clickhouse_version;
   // timezone() of the server, the zone of its DateTime text ("" until known).
   std::string clickhouse_timezone;
+  // max_query_size of the server: the longest SQL text that it parses (0 until known).
+  size_t clickhouse_max_query_size = 0;
   int64_t version_checked_at_ms = 0;
   HostSystemTables system_tables;
   HostAccess access;

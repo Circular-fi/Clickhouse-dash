@@ -450,6 +450,13 @@ public:
     result.formatted_sql = sql;
     return result;
   }
+  // No tree: a statement that is laid out locally is not judged here (tests/native/format_test.cpp judges it).
+  FormatQueryResult explain_ast(const std::string&, size_t) override {
+    FormatQueryResult result;
+    result.failure = FormatQueryFailureKind::server;
+    result.message = "no syntax tree in this fake";
+    return result;
+  }
 };
 
 void test_format_service() {
@@ -554,6 +561,11 @@ void test_format_service() {
         } else {
           result.formatted_sql = sql;
         }
+        return result;
+      }
+      FormatQueryResult explain_ast(const std::string&, size_t) override {
+        FormatQueryResult result;
+        result.failure = FormatQueryFailureKind::server;
         return result;
       }
       int calls = 0;

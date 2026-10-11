@@ -26,8 +26,12 @@ string postprocess_format_query(const std::string& s, size_t threshold) {
 
 string unwrap_alter_table_commands(std::string formatted) {
   const string_view s(formatted);
+  // Comments before the statement stay where they are (a statement that was laid out locally has them).
   size_t begin = 0;
-  while (begin < s.size() && (s[begin] == ' ' || s[begin] == '\t' || s[begin] == '\n' || s[begin] == '\r')) ++begin;
+  for (const sql::Token& token : sql::lex(s)) {
+    if (!sql::is_trivia(token.kind)) break;
+    begin = token.end;
+  }
   auto word_at = [&](size_t pos, string_view word) {
     return ci_match_at(s, pos, word) && (pos + word.size() >= s.size() || !is_ident_char(s[pos + word.size()]));
   };
@@ -47,11 +51,13 @@ string unwrap_alter_table_commands(std::string formatted) {
     step_scan(st, s, i);
   }
   if (open == string::npos) return formatted;
-  const string header = trim_ascii_spaces(s.substr(0, open));
+  const string prefix(s.substr(0, begin));
+  const string header = trim_ascii_spaces(s.substr(begin, open - begin));
   if (header.empty()) return formatted;
 
-  // From there to the end: groups separated by commas, nothing else.
+  // From there to the end: groups separated by commas, and comments after the last one.
   vector<string_view> groups;
+  string suffix;
   size_t cursor = open;
   for (;;) {
     const size_t close = find_matching_paren(s, cursor);
@@ -60,13 +66,21 @@ string unwrap_alter_table_commands(std::string formatted) {
     cursor = close + 1;
     while (cursor < s.size() && (s[cursor] == ' ' || s[cursor] == '\t' || s[cursor] == '\n' || s[cursor] == '\r')) ++cursor;
     if (cursor >= s.size()) break;
-    if (s[cursor] != ',') return formatted;
+    // After the last group: comments only (the ones that end the statement), kept after the commands.
+    if (s[cursor] != ',') {
+      const string_view rest = s.substr(cursor);
+      for (const sql::Token& token : sql::lex(rest)) {
+        if (!sql::is_trivia(token.kind)) return formatted;
+      }
+      suffix = trim_ascii_spaces(rest);
+      break;
+    }
     ++cursor;
     while (cursor < s.size() && (s[cursor] == ' ' || s[cursor] == '\t' || s[cursor] == '\n' || s[cursor] == '\r')) ++cursor;
     if (cursor >= s.size() || s[cursor] != '(') return formatted;
   }
 
-  string out = header;
+  string out = prefix + header;
   for (size_t g = 0; g < groups.size(); ++g) {
     string_view inner = groups[g];
     size_t first = 0;
@@ -92,7 +106,7 @@ string unwrap_alter_table_commands(std::string formatted) {
       }
     } else {
       // "(COMMAND)" at four spaces: the command at the left edge, the rest of its lines moved with it.
-      const string trimmed = rtrim_spaces(inner.substr(first));
+      const string trimmed = trim_ascii_spaces(inner.substr(first));
       if (trimmed.empty()) return formatted;
       vector<string> lines = split_lines_keep(trimmed);
       for (size_t i = 0; i < lines.size(); ++i) {
@@ -101,8 +115,11 @@ string unwrap_alter_table_commands(std::string formatted) {
         command += (i ? "\n" : "") + line;
       }
     }
-    out += "\n" + command + (g + 1 < groups.size() ? "," : "");
+    // The comma goes before a comment that ends the command's last line.
+    if (g + 1 < groups.size()) append_item_comma(command);
+    out += "\n" + command;
   }
+  if (!suffix.empty()) out += "\n" + suffix;
   return out;
 }
 

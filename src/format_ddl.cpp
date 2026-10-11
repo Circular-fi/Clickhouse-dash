@@ -630,6 +630,8 @@ string Formatter::format_create_table(string_view s) {
   vector<std::pair<string, string>> parsed;
   for (const auto& item : items) {
     const string col = trim_ascii_spaces(item);
+    // A trailing comma (`a UInt8,\n)`) leaves an empty item: ClickHouse takes the list without it.
+    if (col.empty()) continue;
     const size_t sp = col.find_first_of(" \t\n");
     string lhs = (sp == string::npos) ? col : trim_ascii_spaces(col.substr(0, sp));
     const string rhs = (sp == string::npos) ? string() : trim_ascii_spaces(col.substr(sp + 1));
@@ -781,9 +783,185 @@ string Formatter::format_create_view(string_view s, bool) {
   return head + "\n" + body;
 }
 
+namespace {
+
+// The first word of a command of ALTER TABLE: after a comma at the top level, one of these starts the next command (a comma inside a
+// command, as in `UPDATE a = 1, b = 2`, is followed by a name).
+bool is_alter_command_word(string_view lower) {
+  static const char* const kWords[] = {"add",    "drop",   "modify",   "rename", "clear",  "comment", "update", "delete", "materialize",
+                                       "replace", "attach", "detach",   "fetch",  "move",   "freeze",  "unfreeze", "reset", "apply",
+                                       "remove",  "alter",  "reorder"};
+  for (const char* word : kWords) {
+    if (lower == word) return true;
+  }
+  return false;
+}
+
+// ClickHouse writes ALTER TABLE as its commands between parentheses ("ALTER TABLE t\n(\n    ADD COLUMN ...\n)", "(cmd),\n(cmd)"), and the layout below
+// reads that shape. A text that was written with the commands bare (`ALTER TABLE t ADD COLUMN a UInt8, DROP COLUMN b`) is put in that shape
+// first, so that a statement with comments (which does not go through formatQuery) has the layout of the same statement without them.
+// The commands are split at a comma that a command word follows; a SETTINGS clause at the end stays outside. The name that ADD COLUMN and
+// MODIFY COLUMN declare is written between backticks, as formatQuery does. Empty when the text is not of this form (it is left to
+// the layout as it is).
+string alter_commands_in_groups(string_view s) {
+  const auto tokens = sql::lex(s);
+  vector<size_t> sig;
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    if (!sql::is_trivia(tokens[i].kind)) sig.push_back(i);
+  }
+  const auto text_of = [&](size_t k) { return k < sig.size() ? tokens[sig[k]].text(s) : string_view(); };
+  const auto word_of = [&](size_t k) {
+    string out;
+    if (k < sig.size() && tokens[sig[k]].kind == sql::TokenKind::Word) {
+      for (const char c : text_of(k)) out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    return out;
+  };
+  const auto is_name = [&](size_t k) {
+    return k < sig.size() && (tokens[sig[k]].kind == sql::TokenKind::Word || tokens[sig[k]].kind == sql::TokenKind::QuotedIdent);
+  };
+  if (word_of(0) != "alter" || word_of(1) != "table") return {};
+  size_t k = 2;
+  if (word_of(k) == "if" && word_of(k + 1) == "exists") k += 2;
+  const auto take_name = [&]() {
+    if (!is_name(k)) return false;
+    ++k;
+    while (text_of(k) == "." && is_name(k + 1)) k += 2;
+    return true;
+  };
+  // The words of the head are written as formatQuery writes them; the names keep their spelling.
+  const size_t name_first = k;
+  if (!take_name()) return {};
+  string head = "ALTER TABLE ";
+  if (name_first > 2) head += "IF EXISTS ";
+  head += string(s.substr(tokens[sig[name_first]].begin, tokens[sig[k - 1]].end - tokens[sig[name_first]].begin));
+  if (word_of(k) == "on" && word_of(k + 1) == "cluster") {
+    k += 2;
+    const size_t cluster_first = k;
+    if (!take_name()) return {};
+    head += " ON CLUSTER " + string(s.substr(tokens[sig[cluster_first]].begin, tokens[sig[k - 1]].end - tokens[sig[cluster_first]].begin));
+  }
+  if (k >= sig.size() || !is_alter_command_word(word_of(k))) return {};
+  // A comment between the table and its first command: leave the statement to the layout as it is.
+  for (size_t i = sig[0]; i < sig[k]; ++i) {
+    if (sql::is_comment(tokens[i].kind)) return {};
+  }
+
+  struct Command {
+    size_t begin = 0, end = 0;   // the text of the command, with the comments inside it
+    string leading;              // the comments on the lines before it
+    string trailing;             // the comment after the comma that ends the command before it, on the line of that comma
+  };
+  vector<Command> commands;
+  size_t tail_begin = string_view::npos;
+  Command current;
+  current.begin = tokens[sig[k]].begin;
+  int depth = 0;
+  size_t j = k;
+  for (; j < sig.size(); ++j) {
+    const sql::Token& token = tokens[sig[j]];
+    if (token.kind == sql::TokenKind::Punct && token.end - token.begin == 1) {
+      const char c = s[token.begin];
+      if (c == '(' || c == '[' || c == '{') ++depth;
+      else if ((c == ')' || c == ']' || c == '}') && depth > 0) --depth;
+      else if (c == ',' && depth == 0 && is_alter_command_word(word_of(j + 1))) {
+        current.end = token.begin;
+        commands.push_back(current);
+        current = Command();
+        current.begin = tokens[sig[j + 1]].begin;
+        // The comments between the comma and the next command: the ones on the line of the comma belong to the command before.
+        bool same_line = true;
+        for (size_t t = sig[j] + 1; t < sig[j + 1]; ++t) {
+          const sql::Token& gap = tokens[t];
+          if (gap.kind == sql::TokenKind::Blank) {
+            if (s.substr(gap.begin, gap.end - gap.begin).find('\n') != string_view::npos) same_line = false;
+          } else if (sql::is_comment(gap.kind)) {
+            const string comment(s.substr(gap.begin, gap.end - gap.begin));
+            if (same_line) commands.back().trailing += (commands.back().trailing.empty() ? "" : " ") + comment;
+            else current.leading += comment + "\n";
+            if (gap.kind == sql::TokenKind::LineComment) same_line = false;
+          }
+        }
+        continue;
+      }
+    }
+    if (depth == 0 && word_of(j) == "settings" && is_name(j + 1) && text_of(j + 2) == "=") {
+      tail_begin = token.begin;
+      break;
+    }
+  }
+  current.end = tail_begin == string_view::npos ? s.size() : tail_begin;
+  commands.push_back(current);
+
+  const auto declared_name_quoted = [&](string command) {
+    // ADD COLUMN [IF NOT EXISTS] name ... and MODIFY COLUMN [IF EXISTS] name ...
+    const auto words = sql::lex(command);
+    vector<size_t> w;
+    for (size_t i = 0; i < words.size(); ++i) {
+      if (!sql::is_trivia(words[i].kind)) w.push_back(i);
+      if (w.size() >= 7) break;
+    }
+    const auto lower_at = [&](size_t n) {
+      string out;
+      if (n < w.size() && words[w[n]].kind == sql::TokenKind::Word) {
+        for (const char c : words[w[n]].text(command)) out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+      }
+      return out;
+    };
+    // The words of the command, as formatQuery writes them: ADD COLUMN IF NOT EXISTS, DROP PARTITION, MODIFY TTL.
+    {
+      static const char* const kObjects[] = {"column", "index", "projection", "partition", "part", "ttl", "setting", "statistics", "constraint", "where"};
+      size_t n = 1;
+      bool object = false;
+      for (const char* name : kObjects) object = object || lower_at(1) == name;
+      if (object) n = 2;
+      if (lower_at(n) == "if") {
+        ++n;
+        if (lower_at(n) == "not") ++n;
+        if (lower_at(n) == "exists") ++n;
+      }
+      string upper = command;
+      for (size_t i = 0; i < std::min(n, w.size()); ++i) {
+        if (words[w[i]].kind != sql::TokenKind::Word) break;
+        for (size_t at = words[w[i]].begin; at < words[w[i]].end; ++at) {
+          upper[at] = static_cast<char>(std::toupper(static_cast<unsigned char>(upper[at])));
+        }
+      }
+      command = std::move(upper);
+    }
+    if (lower_at(1) != "column" || (lower_at(0) != "add" && lower_at(0) != "modify")) return command;
+    size_t at = 2;
+    if (lower_at(0) == "add" && lower_at(2) == "if" && lower_at(3) == "not" && lower_at(4) == "exists") at = 5;
+    if (lower_at(0) == "modify" && lower_at(2) == "if" && lower_at(3) == "exists") at = 4;
+    if (at >= w.size() || words[w[at]].kind != sql::TokenKind::Word) return command;
+    const sql::Token& name = words[w[at]];
+    const string plain(name.text(command));
+    const string quoted = backquote_plain_column_name(plain);
+    return command.substr(0, name.begin) + quoted + command.substr(name.end);
+  };
+
+  string out = head;
+  for (size_t i = 0; i < commands.size(); ++i) {
+    string command = trim_ascii_spaces(s.substr(commands[i].begin, commands[i].end - commands[i].begin));
+    if (command.empty()) return {};
+    command = declared_name_quoted(std::move(command));
+    string group = commands[i].leading + command;
+    if (!commands[i].trailing.empty()) group += " " + commands[i].trailing;
+    // The block shape of formatQuery ("(\n    COMMAND\n)"), the lines of the command one level in: the layout of the command takes them back out, so
+    // the continuation lines of a command that was laid out before keep their indentation. A comment that runs to the end of its line
+    // does not take the closing parenthesis with it: the parenthesis is on a line of its own.
+    out += (i == 0 ? "\n(\n" : ",\n(\n") + indent_block(group, 4) + "\n)";
+  }
+  if (tail_begin != string_view::npos) out += "\n" + trim_ascii_spaces(s.substr(tail_begin));
+  return out;
+}
+
+}  // namespace
+
 string Formatter::format_alter_table(string_view s) {
   const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
+  if (const string grouped = alter_commands_in_groups(text); !grouped.empty()) return format_alter_table(grouped);
   const size_t par = text.find('(');
   if (par == string::npos) return cleanup_surface(text);
   const size_t close = find_matching_paren(text, par);

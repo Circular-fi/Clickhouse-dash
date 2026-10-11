@@ -156,6 +156,15 @@ if (CHDASH_BUILD_FORMAT_TESTS)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_format_depth_test PRIVATE Threads::Threads)
   chdash_configure_target(chdash_format_depth_test)
+
+  # The formatter as a service on a fake ClickHouse: the check of the meaning, the place of an error, the limits and the properties of
+  # the layout (tests/native/format_test.cpp).
+  add_executable(chdash_format_test ../tests/native/format_test.cpp format_service.cpp format_cache.cpp ${CHDASH_FORMATTER_SOURCES} jwt.cpp
+    secure_random.cpp)
+  target_include_directories(chdash_format_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_format_test SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+  target_link_libraries(chdash_format_test PRIVATE Threads::Threads)
+  chdash_configure_target(chdash_format_test)
 endif()
 
 if (CHDASH_BUILD_CH_QUERY_TESTS)
@@ -266,7 +275,7 @@ if (CHDASH_BUILD_FUZZERS)
     set(CHDASH_FUZZERS ${CHDASH_FUZZERS} ${name} PARENT_SCOPE)
   endfunction()
   chdash_add_fuzzer(chdash_fuzz_json_parse ${_FUZZ_DIR}/fuzz_json_parse.cpp)
-  chdash_add_fuzzer(chdash_fuzz_format ${_FUZZ_DIR}/fuzz_format.cpp ${CHDASH_FORMATTER_SOURCES})
+  chdash_add_fuzzer(chdash_fuzz_format ${_FUZZ_DIR}/fuzz_format.cpp format_service.cpp format_cache.cpp ${CHDASH_FORMATTER_SOURCES} jwt.cpp secure_random.cpp)
   chdash_add_fuzzer(chdash_fuzz_mcp_sql ${_FUZZ_DIR}/fuzz_mcp_sql.cpp mcp_sql.cpp)
   chdash_add_fuzzer(chdash_fuzz_user_sql_policy ${_FUZZ_DIR}/fuzz_user_sql_policy.cpp user_sql_policy.cpp)
   chdash_add_fuzzer(chdash_fuzz_hcl ${_FUZZ_DIR}/fuzz_hcl.cpp hcl.cpp)

@@ -417,7 +417,7 @@ These checks find defects that the functional tests do not see: a dangling refer
 
 | Command | What runs |
 | --- | --- |
-| `native` | `chdash_query_library_test`, `chdash_system_monitor_test`, `chdash_mcp_test`, `chdash_result_path_test`, `chdash_format_depth_test`, `chdash_cache_acl_test` and `chdash_ch_query_test` (with its server cases when the network of the test stack exists) |
+| `native` | `chdash_query_library_test`, `chdash_system_monitor_test`, `chdash_mcp_test`, `chdash_result_path_test`, `chdash_format_depth_test`, `chdash_format_test`, `chdash_cache_acl_test` and `chdash_ch_query_test` (with its server cases when the network of the test stack exists) |
 | `backend` | the sanitized server next to the test ClickHouse, then the format and type checks of `tests/api`, `tests/backend-functional` (the whole directory) and `tests/harness` against it |
 | `frontend` | Playwright (`desktop-1440`) on `page-per-view`, `query-library`, `observability`, `system` and `explorer-nav` against the sanitized server |
 | `load` | `tests/sanitize/load.py` against the sanitized server: 12 clients for 90 s (`CHDASH_LOAD_WORKERS`, `CHDASH_LOAD_SECONDS`) run queries that they read, drop or cancel, exports, formats and the cached pages |
@@ -448,7 +448,7 @@ The `backend` tests send one request at a time. The races are in the shared stat
 | Target | Code | Checks besides a crash or a sanitizer finding |
 | --- | --- | --- |
 | `json_parse` | `parse_json_bounded` (`src/json_parse.hpp`), the parse of every request body | the depth bound holds; a parsed text, written again, parses to the same value |
-| `format` | the SQL formatter without ClickHouse: `postprocess_format_query`, the masks and the restore passes of `src/sql_scan.hpp`, `unwrap_alter_table_commands` | no input takes more than 25 s (the formatter gives up after 2 s) |
+| `format` | the SQL formatter without ClickHouse: `postprocess_format_query`, the masks and the restore passes of `src/sql_scan.hpp`, `unwrap_alter_table_commands`, and `FormatBatch` on a fake ClickHouse | no input takes more than 25 s (the formatter gives up after 2 s); a warning gives the text as written; the place of an error is in the text |
 | `user_sql_policy` | `user_sql_is_forbidden` (no direct `KILL QUERY`) | a script that starts with `KILL QUERY` is refused; text after a refused script does not make it accepted |
 | `mcp_sql` | `mcp_scan_single_statement`, the quoting functions and `mcp_build_table_query` of `src/mcp_sql.cpp` | an accepted statement is accepted again alone; a quoted value never ends a statement; a built `SELECT` passes the scan |
 | `hcl` | `parse_hcl` (`src/hcl.cpp`), the parser of the configuration file | the parser fails only with `HclParseError` |

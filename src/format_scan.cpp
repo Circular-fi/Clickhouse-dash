@@ -389,7 +389,7 @@ vector<string> line_comment_texts(string_view s) {
   vector<string> out;
   ScanState st;
   for (size_t i = 0; i < s.size(); ++i) {
-    if (is_top_level(st)) {
+    if (st.in_code()) {
       const char c = s[i];
       const char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
       if ((c == '-' && n == '-') || c == '#') {

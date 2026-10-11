@@ -267,6 +267,8 @@ struct HostVersion {
   // The server's timezone(): ClickHouse prints DateTime values of system
   // tables in it, and the UI converts them to the browser's zone.
   std::string timezone;
+  // max_query_size: ClickHouse refuses a text that it parses (formatQuery, EXPLAIN AST) when it is longer.
+  size_t max_query_size = 0;
 };
 
 static HostVersion detect_host_version(clickhouse::Client* client) {
@@ -286,6 +288,22 @@ static HostVersion detect_host_version(clickhouse::Client* client) {
     );
   } catch (...) {
     return HostVersion{};
+  }
+  // Apart from the version: a server that cannot say it keeps the version.
+  try {
+    ch_select(*client,
+      "SELECT toString(getSetting('max_query_size'))",
+      [&](const clickhouse::Block& b) {
+        if (out.max_query_size != 0 || b.GetRowCount() == 0 || b.GetColumnCount() < 1) return;
+        if (auto text = b[0]->As<clickhouse::ColumnString>()) {
+          const std::string value(text->At(0));
+          if (!value.empty() && value.find_first_not_of("0123456789") == std::string::npos && value.size() < 15) {
+            out.max_query_size = static_cast<size_t>(std::stoull(value));
+          }
+        }
+      }
+    );
+  } catch (...) {
   }
   return out;
 }
@@ -484,6 +502,7 @@ void HealthRunner::ping_loop(size_t index) {
         ctx.last.version_checked_at_ms = ts;
         if (!version->version.empty()) ctx.last.clickhouse_version = std::move(version->version);
         if (!version->timezone.empty()) ctx.last.clickhouse_timezone = std::move(version->timezone);
+        if (version->max_query_size != 0) ctx.last.clickhouse_max_query_size = version->max_query_size;
       }
       ++version_;
     }

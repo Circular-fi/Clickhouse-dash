@@ -344,7 +344,7 @@ The backend keeps what it reads from ClickHouse in bounded caches (`src/ttl_cach
 
 **The DDL texts.** The Explorer keeps the `engine_full` and `create_table_query` texts of the objects by identity (the SHA-256 of the URI of the connection), because ClickHouse masks the secrets of these texts by user. It reads at most 2,000 names in one query. The limits are 200,000 entries and 128 MiB.
 
-**The format cache** (`format_cache { }`). The key has the host, the ClickHouse version of the host (its health check), the line width and the SHA-256 of the text. A hit also compares the text. Only the text that was formatted is a key: formatting a formatted text runs the formatter again.
+**The format cache** (`format_cache { }`). The key has the host, the ClickHouse version of the host (its health check), the line width and the SHA-256 of the text. A hit also compares the text. Only the text that was formatted is a key: formatting a formatted text runs the formatter again. A text that the formatter returned as written, with a warning, is not kept: the next request checks it again.
 
 ### The observability block
 

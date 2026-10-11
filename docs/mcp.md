@@ -374,7 +374,7 @@ How they work:
 | `query_library` | `GET /api/query-library` | The saved queries and their folders (the Query page library of the server). |
 | `query_execution` | `GET /api/query/execution` | The record of a query that ChDash ran: status, timings and profile counters. |
 
-| `format_sql` | `POST /api/format` | Format SQL text like the Format button of the Query page (it reads the ClickHouse version of the host to parse it). |
+| `format_sql` | `POST /api/format` | Format SQL text like the Format button of the Query page (it reads the ClickHouse version of the host to parse it). A text that the formatter would change in meaning comes back as written, with a `warning` ([formatter.md](formatter.md)). |
 
 
 ### `list_hosts`
