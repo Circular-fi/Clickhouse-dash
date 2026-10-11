@@ -3,7 +3,7 @@
 
 import { format } from "./app_format.js";
 import { JsonNumber, computeGaugeScale, extractFiniteNumber, isScalarNumericType, isScalarValue, jsonText, queryBarPercent, scalarText } from "./app_results_values.js";
-import { table as tableMod } from "./app_ui_table.js";
+import { table } from "./app_ui_table.js";
 
 // A value in full, for the one-row view, a single value and the row details: a scalar as it is
 // (a string keeps its backslashes and line breaks), a structure as indented, coloured JSON.
@@ -158,7 +158,7 @@ function setDisplayCell(td, raw, text) {
 function setQueryGaugeCell(td, raw, colIndex, text, maxArr, minArr) {
   td.classList.add("num");
   const percent = queryBarPercent(extractFiniteNumber(raw), minArr[colIndex], maxArr[colIndex]);
-  if (percent !== null && tableMod) tableMod.cellBar(td, percent);
+  if (percent !== null && table) table.cellBar(td, percent);
   setDisplayCell(td, raw, text);
 }
 
@@ -168,10 +168,10 @@ function setQueryGaugeCell(td, raw, colIndex, text, maxArr, minArr) {
 function setGaugeCell(td, raw, colIndex, text, maxArr, minArr, name = "") {
   td.classList.add("num");
   const min = minArr[colIndex] || 0;
-  if (tableMod && tableMod.barEligible({ name, min })) {
+  if (table && table.barEligible({ name, min })) {
     const n = extractFiniteNumber(raw);
     const scale = computeGaugeScale(n, maxArr[colIndex] || 0, min);
-    tableMod.cellBar(td, scale > 0 ? scale * 100 : 0);
+    table.cellBar(td, scale > 0 ? scale * 100 : 0);
   }
   setDisplayCell(td, raw, text);
 }

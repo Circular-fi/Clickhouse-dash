@@ -9,7 +9,7 @@ import { createStaticResultTable } from "./app_results_static.js";
 import { createLiveTable } from "./app_results_table.js";
 import { flattenTupleTableData, jsonText, parseChType, parseJsonText, resultCsvText, resultJsonText, serialize, valueText } from "./app_results_values.js";
 import { state } from "./app_state.js";
-import { copy as copyMod } from "./app_ui_copy.js";
+import { copy } from "./app_ui_copy.js";
 import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
@@ -277,7 +277,7 @@ const getColCount = () => mainTable?.columnCount() || 0;
 
 // A query block's Copy JSON split (copy.split): JSON, and CSV in the menu.
 function createCopySplitSmall({ getJsonText, getCsvText }) {
-  const ctrl = copyMod.split({
+  const ctrl = copy.split({
     getText: () => (typeof getJsonText === "function" ? getJsonText() : ""),
     items: [{ label: "Copy CSV", copy: () => (typeof getCsvText === "function" ? getCsvText() : "") }],
   });

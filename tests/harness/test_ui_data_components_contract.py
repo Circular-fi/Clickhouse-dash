@@ -101,7 +101,7 @@ def test_in_cell_bars_are_cell_bars_and_stay_off_identifiers_and_signed_columns(
     assert not offenders(r"resultTable__gaugeCell|--gaugeFill|traceTable__bar|traceSpanListRow__bar|explorerOpsProgress|explorerStorageList__bar|traceSvcShare__bar|logsShareBar")
     table = read("app_ui_table.js")
     assert "function barEligible(" in table and "return !(Number(min) < 0);" in table
-    assert "tableMod.barEligible({ name, min })" in modules.read_family("app_results")
+    assert "table.barEligible({ name, min })" in modules.read_family("app_results")
 
 
 def test_query_results_bar_every_numeric_value_from_the_column_minimum_once_the_stream_ends():

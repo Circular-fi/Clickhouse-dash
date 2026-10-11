@@ -17,7 +17,7 @@
 import "./app_common.js";
 import { api } from "./app_api.js";
 import { boot } from "./app_boot.js";
-import { dom as domMod } from "./app_dom.js";
+import { dom } from "./app_dom.js";
 import { header } from "./app_header.js";
 import { meta } from "./app_meta.js";
 import { router as routerMod } from "./app_router.js";
@@ -81,7 +81,7 @@ function openShape(hash, { replace = false } = {}) {
 }
 
 function show() {
-  systemView.mountSection(domMod.byId("systemPage"), {
+  systemView.mountSection(dom.byId("systemPage"), {
     section: systemQueries,
     shape: hashOf(),
     query: router().current().params.toString(),

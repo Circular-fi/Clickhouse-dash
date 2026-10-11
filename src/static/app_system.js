@@ -16,7 +16,7 @@
 // picker, page switcher, theme) and the view; a host change refreshes the section on screen.
 
 import { api } from "./app_api.js";
-import { dom as domMod } from "./app_dom.js";
+import { dom } from "./app_dom.js";
 import { header } from "./app_header.js";
 import { router as routerMod } from "./app_router.js";
 import { features } from "./app_state.js";
@@ -42,7 +42,7 @@ let shownQuery = "";
 
 function show(query) {
   shownQuery = String(query || "");
-  systemView.mountSection(domMod.byId("systemPage"), {
+  systemView.mountSection(dom.byId("systemPage"), {
     section: SECTION,
     query: shownQuery,
     onQuery: (nextQuery, { history: mode = "push" } = {}) => {
@@ -87,7 +87,7 @@ function onPopState() {
 // The links to the sections the server offers: Queries only with system.top_queries.
 function renderRow() {
   const f = features.get("system");
-  for (const link of domMod.$$("#systemTabs [data-section]")) {
+  for (const link of dom.$$("#systemTabs [data-section]")) {
     link.hidden = link.getAttribute("data-section") === "queries" && f?.top_queries === false;
   }
 }

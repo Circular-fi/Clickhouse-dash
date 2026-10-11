@@ -13,7 +13,7 @@
 import "./app_common.js";
 import { api } from "./app_api.js";
 import { boot } from "./app_boot.js";
-import { dom as domMod } from "./app_dom.js";
+import { dom } from "./app_dom.js";
 import { header } from "./app_header.js";
 import { mcpForm } from "./app_mcp_form.js";
 import { mcpView } from "./app_mcp_view.js";
@@ -49,11 +49,11 @@ async function loadAccess({ refresh = false } = {}) {
     const access = await api.getMcpAccessSummary({ refresh, signal: req.signal });
     if (!req.isCurrent()) return;
     state.access = access;
-    mcpView.fillAccess(domMod.byId("mcpKeys"), access);
+    mcpView.fillAccess(dom.byId("mcpKeys"), access);
   } catch (error) {
     if (!req.isCurrent()) return;
     state.access = null;
-    mcpView.fillAccess(domMod.byId("mcpKeys"), null, util.errorText(error, "The data of the keys could not be counted."));
+    mcpView.fillAccess(dom.byId("mcpKeys"), null, util.errorText(error, "The data of the keys could not be counted."));
   }
 }
 
@@ -68,23 +68,23 @@ const liveView = Object.defineProperties({}, {
 });
 
 function renderKeys({ refresh = false } = {}) {
-  domMod.byId("mcpLayout").hidden = false;
-  domMod.byId("mcpState").replaceChildren();
-  mcpView.renderKeys(domMod.byId("mcpKeys"), liveView, actions());
+  dom.byId("mcpLayout").hidden = false;
+  dom.byId("mcpState").replaceChildren();
+  mcpView.renderKeys(dom.byId("mcpKeys"), liveView, actions());
   // The counts that are known show at once; they are asked again (the grants of a host are kept 60 s by the server).
-  if (state.access) mcpView.fillAccess(domMod.byId("mcpKeys"), state.access);
+  if (state.access) mcpView.fillAccess(dom.byId("mcpKeys"), state.access);
   void loadAccess({ refresh });
 }
 
 // Nothing of the keys or the side column shows: the state is loading, off or in error.
 function clearBody() {
-  domMod.byId("mcpKeys").replaceChildren();
-  domMod.byId("mcpSide").replaceChildren();
-  domMod.byId("mcpLayout").hidden = true;
+  dom.byId("mcpKeys").replaceChildren();
+  dom.byId("mcpSide").replaceChildren();
+  dom.byId("mcpLayout").hidden = true;
 }
 
 function renderStateError(error) {
-  uiState.error(domMod.byId("mcpState"), { title: "Could not load the MCP state", body: util.errorText(error), retry: () => load() });
+  uiState.error(dom.byId("mcpState"), { title: "Could not load the MCP state", body: util.errorText(error), retry: () => load() });
   clearBody();
 }
 
@@ -95,7 +95,7 @@ async function load({ retried = false } = {}) {
   const req = util.latest(STATE_KEY);
   state.status = "loading";
   state.error = null;
-  uiState.loading(domMod.byId("mcpState"), { label: "Loading the MCP state\u2026" });
+  uiState.loading(dom.byId("mcpState"), { label: "Loading the MCP state\u2026" });
   clearBody();
   let meta;
   try {
@@ -107,11 +107,11 @@ async function load({ retried = false } = {}) {
   if (!req.isCurrent()) return;
   state.meta = meta;
   if (!meta.enabled) {
-    mcpView.renderDisabled(domMod.byId("mcpState"));
+    mcpView.renderDisabled(dom.byId("mcpState"));
     return;
   }
   state.keys = [];
-  mcpView.renderSide(domMod.byId("mcpSide"), meta);
+  mcpView.renderSide(dom.byId("mcpSide"), meta);
   renderKeys();
   try {
     state.keys = await api.getMcpKeys({ signal: req.signal });
@@ -141,14 +141,14 @@ async function reload(button = null) {
     if (!req.isCurrent()) return;
     if (!meta.enabled) {
       state.meta = meta;
-      mcpView.renderDisabled(domMod.byId("mcpState"));
+      mcpView.renderDisabled(dom.byId("mcpState"));
       clearBody();
       return;
     }
     state.meta = meta;
     state.keys = keys;
     state.status = "ready";
-    mcpView.renderSide(domMod.byId("mcpSide"), meta);
+    mcpView.renderSide(dom.byId("mcpSide"), meta);
     // The Refresh button reads the grants of the MCP users again; an action (a key made or deleted) uses what is kept.
     renderKeys({ refresh: !!button });
   } catch (error) {
@@ -160,7 +160,7 @@ async function reload(button = null) {
 }
 
 function showAlert(error) {
-  const box = domMod.byId("mcpAlert");
+  const box = dom.byId("mcpAlert");
   if (!box) return;
   uiState.banner(box, { message: util.errorText(error, "The change failed.") });
   box.hidden = !box.textContent;
@@ -168,7 +168,7 @@ function showAlert(error) {
 }
 
 function clearAlert() {
-  const box = domMod.byId("mcpAlert");
+  const box = dom.byId("mcpAlert");
   if (box) {
     box.replaceChildren();
     box.hidden = true;
@@ -177,8 +177,8 @@ function clearAlert() {
 
 // The focus after a list that was drawn again: the same button of the same row, else New key.
 function focusRow(id, action) {
-  const row = id ? domMod.$(`tr[data-key-id="${CSS.escape(id)}"]`, domMod.byId("mcpKeys")) : null;
-  const target = (row && domMod.$(`[data-action="${action}"]:not(:disabled)`, row)) || domMod.byId("mcpNewKey");
+  const row = id ? dom.$(`tr[data-key-id="${CSS.escape(id)}"]`, dom.byId("mcpKeys")) : null;
+  const target = (row && dom.$(`[data-action="${action}"]:not(:disabled)`, row)) || dom.byId("mcpNewKey");
   target?.focus();
 }
 
