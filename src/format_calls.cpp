@@ -272,8 +272,9 @@ string collapse_fitting_calls(string_view text, size_t width, vector<size_t>* jo
             is_vertical_branch_call(text, scan, i - branch_name.size(), i)) blocked = true;
       }
     }
+    // A comment inside the call keeps it open. One after its closing parenthesis (`), -- note`) is the end of the line, and stays there.
     for (size_t i = starts[o]; i < line_end(k) && !blocked; ++i) {
-      if (scan.kind[i] == kCallComment) blocked = true;
+      if (scan.kind[i] == kCallComment && i < close) blocked = true;
       else if (text[i] == '\n' && scan.kind[i] == kCallLiteral) blocked = true;
     }
     if (blocked) continue;

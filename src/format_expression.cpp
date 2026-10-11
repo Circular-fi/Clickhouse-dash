@@ -863,7 +863,10 @@ string Formatter::format_in_subquery(string_view expr, bool break_after_in) {
       static const char* ops[] = {"GLOBAL IN", "IN"};
       for (const char* raw : ops) {
         const string_view op(raw);
-        if (i + op.size() <= expr.size() && iequals_ascii(expr.substr(i, op.size()), op)) {
+        // The operator is a word of its own: the `in` of `admin(` or of `join` is part of a name.
+        const bool word_start = i == 0 || !is_ident_char(expr[i - 1]);
+        const bool word_end = i + op.size() >= expr.size() || !is_ident_char(expr[i + op.size()]);
+        if (word_start && word_end && i + op.size() <= expr.size() && iequals_ascii(expr.substr(i, op.size()), op)) {
           const string left = commented_operand(expr.substr(0, i));
           const string tail = trim_ascii_spaces(expr.substr(i + op.size()));
           const string inner = unwrap_outer_parens(tail);

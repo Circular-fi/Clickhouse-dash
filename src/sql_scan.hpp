@@ -6,6 +6,7 @@
 #include <cctype>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -152,6 +153,11 @@ inline std::string restore_sql_single_quoted_literals(
     source_values.push_back(decode_sql_single_quoted_literal(original.substr(begin, end - begin)));
   }
 
+  // The places of each value in the source, in order: the next literal of a value after the cursor is found by a search in its list, not by a
+  // walk over the rest of the source (a literal that formatQuery added has no equal and walked to the end each time).
+  std::unordered_map<std::string, std::vector<size_t>> places;
+  for (size_t i = 0; i < source_values.size(); ++i) places[source_values[i]].push_back(i);
+
   std::string out;
   out.reserve(std::max(formatted.size(), original.size()));
   size_t cursor = 0;
@@ -160,8 +166,11 @@ inline std::string restore_sql_single_quoted_literals(
     out.append(formatted, cursor, begin - cursor);
     const std::string_view current = std::string_view(formatted).substr(begin, end - begin);
     const std::string value = decode_sql_single_quoted_literal(current);
-    size_t match = source_cursor;
-    while (match < source_values.size() && source_values[match] != value) ++match;
+    size_t match = source_values.size();
+    if (const auto found = places.find(value); found != places.end()) {
+      const auto next = std::lower_bound(found->second.begin(), found->second.end(), source_cursor);
+      if (next != found->second.end()) match = *next;
+    }
     if (match < source_values.size()) {
       const auto [source_begin, source_end] = source_ranges[match];
       out.append(original.substr(source_begin, source_end - source_begin));
@@ -528,18 +537,28 @@ inline std::string restore_sql_quoted_identifiers(
       add_replacement(source_tokens[i], formatted_tokens[i]);
     }
   } else {
-    size_t formatted_index = 0;
-
     // Align the complete identifier stream rather than only quoted tokens. This
     // prevents a quoted alias from being matched to an earlier unquoted alias
-    // which formatQuery happened to wrap in backticks.
+    // which formatQuery happened to wrap in backticks. The places of each name
+    // (lower case) in the formatted text are searched, not walked: a name that
+    // is not there is passed over, and the names after it are still restored
+    // (formatQuery drops some: `x::T` has a name less than `CAST(x, 'T')`).
+    std::unordered_map<std::string, std::vector<size_t>> places;
+    for (size_t i = 0; i < formatted_tokens.size(); ++i) {
+      std::string lower;
+      for (const char ch : formatted_tokens[i].decoded) lower.push_back(sql_ascii_lower(ch));
+      places[lower].push_back(i);
+    }
+    size_t formatted_index = 0;
     for (const auto& source : source_tokens) {
-      while (formatted_index < formatted_tokens.size() &&
-             !sql_identifier_value_equal(source.decoded, formatted_tokens[formatted_index].decoded)) {
-        ++formatted_index;
-      }
-      if (formatted_index >= formatted_tokens.size()) break;
-      add_replacement(source, formatted_tokens[formatted_index++]);
+      std::string lower;
+      for (const char ch : source.decoded) lower.push_back(sql_ascii_lower(ch));
+      const auto found = places.find(lower);
+      if (found == places.end()) continue;
+      const auto next = std::lower_bound(found->second.begin(), found->second.end(), formatted_index);
+      if (next == found->second.end()) continue;
+      add_replacement(source, formatted_tokens[*next]);
+      formatted_index = *next + 1;
     }
   }
 
