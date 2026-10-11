@@ -58,7 +58,7 @@
 //   Names: "traces", "logs", "metrics" (app_obs_page.js and the trace page:
 //   a page shows one view for as long as it lives, so the scope is never
 //   left), and "explorer:browse", "explorer:graph", "explorer:storage",
-//   "explorer:functions" (app_explorer.js: the modes alternate in the page).
+//   "explorer:functions" (app_explorer_shell.js: the modes alternate in the page).
 //   Listeners bound with { signal: scope.signal } go away with the scope:
 //   switching views never adds listeners.
 

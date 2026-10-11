@@ -84,7 +84,7 @@ struct ExplorerGraphEdge {
   bool can_animate = false;
 };
 
-// The graph is bounded: the topology of a cluster (a node for each shard and each replica) is left out of a Distributed table when it would
+// The graph is bounded: the topology of a cluster (a node for each shard and each replica, shared by the Distributed tables that name it) is left out when it would
 // make the graph larger than this, and `truncated` says so.
 constexpr size_t kMaxGraphNodes = 20000;
 constexpr size_t kMaxGraphEdges = 40000;

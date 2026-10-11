@@ -15,7 +15,7 @@ import { table } from "./app_ui_table.js";
 const { $$ } = dom;
 
 // An SQL expression of the card, coloured by the Query editor's
-// highlighter (renderHighlightedCode, app_explorer.js: ns.highlight, the
+// highlighter (renderHighlightedCode, app_explorer_doc.js: ns.highlight, the
 // same .tok-* classes and theme colours).
 // Function names need the host's function list (ns.meta): the
 // expressions repaint when it arrives (chdash:meta-changed).

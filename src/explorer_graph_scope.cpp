@@ -145,6 +145,7 @@ class Scoper {
         out.included[i] = 1;
       }
     }
+    if (scope_.physical && storage_ && !scope_.database.empty()) shared_below(out);
     return out;
   }
 
@@ -249,6 +250,27 @@ class Scoper {
         if (out.included[child]) continue;
         out.included[child] = 1;
         below.push_back(child);
+      }
+    }
+  }
+
+  // The topology of a cluster belongs to no database (the Distributed tables of several databases share it): the Storage mode of a database shows the
+  // shared nodes below its own tables, and no other.
+  void shared_below(ScopedNodes& out) const {
+    std::vector<uint32_t> queue;
+    for (uint32_t i = 0; i < graph_.nodes.size(); ++i) {
+      if (!out.included[i] || graph_.nodes[i].layer != "logical") continue;
+      for (const uint32_t child : index_.physical_children[i]) {
+        if (!graph_.nodes[child].database.empty() || out.included[child]) continue;
+        out.included[child] = 1;
+        queue.push_back(child);
+      }
+    }
+    for (size_t at = 0; at < queue.size(); ++at) {
+      for (const uint32_t child : index_.physical_children[queue[at]]) {
+        if (out.included[child]) continue;
+        out.included[child] = 1;
+        queue.push_back(child);
       }
     }
   }

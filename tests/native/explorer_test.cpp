@@ -727,20 +727,58 @@ void test_the_physical_topology_of_a_graph() {
   size_t mem_children = 0;
   for (const auto& edge : graph.edges) mem_children += edge.from == "table:db.mem";
   CHECK_EQ(mem_children, size_t(0));
-  // A Distributed table has a shard node and a replica node for each row of its cluster, and the badge "2S × 1R".
-  CHECK(find_node(graph, "physical:table:db.dist:shard:1") != nullptr);
-  CHECK(find_node(graph, "physical:table:db.dist:shard:2:replica:1") != nullptr);
+  // The cluster has a shard node and a replica node for each of its rows, shared by the Distributed tables that name it; the table has an edge to
+  // each shard, and the badge "2S × 1R".
+  CHECK(find_node(graph, "physical:cluster:c1:shard:1") != nullptr);
+  CHECK(find_node(graph, "physical:cluster:c1:shard:2:replica:1") != nullptr);
+  CHECK(find_edge(graph, "table:db.dist", "physical:cluster:c1:shard:1", "contains") != nullptr);
+  CHECK(find_edge(graph, "physical:cluster:c1:shard:2", "physical:cluster:c1:shard:2:replica:1", "contains") != nullptr);
   CHECK_EQ(find_node(graph, "table:db.dist")->topology_badge, std::string("2S × 1R"));
   CHECK_EQ(graph.definitions.at("table:db.dist").distributed_shards, uint64_t(2));
 }
 
-void test_the_cluster_topology_of_a_graph_is_bounded() {
-  // 300 Distributed tables on a cluster of 40 shards with 3 replicas: 160 nodes for each table would make 48,000.
+void test_the_cluster_topology_is_shared_by_its_distributed_tables() {
+  // Two Distributed tables of two databases name one cluster of 2 shards with 2 replicas: the shards and the replicas are made once, and each table has
+  // an edge to each shard.
   ExplorerGraphInputs inputs;
-  std::vector<std::pair<const char*, const char*>> names;
+  inputs.tables = {graph_table("a", "d1", "Distributed", "Distributed(c1, a, t, rand())"), graph_table("b", "d2", "Distributed", "Distributed(c1, b, t, rand())")};
+  inputs.clusters = {{"c1", 1, 1, "h11"}, {"c1", 1, 2, "h12"}, {"c1", 2, 1, "h21"}, {"c1", 2, 2, "h22"}};
+  ExplorerCatalog catalog;
+  catalog.tables = {table_summary("a", "d1", "Distributed"), table_summary("b", "d2", "Distributed")};
+  ExplorerGraph graph;
+  build_explorer_graph(inputs, allowed_of({{"a", "d1"}, {"b", "d2"}}), catalog, graph);
+  size_t shards = 0, replicas = 0;
+  for (const auto& node : graph.nodes) {
+    shards += node.kind == "shard";
+    replicas += node.kind == "replica";
+  }
+  CHECK_EQ(shards, size_t(2));
+  CHECK_EQ(replicas, size_t(4));
+  for (const char* table : {"table:a.d1", "table:b.d2"}) {
+    CHECK(find_edge(graph, table, "physical:cluster:c1:shard:1", "contains") != nullptr);
+    CHECK(find_edge(graph, table, "physical:cluster:c1:shard:2", "contains") != nullptr);
+  }
+  CHECK_EQ(find_node(graph, "table:a.d1")->topology_badge, std::string("2S × 2R"));
+  CHECK_EQ(find_node(graph, "physical:cluster:c1:shard:1:replica:2")->host_name, std::string("h12"));
+  // The Storage mode of a database shows the shared nodes below its own tables, and the focus on a table shows them too.
+  GraphScopeRequest scope;
+  scope.physical = true;
+  scope.database = "a";
+  size_t scoped_shards = 0;
+  for (const auto& node : scope_graph(graph, scope, true, true).nodes) scoped_shards += node.kind == "shard";
+  CHECK_EQ(scoped_shards, size_t(2));
+  scope.database.clear();
+  scope.focus_id = "table:b.d2";
+  CHECK_EQ(scope_graph(graph, scope, true, true).nodes.size(), size_t(1 + 2 + 4));
+}
+
+void test_the_cluster_topology_of_a_graph_is_bounded() {
+  // 1,100 Distributed tables on a cluster of 40 shards with 3 replicas: an edge from each table to each shard makes 44,000, over the 40,000 of the
+  // graph. The nodes of the cluster are made once (160), whatever the number of tables.
+  ExplorerGraphInputs inputs;
   std::vector<std::string> keep;
   ExplorerCatalog catalog;
-  for (int i = 0; i < 300; ++i) {
+  for (int i = 0; i < 1100; ++i) {
     keep.push_back("d" + std::to_string(1000 + i));
     inputs.tables.push_back(graph_table("db", keep.back(), "Distributed", "Distributed(big, db, t, rand())"));
     catalog.tables.push_back(table_summary("db", keep.back(), "Distributed"));
@@ -761,14 +799,18 @@ void test_the_cluster_topology_of_a_graph_is_bounded() {
   CHECK(graph.truncated);
   CHECK(graph.nodes.size() <= kMaxGraphNodes);
   CHECK(graph.edges.size() <= kMaxGraphEdges);
-  // The logical graph is whole: every table has its node and its definition (with the size of the cluster), only the topology below some is left out.
-  size_t logical = 0, with_topology = 0;
+  // The logical graph is whole: every table has its node and its definition (with the size of the cluster), only the shard edges below some are left out.
+  size_t logical = 0, shards = 0, replicas = 0, tables_with_shards = 0;
   for (const auto& node : graph.nodes) {
     logical += node.layer == "logical";
-    with_topology += node.kind == "shard";
+    shards += node.kind == "shard";
+    replicas += node.kind == "replica";
   }
-  CHECK_EQ(logical, size_t(300));
-  CHECK(with_topology > 0 && with_topology < 300 * 40);
+  for (const auto& edge : graph.edges) tables_with_shards += edge.kind == "contains" && edge.label == "shard";
+  CHECK_EQ(logical, size_t(1100));
+  CHECK_EQ(shards, size_t(40));
+  CHECK_EQ(replicas, size_t(120));
+  CHECK(tables_with_shards > 0 && tables_with_shards < 1100 * 40);
   CHECK_EQ(graph.definitions.at("table:db.d1000").distributed_shards, uint64_t(40));
   // A small cluster is not cut.
   ExplorerGraph small;
@@ -1505,7 +1547,7 @@ void test_the_graph_is_read_as_the_system_account_and_built() {
   CHECK(find_edge(graph, "table:db.src", "table:db.mv", "materialized_view") != nullptr);
   CHECK(find_edge(graph, "table:db.mv", "table:db.dst", "materialized_view_output") != nullptr);
   CHECK(find_edge(graph, "table:db.dist", "table:db.dst", "distributed_route") != nullptr);
-  CHECK(find_node(graph, "physical:table:db.dist:shard:2:replica:1") != nullptr);
+  CHECK(find_node(graph, "physical:cluster:c1:shard:2:replica:1") != nullptr);
   CHECK(find_node(graph, "physical:database:db:policy:tiered") != nullptr);
   // The object that the runner does not read is not a node, and no edge names it.
   for (const auto& node : graph.nodes) CHECK(node.database != "secret");
@@ -2318,6 +2360,7 @@ int main() {
   RUN(test_what_a_definition_says_and_never_names);
   RUN(test_a_dictionary_whose_source_is_hidden_does_not_name_it);
   RUN(test_the_physical_topology_of_a_graph);
+  RUN(test_the_cluster_topology_is_shared_by_its_distributed_tables);
   RUN(test_the_cluster_topology_of_a_graph_is_bounded);
   RUN(test_two_tables_do_not_share_a_node_id);
   RUN(test_a_hidden_table_is_not_in_the_graph);
