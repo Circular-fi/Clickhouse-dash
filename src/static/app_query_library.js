@@ -1169,8 +1169,9 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
   sqlBox.setAttribute("role", "group");
   const sqlLabel = h("span", { class: "uiField__label", id: "qlFormSqlLabel" });
   sqlBox.setAttribute("aria-labelledby", sqlLabel.id);
+  const sqlHead = h("div", { class: "qlForm__sqlHead" }, sqlLabel);
   const sqlBody = h("div", { class: "qlForm__sqlBody" });
-  sqlBox.append(sqlLabel, sqlBody);
+  sqlBox.append(sqlHead, sqlBody);
   let raw = null;
   let formattedText = fromHistory?.formatted ? String(fromHistory.sql || "") : null;
   let formatting = null;
@@ -1182,12 +1183,14 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
     } else {
       sqlLabel.textContent = "SQL";
     }
-    sqlBody.replaceChildren(sqlPreview(chosen()));
+    sqlBody.replaceChildren(sqlPreview(chosen(), PANE_SQL_CHARS, { pane: true }));
   };
   if (mode === "save") {
     raw = h("input", { type: "checkbox", name: "raw", id: "qlSaveRaw" });
-    const rawNote = h("span", { class: "uiCheck__note" }, "Keep the query as typed, without formatting.");
-    sqlBox.appendChild(h("label", { class: "uiCheck", for: "qlSaveRaw" }, raw, h("span", { class: "uiCheck__text" }, h("span", { class: "uiCheck__label" }, "Save raw"), rawNote)));
+    // A small, quiet option at the end of the SQL's heading: the formatted text is what most saves want.
+    const rawTextEl = h("span", { class: "qlRawToggle__text" }, "Save raw");
+    const rawLabel = h("label", { class: "qlRawToggle", for: "qlSaveRaw", title: "Keep the query as typed, without formatting." }, raw, rawTextEl);
+    sqlHead.appendChild(rawLabel);
     raw.addEventListener("change", drawSql);
     if (!formattedText) {
       formatting = sqlMod.formatText(ctl.host, rawText).then(
@@ -1196,7 +1199,8 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
           formattedText = null;
           raw.checked = true;
           raw.disabled = true;
-          rawNote.textContent = "The formatter does not accept this query: it is saved as typed.";
+          rawTextEl.textContent = "Saved as typed";
+          rawLabel.title = "The formatter does not accept this query: it is saved as typed.";
         },
       ).then(() => {
         formatting = null;
@@ -1254,9 +1258,15 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
       formError.hidden = false;
     }
   };
-  nameInput.addEventListener("input", () => fieldError("name", "", { focus: false }));
+  nameInput.addEventListener("input", () => {
+    fieldError("name", "", { focus: false });
+    syncGhostName();
+  });
   descriptionInput.addEventListener("input", () => fieldError("description", "", { focus: false }));
-  folder.addEventListener("change", () => fieldError("folder_id", "", { focus: false }));
+  folder.addEventListener("change", () => {
+    fieldError("folder_id", "", { focus: false });
+    showGhost(session);
+  });
 
   const send = async (action) => {
     if (session.busy) return;
@@ -1295,7 +1305,10 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
     const hadFocus = document.activeElement === session.folder;
     session.folder.replaceWith(next);
     session.folder = next;
-    next.addEventListener("change", () => fieldError("folder_id", "", { focus: false }));
+    next.addEventListener("change", () => {
+      fieldError("folder_id", "", { focus: false });
+      showGhost(session);
+    });
     if (hadFocus) next.focus();
   };
   // The place picked in the tree is the folder (a root or folder of a read-only storage is not offered).
@@ -1303,15 +1316,69 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
     if (!loc) return;
     const option = [...session.folder.options].find((o) => o.value === locValue(loc));
     if (!option || option.disabled || option.parentElement?.disabled) return;
+    const changed = session.folder.value !== option.value;
     session.folder.value = option.value;
     fieldError("folder_id", "", { focus: false });
+    if (changed) showGhost(session);
   };
+  session.draftName = () => nameInput.value.trim();
   session.focus = () => {
     nameInput.focus({ preventScroll: true });
     nameInput.select();
   };
   session.folder = folder;
   return session;
+}
+
+// Where the form's query will sit, drawn in the tree: a dashed row in the folder of the Folder field (opened for it), at the
+// place its name sorts to. Edit shows it only when the query moves. It is for the eye: aria-hidden, the Folder field says it.
+const GHOST_NAME = "New query";
+let ghost = null;
+let ghostOpens = new Set();
+
+function ghostSpot() {
+  const form = ctl.form;
+  if (!form || ctl.shown !== "saved" || !form.folder) return null;
+  const loc = parseLoc(form.folder.value);
+  if (!loc || !storeOf(loc.store)) return null;
+  const moving = form.mode === "edit";
+  if (moving) {
+    const current = queryById(storeOf(form.store)?.library || emptyLibrary(), form.queryId);
+    if (current && form.store === loc.store && (current.folder_id || null) === (loc.folderId || null)) return null;
+  }
+  return { store: loc.store, folderId: loc.folderId, name: form.draftName() || GHOST_NAME, moving };
+}
+
+function planGhost() {
+  ghost = ghostSpot();
+  ghostOpens = new Set();
+  if (!ghost) return;
+  const lib = storeOf(ghost.store).library;
+  for (let cur = folderById(lib, ghost.folderId); cur; cur = folderById(lib, cur.parent_id)) ghostOpens.add(`${ghost.store}:${cur.id}`);
+}
+
+const folderIsOpen = (storeKind, id) => ctl.expanded.has(`${storeKind}:${id}`) || ghostOpens.has(`${storeKind}:${id}`);
+
+function ghostRow(level) {
+  const li = h("li", { class: "qlNode qlNode--ghost" });
+  li.setAttribute("role", "none");
+  li.setAttribute("aria-hidden", "true");
+  const row = rowLead(level);
+  row.classList.add("qlRow--ghost");
+  row.append(icon("query"), h("span", { class: "qlRow__text" }, h("span", { class: "qlRow__name" }, ghost.name)), h("span", { class: "qlRow__meta" }, ghost.moving ? "moves here" : "saved here"));
+  li.appendChild(row);
+  return li;
+}
+
+// The tree draws the place again (the Folder changed); the focus stays where it is.
+function showGhost(session) {
+  if (ctl.form === session && ctl.shown === "saved") renderTree();
+}
+
+// The name is typed: the dashed row follows it.
+function syncGhostName() {
+  const name = libraryEls.tree && $(".qlNode--ghost .qlRow__name", libraryEls.tree);
+  if (name && ctl.form) name.textContent = ctl.form.draftName() || GHOST_NAME;
 }
 
 // Shows the form in the pane: the Saved tab, the form attached, its name field focused (a phone: the pane step).
@@ -1321,6 +1388,7 @@ async function openForm(session) {
   await queryUi.openQueryLibrary("saved", { focus: false });
   if (ctl.form !== session) return;
   renderPreview();
+  renderTree();
   if (isPhone()) setPreviewStep(true);
   session.focus();
 }
@@ -1330,6 +1398,7 @@ function revealForm() {
   if (ctl.shown !== "saved") void queryUi.openQueryLibrary("saved", { focus: false }).then(() => revealForm());
   else {
     renderPreview();
+    renderTree();
     if (isPhone()) setPreviewStep(true);
     if (ctl.form && !ctl.form.el.contains(document.activeElement)) ctl.form.focus();
   }
@@ -1341,7 +1410,10 @@ function closeForm() {
   const session = ctl.form;
   if (!session) return;
   ctl.form = null;
-  if (ctl.shown === "saved") renderPreview();
+  if (ctl.shown === "saved") {
+    renderPreview();
+    renderTree();
+  }
   if (isPhone()) setPreviewStep(false);
   const button = libraryEls.save;
   if (session.fromButton && button && !button.disabled && !button.hidden) button.focus({ preventScroll: true });
@@ -1358,7 +1430,10 @@ function syncForm() {
   if (!session) return;
   if (session.host !== ctl.host || (session.mode === "edit" && !queryById(storeOf(session.store)?.library || emptyLibrary(), session.queryId))) {
     ctl.form = null;
-    if (ctl.shown === "saved") renderPreview();
+    if (ctl.shown === "saved") {
+      renderPreview();
+      renderTree();
+    }
     return;
   }
   session.refreshFolders();
@@ -2032,7 +2107,7 @@ function fileRow(kind, storeKind, entity, level, { terms = null, path = "" } = {
   menu.setAttribute("aria-haspopup", "menu");
   row.appendChild(menu);
   if (kind === "folder") {
-    li.setAttribute("aria-expanded", String(ctl.expanded.has(`${storeKind}:${entity.id}`)));
+    li.setAttribute("aria-expanded", String(folderIsOpen(storeKind, entity.id)));
   } else if (ctl.opened?.store === storeKind && ctl.opened.id === entity.id) {
     row.classList.add("is-opened");
     li.setAttribute("aria-current", "true");
@@ -2047,7 +2122,7 @@ function appendFolderChildren(parentEl, storeKind, folderId, level) {
   if (ctl.editing?.mode === "new" && ctl.editing.store === storeKind && (ctl.editing.parentId || null) === (folderId || null)) parentEl.appendChild(newFolderRow(level));
   for (const folder of childFolders(lib, folderId)) {
     const li = fileRow("folder", storeKind, folder, level);
-    if (ctl.expanded.has(`${storeKind}:${folder.id}`) && !(ctl.editing?.mode === "rename" && ctl.editing.key === li.dataset.key)) {
+    if (folderIsOpen(storeKind, folder.id) && !(ctl.editing?.mode === "rename" && ctl.editing.key === li.dataset.key)) {
       const group = h("ul", { class: "qlTree__group" });
       group.setAttribute("role", "group");
       appendFolderChildren(group, storeKind, folder.id, level + 1);
@@ -2056,10 +2131,16 @@ function appendFolderChildren(parentEl, storeKind, folderId, level) {
     }
     parentEl.appendChild(li);
   }
+  let ghostPlaced = !(ghost && ghost.store === storeKind && (ghost.folderId || null) === (folderId || null));
   for (const query of childQueries(lib, folderId)) {
+    if (!ghostPlaced && byName({ name: ghost.name }, query) <= 0) {
+      parentEl.appendChild(ghostRow(level));
+      ghostPlaced = true;
+    }
     const li = fileRow("query", storeKind, query, level);
     parentEl.appendChild(li);
   }
+  if (!ghostPlaced) parentEl.appendChild(ghostRow(level));
 }
 
 function emptyFolderRow(text, level) {
@@ -2073,7 +2154,7 @@ function emptyFolderRow(text, level) {
 // when read-only; open unless closed.
 function rootRow(store) {
   const li = rowShell("root", store.kind, "", 1);
-  const open = !ctl.closedRoots.has(store.kind);
+  const open = !ctl.closedRoots.has(store.kind) || ghost?.store === store.kind;
   li.setAttribute("aria-expanded", String(open));
   const row = rowLead(1, { twisty: true });
   row.classList.add("qlRow--root");
@@ -2110,6 +2191,7 @@ function renderTree({ keepFocus = false } = {}) {
   const tree = libraryEls.tree;
   if (!tree) return;
   const hadFocus = keepFocus || tree.contains(document.activeElement);
+  planGhost();
   tree.replaceChildren();
   const matches = searchMatches();
   tree.classList.toggle("is-search", !!matches);

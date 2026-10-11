@@ -867,6 +867,44 @@
   min-height: 0;
 }
 
+/* The SQL's heading with the quiet "Save raw" option at its end: small, muted, a native check box. */
+.qlForm__sqlHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.qlRawToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.qlRawToggle:hover {
+  color: var(--text);
+}
+
+.qlRawToggle > input {
+  margin: 0;
+}
+
+/* Where the query will be saved: a dashed row in the tree, in the accent colour, not selectable. */
+.qlRow--ghost {
+  border: 1px dashed var(--selected-edge);
+  border-radius: var(--r-md);
+  color: var(--accent-text, var(--text));
+  background: transparent;
+  pointer-events: none;
+}
+
+.qlRow--ghost .qlRow__name {
+  font-style: italic;
+}
+
 @media (max-width: 760px) {
   .qlPaneForm .qlSql {
     max-height: 11rem;
