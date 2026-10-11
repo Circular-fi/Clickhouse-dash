@@ -56,6 +56,8 @@ std::string filters_sql(const std::vector<AttributeFilter>& filters, SqlParams& 
 
 // The kind tables that exist (system.tables).
 std::string existing_kinds_sql(const MetricSettings& metrics);
+// The kind tables that have the scope columns that tell two instrumentation scopes apart (system.columns): their names.
+std::string scope_columns_sql(const MetricSettings& metrics);
 // One row for each (kind, service, metric) of the window; "" when no kind table exists.
 std::string catalog_sql(const MetricSettings& metrics, const std::set<std::string>& kinds, const std::string& visibility,
                         const TimeWindow& window);

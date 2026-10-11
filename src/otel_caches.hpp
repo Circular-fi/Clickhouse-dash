@@ -94,11 +94,18 @@ inline LogColumnsCache::Options log_columns_cache_options() {
   return options;
 }
 
-// ---- The Metrics page: the kind tables of a source, kept like the catalog (api_metrics.cpp).
+// ---- The Metrics page: the kind tables of a source, kept like the catalog (metrics_service.hpp).
 constexpr auto kCatalogTtl = std::chrono::seconds(60);
 constexpr size_t kCatalogCacheMaxEntries = 256;
 
-using KindTablesCache = TtlCache<std::string, std::set<std::string>>;
+// The kinds whose table exists, and among them the kinds whose table has ScopeName and ScopeVersion (the exporter writes both): a series is
+// told from another by its scope too when it can be.
+struct KindTables {
+  std::set<std::string> kinds;
+  std::set<std::string> with_scope;
+};
+
+using KindTablesCache = TtlCache<std::string, KindTables>;
 
 inline KindTablesCache::Options kind_tables_cache_options() {
   KindTablesCache::Options options;

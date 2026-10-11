@@ -73,6 +73,10 @@ std::string catalog_json(const CatalogAnswer& answer) {
       w.Key("monotonic");
       if (e.monotonic < 0) w.Null();
       else w.Bool(e.monotonic == 1);
+      // "monotonic" is true when any series is monotonic: this says that some are not.
+      w.Key("monotonic_mixed");
+      if (e.monotonic_mixed < 0) w.Null();
+      else w.Bool(e.monotonic_mixed == 1);
       w.Key("points"); w.Int64(e.points);
       w.EndObject();
     }
@@ -189,6 +193,9 @@ std::string series_json(const SeriesAnswer& answer) {
   else write_str(w, temporality);
   w.Key("monotonic");
   if (request.kind == "sum" && answer.info.points > 0) w.Bool(answer.info.monotonic);
+  else w.Null();
+  w.Key("monotonic_mixed");
+  if (request.kind == "sum" && answer.info.points > 0) w.Bool(monotonic_mixed(answer.info));
   else w.Null();
   w.Key("points"); w.Int64(answer.info.points);
   w.Key("agg"); write_str(w, plan.agg);

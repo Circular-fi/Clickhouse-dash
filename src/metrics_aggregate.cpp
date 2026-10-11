@@ -87,8 +87,16 @@ void merge_exp(ExpState& into, ExpState from) {
   into.zero += from.zero;
 }
 
-// Adds explicit-bucket counts. Rows with other bounds are re-bucketed: each source bucket's count goes to the target bucket holding its
-// upper bound.
+// The bucket of `bounds` (explicit bounds, then the +Inf bucket) that holds the upper bound `upper`.
+size_t bucket_of(const std::vector<double>& bounds, double upper) {
+  if (!std::isfinite(upper)) return bounds.size();
+  const auto at = std::lower_bound(bounds.begin(), bounds.end(), upper);
+  return static_cast<size_t>(at - bounds.begin());
+}
+
+// Adds explicit-bucket counts. Rows with the same bounds add up bucket by bucket. Rows with other bounds are re-bucketed onto the sorted
+// union of their bounds: each source bucket's count goes to the bucket that has its upper bound, so the result does not depend on the
+// order of the rows (a row with no bounds is one +Inf bucket).
 void merge_hist(Cell& into, const std::vector<double>& bounds, const std::vector<double>& counts) {
   if (counts.empty()) return;
   if (into.counts.empty()) {
@@ -100,18 +108,26 @@ void merge_hist(Cell& into, const std::vector<double>& bounds, const std::vector
     for (size_t i = 0; i < counts.size(); ++i) into.counts[i] += counts[i];
     return;
   }
-  for (size_t i = 0; i < counts.size(); ++i) {
-    const double upper = i < bounds.size() ? bounds[i] : std::numeric_limits<double>::infinity();
-    size_t target = into.bounds.size();
-    for (size_t j = 0; j < into.bounds.size(); ++j) {
-      if (into.bounds[j] >= upper) {
-        target = j;
-        break;
-      }
+  std::vector<double> merged;
+  const std::vector<double>* const lists[] = {&into.bounds, &bounds};
+  for (const std::vector<double>* list : lists) {
+    for (const double bound : *list) {
+      if (std::isfinite(bound)) merged.push_back(bound);
     }
-    if (target >= into.counts.size()) into.counts.resize(target + 1, 0.0);
-    into.counts[target] += counts[i];
   }
+  std::sort(merged.begin(), merged.end());
+  merged.erase(std::unique(merged.begin(), merged.end()), merged.end());
+  std::vector<double> next(merged.size() + 1, 0.0);
+  const auto add = [&](const std::vector<double>& from_bounds, const std::vector<double>& from_counts) {
+    for (size_t i = 0; i < from_counts.size(); ++i) {
+      const double upper = i < from_bounds.size() ? from_bounds[i] : std::numeric_limits<double>::infinity();
+      next[bucket_of(merged, upper)] += from_counts[i];
+    }
+  };
+  add(into.bounds, into.counts);
+  add(bounds, counts);
+  into.bounds = std::move(merged);
+  into.counts = std::move(next);
 }
 
 }  // namespace
@@ -230,6 +246,7 @@ void read_metric_info(const clickhouse::Block& block, MetricInfo* info) {
     info->temporality_min = text_to_i64(ch_block_text_at(block, 2, row));
     info->temporality_max = text_to_i64(ch_block_text_at(block, 3, row));
     info->monotonic = ch_block_text_at(block, 4, row) == "1";
+    info->monotonic_min = block.GetColumnCount() > 7 && ch_block_text_at(block, 7, row) == "1";
     info->points = text_to_i64(ch_block_text_at(block, 5, row));
     for (auto& q : split_keep(ch_block_text_at(block, 6, row), ',')) {
       if (!q.empty() && std::isfinite(text_to_double(q))) info->quantiles.push_back(q);

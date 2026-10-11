@@ -24,6 +24,7 @@
 #include <httplib.h>
 #include <rapidjson/document.h>
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 #include <iostream>
@@ -69,6 +70,23 @@ std::string inlined(const Statement& statement) {
     for (size_t at = out.find(mark); at != std::string::npos; at = out.find(mark, at + quoted.size())) out.replace(at, mark.size(), quoted);
   }
   return out;
+}
+
+// The statements of the code before the split, with the changes on purpose of ARCH-B-086: the information of a sum has the least of
+// IsMonotonic too (the other kinds a constant), and the rows of a histogram come in the order of their bounds.
+std::string changed_info(std::string golden, bool sum) {
+  const size_t at = golden.find(" FROM `otel`.`otel_metrics_");
+  CHECK(at != std::string::npos);
+  golden.insert(at, sum ? ", toString(min(toUInt8(IsMonotonic)))" : ", '0'");
+  return golden;
+}
+
+std::string changed_histogram(std::string golden) {
+  const std::string old_order = "GROUP BY g, b, bstr ORDER BY g, b LIMIT";
+  const size_t at = golden.find(old_order);
+  CHECK(at != std::string::npos);
+  golden.replace(at, old_order.size(), "GROUP BY g, b, bstr ORDER BY g, b, bstr LIMIT");
+  return golden;
 }
 
 MetricSettings settings() {
@@ -282,30 +300,30 @@ void test_the_series_statements_are_unchanged() {
   (void)window;
   const auto gauge = series_request({{"kind", "gauge"}, {"service", "api_service"}, {"metric", "queue.depth"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
   SeriesStatements gauge_statements(gauge, table_of("gauge"), "1", false);
-  CHECK_EQ(inlined(gauge_statements.info()), std::string(golden::kInfoGauge));
+  CHECK_EQ(inlined(gauge_statements.info()), changed_info(golden::kInfoGauge, false));
   CHECK_EQ(inlined(gauge_statements.series(Mode::Gauge, false, "")), std::string(golden::kSeriesGauge));
 
   const auto sum = series_request({{"kind", "sum"}, {"service", "auth_service"}, {"metric", "traces.span.metrics.calls"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
   SeriesStatements sum_statements(sum, table_of("sum"), "1", false);
-  CHECK_EQ(inlined(sum_statements.info()), std::string(golden::kInfoSum));
+  CHECK_EQ(inlined(sum_statements.info()), changed_info(golden::kInfoSum, true));
   CHECK_EQ(inlined(sum_statements.series(Mode::Delta, false, "")), std::string(golden::kSeriesSumCumulative));
 
   const auto histogram_delta = series_request({{"kind", "histogram"}, {"service", "api_service"}, {"metric", "http.server.request.duration"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
   SeriesStatements delta_statements(histogram_delta, table_of("histogram"), "1", false);
-  CHECK_EQ(inlined(delta_statements.info()), std::string(golden::kInfoHistogram));
-  CHECK_EQ(inlined(delta_statements.series(Mode::Histogram, true, "")), std::string(golden::kSeriesHistogramDelta));
+  CHECK_EQ(inlined(delta_statements.info()), changed_info(golden::kInfoHistogram, false));
+  CHECK_EQ(inlined(delta_statements.series(Mode::Histogram, true, "")), changed_histogram(golden::kSeriesHistogramDelta));
   const auto histogram_cumulative = series_request({{"kind", "histogram"}, {"service", "auth_service"}, {"metric", "http.server.request.duration"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
   SeriesStatements cumulative_statements(histogram_cumulative, table_of("histogram"), "1", false);
-  CHECK_EQ(inlined(cumulative_statements.series(Mode::Histogram, false, "")), std::string(golden::kSeriesHistogramCumulative));
+  CHECK_EQ(inlined(cumulative_statements.series(Mode::Histogram, false, "")), changed_histogram(golden::kSeriesHistogramCumulative));
 
   const auto exponential = series_request({{"kind", "exponential_histogram"}, {"service", "api_service"}, {"metric", "span.duration.exponential"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
   SeriesStatements exponential_statements(exponential, table_of("exponential_histogram"), "1", false);
-  CHECK_EQ(inlined(exponential_statements.info()), std::string(golden::kInfoExponential));
+  CHECK_EQ(inlined(exponential_statements.info()), changed_info(golden::kInfoExponential, false));
   CHECK_EQ(inlined(exponential_statements.series(Mode::Exponential, true, "")), std::string(golden::kSeriesExponentialDelta));
 
   const auto summary = series_request({{"kind", "summary"}, {"service", "auth_service"}, {"metric", "span.duration.summary"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
   SeriesStatements summary_statements(summary, table_of("summary"), "1", false);
-  CHECK_EQ(inlined(summary_statements.info()), std::string(golden::kInfoSummary));
+  CHECK_EQ(inlined(summary_statements.info()), changed_info(golden::kInfoSummary, false));
   CHECK_EQ(inlined(summary_statements.series(Mode::SummaryQuantile, false, "0.5")), std::string(golden::kSeriesSummaryQuantile));
   const auto summary_delta = series_request({{"kind", "summary"}, {"service", "auth_service"}, {"metric", "span.duration.summary"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
   SeriesStatements summary_delta_statements(summary_delta, table_of("summary"), "1", false);
@@ -319,7 +337,7 @@ void test_the_series_statements_are_unchanged() {
   const auto filters = series_request({{"kind", "sum"}, {"service", "auth_service"}, {"metric", "traces.span.metrics.calls"}, {"start_ms", kStart6h.c_str()}, {"end_ms", kEndText.c_str()},
                                        {"group_by", "span.kind"}, {"filter", "span.kind=SERVER"}, {"filter", "span.kind=CLIENT"}});
   SeriesStatements filter_statements(filters, table_of("sum"), "1", false);
-  CHECK_EQ(inlined(filter_statements.info()), std::string(golden::kInfoFiltered));
+  CHECK_EQ(inlined(filter_statements.info()), changed_info(golden::kInfoFiltered, true));
   CHECK_EQ(inlined(filter_statements.series(Mode::Delta, false, "")), std::string(golden::kSeriesFiltered));
   const auto filter_not = series_request({{"kind", "sum"}, {"service", "auth_service"}, {"metric", "traces.span.metrics.calls"}, {"start_ms", kStart6h.c_str()}, {"end_ms", kEndText.c_str()},
                                           {"group_by", "span.name"}, {"filter_not", "span.kind=SERVER"}, {"step_ms", "600000"}});
@@ -335,7 +353,7 @@ void test_the_series_statements_are_unchanged() {
   CHECK_EQ(inlined(aligned_statements.series(Mode::Gauge, false, "")), std::string(golden::kSeriesGaugeAligned));
   const auto quote = series_request({{"kind", "gauge"}, {"service", "a'b"}, {"metric", "m\\n"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}, {"filter", "k'=v'"}});
   SeriesStatements quote_statements(quote, table_of("gauge"), "1", false);
-  CHECK_EQ(inlined(quote_statements.info()), std::string(golden::kInfoQuote));
+  CHECK_EQ(inlined(quote_statements.info()), changed_info(golden::kInfoQuote, false));
   CHECK_EQ(inlined(quote_statements.series(Mode::Gauge, false, "")), std::string(golden::kSeriesQuote));
   CHECK(quote_statements.info().sql.find("a'b") == std::string::npos);
 
@@ -361,6 +379,24 @@ void test_the_exemplars_statement_is_unchanged() {
   const auto limited = exemplars_request({{"kind", "histogram"}, {"service", "auth_service"}, {"metric", "http.server.request.duration"},
                                           {"start_ms", kStart24h.c_str()}, {"end_ms", kEndText.c_str()}, {"per_bucket", "1"}, {"limit", "5"}});
   CHECK_EQ(inlined(exemplars_statement(table_of("histogram"), "1", limited)), std::string(golden::kExemplarsLimited));
+}
+
+void test_a_series_is_told_apart_by_its_scope_when_the_table_has_one() {
+  const auto gauge = series_request({{"kind", "gauge"}, {"service", "api_service"}, {"metric", "queue.depth"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
+  SeriesStatements scoped(gauge, table_of("gauge"), "1", true);
+  const std::string text = scoped.series(Mode::Gauge, false, "").sql;
+  CHECK(text.find("cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion) AS sid") != std::string::npos);
+  CHECK_EQ(scoped.series_id(), std::string("cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion)"));
+  // A series that is differenced is partitioned by the same identity.
+  const auto sum = series_request({{"kind", "sum"}, {"service", "auth_service"}, {"metric", "traces.span.metrics.calls"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
+  SeriesStatements scoped_sum(sum, table_of("sum"), "1", true);
+  CHECK(scoped_sum.series(Mode::Delta, false, "").sql.find("WINDOW w AS (PARTITION BY cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion) ORDER BY") != std::string::npos);
+  SeriesStatements plain(gauge, table_of("gauge"), "1", false);
+  CHECK(plain.series(Mode::Gauge, false, "").sql.find("ScopeName") == std::string::npos);
+  CHECK_EQ(scope_columns_sql(settings()),
+           std::string("SELECT toString(`table`) FROM system.columns WHERE database = 'otel' AND `table` IN ('otel_metrics_gauge', 'otel_metrics_sum', "
+                       "'otel_metrics_histogram', 'otel_metrics_exponential_histogram', 'otel_metrics_summary') AND name IN ('ScopeName', 'ScopeVersion') "
+                       "GROUP BY `table` HAVING count() = 2"));
 }
 
 // ---- the aggregation of the rows ----
@@ -434,7 +470,7 @@ void test_cells_merge() {
   CHECK_EQ(h1.counts.size(), size_t(3));
   CHECK_EQ(h1.counts[0], 11.0);
   CHECK_EQ(h1.counts[2], 33.0);
-  // Other bounds: each bucket goes to the bucket that holds its upper bound.
+  // Other bounds: the bounds are the sorted union, and each bucket goes to the bucket that has its upper bound.
   Cell wide;
   wide.bounds = {1, 2, 4};
   wide.counts = {1, 1, 1, 1};
@@ -442,9 +478,8 @@ void test_cells_merge() {
   fine.bounds = {2, 3};
   fine.counts = {5, 7, 9};
   merge_cell(wide, fine);
-  CHECK_EQ(wide.counts[1], 6.0);   // (.., 2] of fine -> bound 2
-  CHECK_EQ(wide.counts[2], 8.0);   // (2, 3] of fine -> bound 4
-  CHECK_EQ(wide.counts[3], 10.0);   // the +Inf bucket of fine -> the +Inf bucket
+  CHECK((wide.bounds == std::vector<double>{1, 2, 3, 4}));
+  CHECK((wide.counts == std::vector<double>{1, 6, 7, 1, 10}));
   // Exponential buckets are rescaled to the coarser scale before they add up.
   Cell e1, e2;
   e1.exp.present = true;
@@ -459,6 +494,55 @@ void test_cells_merge() {
   CHECK_EQ(e1.exp.positive.size(), size_t(1));
   CHECK_EQ(e1.exp.positive[1], 20.0);
   CHECK_EQ(e1.exp.zero, 2.0);
+}
+
+void test_the_merge_of_histograms_does_not_depend_on_the_order_of_the_rows() {
+  struct Source { std::vector<double> bounds, counts; };
+  const std::vector<Source> sources = {{{1, 2, 5}, {1, 2, 3, 4}}, {{2, 3}, {5, 7, 9}}, {{}, {6}}, {{1, 5, 10}, {1, 1, 1, 1}}, {{2, 3}, {1, 0, 0}}};
+  const auto merged = [&](std::vector<size_t> order) {
+    Cell cell;
+    for (const size_t i : order) {
+      Cell next;
+      next.bounds = sources[i].bounds;
+      next.counts = sources[i].counts;
+      merge_cell(cell, next);
+    }
+    return cell;
+  };
+  const Cell first = merged({0, 1, 2, 3, 4});
+  // The bounds are the sorted union, and no count is lost.
+  CHECK((first.bounds == std::vector<double>{1, 2, 3, 5, 10}));
+  double total = 0, expected = 0;
+  for (const double c : first.counts) total += c;
+  for (const auto& source : sources) for (const double c : source.counts) expected += c;
+  CHECK_EQ(total, expected);
+  CHECK_EQ(first.counts.size(), size_t(6));
+  // Every other order gives the same cell.
+  std::vector<size_t> order = {0, 1, 2, 3, 4};
+  do {
+    const Cell other = merged(order);
+    CHECK(other.bounds == first.bounds);
+    CHECK(other.counts == first.counts);
+  } while (std::next_permutation(order.begin(), order.end()));
+  // A row with no bounds first: its count is not put in the first bucket, and the quantile is not NaN.
+  Cell empty_first;
+  Cell no_bounds;
+  no_bounds.counts = {4};
+  merge_cell(empty_first, no_bounds);
+  Cell real;
+  real.bounds = {1, 2};
+  real.counts = {10, 10, 0};
+  merge_cell(empty_first, real);
+  CHECK((empty_first.bounds == std::vector<double>{1, 2}));
+  CHECK((empty_first.counts == std::vector<double>{10, 10, 4}));
+  CHECK(!std::isnan(explicit_quantile(0.5, empty_first.bounds, empty_first.counts)));
+  // The same bounds stay a plain sum.
+  Cell same_a, same_b;
+  same_a.bounds = same_b.bounds = {1, 2};
+  same_a.counts = {1, 1, 1};
+  same_b.counts = {2, 2, 2};
+  merge_cell(same_a, same_b);
+  CHECK((same_a.counts == std::vector<double>{3, 3, 3}));
 }
 
 void test_the_values_of_a_cell() {
@@ -890,6 +974,76 @@ void test_the_table_of_a_kind_may_be_missing_or_not_readable() {
   CHECK_EQ(service_over(quiet, quiet_caches).series(context, metrics_host(), "local", request("gauge")).error.code, std::string("metrics_table_missing"));
 }
 
+void test_the_service_tells_series_apart_by_their_scope() {
+  FakeDb db;
+  TestCaches caches;
+  db.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
+  db.on("FROM system.columns WHERE database = 'otel'", {{"otel_metrics_gauge"}, {"otel_metrics_histogram"}});
+  db.on("SELECT any(MetricUnit)", {{"", "", "0", "0", "0", "1", "", "0"}});
+  const auto service = service_over(db, caches);
+  RequestContext context;
+  const auto request = [&](const char* kind) {
+    return series_request({{"kind", kind}, {"service", "a"}, {"metric", "b"}, {"start_ms", "60000"}, {"end_ms", "179999"}});
+  };
+  CHECK(service.series(context, metrics_host(), "local", request("gauge")));
+  CHECK(db.sqls.back().find("cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion)") != std::string::npos);
+  CHECK(service.series(context, metrics_host(), "local", request("histogram")));
+  CHECK(db.sqls.back().find("ScopeVersion") != std::string::npos);
+  // A table without them: the attributes only.
+  CHECK(service.series(context, metrics_host(), "local", request("sum")));
+  CHECK(db.sqls.back().find("ScopeName") == std::string::npos);
+  // The columns are read once with the kinds.
+  CHECK_EQ(db.count("FROM system.columns"), size_t(1));
+  // A source that cannot say: as before.
+  FakeDb quiet;
+  TestCaches quiet_caches;
+  quiet.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
+  quiet.fail_on("FROM system.columns", [] { throw server_error(497, "Not enough privileges"); });
+  quiet.on("SELECT any(MetricUnit)", {{"", "", "0", "0", "0", "1", "", "0"}});
+  CHECK(service_over(quiet, quiet_caches).series(context, metrics_host(), "local", request("gauge")));
+  CHECK(quiet.sqls.back().find("ScopeName") == std::string::npos);
+}
+
+void test_monotonic_is_said_to_be_mixed() {
+  FakeDb db;
+  TestCaches caches;
+  db.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
+  // kind, service, metric, unit, description, tmin, tmax, mono_min, mono_max, points
+  db.on("SELECT kind, service, metric", {
+    {"sum", "api", "all", "", "", "2", "2", "1", "1", "5"}, {"sum", "api", "none", "", "", "2", "2", "0", "0", "5"},
+    {"sum", "api", "some", "", "", "2", "2", "0", "1", "5"}, {"gauge", "api", "g", "", "", "", "", "", "", "5"}});
+  const auto service = service_over(db, caches);
+  RequestContext context;
+  CatalogRequest request;
+  request.window = TimeWindow{1000, 2000};
+  const auto doc = parse(catalog_json(*service.catalog(context, metrics_host(), "local", request).value));
+  const auto& metrics = doc["services"][0]["metrics"];
+  CHECK(metrics[0]["monotonic"].GetBool() && !metrics[0]["monotonic_mixed"].GetBool());      // all
+  CHECK(!metrics[1]["monotonic"].GetBool() && !metrics[1]["monotonic_mixed"].GetBool());     // none
+  CHECK(metrics[2]["monotonic"].GetBool() && metrics[2]["monotonic_mixed"].GetBool());       // some
+  CHECK(metrics[3]["monotonic"].IsNull() && metrics[3]["monotonic_mixed"].IsNull());         // a gauge
+  // The series of a sum: the information has the least and the most of IsMonotonic.
+  FakeDb sums;
+  TestCaches sum_caches;
+  sums.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
+  sums.on("SELECT any(MetricUnit)", {{"", "", "2", "2", "1", "9", "", "0"}});
+  sums.on("SELECT g, toString(b), toString(sum(d1))", {{"", "60000", "1", "0"}});
+  const auto answer = service_over(sums, sum_caches).series(context, metrics_host(), "local",
+                                                              series_request({{"kind", "sum"}, {"service", "a"}, {"metric", "b"}, {"start_ms", "60000"}, {"end_ms", "179999"}}));
+  CHECK(answer);
+  const auto series = parse(series_json(*answer.value));
+  CHECK(series["monotonic"].GetBool());
+  CHECK(series["monotonic_mixed"].GetBool());
+  // A gauge says nothing about it.
+  FakeDb gauges;
+  TestCaches gauge_caches;
+  gauges.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
+  gauges.on("SELECT any(MetricUnit)", {{"", "", "0", "0", "0", "9", "", "0"}});
+  const auto gauge = service_over(gauges, gauge_caches).series(context, metrics_host(), "local",
+                                                                series_request({{"kind", "gauge"}, {"service", "a"}, {"metric", "b"}, {"start_ms", "60000"}, {"end_ms", "179999"}}));
+  CHECK(parse(series_json(*gauge.value))["monotonic_mixed"].IsNull());
+}
+
 void test_the_attributes_of_a_metric() {
   FakeDb db;
   TestCaches caches;
@@ -1206,6 +1360,10 @@ int main() {
   RUN(test_the_attribute_statements_are_unchanged);
   RUN(test_the_series_statements_are_unchanged);
   RUN(test_the_exemplars_statement_is_unchanged);
+  RUN(test_a_series_is_told_apart_by_its_scope_when_the_table_has_one);
+  RUN(test_the_merge_of_histograms_does_not_depend_on_the_order_of_the_rows);
+  RUN(test_the_service_tells_series_apart_by_their_scope);
+  RUN(test_monotonic_is_said_to_be_mixed);
   RUN(test_explicit_quantiles);
   RUN(test_exponential_quantiles);
   RUN(test_cells_merge);

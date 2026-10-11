@@ -58,6 +58,11 @@ std::string existing_kinds_sql(const MetricSettings& metrics) {
          kind_table_names(metrics);
 }
 
+std::string scope_columns_sql(const MetricSettings& metrics) {
+  return "SELECT toString(`table`) FROM system.columns WHERE database = " + quote_string(metrics.database) + " AND `table` IN " +
+         kind_table_names(metrics) + " AND name IN ('ScopeName', 'ScopeVersion') GROUP BY `table` HAVING count() = 2";
+}
+
 std::string catalog_sql(const MetricSettings& metrics, const std::set<std::string>& kinds, const std::string& visibility,
                         const TimeWindow& window) {
   std::vector<std::string> branches;
@@ -137,7 +142,7 @@ Statement SeriesStatements::info() const {
       std::string(kind == "summary"
                       ? "arrayStringConcat(arrayMap(x -> toString(x), arraySort(groupUniqArrayArray(`ValueAtQuantiles.Quantile`))), ',')"
                       : "''") +
-      " FROM " + table_ + " PREWHERE " + window_prewhere_ + " WHERE " + where_ + kQuerySettings;
+      std::string(kind == "sum" ? ", toString(min(toUInt8(IsMonotonic)))" : ", '0'") + " FROM " + table_ + " PREWHERE " + window_prewhere_ + " WHERE " + where_ + kQuerySettings;
   return out;
 }
 
@@ -194,7 +199,7 @@ Statement SeriesStatements::series(Mode mode, bool all_delta, const std::string&
       sql = "SELECT g, toString(b), bstr, " + counts + ", toString(sum(dcount)), toString(sum(dsum)) FROM (SELECT " +
             group_expr + " AS g, " + bucket + " AS b, arrayStringConcat(arrayMap(x -> toString(x), ExplicitBounds), ',') AS bstr, "
             "BucketCounts AS dc, toFloat64(Count) AS dcount, Sum AS dsum FROM " + table + " PREWHERE " + window_prewhere +
-            " WHERE " + where + ") GROUP BY g, b, bstr ORDER BY g, b" + row_limit;
+            " WHERE " + where + ") GROUP BY g, b, bstr ORDER BY g, b, bstr" + row_limit;
     } else {
       sql = "SELECT g, toString(b), bstr, " + counts + ", toString(sum(dcount)), toString(sum(dsum)) FROM (SELECT g, b, bstr, "
             "if(plain, arrayMap(x -> toInt64(x), BucketCounts), arrayMap((c, i) -> toInt64(c) - toInt64(pc[i]), BucketCounts, "
@@ -208,7 +213,7 @@ Statement SeriesStatements::series(Mode mode, bool all_delta, const std::string&
             "lagInFrame(BucketCounts) OVER w AS pc, lagInFrame(ExplicitBounds) OVER w AS pb, lagInFrame(Count) OVER w AS pcount, "
             "lagInFrame(Sum) OVER w AS psum, lagInFrame(StartTimeUnix) OVER w AS ps, row_number() OVER w AS rn FROM " + table +
             " PREWHERE " + lag_prewhere + " WHERE " + where + lag_window + ") WHERE " + in_window +
-            " AND (temporality = 1 OR rn > 1))) GROUP BY g, b, bstr ORDER BY g, b" + row_limit;
+            " AND (temporality = 1 OR rn > 1))) GROUP BY g, b, bstr ORDER BY g, b, bstr" + row_limit;
     }
   } else if (mode == Mode::Exponential) {
     const std::string sums = "arrayStringConcat(arrayMap(x -> toString(x), sumForEach(dpos)), ','), "

@@ -84,13 +84,16 @@ struct MetricInfo {
   std::string description;
   int64_t temporality_min = 0;
   int64_t temporality_max = 0;
-  bool monotonic = false;
+  bool monotonic = false;        // at least one series is monotonic
+  bool monotonic_min = false;    // every series is monotonic (sums only)
   int64_t points = 0;
   std::vector<std::string> quantiles;  // summary: textual quantile values ("0.5")
 };
 
 // The row of metric_info_statement.
 void read_metric_info(const clickhouse::Block& block, MetricInfo* info);
+// Some series of a sum are monotonic and some are not.
+inline bool monotonic_mixed(const MetricInfo& info) { return info.monotonic && !info.monotonic_min; }
 // "delta", "cumulative", "mixed", or "" when the metric has no temporality.
 std::string temporality_name(const MetricInfo& info);
 

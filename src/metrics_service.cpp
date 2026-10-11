@@ -40,16 +40,29 @@ std::string MetricsService::connect_error(const std::string& reason) const {
   return reason.empty() ? "Cannot connect to the metrics ClickHouse source." : reason;
 }
 
-std::set<std::string> MetricsService::existing_kinds(ChExecutor& db, const HostSpec& host) const {
+KindTables MetricsService::kind_tables(ChExecutor& db, const HostSpec& host) const {
   const MetricSettings& metrics = host.otel.metrics;
   const std::string key = host.system_uri + '\x1f' + metrics.database + '\x1f' + metrics.table_prefix;
-  const auto result = kinds_.get(key, [&](std::set<std::string>& kinds, std::string&, std::string&) {
+  const auto result = kinds_.get(key, [&](KindTables& tables_of, std::string&, std::string&) {
     std::set<std::string> tables;
     db.select(existing_kinds_sql(metrics), [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) tables.insert(ch_block_text_at(block, 0, row));
     });
     for (const char* kind : kKinds) {
-      if (tables.count(metrics.table_prefix + "_" + kind)) kinds.insert(kind);
+      if (tables.count(metrics.table_prefix + "_" + kind)) tables_of.kinds.insert(kind);
+    }
+    if (tables_of.kinds.empty()) return true;
+    // A source that cannot say which columns its tables have is read as before: its series are told apart by their attributes only.
+    std::set<std::string> scoped;
+    try {
+      db.select(scope_columns_sql(metrics), [&](const clickhouse::Block& block) {
+        for (size_t row = 0; row < block.GetRowCount(); ++row) scoped.insert(ch_block_text_at(block, 0, row));
+      });
+    } catch (const std::exception&) {
+      scoped.clear();
+    }
+    for (const std::string& kind : tables_of.kinds) {
+      if (scoped.count(metrics.table_prefix + "_" + kind)) tables_of.with_scope.insert(kind);
     }
     return true;
   });
@@ -58,7 +71,7 @@ std::set<std::string> MetricsService::existing_kinds(ChExecutor& db, const HostS
 
 std::optional<ApiError> MetricsService::check_kind_table(ChExecutor& db, const HostSpec& host, const std::string& kind) const {
   const MetricSettings& metrics = host.otel.metrics;
-  if (existing_kinds(db, host).count(kind)) return std::nullopt;
+  if (kind_tables(db, host).kinds.count(kind)) return std::nullopt;
   const std::string table = metrics.database + "." + metrics.table_prefix + "_" + kind;
   if (const auto grant = missing_select_grant(db, metrics.database, metrics.table_prefix + "_" + kind)) {
     const auto user = parse_clickhouse_uri(host.system_uri, nullptr);
@@ -96,7 +109,7 @@ Result<CatalogAnswer> MetricsService::catalog(const RequestContext&, const HostS
         snapshot.window = window;
         int64_t query_ms = 0;
         const auto kinds_started = Clock::now();
-        snapshot.kinds = existing_kinds(*db, host);
+        snapshot.kinds = kind_tables(*db, host).kinds;
         query_ms += elapsed_ms(kinds_started);
 
         const std::string sql = catalog_sql(metrics, snapshot.kinds, visibility, window);
@@ -127,8 +140,12 @@ Result<CatalogAnswer> MetricsService::catalog(const RequestContext&, const HostS
                 else if (tmin == "1") e.temporality = "delta";
                 else if (tmin == "2") e.temporality = "cumulative";
               }
+              const std::string mono_min = ch_block_text_at(block, 7, row);
               const std::string mono_max = ch_block_text_at(block, 8, row);
-              if (!mono_max.empty()) e.monotonic = mono_max == "1" ? 1 : 0;
+              if (!mono_max.empty()) {
+                e.monotonic = mono_max == "1" ? 1 : 0;
+                e.monotonic_mixed = mono_min != mono_max ? 1 : 0;
+              }
               e.points = text_to_i64(ch_block_text_at(block, 9, row));
               snapshot.services[service].push_back(std::move(e));
             }
@@ -226,7 +243,9 @@ Result<SeriesAnswer> MetricsService::series(const RequestContext&, const HostSpe
     SeriesAnswer answer;
     answer.source_host_id = source_host_id;
     answer.request = request;
-    SeriesStatements statements(answer.request, table, visibility, /*with_scope=*/false);
+    // The series are told apart by their scope as well when the table has the scope columns (kind_tables was read by the check above).
+    const bool with_scope = kind_tables(*db, host).with_scope.count(request.kind) != 0;
+    SeriesStatements statements(answer.request, table, visibility, with_scope);
     int64_t query_ms = 0;
 
     const Statement info_statement = statements.info();

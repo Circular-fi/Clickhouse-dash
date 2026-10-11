@@ -34,7 +34,8 @@ namespace metrics {
 
 struct CatalogEntry {
   std::string kind, metric, unit, description, temporality;
-  int monotonic = -1;  // -1: not a sum
+  int monotonic = -1;        // -1: not a sum; 1: at least one series is monotonic
+  int monotonic_mixed = -1;  // -1: not a sum; 1: some series are monotonic and some are not
   int64_t points = 0;
 };
 
@@ -129,8 +130,8 @@ class MetricsService {
                                     const ExemplarsRequest& request) const;
 
  private:
-  // The kind tables of the source that exist: one system.tables read, kept like the catalog.
-  std::set<std::string> existing_kinds(ChExecutor& db, const HostSpec& host) const;
+  // The kind tables of the source that exist, and the columns that tell their series apart: two reads, kept like the catalog.
+  KindTables kind_tables(ChExecutor& db, const HostSpec& host) const;
   // An error when the table of `kind` does not exist or the system user may not read it.
   std::optional<ApiError> check_kind_table(ChExecutor& db, const HostSpec& host, const std::string& kind) const;
   std::string connect_error(const std::string& reason) const;
