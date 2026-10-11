@@ -4,10 +4,9 @@
 import { dom } from "./app_dom.js";
 import { setNullCell } from "./app_results_cells.js";
 import { closeRowDetails, closeRowDetailsMenu } from "./app_results_rowdetails.js";
-import { SORT_WASM_MIN_ROWS, compareNumericForSort, numericSortKeys, orderByKeysJs, orderByKeysWasm, setSortWasm, sortNumericRows, sortNumericRowsByComparator, sortTextRows, sortTextRowsByComparator } from "./app_results_sort.js";
 import { createStaticResultTable } from "./app_results_static.js";
 import { createLiveTable } from "./app_results_table.js";
-import { flattenTupleTableData, jsonText, parseChType, parseJsonText, resultCsvText, resultJsonText, serialize, valueText } from "./app_results_values.js";
+import { flattenTupleTableData, parseChType, resultCsvText, resultJsonText, serialize, valueText } from "./app_results_values.js";
 import { state } from "./app_state.js";
 import { copy } from "./app_ui_copy.js";
 import { uiState } from "./app_ui_state.js";
@@ -570,19 +569,4 @@ export const results = {
   // Download JSON / CSV and the Debug archive (app_download.js), and the text of one value.
   serialize,
   cellText: (value, type = "") => valueText(value, parseChType(type)),
-  // The sort paths and the kernel switch, for the equivalence tests (tests/frontend/specs/wasm-rowsort.spec.js).
-  testing: {
-    sortNumericRows,
-    sortNumericRowsByComparator,
-    sortTextRows,
-    sortTextRowsByComparator,
-    numericSortKeys,
-    orderByKeysJs,
-    orderByKeysWasm,
-    sortWasmMinRows: SORT_WASM_MIN_ROWS,
-    setWasm: setSortWasm,
-    parseJsonText,
-    jsonText: (value, type = "", indent = 0) => jsonText(value, parseChType(type), indent),
-    compareNumericForSort,
-  },
 };

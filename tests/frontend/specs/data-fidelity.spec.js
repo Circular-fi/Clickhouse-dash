@@ -268,7 +268,8 @@ test('a JSON column keeps its big integers and the order of its keys', async ({ 
 test('a numeric sort compares the digits of a UInt64 and of a long Decimal exactly; inf sorts as a number, nan with the NULLs', async ({ page }) => {
   await openApp(page);
   const order = await page.evaluate(() => {
-    const t = window.ChDash.results.testing;
+    // The sort paths are exports of app_results_sort.js, which the page hands to window.ChDash.
+    const t = window.ChDash;
     const values = [
       '12345678901234567890.123456789', '12345678901234567890.123456788', '-12345678901234567890.123456789',
       '18446744073709551615', '18446744073709551614', 'inf', '-inf', 'nan', null, '0.000000001', '-0.000000001', '0',
@@ -289,14 +290,14 @@ test('a numeric sort compares the digits of a UInt64 and of a long Decimal exact
 test('JSON text is parsed without loss: numbers a double cannot keep stay their text, keys keep their order', async ({ page }) => {
   await openApp(page);
   const out = await page.evaluate(() => {
-    const t = window.ChDash.results.testing;
-    const round = (text) => t.jsonText(t.parseJsonText(text));
+    const t = window.ChDash;
+    const round = (text) => t.jsonText(t.parseJsonText(text), t.parseChType(''), 0);
     return {
       big: round('{"id":12345678901234567890,"a":1.0,"b":0.5}'),
       keys: round('{"10":1,"2":2,"x":[1e100,-0.25]}'),
       plain: round('{"a":[1,2,{"b":null}],"c":"t\\u00e9xt"}'),
       broken: t.parseJsonText('{"a":'),
-      pretty: t.jsonText(t.parseJsonText('{"10":1,"2":[3]}'), '', 2),
+      pretty: t.jsonText(t.parseJsonText('{"10":1,"2":[3]}'), t.parseChType(''), 2),
     };
   });
   expect(out.big).toBe('{"id":12345678901234567890,"a":1.0,"b":0.5}');
