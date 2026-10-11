@@ -2,6 +2,7 @@ from pathlib import Path
 import css_sources
 import modules
 import config_keys
+from explorer_sources import read_api, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -95,13 +96,16 @@ def test_explorer_features_are_configurable_and_server_enforced() -> None:
     assert 'w.Key("browse"); w.Bool(cfg_.explorer.browse);' in server
     assert 'w.Key("lineage"); w.Bool(cfg_.explorer.lineage);' in server
     assert 'w.Key("storage_topology"); w.Bool(cfg_.explorer.storage_topology);' in server
-    api_explorer = read("src/api_explorer.cpp")
-    assert "ExplorerGraphRequestScope" in api_explorer
+    api_explorer = read_api()
+    assert "struct GraphScopeRequest" in api_explorer
     assert "scope_graph(" in api_explorer
-    assert "cfg_.explorer.lineage" in api_explorer
-    assert "cfg_.explorer.storage_topology" in api_explorer
-    assert 'scope.physical && storage_enabled' in api_explorer
-    assert '!scope.physical && lineage_enabled' in api_explorer
+    # The route hands the two switches of the configuration to the service; the scope obeys them (the mode of the request cannot bypass a switch).
+    route = read_unit("api_explorer.cpp")
+    assert "cfg_.explorer.lineage" in route
+    assert "cfg_.explorer.storage_topology" in route
+    scope = read_unit("explorer_graph_scope.cpp")
+    assert "scope_.physical && storage_" in scope
+    assert "!scope_.physical && lineage_" in scope
     assert "browse = true" in example
     assert "graph {" in example
     assert "lineage" in example and "storage_topology" in example

@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_catalog, read_graph, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -88,7 +89,7 @@ def test_current_analysis_ui_has_no_raw_or_deep_and_uses_honest_processor_durati
 
 def test_function_search_is_name_only_and_server_description_catalog_is_cached() -> None:
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     header = read("src/server.hpp")
     config = read("config.example.hcl")
 
@@ -98,7 +99,7 @@ def test_function_search_is_name_only_and_server_description_catalog_is_cached()
     assert "name.startsWith(q)" in visible
     assert "model.functionsCatalog" in ui
     assert "if (!force && model.functionsCatalog)" in ui
-    assert "explorer_functions_cache_.get(" in api
+    assert "stores_.functions.get(" in api
     assert "std::chrono::milliseconds(std::max(1000, cfg_.explorer.function_cache_ttl_ms))" in header
     assert "function_cache_ttl_ms = 60 * 60 * 1000" in header
     assert "function_cache_ttl_ms   = 3600000" in config
@@ -157,8 +158,8 @@ def test_table_header_owns_state_and_codec_empty_value_uses_observed_part_defaul
 
 def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_highlighter() -> None:
     header = read("src/explorer_catalog.hpp")
-    catalog = read("src/explorer_catalog.cpp")
-    api = read("src/api_explorer.cpp")
+    catalog = read_catalog()
+    api = read_api()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
 
     assert "rows_total_1h" in header and "bytes_total_1h" in header
@@ -174,7 +175,7 @@ def test_operations_include_one_hour_totals_and_ddl_uses_shared_formatter_and_hi
 def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_projection() -> None:
     ui = read("src/static/app_explorer_detail.js")
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    graph_backend = read("src/explorer_graph.cpp")
+    graph_backend = read_graph()
 
     assert '!/^_?row$/i.test(String(d.table || ""))' in ui
     lineage = ui[ui.index("function renderLineageTab") : ui.index("function previewLimit")]
@@ -194,15 +195,18 @@ def test_lineage_hides_row_pseudo_objects_and_storage_is_a_separate_physical_pro
 
 
 def test_database_inventory_stays_navigation_only_and_table_details_are_lazy() -> None:
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     html = read("src/static/explorer.html")
 
-    catalog_handler = api[api.index("void Server::handle_explorer_catalog"):api.index("void Server::handle_explorer_table")]
+    service = read_unit("explorer_service.cpp")
+    catalog_handler = service[service.index("ExplorerService::catalog("):service.index("ExplorerService::storage(")]
+    json = read_unit("explorer_json.cpp")
+    catalog_writer = json[json.index("std::string catalog_json("):json.index("std::string storage_json(")]
     assert "load_explorer_catalog_index" in catalog_handler
-    assert 'w.Key("database_summaries")' in catalog_handler
-    assert 'w.Key("engine_full")' not in catalog_handler
-    assert 'w.Key("database")' in catalog_handler and 'w.Key("name")' in catalog_handler and 'w.Key("engine")' in catalog_handler
+    assert 'w.Key("database_summaries")' in catalog_writer
+    assert 'w.Key("engine_full")' not in catalog_writer
+    assert 'w.Key("database")' in catalog_writer and 'w.Key("name")' in catalog_writer and 'w.Key("engine")' in catalog_writer
     assert 'id="explorerDatabasesSectionButton"' not in html
     assert 'id="explorerDatabaseCards"' not in html
     assert "function renderDatabaseDetail(database)" in ui
@@ -233,7 +237,7 @@ def test_host_bootstrap_uses_api_resolver_instead_of_falling_offline_from_refere
 
 
 def test_preview_ignores_empty_callback_blocks_before_validating_selected_column_width() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     start = catalog.index("bool load_explorer_preview(")
     block = catalog[start:]
     zero = block.index("if (block.GetRowCount() == 0) return;")
@@ -243,18 +247,18 @@ def test_preview_ignores_empty_callback_blocks_before_validating_selected_column
 
 
 def test_column_metadata_uses_technical_account_and_reports_compact_storage_without_fake_per_column_bytes() -> None:
-    catalog = read("src/explorer_catalog.cpp")
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     ui = read("src/static/app_explorer_detail.js")
-    start = catalog.index("bool load_explorer_table_detail(")
-    detail = catalog[start:catalog.index("bool load_explorer_functions", start)]
-    assert 'bool columns_loaded = load_columns(system,' in detail
-    assert 'columns_loaded = load_columns(runner,' in detail
-    assert 'if (!allowed.allows_column(database, table, name)) continue;' in detail
-    assert "countIf(part_type = 'Compact')" in detail
-    assert 'FROM system.parts WHERE active' in detail
-    assert 'FROM system.parts_columns WHERE active' in detail
-    assert "part_type = 'Wide'" in detail
+    # The reader of the table detail (explorer_detail.cpp) and its statements (explorer_sql.cpp).
+    detail = read_unit("explorer_detail.cpp")
+    statements = read_unit("explorer_sql.cpp")
+    assert 'bool columns_loaded = load_columns(system_,' in detail
+    assert 'columns_loaded = load_columns(runner_,' in detail
+    assert 'if (!allowed_.allows_column(database_, table_, name)) continue;' in detail
+    assert "countIf(part_type = 'Compact')" in statements
+    assert 'FROM system.parts WHERE active' in statements
+    assert 'FROM system.parts_columns WHERE active' in statements
+    assert "part_type = 'Wide'" in statements
     assert 'column.compressed_bytes.reset();' in detail
     assert 'column_sizes_compact_shared' in detail
     assert 'column_sizes_mixed_shared' in detail
@@ -314,7 +318,7 @@ def test_acl_discovery_falls_back_to_zero_row_column_probe_without_widening_perm
 
 
 def test_preview_finalizes_aggregate_function_states_only_inside_bounded_limit() -> None:
-    source = read("src/explorer_catalog.cpp")
+    source = read_catalog()
     block = source[source.index("bool load_explorer_preview("):]
     assert 'declared_type.rfind("AggregateFunction(", 0) == 0' in block
     assert 'toString(finalizeAggregation(' in block
@@ -353,8 +357,8 @@ def test_graph_depth_preserves_focus_and_disables_plus_when_no_new_nodes() -> No
 
 def test_graph_uses_full_object_names_hides_view_storage_metrics_and_enriches_disks() -> None:
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
-    backend = read("src/explorer_graph.cpp")
-    api = read("src/api_explorer.cpp")
+    backend = read_graph()
+    api = read_api()
     assert 'materialized_view: "MaterializedView"' in graph
     assert 'mergetree: "MergeTree"' in graph
     assert 'materialized_view: "MV"' not in graph

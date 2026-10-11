@@ -4,6 +4,7 @@
 #include "allowed_objects.hpp"
 #include "ch_block_value.hpp"
 #include "ch_query.hpp"
+#include "ch_executor.hpp"
 #include "explorer_catalog.hpp"
 #include "sql_literal.hpp"
 #include "sql_params.hpp"
@@ -270,7 +271,8 @@ bool load_system_activity(
     tables.reserve(out.replicas.size());
     for (const auto& replica : out.replicas) tables.emplace_back(replica.database, replica.table);
     std::string counts_error;
-    const auto counts = load_cached_replica_counts(system, caches, tables, &counts_error);
+    BorrowedExecutor system_db(system);
+    const auto counts = load_cached_replica_counts(system_db, caches, tables, &counts_error);
     for (auto& replica : out.replicas) {
       const auto it = counts.find(object_key(replica.database, replica.table));
       if (it == counts.end()) continue;

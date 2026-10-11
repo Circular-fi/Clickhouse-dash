@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_catalog, read_graph, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,16 +10,16 @@ def read(rel: str) -> str:
 
 
 def test_clickhouse_267_column_ttl_does_not_query_missing_system_columns_field() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     assert "toString(ttl_expression)" not in catalog
-    assert '"DESCRIBE TABLE " + quote_ident(database) + "." + quote_ident(table)' in catalog
+    assert '"DESCRIBE TABLE " + qualified_ident(database, table)' in read_unit("explorer_sql.cpp")
     assert "column.ttl_expression = described_ttl" in catalog
 
 
 def test_storage_topology_is_physical_only_and_ttl_is_rendered_as_tier_lifecycle() -> None:
-    backend = read("src/explorer_graph.cpp")
+    backend = read_graph()
     header = read("src/explorer_graph.hpp")
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     graph = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert "FROM system.storage_policies" in backend
     assert '"volume_tier"' in backend

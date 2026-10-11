@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_catalog, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -115,9 +116,11 @@ def test_storage_layout_places_buffers_before_downstream_targets() -> None:
 
 
 def test_log_family_keeps_clickhouse_uncompressed_total_when_clickhouse_exposes_it() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     ui = read("src/static/app_explorer_detail.js")
     assert "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed)" in catalog
     assert "summary.uncompressed_bytes = total_uncompressed_bytes;" in catalog
-    assert 'summary.engine == "TinyLog" || summary.engine == "Log" || summary.engine == "StripeLog"' in catalog
+    assert "if (is_log_family(summary.engine)) summary.physical_bytes = total_bytes;" in catalog
+    # The Log family is one rule, in explorer_rules.cpp.
+    assert 'return engine == "TinyLog" || engine == "Log" || engine == "StripeLog";' in read_unit("explorer_rules.cpp")
     assert 'aboutTile("Uncompressed", format.bytes(s.uncompressed_bytes), "data before compression"' in ui

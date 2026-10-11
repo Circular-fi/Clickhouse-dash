@@ -20,7 +20,7 @@ The ACL cache has the scope of the runner identity: the digest of its URI (user,
 
 **The discovery is bounded.** One discovery checks at most 4,000 objects in 20 s. To decide whether a database is readable, it probes at most 400 of its objects. When a bound stops it, the answer has `"acl_truncated": true`. An object that was not checked is not listed. A database whose answer the bound did not reach stays in the database list (its name is what `SHOW DATABASES` gives the runner). Its objects are checked when it is opened.
 
-**The names follow `SELECT`, not `SHOW`.** A runner can have `SHOW DATABASES` and `SHOW TABLES` on `*.*` and `SELECT` on two databases. The sidebar lists a database when the runner reads all of it (`CHECK GRANT SELECT ON db.*`) or at least one of its tables. In a database, it lists the tables that the runner reads. The sizes of the first answer come from the same list. `system` stays in the list, because ClickHouse lets every user read `system.databases`, `system.tables` and `system.columns`.
+**The names follow `SELECT`, not `SHOW`.** A runner can have `SHOW DATABASES` and `SHOW TABLES` on `*.*` and `SELECT` on two databases. The sidebar lists a database when the runner reads all of it (`CHECK GRANT SELECT ON db.*`) or at least one of its tables. In a database, it lists the tables that the runner reads. The table counts, the rows and the bytes of the first answer (the databases of the tree and of the overview) come from `system.tables` as the runner: they cover the tables that the runner may list (`SHOW TABLES`), which can be more than the tables that it may `SELECT`. The first answer does not check every table, because that would cost one probe for each table of the server. The list of a database that is opened has only the tables that the runner reads. The shares of a table card (Table / Database, Table / ClickHouse) use the same totals as the first answer. The numbers agree when the runner reads every table that it lists. `system` stays in the list, because ClickHouse lets every user read `system.databases`, `system.tables` and `system.columns`.
 
 **A missing grant of the system user degrades the answer.** If the system user may not read a system table that a section needs (`system.parts`, `system.disks`, `system.merges`...), the table card and the graph answer 200 without the figures of that section. They name it in `unavailable_sections`, and `unavailable` lists, for each section, `reason: "not_granted"`, the `user`, the `grant` and the `hint` (the `GRANT` statement). Any other error of a section is still an error. The access audit of the host (`docs/configuration.md`) says the same at start.
 
@@ -449,6 +449,12 @@ For this reason, physical nodes do not accumulate on top of a lineage neighborho
 - The backend deduplicates a physical disk node within the returned database scope. In this way, multiple authorized tables and replicas can point to the same disk.
 - Distributed tables use `system.clusters` to expose the shard → replica membership.
 - The user can increase or decrease the neighborhood depth down to focus-only.
+
+The graph is bounded. A Distributed table adds a node and an edge for each shard and for each replica of its cluster. The graph holds at most 20,000 nodes and 40,000 edges. When the topology of a Distributed table does not fit, the backend leaves it out. The table keeps its node and its `topology_badge` (`2S × 3R`) and its definition, and the answer has `"truncated": true`.
+
+A node id is `table:<database>.<table>`. When two objects would have one id (`a.b` + `c` and `a` + `b.c`), the later one has the suffix `#2`. The backend finds a node by the names of the object (`database` and `table` of the definition route, `focus_database` and `focus_table` of the graph route), never by cutting an id at a dot.
+
+The backend makes the adjacency of the graph once for each snapshot (a refresh of the graph), not for each request. A request only walks it. A focused lineage costs the size of its scope, plus one more level to say whether the scope has more.
 
 On top of that global depth, a focused Lineage request can carry expansions for each node. These are repeated `expand=up:<node id>` / `expand=down:<node id>` parameters (at most 64). The expansions work in this way:
 

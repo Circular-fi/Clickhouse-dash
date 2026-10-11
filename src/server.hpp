@@ -7,6 +7,7 @@
 #include "allowed_objects.hpp"
 #include "explorer_catalog.hpp"
 #include "explorer_graph.hpp"
+#include "explorer_service.hpp"
 #include "metrics_service.hpp"
 #include "system_monitor.hpp"
 #include "system_activity.hpp"
@@ -403,8 +404,7 @@ private:
   void handle_explorer_table_data(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_graph(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_graph_definition(const httplib::Request& req, httplib::Response& res);
-  bool explorer_graph_snapshot(const httplib::Request& req, httplib::Response& res, const std::string& host_id,
-                               std::shared_ptr<const ExplorerGraph>& graph, bool& stale);
+  std::unique_ptr<ChExecutor> open_explorer_executor(const std::string& uri, std::string* error);
   void handle_explorer_functions(const httplib::Request& req, httplib::Response& res);
   void handle_explorer_storage(const httplib::Request& req, httplib::Response& res);
   void handle_system_activity(const httplib::Request& req, httplib::Response& res);
@@ -636,6 +636,13 @@ private:
   // Server-wide storage distribution for the Explorer System section.
   TtlCache<std::string, ExplorerStorageMap> explorer_storage_cache_{cache_options<ExplorerStorageMap>(
       explorer_ttl(), std::chrono::minutes(1), 256, 32u << 20, cache_size::storage)};
+
+  // The Explorer service (explorer_service.hpp): the privileges of the runner, these caches, and the two connections of a read.
+  explorer::ExplorerService explorer_service_{
+      [this](const std::string& uri, std::string* error) { return open_explorer_executor(uri, error); },
+      [this](const HostSpec& host) { return runner_access(host); }, acl_, explorer_caches_,
+      explorer::ExplorerStores{explorer_catalog_list_cache_, explorer_catalog_cache_, explorer_table_detail_cache_, explorer_graph_cache_,
+                               explorer_functions_cache_, explorer_storage_cache_}};
   // Short-lived snapshots shared by every viewer of a host, so an auto-refreshing page costs one read per TTL.
   TtlCache<std::string, SystemActivity> system_activity_cache_{cache_options<SystemActivity>(
       live_ttl(), std::chrono::seconds(10), 256, 32u << 20, cache_size::activity)};

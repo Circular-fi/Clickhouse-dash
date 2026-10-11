@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_catalog, read_graph, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -10,9 +11,9 @@ def read(rel: str) -> str:
 
 
 def test_dictionary_reports_allocated_size_without_pretending_it_is_compressed() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     header = read("src/explorer_catalog.hpp")
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "bytes_allocated" in catalog
     assert "resident_bytes" in header
@@ -92,7 +93,7 @@ def test_create_statement_has_no_internal_vertical_height_limit() -> None:
 
 def test_graph_camera_controls_are_separate_and_buffer_ttl_metadata_is_exposed() -> None:
     html = read("src/static/explorer.html")
-    graph_cpp = read("src/explorer_graph.cpp")
+    graph_cpp = read_graph()
     graph_js = (read("src/static/app_explorer_graph.js") + read("src/static/app_graph_kit.js"))
     assert 'class="graphKitGroup graphKitTools"' in html
     assert 'id="explorerGraphZoomOutButton"' in html
@@ -131,9 +132,11 @@ def test_analysis_dialog_is_inset_dimmed_and_backdrop_click_dismisses() -> None:
 
 
 def test_log_family_storage_uses_data_paths_instead_of_parts() -> None:
-    graph = read("src/explorer_graph.cpp")
+    graph = read_graph()
     assert "arrayStringConcat(data_paths, char(31))" in graph
-    assert 'table.engine == "TinyLog" || table.engine == "Log" || table.engine == "StripeLog"' in graph
+    assert "is_log_family(table.engine) && !table.data_paths.empty()" in graph
+    # The Log family is one rule, in explorer_rules.cpp.
+    assert 'return engine == "TinyLog" || engine == "Log" || engine == "StripeLog";' in read_unit("explorer_rules.cpp")
     assert 'add_edge_unique(out, seen_edges, {{}, physical_parent, disk_id, "contains", "data path", false});' in graph
 
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 import modules
+from explorer_sources import read_api, read_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,9 +20,9 @@ def test_storage_composition_reconciles_to_bytes_on_disk() -> None:
 
 
 def test_storage_composition_uses_parent_part_on_disk_split() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     header = read("src/explorer_catalog.hpp")
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     assert "sumIf(bytes_on_disk, part_type = 'Compact')" in catalog
     assert "sumIf(bytes_on_disk, part_type = 'Wide')" in catalog
     assert "compact_on_disk_bytes" in header
@@ -31,9 +32,9 @@ def test_storage_composition_uses_parent_part_on_disk_split() -> None:
 
 
 def test_projection_composition_uses_projection_footprint_not_only_compressed_data() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     header = read("src/explorer_catalog.hpp")
-    api = read("src/api_explorer.cpp")
+    api = read_api()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "toString(sum(bytes_on_disk)) FROM system.projection_parts" in catalog
     assert "std::optional<uint64_t> on_disk_bytes;" in header

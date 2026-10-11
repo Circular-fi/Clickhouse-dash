@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_catalog, read_graph, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -118,12 +119,13 @@ def test_weather_fixture_contains_buffer_fanout_and_buffer_chain() -> None:
 
 
 def test_non_merge_tree_counts_and_graph_labels_are_engine_specific() -> None:
-    catalog = read("src/explorer_catalog.cpp")
-    graph_cpp = read("src/explorer_graph.cpp")
+    catalog = read_catalog()
+    graph_cpp = read_graph()
     graph_js = read("src/static/app_explorer_graph.js")
     assert "system.dictionaries" in catalog and "element_count" in catalog
-    assert 'target->engine == "TinyLog"' in catalog
-    assert 'target->engine == "Log"' in catalog and 'target->engine == "StripeLog"' in catalog
+    assert "!is_log_family(target->engine)" in catalog
+    # The Log family is one rule, in explorer_rules.cpp.
+    assert 'return engine == "TinyLog" || engine == "Log" || engine == "StripeLog";' in read_unit("explorer_rules.cpp")
     assert 'if (engine == "TinyLog") return "tinylog";' in graph_cpp
     assert 'if (engine == "StripeLog") return "stripelog";' in graph_cpp
     # Engines read as ClickHouse names them.

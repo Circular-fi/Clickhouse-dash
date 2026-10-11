@@ -2,6 +2,7 @@ import re
 import modules
 from pathlib import Path
 import css_sources
+from explorer_sources import read_api, read_catalog, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,7 +35,7 @@ def test_page_selector_navigation_pushes_real_query_and_explorer_routes() -> Non
 
 
 def test_materialized_view_target_is_added_as_downstream_and_select_sources_remain_upstream() -> None:
-    catalog = read('src/explorer_catalog.cpp')
+    catalog = read_catalog()
     assert 'sql::materialized_view_target' in catalog
     assert 'append_dependency(target->database, target->table, "downstream", "materialized_view")' in catalog
     assert 'append_dependency(source.database, source.table, "upstream", view_kind)' in catalog
@@ -54,7 +55,7 @@ def test_create_statement_uses_editor_copy_icon_gutter_and_highlighting() -> Non
 
 def test_engine_specific_explorer_surfaces_do_not_assume_mergetree() -> None:
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
-    catalog = read('src/explorer_catalog.cpp')
+    catalog = read_catalog()
     assert 'isDictionarySummary' in ui
     assert 'isMemorySummary' in ui
     assert 'isBufferSummary' in ui
@@ -63,17 +64,19 @@ def test_engine_specific_explorer_surfaces_do_not_assume_mergetree() -> None:
     assert 'if (isViewLikeSummary(summary) || isDictionarySummary(summary)) return false;' in ui
     assert 'bufferTarget' not in ui
     assert '["Target", buffer ? bufferTarget(s) || null : null]' not in ui
-    assert "normalize_buffer_runtime_rows" in read("src/explorer_catalog.cpp")
+    assert "normalize_buffer_runtime_rows" in read_catalog()
     assert 'toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed)' in catalog
 
 
 def test_ttl_uses_version_stable_describe_metadata_and_table_ddl() -> None:
-    catalog = read('src/explorer_catalog.cpp')
-    api = read('src/api_explorer.cpp')
+    catalog = read_catalog()
+    api = read_api()
     ui = (modules.read_explorer() + read('src/static/app_explorer_detail.js'))
     assert 'toString(ttl_expression)' not in catalog
     assert 'DESCRIBE TABLE ' in catalog
-    assert 'describe_include_subcolumns = 0' in catalog
+    assert 'describe_include_subcolumns = ' in catalog
+    assert 'describe_sql(database_, table_, false)' in read_unit("explorer_detail.cpp")
+    assert 'with_subcolumns ? "1" : "0"' in read_unit("explorer_sql.cpp")
     assert 'column.ttl_expression = described_ttl' in catalog
     assert 'w.Key("ttl_expression")' in api
     assert '["TTL", tableTtl || null]' not in ui

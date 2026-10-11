@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,7 +41,7 @@ def test_explorer_data_static_numeric_columns_get_gauges() -> None:
 
 
 def test_hidden_non_storing_nodes_cost_zero_semantic_depth() -> None:
-    cpp = read("src/api_explorer.cpp")
+    cpp = read_api()
     api = read("src/static/app_api.js")
     graph = read("src/static/app_explorer_graph.js")
     assert 'scope.include_non_storing = !req.has_param("include_non_storing")' in cpp
@@ -53,8 +54,8 @@ def test_hidden_non_storing_nodes_cost_zero_semantic_depth() -> None:
 
 
 def test_sidebar_loads_database_names_then_only_expanded_database_tables_with_stats() -> None:
-    api_cpp = read("src/api_explorer.cpp")
-    catalog_cpp = read("src/explorer_catalog.cpp")
+    api_cpp = read_api()
+    catalog_cpp = read_catalog()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "acl_.databases(access)" in api_cpp
     assert "acl_.objects(access, database_filter)" in api_cpp
@@ -84,6 +85,9 @@ def test_graph_live_activity_is_removed_entirely() -> None:
         "src/server.cpp",
         "src/server.hpp",
         "src/api_explorer.cpp",
+        "src/explorer_service.cpp",
+        "src/explorer_json.cpp",
+        "src/explorer_graph_scope.cpp",
         "src/explorer_graph.cpp",
         "src/explorer_graph.hpp",
         "src/static/app_api.js",

@@ -2,6 +2,7 @@ from pathlib import Path
 from trace_sources import read_traces, read_unit
 
 import modules
+from explorer_sources import read_api, read_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -12,13 +13,13 @@ def read(path: str) -> str:
 
 def test_explorer_detail_cache_uses_metadata_revision_without_hover_prefetch():
     catalog_hpp = read("src/explorer_catalog.hpp")
-    catalog_cpp = read("src/explorer_catalog.cpp")
-    api = read("src/api_explorer.cpp")
+    catalog_cpp = read_catalog()
+    api = read_api()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
 
     assert "metadata_modification_time" in catalog_hpp
     assert "toString(metadata_modification_time)" in catalog_cpp
-    assert "kExplorerTableDetailCacheTtlMs = 30 * 1000" in api
+    assert "kTableDetailCacheTtlMs = 30 * 1000" in api
     assert "detailMatchesCatalog" in ui
     assert "applyFreshSidebarSummary" in ui
     assert "prefetchTableDetail" not in ui

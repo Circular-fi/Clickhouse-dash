@@ -1,4 +1,5 @@
 from pathlib import Path
+from explorer_sources import read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -8,15 +9,23 @@ def read(path: str) -> str:
 
 
 def test_bulk_replication_metadata_avoids_keeper_on_every_build() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_unit("explorer_catalog.cpp")
+    statements = read_unit("explorer_sql.cpp")
     load = catalog[catalog.index("bool load_replication("):catalog.index("bool load_database_summaries(")]
-    bulk = load[:load.index("caches.replica_counts->get(")]
-    # The per-build query only reads in-memory columns.
-    assert "total_replicas" not in bulk and "active_replicas" not in bulk
-    assert "toString(queue_size), toString(absolute_delay), toString(is_readonly)" in bulk
-    cache = catalog[catalog.index("class ReplicaCountCache"):catalog.index("bool load_replication(")]
+    bulk = load[:load.index("load_cached_replica_counts(system, caches, replicated")]
+    # The per-build statement only reads in-memory columns.
+    assert "replicas_sql()" in bulk
+    bulk_sql = statements[statements.index("SqlStatement replicas_sql()"):statements.index("SqlStatement replica_counts_sql(")]
+    assert "total_replicas" not in bulk_sql and "active_replicas" not in bulk_sql
+    assert "toString(queue_size), toString(absolute_delay), toString(is_readonly)" in bulk_sql
+    # The counts (one Keeper read for each table) are cached per server (explorer_replicas.cpp) and asked for in a statement of their own.
+    replicas = read_unit("explorer_replicas.cpp")
+    cache = replicas[replicas.index("class ReplicaCountCache"):replicas.index("load_cached_replica_counts(\n")]
     assert "kReplicaCountTtl = std::chrono::seconds(60)" in cache
-    assert '"FROM system.replicas WHERE database IN " + in_list(stale_databases) + " AND `table` IN " + in_list(stale_tables)' in cache
+    assert "replica_counts_sql(" in cache
+    counts_sql = statements[statements.index("SqlStatement replica_counts_sql("):statements.index("SqlStatement disks_with_host_sql()")]
+    assert '"FROM system.replicas WHERE database IN (" + database_list + ") AND `table` IN (" + table_list + ")"' in counts_sql
+    assert "out.params.texts(databases)" in counts_sql and "out.params.texts(tables)" in counts_sql
 
 
 def test_compose_runs_a_second_replica_with_embedded_keeper() -> None:

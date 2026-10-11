@@ -5,7 +5,7 @@
 #include "allowed_objects.hpp"
 #include "ddl_text_cache.hpp"
 
-#include <clickhouse/client.h>
+#include "ch_executor.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -433,14 +433,14 @@ struct ExplorerCaches {
 };
 
 bool load_explorer_catalog_index(
-    clickhouse::Client& system,
-    clickhouse::Client& runner,
+    ChExecutor& system,
+    ChExecutor& runner,
     const AllowedObjectSet& allowed,
     ExplorerCatalog& out,
     std::string* error);
 
 bool load_explorer_database_summaries(
-    clickhouse::Client& runner,
+    ChExecutor& runner,
     const std::vector<std::string>& databases,
     std::vector<ExplorerDatabaseSummary>& out,
     std::string* error);
@@ -450,15 +450,15 @@ bool load_explorer_database_summaries(
 // system context only contributes byte/row counters for names already in that
 // boundary (one aggregated system.parts query + one system.tables query).
 bool load_explorer_storage_map(
-    clickhouse::Client& system,
-    clickhouse::Client& runner,
+    ChExecutor& system,
+    ChExecutor& runner,
     AclView& acl,
     ExplorerStorageMap& out,
     std::string* error);
 
 bool load_explorer_table_summary(
-    clickhouse::Client& system,
-    clickhouse::Client& runner,
+    ChExecutor& system,
+    ChExecutor& runner,
     const AllowedObjectSet& allowed,
     const std::string& database,
     const std::string& table,
@@ -466,8 +466,8 @@ bool load_explorer_table_summary(
     std::string* error);
 
 bool load_explorer_catalog(
-    clickhouse::Client& system,
-    clickhouse::Client& runner,
+    ChExecutor& system,
+    ChExecutor& runner,
     ExplorerCaches& caches,
     const ExplorerIdentities& identities,
     const AllowedObjectSet& allowed,
@@ -475,8 +475,8 @@ bool load_explorer_catalog(
     std::string* error);
 
 bool load_explorer_table_detail(
-    clickhouse::Client& system,
-    clickhouse::Client& runner,
+    ChExecutor& system,
+    ChExecutor& runner,
     AclView& acl,
     const AllowedObjectSet& allowed,
     const std::string& database,
@@ -486,12 +486,12 @@ bool load_explorer_table_detail(
     std::string* error);
 
 bool load_explorer_functions(
-    clickhouse::Client& runner,
+    ChExecutor& runner,
     ExplorerFunctionsCatalog& out,
     std::string* error);
 
 bool load_explorer_preview(
-    clickhouse::Client& runner,
+    ChExecutor& runner,
     const AllowedObjectSet& allowed,
     const std::string& database,
     const std::string& table,
@@ -509,7 +509,7 @@ struct ExplorerReplicaCounts {
 // costs one Keeper request). Keyed by database + '\0' + table; tables whose
 // lookup failed are absent.
 std::unordered_map<std::string, ExplorerReplicaCounts> load_cached_replica_counts(
-    clickhouse::Client& system,
+    ChExecutor& system,
     ExplorerCaches& caches,
     const std::vector<std::pair<std::string, std::string>>& tables,
     std::string* error);

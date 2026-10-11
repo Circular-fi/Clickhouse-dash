@@ -1,4 +1,5 @@
 from pathlib import Path
+from explorer_sources import read_catalog, read_graph, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -8,17 +9,20 @@ def read(path: str) -> str:
 
 
 def test_catalog_uses_runner_as_acl_authority_and_metadata_fallback() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
 
     assert "load_base_summaries(system, runner, caches, identities, allowed" in catalog
     assert "runner metadata fallback failed" in catalog
     assert "Fill only the missing runner-authorized objects" in catalog
     assert "Technical metadata account cannot see runner-readable object" not in catalog
-    assert '" AND name = " + quote_string(entry.table) + " LIMIT 1"' in catalog
+    # One object by name: the names are bound parameters of the statement (explorer_sql.cpp), no more quote_string in the text.
+    assert "base_table_sql(entry.database, entry.table)" in read_unit("explorer_catalog.cpp")
+    assert '"AND database = " + db + " AND name = " + tbl + " LIMIT 1"' in read_unit("explorer_sql.cpp")
+    assert "quote_string" not in read_unit("explorer_sql.cpp")
 
 
 def test_table_detail_recovers_safe_per_object_metadata_through_runner() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
 
     assert "load_ddl(runner" in catalog
     assert "load_columns(runner" in catalog
@@ -28,11 +32,11 @@ def test_table_detail_recovers_safe_per_object_metadata_through_runner() -> None
 
 
 def test_graph_does_not_depend_on_version_specific_system_buffers() -> None:
-    graph = read("src/explorer_graph.cpp")
+    graph = read_graph()
 
     assert "system.buffers" not in graph.replace("`system.buffers`", "")
-    assert "total_rows" in read("src/explorer_catalog.cpp")
-    assert "total_bytes" in read("src/explorer_catalog.cpp")
+    assert "total_rows" in read_catalog()
+    assert "total_bytes" in read_catalog()
 
 
 def test_integration_contract_distinguishes_parts_from_partitions_and_dynamic_objects() -> None:

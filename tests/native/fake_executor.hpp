@@ -79,6 +79,8 @@ class FakeDb final : public ChExecutor {
     select(sql, sent, on_block);
     return bounded_result;
   }
+  std::string endpoint_name = "fake:9000";
+  std::string endpoint() const override { return endpoint_name; }
   void invalidate() override { ++invalidated; }
   bool renew(std::string* error) override {
     ++renewed;
@@ -123,6 +125,7 @@ class ForwardDb final : public ChExecutor {
   BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block, const ChParams& params) override {
     return db_.bounded_select(sql, on_block, params);
   }
+  std::string endpoint() const override { return db_.endpoint(); }
   void invalidate() override { db_.invalidate(); }
   bool renew(std::string* error) override { return db_.renew(error); }
 

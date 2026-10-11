@@ -20,11 +20,7 @@
 namespace chdash {
 namespace metrics {
 
-// A statement and the parameters that it needs.
-struct Statement {
-  std::string sql;
-  SqlParams params;
-};
+using Statement = SqlStatement;
 
 // The time that one statement may run (a statement of ClickHouse takes this SETTINGS clause as its own; the scope of the request keeps the
 // bounds of the whole request below it).

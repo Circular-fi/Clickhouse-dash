@@ -21,6 +21,12 @@
 
 namespace chdash {
 
+// "host:port" of the server that a connection is on.
+inline std::string client_endpoint(clickhouse::Client& client) {
+  const auto& endpoint = client.GetCurrentEndpoint();
+  return endpoint ? endpoint->host + ":" + std::to_string(endpoint->port) : std::string{};
+}
+
 class ChExecutor {
  public:
   using OnBlock = std::function<void(const clickhouse::Block&)>;
@@ -35,6 +41,9 @@ class ChExecutor {
   // A SELECT whose work is bounded by its SETTINGS, and what it read (facet_limits.hpp).
   virtual BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block, const ChParams& params) = 0;
   BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block) { return bounded_select(sql, on_block, ChParams{}); }
+
+  // The server that the statements go to ("host:port"), for what a service keeps for each server; empty when it is not known.
+  virtual std::string endpoint() const { return {}; }
 
   // After a failed statement: the connection is not lent again.
   virtual void invalidate() = 0;
@@ -63,6 +72,7 @@ class ClientExecutor final : public ChExecutor {
   BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block, const ChParams& params) override {
     return chdash::bounded_select(connection(), sql, on_block, params);
   }
+  std::string endpoint() const override { return client_ ? client_endpoint(*client_) : std::string{}; }
   void invalidate() override {
     if (pool_ && client_) pool_->invalidate(client_);
   }
@@ -100,6 +110,7 @@ class BorrowedExecutor final : public ChExecutor {
   BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block, const ChParams& params) override {
     return chdash::bounded_select(client_, sql, on_block, params);
   }
+  std::string endpoint() const override { return client_endpoint(client_); }
   void invalidate() override {}
   bool renew(std::string* error) override {
     if (error) *error = "a borrowed connection cannot be renewed";

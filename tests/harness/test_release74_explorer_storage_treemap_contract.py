@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -100,15 +101,21 @@ def test_storage_drawings_are_bounded_treemaps_with_a_strip_fallback() -> None:
 
 def test_storage_endpoint_names_come_from_the_runner_boundary() -> None:
     server = read("src/server.cpp")
-    api = read("src/api_explorer.cpp")
-    catalog = read("src/explorer_catalog.cpp")
+    api = read_api()
     assert 'http_.Get("/api/explorer/storage"' in server
-    assert "explorer_storage_cache_.get_revalidating(" in api
-    assert "if (force_refresh) acl_.invalidate(access);" in api
-    block = catalog[catalog.index("bool load_explorer_storage_map("):catalog.index("bool load_explorer_table_summary(")]
+    service = read_unit("explorer_service.cpp")
+    handler = service[service.index("ExplorerService::storage("):service.index("ExplorerService::table(")]
+    assert "stores_.storage.get_revalidating(" in handler
+    assert "if (refresh) acl_.invalidate(access);" in handler
+    assert "AclView acl(acl_, access);" in handler
+    # The reader of the storage map is explorer_storage.cpp; its statements are in explorer_sql.cpp.
+    block = read_unit("explorer_storage.cpp")
+    statements = read_unit("explorer_sql.cpp")
+    storage = statements[statements.index("// ---- the storage map ----"):statements.index("// ---- the card of a table ----")]
     assert "const auto databases = acl.databases();" in block
     assert "for (const auto& database : databases) acl.objects(database);" in block
     assert "if (!is_visible(database, table)) continue;" in block
-    assert "FROM system.parts WHERE active AND " in block
-    assert "GROUP BY database, `table`" in block
+    assert "storage_parts_sql(databases)" in block
+    assert "FROM system.parts WHERE active AND " in storage
+    assert "GROUP BY database, `table`" in storage
     assert "SYSTEM FLUSH" not in block

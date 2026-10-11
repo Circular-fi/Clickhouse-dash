@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -43,7 +44,7 @@ def test_storage_breakdown_reuses_query_sorting_and_numeric_alignment() -> None:
 
 
 def test_buffer_rows_are_normalized_to_resident_rows() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "void normalize_buffer_runtime_rows" in catalog
     assert 'sql::engine_arguments(table.engine_full, "Buffer")' in catalog
@@ -72,7 +73,7 @@ def test_storage_and_operations_are_separate_tabs_of_collapsible_sections() -> N
 
 
 def test_structure_zero_is_known_only_after_successful_metadata_queries() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     assert "std::unordered_set<std::string> index_seen;" in catalog
     assert "if (indexes_loaded)" in catalog
     assert "table->secondary_indices_bytes = 0;" in catalog

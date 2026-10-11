@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -46,16 +47,20 @@ def test_profiling_label_and_function_description_alignment() -> None:
 
 
 def test_database_catalog_includes_only_database_level_size_summaries() -> None:
-    api = read("src/api_explorer.cpp")
-    catalog = read("src/explorer_catalog.cpp")
+    api = read_api()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
-    handler = api[api.index("void Server::handle_explorer_catalog"):api.index("void Server::handle_explorer_table")]
+    service = read_unit("explorer_service.cpp")
+    handler = service[service.index("ExplorerService::catalog("):service.index("ExplorerService::storage(")]
+    json = read_unit("explorer_json.cpp")
+    writer = json[json.index("std::string catalog_json("):json.index("std::string storage_json(")]
     assert "load_explorer_database_summaries" in handler
-    assert 'w.Key("database_summaries")' in handler
-    assert 'w.Key("engine_full")' not in handler
-    assert "GROUP BY database ORDER BY database" in catalog
-    assert "const auto visible_databases = acl.databases();" in catalog
-    assert "out.database_footprint_bytes = summary_row.bytes;" in catalog
+    assert 'w.Key("database_summaries")' in writer
+    assert 'w.Key("engine_full")' not in writer
+    assert "GROUP BY database ORDER BY database" in read_unit("explorer_sql.cpp")
+    assert "database_totals_sql()" in read_unit("explorer_index.cpp")
+    lineage = read_unit("explorer_lineage.cpp")
+    assert "const auto visible_databases = acl_.databases();" in lineage
+    assert "out_.database_footprint_bytes = summary_row.bytes;" in lineage
     assert "format.bytes(summary.bytes)" in ui and "function databaseSummary(name) {" in ui
     assert "const dbShare = percentValue(footprint, dbBytes);" in ui
 

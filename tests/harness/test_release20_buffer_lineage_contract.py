@@ -1,5 +1,6 @@
 from pathlib import Path
 import css_sources
+from explorer_sources import read_catalog, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -9,7 +10,7 @@ def read(path: str) -> str:
 
 
 def test_buffer_rows_use_one_system_tables_snapshot_before_parts_override() -> None:
-    catalog = read("src/explorer_catalog.cpp")
+    catalog = read_catalog()
     load = catalog[catalog.index("bool load_explorer_catalog("):]
     normalize_pos = load.index("normalize_buffer_runtime_rows(out.tables);")
     parts_pos = load.index("load_parts_summary(system, allowed, map")
@@ -22,8 +23,10 @@ def test_buffer_rows_use_one_system_tables_snapshot_before_parts_override() -> N
 
 
 def test_buffer_bytes_are_resident_memory_not_database_disk_footprint() -> None:
-    catalog = read("src/explorer_catalog.cpp")
-    assert 'if (summary.engine == "Buffer" || summary.engine == "Memory" || summary.engine == "Dictionary")' in catalog
+    catalog = read_catalog()
+    assert "if (is_resident_memory_engine(summary.engine)) {" in catalog
+    # The resident engines are one rule, in explorer_rules.cpp.
+    assert 'return engine == "Buffer" || engine == "Memory" || engine == "Dictionary";' in read_unit("explorer_rules.cpp")
     assert "summary.resident_bytes = total_bytes;" in catalog
     assert "summary.logical_bytes.reset();" in catalog
     assert "db.bytes += table.logical_bytes.value_or(0);" in catalog

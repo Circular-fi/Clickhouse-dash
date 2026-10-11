@@ -2,6 +2,7 @@ from pathlib import Path
 import css_sources
 import modules
 import config_keys
+from explorer_sources import read_api, read_catalog, read_graph, read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -12,13 +13,19 @@ def read(path: str) -> str:
 
 def test_functions_explorer_is_runner_scoped_and_version_matched() -> None:
     server = read("src/server.cpp")
-    api = read("src/api_explorer.cpp")
-    catalog = read("src/explorer_catalog.cpp")
+    api = read_api()
+    catalog = read_catalog()
 
     assert 'http_.Get("/api/explorer/functions"' in server
     assert "handle_explorer_functions" in api
-    assert "host->runner_uri" in api[api.index("handle_explorer_functions"):api.index("handle_explorer_table_data")]
-    assert "system_uri" not in api[api.index("handle_explorer_functions"):api.index("handle_explorer_table_data")]
+    # The route calls the service; the service reads the functions on the connection of the runner, never on the technical account.
+    route = read_unit("api_explorer.cpp")
+    assert "explorer_service_.functions(" in route[route.index("handle_explorer_functions"):route.index("handle_explorer_table_data")]
+    service = read_unit("explorer_service.cpp")
+    functions = service[service.index("ExplorerService::functions("):service.index("ExplorerService::preview(")]
+    assert "connect_(host.runner_uri, &error)" in functions
+    assert "system_uri" not in functions
+    assert "load_explorer_functions(*runner, value, &error)" in functions
     assert "FROM system.documentation" in catalog
     assert "FROM system.functions" in catalog
     assert "arrayStringConcat(categories" not in catalog
@@ -54,8 +61,8 @@ def test_functions_frontend_has_search_filter_and_safe_text_rendering() -> None:
 
 def test_table_operational_metadata_includes_storage_compression_weight_and_distributed_queue() -> None:
     header = read("src/explorer_catalog.hpp")
-    catalog = read("src/explorer_catalog.cpp")
-    api = read("src/api_explorer.cpp")
+    catalog = read_catalog()
+    api = read_api()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
 
     assert "storage_policy" in header
@@ -71,13 +78,14 @@ def test_table_operational_metadata_includes_storage_compression_weight_and_dist
 
 
 def test_manual_catalog_refresh_also_invalidates_function_metadata() -> None:
-    api = read("src/api_explorer.cpp")
-    catalog_handler = api[api.index("handle_explorer_catalog"):api.index("handle_explorer_table")]
+    api = read_api()
+    service = read_unit("explorer_service.cpp")
+    catalog_handler = service[service.index("ExplorerService::catalog("):service.index("ExplorerService::storage(")]
 
     assert "acl_.invalidate(access);" in catalog_handler
-    assert "explorer_catalog_cache_.invalidate" in catalog_handler
-    assert "explorer_graph_cache_.invalidate" in catalog_handler
-    assert "explorer_functions_cache_.invalidate" in catalog_handler
+    assert "stores_.catalog.invalidate" in catalog_handler
+    assert "stores_.graph.invalidate" in catalog_handler
+    assert "stores_.functions.invalidate" in catalog_handler
 
 
 def test_runner_identity_boundary_is_explicit_and_registry_sql_memory_is_capped() -> None:
@@ -188,8 +196,8 @@ def test_fixture_reset_converges_users_and_validates_security_boundary_before_te
 def test_clickhouse_text_decoder_handles_lowcardinality_metadata_without_empty_string_fallback() -> None:
     helper = read("src/ch_block_value.hpp")
     for source in [
-        "src/explorer_catalog.cpp",
-        "src/explorer_graph.cpp",
+        # The shared readers of the Explorer (explorer_values.hpp) decode every cell of the catalog and of the graph through it.
+        "src/explorer_values.hpp",
         "src/allowed_objects.cpp",
         "src/api_meta.cpp",
         "src/query_execution.cpp",
@@ -202,8 +210,15 @@ def test_clickhouse_text_decoder_handles_lowcardinality_metadata_without_empty_s
     assert "throw std::out_of_range" in helper
     assert "throw std::runtime_error" in helper
     assert "catch (...)" not in helper
-    assert "ch_block_text_at(block, column, row)" in read("src/explorer_catalog.cpp")
-    assert "ch_block_text_at(block, column, row)" in read("src/explorer_graph.cpp")
+    assert "return ch_block_text_at(block, column, row);" in read_unit("explorer_values.hpp")
+    for unit in [
+        "explorer_catalog.cpp", "explorer_index.cpp", "explorer_storage.cpp", "explorer_table.cpp", "explorer_detail.cpp",
+        "explorer_lineage.cpp", "explorer_functions.cpp", "explorer_preview.cpp", "explorer_replicas.cpp",
+        "explorer_graph.cpp", "explorer_graph_build.cpp",
+    ]:
+        assert '#include "explorer_values.hpp"' in read_unit(unit), unit
+    assert "ch_block_text_at(block, column, row)" in read_catalog()
+    assert "ch_block_text_at(block, column, row)" in read_graph()
 
 
 def test_query_database_scope_never_fails_open_to_default_database() -> None:
@@ -232,8 +247,8 @@ def test_query_log_numeric_decoding_is_fail_closed_instead_of_zero_fallback() ->
 
 def test_function_aliases_are_resolved_server_side_with_cycle_and_depth_guards() -> None:
     header = read("src/explorer_catalog.hpp")
-    catalog = read("src/explorer_catalog.cpp")
-    api = read("src/api_explorer.cpp")
+    catalog = read_catalog()
+    api = read_api()
     ui = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
 
     assert "ExplorerFunctionAliasDocument" in header
@@ -251,7 +266,7 @@ def test_function_markdown_links_are_disabled_by_default_and_configurable() -> N
     config = read("src/config.cpp")
     server = read("src/server.hpp")
     example = read("config.example.hcl")
-    api = read("src/api_explorer.cpp")
+    api = read_api()
 
     assert "bool function_markdown_links = false" in server
     assert config_keys.row("explorer", "function_markdown_links")["default"] == "false"

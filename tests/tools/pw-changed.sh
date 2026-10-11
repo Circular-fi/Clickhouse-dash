@@ -67,7 +67,7 @@ specs_for() {
     src/static/app_timerange.js) echo obs-filterbar observability design ;;
     src/static/app_obs_page.js|src/static/traces.html|src/static/logs.html|src/static/metrics.html|src/static/css/20-features/observability.css)
       echo observability page-per-view obs-filterbar page-chrome design accessibility ;;
-    src/static/app_explorer_graph.js|src/explorer_graph.*) echo explorer-graph ;;
+    src/static/app_explorer_graph.js|src/explorer_graph*) echo explorer-graph ;;
     src/static/app_explorer_storage.js) echo explorer-storage ;;
     src/static/app_explorer_treemap.js) echo explorer-storage system ;;
     src/static/app_system*.js|src/static/system.html|src/static/queries.html|src/static/disks.html|src/static/css/20-features/system.css|src/api_system*.cpp|src/system_*)

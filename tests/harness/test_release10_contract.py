@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_api, read_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -25,8 +26,8 @@ def test_theme_change_repaints_graph_in_same_ui_transaction() -> None:
 
 def test_aggregate_function_preview_is_explicitly_marked_as_finalized() -> None:
     header = read("src/explorer_catalog.hpp")
-    catalog = read("src/explorer_catalog.cpp")
-    api = read("src/api_explorer.cpp")
+    catalog = read_catalog()
+    api = read_api()
     explorer = (modules.read_explorer() + read("src/static/app_explorer_detail.js"))
     assert "bool finalized_for_preview = false;" in header
     assert 'out.columns[i].finalized_for_preview = declared_type.rfind("AggregateFunction(", 0) == 0;' in catalog

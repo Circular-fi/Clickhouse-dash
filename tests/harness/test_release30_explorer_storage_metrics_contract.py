@@ -1,6 +1,7 @@
 from pathlib import Path
 import css_sources
 import modules
+from explorer_sources import read_unit
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -79,11 +80,12 @@ def test_tuple_storage_accounts_for_hidden_array_offsets_and_array_tuple_roots()
     assert "tuple_parent: tupleRoot" in block
 
 def test_buffer_detail_subtracts_target_rows_lazily() -> None:
-    catalog = read("src/explorer_catalog.cpp")
-    detail = catalog[catalog.index("bool load_explorer_table_summary"):catalog.index("bool load_explorer_catalog(", catalog.index("bool load_explorer_table_summary"))]
+    # The card of one table (explorer_table.cpp) asks for the one row count of the destination (a statement of explorer_sql.cpp).
+    detail = read_unit("explorer_table.cpp")
     assert 'if (out.engine == "Buffer")' in detail
     assert "resolve_buffer_database_arg(args[0], database)" in detail
-    assert 'SELECT toString(total_rows) FROM system.tables WHERE database = ' in detail
+    assert "buffer_target_rows_sql(target_database, target_table)" in detail
+    assert 'SELECT toString(total_rows) FROM system.tables WHERE database = ' in read_unit("explorer_sql.cpp")
     assert "*out.rows - *target_rows" in detail
 
 

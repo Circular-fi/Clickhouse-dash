@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import css_sources
+from explorer_sources import read_api
 
 ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().parents[2])).resolve()
 STATIC = ROOT / "src" / "static"
@@ -64,8 +65,8 @@ def test_storage_is_a_table_card_tab_and_part_of_the_database_page() -> None:
     assert 'label: "Share"' in block and "table.shareBar(td," in block
     assert 'id: "explorerPartitionTreemap",' in block
     # The database's disks come with its catalog branch.
-    api = (ROOT / "src" / "api_explorer.cpp").read_text(encoding="utf-8")
-    assert "for (const auto& disk : catalog_result.value->database_disks) {" in api
+    api = read_api()
+    assert "for (const auto& disk : catalog.database_disks) {" in api
     assert "model.databaseDisks.set(name, Array.isArray(payload?.disks) ? payload.disks : []);" in ui
 
 

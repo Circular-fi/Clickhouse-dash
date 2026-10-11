@@ -18,6 +18,7 @@ option(CHDASH_BUILD_REQUEST_TESTS "Build the unit tests of the way a request is 
 option(CHDASH_BUILD_ERROR_TESTS "Build the unit tests of the error answer: the envelope, the classification of ClickHouse failures" OFF)
 option(CHDASH_BUILD_CONFIG_TESTS "Build the unit tests of the configuration file: the table of keys, the bounds, the URIs, the HCL parser" OFF)
 option(CHDASH_BUILD_SQL_TESTS "Build the unit tests of the SQL text: literals, lexer, policy, structure" OFF)
+option(CHDASH_BUILD_EXPLORER_TESTS "Build the unit tests of the Explorer: the SQL, the rules, the readers on a fake executor, the TTL, the graph (no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_METRICS_TESTS "Build the unit tests of the Metrics page: the request, the SQL, the aggregation of the rows, the service (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_TRACE_TESTS "Build the unit tests of the Traces page: the request, the filters, the SQL, the search strategies (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
@@ -101,6 +102,22 @@ if (CHDASH_BUILD_RESULT_TESTS)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash_result_path_test PRIVATE clickhouse-cpp-lib Threads::Threads)
   chdash_configure_target(chdash_result_path_test)
+endif()
+
+if (CHDASH_BUILD_EXPLORER_TESTS)
+  # The Explorer below its routes: the statements, the rules on the rows, the readers of the catalog, the sidebar, the storage map, the card of a
+  # table, the functions and the preview on a fake executor, the TTL, and the graph.
+  add_executable(chdash_explorer_test ../tests/native/explorer_test.cpp
+    explorer_catalog.cpp explorer_detail.cpp explorer_functions.cpp explorer_graph.cpp explorer_graph_build.cpp explorer_graph_scope.cpp explorer_index.cpp explorer_json.cpp explorer_lineage.cpp
+    explorer_preview.cpp explorer_replicas.cpp explorer_rules.cpp explorer_service.cpp explorer_sql.cpp explorer_storage.cpp explorer_table.cpp explorer_ttl.cpp
+    sql_structure.cpp acl_service.cpp allowed_objects.cpp
+    ch_query.cpp ch_client_pool.cpp ch_uri.cpp ch_error.cpp api_error.cpp error_envelope.cpp request_context.cpp log.cpp jwt.cpp secure_random.cpp)
+  target_include_directories(chdash_explorer_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_explorer_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_explorer_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_explorer_test)
 endif()
 
 if (CHDASH_BUILD_METRICS_TESTS)
@@ -297,7 +314,22 @@ if (CHDASH_BUILD_APP)
     acl_service.cpp
     allowed_objects.cpp
     explorer_catalog.cpp
+    explorer_detail.cpp
+    explorer_functions.cpp
     explorer_graph.cpp
+    explorer_graph_build.cpp
+    explorer_graph_scope.cpp
+    explorer_index.cpp
+    explorer_json.cpp
+    explorer_lineage.cpp
+    explorer_preview.cpp
+    explorer_replicas.cpp
+    explorer_rules.cpp
+    explorer_service.cpp
+    explorer_sql.cpp
+    explorer_storage.cpp
+    explorer_table.cpp
+    explorer_ttl.cpp
     sql_structure.cpp
     system_activity.cpp
     system_monitor.cpp
