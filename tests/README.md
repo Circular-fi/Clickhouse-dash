@@ -399,7 +399,7 @@ The design phase is separate from frontend functionality. It captures determinis
 - axe accessibility findings;
 - Playwright traces/videos of the retry when a capture itself fails (`PW_ARTIFACTS=full`: of every failure).
 
-Design heuristics are report signals rather than aesthetic pass/fail rules. Visual baseline comparison remains opt-in via `VISUAL_COMPARE=1` until the redesign is accepted.
+Design heuristics are report signals rather than aesthetic pass/fail rules. Two hard gates sit next to them. Any axe violation fails the run (`specs/accessibility.spec.js`: Query, analysis, Explorer; `specs/a11y-contract.spec.js`: every other page and state). `specs/visual-regression.spec.js` compares the Query results and the Explorer with the PNGs of `tests/frontend/snapshots/<viewport>/`. The PNGs come from the pinned Playwright image on linux/amd64, the volatile figures of the page are replaced by a fixed text, and the comparison is exact. `VISUAL_COMPARE=0` skips it. After a change of the look on purpose, run `npm run snapshots:update` in the test container (`tests/frontend`) and commit the new PNGs; the analysis modal has no baseline because its figures are timings.
 
 ## Sanitizers, static analysis and the release smoke test
 

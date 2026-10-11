@@ -70,13 +70,17 @@ def test_frontend_functional_and_design_are_separate_playwright_suites():
     assert "overlappingControls" in review
 
 
-def test_design_covers_three_desktop_viewports_and_visual_baseline_remains_opt_in():
+def test_design_covers_three_desktop_viewports_and_the_visual_baselines_are_committed():
     config = read("tests/frontend/playwright.config.js")
     visual = read("tests/frontend/specs/visual-regression.spec.js")
     for size in ["1920, height: 1080", "1440, height: 900", "1280, height: 800"]:
         assert size in config
     assert "VISUAL_COMPARE" in visual
     assert "toHaveScreenshot" in visual
+    # The baselines are in the repository for each viewport (a run on a clean checkout compares, it does not write).
+    for viewport in ("desktop-1920", "desktop-1440", "laptop-1280"):
+        for name in ("explorer.png", "query-results.png"):
+            assert (ROOT / "tests/frontend/snapshots" / viewport / "visual-regression.spec.js" / name).is_file(), (viewport, name)
 
 
 def test_ci_collects_single_combined_test_review_artifact():

@@ -222,8 +222,7 @@ services:
       TEST_ARTIFACTS_ROOT: /artifacts
       PERF_RUNS: "${PERF_RUNS:-20}"
       PERF_WARMUP: "${PERF_WARMUP:-1}"
-      A11Y_STRICT: "${A11Y_STRICT:-0}"
-      VISUAL_COMPARE: "${VISUAL_COMPARE:-0}"
+      VISUAL_COMPARE: "${VISUAL_COMPARE:-1}"
     volumes:
       - type: bind
         source: ./artifacts
