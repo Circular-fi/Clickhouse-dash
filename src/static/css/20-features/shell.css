@@ -44,13 +44,13 @@
   min-width: 0;
 }
 
-/* The logo mark: four bars of a column chart in the accent fill, 30 px (as tall as the name and the version under it), before
-   the name (src/static/images/logo.svg is the same drawing as the favicon). */
+/* The logo mark: four bars of a column chart in the accent fill, 26 px (a little taller than the name and the version under it),
+   before the name (src/static/images/logo.svg is the same drawing as the favicon). */
 .appBrand__logo {
   align-self: center;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
   margin-right: -2px;
   fill: var(--accent-fill);
 }
@@ -69,7 +69,13 @@
   min-width: 0;
 }
 
+/* The version never goes past the end of the name: it adds nothing to the width of the brand (width 0, then as wide as the
+   column), and a longer text ends with an ellipsis; the whole text is in the title. */
 .versionBadge {
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--muted);
   font-size: var(--fs-xs);
   line-height: 1.1;

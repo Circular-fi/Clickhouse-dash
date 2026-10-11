@@ -62,7 +62,8 @@ async function loadMeta() {
     const build = verObj && typeof verObj === "object" ? String(verObj.build_time || "") : String(data.build_time || "");
     const text = sha && sha !== "unknown" ? `${ver} (${sha})` : ver;
     badge.textContent = text;
-    if (build) badge.title = `Backend version\nBuild: ${build}`;
+    // The badge is as wide as the name above it and cuts a longer text: the title has all of it.
+    badge.title = `Backend version\n${text}${build ? `\nBuild: ${build}` : ""}`;
   } catch {
     if (badge) badge.textContent = "meta: offline";
   }
