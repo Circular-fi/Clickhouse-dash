@@ -64,12 +64,30 @@ const mcpUser = (host) => (host.mcp.user ? `The MCP user ${host.mcp.user}` : "Th
 // Who lacks the grants of a tool (the MCP user, or the system user for the OpenTelemetry pages).
 const lacking = (gap) => `The ${gap.role}${gap.user ? ` ${gap.user}` : ""}`;
 
-// The groups that have tools, in the order of the server, then any group that the server forgot to list.
+// The groups that have tools, in the order of the server, then any group that the server forgot to list. A family with
+// sections (Observability: Traces, Logs, Metrics) is one group for each section ("Observability - Traces"), so that no card
+// holds the three signals; a tool of such a family without a known section stays in a group of the family's own title.
+// Every group says which tools it owns.
 function groupsOf(meta) {
   const known = meta.toolGroups.filter((group) => meta.tools.some((tool) => tool.group === group.id));
   const ids = new Set(known.map((group) => group.id));
   const extra = [...new Set(meta.tools.map((tool) => tool.group))].filter((id) => !ids.has(id)).map((id) => ({ id, title: id, note: "" }));
-  return [...known, ...extra];
+  const groups = [];
+  for (const group of [...known, ...extra]) {
+    const sections = (group.sections || []).filter((section) => meta.tools.some((tool) => tool.group === group.id && tool.section === section.id));
+    const sectionIds = new Set(sections.map((section) => section.id));
+    if (!sections.length) {
+      groups.push({ id: group.id, parent: group.id, title: group.title, note: group.note, owns: (tool) => tool.group === group.id });
+      continue;
+    }
+    if (meta.tools.some((tool) => tool.group === group.id && !sectionIds.has(tool.section))) {
+      groups.push({ id: group.id, parent: group.id, title: group.title, note: group.note, owns: (tool) => tool.group === group.id && !sectionIds.has(tool.section) });
+    }
+    for (const section of sections) {
+      groups.push({ id: `${group.id}-${section.id}`, parent: group.id, title: `${group.title} - ${section.title}`, note: "", owns: (tool) => tool.group === group.id && tool.section === section.id });
+    }
+  }
+  return groups;
 }
 
 // --- Fields ----------------------------------------------------------------------------
@@ -155,40 +173,25 @@ function buildForm(meta) {
   const cards = [];
   const groupsBox = h("div", { class: "mcpGroups" });
   for (const group of groupsOf(meta)) {
-    const tools = meta.tools.filter((tool) => tool.group === group.id);
+    const tools = meta.tools.filter(group.owns);
     const body = h("div", { class: "mcpGroup__body", id: `mcpGroupBody-${group.id}`, hidden: true });
     // A family of one tool has nothing to open: its check box is the tool itself, no arrow.
     const single = tools.length === 1;
-    // A family with sections (Observability: Traces, Logs, Metrics) lists its tools under sub-headings, in the order of the
-    // server's table; a tool without a known section stays at the top.
-    const sectionNodes = new Map();
-    if (group.sections?.length && !single) {
-      for (const section of group.sections) {
-        const count = h("span", { class: "mcpSection__count" });
-        const node = h("div", { class: "mcpSection", dataset: { section: section.id } },
-          h("h4", { class: "mcpSection__title" }, section.title, count));
-        sectionNodes.set(section.id, { node, count });
-      }
-    }
     const members = tools.map((tool) => {
       const box = checkbox({
         id: `mcpTool-${tool.name}`,
         label: tool.name,
-        checked: DEFAULT_GROUPS.has(group.id) && !tool.needsAllData,
+        checked: DEFAULT_GROUPS.has(group.parent) && !tool.needsAllData,
         title: plainText(tool.description),
         value: tool.name,
         mono: true,
       });
       if (!single) box.wrap.appendChild(h("span", { class: "mcpGroup__tip" }, firstSentence(tool.description)));
       box.tool = tool;
-      const section = sectionNodes.get(tool.section);
-      if (section) section.node.appendChild(box.wrap);
-      else if (!single) body.appendChild(box.wrap);
-      box.section = section || null;
+      if (!single) body.appendChild(box.wrap);
       toolBoxes.push(box);
       return box;
     });
-    for (const { node } of sectionNodes.values()) if (node.children.length > 1) body.appendChild(node);
     if (single) {
       const only = members[0];
       const reason = h("span", { class: "mcpGroup__reason" });
@@ -281,11 +284,6 @@ function buildForm(meta) {
       item.all.input.indeterminate = on > 0 && on < free.length;
       item.all.wrap.classList.toggle("is-disabled", !free.length);
       item.count.textContent = `${on}/${item.members.length}`;
-      // The count of each section of the family.
-      for (const section of new Set(item.members.map((box) => box.section).filter(Boolean))) {
-        const mine = item.members.filter((box) => box.section === section);
-        section.count.textContent = `${mine.filter((box) => box.input.checked && !box.input.disabled).length}/${mine.length}`;
-      }
       item.card.classList.toggle("has-tools", on > 0);
       // A family that is all locked says why in its head.
       item.reason.hidden = !!free.length;
@@ -505,20 +503,6 @@ function reachBody(access) {
   return wrap;
 }
 
-// The tools of a family that a key holds, as a list, or as one list under each sub-heading when the family has sections.
-function sectioned(group, tools, render) {
-  const list = (items) => h("ul", { class: "mcpGrants" }, items.map(render));
-  if (!group.sections?.length || !tools.some((tool) => tool.section)) return list(tools);
-  const parts = [];
-  for (const section of group.sections) {
-    const mine = tools.filter((tool) => tool.section === section.id);
-    if (mine.length) parts.push(h("div", { class: "mcpSection", dataset: { section: section.id } }, h("h4", { class: "mcpSection__title" }, section.title, h("span", { class: "mcpSection__count" }, String(mine.length))), list(mine)));
-  }
-  const rest = tools.filter((tool) => !group.sections.some((section) => section.id === tool.section));
-  if (rest.length) parts.unshift(list(rest));
-  return h("div", { class: "mcpSections" }, parts);
-}
-
 function keyDetails({ meta, key }) {
   const granted = grantedTools(meta, key);
   const held = new Set(granted.map((tool) => tool.name));
@@ -557,11 +541,11 @@ function keyDetails({ meta, key }) {
   // it; the tallest families go first, each into the shorter column, then every column is put back in the
   // order of the families.
   const cards = groupsOf(meta).map((group, index) => {
-    const tools = meta.tools.filter((tool) => tool.group === group.id);
+    const tools = meta.tools.filter(group.owns);
     const mine = tools.filter((tool) => held.has(tool.name));
     const node = h("div", { class: `mcpGrantGroup${mine.length ? "" : " is-empty"}`, dataset: { group: group.id } },
       h("div", { class: "mcpGrantGroup__head" }, h("span", { class: "mcpGrantGroup__title" }, group.title), h("span", { class: "mcpGrantGroup__count" }, `${mine.length} of ${tools.length}`)),
-      mine.length ? sectioned(group, mine, (tool) => {
+      mine.length ? h("ul", { class: "mcpGrants" }, mine.map((tool) => {
         // A tool that the MCP user of the host cannot serve says which grant is missing (the key keeps it).
         const gap = gaps.get(tool.name);
         const lost = !!gap;
@@ -570,10 +554,8 @@ function keyDetails({ meta, key }) {
         return h("li", { class: `mcpGrant${lost ? " is-lost" : ""}`, dataset: { tool: tool.name }, title: gap ? `${gap.grants.join(", ")} is missing.\n${gap.statement}` : plainText(tool.description) },
           h("span", { class: "mcpGrant__name" }, tool.name),
           h("span", { class: "mcpGrant__note" }, note));
-      }) : null);
-    // A section adds its heading to the height of the card.
-    const headings = new Set(mine.map((tool) => tool.section).filter(Boolean)).size;
-    return { node, index, weight: mine.length ? 1.5 + 1.4 * mine.length + 1.0 * headings : 1.6 };
+      })) : null);
+    return { node, index, weight: mine.length ? 1.5 + 1.4 * mine.length : 1.6 };
   });
   const columns = [{ total: 0, cards: [] }, { total: 0, cards: [] }];
   for (const card of [...cards].sort((x, y) => y.weight - x.weight || x.index - y.index)) {
