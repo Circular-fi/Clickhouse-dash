@@ -186,6 +186,8 @@
      (WCAG 1.4.11). --border and --button-border stay for rules and for buttons, whose label names them. */
   --control-border: rgba(255, 255, 255, 0.4);
   --control-border-hover: rgba(255, 255, 255, 0.58);
+  /* The frame of the Query editor, a large surface: softer than the edge of a field in the dark theme (its focus takes the accent). */
+  --editor-border: rgba(255, 255, 255, 0.22);
   --metric-bg: var(--bg);
   --row-hover: rgba(53, 111, 230, 0.08);
   --row-divider: rgba(255, 255, 255, 0.02);
@@ -422,6 +424,7 @@
     --button-border-hover: rgba(15, 18, 25, 0.24);
     --control-border: rgba(15, 18, 25, 0.54);
     --control-border-hover: rgba(15, 18, 25, 0.72);
+    --editor-border: var(--control-border);
     --row-hover: rgba(37, 88, 217, 0.06);
     --row-divider: rgba(15, 18, 25, 0.04);
     --danger: #b91c1c;
@@ -528,6 +531,8 @@ html[data-theme="dark"] {
   --button-border-hover: rgba(255, 255, 255, 0.2);
   --control-border: rgba(255, 255, 255, 0.4);
   --control-border-hover: rgba(255, 255, 255, 0.58);
+  /* The frame of the Query editor, a large surface: softer than the edge of a field in the dark theme (its focus takes the accent). */
+  --editor-border: rgba(255, 255, 255, 0.22);
   --row-hover: rgba(53, 111, 230, 0.08);
   --row-divider: rgba(255, 255, 255, 0.02);
   --danger: #f87171;
@@ -630,6 +635,7 @@ html[data-theme="light"] {
   --button-border-hover: rgba(15, 18, 25, 0.24);
   --control-border: rgba(15, 18, 25, 0.54);
   --control-border-hover: rgba(15, 18, 25, 0.72);
+  --editor-border: var(--control-border);
   --row-hover: rgba(37, 88, 217, 0.06);
   --row-divider: rgba(15, 18, 25, 0.04);
   --danger: #b91c1c;

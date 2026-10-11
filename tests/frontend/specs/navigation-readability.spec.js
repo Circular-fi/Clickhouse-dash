@@ -174,15 +174,16 @@ test('System > Queries: the table is the scroller under the tiles and its head s
 
 // ---- the Query rail -----------------------------------------------------------------------------------------------------
 
-test('the rail says once that a run will fill it, and the editor keeps its height when the tiles come', async ({ page }) => {
+test('the rail shows its tiles with dashes before any run, and the editor keeps its height when the figures come', async ({ page }) => {
   await openApp(page);
-  const idle = page.locator('#runStatsIdle');
-  await expect(idle).toBeVisible();
-  await expect(page.locator('#runStatsTiles .metricCompact:visible')).toHaveCount(0);
+  await expect(page.locator('#runStatsTiles .metricCompact:visible')).toHaveCount(6);
+  for (const id of ['elapsedSecondsText', 'progressPercentText', 'readRowsTotalText', 'readBytesTotalText', 'cpuMaxText', 'memoryMaxText']) {
+    await expect(page.locator(`#${id}`), `${id} is a dash before a run`).toHaveText('\u2014');
+  }
   const before = await page.locator('#queryTextArea').evaluate((el) => el.closest('.editorWrap').getBoundingClientRect().height);
   await runSuccessfulQuery(page, 'SELECT number AS n FROM numbers(1000)');
-  await expect(idle).toBeHidden();
   await expect(page.locator('#runStatsTiles .metricCompact:visible')).toHaveCount(6);
+  await expect(page.locator('#elapsedSecondsText')).not.toHaveText('\u2014');
   const after = await page.locator('#queryTextArea').evaluate((el) => el.closest('.editorWrap').getBoundingClientRect().height);
   expect(Math.abs(after - before), 'no jump of the editor').toBeLessThanOrEqual(1);
 });

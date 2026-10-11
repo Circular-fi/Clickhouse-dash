@@ -296,9 +296,9 @@ function finishRail(totals, clientMs = null) {
   setRailPhase("done");
 }
 
-// Before the first run (and after Clear) the rail is idle: its tiles give way to one line that says where the stats
-// will be (query.css, .metricColumn.is-idle); a run puts the tiles back, with dashes until their figures arrive.
-// A run that failed keeps only the tiles that have a figure (hideEmptyTiles).
+// Before the first run (and after Clear) the rail is idle: its tiles are there with dashes until a run gives their figures
+// (.metricColumn.is-idle only tells the folded summary to say "Run stats"). A run that failed keeps only the tiles that have a
+// figure (hideEmptyTiles).
 const RAIL_VALUES = ["progressPercentText", "readRowsTotalText", "readBytesTotalText", "cpuMaxText", "memoryMaxText"];
 
 function hideEmptyTiles(failed) {

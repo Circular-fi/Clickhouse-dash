@@ -617,20 +617,9 @@ html.is-ready #queryTextArea::placeholder {
   display: none;
 }
 
-/* Idle (no run yet): no tile, one muted line where the stats will be. A run that failed hides the tiles that have no
-   figure (is-empty, app_run.js hideEmptyTiles): the elapsed time and the error are what there is to read. */
-.metricColumn > .metricColumn__idle {
-  display: none;
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-
-.metricColumn.is-idle > .metricCompact { display: none; }
-
-.metricColumn.is-idle > .metricColumn__idle { display: block; }
-
+/* Idle (no run yet, or after Clear): the tiles are there with dashes, so the rail keeps its shape and the editor its height. A run
+   that failed hides the tiles that have no figure (is-empty, app_run.js hideEmptyTiles): the elapsed time and the error are
+   what there is to read. */
 .metricColumn > .metricCompact:nth-child(1),
 .metricColumn > .metricCompact:nth-child(2) {
   grid-column: span 1;
@@ -843,7 +832,7 @@ html.is-ready #queryTextArea::placeholder {
   position: relative;
   width: 100%;
   overflow: hidden;
-  border: 1px solid var(--control-border);
+  border: 1px solid var(--editor-border, var(--control-border));
   background: var(--input-bg);
   border-radius: var(--r-lg);
   height: var(--initialEditorHeight, 100%);
