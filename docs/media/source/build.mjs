@@ -344,26 +344,25 @@ for (const s of SCENES) for (const ln of s.lines) {
 // title and closing cards
 const logo = (cls) => `<svg class="${cls}" viewBox="0 0 18 18" width="140" height="140"><rect class="b1" x="0.75" y="10.5" width="3" height="6" rx="1"/><rect class="b2" x="5.25" y="5.5" width="3" height="11" rx="1"/><rect class="b3" x="9.75" y="8" width="3" height="8.5" rx="1"/><rect class="b4" x="14.25" y="1.5" width="3" height="15" rx="1"/></svg>`;
 const S1 = SCENES[1].start;
-P(`<div id="title" class="card"><div class="lockup">${logo("logo t")}<div><h1 id="tname">ClickHouse Dash</h1><p id="ttag">A lightweight real-time ClickHouse query dashboard.</p></div></div><div id="tver" class="ver">1.0.0</div></div>`);
-T(`tl.fromTo("#title .b1", { scaleY: 0 }, { scaleY: 1, duration: 0.5, ease: "back.out(1.6)", transformOrigin: "50% 100%" }, 0.15);`);
-T(`tl.fromTo("#title .b2", { scaleY: 0 }, { scaleY: 1, duration: 0.5, ease: "back.out(1.6)", transformOrigin: "50% 100%" }, 0.25);`);
-T(`tl.fromTo("#title .b3", { scaleY: 0 }, { scaleY: 1, duration: 0.5, ease: "back.out(1.6)", transformOrigin: "50% 100%" }, 0.35);`);
-T(`tl.fromTo("#title .b4", { scaleY: 0 }, { scaleY: 1, duration: 0.5, ease: "back.out(1.6)", transformOrigin: "50% 100%" }, 0.45);`);
+P(`<div id="title" class="card"><div class="lockup">${logo("logo t")}<div><h1 id="tname">ClickHouse Dash</h1><p id="ttag">A lightweight real-time ClickHouse query dashboard.</p></div></div></div>`);
+T(`tl.fromTo("#title .b1", { scaleY: 0, svgOrigin: "2.25 16.5" }, { scaleY: 1, svgOrigin: "2.25 16.5", duration: 0.5, ease: "back.out(1.6)" }, 0.15);`);
+T(`tl.fromTo("#title .b2", { scaleY: 0, svgOrigin: "6.75 16.5" }, { scaleY: 1, svgOrigin: "6.75 16.5", duration: 0.5, ease: "back.out(1.6)" }, 0.25);`);
+T(`tl.fromTo("#title .b3", { scaleY: 0, svgOrigin: "11.25 16.5" }, { scaleY: 1, svgOrigin: "11.25 16.5", duration: 0.5, ease: "back.out(1.6)" }, 0.35);`);
+T(`tl.fromTo("#title .b4", { scaleY: 0, svgOrigin: "15.75 16.5" }, { scaleY: 1, svgOrigin: "15.75 16.5", duration: 0.5, ease: "back.out(1.6)" }, 0.45);`);
 T(`tl.fromTo("#tname", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.8, ease: "power4.out" }, 0.55);`);
 T(`tl.fromTo("#ttag", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 1.15);`);
-T(`tl.fromTo("#tver", { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, 1.55);`);
 T(`tl.to("#title", { opacity: 0, scale: 1.06, filter: "blur(10px)", duration: 0.55, ease: "power2.in" }, ${f3(S1 - 0.25)});`);
 T(`tl.fromTo("#stage", { opacity: 0, scale: 0.955, y: 24 }, { opacity: 1, scale: 1, y: 0, duration: 0.7, ease: "power3.out" }, ${f3(S1 - 0.1)});`);
 T(`tl.to("#stage", { opacity: 0, scale: 0.97, duration: 0.5, ease: "power2.in" }, ${f3(END.start - 0.2)});`);
 T(`tl.to("#capstrip", { opacity: 0, duration: 0.3 }, ${f3(END.start - 0.1)});`);
 
-P(`<div id="end" class="card"><div class="lockup">${logo("logo e")}<div><h1 id="ename">ClickHouse Dash</h1><p id="etag">One self-contained binary. A lightweight, real-time ClickHouse query dashboard.</p></div></div><div class="row"><div id="ever" class="ver">1.0.0</div><div id="erepo" class="repo">github.com/Circular-fi/Clickhouse-dash</div></div><div id="enav">${NAV.map((n) => `<span class="pg2">${n}</span>`).join("")}</div><div id="ecredit">Music: Happy Beats &amp; Business Moves Vol. 12 by Sascha Ende, ende.app, CC BY 4.0</div></div>`);
+P(`<div id="end" class="card"><div class="lockup">${logo("logo e")}<div><h1 id="ename">ClickHouse Dash</h1><p id="etag">One self-contained binary. A lightweight, real-time ClickHouse query dashboard.</p></div></div><div class="row"><div id="erepo" class="repo">github.com/Circular-fi/Clickhouse-dash</div></div><div id="enav">${NAV.map((n) => `<span class="pg2">${n}</span>`).join("")}</div><div id="ecredit">Music: Happy Beats &amp; Business Moves Vol. 12 by Sascha Ende, ende.app, CC BY 4.0</div></div>`);
 const E0 = f3(END.start);
 T(`tl.fromTo("#end", { opacity: 0 }, { opacity: 1, duration: 0.4 }, ${E0});`);
-for (let k = 1; k <= 4; k++) T(`tl.fromTo("#end .b${k}", { scaleY: 0 }, { scaleY: 1, duration: 0.5, ease: "back.out(1.6)", transformOrigin: "50% 100%" }, ${f3(END.start + 0.1 + k * 0.1)});`);
+const BARX = [0, 2.25, 6.75, 11.25, 15.75];
+for (let k = 1; k <= 4; k++) T(`tl.fromTo("#end .b${k}", { scaleY: 0, svgOrigin: "${BARX[k]} 16.5" }, { scaleY: 1, svgOrigin: "${BARX[k]} 16.5", duration: 0.5, ease: "back.out(1.6)" }, ${f3(END.start + 0.1 + k * 0.1)});`);
 T(`tl.fromTo("#ename", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 0.8, ease: "power4.out" }, ${f3(END.start + 0.45)});`);
 T(`tl.fromTo("#etag", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, ${f3(END.start + 1.0)});`);
-T(`tl.fromTo("#ever", { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2)" }, ${f3(END.start + 1.5)});`);
 T(`tl.fromTo("#erepo", { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" }, ${f3(END.start + 1.7)});`);
 T(`tl.fromTo("#enav .pg2", { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.4, stagger: 0.12, ease: "power3.out" }, ${f3(END.start + 2.1)});`);
 T(`tl.fromTo("#ecredit", { opacity: 0 }, { opacity: 0.85, duration: 0.6 }, ${f3(END.start + 3.0)});`);

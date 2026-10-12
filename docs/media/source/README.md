@@ -36,7 +36,7 @@ Needs: the test ClickHouse stack of `tests/` (compose, running), Docker, Node 22
 Hyperframes CLI (`npx hyperframes`, 0.8.x). The music file comes from the `brag` skill (see `MUSIC-LICENSE.md`).
 
 ```bash
-# 1. the server of the demo (image of this worktree, version 1.0.0) and its ClickHouse users (scratch users of the test stack)
+# 1. the server of the demo (image of this worktree, built with the version and sha that the header shows) and its ClickHouse users (scratch users of the test stack)
 docker build -f tests/Dockerfile.source -t chdash-video:local \
   --build-arg CHDASH_SEMVER=1.0.0 --build-arg CHDASH_GIT_SHA=3f9a1c7e5b2d84a6c0e9f17b3d52a8c4e6f09b1d .
 record/setup-clickhouse.sh up        # creates dash_runner / dash_system / dash_mcp on the test ClickHouse

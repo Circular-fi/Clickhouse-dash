@@ -44,10 +44,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: #090b0
 #end { opacity: 0; }
 .lockup { display: flex; align-items: center; gap: 44px; }
 .logo { width: 150px; height: 150px; overflow: visible; }
-.logo rect { fill: #4a86f7; transform-box: fill-box; }
+.logo rect { fill: #4a86f7; }
 h1 { font-weight: 600; font-size: 128px; letter-spacing: -0.02em; line-height: 1; color: #f4f7ff; }
 .lockup p { margin-top: 18px; font-size: 38px; font-weight: 400; color: #a9bddf; max-width: 1000px; line-height: 1.25; }
-.ver { font-family: "PlexMono", monospace; font-weight: 500; font-size: 36px; padding: 8px 26px; border-radius: 40px; border: 2px solid rgba(122,165,255,0.8); background: rgba(74,134,247,0.16); color: #bcd0ff; }
 .row { display: flex; align-items: center; gap: 28px; }
 .repo { font-family: "PlexMono", monospace; font-weight: 500; font-size: 34px; color: #cfdcf8; }
 #enav { display: flex; gap: 14px; }

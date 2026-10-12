@@ -15,4 +15,4 @@
 07b|and the heaviest query shapes,
 07c|each one a click from its formatted text.
 08|When an AI assistant needs your data, give it a key, with only the tools and tables you allow.
-09|ClickHouse Dash. One self-contained binary. Version one point zero.|ClickHouse Dash. One self-contained binary. Version 1.0.0.
+09|ClickHouse Dash. One self-contained binary.
