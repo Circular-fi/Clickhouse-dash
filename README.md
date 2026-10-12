@@ -3,12 +3,12 @@
 A lightweight real-time ClickHouse query dashboard.
 
 <p align="center">
-  <video src="docs/media/chdash-demo.mp4" poster="docs/media/chdash-demo.jpg" width="100%" controls muted loop playsinline>
-    <a href="docs/media/chdash-demo.mp4"><img src="docs/media/chdash-demo.gif" alt="A 28-second tour of ClickHouse Dash: the Query page, History, the Explorer, System, Traces and MCP." width="100%"></a>
+  <video src="docs/media/chdash-presentation.mp4" poster="docs/media/chdash-presentation.jpg" width="100%" controls playsinline>
+    <a href="docs/media/chdash-presentation.mp4"><img src="docs/media/chdash-presentation.jpg" alt="A 74-second presentation of ClickHouse Dash: the Query page, the query library, the Explorer, Traces, Logs, Metrics, System and the MCP keys." width="100%"></a>
   </video>
 </p>
 
-The video shows ClickHouse Dash with sample data. It lasts 28 seconds. If your viewer does not play it, [open the video](docs/media/chdash-demo.mp4).
+The video presents ClickHouse Dash with sample data, with a voice-over and music. It lasts 74 seconds. If your viewer does not play it, [open the video](docs/media/chdash-presentation.mp4) (a version [without the music](docs/media/chdash-presentation-nomusic.mp4) is next to it). Music: "Happy Beats & Business Moves Vol. 12" by Sascha Ende ([ende.app](https://ende.app)), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The sources to record and render the video again are in [docs/media/source](docs/media/source/README.md).
 
 | Query | Explorer |
 | --- | --- |
