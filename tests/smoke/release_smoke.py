@@ -48,7 +48,7 @@ PROBES = [
     ("/query", 200, {"type": HTML, "has": "<title>"}),
     ("/observability", 302, {"location": "observability/traces"}),
     ("/observability?x=1", 302, {"location": "observability/traces?x=1"}),
-    ("/observability/zzz", 302, {"location": "traces"}),
+    ("/observability/zzz", 302, {"location": "traces?redirected_from=%2Fobservability%2Fzzz"}),
     ("/observability/traces", 200, {"type": HTML}),
     ("/observability/logs", 200, {"type": HTML}),
     ("/observability/metrics", 200, {"type": HTML}),
@@ -61,7 +61,7 @@ PROBES = [
     ("/system/disks", 200, {"type": HTML}),
     ("/mcp-integration", 200, {"type": HTML}),
     ("/api/mcp/meta", 200, {"type": "application/json", "json": ["enabled", "endpoint_path"]}),
-    ("/system/zzz", 302, {"location": "../system"}),
+    ("/system/zzz", 302, {"location": "../system?redirected_from=%2Fsystem%2Fzzz"}),
     ("/static/does-not-exist.js", 404, {}),
     ("/api/version", 200, {"type": "application/json", "json": ["name", "version", "features"]}),
     # The probes: the process answers; no host answers, so the server is not ready.

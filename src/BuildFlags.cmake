@@ -92,6 +92,11 @@ set(CHDASH_HARDEN ${_chdash_harden_default} CACHE BOOL "Build with the hardening
 if (CHDASH_HARDEN AND NOT MSVC)
   include(CheckCXXSourceCompiles)
   foreach(_flag -fstack-protector-strong -fstack-clash-protection -ftrivial-auto-var-init=zero)
+    # Apple clang accepts -fstack-clash-protection in the check but ignores it, and the dependencies that build with
+    # -Werror (abseil in clickhouse-cpp) stop on "argument unused during compilation": the macOS release failed there.
+    if (APPLE AND _flag STREQUAL "-fstack-clash-protection")
+      continue()
+    endif()
     string(MAKE_C_IDENTIFIER "CHDASH_HAS${_flag}" _var)
     check_cxx_compiler_flag(${_flag} ${_var})
     if (${_var})

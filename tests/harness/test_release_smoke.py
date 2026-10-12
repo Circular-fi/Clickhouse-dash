@@ -58,11 +58,11 @@ FAKE_SERVER = textwrap.dedent('''\
                     return self.send(404, b"no observability view is enabled", "text/plain")
                 return self.send(302, headers=[("Location", "observability/traces" + suffix)])
             if re.fullmatch(r"/observability/(zzz)", path):
-                return self.send(302, headers=[("Location", "traces")])
+                return self.send(302, headers=[("Location", "traces?redirected_from=%2Fobservability%2Fzzz")])
             if path == "/explorer":
                 return self.send(302, headers=[("Location", "explorer/catalog")])
             if path == "/system/zzz":
-                return self.send(302, headers=[("Location", "../system")])
+                return self.send(302, headers=[("Location", "../system?redirected_from=%2Fsystem%2Fzzz")])
             if path == "/static/app_common.js":
                 accepts = "gzip" in self.headers.get("Accept-Encoding", "")
                 headers = [("Cache-Control", "public, max-age=31536000, immutable" if query == "v=0123456789ab" else "no-store")]
