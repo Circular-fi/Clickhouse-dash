@@ -1275,7 +1275,7 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
     form.setAttribute("aria-busy", "true");
     try {
       if (formatting) await formatting;
-      const done = await submit(action, { name: nameInput.value, description: descriptionInput.value, folder: folder.value, sql: chosen(), session });
+      const done = await submit(action, { name: nameInput.value, description: descriptionInput.value, folder: session.folder.value, sql: chosen(), session });
       if (done) return;
     } catch (err) {
       showError(err);
