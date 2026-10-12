@@ -1872,6 +1872,9 @@ test('a long query in a preview (Saved or History) scrolls inside its block, bot
   await openLibrary(page);
   const block = preview(page).locator('.qlSql .sqlBlock__body');
   const scrolls = async () => {
+    // The block of the pane is drawn (a click on a History row shows its preview a frame later, and a busy host a few more).
+    await expect(block).toBeVisible();
+    await expect.poll(() => block.evaluate((el) => el.scrollHeight)).toBeGreaterThan(0);
     const before = await block.evaluate((el) => ({ client: [el.clientWidth, el.clientHeight], scroll: [el.scrollWidth, el.scrollHeight] }));
     // The block fits in the pane (it does not push the pane's content out) and has more to show.
     expect(before.scroll[1]).toBeGreaterThan(before.client[1] * 2);
