@@ -28,22 +28,29 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: #090b0
 .vwrap { position: absolute; inset: 0; opacity: 0; will-change: transform, opacity; }
 .vwrap video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; background: #0d0f12; }
 
-/* callouts */
+/* callouts: a wrapper (it can move with a scroll), its rings and its label */
+.cw { position: absolute; left: 0; top: 0; width: 0; height: 0; }
 #fx { position: absolute; inset: 0; pointer-events: none; }
-.ring { position: absolute; border: 3px solid #7aa5ff; border-radius: 12px; opacity: 0; box-shadow: 0 0 0 5px rgba(74,134,247,0.20), 0 0 28px rgba(74,134,247,0.55), inset 0 0 18px rgba(74,134,247,0.18); }
+.ring { position: absolute; border: 2.5px solid #7aa5ff; border-radius: 10px; opacity: 0; box-shadow: 0 0 0 1px rgba(5, 7, 10, 0.55), 0 0 18px rgba(74, 134, 247, 0.35); }
 .lblbox { position: absolute; height: 70px; display: flex; opacity: 0; }
-.lbl { display: inline-flex; flex-direction: column; gap: 2px; padding: 9px 18px 10px; border-radius: 12px; background: rgba(13, 16, 22, 0.94); border: 1.5px solid rgba(122, 165, 255, 0.85);
-  box-shadow: 0 10px 34px rgba(0,0,0,0.55); white-space: nowrap; }
-.lbl b { font-weight: 600; font-size: 25px; letter-spacing: -0.005em; color: #f2f6ff; }
-.lbl span { font-weight: 400; font-size: 18px; color: #a9bddf; }
+/* a small neutral glass label, tied to its ring by a short leader line that ends in an accent dot */
+.lbl { position: relative; display: inline-flex; flex-direction: column; gap: 2px; padding: 9px 18px 10px; border-radius: 8px; background: rgba(9, 11, 15, 0.9); border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); white-space: nowrap; }
+.lbl b { font-weight: 600; font-size: 25px; letter-spacing: -0.005em; color: #f4f6fa; }
+.lbl b .dot { display: inline-block; width: 8px; height: 8px; margin-right: 11px; border-radius: 50%; background: #7aa5ff; vertical-align: 3px; }
+.lbl span { font-weight: 400; font-size: 18px; color: #b4bccb; padding-left: 19px; }
+.lbl::after { content: ""; position: absolute; background: rgba(255, 255, 255, 0.45); }
+.lbl.s-left::after { right: -17px; top: 50%; width: 17px; height: 1px; }
+.lbl.s-right::after { left: -17px; top: 50%; width: 17px; height: 1px; }
+.lbl.s-top::after { bottom: -17px; left: 50%; width: 1px; height: 17px; }
+.lbl.s-bottom::after { top: -17px; left: 50%; width: 1px; height: 17px; }
 
 /* the strip under the stage: the page switcher and the captions */
 #capstrip { position: absolute; left: 0; top: 995px; width: 1920px; height: 85px; }
 #nav { position: absolute; left: 88px; top: 24px; height: 38px; opacity: 0; }
-.pg { position: absolute; top: 0; height: 38px; line-height: 38px; text-align: center; font-weight: 500; font-size: 19px; color: #8d9bb4; letter-spacing: 0.005em; }
-#pgind { position: absolute; left: 0; top: 0; height: 38px; border-radius: 19px; background: rgba(74,134,247,0.22); border: 1.5px solid rgba(122,165,255,0.75); width: 74px; }
-.pg { z-index: 2; }
-#nav #pgind { z-index: 1; }
+.pg { position: absolute; top: 0; height: 36px; line-height: 36px; text-align: center; font-weight: 500; font-size: 19px; color: #8d9bb4; letter-spacing: 0.005em; z-index: 2; }
+.sep { position: absolute; top: 10px; width: 1px; height: 16px; background: rgba(255, 255, 255, 0.16); }
+#pgind { position: absolute; left: 0; top: 36px; height: 2px; border-radius: 1px; background: #7aa5ff; width: 60px; }
 #caps { position: absolute; left: 800px; width: 1032px; top: 0; height: 85px; }
 .cap { position: absolute; left: 0; width: 1032px; top: 16px; text-align: right; font-weight: 500; font-size: 34px; line-height: 52px; color: #7d8aa3; opacity: 0; white-space: nowrap; letter-spacing: -0.003em; }
 .cap span { color: #7d8aa3; }
@@ -58,8 +65,9 @@ h1 { font-weight: 600; font-size: 128px; letter-spacing: -0.02em; line-height: 1
 .lockup p { margin-top: 18px; font-size: 38px; font-weight: 400; color: #a9bddf; max-width: 1000px; line-height: 1.25; }
 .row { display: flex; align-items: center; gap: 28px; }
 .repo { font-family: "PlexMono", monospace; font-weight: 500; font-size: 34px; color: #cfdcf8; }
-#enav { display: flex; gap: 14px; }
-.pg2 { font-weight: 500; font-size: 26px; padding: 8px 24px; border-radius: 30px; border: 1.5px solid rgba(147,180,255,0.4); color: #b9c9e8; background: rgba(255,255,255,0.03); }
+#enav { display: flex; gap: 0; }
+.pg2 { font-weight: 500; font-size: 26px; padding: 2px 26px; color: #b9c9e8; }
+.pg2 + .pg2 { border-left: 1px solid rgba(255, 255, 255, 0.2); }
 #ecredit { position: absolute; bottom: 44px; font-size: 20px; color: #8d9bb4; }
 
 </style>
@@ -78,61 +86,34 @@ h1 { font-weight: 600; font-size: 128px; letter-spacing: -0.02em; line-height: 1
     <div class="vwrap" id="w-mcp" data-layout-allow-overflow><video id="v-mcp" src="assets/clips/mcp.mp4" muted playsinline data-start="62.741" data-duration="6.948" data-track-index="8"></video></div>
   </div>
   <div id="fx">
-    <div class="ring" id="c0r" style="left:1417.16px;top:479.335px;width:47.06px;height:47.06px"></div>
-    <div class="lblbox" id="c0l" style="left:1060.69px;top:400.335px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl"><b>One click formats it</b></div></div>
-    <div class="ring" id="c1r" style="left:1559.95px;top:68.95px;width:249.8px;height:459.08px"></div>
-    <div class="lblbox" id="c1l" style="left:790.95px;top:263.49px;width:760px;justify-content:flex-end;align-items:center"><div class="lbl"><b>Live while it runs</b><span>rows, bytes, CPU, memory</span></div></div>
-    <div class="ring" id="c2r" style="left:1155.884px;top:540.988px;width:403.643px;height:35.07px"></div>
-    <div class="lblbox" id="c2l" style="left:977.705px;top:585.058px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>Results stream in as they arrive</b></div></div>
-    <div class="ring" id="c3r" style="left:1590.708px;top:538.672px;width:49.24px;height:40.52px"></div>
-    <div class="lblbox" id="c3l" style="left:821.708px;top:523.932px;width:760px;justify-content:flex-end;align-items:center"><div class="lbl"><b>Table or chart, one click</b></div></div>
-    <div class="ring" id="c4r" style="left:1456.4px;top:477.155px;width:51.42px;height:51.42px"></div>
-    <div class="lblbox" id="c4l" style="left:1092px;top:398.155px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl"><b>Query library</b></div></div>
-    <div class="ring" id="c5r" style="left:173.833px;top:845.575px;width:131.717px;height:40.883px"></div>
-    <div class="lblbox" id="c5l" style="left:314.55px;top:831.017px;width:760px;justify-content:flex-start;align-items:center"><div class="lbl"><b>Save query</b></div></div>
-    <div class="ring" id="c6r" style="left:769.7px;top:384.573px;width:973.56px;height:56.87px"></div>
-    <div class="lblbox" id="c6l" style="left:876.48px;top:450.443px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>Pick the folder</b></div></div>
-    <div class="ring" id="c7r" style="left:166.93px;top:406.356px;width:576.8px;height:51.846px"></div>
-    <div class="lblbox" id="c7l" style="left:75.33px;top:467.202px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>The tree shows where it lands</b></div></div>
-    <div class="ring" id="c8r" style="left:246.704px;top:408.195px;width:123.53px;height:48.15px"></div>
-    <div class="lblbox" id="c8l" style="left:68px;top:465.345px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>Saved in shared server storage</b></div></div>
-    <div class="ring" id="c9r" style="left:410.908px;top:172.5px;width:1390.667px;height:202.567px"></div>
-    <div class="lblbox" id="c9l" style="left:726.242px;top:384.067px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>Every database, sized on disk</b></div></div>
-    <div class="ring" id="c10r" style="left:410.908px;top:277.867px;width:1109.083px;height:205.292px"></div>
-    <div class="lblbox" id="c10l" style="left:585.45px;top:492.158px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>Column sizes, compressed</b></div></div>
-    <div class="ring" id="c11r" style="left:580.767px;top:181.583px;width:82.667px;height:37.25px"></div>
-    <div class="lblbox" id="c11l" style="left:242.1px;top:227.833px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>Parts, disks, partitions</b></div></div>
-    <div class="ring" id="c12r" style="left:839.642px;top:181.583px;width:59.05px;height:37.25px"></div>
-    <div class="lblbox" id="c12l" style="left:489.167px;top:227.833px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>The DDL</b></div></div>
-    <div class="ring" id="c13r" style="left:261.033px;top:762.917px;width:1372.5px;height:218.917px"></div>
-    <div class="lblbox" id="c13l" style="left:567.283px;top:683.917px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl"><b>Lineage: tables, views, materialized views</b></div></div>
-    <div class="ring" id="c14r" style="left:1311.067px;top:210.65px;width:333.367px;height:57.233px"></div>
-    <div class="lblbox" id="c14l" style="left:542.067px;top:204.267px;width:760px;justify-content:flex-end;align-items:center"><div class="lbl"><b>Drag a box on the slow band</b></div></div>
-    <div class="ring" id="c15r" style="left:1109.417px;top:782.9px;width:341.542px;height:111.733px"></div>
-    <div class="lblbox" id="c15l" style="left:900.188px;top:903.633px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>feature.flag = new_pricing</b><span>90.5% of the slow traces, 0.9% of the rest</span></div></div>
-    <div class="ring" id="c16r" style="left:93.9px;top:756.093px;width:1726.75px;height:36.16px"></div>
-    <div class="lblbox" id="c16l" style="left:922.442px;top:801.253px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>Where the time goes</b></div></div>
-    <div class="ring" id="c17r" style="left:1009.5px;top:145.25px;width:700.333px;height:282.5px"></div>
-    <div class="lblbox" id="c17l" style="left:240.5px;top:251.5px;width:760px;justify-content:flex-end;align-items:center"><div class="lbl"><b>Service map</b><span>calls, p95 and errors</span></div></div>
-    <div class="ring" id="c18r" style="left:95.717px;top:63.5px;width:231.633px;height:46.333px"></div>
-    <div class="lblbox" id="c18l" style="left:68px;top:118.833px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>Traces, Logs and Metrics: one page</b></div></div>
-    <div class="ring" id="c19r" style="left:413.633px;top:168.867px;width:1405.2px;height:446px"></div>
-    <div class="lblbox" id="c19l" style="left:736.233px;top:89.867px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl"><b>Pick a metric, chart it</b></div></div>
-    <div class="ring" id="c20r" style="left:95.717px;top:167.05px;width:1728.567px;height:89.933px"></div>
-    <div class="lblbox" id="c20l" style="left:580px;top:265.983px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>The server at a glance</b></div></div>
-    <div class="ring" id="c21r" style="left:95.717px;top:554px;width:1728.567px;height:409.667px"></div>
-    <div class="lblbox" id="c21l" style="left:580px;top:475px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl"><b>Performance from the system logs</b></div></div>
-    <div class="ring" id="c22r" style="left:95.717px;top:263.333px;width:1728.567px;height:237.083px"></div>
-    <div class="lblbox" id="c22l" style="left:580px;top:509.417px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>The heaviest query shapes</b></div></div>
-    <div class="ring" id="c23r" style="left:95.717px;top:517.667px;width:645.833px;height:337px"></div>
-    <div class="lblbox" id="c23l" style="left:750.55px;top:651.167px;width:760px;justify-content:flex-start;align-items:center"><div class="lbl"><b>One shape: formatted text, runs, CPU</b></div></div>
-    <div class="ring" id="c24r" style="left:95.717px;top:118px;width:1066.392px;height:148.067px"></div>
-    <div class="lblbox" id="c24l" style="left:248.913px;top:275.067px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl"><b>Access keys: hosts, tools, data</b></div></div>
-    <div class="ring" id="c25r" style="left:411.817px;top:459.533px;width:734.85px;height:309.75px"></div>
-    <div class="lblbox" id="c25l" style="left:68px;top:579.408px;width:760px;justify-content:flex-end;align-items:center"><div class="lbl"><b>Observability</b><span>Traces, Logs, Metrics</span></div></div>
+    <div class="cw" id="c0"><div class="ring" id="c0r0" style="left:1417.16px;top:479.335px;width:47.06px;height:47.06px"></div><div class="lblbox" id="c0l" style="left:1060.69px;top:392.335px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl s-top"><b><i class="dot"></i>One click formats it</b></div></div></div>
+    <div class="cw" id="c1"><div class="ring" id="c1r0" style="left:1559.95px;top:68.95px;width:249.8px;height:459.08px"></div><div class="lblbox" id="c1l" style="left:782.95px;top:263.49px;width:760px;justify-content:flex-end;align-items:center"><div class="lbl s-left"><b><i class="dot"></i>Live while it runs</b><span>rows, bytes, CPU, memory</span></div></div></div>
+    <div class="cw" id="c2"><div class="ring" id="c2r0" style="left:1155.884px;top:540.988px;width:403.643px;height:35.07px"></div><div class="lblbox" id="c2l" style="left:977.705px;top:593.058px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Results stream in as they arrive</b></div></div></div>
+    <div class="cw" id="c3"><div class="ring" id="c3r0" style="left:1590.708px;top:538.672px;width:49.24px;height:40.52px"></div><div class="lblbox" id="c3l" style="left:813.708px;top:523.932px;width:760px;justify-content:flex-end;align-items:center"><div class="lbl s-left"><b><i class="dot"></i>Table or chart, one click</b></div></div></div>
+    <div class="cw" id="c4"><div class="ring" id="c4r0" style="left:1456.4px;top:477.155px;width:51.42px;height:51.42px"></div><div class="lblbox" id="c4l" style="left:1092px;top:390.155px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl s-top"><b><i class="dot"></i>Query library</b></div></div></div>
+    <div class="cw" id="c5"><div class="ring" id="c5r0" style="left:173.833px;top:845.575px;width:131.717px;height:40.883px"></div><div class="lblbox" id="c5l" style="left:322.55px;top:831.017px;width:760px;justify-content:flex-start;align-items:center"><div class="lbl s-right"><b><i class="dot"></i>Save query</b></div></div></div>
+    <div class="cw" id="c6"><div class="ring" id="c6r0" style="left:769.7px;top:384.573px;width:973.56px;height:56.87px"></div><div class="lblbox" id="c6l" style="left:876.48px;top:458.443px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Pick the folder</b></div></div></div>
+    <div class="cw" id="c7"><div class="ring" id="c7r0" style="left:166.93px;top:406.356px;width:576.8px;height:51.846px"></div><div class="lblbox" id="c7l" style="left:75.33px;top:475.202px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>The tree shows where it lands</b></div></div></div>
+    <div class="cw" id="c8"><div class="ring" id="c8r0" style="left:246.704px;top:408.195px;width:123.53px;height:48.15px"></div><div class="lblbox" id="c8l" style="left:68px;top:473.345px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Saved in shared server storage</b></div></div></div>
+    <div class="cw" id="c9"><div class="ring" id="c9r0" style="left:410.908px;top:172.5px;width:1390.667px;height:202.567px"></div><div class="lblbox" id="c9l" style="left:726.242px;top:392.067px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Every database, sized on disk</b></div></div></div>
+    <div class="cw" id="c10"><div class="ring" id="c10r0" style="left:410.908px;top:277.867px;width:1109.083px;height:205.292px"></div><div class="lblbox" id="c10l" style="left:585.45px;top:500.158px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Column sizes, compressed</b></div></div></div>
+    <div class="cw" id="c11"><div class="ring" id="c11r0" style="left:580.767px;top:181.583px;width:82.667px;height:37.25px"></div><div class="lblbox" id="c11l" style="left:242.1px;top:235.833px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Parts, disks, partitions</b></div></div></div>
+    <div class="cw" id="c12"><div class="ring" id="c12r0" style="left:738.817px;top:181.583px;width:60.867px;height:37.25px"></div><div class="lblbox" id="c12l" style="left:389.25px;top:235.833px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>The DDL</b></div></div></div>
+    <div class="cw" id="c13"><div class="ring" id="c13r0" style="left:428.167px;top:417.75px;width:1354.333px;height:264.333px"></div><div class="lblbox" id="c13l" style="left:725.333px;top:699.083px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Lineage: tables, views, materialized views</b></div></div></div>
+    <div class="cw" id="c14"><div class="ring" id="c14r0" style="left:1311.067px;top:210.65px;width:333.367px;height:57.233px"></div><div class="lblbox" id="c14l" style="left:534.067px;top:204.267px;width:760px;justify-content:flex-end;align-items:center"><div class="lbl s-left"><b><i class="dot"></i>Drag a box on the slow band</b></div></div></div>
+    <div class="cw" id="c15"><div class="ring" id="c15r0" style="left:1109.417px;top:782.9px;width:341.542px;height:111.733px"></div><div class="lblbox" id="c15l" style="left:900.188px;top:911.633px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>feature.flag = new_pricing</b><span>90.5% of the slow traces, 0.9% of the rest</span></div></div></div>
+    <div class="cw" id="c16"><div class="ring" id="c16r0" style="left:93.9px;top:756.093px;width:1726.75px;height:36.16px"></div><div class="lblbox" id="c16l" style="left:922.442px;top:809.253px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Where the time goes</b></div></div></div>
+    <div class="cw" id="c17"><div class="ring" id="c17r0" style="left:301px;top:281.5px;width:1308.917px;height:464.167px"></div><div class="lblbox" id="c17l" style="left:575.458px;top:194.5px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl s-top"><b><i class="dot"></i>Service map</b><span>calls, p95 and errors</span></div></div></div>
+    <div class="cw" id="c18"><div class="ring" id="c18r0" style="left:95.717px;top:63.5px;width:231.633px;height:46.333px"></div><div class="lblbox" id="c18l" style="left:68px;top:126.833px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Traces, Logs and Metrics: one page</b></div></div></div>
+    <div class="cw" id="c19"><div class="ring" id="c19r0" style="left:413.633px;top:168.867px;width:1405.2px;height:446px"></div><div class="lblbox" id="c19l" style="left:736.233px;top:81.867px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl s-top"><b><i class="dot"></i>Pick a metric, chart it</b></div></div></div>
+    <div class="cw" id="c20"><div class="ring" id="c20r0" style="left:95.717px;top:167.05px;width:1728.567px;height:89.933px"></div><div class="lblbox" id="c20l" style="left:580px;top:273.983px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>The server at a glance</b></div></div></div>
+    <div class="cw" id="c21"><div class="ring" id="c21r0" style="left:95.717px;top:554px;width:1728.567px;height:409.667px"></div><div class="lblbox" id="c21l" style="left:580px;top:467px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl s-top"><b><i class="dot"></i>Performance from the system logs</b></div></div></div>
+    <div class="cw" id="c22"><div class="ring" id="c22r0" style="left:95.717px;top:517.667px;width:1728.567px;height:373.333px"></div><div class="lblbox" id="c22l" style="left:580px;top:430.667px;width:760px;justify-content:center;align-items:flex-end"><div class="lbl s-top"><b><i class="dot"></i>One shape: its runs, duration and CPU</b></div></div></div>
+    <div class="cw" id="c23"><div class="ring" id="c23r0" style="left:95.717px;top:118px;width:1066.392px;height:148.067px"></div><div class="lblbox" id="c23l" style="left:248.913px;top:283.067px;width:760px;justify-content:center;align-items:flex-start"><div class="lbl s-bottom"><b><i class="dot"></i>Access keys: hosts, tools, data</b></div></div></div>
+    <div class="cw" id="c24"><div class="ring" id="c24r0" style="left:411.817px;top:672.083px;width:368.792px;height:88.117px"></div><div class="ring" id="c24r1" style="left:779.692px;top:459.533px;width:366.975px;height:168.958px"></div><div class="ring" id="c24r2" style="left:779.692px;top:629.392px;width:366.975px;height:137.167px"></div><div class="lblbox" id="c24l" style="left:68px;top:681.142px;width:326.817px;justify-content:flex-end;align-items:center"><div class="lbl s-left"><b><i class="dot"></i>Observability</b><span>Traces, Logs, Metrics</span></div></div></div>
   </div>
   <div id="capstrip">
-    <div id="nav" style="width:496px"><div id="pgind"></div><span class="pg" style="left:0px;width:74px">Query</span><span class="pg" style="left:80px;width:100px">Explorer</span><span class="pg" style="left:186px;width:142px">Observability</span><span class="pg" style="left:334px;width:90px">System</span><span class="pg" style="left:430px;width:66px">MCP</span></div>
+    <div id="nav" style="width:560px"><div id="pgind"></div><span class="pg" id="pg0" style="left:0px;width:74px">Query</span><span class="pg" id="pg1" style="left:96px;width:100px">Explorer</span><i class="sep" style="left:85px"></i><span class="pg" id="pg2" style="left:218px;width:142px">Observability</span><i class="sep" style="left:207px"></i><span class="pg" id="pg3" style="left:382px;width:90px">System</span><i class="sep" style="left:371px"></i><span class="pg" id="pg4" style="left:494px;width:66px">MCP</span><i class="sep" style="left:483px"></i></div>
     <div id="caps" data-layout-allow-overlap><div class="cap" id="k0"><span id="k0w0">This</span> <span id="k0w1">is</span> <span id="k0w2">ClickHouse</span> <span id="k0w3">Dash:</span></div><div class="cap" id="k1"><span id="k1w0">a</span> <span id="k1w1">lightweight,</span></div><div class="cap" id="k2"><span id="k2w0">real-time</span> <span id="k2w1">dashboard</span> <span id="k2w2">for</span> <span id="k2w3">ClickHouse.</span></div><div class="cap" id="k3"><span id="k3w0">Write</span> <span id="k3w1">a</span> <span id="k3w2">query,</span></div><div class="cap" id="k4"><span id="k4w0">and</span> <span id="k4w1">format</span> <span id="k4w2">it.</span></div><div class="cap" id="k5"><span id="k5w0">Run</span> <span id="k5w1">it,</span> <span id="k5w2">and</span> <span id="k5w3">watch</span> <span id="k5w4">the</span> <span id="k5w5">numbers</span> <span id="k5w6">fill</span> <span id="k5w7">in</span> <span id="k5w8">live.</span></div><div class="cap" id="k6"><span id="k6w0">Switch</span> <span id="k6w1">to</span> <span id="k6w2">a</span> <span id="k6w3">chart,</span></div><div class="cap" id="k7"><span id="k7w0">and</span> <span id="k7w1">explore</span> <span id="k7w2">it</span> <span id="k7w3">right</span> <span id="k7w4">there.</span></div><div class="cap" id="k8"><span id="k8w0">Keep</span> <span id="k8w1">the</span> <span id="k8w2">good</span> <span id="k8w3">ones.</span></div><div class="cap" id="k9"><span id="k9w0">Name</span> <span id="k9w1">it,</span> <span id="k9w2">file</span> <span id="k9w3">it</span> <span id="k9w4">in</span> <span id="k9w5">a</span> <span id="k9w6">folder,</span></div><div class="cap" id="k10"><span id="k10w0">and</span> <span id="k10w1">the</span> <span id="k10w2">whole</span> <span id="k10w3">team</span> <span id="k10w4">can</span> <span id="k10w5">open</span> <span id="k10w6">it.</span></div><div class="cap" id="k11"><span id="k11w0">The</span> <span id="k11w1">Explorer</span> <span id="k11w2">sizes</span> <span id="k11w3">every</span> <span id="k11w4">database,</span></div><div class="cap" id="k12"><span id="k12w0">opens</span> <span id="k12w1">any</span> <span id="k12w2">table</span> <span id="k12w3">down</span> <span id="k12w4">to</span> <span id="k12w5">its</span> <span id="k12w6">parts</span> <span id="k12w7">and</span> <span id="k12w8">its</span> <span id="k12w9">DDL,</span></div><div class="cap" id="k13"><span id="k13w0">and</span> <span id="k13w1">draws</span> <span id="k13w2">the</span> <span id="k13w3">lineage.</span></div><div class="cap" id="k14"><span id="k14w0">Chasing</span> <span id="k14w1">a</span> <span id="k14w2">slow</span> <span id="k14w3">checkout?</span></div><div class="cap" id="k15"><span id="k15w0">Drag</span> <span id="k15w1">a</span> <span id="k15w2">box</span> <span id="k15w3">over</span> <span id="k15w4">the</span> <span id="k15w5">slow</span> <span id="k15w6">band,</span></div><div class="cap" id="k16"><span id="k16w0">and</span> <span id="k16w1">Dash</span> <span id="k16w2">shows</span> <span id="k16w3">what</span> <span id="k16w4">sets</span> <span id="k16w5">those</span> <span id="k16w6">traces</span> <span id="k16w7">apart.</span></div><div class="cap" id="k17"><span id="k17w0">Open</span> <span id="k17w1">one,</span> <span id="k17w2">and</span> <span id="k17w3">follow</span> <span id="k17w4">it</span> <span id="k17w5">across</span> <span id="k17w6">every</span> <span id="k17w7">service.</span></div><div class="cap" id="k18"><span id="k18w0">Logs</span> <span id="k18w1">are</span> <span id="k18w2">right</span> <span id="k18w3">there,</span></div><div class="cap" id="k19"><span id="k19w0">and</span> <span id="k19w1">metrics</span> <span id="k19w2">are</span> <span id="k19w3">one</span> <span id="k19w4">click</span> <span id="k19w5">away.</span></div><div class="cap" id="k20"><span id="k20w0">System</span> <span id="k20w1">keeps</span> <span id="k20w2">an</span> <span id="k20w3">eye</span> <span id="k20w4">on</span> <span id="k20w5">the</span> <span id="k20w6">server</span> <span id="k20w7">itself,</span></div><div class="cap" id="k21"><span id="k21w0">with</span> <span id="k21w1">live</span> <span id="k21w2">charts,</span></div><div class="cap" id="k22"><span id="k22w0">and</span> <span id="k22w1">the</span> <span id="k22w2">heaviest</span> <span id="k22w3">query</span> <span id="k22w4">shapes,</span></div><div class="cap" id="k23"><span id="k23w0">each</span> <span id="k23w1">one</span> <span id="k23w2">a</span> <span id="k23w3">click</span> <span id="k23w4">from</span> <span id="k23w5">its</span> <span id="k23w6">formatted</span> <span id="k23w7">text.</span></div><div class="cap" id="k24"><span id="k24w0">When</span> <span id="k24w1">an</span> <span id="k24w2">AI</span> <span id="k24w3">assistant</span> <span id="k24w4">needs</span> <span id="k24w5">your</span> <span id="k24w6">data,</span></div><div class="cap" id="k25"><span id="k25w0">give</span> <span id="k25w1">it</span> <span id="k25w2">a</span> <span id="k25w3">key,</span></div><div class="cap" id="k26"><span id="k26w0">with</span> <span id="k26w1">only</span> <span id="k26w2">the</span> <span id="k26w3">tools</span> <span id="k26w4">and</span> <span id="k26w5">tables</span> <span id="k26w6">you</span> <span id="k26w7">allow.</span></div><div class="cap" id="k27"><span id="k27w0">ClickHouse</span> <span id="k27w1">Dash.</span></div><div class="cap" id="k28"><span id="k28w0">One</span> <span id="k28w1">self-contained</span> <span id="k28w2">binary.</span></div></div>
   </div>
   <div id="title" class="card"><div class="lockup"><svg class="logo t" viewBox="0 0 18 18" width="140" height="140"><rect class="b1" x="0.75" y="10.5" width="3" height="6" rx="1"/><rect class="b2" x="5.25" y="5.5" width="3" height="11" rx="1"/><rect class="b3" x="9.75" y="8" width="3" height="8.5" rx="1"/><rect class="b4" x="14.25" y="1.5" width="3" height="15" rx="1"/></svg><div><h1 id="tname">ClickHouse Dash</h1><p id="ttag">A lightweight real-time ClickHouse query dashboard.</p></div></div></div>
@@ -175,118 +156,125 @@ tl.to("#w-logs_metrics", { x: -34, scale: 0.992, duration: 0.45, ease: "power2.i
 tl.fromTo("#w-system", { opacity: 0, x: 46, scale: 1 }, { opacity: 1, x: 0, scale: 1, duration: 0.35, ease: "power3.out" }, 54.556);
 tl.to("#w-system", { x: -34, scale: 0.992, duration: 0.45, ease: "power2.in" }, 62.741);
 tl.fromTo("#w-mcp", { opacity: 0, x: 46, scale: 1 }, { opacity: 1, x: 0, scale: 1, duration: 0.35, ease: "power3.out" }, 62.741);
-tl.fromTo("#c0r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 9.412);
+tl.fromTo("#c0r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 9.412);
+tl.to("#c0r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 10.636);
 tl.fromTo("#c0l", { opacity: 0, x: 0, y: 10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 9.512);
-tl.to("#c0r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 11.162);
-tl.to("#c0l", { opacity: 0, x: 0, y: -5, duration: 0.25, ease: "power2.in" }, 11.162);
-tl.fromTo("#c1r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 11.486);
+tl.to("#c0l", { opacity: 0, x: 0, y: -5, duration: 0.25, ease: "power2.in" }, 10.636);
+tl.fromTo("#c1r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 11.486);
+tl.to("#c1r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 13.899);
 tl.fromTo("#c1l", { opacity: 0, x: 14, y: 0 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 11.586);
-tl.to("#c1r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 13.899);
 tl.to("#c1l", { opacity: 0, x: -7, y: 0, duration: 0.25, ease: "power2.in" }, 13.899);
-tl.fromTo("#c2r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 13.262);
+tl.fromTo("#c2r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 13.262);
+tl.to("#c2r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 13.899);
 tl.fromTo("#c2l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 13.362);
-tl.to("#c2r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 13.899);
 tl.to("#c2l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 13.899);
-tl.fromTo("#c3r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 15.484);
+tl.fromTo("#c3r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 15.484);
+tl.to("#c3r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 17.534);
 tl.fromTo("#c3l", { opacity: 0, x: 14, y: 0 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 15.584);
-tl.to("#c3r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 17.534);
 tl.to("#c3l", { opacity: 0, x: -7, y: 0, duration: 0.25, ease: "power2.in" }, 17.534);
-tl.fromTo("#c4r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 19.3);
+tl.fromTo("#c4r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 19.3);
+tl.to("#c4r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 19.95);
 tl.fromTo("#c4l", { opacity: 0, x: 0, y: 10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 19.4);
-tl.to("#c4r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 20.55);
-tl.to("#c4l", { opacity: 0, x: 0, y: -5, duration: 0.25, ease: "power2.in" }, 20.55);
-tl.fromTo("#c5r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 20.5);
+tl.to("#c4l", { opacity: 0, x: 0, y: -5, duration: 0.25, ease: "power2.in" }, 19.95);
+tl.fromTo("#c5r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 20.5);
+tl.to("#c5r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 21.45);
 tl.fromTo("#c5l", { opacity: 0, x: -14, y: 0 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 20.6);
-tl.to("#c5r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 21.45);
 tl.to("#c5l", { opacity: 0, x: 7, y: 0, duration: 0.25, ease: "power2.in" }, 21.45);
-tl.fromTo("#c6r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 22.688);
+tl.fromTo("#c6r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 22.688);
+tl.to("#c6r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 23.938);
 tl.fromTo("#c6l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 22.788);
-tl.to("#c6r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 23.938);
 tl.to("#c6l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 23.938);
-tl.fromTo("#c7r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 24.338);
+tl.fromTo("#c7r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 24.338);
+tl.to("#c7r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 25.188);
 tl.fromTo("#c7l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 24.438);
-tl.to("#c7r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 25.188);
 tl.to("#c7l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 25.188);
-tl.fromTo("#c8r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 25.554);
+tl.fromTo("#c8r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 25.554);
+tl.to("#c8r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 26.438);
 tl.fromTo("#c8l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 25.654);
-tl.to("#c8r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 26.438);
 tl.to("#c8l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 26.438);
-tl.fromTo("#c9r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 27.776);
+tl.fromTo("#c9r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 27.776);
+tl.to("#c9r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 28.465);
 tl.fromTo("#c9l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 27.876);
-tl.to("#c9r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 29.226);
-tl.to("#c9l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 29.226);
-tl.fromTo("#c10r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 30.402);
+tl.to("#c9l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 28.465);
+tl.fromTo("#c10r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 30.402);
+tl.to("#c10r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 31.099);
 tl.fromTo("#c10l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 30.502);
-tl.to("#c10r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 32.152);
-tl.to("#c10l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 32.152);
-tl.fromTo("#c11r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 31.499);
+tl.to("#c10l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 31.099);
+tl.fromTo("#c11r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 31.499);
+tl.to("#c11r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 32.174);
 tl.fromTo("#c11l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 31.599);
-tl.to("#c11r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 32.649);
-tl.to("#c11l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 32.649);
-tl.fromTo("#c12r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 32.574);
+tl.to("#c11l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 32.174);
+tl.fromTo("#c12r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 32.574);
+tl.to("#c12r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 33.5);
 tl.fromTo("#c12l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 32.674);
-tl.to("#c12r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 33.624);
-tl.to("#c12l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 33.624);
-tl.fromTo("#c13r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 34.15);
-tl.fromTo("#c13l", { opacity: 0, x: 0, y: 10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 34.25);
-tl.to("#c13r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 35.703);
-tl.to("#c13l", { opacity: 0, x: 0, y: -5, duration: 0.25, ease: "power2.in" }, 35.703);
-tl.fromTo("#c14r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 37.565);
+tl.to("#c12l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 33.5);
+tl.fromTo("#c13r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 34.15);
+tl.to("#c13r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 35.703);
+tl.fromTo("#c13l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 34.25);
+tl.to("#c13l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 35.703);
+tl.fromTo("#c14r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 37.565);
+tl.to("#c14r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 39.915);
 tl.fromTo("#c14l", { opacity: 0, x: 14, y: 0 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 37.665);
-tl.to("#c14r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 39.915);
 tl.to("#c14l", { opacity: 0, x: -7, y: 0, duration: 0.25, ease: "power2.in" }, 39.915);
-tl.fromTo("#c15r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 38.431);
+tl.fromTo("#c15r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 38.431);
+tl.to("#c15r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 40.224);
 tl.fromTo("#c15l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 38.531);
-tl.to("#c15r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 40.281);
-tl.to("#c15l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 40.281);
-tl.fromTo("#c16r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 42.819);
+tl.to("#c15l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 40.224);
+tl.fromTo("#c16r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 42.819);
+tl.to("#c16r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 43.869);
 tl.fromTo("#c16l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 42.919);
-tl.to("#c16r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 44.469);
-tl.to("#c16l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 44.469);
-tl.fromTo("#c17r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 45.226);
-tl.fromTo("#c17l", { opacity: 0, x: 14, y: 0 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 45.326);
-tl.to("#c17r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 46.616);
-tl.to("#c17l", { opacity: 0, x: -7, y: 0, duration: 0.25, ease: "power2.in" }, 46.616);
-tl.fromTo("#c18r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 47.016);
+tl.to("#c16l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 43.869);
+tl.fromTo("#c17r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 45.226);
+tl.to("#c17r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 46.616);
+tl.fromTo("#c17l", { opacity: 0, x: 0, y: 10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 45.326);
+tl.to("#c17l", { opacity: 0, x: 0, y: -5, duration: 0.25, ease: "power2.in" }, 46.616);
+tl.fromTo("#c18r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 47.016);
+tl.to("#c18r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 48.566);
 tl.fromTo("#c18l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 47.116);
-tl.to("#c18r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 48.566);
 tl.to("#c18l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 48.566);
-tl.fromTo("#c19r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 53.087);
+tl.fromTo("#c19r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 53.087);
+tl.to("#c19r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 54.256);
 tl.fromTo("#c19l", { opacity: 0, x: 0, y: 10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 53.187);
-tl.to("#c19r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 54.256);
 tl.to("#c19l", { opacity: 0, x: 0, y: -5, duration: 0.25, ease: "power2.in" }, 54.256);
-tl.fromTo("#c20r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 55.361);
+tl.fromTo("#c20r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 55.361);
+tl.to("#c20r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 56.311);
 tl.fromTo("#c20l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 55.461);
-tl.to("#c20r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 56.311);
 tl.to("#c20l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 56.311);
-tl.fromTo("#c21r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 56.593);
+tl.fromTo("#c20", { y: 0 }, { y: -1199, duration: 0.804, ease: "power3.inOut" }, 55.689);
+tl.fromTo("#c21r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 56.593);
+tl.to("#c21r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 58.143);
 tl.fromTo("#c21l", { opacity: 0, x: 0, y: 10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 56.693);
-tl.to("#c21r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 58.143);
 tl.to("#c21l", { opacity: 0, x: 0, y: -5, duration: 0.25, ease: "power2.in" }, 58.143);
-tl.fromTo("#c22r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 59.598);
-tl.fromTo("#c22l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 59.698);
-tl.to("#c22r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 60.948);
-tl.to("#c22l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 60.948);
-tl.fromTo("#c23r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 61.131);
-tl.fromTo("#c23l", { opacity: 0, x: -14, y: 0 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 61.231);
-tl.to("#c23r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 62.441);
-tl.to("#c23l", { opacity: 0, x: 7, y: 0, duration: 0.25, ease: "power2.in" }, 62.441);
-tl.fromTo("#c24r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 63.687);
-tl.fromTo("#c24l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 63.787);
-tl.to("#c24r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 65.037);
-tl.to("#c24l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 65.037);
-tl.fromTo("#c25r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 66.186);
-tl.fromTo("#c25l", { opacity: 0, x: 14, y: 0 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 66.286);
-tl.to("#c25r", { opacity: 0, duration: 0.25, ease: "power2.in" }, 68.989);
-tl.to("#c25l", { opacity: 0, x: -7, y: 0, duration: 0.25, ease: "power2.in" }, 68.989);
-tl.set("#pgind", { x: 0, width: 74 }, 0);
-tl.to("#pgind", { x: 0, width: 74, duration: 0.45, ease: "power3.inOut" }, 14.199);
-tl.to("#pgind", { x: 0, width: 74, duration: 0.45, ease: "power3.inOut" }, 19.11);
-tl.to("#pgind", { x: 80, width: 100, duration: 0.45, ease: "power3.inOut" }, 26.738);
-tl.to("#pgind", { x: 186, width: 142, duration: 0.45, ease: "power3.inOut" }, 36.003);
-tl.to("#pgind", { x: 186, width: 142, duration: 0.45, ease: "power3.inOut" }, 46.916);
-tl.to("#pgind", { x: 334, width: 90, duration: 0.45, ease: "power3.inOut" }, 54.556);
-tl.to("#pgind", { x: 430, width: 66, duration: 0.45, ease: "power3.inOut" }, 62.741);
+tl.fromTo("#c22r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 61.131);
+tl.to("#c22r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 62.441);
+tl.fromTo("#c22l", { opacity: 0, x: 0, y: 10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 61.231);
+tl.to("#c22l", { opacity: 0, x: 0, y: -5, duration: 0.25, ease: "power2.in" }, 62.441);
+tl.fromTo("#c23r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 63.687);
+tl.to("#c23r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 64.986);
+tl.fromTo("#c23l", { opacity: 0, x: 0, y: -10 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 63.787);
+tl.to("#c23l", { opacity: 0, x: 0, y: 5, duration: 0.25, ease: "power2.in" }, 64.986);
+tl.fromTo("#c24r0", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 66.186);
+tl.to("#c24r0", { opacity: 0, duration: 0.25, ease: "power2.in" }, 68.989);
+tl.fromTo("#c24r1", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 66.366);
+tl.to("#c24r1", { opacity: 0, duration: 0.25, ease: "power2.in" }, 68.989);
+tl.fromTo("#c24r2", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, 66.546);
+tl.to("#c24r2", { opacity: 0, duration: 0.25, ease: "power2.in" }, 68.989);
+tl.fromTo("#c24l", { opacity: 0, x: 14, y: 0 }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, 66.286);
+tl.to("#c24l", { opacity: 0, x: -7, y: 0, duration: 0.25, ease: "power2.in" }, 68.989);
+tl.set("#pgind", { x: 12, width: 50 }, 0);
+tl.set("#pg0", { color: "#f4f7ff" }, 0);
+tl.to("#pgind", { x: 108, width: 76, duration: 0.45, ease: "power3.inOut" }, 26.738);
+tl.to("#pg0", { color: "#8d9bb4", duration: 0.3 }, 26.738);
+tl.to("#pg1", { color: "#f4f7ff", duration: 0.3 }, 26.838);
+tl.to("#pgind", { x: 230, width: 118, duration: 0.45, ease: "power3.inOut" }, 36.003);
+tl.to("#pg1", { color: "#8d9bb4", duration: 0.3 }, 36.003);
+tl.to("#pg2", { color: "#f4f7ff", duration: 0.3 }, 36.103);
+tl.to("#pgind", { x: 394, width: 66, duration: 0.45, ease: "power3.inOut" }, 54.556);
+tl.to("#pg2", { color: "#8d9bb4", duration: 0.3 }, 54.556);
+tl.to("#pg3", { color: "#f4f7ff", duration: 0.3 }, 54.656);
+tl.to("#pgind", { x: 506, width: 42, duration: 0.45, ease: "power3.inOut" }, 62.741);
+tl.to("#pg3", { color: "#8d9bb4", duration: 0.3 }, 62.741);
+tl.to("#pg4", { color: "#f4f7ff", duration: 0.3 }, 62.841);
 tl.fromTo("#nav", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, 5.111);
 tl.to("#nav", { opacity: 0, y: 10, duration: 0.35 }, 69.189);
 tl.fromTo("#k0", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.16, ease: "power2.out" }, 0.3);

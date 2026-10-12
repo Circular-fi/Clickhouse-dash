@@ -47,7 +47,7 @@ const SCENES = [
 // `side` is where the label sits: left, right, top, bottom of the ring.
 const C = {
   query_a: [
-    { at: ["formatted", -0.15], dur: 2.0, box: "format", side: "top", text: "One click formats it" },
+    { at: ["formatted", -0.15], dur: 2.0, until: ["run", -0.2], box: "format", side: "top", text: "One click formats it" },
     { at: ["run", 0.4], dur: 4.6, box: "tiles", side: "left", text: "Live while it runs", sub: "rows, bytes, CPU, memory" },
     { at: ["tilesDone", 0.2], dur: 2.4, box: "summary", side: "bottom", text: "Results stream in as they arrive" },
   ],
@@ -55,38 +55,37 @@ const C = {
     { at: ["chart", 0.0], dur: 2.3, box: "chartToggle", side: "left", text: "Table or chart, one click" },
   ],
   save: [
-    { at: ["libOpen", -0.85], dur: 1.5, box: "lib", side: "top", text: "Query library" },
+    { at: ["libOpen", -0.85], dur: 1.5, until: ["libOpen", 0.05], box: "lib", side: "top", text: "Query library" },
     { at: ["libOpen", 0.35], dur: 1.2, box: [100, 921, 134, 34], side: "right", text: "Save query" },
     { at: ["folder", -1.6], dur: 1.5, box: "folderSel", side: "bottom", text: "Pick the folder" },
     { at: ["folder", 0.05], dur: 1.1, box: "ghost2", side: "bottom", text: "The tree shows where it lands" },
     { at: ["saved", 0.15], dur: 2.5, box: "saved", side: "bottom", text: "Saved in shared server storage" },
   ],
   explorer: [
-    { at: ["catalog", 0.2], dur: 1.7, box: [361, 180, 1520, 212], side: "bottom", text: "Every database, sized on disk" },
-    { at: ["table", 0.15], dur: 2.0, box: [361, 296, 1210, 215], side: "bottom", text: "Column sizes, compressed" },
-    { at: ["storage", 0.0], dur: 1.4, box: [548, 190, 80, 30], side: "bottom", text: "Parts, disks, partitions" },
-    { at: ["ddl", 0.0], dur: 1.3, box: [833, 190, 54, 30], side: "bottom", text: "The DDL" },
-    { at: ["graph", 0.3], dur: 2.2, box: [196, 830, 1500, 230], side: "top", text: "Lineage: tables, views, materialized views" },
+    { at: ["catalog", 0.2], dur: 1.7, until: ["db", -0.15], box: [361, 180, 1520, 212], side: "bottom", text: "Every database, sized on disk" },
+    { at: ["table", 0.15], dur: 2.0, until: ["storage", -0.15], box: [361, 296, 1210, 215], side: "bottom", text: "Column sizes, compressed" },
+    { at: ["storage", 0.0], dur: 1.4, until: ["ddl", -0.15], box: [548, 190, 80, 30], side: "bottom", text: "Parts, disks, partitions" },
+    { at: ["ddl", 0.0], dur: 1.3, until: ["graph", -0.1], box: [722, 190, 56, 30], side: "bottom", text: "The DDL" },
+    { at: ["graph", 0.3], dur: 2.2, box: [380, 450, 1480, 280], side: "bottom", text: "Lineage: tables, views, materialized views" },
   ],
   traces: [
-    { at: ["boxed", -0.5], dur: 2.6, box: [1352, 222, 356, 52], side: "left", text: "Drag a box on the slow band" },
-    { at: ["deltas", 0.35], dur: 2.1, box: [1130, 852, 365, 112], side: "bottom", text: "feature.flag = new_pricing", sub: "90.5% of the slow traces, 0.9% of the rest" },
-    { at: ["bar", -1.0], dur: 1.9, box: "fees", full: true, side: "bottom", ldx: 380, text: "Where the time goes" },
-    { at: ["map", 0.1], dur: 2.2, box: [1020, 150, 760, 300], side: "left", text: "Service map", sub: "calls, p95 and errors" },
+    { at: ["boxed", -0.5], dur: 2.6, until: ["list", -0.15], box: [1352, 222, 356, 52], side: "left", text: "Drag a box on the slow band" },
+    { at: ["deltas", 0.35], dur: 2.1, until: ["list", -0.15], box: [1130, 852, 365, 112], side: "bottom", text: "feature.flag = new_pricing", sub: "90.5% of the slow traces, 0.9% of the rest" },
+    { at: ["bar", -1.0], dur: 1.9, until: ["bar", 0.3], box: "fees", full: true, side: "bottom", ldx: 380, text: "Where the time goes" },
+    { at: ["map", 0.1], dur: 2.2, box: [240, 300, 1430, 500], side: "top", text: "Service map", sub: "calls, p95 and errors" },
   ],
   logs_metrics: [
     { at: ["start", 0.1], dur: 1.8, box: [14, 60, 244, 40], side: "bottom", text: "Traces, Logs and Metrics: one page" },
     { at: ["chart", 0.2], dur: 2.0, box: [364, 176, 1536, 480], side: "top", text: "Pick a metric, chart it" },
   ],
   system: [
-    { at: ["overview", 0.1], dur: 1.2, box: [14, 174, 1892, 88], side: "bottom", text: "The server at a glance" },
+    { at: ["overview", 0.1], dur: 1.2, follow: { from: "scrollStart", to: "perf", dy: -1320 }, box: [14, 174, 1892, 88], side: "bottom", text: "The server at a glance" },
     { at: ["perf", 0.1], dur: 1.8, box: [14, 600, 1892, 440], side: "top", text: "Performance from the system logs" },
-    { at: ["queries", 0.1], dur: 1.6, box: [14, 280, 1892, 250], side: "bottom", text: "The heaviest query shapes" },
-    { at: ["shape", 0.15], dur: 2.4, box: [14, 560, 700, 360], side: "right", text: "One shape: formatted text, runs, CPU" },
+    { at: ["shape", 0.15], dur: 2.4, box: [14, 560, 1892, 400], side: "top", text: "One shape: its runs, duration and CPU" },
   ],
   mcp: [
-    { at: ["keys", 0.0], dur: 1.6, box: [14, 120, 1163, 152], side: "bottom", text: "Access keys: hosts, tools, data" },
-    { at: ["open", 0.9], dur: 3.4, box: [362, 496, 798, 330], side: "left", text: "Observability", sub: "Traces, Logs, Metrics" },
+    { at: ["keys", 0.0], dur: 1.6, until: ["open", -0.05], box: [14, 120, 1163, 152], side: "bottom", text: "Access keys: hosts, tools, data" },
+    { at: ["open", 0.9], dur: 3.4, box: [362, 730, 395, 86], extra: [[767, 496, 393, 175], [767, 683, 393, 140]], side: "left", text: "Observability", sub: "Traces, Logs, Metrics" },
   ],
 };
 
@@ -269,44 +268,69 @@ for (const s of SCENES) {
     let [bx, by, bw, bh] = box;
     if (c.full) { bx = 12; bw = 1890; }
     const X = gx(bx), Y = gy(by), W = bw * SC, H = bh * SC;
-    const t0 = f3(s.start + (s.clip.marks[c.at[0]] ?? 0) + c.at[1]);
-    const t1 = f3(Math.min(t0 + c.dur, s.start + s.dur - 0.05));
-    if (t1 - t0 < 0.8) console.warn("short callout", s.id, c.text, t1 - t0);
-    const M = 14, BOX = 760;
+    const mk = (name, off = 0) => s.start + (s.clip.marks[name] ?? 0) + off;
+    const t0 = f3(mk(c.at[0], c.at[1]));
+    // a callout ends when its time is over, when the page changes under it (`until`), or with the scene
+    let tEnd = Math.min(t0 + c.dur, s.start + s.dur - 0.05);
+    if (c.until) tEnd = Math.min(tEnd, mk(c.until[0], c.until[1]));
+    if (c.follow) tEnd = Math.min(Math.max(tEnd, mk(c.follow.to)), s.start + s.dur - 0.05);
+    const t1 = f3(tEnd);
+    if (t1 - t0 < 0.7) console.warn("short callout", s.id, c.text, (t1 - t0).toFixed(2));
+    const M = 22, BOX = 760;
     let lx, ly, jc = "center", al = "center";
     const cx = X + W / 2 + (c.ldx || 0) * SC;
     if (c.side === "top") { lx = cx - BOX / 2; ly = Y - M - 70; al = "flex-end"; }
     if (c.side === "bottom") { lx = cx - BOX / 2; ly = Y + H + M; al = "flex-start"; }
-    if (c.side === "left") { lx = X - M - BOX; ly = Y + H / 2 - 35; jc = "flex-end"; }
-    if (c.side === "right") { lx = X + W + M; ly = Y + H / 2 - 35; jc = "flex-start"; }
+    let BW = BOX;
+    // a label at the side of its ring keeps touching the ring: it gets a narrower box when the stage edge is near
+    if (c.side === "left") { BW = Math.min(BOX, X - M - (ST.x - 20)); lx = X - M - BW; ly = Y + H / 2 - 35; jc = "flex-end"; }
+    if (c.side === "right") { BW = Math.min(BOX, ST.x + ST.w + 20 - (X + W + M)); lx = X + W + M; ly = Y + H / 2 - 35; jc = "flex-start"; }
     // keep the label inside the stage
-    lx = Math.max(ST.x - 20, Math.min(lx, ST.x + ST.w + 20 - BOX));
+    if (c.side === "top" || c.side === "bottom") lx = Math.max(ST.x - 20, Math.min(lx, ST.x + ST.w + 20 - BOX));
     ly = Math.max(ST.y + 4, Math.min(ly, ST.y + ST.h - 76));
     const flexAlignY = c.side === "top" ? "flex-end" : c.side === "bottom" ? "flex-start" : "center";
-    P(`<div class="ring" id="${id}r" style="left:${f3(X - 5)}px;top:${f3(Y - 5)}px;width:${f3(W + 10)}px;height:${f3(H + 10)}px"></div>`);
-    P(`<div class="lblbox" id="${id}l" style="left:${f3(lx)}px;top:${f3(ly)}px;width:${BOX}px;justify-content:${jc};align-items:${flexAlignY}"><div class="lbl"><b>${esc(c.text)}</b>${c.sub ? `<span>${esc(c.sub)}</span>` : ""}</div></div>`);
+    // the rings (the main one and the extra ones that share the label) and the label live in one wrapper, which is the
+    // thing that follows a scroll
+    const rings = [[X, Y, W, H], ...(c.extra || []).map(([ex, ey, ew, eh]) => [gx(ex), gy(ey), ew * SC, eh * SC])];
+    P(`<div class="cw" id="${id}">${rings.map(([rx, ry, rw, rh], k) => `<div class="ring" id="${id}r${k}" style="left:${f3(rx - 5)}px;top:${f3(ry - 5)}px;width:${f3(rw + 10)}px;height:${f3(rh + 10)}px"></div>`).join("")}<div class="lblbox" id="${id}l" style="left:${f3(lx)}px;top:${f3(ly)}px;width:${f3(BW)}px;justify-content:${jc};align-items:${flexAlignY}"><div class="lbl s-${c.side}"><b><i class="dot"></i>${esc(c.text)}</b>${c.sub ? `<span>${esc(c.sub)}</span>` : ""}</div></div></div>`);
     const dirY = c.side === "top" ? 10 : c.side === "bottom" ? -10 : 0;
     const dirX = c.side === "left" ? 14 : c.side === "right" ? -14 : 0;
-    T(`tl.fromTo("#${id}r", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, ${t0});`);
+    rings.forEach((_, k) => {
+      T(`tl.fromTo("#${id}r${k}", { opacity: 0, scale: 1.12 }, { opacity: 1, scale: 1, duration: 0.32, ease: "back.out(1.7)" }, ${f3(t0 + k * 0.18)});`);
+      T(`tl.to("#${id}r${k}", { opacity: 0, duration: 0.25, ease: "power2.in" }, ${f3(t1 - 0.25)});`);
+    });
     T(`tl.fromTo("#${id}l", { opacity: 0, x: ${dirX}, y: ${dirY} }, { opacity: 1, x: 0, y: 0, duration: 0.34, ease: "power3.out" }, ${f3(t0 + 0.1)});`);
-    T(`tl.to("#${id}r", { opacity: 0, duration: 0.25, ease: "power2.in" }, ${f3(t1 - 0.25)});`);
     T(`tl.to("#${id}l", { opacity: 0, x: ${-dirX / 2}, y: ${-dirY / 2}, duration: 0.25, ease: "power2.in" }, ${f3(t1 - 0.25)});`);
+    if (c.follow) {
+      // the page scrolls under the callout: the wrapper moves with the scroll (same easing as the page's own scroll)
+      const f0 = f3(mk(c.follow.from)), f1 = f3(mk(c.follow.to));
+      T(`tl.fromTo("#${id}", { y: 0 }, { y: ${f3(c.follow.dy * SC)}, duration: ${f3(f1 - f0)}, ease: "power3.inOut" }, ${f0});`);
+    }
     calls.push({ id, t0, t1, scene: s.id });
   }
 }
 
 // the page switcher of the strip: the product's own five pages, the current one lit
 const pill = [];
-const pillW = [74, 100, 142, 90, 66]; // measured at 20px Plex Sans Medium (+ padding), kept as constants for the seek-safe layout
+const pillW = [74, 100, 142, 90, 66]; // text width (Plex Sans Medium 19 px) plus 12 px either side, kept as constants for the seek-safe layout
+const GAP = 22;
 let px = 0;
-const pillX = pillW.map((w) => { const x = px; px += w + 6; return x; });
-const NAVW = px - 6;
-NAV.forEach((n, i) => pill.push(`<span class="pg" style="left:${pillX[i]}px;width:${pillW[i]}px">${n}</span>`));
+const pillX = pillW.map((w) => { const x = px; px += w + GAP; return x; });
+const NAVW = px - GAP;
+// plain typographic nav: dim items, hairlines between them, the current page brighter with a thin accent underline
+NAV.forEach((n, i) => {
+  pill.push(`<span class="pg" id="pg${i}" style="left:${pillX[i]}px;width:${pillW[i]}px">${n}</span>`);
+  if (i > 0) pill.push(`<i class="sep" style="left:${f3(pillX[i] - GAP / 2)}px"></i>`);
+});
 const lastPageScene = SCENES.filter((s) => s.page != null);
 lastPageScene.forEach((s, k) => {
-  const x = pillX[s.page], w = pillW[s.page];
-  if (k === 0) T(`tl.set("#pgind", { x: ${x}, width: ${w} }, 0);`);
-  else T(`tl.to("#pgind", { x: ${x}, width: ${w}, duration: 0.45, ease: "power3.inOut" }, ${f3(s.start)});`);
+  const x = pillX[s.page] + 12, w = pillW[s.page] - 24;
+  if (k === 0) { T(`tl.set("#pgind", { x: ${x}, width: ${w} }, 0);`); T(`tl.set("#pg${s.page}", { color: "#f4f7ff" }, 0);`); return; }
+  const prev = lastPageScene[k - 1];
+  if (prev.page === s.page) return;
+  T(`tl.to("#pgind", { x: ${x}, width: ${w}, duration: 0.45, ease: "power3.inOut" }, ${f3(s.start)});`);
+  T(`tl.to("#pg${prev.page}", { color: "#8d9bb4", duration: 0.3 }, ${f3(s.start)});`);
+  T(`tl.to("#pg${s.page}", { color: "#f4f7ff", duration: 0.3 }, ${f3(s.start + 0.1)});`);
 });
 T(`tl.fromTo("#nav", { opacity: 0, y: 16 }, { opacity: 1, y: 0, duration: 0.5, ease: "power3.out" }, ${f3(SCENES[1].start + 0.2)});`);
 T(`tl.to("#nav", { opacity: 0, y: 10, duration: 0.35 }, ${f3(END.start - 0.1)});`);
@@ -399,7 +423,7 @@ ${css.replace(/__ST_X__/g, ST.x).replace(/__ST_Y__/g, ST.y).replace(/__ST_W__/g,
     ${clipEls.join("\n    ")}
   </div>
   <div id="fx">
-    ${html.filter((h) => h.startsWith('<div class="ring"') || h.startsWith('<div class="lblbox"')).join("\n    ")}
+    ${html.filter((h) => h.startsWith('<div class="cw"')).join("\n    ")}
   </div>
   <div id="capstrip">
     <div id="nav" style="width:${NAVW}px"><div id="pgind"></div>${pill.join("")}</div>

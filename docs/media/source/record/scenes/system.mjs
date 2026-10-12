@@ -15,6 +15,7 @@ export default async (env) => {
   await page.getByText("Performance").first().waitFor({ timeout: 20000 });
   rec.mark("overview");
   await sleep(1500);
+  rec.mark("scrollStart");
   await smoothScroll(page, ".systemPage__panel", 1100, 1200);
   rec.mark("perf");
   await sleep(500);
