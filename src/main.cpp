@@ -8,7 +8,9 @@
 #include <httplib.h>
 
 #include <atomic>
+#include <chrono>
 #include <cerrno>
+#include <initializer_list>
 #include <csignal>
 #include <cstdlib>
 #include <ctime>
@@ -138,6 +140,35 @@ void log_configuration(const chdash::AppConfig& cfg) {
   }
 }
 
+// Waits up to timeout_ms for one of the (blocked) signals: its number, or -1 with errno EAGAIN at the end of the time
+// (or when `finished` is set, on the platforms that poll). macOS has no sigtimedwait: there the pending signals are polled.
+int wait_signal_for(const sigset_t& signals, int timeout_ms, const std::atomic<bool>& finished) {
+#if defined(__linux__)
+  (void)finished;
+  const timespec wait{timeout_ms / 1000, static_cast<long>(timeout_ms % 1000) * 1000000L};
+  return sigtimedwait(&signals, nullptr, &wait);
+#else
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+  for (;;) {
+    sigset_t pending;
+    sigemptyset(&pending);
+    sigpending(&pending);
+    for (const int signal : {SIGTERM, SIGINT}) {
+      if (sigismember(&signals, signal) == 1 && sigismember(&pending, signal) == 1) {
+        int received = 0;
+        sigwait(&signals, &received);
+        return received;
+      }
+    }
+    if (finished.load() || std::chrono::steady_clock::now() >= deadline) {
+      errno = EAGAIN;
+      return -1;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+#endif
+}
+
 // Runs the server until a stop. SIGTERM and SIGINT stop it cleanly (docs/operations.md, "Shutdown"): the process
 // is PID 1 in a container, where a signal without a handler is ignored. The signals are blocked before any other
 // thread starts (each thread inherits the mask), and one thread waits for them. It stops the server, then watches
@@ -164,9 +195,8 @@ int serve(const chdash::AppConfig& cfg) {
       if (running) running->stop();
       else stop_requested = true;
     }
-    timespec wait{timeout_ms / 1000, static_cast<long>(timeout_ms % 1000) * 1000000L};
     for (;;) {
-      const int again = sigtimedwait(&shutdown_signals, nullptr, &wait);
+      const int again = wait_signal_for(shutdown_signals, timeout_ms, finished);
       if (finished.load()) return;
       if (again < 0 && errno == EINTR) continue;
       chdash::log_event(chdash::LogLevel::Error, again < 0 ? "server.shutdown_timeout" : "server.signal_again",

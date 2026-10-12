@@ -97,7 +97,11 @@ static std::optional<std::string> read_password_file(const std::string& path, st
     if (err) *err = "cannot open password_file: " + path;
     return std::nullopt;
   }
+#if defined(__APPLE__)
+  const int64_t mtime_ns = static_cast<int64_t>(info.st_mtimespec.tv_sec) * 1000000000 + info.st_mtimespec.tv_nsec;
+#else
   const int64_t mtime_ns = static_cast<int64_t>(info.st_mtim.tv_sec) * 1000000000 + info.st_mtim.tv_nsec;
+#endif
   {
     std::lock_guard<std::mutex> lock(mu);
     const auto it = cache.find(path);
