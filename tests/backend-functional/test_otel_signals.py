@@ -455,16 +455,19 @@ def test_fixture_call_counter_is_cumulative_monotonic_with_one_reset():
         " ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS prev "
         "FROM otel.otel_metrics_sum WHERE MetricName = 'traces.span.metrics.calls')")
     assert int(decreasing) == 0
+    # The span-derived counters have one reset; the rich dataset (2026-09-12, loaded into the same tables on a fresh
+    # volume) has a release per service of its own, so it is left out here.
     resets = ch_rows(
         "SELECT ServiceName, uniqExact(StartTimeUnix) AS starts FROM otel.otel_metrics_sum "
-        "WHERE MetricName = 'traces.span.metrics.calls' GROUP BY ServiceName HAVING starts > 1")
+        "WHERE MetricName = 'traces.span.metrics.calls' AND toDate(TimeUnix) != '2026-09-12' "
+        "GROUP BY ServiceName HAVING starts > 1")
     assert len(resets) == 1 and int(resets[0]["starts"]) == 2, resets
     # Across the reset the series value drops back (the restart is visible).
     drop = ch_value(
         "SELECT countIf(Value < prev) FROM (SELECT Value, lagInFrame(Value, 1, 0) OVER "
         "(PARTITION BY toString(Attributes) ORDER BY TimeUnix ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS prev "
         "FROM otel.otel_metrics_sum WHERE MetricName = 'traces.span.metrics.calls' "
-        f"AND ServiceName = '{resets[0]['ServiceName']}')")
+        f"AND toDate(TimeUnix) != '2026-09-12' AND ServiceName = '{resets[0]['ServiceName']}')")
     assert int(drop) >= 1
 
 

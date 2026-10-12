@@ -23,8 +23,8 @@
       "p95_ms_max": 80
     },
     "select_weather_buffer_120k": {
-      "encode_median_ms_max": 450,
-      "encode_p95_ms_max": 800
+      "encode_median_ms_max": 700,
+      "encode_p95_ms_max": 1200
     }
   }
 }

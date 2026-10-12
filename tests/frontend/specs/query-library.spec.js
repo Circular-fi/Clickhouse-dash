@@ -1280,7 +1280,9 @@ test('the preview head: title, then its meta, then the tools as icon buttons at 
   shape = await head(page);
   check(shape);
   expect(shape.buttons.map((b) => b.action)).toEqual(['save']);
-  await expect(preview(page).locator('.qlPreview__title')).toHaveText('SELECT 1 AS one');
+  // The run is formatted when it is looked at (the answer of /api/format replaces the shown text): a quick run still
+  // reads the typed text, a slow one already reads the formatter's, which quotes the alias.
+  await expect(preview(page).locator('.qlPreview__title')).toHaveText(/^SELECT 1 AS `?one`?$/);
   await expect(preview(page).locator('.qlPreview__meta')).toHaveText(/^Oct 1(, 2026)? \d\d:\d\d:\d\d \u00b7 Succeeded$/);
   await expect(preview(page).locator('.qlPreview__meta .qhItem__status--ok')).toHaveCount(1);
   const historyHead = await listHead('History');
