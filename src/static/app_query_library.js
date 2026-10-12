@@ -1558,6 +1558,8 @@ async function beginEdit(storeKind, query) {
         if (!result) return false;
       }
       expandPath(target.store, target.folderId);
+      // The change drew the tree while the query sat in a folder that was closed: it is selected again, now that the folder is open.
+      ctl.selection.saved = keyOf("query", target.store, target.store === storeKind ? query.id : parseKey(ctl.selection.saved)?.id || query.id);
       ctl.form = null;
       renderLibrary({ keepFocus: false });
       closeAfter();
@@ -1819,7 +1821,12 @@ function buildLibraryShell(root) {
   });
   save.addEventListener("click", () => void beginSave({ fromButton: true }));
 
+  tree.addEventListener("pointerdown", onTreePointerDown, true);
   tree.addEventListener("click", onTreeClick);
+  tree.addEventListener("click", endTreePointer);
+  tree.addEventListener("contextmenu", endTreePointer);
+  tree.addEventListener("dragstart", endTreePointer);
+  tree.addEventListener("pointercancel", endTreePointer);
   tree.addEventListener("dblclick", onTreeDoubleClick);
   tree.addEventListener("contextmenu", onTreeContextMenu);
   tree.addEventListener("keydown", onTreeKeydown);
@@ -2398,8 +2405,27 @@ function onTreeContextMenu(ev) {
   openRowMenu(li, { x: ev.clientX, y: ev.clientY });
 }
 
+// A press on a row of the tree, until its click (or its context menu, drag or cancel) ends it. The press focuses the row
+// before the click: with the form open that focus sets the Folder and draws the tree again, and the row under the pointer
+// would be gone before the click reached it (a twisty never opened, a folder tapped on a phone never went back to the form).
+// While a press is on, the click that follows does what the focus would do.
+let treePressed = false;
+let treePressTimer = 0;
+
+function onTreePointerDown() {
+  treePressed = true;
+  clearTimeout(treePressTimer);
+  treePressTimer = setTimeout(endTreePointer, 800);
+}
+
+function endTreePointer() {
+  treePressed = false;
+  clearTimeout(treePressTimer);
+}
+
 // The focus and the highlight move together (Tab back into the list).
 function onTreeFocus(ev) {
+  if (treePressed && ctl.form) return;
   const li = itemOf(ev.target);
   if (li && li.dataset.key !== ctl.selection.saved && !ev.target.closest(".qlRow--edit")) select("saved", li, { focus: false });
 }

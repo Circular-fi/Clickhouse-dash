@@ -591,7 +591,8 @@ test('Save from History: the formatted text by default, the text as typed with S
   d = saveForm(page);
   await expect(d.locator('input[name="raw"]')).toBeChecked();
   await expect(d.locator('input[name="raw"]')).toBeDisabled();
-  await expect(d).toContainText('does not accept this query');
+  await expect(d.locator('.qlRawToggle')).toContainText('Saved as typed');
+  await expect(d.locator('.qlRawToggle')).toHaveAttribute('title', /does not accept this query/);
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText('select ((( from');
   await fillForm(page, { name: 'Broken' });
   await d.getByRole('button', { name: 'Save', exact: true }).click();
@@ -764,7 +765,11 @@ test('the folder follows the tree while the form is open, and what was typed sur
   await expect(folderField(page)).toHaveValue('local:');
   await node(page, 'Merges').focus();
   await expect(folderField(page)).toHaveValue('local:f_merges');
+  // The folder the form names is open (the dashed row sits in it): the arrow goes into it, to its query.
   await page.keyboard.press('ArrowDown');
+  await expect(selectedRow(page)).toHaveAttribute('data-id', 'q_merges');
+  await expect(folderField(page)).toHaveValue('local:f_merges');
+  await node(page, 'Active parts').focus();
   await expect(selectedRow(page)).toHaveAttribute('data-id', 'q_parts');
   await expect(folderField(page)).toHaveValue('local:f_ops');
   await node(page, 'The answer').focus();
@@ -939,7 +944,7 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await expect(saveForm(page).locator('.qlPaneForm__fields')).toBeVisible();
   await expect(saveForm(page).locator('[name="tags"]')).toHaveCount(0);
   await fillForm(page, { name: 'Table count', description: 'How many tables', folder_id: '/Reports' });
-  await dialog(page).getByRole('button', { name: 'Save', exact: true }).click();
+  await formButton(page, 'Save').click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
   await expect(node(page, 'Table count')).toBeVisible();
   let stored = await libraryState(page);
@@ -1580,6 +1585,10 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await saveForm(page).getByRole('button', { name: 'Save', exact: true }).click();
   // The dialog's submit is asynchronous (validation, then the adapter's write).
   await expect.poll(async () => (await libraryState(page)).queries.map((q) => [q.sql, q.host_id])).toEqual([['SELECT \'older\' AS `tag`', HOST]]);
+
+  // The save ends on Saved, with the new query selected; History is one click away.
+  await expect(page.locator('#queryLibraryTabSaved')).toHaveAttribute('aria-selected', 'true');
+  await showPanel(page, 'history');
 
   // No removal: neither the preview nor the Delete key takes a run out of History.
   await items.filter({ hasText: 'oldest' }).click();
@@ -2424,6 +2433,8 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   await saveForm(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
   expect((await libraryState(page)).queries.map((q) => q.name).sort()).toEqual(['Mine', 'Mine too']);
+  // The library stays open on the saved query; the editor behind it is inert until it closes.
+  await closePanel(page);
 
   // History: Save to library (into the browser's root) and Remove (the History is the browser's, whatever the server root).
   await runSuccessfulQuery(page, 'SELECT 5 AS five');
