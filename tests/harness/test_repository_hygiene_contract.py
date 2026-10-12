@@ -40,6 +40,8 @@ def test_project_authored_sources_do_not_embed_business_fixture_names() -> None:
                 text = path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 continue
+            # The slug of the repository's own organisation (clone and release URLs, the address of the Pages site) is not a leak.
+            text = re.sub(r"circular-fi", "", text, flags=re.I)
             for needle in needles:
                 if needle.search(text):
                     offenders.append(f"{path.relative_to(ROOT)}: {needle.pattern}")

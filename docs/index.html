@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClickHouse Dash</title>
+<meta name="description" content="A real-time dashboard for ClickHouse in one 6.6 MB binary: query, explore, trace and monitor your servers. Built by Circular.fi.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#07111f">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ClickHouse Dash">
+<meta property="og:description" content="A real-time dashboard for ClickHouse in one binary. Query, explore, trace and monitor. Built by Circular.fi.">
+<meta property="og:image" content="https://circular-fi.github.io/Clickhouse-dash/media/chdash-presentation.jpg">
+<meta property="og:url" content="https://circular-fi.github.io/Clickhouse-dash/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preload" href="assets/fonts/bricolage.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/onest.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/img/poster-1280.webp" as="image" type="image/webp" fetchpriority="high">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<a class="skip" href="#run">Skip to the download</a>
+<canvas id="columns" class="columns" aria-hidden="true"></canvas>
+<div class="veil" aria-hidden="true"></div>
+
+<header class="nav" id="nav">
+  <div class="brandBlock">
+    <a class="brand" href="#top" aria-label="ClickHouse Dash, top of the page">
+      <svg class="mark" viewBox="0 0 18 18" aria-hidden="true"><rect x="0.75" y="10.5" width="3" height="6" rx="1"/><rect x="5.25" y="5.5" width="3" height="11" rx="1"/><rect x="9.75" y="8" width="3" height="8.5" rx="1"/><rect x="14.25" y="1.5" width="3" height="15" rx="1"/></svg>
+      <span>ClickHouse Dash</span>
+    </a>
+    <a class="by" href="https://circular.fi">by circular.fi</a>
+  </div>
+  <nav class="links" aria-label="Sections">
+    <a href="#inside">Features</a>
+    <a href="#opentelemetry">OpenTelemetry</a>
+    <a href="#run">Run it</a>
+    <a href="documentation.html">Documentation</a>
+  </nav>
+  <div class="navRight">
+    <a class="ghLink" href="https://github.com/Circular-fi/Clickhouse-dash" aria-label="GitHub"><svg class="gh" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span>GitHub</span></a>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero" id="tour" aria-labelledby="h1">
+    <div class="heroShade" aria-hidden="true"></div>
+    <div class="heroTop">
+      <div class="heroTitle">
+        <h1 id="h1">
+          <span class="w" style="--i:0">A</span> <span class="w" style="--i:1">real-time</span> <span class="w" style="--i:2">dashboard</span> <span class="w" style="--i:3">for</span> <span class="w accent" style="--i:4">ClickHouse.</span>
+        </h1>
+        <p class="lede">Query, explore, trace and monitor your servers from one 6.6 MB binary.</p>
+      </div>
+      <div class="heroSide">
+        <div class="cta">
+          <a class="btn primary" href="https://github.com/Circular-fi/Clickhouse-dash/releases/latest">
+            <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-arrow-down"/></svg>
+            Download v1.0.0
+          </a>
+          <a class="btn ghost" href="#run">Run it</a>
+        </div>
+        <p class="fine">Linux and macOS, amd64 and arm64. MIT license.</p>
+      </div>
+    </div>
+    <div class="stage" id="stage">
+      <div class="tilt" id="tilt">
+        <video id="tour-video" class="screen" src="media/chdash-presentation-web.mp4" poster="assets/img/poster-1280.webp" muted playsinline preload="none" aria-label="A 74-second tour of ClickHouse Dash with voice-over"></video>
+        <div class="playerBar">
+          <button class="pbtn" id="toggle" type="button" aria-label="Pause the video">
+            <svg class="icon" aria-hidden="true"><use id="toggleIcon" href="assets/icons.svg#i-player-pause"/></svg>
+          </button>
+          <button class="pbtn pill" id="sound" type="button" aria-pressed="false">
+            <svg class="icon" aria-hidden="true"><use id="soundIcon" href="assets/icons.svg#i-volume-off"/></svg>
+            <span>Sound on</span>
+          </button>
+        </div>
+        <div class="progress" aria-hidden="true"><i id="progress"></i></div>
+      </div>
+    </div>
+    <p class="credit">74 seconds, with voice-over and music. Music: Happy Beats &amp; Business Moves Vol. 12 by Sascha Ende (<a href="https://ende.app">ende.app</a>), <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</p>
+  </section>
+
+  <section class="inside" id="inside" aria-labelledby="inside-h">
+    <h2 id="inside-h">Everything you check on a ClickHouse server, in one place.</h2>
+    <div class="bento">
+      <a class="feature wide" href="documentation.html#/query-analysis">
+        <div class="featureShot"><picture><source type="image/avif" srcset="assets/img/query-800.avif 800w, assets/img/query-1440.avif 1440w" sizes="(min-width: 960px) 52vw, 100vw"><img src="assets/img/query-800.webp" srcset="assets/img/query-800.webp 800w, assets/img/query-1440.webp 1440w" sizes="(min-width: 960px) 52vw, 100vw" alt="The Query page of ClickHouse Dash" width="1440" height="810" loading="lazy" decoding="async"></picture></div>
+        <div class="featureText">
+          <h3><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-search"/></svg> Query<svg class="icon go" aria-hidden="true"><use href="assets/icons.svg#i-arrow-up-right"/></svg></h3>
+          <p>Streamed results, a SQL formatter, live read rates, CPU and memory while it runs, then a chart in one click.</p>
+        </div>
+      </a>
+      <a class="feature narrow" href="documentation.html#/query-library">
+        <div class="featureShot"><picture><source type="image/avif" srcset="assets/img/history-800.avif 800w, assets/img/history-1440.avif 1440w" sizes="(min-width: 960px) 38vw, 100vw"><img src="assets/img/history-800.webp" srcset="assets/img/history-800.webp 800w, assets/img/history-1440.webp 1440w" sizes="(min-width: 960px) 38vw, 100vw" alt="The Library page of ClickHouse Dash" width="1440" height="810" loading="lazy" decoding="async"></picture></div>
+        <div class="featureText">
+          <h3><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-folder"/></svg> Library<svg class="icon go" aria-hidden="true"><use href="assets/icons.svg#i-arrow-up-right"/></svg></h3>
+          <p>Folders of saved queries that the whole team can open, and a History of every run.</p>
+        </div>
+      </a>
+      <a class="feature narrow" href="documentation.html#/explorer">
+        <div class="featureShot"><picture><source type="image/avif" srcset="assets/img/explorer-800.avif 800w, assets/img/explorer-1440.avif 1440w" sizes="(min-width: 960px) 38vw, 100vw"><img src="assets/img/explorer-800.webp" srcset="assets/img/explorer-800.webp 800w, assets/img/explorer-1440.webp 1440w" sizes="(min-width: 960px) 38vw, 100vw" alt="The Explorer page of ClickHouse Dash" width="1440" height="810" loading="lazy" decoding="async"></picture></div>
+        <div class="featureText">
+          <h3><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-database"/></svg> Explorer<svg class="icon go" aria-hidden="true"><use href="assets/icons.svg#i-arrow-up-right"/></svg></h3>
+          <p>Every database sized on disk. Open a table down to its parts and its DDL, and follow the lineage between tables and views.</p>
+        </div>
+      </a>
+      <a class="feature wide" href="documentation.html#/traces">
+        <div class="featureShot"><picture><source type="image/avif" srcset="assets/img/traces-800.avif 800w, assets/img/traces-1440.avif 1440w" sizes="(min-width: 960px) 52vw, 100vw"><img src="assets/img/traces-800.webp" srcset="assets/img/traces-800.webp 800w, assets/img/traces-1440.webp 1440w" sizes="(min-width: 960px) 52vw, 100vw" alt="The Observability page of ClickHouse Dash" width="1440" height="810" loading="lazy" decoding="async"></picture></div>
+        <div class="featureText">
+          <h3><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-route"/></svg> Observability<svg class="icon go" aria-hidden="true"><use href="assets/icons.svg#i-arrow-up-right"/></svg></h3>
+          <p>Traces with a duration heatmap, trace comparison, waterfall and service map. Logs and metrics sit next to them.</p>
+        </div>
+      </a>
+      <a class="feature wide" href="documentation.html#/system">
+        <div class="featureShot"><picture><source type="image/avif" srcset="assets/img/system-800.avif 800w, assets/img/system-1440.avif 1440w" sizes="(min-width: 960px) 52vw, 100vw"><img src="assets/img/system-800.webp" srcset="assets/img/system-800.webp 800w, assets/img/system-1440.webp 1440w" sizes="(min-width: 960px) 52vw, 100vw" alt="The System page of ClickHouse Dash" width="1440" height="810" loading="lazy" decoding="async"></picture></div>
+        <div class="featureText">
+          <h3><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-chart-area-line"/></svg> System<svg class="icon go" aria-hidden="true"><use href="assets/icons.svg#i-arrow-up-right"/></svg></h3>
+          <p>Live charts of the server, the heaviest query shapes of the hour, disks and replication.</p>
+        </div>
+      </a>
+      <a class="feature narrow" href="documentation.html#/mcp">
+        <div class="featureShot"><picture><source type="image/avif" srcset="assets/img/mcp-800.avif 800w, assets/img/mcp-1440.avif 1440w" sizes="(min-width: 960px) 38vw, 100vw"><img src="assets/img/mcp-800.webp" srcset="assets/img/mcp-800.webp 800w, assets/img/mcp-1440.webp 1440w" sizes="(min-width: 960px) 38vw, 100vw" alt="The MCP page of ClickHouse Dash" width="1440" height="810" loading="lazy" decoding="async"></picture></div>
+        <div class="featureText">
+          <h3><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-lock"/></svg> MCP<svg class="icon go" aria-hidden="true"><use href="assets/icons.svg#i-arrow-up-right"/></svg></h3>
+          <p>Give an AI assistant a key. Each key has its own hosts, tools and tables, and runs as a read-only user.</p>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <section class="otel" id="opentelemetry" aria-labelledby="otel-h">
+    <h2 id="otel-h">Reads what your OpenTelemetry Collector already writes.</h2>
+    <p class="sub">Dash works on the tables of the OpenTelemetry Collector contrib ClickHouse exporter. There is no second store to feed.</p>
+    <div class="flow" role="img" aria-label="The contrib ClickHouse exporter writes otel_traces, otel_logs and the otel_metrics tables; Dash shows them as Traces, Logs and Metrics.">
+      <div class="flowSource">
+        <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-stack"/></svg>
+        <strong>Collector</strong>
+        <span>contrib ClickHouse exporter</span>
+      </div>
+      <div class="flowRows">
+        <div class="flowRow"><span class="pipe"><i></i><i></i><i></i></span><code>otel_traces</code><span class="pipe"><i></i><i></i></span><span class="target">Traces<small>heatmap, waterfall, service map</small></span></div>
+        <div class="flowRow"><span class="pipe"><i></i><i></i><i></i></span><code>otel_logs</code><span class="pipe"><i></i><i></i></span><span class="target">Logs<small>token search, per-trace logs</small></span></div>
+        <div class="flowRow"><span class="pipe"><i></i><i></i><i></i></span><code>otel_metrics_*</code><span class="pipe"><i></i><i></i></span><span class="target">Metrics<small>gauge, sum, histogram, exponential histogram, summary</small></span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="run" id="run" aria-labelledby="run-h">
+    <div class="runHead">
+      <h2 id="run-h">Run it in three steps.</h2>
+      <div class="platforms" role="tablist" aria-label="Platform">
+        <button role="tab" type="button" data-os="linux" data-arch="amd64" aria-selected="true">Linux amd64</button>
+        <button role="tab" type="button" data-os="linux" data-arch="arm64" aria-selected="false">Linux arm64</button>
+        <button role="tab" type="button" data-os="darwin" data-arch="arm64" aria-selected="false">macOS arm64</button>
+        <button role="tab" type="button" data-os="darwin" data-arch="amd64" aria-selected="false">macOS amd64</button>
+      </div>
+    </div>
+    <div class="runSteps">
+      <div class="runStep">
+        <h3>Download</h3>
+        <pre tabindex="0" aria-label="Command"><code id="cmd-download">curl -fsSLO https://github.com/Circular-fi/Clickhouse-dash/releases/download/v1.0.0/chdash_1.0.0_linux_amd64.tar.gz
+tar xzf chdash_1.0.0_linux_amd64.tar.gz</code></pre>
+        <button class="copy" type="button" data-copy="cmd-download"><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-copy"/></svg><span>Copy</span></button>
+      </div>
+      <div class="runStep">
+        <h3>Point it at ClickHouse</h3>
+        <pre tabindex="0" aria-label="Command"><code id="cmd-config">clickhouse {
+  host {
+    name       = "local"
+    label      = "My ClickHouse"
+    runner_uri = "clickhouse://default:@localhost:9000"
+    system_uri = "clickhouse://default:@localhost:9000"
+  }
+}</code></pre>
+        <button class="copy" type="button" data-copy="cmd-config"><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-copy"/></svg><span>Copy</span></button>
+        <p class="note">Save it as <code>config.hcl</code>.</p>
+      </div>
+      <div class="runStep">
+        <h3>Run</h3>
+        <pre tabindex="0" aria-label="Command"><code id="cmd-run">./chdash --config config.hcl</code></pre>
+        <button class="copy" type="button" data-copy="cmd-run"><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#i-copy"/></svg><span>Copy</span></button>
+        <p class="note">Open <code>http://localhost:8080</code>.</p>
+      </div>
+    </div>
+    <p class="runFoot">
+      The archive is 6.6 MB and has no runtime dependency. Checksums: <a href="https://github.com/Circular-fi/Clickhouse-dash/releases/download/v1.0.0/SHA256SUMS">SHA256SUMS</a>.
+      Next: <a href="documentation.html#/configuration">configuration</a>,
+      <a href="documentation.html#/operations">operations</a>,
+      <a href="documentation.html#/mcp">MCP</a>.
+    </p>
+  </section>
+</main>
+
+<footer class="foot">
+  <p class="footText">ClickHouse Dash, by <a href="https://circular.fi">circular.fi</a></p>
+  <ul class="footLinks">
+    <li><a href="documentation.html">Documentation</a></li>
+    <li><a class="ghInline" href="https://github.com/Circular-fi/Clickhouse-dash"><svg class="gh" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>GitHub</a></li>
+    <li><a href="https://github.com/Circular-fi/Clickhouse-dash/releases">Releases</a></li>
+    <li><a href="https://github.com/Circular-fi/Clickhouse-dash/blob/main/LICENSE">MIT license</a></li>
+  </ul>
+</footer>
+
+<script src="assets/site.js" defer></script>
+<script src="assets/scene.js" defer></script>
+</body>
+</html>

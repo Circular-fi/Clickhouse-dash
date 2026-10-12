@@ -2,13 +2,15 @@
 
 A lightweight real-time ClickHouse query dashboard.
 
+**[Home page](https://circular-fi.github.io/Clickhouse-dash/)** · **[Documentation](https://circular-fi.github.io/Clickhouse-dash/documentation.html)** · **[Download v1.0.0](https://github.com/Circular-fi/Clickhouse-dash/releases/latest)**
+
 <p align="center">
-  <video src="docs/media/chdash-presentation.mp4" poster="docs/media/chdash-presentation.jpg" width="100%" controls playsinline>
-    <a href="docs/media/chdash-presentation.mp4"><img src="docs/media/chdash-presentation.jpg" alt="A 74-second presentation of ClickHouse Dash: the Query page, the query library, the Explorer, Traces, Logs, Metrics, System and the MCP keys." width="100%"></a>
+  <video src="docs/media/chdash-presentation-web.mp4" poster="docs/assets/img/poster-1280.webp" width="100%" controls playsinline preload="none">
+    <a href="docs/media/chdash-presentation.mp4"><img src="docs/assets/img/poster-1280.webp" alt="A 74-second presentation of ClickHouse Dash: the Query page, the query library, the Explorer, Traces, Logs, Metrics, System and the MCP keys." width="100%"></a>
   </video>
 </p>
 
-The video presents ClickHouse Dash with sample data, with a voice-over and music. It lasts 74 seconds. If your viewer does not play it, [open the video](docs/media/chdash-presentation.mp4). Music: "Happy Beats & Business Moves Vol. 12" by Sascha Ende ([ende.app](https://ende.app)), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The sources to record and render the video again are in [docs/media/source](docs/media/source/README.md).
+The video presents ClickHouse Dash with sample data, with a voice-over and music. It lasts 74 seconds. If your viewer does not play it, [open the video](docs/media/chdash-presentation.mp4) (full HD; the player above plays a 720p copy). Music: "Happy Beats & Business Moves Vol. 12" by Sascha Ende ([ende.app](https://ende.app)), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The sources to record and render the video again are in [docs/media/source](docs/media/source/README.md).
 
 | Query | Explorer |
 | --- | --- |

@@ -1,0 +1,113 @@
+/* The documentation page: the Markdown of docs/ in the colours of the home page. No effect on anything that cannot be clicked. */
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.docsPage { background: var(--ground); --nav-h: 0px; }
+.docsBrand { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 14px; }
+.docsLinks { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 22px; font-size: 0.92rem; }
+.docsLinks a { color: var(--muted); text-decoration: none; transition: color 0.2s; }
+.docsLinks a:hover { color: var(--text); text-decoration: underline; }
+.docsLayout { max-width: 1480px; margin: 0 auto; padding: calc(var(--nav-h) + 24px) clamp(16px, 3vw, 40px) 24px; display: grid; grid-template-columns: 260px minmax(0, 1fr) 230px; gap: clamp(24px, 4vw, 64px); align-items: start; }
+
+/* Sidebar */
+.docsSide { position: sticky; top: calc(var(--nav-h) + 24px); max-height: calc(100dvh - var(--nav-h) - 48px); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; padding-inline: 12px; margin-inline: -12px; }
+.docsMenu > summary { list-style: none; font-family: var(--display); font-weight: 600; font-size: 1.15rem; letter-spacing: -0.01em; margin-bottom: 14px; cursor: default; }
+.docsMenu > summary::-webkit-details-marker { display: none; }
+.docsFilter input { width: 100%; height: 42px; padding: 0 16px; border-radius: var(--pill); border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); font: inherit; font-size: 0.95rem; }
+.docsFilter input::placeholder { color: var(--muted); }
+.docsFilter input:focus-visible { outline: 2px solid var(--aqua); outline-offset: 2px; }
+#sidebar h2 { margin: 24px 0 6px; font-family: var(--display); font-size: 0.95rem; font-weight: 600; letter-spacing: 0; color: var(--muted); max-width: none; line-height: 1.4; }
+#sidebar ul { list-style: none; margin: 0; padding: 0; }
+#sidebar a { display: block; padding: 7px 12px; margin-inline: -12px; border-radius: 10px; color: var(--text); text-decoration: none; font-size: 0.95rem; line-height: 1.4; transition: background 0.2s, color 0.2s; }
+#sidebar a:hover { background: var(--panel-2); }
+#sidebar a[aria-current="page"] { background: color-mix(in srgb, var(--aqua) 12%, transparent); color: var(--aqua); }
+#sidebar .none { color: var(--muted); margin-top: 16px; font-size: 0.95rem; }
+
+/* Article */
+.doc { max-width: 78ch; min-width: 0; outline: none; }
+.doc h1 { font-size: clamp(2rem, 3.4vw, 2.9rem); line-height: 1.12; letter-spacing: -0.03em; font-weight: 600; margin-bottom: 20px; max-width: none; text-wrap: balance; }
+.doc h2 { font-size: 1.75rem; line-height: 1.25; letter-spacing: -0.02em; margin: 56px 0 14px; max-width: none; scroll-margin-top: calc(var(--nav-h) + 20px); }
+.doc h3 { font-size: 1.3rem; line-height: 1.3; margin: 36px 0 10px; scroll-margin-top: calc(var(--nav-h) + 20px); }
+.doc h4 { font-size: 1.1rem; margin: 28px 0 8px; scroll-margin-top: calc(var(--nav-h) + 20px); }
+.doc h3, .doc h4 { font-family: var(--display); font-weight: 600; letter-spacing: -0.01em; }
+.doc .anchor { margin-left: 10px; color: var(--muted); text-decoration: none; font-weight: 400; opacity: 0; transition: opacity 0.2s, color 0.2s; }
+.doc h2:hover .anchor, .doc h3:hover .anchor, .doc h4:hover .anchor, .doc .anchor:focus-visible { opacity: 1; }
+.doc .anchor:hover { color: var(--aqua); }
+.doc p, .doc li { font-size: 1.04rem; line-height: 1.75; color: #d2e3ee; }
+.doc p { margin: 0 0 1.1em; }
+.doc ul, .doc ol { margin: 0 0 1.2em; padding-left: 1.4em; }
+.doc li { margin: 0.35em 0; }
+.doc li > ul, .doc li > ol { margin: 0.4em 0 0.4em; }
+.doc a { color: var(--aqua); text-decoration-thickness: 1px; }
+.doc strong { color: var(--text); font-weight: 600; }
+.doc hr { border: 0; height: 1px; background: var(--line); margin: 40px 0; }
+.doc code { font-family: var(--mono); font-size: 0.88em; padding: 0.12em 0.4em; border-radius: 6px; background: var(--panel-2); color: #bff6f3; }
+.doc pre { position: relative; margin: 0 0 1.4em; padding: 18px 20px; border-radius: 14px; background: #050c16; border: 1px solid var(--line); overflow-x: auto; font-size: 0.88rem; line-height: 1.7; color: #d6ecf7; }
+.doc pre code { padding: 0; background: none; color: inherit; font-size: inherit; white-space: pre; }
+.copyCode { position: absolute; top: 10px; right: 10px; height: 32px; padding: 0 12px; border-radius: var(--pill); border: 1px solid var(--line-strong); background: var(--ground); color: var(--muted); font: inherit; font-size: 0.8rem; cursor: pointer; transition: color 0.2s, border-color 0.2s; }
+.copyCode:hover { color: var(--text); border-color: var(--aqua); }
+.doc blockquote { margin: 0 0 1.2em; padding: 14px 20px; border-radius: 14px; background: var(--panel); }
+.doc blockquote p:last-child { margin-bottom: 0; }
+.doc img { max-width: 100%; height: auto; border-radius: 14px; }
+.tableWrap { overflow-x: auto; margin: 0 0 1.4em; border-radius: 14px; box-shadow: 0 0 0 1px var(--line); }
+.doc table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+.doc th, .doc td { padding: 10px 14px; text-align: left; vertical-align: top; line-height: 1.55; }
+.doc th { background: var(--panel); color: var(--text); font-weight: 600; white-space: nowrap; }
+.doc td { border-top: 1px solid var(--line); color: #d2e3ee; }
+.doc td code, .doc th code { white-space: nowrap; }
+.doc .lead { font-size: 1.2rem; color: var(--muted); }
+.doc .index { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
+.doc .index li { margin: 0; }
+.doc .index a { display: inline-flex; align-items: center; height: 42px; padding: 0 18px; border-radius: var(--pill); border: 1px solid var(--line-strong); color: var(--text); text-decoration: none; transition: border-color 0.2s, background 0.2s; }
+.doc .index a:hover { border-color: var(--aqua); background: color-mix(in srgb, var(--aqua) 8%, transparent); }
+.loading { display: grid; gap: 14px; }
+.loading i { display: block; height: 18px; border-radius: 9px; background: var(--panel-2); }
+.loading i:nth-child(1) { width: 55%; height: 38px; }
+.loading i:nth-child(3) { width: 90%; }
+.loading i:nth-child(4) { width: 70%; }
+
+/* Previous and next */
+.docNext { max-width: 78ch; margin-top: 56px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.docNext a { display: flex; flex-direction: column; gap: 4px; padding: 18px 22px; border-radius: var(--radius); box-shadow: 0 0 0 1px var(--line); text-decoration: none; transition: box-shadow 0.25s var(--ease), transform 0.3s var(--ease); }
+.docNext a:hover { box-shadow: 0 0 0 1px var(--aqua); transform: translateY(-2px); }
+.docNext .next { grid-column: 2; text-align: right; }
+.docNext small { color: var(--muted); font-size: 0.85rem; }
+.docNext strong { font-family: var(--display); font-size: 1.15rem; font-weight: 600; letter-spacing: -0.01em; }
+
+/* On this page */
+.docsToc { position: sticky; top: calc(var(--nav-h) + 24px); max-height: calc(100dvh - var(--nav-h) - 48px); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.docsToc p { font-family: var(--display); font-weight: 600; font-size: 0.95rem; color: var(--muted); margin: 0 0 10px; }
+.docsToc nav { display: grid; }
+.docsToc nav a { padding: 5px 0 5px 12px; color: var(--muted); text-decoration: none; font-size: 0.88rem; line-height: 1.4; transition: color 0.2s; }
+.docsToc nav a.sub { padding-left: 26px; }
+.docsToc nav a:hover, .docsToc nav a[aria-current="true"] { color: var(--aqua); }
+.editLink { display: inline-flex; align-items: center; gap: 8px; margin-top: 22px; padding: 8px 14px; border-radius: var(--pill); border: 1px solid var(--line-strong); color: var(--text); text-decoration: none; font-size: 0.88rem; transition: border-color 0.2s; }
+.editLink:hover { border-color: var(--aqua); }
+
+@media (max-width: 1180px) {
+  .docsLayout { grid-template-columns: 240px minmax(0, 1fr); }
+  .docsToc { display: none; }
+}
+@media (max-width: 820px) {
+  .docsLayout { grid-template-columns: 200px minmax(0, 1fr); gap: 24px; }
+  .docsMenu > summary { font-size: 1.05rem; }
+}
+/* Phones: the menu is a bar under the navigation that stays in place; open, it is a scrollable panel over the page */
+@media (max-width: 640px) {
+  .docsLayout { grid-template-columns: minmax(0, 1fr); padding-top: var(--nav-h); padding-bottom: 0; gap: 12px; }
+  .docsSide { top: var(--nav-h); z-index: 20; max-height: calc(100dvh - var(--nav-h)); background: var(--ground); padding: 8px 12px 8px; margin-inline: -12px; }
+  .docsBrand, .docsLinks { display: none; }
+  .docsMenu { border-radius: var(--radius); box-shadow: 0 0 0 1px var(--line); padding: 12px 18px; background: var(--panel); }
+  .docsMenu > summary { cursor: pointer; margin: 0; }
+  .docsMenu[open] > summary { margin-bottom: 14px; }
+  .docNext { grid-template-columns: 1fr; }
+  .docNext .next { grid-column: 1; }
+}
+
+/* The sticky columns stop sticking where their grid row ends: the space below the article belongs to the row (margin) and the layout
+   keeps 24 px under it, so at the end of a page the columns still sit exactly where they stick. */
+.docsMain { min-width: 0; margin-bottom: 56px; }
+
+/* Wide content scrolls inside its own box, never the page */
+.doc table { min-width: 760px; }
+.doc td:last-child { min-width: 240px; }
+.doc :not(pre):not(td):not(th) > code { overflow-wrap: anywhere; }
+.doc h1 code, .doc h2 code, .doc h3 code { font-size: 0.8em; }
