@@ -1,0 +1,18 @@
+# generated or downloaded by the steps of README.md, never committed
+composition/node_modules/
+composition/assets/clips/
+composition/assets/music/
+composition/assets/vo/
+composition/assets/sfx/
+composition/assets/sfx-bed.wav
+composition/assets/sfx-events.json
+composition/assets/audio-data.js
+composition/assets/gsap.min.js
+composition/assets/fonts/
+composition/renders/
+composition/snapshots/
+composition/.hyperframes/
+record/node_modules/
+record/clips/
+AGENTS.md
+CLAUDE.md
