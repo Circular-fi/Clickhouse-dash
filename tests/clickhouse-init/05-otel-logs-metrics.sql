@@ -247,3 +247,13 @@ ORDER BY (ServiceName, MetricName, Attributes, toUnixTimestamp64Nano(TimeUnix))
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 
 GRANT SELECT ON otel.* TO chdash_system;
+
+-- (Here, not in 02-frontend-fixtures.sql: the copies are made of the tables above, which a fresh server creates after 02.)
+-- The tables of the OpenTelemetry signals can differ from a host to another (tests/config/otel-hosts.hcl): this database
+-- holds empty copies of the logs and metrics tables under other names, so that a second host of the same server can have its
+-- own (the host that reads them finds no record: the same route answers differently from a host to another).
+CREATE DATABASE IF NOT EXISTS otel_alt;
+CREATE TABLE IF NOT EXISTS otel_alt.logs_copy AS otel.otel_logs;
+CREATE TABLE IF NOT EXISTS otel_alt.metrics_gauge AS otel.otel_metrics_gauge;
+CREATE TABLE IF NOT EXISTS otel_alt.metrics_sum AS otel.otel_metrics_sum;
+CREATE TABLE IF NOT EXISTS otel_alt.metrics_histogram AS otel.otel_metrics_histogram;
