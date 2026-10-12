@@ -34,6 +34,6 @@ Keep it, or keep the credit line wherever the video is posted.
 
 **Do not** register the video with Content ID (the licence forbids it for the music).
 
-**Voice-only variant.** `docs/media/chdash-presentation-nomusic.mp4` has the same narration and sound effects and no music. The sound
+**Sound effects and voice.** The sound
 effects (cursor clicks, key presses, a soft hit on each cut) are CC0 (Kenney.nl, and "Keyboard Soundpack #1" by unicae_games on
 OpenGameArt, CC0), bundled with the `brag` skill. The voice is generated locally with Kokoro-82M (Apache-2.0 model) through Hyperframes.

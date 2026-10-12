@@ -8,7 +8,7 @@ A lightweight real-time ClickHouse query dashboard.
   </video>
 </p>
 
-The video presents ClickHouse Dash with sample data, with a voice-over and music. It lasts 74 seconds. If your viewer does not play it, [open the video](docs/media/chdash-presentation.mp4) (a version [without the music](docs/media/chdash-presentation-nomusic.mp4) is next to it). Music: "Happy Beats & Business Moves Vol. 12" by Sascha Ende ([ende.app](https://ende.app)), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The sources to record and render the video again are in [docs/media/source](docs/media/source/README.md).
+The video presents ClickHouse Dash with sample data, with a voice-over and music. It lasts 74 seconds. If your viewer does not play it, [open the video](docs/media/chdash-presentation.mp4). Music: "Happy Beats & Business Moves Vol. 12" by Sascha Ende ([ende.app](https://ende.app)), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The sources to record and render the video again are in [docs/media/source](docs/media/source/README.md).
 
 | Query | Explorer |
 | --- | --- |
