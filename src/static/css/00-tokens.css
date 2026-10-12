@@ -766,3 +766,11 @@ html[data-theme="light"] {
     --trace-bar-top: 13px;
   }
 }
+
+/* A phone or a touch screen: the tabs of a nav row stand on its 1 px bottom border, so the row is --hit + 1 px and its
+   tabs keep a hit area of --hit (a mouse on a wide window has the 40 px row). */
+@media (pointer: coarse), (max-width: 760px) {
+  :root {
+    --nav-row-h: calc(var(--hit) + 1px);
+  }
+}

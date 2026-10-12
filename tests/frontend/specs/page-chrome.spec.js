@@ -4,8 +4,8 @@ import { appReady } from '../helpers/modules.js';
 import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
 // The page shell (style.css "Page shell" block): one full-bleed chrome for
-// Query, Explorer, Observability and System. Header, then the page's nav row (48 px,
-// --nav-row-h), then the regions edge to edge on a flat background, split by
+// Query, Explorer, Observability and System. Header, then the page's nav row (40 px,
+// --nav-row-h; 41 px on a phone or a touch screen, where its tabs keep 40 px on its border), then the regions edge to edge on a flat background, split by
 // 1 px borders and inset by the 12 px gutter (10 px at --bp-md and below).
 // The document never scrolls: each page's content region is its scroller.
 // Desktop blocks run on every project (1920 / 1440 / 1280) in both themes;
@@ -111,10 +111,11 @@ function expectFrame(m, name, gutter) {
   expect(m.headerPad, name).toBe(gutter);
   expect(m.headerBorder, name).toEqual(['1px', m.tokens.border]);
   if (m.nav) {
-    // 48 px; on a phone the Explorer's Catalog modes and the System
-    // section's controls take a line of their own.
-    if ((name === 'explorer' || name === 'system') && m.vw <= 600) expect(Math.round(m.nav.h), `${name} nav row height`).toBeGreaterThanOrEqual(48);
-    else expect(Math.round(m.nav.h), `${name} nav row height`).toBe(48);
+    // 40 px, 41 on a phone (the tabs standing on its 1 px border keep 40 px of hit area); on a phone the Explorer's Catalog
+    // modes and the System section's controls may take a line of their own.
+    const navH = m.vw <= 760 ? 41 : 40;
+    if ((name === 'explorer' || name === 'system') && m.vw <= 600) expect(Math.round(m.nav.h), `${name} nav row height`).toBeGreaterThanOrEqual(navH);
+    else expect(Math.round(m.nav.h), `${name} nav row height`).toBe(navH);
     expect(Math.abs(m.nav.y - m.header.bottom), name).toBeLessThanOrEqual(0.5);
     expect(m.navPad, name).toBe(gutter);
     expect(m.navStyle, name).toEqual(['1px', m.tokens.border, m.tokens.panel]);
@@ -135,7 +136,7 @@ for (const theme of ['dark', 'light']) {
   test.describe(`page chrome (${theme})`, () => {
     test.use({ colorScheme: theme });
 
-    test('every page is full bleed under one header and one 48 px nav row', async ({ page }) => {
+    test('every page is full bleed under one header and one 40 px nav row', async ({ page }) => {
       const headers = {};
       for (const name of Object.keys(PAGES)) {
         await open(page, name);
@@ -185,7 +186,7 @@ for (const theme of ['dark', 'light']) {
       expect(m.title.x).toBe(12);
       // The results header row lines up with the editor toolbar: same inset,
       // a nav-row height, a separator, then the table edge to edge.
-      expect(Math.round(m.header.h)).toBe(48);
+      expect(Math.round(m.header.h)).toBe(40);
       expect(m.headerBorder).toBe('1px');
       expect(m.table.x).toBe(0);
       expect(m.tableBorder).toEqual(['0px', '0px']);
@@ -209,7 +210,7 @@ for (const theme of ['dark', 'light']) {
       expect((await wrap.boundingBox()).height).toBeGreaterThanOrEqual(initial.height + 40);
     });
 
-    test('Explorer: tree and content run edge to edge with one separator, one 48 px nav row holds the tabs and Browse | Graph', async ({ page }) => {
+    test('Explorer: tree and content run edge to edge with one separator, one 40 px nav row holds the tabs and Browse | Graph', async ({ page }) => {
       await open(page, 'explorer');
       const m = await page.evaluate(() => {
         const box = (sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom }; };
@@ -232,11 +233,11 @@ for (const theme of ['dark', 'light']) {
       expect(m.treeBorder).toBe('1px');
       expect(Math.abs(m.main.x - m.tree.right)).toBeLessThanOrEqual(0.5);
       expect(Math.round(m.main.right)).toBe(m.vw);
-      // One row: 48 px, the gutter, the separator; the tabs sit 12 px in,
+      // One row: 40 px, the gutter, the separator; the tabs sit 12 px in,
       // then the divider and Browse | Graph, on the same line, standing on
       // the row's bottom border like the view tabs (second-level sections).
-      expect(m.rows[0].slice(0, 3)).toEqual(['48px', '12px', '1px']);
-      expect(Math.round(m.top.h)).toBe(48);
+      expect(m.rows[0].slice(0, 3)).toEqual(['40px', '12px', '1px']);
+      expect(Math.round(m.top.h)).toBe(40);
       expect(m.navTabs.y).toBeGreaterThanOrEqual(m.top.y);
       expect(m.navTabs.bottom).toBeLessThanOrEqual(m.top.bottom);
       expect(m.tabs.x).toBe(12);
@@ -266,7 +267,7 @@ for (const theme of ['dark', 'light']) {
 test.describe('page chrome on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('the header wraps the same way on every page, nav rows stay 48 px, content scrolls inside', async ({ page }, testInfo) => {
+  test('the header wraps the same way on every page, nav rows are 41 px, content scrolls inside', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-1440', 'the phone viewport is pinned: one project is enough');
     const headers = {};
     for (const name of Object.keys(PAGES)) {

@@ -2409,33 +2409,52 @@ async function holdRequests(page, pattern) {
 
 for (const path of ['/query', '/explorer/catalog', '/observability/traces', '/observability/logs', '/observability/metrics', '/system']) {
   test(`${path}: the Query / Explorer / Observability / System links are painted with the shell, before any API answer`, async ({ page }) => {
-    // A first visit learns which pages the server has on (the header's script keeps it, as the shell's first paint
-    // reads it); the next one paints them all at once, and nothing moves when the API answers.
-    await page.goto(path);
+    // A first visit has nothing to show of the server yet: the version and the host keep their words ("--" and "Host") until
+    // the API answers. The header's script keeps what it learns (the pages the server has on, the version, the selected
+    // host), and the next visit paints all of it with the shell, so nothing moves or blinks when the API answers.
+    const first = await holdRequests(page, '**/api/**');
+    try {
+      await page.goto(path, { waitUntil: 'domcontentloaded' });
+      await expect.poll(() => first.count()).toBeGreaterThan(0);
+      await expect(page.locator('#versionBadge')).toHaveText('--');
+      await expect(page.locator('#hostPickerText')).toHaveText('Host');
+    } finally {
+      await first.release();
+    }
     await expect(page.locator('#versionBadge')).not.toHaveText('--');
+    await expect(page.locator('#hostPickerText')).not.toHaveText('Host');
     await expect.poll(() => page.evaluate(() => !!localStorage.getItem('chdash.pageNav.v1'))).toBe(true);
+    await expect.poll(() => page.evaluate(() => !!(JSON.parse(localStorage.getItem('chdash.header.v1') || 'null') || {}).host)).toBe(true);
+    const version = await page.locator('#versionBadge').textContent();
+    const hostText = await page.locator('#hostPickerText').textContent();
     const api = await holdRequests(page, '**/api/**');
     try {
-      const switcherBox = () => page.evaluate(() => {
+      const headerBoxes = () => page.evaluate(() => {
         const el = document.getElementById('pageSelect');
         const r = el.getBoundingClientRect();
         const links = [...el.querySelectorAll('a')].filter((a) => a.getClientRects().length).map((a) => a.textContent.trim());
-        return { hidden: el.hidden, display: getComputedStyle(el).display, x: r.x, y: r.y, width: r.width, height: r.height, links };
+        const box = (id) => { const b = document.getElementById(id).getBoundingClientRect(); return [b.x, b.y, b.width, b.height]; };
+        return { hidden: el.hidden, display: getComputedStyle(el).display, x: r.x, y: r.y, width: r.width, height: r.height, links, version: box('versionBadge'), title: document.getElementById('versionBadge').title };
       });
       await page.goto(path, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('#navQueryLink')).toBeVisible();
-      // Scripts have started and their /api calls (version, hosts) are parked.
+      // Scripts have started and their /api calls (version, hosts) are parked: the shell shows the last visit's version and
+      // host (not the words of a first visit), and the page switcher has all its links.
       await expect.poll(() => api.count()).toBeGreaterThan(0);
-      await expect(page.locator('#versionBadge')).toHaveText('--');
-      const early = await switcherBox();
+      await expect(page.locator('#versionBadge')).toHaveText(version);
+      await expect(page.locator('#hostPickerText')).toHaveText(hostText);
+      const early = await headerBoxes();
       expect(early.hidden).toBe(false);
       expect(early.width).toBeGreaterThan(0);
       expect(early.links).toEqual(['Query', 'Explorer', 'Observability', 'System']);
+      expect(early.title).toContain(version);
 
       await api.release();
-      await expect(page.locator('#versionBadge')).not.toHaveText('--');
-      await expect(page.locator('#hostPickerText')).not.toHaveText('Host');
-      expect(await switcherBox()).toEqual(early);
+      await expect(page.locator('#versionBadge')).toHaveText(version);
+      await expect(page.locator('#hostPickerText')).toHaveText(hostText);
+      // Nothing moved when the API answered: the switcher and the version are where they were (the host button grows when its
+      // ping comes: the ping is not kept, and the button is at the right end of the header).
+      expect(await headerBoxes()).toEqual(early);
       // Every page is a link; this page's own is the current one.
       const current = path.startsWith('/observability') ? 'observability' : path.slice(1).split('/')[0];
       const name = current[0].toUpperCase() + current.slice(1);

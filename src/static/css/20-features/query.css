@@ -804,8 +804,10 @@ html.is-ready #queryTextArea::placeholder {
 .resultTable tbody td:not(:where(.dataTable > tbody > tr > td)) { white-space: pre; }
 
 @media (max-width: 1100px) {
+  /* The rail is under the editor here (two rows of stats tiles): a shorter editor keeps the results in the first screen of a
+     1024 x 768 window (navigation-readability.spec.js). */
   #queryTextArea {
-    min-height: 30rem;
+    min-height: 26rem;
   }
   .metricColumn {
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1914,6 +1916,7 @@ html:not(.is-ready) .queryEmptyState {
   .panel--results > .panel__header {
     flex-wrap: wrap;
     row-gap: var(--space-4);
+    padding-block: var(--space-4);
   }
   .panel--results > .panel__header > .panel__title { margin-right: auto; }
   .panel--results > .panel__header > .panel__meta { display: contents; }

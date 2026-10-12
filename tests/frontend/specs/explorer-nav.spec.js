@@ -61,7 +61,7 @@ for (const theme of ['dark', 'light']) {
       await expect(page.locator('#explorerCatalogTab')).toHaveAttribute('aria-current', 'page');
       // Browse | Graph are underline tabs in the same row as Catalog |
       // Functions, after a divider, as Observability's Search / Services /
-      // Service map after Traces / Logs / Metrics; the row is 48 px.
+      // Service map after Traces / Logs / Metrics; the row is 40 px.
       const modes = page.locator('#explorerModeTabs .contentTabs__tab:visible');
       await expect(modes).toHaveText(['Browse', 'Graph']);
       // Storage is a tab of the table card and part of the database page, not a mode.
@@ -78,7 +78,7 @@ for (const theme of ['dark', 'light']) {
       const sub = await page.locator('#explorerModeTabs').boundingBox();
       const functionsTab = await page.locator('#explorerFunctionsTab').boundingBox();
       const browse = await page.locator('#explorerModeBrowse').boundingBox();
-      expect(row.height).toBeCloseTo(48, 0);
+      expect(row.height).toBeCloseTo(40, 0);
       // Left to right: the view tabs, the divider, Browse | Graph, right
       // after them (not pushed to the row's right edge).
       expect(sep.x).toBeGreaterThanOrEqual(tabs.x + tabs.width - 0.5);
@@ -705,7 +705,7 @@ for (const theme of ['dark', 'light']) {
         expect(box.y + box.height, id).toBeLessThanOrEqual(topBar.y + topBar.height + 0.5);
       }
       await expect(page.locator('#explorerBreadcrumb')).toHaveCount(0);
-      // 40 px hit areas on a touch screen (the row is the 48 px nav row).
+      // 40 px hit areas on a phone (the nav row is 41 px there, its 1 px border under the tabs).
       for (const id of ['#explorerCatalogTab', '#explorerFunctionsTab', '#explorerModeBrowse', '#explorerModeGraph']) {
         const box = await page.locator(id).boundingBox();
         expect(box.height, id).toBeGreaterThanOrEqual(40);

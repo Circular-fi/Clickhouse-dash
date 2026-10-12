@@ -85,6 +85,8 @@ for (const width of [1440, 390, 360]) {
         const state = await page.evaluate(() => {
           const mark = document.querySelector('.appBrand__logo');
           const name = document.querySelector('.appBrand__name');
+          const version = document.querySelector('#versionBadge');
+          const brand = document.querySelector('.appBrand');
           const header = document.querySelector('.appHeader');
           const box = mark.getBoundingClientRect();
           const probe = document.createElement('i');
@@ -96,13 +98,21 @@ for (const width of [1440, 390, 360]) {
             w: box.width, h: box.height,
             // Up to 600 px the logo stands for the name: the name stays for a screen reader, clipped to a pixel.
             beforeName: innerWidth <= 600 ? name.getBoundingClientRect().width <= 1 : box.right <= name.getBoundingClientRect().left,
-            centred: Math.abs((box.top + box.bottom) / 2 - (name.getBoundingClientRect().top + name.getBoundingClientRect().bottom) / 2) <= 2,
+            // The mark stands in the middle of the brand: the name with the version under it (the name alone up to 600 px).
+            centred: Math.abs((box.top + box.bottom) / 2 - (brand.getBoundingClientRect().top + brand.getBoundingClientRect().bottom) / 2) <= 1,
+            // The version is small text under the name, as wide as the name at most (a longer text ends with an ellipsis); up to 600 px it is not drawn.
+            versionUnderName: innerWidth <= 600
+              ? getComputedStyle(version).display === 'none'
+              : version.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 1
+                && Math.abs(version.getBoundingClientRect().left - name.getBoundingClientRect().left) <= 1
+                && version.getBoundingClientRect().width <= name.getBoundingClientRect().width + 1
+                && parseFloat(getComputedStyle(version).fontSize) < parseFloat(getComputedStyle(name).fontSize),
             fill: getComputedStyle(mark.querySelector('rect')).fill, accent,
             overflow: Math.max(header.scrollWidth - header.clientWidth, document.documentElement.scrollWidth - innerWidth),
             rightEdge: Math.max(...[...header.querySelectorAll('*')].map((el) => el.getBoundingClientRect().right)) - innerWidth,
           };
         });
-        expect(state).toMatchObject({ w: 18, h: 18, beforeName: true, centred: true, overflow: 0 });
+        expect(state).toMatchObject({ w: 26, h: 26, beforeName: true, centred: true, versionUnderName: true, overflow: 0 });
         expect(state.fill).toBe(state.accent);
         expect(state.rightEdge).toBeLessThanOrEqual(0);
       });

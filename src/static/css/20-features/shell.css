@@ -28,7 +28,7 @@
   min-width: 0;
 }
 
-/* The header's height comes from its right side (the controls and 12 px above and below them): the left side stretches,
+/* The header's height comes from its right side (the controls and 8 px above and below them): the left side stretches,
    so the page switcher's current-page underline stands on the header's bottom border. */
 .appHeader__right {
   display: flex;
@@ -552,9 +552,11 @@ body {
   overflow-anchor: none;
 }
 
+/* The header row is as tall as a nav row (its controls are centred in it, no padding above or below; on a phone it wraps and
+   gets some: query.css). */
 .panel--results > .panel__header {
   min-height: var(--nav-row-h);
-  padding: var(--space-4) var(--gutter);
+  padding-inline: var(--gutter);
   border-bottom: var(--shell-border);
 }
 
