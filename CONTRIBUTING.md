@@ -55,8 +55,8 @@ The release workflow builds Linux amd64/arm64 and macOS amd64/arm64. It uses iso
 
 The release chain follows these rules:
 
-- The release runs the CI workflow (`ci.yml`) on the commit that it builds. The build starts only when the tests pass.
-- The tests do not run on a push or a pull request: they are long. `ci.yml` runs when a release is asked for (it is called by `release.yaml`) and on request (Actions > CI > Run workflow). The sanitizers (`sanitize.yml`), clang-tidy and the release smoke test run on request only; CodeQL runs once a week.
+- The release runs no test suite: it builds the commit of the tag, smoke-tests each binary and publishes (about 15 minutes). The full suite (about 75 minutes on a runner) runs before the tag is made: `docker compose --profile test up --build` in `tests/` (see `tests/README.md`).
+- The tests do not run on a push or a pull request: they are long. `ci.yml` runs on request (Actions > CI > Run workflow). The sanitizers (`sanitize.yml`), clang-tidy and the release smoke test run on request only; CodeQL runs once a week.
 - Each action has a pin to a commit SHA, with the version in a comment. Dependabot updates the pins.
 - No release job restores a cache. Each checkout uses `persist-credentials: false`.
 - Only the publish job can write to the repository. It runs in the `release` environment. Set a required reviewer for this environment in the repository settings. The `gh` CLI publishes the release. No third-party action gets the write token.

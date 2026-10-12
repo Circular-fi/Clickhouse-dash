@@ -1,6 +1,6 @@
 name: Static analysis
 
-# On request only (Actions > run workflow): the tests of a release are those of ci.yml.
+# On request only (Actions > run workflow): the tests are those of ci.yml, on request too.
 on:
   workflow_dispatch:
 

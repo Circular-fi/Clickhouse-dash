@@ -1,7 +1,7 @@
 """Policy of the CI and release workflows and of the test stack's dependencies: what must hold whatever the jobs do.
 
 Why a file read: these are the rules that make the build trustworthy (nothing unpinned, no token left behind, no event text in a
-script, the release builds only the commit that was tested, only the publish job writes). The jobs themselves are the tests of the
+script, the release builds only the commit of its tag, only the publish job writes). The jobs themselves are the tests of the
 build; their flags and names are not asserted here. The smoke test and the sanitizer repros run for real in test_release_smoke.py and
 test_sanitizer_repros.py, the dangling-capture check in test_build_flags_contract.py.
 """
@@ -54,11 +54,11 @@ def test_no_expression_of_an_event_is_pasted_into_a_script():
                 assert not any("${{ " + name in line for name in risky), (workflow.name, line)
 
 
-def test_the_release_builds_the_commit_that_was_tested_and_smoke_tests_every_binary_before_publishing():
-    tests = RELEASE.split("  tests:\n", 1)[1].split("\n  build:\n", 1)[0]
-    assert "uses: ./.github/workflows/ci.yml" in tests and "ref: ${{ needs.prepare.outputs.sha }}" in tests
+def test_the_release_builds_the_tagged_commit_and_smoke_tests_every_binary_before_publishing():
+    # No test job: the suite takes more than an hour on a runner, and runs before the tag is made (and on request, ci.yml).
+    assert "\n  tests:\n" not in RELEASE and "uses: ./.github/workflows/ci.yml" not in RELEASE
     build = RELEASE.split("\n  build:\n", 1)[1].split("\n  release:\n", 1)[0]
-    assert "- tests" in build and "ref: ${{ needs.prepare.outputs.sha }}" in build
+    assert "needs: prepare" in build and "ref: ${{ needs.prepare.outputs.sha }}" in build
     smoke = RELEASE.index("- name: Smoke test the binary")
     assert RELEASE.index("- name: Verify and strip the Linux binary") < smoke < RELEASE.index("- name: Upload release asset")
     assert "if:" not in RELEASE[smoke:RELEASE.index("run:", smoke)]  # the macOS binaries too

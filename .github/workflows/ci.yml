@@ -1,10 +1,10 @@
 name: CI
 
-# The tests are long: they run when a release is asked for (release.yaml calls this workflow before it builds) and on request
-# (Actions > CI > Run workflow), not on every push or pull request.
+# The tests are long (more than an hour on a runner): they run on request (Actions > CI > Run workflow), not on every push or
+# pull request, and not in the release (release.yaml builds and publishes; the suite runs before the tag is made).
 on:
   workflow_dispatch:
-  # The release workflow runs this profile on the commit it builds (release.yaml, job "tests").
+  # Callable by another workflow with the commit to test.
   workflow_call:
     inputs:
       ref:

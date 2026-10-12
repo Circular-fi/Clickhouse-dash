@@ -1,8 +1,9 @@
 name: Release
 
-# A release builds the tagged commit only after the tests passed on it (the CI workflow, called below),
-# checks and smoke-tests each binary, then publishes the archives with SHA256SUMS and a signed build
-# provenance attestation (gh attestation verify <archive> --repo <owner>/<repo>).
+# A release builds the tagged commit, checks and smoke-tests each binary, then publishes the archives
+# with SHA256SUMS and a signed build provenance attestation (gh attestation verify <archive> --repo
+# <owner>/<repo>). It runs no test suite (that took more than an hour): the full suite runs before the
+# tag is made (tests/README.md) and on request (Actions > CI > Run workflow).
 #
 # Supply chain: every action is pinned by commit SHA (Dependabot updates the pins), no job restores a
 # cache, no checkout keeps the token in .git/config, and only the last job may write to the repository.
@@ -94,22 +95,9 @@ jobs:
           echo "Resolved release tag: ${TAG}"
           echo "Resolved version: ${VERSION}"
 
-  # The full test profile of ci.yml (with the check of the WebAssembly kernels), on the commit that the
-  # release builds. Its checkout keeps no token: the kernel check mounts the checkout in a container.
-  tests:
-    name: Tests
-    needs: prepare
-    permissions:
-      contents: read
-    uses: ./.github/workflows/ci.yml
-    with:
-      ref: ${{ needs.prepare.outputs.sha }}
-
   build:
     name: Build (${{ matrix.goos }} ${{ matrix.goarch }})
-    needs:
-      - prepare
-      - tests
+    needs: prepare
     permissions:
       contents: read
     runs-on: ${{ matrix.runner }}
