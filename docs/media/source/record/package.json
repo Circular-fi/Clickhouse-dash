@@ -1,0 +1,7 @@
+{
+  "name": "chdash-presentation-recorder",
+  "private": true,
+  "type": "module",
+  "description": "Choreographed Playwright recording of ClickHouse Dash for docs/media/chdash-presentation.mp4",
+  "dependencies": { "playwright-core": "1.52.0" }
+}

@@ -1,0 +1,18 @@
+00|This is ClickHouse Dash: a lightweight, real-time dashboard for ClickHouse.
+01a|Write a query, and format it.
+01b|Run it, and watch the numbers fill in live.
+02|Switch to a chart, and explore it right there.
+03|Keep the good ones. Name it, file it in a folder, and the whole team can open it.
+04a|The Explorer sizes every database,
+04b|opens any table down to its parts and its D D L,|opens any table down to its parts and its DDL,
+04c|and draws the lineage.
+05a|Chasing a slow checkout? Drag a box over the slow band,
+05b|and Dash shows what sets those traces apart.
+05c|Open one, and follow it across every service.
+06a|Logs are right there,
+06b|and metrics are one click away.
+07a|System keeps an eye on the server itself, with live charts,
+07b|and the heaviest query shapes,
+07c|each one a click from its formatted text.
+08|When an AI assistant needs your data, give it a key, with only the tools and tables you allow.
+09|ClickHouse Dash. One self-contained binary. Version one point zero.|ClickHouse Dash. One self-contained binary. Version 1.0.0.
