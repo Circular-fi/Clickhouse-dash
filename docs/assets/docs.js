@@ -139,6 +139,7 @@
       table.replaceWith(wrap);
       wrap.appendChild(table);
     }
+    root.querySelectorAll("pre code").forEach((code) => { if (window.chdashHighlight) window.chdashHighlight(code); });
     for (const pre of root.querySelectorAll("pre")) {
       pre.tabIndex = 0;
       pre.setAttribute("aria-label", "Code");

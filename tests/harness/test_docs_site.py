@@ -29,15 +29,16 @@ def test_the_home_page_links_only_to_documentation_pages_that_exist():
 
 def test_the_home_page_keeps_its_weight_budget():
     # Why: the page is meant to cost as little as possible (bytes, decoding, GPU). These are the limits that were measured when it was
-    # optimised (video 2.4 MB, images 243 kB without the video, fonts 63 kB); a change that goes past them should be a decision.
+    # optimised (video 6.7 MB in full HD and 2.5 MB in 720p, images 243 kB without the video, fonts 63 kB); a change that goes past them should be a decision.
     docs = ROOT / "docs"
-    assert (docs / "media/chdash-presentation-web.mp4").stat().st_size <= 3_500_000
+    assert (docs / "media/chdash-presentation-1080.mp4").stat().st_size <= 8_000_000  # full HD, 24 fps, the default of the player
+    assert (docs / "media/chdash-presentation-720.mp4").stat().st_size <= 3_500_000  # for Save-Data and phones
     for image in (docs / "assets/img").iterdir():
         assert image.stat().st_size <= 70_000, image.name
     fonts = sum(path.stat().st_size for path in (docs / "assets/fonts").glob("*.woff2"))
     assert fonts <= 80_000, fonts
     assert (docs / "assets/icons.svg").stat().st_size <= 6_000
-    for script in ("site.js", "scene.js", "docs.js"):
+    for script in ("site.js", "scene.js", "docs.js", "highlight.js"):
         assert (docs / "assets" / script).stat().st_size <= 20_000, script
 
 

@@ -15,6 +15,12 @@ colors:
   track: "rgba(255, 255, 255, 0.12)"
   doc-text: "#d2e3ee"
   doc-code: "#bff6f3"
+  code-key: "#93b4ff"
+  code-string: "#f2c56b"
+  code-url: "#9be3b5"
+  code-number: "#c4a8ff"
+  code-comment: "#7f97ae"
+  code-punct: "#8da4bb"
   code-text: "#d6ecf7"
   fallback-glow: "#0d3358"
   shadow-soft: "rgba(0, 0, 0, 0.6)"
@@ -160,18 +166,18 @@ One scale: 20 px frames and cards, 14 px code blocks, full pills for every butto
 
 ## Components
 
-- **Hero and player:** the video is the first thing on the page: one compact row (a one-line headline with the sentence under it on the left, the Download and Run buttons with a line of facts on the right), then the 16:9 player sized to the rest of the viewport height, with the column field around it and the video credit under it. The video autoplays muted and loops while on screen, and enters with a short 3D lift. Sound and Pause are icon buttons inside the player, in a bar that shows on hover, on focus, when paused and for a few seconds after a tap; clicking the video pauses it. There are no chapter buttons. Below 780 px of height the sentence and the facts line are dropped and the headline and buttons shrink, so the video stays in the first screen.
+- **Hero and player:** the video is the first thing on the page: one compact row (a one-line headline with the sentence under it on the left, the Download and Run buttons with a line of facts on the right), then the 16:9 player sized to the rest of the viewport height, with the column field around it and the video credit under it. The video autoplays muted and loops while on screen, and enters with a short 3D lift. Sound, Pause and Full screen are buttons inside the player, in a bar that shows on hover, on focus, when paused and for a few seconds after a tap; clicking the video pauses it. There are no chapter buttons. Below 780 px of height the sentence and the facts line are dropped and the headline and buttons shrink, so the video stays in the first screen.
 - **Column field:** instanced cubes, the heights of four shapes (inserts stream, sparse primary index with merging runs, latency heatmap, scan sweep) computed in the vertex shader and mixed by a stage taken from the scroll. The camera, the brightness and a navy veil change with the stage so text stays readable. Pauses in hidden tabs; draws still frames on scroll under `prefers-reduced-motion`; hidden (with a gradient fallback) without WebGL2. It never follows the pointer.
 - **Features:** a bento of the six pages, each card a link to its documentation page (hover lifts it and moves the arrow), with a real screenshot.
 - **Flow:** three rows, collector to table to page, with packets running along the pipes while the section is visible.
-- **Install:** the platform tab rewrites the archive name in the commands; Copy buttons confirm for 1.6 s.
+- **Install:** the platform tab rewrites the archive name in the commands; Copy buttons confirm for 1.6 s. Code is coloured by a 3 kB highlighter (shell, HCL, SQL, JSON, HTTP, YAML): commands in the page accent, keys and flags in the accent text blue of ClickHouse Dash (#93b4ff), strings amber, URLs green, numbers and keywords violet, comments grey.
 - **Documentation (`documentation.html`):** the Markdown files of `docs/` fetched and rendered in the browser with marked; a filterable menu, an on-this-page list, previous and next cards, copy buttons on code, wide tables that scroll inside their box. Links between files, anchors, images and links to repository files are rewritten. The list of pages lives in `docs/assets/docs.js` and a repository check keeps it equal to `docs/*.md`.
 - **Circular:** a discreet reference, never a logo: "by circular.fi" in small muted type right after the name in the navigation, and one quiet footer line. Every mention is a link to https://circular.fi; GitHub always carries its mark.
 - **Hover:** only what can be clicked reacts to the pointer.
 
 ## Performance
 
-The page is built to cost little, and `tests/harness/test_docs_site.py` guards the numbers: the video is a 720p, 24 fps, 2.4 MB copy that starts when the page is idle and plays once; images are AVIF with WebP fallback at two widths (under 70 kB each); two subset fonts (63 kB); a 3 kB icon sprite; no web font for code; no blur behind the navigation (it would repaint over the animated canvas); sections below the fold use `content-visibility: auto`. The column field computes its heights on the CPU for the two shapes in use, draws one instanced call at 24 frames per second (10 when left alone), at most 1.25 device pixels per pixel, without multisampling, on the low-power GPU, measures its own frame time and lowers its resolution or stops animating when the machine cannot keep up, and stops in hidden tabs. Reduced motion and Save-Data get still frames and no autoplay.
+The page is built to cost little, and `tests/harness/test_docs_site.py` guards the numbers: the video is a full HD, 24 fps, 6.7 MB copy (a 2.5 MB 720p copy for Save-Data and phones) that starts when the page is idle and plays once; images are AVIF with WebP fallback at two widths (under 70 kB each); two subset fonts (63 kB); a 3 kB icon sprite; no web font for code; no blur behind the navigation (it would repaint over the animated canvas); sections below the fold use `content-visibility: auto`. The column field computes its heights on the CPU for the two shapes in use, draws one instanced call at 24 frames per second (10 when left alone), at most 1.25 device pixels per pixel, without multisampling, on the low-power GPU, measures its own frame time and lowers its resolution or stops animating when the machine cannot keep up, and stops in hidden tabs. Reduced motion and Save-Data get still frames and no autoplay.
 
 ## Do's and Don'ts
 

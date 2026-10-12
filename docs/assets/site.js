@@ -30,6 +30,8 @@
   const SPRITE = "assets/icons.svg#i-";
   if (video) {
     const saveData = !!(navigator.connection && navigator.connection.saveData);
+    // Full HD by default; the 720p copy (a third of the weight) for Save-Data and for phones
+    if (saveData || window.matchMedia("(max-width: 700px)").matches) video.src = video.getAttribute("src").replace("-1080.mp4", "-720.mp4");
     let wantsPlay = !reduce && !saveData;
     let hideTimer = 0;
     // The bar shows on hover and focus (CSS), when the video is paused or ended, and for a few seconds after a tap or at the start.
@@ -49,6 +51,25 @@
     };
     const play = () => { video.preload = "auto"; const p = video.play(); if (p && p.catch) p.catch(() => { wantsPlay = false; paint(); }); };
     const flip = () => { wantsPlay = video.paused || video.ended; if (wantsPlay) play(); else video.pause(); paint(); showBar(); };
+    // Full screen: the frame (so the bar stays), or the video itself where only that is allowed (iOS Safari)
+    const full = $("#full");
+    const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+    const paintFull = () => {
+      const on = fsElement() === frame;
+      $("#fullIcon").setAttribute("href", SPRITE + (on ? "minimize" : "maximize"));
+      full.setAttribute("aria-label", on ? "Leave full screen" : "Full screen");
+    };
+    if (frame.requestFullscreen || frame.webkitRequestFullscreen || video.webkitEnterFullscreen) {
+      full.addEventListener("click", () => {
+        if (fsElement()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+        if (frame.requestFullscreen) frame.requestFullscreen().catch(() => {});
+        else if (frame.webkitRequestFullscreen) frame.webkitRequestFullscreen();
+        else video.webkitEnterFullscreen();
+        showBar();
+      });
+      document.addEventListener("fullscreenchange", paintFull);
+      document.addEventListener("webkitfullscreenchange", paintFull);
+    } else full.hidden = true;
     toggle.addEventListener("click", flip);
     video.addEventListener("click", flip);
     sound.addEventListener("click", () => { video.muted = !video.muted; if (video.paused || video.ended) { wantsPlay = true; play(); } paint(); showBar(); });
@@ -93,6 +114,7 @@
   const setPlatform = (tab) => {
     const archive = `chdash_${VERSION}_${tab.dataset.os}_${tab.dataset.arch}.tar.gz`;
     download.textContent = `curl -fsSLO ${BASE}/${archive}\ntar xzf ${archive}`;
+    if (window.chdashHighlight) window.chdashHighlight(download, "sh");
     tabs.forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
   };
   tabs.forEach((tab) => tab.addEventListener("click", () => setPlatform(tab)));
