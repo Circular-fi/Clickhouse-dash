@@ -1,9 +1,9 @@
 # Query library and history
 
-The Query page keeps saved queries (in folders; a query has a name, a description and its SQL; a folder has a name and a place). It also keeps the history of the queries that it ran. Saved queries are in two storages. Both are top folders of one tree:
+The Query page keeps saved queries (in folders; a query has a name, a description and its SQL; a folder has a name and a place). It also keeps the history of the queries that it ran. Saved queries are in storages. All of them are top folders of one tree:
 
 - **Local browser storage** is the localStorage of this browser. It is always there.
-- **Shared server storage** is one JSON file on the ChDash server. Every user of the panel shares it. The page shows it when the optional `query_library` block is enabled.
+- **Shared server storage** is one JSON file on the ChDash server. Every user of the panel shares it. The page shows it when the optional `query_library` block is enabled. The server can have several of these files, each with its own name and its own read-only switch (see *Several libraries on the server*).
 
 The history is always in the browser (IndexedDB). The browser never sends it to the server, and nobody shares it.
 
@@ -22,18 +22,46 @@ query_library {
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `false` | `false`: every `/api/query-library` route answers 404. Saved shows the *Local browser storage* only. |
+| `enabled` | `false` | `false`: the block is ignored. When no block is enabled, every `/api/query-library` route answers 404, and Saved shows the *Local browser storage* only. |
+| `name` | `default` for the first library | The name of the library: its id in the API (`?library=`) and what the Query page shows. Any text of 1 to 128 bytes, spaces and accents included, with no control character and no space at either end. Only the first library may leave it out. Each name is different. |
 | `file` | none | Required when enabled. The parent directory must exist. The dashboard creates the file on the first write. |
 | `writable` | `false` | `false`: read-only library. Folder/query create, edit, move and delete, and import answer 403 `read_only`. |
 | `max_file_bytes` | 8 MiB | Size cap of the file (64 KiB..1 GiB). A write that exceeds it answers 413 and nothing changes. |
 | `max_query_bytes` | 256 KiB | SQL size cap of one saved query (1 KiB..`max_file_bytes`). Larger SQL answers 413. |
+
+### Several libraries on the server
+
+Repeat the `query_library` block: each enabled block is one more library, with its own name, file and `writable`. The page shows each of them as a top folder named after the library, in the order of the file, above *Local browser storage*. Use it to keep a shared library that everyone can change next to a read-only one that holds approved queries (a file that you maintain by hand or by a deployment).
+
+```hcl
+query_library {              # the first one is the default library of the API
+  enabled  = true
+  name     = "team"
+  file     = "/var/lib/chdash/team.json"
+  writable = true
+}
+
+query_library {
+  enabled  = true
+  name     = "runbooks"
+  file     = "/var/lib/chdash/runbooks.json"
+  writable = false
+}
+```
+
+- A single block works as before: the same file, the same routes. A single library that keeps the name `default` shows as *Shared server storage*.
+- Only the first library may leave out its `name` (it is then `default`). Names are different, and a file is never shared by two libraries (the start fails otherwise). A block with `enabled = false` is ignored.
+- Each library has its own revision, its own limits (`max_file_bytes`, `max_query_bytes`) and its own load error. A library whose file cannot be read is read-only; the others are not affected.
+- A read-only library shows a *Read-only* badge. Its queries can be opened, searched and exported (the folder menu saves a JSON file). Nothing in it can be changed, moved or removed, and nothing can be moved into it.
+- Moving a query or a folder between two libraries works as between the browser and the server: the item is created in the target, then removed from the source. Both libraries must be writable.
+- The routes are the same for every library; `?library=<name>` picks one (reads and writes). Without it, the first library answers.
 
 A `history {}` block in `query_library` (`history.store`, `history.max_entries`, from earlier releases) is refused at startup. The message asks the user to delete it. A library file that an earlier release wrote keeps its `history` array. The dashboard drops this array on load:
 
 - A writable library rewrites the file without the array. The log gives the count.
 - A read-only library leaves the file as it is.
 
-`/api/version` reports `features.query_library = {"enabled", "writable"}`. `writable` is the effective state. It is false when `writable = false`. It is also false while the file has a load error. With the feature disabled, it reports `{"enabled": false, "writable": false}`.
+`/api/version` reports `features.query_library = {"enabled", "writable", "libraries"}`. `libraries` lists each library in the order of the file: `[{"name", "writable"}]`; the first is the default one. `writable` of a library is the effective state: it is false when `writable = false`, and also while the file has a load error. The `writable` of `query_library` itself is the one of the first library. With the feature disabled, it reports `{"enabled": false, "writable": false, "libraries": []}`.
 
 ## In the Query page
 
@@ -45,7 +73,7 @@ Both tabs have the same layout:
 
 - A search is on top of the list. In Saved, the *New folder* icon button is at the right of the search.
 - The list is below the search.
-- A foot line is below the list. In Saved, the primary button **Save query** is at the bottom left of the foot. The count and the host are at the right.
+- A foot line is below the list. In Saved, it holds the count of queries and the host. Saving is not here: it is the floppy **Save** button of the editor.
 
 The list on the left selects an item (with a click or the arrow keys). The pane on the right shows the selected item. The head of the pane is one line. It shows the title, then its meta, then the tools of the item as icon buttons. The meta is the *Updated ...* of a saved query or a folder, or the time and the status of a run. Each tool has its label as `aria-label` and as tooltip. The foot of the pane holds one action, **Load**, at the bottom right (while the pane shows the save form, it holds the form's buttons instead: see *Save*). You can also press Ctrl/Cmd+Enter in the list or in the pane. The action puts the SQL in the editor and closes the dialog. A click never loads a query by itself.
 
@@ -53,12 +81,12 @@ The highlighted SQL has its own copy button. It also has the line-number gutter 
 
 On a phone, the list and the preview are two steps. Tap a row to see its pane. A back button returns to the list. A twisty or an icon of a folder opens the folder, and the name of the folder shows its pane. The meta goes under the title there. On a touch screen, the icon tools are 40 px square.
 
-- **Saved**: shows a tree, like the Explorer. These are the top folders of the tree: *Shared server storage* (when the server library is enabled), then *Local browser storage*. If the server library is off, only the browser storage shows. Each storage has its count of queries. A folder holds nested folders and saved queries. A saved query has a description. A folder has no description.
-  - Every folder opens and closes in place. Use the twisty, a click, Right / Left, or Enter. The dashboard remembers the open state.
+- **Saved**: shows a tree, like the Explorer. These are the top folders of the tree: *Shared server storage* (when the server library is enabled), then *Local browser storage*. If the server library is off, only the browser storage shows. Each storage and each folder shows its count of queries (the queries under a folder, subfolders included), also while it is closed; an empty folder says *Empty*. A folder holds nested folders and saved queries. A saved query has a description. A folder has no description.
+  - Every folder opens and closes in place. The chevron (the twisty) opens and closes it. A click on the row selects the folder and opens it when it is closed. A click on a folder that is already selected (the blue frame) and open closes it, as the chevron does; a click on an open folder that is not selected only selects it. With the keyboard, Right opens, Left closes, and Enter and Space open or close the folder. On a phone, a tap on the icon also does. The dashboard remembers the open state.
   - The search covers both storages. It searches names, descriptions and SQL. Each result names its storage and its folder.
   - The preview of a query shows its name and last update, its description and the highlighted SQL. It has no folder line, because the tree shows the folder.
-  - The preview of a folder shows its path and its contents.
-  - The preview of a storage says where the storage is stored.
+  - The preview of a folder shows its path and its contents (the queries and subfolders under it), then lists what is directly in it: its subfolders first, each with its count of queries, then its queries with their description and last change. A click on an entry opens it in the tree. An empty folder says so.
+  - The preview of a storage says where the storage is stored, then lists its top level the same way (*In this library*).
   - The *New folder* icon button creates the folder inside the highlighted folder or storage. The user types the name of the new folder in a row. Enter creates the folder. Escape drops it. The row refuses a duplicate name.
   - The user renames a folder in its row (F2, Rename).
   - Each row has a "..." menu. It shows on hover, on focus and on the highlighted row. A right click and Shift+F10 also open it. The menu has these items:
@@ -76,16 +104,17 @@ On a phone, the list and the preview are two steps. Tap a row to see its pane. A
   - A folder with everything in it is created in the browser at once. On the server, it is created with one all-or-nothing `POST /api/query-library/import` in copy mode (below).
   - The dashboard refuses a name that the target folder already holds. It does this before anything changes.
   - If the copy is in but the source cannot remove its item, the dashboard tells the user. The item is then in both storages.
-- **Save** (the Save query button, Ctrl+S, or *Save to library...* of a run) opens no window over the dialog. The library opens (or stays open) on **Saved**, and the right pane shows the save form in place of the preview of the selection. The tree stays on the left and works as usual (search, open and close folders, the *New folder* button).
-  - The form is labelled by its title (*Save to library*, or *Save "name"* when the editor holds a saved query). Its fields are **Name**, **Description** and **Folder**. Under them is the SQL that will be saved, with its label (*SQL (from the editor, formatted)*, *from History*, *formatting...*) and the check box **Save raw**. The foot has **Cancel** and **Save**. When the editor holds a query that was opened from a storage that can be written, the foot has **Update** and **Save as new** instead (Update changes that query, Save as new creates another one). The keyboard focus moves to Name. Enter in Name saves. Ctrl/Cmd+Enter saves from any field of the form.
+- **Save** (the floppy *Save query* button in the corner of the editor, between the copy button and the options cog; Ctrl+S; or *Save to library...* of a run) opens no window over the dialog. The library opens (or stays open) on **Saved**, and the right pane shows the save form in place of the preview of the selection. The tree stays on the left and works as usual (search, open and close folders, the *New folder* button).
+  - The form is labelled by its title (*Save to library*, or *Save "name"* when the editor holds a saved query). Its fields are **Name**, **Description** and **Folder**. Under them is the SQL that will be saved, with its label (*SQL (from the editor, formatted)*, *from History*, *formatting...*) and the check box **Save raw** (it is shown only when the formatter changes the text; a query that it leaves as it is has one text to save). The foot has **Cancel** and **Save**. When the editor holds a query that was opened from a storage that can be written, the foot has **Update** and **Save as new** instead (Update changes that query, Save as new creates another one). The keyboard focus moves to Name. Enter in Name saves. Ctrl/Cmd+Enter saves from any field of the form.
   - The query is saved as the formatter writes it. The small check box **Save raw**, at the end of the SQL's heading, is not ticked by default. When the user ticks it, the text shown is the text as typed and the query is saved as typed. If the formatter does not accept the query, the box is ticked and locked and the query is saved as typed.
   - The SQL is drawn like the preview of a query: with its line numbers (when the editor shows them) and a copy button.
   - The tree shows where the query will go: a dashed row (*New query*, then the typed name) in the folder of the **Folder** field, at the place its name sorts to. The folder opens for it. When an edited query moves, the row shows its new place.
   - **Folder** starts at the place that is selected in the tree (the folder of a selected query, the storage for a selected storage), or at the folder of the opened query when the form updates it. While the form is open, a click on a folder or a storage in the tree (or the arrow keys on it) sets the Folder field, so the user picks the target in the tree. The Folder list always offers every folder of both storages, as in the other pickers. A new folder made with the *New folder* button while the form is open is added to the list and chosen. The form keeps what the user typed when the tree is drawn again.
+  - **Folder** is a folder picker, as in the open-source drives (Nextcloud, Google Drive, Dropbox). It reads as a path (*Team queries > Reports > Daily*, the last folder in bold). A click, or the Down arrow, opens a tree of the storages and their folders. A twisty opens a folder (Right and Left open and close it, and go to the first child and to the parent). Up, Down, Home and End move, and Enter or a click chooses and closes the tree. Escape closes only the tree; the form and the dialog stay. The places that were chosen last (at most three) come first under *Recent*, with their path. With 8 folders or more, a *Filter folders* box finds a folder by any part of its path and shows each result with where it is (Enter chooses the first). A read-only storage is shown locked (*Read-only*) and cannot be chosen. *Move to...* uses the same tree, always open.
   - A name that is empty, too long or already used in the folder, a description that is too long and a folder that cannot be used show their message under the field (`role="alert"`, the field has `aria-invalid`), and the focus goes to the field. Any other refusal (a conflict, a read-only storage, a failed request) shows its message above the buttons. The form stays open and nothing is lost. The guards of the library are the same as before: with no host, with a library that is read-only, and with an empty editor, no form opens and a toast says why.
-  - **Escape** drops the form and shows the preview of the selection again, wherever the focus is in the dialog. A second Escape closes the dialog. The focus goes back to *Save query* when the button opened the form, else to the selected row. Closing the dialog, another host and a removed query (for Edit) also end the form. A second *Save query* or Ctrl+S with the same form open only focuses it. If the user switches to **History**, the form stays and comes back with **Saved**.
+  - **Escape** drops the form and shows the preview of the selection again, wherever the focus is in the dialog. A second Escape closes the dialog. The focus goes to the selected row. Closing the dialog, another host and a removed query (for Edit) also end the form. A second click on the editor's *Save query* button or Ctrl+S with the same form open only focuses it. If the user switches to **History**, the form stays and comes back with **Saved**.
   - After a save, the toast says *Query saved.* (or *Query updated.*), the tree opens the folder of the query and selects it, and the pane shows its normal preview.
-  - On a phone, the form is the step of the pane. The back button of its head returns to the list and keeps the form (*Save query* brings it back). A tap on a folder or a query of the list sets the Folder and returns to the form. Cancel and Escape drop the form and show the list.
+  - On a phone, the form is the step of the pane. The back button of its head returns to the list and keeps the form (the editor's *Save query* brings it back). A tap on a folder or a query of the list sets the Folder and returns to the form. Cancel and Escape drop the form and show the list.
 - **History**: shows the runs of the current host, grouped by day. Each run has the status (ok / error / cancelled), the elapsed time and the rows. There is a search.
   - The preview of a run has the SQL as its title, with its time and status beside it. Then it shows the elapsed time, the rows, the server error of a failed run and the SQL.
   - Its tool is *Save to library...*.
@@ -189,6 +218,8 @@ To pre-seed a read-only library, write such a file by hand (for example from an 
 
 All bodies are JSON. Every mutating request accepts `If-Match: <revision>` (`42`, `"42"`, `W/"42"` and `*` are understood). On a mismatch, the request answers 409 `{"error_code": "conflict", "revision": <current>, ...}`, so that the UI can reload. Mutation responses carry the new `revision`.
 
+Every route takes `?library=<name>` (the `name` of a `query_library` block) to pick the library. Without it the first one answers. A name that no library has answers 404 `unknown_library`.
+
 `host_id` is required where the table names it. It must name a configured host. If it is missing, the request answers 400 `reason: "required"`. If it is unknown, the request answers 400 `reason: "unknown_host"` (both with `field: "host_id"`). Requests by id (`PATCH`, `DELETE .../<id>`) act on the own host of the entity. A move into a folder of another host answers 400 `reason: "host_mismatch"` and changes nothing. A `host_id` in a PATCH that is not the host of the entity answers in the same way.
 
 The library revision is one for the whole file (every host). It changes with every change of a folder or a query, and with an external edit of the file. Running queries never changes it.
@@ -264,7 +295,7 @@ Errors have the body of every ChDash error (`error_code`, `message`, `retryable`
     - The one line of the head and the icon tools.
     - No Folder line.
     - The line-number gutter on and off.
-    - *Save query* in the foot, and the *Load* action alone in the pane.
+    - The editor's floppy *Save query* button (beside the copy button, disabled while the editor is empty), and the *Load* action alone in the pane.
     - The keyboard.
     - History without *Clear history* and without any removal.
     - A host switch.

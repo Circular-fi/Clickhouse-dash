@@ -5,6 +5,7 @@ const build = () => ({
 
   queryTextArea: byId("queryTextArea"),
   editorCopyButton: byId("editorCopyButton"),
+  editorSaveButton: byId("editorSaveButton"),
   autocompleteMenu: byId("autocompleteMenu"),
 
   runSplit: byId("runSplit"),

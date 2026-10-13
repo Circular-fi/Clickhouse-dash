@@ -23,6 +23,8 @@
 namespace chdash {
 
 struct QueryLibraryOptions {
+  // The id of the library in the API (?library=), and its name in the UI.
+  std::string name;
   std::string file;
   // The configured ClickHouse host ids: every request names one of them
   // (host_id), and the library and its folders are per host.

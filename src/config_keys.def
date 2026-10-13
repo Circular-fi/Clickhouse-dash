@@ -132,7 +132,8 @@ CFG_INT("export", "max_memory_usage", uint64_t, c.export_settings.max_memory_usa
 CFG_INT("export", "receive_timeout_ms", int, c.export_settings.receive_timeout_ms, "600000", 10000, 604800000, true, "ms", "A statement that sends nothing (no row, no progress) for this long fails. 0 = no limit.")
 
 // ---- query_library ------------------------------------------------------------------------------------------------------
-CFG_BOOL("query_library", "enabled", c.query_library.enabled, "false", "Keep the saved queries on the server, in one file.")
+CFG_BOOL("query_library", "enabled", c.query_library.enabled, "false", "Keep the saved queries on the server, in one file. The block can be repeated: each enabled block is one more library.")
+CFG_STRING("query_library", "name", c.query_library.name, "", "The name of the library: the id of the API (?library=) and what the Query page shows (at most 128 bytes; any text, no control character and no space at either end). The first library may leave it out (it is then \"default\"; a single library of that name shows as \"Shared server storage\"); the others need one, each different.")
 CFG_STRING("query_library", "file", c.query_library.file, "", "The path of the file. It is required when the library is enabled.")
 CFG_BOOL("query_library", "writable", c.query_library.writable, "false", "Allow a change. When false, a change is refused with 403 read_only.")
 CFG_INT("query_library", "max_file_bytes", size_t, c.query_library.max_file_bytes, "8388608", 65536, 1073741824, false, "bytes", "The largest library file.")

@@ -56,6 +56,7 @@
 /* ---- 10-components/menu.css ---- */
 
 .editorCopyButton,
+.editorSaveButton,
 .editorAutocompleteControl__button {
   border: 0;
   background: transparent;
@@ -350,6 +351,7 @@
   .runSettings .runSettings__button,
   .editorAutocompleteControl__button,
   .editorCopyButton.uiCopy,
+  .editorSaveButton,
   .qlIconButton,
   .graphKitTool,
   .pageBack,
@@ -393,8 +395,9 @@
 
   .obsFilterBar { --obs-bar-control: var(--hit); }
 
-  /* The editor's buttons: the options cog in the corner, the copy button beside it. */
-  .editorCopyButton { right: 52px; }
+  /* The editor's buttons: the options cog in the corner, Save beside it, then the copy button. */
+  .editorSaveButton { right: 52px; }
+  .editorCopyButton { right: 94px; }
 
   /* A segmented control keeps its inset look: its options reach --hit through their band. */
   .segmented,

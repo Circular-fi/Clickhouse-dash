@@ -468,7 +468,9 @@ query_library {
 - `max_file_bytes` (64 KiB..1 GiB) caps the file. A write that exceeds it answers 413.
 - `max_query_bytes` (1 KiB..`max_file_bytes`) caps the SQL of one saved query.
 - The dashboard never overwrites a file that it cannot parse. It serves the library read-only with `load_error` until you fix the file.
-- `/api/version` reports `features.query_library = {enabled, writable}`. `writable` is false while the file has a load error.
+- `name` names the library: its id in the API (`?library=`; any text of at most 128 bytes, with no control character and no space at either end) and what the Query page shows. It matters only with several libraries (a single library that keeps the name `default` shows as *Shared server storage*).
+- Repeat the `query_library {}` block for **several libraries**, each with its own `file` and `writable` (a library that everyone edits next to a read-only one). Every block after the first needs a different `name`, and each `file` is different too. The first block is the default library of the API. Details: [`docs/query-library.md`](query-library.md#several-libraries-on-the-server).
+- `/api/version` reports `features.query_library = {enabled, writable, libraries}`. `libraries` is `[{name, writable}]` in the order of the file. `writable` is false while the file has a load error.
 
 [`docs/query-library.md`](query-library.md) describes the REST API and the file format.
 

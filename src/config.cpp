@@ -57,7 +57,6 @@ void finish_config(AppConfig& cfg) {
   at_most(static_cast<int64_t>(cfg.query_options.sse_write_batch_bytes), static_cast<int64_t>(cfg.query_options.sse_queue_max_bytes), "query.sse_batch_bytes", "query.sse_queue_max_bytes");
   at_most(cfg.system.disk_growth_days, cfg.system.max_lookback_days, "system.disk_growth_days", "system.max_lookback_days");
   at_most(cfg.system.default_lookback_minutes, cfg.system.max_lookback_days * 24 * 60, "system.default_lookback_minutes", "system.max_lookback_days in minutes");
-  at_most(static_cast<int64_t>(cfg.query_library.max_query_bytes), static_cast<int64_t>(cfg.query_library.max_file_bytes), "query_library.max_query_bytes", "query_library.max_file_bytes");
 
   TraceSettings& traces = cfg.otel_defaults.traces;
   LogSettings& logs = cfg.otel_defaults.logs;
@@ -88,9 +87,6 @@ void finish_config(AppConfig& cfg) {
   if (cfg.export_settings.compression) {
     throw std::runtime_error("export.compression = true is not supported: the ZIP64 archive is stored without compression; use false");
   }
-  if (cfg.query_library.enabled && cfg.query_library.file.empty()) {
-    throw std::runtime_error("query_library.file is required when query_library.enabled = true");
-  }
 
   // The HTTP server. worker_threads = 0 is automatic: the larger of 8 and the hardware threads, at most max_worker_threads.
   if (cfg.server.worker_threads == 0) {
@@ -104,8 +100,8 @@ void finish_config(AppConfig& cfg) {
   // library (an import). 0 = derived from them.
   if (cfg.server.max_body_bytes == 0) {
     cfg.server.max_body_bytes = cfg.query_max_sql_bytes * 2 + 1024 * 1024;
-    if (cfg.query_library.enabled) {
-      cfg.server.max_body_bytes = std::max(cfg.server.max_body_bytes, cfg.query_library.max_file_bytes + 64 * 1024);
+    for (const auto& library : cfg.query_libraries) {
+      cfg.server.max_body_bytes = std::max(cfg.server.max_body_bytes, library.max_file_bytes + 64 * 1024);
     }
   }
   // Half of the threads at most hold a host status stream: the others stay for the queries.
@@ -575,6 +571,55 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
   }
 }
 
+// The query_library blocks: one is the library of the server as before; more of them (each with a name) are more
+// libraries, shown side by side on the Query page, some of them read-only (writable = false). A block that is not enabled
+// is ignored. The first enabled one is the default library, the one a request without ?library= reaches.
+void load_query_libraries(AppConfig& cfg, const HclObject& root) {
+  cfg.query_libraries.clear();
+  const auto found = root.blocks.find("query_library");
+  if (found == root.blocks.end()) return;
+  for (const auto& block : found->second) {
+    if (optional_block(block, "history", "query_library")) {
+      throw std::runtime_error("query_library.history was removed: the query history is always kept in the browser; delete the block");
+    }
+    validate_blocks(block, "query_library", {});
+    cfg.query_library = QueryLibrarySettings{};
+    config::apply_block(cfg, block, "query_library", "query_library");
+    if (cfg.query_library.max_query_bytes > cfg.query_library.max_file_bytes) {
+      throw std::runtime_error("query_library.max_query_bytes must be at most query_library.max_file_bytes (" + std::to_string(cfg.query_library.max_file_bytes) +
+                               "), not " + std::to_string(cfg.query_library.max_query_bytes));
+    }
+    if (cfg.query_library.enabled) cfg.query_libraries.push_back(cfg.query_library);
+  }
+  cfg.query_library = QueryLibrarySettings{};
+
+  // Any text the UI can show: no control character, no space at either end, at most 128 bytes. The API takes it as the
+  // value of ?library= (encoded as any query value).
+  const auto valid_name = [](const std::string& name) {
+    return !name.empty() && name.size() <= 128 && name.front() != ' ' && name.back() != ' ' &&
+           std::none_of(name.begin(), name.end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; });
+  };
+  std::unordered_set<std::string> names;
+  std::unordered_set<std::string> files;
+  for (size_t i = 0; i < cfg.query_libraries.size(); ++i) {
+    QueryLibrarySettings& library = cfg.query_libraries[i];
+    if (library.name.empty() && i == 0) library.name = "default";
+    if (library.name.empty()) {
+      throw std::runtime_error("query_library.name is required when there are several libraries (only the first may leave it out, it is then \"default\")");
+    }
+    if (!valid_name(library.name)) {
+      throw std::runtime_error("query_library.name must be 1 to 128 bytes, with no control character and no space at either end, not \"" + library.name + "\"");
+    }
+    if (!names.insert(library.name).second) throw std::runtime_error("duplicate query_library.name: " + library.name);
+    if (library.file.empty()) {
+      throw std::runtime_error("query_library.file is required when query_library.enabled = true (library " + library.name + ")");
+    }
+    if (!files.insert(library.file).second) {
+      throw std::runtime_error("query_library.file " + library.file + " is used by two libraries (" + library.name + " and another): each library has its own file");
+    }
+  }
+}
+
 void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view source) {
   validate_object(root, source, {}, {
       "server", "query", "client_pool", "generated_queries", "admission", "format_cache", "health",
@@ -638,13 +683,7 @@ void apply_full_hcl(AppConfig& cfg, const HclObject& root, std::string_view sour
 
   load_observability(cfg, root, source);
 
-  if (const auto* library = optional_block(root, "query_library", source)) {
-    if (optional_block(*library, "history", "query_library")) {
-      throw std::runtime_error("query_library.history was removed: the query history is always kept in the browser; delete the block");
-    }
-    validate_blocks(*library, "query_library", {});
-    config::apply_block(cfg, *library, "query_library", "query_library");
-  }
+  load_query_libraries(cfg, root);
 
   load_hosts(cfg, root, source);
   load_mcp(cfg, root, source);

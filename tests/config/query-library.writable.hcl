@@ -21,6 +21,15 @@ query_library {
   max_query_bytes = 16384
 }
 
+# A second library, read-only and empty: several libraries on one server, the default one (the first) is the one
+# above (test_query_library.py: test_several_libraries_*).
+query_library {
+  enabled  = true
+  name     = "reference"
+  file     = "/data/reference_library.json"
+  writable = false
+}
+
 clickhouse {
   host {
     name       = "local"

@@ -1,9 +1,9 @@
 // REST handlers of the server-side query library (docs/query-library.md).
 //
-// Routes exist only when query_library.enabled = true (404 otherwise). This file
+// Routes exist only when a query_library block is enabled (404 otherwise); ?library= names one of them. This file
 // never executes SQL: saved SQL is stored and returned verbatim.
 // Request paths only select an entity id; the filesystem path is the
-// configured query_library.file.
+// configured file of the library (query_library.file).
 
 #include "server.hpp"
 
@@ -51,11 +51,24 @@ void send(httplib::Response& res, const QueryLibraryStore::Response& out) {
 } // namespace
 
 void Server::handle_query_library(const httplib::Request& req, httplib::Response& res, QueryLibraryRoute route) {
-  if (!query_library_) {
+  if (query_libraries_.empty()) {
     library_error(res, 404, "not_found", "the query library is disabled");
     return;
   }
-  QueryLibraryStore& store = *query_library_;
+  // Several libraries: ?library=<name> picks one (on every route, the writes too); without it the first, the default.
+  QueryLibraryStore* chosen = query_libraries_.front().get();
+  if (req.has_param("library")) {
+    const std::string wanted = req.get_param_value("library");
+    chosen = nullptr;
+    for (const auto& candidate : query_libraries_) {
+      if (candidate->options().name == wanted) chosen = candidate.get();
+    }
+    if (!chosen) {
+      library_error(res, 404, "unknown_library", "no query library has this name (library)");
+      return;
+    }
+  }
+  QueryLibraryStore& store = *chosen;
   const bool has_body = route == QueryLibraryRoute::FolderCreate || route == QueryLibraryRoute::FolderUpdate ||
                         route == QueryLibraryRoute::QueryCreate || route == QueryLibraryRoute::QueryUpdate ||
                         route == QueryLibraryRoute::Import;

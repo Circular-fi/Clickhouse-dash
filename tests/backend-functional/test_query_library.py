@@ -157,7 +157,7 @@ def test_disabled_library_routes_are_absent():
     if feature is not None and feature.get("enabled"):
         pytest.skip(f"{DISABLED_URL} has the query library enabled")
     if feature is not None:
-        assert feature == {"enabled": False, "writable": False}
+        assert feature == {"enabled": False, "writable": False, "libraries": []}
     for method, path in [
         ("GET", "/api/query-library"),
         ("POST", "/api/query-library/folders"),
@@ -178,7 +178,8 @@ def test_disabled_library_routes_are_absent():
 @needs_writable
 def test_version_reports_the_feature():
     feature = ok(w("GET", "/api/version"))["features"]["query_library"]
-    assert feature == {"enabled": True, "writable": True}
+    assert (feature["enabled"], feature["writable"]) == (True, True)
+    assert [item["name"] for item in feature["libraries"]][0] == "default"
 
 
 @needs_writable
@@ -615,7 +616,8 @@ def ro(method: str, path: str, **kwargs) -> requests.Response:
 @needs_readonly
 def test_read_only_library():
     feature = ok(ro("GET", "/api/version"))["features"]["query_library"]
-    assert feature == {"enabled": True, "writable": False}
+    assert (feature["enabled"], feature["writable"]) == (True, False)
+    assert feature["libraries"] == [{"name": "default", "writable": False}]
     lib = ok(ro("GET", "/api/query-library", params={"host_id": HOST}))
     assert lib["writable"] is False and lib["load_error"] is None
     folder_id = lib["folders"][0]["id"] if lib["folders"] else "f_missing"
@@ -791,3 +793,37 @@ def test_import_keeps_the_current_host(clean_library):
     # The same payload into the local host is new there.
     again = ok(w("POST", "/api/query-library/import", body={**payload, "host_id": HOST}))
     assert again["imported_queries"] == 2 and again["merged_folders"] == 0
+
+
+@needs_writable
+def test_several_libraries_are_listed_and_each_is_its_own_store(clean_library):
+    """The writable instance has a second library, read-only ("reference"): /api/version lists both, the first is the
+    default, ?library= picks one, and a write to a read-only library changes nothing."""
+    features = ok(call(WRITABLE_URL, "GET", "/api/version"))["features"]["query_library"]
+    assert features["enabled"] is True and features["writable"] is True
+    assert [(item["name"], item["writable"]) for item in features["libraries"]] == [("default", True), ("reference", False)]
+    made = make_folder("Only in the default library")
+    reference = ok(w("GET", "/api/query-library", params={"host_id": HOST, "library": "reference"}))
+    assert reference["writable"] is False and reference["folders"] == [] and reference["queries"] == []
+    assert [item["id"] for item in library()["folders"]] == [made["id"]]
+    assert ok(w("GET", "/api/query-library", params={"host_id": HOST, "library": "default"}))["folders"] == library()["folders"]
+
+
+@needs_writable
+def test_several_libraries_a_read_only_one_refuses_every_write_and_an_unknown_name_is_404(clean_library):
+    body = {"host_id": HOST, "parent_id": None, "name": "Nope"}
+    refused = w("POST", "/api/query-library/folders", body=body, params={"library": "reference"})
+    assert refused.status_code == 403 and refused.json()["error_code"] == "read_only"
+    refused = w(
+        "POST",
+        "/api/query-library/queries",
+        body={"host_id": HOST, "folder_id": None, "name": "Nope", "description": "", "sql": "SELECT 1"},
+        params={"library": "reference"},
+    )
+    assert refused.status_code == 403 and refused.json()["error_code"] == "read_only"
+    refused = w("POST", "/api/query-library/import", body={"host_id": HOST, "folders": [], "queries": []}, params={"library": "reference"})
+    assert refused.status_code == 403 and refused.json()["error_code"] == "read_only"
+    assert library()["folders"] == []
+    for method, path in (("GET", "/api/query-library"), ("POST", "/api/query-library/folders")):
+        unknown = w(method, path, body=body if method == "POST" else None, params={"host_id": HOST, "library": "missing"})
+        assert unknown.status_code == 404 and unknown.json()["error_code"] == "unknown_library"

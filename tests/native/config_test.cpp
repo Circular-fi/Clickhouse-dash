@@ -198,6 +198,31 @@ void test_values_and_derived_settings() {
   CHECK(contains(error_of("query_library { enabled = true }"), "query_library.file is required"));
   CHECK(contains(error_of("query_library { max_file_bytes = 65536\n max_query_bytes = 100000 }"), "query_library.max_query_bytes must be at most"));
 
+  // Several libraries: the first is the default one (it may leave its name out), the others are named; a block that is not
+  // enabled is ignored.
+  {
+    const AppConfig single = load("query_library { enabled = true\n file = \"/a.json\" }");
+    CHECK_EQ(single.query_libraries.size(), size_t(1));
+    CHECK_EQ(single.query_libraries[0].name, std::string("default"));
+    CHECK(!single.query_libraries[0].writable);
+    const AppConfig many = load("query_library { enabled = true\n file = \"/a.json\"\n writable = true }\n"
+                                "query_library { enabled = true\n name = \"runbooks\"\n file = \"/b.json\" }\n"
+                                "query_library { enabled = false\n name = \"off\"\n file = \"/c.json\" }");
+    CHECK_EQ(many.query_libraries.size(), size_t(2));
+    CHECK_EQ(many.query_libraries[0].name, std::string("default"));
+    CHECK(many.query_libraries[0].writable);
+    CHECK_EQ(many.query_libraries[1].name, std::string("runbooks"));
+    CHECK(!many.query_libraries[1].writable);
+    CHECK(load("").query_libraries.empty());
+    CHECK(contains(error_of("query_library { enabled = true\n file = \"/a.json\" }\nquery_library { enabled = true\n file = \"/b.json\" }"), "query_library.name is required"));
+    CHECK(contains(error_of("query_library { enabled = true\n name = \"x\"\n file = \"/a.json\" }\nquery_library { enabled = true\n name = \"x\"\n file = \"/b.json\" }"), "duplicate query_library.name: x"));
+    CHECK(contains(error_of("query_library { enabled = true\n file = \"/a.json\" }\nquery_library { enabled = true\n name = \"y\"\n file = \"/a.json\" }"), "used by two libraries"));
+    CHECK_EQ(load("query_library { enabled = true\n name = \"Team \\u00e9quipe 1\"\n file = \"/a.json\" }").query_libraries[0].name, std::string("Team \xc3\xa9quipe 1"));
+    CHECK(contains(error_of("query_library { enabled = true\n name = \" lead\"\n file = \"/a.json\" }"), "query_library.name must be 1 to 128 bytes"));
+    CHECK(contains(error_of("query_library { enabled = true\n name = \"tab\\there\"\n file = \"/a.json\" }"), "query_library.name must be 1 to 128 bytes"));
+    CHECK(contains(error_of("query_library { enabled = true\n file = \"/a.json\"\n label = \"L\" }"), "unknown attribute label"));
+  }
+
   // The old clamps are errors now: nothing is changed silently.
   CHECK(contains(error_of("export { max_concurrent = 0 }"), "export.max_concurrent must be between 1 and 64, not 0"));
   CHECK(contains(error_of("query { sample_interval_ms = 1 }"), "query.sample_interval_ms must be between 10 and 1000"));

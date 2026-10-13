@@ -235,6 +235,17 @@ query_library {
   max_query_bytes = 262144  # per saved query SQL
 }
 
+# More libraries: repeat the block. The first one is the default (name "default"
+# when left out); the others need a different name and file. A library
+# with writable = false is read-only (open, search and export only).
+#
+# query_library {
+#   enabled  = true
+#   name     = "runbooks"
+#   file     = "/var/lib/chdash/runbooks.json"
+#   writable = false
+# }
+
 # MCP: an AI client reads ClickHouse data through ChDash, with access keys that
 # have their own hosts, tools and data. Optional; disabled by default.
 # Each host needs an mcp_uri (a separate, read-only ClickHouse user, never the

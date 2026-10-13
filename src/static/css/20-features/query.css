@@ -147,11 +147,13 @@
   padding-left: calc(14px + var(--gutter-w));
 }
 
-.editorCopyButton:active:not(:disabled) {
+.editorCopyButton:active:not(:disabled),
+.editorSaveButton:active:not(:disabled) {
   transform: translateY(1px);
 }
 
-.editorCopyButton:disabled {
+.editorCopyButton:disabled,
+.editorSaveButton:disabled {
   opacity: 0.45;
   cursor: default;
 }
@@ -1230,13 +1232,16 @@ html[data-theme="light"] .autocompleteItem__badge {
   visibility: hidden;
 }
 
-.editorCopyButton:hover:not(:disabled) {
+.editorCopyButton:hover:not(:disabled),
+.editorSaveButton:hover:not(:disabled) {
   color: var(--text);
   background: transparent;
 }
 
 .editorCopyButton:focus,
 .editorCopyButton:focus-visible,
+.editorSaveButton:focus,
+.editorSaveButton:focus-visible,
 .editorAutocompleteControl__button:focus,
 .editorAutocompleteControl__button:focus-visible {
   box-shadow: none;

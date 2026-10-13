@@ -9,12 +9,15 @@
 //
 // Saved queries, folders and History are per host: the dialog shows the
 // selected host's only and follows a host switch (chdash:host-changed).
-// Saved holds two root folders, two storages with the same adapter
-// interface, browsable side by side:
-//   - "Shared server storage" (server): the REST API of
-//     features.query_library (/api/query-library?host_id=, through
-//     api.request), shown only when the feature is enabled; read-only when
-//     the server says writable = false (the root then has no edit tools).
+// Saved holds root folders, storages with the same adapter interface,
+// browsable side by side:
+//   - one root for each library of the server (kind "server" for the first,
+//     "server~<name>" for the others; features.query_library.libraries gives
+//     their name and writable, and the root shows the name; a single library
+//     that keeps the name "default" shows "Shared server storage"): the REST API of features.query_library
+//     (/api/query-library?host_id=&library=, through api.request), shown only
+//     when the feature is enabled; read-only when the server says
+//     writable = false (the root then has no edit tools and takes no drop).
 //     Every folder / query change sends If-Match: <revision>; a 409 conflict
 //     reloads the library and retries once before the user is told.
 //   - "Local browser storage" (local): this browser (localStorage
@@ -72,13 +75,13 @@ const HISTORY_REQUEST = "queryLibrary:history";
 const ELLIPSIS = "\u2026";
 const MIDDOT = " \u00b7 ";
 
-// The two roots of Saved, in their order.
-const STORES = ["server", "local"];
-const ROOT_LABELS = { server: "Shared server storage", local: "Local browser storage" };
-const ROOT_HINTS = {
-  server: "Shared by everyone using this ClickHouse Dash server, in its query library file.",
-  local: "Only this browser sees these queries (its localStorage).",
-};
+// The roots of Saved, in their order: one for each query library of the server (the first is "server", the others
+// "server~<name>"; /api/version lists them: features.query_library.libraries), then "local".
+const LOCAL_STORE = "local";
+const DEFAULT_SERVER_LABEL = "Shared server storage";
+const LOCAL_LABEL = "Local browser storage";
+const SERVER_HINT = "Shared by everyone using this ClickHouse Dash server, in its query library file.";
+const LOCAL_HINT = "Only this browser sees these queries (its localStorage).";
 
 // ---------------------------------------------------------------- helpers
 
@@ -278,6 +281,25 @@ function folderPath(lib, id) {
 // A folder as the pickers and the preview write it: "/" for the top
 // level of a root, then "/Operations", "/Operations/Merges".
 const folderPathText = (lib, id) => `/${folderPath(lib, id).join("/")}`;
+
+// The queries under every folder, subfolders included: folder id -> count (the top level is the whole library). One pass
+// for a library; it is kept while the library object is the same one.
+const queryCountCache = new WeakMap();
+function queryCounts(lib) {
+  const signature = `${lib.revision}:${lib.folders.length}:${lib.queries.length}`;
+  const hit = queryCountCache.get(lib);
+  if (hit && hit.signature === signature) return hit.counts;
+  const parentOf = new Map(lib.folders.map((f) => [f.id, f.parent_id || null]));
+  const counts = new Map();
+  for (const query of lib.queries) {
+    for (let id = query.folder_id || null, hops = 0; id && hops <= MAX_DEPTH + 1; id = parentOf.get(id) || null, hops += 1) {
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+  }
+  queryCountCache.set(lib, { signature, counts });
+  return counts;
+}
+const queriesText = (n) => (n ? format.countLabel(n, "query", "queries") : "Empty");
 
 function subtreeCounts(lib, id) {
   let folders = 0;
@@ -560,7 +582,8 @@ function errorFromResponse(status, payload) {
   return new LibraryError(code, String(payload?.message || fallback), { field: payload?.field, status });
 }
 
-function createServerAdapter() {
+// library: the name of the server's library this adapter reads and writes (?library=); "" for the default one.
+function createServerAdapter(library = "") {
   let revision = null;
   // The library this adapter loaded last: what a change was made from (change() compares it after a conflict).
   let known = null;
@@ -571,8 +594,9 @@ function createServerAdapter() {
   async function request(method, path, body, { ifMatch = true, signal } = {}) {
     const headers = {};
     if (ifMatch && revision != null) headers["If-Match"] = String(revision);
+    const target = library ? `${path}${path.includes("?") ? "&" : "?"}library=${encodeURIComponent(library)}` : path;
     try {
-      return await api.request(`${API_BASE}${path}`, { method, body, headers, signal });
+      return await api.request(`${API_BASE}${target}`, { method, body, headers, signal });
     } catch (err) {
       if (util.isAbort(err)) throw err;
       if (err && err.status) throw errorFromResponse(err.status, err.body);
@@ -665,22 +689,30 @@ function freshHistoryState(q = "") {
   return { entries: [], loading: false, loaded: false, q, error: "" };
 }
 
-// One root: its adapter, the current host's library and its state.
-function newStore(kind, adapter, writable) {
-  return { kind, adapter, writable, library: emptyLibrary(), loadError: "", fatal: "", loadedAt: 0 };
+// One root: its adapter, the current host's library and its state. label and hint are what the tree and the preview say of it.
+function newStore(kind, adapter, writable, { label, hint }) {
+  return { kind, adapter, writable, label, hint, library: emptyLibrary(), loadError: "", fatal: "", loadedAt: 0 };
 }
+
+// Every root but the browser's is a library of the server.
+const isServerStore = (store) => store.kind !== LOCAL_STORE;
+const rootLabel = (kind) => ctl.stores[kind]?.label || (kind === LOCAL_STORE ? LOCAL_LABEL : DEFAULT_SERVER_LABEL);
 
 const uiPrefs = readJson(UI_KEY, {});
 const ctl = {
   started: null,
-  // The roots: "local" always, "server" when features.query_library is on.
-  stores: { server: null, local: null },
+  // The roots by kind: "local" always, one for each library of the server when features.query_library is on; order is
+  // their order in the tree.
+  stores: {},
+  order: [],
   history: null,
   // The host the shown library and History belong to.
   host: "",
   // Open folders ("<store>:<folder id>") and closed roots ("<store>").
   expanded: new Set(Array.isArray(uiPrefs.expanded) ? uiPrefs.expanded.filter((x) => typeof x === "string" && x.includes(":")) : []),
-  closedRoots: new Set(Array.isArray(uiPrefs.closedRoots) ? uiPrefs.closedRoots.filter((x) => STORES.includes(x)) : []),
+  closedRoots: new Set(Array.isArray(uiPrefs.closedRoots) ? uiPrefs.closedRoots.filter((x) => typeof x === "string") : []),
+  // The folders chosen last in the folder picker ("<store>:<folder id>"), the newest first.
+  recent: Array.isArray(uiPrefs.recentFolders) ? uiPrefs.recentFolders.filter((x) => typeof x === "string" && x.includes(":")).slice(0, 8) : [],
   // The name being typed in a row: { mode, ... }.
   editing: null,
   // The Save / Edit form shown in the pane in place of the preview (createPaneForm), or null.
@@ -696,16 +728,15 @@ const ctl = {
   rendered: { library: false, history: false },
 };
 
-const storeList = () => STORES.map((kind) => ctl.stores[kind]).filter(Boolean);
-const storeOf = (kind) => ctl.stores[kind] || null;
+const storeList = () => ctl.order.map((kind) => ctl.stores[kind]).filter(Boolean);
+const storeOf = (kind) => (Object.hasOwn(ctl.stores, kind) ? ctl.stores[kind] : null);
 const editableStore = (store) => !!store && store.writable && !store.fatal && !!ctl.host;
 const anyEditable = () => storeList().some(editableStore);
-// Where a new folder or query goes by default: the server root when it
-// can take it, else this browser's.
-const defaultStore = () => (editableStore(ctl.stores.server) ? "server" : "local");
+// Where a new folder or query goes by default: the first library of the server that can take it, else this browser's.
+const defaultStore = () => storeList().find((store) => isServerStore(store) && editableStore(store))?.kind || LOCAL_STORE;
 
 function saveUiPrefs() {
-  writeJson(UI_KEY, { expanded: [...ctl.expanded].slice(-400), closedRoots: [...ctl.closedRoots] });
+  writeJson(UI_KEY, { expanded: [...ctl.expanded].slice(-400), closedRoots: [...ctl.closedRoots], recentFolders: ctl.recent });
 }
 
 // /api/version picks the roots; without an answer in 4 s, the browser's only.
@@ -733,11 +764,25 @@ function start() {
     ctl.started = (async () => {
       await Promise.all([waitForFeatures(), waitForHost()]);
       const features = featuresMod.get("query_library");
-      ctl.stores.local = newStore("local", createLocalAdapter(), true);
-      readLocalLibrary();
+      ctl.stores = {};
+      ctl.order = [];
       if (features.enabled) {
-        ctl.stores.server = newStore("server", createServerAdapter(), features.writable === true);
+        // Older servers list no libraries: one, the default.
+        const libraries = Array.isArray(features.libraries) && features.libraries.length
+          ? features.libraries
+          : [{ name: "", writable: features.writable === true }];
+        libraries.forEach((library, index) => {
+          // The kind goes into keys split on ":" and into attributes: the name is encoded (a name may hold any text).
+          const kind = index === 0 ? "server" : `server~${encodeURIComponent(library.name)}`;
+          // The name is what the tree shows; a single library that was never named keeps the old "Shared server storage".
+          const label = libraries.length === 1 && (!library.name || library.name === "default") ? DEFAULT_SERVER_LABEL : String(library.name);
+          ctl.stores[kind] = newStore(kind, createServerAdapter(index === 0 && !library.name ? "" : String(library.name)), library.writable === true, { label, hint: SERVER_HINT });
+          ctl.order.push(kind);
+        });
       }
+      ctl.stores.local = newStore(LOCAL_STORE, createLocalAdapter(), true, { label: LOCAL_LABEL, hint: LOCAL_HINT });
+      ctl.order.push(LOCAL_STORE);
+      readLocalLibrary();
       ctl.history = createLocalHistory();
       await reloadLibrary();
     })();
@@ -760,7 +805,7 @@ async function reloadStore(store) {
     store.library = loaded.library;
     store.loadError = loaded.loadError || "";
     store.fatal = "";
-    if (store.kind === "server") store.writable = loaded.writable === true;
+    if (isServerStore(store)) store.writable = loaded.writable === true;
     store.loadedAt = Date.now();
   } catch (err) {
     if (util.isAbort(err) || !token.isCurrent()) return;
@@ -804,7 +849,7 @@ function takeResult(store, result) {
   }
   store.library = result.library;
   if (result.loadError !== undefined) store.loadError = result.loadError || "";
-  if (store.kind === "server" && result.writable !== undefined) store.writable = result.writable === true;
+  if (isServerStore(store) && result.writable !== undefined) store.writable = result.writable === true;
   store.loadedAt = Date.now();
 }
 
@@ -815,7 +860,7 @@ function takeResult(store, result) {
 async function apply(storeKind, operation, { success = "", select = null, inDialog = false } = {}) {
   const store = storeOf(storeKind);
   if (!editableStore(store)) {
-    toast(ctl.host ? `${ROOT_LABELS[storeKind]} is read-only.` : new NoHostError().message, "error");
+    toast(ctl.host ? `${rootLabel(storeKind)} is read-only.` : new NoHostError().message, "error");
     return null;
   }
   ctl.busy = true;
@@ -835,7 +880,7 @@ async function apply(storeKind, operation, { success = "", select = null, inDial
     if (err instanceof LibraryError && err.code === "validation") throw err;
     const message = err instanceof LibraryError ? err.message : "The change failed.";
     if (err instanceof LibraryError && err.code === "read_only") store.writable = false;
-    if (store.kind === "server") await reloadStore(store);
+    if (isServerStore(store)) await reloadStore(store);
     renderLibrary({ keepFocus: true });
     if (inDialog) throw new LibraryError(err instanceof LibraryError ? err.code : "server", message);
     toast(message, "error");
@@ -851,9 +896,9 @@ function parseLoc(value) {
   const text = String(value || "");
   const at = text.indexOf(":");
   const store = at > 0 ? text.slice(0, at) : "";
-  return STORES.includes(store) ? { store, folderId: text.slice(at + 1) || null } : null;
+  return storeOf(store) ? { store, folderId: text.slice(at + 1) || null } : null;
 }
-const whereText = (loc) => `${ROOT_LABELS[loc.store]} ${folderPathText(storeOf(loc.store)?.library || emptyLibrary(), loc.folderId)}`;
+const whereText = (loc) => `${rootLabel(loc.store)} ${folderPathText(storeOf(loc.store)?.library || emptyLibrary(), loc.folderId)}`;
 
 // Moves a query or a folder from one root to the other: a copy into the
 // target (the server's in one all-or-nothing request), then the removal
@@ -862,7 +907,7 @@ async function moveAcross(item, target, { inDialog = false, patch = null } = {})
   const source = storeOf(item.store);
   const dest = storeOf(target.store);
   if (!editableStore(source) || !editableStore(dest)) {
-    const message = `${ROOT_LABELS[editableStore(dest) ? item.store : target.store]} is read-only.`;
+    const message = `${rootLabel(editableStore(dest) ? item.store : target.store)} is read-only.`;
     if (inDialog) throw new LibraryError("read_only", message);
     toast(message, "error");
     return false;
@@ -900,7 +945,7 @@ async function moveAcross(item, target, { inDialog = false, patch = null } = {})
     }
   } catch (err) {
     ctl.busy = false;
-    if (dest.kind === "server" && !(err instanceof LibraryError && err.code === "validation")) await reloadStore(dest);
+    if (isServerStore(dest) && !(err instanceof LibraryError && err.code === "validation")) await reloadStore(dest);
     renderLibrary({ keepFocus: true });
     if (inDialog) throw err;
     toast(util.errorText(err, "The item could not be moved."), "error");
@@ -915,7 +960,7 @@ async function moveAcross(item, target, { inDialog = false, patch = null } = {})
   } catch (err) {
     removed = false;
     await reloadStore(source);
-    toast(`Copied to ${ROOT_LABELS[target.store]}, but it could not be removed from ${ROOT_LABELS[item.store]}: ${util.errorText(err, "the change failed")}`, "error");
+    toast(`Copied to ${rootLabel(target.store)}, but it could not be removed from ${rootLabel(item.store)}: ${util.errorText(err, "the change failed")}`, "error");
   } finally {
     ctl.busy = false;
   }
@@ -1032,48 +1077,414 @@ function textArea(name, value, placeholder) {
   return area;
 }
 
-// Folder <select> (Save, Edit, Move, New folder): one group per root
-// ("Shared server storage", "Local browser storage"), each with "/" for
-// its top level, then every folder of the host as its path
-// ("/Operations/Merges"). A read-only root's group is disabled. `exclude`
-// ({ store, id } or a list of them): the folders being moved, which cannot go
-// into themselves; a target too deep for them is disabled.
-function folderSelect(name, selected, { exclude = null } = {}) {
-  const select = h("select", { class: "uiInput qlSelect" });
-  select.name = name;
-  select.dataset.field = name;
+// ------------------------------------------------------------ the folder picker
+
+// Where a query goes: the Folder of the Save and Edit form, and the target of Move to. It follows what the drives do
+// (Google Drive "Move to", Nextcloud "Choose target folder", Dropbox "Save to"): the choice reads as a path
+// (Team queries > Reports > Daily); it opens on a tree of the storages and their folders to browse (twisties and arrow
+// keys); the places chosen last come first; a box filters by name when there are many folders. A storage that cannot be
+// written is shown locked and cannot be chosen. In Move to, the tree is always open (inline).
+//
+//   const picker = createFolderPicker({ name, selected, exclude, inline, labelId });
+//   picker.el            the control (a "change" event bubbles from it when the user picks a place)
+//   picker.value         "<store>:<folder id>" ("<store>:" is the top of a storage), "" when nothing can be chosen
+//   picker.set(loc)      picks a place (no event); false when it cannot be chosen
+//   picker.refresh()     the folders changed: builds the tree again with the same choice; true when it differed
+//   picker.focus() / picker.hasFocus()
+// `exclude` ({ store, id } or a list): the folders being moved, which cannot go into themselves (nor deeper than MAX_DEPTH).
+const PICKER_RECENT_SHOWN = 3;
+const PICKER_FILTER_FROM = 8;
+let pickerSeq = 0;
+
+function rememberPlace(value) {
+  if (!value || value.endsWith(":")) return;
+  ctl.recent = [value, ...ctl.recent.filter((entry) => entry !== value)].slice(0, 8);
+  saveUiPrefs();
+}
+
+function createFolderPicker({ name, selected = null, exclude = null, inline = false, labelId = "" }) {
+  const uid = ++pickerSeq;
   const moved = exclude ? [].concat(exclude) : [];
   const height = Math.max(0, ...moved.map((m) => (storeOf(m.store) ? subtreeHeight(storeOf(m.store).library, m.id) : 0)));
-  for (const store of storeList()) {
-    const lib = store.library;
-    const group = h("optgroup");
-    const writable = editableStore(store);
-    group.label = writable ? ROOT_LABELS[store.kind] : `${ROOT_LABELS[store.kind]} (read-only)`;
-    group.dataset.store = store.kind;
-    if (!writable) group.disabled = true;
-    const top = h("option", null, "/");
-    top.value = `${store.kind}:`;
-    if (moved.length && height > MAX_DEPTH) top.disabled = true;
-    group.appendChild(top);
-    const walk = (parentId) => {
-      for (const folder of childFolders(lib, parentId)) {
-        if (moved.some((m) => m.store === store.kind && (folder.id === m.id || isInside(lib, folder.id, m.id)))) continue;
-        const option = h("option", null, folderPathText(lib, folder.id));
-        option.value = `${store.kind}:${folder.id}`;
-        if (moved.length && folderDepth(lib, folder.id) + height > MAX_DEPTH) option.disabled = true;
-        group.appendChild(option);
-        walk(folder.id);
-      }
-    };
-    walk(null);
-    select.appendChild(group);
+  const expanded = new Set();
+  let nodes = new Map();
+  let value = "";
+  let isOpen = inline;
+  let filter = "";
+  let signature = "";
+
+  const buildNodes = () => {
+    const out = new Map();
+    for (const store of storeList()) {
+      const lib = store.library;
+      const writable = editableStore(store);
+      const top = { key: `${store.kind}:`, store, label: rootLabel(store.kind), depth: 1, parent: null, children: [], locked: !writable, disabled: !writable || (moved.length > 0 && height > MAX_DEPTH), root: true };
+      out.set(top.key, top);
+      const walk = (parentId, parent, depth) => {
+        for (const folder of childFolders(lib, parentId)) {
+          if (moved.some((m) => m.store === store.kind && (folder.id === m.id || isInside(lib, folder.id, m.id)))) continue;
+          const node = { key: `${store.kind}:${folder.id}`, store, label: folder.name, depth, parent, children: [], locked: false, disabled: !writable || (moved.length > 0 && folderDepth(lib, folder.id) + height > MAX_DEPTH), root: false };
+          out.set(node.key, node);
+          parent.children.push(node);
+          walk(folder.id, node, depth + 1);
+        }
+      };
+      walk(null, top, 2);
+    }
+    return out;
+  };
+  const usable = (key) => {
+    const node = nodes.get(key);
+    return !!node && !node.disabled;
+  };
+  const chain = (node) => {
+    const path = [];
+    for (let n = node; n; n = n.parent) path.unshift(n);
+    return path;
+  };
+  const reveal = (key) => {
+    for (let n = nodes.get(key)?.parent; n; n = n.parent) expanded.add(n.key);
+  };
+  const signatureOf = () => [...nodes.values()].map((n) => `${n.key}|${n.label}|${n.depth}|${n.disabled ? 1 : 0}`).join("\n");
+  const firstChoice = (wanted) => {
+    const fallback = `${defaultStore()}:`;
+    if (wanted && usable(wanted)) return wanted;
+    if (usable(fallback)) return fallback;
+    return [...nodes.keys()].find(usable) || "";
+  };
+
+  const el = h("div", { class: `qlPicker${inline ? " qlPicker--inline" : ""}` });
+  const panel = h("div", { class: "qlPicker__panel", id: `qlPicker-${uid}` });
+  const filterInput = h("input", { class: "uiInput qlPicker__filter", type: "search", placeholder: "Filter folders", autocomplete: "off", spellcheck: "false" });
+  filterInput.setAttribute("aria-label", "Filter folders");
+  filterInput.hidden = true;
+  const recentLabel = h("div", { class: "qlPicker__label" }, "Recent");
+  const recentList = h("ul", { class: "qlPicker__list", role: "group" });
+  recentList.setAttribute("aria-label", "Recent folders");
+  const tree = h("ul", { class: "qlPicker__list qlPicker__tree", role: "tree" });
+  tree.setAttribute("aria-label", "Folders");
+  const emptyRow = h("div", { class: "qlPicker__empty" }, "No folder matches.");
+  emptyRow.hidden = true;
+  panel.append(filterInput, recentLabel, recentList, tree, emptyRow);
+
+  let trigger = null;
+  let triggerCrumbs = null;
+  if (!inline) {
+    triggerCrumbs = h("span", { class: "qlPicker__crumbs", id: `qlPickerValue-${uid}` });
+    const chevron = h("span", { class: "qlPicker__chevron" });
+    chevron.setAttribute("aria-hidden", "true");
+    trigger = h("button", { class: "uiInput qlPicker__button", type: "button" }, triggerCrumbs, chevron);
+    trigger.dataset.field = name;
+    trigger.setAttribute("aria-haspopup", "tree");
+    trigger.setAttribute("aria-controls", panel.id);
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-labelledby", `${labelId ? `${labelId} ` : ""}${triggerCrumbs.id}`);
+    el.append(trigger, panel);
+  } else {
+    tree.dataset.field = name;
+    tree.tabIndex = -1;
+    el.append(panel);
   }
-  const wanted = selected ? locValue(selected) : `${defaultStore()}:`;
-  const options = [...select.options];
-  const usable = (option) => option && !option.disabled && !option.parentElement?.disabled;
-  const pick = options.find((o) => o.value === wanted && usable(o)) || options.find((o) => o.value === `${defaultStore()}:` && usable(o)) || options.find(usable);
-  if (pick) select.value = pick.value;
-  return select;
+  panel.hidden = !isOpen;
+
+  const iconFor = (node) => {
+    if (node.root) return icon(isServerStore(node.store) ? "server" : "local");
+    return icon(expanded.has(node.key) && node.children.length ? "folderOpen" : "folder");
+  };
+  const pathText = (node) => chain(node).map((n) => n.label).join(" › ");
+  // "/" for the top of a storage, "/Reports/Daily" for a folder (what the data attributes say, for tests and tools).
+  const pathOf = (node) => (node.root ? "/" : `/${chain(node).slice(1).map((n) => n.label).join("/")}`);
+
+  const drawTrigger = () => {
+    el.dataset.value = value;
+    el.dataset.path = nodes.get(value) ? pathOf(nodes.get(value)) : "";
+    if (!triggerCrumbs) return;
+    const node = nodes.get(value);
+    triggerCrumbs.replaceChildren();
+    if (!node) {
+      triggerCrumbs.textContent = "No folder to save to";
+      return;
+    }
+    const parts = chain(node);
+    triggerCrumbs.appendChild(iconFor(parts[0]));
+    parts.forEach((part, index) => {
+      if (index) triggerCrumbs.appendChild(h("span", { class: "qlPicker__sep" }, "›"));
+      triggerCrumbs.appendChild(h("span", { class: index === parts.length - 1 ? "qlPicker__crumb qlPicker__crumb--last" : "qlPicker__crumb" }, part.label));
+    });
+    trigger.title = pathText(node);
+  };
+
+  const rowFor = (node, { section, flat = false }) => {
+    const li = h("li", { class: "qlPicker__item", role: "treeitem" });
+    li.dataset.key = node.key;
+    li.dataset.section = section;
+    li.dataset.path = pathOf(node);
+    li.tabIndex = -1;
+    // The dialog of Move to puts the focus on the chosen place when it opens.
+    if (inline && node.key === value && section === "tree") li.setAttribute("autofocus", "");
+    li.setAttribute("aria-level", String(flat ? 1 : node.depth));
+    li.setAttribute("aria-selected", String(node.key === value));
+    if (node.disabled) li.setAttribute("aria-disabled", "true");
+    if (!flat && node.children.length) li.setAttribute("aria-expanded", String(expanded.has(node.key)));
+    li.style.setProperty("--depth", String(flat ? 0 : node.depth - 1));
+    const row = h("div", { class: "qlPicker__row" });
+    const twisty = h("span", { class: "qlPicker__twisty" });
+    twisty.setAttribute("aria-hidden", "true");
+    if (!flat && node.children.length) twisty.dataset.twisty = "";
+    else twisty.classList.add("qlPicker__twisty--none");
+    row.append(twisty, iconFor(node), h("span", { class: `qlPicker__name${node.root ? " qlPicker__name--root" : ""}` }, node.label));
+    if (flat && node.parent) row.appendChild(h("span", { class: "qlPicker__path" }, chain(node.parent).map((n) => n.label).join(" › ")));
+    if (node.locked) {
+      const lock = h("span", { class: "qlPicker__lock", title: "Read-only: nothing can be saved here." }, icon("lock"), h("span", null, "Read-only"));
+      row.appendChild(lock);
+    } else if (node.key === value) {
+      const check = icon("check");
+      check.classList.add("qlPicker__check");
+      row.appendChild(check);
+    }
+    li.appendChild(row);
+    return li;
+  };
+
+  const folderCount = () => [...nodes.values()].filter((n) => !n.root).length;
+  const recents = () => ctl.recent.filter((key) => usable(key) && nodes.get(key) && !nodes.get(key).root).slice(0, PICKER_RECENT_SHOWN);
+
+  const render = () => {
+    filterInput.hidden = folderCount() < PICKER_FILTER_FROM;
+    const terms = fold(filter).split(/\s+/).filter(Boolean);
+    const filtering = terms.length > 0 && !filterInput.hidden;
+    recentList.replaceChildren();
+    tree.replaceChildren();
+    let shown = 0;
+    if (filtering) {
+      for (const node of nodes.values()) {
+        if (node.root || node.disabled || !terms.every((t) => fold(pathText(node)).includes(t))) continue;
+        tree.appendChild(rowFor(node, { section: "tree", flat: true }));
+        shown += 1;
+      }
+    } else {
+      const lastPlaces = recents();
+      for (const key of lastPlaces) recentList.appendChild(rowFor(nodes.get(key), { section: "recent", flat: true }));
+      const walk = (node) => {
+        tree.appendChild(rowFor(node, { section: "tree" }));
+        shown += 1;
+        if (expanded.has(node.key)) node.children.forEach(walk);
+      };
+      for (const node of nodes.values()) if (node.root) walk(node);
+      recentLabel.hidden = recentList.hidden = lastPlaces.length === 0;
+    }
+    if (filtering) recentLabel.hidden = recentList.hidden = true;
+    emptyRow.hidden = shown > 0;
+    tree.hidden = shown === 0;
+    // One tab stop in the list: the chosen place (else the first row); the arrow keys move it.
+    const stop = itemFor(value) || items()[0];
+    if (stop) stop.tabIndex = 0;
+  };
+  const items = () => [...panel.querySelectorAll('[role="treeitem"]')];
+  const itemFor = (key, section = "tree") => items().find((li) => li.dataset.key === key && li.dataset.section === section) || items().find((li) => li.dataset.key === key) || null;
+
+  const setOpen = (open, { focus = false } = {}) => {
+    if (inline || isOpen === open) return;
+    isOpen = open;
+    panel.hidden = !open;
+    trigger.setAttribute("aria-expanded", String(open));
+    if (open) {
+      reveal(value);
+      render();
+      const target = itemFor(value) || items()[0];
+      target?.scrollIntoView({ block: "nearest" });
+      if (focus) target?.focus({ preventScroll: true });
+      document.addEventListener("pointerdown", onOutside, true);
+    } else {
+      document.removeEventListener("pointerdown", onOutside, true);
+      if (filter) {
+        filter = "";
+        filterInput.value = "";
+      }
+    }
+  };
+  const onOutside = (ev) => {
+    if (!el.isConnected) document.removeEventListener("pointerdown", onOutside, true);
+    else if (!el.contains(ev.target)) setOpen(false);
+  };
+
+  const choose = (key) => {
+    if (!usable(key)) return;
+    const changed = key !== value;
+    value = key;
+    rememberPlace(key);
+    drawTrigger();
+    if (!inline) {
+      setOpen(false);
+      trigger.focus({ preventScroll: true });
+    } else {
+      render();
+      itemFor(key)?.focus({ preventScroll: true });
+    }
+    if (changed) el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const toggle = (key, open) => {
+    const node = nodes.get(key);
+    if (!node || !node.children.length) return;
+    if (open === undefined ? expanded.has(key) : !open) expanded.delete(key);
+    else expanded.add(key);
+    render();
+    itemFor(key)?.focus({ preventScroll: true });
+  };
+
+  panel.addEventListener("click", (ev) => {
+    const li = ev.target instanceof Element ? ev.target.closest('[role="treeitem"]') : null;
+    if (!li) return;
+    if (ev.target.closest("[data-twisty]")) {
+      toggle(li.dataset.key);
+      return;
+    }
+    if (li.getAttribute("aria-disabled") === "true") return;
+    choose(li.dataset.key);
+  });
+  panel.addEventListener("keydown", (ev) => {
+    const list = items();
+    const current = ev.target instanceof Element ? ev.target.closest('[role="treeitem"]') : null;
+    const at = current ? list.indexOf(current) : -1;
+    const move = (target) => {
+      if (!target) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: "nearest" });
+    };
+    if (ev.target === filterInput) {
+      if (ev.key === "ArrowDown") move(list[0]);
+      else if (ev.key === "Enter" && fold(filter)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const first = list.find((li) => li.getAttribute("aria-disabled") !== "true");
+        if (first) choose(first.dataset.key);
+      } else if (ev.key === "Escape" && !inline) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (filter) {
+          filter = "";
+          filterInput.value = "";
+          render();
+        } else {
+          setOpen(false);
+          trigger.focus({ preventScroll: true });
+        }
+      }
+      return;
+    }
+    if (!current) return;
+    const node = nodes.get(current.dataset.key);
+    switch (ev.key) {
+      case "ArrowDown": move(list[Math.min(list.length - 1, at + 1)]); break;
+      case "ArrowUp":
+        if (at === 0 && !filterInput.hidden) move(filterInput);
+        else move(list[Math.max(0, at - 1)]);
+        break;
+      case "Home": move(list[0]); break;
+      case "End": move(list[list.length - 1]); break;
+      case "ArrowRight":
+        if (current.dataset.section !== "tree" || !node?.children.length) break;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (!expanded.has(node.key)) toggle(node.key, true);
+        else move(itemFor(node.children[0].key));
+        break;
+      case "ArrowLeft":
+        if (current.dataset.section !== "tree" || !node) break;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (node.children.length && expanded.has(node.key)) toggle(node.key, false);
+        else if (node.parent) move(itemFor(node.parent.key));
+        break;
+      case "Enter":
+      case " ":
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (current.getAttribute("aria-disabled") !== "true") choose(node.key);
+        break;
+      case "Escape":
+        if (inline) break;
+        ev.preventDefault();
+        ev.stopPropagation();
+        setOpen(false);
+        trigger.focus({ preventScroll: true });
+        break;
+      default:
+        break;
+    }
+  });
+  panel.addEventListener("focusin", (ev) => {
+    const li = ev.target instanceof Element ? ev.target.closest('[role="treeitem"]') : null;
+    if (!li) return;
+    for (const other of items()) other.tabIndex = other === li ? 0 : -1;
+  });
+  filterInput.addEventListener("input", () => {
+    filter = filterInput.value;
+    render();
+  });
+  el.addEventListener("focusout", (ev) => {
+    if (!inline && isOpen && ev.relatedTarget && !el.contains(ev.relatedTarget)) setOpen(false);
+  });
+  if (trigger) {
+    trigger.addEventListener("click", () => setOpen(!isOpen, { focus: !isOpen }));
+    trigger.addEventListener("keydown", (ev) => {
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setOpen(true, { focus: true });
+      } else if (ev.key === "Escape" && isOpen) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        setOpen(false);
+      }
+    });
+  }
+
+  const start = () => {
+    nodes = buildNodes();
+    signature = signatureOf();
+    value = firstChoice(selected ? locValue(selected) : "");
+    for (const node of nodes.values()) if (node.root) expanded.add(node.key);
+    reveal(value);
+    drawTrigger();
+    if (isOpen) render();
+  };
+  start();
+
+  return {
+    el,
+    name,
+    get value() { return value; },
+    set(loc) {
+      const key = loc ? locValue(loc) : "";
+      if (!usable(key)) return false;
+      value = key;
+      reveal(key);
+      drawTrigger();
+      if (isOpen) render();
+      return true;
+    },
+    refresh() {
+      const next = buildNodes();
+      const before = signature;
+      nodes = next;
+      signature = signatureOf();
+      if (signature === before) return false;
+      value = firstChoice(value);
+      for (const node of nodes.values()) if (node.root && !expanded.has(node.key) && !before.includes(`${node.key}|`)) expanded.add(node.key);
+      reveal(value);
+      drawTrigger();
+      if (isOpen) render();
+      return true;
+    },
+    focus() {
+      if (trigger) trigger.focus({ preventScroll: true });
+      else (itemFor(value) || items()[0])?.focus({ preventScroll: true });
+    },
+    hasFocus: () => el.contains(document.activeElement),
+  };
 }
 
 // Highlighted SQL, clipped (a prompt shows the start, the pane more):
@@ -1124,19 +1535,17 @@ function formField(name, label, control) {
   const wrap = h("div", { class: "uiField", dataset: { wrap: name } });
   control.id = `qlForm-${name}`;
   const error = h("div", { class: "uiField__error", id: `qlFormError-${name}`, role: "alert", hidden: true });
-  wrap.append(h("label", { class: "uiField__label", for: control.id }, label), control, error);
+  wrap.append(h("label", { class: "uiField__label", for: control.id, id: `qlFormLabel-${name}` }, label), control, error);
   return wrap;
 }
-
-const folderSignature = (select) => [...select.options].map((o) => `${o.parentElement?.label || ""}|${o.value}|${o.textContent}|${o.disabled || o.parentElement?.disabled ? 1 : 0}`).join("\n");
 
 // mode "save": rawText (the editor's or the History run's) and fromHistory; "edit": sqlText, shown only.
 // `submit(action, values)` ("submit" or "new") makes the change: true when it is done (it has closed the form),
 // false when it stays (the toast said why); it throws what the form shows (a LibraryError, under its field).
-function createPaneForm({ mode, key, title, name = "", description = "", where = null, rawText = "", fromHistory = null, sqlText = "", submitLabel = "Save", extraLabel = "", fromButton = false, submit }) {
+function createPaneForm({ mode, key, title, name = "", description = "", where = null, rawText = "", fromHistory = null, sqlText = "", submitLabel = "Save", extraLabel = "", submit }) {
   const form = h("form", { class: "qlPaneForm" });
   form.noValidate = true;
-  const session = { mode, key, el: form, host: ctl.host, title, busy: false, fromButton, store: "", queryId: "", folder: null };
+  const session = { mode, key, el: form, host: ctl.host, title, busy: false, store: "", queryId: "", folder: null };
   const head = h("div", { class: "qlPreview__head" });
   const back = h("button", { class: "qlIconButton qlPreview__back" });
   back.type = "button";
@@ -1151,16 +1560,11 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
 
   const nameInput = textInput("name", name, { placeholder: "e.g. Largest tables" });
   const descriptionInput = textArea("description", description, "What it answers, when to use it (optional)");
-  const folderOf = (loc) => {
-    const select = folderSelect("folder_id", loc);
-    select.id = "qlForm-folder_id";
-    return select;
-  };
-  const folder = folderOf(where);
+  const folder = createFolderPicker({ name: "folder_id", selected: where, labelId: "qlFormLabel-folder_id" });
   const fields = h("div", { class: "uiForm qlPaneForm__fields" });
   const nameWrap = formField("name", "Name", nameInput);
   const descriptionWrap = formField("description", "Description", descriptionInput);
-  const folderWrap = formField("folder_id", "Folder", folder);
+  const folderWrap = formField("folder_id", "Folder", folder.el);
   fields.append(nameWrap, descriptionWrap, folderWrap);
 
   // The SQL: Save writes it as the formatter does unless "Save raw" keeps it as typed. A History run that was formatted
@@ -1173,13 +1577,18 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
   const sqlBody = h("div", { class: "qlForm__sqlBody" });
   sqlBox.append(sqlHead, sqlBody);
   let raw = null;
+  let rawLabel = null;
   let formattedText = fromHistory?.formatted ? String(fromHistory.sql || "") : null;
   let formatting = null;
   const chosen = () => (mode !== "save" ? sqlText : raw.checked || !formattedText ? rawText : formattedText);
+  // The formatter changed nothing: there is one text to save, and "Save raw" would offer a choice that is not one.
+  const sameText = () => !!formattedText && formattedText.trim() === rawText.trim();
   const drawSql = () => {
     if (mode === "save") {
       const source = fromHistory ? "from History" : "from the editor";
-      sqlLabel.textContent = `SQL (${source}${raw.checked || !formattedText ? (formatting ? ", formatting\u2026" : "") : ", formatted"})`;
+      const same = sameText();
+      rawLabel.hidden = same;
+      sqlLabel.textContent = `SQL (${source}${same ? "" : raw.checked || !formattedText ? (formatting ? ", formatting\u2026" : "") : ", formatted"})`;
     } else {
       sqlLabel.textContent = "SQL";
     }
@@ -1189,7 +1598,7 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
     raw = h("input", { type: "checkbox", name: "raw", id: "qlSaveRaw" });
     // A small, quiet option at the end of the SQL's heading: the formatted text is what most saves want.
     const rawTextEl = h("span", { class: "qlRawToggle__text" }, "Save raw");
-    const rawLabel = h("label", { class: "qlRawToggle", for: "qlSaveRaw", title: "Keep the query as typed, without formatting." }, raw, rawTextEl);
+    rawLabel = h("label", { class: "qlRawToggle", for: "qlSaveRaw", title: "Keep the query as typed, without formatting." }, raw, rawTextEl);
     sqlHead.appendChild(rawLabel);
     raw.addEventListener("change", drawSql);
     if (!formattedText) {
@@ -1263,7 +1672,7 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
     syncGhostName();
   });
   descriptionInput.addEventListener("input", () => fieldError("description", "", { focus: false }));
-  folder.addEventListener("change", () => {
+  folder.el.addEventListener("change", () => {
     fieldError("folder_id", "", { focus: false });
     showGhost(session);
   });
@@ -1300,26 +1709,15 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
 
   // The folders of the tree changed (a folder made while saving): the list is built again with the same choice.
   session.refreshFolders = () => {
-    const next = folderOf(parseLoc(session.folder.value));
-    if (folderSignature(next) === folderSignature(session.folder)) return;
-    const hadFocus = document.activeElement === session.folder;
-    session.folder.replaceWith(next);
-    session.folder = next;
-    next.addEventListener("change", () => {
-      fieldError("folder_id", "", { focus: false });
-      showGhost(session);
-    });
-    if (hadFocus) next.focus();
+    session.folder.refresh();
   };
   // The place picked in the tree is the folder (a root or folder of a read-only storage is not offered).
   session.pickFolder = (loc) => {
     if (!loc) return;
-    const option = [...session.folder.options].find((o) => o.value === locValue(loc));
-    if (!option || option.disabled || option.parentElement?.disabled) return;
-    const changed = session.folder.value !== option.value;
-    session.folder.value = option.value;
+    const before = session.folder.value;
+    if (!session.folder.set(loc)) return;
     fieldError("folder_id", "", { focus: false });
-    if (changed) showGhost(session);
+    if (session.folder.value !== before) showGhost(session);
   };
   session.draftName = () => nameInput.value.trim();
   session.focus = () => {
@@ -1404,8 +1802,7 @@ function revealForm() {
   }
 }
 
-// The form is dropped: the preview of the selection is back, the focus on the button that opened it (the foot's "Save query")
-// or on the selected row (a phone goes back to the list).
+// The form is dropped: the preview of the selection is back, the focus on the selected row (a phone goes back to the list).
 function closeForm() {
   const session = ctl.form;
   if (!session) return;
@@ -1415,9 +1812,7 @@ function closeForm() {
     renderTree();
   }
   if (isPhone()) setPreviewStep(false);
-  const button = libraryEls.save;
-  if (session.fromButton && button && !button.disabled && !button.hidden) button.focus({ preventScroll: true });
-  else focusSelected();
+  focusSelected();
 }
 
 function cancelForm() {
@@ -1456,7 +1851,7 @@ function formFollows(key) {
 // Save the editor (or a History run) as a library query, in either
 // root. When the editor holds a query opened from an editable root, the
 // form also offers to update it ("Update", and "Save as new").
-async function beginSave({ sql = null, fromHistory = null, fromButton = false } = {}) {
+async function beginSave({ sql = null, fromHistory = null } = {}) {
   await start();
   if (!ctl.host) {
     toast(new NoHostError().message, "error");
@@ -1491,7 +1886,6 @@ async function beginSave({ sql = null, fromHistory = null, fromButton = false } 
     fromHistory,
     submitLabel: opened ? "Update" : "Save",
     extraLabel: opened ? "Save as new" : "",
-    fromButton,
     submit: async (action, values) => {
       const target = parseLoc(values.folder);
       if (!target) throw validation("folder_id", "Pick a folder.");
@@ -1582,18 +1976,20 @@ async function moveDialog(items) {
   const first = list[0];
   const current = { store: first.item.store, folderId: first.item.kind === "folder" ? first.entity.parent_id : first.entity.folder_id };
   const folders = list.filter((x) => x.item.kind === "folder").map((x) => ({ store: x.item.store, id: x.entity.id }));
-  const select = folderSelect("target", current, { exclude: folders });
-  select.size = Math.min(12, Math.max(4, select.options.length + $$("optgroup", select).length));
-  select.classList.add("qlSelect--list");
+  const picker = createFolderPicker({ name: "target", selected: current, exclude: folders, inline: true, labelId: "qlMoveLabel" });
   const body = h("div", { class: "uiForm" });
   const what = list.length === 1 ? `\u201c${first.entity.name}\u201d` : `${format.count(list.length)} items`;
-  body.appendChild(field(`Move ${what} to`, select));
+  const moveField = h("div", { class: "uiField" });
+  moveField.setAttribute("role", "group");
+  moveField.setAttribute("aria-labelledby", "qlMoveLabel");
+  moveField.append(h("span", { class: "uiField__label", id: "qlMoveLabel" }, `Move ${what} to`), picker.el);
+  body.appendChild(moveField);
   await openDialog({
     title: "Move to\u2026",
     submitLabel: "Move",
     body,
     onSubmit: async () => {
-      const target = parseLoc(select.value);
+      const target = parseLoc(picker.value);
       if (!target || locValue(target) === locValue(current)) return true;
       for (const { item } of list) {
         if (!(await moveItem(item, target, { inDialog: true }))) return false;
@@ -1729,9 +2125,9 @@ function keyOf(kind, store, id) {
 
 function parseKey(key) {
   const text = String(key || "");
-  let m = /^r:(server|local)$/.exec(text);
+  let m = /^r:([^:]+)$/.exec(text);
   if (m) return { kind: "root", store: m[1], id: "" };
-  m = /^([fq]):(server|local):(.+)$/.exec(text);
+  m = /^([fq]):([^:]+):(.+)$/.exec(text);
   return m ? { kind: m[1] === "f" ? "folder" : "query", store: m[2], id: m[3] } : null;
 }
 
@@ -1782,16 +2178,11 @@ function buildLibraryShell(root) {
   tree.setAttribute("aria-label", "Saved queries");
   tree.setAttribute("aria-multiselectable", "true");
   const foot = h("div", { class: "ql__foot" });
-  const save = h("button", { class: "button button--primary qlFoot__save" });
-  save.type = "button";
-  save.dataset.action = "save";
-  save.title = `Save the editor's query (${util.modifierKeyLabel()}+S)`;
-  save.append(icon("plus"), h("span", null, "Save query"));
   const count = h("span", { class: "qlFoot__count" });
-  foot.append(save, count);
+  foot.append(count);
   wrap.append(head, notice, tree, foot);
   root.appendChild(wrap);
-  Object.assign(libraryEls, { root, wrap, input, actions, newFolder, notice, tree, foot, save, count });
+  Object.assign(libraryEls, { root, wrap, input, actions, newFolder, notice, tree, foot, count });
 
   // ns.search: the one delay; Enter (before the handler below) and Escape (a
   // filled field) apply the field at once.
@@ -1819,7 +2210,6 @@ function buildLibraryShell(root) {
     const loc = selectedLoc() || { store: defaultStore(), folderId: null };
     startNewFolder({ store: loc.store, parentId: loc.folderId });
   });
-  save.addEventListener("click", () => void beginSave({ fromButton: true }));
 
   tree.addEventListener("pointerdown", onTreePointerDown, true);
   tree.addEventListener("click", onTreeClick);
@@ -1847,23 +2237,11 @@ function renderLibrary({ keepFocus = false } = {}) {
   }
   const canEdit = anyEditable();
   libraryEls.actions.hidden = !canEdit;
-  libraryEls.save.hidden = !canEdit;
-  syncSaveButton();
   libraryEls.wrap.classList.toggle("is-readonly", !canEdit);
   renderNotice();
   renderFoot();
   syncForm();
   renderTree({ keepFocus });
-}
-
-// The editor is inert while the library is open: an empty one stays empty, and Save says so rather than only answering a
-// click. Read each time the library is shown (the editor changed since it was built).
-function syncSaveButton() {
-  const save = libraryEls.save;
-  if (!save) return;
-  const emptyEditor = !editorSql().trim();
-  save.disabled = !ctl.host || emptyEditor;
-  save.title = emptyEditor ? "Write a query first: the editor is empty" : `Save the editor's query (${util.modifierKeyLabel()}+S)`;
 }
 
 function renderNotice() {
@@ -1872,21 +2250,21 @@ function renderNotice() {
   if (!ctl.host) notice.appendChild(uiState.banner(h("div"), { message: "Select a ClickHouse host: saved queries and History belong to a host.", inset: true }));
   for (const store of storeList()) {
     if (store.fatal) {
-      notice.appendChild(uiState.banner(h("div"), { message: `${ROOT_LABELS[store.kind]}: ${store.fatal}`, retry: () => void reloadStore(store).then(() => renderLibrary()), inset: true }));
+      notice.appendChild(uiState.banner(h("div"), { message: `${rootLabel(store.kind)}: ${store.fatal}`, retry: () => void reloadStore(store).then(() => renderLibrary()), inset: true }));
     }
     if (store.loadError) {
-      notice.appendChild(uiState.banner(h("div"), { message: `The library file could not be read (${store.loadError}); ${ROOT_LABELS[store.kind]} is shown read-only.`, inset: true }));
+      notice.appendChild(uiState.banner(h("div"), { message: `The library file could not be read (${store.loadError}); ${rootLabel(store.kind)} is shown read-only.`, inset: true }));
     }
   }
   notice.hidden = !notice.childElementCount;
 }
 
-// The foot: "Save query" at the bottom left, the count of queries and the host at the right.
+// The foot: the count of queries and the host. (Saving the editor's query is the editor's own button, beside the copy button.)
 function renderFoot() {
   const total = storeList().reduce((n, store) => n + store.library.queries.length, 0);
   const count = format.countLabel(total, "query", "queries");
   libraryEls.count.textContent = ctl.host ? `${count}${MIDDOT}${ctl.host}` : count;
-  libraryEls.count.title = storeList().map((store) => `${ROOT_LABELS[store.kind]}: ${format.countLabel(store.library.queries.length, "query", "queries")}`).join("\n");
+  libraryEls.count.title = storeList().map((store) => `${rootLabel(store.kind)}: ${format.countLabel(store.library.queries.length, "query", "queries")}`).join("\n");
 }
 
 // ---- search
@@ -1898,7 +2276,7 @@ function searchMatches() {
   for (const store of storeList()) {
     const lib = store.library;
     for (const q of lib.queries) {
-      const path = `${ROOT_LABELS[store.kind]} ${folderPathText(lib, q.folder_id)}`;
+      const path = `${rootLabel(store.kind)} ${folderPathText(lib, q.folder_id)}`;
       const hay = fold(`${q.name}\n${q.description}\n${q.sql}\n${folderPathText(lib, q.folder_id)}`);
       if (!terms.every((t) => hay.includes(t))) continue;
       const nameHits = terms.filter((t) => fold(q.name).includes(t)).length;
@@ -2065,10 +2443,7 @@ function startRename(li) {
 }
 
 function metaText(kind, store, entity) {
-  if (kind === "folder") {
-    const n = childQueries(store.library, entity.id).length + childFolders(store.library, entity.id).length;
-    return n ? format.countLabel(n, "item") : "Empty";
-  }
+  if (kind === "folder") return queriesText(queryCounts(store.library).get(entity.id) || 0);
   return entity.updated_at_ms ? format.time(entity.updated_at_ms, { precision: "min" }) : "";
 }
 
@@ -2165,18 +2540,18 @@ function rootRow(store) {
   li.setAttribute("aria-expanded", String(open));
   const row = rowLead(1, { twisty: true });
   row.classList.add("qlRow--root");
-  row.append(icon(store.kind));
+  row.append(icon(isServerStore(store) ? "server" : "local"));
   const text = h("span", { class: "qlRow__text" });
-  text.appendChild(h("span", { class: "qlRow__name" }, ROOT_LABELS[store.kind]));
+  text.appendChild(h("span", { class: "qlRow__name" }, rootLabel(store.kind)));
   row.appendChild(text);
-  if (store.kind === "server" && !editableStore(store) && ctl.host && !store.fatal) {
+  if (isServerStore(store) && !editableStore(store) && ctl.host && !store.fatal) {
     const badge = badgeMod.el("Read-only", { tone: "warn", size: "sm", shape: "pill", className: "qlBadge qlBadge--readonly" });
     badge.title = "This server shares its query library read-only: opening and copying queries works, changes are disabled.";
     badge.prepend(icon("lock"));
     row.appendChild(badge);
   }
   const n = store.library.queries.length;
-  if (n) row.appendChild(h("span", { class: "qlRow__count" }, format.count(n)));
+  if (n) row.appendChild(h("span", { class: "qlRow__count" }, format.countLabel(n, "query", "queries")));
   li.appendChild(row);
   if (open) {
     const group = h("ul", { class: "qlTree__group" });
@@ -2259,7 +2634,7 @@ function entityOf(li) {
   if (!li) return null;
   const store = storeOf(li.dataset.store);
   if (!store) return null;
-  if (li.dataset.kind === "root") return { id: "", name: ROOT_LABELS[store.kind] };
+  if (li.dataset.kind === "root") return { id: "", name: rootLabel(store.kind) };
   return li.dataset.kind === "folder" ? folderById(store.library, li.dataset.id) : queryById(store.library, li.dataset.id);
 }
 
@@ -2377,13 +2752,24 @@ function onTreeClick(ev) {
     openRowMenu(li, { anchor: menuButton });
     return;
   }
+  // Was this row the selected one before the press? (The press focuses the row, and the focus selects it.)
+  const wasSelected = treePress?.key === li.dataset.key ? treePress.wasSelected : ctl.selection.saved === li.dataset.key;
+  treePress = null;
   if (isFolderLike(li)) {
-    if (isPhone() && !target.closest(".qlRow__twisty, .qlRow > .qlIcon")) {
-      select("saved", li);
-      enterPreview();
+    if (isPhone()) {
+      // The twisty is small under a finger: the icon opens and closes too, the name shows the pane.
+      if (!target.closest(".qlRow__twisty, .qlRow > .qlIcon")) {
+        select("saved", li);
+        enterPreview();
+        return;
+      }
+      toggleFolder(li);
       return;
     }
-    toggleFolder(li);
+    // The chevron opens and closes. A click on the row selects a folder and opens it when it is closed; on the folder that
+    // is already selected (the blue frame) and open, it closes it as the chevron does.
+    if (target.closest(".qlRow__twisty")) toggleFolder(li);
+    else toggleFolder(li, !(wasSelected && li.getAttribute("aria-expanded") === "true"));
     return;
   }
   select("saved", li);
@@ -2410,9 +2796,13 @@ function onTreeContextMenu(ev) {
 // would be gone before the click reached it (a twisty never opened, a folder tapped on a phone never went back to the form).
 // While a press is on, the click that follows does what the focus would do.
 let treePressed = false;
+// The row under the last press and whether it was the selected one then (see onTreeClick): the press itself selects it.
+let treePress = null;
 let treePressTimer = 0;
 
-function onTreePointerDown() {
+function onTreePointerDown(ev) {
+  const li = itemOf(ev.target instanceof Element ? ev.target : null);
+  treePress = li ? { key: li.dataset.key, wasSelected: ctl.selection.saved === li.dataset.key } : null;
   treePressed = true;
   clearTimeout(treePressTimer);
   treePressTimer = setTimeout(endTreePointer, 800);
@@ -2766,6 +3156,11 @@ function previewPane() {
 }
 
 function onPreviewClick(ev) {
+  const entry = ev.target instanceof Element ? ev.target.closest("button[data-open-key]") : null;
+  if (entry) {
+    openEntry(entry.dataset.openKey);
+    return;
+  }
   const button = ev.target instanceof Element ? ev.target.closest("button[data-action]") : null;
   if (!button) return;
   if (button.dataset.action === "back") {
@@ -2806,6 +3201,35 @@ function contentsText(counts) {
   return [counts.queries ? format.countLabel(counts.queries, "query", "queries") : "", counts.folders ? format.countLabel(counts.folders, "subfolder") : ""].filter(Boolean).join(MIDDOT) || "Empty";
 }
 
+// What a folder (folderId) or a storage (null) holds, one level down: its subfolders with their count of queries, then its
+// queries with their description and last change. The pane lists them, and a click opens one.
+function entriesOf(store, folderId) {
+  const lib = store.library;
+  const counts = queryCounts(lib);
+  const out = [];
+  for (const folder of childFolders(lib, folderId)) {
+    out.push({ key: keyOf("folder", store.kind, folder.id), kind: "folder", name: folder.name, meta: queriesText(counts.get(folder.id) || 0) });
+  }
+  for (const query of childQueries(lib, folderId)) {
+    out.push({ key: keyOf("query", store.kind, query.id), kind: "query", name: query.name, description: query.description, meta: query.updated_at_ms ? format.time(query.updated_at_ms, { precision: "min" }) : "" });
+  }
+  return out;
+}
+
+// A click in the pane's list: the item is highlighted in the tree (a folder also opens), as if it had been clicked there.
+function openEntry(key) {
+  const sel = parseKey(key);
+  const store = sel ? storeOf(sel.store) : null;
+  if (!store) return;
+  if (sel.kind === "folder") expandPath(sel.store, sel.id);
+  else if (sel.kind === "query") expandPath(sel.store, queryById(store.library, sel.id)?.folder_id);
+  ctl.search = "";
+  if (libraryEls.input) libraryEls.input.value = "";
+  ctl.selection.saved = key;
+  renderLibrary({ keepFocus: false });
+  focusSelected();
+}
+
 function savedPreview(key) {
   if (!key) return null;
   const sel = parseKey(key);
@@ -2815,13 +3239,16 @@ function savedPreview(key) {
   const canEdit = editableStore(store);
   if (sel.kind === "root") {
     const meta = h("span", { class: "qlPreview__meta" }, contentsText({ queries: lib.queries.length, folders: lib.folders.length }));
-    if (store.kind === "server" && !canEdit && ctl.host && !store.fatal) meta.append(MIDDOT, "Read-only");
+    if (isServerStore(store) && !canEdit && ctl.host && !store.fatal) meta.append(MIDDOT, "Read-only");
     return {
-      title: ROOT_LABELS[store.kind],
+      title: rootLabel(store.kind),
       meta,
-      description: ROOT_HINTS[store.kind],
+      description: store.hint,
       facts: ctl.host ? [["Host", ctl.host]] : [],
       error: store.fatal || (store.loadError ? `The library file could not be read (${store.loadError}): read-only.` : ""),
+      entries: store.fatal ? null : entriesOf(store, null),
+      entriesTitle: "In this library",
+      entriesEmpty: canEdit ? "Nothing saved here yet. Save a query, or make a folder with New folder." : "Nothing is saved here.",
       tools: canEdit ? [{ label: "New folder", icon: "folderPlus", action: "new-subfolder", run: () => startNewFolder({ store: store.kind, parentId: null }) }] : [],
     };
   }
@@ -2834,7 +3261,10 @@ function savedPreview(key) {
     return {
       title: folder.name,
       meta: updatedMeta(folder.updated_at_ms),
-      facts: [["Path", `${ROOT_LABELS[store.kind]} ${folderPathText(lib, folder.id)}`], ["Contents", contentsText(subtreeCounts(lib, folder.id))]],
+      facts: [["Path", `${rootLabel(store.kind)} ${folderPathText(lib, folder.id)}`], ["Contents", contentsText(subtreeCounts(lib, folder.id))]],
+      entries: entriesOf(store, folder.id),
+      entriesTitle: "In this folder",
+      entriesEmpty: canEdit ? "This folder is empty. Save a query into it, or make a subfolder." : "This folder is empty.",
       tools: canEdit ? [
         { label: "Rename", icon: "edit", action: "rename", run: () => { if (row) startRename(row); } },
         { label: "Move to\u2026", icon: "move", action: "move", run: () => moveDialog([item]) },
@@ -2989,6 +3419,7 @@ function renderPreview() {
   }
   if (model.error) content.appendChild(h("div", { class: "qlPreview__error" }, oneLine(model.error, 600)));
   if (model.sql != null) content.appendChild(sqlPreview(model.sql, PANE_SQL_CHARS, { pane: true }));
+  if (model.entries) content.appendChild(contentsList(model));
   pane.appendChild(content);
   if (model.actions && model.actions.length) {
     const foot = h("div", { class: "qlPreview__foot" });
@@ -3005,6 +3436,32 @@ function renderPreview() {
     pane.appendChild(foot);
   }
   if (refocus !== null) ($(`[data-action="${refocus}"]`, pane) || pane).focus({ preventScroll: true });
+}
+
+// What a folder or a storage holds, as a list in the pane: each entry is a button that opens it in the tree.
+const CONTENTS_SHOWN = 200;
+function contentsList(model) {
+  const wrap = h("section", { class: "qlContents" });
+  wrap.setAttribute("aria-label", model.entriesTitle);
+  wrap.appendChild(h("div", { class: "qlContents__label" }, model.entriesTitle));
+  if (!model.entries.length) {
+    wrap.appendChild(h("p", { class: "qlContents__empty" }, model.entriesEmpty));
+    return wrap;
+  }
+  const list = h("ul", { class: "qlContents__list" });
+  for (const entry of model.entries.slice(0, CONTENTS_SHOWN)) {
+    const button = h("button", { class: `qlContents__item qlContents__item--${entry.kind}`, type: "button" });
+    button.dataset.openKey = entry.key;
+    const text = h("span", { class: "qlContents__text" }, h("span", { class: "qlContents__name" }, entry.name));
+    if (entry.description) text.appendChild(h("span", { class: "qlContents__desc" }, oneLine(entry.description, 140)));
+    button.append(icon(entry.kind === "folder" ? "folder" : "query"), text, h("span", { class: "qlContents__meta" }, entry.meta));
+    list.appendChild(h("li", null, button));
+  }
+  wrap.appendChild(list);
+  if (model.entries.length > CONTENTS_SHOWN) {
+    wrap.appendChild(h("p", { class: "qlContents__more" }, `${format.count(model.entries.length - CONTENTS_SHOWN)} more: use the list on the left or the search.`));
+  }
+  return wrap;
 }
 
 // ------------------------------------------------------------ history view
@@ -3215,13 +3672,12 @@ async function show(tab) {
   renderPreview();
   await start();
   if (next === "saved") {
-    const server = ctl.stores.server;
-    if (server && ctl.rendered.library && Date.now() - server.loadedAt > SERVER_RELOAD_AFTER_MS) {
-      await reloadStore(server);
+    const stale = storeList().filter((store) => isServerStore(store) && ctl.rendered.library && Date.now() - store.loadedAt > SERVER_RELOAD_AFTER_MS);
+    if (stale.length) {
+      await Promise.all(stale.map((store) => reloadStore(store)));
       renderLibrary();
     }
     if (!ctl.rendered.library) renderLibrary();
-    else syncSaveButton();
   } else if (!ctl.historyState.loaded) {
     renderHistory();
     await loadHistory();
@@ -3287,8 +3743,9 @@ export const queryLibrary = {
   saveCurrent: () => beginSave(),
   historyChanged,
   // For tests and diagnostics.
-  get mode() { return ctl.stores.server ? "server" : "local"; },
+  get mode() { return storeList().some(isServerStore) ? "server" : "local"; },
   get roots() { return storeList().map((store) => store.kind); },
   get writable() { return ctl.stores.server ? !!ctl.stores.server.writable : true; },
+  get libraries() { return storeList().filter(isServerStore).map((store) => ({ kind: store.kind, label: store.label, writable: !!store.writable })); },
   get host() { return ctl.host; },
 };

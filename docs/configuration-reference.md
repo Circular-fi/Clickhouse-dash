@@ -158,7 +158,8 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 
 | Key | Type | Default | Range | Use |
 |---|---|---|---|---|
-| `enabled` | boolean | `false` |  | Keep the saved queries on the server, in one file. |
+| `enabled` | boolean | `false` |  | Keep the saved queries on the server, in one file. The block can be repeated: each enabled block is one more library. |
+| `name` | text |  |  | The name of the library: the id of the API (?library=) and what the Query page shows (at most 128 bytes; any text, no control character and no space at either end). The first library may leave it out (it is then "default"; a single library of that name shows as "Shared server storage"); the others need one, each different. |
 | `file` | text |  |  | The path of the file. It is required when the library is enabled. |
 | `writable` | boolean | `false` |  | Allow a change. When false, a change is refused with 403 read_only. |
 | `max_file_bytes` | integer | `8388608` | 65536 to 1073741824 bytes | The largest library file. |

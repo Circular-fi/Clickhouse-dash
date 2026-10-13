@@ -296,6 +296,21 @@ function initEditorCopyButton() {
   dom.queryTextArea.addEventListener("input", sync);
 }
 
+// The editor's save button, between the copy button and the options cog: the library opens on Saved with the save form
+// (the same as Ctrl+S). It waits for a query to save, as the copy button does.
+function initEditorSaveButton() {
+  if (!dom.editorSaveButton || !dom.queryTextArea) return;
+  const mod = util.modifierKeyLabel();
+  const sync = () => {
+    const empty = !String(dom.queryTextArea.value || "").trim();
+    dom.editorSaveButton.disabled = empty;
+    dom.editorSaveButton.title = empty ? "Save query: write a query first" : `Save query (${mod}+S)`;
+  };
+  dom.editorSaveButton.addEventListener("click", saveCurrentQuery);
+  sync();
+  dom.queryTextArea.addEventListener("input", sync);
+}
+
 // Ctrl+Enter runs the query: the page's controller says what runs it (init({ onRun })).
 let runHandler = null;
 
@@ -704,6 +719,7 @@ function init({ onRun } = {}) {
   applyRunOptionsUi();
   initEditor();
   initEditorCopyButton();
+  initEditorSaveButton();
 
   menus.run = menu?.split(dom.runButton, dom.runMenuButton, dom.runMenu) || null;
 

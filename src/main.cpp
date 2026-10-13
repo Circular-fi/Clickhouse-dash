@@ -135,8 +135,9 @@ void log_configuration(const chdash::AppConfig& cfg) {
                {"manage_from_ui", cfg.mcp.manage_from_ui},
                {"hosts", mcp_hosts}});
   }
-  if (cfg.query_library.enabled) {
-    log_event(LogLevel::Info, "server.query_library", {{"file", cfg.query_library.file}, {"writable", cfg.query_library.writable}});
+  for (const auto& library : cfg.query_libraries) {
+    log_event(LogLevel::Info, "server.query_library",
+              {{"name", library.name}, {"file", library.file}, {"writable", library.writable}});
   }
 }
 

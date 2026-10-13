@@ -82,6 +82,9 @@ struct ExplorerSettings {
 // history of the runs is always the browser's. See docs/query-library.md.
 struct QueryLibrarySettings {
   bool enabled = false;
+  // The id the API names (?library=), and the name the UI shows. The first library is the default one: it needs no name
+  // ("default"); the others do.
+  std::string name;
   std::string file;
   // false: GET only; folder/query create, edit, move, delete and import answer
   // 403 read_only.
@@ -267,7 +270,10 @@ struct AppConfig {
     return false;
   }
   ExportSettings export_settings;
+  // The block being read (the table of keys writes into it); after loading, query_libraries holds the enabled ones in
+  // the order of the file, and the first is the default.
   QueryLibrarySettings query_library;
+  std::vector<QueryLibrarySettings> query_libraries;
   McpSettings mcp;
 
   // /api/version
@@ -509,8 +515,8 @@ private:
   std::atomic<size_t> active_query_streams_{0};
   std::shared_ptr<ClickHouseClientPool> client_pool_;
   std::unique_ptr<FormatCache> format_cache_;
-  // Only constructed when query_library.enabled = true.
-  std::unique_ptr<QueryLibraryStore> query_library_;
+  // One store per enabled query_library block, in the order of the file (the first is the default).
+  std::vector<std::unique_ptr<QueryLibraryStore>> query_libraries_;
   // Only constructed when mcp.enabled = true. The database outlives the tools that use it.
   std::unique_ptr<McpKeyStore> mcp_keys_;
   std::unique_ptr<McpDatabase> mcp_db_;

@@ -390,7 +390,7 @@ const FEATURE_DEFAULTS = Object.freeze({
   traces: { enabled: false },
   logs: { enabled: false, body_search: "token" },
   metrics: { enabled: false },
-  query_library: { enabled: false, writable: false },
+  query_library: { enabled: false, writable: false, libraries: [] },
   // The MCP endpoint (docs/mcp.md): its page is in the page switcher only when it is on.
   mcp: { enabled: false },
 });
@@ -443,9 +443,13 @@ function normalizeFeatures(raw) {
     traces: { enabled: bool(src.traces?.enabled, d.traces.enabled) },
     logs: { enabled: bool(src.logs?.enabled, d.logs.enabled), body_search: String(src.logs?.body_search || d.logs.body_search) },
     metrics: { enabled: bool(src.metrics?.enabled, d.metrics.enabled) },
+    // libraries: every library of the server, the first is the default one ({ name, writable }).
     query_library: {
       enabled: libraryEnabled,
       writable: libraryEnabled && library.writable === true,
+      libraries: libraryEnabled && Array.isArray(library.libraries)
+        ? library.libraries.filter((item) => item && typeof item.name === "string" && item.name).map((item) => ({ name: item.name, writable: item.writable === true }))
+        : [],
     },
     mcp: { enabled: bool(src.mcp?.enabled, d.mcp.enabled) },
   };

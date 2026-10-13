@@ -1,6 +1,8 @@
 /* Copy controls (app_ui_copy.js): .uiCopy. */
 
-.editorCopyButton {
+/* The editor's corner, from the right: the options cog (right: 10px), Save, then Copy. */
+.editorCopyButton,
+.editorSaveButton {
   position: absolute;
   top: 10px;
   right: 42px;
@@ -16,6 +18,8 @@
   color: var(--muted);
   transition: color var(--dur-quick) var(--ease), opacity var(--dur-quick) var(--ease), transform var(--dur-quick) var(--ease);
 }
+
+.editorCopyButton { right: 74px; }
 
 /* The editor's copy button is a .uiCopy at the editor's own size. */
 .editorCopyButton.uiCopy {

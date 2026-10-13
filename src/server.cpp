@@ -264,14 +264,15 @@ Server::Server(AppConfig cfg, bool start_background)
       background_enabled_(start_background) {
   fs_static_cache_ = std::make_shared<FsStaticCache>();
 
-  if (cfg_.query_library.enabled) {
+  for (const auto& settings : cfg_.query_libraries) {
     QueryLibraryOptions library;
-    library.file = cfg_.query_library.file;
+    library.name = settings.name;
+    library.file = settings.file;
     for (const auto& host : cfg_.hosts) library.host_ids.push_back(host.id);
-    library.writable = cfg_.query_library.writable;
-    library.max_file_bytes = cfg_.query_library.max_file_bytes;
-    library.max_query_bytes = cfg_.query_library.max_query_bytes;
-    query_library_ = std::make_unique<QueryLibraryStore>(std::move(library));
+    library.writable = settings.writable;
+    library.max_file_bytes = settings.max_file_bytes;
+    library.max_query_bytes = settings.max_query_bytes;
+    query_libraries_.push_back(std::make_unique<QueryLibraryStore>(std::move(library)));
   }
 
   // The threads of the background cache refreshes (stale-while-revalidate): two, and a short queue.
@@ -595,7 +596,7 @@ Server::Server(AppConfig cfg, bool start_background)
 
   // Query library: every route is absent (404) unless query_library.enabled.
   // There is no history route: the history of the runs is the browser's.
-  if (cfg_.query_library.enabled) {
+  if (!cfg_.query_libraries.empty()) {
     const auto library = [this](QueryLibraryRoute route) {
       return [this, route](const httplib::Request& req, httplib::Response& res) { handle_query_library(req, res, route); };
     };
@@ -1115,8 +1116,18 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   // writable is the effective state: false when the file failed to load.
   w.Key("query_library");
   w.StartObject();
-  w.Key("enabled"); w.Bool(cfg_.query_library.enabled);
-  w.Key("writable"); w.Bool(query_library_ ? query_library_->writable() : false);
+  // writable is the default library's; libraries lists every one, in the order of the file (the first is the default).
+  w.Key("enabled"); w.Bool(!query_libraries_.empty());
+  w.Key("writable"); w.Bool(query_libraries_.empty() ? false : query_libraries_.front()->writable());
+  w.Key("libraries");
+  w.StartArray();
+  for (const auto& store : query_libraries_) {
+    w.StartObject();
+    w.Key("name"); write_json_text(w, store->options().name);
+    w.Key("writable"); w.Bool(store->writable());
+    w.EndObject();
+  }
+  w.EndArray();
   w.EndObject();
   w.Key("mcp");
   w.StartObject();
