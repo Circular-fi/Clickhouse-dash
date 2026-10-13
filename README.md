@@ -2,7 +2,7 @@
 
 A lightweight real-time ClickHouse query dashboard.
 
-**[Home page](https://circular-fi.github.io/Clickhouse-dash/)** · **[Documentation](https://circular-fi.github.io/Clickhouse-dash/documentation.html)** · **[Download v1.0.0](https://github.com/Circular-fi/Clickhouse-dash/releases/latest)**
+**[Home page](https://circular-fi.github.io/Clickhouse-dash/)** · **[Documentation](https://circular-fi.github.io/Clickhouse-dash/documentation.html)** · **[Download v1.0.1](https://github.com/Circular-fi/Clickhouse-dash/releases/latest)**
 
 <p align="center">
   <video src="docs/media/chdash-presentation-1080.mp4" poster="docs/assets/img/poster-1280.webp" width="100%" controls playsinline preload="none">

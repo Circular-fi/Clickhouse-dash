@@ -107,7 +107,7 @@
   } else if (flow) flow.classList.add("is-live");
 
   // Install panel: the platform picks the archive
-  const VERSION = "1.0.0";
+  const VERSION = "1.0.1";
   const BASE = `https://github.com/Circular-fi/Clickhouse-dash/releases/download/v${VERSION}`;
   const download = $("#cmd-download");
   const tabs = $$(".platforms button");

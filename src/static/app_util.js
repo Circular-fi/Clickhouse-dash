@@ -193,11 +193,15 @@ function replaceTextAreaValue(textAreaEl, nextValue) {
       } catch {
         null;
       }
-      textAreaEl.setSelectionRange(0, before.length);
-      const ok = document.execCommand && document.execCommand("insertText", false, v);
-      if (ok || String(textAreaEl.value ?? "") !== before) {
-        restoreView();
-        return;
+      // The focus can be refused (the editor sits under a modal dialog, so the page is inert): insertText then
+      // goes to whatever else is focused (the library's search box) and reports success, leaving the editor as it was.
+      if (document.activeElement === textAreaEl) {
+        textAreaEl.setSelectionRange(0, before.length);
+        const ok = document.execCommand && document.execCommand("insertText", false, v);
+        if ((ok || String(textAreaEl.value ?? "") !== before) && String(textAreaEl.value ?? "") === v) {
+          restoreView();
+          return;
+        }
       }
     }
   } catch {

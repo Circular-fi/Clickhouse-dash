@@ -2867,6 +2867,8 @@ function savedPreview(key) {
 // it is looked at: selected in the list, loaded, or saved. The list does not change (it shows each query on one
 // line), so nothing moves while the user reads. A script that the formatter rejects stays as typed.
 const historyFormatting = new Map();
+// Load does not wait longer than this for the formatter (a slow or unreachable server): the editor gets the text as typed.
+const HISTORY_FORMAT_WAIT_MS = 1500;
 function ensureHistoryFormatted(entry) {
   if (entry.formatted || !sqlMod?.formatText) return Promise.resolve(entry);
   let task = historyFormatting.get(entry.id);
@@ -2915,7 +2917,7 @@ function historyPreview(key) {
     sql: entry.sql,
     tools,
     actions: [
-      { label: "Load", action: "load", primary: true, run: () => ensureHistoryFormatted(entry).then(() => openInEditor(entry)) },
+      { label: "Load", action: "load", primary: true, run: () => Promise.race([ensureHistoryFormatted(entry), new Promise((resolve) => setTimeout(resolve, HISTORY_FORMAT_WAIT_MS))]).then(() => openInEditor(entry)) },
     ],
   };
 }
