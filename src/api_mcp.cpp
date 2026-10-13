@@ -222,23 +222,34 @@ public:
                                  std::chrono::seconds(timeout_cap_ + 15), std::chrono::milliseconds(10000), &connect_error);
     if (!client) throw McpDbError("host_unavailable", "cannot connect to ClickHouse host " + host + " as " + who + ": " + connect_error);
 
+    // The settings profile of the user decides what is sent (ch_mcp_settings): readonly = 1 when the profile leaves it at 0
+    // (the SQL then cannot change anything, nor any limit below), none when the profile has it at 1, and a limit only
+    // when it is smaller than the profile's. The profile of the connection is read once.
+    ChMcpLimits guard;
+    guard.max_rows = limits.max_rows;
+    guard.max_bytes = limits.max_bytes;
+    guard.timeout_seconds = limits.timeout_seconds;
+    guard.max_memory_bytes = limits.max_memory_bytes;
+    guard.max_rows_to_read = limits.max_rows_to_read;
+    guard.sql_bytes = static_cast<int64_t>(sql.size());
+    guard.log_comment = "chdash-mcp key=" + limits.key_id;
+    ChMcpSettings plan;
+    try {
+      plan = ch_mcp_settings(guard, ch_connection_profile(*client));
+    } catch (const std::system_error& error) {
+      pool_->invalidate(client);
+      throw McpDbError("host_unavailable", std::string("the connection to ClickHouse failed: ") + error.what());
+    } catch (const std::exception& error) {
+      pool_->invalidate(client);
+      throw McpDbError("query_failed", error.what());
+    }
+
     clickhouse::Query query(sql);
-    const auto set = [&query](const char* name, const std::string& value) {
+    for (const auto& [name, value] : plan.settings) {
       clickhouse::QuerySettingsField field;
       field.value = value;
       query.SetSetting(name, field);
-    };
-    // The settings are applied together; readonly=1 first in meaning: from here the SQL cannot change anything,
-    // nor any of the limits below.
-    set("readonly", "1");
-    set("max_execution_time", std::to_string(limits.timeout_seconds));
-    set("max_result_rows", std::to_string(limits.max_rows + 1));
-    set("result_overflow_mode", "break");
-    set("max_result_bytes", std::to_string(limits.max_bytes));
-    set("max_memory_usage", std::to_string(limits.max_memory_bytes));
-    set("max_query_size", std::to_string(std::max<int64_t>(262144, static_cast<int64_t>(sql.size()) + 1024)));
-    if (limits.max_rows_to_read > 0) set("max_rows_to_read", std::to_string(limits.max_rows_to_read));
-    set("log_comment", "chdash-mcp key=" + limits.key_id);
+    }
 
     McpDbResult result;
     bool done = false;
@@ -246,8 +257,9 @@ public:
     uint64_t native_bytes = 0;
     rapidjson::StringBuffer cell_buffer;
     rapidjson::Writer<rapidjson::StringBuffer> cell_writer(cell_buffer);
-    const uint64_t max_rows = static_cast<uint64_t>(limits.max_rows);
-    const uint64_t max_bytes = static_cast<uint64_t>(limits.max_bytes);
+    // The rows and bytes the call can return: the guard rails, or the profile's when it cuts earlier.
+    const uint64_t max_rows = static_cast<uint64_t>(plan.max_rows);
+    const uint64_t max_bytes = static_cast<uint64_t>(plan.max_bytes);
 
     query.OnDataCancelable([&](const clickhouse::Block& block) -> bool {
       if (done) return false;
@@ -305,8 +317,10 @@ public:
       throw McpDbError("query_failed", error.what());
     }
     result.elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-    // ClickHouse itself may have stopped at max_result_bytes (result_overflow_mode = break).
+    // ClickHouse itself may have stopped at max_result_bytes (result_overflow_mode = break), and a cut of the profile leaves
+    // no extra row to show it: a result that fills what the profile allows is reported as cut.
     if (native_bytes >= max_bytes) result.truncated = true;
+    if (plan.rows_cut_by_profile && result.rows.size() >= max_rows) result.truncated = true;
     return result;
   }
 

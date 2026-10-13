@@ -9,7 +9,7 @@ MCP is off by default. Add an `mcp {}` block to the configuration to turn it on.
 - The endpoint is `POST /mcp`. It uses the MCP "Streamable HTTP" transport. Each request gets one JSON answer. There is no stream and no session.
 - The client sends `Authorization: Bearer <key>`. ChDash finds the key and checks its rights on every call. `mcp.auth_header` can change the header name (see the table of the `mcp` block).
 - MCP has its own ClickHouse user. Each host has an `mcp_uri` for it. The schema, read and SQL tools use only that user. The API tools use it as the runner and keep the system user of the host for what the pages read with it (figures, the System page, the OpenTelemetry tables). ChDash never uses `runner_uri` for MCP. A host without `mcp_uri` is invisible to MCP.
-- Each query runs with `readonly=1`. The SQL cannot change data and cannot change its own limits.
+- Each query runs with `readonly=1`, or with the `readonly` of the profile of the MCP user when the profile already sets it (see [The settings profile of the user](#the-settings-profile-of-the-user)). The SQL cannot change data and cannot change its own limits.
 - Each query has caps on rows, bytes, time and memory. A result has `truncated: true` when a cap cut it.
 - The real security boundary is the ClickHouse user. The key only narrows what that user can do.
 
@@ -154,7 +154,7 @@ GRANT SELECT ON system.documentation TO chdash_mcp;        -- explorer_functions
 - Do not grant `FILE`, `URL`, `REMOTE`, `S3` or any other source. These sources read files or call other servers.
 - Do not grant `INSERT`, `ALTER`, `CREATE`, `DROP`, `SYSTEM`, `KILL QUERY` or `ACCESS MANAGEMENT`.
 - Do not grant `SELECT` on `system.users`, `system.query_log`, `system.processes` or other tables with data of other users.
-- Keep the default profile of the user (`readonly = 0`). ChDash sends `readonly = 1` and the limits with each query. With `readonly = 1` in the profile, ClickHouse refuses the limits. With `readonly = 2`, ClickHouse refuses `readonly = 1`. Do not use either one.
+- The profile of the user may keep the default (`readonly = 0`), or set `readonly = 2` (the usual profile of a read-only user in production), or `readonly = 1`. ChDash reads the profile of each connection and adapts what it sends: [The settings profile of the user](#the-settings-profile-of-the-user) has the rules.
 - `tests/clickhouse-init/01-chdash-users.sql` has the user of the tests, `chdash_mcp`. It uses the same pattern.
 
 A key can limit the user more. A key cannot give the user more.
@@ -473,13 +473,28 @@ A request without an `Origin` header comes from a program (a CLI, an SDK, an IDE
 
 Each key has a token bucket in memory. The bucket holds `rate_limit_per_minute` calls and fills evenly during one minute. All calls count: also a `ping` or a `tools/list`.
 
+### The settings profile of the user
+
+The settings profile of the ClickHouse MCP user can already set `readonly` and some limits. ChDash reads the profile of each connection once (`getSetting`) and sends only what the profile allows. ClickHouse refuses every change of `readonly` when the profile has `readonly = 2` (even to 1), and every setting at all when it has `readonly = 1`.
+
+| `readonly` in the profile | What ChDash sends |
+| --- | --- |
+| `0` (the default) | `readonly = 1` and the limits of the table below. |
+| `2` | The limits of the table below, **not** `readonly`. The profile already stops every write, and a statement cannot change a limit. |
+| `1` | **Nothing.** ClickHouse refuses any setting. The profile holds the limits (time, memory, rows to read). ChDash still caps the rows and the bytes that it returns, and sets `truncated`. |
+| unknown (an old server without `getSetting`) | Everything, as for `0`. |
+
+**The profile wins over the configuration.** When the profile of the user sets `max_execution_time`, `max_result_rows`, `max_result_bytes`, `max_memory_usage` or `max_rows_to_read`, ChDash does not send a value that contradicts it, and the configuration (`mcp { max_rows, query_timeout_seconds, ... }`) or a key cannot raise it. When the value of the configuration, or of a key, is **lower** than the one of the profile, the lower one is kept: a key can only lower a limit, never raise it. In short, the limit of a call is the smaller of the profile, the configuration and the key. The rows and the bytes that a call returns follow the same smaller value, and a result that reaches a cut of the profile has `truncated: true` (ClickHouse cuts there without one more row to show it). With `result_overflow_mode = break` that ChDash sends, the cut ends the result and is not an error.
+
+The test stack has these users (`tests/clickhouse-init/01-chdash-users.sql`, `tests/config/mcp.profile.hcl`): `chdash_mcp_ro2` (`readonly = 2`, three databases), `chdash_mcp_ro2cap` (`readonly = 2`, `max_result_rows = 7`, `max_execution_time = 4`) and `chdash_mcp_ro1` (`readonly = 1`).
+
 ### Guard rails of each query
 
-ChDash sends these settings to ClickHouse with each query:
+ChDash sends these settings to ClickHouse with each query (the profile of the user can remove some of them: see above):
 
 | Setting | Value |
 | --- | --- |
-| `readonly` | `1` |
+| `readonly` | `1`, only when the profile of the user has `readonly = 0` |
 | `max_execution_time` | the timeout of the key (at most `query_timeout_seconds`) |
 | `max_result_rows`, `result_overflow_mode` | `max_rows` + 1, `break` |
 | `max_result_bytes` | `max_result_bytes` (with `result_overflow_mode = break`) |
@@ -627,7 +642,7 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **Health.** `healthy` is the health that ChDash measures for the host with its normal check. It does not test the MCP user.
 - **`FORMAT`.** ChDash uses the native protocol. The result is always JSON, so a `FORMAT` clause has no effect and is accepted.
 - **Denied functions.** `file`, `url`, `remote`, `s3`, `hdfs`, `mysql`, `postgresql`, `mongodb`, `redis`, `jdbc`, `odbc`, `sqlite`, `executable`, `input`, the Azure, Iceberg, Delta Lake and Hudi readers, and their `Cluster` forms.
-- **Settings order.** The settings of a query go together in one packet. ClickHouse checks each of them against the profile of the user, then applies them. `readonly=1` does not block the limits that come with it. A `SETTINGS` clause in the SQL is refused after that, so the SQL cannot change a limit.
+- **Settings order.** The settings of a query go together in one packet. ClickHouse checks each of them against the profile of the user, then applies them. `readonly=1` does not block the limits that come with it. A profile that has `readonly` at 1 or 2 changes what is sent: see [The settings profile of the user](#the-settings-profile-of-the-user). A `SETTINGS` clause in the SQL is refused after that, so the SQL cannot change a limit.
 - **Connections.** MCP queries use the shared connection pool with the `mcp_uri` of the host. The pool key includes the URI, so MCP connections never mix with runner or system connections. The receive timeout is `query_timeout_seconds` plus 15 seconds.
 - **API errors.** The page API and the guard of the writes use the one error body of ChDash: `{"error_code", "message", "retryable"}` (and `field` and `reason` for validation). The check of `manage_from_ui` comes after the cross-site guard and before the validation.
 - **The page.** The route `/mcp-integration` always serves `mcp.html`, also when MCP is off. The page then shows how to turn MCP on. The link in the page switcher shows only when `features.mcp.enabled` is true. The route answers 404 when `mcp.html` is missing.

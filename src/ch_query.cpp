@@ -140,6 +140,17 @@ class Runner {
     }
   }
 
+ // The profile of the connection, read by the probe the first time.
+  ChSettingsProfile profile() {
+    auto state = state_of(client_);
+    if (!state) return ChSettingsProfile{};
+    if (!state->probed) {
+      probe();
+      state = state_of(client_);
+    }
+    return state ? state->profile : ChSettingsProfile{};
+  }
+
  private:
   static bool is_setting_refusal(int code, std::string_view message, const std::vector<std::string>& names) {
     if (code == 164 && message.find("Cannot modify") == std::string_view::npos) return false;
@@ -190,6 +201,9 @@ class Runner {
       profile.max_result_bytes = parse_u64(text(5));
       profile.known = true;
     });
+    // A server that refuses the label also drops the connection (the next statement then fails with "closed"): the
+    // connection is marked, and the statement that follows opens a new socket first (point 1 of ch_query.hpp).
+    bool refused = false;
     try {
       execute(query);
     } catch (const clickhouse::ServerError& error) {
@@ -197,11 +211,13 @@ class Runner {
       if (error.GetCode() == 164) {
         profile.known = true;
         profile.readonly = 1;
+        refused = true;
       }
     }
-    update_state(client_, [&profile](ConnectionState& value) {
+    update_state(client_, [&profile, refused](ConnectionState& value) {
       value.probed = true;
       value.profile = profile;
+      if (refused) value.dirty = true;
     });
   }
 
@@ -362,6 +378,51 @@ std::vector<std::pair<std::string, std::string>> ch_query_settings(
     result_cap = true;
   }
   if (result_cap && !limits.result_overflow_mode.empty()) out.emplace_back("result_overflow_mode", limits.result_overflow_mode);
+  return out;
+}
+
+ChSettingsProfile ch_connection_profile(clickhouse::Client& client) { return Runner(client).profile(); }
+
+ChMcpSettings ch_mcp_settings(const ChMcpLimits& limits, const ChSettingsProfile& profile) {
+  ChMcpSettings out;
+  out.max_rows = limits.max_rows;
+  out.max_bytes = limits.max_bytes;
+  // The smaller of the rows and the bytes that the guard rails and the profile allow.
+  if (profile.known && profile.max_result_rows > 0 && profile.max_result_rows <= static_cast<uint64_t>(std::max<int64_t>(0, limits.max_rows))) {
+    out.max_rows = static_cast<int64_t>(profile.max_result_rows);
+    out.rows_cut_by_profile = true;
+  }
+  if (profile.known && profile.max_result_bytes > 0 && profile.max_result_bytes <= static_cast<uint64_t>(std::max<int64_t>(0, limits.max_bytes))) {
+    out.max_bytes = static_cast<int64_t>(profile.max_result_bytes);
+    out.bytes_cut_by_profile = true;
+  }
+  // readonly = 1 in the profile: ClickHouse refuses every setting of the statement.
+  if (profile.known && profile.readonly == 1) return out;
+
+  const auto add = [&out](const char* name, std::string value) { out.settings.emplace_back(name, std::move(value)); };
+  // A guard rail goes when the profile has no value, or a larger one: the profile is never contradicted, and a request
+  // never raises it.
+  const auto lowers = [&profile](uint64_t ours, uint64_t theirs) { return !profile.known || theirs == 0 || ours < theirs; };
+
+  if (!profile.known || profile.readonly == 0) add("readonly", "1");
+  if (limits.timeout_seconds > 0 && (!profile.known || profile.max_execution_time <= 0 || static_cast<double>(limits.timeout_seconds) < profile.max_execution_time)) {
+    add("max_execution_time", std::to_string(limits.timeout_seconds));
+  }
+  // One row more than the guard rail is read, so that a result that fills it tells whether it was cut.
+  const uint64_t rows = static_cast<uint64_t>(std::max<int64_t>(0, limits.max_rows)) + 1;
+  if (lowers(rows, profile.max_result_rows)) add("max_result_rows", std::to_string(rows));
+  add("result_overflow_mode", "break");
+  if (limits.max_bytes > 0 && lowers(static_cast<uint64_t>(limits.max_bytes), profile.max_result_bytes)) {
+    add("max_result_bytes", std::to_string(limits.max_bytes));
+  }
+  if (limits.max_memory_bytes > 0 && lowers(static_cast<uint64_t>(limits.max_memory_bytes), profile.max_memory_usage)) {
+    add("max_memory_usage", std::to_string(limits.max_memory_bytes));
+  }
+  add("max_query_size", std::to_string(std::max<int64_t>(262144, limits.sql_bytes + 1024)));
+  if (limits.max_rows_to_read > 0 && lowers(static_cast<uint64_t>(limits.max_rows_to_read), profile.max_rows_to_read)) {
+    add("max_rows_to_read", std::to_string(limits.max_rows_to_read));
+  }
+  if (!limits.log_comment.empty()) add("log_comment", limits.log_comment);
   return out;
 }
 

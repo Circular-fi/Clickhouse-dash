@@ -174,10 +174,10 @@
   word-break: normal;
 }
 
-/* A phone: the empty editor's placeholder wraps clear of the copy and options buttons. */
+/* A phone: the empty editor's placeholder wraps clear of the copy, save and options buttons. */
 @media (max-width: 600px) {
   #queryTextArea.editorInput:placeholder-shown {
-    padding-right: calc(var(--control-h) * 2 + 24px);
+    padding-right: calc(var(--control-h) * 3 + 24px);
     white-space: pre-wrap;
   }
 }
@@ -396,8 +396,8 @@
   .obsFilterBar { --obs-bar-control: var(--hit); }
 
   /* The editor's buttons: the options cog in the corner, Save beside it, then the copy button. */
-  .editorSaveButton { right: 52px; }
-  .editorCopyButton { right: 94px; }
+  .editorWrap .editorSaveButton { right: 52px; }
+  .editorWrap .editorCopyButton { right: 94px; }
 
   /* A segmented control keeps its inset look: its options reach --hit through their band. */
   .segmented,
@@ -544,6 +544,9 @@
   .explorerSection__summary::before,
   .queryLibrary__button::after,
   .qlRow__twisty::before,
+  .qlPicker__chevron::before,
+  .qlPicker__sep::before,
+  .qlPicker__twisty::before,
   .runSplit__toggle::after,
   .editorAutocompleteControl__caret,
   .traceJaegerGroup > summary::before,

@@ -106,3 +106,48 @@ GRANT SELECT ON system.data_skipping_indices TO chdash_mcp;
 GRANT SELECT ON system.documentation TO chdash_mcp;
 -- system.parts: the logs and metrics pages read the size and the rows of their tables (ClickHouse shows a user the parts of its tables only).
 GRANT SELECT ON system.parts TO chdash_mcp;
+
+-- MCP identities whose settings profile sets readonly (docs/mcp.md, "The ClickHouse MCP user"). A profile with readonly = 2
+-- (the readonly profile of a production server) makes ClickHouse refuse every change of `readonly`, even to 1; a profile with
+-- readonly = 1 refuses every setting. ChDash reads the profile of the connection and sends readonly = 1 only to a user whose
+-- profile leaves it at 0, and a limit only when it is smaller than the profile's.
+--   chdash_mcp_ro2      readonly = 2, reads three databases (chdash_ui, otel, otel_alt) and not the fourth (chdash_denied);
+--   chdash_mcp_ro2cap   readonly = 2 and limits of its own (max_result_rows = 7, max_execution_time = 4, max_memory_usage);
+--   chdash_mcp_ro1      readonly = 1: no setting can be sent, the profile holds every limit.
+CREATE SETTINGS PROFILE IF NOT EXISTS chdash_readonly2 SETTINGS readonly = 2;
+CREATE SETTINGS PROFILE IF NOT EXISTS chdash_readonly2_capped SETTINGS readonly = 2, max_result_rows = 7, max_execution_time = 4, max_memory_usage = 2000000000;
+CREATE SETTINGS PROFILE IF NOT EXISTS chdash_readonly1 SETTINGS readonly = 1;
+ALTER SETTINGS PROFILE chdash_readonly2 SETTINGS readonly = 2;
+ALTER SETTINGS PROFILE chdash_readonly2_capped SETTINGS readonly = 2, max_result_rows = 7, max_execution_time = 4, max_memory_usage = 2000000000;
+ALTER SETTINGS PROFILE chdash_readonly1 SETTINGS readonly = 1;
+CREATE USER IF NOT EXISTS chdash_mcp_ro2 IDENTIFIED WITH plaintext_password BY 'mcp_ro2_test' SETTINGS PROFILE 'chdash_readonly2';
+CREATE USER IF NOT EXISTS chdash_mcp_ro2cap IDENTIFIED WITH plaintext_password BY 'mcp_ro2cap_test' SETTINGS PROFILE 'chdash_readonly2_capped';
+CREATE USER IF NOT EXISTS chdash_mcp_ro1 IDENTIFIED WITH plaintext_password BY 'mcp_ro1_test' SETTINGS PROFILE 'chdash_readonly1';
+ALTER USER chdash_mcp_ro2 IDENTIFIED WITH plaintext_password BY 'mcp_ro2_test' SETTINGS PROFILE 'chdash_readonly2';
+ALTER USER chdash_mcp_ro2cap IDENTIFIED WITH plaintext_password BY 'mcp_ro2cap_test' SETTINGS PROFILE 'chdash_readonly2_capped';
+ALTER USER chdash_mcp_ro1 IDENTIFIED WITH plaintext_password BY 'mcp_ro1_test' SETTINGS PROFILE 'chdash_readonly1';
+REVOKE ALL ON *.* FROM chdash_mcp_ro2;
+REVOKE ALL ON *.* FROM chdash_mcp_ro2cap;
+REVOKE ALL ON *.* FROM chdash_mcp_ro1;
+CREATE DATABASE IF NOT EXISTS chdash_denied;
+CREATE TABLE IF NOT EXISTS chdash_denied.secret (n UInt8) ENGINE = Memory;
+GRANT SELECT ON chdash_ui.* TO chdash_mcp_ro2;
+GRANT SELECT ON otel.* TO chdash_mcp_ro2;
+GRANT SELECT ON otel_alt.* TO chdash_mcp_ro2;
+GRANT SELECT ON system.databases TO chdash_mcp_ro2;
+GRANT SELECT ON system.tables TO chdash_mcp_ro2;
+GRANT SELECT ON system.columns TO chdash_mcp_ro2;
+GRANT SELECT ON system.one TO chdash_mcp_ro2;
+GRANT SELECT ON system.numbers TO chdash_mcp_ro2;
+GRANT SELECT ON chdash_ui.* TO chdash_mcp_ro2cap;
+GRANT SELECT ON system.one TO chdash_mcp_ro2cap;
+GRANT SELECT ON system.numbers TO chdash_mcp_ro2cap;
+GRANT SELECT ON system.databases TO chdash_mcp_ro2cap;
+GRANT SELECT ON system.tables TO chdash_mcp_ro2cap;
+GRANT SELECT ON system.columns TO chdash_mcp_ro2cap;
+GRANT SELECT ON chdash_ui.* TO chdash_mcp_ro1;
+GRANT SELECT ON system.one TO chdash_mcp_ro1;
+GRANT SELECT ON system.numbers TO chdash_mcp_ro1;
+GRANT SELECT ON system.databases TO chdash_mcp_ro1;
+GRANT SELECT ON system.tables TO chdash_mcp_ro1;
+GRANT SELECT ON system.columns TO chdash_mcp_ro1;

@@ -19,7 +19,7 @@
   transition: color var(--dur-quick) var(--ease), opacity var(--dur-quick) var(--ease), transform var(--dur-quick) var(--ease);
 }
 
-.editorCopyButton { right: 74px; }
+.editorWrap .editorCopyButton { right: 74px; }
 
 /* The editor's copy button is a .uiCopy at the editor's own size. */
 .editorCopyButton.uiCopy {

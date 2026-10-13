@@ -137,4 +137,39 @@ struct ChSettingsProfile {
 std::vector<std::pair<std::string, std::string>> ch_query_settings(
     const ChQueryLimits& limits, const ChSettingsProfile& profile, std::chrono::steady_clock::time_point now);
 
+// What the settings profile of the user of `client` allows: read once for the connection (the probe of point 2), then
+// kept. known = false when it could not be read (an old server) or when `client` did not come from ch_open_client.
+ChSettingsProfile ch_connection_profile(clickhouse::Client& client);
+
+// The guard rails of one statement of the MCP tools (docs/mcp.md, "Per-request guard rails"). Not a scope: the tools send
+// their settings themselves, and a profile of the user decides what of them can be sent.
+struct ChMcpLimits {
+  int64_t max_rows = 0;
+  int64_t max_bytes = 0;
+  int64_t timeout_seconds = 0;
+  int64_t max_memory_bytes = 0;
+  int64_t max_rows_to_read = 0;  // 0 = none
+  int64_t sql_bytes = 0;         // the size of the statement: max_query_size follows it
+  std::string log_comment;
+};
+
+struct ChMcpSettings {
+  std::vector<std::pair<std::string, std::string>> settings;
+  // What the statement can return, when the profile of the user cuts it earlier than the guard rails: a result that
+  // reaches one of them may have been cut by ClickHouse, whose own cut the caller cannot see.
+  int64_t max_rows = 0;
+  int64_t max_bytes = 0;
+  bool rows_cut_by_profile = false;
+  bool bytes_cut_by_profile = false;
+};
+
+// The settings of a MCP statement for a user whose profile is `profile`:
+// - readonly = 1 when the profile leaves readonly at 0 (the statement cannot change anything, nor any limit). A profile
+//   that has readonly = 2 or 1 already has it: ClickHouse refuses to change the setting, even to 1.
+// - readonly = 1 in the profile: no setting at all, ClickHouse refuses every one. The profile then holds the limits.
+// - The profile wins: a limit that the profile sets is sent only when the guard rail is smaller (the request can only
+//   lower it, never raise it), and the rows and bytes the statement returns follow the smaller one.
+// An unreadable profile gets everything, as a user without a profile would.
+ChMcpSettings ch_mcp_settings(const ChMcpLimits& limits, const ChSettingsProfile& profile);
+
 }  // namespace chdash

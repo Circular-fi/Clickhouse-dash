@@ -13,6 +13,8 @@ chdash_source with the feature disabled, only runs the disabled checks):
 - MCP_STARTUP_CMD: a command that runs the REAL binary on a config file, with {dir} (the directory
   that holds the file) and {name} (its name), for the startup errors; for example
   docker run --rm -v {dir}:/cfg:ro --entrypoint /app/chdash chdash-m3b-app:local --config /cfg/{name}
+- MCP_PROFILE_BASE_URL: tests/config/mcp.profile.hcl, MCP users whose settings profile sets readonly = 2 or 1 (the compose service
+  chdash_mcp_profile, users in tests/clickhouse-init/01-chdash-users.sql).
 - CLICKHOUSE_URL, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD: an admin account, to make the scratch
   database mcp_scratch (and to check what the MCP user could not change).
 """
@@ -42,6 +44,7 @@ LOGS_CMD = os.environ.get("MCP_LOGS_CMD", "")
 RO_URL = os.environ.get("MCP_RO_BASE_URL", "").rstrip("/")
 RO_DATA_DIR = os.environ.get("MCP_RO_DATA_DIR", "")
 NOSTORAGE_URL = os.environ.get("MCP_NOSTORAGE_BASE_URL", "").rstrip("/")
+PROFILE_URL = os.environ.get("MCP_PROFILE_BASE_URL", "").rstrip("/")
 STARTUP_CMD = os.environ.get("MCP_STARTUP_CMD", "")
 # Where the binary sees the directory {dir} of the command (the mount point of a docker run; "{dir}" when the command runs on the host).
 STARTUP_CONFIG_DIR = os.environ.get("MCP_STARTUP_CONFIG_DIR", "/cfg")
@@ -57,6 +60,11 @@ LIMITED = "11317ed0-0000-4000-8000-000000000004"
 SECOND = "5ec0d000-0000-4000-8000-000000000005"
 HOSTS_ONLY = "4057a000-0000-4000-8000-000000000006"
 RATE = "7a7e7e57-0000-4000-8000-000000000007"
+# Of tests/config/mcp.profile.hcl.
+PROFILE_RO2 = "20a7c0de-0000-4000-8000-000000000001"
+PROFILE_RO2CAP = "20a7c0de-0000-4000-8000-000000000002"
+PROFILE_RO2CAP_LOW = "20a7c0de-0000-4000-8000-000000000003"
+PROFILE_RO1 = "20a7c0de-0000-4000-8000-000000000004"
 # Of tests/config/mcp.nostorage.hcl.
 ONLY_KEY = "0a17e100-0000-4000-8000-000000000008"
 # Of tests/config/mcp.seed.json.
@@ -74,6 +82,7 @@ SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "chdash-backend-functional/1"})
 
 needs_mcp = pytest.mark.skipif(not MCP_URL, reason="MCP_BASE_URL is not set")
+needs_profile = pytest.mark.skipif(not PROFILE_URL, reason="MCP_PROFILE_BASE_URL is not set")
 needs_data_dir = pytest.mark.skipif(not (MCP_URL and DATA_DIR), reason="MCP_DATA_DIR is not set")
 needs_restart = pytest.mark.skipif(not (MCP_URL and RESTART_CMD), reason="MCP_RESTART_CMD is not set")
 needs_logs = pytest.mark.skipif(not (MCP_URL and LOGS_CMD), reason="MCP_LOGS_CMD is not set")
@@ -1715,3 +1724,78 @@ def test_api_tools_need_all_the_data():
     # The cap of the key on rows does not cut an API answer: the byte cap of the instance does.
     big = call_tool(MCP_URL, ALL, "explorer_functions", {"host": "local"})
     assert big["isError"] is True and big["structuredContent"]["error"] == "result_too_large"
+
+
+# ---- users whose settings profile sets readonly ------------------------------------------------------------------------
+
+SETTINGS_SQL = "SELECT getSetting('readonly') AS readonly, getSetting('max_execution_time') AS seconds, getSetting('max_result_rows') AS result_rows"
+
+
+def profile_settings(key: str) -> dict:
+    """What the statement of run_query saw as its own settings (the profile of the user, and what ChDash sent)."""
+    result = ok_tool(PROFILE_URL, key, "run_query", {"sql": SETTINGS_SQL})
+    return dict(zip([c["name"] for c in result["columns"]], result["rows"][0]))
+
+
+def never_refused_a_setting(payload: dict) -> None:
+    assert "Cannot modify" not in json.dumps(payload), payload
+
+
+@needs_profile
+def test_a_user_with_readonly_2_in_its_profile_serves_mcp():
+    # The profile of a production server (readonly = 2): ClickHouse refuses to change `readonly`, even to 1, and a statement
+    # that said readonly = 1 failed with "Cannot modify 'readonly' setting in readonly mode". ChDash sends it only to a profile
+    # that leaves it at 0.
+    databases = ok_tool(PROFILE_URL, PROFILE_RO2, "list_databases")
+    never_refused_a_setting(databases)
+    names = {d["name"] for d in databases["databases"]}
+    # The three databases that the user reads, and system (it reads system.databases); not the fourth.
+    assert names == {"chdash_ui", "otel", "otel_alt", "system"}, names
+    never_refused_a_setting(ok_tool(PROFILE_URL, PROFILE_RO2, "list_tables", {"database": "chdash_ui"}))
+    rows = ok_tool(PROFILE_URL, PROFILE_RO2, "run_query", {"sql": "SELECT count() AS n FROM chdash_ui.weather_observations"})
+    assert rows["row_count"] == 1 and rows["rows"][0][0] != 0, rows
+    # A fourth database is refused by ClickHouse, as a missing right and not as a refused setting.
+    denied = fail_tool(PROFILE_URL, PROFILE_RO2, "run_query", {"sql": "SELECT * FROM chdash_denied.secret"})
+    never_refused_a_setting(denied)
+    assert denied["error"] == "permission_denied", denied
+
+
+@needs_profile
+def test_the_other_limits_are_still_sent_to_a_readonly_2_user():
+    # readonly = 2 allows the other settings: the profile does not set these, so the limits of ChDash apply (this instance:
+    # 5 seconds, 100 rows + 1).
+    seen = profile_settings(PROFILE_RO2)
+    assert seen["readonly"] == 2
+    assert seen["seconds"] == 5 and seen["result_rows"] == 101, seen
+    # The rows are capped at 100, and the cut is reported.
+    result = ok_tool(PROFILE_URL, PROFILE_RO2, "run_query", {"sql": "SELECT number FROM system.numbers LIMIT 500"})
+    assert result["row_count"] == 100 and result["truncated"] is True
+
+
+@needs_profile
+def test_the_profile_wins_over_the_configuration_and_a_stricter_key_still_lowers_it():
+    # The profile has max_execution_time = 4 and max_result_rows = 7; the configuration says 5 seconds and 100 rows. The
+    # profile is not contradicted: its values stand.
+    seen = profile_settings(PROFILE_RO2CAP)
+    assert seen["readonly"] == 2 and seen["seconds"] == 4 and seen["result_rows"] == 7, seen
+    result = ok_tool(PROFILE_URL, PROFILE_RO2CAP, "run_query", {"sql": "SELECT number FROM system.numbers LIMIT 500"})
+    assert result["row_count"] == 7 and result["truncated"] is True, result
+    never_refused_a_setting(result)
+    # A key that is stricter than the profile (3 rows) lowers it: a key can only lower, never raise.
+    seen = profile_settings(PROFILE_RO2CAP_LOW)
+    assert seen["result_rows"] == 4 and seen["seconds"] == 4, seen
+    low = ok_tool(PROFILE_URL, PROFILE_RO2CAP_LOW, "run_query", {"sql": "SELECT number FROM system.numbers LIMIT 500"})
+    assert low["row_count"] == 3 and low["truncated"] is True, low
+    # Below the profile's cap the result is whole.
+    whole = ok_tool(PROFILE_URL, PROFILE_RO2CAP, "run_query", {"sql": "SELECT number FROM system.numbers LIMIT 4"})
+    assert whole["row_count"] == 4 and whole["truncated"] is False, whole
+
+
+@needs_profile
+def test_a_user_with_readonly_1_in_its_profile_serves_mcp_without_any_setting():
+    # readonly = 1 in the profile: ClickHouse refuses every setting of a statement, so ChDash sends none; the profile holds the
+    # limits and the cap on rows is the one of ChDash.
+    assert profile_settings(PROFILE_RO1)["readonly"] == 1
+    never_refused_a_setting(ok_tool(PROFILE_URL, PROFILE_RO1, "list_databases"))
+    result = ok_tool(PROFILE_URL, PROFILE_RO1, "run_query", {"sql": "SELECT number FROM system.numbers LIMIT 500"})
+    assert result["row_count"] == 100 and result["truncated"] is True, result

@@ -429,10 +429,83 @@ void test_the_pool_bounds_its_leases(const std::string& uri) {
 
 }  // namespace
 
+// The settings of a MCP statement: readonly = 1 only when the profile leaves it at 0, the profile never contradicted.
+void test_mcp_settings_follow_the_profile() {
+  ChMcpLimits limits;
+  limits.max_rows = 1000;
+  limits.max_bytes = 1'048'576;
+  limits.timeout_seconds = 30;
+  limits.max_memory_bytes = 1'073'741'824;
+  limits.sql_bytes = 100;
+  limits.log_comment = "chdash-mcp key=k1";
+
+  // A user without a profile: everything, readonly = 1 first.
+  ChMcpSettings plan = ch_mcp_settings(limits, open_profile());
+  CHECK(setting(plan.settings, "readonly") == "1");
+  CHECK(setting(plan.settings, "max_execution_time") == "30");
+  CHECK(setting(plan.settings, "max_result_rows") == "1001");
+  CHECK(setting(plan.settings, "result_overflow_mode") == "break");
+  CHECK(setting(plan.settings, "max_result_bytes") == "1048576");
+  CHECK(setting(plan.settings, "max_memory_usage") == "1073741824");
+  CHECK(setting(plan.settings, "max_query_size") == "262144");
+  CHECK(setting(plan.settings, "max_rows_to_read") == "<unset>");
+  CHECK(setting(plan.settings, "log_comment") == "chdash-mcp key=k1");
+  CHECK(plan.max_rows == 1000 && !plan.rows_cut_by_profile && !plan.bytes_cut_by_profile);
+  // An unreadable profile is a user without one.
+  CHECK(setting(ch_mcp_settings(limits, ChSettingsProfile{}).settings, "readonly") == "1");
+
+  // readonly = 2 in the profile: ClickHouse refuses to change readonly, even to 1; the limits are still sent.
+  ChSettingsProfile two = open_profile();
+  two.readonly = 2;
+  plan = ch_mcp_settings(limits, two);
+  CHECK(setting(plan.settings, "readonly") == "<unset>");
+  CHECK(setting(plan.settings, "max_execution_time") == "30");
+  CHECK(setting(plan.settings, "max_result_rows") == "1001");
+  CHECK(setting(plan.settings, "log_comment") == "chdash-mcp key=k1");
+
+  // readonly = 1 in the profile: ClickHouse refuses every setting, so none is sent.
+  ChSettingsProfile one = open_profile();
+  one.readonly = 1;
+  CHECK(ch_mcp_settings(limits, one).settings.empty());
+
+  // The profile wins. A limit that it sets and that is not larger than ours is not sent, and what the call returns follows it.
+  ChSettingsProfile strict = two;
+  strict.max_execution_time = 10;
+  strict.max_result_rows = 200;
+  strict.max_result_bytes = 4096;
+  strict.max_memory_usage = 1'000'000;
+  strict.max_rows_to_read = 5000;
+  limits.max_rows_to_read = 100'000;
+  plan = ch_mcp_settings(limits, strict);
+  CHECK(setting(plan.settings, "max_execution_time") == "<unset>");
+  CHECK(setting(plan.settings, "max_result_rows") == "<unset>");
+  CHECK(setting(plan.settings, "max_result_bytes") == "<unset>");
+  CHECK(setting(plan.settings, "max_memory_usage") == "<unset>");
+  CHECK(setting(plan.settings, "max_rows_to_read") == "<unset>");
+  CHECK(plan.max_rows == 200 && plan.rows_cut_by_profile);
+  CHECK(plan.max_bytes == 4096 && plan.bytes_cut_by_profile);
+
+  // A guard rail below the profile (the configuration or a key that is stricter) is kept: it can only lower.
+  ChSettingsProfile loose = two;
+  loose.max_execution_time = 600;
+  loose.max_result_rows = 50'000;
+  loose.max_result_bytes = 100'000'000;
+  loose.max_memory_usage = 8'000'000'000ULL;
+  loose.max_rows_to_read = 1'000'000;
+  plan = ch_mcp_settings(limits, loose);
+  CHECK(setting(plan.settings, "max_execution_time") == "30");
+  CHECK(setting(plan.settings, "max_result_rows") == "1001");
+  CHECK(setting(plan.settings, "max_result_bytes") == "1048576");
+  CHECK(setting(plan.settings, "max_memory_usage") == "1073741824");
+  CHECK(setting(plan.settings, "max_rows_to_read") == "100000");
+  CHECK(plan.max_rows == 1000 && !plan.rows_cut_by_profile && plan.max_bytes == 1'048'576 && !plan.bytes_cut_by_profile);
+}
+
 int main() {
   test_settings_follow_the_scope_and_never_loosen_the_profile();
   test_readonly_or_unknown_profile_gets_no_setting();
   test_read_only_and_the_overflow_modes();
+  test_mcp_settings_follow_the_profile();
   test_scopes_nest_and_the_cancel_check_throws();
 
   const char* uri = std::getenv("CHDASH_TEST_CLICKHOUSE_URI");

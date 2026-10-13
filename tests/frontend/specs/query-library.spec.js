@@ -629,7 +629,7 @@ test('folder picker: the choice reads as a path, the tree opens on it and is bro
   await picker.locator('[role="treeitem"][data-key="local:f_merges"] .qlPicker__row').click();
   await expect(panelOf).toBeHidden();
   await expect(trigger).toBeFocused();
-  await expect(trigger.locator('.qlPicker__crumb')).toHaveText([LOCAL_ROOT, 'Operations']);
+  await expect(trigger.locator('.qlPicker__crumb:not(.qlPicker__crumb--last)')).toHaveText([LOCAL_ROOT, 'Operations']);
   await expect(trigger.locator('.qlPicker__crumb--last')).toHaveText('Merges');
   await expect(picker).toHaveAttribute('data-path', '/Operations/Merges');
   // The choice is the folder the query is saved in, and the tree behind shows it there.
@@ -657,7 +657,7 @@ test('folder picker: the choice reads as a path, the tree opens on it and is bro
   const recent = picker.locator('[role="treeitem"][data-section="recent"]');
   await expect(recent).toHaveCount(2);
   await expect(recent.first()).toHaveAttribute('data-key', 'local:f_reports');
-  await expect(recent.nth(1).locator('.qlPicker__path')).toHaveText(`${LOCAL_ROOT} \u203a Operations`);
+  await expect(recent.nth(1).locator('.qlPicker__path')).toHaveText(`${LOCAL_ROOT} / Operations`);
   await recent.nth(1).locator('.qlPicker__row').click();
   await expect(picker).toHaveAttribute('data-path', '/Operations/Merges');
   // The form saves where the picker says.
@@ -683,7 +683,7 @@ test('folder picker: with many folders a filter finds one by name and shows wher
   await filter.fill('disk');
   const rows = picker.locator('.qlPicker__tree [role="treeitem"]');
   await expect(rows).toHaveCount(1);
-  await expect(rows.first().locator('.qlPicker__path')).toHaveText(`${LOCAL_ROOT} \u203a Team 3`);
+  await expect(rows.first().locator('.qlPicker__path')).toHaveText(`${LOCAL_ROOT} / Team 3`);
   await filter.fill('nothing like it');
   await expect(picker.locator('.qlPicker__empty')).toBeVisible();
   await filter.fill('disk');
@@ -2744,6 +2744,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     // Every button of the pane is inside it; the title keeps its line with
     // Back and the tools, the meta goes under it.
+    await settled(panel(page));
     const fit = await page.evaluate(() => {
       const pane = document.getElementById('queryLibraryPreview').getBoundingClientRect();
       const buttons = [...document.querySelectorAll('#queryLibraryPreview button')].filter((b) => b.getClientRects().length).map((b) => b.getBoundingClientRect());
@@ -3012,8 +3013,8 @@ test('several server libraries: one named root each (the first is the default), 
   await expect(roots.nth(2)).toHaveAttribute('data-store', 'local');
   expect(await page.evaluate(() => window.ChDash.queryLibrary.roots)).toEqual(['server', 'server~runbooks', 'local']);
   // Both server roots have the database icon; only the read-only one says so.
-  await expect(roots.nth(0).locator(':scope > .qlRow .qlIcon use')).toHaveAttribute('href', /#i-database$/);
-  await expect(roots.nth(1).locator(':scope > .qlRow .qlIcon use')).toHaveAttribute('href', /#i-database$/);
+  await expect(roots.nth(0).locator(':scope > .qlRow .qlIcon--server use')).toHaveAttribute('href', /#i-database$/);
+  await expect(roots.nth(1).locator(':scope > .qlRow .qlIcon--server use')).toHaveAttribute('href', /#i-database$/);
   await expect(roots.nth(0).locator(':scope > .qlRow .qlBadge--readonly')).toHaveCount(0);
   await expect(roots.nth(1).locator(':scope > .qlRow .qlBadge--readonly')).toHaveCount(1);
   // Each library was read by its own name.
@@ -3038,6 +3039,8 @@ test('several server libraries: one named root each (the first is the default), 
 
 const LIVE = process.env.QUERY_LIBRARY_LIVE_URL || '';
 
+// The live instance has two libraries (default and reference): the first shows its name.
+const LIVE_SERVER_ROOT = 'default';
 test('live server library: both roots; create, save, move within and across the roots, reload and remove against a real instance', async ({ page }) => {
   requireInstance(test, 'QUERY_LIBRARY_LIVE_URL', LIVE);
   const stamp = `pw-${Date.now().toString(36)}`;
@@ -3047,10 +3050,10 @@ test('live server library: both roots; create, save, move within and across the 
   await showPanel(page);
   await expect(footCount(page)).toContainText(`· ${host}`);
   expect(await page.evaluate(() => window.ChDash.queryLibrary.roots)).toEqual(['server', 'server~reference', 'local']);
-  await expect(node(page, SERVER_ROOT)).toBeVisible();
+  await expect(node(page, LIVE_SERVER_ROOT)).toBeVisible();
   await expect(node(page, LOCAL_ROOT)).toBeVisible();
 
-  await selectItem(page, SERVER_ROOT);
+  await selectItem(page, LIVE_SERVER_ROOT);
   await previewTool(page, 'new-subfolder').click();
   await expect(newFolderInput(page)).toBeFocused();
   await newFolderInput(page).fill(`${stamp} folder`);
@@ -3097,7 +3100,7 @@ test('live server library: both roots; create, save, move within and across the 
   expect(library.folders.some((f) => f.name === `${stamp} folder`)).toBe(false);
   expect(library.queries.some((q) => q.name === `${stamp} query`)).toBe(false);
   expect((await libraryState(page)).queries.find((q) => q.name === `${stamp} query`)).toMatchObject({ host_id: host, description: 'live check' });
-  await node(page, `${stamp} folder`).locator(':scope > .qlRow').dragTo(node(page, SERVER_ROOT).locator(':scope > .qlRow'));
+  await node(page, `${stamp} folder`).locator(':scope > .qlRow').dragTo(node(page, LIVE_SERVER_ROOT).locator(':scope > .qlRow'));
   await expect(node(page, `${stamp} folder`)).toHaveAttribute('data-store', 'server');
   library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
   const folder = library.folders.find((f) => f.name === `${stamp} folder`);

@@ -1191,7 +1191,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     if (node.root) return icon(isServerStore(node.store) ? "server" : "local");
     return icon(expanded.has(node.key) && node.children.length ? "folderOpen" : "folder");
   };
-  const pathText = (node) => chain(node).map((n) => n.label).join(" › ");
+  const pathText = (node) => chain(node).map((n) => n.label).join(" / ");
   // "/" for the top of a storage, "/Reports/Daily" for a folder (what the data attributes say, for tests and tools).
   const pathOf = (node) => (node.root ? "/" : `/${chain(node).slice(1).map((n) => n.label).join("/")}`);
 
@@ -1208,7 +1208,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     const parts = chain(node);
     triggerCrumbs.appendChild(iconFor(parts[0]));
     parts.forEach((part, index) => {
-      if (index) triggerCrumbs.appendChild(h("span", { class: "qlPicker__sep" }, "›"));
+      if (index) triggerCrumbs.appendChild(h("span", { class: "qlPicker__sep", "aria-hidden": "true" }));
       triggerCrumbs.appendChild(h("span", { class: index === parts.length - 1 ? "qlPicker__crumb qlPicker__crumb--last" : "qlPicker__crumb" }, part.label));
     });
     trigger.title = pathText(node);
@@ -1233,7 +1233,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     if (!flat && node.children.length) twisty.dataset.twisty = "";
     else twisty.classList.add("qlPicker__twisty--none");
     row.append(twisty, iconFor(node), h("span", { class: `qlPicker__name${node.root ? " qlPicker__name--root" : ""}` }, node.label));
-    if (flat && node.parent) row.appendChild(h("span", { class: "qlPicker__path" }, chain(node.parent).map((n) => n.label).join(" › ")));
+    if (flat && node.parent) row.appendChild(h("span", { class: "qlPicker__path" }, chain(node.parent).map((n) => n.label).join(" / ")));
     if (node.locked) {
       const lock = h("span", { class: "qlPicker__lock", title: "Read-only: nothing can be saved here." }, icon("lock"), h("span", null, "Read-only"));
       row.appendChild(lock);
@@ -1280,7 +1280,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     const stop = itemFor(value) || items()[0];
     if (stop) stop.tabIndex = 0;
   };
-  const items = () => [...panel.querySelectorAll('[role="treeitem"]')];
+  const items = () => Array.from($$('[role="treeitem"]', panel));
   const itemFor = (key, section = "tree") => items().find((li) => li.dataset.key === key && li.dataset.section === section) || items().find((li) => li.dataset.key === key) || null;
 
   const setOpen = (open, { focus = false } = {}) => {
@@ -1360,17 +1360,6 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
         ev.stopPropagation();
         const first = list.find((li) => li.getAttribute("aria-disabled") !== "true");
         if (first) choose(first.dataset.key);
-      } else if (ev.key === "Escape" && !inline) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        if (filter) {
-          filter = "";
-          filterInput.value = "";
-          render();
-        } else {
-          setOpen(false);
-          trigger.focus({ preventScroll: true });
-        }
       }
       return;
     }
@@ -1404,13 +1393,6 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
         ev.stopPropagation();
         if (current.getAttribute("aria-disabled") !== "true") choose(node.key);
         break;
-      case "Escape":
-        if (inline) break;
-        ev.preventDefault();
-        ev.stopPropagation();
-        setOpen(false);
-        trigger.focus({ preventScroll: true });
-        break;
       default:
         break;
     }
@@ -1434,13 +1416,23 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
         ev.preventDefault();
         ev.stopPropagation();
         setOpen(true, { focus: true });
-      } else if (ev.key === "Escape" && isOpen) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        setOpen(false);
       }
     });
   }
+  // Escape closes the picker and only it (the form and the dialog stay); in the filter it first clears the text.
+  el.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Escape" || inline || !isOpen) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.target === filterInput && filter) {
+      filter = "";
+      filterInput.value = "";
+      render();
+      return;
+    }
+    setOpen(false);
+    trigger.focus({ preventScroll: true });
+  });
 
   const start = () => {
     nodes = buildNodes();

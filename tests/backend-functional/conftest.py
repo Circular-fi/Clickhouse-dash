@@ -226,7 +226,7 @@ def reset_clickhouse_integration_fixture() -> None:
 # this list prevents. Without the variable (a run by hand against one instance) they skip as before.
 STACK_INSTANCES = (
     "EMBEDDED_BASE_URL", "OTEL_HOSTS_BASE_URL", "TRACES_ALLOWLIST_BASE_URL", "PRIVILEGES_BASE_URL",
-    "SYSTEM_DISABLED_BASE_URL", "SYSTEM_LIMITS_BASE_URL",
+    "SYSTEM_DISABLED_BASE_URL", "SYSTEM_LIMITS_BASE_URL", "MCP_PROFILE_BASE_URL",
 )
 
 

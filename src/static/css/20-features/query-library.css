@@ -857,8 +857,18 @@
 }
 
 .qlPicker__sep {
+  position: relative;
   flex: 0 0 auto;
-  color: var(--muted);
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
+.qlPicker__sep::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: var(--muted);
+  mask: var(--icon-chevron-right) center / 100% no-repeat;
 }
 
 .qlPicker__chevron {
@@ -869,7 +879,7 @@
 }
 
 .qlPicker__chevron::before,
-.qlPicker__twisty:not(.qlPicker__twisty--none)::before {
+.qlPicker__twisty::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -878,8 +888,12 @@
   transition: transform var(--dur-quick) var(--ease);
 }
 
-.qlPicker__chevron::before {
+.qlPicker__button .qlPicker__chevron::before {
   transform: rotate(90deg);
+}
+
+.qlPicker__twisty--none::before {
+  display: none;
 }
 
 .qlPicker__button[aria-expanded="true"] .qlPicker__chevron::before {
@@ -1285,7 +1299,7 @@
   font-weight: var(--fw-semibold);
 }
 
-.qlContents__desc {
+.qlContents__text > .qlContents__desc {
   color: var(--muted);
   font-size: var(--fs-xs);
 }

@@ -313,6 +313,23 @@ services:
       - privileges_data:/data
     healthcheck: *instance_health
 
+  # MCP users whose settings profile sets readonly = 2 or 1 (config/mcp.profile.hcl): ChDash must serve them.
+  chdash_mcp_profile:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-mcp-profile
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on: *instance_depends
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/mcp.profile.hcl
+        target: /config/chdash.hcl
+        read_only: true
+    healthcheck: *instance_health
+
   chdash_system_disabled:
     profiles: ["test"]
     image: chdash-tests-source:local
@@ -418,6 +435,8 @@ services:
         condition: service_healthy
       chdash_privileges:
         condition: service_healthy
+      chdash_mcp_profile:
+        condition: service_healthy
       chdash_system_disabled:
         condition: service_healthy
       chdash_system_limits:
@@ -437,6 +456,7 @@ services:
       OTEL_HOSTS_BASE_URL: http://chdash_otel_hosts:8080
       TRACES_ALLOWLIST_BASE_URL: http://chdash_traces_allowlist:8080
       PRIVILEGES_BASE_URL: http://chdash_privileges:8080
+      MCP_PROFILE_BASE_URL: http://chdash_mcp_profile:8080
       SYSTEM_DISABLED_BASE_URL: http://chdash_system_disabled:8080
       SYSTEM_LIMITS_BASE_URL: http://chdash_system_limits:8080
       CHDASH_REQUIRE_FIXTURES: "1"
