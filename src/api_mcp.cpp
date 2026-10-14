@@ -16,6 +16,7 @@
 #include "json_clickhouse.hpp"
 #include "log.hpp"
 #include "mcp_grants.hpp"
+#include "mcp_cost.hpp"
 #include "mcp_identity.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
@@ -277,7 +278,9 @@ public:
       throw McpDbError("query_failed", error.what());
     }
 
-    clickhouse::Query query(sql);
+    // Named for the key and the tool (mcp_cost.hpp): what the statement costs is found in system.query_log, whatever its profile
+    // lets ChDash send and whatever its SQL says.
+    clickhouse::Query query(sql, mcp_query_id(limits.key_id, limits.tool));
     for (const auto& [name, value] : plan.settings) {
       clickhouse::QuerySettingsField field;
       field.value = value;
@@ -772,6 +775,13 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       w.EndArray();
       w.Key("default_window"); put(w, mcp_usage_default_window(s.usage_retention_days));
       w.Key("since"); put(w, mcp_iso_utc(mcp_usage_ ? mcp_usage_->since() : now));
+      // The windows of the ClickHouse cost of a key (api_mcp_cost.cpp): none when System > Queries is off (it reads query_log the same way).
+      w.Key("cost_windows");
+      w.StartArray();
+      if (cfg_.system.top_queries_enabled()) {
+        for (const auto& window : mcp_cost_windows()) put(w, window);
+      }
+      w.EndArray();
       w.EndObject();
     }
     w.EndObject();
@@ -1008,6 +1018,8 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     api_ok(res, 200, sb);
     return;
   }
+  // What the statements of a key cost ClickHouse, read from system.query_log of its host (api_mcp_cost.cpp): a read of the page too.
+  if (route == McpApiRoute::KeyCost) return handle_mcp_key_cost(req, res, now);
   if (!store.manage_from_ui()) {
     api_error(res, 403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
     return;
@@ -1070,6 +1082,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     case McpApiRoute::AccessSummary:
     case McpApiRoute::Usage:
     case McpApiRoute::KeyUsage:
+    case McpApiRoute::KeyCost:
       break;
   }
   api_error(res, 404, "not_found", "unknown MCP route");

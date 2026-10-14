@@ -44,7 +44,7 @@ inline BoundedRead bounded_select(clickhouse::Client& client, const std::string&
                                   const std::vector<std::pair<std::string, std::string>>& params = {}) {
   BoundedRead out;
   const auto started = std::chrono::steady_clock::now();
-  clickhouse::Query query(sql);
+  clickhouse::Query query(sql, ch_statement_query_id());
   for (const auto& [name, value] : params) query.SetParam(name, value);
   // The caller of the request may go away while the scan runs (ch_query.hpp).
   query.OnData([&on_block](const clickhouse::Block& block) {

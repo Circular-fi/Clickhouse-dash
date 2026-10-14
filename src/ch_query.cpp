@@ -180,10 +180,12 @@ class Runner {
   // and no setting is sent.
   void probe() {
     ChSettingsProfile profile;
-    clickhouse::Query query(
+    // Never named for the caller: it runs once for the connection, whoever asked first.
+    const std::string sql =
         "SELECT toString(getSetting('readonly')), toString(getSetting('max_execution_time')), "
         "toString(getSetting('max_memory_usage')), toString(getSetting('max_rows_to_read')), "
-        "toString(getSetting('max_result_rows')), toString(getSetting('max_result_bytes'))");
+        "toString(getSetting('max_result_rows')), toString(getSetting('max_result_bytes'))";
+    clickhouse::Query query(sql, std::string());
     clickhouse::QuerySettingsField label;
     label.value = "chdash:probe";
     query.SetSetting("log_comment", label);
@@ -236,6 +238,11 @@ const ChQueryLimits* ChQueryScope::current() { return t_scope ? &t_scope->limits
 
 ChQueryLimits ChQueryScope::current_copy() { return t_scope ? t_scope->limits_ : ChQueryLimits{}; }
 
+std::string ch_statement_query_id() {
+  const ChQueryLimits* limits = ChQueryScope::current();
+  return limits && limits->query_id ? limits->query_id() : std::string();
+}
+
 void ch_check_canceled() {
   ChQueryScope* scope = t_scope;
   if (!scope || !scope->limits_.canceled) return;
@@ -257,7 +264,7 @@ void ch_select(clickhouse::Client& client, const std::string& sql,
 
 void ch_select(clickhouse::Client& client, const std::string& sql, const ChParams& params,
                const std::function<void(const clickhouse::Block&)>& on_block) {
-  clickhouse::Query query(sql);
+  clickhouse::Query query(sql, ch_statement_query_id());
   for (const auto& [name, value] : params) query.SetParam(name, value);
   query.OnData([&on_block](const clickhouse::Block& block) {
     ch_check_canceled();
@@ -270,7 +277,7 @@ void ch_select(clickhouse::Client& client, const std::string& sql, const ChParam
 void ch_select_cancelable(clickhouse::Client& client, const std::string& sql,
                           const std::function<bool(const clickhouse::Block&)>& on_block) {
   bool stopped = false;
-  clickhouse::Query query(sql);
+  clickhouse::Query query(sql, ch_statement_query_id());
   query.OnDataCancelable([&on_block, &stopped](const clickhouse::Block& block) {
     // false once: clickhouse-cpp sends one Cancel packet and reads the stream to its end.
     if (stopped) return true;
@@ -292,7 +299,7 @@ void ch_select_cancelable(clickhouse::Client& client, const std::string& sql,
 }
 
 void ch_execute(clickhouse::Client& client, const std::string& sql) {
-  clickhouse::Query query(sql);
+  clickhouse::Query query(sql, ch_statement_query_id());
   query.OnProgress([](const clickhouse::Progress&) { ch_check_canceled(); });
   Runner(client).run(query);
 }

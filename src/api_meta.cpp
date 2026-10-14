@@ -4,6 +4,7 @@
 #include "ch_block_value.hpp"
 
 #include "api_error.hpp"
+#include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "host_util.hpp"
 #include "time_util.hpp"
@@ -657,7 +658,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
           "SELECT database, `table`, name, type "
           "FROM system.columns "
           "WHERE database = {database:String} AND `table` = {table:String} "
-          "ORDER BY lower(name), name"
+          "ORDER BY lower(name), name",
+          ch_statement_query_id()
         );
         query.SetParam("database", column_database);
         query.SetParam("table", column_table);

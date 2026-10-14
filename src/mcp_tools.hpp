@@ -22,7 +22,8 @@ struct McpDbLimits {
   int64_t timeout_seconds = 30;
   int64_t max_memory_bytes = 1073741824;
   int64_t max_rows_to_read = 0;  // 0 = none
-  std::string key_id;            // for log_comment
+  std::string key_id;            // for log_comment and the query_id
+  std::string tool;              // the tool of the call: the query_id of its statements (mcp_cost.hpp)
   // Run with the system user of the host instead of the MCP user: the OpenTelemetry tools read their tables as the pages do.
   bool as_system = false;
 };
@@ -71,6 +72,7 @@ struct McpApiRequest {
   int64_t timeout_seconds = 30;
   int64_t max_bytes = 1048576;  // an answer above it is `too_large`
   std::string key_id;           // the key that made the call: the audit and the label of the statements
+  std::string tool;             // the tool that made the call: with the key, the query_id of the statements (mcp_cost.hpp)
 };
 
 struct McpApiResponse {

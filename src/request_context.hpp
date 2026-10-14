@@ -25,6 +25,8 @@ struct RequestContext {
   Caller caller = Caller::Browser;
   // The key of MCP that made the call (its id), for the audit and the label of the statements; empty for a browser.
   std::string caller_id;
+  // The tool of MCP that made the call: with the key, the query_id of the statements (mcp_cost.hpp); empty for a browser.
+  std::string caller_tool;
   // The path of the route (the label of the statements, the access log).
   std::string route;
   std::string request_id;

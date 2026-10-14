@@ -13,6 +13,7 @@
 
 #include "acl_service.hpp"
 #include "fake_executor.hpp"
+#include "mcp_cost.hpp"
 #include "native_check.hpp"
 #include "system_activity.hpp"
 #include "system_disks.hpp"
@@ -1399,6 +1400,88 @@ void reasons_follow_the_error_code() {
   CHECK(monitor_reason_of(std::runtime_error("x")) == "failed");
 }
 
+// The cost of an MCP key (mcp_cost.hpp): its statements are named chdash-mcp/<key>/<tool>/<uuid>, and one scan of query_log reads them.
+void the_statements_of_a_key_are_named_for_its_key_and_tool() {
+  const std::string first = mcp_query_id("ci-bot", "query_table");
+  const std::string second = mcp_query_id("ci-bot", "query_table");
+  CHECK(first.rfind("chdash-mcp/ci-bot/query_table/", 0) == 0);
+  CHECK(first.size() == std::string("chdash-mcp/ci-bot/query_table/").size() + 36);
+  CHECK(first != second);
+  CHECK(mcp_query_id("ui_0a1b2c3d4e5f", "").rfind("chdash-mcp/ui_0a1b2c3d4e5f/-/", 0) == 0);
+  CHECK(mcp_query_id_prefix("k") == "chdash-mcp/k/");
+}
+
+void the_cost_windows_end_with_the_minute_and_keep_to_the_lookback() {
+  const int64_t now = 1'800'000'030;  // 30 s into a minute
+  const auto day = mcp_cost_window("24h", 168, now);
+  CHECK(day.has_value());
+  CHECK_EQ(day->to_s, int64_t{1'800'000'060});
+  CHECK_EQ(day->from_s, day->to_s - 86400);
+  CHECK(!day->clamped);
+  const auto week = mcp_cost_window("7d", 168, now);
+  CHECK_EQ(week->from_s, week->to_s - 7 * 86400);
+  CHECK(!week->clamped);
+  const auto cut = mcp_cost_window("7d", 24, now);
+  CHECK(cut->clamped);
+  CHECK_EQ(cut->from_s, cut->to_s - 86400);
+  CHECK(!mcp_cost_window("30d", 168, now).has_value());
+  CHECK(!mcp_cost_window("", 168, now).has_value());
+  CHECK(mcp_cost_windows() == std::vector<std::string>({"24h", "7d"}));
+}
+
+void the_cost_of_a_key_is_one_bounded_scan_of_its_prefix() {
+  const auto window = *mcp_cost_window("24h", 168, 1'800'000'000);
+  const std::string sql = mcp_cost_sql(window, 50'000'000);
+  CHECK(contains(sql, "FROM system.query_log PREWHERE startsWith(query_id, {chdash_prefix:String}) WHERE event_date BETWEEN"));
+  CHECK(contains(sql, "is_initial_query") && contains(sql, "GROUP BY user, tool") && contains(sql, "LIMIT 501"));
+  CHECK(contains(sql, "readonly = 2") && contains(sql, "max_rows_to_read = 50000000") && contains(sql, "read_overflow_mode = 'throw'") &&
+        contains(sql, "log_comment = 'chdash-system'") && contains(sql, "max_rows_to_group_by = 10000"));
+  CHECK(contains(sql, "event_time >= toDateTime(" + std::to_string(window.from_s) + ")"));
+
+  nt::FakeDb db;
+  // user, tool, statements, failed, canceled, read rows and bytes, result rows and bytes, duration, CPU (us), memory, the map, the tables.
+  db.on("FROM system.query_log", nt::Rows{
+      {"chdash_mcp", "query_table", "4", "1", "1", "1000", "64000", "40", "2000", "120", "9000", "1048576", "", "db.events\t3\nsystem.tables\t1"},
+      {"chdash_system", "traces_search", "2", "0", "0", "5000", "320000", "10", "800", "300", "40000", "4194304", "", "db.events\t3\nsystem.tables\t1"},
+  });
+  db.bounded_result.read_rows = 77;
+  const McpCost cost = mcp_read_cost(db, "o'brien", window, 50'000'000, 1'800'000'000);
+  CHECK(db.params.size() == 1 && db.params[0].size() == 1 && db.params[0][0].first == "chdash_prefix" &&
+        db.params[0][0].second == "chdash-mcp/o'brien/");
+  CHECK(!contains(db.sqls[0], "brien"));  // the key reaches ClickHouse as a parameter, never in the text
+  CHECK_EQ(cost.rows.size(), size_t{2});
+  CHECK(cost.rows[0].user == "chdash_mcp" && cost.rows[0].tool == "query_table");
+  CHECK_EQ(cost.rows[0].statements, uint64_t{4});
+  CHECK_EQ(cost.rows[0].failed, uint64_t{1});
+  CHECK_EQ(cost.rows[0].canceled, uint64_t{1});
+  CHECK_EQ(cost.rows[1].read_bytes, uint64_t{320000});
+  CHECK_EQ(cost.rows[1].cpu_us, uint64_t{40000});
+  CHECK_EQ(cost.rows[1].memory_peak_bytes, uint64_t{4194304});
+  CHECK(cost.tables.size() == 2 && cost.tables[0].first == "db.events" && cost.tables[0].second == 3);
+  CHECK(!cost.tables_truncated && !cost.rows_truncated);
+  CHECK_EQ(cost.log_rows_read, uint64_t{77});
+  CHECK_EQ(cost.read_at_s, int64_t{1'800'000'000});
+
+  // More tables than the answer shows: the 10 most read, and the cut is said.
+  nt::FakeDb many;
+  std::string tables;
+  for (int i = 0; i < 11; ++i) tables += (i ? "\n" : "") + std::string("db.t") + std::to_string(i) + "\t" + std::to_string(20 - i);
+  many.on("FROM system.query_log", nt::Rows{{"u", "list_tables", "1", "0", "0", "0", "0", "0", "0", "0", "0", "0", "", tables}});
+  const McpCost cut = mcp_read_cost(many, "k", window, 1000, 0);
+  CHECK(cut.tables.size() == kMcpCostTables && cut.tables_truncated && cut.tables.front().first == "db.t0");
+
+  // A read that ClickHouse refuses throws: the route says why (the grant, a window too large).
+  nt::FakeDb denied;
+  denied.fail_on("FROM system.query_log", [] { throw nt::server_error(497, "Not enough privileges"); });
+  bool threw = false;
+  try {
+    mcp_read_cost(denied, "k", window, 1000, 0);
+  } catch (const std::exception& error) {
+    threw = monitor_reason_of(error) == "not_granted";
+  }
+  CHECK(threw);
+}
+
 // The longest lookback (365 days) fits in the points that the page draws.
 void series_steps_keep_the_longest_window_within_the_points() {
   for (const uint64_t days : {1, 7, 30, 90, 365}) {
@@ -1429,6 +1512,9 @@ int main(int argc, char** argv) {
   queries_order_and_error_filters_are_fixed_clauses();
   reasons_follow_the_error_code();
   series_steps_keep_the_longest_window_within_the_points();
+  the_statements_of_a_key_are_named_for_its_key_and_tool();
+  the_cost_windows_end_with_the_minute_and_keep_to_the_lookback();
+  the_cost_of_a_key_is_one_bounded_scan_of_its_prefix();
   RUN(a_request_that_names_the_host_only);
   RUN(the_window_of_the_series);
   RUN(the_filters_of_the_queries);

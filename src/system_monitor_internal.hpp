@@ -82,6 +82,22 @@ inline std::vector<std::string> split_lines(const std::string& value) {
   return out;
 }
 
+// The rows of system.query_log in a window [from_s, to_s): its primary key (event_date, event_time) prunes the parts.
+inline std::string query_log_time_predicate(int64_t from_s, int64_t to_s) {
+  const std::string from = "toDateTime(" + std::to_string(from_s) + ")";
+  const std::string to = "toDateTime(" + std::to_string(to_s) + ")";
+  return "event_date BETWEEN toDate(" + from + ") AND toDate(" + to + ") AND event_time >= " + from + " AND event_time < " + to;
+}
+
+// Two columns of a grouped read of query_log: the names in its array column `column` (databases, tables) and how many rows involved each,
+// over every group of the answer (a window function after the GROUP BY, no second read), then the `limit` most involved as one
+// "name\tcount" per line (the same on every row).
+inline std::string query_log_object_list_sql(const std::string& column, const std::string& alias, size_t limit) {
+  return "sumMap(sumMap(arrayMap(x -> toString(x), " + column + "), arrayMap(x -> toUInt64(1), " + column + "))) OVER () AS " + alias + ", "
+         "arrayStringConcat(arrayMap(x -> concat(replaceAll(replaceAll(x.1, '\\t', ' '), '\\n', ' '), '\\t', toString(x.2)), "
+         "arraySlice(arrayReverseSort(x -> x.2, arrayZip(" + alias + ".1, " + alias + ".2)), 1, " + std::to_string(limit) + ")), '\\n')";
+}
+
 // The runner's boundary (its ACL, kept by the AclService), resolved lazily per
 // database (the RunnerVisibility of system_activity.cpp).
 class VisibleTables {

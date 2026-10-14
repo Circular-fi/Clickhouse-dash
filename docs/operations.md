@@ -79,7 +79,7 @@ The heavy reads of the pages, and the calls of the API tools of MCP, take a plac
 
 | Class | Routes | Limit (the `admission` block) |
 |---|---|---|
-| `heavy` | The reads of the Explorer, System, Traces, Logs and Metrics pages (not their `meta` routes) | `heavy_per_host` (default 16) for each host |
+| `heavy` | The reads of the Explorer, System, Traces, Logs and Metrics pages (not their `meta` routes), and the cost of an MCP key (`GET /api/mcp/keys/<id>/cost`, for the host of the key) | `heavy_per_host` (default 16) for each host |
 | `analysis` | `POST /api/query/analysis`, and the job of `POST /api/query/deep-analysis` (from its start to its end) | `analysis_per_host` (default 1) for each host |
 | `mcp` | The API tools of MCP | `mcp_max` (default 8) in all |
 
@@ -170,7 +170,7 @@ ChDash has no login. A page of another site must not be able to use the browser 
 - Without `Sec-Fetch-Site` (an older browser), an `Origin` header must name this server: the `Host` header, or the first `X-Forwarded-Host`. Otherwise the answer is 403 `cross_site_request`. A proxy that changes `Host` must set `X-Forwarded-Host`.
 - A request with a body must send `Content-Type: application/json`. Otherwise the answer is 415 `unsupported_media_type`. A page of another site cannot send this type without a CORS preflight, and ChDash never allows a preflight.
 
-A client that is not a browser (curl, a script, a test) sends neither header and passes. `POST /mcp` has its own rules (`mcp.allowed_origins`, docs/mcp.md). The routes of the MCP page that show a secret, what a key reaches or what it did (`GET .../secret`, `GET .../access`, `GET /api/mcp/access`, `GET /api/mcp/usage`, `GET .../usage`) also refuse a cross-site request.
+A client that is not a browser (curl, a script, a test) sends neither header and passes. `POST /mcp` has its own rules (`mcp.allowed_origins`, docs/mcp.md). The routes of the MCP page that show a secret, what a key reaches, what it did or what it cost (`GET .../secret`, `GET .../access`, `GET /api/mcp/access`, `GET /api/mcp/usage`, `GET .../usage`, `GET .../cost`) also refuse a cross-site request.
 
 ### Static assets
 
@@ -178,4 +178,4 @@ The staged shells ask for each script, stylesheet and WebAssembly kernel as `sta
 
 ### Identifiers and secrets
 
-The `query_id` of a run, the `export_id` of an export, the signing secret of the cancel and export tokens, the secrets of the MCP keys, the internal token of the MCP API tools and the names of the temporary files come from the system random source (`getrandom`, else `/dev/urandom`). A `query_id` gives access to the result stream of its query, so it must not be guessable.
+The `query_id` of a run, the `export_id` of an export, the signing secret of the cancel and export tokens, the secrets of the MCP keys, the internal token of the MCP API tools, the UUID that ends the `query_id` of a statement of an MCP call (`chdash-mcp/<key id>/<tool>/<uuid>`, docs/mcp.md) and the names of the temporary files come from the system random source (`getrandom`, else `/dev/urandom`). A `query_id` gives access to the result stream of its query, so it must not be guessable.

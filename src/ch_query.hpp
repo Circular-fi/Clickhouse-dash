@@ -55,6 +55,10 @@ struct ChQueryLimits {
   bool read_only = false;
   // True when the caller went away (the browser closed the connection). Asked at most every 200 ms.
   std::function<bool()> canceled;
+  // A new query_id for each statement of the scope (ch_statement_query_id): the statements of a call of MCP are named for their
+  // key and their tool (mcp_cost.hpp). Empty: ClickHouse names each statement. A query_id is a field of the statement, not a
+  // setting: a readonly = 1 user gets it too, and no SETTINGS clause changes it.
+  std::function<std::string()> query_id;
 };
 
 // The limits of the statements that this thread sends while the scope lives. Scopes nest: the inner one
@@ -88,6 +92,10 @@ class ChQueryCanceled : public std::runtime_error {
 
 // Throws ChQueryCanceled when the caller of the current scope went away.
 void ch_check_canceled();
+
+// The query_id of a statement that this thread is about to build: the one that the scope makes, or "" (ClickHouse names it).
+// Every clickhouse::Query of ChDash is built with it, or with an id of its own (a run, an export, Deep Analyze).
+std::string ch_statement_query_id();
 
 // The statements. Each one applies the limits of the current scope, keeps the connection state of point 1,
 // and throws what ClickHouse or the callback throws.

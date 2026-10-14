@@ -60,7 +60,8 @@ struct Ctx {
 std::vector<std::string> key_hosts(const McpKey& key, const McpToolsConfig& config);
 // The host of the call: the argument `host`, or the only host that the key has. Fails with host_not_allowed, no_host or host_required.
 void resolve_host(Ctx& ctx, const rapidjson::Value& args);
-Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db);
+// `tool` names the statements of the call (their query_id, mcp_cost.hpp).
+Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db, const std::string& tool = {});
 // One statement on the host of the call; a McpDbError is a ToolFailure with its code.
 McpDbResult run(Ctx& ctx, const std::string& sql, const McpDbLimits& limits);
 

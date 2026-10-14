@@ -24,6 +24,7 @@
 #include "health_runner.hpp"
 #include "jwt.hpp"
 #include "metrics.hpp"
+#include "mcp_cost.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_tools.hpp"
 #include "mcp_usage.hpp"
@@ -314,6 +315,8 @@ enum class McpApiRoute {
   // The usage of every key in a window (the Used column), and of one key (its details).
   Usage,
   KeyUsage,
+  // What the statements of one key cost ClickHouse, read from system.query_log (api_mcp_cost.cpp).
+  KeyCost,
 };
 
 struct FsStaticCache;
@@ -373,6 +376,8 @@ private:
   // the limit waits (and stops waiting when the browser goes away or the server stops); when no place comes, the answer is
   // 503 server_busy and nothing is returned. A request that needs none (the limit is 0) always gets a ticket.
   std::optional<Admission::Ticket> admit(WorkClass work, const httplib::Request& req, httplib::Response& res);
+  // The same for a host that the handler found itself (a route that names no host_id: the cost of an MCP key reads the host of the key).
+  std::optional<Admission::Ticket> admit(WorkClass work, const std::string& host_id, const httplib::Request& req, httplib::Response& res);
   // The host that a request names, for the key of its place: its id when configured, else "-".
   std::string admission_host(const httplib::Request& req) const;
 
@@ -473,6 +478,8 @@ private:
   void save_mcp_usage(bool force);
   void handle_mcp_not_allowed(const httplib::Request& req, httplib::Response& res);
   void handle_api_mcp(const httplib::Request& req, httplib::Response& res, McpApiRoute route);
+  // GET /api/mcp/keys/<id>/cost (api_mcp_cost.cpp): called by handle_api_mcp, after the guard of the page.
+  void handle_mcp_key_cost(const httplib::Request& req, httplib::Response& res, int64_t now);
 
   void session_reaper_loop();
   void reap_sessions_once();
@@ -649,6 +656,9 @@ private:
   // per shape the same way.
   TtlCache<std::string, SystemMonitorQueries> system_monitor_queries_cache_{cache_options<SystemMonitorQueries>(
       std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::queries)};
+  // The cost of an MCP key: 60 s per host, key and window (one read in flight per key; refresh=1 reads again).
+  TtlCache<std::string, McpCost> mcp_cost_cache_{cache_options<McpCost>(
+      std::chrono::minutes(1), {}, 256, 8u << 20, [](const McpCost& value) { return sizeof(McpCost) + value.rows.size() * 160 + value.tables.size() * 96; })};
   TtlCache<std::string, SystemMonitorQuery> system_monitor_query_cache_{cache_options<SystemMonitorQuery>(
       std::chrono::minutes(1), {}, 256, 32u << 20, cache_size::query)};
   // The formatted text of a shape: the layout depends on the text, the host and its version only, so 10 min per host and text, whatever the

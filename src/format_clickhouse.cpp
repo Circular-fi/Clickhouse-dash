@@ -1,6 +1,7 @@
 #include "format_clickhouse.hpp"
 
 #include "ch_error.hpp"
+#include "ch_query.hpp"
 #include "ch_uri.hpp"
 #include "server.hpp"
 
@@ -40,7 +41,8 @@ FormatQueryResult run_text_query_once(
     // Query parameters avoid copying and escaping the complete editor buffer
     // into a second SQL string. They also keep quotes and backslashes exact.
     // EXPLAIN AST takes the text as the statement itself: ClickHouse parses it and does not run it.
-    clickhouse::Query query(kind == TextQuery::format_query ? "SELECT formatQuery({sql:String}) AS query" : "EXPLAIN AST " + sql);
+    clickhouse::Query query(kind == TextQuery::format_query ? std::string("SELECT formatQuery({sql:String}) AS query") : "EXPLAIN AST " + sql,
+                            ch_statement_query_id());
     if (kind == TextQuery::format_query) query.SetParam("sql", sql);
     std::string tree;
     query.OnData([&](const clickhouse::Block& block) {

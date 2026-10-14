@@ -676,7 +676,7 @@ void QuerySession::run_query() {
 
         if (result_plan.empty()) {
           const std::string ds = strip_trailing_semicolon_copy(sql_);
-          clickhouse::Query dq("DESCRIBE (" + ds + ")");
+          clickhouse::Query dq("DESCRIBE (" + ds + ")", ch_statement_query_id());
           dq.OnData([&](const clickhouse::Block& b) { add_described_columns(b, &result_plan); });
           ch_execute(*client_query_, dq);
           cache_new_plan_after_success = !result_plan.empty();

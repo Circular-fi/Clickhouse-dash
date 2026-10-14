@@ -78,7 +78,7 @@ export const META = {
   limits: { max_rows: 1000, max_result_bytes: 1048576, query_timeout_seconds: 30, max_sql_bytes: 65536, max_memory_bytes: 1073741824, max_rows_to_read: 0, rate_limit_per_minute: 600 },
   name_pattern: '^[a-z0-9][a-z0-9_-]{0,31}$',
   // The usage of the keys (mcp_usage.hpp): kept in mcp.usage_file, and the windows of its answers.
-  usage: { persisted: true, retention_days: 90, windows: ['24h', '7d', '30d', '90d'], default_window: '7d', since: '2026-10-01T08:00:00Z' },
+  usage: { persisted: true, retention_days: 90, windows: ['24h', '7d', '30d', '90d'], default_window: '7d', since: '2026-10-01T08:00:00Z', cost_windows: ['24h', '7d'] },
 };
 
 // The mask of a secret as the server sends it (mcp_secret_mask): the shape of a UUID, the hint in clear.

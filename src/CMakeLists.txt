@@ -301,7 +301,7 @@ endif()
 
 if (CHDASH_BUILD_SYSTEM_TESTS)
   # The System page SQL builders and the disk forecast (no ClickHouse needed).
-  add_executable(chdash_system_monitor_test ../tests/native/system_monitor_test.cpp system_monitor_caps.cpp system_overview.cpp system_series.cpp system_queries.cpp system_disks.cpp
+  add_executable(chdash_system_monitor_test ../tests/native/system_monitor_test.cpp system_monitor_caps.cpp system_overview.cpp system_series.cpp system_queries.cpp system_disks.cpp mcp_cost.cpp
     system_activity.cpp system_service.cpp system_query_format.cpp system_request.cpp system_json.cpp allowed_objects.cpp acl_service.cpp
     ch_query.cpp ch_client_pool.cpp ch_uri.cpp ch_error.cpp api_error.cpp error_envelope.cpp request_context.cpp log.cpp jwt.cpp secure_random.cpp)
   target_include_directories(chdash_system_monitor_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
@@ -427,6 +427,8 @@ if (CHDASH_BUILD_APP)
     mcp_protocol.cpp
     ${CHDASH_MCP_TOOL_SOURCES}
     api_mcp.cpp
+    api_mcp_cost.cpp
+    mcp_cost.cpp
     ch_uri.cpp
     ch_query.cpp
     ch_client_pool.cpp

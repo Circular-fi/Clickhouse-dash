@@ -23,7 +23,7 @@ std::vector<std::string> mcp_data_tables(const McpObservabilityConfig& config, u
 McpToolOutcome McpTools::call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments,
                                    int64_t) {
   using namespace mcp_tools;
-  Ctx ctx = make_ctx(key, config_, db_);
+  Ctx ctx = make_ctx(key, config_, db_, tool);
   ctx.api = api_;
   McpToolOutcome outcome;
   try {

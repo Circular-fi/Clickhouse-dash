@@ -98,10 +98,7 @@ std::string queries_having_sql(const MonitorQueriesRequest& r, bool with_errors)
 // the names and how many runs involved each, the most involved first,
 // kMonitorQueryObjectCandidates at most, one "name\tcount" per line.
 std::string queries_object_list_sql(const std::string& column, const std::string& alias) {
-  return "sumMap(sumMap(arrayMap(x -> toString(x), " + column + "), arrayMap(x -> toUInt64(1), " + column + "))) OVER () AS " + alias + ", "
-         "arrayStringConcat(arrayMap(x -> concat(replaceAll(replaceAll(x.1, '\\t', ' '), '\\n', ' '), '\\t', toString(x.2)), "
-         "arraySlice(arrayReverseSort(x -> x.2, arrayZip(" + alias + ".1, " + alias + ".2)), 1, " +
-         std::to_string(kMonitorQueryObjectCandidates) + ")), '\\n')";
+  return query_log_object_list_sql(column, alias, kMonitorQueryObjectCandidates);
 }
 
 const std::vector<std::pair<std::string, std::string>>& query_run_order_expressions() {
@@ -113,11 +110,7 @@ const std::vector<std::pair<std::string, std::string>>& query_run_order_expressi
   return orders;
 }
 
-std::string queries_time_predicate(const MonitorQueriesRequest& r) {
-  const std::string from = "toDateTime(" + std::to_string(r.from_s) + ")";
-  const std::string to = "toDateTime(" + std::to_string(r.to_s) + ")";
-  return "event_date BETWEEN toDate(" + from + ") AND toDate(" + to + ") AND event_time >= " + from + " AND event_time < " + to;
-}
+std::string queries_time_predicate(const MonitorQueriesRequest& r) { return query_log_time_predicate(r.from_s, r.to_s); }
 
 // The rows a shape counts: the window's finished or failed initial queries,
 // never the System page's own reads; with hide_chdash not the system

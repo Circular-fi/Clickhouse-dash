@@ -221,7 +221,8 @@ def test_disabled_instance_answers_as_documented():
     meta = api_ok(m("GET", "/api/mcp/meta", base=DISABLED_URL))
     assert meta == {"enabled": False}
     for method, path in [("GET", "/api/mcp/keys"), ("POST", "/api/mcp/keys"), ("DELETE", "/api/mcp/keys/ui_000000000000"),
-                         ("GET", "/api/mcp/keys/ui_000000000000/access"), ("GET", "/api/mcp/usage"), ("GET", "/api/mcp/keys/ui_000000000000/usage")]:
+                         ("GET", "/api/mcp/keys/ui_000000000000/access"), ("GET", "/api/mcp/usage"), ("GET", "/api/mcp/keys/ui_000000000000/usage"),
+                         ("GET", "/api/mcp/keys/ui_000000000000/cost")]:
         body = {"name": "x"} if method == "POST" else None
         api_error(m(method, path, base=DISABLED_URL, body=body), 404, "mcp_disabled")
     # No route gives a secret again (SEC-009), on any instance.
@@ -278,6 +279,8 @@ def test_meta_and_version():
     assert usage["persisted"] is True and usage["retention_days"] == 90
     assert usage["windows"] == ["24h", "7d", "30d", "90d"] and usage["default_window"] == "7d"
     assert usage["since"].endswith("Z")
+    # The windows of the ClickHouse cost of a key (System > Queries is on: it reads query_log the same way).
+    assert usage["cost_windows"] == ["24h", "7d"]
     assert tools["query_table"]["group"] == "data" and tools["list_hosts"]["group"] == "data"
     assert {tools[n]["group"] for n in ("query_library", "format_sql", "query_execution")} == {"query"}
     # The API tools: one for each read function of the API, in the families of the pages; they need all the data.
@@ -480,7 +483,7 @@ def usage_of(key_id: str, window: str = "24h", base: str | None = None) -> dict:
 @needs_mcp
 def test_rate_limit_per_key():
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-    limited_before = usage_of("rate")["totals"]["rate_limited"]
+    limited_before = usage_of("rate-test")["totals"]["rate_limited"]
     seen = None
     for _ in range(140):  # 120 a minute: a burst of 120
         response = post_mcp(MCP_URL, RATE, body)
@@ -497,7 +500,7 @@ def test_rate_limit_per_key():
     time.sleep(1.2)
     assert post_mcp(MCP_URL, RATE, body).status_code == 200
     # The refusal counts in the usage of the key.
-    assert usage_of("rate")["totals"]["rate_limited"] >= limited_before + 1
+    assert usage_of("rate-test")["totals"]["rate_limited"] >= limited_before + 1
 
 
 # ---- schema tools -----------------------------------------------------------------------------------------------------
@@ -979,7 +982,7 @@ def test_usage_of_a_key():
         assert rpc(MCP_URL, secret, "nope/nothing", headers=agent).json()["error"]["code"] == -32601
         ok = call_tool(MCP_URL, secret, "list_hosts")
         assert ok["isError"] is False
-        fail_tool(MCP_URL, secret, "query_table", {"host": "local", "database": "chdash_ui", "table": "weather_observations", "limit": 1}, "table_not_allowed")
+        fail_tool(MCP_URL, secret, "query_table", {"host": "local", "database": "otel", "table": "otel_traces", "limit": 1}, "table_not_allowed")
         refused = SESSION.post(f"{MCP_URL}/mcp", data="{}", headers={"Authorization": f"Bearer {secret}", "Content-Type": "text/plain"}, timeout=10)
         assert refused.status_code == 415
 
@@ -1121,6 +1124,7 @@ def test_key_routes_cross_site_guard():
             # The data of a key and what it did are read from the ChDash page only, like a change.
             api_error(m("GET", path + "/access", headers=headers), 403, "cross_site_request")
             api_error(m("GET", path + "/usage", headers=headers), 403, "cross_site_request")
+            api_error(m("GET", path + "/cost", headers=headers), 403, "cross_site_request")
             api_error(m("GET", "/api/mcp/usage", headers=headers), 403, "cross_site_request")
         # Same origin passes, by the browser's header or by Origin = Host.
         host = MCP_URL.split("//", 1)[1]
@@ -1735,6 +1739,77 @@ def test_the_explorer_tools_follow_the_patterns_of_the_key():
                   field="tools", reason="needs_all_data")
     finally:
         drop_key(key["id"])
+
+
+# ---- the statements of a key are named for it, and their cost ---------------------------------------------------------------------
+
+
+def query_log_rows(sql: str) -> list[list[str]]:
+    """Rows of a read of system.query_log by the admin account, once the logs are flushed."""
+    ch("SYSTEM FLUSH LOGS")
+    return [line.split("\t") for line in ch(sql + " FORMAT TSV").splitlines() if line]
+
+
+@needs_clickhouse
+def test_the_statements_of_a_key_are_named_and_their_cost_is_read():
+    # Every statement of a call is named chdash-mcp/<key id>/<tool>/<uuid> (its query_id): the tools that build their SQL, and the routes
+    # that an API tool calls, System's too (their log_comment is 'chdash-system'). Each statement has an id of its own.
+    key, secret = make_key(new_key_body("named", tools=["list_tables", "explorer_catalog", "system_overview"], databases=["chdash_ui"]))
+    try:
+        assert ok_tool(MCP_URL, secret, "list_tables", {"database": "chdash_ui"})["count"] >= 1
+        ok_tool(MCP_URL, secret, "explorer_catalog", {"params": {"refresh": 1}})
+        ok_tool(MCP_URL, secret, "system_overview", {"params": {"refresh": 1}})
+        prefix = f"chdash-mcp/{key['id']}/"
+        rows = query_log_rows(
+            "SELECT splitByChar('/', query_id)[3] AS tool, user, toString(count()), toString(uniqExact(query_id)), "
+            "toString(countIf(log_comment = 'chdash-system')) FROM system.query_log "
+            f"WHERE event_date >= yesterday() AND startsWith(query_id, '{prefix}') AND type = 'QueryFinish' GROUP BY tool, user")
+        assert {"list_tables", "explorer_catalog", "system_overview"} <= {row[0] for row in rows}, rows
+        assert all(row[2] == row[3] for row in rows), rows  # one id for each statement
+        assert any(row[0] == "system_overview" and int(row[4]) > 0 for row in rows), rows  # named, though labelled 'chdash-system'
+        assert any(row[0] == "list_tables" and row[1] == "chdash_mcp" for row in rows), rows
+
+        # The cost of the key: system.query_log of its host, read by the page with the runner account.
+        cost = api_ok(m("GET", f"/api/mcp/keys/{key['id']}/cost?window=24h&refresh=1"))
+        assert cost["status"] == "ok" and cost["reason"] == "" and cost["id"] == key["id"] and cost["host"] == "local", cost
+        assert cost["window"] == "24h" and cost["clamped"] is False and cost["read_at"].endswith("Z") and cost["max_lookback_hours"] == 168
+        totals = cost["totals"]
+        assert totals["statements"] >= 3 and totals["statements"] >= totals["failed"] + totals["canceled"], totals
+        assert {"list_tables", "explorer_catalog", "system_overview"} <= {t["tool"] for t in cost["tools"]}, cost["tools"]
+        assert sum(t["statements"] for t in cost["tools"]) == totals["statements"]
+        roles = {i["user"]: i["role"] for i in cost["identities"]}
+        assert roles.get("chdash_mcp") == "mcp", roles
+        assert all(role in ("mcp", "system") for role in roles.values()), roles
+        assert all("." in t["name"] and t["statements"] >= 1 for t in cost["tables"]), cost["tables"]
+        # Kept 60 s: a second read answers at once with the same read; refresh=1 reads again.
+        again = api_ok(m("GET", f"/api/mcp/keys/{key['id']}/cost?window=24h"))
+        assert again["read_at"] == cost["read_at"] and again["totals"] == totals
+        week = api_ok(m("GET", f"/api/mcp/keys/{key['id']}/cost?window=7d"))
+        assert week["status"] == "ok" and week["totals"]["statements"] >= totals["statements"]
+        api_error(m("GET", f"/api/mcp/keys/{key['id']}/cost?window=30d"), 400, "validation", field="window", reason="invalid")
+        api_error(m("GET", "/api/mcp/keys/ui_000000000000/cost"), 404, "not_found")
+        assert secret not in json.dumps(cost) and "SELECT" not in json.dumps(cost)
+        # A deleted key: its cost is read on the host that its usage kept.
+        drop_key(key["id"])
+        gone = api_ok(m("GET", f"/api/mcp/keys/{key['id']}/cost?window=24h"))
+        assert gone["status"] == "ok" and gone["host"] == "local" and gone["totals"]["statements"] >= 3
+    finally:
+        drop_key(key["id"])
+
+
+@needs_profile
+def test_a_readonly_1_user_is_named_without_any_setting():
+    # readonly = 1: ChDash sends no setting, so no log_comment; the query_id is not a setting, and names the statement all the same.
+    if not CLICKHOUSE_URL:
+        pytest.skip("needs CLICKHOUSE_URL")
+    marker = f"named_{uuid.uuid4().hex[:8]}"
+    ok_tool(PROFILE_URL, PROFILE_RO1, "run_query", {"sql": f"SELECT '{marker}' AS v"})
+    rows = query_log_rows(
+        "SELECT query_id, log_comment, user FROM system.query_log "
+        f"WHERE event_date >= yesterday() AND type = 'QueryFinish' AND query LIKE '%{marker}%' AND query NOT LIKE '%system.query_log%'")
+    assert rows, "the statement is not in query_log"
+    query_id, log_comment, user = rows[-1]
+    assert query_id.startswith("chdash-mcp/ro1/run_query/") and log_comment == "" and user == "chdash_mcp_ro1", rows[-1]
 
 
 # ---- the API tools run as the MCP user -------------------------------------------------------------------------------------------

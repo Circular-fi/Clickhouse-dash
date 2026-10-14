@@ -70,7 +70,7 @@ void resolve_host(Ctx& ctx, const rapidjson::Value& args) {
   fail("host_required", "this key has several hosts; pass host, one of: " + list);
 }
 
-Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db) {
+Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db, const std::string& tool) {
   Ctx ctx{key, config, db, nullptr, "", 0, {}, {}, {}, {}, 0};
   ctx.max_rows = config.max_rows;
   if (key.max_rows) ctx.max_rows = std::min(ctx.max_rows, *key.max_rows);
@@ -82,6 +82,7 @@ Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db) {
   ctx.user_limits.max_memory_bytes = config.max_memory_bytes;
   ctx.user_limits.max_rows_to_read = config.max_rows_to_read;
   ctx.user_limits.key_id = key.id;
+  ctx.user_limits.tool = tool;
   // Schema tools: the key's row cap does not cut them (the scope filters after the read).
   ctx.schema_limits = ctx.user_limits;
   ctx.schema_limits.max_rows = kMcpSchemaReadRows;

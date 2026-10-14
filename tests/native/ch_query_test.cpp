@@ -14,6 +14,7 @@
 
 #include "ch_client_pool.hpp"
 #include "ch_query.hpp"
+#include "facet_limits.hpp"
 #include "sql_params.hpp"
 
 #include <clickhouse/columns/numeric.h>
@@ -191,6 +192,31 @@ void test_scopes_nest_and_the_cancel_check_throws() {
   CHECK(ChQueryScope::current() == nullptr);
 }
 
+// The query_id of a statement comes from its scope (the statements of a call of MCP, mcp_cost.hpp): one for each statement, kept by an
+// inner scope that copies the outer one, none outside of every scope.
+void test_a_scope_names_each_statement() {
+  CHECK(ch_statement_query_id().empty());
+  int made = 0;
+  ChQueryLimits limits;
+  limits.query_id = [&made] { return "q" + std::to_string(++made); };
+  {
+    ChQueryScope scope(std::move(limits));
+    CHECK(ch_statement_query_id() == "q1");
+    CHECK(ch_statement_query_id() == "q2");
+    {
+      ChQueryLimits inner = ChQueryScope::current_copy();
+      inner.log_comment = "inner";
+      ChQueryScope nested(std::move(inner));
+      CHECK(ch_statement_query_id() == "q3");
+    }
+    {
+      ChQueryScope plain{ChQueryLimits{}};
+      CHECK(ch_statement_query_id().empty());
+    }
+  }
+  CHECK(ch_statement_query_id().empty());
+}
+
 // ---- with a server ----------------------------------------------------------------------------
 
 struct Stop : std::runtime_error {
@@ -318,6 +344,8 @@ void test_the_scope_settings_reach_clickhouse(const std::string& uri) {
   CHECK(select_text(*client, "SELECT toString(getSetting('log_comment'))") == "chdash:/native/test");
   CHECK(select_u64(*client, "SELECT toString(getSetting('max_memory_usage'))") == 123456789);
   CHECK(select_u64(*client, "SELECT toString(toUInt64(getSetting('max_execution_time')))") == 17);
+  // No query_id from the scope: ClickHouse names the statement (a UUID).
+  CHECK(select_text(*client, "SELECT queryID()").size() == 36);
   // A SETTINGS clause of the SQL wins.
   CHECK(select_u64(*client, "SELECT toString(getSetting('max_memory_usage')) SETTINGS max_memory_usage = 99999") == 99999);
   {
@@ -334,6 +362,31 @@ void test_the_scope_settings_reach_clickhouse(const std::string& uri) {
     CHECK(code == 164);
     CHECK(!ch_connection_dirty(*client));
   }
+}
+
+// The query_id of the scope reaches ClickHouse for each kind of statement, and a SETTINGS clause does not change it.
+void test_the_query_id_of_the_scope_reaches_clickhouse(const std::string& uri) {
+  auto pool = std::make_shared<ClickHouseClientPool>(4);
+  auto client = lease(pool, uri);
+  const std::string base = "chdash-test/" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "/";
+  int made = 0;
+  ChQueryLimits limits;
+  limits.log_comment = "chdash:/native/test";
+  limits.query_id = [&made, base] { return base + std::to_string(++made); };
+  ChQueryScope scope(std::move(limits));
+  CHECK(select_text(*client, "SELECT queryID()") == base + "1");
+  CHECK(select_text(*client, "SELECT queryID() SETTINGS log_comment = 'x'") == base + "2");
+  std::string seen;
+  ch_select_cancelable(*client, "SELECT queryID()", [&seen](const clickhouse::Block& block) {
+    if (block.GetRowCount() > 0) seen = std::string(block[0]->As<clickhouse::ColumnString>()->At(0));
+    return true;
+  });
+  CHECK(seen == base + "3");
+  const BoundedRead read = bounded_select(*client, "SELECT queryID()", [&seen](const clickhouse::Block& block) {
+    if (block.GetRowCount() > 0) seen = std::string(block[0]->As<clickhouse::ColumnString>()->At(0));
+  });
+  (void)read;
+  CHECK(seen == base + "4");
 }
 
 void test_a_passed_deadline_or_a_cancel_stops_before_sending(const std::string& uri) {
@@ -507,6 +560,7 @@ int main() {
   test_read_only_and_the_overflow_modes();
   test_mcp_settings_follow_the_profile();
   test_scopes_nest_and_the_cancel_check_throws();
+  test_a_scope_names_each_statement();
 
   const char* uri = std::getenv("CHDASH_TEST_CLICKHOUSE_URI");
   if (uri && *uri) {
@@ -516,6 +570,7 @@ int main() {
       test_a_server_error_keeps_the_connection(uri);
       test_a_callback_that_stops_reading_keeps_the_connection(uri);
       test_the_scope_settings_reach_clickhouse(uri);
+      test_the_query_id_of_the_scope_reaches_clickhouse(uri);
       test_a_passed_deadline_or_a_cancel_stops_before_sending(uri);
       test_the_pool_bounds_its_leases(uri);
       test_names_go_through_string_parameters_as_they_are(uri);

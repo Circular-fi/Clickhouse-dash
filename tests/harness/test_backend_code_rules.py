@@ -47,6 +47,38 @@ def test_no_statement_bypasses_the_connection_state():
     assert not offenders, "a statement must go through ch_select / ch_execute:\n" + "\n".join(offenders)
 
 
+def test_every_statement_is_built_with_its_query_id():
+    # Why: the statements of a call of MCP are named for their key and tool by their query_id (mcp_cost.hpp), which is how the
+    # page finds what a key cost in system.query_log; a clickhouse::Query built without an id would escape the cost of the key.
+    # A statement takes ch_statement_query_id() (the id of its scope, "" outside of MCP) or names itself (a run, an export).
+    construct = re.compile(r"clickhouse::Query\s+\w+\s*\(")
+    offenders = []
+    for name, text in sources():
+        code = code_of(text)
+        for match in construct.finditer(code):
+            depth, index, commas = 1, match.end(), 0
+            quoted = None
+            while index < len(code) and depth:
+                char = code[index]
+                if quoted:
+                    if char == "\\":
+                        index += 1
+                    elif char == quoted:
+                        quoted = None
+                elif char in "\"'":
+                    quoted = char
+                elif char in "([{":
+                    depth += 1
+                elif char in ")]}":
+                    depth -= 1
+                elif char == "," and depth == 1:
+                    commas += 1
+                index += 1
+            if commas == 0:
+                offenders.append(f"{name}: {code[match.start():index].strip()[:120]}")
+    assert not offenders, "build a clickhouse::Query with its query id (ch_statement_query_id()):\n" + "\n".join(offenders)
+
+
 def test_every_connection_is_opened_by_ch_open_client():
     # Why: ch_open_client is the one place that keeps the state of a connection (dirty / clean) the pool relies on.
     construct = re.compile(r"make_(?:unique|shared)<clickhouse::Client>|new clickhouse::Client\b|clickhouse::Client \w+\(")
@@ -100,6 +132,11 @@ def test_mcp_code_is_not_reachable_from_other_routes_and_never_uses_the_runner()
     uses = [line for line in api.split("\n") if "system_uri" in line]
     assert len(uses) == 1 and "as_system" in uses[0], uses
     assert "mcp_password_file" not in read("src/config.cpp")
+    # The cost of a key is a read of the page, not of MCP: it reads query_log with the runner account, as System > Queries does,
+    # and never as the MCP identity.
+    cost = code_of(read("src/api_mcp_cost.cpp"))
+    assert "open_system_runner_executor" in cost and "mcp_uri" not in cost.replace("user_of(host->mcp_uri)", "")
+    assert "McpTools" not in cost and "handle_mcp_post" not in cost
 
 
 def test_panel_sql_never_runs_on_the_system_account():

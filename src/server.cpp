@@ -627,6 +627,7 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/mcp/access", mcp_api(McpApiRoute::AccessSummary));
     http_.Get("/api/mcp/usage", mcp_api(McpApiRoute::Usage));
     http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/usage)", mcp_api(McpApiRoute::KeyUsage));
+    http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/cost)", mcp_api(McpApiRoute::KeyCost));
   }
   if (cfg_.mcp.enabled) {
     http_.Post("/mcp", [this](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
@@ -868,11 +869,17 @@ RequestContext Server::make_context(const httplib::Request& req, bool with_deadl
   const RequestContext& outer = current_request_context();
   context.caller = outer.caller;
   context.caller_id = outer.caller_id;
+  context.caller_tool = outer.caller_tool;
   context.route = req.path;
   context.request_id = req.get_header_value("X-Request-Id");
   context.limits = request_limits(req, with_deadline);
-  // The statements of a tool carry its key: System > Queries and the log of ClickHouse show who asked.
-  if (context.is_mcp()) context.limits.log_comment = "chdash-mcp key=" + context.caller_id + " " + req.path.substr(0, 120);
+  // The statements of a tool carry its key: System > Queries and the log of ClickHouse show who asked. Each one is named for the key
+  // and the tool too (mcp_cost.hpp): its query_id holds where a SETTINGS clause rewrites the label ('chdash-system' of the System
+  // routes), and for a user whose profile takes no setting at all.
+  if (context.is_mcp()) {
+    context.limits.log_comment = "chdash-mcp key=" + context.caller_id + " " + req.path.substr(0, 120);
+    context.limits.query_id = [key = context.caller_id, tool = context.caller_tool] { return mcp_query_id(key, tool); };
+  }
   return context;
 }
 
@@ -908,6 +915,7 @@ McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
   RequestContext caller;
   caller.caller = RequestContext::Caller::Mcp;
   caller.caller_id = request.key_id;
+  caller.caller_tool = request.tool;
   caller.route = request.path;
   caller.limits = ChQueryScope::current_copy();
   RequestScope scope(std::move(caller));
@@ -935,11 +943,15 @@ McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
 }
 
 std::optional<Admission::Ticket> Server::admit(WorkClass work, const httplib::Request& req, httplib::Response& res) {
+  // The MCP limit is global; the others are for each host.
+  return admit(work, work == WorkClass::Mcp ? std::string() : admission_host(req), req, res);
+}
+
+std::optional<Admission::Ticket> Server::admit(WorkClass work, const std::string& host_id, const httplib::Request& req, httplib::Response& res) {
   const AdmissionSettings& limits = cfg_.admission;
   const char* name = work == WorkClass::Analysis ? "analysis" : work == WorkClass::Mcp ? "mcp" : "heavy";
   const size_t max = work == WorkClass::Analysis ? limits.analysis_per_host : work == WorkClass::Mcp ? limits.mcp_max : limits.heavy_per_host;
-  // The MCP limit is global; the others are for each host.
-  const std::string key = std::string(name) + '\x1f' + (work == WorkClass::Mcp ? std::string() : admission_host(req));
+  const std::string key = std::string(name) + '\x1f' + host_id;
   auto ticket = admission_.acquire(key, max, std::chrono::milliseconds(limits.wait_ms), [this, &req] {
     return stopping() || (req.is_connection_closed && req.is_connection_closed());
   });

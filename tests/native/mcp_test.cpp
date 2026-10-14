@@ -1682,6 +1682,8 @@ void test_api_tools() {
     CHECK_EQ(api.calls[0].path, std::string("/api/explorer/catalog"));
     CHECK_EQ(query_of(api.calls[0]), std::string("database=otel&refresh=1&host_id=prod\x1f" "mcp"));
     CHECK(db.calls.empty());  // no SQL of the MCP user: the route has its own
+    CHECK_EQ(api.calls[0].tool, std::string("explorer_catalog"));  // the statements of the route are named for the key and the tool
+    CHECK_EQ(api.calls[0].key_id, all.id);
     CHECK_EQ(api.calls[0].timeout_seconds, int64_t(30));
     CHECK_EQ(api.calls[0].max_bytes, int64_t(1048576));
     // A list repeats the parameter; a boolean and a number are text.
@@ -1925,6 +1927,9 @@ void test_observability() {
     CHECK(contains(db.calls.back().sql, "Timestamp >= now() - INTERVAL 60 MINUTE"));
     CHECK(contains(db.calls.back().sql, "LIMIT 6"));  // the key's 5 rows, and one more to know that rows were cut
     CHECK_EQ(db.calls.back().limits.max_rows, int64_t(5));
+    // The statement is named for its key and its tool (its query_id, mcp_cost.hpp).
+    CHECK_EQ(db.calls.back().limits.tool, std::string("list_services"));
+    CHECK_EQ(db.calls.back().limits.key_id, narrow.id);
     doc = call(tools, all, "list_services", R"({"signal":"logs","since_minutes":15})");
     CHECK(contains(db.calls.back().sql, "`otel`.`otel_logs`") && contains(db.calls.back().sql, "INTERVAL 15 MINUTE"));
     CHECK_EQ(std::string(call(tools, all, "list_services", R"({"signal":"metrics"})")["error"].GetString()), std::string("invalid_argument"));
@@ -2462,6 +2467,13 @@ void test_tool_support() {
   CHECK(!ctx.user_limits.as_system && ctx.system_limits.as_system && ctx.system_schema_limits.as_system && !ctx.schema_limits.as_system);
   CHECK_EQ(ctx.schema_limits.max_rows, kMcpSchemaReadRows);
   CHECK_EQ(ctx.schema_limits.max_bytes, kMcpSchemaReadBytes);
+  // The tool of the call names the statements of every set of limits (their query_id, mcp_cost.hpp).
+  const Ctx named = make_ctx(key, config, database, "query_table");
+  for (const McpDbLimits* limits : {&named.user_limits, &named.schema_limits, &named.system_limits, &named.system_schema_limits}) {
+    CHECK_EQ(limits->tool, std::string("query_table"));
+    CHECK_EQ(limits->key_id, std::string("k1"));
+  }
+  CHECK_EQ(ctx.user_limits.tool, std::string(""));
   key.max_rows.reset();
   key.timeout_seconds.reset();
   CHECK_EQ(make_ctx(key, config, database).max_rows, int64_t{500});
