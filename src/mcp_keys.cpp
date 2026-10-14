@@ -617,24 +617,18 @@ void McpKeyStore::apply_input(const McpKeyInput& input, McpKey* key) const {
   key->timeout_seconds = input.timeout_seconds;
 }
 
-std::vector<McpKeyStore::Listed> McpKeyStore::list() {
+std::vector<McpKey> McpKeyStore::list() {
   std::lock_guard<std::mutex> lock(mu_);
-  std::vector<Listed> out;
+  std::vector<McpKey> out;
   for (const auto& key : keys_) {
-    if (key.source != "config") continue;
-    Listed item{key, std::nullopt};
-    if (const auto it = last_used_.find(key.id); it != last_used_.end()) item.last_used_at = it->second;
-    out.push_back(std::move(item));
+    if (key.source == "config") out.push_back(key);
   }
   const size_t first_ui = out.size();
   for (const auto& key : keys_) {
-    if (key.source != "ui") continue;
-    Listed item{key, std::nullopt};
-    if (const auto it = last_used_.find(key.id); it != last_used_.end()) item.last_used_at = it->second;
-    out.push_back(std::move(item));
+    if (key.source == "ui") out.push_back(key);
   }
-  std::stable_sort(out.begin() + static_cast<std::ptrdiff_t>(first_ui), out.end(), [](const Listed& a, const Listed& b) {
-    return a.key.created_at.value_or(0) < b.key.created_at.value_or(0);
+  std::stable_sort(out.begin() + static_cast<std::ptrdiff_t>(first_ui), out.end(), [](const McpKey& a, const McpKey& b) {
+    return a.created_at.value_or(0) < b.created_at.value_or(0);
   });
   return out;
 }
@@ -704,13 +698,12 @@ McpKeyStore::Result McpKeyStore::remove(const std::string& id) {
   if (!write_file(candidate, &error)) return fail(500, "storage_error", "the key file could not be written: " + error);
   lock.lock();
   keys_ = std::move(candidate);
-  last_used_.erase(id);
   Result r;
   r.key = removed;
   return r;
 }
 
-McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token, int64_t now) {
+McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token) {
   AuthResult result;
   if (token.empty()) return result;
   result.status = AuthStatus::Unknown;
@@ -725,7 +718,6 @@ McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token, int64_
   if (!found) return result;
   result.key = *found;
   result.status = AuthStatus::Ok;
-  last_used_[found->id] = now;
   return result;
 }
 

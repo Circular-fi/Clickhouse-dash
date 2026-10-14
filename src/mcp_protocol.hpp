@@ -63,6 +63,9 @@ struct McpRpcResult {
   bool tool_called = false;
   McpToolOutcome outcome;
   int rpc_error = 0;
+  // initialize: the clientInfo of the client (at most 256 bytes each), for the usage of the key (mcp_usage.hpp).
+  std::string client_name;
+  std::string client_version;
 };
 
 // The JSON Schema of a tool's arguments, as JSON text.

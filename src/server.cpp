@@ -625,6 +625,8 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Delete(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+))", mcp_api(McpApiRoute::KeyDelete));
     http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/access)", mcp_api(McpApiRoute::KeyAccess));
     http_.Get("/api/mcp/access", mcp_api(McpApiRoute::AccessSummary));
+    http_.Get("/api/mcp/usage", mcp_api(McpApiRoute::Usage));
+    http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/usage)", mcp_api(McpApiRoute::KeyUsage));
   }
   if (cfg_.mcp.enabled) {
     http_.Post("/mcp", [this](const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
@@ -687,6 +689,8 @@ Server::~Server() {
   }
   session_reaper_cv_.notify_all();
   if (session_reaper_thread_.joinable()) session_reaper_thread_.join();
+  // The calls have ended (run() returned after the workers): the last counts of the MCP keys are written.
+  save_mcp_usage(true);
 
   std::vector<std::shared_ptr<QuerySession>> remaining;
   {
@@ -766,6 +770,8 @@ void Server::session_reaper_loop() {
     }
     if (session_reaper_stop_.load(std::memory_order_relaxed)) break;
     reap_sessions_once();
+    // The usage of the MCP keys: its file every minute when something changed (mcp_usage.hpp).
+    save_mcp_usage(false);
     const auto now = std::chrono::steady_clock::now();
     if (cfg_.server.stats_log_interval_ms > 0 && now - last_stats_log_ >= std::chrono::milliseconds(cfg_.server.stats_log_interval_ms)) {
       last_stats_log_ = now;
@@ -996,6 +1002,8 @@ void Server::stop() {
   if (health_) health_->stop();
   // No new connection; run() returns once the connections in progress end (the streams end above).
   http_.stop();
+  // The usage of the MCP keys as it is now, in case the drain ends with the deadline (the destructor writes it again).
+  save_mcp_usage(true);
 }
 
 uint64_t Server::add_stop_hook(std::function<void()> hook) {

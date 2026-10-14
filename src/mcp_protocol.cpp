@@ -399,6 +399,16 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     const auto& supported = mcp_protocol_versions();
     const std::string chosen =
         std::find(supported.begin(), supported.end(), asked) != supported.end() ? asked : std::string(kMcpLatestProtocolVersion);
+    // Who the client is (optional): the usage of the key keeps it.
+    if (const auto client = params->FindMember("clientInfo"); client != params->MemberEnd() && client->value.IsObject()) {
+      const auto text = [&](const char* field) -> std::string {
+        const auto it = client->value.FindMember(field);
+        if (it == client->value.MemberEnd() || !it->value.IsString()) return {};
+        return std::string(it->value.GetString(), std::min<size_t>(it->value.GetStringLength(), 256));
+      };
+      result.client_name = text("name");
+      result.client_version = text("version");
+    }
     result.body = result_body(*id, initialize_result(chosen, info));
     return result;
   }

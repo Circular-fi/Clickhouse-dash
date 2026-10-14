@@ -171,6 +171,8 @@ CFG_STRING("observability.metrics", "table_prefix", c.otel_defaults.metrics.tabl
 CFG_BOOL("mcp", "enabled", c.mcp.enabled, "false", "Serve the MCP endpoint, POST /mcp.")
 CFG_STRING("mcp", "storage_file", c.mcp.storage_file, "", "The JSON file of the keys that are made on the MCP page.")
 CFG_BOOL("mcp", "manage_from_ui", c.mcp.manage_from_ui, "true", "Allow the MCP page to make and delete keys. When false, a change is refused with 403 manage_disabled.")
+CFG_STRING("mcp", "usage_file", c.mcp.usage_file, "", "The JSON file of the usage of the keys, written every minute and at the stop. Empty: the usage is in memory, since the start.")
+CFG_INT("mcp", "usage_retention_days", int64_t, c.mcp.usage_retention_days, "90", 1, 365, false, "days", "How long the usage of a key is kept, by the day (also after the key is deleted).")
 CFG_INT("mcp", "max_rows", int64_t, c.mcp.max_rows, "1000", 1, 1000000, false, "rows", "Rows that a call returns, at most. A key can lower it.")
 CFG_INT("mcp", "max_result_bytes", int64_t, c.mcp.max_result_bytes, "1048576", 1024, 268435456, false, "bytes", "Bytes that a call returns, at most.")
 CFG_INT("mcp", "query_timeout_seconds", int64_t, c.mcp.query_timeout_seconds, "30", 1, 3600, false, "seconds", "The time of one call. A key can lower it.")

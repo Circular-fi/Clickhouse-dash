@@ -218,6 +218,8 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 | `enabled` | boolean | `false` |  | Serve the MCP endpoint, POST /mcp. |
 | `storage_file` | text |  |  | The JSON file of the keys that are made on the MCP page. |
 | `manage_from_ui` | boolean | `true` |  | Allow the MCP page to make and delete keys. When false, a change is refused with 403 manage_disabled. |
+| `usage_file` | text |  |  | The JSON file of the usage of the keys, written every minute and at the stop. Empty: the usage is in memory, since the start. |
+| `usage_retention_days` | integer | `90` | 1 to 365 days | How long the usage of a key is kept, by the day (also after the key is deleted). |
 | `max_rows` | integer | `1000` | 1 to 1000000 rows | Rows that a call returns, at most. A key can lower it. |
 | `max_result_bytes` | integer | `1048576` | 1024 to 268435456 bytes | Bytes that a call returns, at most. |
 | `query_timeout_seconds` | integer | `30` | 1 to 3600 seconds | The time of one call. A key can lower it. |

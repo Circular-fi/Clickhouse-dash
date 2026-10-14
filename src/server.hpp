@@ -26,6 +26,7 @@
 #include "metrics.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_tools.hpp"
+#include "mcp_usage.hpp"
 #include "otel_caches.hpp"
 #include "otel_settings.hpp"
 #include "query_library.hpp"
@@ -102,6 +103,10 @@ struct McpSettings {
   std::string storage_file;
   // false: the page is read-only and every key write answers 403 manage_disabled.
   bool manage_from_ui = true;
+  // The JSON file of the usage of the keys (mcp_usage.hpp); empty = the usage is in memory, since the start.
+  std::string usage_file;
+  // Days of usage kept for each key, also after the key is deleted.
+  int64_t usage_retention_days = 90;
   // The request header that carries the key. "Authorization" takes "Bearer <key>". Another name (for
   // a deployment where a proxy in front already uses Authorization) takes the key alone, or "Bearer <key>".
   std::string auth_header = "Authorization";
@@ -306,6 +311,9 @@ enum class McpApiRoute {
   KeyAccess,
   // How many databases and tables each key reaches, for the table of the page.
   AccessSummary,
+  // The usage of every key in a window (the Used column), and of one key (its details).
+  Usage,
+  KeyUsage,
 };
 
 struct FsStaticCache;
@@ -461,6 +469,8 @@ private:
   // keys exist only when mcp.enabled = true; /api/mcp/meta always answers.
   void init_mcp();
   void handle_mcp_post(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader);
+  // Writes the usage file of the MCP keys: when a minute has passed (force = false), or now (the stop).
+  void save_mcp_usage(bool force);
   void handle_mcp_not_allowed(const httplib::Request& req, httplib::Response& res);
   void handle_api_mcp(const httplib::Request& req, httplib::Response& res, McpApiRoute route);
 
@@ -522,6 +532,8 @@ private:
   std::vector<std::unique_ptr<QueryLibraryStore>> query_libraries_;
   // Only constructed when mcp.enabled = true. The database outlives the tools that use it.
   std::unique_ptr<McpKeyStore> mcp_keys_;
+  // What each key did (mcp_usage.hpp): counted in handle_mcp_post, saved by the reaper every minute and at the stop.
+  std::unique_ptr<McpUsage> mcp_usage_;
   std::unique_ptr<McpDatabase> mcp_db_;
   std::unique_ptr<McpApiClient> mcp_api_;
   std::unique_ptr<McpTools> mcp_tools_;

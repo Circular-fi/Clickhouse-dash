@@ -25,6 +25,7 @@
 #include "sql_literal.hpp"
 #include "mcp_tool_support.hpp"
 #include "mcp_tools.hpp"
+#include "mcp_usage.hpp"
 #include "metrics.hpp"
 #include "secure_random.hpp"
 #include "worker_group.hpp"
@@ -38,6 +39,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -399,9 +401,9 @@ void test_store(const std::string& dir) {
     CHECK(store.can_manage());
     CHECK(::access(file.c_str(), F_OK) != 0);  // absent: created on the first write only
     CHECK_EQ(store.list().size(), size_t(1));
-    CHECK_EQ(store.list()[0].key.source, std::string("config"));
-    CHECK_EQ(store.list()[0].key.id, std::string("cfg-key"));
-    CHECK_EQ(store.list()[0].key.secret_hint, std::string(""));  // config_key() gives none: the config reader sets it
+    CHECK_EQ(store.list()[0].source, std::string("config"));
+    CHECK_EQ(store.list()[0].id, std::string("cfg-key"));
+    CHECK_EQ(store.list()[0].secret_hint, std::string(""));  // config_key() gives none: the config reader sets it
 
     auto created = store.create(input_of(kNewKey), now);
     CHECK_EQ(created.status, 201);
@@ -430,17 +432,15 @@ void test_store(const std::string& dir) {
     CHECK_EQ(doc["keys"].Size(), 1u);
 
     // Authentication by the secret; the config key too.
-    auto auth = store.authenticate(created.secret, now + 10);
+    auto auth = store.authenticate(created.secret);
     CHECK(auth.status == McpKeyStore::AuthStatus::Ok);
     CHECK_EQ(auth.key.id, created.key->id);
-    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f", now).status == McpKeyStore::AuthStatus::Ok);
-    CHECK(store.authenticate("", now).status == McpKeyStore::AuthStatus::Missing);
-    CHECK(store.authenticate("chm_nope", now).status == McpKeyStore::AuthStatus::Unknown);
-    CHECK(store.authenticate(std::string(600, 'x'), now).status == McpKeyStore::AuthStatus::Unknown);
-    const auto listed = store.list();
-    CHECK_EQ(listed.size(), size_t(2));
-    CHECK_EQ(listed[1].last_used_at.value_or(0), now + 10);  // in memory, not in the file
-    CHECK(!contains(read_file(file), "last_used"));
+    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f").status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate("").status == McpKeyStore::AuthStatus::Missing);
+    CHECK(store.authenticate("chm_nope").status == McpKeyStore::AuthStatus::Unknown);
+    CHECK(store.authenticate(std::string(600, 'x')).status == McpKeyStore::AuthStatus::Unknown);
+    CHECK_EQ(store.list().size(), size_t(2));
+    CHECK(!contains(read_file(file), "last_used"));  // when a key was used is its usage's (test_usage)
 
     // Names and secrets are unique across both sources.
     CHECK_EQ(store.create(input_of(kNewKey), now).error, std::string("name_taken"));
@@ -457,27 +457,27 @@ void test_store(const std::string& dir) {
 
     // The store keeps the hint, never the secret: no key of the list holds it, in any of its fields.
     CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 8));
-    for (const auto& item : store.list()) {
+    for (const auto& key : store.list()) {
       rapidjson::StringBuffer sb;
       McpJsonWriter w(sb);
-      mcp_write_key(w, item.key, item.last_used_at);
+      mcp_write_key(w, key, std::nullopt);
       CHECK(!contains(sb.GetString(), created.secret));
       CHECK(!contains(sb.GetString(), "secret_available"));
     }
 
     // A key is made or deleted: there is no update, no rotation and no switch (the store has none).
     const std::string id = created.key->id;
-    CHECK(store.authenticate(created.secret, now + 30).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate(created.secret).status == McpKeyStore::AuthStatus::Ok);
     const std::string second_secret = created.secret;
 
     // A restart reads the same keys back; the hash decides who gets in.
     McpKeyStore again(store_options(file));
     CHECK_EQ(again.list().size(), size_t(2));
-    CHECK_EQ(again.list()[1].key.secret_hint, second_secret.substr(0, 8));
+    CHECK_EQ(again.list()[1].secret_hint, second_secret.substr(0, 8));
     CHECK(read_file(file).find(second_secret) == std::string::npos);
-    CHECK(again.authenticate(second_secret, now).status == McpKeyStore::AuthStatus::Ok);
-    CHECK(again.authenticate("not-the-secret", now).status == McpKeyStore::AuthStatus::Unknown);
-    CHECK_EQ(again.list()[1].key.name, std::string("ci-bot"));
+    CHECK(again.authenticate(second_secret).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(again.authenticate("not-the-secret").status == McpKeyStore::AuthStatus::Unknown);
+    CHECK_EQ(again.list()[1].name, std::string("ci-bot"));
 
     // A failed write restores the memory and answers storage_error.
     const std::string before = read_file(file);
@@ -489,7 +489,7 @@ void test_store(const std::string& dir) {
     CHECK_EQ(store.list().size(), size_t(2));
     CHECK_EQ(store.remove(id).error, std::string("storage_error"));
     CHECK_EQ(store.list().size(), size_t(2));
-    CHECK(store.authenticate(second_secret, now).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate(second_secret).status == McpKeyStore::AuthStatus::Ok);
     CHECK(::rename(moved.c_str(), dir.c_str()) == 0);
     CHECK_EQ(read_file(file), before);
 
@@ -497,7 +497,7 @@ void test_store(const std::string& dir) {
     const auto removed = store.remove(id);
     CHECK_EQ(removed.status, 200);
     CHECK_EQ(store.list().size(), size_t(1));
-    CHECK(store.authenticate(second_secret, now).status == McpKeyStore::AuthStatus::Unknown);
+    CHECK(store.authenticate(second_secret).status == McpKeyStore::AuthStatus::Unknown);
     CHECK_EQ(store.remove(id).error, std::string("not_found"));
     CHECK_EQ(store.remove("cfg-key").error, std::string("config_key"));
     CHECK_EQ(parse(read_file(file))["keys"].Size(), 0u);
@@ -511,7 +511,7 @@ void test_store(const std::string& dir) {
     CHECK(!store.can_manage());
     CHECK_EQ(store.create(input_of(kNewKey), now).error, std::string("storage_not_configured"));
     CHECK_EQ(store.create(input_of(kNewKey), now).status, 409);
-    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f", now).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f").status == McpKeyStore::AuthStatus::Ok);
   }
 
   // manage_from_ui = false: every write is refused; the file is read.
@@ -523,7 +523,7 @@ void test_store(const std::string& dir) {
     McpKeyStore ro(o);
     CHECK(!ro.can_manage());
     CHECK_EQ(ro.list().size(), size_t(2));
-    CHECK(ro.authenticate(made.secret, now).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(ro.authenticate(made.secret).status == McpKeyStore::AuthStatus::Ok);
     CHECK_EQ(ro.create(input_of(kNewKey), now).error, std::string("manage_disabled"));
     CHECK_EQ(ro.create(input_of(kNewKey), now).status, 403);
     CHECK_EQ(ro.remove(made.key->id).error, std::string("manage_disabled"));
@@ -606,7 +606,7 @@ void test_store_startup_errors(const std::string& dir) {
     o.config_keys.clear();
     McpKeyStore store(o);
     CHECK_EQ(store.list().size(), size_t(1));
-    CHECK_EQ(mcp_secret_mask(store.list()[0].key.secret_hint), mcp_secret_mask(""));
+    CHECK_EQ(mcp_secret_mask(store.list()[0].secret_hint), mcp_secret_mask(""));
     CHECK_EQ(read_file(legacy), body);  // nothing to take out: the file is not written
   }
   {
@@ -627,6 +627,450 @@ void test_store_startup_errors(const std::string& dir) {
     }
     CHECK(threw);
     CHECK_EQ(read_file(old), body);  // never rewritten
+  }
+}
+
+// ---- the usage of the keys ---------------------------------------------------------------------------
+
+struct UsageCall {
+  std::string id = "k1";
+  int64_t at = 0;
+  McpUsageKind kind = McpUsageKind::ToolCall;
+  std::string tool;
+  std::string status = "ok";
+  int64_t duration_ms = 0;
+  uint64_t rows = 0;
+  uint64_t bytes = 0;
+  std::string client_name;
+  std::string client_version;
+  std::string user_agent = "agent/1";
+};
+
+void usage_record(McpUsage& usage, const UsageCall& call) {
+  McpUsageEvent event;
+  event.key_id = call.id;
+  event.key_name = call.id;
+  event.key_host = "prod";
+  event.key_source = "config";
+  event.at = call.at;
+  event.kind = call.kind;
+  event.tool = call.tool;
+  event.status = call.status;
+  event.duration_ms = call.duration_ms;
+  event.rows = call.rows;
+  event.bytes = call.bytes;
+  event.client_name = call.client_name;
+  event.client_version = call.client_version;
+  event.user_agent = call.user_agent;
+  usage.record(event);
+}
+
+McpUsageKeyRef usage_key(const std::string& id) { return McpUsageKeyRef{id, id, "prod", "config"}; }
+
+// The JSON of the details of a key, or "" for a 404.
+std::string usage_detail(const McpUsage& usage, const std::string& id, bool live, const std::string& window, int64_t now) {
+  const McpUsageKeyRef key = usage_key(id);
+  const auto range = mcp_usage_window(window, usage.retention_days(), now);
+  if (!range) return "bad window";
+  rapidjson::StringBuffer sb;
+  McpJsonWriter w(sb);
+  if (!usage.write_detail(w, id, live ? &key : nullptr, *range, now)) return "";
+  return sb.GetString();
+}
+
+std::string usage_list(const McpUsage& usage, const std::vector<std::string>& live, const std::string& window, int64_t now) {
+  std::vector<McpUsageKeyRef> keys;
+  for (const auto& id : live) keys.push_back(usage_key(id));
+  rapidjson::StringBuffer sb;
+  McpJsonWriter w(sb);
+  usage.write_list(w, keys, *mcp_usage_window(window, usage.retention_days(), now), now);
+  return sb.GetString();
+}
+
+// The count of `field` for `name` in an array of the details (tools by "tool", statuses by "status").
+uint64_t usage_count(const rapidjson::Value& rows, const char* by, const std::string& name, const char* field) {
+  for (const auto& row : rows.GetArray()) {
+    if (std::string(row[by].GetString()) == name) return row[field].GetUint64();
+  }
+  return 0;
+}
+
+void test_usage(const std::string& dir) {
+  // A whole hour (2027-01-15T10:00:00Z).
+  const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;
+  const int64_t hour = 3600;
+  const int64_t day = 86400;
+
+  // The windows that a retention keeps.
+  CHECK(mcp_usage_windows(1) == std::vector<std::string>({"24h"}));
+  CHECK(mcp_usage_windows(7) == std::vector<std::string>({"24h", "7d"}));
+  CHECK(mcp_usage_windows(90) == std::vector<std::string>({"24h", "7d", "30d", "90d"}));
+  CHECK(mcp_usage_windows(365) == std::vector<std::string>({"24h", "7d", "30d", "90d", "365d"}));
+  CHECK_EQ(mcp_usage_default_window(90), std::string("7d"));
+  CHECK_EQ(mcp_usage_default_window(3), std::string("24h"));
+  {
+    const auto h = mcp_usage_window("24h", 90, now + 1800);
+    CHECK(h.has_value());
+    CHECK_EQ(h->from, now - 23 * hour);
+    CHECK_EQ(h->step, hour);
+    CHECK_EQ(h->points, size_t(24));
+    const auto d = mcp_usage_window("7d", 90, now);
+    CHECK_EQ(d->from, now - now % day - 6 * day);
+    CHECK_EQ(d->step, day);
+    CHECK_EQ(d->points, size_t(7));
+    CHECK(!mcp_usage_window("48h", 90, now).has_value());
+    CHECK(!mcp_usage_window("90d", 30, now).has_value());
+    CHECK(!mcp_usage_window("", 90, now).has_value());
+  }
+  CHECK_EQ(mcp_usage_clean("  a\x01" "b\xc3\xa9  ", 64), std::string("a?b??"));
+  CHECK_EQ(mcp_usage_clean("abcdef", 3), std::string("abc"));
+  CHECK_EQ(mcp_usage_clean("   ", 8), std::string(""));
+
+  // What a key did, in memory only.
+  {
+    McpUsageOptions options;
+    options.retention_days = 30;
+    McpUsage usage(options, now);
+    CHECK(!usage.persisted());
+    CHECK_EQ(usage.since(), now);
+    // A key that is not used: zeros while it exists, a 404 once it does not.
+    CHECK(contains(usage_detail(usage, "k1", true, "24h", now), "\"calls\":0"));
+    CHECK_EQ(usage_detail(usage, "k1", false, "24h", now), std::string(""));
+
+    UsageCall init;
+    init.kind = McpUsageKind::Request;
+    init.at = now + 10;
+    init.client_name = "claude-code";
+    init.client_version = "2.1.0";
+    init.user_agent = "claude-code/2.1.0 (node)";
+    init.bytes = 300;
+    usage_record(usage, init);
+    UsageCall list = init;
+    list.client_name.clear();
+    list.client_version.clear();
+    list.at = now + 11;
+    usage_record(usage, list);
+    UsageCall ok;
+    ok.at = now + 20;
+    ok.tool = "query_table";
+    ok.duration_ms = 12;
+    ok.rows = 5;
+    ok.bytes = 1000;
+    ok.user_agent = init.user_agent;
+    usage_record(usage, ok);
+    UsageCall failed = ok;
+    failed.tool = "run_query";
+    failed.status = "timeout";
+    failed.duration_ms = 30;
+    failed.rows = 0;
+    failed.bytes = 100;
+    usage_record(usage, failed);
+    UsageCall limited;
+    limited.kind = McpUsageKind::RateLimited;
+    limited.status = "429_rate_limited";
+    limited.at = now + 30;
+    limited.bytes = 50;
+    usage_record(usage, limited);
+    UsageCall rejected = limited;
+    rejected.kind = McpUsageKind::Rejected;
+    rejected.status = "415_Unsupported Media";  // a name is kept as [a-z0-9_]
+    usage_record(usage, rejected);
+    UsageCall rpc;
+    rpc.kind = McpUsageKind::Request;
+    rpc.status = "rpc_error_32601";
+    rpc.at = now + 40;
+    usage_record(usage, rpc);
+
+    const auto doc = parse(usage_detail(usage, "k1", true, "24h", now + 60));
+    CHECK_EQ(std::string(doc["window"].GetString()), std::string("24h"));
+    CHECK_EQ(std::string(doc["from"].GetString()), mcp_iso_utc(now - 23 * hour));
+    CHECK(doc["deleted_at"].IsNull());
+    CHECK(!doc["persisted"].GetBool());
+    CHECK_EQ(std::string(doc["first_used_at"].GetString()), mcp_iso_utc(now + 10));
+    CHECK_EQ(std::string(doc["last_used_at"].GetString()), mcp_iso_utc(now + 40));
+    const auto& totals = doc["totals"];
+    CHECK_EQ(totals["requests"].GetUint64(), uint64_t(7));
+    CHECK_EQ(totals["calls"].GetUint64(), uint64_t(2));
+    CHECK_EQ(totals["errors"].GetUint64(), uint64_t(2));  // the tool that failed and the JSON-RPC error
+    CHECK_EQ(totals["rate_limited"].GetUint64(), uint64_t(1));
+    CHECK_EQ(totals["rejected"].GetUint64(), uint64_t(1));
+    CHECK_EQ(totals["duration_ms_avg"].GetUint64(), uint64_t(21));
+    CHECK_EQ(totals["duration_ms_max"].GetUint64(), uint64_t(30));
+    CHECK_EQ(totals["rows"].GetUint64(), uint64_t(5));
+    CHECK_EQ(totals["bytes"].GetUint64(), uint64_t(300 + 300 + 1000 + 100 + 50 + 50));
+    // One point for each hour, the calls in the current one.
+    CHECK_EQ(std::string(doc["series"]["step"].GetString()), std::string("hour"));
+    CHECK_EQ(doc["series"]["points"].Size(), 24u);
+    CHECK_EQ(std::string(doc["series"]["points"][23]["t"].GetString()), mcp_iso_utc(now));
+    CHECK_EQ(doc["series"]["points"][23]["calls"].GetUint64(), uint64_t(2));
+    CHECK_EQ(doc["series"]["points"][23]["requests"].GetUint64(), uint64_t(7));
+    CHECK_EQ(doc["series"]["points"][0]["calls"].GetUint64(), uint64_t(0));
+    // The tools (the most called first, then by name) and the results: the calls, and the requests that failed.
+    CHECK_EQ(doc["tools"].Size(), 2u);
+    CHECK_EQ(std::string(doc["tools"][0]["tool"].GetString()), std::string("query_table"));
+    CHECK_EQ(usage_count(doc["tools"], "tool", "run_query", "errors"), uint64_t(1));
+    CHECK_EQ(usage_count(doc["tools"], "tool", "query_table", "rows"), uint64_t(5));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "ok", "count"), uint64_t(1));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "timeout", "count"), uint64_t(1));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "429_rate_limited", "count"), uint64_t(1));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "415_unsupported_media", "count"), uint64_t(1));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "rpc_error_32601", "count"), uint64_t(1));
+    CHECK_EQ(doc["statuses"].Size(), 5u);
+    // The clients: the initialize named the client, the requests after it with its User-Agent are its own.
+    CHECK_EQ(doc["clients"].Size(), 2u);
+    CHECK_EQ(std::string(doc["clients"][1]["name"].GetString()), std::string("claude-code"));
+    CHECK_EQ(std::string(doc["clients"][1]["version"].GetString()), std::string("2.1.0"));
+    CHECK_EQ(doc["clients"][1]["requests"].GetUint64(), uint64_t(4));
+    CHECK_EQ(std::string(doc["clients"][0]["user_agent"].GetString()), std::string("agent/1"));
+    CHECK_EQ(std::string(doc["clients"][0]["name"].GetString()), std::string(""));
+
+    // The list: the live keys in their order (zeros for a key that was not used).
+    const auto listed = parse(usage_list(usage, {"k2", "k1"}, "7d", now + 60));
+    CHECK_EQ(listed["keys"].Size(), 2u);
+    CHECK_EQ(std::string(listed["keys"][0]["id"].GetString()), std::string("k2"));
+    CHECK_EQ(listed["keys"][0]["calls"].GetUint64(), uint64_t(0));
+    CHECK(listed["keys"][0]["last_used_at"].IsNull());
+    CHECK_EQ(listed["keys"][1]["calls"].GetUint64(), uint64_t(2));
+    CHECK_EQ(listed["keys"][1]["errors"].GetUint64(), uint64_t(2));
+    CHECK_EQ(listed["keys"][1]["rate_limited"].GetUint64(), uint64_t(1));
+    CHECK_EQ(listed["keys"][1]["rejected"].GetUint64(), uint64_t(1));
+    CHECK_EQ(listed["retention_days"].GetInt64(), int64_t(30));
+    CHECK_EQ(usage.last_used_all().at("k1"), now + 40);
+    CHECK(!usage.last_used_all().count("k2"));
+  }
+
+  // The windows: the last 24 hours by the hour, the last days by the UTC day.
+  {
+    McpUsageOptions options;
+    options.retention_days = 30;
+    McpUsage usage(options, now - 10 * day);
+    for (const int64_t at : {now - 9 * day, now - 25 * hour, now - 2 * hour, now}) {
+      UsageCall call;
+      call.at = at;
+      call.tool = "list_tables";
+      usage_record(usage, call);
+    }
+    const auto calls = [&](const std::string& window) { return parse(usage_detail(usage, "k1", true, window, now))["totals"]["calls"].GetUint64(); };
+    CHECK_EQ(calls("24h"), uint64_t(2));
+    CHECK_EQ(calls("7d"), uint64_t(3));
+    CHECK_EQ(calls("30d"), uint64_t(4));
+    const auto week = parse(usage_detail(usage, "k1", true, "7d", now));
+    CHECK_EQ(std::string(week["series"]["step"].GetString()), std::string("day"));
+    CHECK_EQ(week["series"]["points"].Size(), 7u);
+    CHECK_EQ(week["series"]["points"][6]["calls"].GetUint64(), uint64_t(2));
+    // A clock that goes back counts in the last bucket.
+    UsageCall back;
+    back.at = now - 3 * day;
+    back.tool = "list_tables";
+    usage_record(usage, back);
+    CHECK_EQ(calls("24h"), uint64_t(3));
+  }
+
+  // The retention: older days go, and the memory stays bounded between two saves.
+  {
+    McpUsageOptions options;
+    options.retention_days = 7;
+    McpUsage usage(options, now - 30 * day);
+    for (int64_t i = 30; i >= 0; --i) {
+      UsageCall call;
+      call.at = now - i * day;
+      call.tool = "list_tables";
+      usage_record(usage, call);
+    }
+    CHECK(!mcp_usage_window("30d", 7, now).has_value());
+    CHECK_EQ(parse(usage_detail(usage, "k1", true, "7d", now))["totals"]["calls"].GetUint64(), uint64_t(7));
+    CHECK_EQ(parse(usage_detail(usage, "k1", true, "24h", now))["totals"]["calls"].GetUint64(), uint64_t(1));
+  }
+
+  // A deleted key: its usage stays until the retention ends; a key that was never used, 2 hours.
+  {
+    McpUsageOptions options;
+    options.retention_days = 7;
+    options.max_deleted = 2;
+    McpUsage usage(options, now);
+    for (const char* id : {"a", "b", "c"}) {
+      UsageCall call;
+      call.id = id;
+      call.at = now;
+      call.tool = "list_hosts";
+      usage_record(usage, call);
+    }
+    usage.mark_deleted(usage_key("a"), now + 1);
+    usage.mark_deleted(usage_key("b"), now + 2);
+    auto listed = parse(usage_list(usage, {"c"}, "7d", now + 3));
+    CHECK_EQ(listed["keys"].Size(), 3u);
+    CHECK_EQ(std::string(listed["keys"][1]["id"].GetString()), std::string("b"));  // the last deletion first
+    CHECK_EQ(std::string(listed["keys"][1]["deleted_at"].GetString()), mcp_iso_utc(now + 2));
+    CHECK(contains(usage_detail(usage, "a", false, "7d", now + 3), "\"deleted_at\":\"" + mcp_iso_utc(now + 1) + "\""));
+    // A call that ends after the deletion counts for the deleted key, which stays deleted.
+    UsageCall late;
+    late.id = "a";
+    late.at = now + 4;
+    late.tool = "list_hosts";
+    usage_record(usage, late);
+    CHECK(contains(usage_detail(usage, "a", false, "7d", now + 5), "\"deleted_at\":\"" + mcp_iso_utc(now + 1) + "\""));
+    CHECK_EQ(parse(usage_detail(usage, "a", false, "7d", now + 5))["totals"]["calls"].GetUint64(), uint64_t(2));
+    // At most max_deleted entries: the oldest deletion goes.
+    usage.mark_deleted(usage_key("c"), now + 6);
+    CHECK_EQ(usage_detail(usage, "a", false, "7d", now + 7), std::string(""));
+    CHECK(!usage_detail(usage, "b", false, "7d", now + 7).empty());
+    // A key that was never used: no line in the list, gone after 2 hours.
+    usage.mark_deleted(usage_key("never"), now + 8);
+    CHECK(!usage_detail(usage, "never", false, "7d", now + 9).empty());
+    listed = parse(usage_list(usage, {}, "7d", now + 9));
+    for (const auto& item : listed["keys"].GetArray()) CHECK(std::string(item["id"].GetString()) != "never");
+    usage.save(now + 8 + 2 * hour);
+    CHECK_EQ(usage_detail(usage, "never", false, "7d", now + 9 + 2 * hour), std::string(""));
+    // Older than the retention: gone.
+    usage.save(now + 8 * day);
+    CHECK_EQ(usage_detail(usage, "b", false, "24h", now + 8 * day), std::string(""));
+  }
+
+  // The start: a key that is gone is deleted; a key of the configuration that is back takes its entry again.
+  {
+    McpUsage usage(McpUsageOptions{}, now);
+    for (const char* id : {"gone", "back"}) {
+      UsageCall call;
+      call.id = id;
+      call.at = now;
+      call.tool = "list_hosts";
+      usage_record(usage, call);
+    }
+    usage.mark_deleted(usage_key("back"), now + 1);
+    usage.sync_live_keys({usage_key("back")}, now + 2);
+    CHECK(contains(usage_detail(usage, "gone", false, "24h", now + 3), "\"deleted_at\":\"" + mcp_iso_utc(now + 2) + "\""));
+    CHECK(contains(usage_detail(usage, "back", false, "24h", now + 3), "\"deleted_at\":null"));
+  }
+
+  // The clients: at most 8, the one seen least recently goes; a client without a name takes the one of its initialize.
+  {
+    McpUsage usage(McpUsageOptions{}, now);
+    for (int i = 0; i < 9; ++i) {
+      UsageCall call;
+      call.kind = McpUsageKind::Request;
+      call.at = now + i;
+      call.user_agent = "agent/" + std::to_string(i);
+      usage_record(usage, call);
+    }
+    UsageCall named;
+    named.kind = McpUsageKind::Request;
+    named.at = now + 20;
+    named.user_agent = "agent/8";
+    named.client_name = "inspector";
+    named.client_version = "0.16";
+    usage_record(usage, named);
+    const auto doc = parse(usage_detail(usage, "k1", true, "24h", now + 30));
+    CHECK_EQ(doc["clients"].Size(), 8u);
+    CHECK_EQ(std::string(doc["clients"][0]["name"].GetString()), std::string("inspector"));
+    CHECK_EQ(doc["clients"][0]["requests"].GetUint64(), uint64_t(2));
+    for (const auto& client : doc["clients"].GetArray()) CHECK(std::string(client["user_agent"].GetString()) != "agent/0");
+  }
+
+  // The cells past the cap count as "other".
+  {
+    McpUsageOptions options;
+    options.max_cells = 3;
+    McpUsage usage(options, now);
+    for (const char* status : {"a_error", "b_error", "c_error", "d_error"}) {
+      UsageCall call;
+      call.at = now;
+      call.tool = "list_hosts";
+      call.status = status;
+      usage_record(usage, call);
+    }
+    const auto doc = parse(usage_detail(usage, "k1", true, "24h", now));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "other", "count"), uint64_t(3));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "a_error", "count"), uint64_t(1));
+  }
+
+  // The file: written atomically (0600, no temporary file left), only when something changed, read back by the next start.
+  {
+    const std::string file = dir + "/usage.json";
+    McpUsageOptions options;
+    options.file = file;
+    {
+      McpUsage usage(options, now);
+      CHECK(usage.persisted());
+      CHECK(::access(file.c_str(), F_OK) != 0);  // written at the first save
+      UsageCall call;
+      call.at = now + 5;
+      call.tool = "query_table";
+      call.status = "table_not_allowed";
+      call.client_name = "claude-code";
+      usage_record(usage, call);
+      CHECK(usage.save(now + 6));
+      struct stat st;
+      CHECK(::stat(file.c_str(), &st) == 0 && (st.st_mode & 0777) == 0600);
+      for (const auto& item : std::filesystem::directory_iterator(dir)) CHECK(!contains(item.path().filename().string(), ".tmp"));
+      const auto doc = parse(read_file(file));
+      CHECK_EQ(doc["version"].GetInt(), 1);
+      CHECK_EQ(std::string(doc["since"].GetString()), mcp_iso_utc(now));
+      CHECK_EQ(doc["keys"][0]["hours"][0].Size(), 12u);
+      // Nothing changed: the file is not written again.
+      const std::string before = read_file(file);
+      CHECK(usage.save(now + 7));
+      CHECK_EQ(read_file(file), before);
+      // A failed write keeps the counts to write; a save that is due writes them.
+      usage_record(usage, call);
+      const std::string moved = dir + "-moved";
+      CHECK(::rename(dir.c_str(), moved.c_str()) == 0);
+      CHECK(!usage.save(now + 70));
+      CHECK(::rename(moved.c_str(), dir.c_str()) == 0);
+      CHECK(usage.save_if_due(now + 71));  // due a minute after the last try, not before
+      CHECK_EQ(read_file(file), before);
+      CHECK(usage.save_if_due(now + 131));
+      CHECK(read_file(file) != before);
+    }
+    McpUsage again(options, now + 200);
+    CHECK_EQ(again.since(), now);
+    const auto doc = parse(usage_detail(again, "k1", true, "24h", now + 200));
+    CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(2));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "table_not_allowed", "count"), uint64_t(2));
+    CHECK_EQ(std::string(doc["clients"][0]["name"].GetString()), std::string("claude-code"));
+    CHECK_EQ(again.last_used_all().at("k1"), now + 5);
+  }
+
+  // A file that is not a usage file of this ChDash stops the start, and is never rewritten.
+  {
+    const std::string file = dir + "/bad-usage.json";
+    const std::string since = R"({"version":1,"since":"2026-10-01T00:00:00Z","keys":[)";
+    const std::string entry = R"({"id":"k1","name":"k1","source":"config","host":"prod","first_used_at":null,"last_used_at":null,"deleted_at":null,"clients":[],)";
+    for (const std::string& content : std::vector<std::string>{
+             "not json", "[]", R"({"version":2,"since":"2026-10-01T00:00:00Z","keys":[]})", R"({"version":1,"keys":[]})", since + "{}]}",
+             since + entry + R"("hours":[[1,0,0,0,0,0,0,0,0,0,{},{}]],"days":[]}]})",
+             since + entry + R"("hours":[],"days":[[86400,0,0,0,0,0,0,0,0,0,{"Bad Name":[1,0,0,0,0,0]},{}]]}]})",
+             since + entry + R"("hours":[],"days":[[172800,0,0,0,0,0,0,0,0,0,{},{}],[86400,0,0,0,0,0,0,0,0,0,{},{}]]}]})",
+             since + entry + R"("hours":[],"days":[]},)" + entry + R"("hours":[],"days":[]}]})"}) {
+      write_file(file, content);
+      bool threw = false;
+      try {
+        McpUsageOptions options;
+        options.file = file;
+        McpUsage usage(options, now);
+      } catch (const std::exception&) {
+        threw = true;
+      }
+      CHECK(threw);
+      threw = false;
+      try {
+        mcp_check_usage_file(file);
+      } catch (const std::exception&) {
+        threw = true;
+      }
+      CHECK(threw);
+      CHECK_EQ(read_file(file), content);
+    }
+    // A valid entry reads.
+    write_file(file, since + entry + R"("hours":[],"days":[[86400,1,1,0,0,0,3,3,0,10,{"list_hosts":[1,0,3,3,0,10]},{"ok":1}]]}]})");
+    mcp_check_usage_file(file);
+    bool threw = false;
+    try {
+      mcp_check_usage_file(dir + "/no-such-dir/usage.json");
+    } catch (const std::exception& e) {
+      threw = contains(e.what(), "does not exist");
+    }
+    CHECK(threw);
+    mcp_check_usage_file(dir + "/not-yet.json");  // absent in a directory that exists: no usage yet
   }
 }
 
@@ -945,6 +1389,18 @@ void test_protocol() {
     CHECK(!doc["result"]["capabilities"].HasMember("resources"));
     CHECK_EQ(std::string(doc["result"]["serverInfo"]["version"].GetString()), std::string("9.9"));
     CHECK_EQ(doc["id"].GetInt(), 1);
+  }
+  // initialize keeps who the client is, for the usage of the key (at most 256 bytes each); a client that says nothing is fine.
+  {
+    const auto r = mcp_handle_message(rpc("initialize", R"({"protocolVersion":"2025-06-18","clientInfo":{"name":"claude-code","version":"2.1.0"}})"), all, backend, info, now);
+    CHECK_EQ(r.client_name, std::string("claude-code"));
+    CHECK_EQ(r.client_version, std::string("2.1.0"));
+    const auto quiet = mcp_handle_message(rpc("initialize", R"({"protocolVersion":"2025-06-18","clientInfo":{"name":5}})"), all, backend, info, now);
+    CHECK_EQ(quiet.http_status, 200);
+    CHECK_EQ(quiet.client_name, std::string(""));
+    const auto big = mcp_handle_message(rpc("initialize", R"({"protocolVersion":"2025-06-18","clientInfo":{"name":")" + std::string(1000, 'x') + "\"}}"), all, backend, info, now);
+    CHECK_EQ(big.client_name.size(), size_t(256));
+    CHECK_EQ(mcp_handle_message(rpc("ping"), all, backend, info, now).client_name, std::string(""));
   }
   {
     const auto r = mcp_handle_message(rpc("initialize", R"({"protocolVersion":"1999-01-01"})"), all, backend, info, now);
@@ -2172,7 +2628,7 @@ mcp {
   CHECK(!load(dir, "mcp { enabled = false }\n" + hosts).mcp.enabled);
   CHECK(contains(load_error(dir, "mcp { enabled = false\n key { name = \"x\" } }\n" + hosts), "exactly one of"));
 
-  // The seven startup errors.
+  // The startup errors (docs/mcp.md, "Startup errors"; 8, the usage file, is below 3).
   // 1. enabled with no storage file and no key.
   CHECK(contains(load_error(dir, "mcp { enabled = true }\n" + hosts), "mcp.storage_file"));
   // 2. enabled and no host has mcp_uri.
@@ -2186,6 +2642,33 @@ mcp {
     CHECK(contains(message, bad));
     CHECK_EQ(read_file(bad), std::string("{not json"));
     CHECK(contains(load_error(dir, "mcp { enabled = true\n storage_file = \"" + dir + "/missing-dir/k.json\" }\n" + hosts), "does not exist"));
+  }
+  // 8. the usage file: a file of its own, a usage file of this ChDash (never rewritten when it is not), in a directory that exists.
+  {
+    const std::string keys_file = dir + "/usage-keys.json";
+    const auto with_usage = [&](const std::string& usage, const std::string& more = "") {
+      return "mcp { enabled = true\n storage_file = \"" + keys_file + "\"\n usage_file = \"" + usage + "\"\n" + more + "}\n" + hosts;
+    };
+    const std::string usage = dir + "/usage.json";
+    const AppConfig cfg = load(dir, with_usage(usage, " usage_retention_days = 30\n"));
+    CHECK_EQ(cfg.mcp.usage_file, usage);
+    CHECK_EQ(cfg.mcp.usage_retention_days, int64_t(30));
+    CHECK_EQ(load(dir, hosts).mcp.usage_retention_days, int64_t(90));
+    CHECK(::access(usage.c_str(), F_OK) != 0);  // loading the config never creates the file
+    CHECK(contains(load_error(dir, with_usage(keys_file)), "key file"));
+    CHECK(contains(load_error(dir, with_usage(dir + "/./usage-keys.json")), "key file"));
+    CHECK(contains(load_error(dir, with_usage(usage, " usage_retention_days = 0\n")), "usage_retention_days"));
+    CHECK(contains(load_error(dir, with_usage(usage, " usage_retention_days = 366\n")), "usage_retention_days"));
+    CHECK(contains(load_error(dir, with_usage(dir + "/missing-dir/usage.json")), "does not exist"));
+    const std::string bad = dir + "/bad-usage.json";
+    const std::string newer = R"({"version":2,"since":"2026-10-01T00:00:00Z","keys":[]})";
+    write_file(bad, newer);
+    const std::string message = load_error(dir, with_usage(bad));
+    CHECK(contains(message, "version must be 1"));
+    CHECK(contains(message, "the file is not changed"));
+    CHECK_EQ(read_file(bad), newer);
+    const std::string library = dir + "/usage-library.json";
+    CHECK(contains(load_error(dir, "query_library {\n enabled = true\n file = \"" + library + "\"\n}\n" + with_usage(library)), "query library"));
   }
   // 4. two keys with the same name or the same secret (config and file included).
   const auto key = [](const std::string& name, const std::string& secret_attr, const std::string& tools = "[\"*\"]", const std::string& databases = "[\"*\"]", const std::string& hosts_attr = "[\"prod\"]") {
@@ -2784,6 +3267,7 @@ int main() {
     test_store(d);
   }
   test_store_startup_errors(make_temp_dir());
+  test_usage(make_temp_dir());
   test_rate_limiter();
   test_sql_scanner();
   test_sql_quoting_and_types();

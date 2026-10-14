@@ -19,6 +19,7 @@
 #include "mcp_identity.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
+#include "mcp_usage.hpp"
 #include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -37,6 +38,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_map>
 
 namespace chdash {
 namespace {
@@ -423,6 +425,16 @@ void Server::init_mcp() {
     return std::nullopt;
   };
   mcp_keys_ = std::make_unique<McpKeyStore>(std::move(store));
+  // What each key did: read from its file (an invalid file stopped the start in config.cpp), then the keys that are gone
+  // since the last run are deleted from now on.
+  McpUsageOptions usage;
+  usage.file = cfg_.mcp.usage_file;
+  usage.retention_days = cfg_.mcp.usage_retention_days;
+  const int64_t started = unix_seconds();
+  mcp_usage_ = std::make_unique<McpUsage>(std::move(usage), started);
+  std::vector<McpUsageKeyRef> live;
+  for (const auto& key : mcp_keys_->list()) live.push_back(mcp_usage_key_ref(key));
+  mcp_usage_->sync_live_keys(live, started);
 
   // `this`, never a local: the callback outlives the constructor.
   mcp_db_ = std::make_unique<ClickHouseMcpDatabase>(
@@ -452,6 +464,13 @@ void Server::init_mcp() {
   }
   mcp_api_ = std::make_unique<InProcessMcpApi>(*this);
   mcp_tools_ = std::make_unique<McpTools>(std::move(tools), *mcp_db_, mcp_api_.get());
+}
+
+void Server::save_mcp_usage(bool force) {
+  if (!mcp_usage_) return;
+  const int64_t now = unix_seconds();
+  if (force) mcp_usage_->save(now);
+  else mcp_usage_->save_if_due(now);
 }
 
 // ---- POST /mcp ----------------------------------------------------------------------------------
@@ -489,7 +508,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   // 2. The key.
   const std::string token = bearer_token(req, cfg_.mcp.auth_header);
   const bool standard_header = lower_ascii(cfg_.mcp.auth_header) == "authorization";
-  const auto auth = mcp_keys_->authenticate(token, now);
+  const auto auth = mcp_keys_->authenticate(token);
   if (auth.status != McpKeyStore::AuthStatus::Ok) {
     const char* reason = auth.status == McpKeyStore::AuthStatus::Missing ? "missing" : "unknown";
     audit("-", "request", "", std::string("401_") + reason, elapsed(), 0);
@@ -498,13 +517,40 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     return;
   }
   const McpKey& key = auth.key;
+  const std::string user_agent = req.get_header_value("User-Agent");
+  // A request that came with a key: its audit line, and its count in the usage of the key (mcp_usage.hpp), once its answer
+  // is set (its size is counted).
+  const auto account = [&](McpUsageKind kind, const std::string& what, const std::string& host, const std::string& status, uint64_t rows,
+                           const McpRpcResult* result) {
+    const int64_t duration = elapsed();
+    audit(key.id, what, host, status, duration, rows);
+    if (!mcp_usage_) return;
+    McpUsageEvent event;
+    event.key_id = key.id;
+    event.key_name = key.name;
+    event.key_host = key.hosts.size() == 1 ? std::string_view(key.hosts.front()) : std::string_view();
+    event.key_source = key.source;
+    event.at = now;
+    event.kind = kind;
+    if (result && result->tool_called) event.tool = result->tool;
+    event.status = status;
+    event.duration_ms = duration;
+    event.rows = rows;
+    event.bytes = res.body.size();
+    if (result) {
+      event.client_name = result->client_name;
+      event.client_version = result->client_version;
+    }
+    event.user_agent = user_agent;
+    mcp_usage_->record(event);
+  };
 
   // 3. The rate limit of the key.
   int retry_after = 1;
   if (!mcp_rate_.allow(key.id, steady_ms(), cfg_.mcp.rate_limit_per_minute, &retry_after)) {
-    audit(key.id, "request", "", "429_rate_limited", elapsed(), 0);
     res.set_header("Retry-After", std::to_string(retry_after));
     early(429, "rate_limited", "too many calls for this key; retry in " + std::to_string(retry_after) + " seconds");
+    account(McpUsageKind::RateLimited, "request", "", "429_rate_limited", 0, nullptr);
     return;
   }
 
@@ -512,16 +558,16 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   std::string type = req.get_header_value("Content-Type");
   if (const auto semi = type.find(';'); semi != std::string::npos) type.resize(semi);
   if (lower_ascii(trim_spaces(type)) != "application/json") {
-    audit(key.id, "request", "", "415_unsupported_media_type", elapsed(), 0);
     early(415, "unsupported_media_type", "the request body must be application/json");
+    account(McpUsageKind::Rejected, "request", "", "415_unsupported_media_type", 0, nullptr);
     return;
   }
   const std::string version_header = trim_spaces(req.get_header_value("MCP-Protocol-Version"));
   if (!version_header.empty()) {
     const auto& supported = mcp_protocol_versions();
     if (std::find(supported.begin(), supported.end(), version_header) == supported.end()) {
-      audit(key.id, "request", "", "400_protocol_version", elapsed(), 0);
       early(400, "unsupported_protocol_version", "MCP-Protocol-Version " + version_header + " is not supported");
+      account(McpUsageKind::Rejected, "request", "", "400_protocol_version", 0, nullptr);
       return;
     }
   }
@@ -531,8 +577,8 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   const bool length_is_number = !length_header.empty() && length_header.size() < 19 &&
       std::all_of(length_header.begin(), length_header.end(), [](char c) { return c >= '0' && c <= '9'; });
   if (length_is_number && std::stoull(length_header) > max_body) {
-    audit(key.id, "request", "", "413_too_large", elapsed(), 0);
     early(413, "payload_too_large", "the request body is larger than " + std::to_string(max_body) + " bytes");
+    account(McpUsageKind::Rejected, "request", "", "413_too_large", 0, nullptr);
     return;
   }
   std::string body;
@@ -546,13 +592,13 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     return true;
   });
   if (too_large) {
-    audit(key.id, "request", "", "413_too_large", elapsed(), 0);
     early(413, "payload_too_large", "the request body is larger than " + std::to_string(max_body) + " bytes");
+    account(McpUsageKind::Rejected, "request", "", "413_too_large", 0, nullptr);
     return;
   }
   if (!read_ok) {
-    audit(key.id, "request", "", "400_unreadable", elapsed(), 0);
     early(400, "bad_request", "the request body could not be read");
+    account(McpUsageKind::Rejected, "request", "", "400_unreadable", 0, nullptr);
     return;
   }
 
@@ -572,7 +618,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   std::string status = "ok";
   if (result.rpc_error != 0) status = "rpc_error_" + std::to_string(-result.rpc_error);
   else if (result.tool_called && result.outcome.is_error) status = result.outcome.error_code;
-  audit(key.id, what, result.outcome.host, status, elapsed(), result.outcome.rows);
+  account(result.tool_called ? McpUsageKind::ToolCall : McpUsageKind::Request, what, result.outcome.host, status, result.outcome.rows, &result);
 }
 
 // ---- /api/mcp/* -----------------------------------------------------------------------------------
@@ -715,6 +761,18 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       w.Key("rate_limit_per_minute"); w.Int64(s.rate_limit_per_minute);
       w.EndObject();
       w.Key("name_pattern"); w.String(kMcpNamePattern);
+      // The usage of the keys (mcp_usage.hpp): kept in mcp.usage_file or in memory since the start, and the windows of its answers.
+      w.Key("usage");
+      w.StartObject();
+      w.Key("persisted"); w.Bool(mcp_usage_ && mcp_usage_->persisted());
+      w.Key("retention_days"); w.Int64(s.usage_retention_days);
+      w.Key("windows");
+      w.StartArray();
+      for (const auto& window : mcp_usage_windows(s.usage_retention_days)) put(w, window);
+      w.EndArray();
+      w.Key("default_window"); put(w, mcp_usage_default_window(s.usage_retention_days));
+      w.Key("since"); put(w, mcp_iso_utc(mcp_usage_ ? mcp_usage_->since() : now));
+      w.EndObject();
     }
     w.EndObject();
     api_ok(res, 200, sb);
@@ -732,7 +790,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     Writer w(sb);
     w.StartObject();
     w.Key("key");
-    mcp_write_key(w, *result.key, result.last_used_at);
+    mcp_write_key(w, *result.key, std::nullopt);
     if (with_secret) {
       w.Key("secret");
       put(w, result.secret);
@@ -750,7 +808,12 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     w.StartObject();
     w.Key("keys");
     w.StartArray();
-    for (const auto& item : store.list()) mcp_write_key(w, item.key, item.last_used_at);
+    // When a key was last used is its usage's: kept in mcp.usage_file when it is set.
+    const auto last_used = mcp_usage_ ? mcp_usage_->last_used_all() : std::unordered_map<std::string, int64_t>{};
+    for (const auto& key : store.list()) {
+      const auto used = last_used.find(key.id);
+      mcp_write_key(w, key, used == last_used.end() ? std::nullopt : std::optional<int64_t>(used->second));
+    }
     w.EndArray();
     w.EndObject();
     api_ok(res, 200, sb);
@@ -764,8 +827,8 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     // host may read, cut by the patterns of the key). The grants of a host are read once and kept 60 s, whatever the keys.
     const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
     std::vector<const HostSpec*> hosts;
-    for (const auto& item : store.list()) {
-      const HostSpec* host = item.key.hosts.size() == 1 ? find_host(cfg_.hosts, item.key.hosts.front()) : nullptr;
+    for (const auto& key : store.list()) {
+      const HostSpec* host = key.hosts.size() == 1 ? find_host(cfg_.hosts, key.hosts.front()) : nullptr;
       if (host && !host->mcp_uri.empty()) hosts.push_back(host);
     }
     const std::map<std::string, McpReadable> readable_by_host = mcp_readable_by_host(acl_, client_pool_, hosts, refresh);
@@ -774,8 +837,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     w.StartObject();
     w.Key("keys");
     w.StartArray();
-    for (const auto& item : store.list()) {
-      const McpKey& key = item.key;
+    for (const auto& key : store.list()) {
       w.StartObject();
       w.Key("id"); put(w, key.id);
       const HostSpec* host = key.hosts.size() == 1 ? find_host(cfg_.hosts, key.hosts.front()) : nullptr;
@@ -820,8 +882,8 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
   if (route == McpApiRoute::KeyAccess) {
     const std::string wanted = req.matches.size() > 1 ? std::string(req.matches[1]) : std::string();
     std::optional<McpKey> found;
-    for (const auto& item : store.list()) {
-      if (item.key.id == wanted) found = item.key;
+    for (const auto& key : store.list()) {
+      if (key.id == wanted) found = key;
     }
     if (!found) return api_error(res, 404, "not_found", "no such key");
     const McpKey& key = *found;
@@ -915,6 +977,37 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     api_ok(res, 200, sb);
     return;
   }
+  // What the keys did (mcp_usage.hpp): every key in one answer (the Used column of the page) and one key (its details), in a
+  // window of the usage. A read of the page, as the access above; it never holds SQL, data or a secret.
+  if (route == McpApiRoute::Usage || route == McpApiRoute::KeyUsage) {
+    const int64_t retention = cfg_.mcp.usage_retention_days;
+    const std::string asked = req.has_param("window") ? req.get_param_value("window") : std::string();
+    const auto window = mcp_usage_window(asked.empty() ? mcp_usage_default_window(retention) : asked, retention, now);
+    if (!window) {
+      std::string names;
+      for (const auto& name : mcp_usage_windows(retention)) names += (names.empty() ? "" : ", ") + name;
+      return api_error(res, 400, "validation", "window must be one of " + names, "window", "invalid");
+    }
+    std::vector<McpUsageKeyRef> live;
+    for (const auto& key : store.list()) live.push_back(mcp_usage_key_ref(key));
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    if (route == McpApiRoute::Usage) {
+      mcp_usage_->write_list(w, live, *window, now);
+      audit("-", "keys/usage-summary", "", "ok", 0, 0);
+    } else {
+      const std::string wanted = req.matches.size() > 1 ? std::string(req.matches[1]) : std::string();
+      const McpUsageKeyRef* key = nullptr;
+      for (const auto& item : live) {
+        if (item.id == wanted) key = &item;
+      }
+      // A deleted key answers as long as its usage is kept.
+      if (!mcp_usage_->write_detail(w, wanted, key, *window, now)) return api_error(res, 404, "not_found", "no such key");
+      audit("-", "keys/usage", "", "ok:" + wanted, 0, 0);
+    }
+    api_ok(res, 200, sb);
+    return;
+  }
   if (!store.manage_from_ui()) {
     api_error(res, 403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
     return;
@@ -959,6 +1052,8 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     case McpApiRoute::KeyDelete: {
       const auto result = store.remove(id);
       if (!result.key) return write_failure(result);
+      // Its usage stays until it is older than mcp.usage_retention_days.
+      if (mcp_usage_) mcp_usage_->mark_deleted(mcp_usage_key_ref(*result.key), now);
       audit("-", "keys/delete", "", "ok:" + id, 0, 0);
       rapidjson::StringBuffer sb;
       Writer w(sb);
@@ -973,6 +1068,8 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     case McpApiRoute::KeysList:
     case McpApiRoute::KeyAccess:
     case McpApiRoute::AccessSummary:
+    case McpApiRoute::Usage:
+    case McpApiRoute::KeyUsage:
       break;
   }
   api_error(res, 404, "not_found", "unknown MCP route");

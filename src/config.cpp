@@ -6,6 +6,7 @@
 #include "mcp_identity.hpp"
 #include "mcp_keys.hpp"
 #include "mcp_scope.hpp"
+#include "mcp_usage.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -567,6 +568,26 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
           throw std::runtime_error("mcp.storage_file " + out.storage_file + ": key " + ui.name + " has the same secret as the configuration key " + key.name);
         }
       }
+    }
+  }
+  // 8. The usage file is a file of its own (not the key file, not a library), and a usage file of this ChDash (it is never
+  // rewritten when it is not); its directory exists.
+  if (!out.usage_file.empty()) {
+    const auto same = [](const std::string& a, const std::string& b) {
+      return std::filesystem::path(a).lexically_normal() == std::filesystem::path(b).lexically_normal();
+    };
+    if (!out.storage_file.empty() && same(out.usage_file, out.storage_file)) {
+      throw std::runtime_error("mcp.usage_file " + out.usage_file + " is the key file (mcp.storage_file): the usage needs a file of its own");
+    }
+    for (const auto& library : cfg.query_libraries) {
+      if (same(out.usage_file, library.file)) {
+        throw std::runtime_error("mcp.usage_file " + out.usage_file + " is the file of the query library " + library.name + ": the usage needs a file of its own");
+      }
+    }
+    try {
+      mcp_check_usage_file(out.usage_file);
+    } catch (const std::exception& error) {
+      throw std::runtime_error("mcp.usage_file " + out.usage_file + ": " + error.what() + " (the file is not changed)");
     }
   }
 }

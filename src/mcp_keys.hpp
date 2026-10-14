@@ -150,7 +150,6 @@ public:
     std::string message;
     std::optional<McpKey> key;
     std::string secret;  // set on create, the one time the secret is given
-    std::optional<int64_t> last_used_at;
   };
 
   enum class AuthStatus { Ok, Missing, Unknown };
@@ -170,19 +169,15 @@ public:
   bool can_manage() const { return storage_configured() && options_.manage_from_ui; }
   const McpKeyContext& context() const { return options_.context; }
 
-  struct Listed {
-    McpKey key;
-    std::optional<int64_t> last_used_at;
-  };
   // Config keys first, then UI keys by creation time.
-  std::vector<Listed> list();
+  std::vector<McpKey> list();
 
   // The secret comes once, in the Result of create: the store keeps its hash only.
   Result create(const McpKeyInput& input, int64_t now);
   Result remove(const std::string& id);
 
-  // Constant-time comparison of the hash of `token` with every key.
-  AuthResult authenticate(std::string_view token, int64_t now);
+  // Constant-time comparison of the hash of `token` with every key. When a key was last used is its usage's (mcp_usage.hpp).
+  AuthResult authenticate(std::string_view token);
 
 private:
   Result fail(int status, const char* error, const std::string& message) const;
@@ -194,12 +189,11 @@ private:
   std::vector<McpKey> ui_keys_locked() const;
 
   McpStoreOptions options_;
-  // write_mu_ makes the changes one at a time and is held while the file is written (fsync); mu_ guards keys_ and
-  // last_used_ and is never held during the write, so authenticate() does not wait for a disk.
+  // write_mu_ makes the changes one at a time and is held while the file is written (fsync); mu_ guards keys_ and is
+  // never held during the write, so authenticate() does not wait for a disk.
   std::mutex write_mu_;
   mutable std::mutex mu_;
   std::vector<McpKey> keys_;  // config keys, then UI keys
-  std::unordered_map<std::string, int64_t> last_used_;
 };
 
 // ---- the rate limit -----------------------------------------------------------

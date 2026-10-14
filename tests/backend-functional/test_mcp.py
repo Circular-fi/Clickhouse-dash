@@ -221,7 +221,7 @@ def test_disabled_instance_answers_as_documented():
     meta = api_ok(m("GET", "/api/mcp/meta", base=DISABLED_URL))
     assert meta == {"enabled": False}
     for method, path in [("GET", "/api/mcp/keys"), ("POST", "/api/mcp/keys"), ("DELETE", "/api/mcp/keys/ui_000000000000"),
-                         ("GET", "/api/mcp/keys/ui_000000000000/access")]:
+                         ("GET", "/api/mcp/keys/ui_000000000000/access"), ("GET", "/api/mcp/usage"), ("GET", "/api/mcp/keys/ui_000000000000/usage")]:
         body = {"name": "x"} if method == "POST" else None
         api_error(m(method, path, base=DISABLED_URL, body=body), 404, "mcp_disabled")
     # No route gives a secret again (SEC-009), on any instance.
@@ -273,6 +273,11 @@ def test_meta_and_version():
     assert {observability[n] for n in ("list_metrics", "query_metric", "metrics_series")} == {"metrics"}
     assert set(observability.values()) == {"traces", "logs", "metrics"}
     assert all(t["section"] == "" for t in meta["tools"] if t["group"] != "observability")
+    # The usage of the keys: kept in mcp.usage_file, and the windows of its answers.
+    usage = meta["usage"]
+    assert usage["persisted"] is True and usage["retention_days"] == 90
+    assert usage["windows"] == ["24h", "7d", "30d", "90d"] and usage["default_window"] == "7d"
+    assert usage["since"].endswith("Z")
     assert tools["query_table"]["group"] == "data" and tools["list_hosts"]["group"] == "data"
     assert {tools[n]["group"] for n in ("query_library", "format_sql", "query_execution")} == {"query"}
     # The API tools: one for each read function of the API, in the families of the pages; they need all the data.
@@ -467,9 +472,15 @@ def test_a_tool_the_key_lacks_is_refused():
     fail_tool(MCP_URL, HOSTS_ONLY, "list_databases", {}, "tool_not_allowed")
 
 
+def usage_of(key_id: str, window: str = "24h", base: str | None = None) -> dict:
+    """The usage of a key in a window (GET /api/mcp/keys/<id>/usage), from the page."""
+    return api_ok(m("GET", f"/api/mcp/keys/{key_id}/usage?window={window}", base=base or MCP_URL))
+
+
 @needs_mcp
 def test_rate_limit_per_key():
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+    limited_before = usage_of("rate")["totals"]["rate_limited"]
     seen = None
     for _ in range(140):  # 120 a minute: a burst of 120
         response = post_mcp(MCP_URL, RATE, body)
@@ -485,6 +496,8 @@ def test_rate_limit_per_key():
     # One token comes back every half second.
     time.sleep(1.2)
     assert post_mcp(MCP_URL, RATE, body).status_code == 200
+    # The refusal counts in the usage of the key.
+    assert usage_of("rate")["totals"]["rate_limited"] >= limited_before + 1
 
 
 # ---- schema tools -----------------------------------------------------------------------------------------------------
@@ -952,6 +965,71 @@ def test_key_lifecycle():
 
 
 @needs_mcp
+def test_usage_of_a_key():
+    # What a key did: its requests, tool calls, errors and refusals, by tool and by result, and its clients.
+    key, secret = make_key(new_key_body("usage-key", tools=["list_hosts", "query_table"]))
+    agent = {"User-Agent": "pytest-usage/1"}
+    try:
+        empty = usage_of(key["id"])
+        assert empty["totals"]["calls"] == 0 and empty["last_used_at"] is None and empty["deleted_at"] is None
+        assert empty["clients"] == [] and empty["tools"] == [] and empty["statuses"] == []
+        init = rpc(MCP_URL, secret, "initialize", {"protocolVersion": "2025-06-18", "clientInfo": {"name": "pytest-client", "version": "1.2"}}, headers=agent)
+        assert init.status_code == 200
+        assert rpc(MCP_URL, secret, "tools/list", headers=agent).status_code == 200
+        assert rpc(MCP_URL, secret, "nope/nothing", headers=agent).json()["error"]["code"] == -32601
+        ok = call_tool(MCP_URL, secret, "list_hosts")
+        assert ok["isError"] is False
+        fail_tool(MCP_URL, secret, "query_table", {"host": "local", "database": "chdash_ui", "table": "weather_observations", "limit": 1}, "table_not_allowed")
+        refused = SESSION.post(f"{MCP_URL}/mcp", data="{}", headers={"Authorization": f"Bearer {secret}", "Content-Type": "text/plain"}, timeout=10)
+        assert refused.status_code == 415
+
+        usage = usage_of(key["id"])
+        assert usage["id"] == key["id"] and usage["name"] == "usage-key" and usage["host"] == "local" and usage["source"] == "ui"
+        assert usage["window"] == "24h" and usage["persisted"] is True and usage["retention_days"] == 90
+        totals = usage["totals"]
+        assert totals["requests"] == 6 and totals["calls"] == 2, totals
+        assert totals["errors"] == 2 and totals["rejected"] == 1 and totals["rate_limited"] == 0, totals
+        assert totals["duration_ms_max"] >= totals["duration_ms_avg"] >= 0 and totals["bytes"] > 0
+        assert {t["tool"]: (t["calls"], t["errors"]) for t in usage["tools"]} == {"list_hosts": (1, 0), "query_table": (1, 1)}
+        assert {s["status"]: s["count"] for s in usage["statuses"]} == {
+            "ok": 1, "table_not_allowed": 1, "rpc_error_32601": 1, "415_unsupported_media_type": 1}
+        # One point for each hour; the requests are in the last one (or the one before it, at the turn of an hour).
+        points = usage["series"]["points"]
+        assert usage["series"]["step"] == "hour" and len(points) == 24
+        assert sum(p["calls"] for p in points[-2:]) == 2 and sum(p["requests"] for p in points) == 6
+        # The client named itself in initialize; the requests after it with its User-Agent are its own.
+        named = [c for c in usage["clients"] if c["name"] == "pytest-client"]
+        assert len(named) == 1 and named[0]["version"] == "1.2" and named[0]["user_agent"] == "pytest-usage/1" and named[0]["requests"] == 3
+        assert usage["first_used_at"] <= usage["last_used_at"]
+        # The column of the page: every key in one answer, the same counts.
+        summary = api_ok(m("GET", "/api/mcp/usage?window=7d"))
+        assert summary["window"] == "7d" and summary["persisted"] is True
+        row = next(k for k in summary["keys"] if k["id"] == key["id"])
+        assert (row["requests"], row["calls"], row["errors"], row["rejected"]) == (6, 2, 2, 1)
+        ids = [k["id"] for k in summary["keys"]]
+        assert ids[:len(api_ok(m("GET", "/api/mcp/keys"))["keys"])] == [k["id"] for k in api_ok(m("GET", "/api/mcp/keys"))["keys"]]
+        assert next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])["last_used_at"] == usage["last_used_at"]
+        # Never a secret, never SQL.
+        for text in (json.dumps(usage), json.dumps(summary)):
+            assert secret not in text and secret[9:] not in text and "SELECT" not in text
+        # A window that the retention does not keep, a key that exists nowhere.
+        api_error(m("GET", f"/api/mcp/keys/{key['id']}/usage?window=365d"), 400, "validation", field="window", reason="invalid")
+        api_error(m("GET", "/api/mcp/usage?window=48h"), 400, "validation", field="window", reason="invalid")
+        api_error(m("GET", "/api/mcp/keys/ui_000000000000/usage"), 404, "not_found")
+        assert usage_of(key["id"], "7d")["series"]["step"] == "day"
+        # A deleted key keeps its usage: it is listed after the keys, with when it was deleted.
+        drop_key(key["id"])
+        gone = usage_of(key["id"])
+        assert gone["deleted_at"] and gone["totals"]["calls"] == 2
+        listed = api_ok(m("GET", "/api/mcp/usage"))["keys"]
+        row = next(k for k in listed if k["id"] == key["id"])
+        assert row["deleted_at"] == gone["deleted_at"] and row["calls"] == 2
+        assert all(k["deleted_at"] is None for k in listed[:listed.index(row)] if k["source"] == "config")
+    finally:
+        drop_key(key["id"])
+
+
+@needs_mcp
 def test_key_validation_errors():
     def invalid(body, field, reason, method="POST", path="/api/mcp/keys"):
         response = m(method, path, body=body)
@@ -1040,8 +1118,10 @@ def test_key_routes_cross_site_guard():
         for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}, {"Origin": "https://evil.example.com"}):
             api_error(m("POST", "/api/mcp/keys", body=new_key_body("blocked"), headers=headers), 403, "cross_site_request")
             api_error(m("DELETE", path, headers=headers), 403, "cross_site_request")
-            # The data of a key is read from the ChDash page only, like a change.
+            # The data of a key and what it did are read from the ChDash page only, like a change.
             api_error(m("GET", path + "/access", headers=headers), 403, "cross_site_request")
+            api_error(m("GET", path + "/usage", headers=headers), 403, "cross_site_request")
+            api_error(m("GET", "/api/mcp/usage", headers=headers), 403, "cross_site_request")
         # Same origin passes, by the browser's header or by Origin = Host.
         host = MCP_URL.split("//", 1)[1]
         for headers in ({"Sec-Fetch-Site": "same-origin"}, {"Origin": f"http://{host}"}, {"Sec-Fetch-Site": "none"}):
@@ -1084,8 +1164,35 @@ def test_key_file_holds_the_hash_never_the_secret_and_is_private():
         assert "description" not in stored and "expires_at" not in stored
         # Config keys are never written.
         assert "weather-only" not in text and "all-data" not in text
-        assert not [p for p in Path(DATA_DIR).iterdir() if ".tmp" in p.name]  # no temporary file is left
+        assert not [p for p in Path(DATA_DIR).iterdir() if p.name.startswith(".mcp_keys.json.tmp")]  # no temporary file is left
         assert "enabled" not in stored and "state" not in stored
+    finally:
+        drop_key(key["id"])
+
+
+@needs_data_dir
+def test_usage_file_holds_counts_never_secrets():
+    # The usage file: written by the stop and every minute (mode 0600), counts and names, never a secret or SQL.
+    key, secret = make_key(new_key_body("usage-file", tools=["list_hosts"]))
+    try:
+        assert ok_tool(MCP_URL, secret, "list_hosts")["count"] == 1
+        path = Path(DATA_DIR) / "mcp_usage.json"
+        deadline = time.time() + 75
+        while time.time() < deadline:
+            if path.exists() and key["id"] in path.read_text():
+                break
+            time.sleep(1)
+        assert path.exists() and key["id"] in path.read_text(), "the usage file was not written within a minute"
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        text = path.read_text()
+        assert secret not in text and secret[9:] not in text and "SELECT" not in text
+        document = json.loads(text)
+        assert document["version"] == 1 and document["since"].endswith("Z")
+        entry = next(e for e in document["keys"] if e["id"] == key["id"])
+        assert entry["name"] == "usage-file" and entry["host"] == "local" and entry["source"] == "ui" and entry["deleted_at"] is None
+        hour = entry["hours"][-1]
+        assert len(hour) == 12 and hour[0] % 3600 == 0 and hour[10]["list_hosts"][0] >= 1
+        assert len(entry["days"][-1]) == 12 and entry["days"][-1][0] % 86400 == 0
     finally:
         drop_key(key["id"])
 
@@ -1121,6 +1228,8 @@ def test_keys_survive_a_restart():
     key, secret = make_key(new_key_body("survivor", tools=["list_hosts"], max_rows=9))
     patched = key
     rpc(MCP_URL, secret, "ping")
+    assert ok_tool(MCP_URL, secret, "list_hosts")["count"] == 1
+    used = usage_of(key["id"])
     subprocess.run(RESTART_CMD, shell=True, check=True, timeout=120)
     deadline = time.time() + 60
     while True:
@@ -1132,11 +1241,16 @@ def test_keys_survive_a_restart():
         assert time.time() < deadline, "the instance did not come back"
         time.sleep(0.5)
     try:
+        # The usage was written at the stop: the counts and the last use come back from the usage file.
+        kept = usage_of(key["id"])
+        assert kept["totals"] == used["totals"] and kept["last_used_at"] == used["last_used_at"] and kept["since"] == used["since"]
+        assert next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])["last_used_at"] == used["last_used_at"]
         assert rpc(MCP_URL, secret, "ping").status_code == 200
         again = next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])
         assert again["max_rows"] == 9 and again["created_at"] == patched["created_at"]
         assert again["secret_hint"] == secret[:8]
-        assert again["last_used_at"] is not None  # set by the ping just above, not read from the file
+        assert again["last_used_at"] is not None  # the usage of the key, not the key file
+        assert usage_of(key["id"])["totals"]["requests"] == used["totals"]["requests"] + 1
     finally:
         drop_key(key["id"])
 
@@ -1155,8 +1269,10 @@ def test_read_only_instance():
     # No secret is shown again, of a config key or of a key of the file.
     for key_id in ("ui_0a1b2c3d4e5f", "cfg-reader"):
         assert m("GET", f"/api/mcp/keys/{key_id}/secret", base=RO_URL).status_code == 404
-    # The keys of the file work.
+    # The keys of the file work, and what they do is counted: a read of the page, not a change.
     assert rpc(RO_URL, SEED, "ping").status_code == 200
+    assert api_ok(m("GET", "/api/mcp/keys/ui_0a1b2c3d4e5f/usage", base=RO_URL))["totals"]["requests"] >= 1
+    assert any(k["id"] == "ui_0a1b2c3d4e5f" for k in api_ok(m("GET", "/api/mcp/usage", base=RO_URL))["keys"])
     assert [t["name"] for t in rpc(RO_URL, SEED, "tools/list").json()["result"]["tools"]] == ["list_databases", "list_tables", "describe_table", "query_table"]
     assert ok_tool(RO_URL, SEED, "list_tables", {})["tables"]
     # Every write is refused.
@@ -1176,6 +1292,8 @@ def test_read_only_instance():
 @needs_nostorage
 def test_no_storage_instance():
     meta = api_ok(m("GET", "/api/mcp/meta", base=NOSTORAGE_URL))
+    # No usage_file: the usage is in memory, since the start.
+    assert meta["usage"]["persisted"] is False
     assert meta["storage_configured"] is False and meta["manage_from_ui"] is True and meta["can_manage"] is False
     assert [k["name"] for k in api_ok(m("GET", "/api/mcp/keys", base=NOSTORAGE_URL))["keys"]] == ["only-key"]
     api_error(m("POST", "/api/mcp/keys", base=NOSTORAGE_URL, body=new_key_body()), 409, "storage_not_configured")
@@ -1379,6 +1497,24 @@ def test_startup_error_3_storage_file():
         assert_config_error(result, "storage_file", "version")
     # The directory does not exist.
     assert_config_error(start_binary('mcp {\n enabled = true\n storage_file = "/no/such/dir/keys.json"\n}\n' + HOSTS), "storage_file", "does not exist")
+
+
+@needs_startup
+def test_startup_error_8_usage_file():
+    # The key file is no usage file; a usage file of another shape is refused and never rewritten; its directory must exist.
+    same = 'mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n usage_file = "@DIR@/keys.json"\n' + KEY % "" + "}\n" + HOSTS
+    assert_config_error(start_binary(same), "mcp.usage_file", "key file")
+    content = '{"version": 2, "since": "2026-10-01T00:00:00Z", "keys": []}'
+    with tempfile.TemporaryDirectory() as tmp:
+        os.chmod(tmp, 0o755)
+        (Path(tmp) / "usage.json").write_text(content)
+        os.chmod(Path(tmp) / "usage.json", 0o644)
+        (Path(tmp) / "chdash.hcl").write_text(('mcp {\n enabled = true\n usage_file = "@DIR@/usage.json"\n' + KEY % "" + "}\n" + HOSTS).replace("@DIR@", config_dir(tmp)))
+        os.chmod(Path(tmp) / "chdash.hcl", 0o644)
+        result = subprocess.run(STARTUP_CMD.format(dir=shlex.quote(tmp), name="chdash.hcl"), shell=True, capture_output=True, text=True, timeout=60)
+        assert_config_error(result, "mcp.usage_file", "version must be 1", "the file is not changed")
+        assert (Path(tmp) / "usage.json").read_text() == content
+    assert_config_error(start_binary('mcp {\n enabled = true\n usage_file = "/no/such/dir/usage.json"\n' + KEY % "" + "}\n" + HOSTS), "usage_file", "does not exist")
 
 
 @needs_startup

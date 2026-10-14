@@ -33,7 +33,7 @@ The stop has these steps:
 2. ChDash cancels each running query and sends `KILL QUERY` to ClickHouse. The result stream of each query ends with an `error` event (`error_code: "server_stopping"`) and a `done` event, so the page shows that the server stopped the query.
 3. ChDash kills the ClickHouse query of each export. The ZIP archive ends with an `error.txt` that says that the server stopped. The archive is complete, not cut.
 4. The health threads stop, and the host status streams end.
-5. The listening socket closes: a new connection is refused. The requests in progress end.
+5. The listening socket closes: a new connection is refused. The requests in progress end. ChDash writes the usage of the MCP keys (`mcp.usage_file`, docs/mcp.md), and writes it again once the requests have ended.
 6. ChDash waits for each query thread. Then the process exits with status 0.
 
 `server.shutdown_timeout_ms` (default 10 000) limits the whole stop. When the stop takes longer, or when a second signal comes, the process exits at once with status 1 (log line `server.shutdown_timeout` or `server.signal_again`). Give the container more time than this limit: `stop_grace_period: 15s` in compose, `terminationGracePeriodSeconds: 15` in Kubernetes. `init: true` is not necessary, but it does no harm.
@@ -118,6 +118,7 @@ The events:
 | `query.cancel_failed` | A cancel could not reach ClickHouse. |
 | `query.kill_failed` | A `KILL QUERY` of a cancel did not work (a missing grant or a lost connection): the cancel stays best effort. |
 | `mcp.tool_failed` | A tool of MCP failed with an exception: the tool, the key and the cut text of the error. |
+| `mcp.usage_save_failed` | The usage file of the MCP keys (`mcp.usage_file`) could not be written: the file and the error. The counts stay in memory and the next save (a minute later) tries again. |
 | `traces.index_fallback`, `traces.estimate_failed`, `traces.filters_are_broad_failed`, `traces.release_markers_failed`, `traces.attribute_maps_failed` | A Traces route left its fast path: the index search, the estimate of the size of a window, the test of broad filters, the release markers, or the read of the attribute columns. The answer is still given, slower or with less detail (the search says `fallback_reason`). |
 | `query_library` | A load, a migration or a write error of the query library file. |
 
@@ -169,7 +170,7 @@ ChDash has no login. A page of another site must not be able to use the browser 
 - Without `Sec-Fetch-Site` (an older browser), an `Origin` header must name this server: the `Host` header, or the first `X-Forwarded-Host`. Otherwise the answer is 403 `cross_site_request`. A proxy that changes `Host` must set `X-Forwarded-Host`.
 - A request with a body must send `Content-Type: application/json`. Otherwise the answer is 415 `unsupported_media_type`. A page of another site cannot send this type without a CORS preflight, and ChDash never allows a preflight.
 
-A client that is not a browser (curl, a script, a test) sends neither header and passes. `POST /mcp` has its own rules (`mcp.allowed_origins`, docs/mcp.md). The routes of the MCP page that show a secret or what a key reaches (`GET .../secret`, `GET .../access`, `GET /api/mcp/access`) also refuse a cross-site request.
+A client that is not a browser (curl, a script, a test) sends neither header and passes. `POST /mcp` has its own rules (`mcp.allowed_origins`, docs/mcp.md). The routes of the MCP page that show a secret, what a key reaches or what it did (`GET .../secret`, `GET .../access`, `GET /api/mcp/access`, `GET /api/mcp/usage`, `GET .../usage`) also refuse a cross-site request.
 
 ### Static assets
 
