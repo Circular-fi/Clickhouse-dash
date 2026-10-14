@@ -1795,8 +1795,8 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
   const folderWrap = formField("folder_id", "Folder", folder.el);
   fields.append(nameWrap, descriptionWrap, folderWrap);
 
-  // The SQL: Save writes it as the formatter does unless "Save raw" keeps it as typed. A History run that was formatted
-  // has its text; the others wait for the formatter (a script it rejects is saved as typed, the box is ticked and locked).
+  // The SQL: Save writes it as the formatter does unless the Formatted switch is released (as typed). A History run that was
+  // formatted has its text; the others wait for the formatter (a script it rejects is saved as typed, the switch released and locked).
   const sqlBox = h("div", { class: "uiField qlForm__sql" });
   sqlBox.setAttribute("role", "group");
   const sqlLabel = h("span", { class: "uiField__label", id: "qlFormSqlLabel" });
@@ -1804,40 +1804,42 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
   const sqlHead = h("div", { class: "qlForm__sqlHead" }, sqlLabel);
   const sqlBody = h("div", { class: "qlForm__sqlBody" });
   sqlBox.append(sqlHead, sqlBody);
-  let raw = null;
-  let rawLabel = null;
+  let formattedSwitch = null;
+  let asTyped = false; // the Formatted switch is released: the text is saved as typed
   let formattedText = fromHistory?.formatted ? String(fromHistory.sql || "") : null;
   let formatting = null;
-  const chosen = () => (mode !== "save" ? sqlText : raw.checked || !formattedText ? rawText : formattedText);
-  // The formatter changed nothing: there is one text to save, and "Save raw" would offer a choice that is not one.
+  const chosen = () => (mode !== "save" ? sqlText : asTyped || !formattedText ? rawText : formattedText);
+  // The formatter changed nothing: there is one text to save, and the Formatted switch would offer a choice that is not one.
   const sameText = () => !!formattedText && formattedText.trim() === rawText.trim();
   const drawSql = () => {
     if (mode === "save") {
       const source = fromHistory ? "from History" : "from the editor";
       const same = sameText();
-      rawLabel.hidden = same;
-      sqlLabel.textContent = `SQL (${source}${same ? "" : raw.checked || !formattedText ? (formatting ? ", formatting\u2026" : "") : ", formatted"})`;
+      formattedSwitch.hidden = same;
+      sqlLabel.textContent = `SQL (${source}${!same && formatting ? ", formatting\u2026" : ""})`;
     } else {
       sqlLabel.textContent = "SQL";
     }
-    sqlBody.replaceChildren(sqlPreview(chosen(), PANE_SQL_CHARS, { pane: true }));
+    const block = sqlPreview(chosen(), PANE_SQL_CHARS, { pane: true });
+    // The Formatted switch sits in the block, left of its copy button, as in a result's statement.
+    if (formattedSwitch) block.appendChild(formattedSwitch);
+    sqlBody.replaceChildren(block);
   };
   if (mode === "save") {
-    raw = h("input", { type: "checkbox", name: "raw", id: "qlSaveRaw" });
-    // A small, quiet option at the end of the SQL's heading: the formatted text is what most saves want.
-    const rawTextEl = h("span", { class: "qlRawToggle__text" }, "Save raw");
-    rawLabel = h("label", { class: "qlRawToggle", for: "qlSaveRaw", title: "Keep the query as typed, without formatting." }, raw, rawTextEl);
-    sqlHead.appendChild(rawLabel);
-    raw.addEventListener("change", drawSql);
+    // The Formatted switch of the results (drawSql puts it in the block): the formatted text is what most saves want.
+    formattedSwitch = sqlBlock.formatSwitch({ rawName: "as typed", onChange: (on) => { asTyped = !on; drawSql(); } });
+    formattedSwitch.id = "qlSaveFormatted";
+    formattedSwitch.classList.add("sqlBlock__mode");
     if (!formattedText) {
+      formattedSwitch.disabled = true;
       formatting = sqlMod.formatText(ctl.host, rawText).then(
-        (text) => { formattedText = text || null; },
+        (text) => { formattedText = text || null; formattedSwitch.disabled = !formattedText; },
         () => {
           formattedText = null;
-          raw.checked = true;
-          raw.disabled = true;
-          rawTextEl.textContent = "Saved as typed";
-          rawLabel.title = "The formatter does not accept this query: it is saved as typed.";
+          asTyped = true;
+          formattedSwitch.disabled = true;
+          formattedSwitch.setAttribute("aria-pressed", "false");
+          formattedSwitch.title = "The formatter does not accept this query: it is saved as typed.";
         },
       ).then(() => {
         formatting = null;

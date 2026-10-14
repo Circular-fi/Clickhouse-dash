@@ -2,11 +2,11 @@
 // blocks of a batch of statements. The table itself is app_results_table.js: this panel has one for the result of a query and
 // each statement of a batch has its own. The values, the cells, the sort and the row details are the modules app_results_*.js.
 import { dom } from "./app_dom.js";
-import { setNullCell } from "./app_results_cells.js";
+import { setNullCell, useSqlFormatter } from "./app_results_cells.js";
 import { closeRowDetails, closeRowDetailsMenu } from "./app_results_rowdetails.js";
 import { createStaticResultTable } from "./app_results_static.js";
 import { createLiveTable } from "./app_results_table.js";
-import { flattenTupleTableData, parseChType, resultCsvText, resultJsonText, serialize, valueText } from "./app_results_values.js";
+import { flattenTupleTableData, parseChType, resultCopyJsonText, resultCsvText, serialize, valueText } from "./app_results_values.js";
 import { state } from "./app_state.js";
 import { copy } from "./app_ui_copy.js";
 import { uiState } from "./app_ui_state.js";
@@ -225,7 +225,7 @@ function terminalErrorText(status, error) {
 function buildCopyJsonText() {
   const err = terminalErrorText(currentStatusValue, lastErrorMessage);
   if (err) return err;
-  return resultJsonText(mainTable?.columns() || [], mainTable?.typeAsts() || [], mainTable?.rows() || []);
+  return resultCopyJsonText(mainTable?.columns() || [], mainTable?.typeAsts() || [], mainTable?.rows() || []);
 }
 
 function buildCopyCsvText() {
@@ -381,7 +381,7 @@ function beginMultiqueryPanel({ index = 0, total = 1, autoToggle = true } = {}) 
   // without rows copies its error.
   const errorWithoutRows = () => (errorText && !table.rowCount() ? errorText : "");
   const copyText = (format) => errorWithoutRows()
-    || (format === "csv" ? resultCsvText : resultJsonText)(table.columns(), table.typeAsts(), table.rows());
+    || (format === "csv" ? resultCsvText : resultCopyJsonText)(table.columns(), table.typeAsts(), table.rows());
   const copyCtrl = createCopySplitSmall({
     getJsonText: () => copyText("json"),
     getCsvText: () => copyText("csv"),
@@ -536,6 +536,7 @@ function mountMainChart() {
 
 function use(parts = {}) {
   queryChart = parts.queryChart || null;
+  useSqlFormatter(parts.formatSql || null);
   mountMainChart();
 }
 

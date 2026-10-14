@@ -106,16 +106,16 @@ test('trace: the critical path is a strip on the lower edge of the bar, never ac
 
 const GAP_SQL = `SELECT toDateTime('2026-01-01 00:00:00') + INTERVAL number HOUR AS t, 10 AS v FROM numbers(24) WHERE number NOT IN (10, 11, 12) ORDER BY t`;
 
-test('query chart: rows missing on a regular time axis break the line; "Connect gaps" joins it', async ({ page }) => {
+test('query chart: rows missing on a regular time axis break the line; "Missing values" Connect joins it, Zero fills it', async ({ page }) => {
   await page.goto('/query');
   await runSuccessfulQuery(page, GAP_SQL);
   await page.locator('.segmented__option[data-view="chart"]').first().click();
   const chart = page.locator('.queryChart .chartCore').first();
   await expect(chart.locator('canvas.chartCore__canvas')).toBeVisible({ timeout: 20_000 });
-  const gaps = page.locator('.queryChart__gaps');
-  await expect(gaps).toBeVisible();
-  await expect(gaps).toHaveAttribute('aria-pressed', 'false');
-  await expect(gaps).toHaveAttribute('title', /^1 gap: /);
+  // One stop of the data (hours 10..12): the engine counts it, and the setting is in Chart details.
+  await expect(chart).toHaveAttribute('data-gaps', '1');
+  const missing = page.locator('.queryChart .tracePicker:has(> select[data-cfg="missing"])');
+  await expect(missing.locator('.tracePicker__button')).toContainText('Gap');
   const box = await plotBox(chart);
   const [, , , plotHeight] = [0, 0, 0, box.height];
   // The values are one constant: the line is horizontal, at the middle of the plot. Hours 0..9 and 13..23 are present
@@ -130,9 +130,14 @@ test('query chart: rows missing on a regular time axis break the line; "Connect 
   };
   expect(await inked(4.5)).toBeGreaterThan(150);
   expect(await inked(11)).toBeLessThan(80);
-  await gaps.click();
-  await expect(gaps).toHaveAttribute('aria-pressed', 'true');
+  await missing.locator('.tracePicker__button').click();
+  await missing.locator('.tracePicker__option[data-value="connect"]').click();
   await expect.poll(() => inked(11)).toBeGreaterThan(150);
+  // Zero: the hours without a row read as 0, so there is no stop left and the line dips to the bottom.
+  await missing.locator('.tracePicker__button').click();
+  await missing.locator('.tracePicker__option[data-value="zero"]').click();
+  await expect(chart).toHaveAttribute('data-gaps', '0');
+  await expect.poll(() => inked(11)).toBeLessThan(80);
 });
 
 test('query chart: a series that is not on a regular step keeps its line (event times are not gaps)', async ({ page }) => {
@@ -141,7 +146,7 @@ test('query chart: a series that is not on a regular step keeps its line (event 
   await page.locator('.segmented__option[data-view="chart"]').first().click();
   const chart = page.locator('.queryChart .chartCore').first();
   await expect(chart.locator('canvas.chartCore__canvas')).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('.queryChart__gaps')).toBeHidden();
+  await expect(chart).toHaveAttribute('data-gaps', '0');
 });
 
 // --- Traces: a range the server shortens is said (UI-008) --------------------------------------------------------------

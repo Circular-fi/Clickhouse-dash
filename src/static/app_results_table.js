@@ -218,10 +218,11 @@ function createLiveTable({ wrap, host = {} }) {
 
   function resetTableMode() {
     isVerticalResults = false;
-    if (table) table.classList.remove("resultTable--vertical");
+    if (table) table.classList.remove("resultTable--vertical", "resultTable--single");
   }
 
   function clearTable() {
+    if (table) table.classList.remove("resultTable--single");
     if (thead) thead.replaceChildren();
     if (tbody) tbody.replaceChildren();
   }
@@ -785,15 +786,14 @@ function createLiveTable({ wrap, host = {} }) {
   function simplifySingleValueTable() {
     if (!thead || !tbody) return null;
 
-    const headRow = document.createElement("tr");
-    const th = document.createElement("th");
+    // One value needs no column title above it: the table keeps the name for assistive technology only.
     const colName = String((Array.isArray(resultColumns) && resultColumns[0]) ?? "");
-    th.textContent = colName;
-    th.title = resultTypes[0] || colName;
-    headRow.appendChild(th);
-
     thead.replaceChildren();
-    thead.appendChild(headRow);
+    const tableEl = thead.closest("table");
+    if (tableEl) {
+      tableEl.setAttribute("aria-label", resultTypes[0] ? `${colName} (${resultTypes[0]})` : colName);
+      tableEl.classList.add("resultTable--single");
+    }
 
     let tr = $("tr", tbody);
     if (!tr) {

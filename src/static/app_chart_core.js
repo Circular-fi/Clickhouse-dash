@@ -586,6 +586,26 @@ function logTicks(lo, hi) {
 
 // --- Chart ------------------------------------------------------------------
 
+// The step of an ascending time axis whose points sit on one regular spacing (a row per hour): the median
+// spacing, taken when at least half of the spacings equal it (within 1 %); 0 for an irregular axis (event times,
+// months) and for fewer than 4 points.
+function regularStep(xs) {
+  const n = xs ? xs.length : 0;
+  if (n < 4) return 0;
+  const stride = Math.max(1, Math.floor((n - 1) / 4096));
+  const deltas = [];
+  for (let i = 1; i < n; i += stride) {
+    const d = xs[i] - xs[i - 1];
+    if (d > 0) deltas.push(d);
+  }
+  if (deltas.length < 3) return 0;
+  deltas.sort((a, b) => a - b);
+  const step = deltas[deltas.length >> 1];
+  let regular = 0;
+  for (const d of deltas) if (Math.abs(d - step) <= step * 0.01) regular++;
+  return regular * 2 >= deltas.length ? step : 0;
+}
+
 function create(host, initial = {}) {
   const root = document.createElement("div");
   root.className = "chartCore";
@@ -736,6 +756,17 @@ function create(host, initial = {}) {
     const n = opts.xs.length;
     const state = new Map();
     stacks = new Map();
+    // stackMode "percent": each x shows the shares of its group, out of 100.
+    const totals = new Map();
+    if (opts.stackMode === "percent") {
+      for (const s of visibleSeries()) {
+        if (ownMark(s)) continue;
+        const key = s.group == null ? "" : String(s.group);
+        if (!totals.has(key)) totals.set(key, new Float64Array(n));
+        const sum = totals.get(key);
+        for (let i = 0; i < n; i++) { const v = s.values[i]; if (v === v) sum[i] += Math.abs(v); }
+      }
+    }
     for (const s of visibleSeries()) {
       if (ownMark(s)) continue;
       const key = s.group == null ? "" : String(s.group);
@@ -745,9 +776,10 @@ function create(host, initial = {}) {
       const base = new Float64Array(n);
       counters.allocBytes += 16 * n;
       const values = s.values;
+      const sum = totals.get(key);
       for (let i = 0; i < n; i++) {
         const v = values[i];
-        const value = v === v ? v : 0;
+        const value = v === v ? (sum ? (sum[i] > 0 ? v / sum[i] * 100 : 0) : v) : 0;
         if (st.neg && value < 0) {
           base[i] = st.neg[i];
           top[i] = st.neg[i] + value;
@@ -897,6 +929,13 @@ function create(host, initial = {}) {
       if (yMin !== 0) yMin -= pad;
     }
 
+    // yBounds [min, max]: a fixed edge (null: the data's own); a pair that does not leave a range is ignored.
+    if (Array.isArray(opts.yBounds)) {
+      const lo = Number.isFinite(opts.yBounds[0]) ? opts.yBounds[0] : yMin;
+      const hi = Number.isFinite(opts.yBounds[1]) ? opts.yBounds[1] : yMax;
+      if (hi > lo) { yMin = lo; yMax = hi; }
+    }
+
     const xTwoLines = opts.xKind === "time" && !opts.xDateOnly;
     const bottom = xTwoLines ? 34 : 22;
     const padTop = PAD_TOP + ((opts.annotations || []).some((m) => m && m.label) ? ANNOTATION_GUTTER : 0);
@@ -1034,6 +1073,8 @@ function create(host, initial = {}) {
     root.dataset.seriesWashed = String(stats.washed || 0);
     root.dataset.xMin = String(L.xLo);
     root.dataset.xMax = String(L.xHi);
+    root.dataset.interpolation = interpolation();
+    root.dataset.gaps = String(gapInfo().count);
     root.dataset.yMin = String(L.yMin);
     root.dataset.yMax = String(L.yMax);
     root.dataset.zoomed = String(!!zoom);
@@ -1129,23 +1170,12 @@ function create(host, initial = {}) {
     const n = xs ? xs.length : 0;
     if (opts.xKind !== "time" || opts.type === "bar" || n < 4) return { limit: Infinity, count: 0 };
     if (gapCache.xs === xs && gapCache.n === n) return gapCache;
-    const stride = Math.max(1, Math.floor((n - 1) / 4096));
-    const deltas = [];
-    for (let i = 1; i < n; i += stride) {
-      const d = xs[i] - xs[i - 1];
-      if (d > 0) deltas.push(d);
-    }
     let limit = Infinity;
     let count = 0;
-    if (deltas.length >= 3) {
-      deltas.sort((a, b) => a - b);
-      const step = deltas[deltas.length >> 1];
-      let regular = 0;
-      for (const d of deltas) if (Math.abs(d - step) <= step * 0.01) regular++;
-      if (regular * 2 >= deltas.length) {
-        limit = step * GAP_FACTOR;
-        for (let i = 1; i < n; i++) if (xs[i] - xs[i - 1] > limit) count++;
-      }
+    const step = regularStep(xs);
+    if (step) {
+      limit = step * GAP_FACTOR;
+      for (let i = 1; i < n; i++) if (xs[i] - xs[i - 1] > limit) count++;
     }
     gapCache = { xs, n, limit, count };
     return gapCache;
@@ -1345,16 +1375,13 @@ function create(host, initial = {}) {
   // A stroke through every column's first / low / high / last value (a
   // zigzag of thousands of tall segments) took 100 ms and more to
   // rasterise per frame; the rects need no antialiasing pass.
-  function drawColumns(ctx, L, s, c, alpha) {
+  function drawColumns(ctx, L, s, c, alpha, wash) {
     const n = colCount;
-    const lw = 1.5;
-    if (opts.fill !== false && visibleSeries().length === 1) {
+    const lw = lineW(1.5);
+    if (wash) {
       washedSeries++;
       // The wash under a single series, along each column's top.
       const baseY = Math.min(L.top + L.plotH, Math.max(L.top, L.yOf(Math.max(L.yMin, Math.min(0, L.yMax)))));
-      const grad = ctx.createLinearGradient(0, L.top, 0, L.top + L.plotH);
-      grad.addColorStop(0, rgba(c, 0.14 * alpha));
-      grad.addColorStop(1, rgba(c, 0));
       ctx.beginPath();
       for (let a = 0; a < n;) {
         let b = a + 1;
@@ -1368,7 +1395,7 @@ function create(host, initial = {}) {
         }
         a = b;
       }
-      ctx.fillStyle = grad;
+      ctx.fillStyle = washStyle(ctx, L, c, alpha, wash);
       ctx.fill();
     }
     const color = rgba(c, alpha);
@@ -1412,13 +1439,62 @@ function create(host, initial = {}) {
 
   const runEnd = (r) => (r + 1 < runs.length ? runs[r + 1] : vCount);
 
+  // Line interpolation (opts.interpolation): "linear" (the default), "smooth" (a monotone cubic: no
+  // overshoot past the data), "stepBefore" (the value of a point holds back to the previous one) and
+  // "stepAfter" (it holds on to the next one).
+  const interpolation = () => (opts.interpolation === "smooth" || opts.interpolation === "stepBefore" || opts.interpolation === "stepAfter" ? opts.interpolation : "linear");
+  let secants = new Float64Array(0);
+  let tangents = new Float64Array(0);
+
+  // The vertices a..b-1 of X / Y added to the path, forward or backward (an area's base comes back). `join`: the
+  // pen is already where the first one is; otherwise it moves there.
+  function runTo(ctx, X, Y, a, b, back, join) {
+    const first = back ? b - 1 : a;
+    if (join) ctx.lineTo(X[first], Y[first]); else ctx.moveTo(X[first], Y[first]);
+    if (b - a < 2) return;
+    const mode = interpolation();
+    if (mode === "smooth") { smoothRun(ctx, X, Y, a, b, back); return; }
+    const step = back ? -1 : 1;
+    const last = back ? a : b - 1;
+    for (let k = first; k !== last; k += step) {
+      const next = k + step;
+      const lo = Math.min(k, next), hi = Math.max(k, next);
+      if (mode === "stepBefore") ctx.lineTo(X[lo], Y[hi]);
+      else if (mode === "stepAfter") ctx.lineTo(X[hi], Y[lo]);
+      ctx.lineTo(X[next], Y[next]);
+    }
+  }
+
+  // Fritsch-Butland tangents: the curve keeps the direction of the data, so it never swings past a value.
+  function smoothRun(ctx, X, Y, a, b, back) {
+    const n = b - a;
+    if (secants.length < n) { secants = new Float64Array(Math.max(n, 2 * secants.length)); tangents = new Float64Array(secants.length); }
+    for (let j = 0; j < n - 1; j++) {
+      const dx = X[a + j + 1] - X[a + j];
+      secants[j] = dx > 0 ? (Y[a + j + 1] - Y[a + j]) / dx : 0;
+    }
+    tangents[0] = secants[0];
+    tangents[n - 1] = secants[n - 2];
+    for (let j = 1; j < n - 1; j++) {
+      const d0 = secants[j - 1], d1 = secants[j];
+      if (d0 * d1 <= 0) { tangents[j] = 0; continue; }
+      const h0 = X[a + j] - X[a + j - 1], h1 = X[a + j + 1] - X[a + j];
+      tangents[j] = 3 * (h0 + h1) / ((2 * h1 + h0) / d0 + (h1 + 2 * h0) / d1);
+    }
+    const curve = (j) => {
+      const x0 = X[a + j], y0 = Y[a + j], x1 = X[a + j + 1], y1 = Y[a + j + 1];
+      const t = (x1 - x0) / 3;
+      const c0x = x0 + t, c0y = y0 + tangents[j] * t, c1x = x1 - t, c1y = y1 - tangents[j + 1] * t;
+      if (back) ctx.bezierCurveTo(c1x, c1y, c0x, c0y, x0, y0);
+      else ctx.bezierCurveTo(c0x, c0y, c1x, c1y, x1, y1);
+    };
+    if (back) for (let j = n - 2; j >= 0; j--) curve(j);
+    else for (let j = 0; j < n - 1; j++) curve(j);
+  }
+
   function pathLine(ctx) {
     ctx.beginPath();
-    for (let r = 0; r < runs.length; r++) {
-      const a = runs[r], b = runEnd(r);
-      ctx.moveTo(vx[a], vy[a]);
-      for (let k = a + 1; k < b; k++) ctx.lineTo(vx[k], vy[k]);
-    }
+    for (let r = 0; r < runs.length; r++) runTo(ctx, vx, vy, runs[r], runEnd(r), false, false);
   }
 
   // Closed shapes between the line and its base (an array, or one y).
@@ -1427,59 +1503,80 @@ function create(host, initial = {}) {
     for (let r = 0; r < runs.length; r++) {
       const a = runs[r], b = runEnd(r);
       if (b - a < 2) continue;
-      ctx.moveTo(vx[a], vy[a]);
-      for (let k = a + 1; k < b; k++) ctx.lineTo(vx[k], vy[k]);
-      if (baseY == null) for (let k = b - 1; k >= a; k--) ctx.lineTo(vx[k], vb[k]);
+      runTo(ctx, vx, vy, a, b, false, false);
+      if (baseY == null) runTo(ctx, vx, vb, a, b, true, true);
       else { ctx.lineTo(vx[b - 1], baseY); ctx.lineTo(vx[a], baseY); }
       ctx.closePath();
     }
   }
 
+  // The width of a line: opts.lineWidth, else the mark's own.
+  const lineW = (own) => (opts.lineWidth > 0 ? opts.lineWidth : own);
+
+  // The fill under a line: opts.fillOpacity (0..1) on every line; unset, a light wash under a lone
+  // series ("auto"), and 0.3 under each line of an area that is not stacked.
+  function washOf(unstackedArea) {
+    if (Number.isFinite(opts.fillOpacity)) return opts.fillOpacity;
+    if (unstackedArea) return 0.3;
+    return opts.fill !== false && visibleSeries().length === 1 ? "auto" : 0;
+  }
+
+  function washStyle(ctx, L, c, alpha, wash) {
+    if (wash !== "auto") return rgba(c, wash * alpha);
+    const grad = ctx.createLinearGradient(0, L.top, 0, L.top + L.plotH);
+    grad.addColorStop(0, rgba(c, 0.14 * alpha));
+    grad.addColorStop(1, rgba(c, 0));
+    return grad;
+  }
+
   function drawSeries(ctx, L, s) {
     const c = seriesColor(s);
     const alpha = alphaFor(s);
-    const type = s.type || opts.type;
+    let type = s.type || opts.type;
     const nulls = s.nulls || null;
     const st = stacks && stacks.get(s.id);
     if (type === "area" && st) {
       // Fill between this series' top and its base, then stroke the top.
       trace(L, st.top, null, st.base);
       pathFill(ctx, null);
-      ctx.fillStyle = rgba(c, 0.3 * alpha);
+      ctx.fillStyle = rgba(c, (Number.isFinite(opts.fillOpacity) ? opts.fillOpacity : 0.3) * alpha);
       ctx.fill();
       pathLine(ctx);
       ctx.strokeStyle = rgba(c, alpha);
-      ctx.lineWidth = 1.25;
+      ctx.lineWidth = lineW(1.25);
       ctx.lineJoin = "round";
       ctx.stroke();
       return vCount;
     }
+    // An area that is not stacked: each series is a line with its own fill.
+    const unstackedArea = type === "area";
+    if (unstackedArea) type = "line";
     // A line of few values (few rows, or a sparse series between gaps)
-    // marks each of them.
+    // marks each of them (opts.showPoints: "always" marks all, "never" none).
     const maxPoints = L.plotW / POINTS_AUTO_SPACING;
     let count = 0;
     if (type === "line") for (let i = L.v0; i < L.v1 && count <= maxPoints; i++) if (s.values[i] === s.values[i]) count++;
-    const showPoints = type === "points" || (type === "line" && count > 0 && count <= maxPoints);
+    const marks = opts.showPoints === "always" ? "always" : opts.showPoints === "never" ? "never" : "auto";
+    const showPoints = type === "points" || (type === "line" && (marks === "always" ? true : marks === "auto" && count > 0 && count <= maxPoints));
     if (showPoints && type === "line") markedSeries++;
+    const radius = opts.pointSize > 0 ? opts.pointSize / 2 : 2.6;
     let drawn = 0;
     if (type === "line") {
+      const wash = washOf(unstackedArea);
       trace(L, s.values, nulls, null, s.derived ? null : summaryOf(s));
-      if (decimated) return drawColumns(ctx, L, s, c, alpha);
+      if (decimated) return drawColumns(ctx, L, s, c, alpha, wash);
       drawn = vCount;
       // Grafana's "opacity" gradient: a light wash under each line.
-      if (opts.fill !== false && visibleSeries().length === 1) {
+      if (wash) {
         washedSeries++;
         const baseY = Math.min(L.top + L.plotH, Math.max(L.top, L.yOf(Math.max(L.yMin, Math.min(0, L.yMax)))));
-        const grad = ctx.createLinearGradient(0, L.top, 0, L.top + L.plotH);
-        grad.addColorStop(0, rgba(c, 0.14 * alpha));
-        grad.addColorStop(1, rgba(c, 0));
         pathFill(ctx, baseY);
-        ctx.fillStyle = grad;
+        ctx.fillStyle = washStyle(ctx, L, c, alpha, wash);
         ctx.fill();
       }
       pathLine(ctx);
       ctx.strokeStyle = rgba(c, alpha);
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = lineW(1.5);
       // Round joins only where angles show: a decimated line is mostly
       // vertical strokes, which rasterise much cheaper with bevels.
       ctx.lineJoin = decimated ? "bevel" : "round";
@@ -1509,8 +1606,8 @@ function create(host, initial = {}) {
         if (v !== v) continue;
         const x = L.xOf(category ? i : xs[i]);
         const y = L.yOf(v);
-        ctx.moveTo(x + 2.6, y);
-        ctx.arc(x, y, 2.6, 0, Math.PI * 2);
+        ctx.moveTo(x + radius, y);
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
         dots++;
       }
       ctx.fillStyle = rgba(c, alpha);
@@ -2526,6 +2623,11 @@ function create(host, initial = {}) {
   //   yTickFormat(v, step)  y tick labels.
   //   yAxis(min, max, plotH) -> { min, max, ticks: [{ v, label }], step }: the y
   //                         domain and ticks from the data extent.
+  //   yBounds: [min, max]   fixed y edges (null: the data's own; a pair with max <= min is ignored).
+  //   interpolation         "linear" | "smooth" | "stepBefore" | "stepAfter": the shape of line and area paths.
+  //   lineWidth             px (default 1.5, an area's top 1.25); fillOpacity 0..1: the fill under every line.
+  //   showPoints            "auto" | "always" | "never": the marks on a line; pointSize px (diameter, default 5.2).
+  //   stackMode             "percent": a stack shows shares out of 100 (default: the values add up).
   //   yScale: "log"         log y (positive values; ticks 1-2-5 per decade).
   //   cells: { x0, x1, y0, y1: Float64Array, level: Uint8Array, palette: [CSS colours] }
   //                         heatmap cells: one rect each, palette[level - 1] (0: none).
@@ -3064,6 +3166,7 @@ export const chartCore = {
   lowerBound,
   upperBound,
   bridgeGaps,
+  regularStep,
   logTicks,
   counters: () => ({ ...counters }),
   resetCounters,

@@ -304,3 +304,27 @@ test('a chart time without a zone is the wall clock of the server, not of the br
   // A bare date stays a calendar day.
   expect(out.date).toBe(out.localDate);
 });
+
+// Copy JSON keeps no wrapping that says nothing: one row is its object, one column is its values, one value is itself.
+test('Copy JSON: one row is an object, one column is a list of values, one value is the value', async ({ page }) => {
+  await openApp(page);
+  const copied = await captureCopies(page, { clipboard: true, consume: true });
+  const copy = async (sql) => {
+    await runSuccessfulQuery(page, sql);
+    await page.locator('#copyJsonButton').click();
+    let text = '';
+    await expect.poll(async () => { text = await copied(); return text; }).not.toBe('');
+    return text;
+  };
+  // Several rows, several columns: the list of objects, as before.
+  expect(JSON.parse(await copy('SELECT number AS n, toString(number) AS s FROM numbers(2)'))).toEqual([{ n: 0, s: '0' }, { n: 1, s: '1' }]);
+  // One row: its object, not a list of one.
+  expect(JSON.parse(await copy("SELECT 7 AS n, 'a' AS s"))).toEqual({ n: 7, s: 'a' });
+  // One column: the values, not objects of one key.
+  expect(JSON.parse(await copy('SELECT number FROM numbers(3)'))).toEqual([0, 1, 2]);
+  // One row of one column: the value itself (a string stays a JSON string, a structure its structure).
+  expect(JSON.parse(await copy("SELECT 'x' AS s"))).toBe('x');
+  expect(JSON.parse(await copy('SELECT [1, 2] AS a'))).toEqual([1, 2]);
+  // No row: still a list.
+  expect(JSON.parse(await copy('SELECT number FROM numbers(3) WHERE number > 5'))).toEqual([]);
+});

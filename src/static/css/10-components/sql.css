@@ -135,6 +135,35 @@
   background: var(--editor-solid-bg);
 }
 
+/* The Formatted switch (sqlBlock.formatSwitch): a result's statement and the Save dialog's SQL use it. */
+.sqlMode {
+  height: 22px;
+  padding: 0 var(--space-8);
+  border: 1px solid var(--button-border);
+  border-radius: var(--r-md);
+  background: var(--editor-solid-bg);
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+
+.sqlMode:hover:not(:disabled) { border-color: var(--button-border-hover); color: var(--text); }
+
+.sqlMode[aria-pressed="true"] { border-color: var(--selected-edge); background: var(--selected-bg); color: var(--text); }
+
+.sqlMode:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.sqlMode:focus-visible { box-shadow: var(--ring); }
+
+/* In a result's block it sits left of the copy button. */
+.sqlBlock__mode {
+  position: absolute;
+  top: 6px;
+  right: 54px;
+}
+
 .sqlBlock__expand {
   display: block;
   width: 100%;

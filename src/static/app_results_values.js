@@ -280,6 +280,20 @@ function resultJsonText(columns, asts, rows, indent = 2) {
   return jsonText(rows, rowsAst(columns, asts), indent);
 }
 
+// What Copy JSON puts on the clipboard: the same values, without the wrapping that says nothing. One row is its
+// object, not a list of one; one column is its values, not objects of one key; one row of one column is the
+// value itself. Download JSON keeps the list of objects (a program reads the same shape for every result).
+function resultCopyJsonText(columns, asts, rows, indent = 2) {
+  const oneRow = rows.length === 1;
+  if (columns.length === 1) {
+    const cell = (row) => (Array.isArray(row) ? row[0] : row);
+    const ast = asts[0] || null;
+    return oneRow ? jsonText(cell(rows[0]), ast, indent) : jsonText(rows.map(cell), { kind: "Array", inner: ast }, indent);
+  }
+  if (!oneRow) return resultJsonText(columns, asts, rows, indent);
+  return jsonText(rows[0], rowsAst(columns, asts).row, indent);
+}
+
 // CSV (RFC 4180): a field is quoted only when it has to be; a NULL is a bare \N, as ClickHouse
 // writes CSV, and a text that is exactly \N is quoted so it never reads as NULL. A structure is
 // its compact JSON. Copy CSV, Download CSV and the Debug archive use it.
@@ -662,4 +676,4 @@ function buildCopyValue(value, ast) {
   return isScalarValue(value) ? scalarText(value) : jsonText(value, ast, 2);
 }
 
-export { JsonNumber, NUMERIC_RE, buildCopyValue, computeGaugeScale, createTupleFlattenPlan, decodeStructuredText, extractDecimalScale, extractFiniteNumber, flattenTupleRow, flattenTupleTableData, formatCellForDisplayWithTypes, formatNumericCellText, isScalarNumericType, isScalarValue, isStructuredType, jsonText, parseChType, parseJsonText, queryBarPercent, resultCsvText, resultJsonText, rowsAst, scalarText, serialize, valueText };
+export { resultCopyJsonText, JsonNumber, NUMERIC_RE, buildCopyValue, computeGaugeScale, createTupleFlattenPlan, decodeStructuredText, extractDecimalScale, extractFiniteNumber, flattenTupleRow, flattenTupleTableData, formatCellForDisplayWithTypes, formatNumericCellText, isScalarNumericType, isScalarValue, isStructuredType, jsonText, parseChType, parseJsonText, queryBarPercent, resultCsvText, resultJsonText, rowsAst, scalarText, serialize, valueText };

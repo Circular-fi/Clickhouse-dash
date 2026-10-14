@@ -3,7 +3,38 @@
 
 import { format } from "./app_format.js";
 import { JsonNumber, computeGaugeScale, extractFiniteNumber, isScalarNumericType, isScalarValue, jsonText, queryBarPercent, scalarText } from "./app_results_values.js";
+import { sqlBlock } from "./app_ui_sql.js";
 import { table } from "./app_ui_table.js";
+
+// The server's formatter, given by the page (results.use({ formatSql }), kept as sqlLayout): text -> Promise of the formatted text. Without it
+// a statement shows as it came.
+let sqlLayout = null;
+const formattedStatements = new Map();
+
+function useSqlFormatter(fn) {
+  sqlLayout = typeof fn === "function" ? fn : null;
+}
+
+// The statement as the formatter lays it out replaces the text as returned once it is there (a failure, or the same text,
+// leaves it); a button beside the copy button goes back to the text as returned and forth. Copy copies what is shown.
+function showFormatted(block, raw) {
+  if (!sqlLayout) return;
+  if (!formattedStatements.has(raw)) {
+    formattedStatements.set(raw, Promise.resolve().then(() => sqlLayout(raw)).catch(() => ""));
+    if (formattedStatements.size > 50) formattedStatements.delete(formattedStatements.keys().next().value);
+  }
+  formattedStatements.get(raw).then((formatted) => {
+    const text = String(formatted || "").replace(/\s+$/, "");
+    if (!text || text === raw.replace(/\s+$/, "") || !block.isConnected) return;
+    const mode = sqlBlock.formatSwitch({ rawName: "as ClickHouse returned it", onChange: (on) => sqlBlock.setText(block, on ? text : raw) });
+    mode.classList.add("sqlBlock__mode");
+    block.appendChild(mode);
+    sqlBlock.setText(block, text);
+  });
+}
+
+// A string that starts like a statement and has more than one line.
+const MULTILINE_SQL = /^\s*(?:CREATE|ATTACH|ALTER|DROP|RENAME|SELECT|WITH|INSERT|EXPLAIN|SHOW|SYSTEM|GRANT|REVOKE|OPTIMIZE)\b[^\n]*\n/i;
 
 // A value in full, for the one-row view, a single value and the row details: a scalar as it is
 // (a string keeps its backslashes and line breaks), a structure as indented, coloured JSON.
@@ -15,6 +46,14 @@ function renderValueInto(td, raw, ast) {
   if (!isScalarValue(raw)) {
     renderJsonHighlightedInto(td, jsonText(raw, ast, 4));
     td.removeAttribute("title");
+    return;
+  }
+  // A statement on several lines (SHOW CREATE TABLE, a view's query) is shown as SQL: highlighted, its lines kept.
+  if (typeof raw === "string" && MULTILINE_SQL.test(raw)) {
+    const block = sqlBlock({ sql: raw, copy: true, wrap: true, maxLines: 40 });
+    td.replaceChildren(block);
+    td.removeAttribute("title");
+    showFormatted(block, raw);
     return;
   }
   const numeric = typeof raw === "number" || raw instanceof JsonNumber || isScalarNumericType(ast);
@@ -176,4 +215,4 @@ function setGaugeCell(td, raw, colIndex, text, maxArr, minArr, name = "") {
   setDisplayCell(td, raw, text);
 }
 
-export { renderSingleValueCell, renderValueInto, setCellTextFlat, setDisplayCell, setGaugeCell, setNullCell, setQueryGaugeCell };
+export { useSqlFormatter, renderSingleValueCell, renderValueInto, setCellTextFlat, setDisplayCell, setGaugeCell, setNullCell, setQueryGaugeCell };

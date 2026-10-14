@@ -167,5 +167,5 @@ The Query page shows, copies and downloads these values as they arrive. It never
 - Copy cell copies that text. A structure is indented JSON. A NULL copies as nothing.
 - Copy JSON, Download JSON, Copy row, Copy column and the row details use one serializer. Each row is an object (column: value). When two columns have the same name, each row is an array. A 64-bit integer, a Decimal and NaN stay strings. A `Map` and a named `Tuple` are objects.
 - Copy CSV, Download CSV and `results.csv` of the Debug archive use one serializer. A field has quotes only when it needs them. A NULL is a bare `\N`, as in the CSV of ClickHouse. A text that is exactly `\N` has quotes. A structure is its compact JSON.
-- Copy JSON gives the same text as Download JSON, and Copy CSV gives the same text as Download CSV.
+- Copy CSV gives the same text as Download CSV. Copy JSON gives the same values as Download JSON, without wrapping that says nothing: one row is its object (not a list of one), one column is the list of its values (not objects of one key), and one row of one column is the value itself. Download JSON always writes the list of objects, so a program reads one shape for every result.
 - A numeric sort compares the digits of a `UInt64` or of a long `Decimal` exactly. `inf` and `-inf` sort as numbers, `nan` sorts with the NULLs.

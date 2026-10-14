@@ -481,7 +481,7 @@ string Formatter::format_commented_column_list(const string& head, const string&
   auto render_name = [](const string& name) { return backquote_plain_column_name(name); };
   static const char* kNonColumnHeads[] = {"INDEX", "PROJECTION", "CONSTRAINT", "PRIMARY"};
   vector<std::pair<string, string>> parsed;
-  size_t width = 0;
+  vector<size_t> name_widths;
   for (const auto& column : columns) {
     const string col = collapse_whitespace(column.code);
     const size_t sp = col.find_first_of(" \t\n");
@@ -491,7 +491,7 @@ string Formatter::format_commented_column_list(const string& head, const string&
     for (const char* kw : kNonColumnHeads) structural = structural || iequals_ascii(lhs, kw);
     if (!structural) {
       lhs = render_name(lhs);
-      width = std::max(width, utf8_width(lhs));
+      name_widths.push_back(utf8_width(lhs));
     }
     // A definition with a comment inside keeps its words: the comment text is
     // the author's, never upper-cased.
@@ -499,12 +499,13 @@ string Formatter::format_commented_column_list(const string& head, const string&
     parsed.emplace_back(structural ? "" : lhs,
                         structural || commented ? (structural ? col : rhs) : explode_tuple_types_like_format_query(uppercase_column_clause_keyword(rhs), 4));
   }
+  const size_t width = column_name_align_width(name_widths);
   string out = head + "\n(\n";
   for (size_t i = 0; i < parsed.size(); ++i) {
     for (const auto& comment : columns[i].leading) out += "    " + comment + "\n";
     string line = "    ";
     if (parsed[i].first.empty()) line += parsed[i].second;
-    else line += parsed[i].first + string(width - utf8_width(parsed[i].first) + 1, ' ') + parsed[i].second;
+    else line += parsed[i].first + string(utf8_width(parsed[i].first) >= width ? 1 : width - utf8_width(parsed[i].first) + 1, ' ') + parsed[i].second;
     if (i + 1 < parsed.size()) append_item_comma(line);
     if (!columns[i].trailing.empty()) line += " " + columns[i].trailing;
     // Continuation lines of a definition with a comment inside: one level

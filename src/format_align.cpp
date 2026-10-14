@@ -152,6 +152,119 @@ bool in_create_schema_block(const vector<string>& lines, size_t line_index, size
 }
 }  // namespace
 
+size_t column_name_align_width(const vector<size_t>& name_widths) {
+  size_t widest = 0, widest_within_cap = 0;
+  for (const size_t w : name_widths) {
+    widest = std::max(widest, w);
+    if (w <= kColumnNameAlignCap) widest_within_cap = std::max(widest_within_cap, w);
+  }
+  return widest_within_cap ? widest_within_cap : widest;
+}
+
+namespace {
+// The padding between a name and its type in a column of names `width` wide (one space for a name wider than the column).
+size_t column_name_padding(size_t width, size_t name_width) { return name_width >= width ? 1 : width - name_width + 1; }
+
+// The column lines of a CREATE schema that one alignment covers: from line `first`, the lines at `indent` that look like a
+// column, up to the first INDEX / PROJECTION / CONSTRAINT / PRIMARY KEY / TTL line or a line less indented; `end` is where it stops.
+struct SchemaGroup {
+  vector<size_t> indexes;
+  size_t end = 0;
+};
+
+SchemaGroup collect_schema_group(const vector<string>& lines, size_t first, size_t indent) {
+  SchemaGroup group;
+  size_t j = first;
+  while (j < lines.size()) {
+    const string t = trim_ascii_spaces(lines[j]);
+    if (t.empty()) { ++j; continue; }
+    const size_t current_indent = leading_space_count(lines[j]);
+    if (current_indent < indent) break;
+    if (current_indent == indent) {
+      if (looks_like_create_column_line(lines[j])) group.indexes.push_back(j);
+      else if (starts_with_ci(t, "INDEX ") || starts_with_ci(t, "PROJECTION ") ||
+               starts_with_ci(t, "CONSTRAINT ") || starts_with_ci(t, "PRIMARY KEY ") ||
+               starts_with_ci(t, "TTL ")) break;
+    }
+    ++j;
+  }
+  group.end = j;
+  return group;
+}
+
+// The width of a `name` in a column line (before its type), and the type with its comma.
+size_t column_line_name_width(const string& line) {
+  const string t = trim_ascii_spaces(split_inline_comment(line).first);
+  const size_t close = t.find('`', 1);
+  return close == string::npos ? 0 : utf8_width(t.substr(0, close + 1));
+}
+
+// A `Tuple(` that formatQuery spread over lines goes back on one line when it fits: a column of the schema when the whole
+// column fits the line width beside its aligned name, so a short `Tuple(code UInt16, name String)` is not four lines; a
+// Tuple inside an exploded one when its own line fits. A longer one stays as it is. A comment after the closing line stays
+// at the end of the joined line; a comment inside the block keeps it as it is. Only a block that ends its first line with
+// `Tuple(` is joined (an Enum is split by its own rule). Inner blocks are tried before the one around them.
+void join_short_nested_types(vector<string>& lines, size_t first, size_t indent, size_t max_width) {
+  const SchemaGroup group = collect_schema_group(lines, first, indent);
+  if (group.indexes.empty()) return;
+  vector<size_t> widths;
+  for (const size_t index : group.indexes) widths.push_back(column_line_name_width(lines[index]));
+  const size_t width = column_name_align_width(widths);
+  vector<bool> is_column(lines.size(), false);
+  for (const size_t index : group.indexes) is_column[index] = true;
+  for (size_t at = group.end; at-- > first;) {
+    if (at >= lines.size()) continue;
+    const auto [code, comment] = split_inline_comment(lines[at]);
+    const string head = rtrim_spaces(code);
+    if (!comment.empty() || head.size() < 6 || head.compare(head.size() - 6, 6, "Tuple(") != 0) continue;
+    string joined = head;
+    int depth = 0;
+    ScanState st;
+    auto scan_depth = [&](const string& line) {
+      for (size_t c = 0; c < line.size(); ++c) {
+        const char ch = line[c];
+        if (st.in_code() && ch == '(') ++depth;
+        else if (st.in_code() && ch == ')') --depth;
+        step_scan(st, line, c);
+      }
+    };
+    scan_depth(head);
+    size_t last = at;
+    string closing_comment;
+    bool ok = true;
+    while (depth > 0) {
+      if (++last >= lines.size() || last - at > 64) { ok = false; break; }
+      const auto [next_code, next_comment] = split_inline_comment(lines[last]);
+      const string part = trim_ascii_spaces(next_code);
+      if (part.empty()) { if (!next_comment.empty()) { ok = false; break; } continue; }
+      scan_depth(part);
+      // A comment may close the block (`), -- note`); one inside it keeps the block as it is.
+      if (!next_comment.empty()) {
+        if (depth != 0) { ok = false; break; }
+        closing_comment = next_comment;
+      }
+      joined += (joined.back() == '(' || part.front() == ')') ? part : " " + part;
+    }
+    if (!ok || depth != 0 || last == at) continue;
+    const string t = trim_ascii_spaces(joined);
+    bool fits;
+    if (is_column[at]) {
+      const size_t close = t.find('`', 1);
+      const size_t name_width = utf8_width(t.substr(0, close + 1));
+      const size_t type_width = utf8_width(trim_ascii_spaces(t.substr(close + 1)));
+      fits = indent + std::max(width, name_width) + 1 + type_width <= max_width;
+    } else {
+      fits = leading_space_count(lines[at]) + utf8_width(t) <= max_width;
+    }
+    if (!fits) continue;
+    if (!closing_comment.empty()) joined += " " + closing_comment;
+    lines[at] = std::move(joined);
+    lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(at + 1), lines.begin() + static_cast<std::ptrdiff_t>(last + 1));
+    is_column.erase(is_column.begin() + static_cast<std::ptrdiff_t>(at + 1), is_column.begin() + static_cast<std::ptrdiff_t>(last + 1));
+  }
+}
+}  // namespace
+
 namespace {
 void align_create_columns(vector<string>& lines, size_t max_width) {
   for (size_t i = 0; i < lines.size();) {
@@ -163,26 +276,15 @@ void align_create_columns(vector<string>& lines, size_t max_width) {
     // schema column run as one alignment group rather than resetting after
     // every nested type block.
     if (in_create_schema_block(lines, i, indent)) {
-      vector<size_t> indexes;
-      size_t j = i;
-      while (j < lines.size()) {
-        const string t = trim_ascii_spaces(lines[j]);
-        if (t.empty()) { ++j; continue; }
-        const size_t current_indent = leading_space_count(lines[j]);
-        if (current_indent < indent) break;
-        if (current_indent == indent) {
-          if (looks_like_create_column_line(lines[j])) indexes.push_back(j);
-          else if (starts_with_ci(t, "INDEX ") || starts_with_ci(t, "PROJECTION ") ||
-                   starts_with_ci(t, "CONSTRAINT ") || starts_with_ci(t, "PRIMARY KEY ") ||
-                   starts_with_ci(t, "TTL ")) break;
-        }
-        ++j;
-      }
+      join_short_nested_types(lines, i, indent, max_width);
+      const SchemaGroup group = collect_schema_group(lines, i, indent);
+      const vector<size_t>& indexes = group.indexes;
+      const size_t j = group.end;
 
       if (indexes.size() >= 2) {
-        size_t width = 0;
         struct ColLine { string lhs; string rhs; bool comma; string comment; };
         vector<ColLine> cols;
+        vector<size_t> name_widths;
         cols.reserve(indexes.size());
         for (const size_t index : indexes) {
           auto [code_part, comment] = split_inline_comment(lines[index]);
@@ -192,13 +294,14 @@ void align_create_columns(vector<string>& lines, size_t max_width) {
           const size_t close = t.find('`', 1);
           const string lhs = t.substr(0, close + 1);
           const string rhs = trim_ascii_spaces(t.substr(close + 1));
-          width = std::max(width, utf8_width(lhs));
+          name_widths.push_back(utf8_width(lhs));
           cols.push_back({lhs, rhs, comma, comment});
         }
+        const size_t width = column_name_align_width(name_widths);
         for (size_t k = 0; k < indexes.size(); ++k) {
           string rendered(indent, ' ');
           rendered += cols[k].lhs;
-          rendered += string(width - utf8_width(cols[k].lhs) + 1, ' ');
+          rendered += string(column_name_padding(width, utf8_width(cols[k].lhs)), ' ');
           rendered += cols[k].rhs;
           if (cols[k].comma) append_item_comma(rendered);
           if (!cols[k].comment.empty()) rendered += " " + cols[k].comment;
@@ -211,7 +314,7 @@ void align_create_columns(vector<string>& lines, size_t max_width) {
 
     // Fallback for short standalone runs outside a CREATE schema.
     size_t j = i;
-    size_t width = 0;
+    vector<size_t> name_widths;
     struct ColLine { string lhs; string rhs; bool comma; };
     vector<ColLine> cols;
     while (j < lines.size() && looks_like_create_column_line(lines[j]) && leading_space_count(lines[j]) == indent) {
@@ -221,17 +324,18 @@ void align_create_columns(vector<string>& lines, size_t max_width) {
       const size_t close = t.find('`', 1);
       string lhs = t.substr(0, close + 1);
       string rhs = trim_ascii_spaces(t.substr(close + 1));
-      width = std::max(width, utf8_width(lhs));
+      name_widths.push_back(utf8_width(lhs));
       cols.push_back({lhs, rhs, comma});
       ++j;
     }
+    const size_t width = column_name_align_width(name_widths);
     if (cols.size() >= 2) {
       bool ok = true;
       vector<string> rendered;
       for (const auto& col : cols) {
         string line(indent, ' ');
         line += col.lhs;
-        line += string(width - utf8_width(col.lhs) + 1, ' ');
+        line += string(column_name_padding(width, utf8_width(col.lhs)), ' ');
         line += col.rhs;
         if (col.comma) append_item_comma(line);
         if (utf8_width(line) > max_width) ok = false;

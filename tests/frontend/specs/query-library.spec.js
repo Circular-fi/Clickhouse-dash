@@ -571,7 +571,7 @@ test('History keeps a run formatted: a run typed unformatted, and an older entry
   expect((await historyState(page)).find((h) => h.sql_raw === 'select ((( from').formatted).not.toBe(true);
 });
 
-test('Save: the query is saved formatted, Save raw (off by default) keeps it as typed, and the preview shows what will be saved', async ({ page }) => {
+test('Save: the query is saved formatted, the Formatted switch released keeps it as typed, and the preview shows what will be saved', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   await closePanel(page);
@@ -579,26 +579,32 @@ test('Save: the query is saved formatted, Save raw (off by default) keeps it as 
   await showPanel(page);
   await clickSave(page);
   const d = saveForm(page);
-  const raw = d.locator('input[name="raw"]');
-  await expect(raw).not.toBeChecked();
+  // The Formatted switch is the one of the results: pressed by default.
+  const formatted = d.locator('.qlForm__sql .sqlMode');
+  await expect(formatted).toHaveText('Formatted');
+  // It sits in the SQL block, left of the copy button, as in a result's statement.
+  const switchBox = await formatted.boundingBox();
+  const copyBox = await d.locator('.qlForm__sql .sqlBlock__copy').boundingBox();
+  expect(switchBox.x + switchBox.width).toBeLessThanOrEqual(copyBox.x);
+  expect(Math.abs(switchBox.y - copyBox.y)).toBeLessThan(12);
+  await expect(formatted).toHaveAttribute('aria-pressed', 'true');
   await expect(d.locator('.qlForm__sql .uiField__label')).toContainText('from the editor');
   // The preview is the formatter's text: upper-case keywords, one clause per line.
-  await expect(d.locator('.qlForm__sql .uiField__label')).toContainText('formatted');
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText("SELECT count()\nFROM system.tables\nWHERE database = 'system'");
-  // Save raw: the text as typed.
-  await raw.check();
+  // Released: the text as typed.
+  await formatted.click();
+  await expect(formatted).toHaveAttribute('aria-pressed', 'false');
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText("select count() from system.tables where database = 'system'");
-  await expect(d.locator('.qlForm__sql .uiField__label')).not.toContainText('formatted');
-  await raw.uncheck();
+  await formatted.click();
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText("SELECT count()\nFROM system.tables\nWHERE database = 'system'");
   await fillForm(page, { name: 'Formatted one' });
   await d.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
-  // Again, with Save raw ticked.
+  // Again, with the Formatted switch released.
   // The editor now holds the saved query: the dialog offers Update and Save as new.
   await clickSave(page);
-  await expect(saveForm(page).locator('input[name="raw"]')).not.toBeChecked();
-  await saveForm(page).locator('input[name="raw"]').check();
+  await expect(saveForm(page).locator('.qlForm__sql .sqlMode')).toHaveAttribute('aria-pressed', 'true');
+  await saveForm(page).locator('.qlForm__sql .sqlMode').click();
   await fillForm(page, { name: 'Raw one' });
   await saveForm(page).getByRole('button', { name: 'Save as new' }).click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
@@ -726,7 +732,7 @@ test('every folder and storage says how many queries it holds, and its pane list
   await expect(preview(page).locator('.qlContents__item .qlContents__meta').first()).toHaveText('2 queries');
 });
 
-test('Save: a query that the formatter leaves as it is has no Save raw toggle (there is one text to save)', async ({ page }) => {
+test('Save: a query that the formatter leaves as it is has no Formatted switch (there is one text to save)', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   await closePanel(page);
@@ -736,7 +742,7 @@ test('Save: a query that the formatter leaves as it is has no Save raw toggle (t
   const d = saveForm(page);
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText('SELECT 1');
   // The formatter answered with the same text: the toggle goes, and the label does not claim a formatting.
-  await expect(d.locator('input[name="raw"]')).toBeHidden();
+  await expect(d.locator('.qlForm__sql .sqlMode')).toBeHidden();
   await expect(d.locator('.qlForm__sql .uiField__label')).toHaveText('SQL (from the editor)');
   await fillForm(page, { name: 'Already formatted' });
   await d.getByRole('button', { name: 'Save', exact: true }).click();
@@ -744,7 +750,7 @@ test('Save: a query that the formatter leaves as it is has no Save raw toggle (t
   expect((await libraryState(page)).queries.find((q) => q.name === 'Already formatted').sql).toBe('SELECT 1');
 });
 
-test('Save from History: the formatted text by default, the text as typed with Save raw; a script the formatter rejects is saved as typed', async ({ page }) => {
+test('Save from History: the formatted text by default, the text as typed with the Formatted switch released; a script the formatter rejects is saved as typed', async ({ page }) => {
   await seed(page, {
     'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] },
     'chdash.queryHistory.v1': [
@@ -759,22 +765,21 @@ test('Save from History: the formatted text by default, the text as typed with S
   await previewTool(page, 'save').click();
   let d = saveForm(page);
   await expect(d).toContainText('SQL (from History');
-  await expect(d.locator('input[name="raw"]')).not.toBeChecked();
+  await expect(d.locator('.qlForm__sql .sqlMode')).toHaveAttribute('aria-pressed', 'true');
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText(/^SELECT\s+1 AS `?one`?\s+FROM system\.one$/);
-  await d.locator('input[name="raw"]').check();
+  await d.locator('.qlForm__sql .sqlMode').click();
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText('select 1 as one from system.one');
   await fillForm(page, { name: 'From history raw' });
   await d.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(async () => (await libraryState(page)).queries.map((q) => q.sql)).toEqual(['select 1 as one from system.one']);
-  // A script the formatter rejects: the box is ticked and locked, the note says why, the text is saved as typed.
+  // A script the formatter rejects: the switch is released and locked, its title says why, the text is saved as typed.
   await showPanel(page, 'history');
   await items.filter({ hasText: '(((' }).click();
   await previewTool(page, 'save').click();
   d = saveForm(page);
-  await expect(d.locator('input[name="raw"]')).toBeChecked();
-  await expect(d.locator('input[name="raw"]')).toBeDisabled();
-  await expect(d.locator('.qlRawToggle')).toContainText('Saved as typed');
-  await expect(d.locator('.qlRawToggle')).toHaveAttribute('title', /does not accept this query/);
+  await expect(d.locator('.qlForm__sql .sqlMode')).toHaveAttribute('aria-pressed', 'false');
+  await expect(d.locator('.qlForm__sql .sqlMode')).toBeDisabled();
+  await expect(d.locator('.qlForm__sql .sqlMode')).toHaveAttribute('title', /does not accept this query/);
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText('select ((( from');
   await fillForm(page, { name: 'Broken' });
   await d.getByRole('button', { name: 'Save', exact: true }).click();
@@ -1112,7 +1117,7 @@ test('Edit is the same form in the pane: name, description and folder, the SQL o
   await expect(openDialogs(page)).toHaveCount(1);
   await expect(formTitle(page)).toHaveText('Edit query');
   await expect(saveForm(page).locator('[name="name"]')).toBeFocused();
-  await expect(saveForm(page).locator('input[name="raw"]')).toHaveCount(0);
+  await expect(saveForm(page).locator('.qlForm__sql .sqlMode')).toHaveCount(0);
   await expect(saveForm(page).locator('.qlForm__sql .uiField__label')).toHaveText('SQL');
   await expect(saveForm(page).locator('.qlForm__sql .sqlBlock__code')).toHaveText('SELECT 42 AS answer');
   await expect(saveForm(page).locator('.qlPreview__foot .button')).toHaveText(['Cancel', 'Save']);
@@ -1163,7 +1168,7 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await expect(node(page, 'Table count')).toBeVisible();
   let stored = await libraryState(page);
   const saved = stored.queries.find((q) => q.name === 'Table count');
-  // Saved as the formatter writes it (Save raw is not ticked).
+  // Saved as the formatter writes it (the Formatted switch is pressed).
   expect(saved).toMatchObject({ folder_id: 'f_reports', host_id: HOST, description: 'How many tables', sql: 'SELECT count()\nFROM system.tables' });
 
   // A click selects a query: the preview shows it, the editor is unchanged
@@ -1213,7 +1218,7 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await saveForm(page).getByRole('button', { name: 'Update' }).click();
   await expect(page.locator('.qlToast')).toContainText('Query updated');
   stored = await libraryState(page);
-  // The update is formatted too (Save raw is off).
+  // The update is formatted too (the Formatted switch is pressed).
   expect(stored.queries.find((q) => q.id === 'q_answer').sql).toBe('SELECT\n\t42 AS `answer`,\n\t43 AS `next`');
   expect(stored.queries.filter((q) => q.name === 'The answer')).toHaveLength(1);
 

@@ -18,11 +18,10 @@
   color: var(--muted);
 }
 
-/* X axis, Y values and Split by: the tracePicker look, sized for the toolbar. */
+/* X axis, Y values and Split by: the tracePicker look, the width of the Chart details panel. */
 .queryChart__picker {
-  width: auto;
-  min-width: 8rem;
-  max-width: 18rem;
+  width: 100%;
+  min-width: 0;
 }
 
 .queryChart__picker .tracePicker__button {

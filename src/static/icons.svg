@@ -17,6 +17,7 @@
 <symbol id="i-book" viewBox="0 0 24 24"><path d="M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0"/><path d="M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0"/><path d="M3 6l0 13"/><path d="M12 6l0 13"/><path d="M21 6l0 13"/></symbol><!-- book -->
 <symbol id="i-braces" viewBox="0 0 24 24"><path d="M7 4a2 2 0 0 0 -2 2v3a2 3 0 0 1 -2 3a2 3 0 0 1 2 3v3a2 2 0 0 0 2 2"/><path d="M17 4a2 2 0 0 1 2 2v3a2 3 0 0 0 2 3a2 3 0 0 0 -2 3v3a2 2 0 0 1 -2 2"/></symbol><!-- braces -->
 <symbol id="i-chart-area-line" viewBox="0 0 24 24"><path d="M4 19l4 -6l4 2l4 -5l4 4l0 5l-16 0"/><path d="M4 12l3 -4l4 2l5 -6l4 4"/></symbol><!-- chart-area-line -->
+<symbol id="i-chart-scatter" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 15a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M11 9a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M16 13a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M15 6a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/></symbol>
 <symbol id="i-chart-bar" viewBox="0 0 24 24"><path d="M3 13a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v6a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z"/><path d="M15 9a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z"/><path d="M9 5a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v14a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z"/><path d="M4 20h14"/></symbol><!-- chart-bar -->
 <symbol id="i-chart-line" viewBox="0 0 24 24"><path d="M4 19l16 0"/><path d="M4 15l4 -6l4 2l4 -5l4 4"/></symbol><!-- chart-line -->
 <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5l10 -10"/></symbol><!-- check -->

@@ -1,0 +1,1 @@
+CREATE TABLE anon.defaults (id UInt64, point Tuple(x Float64, y Float64) DEFAULT (0, 0), pair Tuple(a UInt8, b UInt8) CODEC(ZSTD(3)), note String DEFAULT 'none') ENGINE = MergeTree ORDER BY id

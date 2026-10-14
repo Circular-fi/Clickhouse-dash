@@ -666,6 +666,19 @@ ENGINE = MergeTree
 ORDER BY (entity_group, entity_key, event_date)
 ```
 
+A column list is laid out like this (fixtures `092`, `308`, `597`-`607`):
+
+- Column names are back-quoted and the types start in one column. The column is as wide as the longest name,
+  except that a name wider than 32 columns (with its quotes) does not stretch it: that column keeps one space before
+  its type and the others stay aligned. When every name is wider than 32, the longest sets the column.
+- A `Tuple` type goes on the column's line when the whole column fits the line width beside the aligned name:
+  `` `point` Tuple(x Float64, y Float64), `` and `` `segments` Array(Tuple(a UInt32, b UInt32)), `` are one line each.
+  A type that does not fit puts one element on each line, 4 spaces under the column, and its closing parenthesis on a line
+  of its own at the column's indent. Inside such a block, a `Tuple` that fits its own line is on one line
+  (`first Tuple(alpha UInt64, beta String),`).
+- A comment after the comma of a column, or after the closing line of its type, stays at the end of that column's line.
+  A comment inside a type keeps the type on several lines.
+
 ### ALTER TABLE
 
 ```sql

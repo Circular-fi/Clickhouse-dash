@@ -1152,7 +1152,7 @@
   overflow: auto;
 }
 
-/* The SQL's heading with the quiet "Save raw" option at its end: small, muted, a native check box. */
+/* The SQL's heading. */
 .qlForm__sqlHead {
   display: flex;
   align-items: baseline;
@@ -1160,26 +1160,7 @@
   gap: var(--space-8);
 }
 
-.qlRawToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-4);
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  cursor: pointer;
-}
-
-.qlRawToggle[hidden] {
-  display: none;
-}
-
-.qlRawToggle:hover {
-  color: var(--text);
-}
-
-.qlRawToggle > input {
-  margin: 0;
-}
+/* The Formatted switch of the results (sqlBlock.formatSwitch), at the end of the SQL's heading. */
 
 /* Where the query will be saved: a dashed row in the tree, in the accent colour, not selectable. */
 .qlRow--ghost {

@@ -280,7 +280,7 @@ for (const scheme of ['dark', 'light']) {
       await page.locator('#resultsPanel .resultsViewToggle--main [data-view="chart"]').click();
       const chart = page.locator('#resultsPanel .queryChart');
       await expect(chart).toBeVisible();
-      await expect(chart.locator('.queryChart__picker .tracePicker__button')).toHaveText([/^X axis · /, /^Y values · /, /^Split by · /]);
+      await expect(chart.locator('.queryChart__data .tracePicker__button')).toHaveText([/^X axis · /, /^Y values · /, /^Split by · /]);
       await expect(chart.locator('.queryChart__x')).toHaveAttribute('aria-hidden', 'true');
       await chart.locator('.queryChart__seriesButton').click();
       await expect(chart.locator('.queryChart__seriesMenu')).toBeVisible();

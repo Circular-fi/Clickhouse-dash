@@ -1,0 +1,1 @@
+CREATE TABLE anon.boundary_long (id UInt64, a_name_of_exactly_thirty_chars Tuple(first_coordinate Float64, second_coordinate Float64)) ENGINE = MergeTree ORDER BY id

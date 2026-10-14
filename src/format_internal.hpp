@@ -257,6 +257,10 @@ bool query_returns_table_like_cte(string_view query);
 vector<string> split_lines_keep(string_view s);
 size_t leading_space_count(string_view s);
 string normalize_final_layout(string_view s, size_t width);
+// The width of the column of names in a CREATE TABLE column list: that of the longest name, except that a name wider than
+// kColumnNameAlignCap does not stretch the column (it keeps one space before its type), unless every name is that wide.
+constexpr size_t kColumnNameAlignCap = 32;
+size_t column_name_align_width(const vector<size_t>& name_widths);
 // format_arith.cpp
 string strip_redundant_arith_parentheses(string_view s);
 bool split_arith_chain(string_view s, vector<ArithChainOperator>* ops);

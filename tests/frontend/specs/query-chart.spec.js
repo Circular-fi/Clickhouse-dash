@@ -179,9 +179,9 @@ test('the example query charts within budget, explains the Array column and read
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
   await expect(mainTable(page)).toBeHidden();
   // Self-explanatory controls: the label inside each picker, an explicit Auto choice.
-  await expect(chart.locator('.queryChart__picker .tracePicker__button')).toHaveText([/^X axis \u00b7 /, /^Y values \u00b7 /, /^Split by \u00b7 /]);
+  await expect(chart.locator('.queryChart__data .tracePicker__button')).toHaveText([/^X axis \u00b7 /, /^Y values \u00b7 /, /^Split by \u00b7 /]);
   // The three pickers share one look (ns.menu pickers).
-  const looks = await chart.locator('.queryChart__picker .tracePicker__button').evaluateAll((els) => els.map((el) => {
+  const looks = await chart.locator('.queryChart__data .tracePicker__button').evaluateAll((els) => els.map((el) => {
     const cs = getComputedStyle(el);
     return [cs.appearance, cs.height, cs.borderTopColor, cs.borderRadius, cs.backgroundColor, cs.backgroundImage, cs.paddingRight];
   }));
@@ -451,7 +451,7 @@ test('time series result switches between table and chart, types and series pick
   await expect(types).toHaveAttribute('role', 'group');
   await expect(types).toHaveAttribute('aria-label', 'Chart type');
   await expect(types).toHaveText('');
-  const typeIcons = { Line: ['line', 'chart-line', 'One line per series'], Area: ['area', 'chart-area-line', 'Stacked areas: the series add up'],
+  const typeIcons = { Line: ['line', 'chart-line', 'One line per series'], Area: ['area', 'chart-area-line', 'Areas: stacked by default, the series add up'],
     Bars: ['bar', 'chart-bar', 'Bars: split values stack, Y columns stand side by side'] };
   for (const [name, [type, icon, title]] of Object.entries(typeIcons)) {
     const option = types.getByRole('button', { name, exact: true });
@@ -1088,22 +1088,25 @@ test('performance budget: 1,000,000 streamed rows of 5 numeric columns are drawn
   expect(Math.max(0, ...result.longTasks)).toBeLessThan(200);
 });
 
-// Audit round 2: the toolbar starts where the chart's caption starts; the
-// Number icon is as tall as the other types'; off, it is dimmed and keeps a
-// tooltip that says why (aria-disabled, not disabled).
-test('chart toolbar: left-aligned with the caption; the Number icon the size of the others, dimmed with its reason when off', async ({ page }) => {
+// Audit round 2: the Chart details panel sits on the left of the plot and the rows note stays at the right end; the
+// Number icon is as tall as the other types'; off, it is dimmed and keeps a tooltip that says why (aria-disabled, not
+// disabled).
+test('chart details: on the left of the plot; the Number icon the size of the others, dimmed with its reason when off', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, TIME_SERIES);
   await showChart(mainToggle(page));
   const chart = mainChart(page);
   await expect(core(chart)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+  const details = await chart.locator('.queryChart__details').boundingBox();
+  const plot = await core(chart).boundingBox();
+  expect(details.x + details.width).toBeLessThanOrEqual(plot.x);
+  expect(Math.abs(details.y - plot.y)).toBeLessThan(80);
   const types = await chart.locator('.queryChart__types').boundingBox();
-  const caption = await chart.locator('.queryChart__rangeText').boundingBox();
-  expect(Math.abs(types.x - caption.x)).toBeLessThanOrEqual(2);
-  // The note ("120 rows") stays at the right end.
+  expect(types.x).toBeGreaterThanOrEqual(details.x);
+  expect(types.x + types.width).toBeLessThanOrEqual(details.x + details.width);
+  // The note ("120 rows") stays at the right end of the plot column.
   const note = await chart.locator('.queryChart__note').boundingBox();
-  const toolbar = await chart.locator('.queryChart__toolbar').boundingBox();
-  expect(note.x + note.width).toBeGreaterThan(toolbar.x + toolbar.width - 4);
+  expect(note.x + note.width).toBeGreaterThan(plot.x + plot.width - 4);
   // Off: aria-disabled (hover and focus show the title), dimmed, a click does nothing.
   const number = chart.locator('.queryChart__types [data-type="number"]');
   await expect(number).toHaveAttribute('aria-disabled', 'true');
@@ -1131,4 +1134,106 @@ test('chart toolbar: left-aligned with the caption; the Number icon the size of 
     return { number: box('i-number-123'), bar: box('i-chart-bar'), line: box('i-chart-line') };
   });
   expect(heights.number).toBeGreaterThanOrEqual(heights.bar * 0.7);
+});
+
+// Chart details: fixed Y edges, and a panel that folds to a rail (and stays folded).
+test('chart details: fixed Y edges, and a panel that folds and stays folded', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, TIME_SERIES);
+  await showChart(mainToggle(page));
+  const chart = mainChart(page);
+  await expect(core(chart)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+  // Y max alone raises the top edge; both edges fix the axis; a pair that leaves no range is flagged and ignored.
+  await chart.locator('input[data-cfg="yMax"]').fill('50');
+  await expect(core(chart)).toHaveAttribute('data-y-max', '50');
+  await chart.locator('input[data-cfg="yMin"]').fill('-5');
+  await expect(core(chart)).toHaveAttribute('data-y-min', '-5');
+  await chart.locator('input[data-cfg="yMin"]').fill('60');
+  await expect(chart.locator('.queryChart__bounds')).toHaveClass(/is-invalid/);
+  await expect(core(chart)).not.toHaveAttribute('data-y-min', '60');
+  await chart.locator('input[data-cfg="yMin"]').fill('');
+  await chart.locator('input[data-cfg="yMax"]').fill('');
+  await expect(chart.locator('.queryChart__bounds')).not.toHaveClass(/is-invalid/);
+  // The edges survive the next run of the same columns.
+  await chart.locator('input[data-cfg="yMax"]').fill('40');
+  await runSuccessfulQuery(page, TIME_SERIES);
+  await expect(chart.locator('input[data-cfg="yMax"]')).toHaveValue('40');
+  // Fold: the fields go, the button stays, the plot takes the width; the choice is kept for the next chart.
+  await expect(core(chart)).toBeVisible();
+  await expect(core(chart)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/);
+  const before = await core(chart).boundingBox();
+  await chart.locator('.queryChart__detailsToggle').click();
+  await expect(chart.locator('.queryChart__detailsBody')).toBeHidden();
+  await expect(chart.locator('.queryChart__detailsToggle')).toHaveAttribute('aria-expanded', 'false');
+  await expect.poll(async () => (await core(chart).boundingBox()).width).toBeGreaterThan(before.width + 100);
+  expect(await page.evaluate(() => localStorage.getItem('chdash.chart.details'))).toBe('closed');
+  await page.reload();
+  await runSuccessfulQuery(page, TIME_SERIES);
+  await showChart(mainToggle(page));
+  await expect(mainChart(page).locator('.queryChart__detailsBody')).toBeHidden();
+  await mainChart(page).locator('.queryChart__detailsToggle').click();
+  await expect(mainChart(page).locator('.queryChart__detailsBody')).toBeVisible();
+});
+
+// Graph styles (Chart details): what the panel sets reaches the plot.
+test('chart details: stack, interpolation, fill, points and line width reach the plot', async ({ page }) => {
+  await openApp(page);
+  // Three groups share each minute, so a stack has three layers.
+  await runSuccessfulQuery(page, "SELECT toStartOfMinute(now() - intDiv(number, 3) * 60) AS t, number % 7 AS v, ['a', 'b', 'c'][number % 3 + 1] AS g FROM numbers(120)");
+  await showChart(mainToggle(page));
+  const chart = mainChart(page);
+  const root = core(chart);
+  await expect(root).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+  const num = async (name) => Number(await root.getAttribute(name));
+  const field = (key) => chart.locator(`input[data-cfg="${key}"]`);
+
+  // Stack: 100% reads out of 100 (an area), Off draws each area on its own.
+  await chart.locator('.queryChart__types [data-type="area"]').click();
+  await pickChart(chart, 'select[data-cfg="stack"]', 'percent');
+  await expect.poll(() => num('data-y-max')).toBeGreaterThanOrEqual(100);
+  expect(await num('data-y-max')).toBeLessThan(110);
+  await pickChart(chart, 'select[data-cfg="stack"]', 'off');
+  await expect.poll(() => num('data-y-max')).toBeLessThan(20);
+  // Interpolation and fill (a line).
+  await chart.locator('.queryChart__types [data-type="line"]').click();
+  await expect(root).toHaveAttribute('data-interpolation', 'linear');
+  await pickChart(chart, 'select[data-cfg="interp"]', 'smooth');
+  await expect(root).toHaveAttribute('data-interpolation', 'smooth');
+  await pickChart(chart, 'select[data-cfg="interp"]', 'stepAfter');
+  await expect(root).toHaveAttribute('data-interpolation', 'stepAfter');
+  await expect(root).toHaveAttribute('data-series-washed', '0');
+  await field('fill').first().fill('30');
+  await expect(root).toHaveAttribute('data-series-washed', '3');
+  await field('lineWidth').fill('3');
+  await expect(field('lineWidth')).toHaveValue('3');
+  await pickChart(chart, 'select[data-cfg="points"]', 'always');
+  await field('pointSize').first().fill('8');
+  // Points is a type of its own, and keeps the point size.
+  await chart.locator('.queryChart__types [data-type="points"]').click();
+  await expect(root).toHaveAttribute('data-type', 'points');
+  await expect(field('pointSize').last()).toHaveValue('8');
+  // The settings stay for the next result with the same columns.
+  await chart.locator('.queryChart__types [data-type="line"]').click();
+  await runSuccessfulQuery(page, "SELECT toStartOfMinute(now() - intDiv(number, 3) * 60) AS t, number % 7 AS v, ['a', 'b', 'c'][number % 3 + 1] AS g FROM numbers(120)");
+  await expect(root).toHaveAttribute('data-interpolation', 'stepAfter');
+});
+
+// Missing values: a series that has no row at an x leaves a gap; Zero reads it as 0, Connect joins across.
+test('chart details: Missing values Zero gives every series a value at every x', async ({ page }) => {
+  await openApp(page);
+  await runSuccessfulQuery(page, GROUPED);
+  await showChart(mainToggle(page));
+  const chart = mainChart(page);
+  const root = core(chart);
+  await expect(root).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
+  const rows = chart.locator('.chartCore__tooltip .chartCore__tipRow:not(.chartCore__tipRow--total)');
+  // One row per minute, three groups in turn: at a given minute only one series has a value.
+  await hoverPlot(page, chart, 0.5);
+  await expect(rows).toHaveCount(1);
+  await pickChart(chart, 'select[data-cfg="missing"]', 'zero');
+  await hoverPlot(page, chart, 0.5);
+  await expect(rows).toHaveCount(3);
+  await pickChart(chart, 'select[data-cfg="missing"]', 'gap');
+  await hoverPlot(page, chart, 0.5);
+  await expect(rows).toHaveCount(1);
 });

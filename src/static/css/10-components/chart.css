@@ -13,15 +13,6 @@
   background: var(--table-bg);
 }
 
-.queryChart__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-8) var(--space-16);
-  margin-bottom: var(--space-6);
-  font-size: var(--fs-xs);
-}
-
 /* Shared canvas chart: plot and cursor canvases, DOM tooltip and legend. */
 .chartCore { position: relative; min-width: 0; }
 

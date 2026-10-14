@@ -140,7 +140,7 @@ function sqlBlock({ sql = "", gutter = false, copy = false, maxLines = 0, expand
   paintInto(code, text);
 
   if (copy && copyMod?.button) {
-    const button = copyMod.button(null, () => text, { label: `Copy ${label}`, className: "sqlBlock__copy" });
+    const button = copyMod.button(null, () => block._sqlText ?? text, { label: `Copy ${label}`, className: "sqlBlock__copy" });
     block.appendChild(button);
   }
 
@@ -168,6 +168,35 @@ function sqlBlock({ sql = "", gutter = false, copy = false, maxLines = 0, expand
   return block;
 }
 
+// The block shows another text (a formatted statement, then the one as returned): repainted and, from then on, what its copy button copies.
+sqlBlock.setText = (block, sql) => {
+  const code = block?.querySelector?.(".sqlBlock__code");
+  if (!code) return;
+  const text = String(sql ?? "").replace(/\s+$/, "");
+  block._sqlText = text;
+  paintInto(code, text);
+};
+// The Formatted switch, one for every place that offers a statement formatted or as it was: a pressed button reading "Formatted".
+// Pressed, the statement is shown (and saved) as the formatter lays it out; released, as it was (`rawName`: "as typed", "as
+// ClickHouse returned it"). onChange(pressed) runs after a click.
+sqlBlock.formatSwitch = ({ pressed = true, rawName = "as typed", disabled = false, onChange = null } = {}) => {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "sqlMode";
+  button.textContent = "Formatted";
+  const paint = (on) => {
+    button.setAttribute("aria-pressed", String(on));
+    button.title = on ? `Formatted by the formatter: press for the text ${rawName}` : `The text ${rawName}: press to format it`;
+  };
+  paint(pressed);
+  button.disabled = disabled;
+  button.addEventListener("click", () => {
+    const next = button.getAttribute("aria-pressed") !== "true";
+    paint(next);
+    if (typeof onChange === "function") onChange(next);
+  });
+  return button;
+};
 sqlBlock.html = sqlBlockHtml;
 sqlBlock.bind = sqlBind;
 sqlBlock.useHighlighter = useHighlighter;

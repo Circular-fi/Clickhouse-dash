@@ -20,9 +20,11 @@ import { menu } from "./app_ui_menu.js";
 import { segmented } from "./app_ui_segmented.js";
 import { wasm } from "./app_wasm.js";
 
-const { $ } = dom;
+const { $, $$ } = dom;
 
 const viewPref = () => storage.pref(storage.KEYS.resultsView, "table", { allowed: ["table", "chart"] });
+// The Chart details panel (left of the plot): open or folded to its head, kept across results and pages.
+const detailsPref = () => storage.pref(storage.KEYS.chartDetails, "open", { allowed: ["open", "closed"] });
 // Coloured series slots (--qchart-1..8); further groups fold into "Other".
 const MAX_SERIES = 8;
 const PLOT_HEIGHT = 300;
@@ -38,8 +40,9 @@ const CORE_GROUP = "chart";
 // label) and title (the description), like the Table / Chart switch.
 const CHART_TYPES = [
   ["line", "Line", "One line per series", "chart-line"],
-  ["area", "Area", "Stacked areas: the series add up", "chart-area-line"],
+  ["area", "Area", "Areas: stacked by default, the series add up", "chart-area-line"],
   ["bar", "Bars", "Bars: split values stack, Y columns stand side by side", "chart-bar"],
+  ["points", "Points", "Points only: a dot per value", "chart-scatter"],
   ["number", "Number", "One big number per value (single-row results)", "number-123"],
 ];
 const NO_NUMERIC_TITLE = "Chart unavailable: the result has no numeric column";
@@ -337,6 +340,32 @@ function createStore() {
   return { column, reset: () => reset(null) };
 }
 
+// --- Chart details: the graph styles of the panel, in Grafana's words ----
+
+const CHOICES = {
+  interp: [["linear", "Linear"], ["smooth", "Smooth"], ["stepBefore", "Step before"], ["stepAfter", "Step after"]],
+  points: [["auto", "Auto"], ["always", "Always"], ["never", "Never"]],
+  stack: [["normal", "Normal"], ["off", "Off"], ["percent", "100%"]],
+  missing: [["gap", "Gap"], ["connect", "Connect"], ["zero", "Zero"]],
+};
+
+// What the panel sets besides the columns; null is "the chart's own".
+function styleDefaults() {
+  return { interp: "linear", lineWidth: null, fill: null, points: "auto", pointSize: null, stack: "normal", missing: "gap", yMin: null, yMax: null };
+}
+
+function normalizeStyle(cfg) {
+  const bound = (value, lo, hi) => (Number.isFinite(value) ? Math.min(hi, Math.max(lo, value)) : null);
+  const own = styleDefaults();
+  for (const key of Object.keys(CHOICES)) if (!CHOICES[key].some(([v]) => v === cfg[key])) cfg[key] = own[key];
+  cfg.lineWidth = bound(cfg.lineWidth, 0.5, 10);
+  cfg.fill = bound(cfg.fill, 0, 100);
+  cfg.pointSize = bound(cfg.pointSize, 1, 40);
+  cfg.yMin = Number.isFinite(cfg.yMin) ? cfg.yMin : null;
+  cfg.yMax = Number.isFinite(cfg.yMax) ? cfg.yMax : null;
+  return cfg;
+}
+
 // --- Configuration --------------------------------------------------------
 
 function metaSignature(columns, types) {
@@ -365,7 +394,7 @@ function defaultConfig(meta) {
   if (x >= 0 && axisKindOf(kinds[x]) === "time") {
     group = kinds.findIndex((kind, i) => kind === "string" && i !== x);
   }
-  return { x, xAuto: true, series, group, type: "line", typeAuto: true };
+  return { x, xAuto: true, series, group, type: "line", typeAuto: true, ...styleDefaults() };
 }
 
 function normalizeConfig(cfg, meta) {
@@ -375,6 +404,7 @@ function normalizeConfig(cfg, meta) {
   if (cfg.x !== -1 && !valid(cfg.x)) cfg.x = -1;
   cfg.series = cfg.series.filter((i, pos, all) => valid(i) && i !== cfg.x && kinds[i] === "number" && all.indexOf(i) === pos).slice(0, MAX_SERIES);
   if (cfg.group !== -1 && (!valid(cfg.group) || cfg.group === cfg.x || cfg.series.includes(cfg.group))) cfg.group = -1;
+  normalizeStyle(cfg);
   if (cfg.typeAuto) {
     const xKind = cfg.x < 0 ? "index" : axisKindOf(kinds[cfg.x]);
     cfg.type = xKind === "category" ? "bar" : "line";
@@ -608,31 +638,60 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
   const hostEl = document.createElement("div");
   hostEl.className = "queryChart chartCard";
   hostEl.innerHTML = `
-      <div class="queryChart__toolbar chartCard__head">
-        <div class="segmented queryChart__types chartCard__actions" role="group" aria-label="Chart type"></div>
-        <div class="queryChart__field queryChart__xField" title="Column on the horizontal axis. Auto: the first date / time column, else the first numeric or text column, else the row number.">
-          <select class="queryChart__x" data-field-label="X axis" aria-label="X axis column"></select>
+      <aside class="queryChart__details" aria-label="Chart details">
+        <div class="queryChart__detailsInner">
+        <div class="queryChart__detailsHead">
+          <b class="queryChart__detailsTitle">Chart details</b>
+          <button type="button" class="queryChart__detailsToggle" aria-expanded="true" aria-label="Hide chart details" title="Hide chart details"></button>
         </div>
-        <div class="queryChart__field queryChart__seriesField" title="Numeric columns drawn as series on the vertical axis.">
-          <div class="themeSelect tracePicker queryChart__picker">
-            <button type="button" class="button themeSelect__button tracePicker__button queryChart__seriesButton" aria-label="Y value columns"></button>
-            <div class="themeSelect__menu tracePicker__menu queryChart__seriesMenu" role="listbox" aria-multiselectable="true" aria-label="Y value columns" tabindex="-1" hidden></div>
+        <div class="queryChart__detailsBody">
+          <div class="segmented queryChart__types" role="group" aria-label="Chart type"></div>
+          <div class="queryChart__data">
+            <div class="queryChart__field queryChart__xField" title="Column on the horizontal axis. Auto: the first date / time column, else the first numeric or text column, else the row number.">
+              <select class="queryChart__x" data-field-label="X axis" aria-label="X axis column"></select>
+            </div>
+            <div class="queryChart__field queryChart__seriesField" title="Numeric columns drawn as series on the vertical axis.">
+              <div class="themeSelect tracePicker queryChart__picker">
+                <button type="button" class="button themeSelect__button tracePicker__button queryChart__seriesButton" aria-label="Y value columns"></button>
+                <div class="themeSelect__menu tracePicker__menu queryChart__seriesMenu" role="listbox" aria-multiselectable="true" aria-label="Y value columns" tabindex="-1" hidden></div>
+              </div>
+            </div>
+            <div class="queryChart__field queryChart__groupField" title="One series per distinct value of this column (long-format results such as GROUP BY time, label). The 8 largest are kept, the rest add up into Other.">
+              <select class="queryChart__group" data-field-label="Split by" aria-label="Split by column"></select>
+            </div>
+          </div>
+          <div class="queryChart__field" data-for="line area" title="The shape between two points: straight, a smooth curve, or a step."><select data-cfg="interp" data-field-label="Interpolation" aria-label="Line interpolation"></select></div>
+          <div class="queryChart__field" data-for="line area" title="Rows missing from a series, and NULLs. Gap: the line breaks (a time axis with a regular step breaks where a step has no row). Connect: the line joins the points across. Zero: they read as 0."><select data-cfg="missing" data-field-label="Missing values" aria-label="Missing values"></select></div>
+          <div class="queryChart__pair" data-for="line area">
+            <label class="queryChart__bound" title="The width of the line, in pixels."><span>Width</span><input type="number" data-cfg="lineWidth" min="0.5" max="10" step="0.5" placeholder="1.5" aria-label="Line width" autocomplete="off"></label>
+            <label class="queryChart__bound" title="The fill under each line, in per cent. Empty: a light wash under a lone line."><span>Fill</span><input type="number" data-cfg="fill" min="0" max="100" step="5" placeholder="auto" aria-label="Fill opacity" autocomplete="off"></label>
+          </div>
+          <div class="queryChart__pair queryChart__pair--points" data-for="line">
+            <div class="queryChart__field" title="A mark on each value. Auto: only when the points are far enough apart."><select data-cfg="points" data-field-label="Points" aria-label="Show points"></select></div>
+            <label class="queryChart__bound" title="The diameter of a point, in pixels."><span>Size</span><input type="number" data-cfg="pointSize" min="1" max="40" step="1" placeholder="auto" aria-label="Point size" autocomplete="off"></label>
+          </div>
+          <label class="queryChart__bound" data-for="points" title="The diameter of a point, in pixels."><span>Point size</span><input type="number" data-cfg="pointSize" min="1" max="40" step="1" placeholder="auto" aria-label="Point size" autocomplete="off"></label>
+          <div class="queryChart__field" data-for="area bar" title="Normal: the series add up. 100%: each x shows shares out of 100. Off: no stacking."><select data-cfg="stack" data-field-label="Stack" aria-label="Stack series"></select></div>
+          <div class="queryChart__bounds" data-for="line area bar points" title="Fix the vertical axis. Empty: the data's own edge.">
+            <label class="queryChart__bound"><span>Y min</span><input type="number" step="any" data-cfg="yMin" placeholder="auto" aria-label="Y axis minimum" autocomplete="off"></label>
+            <label class="queryChart__bound"><span>Y max</span><input type="number" step="any" data-cfg="yMax" placeholder="auto" aria-label="Y axis maximum" autocomplete="off"></label>
           </div>
         </div>
-        <div class="queryChart__field queryChart__groupField" title="One series per distinct value of this column (long-format results such as GROUP BY time, label). The 8 largest are kept, the rest add up into Other.">
-          <select class="queryChart__group" data-field-label="Split by" aria-label="Split by column"></select>
         </div>
-        <span class="queryChart__note chartCard__meta"></span>
-      </div>
-      <div class="queryChart__range" hidden>
-        <span class="queryChart__rangeText"></span>
-        <span class="queryChart__rangeHint">Drag to zoom \u00b7 double-click to reset</span>
-        <button type="button" class="queryChart__gaps" hidden aria-pressed="false" title="The x values are regular and some rows are missing: the line breaks there. Press to join the points across the gaps.">Connect gaps</button>
-        <button type="button" class="queryChart__resetZoom" hidden title="Show the whole x range again (or double-click the plot)">Reset zoom</button>
-      </div>
-      <div class="queryChart__stage chartCard__body">
-        <div class="queryChart__message" hidden></div>
-        <div class="queryChart__numbers" hidden></div>
+      </aside>
+      <div class="queryChart__main">
+        <div class="queryChart__head">
+          <span class="queryChart__note chartCard__meta"></span>
+        </div>
+        <div class="queryChart__range" hidden>
+          <span class="queryChart__rangeText"></span>
+          <span class="queryChart__rangeHint">Drag to zoom \u00b7 double-click to reset</span>
+          <button type="button" class="queryChart__resetZoom" hidden title="Show the whole x range again (or double-click the plot)">Reset zoom</button>
+        </div>
+        <div class="queryChart__stage chartCard__body">
+          <div class="queryChart__message" hidden></div>
+          <div class="queryChart__numbers" hidden></div>
+        </div>
       </div>`;
   const typesEl = $(".queryChart__types", hostEl);
   const xSelect = $(".queryChart__x", hostEl);
@@ -644,11 +703,19 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
   menu?.select(xSelect, { className: "queryChart__picker" });
   menu?.select(groupSelect, { className: "queryChart__picker" });
   const seriesPicker = menu?.multi(seriesButton, seriesMenu, { root: seriesButton.parentElement }) || null;
+  const styleSelects = $$("select[data-cfg]", hostEl);
+  const styleInputs = $$("input[data-cfg]", hostEl);
+  // The style pickers (Interpolation, Scale, Unit, Legend ...): their options are the CHOICES above.
+  for (const select of styleSelects) {
+    for (const [value, label] of CHOICES[select.dataset.cfg]) select.appendChild(h("option", { value }, label));
+    menu?.select(select, { className: "queryChart__picker" });
+  }
   const noteEl = $(".queryChart__note", hostEl);
+  const boundsEl = $(".queryChart__bounds", hostEl);
+  const detailsToggle = $(".queryChart__detailsToggle", hostEl);
   const rangeEl = $(".queryChart__range", hostEl);
   const rangeText = $(".queryChart__rangeText", hostEl);
   const resetZoomBtn = $(".queryChart__resetZoom", hostEl);
-  const gapsBtn = $(".queryChart__gaps", hostEl);
   const stageEl = $(".queryChart__stage", hostEl);
   const messageEl = $(".queryChart__message", hostEl);
   const numbersEl = $(".queryChart__numbers", hostEl);
@@ -671,6 +738,20 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     render();
   });
 
+  // Chart details: open (the default) or folded to a rail with its button.
+  function setDetails(open, { remember = false } = {}) {
+    hostEl.dataset.details = open ? "open" : "closed";
+    detailsToggle.setAttribute("aria-expanded", String(open));
+    const label = open ? "Hide chart details" : "Show chart details";
+    detailsToggle.setAttribute("aria-label", label);
+    detailsToggle.title = label;
+    detailsToggle.replaceChildren(iconMod.el(open ? "chevrons-left" : "chevrons-right"));
+    if (remember) detailsPref().set(open ? "open" : "closed");
+    if (!open) closeSeriesMenu();
+  }
+  setDetails(detailsPref().get() !== "closed");
+  detailsToggle.addEventListener("click", () => setDetails(hostEl.dataset.details === "closed", { remember: true }));
+
   let meta = null; // { columns, types, kinds, signature }
   let cfg = null;
   let lastCfg = null; // kept across results with the same columns and types
@@ -689,8 +770,6 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
   let rangeKey = "";
   // A zoom reset goes with the next data the chart gets (one draw).
   let zoomReset = false;
-  // Gaps (rows missing on a regular time axis) break the line; this joins the points across them.
-  let connectGaps = false;
   // The chart works only while it can be seen: in the Chart view (effective),
   // in a panel that is not collapsed (the host has a box) and in a tab that
   // is not in the background. Hidden, rows only mark the model dirty; the
@@ -798,6 +877,7 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     h.replace(groupSelect, groupOptions);
     groupSelect.value = String(cfg.group);
 
+    syncStyleFields();
     syncTypeButtons(currentRows().length);
   }
 
@@ -826,6 +906,79 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     typeShown = type;
     segmented?.set(typesEl, type, "type");
     hostEl.dataset.chartType = type;
+  }
+
+  // The style of the chart (Chart details: Graph styles, Axis, Legend, Tooltip): kept in cfg, drawn by the engine's options.
+  function plotOptions(type) {
+    const stackable = type === "area" || type === "bar";
+    const stacked = stackable && cfg.stack !== "off";
+    const percent = stacked && cfg.stack === "percent";
+    return {
+      stack: stacked,
+      stackMode: percent ? "percent" : "normal",
+      interpolation: cfg.interp,
+      lineWidth: cfg.lineWidth,
+      fillOpacity: cfg.fill === null ? null : cfg.fill / 100,
+      showPoints: cfg.points,
+      pointSize: cfg.pointSize,
+      connectGaps: cfg.missing === "connect",
+      yBounds: [cfg.yMin, cfg.yMax],
+      // A 100% stack reads in per cent.
+      yTickFormat: percent ? (v) => `${Number(v.toPrecision(6))} %` : undefined,
+    };
+  }
+
+  function styleChanged() {
+    rememberConfig();
+    if (chart && model && effective === "chart") {
+      chart.update(plotOptions(effectiveType(currentRows().length)));
+      chart.flush();
+    }
+  }
+
+  function syncBounds() {
+    const empty = cfg.yMin !== null && cfg.yMax !== null && !(cfg.yMax > cfg.yMin);
+    boundsEl.classList.toggle("is-invalid", empty);
+    for (const input of $$("input[data-cfg=\"yMin\"], input[data-cfg=\"yMax\"]", boundsEl)) input.setAttribute("aria-invalid", String(empty));
+    boundsEl.title = empty ? "Y max must be above Y min: the data's own edges are used." : "Fix the vertical axis. Empty: the data's own edge.";
+  }
+
+  // The fields show cfg (once per toolbar build, or after a Reset: never while a value is being typed).
+  function syncStyleFields() {
+    for (const select of styleSelects) select._chdashMenu?.set(String(cfg[select.dataset.cfg]));
+    for (const input of styleInputs) {
+      const value = cfg[input.dataset.cfg];
+      input.value = value === null ? "" : String(value);
+    }
+    syncBounds();
+  }
+
+  for (const select of styleSelects) {
+    select.addEventListener("change", () => {
+      if (!cfg) return;
+      const key = select.dataset.cfg;
+      cfg[key] = select.value;
+      // Missing values change the data the plot gets, not just its options.
+      if (key === "missing") { rememberConfig(); render(); return; }
+      styleChanged();
+    });
+  }
+  for (const input of styleInputs) {
+    input.addEventListener("input", () => {
+      if (!cfg) return;
+      const key = input.dataset.cfg;
+      if (input.type === "text") cfg[key] = input.value;
+      else {
+        const text = input.value.trim();
+        const value = text === "" ? NaN : Number(text);
+        // An out-of-range figure is held at the edge of its range.
+        const lo = input.min === "" ? -Infinity : Number(input.min), hi = input.max === "" ? Infinity : Number(input.max);
+        cfg[key] = Number.isFinite(value) ? Math.min(hi, Math.max(lo, value)) : null;
+      }
+      for (const other of styleInputs) if (other !== input && other.dataset.cfg === key) other.value = input.value;
+      if (key === "yMin" || key === "yMax") syncBounds();
+      styleChanged();
+    });
   }
 
   xSelect.addEventListener("change", () => {
@@ -875,7 +1028,6 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
   }
 
   resetZoomBtn.addEventListener("click", () => { if (chart) chart.resetZoom(); });
-  gapsBtn.addEventListener("click", () => { connectGaps = !connectGaps; render(); });
 
   function rememberConfig() {
     lastCfg = cfg ? { ...cfg, series: cfg.series.slice(), signature: meta.signature } : null;
@@ -1113,31 +1265,73 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     h.replace(rangeText, rangeLabel(info));
   }
 
+  // Past this many added x values the steps of a regular time axis stay as they are (only the NULLs and the
+  // rows another series has are filled).
+  const MAX_ZERO_STEPS = 500000;
+  let zeroed = null; // { model, xs, values } of the model it was made from
+
+  // The model with 0 where a line has no value. On a time axis with a regular step (a row per hour) the
+  // steps that have no row at all are added too, so a count of nothing reads as 0 instead of a break.
+  function zeroFilled() {
+    if (zeroed && zeroed.model === model) return zeroed;
+    const xs = model.xs;
+    const n = xs.length;
+    let step = model.xKind === "time" ? chartCore.regularStep(xs) : 0;
+    let extra = 0;
+    if (step) {
+      const limit = step * 1.5;
+      for (let i = 1; i < n; i++) if (xs[i] - xs[i - 1] > limit) extra += Math.round((xs[i] - xs[i - 1]) / step) - 1;
+      if (extra > MAX_ZERO_STEPS) { step = 0; extra = 0; }
+    }
+    const total = n + extra;
+    const outXs = extra ? new Float64Array(total) : xs;
+    const at = new Int32Array(n); // where row i lands
+    if (extra) {
+      let o = 0;
+      for (let i = 0; i < n; i++) {
+        if (i > 0) {
+          const gap = Math.round((xs[i] - xs[i - 1]) / step) - 1;
+          if (xs[i] - xs[i - 1] > step * 1.5) for (let k = 1; k <= gap; k++) outXs[o++] = xs[i - 1] + k * step;
+        }
+        at[i] = o;
+        outXs[o++] = xs[i];
+      }
+    } else for (let i = 0; i < n; i++) at[i] = i;
+    const values = model.lines.map((line) => {
+      const out = new Float64Array(total);
+      for (let i = 0; i < n; i++) { const v = line.values[i]; if (v === v) out[at[i]] = v; }
+      return out;
+    });
+    zeroed = { model, xs: outXs, values };
+    return zeroed;
+  }
+
   function renderPlot(type) {
     counters.plots++;
     const core = chartCore;
     const lines = model.lines;
-    const series = lines.map((line) => ({
+    // Zero: the rows a series misses (and its NULLs) read as 0 (a line or an area).
+    const zero = cfg.missing === "zero" && (type === "line" || type === "area") ? zeroFilled() : null;
+    const series = lines.map((line, j) => ({
       id: line.id,
       label: line.label,
       color: slotColor(line.slot),
-      values: line.values,
-      nulls: line.nulls,
+      values: zero ? zero.values[j] : line.values,
+      nulls: zero ? null : line.nulls,
       // Areas stack every line; bars stack the groups of one Y column and
       // put the columns side by side (different measures never add up).
       group: type === "area" ? 0 : line.seriesIndex,
     }));
     const data = {
       xKind: model.xKind,
-      xs: model.xs,
+      xs: zero ? zero.xs : model.xs,
       categories: model.categories,
       series,
       type,
-      stack: type === "area" || type === "bar",
       xLabel: model.xLabel,
       xFractionDigits: model.subMillisecond ? 6 : 3,
       xDateOnly: model.xColumnKind === "date",
-      connectGaps,
+      ...plotOptions(type),
       hidden: Array.from(hidden),
     };
     if (zoomReset) { data.zoom = null; zoomReset = false; }
@@ -1156,11 +1350,6 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
       // Already in an animation frame: draw now, not one frame later.
       chart.flush();
     }
-    // The control shows only for a chart that has gaps (a line or an area on a regular time axis).
-    const gaps = type === "bar" ? 0 : chart.gaps();
-    gapsBtn.hidden = !gaps;
-    gapsBtn.setAttribute("aria-pressed", String(connectGaps));
-    gapsBtn.title = `${core.formatExact(gaps)} gap${gaps === 1 ? "" : "s"}: rows are missing on this regular ${model.xLabel} axis, so the line breaks there. Press to join the points across them.`;
     const label = chartAriaLabel(type);
     if (chart.root.getAttribute("aria-label") !== label) chart.root.setAttribute("aria-label", label);
     if (chart.root.getAttribute("role") !== "img") chart.root.setAttribute("role", "img");
@@ -1170,7 +1359,7 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
 
   function chartAriaLabel(type) {
     const names = model.lines.map((line) => line.label).join(", ");
-    const kind = type === "area" ? "Stacked area chart" : type === "bar" ? "Bar chart" : "Line chart";
+    const kind = type === "area" ? (cfg.stack === "off" ? "Area chart" : "Stacked area chart") : type === "bar" ? "Bar chart" : type === "points" ? "Scatter chart" : "Line chart";
     return `${kind} of ${names} by ${model.xLabel}`;
   }
 

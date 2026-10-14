@@ -48,6 +48,7 @@ const KEYS = Object.freeze({
   queryLibraryMenu: "chdash.queryLibraryMenu.v1",
   resultsView: "chdash.results.view",
   chartLegend: "chdash.chart.legendMode",
+  chartDetails: "chdash.chart.details",
   graphLegend: "chdash.graphLegend",
   explorerIncludeSystem: "chdash.explorer.includeSystem",
   explorerIncludeNonStoring: "chdash.explorer.includeNonStoring",
