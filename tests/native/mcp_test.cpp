@@ -696,6 +696,21 @@ void test_sql_scanner() {
   }
   CHECK_EQ(code("SELECT 1 INTO OUTFILE '/tmp/x'"), std::string("clause_not_allowed"));
   CHECK_EQ(code("SELECT 1 into /* c */ outfile 'x'"), std::string("clause_not_allowed"));
+  // A SETTINGS clause would change the limits of the key (a profile at readonly = 2 lets a statement change them).
+  for (const char* bad : {"SELECT 1 SETTINGS max_execution_time = 3600", "select 1 settings /* c */ `max_memory_usage` = 0",
+                          "SELECT 1 SETTINGS \"max_rows_to_read\"=0", "SELECT * FROM (SELECT 1 SETTINGS max_result_rows = 0)",
+                          "SELECT 1 FORMAT JSON SETTINGS log_comment = 'x'", "EXPLAIN SELECT 1 SETTINGS readonly = 0",
+                          "SELECT 1 SETTINGS -- c\n max_threads = 1, log_comment = 'x';"}) {
+    CHECK_EQ(code(bad), std::string("clause_not_allowed"));
+  }
+  // A column, an alias, a table or a text named settings is no clause.
+  for (const char* ok : {"SELECT Settings['max_threads'] FROM system.query_log", "SELECT name FROM system.settings WHERE name = 'readonly'",
+                         "SELECT 1 AS settings", "SELECT settings = 1 FROM t", "SELECT 'SETTINGS x = 1'", "SELECT 1 -- SETTINGS x = 1",
+                         "SELECT s.settings.x = 1 FROM t AS s", "SELECT `SETTINGS` FROM t"}) {
+    const auto r = scan(ok);
+    if (!r.ok) std::cerr << "should pass: " << ok << " -> " << r.error << ": " << r.message << std::endl;
+    CHECK(r.ok);
+  }
   CHECK_EQ(code("SELECT * FROM file('/etc/passwd')"), std::string("function_not_allowed"));
   CHECK_EQ(code("SELECT * FROM URL ('http://x', CSV)"), std::string("function_not_allowed"));
   CHECK_EQ(code("SELECT * FROM remote('h', db.t)"), std::string("function_not_allowed"));

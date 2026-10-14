@@ -152,6 +152,12 @@ McpSqlScan mcp_scan_single_statement(std::string_view sql, const std::vector<std
     if (word == "INTO" && i + 1 < count && tokens[i + 1].kind == Tok::Word && upper(tokens[i + 1].text) == "OUTFILE") {
       return scan_fail("clause_not_allowed", "INTO OUTFILE is not allowed");
     }
+    // `SETTINGS name = value` would change the limits that ChDash sends (a profile at readonly = 2 lets a statement change
+    // them, and the clause wins): the limits of the key apply. A column, an alias or a table named settings is no clause.
+    if (word == "SETTINGS" && i + 2 < count && (tokens[i + 1].kind == Tok::Word || tokens[i + 1].kind == Tok::Quoted) &&
+        tokens[i + 2].kind == Tok::Punct && tokens[i + 2].text == "=") {
+      return scan_fail("clause_not_allowed", "SETTINGS is not allowed: the limits of the key apply");
+    }
     if (i + 1 < count && tokens[i + 1].kind == Tok::Punct && tokens[i + 1].text == "(" && denied_function(word)) {
       return scan_fail("function_not_allowed", "the table function " + tokens[i].text + " is not allowed through MCP");
     }

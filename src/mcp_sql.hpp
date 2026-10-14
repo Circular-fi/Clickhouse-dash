@@ -32,8 +32,8 @@ struct McpSqlScan {
 // identifiers, heredocs ($tag$ ... $tag$), `--` / `#` line comments and block
 // comments hide their `;`. Accepts exactly one statement (one closing `;` is
 // fine). The first word must be in `allowed_first_words` (upper case). Rejects
-// INTO OUTFILE and the table functions that read files, URLs, remote servers
-// and other databases.
+// INTO OUTFILE, a SETTINGS clause (it would change the limits of the key), and
+// the table functions that read files, URLs, remote servers and other databases.
 McpSqlScan mcp_scan_single_statement(std::string_view sql, const std::vector<std::string>& allowed_first_words);
 
 // ---- query_table ---------------------------------------------------------------

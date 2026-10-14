@@ -755,11 +755,13 @@ def test_run_query_refuses_what_is_not_one_read_statement():
 
 
 @needs_mcp
-def test_readonly_is_enforced_by_clickhouse():
-    # Settings cannot be changed from inside the statement: readonly = 1 locks them.
+def test_a_statement_cannot_change_its_settings():
+    # Settings cannot be changed from inside the statement: the SETTINGS clause is refused before ClickHouse sees it (readonly
+    # = 1 would lock them too, but a profile at readonly = 2 would not: test_a_readonly_2_user_cannot_raise_a_limit).
     for setting in ("readonly = 0", "max_result_rows = 0", "max_execution_time = 3600", "max_memory_usage = 0", "max_rows_to_read = 0", "result_overflow_mode = 'throw'"):
         payload = fail_tool(MCP_URL, ALL, "run_query", {"host": "local", "sql": f"SELECT 1 SETTINGS {setting}"})
-        assert payload["error"] == "readonly", (setting, payload)
+        assert payload["error"] == "clause_not_allowed", (setting, payload)
+    fail_tool(MCP_URL, ALL, "explain_query", {"host": "local", "sql": "SELECT 1 SETTINGS max_execution_time = 3600"}, "clause_not_allowed")
     assert ok_tool(MCP_URL, ALL, "run_query", {"host": "local", "sql": "SELECT 1"})["rows"] == [[1]]
 
 
@@ -1770,6 +1772,19 @@ def test_the_other_limits_are_still_sent_to_a_readonly_2_user():
     # The rows are capped at 100, and the cut is reported.
     result = ok_tool(PROFILE_URL, PROFILE_RO2, "run_query", {"sql": "SELECT number FROM system.numbers LIMIT 500"})
     assert result["row_count"] == 100 and result["truncated"] is True
+
+
+@needs_profile
+def test_a_readonly_2_user_cannot_raise_a_limit():
+    # readonly = 2 lets a statement change its settings, and a SETTINGS clause wins over what ChDash sends: it would raise the
+    # time, the memory and the rows to read of the key, or rename the statement. The clause is refused before ClickHouse.
+    for key in (PROFILE_RO2, PROFILE_RO2CAP):
+        for setting in ("max_execution_time = 3600", "max_result_rows = 0", "max_rows_to_read = 0", "max_memory_usage = 0", "log_comment = 'x'"):
+            payload = fail_tool(PROFILE_URL, key, "run_query", {"sql": f"SELECT 1 SETTINGS {setting}"})
+            assert payload["error"] == "clause_not_allowed", (key, setting, payload)
+        fail_tool(PROFILE_URL, key, "explain_query", {"sql": "SELECT 1 SETTINGS max_execution_time = 3600"}, "clause_not_allowed")
+    # The limits of ChDash still stand.
+    assert profile_settings(PROFILE_RO2)["seconds"] == 5
 
 
 @needs_profile

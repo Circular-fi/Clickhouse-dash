@@ -422,9 +422,9 @@ Arguments: `host`, `sql`. The key needs `databases = ["*"]`.
 
 - The SQL is exactly one statement. The first word is `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC`, `EXISTS` or `EXPLAIN`. One `;` at the end is fine.
 - A splitter reads the SQL the way ClickHouse reads it. A `;` inside a string, a quoted name, a `$$` string or a comment is not a separator. A second statement is an error: `multiple_statements`.
-- ChDash refuses `INTO OUTFILE` and the table functions that read files, URLs, remote servers and other databases (`file`, `url`, `remote`, `s3`, `mysql` and similar). The error codes are `clause_not_allowed` and `function_not_allowed`.
+- ChDash refuses `INTO OUTFILE`, a `SETTINGS` clause (`SETTINGS name = value`: it would change the limits of the key, see [The settings profile of the user](#the-settings-profile-of-the-user)) and the table functions that read files, URLs, remote servers and other databases (`file`, `url`, `remote`, `s3`, `mysql` and similar). The error codes are `clause_not_allowed` and `function_not_allowed`. A column, an alias or a table named `settings` is not a clause (`Settings['max_threads']`, `system.settings`).
 - A `FORMAT` clause is accepted and has no effect: the result is always JSON.
-- This check is a guard rail. The security is `readonly=1` and the grants of the ClickHouse user.
+- This check is a guard rail. The security is `readonly` and the grants of the ClickHouse user. With a profile at `readonly = 2`, the refusal of `SETTINGS` is what keeps the limits of the key.
 
 Result: `host`, `columns`, `rows`, `row_count`, `truncated`, `elapsed_ms`. A `Bool` value of free SQL comes as `0` or `1`, because the native protocol sends it as `UInt8`. The values follow the contract of the Query results ("Result values" in `docs/telemetry.md`): a `UInt64` or a `Decimal` is a string of its digits, NaN is `"nan"`, and a Map is a list of `[key, value]` pairs.
 
@@ -481,7 +481,7 @@ The settings profile of the ClickHouse MCP user can already set `readonly` and s
 | `readonly` in the profile | What ChDash sends |
 | --- | --- |
 | `0` (the default) | `readonly = 1` and the limits of the table below. |
-| `2` | The limits of the table below, **not** `readonly`. The profile already stops every write, and a statement cannot change a limit. |
+| `2` | The limits of the table below, **not** `readonly`. The profile already stops every write. It lets a statement change its settings, and a `SETTINGS` clause in the SQL would win over the limits that ChDash sends: `run_query` and `explain_query` refuse the clause (`clause_not_allowed`), so a statement cannot change a limit. |
 | `1` | **Nothing.** ClickHouse refuses any setting. The profile holds the limits (time, memory, rows to read). ChDash still caps the rows and the bytes that it returns, and sets `truncated`. |
 | unknown (an old server without `getSetting`) | Everything, as for `0`. |
 
@@ -609,7 +609,7 @@ Use HTTPS when the client is not on the same machine. Put ChDash behind a revers
 - A key is a secret. Whoever has it can do everything the key allows. Delete the keys that you do not use any more.
 - The API tools run with the MCP ClickHouse user as the runner, and with the system user of the host for what the pages read with it. The System tools show the state of the whole server, query texts included, and the tools of Traces, Logs and Metrics read the `otel` tables with the system user: neither the grants of the MCP user nor the patterns of the key limit them, only the permission does. Give System, Traces, Logs and Metrics only to keys that may see the whole server and all its telemetry. Only the SQL tools go to keys with `databases = ["*"]`.
 - The MCP page cannot show a secret again: ChDash does not keep it. Anyone who can open the page (ChDash has no login) can still make and delete keys. Restrict the page with the reverse proxy or the network.
-- ChDash checks the SQL of `run_query` with a splitter. The splitter is a guard rail. It is not a parser of ClickHouse. `readonly=1` and the grants are the boundary.
+- ChDash checks the SQL of `run_query` with a splitter. The splitter is a guard rail. It is not a parser of ClickHouse. `readonly` and the grants are the boundary. With a profile at `readonly = 2`, the splitter's refusal of `SETTINGS` keeps the limits of the key: give that profile `CONST` constraints on the limits that matter to you if you want ClickHouse to hold them too.
 - The scope of a key is a list of table names. Free SQL can read any table that the ClickHouse user can read. This is why only keys with `databases = ["*"]` get free SQL. Give such keys only to people that you trust with all the data of the MCP user.
 - `log_comment` in `system.query_log` shows the key id. It never shows the secret.
 - Use HTTPS. The key goes in a header of each request.
@@ -645,7 +645,7 @@ The first specification of this feature had gaps. This list records what ChDash 
 - **Health.** `healthy` is the health that ChDash measures for the host with its normal check. It does not test the MCP user.
 - **`FORMAT`.** ChDash uses the native protocol. The result is always JSON, so a `FORMAT` clause has no effect and is accepted.
 - **Denied functions.** `file`, `url`, `remote`, `s3`, `hdfs`, `mysql`, `postgresql`, `mongodb`, `redis`, `jdbc`, `odbc`, `sqlite`, `executable`, `input`, the Azure, Iceberg, Delta Lake and Hudi readers, and their `Cluster` forms.
-- **Settings order.** The settings of a query go together in one packet. ClickHouse checks each of them against the profile of the user, then applies them. `readonly=1` does not block the limits that come with it. A profile that has `readonly` at 1 or 2 changes what is sent: see [The settings profile of the user](#the-settings-profile-of-the-user). A `SETTINGS` clause in the SQL is refused after that, so the SQL cannot change a limit.
+- **Settings order.** The settings of a query go together in one packet. ClickHouse checks each of them against the profile of the user, then applies them. `readonly=1` does not block the limits that come with it. A profile that has `readonly` at 1 or 2 changes what is sent: see [The settings profile of the user](#the-settings-profile-of-the-user). A `SETTINGS` clause in the SQL would win over all of them, and a profile at `readonly = 2` lets it through: the SQL tools refuse it before ClickHouse sees it (`clause_not_allowed`), so the SQL cannot change a limit. With `readonly = 1` (sent by ChDash, or in the profile) ClickHouse would refuse it too.
 - **Connections.** MCP queries use the shared connection pool with the `mcp_uri` of the host. The pool key includes the URI, so MCP connections never mix with runner or system connections. The receive timeout is `query_timeout_seconds` plus 15 seconds.
 - **API errors.** The page API and the guard of the writes use the one error body of ChDash: `{"error_code", "message", "retryable"}` (and `field` and `reason` for validation). The check of `manage_from_ui` comes after the cross-site guard and before the validation.
 - **The page.** The route `/mcp-integration` always serves `mcp.html`, also when MCP is off. The page then shows how to turn MCP on. The link in the page switcher shows only when `features.mcp.enabled` is true. The route answers 404 when `mcp.html` is missing.
