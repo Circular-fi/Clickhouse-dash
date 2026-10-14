@@ -8,6 +8,7 @@
 // The Python harness (test_native_unit_tests.py) runs it when QUERY_LIBRARY_TEST_BINARY points at it.
 
 #include "query_library.hpp"
+#include "query_library_read.hpp"
 #include "query_library_import.hpp"
 #include "query_library_json.hpp"
 #include "query_library_request.hpp"
@@ -163,7 +164,7 @@ void test_atomic_write(const std::string& dir) {
 void test_crud_tree_and_conflicts(const std::string& dir) {
   const std::string path = dir + "/library.json";
   QueryLibraryStore store(options_for(path));
-  auto lib = json(store.get_library(LOCAL));
+  auto lib = json(store.export_library(LOCAL, nullptr));
   CHECK(num(lib, "revision") == 0);
   CHECK(lib["writable"].GetBool());
   CHECK(lib["load_error"].IsNull());
@@ -240,7 +241,7 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   CHECK_STATUS(store.update_query("q_missing", "{\"name\":\"x\"}", nullptr), 404);
 
   // If-Match.
-  const int64_t revision = num(json(store.get_library(LOCAL)), "revision");
+  const int64_t revision = num(json(store.export_library(LOCAL, nullptr)), "revision");
   const std::string stale = std::to_string(revision - 1);
   r = store.update_query(query, "{\"name\":\"Renamed\"}", &stale);
   CHECK_STATUS(r, 409);
@@ -267,13 +268,13 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   CHECK(num(json(r), "deleted_folders") == 2);
   CHECK(num(json(r), "deleted_queries") == 1);
   CHECK_STATUS(store.delete_folder(other, true, nullptr), 404);
-  lib = json(store.get_library(LOCAL));
+  lib = json(store.export_library(LOCAL, nullptr));
   CHECK(lib["folders"].Size() == 0);
   CHECK(lib["queries"].Size() == 1);
 
   // Persistence: a new store on the same file sees the same library.
   QueryLibraryStore again(options_for(path));
-  auto lib2 = json(again.get_library(LOCAL));
+  auto lib2 = json(again.export_library(LOCAL, nullptr));
   CHECK(num(lib2, "revision") == num(lib, "revision"));
   CHECK(lib2["queries"].Size() == 1);
 }
@@ -291,7 +292,7 @@ void test_history_is_not_kept(const std::string& dir) {
   {
     QueryLibraryStore store(options_for(path));
     CHECK(store.writable());
-    auto lib = json(store.get_library(LOCAL));
+    auto lib = json(store.export_library(LOCAL, nullptr));
     CHECK(lib["load_error"].IsNull());
     CHECK(lib["queries"].Size() == 1);
     CHECK(!lib.HasMember("history_store"));
@@ -315,7 +316,7 @@ void test_history_is_not_kept(const std::string& dir) {
     auto o = options_for(ro_path);
     o.writable = false;
     QueryLibraryStore ro(o);
-    CHECK(json(ro.get_library(LOCAL))["load_error"].IsNull());
+    CHECK(json(ro.export_library(LOCAL, nullptr))["load_error"].IsNull());
     CHECK(read_file(ro_path) == before);
   }
   std::cerr.rdbuf(old);
@@ -345,7 +346,7 @@ void test_malformed_and_reload(const std::string& dir) {
   auto* old = std::cerr.rdbuf(captured.rdbuf());
   {
     QueryLibraryStore store(options_for(path));
-    auto lib = json(store.get_library(LOCAL));
+    auto lib = json(store.export_library(LOCAL, nullptr));
     CHECK(!lib["load_error"].IsNull());
     CHECK(!lib["writable"].GetBool());
     CHECK(!store.writable());
@@ -357,7 +358,7 @@ void test_malformed_and_reload(const std::string& dir) {
     // Fixing the file on disk clears the error without a restart.
     write_plain(path, "{\"version\":2,\"revision\":7,\"folders\":[{\"id\":\"f_a\",\"host_id\":\"local\",\"parent_id\":null,\"name\":\"A\"}],"
                       "\"queries\":[{\"id\":\"q_a\",\"host_id\":\"local\",\"folder_id\":\"f_a\",\"name\":\"Q\",\"sql\":\"SELECT secret_marker_123\"}]}");
-    lib = json(store.get_library(LOCAL));
+    lib = json(store.export_library(LOCAL, nullptr));
     CHECK(lib["load_error"].IsNull());
     CHECK(lib["writable"].GetBool());
     CHECK(num(lib, "revision") >= 7);
@@ -366,20 +367,20 @@ void test_malformed_and_reload(const std::string& dir) {
     // An external edit with the same revision still moves the revision forward.
     const int64_t before = num(lib, "revision");
     write_plain(path, "{\"version\":2,\"revision\":7,\"folders\":[],\"queries\":[]}");
-    lib = json(store.get_library(LOCAL));
+    lib = json(store.export_library(LOCAL, nullptr));
     CHECK(num(lib, "revision") > before);
     CHECK(lib["queries"].Size() == 0);
 
     // Structural problems are load errors too.
     write_plain(path, "{\"version\":2,\"folders\":[{\"id\":\"f_a\",\"host_id\":\"local\",\"parent_id\":\"f_b\",\"name\":\"A\"},"
                       "{\"id\":\"f_b\",\"host_id\":\"local\",\"parent_id\":\"f_a\",\"name\":\"B\"}]}");
-    CHECK(!json(store.get_library(LOCAL))["load_error"].IsNull());
+    CHECK(!json(store.export_library(LOCAL, nullptr))["load_error"].IsNull());
     // A folder of one host inside a folder of another is inconsistent.
     write_plain(path, "{\"version\":2,\"folders\":[{\"id\":\"f_a\",\"host_id\":\"local\",\"name\":\"A\"},"
                       "{\"id\":\"f_b\",\"host_id\":\"other\",\"parent_id\":\"f_a\",\"name\":\"B\"}]}");
-    CHECK(!json(store.get_library(LOCAL))["load_error"].IsNull());
+    CHECK(!json(store.export_library(LOCAL, nullptr))["load_error"].IsNull());
     write_plain(path, "{\"version\":3}");
-    CHECK(!json(store.get_library(LOCAL))["load_error"].IsNull());
+    CHECK(!json(store.export_library(LOCAL, nullptr))["load_error"].IsNull());
     CHECK(read_file(path) == "{\"version\":3}");  // never rewritten
   }
   std::cerr.rdbuf(old);
@@ -403,7 +404,7 @@ void test_import(const std::string& dir) {
   CHECK(num(r, "imported_queries") == 2);
   CHECK(num(r, "skipped_queries") == 2);
   CHECK(r["folder_ids"].HasMember("local-2"));
-  auto lib = json(store.get_library(LOCAL));
+  auto lib = json(store.export_library(LOCAL, nullptr));
   CHECK(lib["folders"].Size() == 2);
   CHECK(lib["queries"].Size() == 3);
   bool renamed = false;
@@ -419,13 +420,13 @@ void test_import(const std::string& dir) {
       "{\"host_id\":\"local\",\"folders\":[{\"id\":\"a\",\"parent_id\":\"b\",\"name\":\"A\"},{\"id\":\"b\",\"parent_id\":\"a\",\"name\":\"B\"}]}",
       nullptr));
   CHECK(str(r, "reason") == "cycle");
-  CHECK(num(json(store.get_library(LOCAL)), "revision") == revision);  // nothing new: no write
+  CHECK(num(json(store.export_library(LOCAL, nullptr)), "revision") == revision);  // nothing new: no write
 
   // "copy": a folder moved in from the browser's storage, under an existing
   // folder: nothing merged, skipped or renamed (the same query twice stays
   // twice), a clashing folder name is a 400 duplicate and writes nothing.
   std::string imported;
-  const auto folders_now = json(store.get_library(LOCAL));  // a named document: a range-for over a temporary dangles
+  const auto folders_now = json(store.export_library(LOCAL, nullptr));  // a named document: a range-for over a temporary dangles
   for (const auto& f : folders_now["folders"].GetArray()) {
     if (str(f, "name") == "Imported") imported = str(f, "id");
   }
@@ -442,7 +443,7 @@ void test_import(const std::string& dir) {
   CHECK(num(r, "skipped_queries") == 0);
   CHECK(r["folder_ids"].HasMember("b-1"));
   const std::string moved = str(r["folder_ids"], "b-1");
-  lib = json(store.get_library(LOCAL));
+  lib = json(store.export_library(LOCAL, nullptr));
   bool parented = false;
   bool kept_name = false;
   for (const auto& f : lib["folders"].GetArray()) parented |= str(f, "id") == moved && str(f, "parent_id") == imported;
@@ -451,7 +452,7 @@ void test_import(const std::string& dir) {
   const int64_t before_clash = num(lib, "revision");
   r = json(store.import_library(copy, nullptr));
   CHECK(str(r, "reason") == "duplicate");
-  CHECK(num(json(store.get_library(LOCAL)), "revision") == before_clash);
+  CHECK(num(json(store.export_library(LOCAL, nullptr)), "revision") == before_clash);
   CHECK_STATUS(store.import_library("{\"host_id\":\"local\",\"copy\":1,\"folders\":[]}", nullptr), 400);
 }
 
@@ -483,12 +484,12 @@ void test_per_host(const std::string& dir) {
   QueryLibraryStore store(options_for(path));
   const std::string unknown = "elsewhere";
   const std::string empty;
-  auto r = store.get_library(nullptr);
+  auto r = store.export_library(nullptr, nullptr);
   CHECK_STATUS(r, 400);
   CHECK(str(json(r), "field") == "host_id");
   CHECK(str(json(r), "reason") == "required");
-  CHECK(str(json(store.get_library(&empty)), "reason") == "required");
-  r = store.get_library(&unknown);
+  CHECK(str(json(store.export_library(&empty, nullptr)), "reason") == "required");
+  r = store.export_library(&unknown, nullptr);
   CHECK_STATUS(r, 400);
   CHECK(str(json(r), "reason") == "unknown_host");
   // Writes name their host.
@@ -515,12 +516,12 @@ void test_per_host(const std::string& dir) {
   CHECK_STATUS(store.create_query(query_body("Parts", "SELECT 2", other_ops, kOther), nullptr), 201);
   CHECK_STATUS(store.create_query(query_body("Top", "SELECT 3", "", kOther), nullptr), 201);
 
-  auto lib = json(store.get_library(LOCAL));
+  auto lib = json(store.export_library(LOCAL, nullptr));
   CHECK(str(lib, "host_id") == "local");
   CHECK(lib["folders"].Size() == 1);
   CHECK(lib["queries"].Size() == 1);
   CHECK(str(lib["folders"][0], "host_id") == "local");
-  auto other = json(store.get_library(OTHER));
+  auto other = json(store.export_library(OTHER, nullptr));
   CHECK(other["folders"].Size() == 1);
   CHECK(other["queries"].Size() == 2);
   CHECK(num(lib, "revision") == num(other, "revision"));  // one library revision
@@ -544,7 +545,7 @@ void test_per_host(const std::string& dir) {
   r = store.update_folder(local_ops, "{\"parent_id\":\"" + other_ops + "\"}", nullptr);
   CHECK_STATUS(r, 400);
   CHECK(str(json(r), "reason") == "host_mismatch");
-  CHECK(num(json(store.get_library(LOCAL)), "revision") == revision);
+  CHECK(num(json(store.export_library(LOCAL, nullptr)), "revision") == revision);
   // Moves inside a host work.
   CHECK_STATUS(store.update_query(local_query, "{\"folder_id\":null}", nullptr), 200);
 
@@ -556,13 +557,13 @@ void test_per_host(const std::string& dir) {
       nullptr);
   CHECK_STATUS(r, 200);
   CHECK(num(json(r), "imported_queries") == 2);
-  other = json(store.get_library(OTHER));
+  other = json(store.export_library(OTHER, nullptr));
   CHECK(other["queries"].Size() == 4);
   for (const auto& q : other["queries"].GetArray()) {
     CHECK(str(q, "host_id") == "other");
     if (str(q, "name") == "Into local") CHECK(q["folder_id"].IsNull());  // a folder of another host means the top level
   }
-  CHECK(json(store.get_library(LOCAL))["queries"].Size() == 1);
+  CHECK(json(store.export_library(LOCAL, nullptr))["queries"].Size() == 1);
 
   // On disk: version 2, a host on every entry.
   rapidjson::Document file;
@@ -591,14 +592,14 @@ const char* kVersion1 =
     "{\"id\":\"h_3\",\"sql\":\"SELECT 6\",\"ran_at_ms\":3000}]}";
 
 void check_migrated(QueryLibraryStore& store) {
-  auto lib = json(store.get_library(LOCAL));
+  auto lib = json(store.export_library(LOCAL, nullptr));
   CHECK(lib["load_error"].IsNull());
   CHECK(lib["folders"].Size() == 0);
   CHECK(lib["queries"].Size() == 1);
   CHECK(str(lib["queries"][0], "id") == "q_in_folder");
   CHECK(lib["queries"][0]["folder_id"].IsNull());  // its folder had no host: the top level
   CHECK(num(lib, "revision") == 4);
-  auto other = json(store.get_library(OTHER));
+  auto other = json(store.export_library(OTHER, nullptr));
   CHECK(other["queries"].Size() == 1);
 }
 
@@ -650,8 +651,8 @@ void test_migration(const std::string& dir) {
     write_plain(v2_path, "{\"version\":2,\"revision\":1,\"folders\":[{\"id\":\"f_x\",\"name\":\"X\"}],"
                          "\"queries\":[{\"id\":\"q_x\",\"name\":\"X\",\"sql\":\"SELECT 1\",\"host_id\":\"local\"}]}");
     QueryLibraryStore v2(options_for(v2_path));
-    CHECK(json(v2.get_library(LOCAL))["folders"].Size() == 0);
-    CHECK(json(v2.get_library(LOCAL))["queries"].Size() == 1);
+    CHECK(json(v2.export_library(LOCAL, nullptr))["folders"].Size() == 0);
+    CHECK(json(v2.export_library(LOCAL, nullptr))["queries"].Size() == 1);
     rapidjson::Document v2file;
     v2file.Parse(read_file(v2_path).c_str());
     CHECK(v2file["folders"].Size() == 0);
@@ -667,7 +668,7 @@ void test_migration(const std::string& dir) {
     const std::string broken = std::string(kVersion1).substr(0, 120);
     write_plain(bad_path, broken);
     QueryLibraryStore bad(options_for(bad_path));
-    CHECK(!json(bad.get_library(LOCAL))["load_error"].IsNull());
+    CHECK(!json(bad.export_library(LOCAL, nullptr))["load_error"].IsNull());
     CHECK(read_file(bad_path) == broken);
   }
   std::cerr.rdbuf(old);
@@ -831,6 +832,106 @@ void test_the_import_into_a_state() {
 
 } // namespace
 
+// The page of the tree: at most 100 items, as many levels deep as fit, a first level larger than a page in windows.
+chdash::QueryLibraryFolder test_folder(const std::string& id, const std::string& name, const std::string& parent = "") {
+  chdash::QueryLibraryFolder f;
+  f.id = id;
+  f.host_id = *LOCAL;
+  f.name = name;
+  if (!parent.empty()) f.parent_id = parent;
+  return f;
+}
+
+chdash::QueryLibraryQuery test_query(const std::string& id, const std::string& name, const std::string& folder = "", const std::string& sql = "SELECT 1") {
+  chdash::QueryLibraryQuery q;
+  q.id = id;
+  q.host_id = *LOCAL;
+  q.name = name;
+  q.sql = sql;
+  if (!folder.empty()) q.folder_id = folder;
+  return q;
+}
+
+void test_the_page_of_the_tree() {
+  using chdash::qlib::library_page;
+  chdash::QueryLibraryState s;
+  // 10 folders of 9 queries: 10 + 90 = 100 items, so everything fits in one answer, two levels deep.
+  for (int i = 0; i < 10; ++i) {
+    s.folders.push_back(test_folder("f" + std::to_string(i), "Team " + std::to_string(i)));
+    for (int j = 0; j < 9; ++j) s.queries.push_back(test_query("q" + std::to_string(i) + "_" + std::to_string(j), "Query " + std::to_string(j), "f" + std::to_string(i)));
+  }
+  auto page = library_page(s, *LOCAL, std::nullopt, 0, 100);
+  CHECK(page.folders.size() == 10 && page.queries.size() == 90);
+  CHECK(page.depth == 1 && page.complete && !page.next_cursor);
+  CHECK(page.loaded.size() == 10 && page.query_count.at("f3") == 9 && page.child_count.at("f3") == 9);
+  CHECK(page.host_folders == 10 && page.host_queries == 90);
+  // One more folder: 11 + 99 = 110 items do not fit. The page keeps the levels that do: the folders only, and their children wait.
+  s.folders.push_back(test_folder("f10", "Team 10"));
+  for (int j = 0; j < 9; ++j) s.queries.push_back(test_query("q10_" + std::to_string(j), "Query " + std::to_string(j), "f10"));
+  page = library_page(s, *LOCAL, std::nullopt, 0, 100);
+  CHECK(page.folders.size() == 11 && page.queries.empty() && page.depth == 0);
+  CHECK(!page.complete && page.loaded.empty() && page.query_count.at("f10") == 9 && page.child_count.at("f10") == 9);
+  // A folder of the page is read on its own: its children, one level (they fit).
+  page = library_page(s, *LOCAL, std::string("f10"), 0, 100);
+  CHECK(page.folders.empty() && page.queries.size() == 9 && page.complete && page.level_total == 9);
+  CHECK(page.parent_queries == 9 && page.host_queries == 99);
+  // The names are ordered without the case, folders first; "Team 1" comes before "Team 10" and "Team 2".
+  page = library_page(s, *LOCAL, std::nullopt, 0, 100);
+  CHECK(page.folders.front()->name == "Team 0" && page.folders[1]->name == "Team 1" && page.folders[2]->name == "Team 10");
+  // A first level larger than a page comes in windows: 250 queries at the top level.
+  chdash::QueryLibraryState flat;
+  for (int i = 0; i < 250; ++i) flat.queries.push_back(test_query("q" + std::to_string(i), "Q" + std::string(i < 10 ? "00" : i < 100 ? "0" : "") + std::to_string(i)));
+  auto first = library_page(flat, *LOCAL, std::nullopt, 0, 100);
+  CHECK(first.queries.size() == 100 && first.next_cursor && *first.next_cursor == 100 && !first.complete && first.level_total == 250);
+  auto second = library_page(flat, *LOCAL, std::nullopt, 100, 100);
+  CHECK(second.queries.size() == 100 && second.next_cursor && *second.next_cursor == 200);
+  auto last = library_page(flat, *LOCAL, std::nullopt, 200, 100);
+  CHECK(last.queries.size() == 50 && !last.next_cursor);
+  CHECK(first.queries.front()->name == "Q000" && second.queries.front()->name == "Q100" && last.queries.back()->name == "Q249");
+  // The windows cover the level once, folders first: 120 folders and 50 queries.
+  chdash::QueryLibraryState mixed;
+  for (int i = 0; i < 120; ++i) mixed.folders.push_back(test_folder("f" + std::to_string(i), "F" + std::string(i < 10 ? "00" : i < 100 ? "0" : "") + std::to_string(i)));
+  for (int i = 0; i < 50; ++i) mixed.queries.push_back(test_query("q" + std::to_string(i), "Q" + std::to_string(i)));
+  auto m1 = library_page(mixed, *LOCAL, std::nullopt, 0, 100);
+  auto m2 = library_page(mixed, *LOCAL, std::nullopt, 100, 100);
+  CHECK(m1.folders.size() == 100 && m1.queries.empty() && m2.folders.size() == 20 && m2.queries.size() == 50 && !m2.next_cursor);
+  // A limit below the maximum is kept; above it is cut to the maximum.
+  CHECK(library_page(flat, *LOCAL, std::nullopt, 0, 10).queries.size() == 10);
+  CHECK(library_page(flat, *LOCAL, std::nullopt, 0, 5000).queries.size() == 100);
+  // The other host has its own library.
+  CHECK(library_page(flat, *OTHER, std::nullopt, 0, 100).level_total == 0);
+}
+
+void test_the_search_and_the_detail_of_a_query(const std::string& dir) {
+  QueryLibraryStore store(options_for(dir + "/read.json"));
+  const std::string ops = str(json(store.create_folder(folder_body("Operations"), nullptr)), "id");
+  CHECK_STATUS(store.create_query(query_body("Active parts", "SELECT table FROM system.parts", ops), nullptr), 201);
+  CHECK_STATUS(store.create_query(query_body("The answer", "SELECT 42 AS answer"), nullptr), 201);
+  // The page has no SQL; one query has it, with the folders above it.
+  auto page = json(store.get_page(LOCAL, nullptr, 0, 100));
+  CHECK(page["queries"].Size() == 2 && !page["queries"][0].HasMember("sql") && !page["queries"][0].HasMember("description"));
+  CHECK(page["folders"][0]["query_count"].GetInt() == 1 && page["folders"][0]["loaded"].GetBool());
+  CHECK(page["totals"]["queries"].GetInt() == 2 && page["complete"].GetBool());
+  const std::string id = str(json(store.create_query(query_body("Third", "SELECT 3", ops), nullptr)), "id");
+  auto detail = json(store.get_query(LOCAL, id));
+  CHECK(str(detail, "sql") == "SELECT 3" && detail["ancestors"].Size() == 1 && str(detail, "path") == "/Operations");
+  CHECK_STATUS(store.get_query(LOCAL, "q_missing"), 404);
+  CHECK_STATUS(store.get_query(OTHER, id), 404);
+  const std::string missing = "f_missing";
+  CHECK_STATUS(store.get_page(LOCAL, &missing, 0, 100), 404);
+  // The search reads the name, the description, the SQL and the path, every word, without the case.
+  auto found = json(store.search(LOCAL, "PARTS operations", 100));
+  CHECK(found["total"].GetInt() == 1 && str(found["results"][0], "path") == "/Operations");
+  CHECK(json(store.search(LOCAL, "answer", 100))["results"].Size() == 1);
+  CHECK(json(store.search(LOCAL, "nothing like it", 100))["total"].GetInt() == 0);
+  CHECK_STATUS(store.search(LOCAL, "   ", 100), 400);
+  // The export of a folder: it and what is under it, with the SQL; the export of the host: everything.
+  auto exported = json(store.export_library(LOCAL, &ops));
+  CHECK(exported["folders"].Size() == 1 && exported["queries"].Size() == 2 && exported["queries"][0].HasMember("sql"));
+  CHECK(json(store.export_library(LOCAL, nullptr))["queries"].Size() == 3);
+  CHECK_STATUS(store.export_library(LOCAL, &missing), 404);
+}
+
 int main() {
   const std::string dir = make_temp_dir();
   test_atomic_write(make_temp_dir());
@@ -845,6 +946,8 @@ int main() {
   test_the_rules_of_the_tree();
   test_the_fields_of_a_request();
   test_the_import_into_a_state();
+  test_the_page_of_the_tree();
+  test_the_search_and_the_detail_of_a_query(make_temp_dir());
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;
   return g_failures == 0 ? 0 : 1;
 }

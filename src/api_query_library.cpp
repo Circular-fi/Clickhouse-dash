@@ -8,6 +8,7 @@
 #include "server.hpp"
 
 #include "api_error.hpp"
+#include "query_library_read.hpp"
 #include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -40,6 +41,19 @@ const std::string* optional_param(const httplib::Request& req, const char* name,
   if (!req.has_param(name)) return nullptr;
   storage = req.get_param_value(name);
   return &storage;
+}
+
+// A non-negative integer parameter, or the default (an absent, empty or unreadable one).
+size_t number_param(const httplib::Request& req, const char* name, size_t fallback) {
+  if (!req.has_param(name)) return fallback;
+  const std::string text = req.get_param_value(name);
+  if (text.empty() || text.size() > 9) return fallback;
+  size_t value = 0;
+  for (const char c : text) {
+    if (c < '0' || c > '9') return fallback;
+    value = value * 10 + static_cast<size_t>(c - '0');
+  }
+  return value;
 }
 
 void send(httplib::Response& res, const QueryLibraryStore::Response& out) {
@@ -88,9 +102,24 @@ void Server::handle_query_library(const httplib::Request& req, httplib::Response
   const std::string* host_id = optional_param(req, "host_id", host_storage);
 
   switch (route) {
-    case QueryLibraryRoute::Get:
-      send(res, store.get_library(host_id));
+    case QueryLibraryRoute::Get: {
+      // ?parent_id= (a folder: its children; none: the top level), ?cursor= (the offset in a first level larger than a page), ?limit=.
+      std::string parent_storage;
+      const std::string* parent_id = optional_param(req, "parent_id", parent_storage);
+      send(res, store.get_page(host_id, parent_id, number_param(req, "cursor", 0), number_param(req, "limit", qlib::kLibraryPageMax)));
       return;
+    }
+    case QueryLibraryRoute::QueryGet:
+      send(res, store.get_query(host_id, id));
+      return;
+    case QueryLibraryRoute::Search:
+      send(res, store.search(host_id, req.has_param("q") ? req.get_param_value("q") : std::string(), number_param(req, "limit", qlib::kLibrarySearchMax)));
+      return;
+    case QueryLibraryRoute::Export: {
+      std::string folder_storage;
+      send(res, store.export_library(host_id, optional_param(req, "folder_id", folder_storage)));
+      return;
+    }
     case QueryLibraryRoute::FolderCreate:
       send(res, store.create_folder(req.body, if_match));
       return;

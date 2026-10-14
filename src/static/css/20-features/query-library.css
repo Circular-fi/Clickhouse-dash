@@ -452,6 +452,47 @@
   font-style: italic;
 }
 
+/* A row of the tree that says something and offers one action: "Show more" at the end of a level that is larger than a page, "Retry". */
+.qlTree__action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: 0.15rem 0.5rem 0.15rem calc(3.2rem + var(--qlDepth, 0) * 0.95rem);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.qlActionButton {
+  padding: var(--space-2) var(--space-8);
+  border: 1px solid var(--button-border);
+  border-radius: var(--r-md);
+  background: var(--button-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.qlActionButton:hover {
+  border-color: var(--button-border-hover);
+}
+
+.qlActionButton:focus-visible {
+  outline: 2px solid var(--accent-fill);
+  outline-offset: 2px;
+}
+
+.qlPreview__loading {
+  margin: var(--space-12) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.qlContents__showMore {
+  justify-self: start;
+  margin: var(--space-4) var(--space-6);
+}
+
 .qlTree__empty--root {
   display: grid;
   justify-items: center;

@@ -75,7 +75,7 @@ endif()
 set(CHDASH_MCP_TOOL_SOURCES mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp)
 
 # The query library: the store, the file format, the rules of the tree, the import, the reading of a request.
-set(CHDASH_QUERY_LIBRARY_SOURCES query_library.cpp query_library_file.cpp query_library_import.cpp query_library_request.cpp query_library_rules.cpp)
+set(CHDASH_QUERY_LIBRARY_SOURCES query_library.cpp query_library_file.cpp query_library_import.cpp query_library_read.cpp query_library_request.cpp query_library_rules.cpp)
 
 if (CHDASH_BUILD_QUERY_LIBRARY_TESTS)
   add_executable(chdash_query_library_test ../tests/native/query_library_test.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} error_envelope.cpp secure_random.cpp log.cpp)

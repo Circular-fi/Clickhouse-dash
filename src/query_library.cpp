@@ -5,6 +5,7 @@
 #include "log.hpp"
 #include "query_library_import.hpp"
 #include "query_library_json.hpp"
+#include "query_library_read.hpp"
 #include "query_library_request.hpp"
 #include "query_library_rules.hpp"
 #include "secure_random.hpp"
@@ -258,31 +259,171 @@ QueryLibraryStore::Response query_response(int status, const QueryLibraryQuery& 
 
 } // namespace
 
-QueryLibraryStore::Response QueryLibraryStore::get_library(const std::string* host_raw) {
+namespace {
+
+// What every read says first: the host, the revision, whether the library can be written, and its limits.
+void write_read_header(JsonWriter& w, const std::string& host, int64_t revision, int64_t updated_at_ms, bool writable,
+                       const std::string& load_error, const QueryLibraryOptions& options) {
+  w.Key("host_id"); write_string(w, host);
+  w.Key("revision"); w.Int64(revision);
+  w.Key("updated_at_ms"); w.Int64(updated_at_ms);
+  w.Key("writable"); w.Bool(writable);
+  w.Key("load_error");
+  if (load_error.empty()) w.Null();
+  else write_string(w, load_error);
+  w.Key("limits");
+  w.StartObject();
+  w.Key("max_query_bytes"); w.Uint64(options.max_query_bytes);
+  w.Key("max_file_bytes"); w.Uint64(options.max_file_bytes);
+  w.Key("max_folder_depth"); w.Int(kQueryLibraryMaxFolderDepth);
+  w.Key("max_name_bytes"); w.Uint64(kQueryLibraryMaxNameBytes);
+  w.Key("max_description_bytes"); w.Uint64(kQueryLibraryMaxDescriptionBytes);
+  w.Key("page_max"); w.Uint64(kLibraryPageMax);
+  w.EndObject();
+}
+
+}  // namespace
+
+QueryLibraryStore::Response QueryLibraryStore::get_page(const std::string* host_raw, const std::string* parent_raw, size_t cursor, size_t limit) {
   return guarded([&]() -> Response {
     const std::string host = require_host_locked(host_raw, "host_id");
+    std::optional<std::string> parent;
+    if (parent_raw && !parent_raw->empty()) {
+      const QueryLibraryFolder* folder = find_folder(state_, *parent_raw);
+      if (!folder || folder->host_id != host) throw not_found("no such folder");
+      parent = *parent_raw;
+    }
+    const LibraryPage page = library_page(state_, host, parent, cursor, limit);
+    rapidjson::StringBuffer sb;
+    JsonWriter w(sb);
+    w.StartObject();
+    write_read_header(w, host, state_.revision, state_.updated_at_ms, options_.writable && load_error_.empty(), load_error_, options_);
+    w.Key("parent_id"); write_opt(w, parent);
+    w.Key("depth"); w.Int(page.depth);
+    w.Key("complete"); w.Bool(page.complete);
+    w.Key("next_cursor");
+    if (page.next_cursor) w.Uint64(*page.next_cursor);
+    else w.Null();
+    w.Key("level_total"); w.Uint64(page.level_total);
+    // The whole library of the host (what the Query page counts), and the queries under the parent.
+    w.Key("totals");
+    w.StartObject();
+    w.Key("folders"); w.Uint64(page.host_folders);
+    w.Key("queries"); w.Uint64(page.host_queries);
+    w.Key("parent_queries"); w.Uint64(page.parent_queries);
+    w.EndObject();
+    w.Key("folders");
+    w.StartArray();
+    for (const auto* f : page.folders) {
+      w.StartObject();
+      w.Key("id"); write_string(w, f->id);
+      w.Key("parent_id"); write_opt(w, f->parent_id);
+      w.Key("name"); write_string(w, f->name);
+      w.Key("updated_at_ms"); w.Int64(f->updated_at_ms);
+      w.Key("query_count"); w.Uint64(page.query_count.at(f->id));
+      w.Key("child_count"); w.Uint64(page.child_count.at(f->id));
+      w.Key("subfolder_count"); w.Uint64(page.subfolder_count.at(f->id));
+      w.Key("loaded"); w.Bool(page.loaded.count(f->id) != 0);
+      w.EndObject();
+    }
+    w.EndArray();
+    w.Key("queries");
+    w.StartArray();
+    for (const auto* q : page.queries) {
+      w.StartObject();
+      w.Key("id"); write_string(w, q->id);
+      w.Key("folder_id"); write_opt(w, q->folder_id);
+      w.Key("name"); write_string(w, q->name);
+      w.Key("updated_at_ms"); w.Int64(q->updated_at_ms);
+      w.EndObject();
+    }
+    w.EndArray();
+    w.EndObject();
+    return {200, sb.GetString()};
+  });
+}
+
+QueryLibraryStore::Response QueryLibraryStore::get_query(const std::string* host_raw, const std::string& id) {
+  return guarded([&]() -> Response {
+    const std::string host = require_host_locked(host_raw, "host_id");
+    const auto it = std::find_if(state_.queries.begin(), state_.queries.end(), [&](const QueryLibraryQuery& q) { return q.id == id; });
+    if (it == state_.queries.end() || it->host_id != host) throw not_found("no such query");
+    rapidjson::StringBuffer sb;
+    JsonWriter w(sb);
+    w.StartObject();
+    write_query_fields(w, *it);
+    w.Key("revision"); w.Int64(state_.revision);
+    w.Key("ancestors");
+    w.StartArray();
+    for (const auto& folder_id : folder_ancestors(state_, it->folder_id)) write_string(w, folder_id);
+    w.EndArray();
+    w.Key("path"); write_string(w, folder_path_text(state_, it->folder_id));
+    w.EndObject();
+    return {200, sb.GetString()};
+  });
+}
+
+QueryLibraryStore::Response QueryLibraryStore::search(const std::string* host_raw, const std::string& text, size_t limit) {
+  return guarded([&]() -> Response {
+    const std::string host = require_host_locked(host_raw, "host_id");
+    std::vector<std::string> terms;
+    std::string word;
+    for (const char c : text + " ") {
+      if (std::isspace(static_cast<unsigned char>(c))) {
+        if (!word.empty()) terms.push_back(word);
+        word.clear();
+      } else {
+        word.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+      }
+    }
+    if (terms.empty()) throw validation("q", "required", "q is required");
+    if (terms.size() > 16) throw validation("q", "too_many", "q has at most 16 words");
+    limit = std::max<size_t>(1, std::min(limit, kLibrarySearchMax));
+    size_t total = 0;
+    const auto hits = library_search(state_, host, terms, limit, &total);
     rapidjson::StringBuffer sb;
     JsonWriter w(sb);
     w.StartObject();
     w.Key("host_id"); write_string(w, host);
     w.Key("revision"); w.Int64(state_.revision);
-    w.Key("updated_at_ms"); w.Int64(state_.updated_at_ms);
-    w.Key("writable"); w.Bool(options_.writable && load_error_.empty());
-    w.Key("load_error");
-    if (load_error_.empty()) w.Null();
-    else write_string(w, load_error_);
-    w.Key("limits");
-    w.StartObject();
-    w.Key("max_query_bytes"); w.Uint64(options_.max_query_bytes);
-    w.Key("max_file_bytes"); w.Uint64(options_.max_file_bytes);
-    w.Key("max_folder_depth"); w.Int(kQueryLibraryMaxFolderDepth);
-    w.Key("max_name_bytes"); w.Uint64(kQueryLibraryMaxNameBytes);
-    w.Key("max_description_bytes"); w.Uint64(kQueryLibraryMaxDescriptionBytes);
+    w.Key("total"); w.Uint64(total);
+    w.Key("truncated"); w.Bool(total > hits.size());
+    w.Key("results");
+    w.StartArray();
+    for (const auto& hit : hits) {
+      w.StartObject();
+      w.Key("id"); write_string(w, hit.query->id);
+      w.Key("folder_id"); write_opt(w, hit.query->folder_id);
+      w.Key("name"); write_string(w, hit.query->name);
+      w.Key("updated_at_ms"); w.Int64(hit.query->updated_at_ms);
+      w.Key("path"); write_string(w, hit.path);
+      w.EndObject();
+    }
+    w.EndArray();
     w.EndObject();
+    return {200, sb.GetString()};
+  });
+}
+
+QueryLibraryStore::Response QueryLibraryStore::export_library(const std::string* host_raw, const std::string* folder_raw) {
+  return guarded([&]() -> Response {
+    const std::string host = require_host_locked(host_raw, "host_id");
+    // One folder: it and every folder under it, and their queries.
+    std::unordered_set<std::string> keep;
+    if (folder_raw && !folder_raw->empty()) {
+      const QueryLibraryFolder* folder = find_folder(state_, *folder_raw);
+      if (!folder || folder->host_id != host) throw not_found("no such folder");
+      for (const auto& item : folder_subtree(state_, *folder_raw)) keep.insert(item.first);
+    }
+    const bool all = !(folder_raw && !folder_raw->empty());
+    rapidjson::StringBuffer sb;
+    JsonWriter w(sb);
+    w.StartObject();
+    write_read_header(w, host, state_.revision, state_.updated_at_ms, options_.writable && load_error_.empty(), load_error_, options_);
     w.Key("folders");
     w.StartArray();
     for (const auto& f : state_.folders) {
-      if (f.host_id != host) continue;
+      if (f.host_id != host || (!all && !keep.count(f.id))) continue;
       w.StartObject(); write_folder_fields(w, f); w.EndObject();
     }
     w.EndArray();
@@ -290,6 +431,7 @@ QueryLibraryStore::Response QueryLibraryStore::get_library(const std::string* ho
     w.StartArray();
     for (const auto& q : state_.queries) {
       if (q.host_id != host) continue;
+      if (!all && !(q.folder_id && keep.count(*q.folder_id))) continue;
       w.StartObject(); write_query_fields(w, q); w.EndObject();
     }
     w.EndArray();

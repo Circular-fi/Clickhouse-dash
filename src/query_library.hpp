@@ -54,7 +54,16 @@ public:
   // `if_match` is the raw If-Match header value, or nullptr when absent.
   // `host_id` is the request's host_id parameter, or nullptr when absent
   // (400: it is required and must name a configured host).
-  Response get_library(const std::string* host_id);
+  // The reads (docs/query-library.md, "REST API"). The page is what the Query page loads: at most kLibraryPageMax items under `parent_id`
+  // (null: the top level of the host), as many levels deep as fit, with the minimal data of each (no SQL) and, for each folder, whether its
+  // children came with it. `cursor` is the offset in the first level when that level alone is larger than a page.
+  Response get_page(const std::string* host_id, const std::string* parent_id, size_t cursor, size_t limit);
+  // One query, whole, with the folders above it.
+  Response get_query(const std::string* host_id, const std::string& id);
+  // The queries whose name, description, SQL or folder path hold every word of `text`: at most `limit`, minimal data and their path.
+  Response search(const std::string* host_id, const std::string& text, size_t limit);
+  // The host's whole library, or one folder with everything under it, with the SQL: a backup, and what a move to another storage copies.
+  Response export_library(const std::string* host_id, const std::string* folder_id);
   Response create_folder(std::string_view body, const std::string* if_match);
   Response update_folder(const std::string& id, std::string_view body, const std::string* if_match);
   Response delete_folder(const std::string& id, bool recursive, const std::string* if_match);

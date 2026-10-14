@@ -226,7 +226,10 @@ The library revision is one for the whole file (every host). It changes with eve
 
 | Route | Writable only | Result |
 | --- | --- | --- |
-| `GET /api/query-library?host_id=` | | `{host_id, revision, updated_at_ms, writable, load_error, limits, folders, queries}`: the folders and queries of that host (queries include `sql`). `load_error` is `null` or the reason the file could not be loaded. `limits` holds `max_query_bytes`, `max_file_bytes`, `max_folder_depth`, `max_name_bytes`, `max_description_bytes`. |
+| `GET /api/query-library?host_id=` | | One **page** of the tree, never more than 100 items (`limit` can lower it): `{host_id, revision, updated_at_ms, writable, load_error, limits, parent_id, depth, complete, next_cursor, level_total, totals, folders, queries}`. See *Reads in pages* below. |
+| `GET /api/query-library/queries/<id>?host_id=` | | One query, whole: `{id, folder_id, name, description, sql, host_id, created_at_ms, updated_at_ms, revision, ancestors, path}` (`ancestors`: the ids of the folders above it, from the top level). 404 `not_found` for a query of another host. |
+| `GET /api/query-library/search?host_id=&q=` | | The queries whose name, description, SQL or folder path hold every word of `q` (without the case), at most 100: `{host_id, revision, total, truncated, results: [{id, folder_id, name, updated_at_ms, path}]}`. |
+| `GET /api/query-library/export?host_id=[&folder_id=]` | | The whole library of the host (or one folder with everything under it) with the SQL: `{..., folders, queries}` as the library file holds them. It is what a backup reads and what a move to another storage copies. |
 | `POST /api/query-library/folders` `{host_id, parent_id, name}` | yes | 201: the folder plus `revision`. `parent_id` is a folder of the same host. |
 | `PATCH /api/query-library/folders/<id>` `{name?, parent_id?}` | yes | The folder plus `revision`. Setting `parent_id` moves the folder (`null` = the top level of its host). A move of a folder into itself or into one of its subfolders answers 400 `reason: "cycle"`. A move that nests deeper than 8 levels answers 400 `reason: "depth"`. A move into a folder of another host answers 400 `reason: "host_mismatch"`. |
 | `DELETE /api/query-library/folders/<id>?recursive=1` | yes | `{ok, id, deleted_folders, deleted_queries, revision}`. Without `recursive=1`, a folder that holds subfolders or queries answers 409 `{"error_code": "not_empty", "folders": <subfolders>, "queries": <direct queries>, ...}`. |
@@ -236,6 +239,18 @@ The library revision is one for the whole file (every host). It changes with eve
 | `POST /api/query-library/import` `{host_id, folders, queries, copy?}` | yes | `{ok, imported_folders, merged_folders, imported_queries, skipped_queries, folder_ids, revision}`. |
 
 A PATCH that changes nothing does not write the file. It keeps the revision.
+
+### Reads in pages
+
+The Query page does not load the library: a library can hold thousands of queries, and most of them are never opened. `GET /api/query-library` answers one page, and the SQL of a query is read when the query is opened.
+
+- **The first level** is the children of `parent_id` (a folder; without it, the top level of the host): the folders first, then the queries, each by name. A folder has `query_count` (the queries under it, subfolders included), `child_count` (its direct children), `subfolder_count`, and `loaded`; a query has `id`, `folder_id`, `name` and `updated_at_ms`. **No SQL and no description** are in a page.
+- **Levels deeper** are added while the page stays within 100 items: a library of 100 items or fewer comes whole in one answer. With 104 items the deepest levels are left out until the number fits: the page keeps the levels that fit, and a folder whose children are not in the page has `loaded: false`. `depth` is how many levels came below the first one, and `complete` is true when nothing is left to read.
+- **A first level larger than a page** comes in windows: the answer holds the first 100 items and `next_cursor`; the next call is the same with `cursor=<next_cursor>`, until `next_cursor` is `null`. `level_total` is the size of the level.
+- `totals` is the whole library of the host (`folders`, `queries`) and the queries under the parent (`parent_queries`), so that the page shows the counts before anything is read.
+- A folder with `loaded: false` is read with `GET /api/query-library?parent_id=<its id>`, the same way (its children, as many levels as fit, windows when it is large).
+
+The Query page reads a folder when it is opened (the counts are already on the row), reads the next window on *Show more*, reads one query when it is selected or loaded (`GET /queries/<id>`), and asks the server to search. A change (create, edit, move, remove) reloads the top level and the folders that are open.
 
 ### Import
 

@@ -372,7 +372,7 @@ How they work:
 
 | Tool | Route | Use |
 | --- | --- | --- |
-| `query_library` | `GET /api/query-library` | The saved queries and their folders (the Query page library of the server). |
+| `query_library` | `GET /api/query-library` | One page of the saved queries and their folders (the Query page library of the server): at most 100 items with their name and place, no SQL; `parent_id` and `cursor` read more. |
 | `query_execution` | `GET /api/query/execution` | The record of a query that ChDash ran: status, timings and profile counters. |
 
 | `format_sql` | `POST /api/format` | Format SQL text like the Format button of the Query page (it reads the ClickHouse version of the host to parse it). A text that the formatter would change in meaning comes back as written, with a `warning` ([formatter.md](formatter.md)). |

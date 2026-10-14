@@ -214,9 +214,11 @@ const std::vector<McpApiTool>& mcp_api_tools() {
 
       // ---- Library: the saved queries ------------------------------------------------------------------
       {"query_library", "query", "Query library",
-       "The saved queries and their folders (the Query page library of the server). Answers `not_enabled` "
-       "when the configuration has no query_library. Params: `library` (the name of one of several libraries; "
-       "the first answers by default), `recursive`.",
+       "The saved queries and their folders (the Query page library of the server), one page at a time: at most 100 "
+       "items with their name, place and date (no SQL), as many levels deep as fit. Answers `not_enabled` when the "
+       "configuration has no query_library. Params: `library` (the name of one of several libraries; the first answers "
+       "by default), `parent_id` (a folder: its children), `cursor` (the offset in a level that is larger than a page; "
+       "the answer gives `next_cursor`).",
        "GET", "/api/query-library", McpApiScope::Free},
 
       // ---- Query helpers: functions of ChDash that read no data ---------------------------------------

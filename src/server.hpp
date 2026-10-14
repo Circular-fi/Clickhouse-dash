@@ -285,6 +285,9 @@ struct AppConfig {
 // Query library routes (api_query_library.cpp).
 enum class QueryLibraryRoute {
   Get,
+  QueryGet,
+  Search,
+  Export,
   FolderCreate,
   FolderUpdate,
   FolderDelete,

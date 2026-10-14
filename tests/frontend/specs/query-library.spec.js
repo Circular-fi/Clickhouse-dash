@@ -2141,6 +2141,52 @@ test('a long query in a preview (Saved or History) scrolls inside its block, bot
 // writes stamped with their host, revision, If-Match conflicts, read-only,
 // the import's copy mode (a folder moved in from the browser's root). It has
 // no history route: the History is the browser's.
+// What GET /api/query-library answers (src/query_library_read.cpp): the children of a folder, folders first then queries by name, as many
+// levels deep as fit in `limit` items, the minimal data of each; a first level larger than a page comes in windows (`cursor`).
+function pageOf(server, host, parentId, cursor, limit) {
+  const byName = (a, b) => (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : a.id < b.id ? -1 : 1);
+  const folders = server.folders.filter((f) => f.host_id === host);
+  const queries = server.queries.filter((q) => q.host_id === host);
+  const subFolders = (id) => folders.filter((f) => (f.parent_id || null) === (id || null)).sort(byName);
+  const subQueries = (id) => queries.filter((q) => (q.folder_id || null) === (id || null)).sort(byName);
+  const under = (id) => queries.filter((q) => { for (let cur = q.folder_id; cur; cur = folders.find((f) => f.id === cur)?.parent_id) if (cur === id) return true; return false; }).length;
+  const children = (id) => subFolders(id).length + subQueries(id).length;
+  const first = [...subFolders(parentId), ...subQueries(parentId)];
+  const out = { folders: [], queries: [], loaded: new Set(), depth: 0, complete: false, nextCursor: null };
+  const addFolder = (f) => out.folders.push({ id: f.id, parent_id: f.parent_id || null, name: f.name, updated_at_ms: f.updated_at_ms, query_count: under(f.id), child_count: children(f.id), subfolder_count: subFolders(f.id).length });
+  const done = () => ({
+    parent_id: parentId, depth: out.depth, complete: out.complete, next_cursor: out.nextCursor, level_total: first.length,
+    totals: { folders: folders.length, queries: queries.length, parent_queries: parentId ? under(parentId) : queries.length },
+    folders: out.folders.map((f) => ({ ...f, loaded: out.loaded.has(f.id) })),
+    queries: out.queries.map((q) => ({ id: q.id, folder_id: q.folder_id || null, name: q.name, updated_at_ms: q.updated_at_ms })),
+  });
+  if (first.length > limit) {
+    for (const item of first.slice(cursor, cursor + limit)) (item.parent_id !== undefined && folders.includes(item) ? addFolder(item) : out.queries.push(item));
+    if (cursor + limit < first.length) out.nextCursor = cursor + limit;
+    return done();
+  }
+  for (const f of subFolders(parentId)) addFolder(f);
+  for (const q of subQueries(parentId)) out.queries.push(q);
+  let total = first.length;
+  let frontier = subFolders(parentId);
+  while (frontier.length) {
+    const next = frontier.reduce((n, f) => n + children(f.id), 0);
+    if (next === 0 || total + next > limit) break;
+    const nextFrontier = [];
+    for (const f of frontier) {
+      out.loaded.add(f.id);
+      for (const child of subFolders(f.id)) { addFolder(child); nextFrontier.push(child); }
+      for (const q of subQueries(f.id)) out.queries.push(q);
+    }
+    total += next;
+    out.depth += 1;
+    frontier = nextFrontier;
+  }
+  out.complete = true;
+  for (const f of out.folders) { if (f.child_count === 0) out.loaded.add(f.id); if (!out.loaded.has(f.id)) out.complete = false; }
+  return done();
+}
+
 async function mockServerLibrary(page, { writable = true, conflicts = 0, library = LIBRARY } = {}) {
   const server = {
     revision: 10,
@@ -2178,9 +2224,37 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
         return route.abort('failed');
       }
       if (!host) return missingHost(route);
+      const parent = url.searchParams.get('parent_id') || null;
+      if (parent && !server.folders.some((f) => f.id === parent && f.host_id === host)) return json(route, 404, { error: 'not_found', error_code: 'not_found', message: 'no such folder' });
       return json(route, 200, {
         host_id: host, revision: server.revision, updated_at_ms: now, writable, load_error: null,
-        folders: server.folders.filter((f) => f.host_id === host), queries: server.queries.filter((q) => q.host_id === host),
+        ...pageOf(server, host, parent, Number(url.searchParams.get('cursor')) || 0, Math.min(100, Number(url.searchParams.get('limit')) || 100)),
+      });
+    }
+    // One query, whole; a search; the export of a folder or of the host: the reads that the page makes when it needs more than a page.
+    const wantedQuery = method === 'GET' ? /^\/queries\/([^/?]+)$/.exec(path) : null;
+    if (wantedQuery) {
+      const found = server.queries.find((q) => q.id === decodeURIComponent(wantedQuery[1]) && q.host_id === host);
+      if (!found) return json(route, 404, { error: 'not_found', error_code: 'not_found', message: 'no such query' });
+      const ancestors = [];
+      for (let cur = found.folder_id; cur; cur = server.folders.find((f) => f.id === cur)?.parent_id) ancestors.unshift(cur);
+      return json(route, 200, { ...found, revision: server.revision, ancestors, path: `/${ancestors.map((id) => server.folders.find((f) => f.id === id)?.name).join('/')}` });
+    }
+    if (method === 'GET' && path === '/search') {
+      const words = (url.searchParams.get('q') || '').toLowerCase().split(/\s+/).filter(Boolean);
+      if (!words.length) return json(route, 400, { error: 'validation', error_code: 'validation', field: 'q', reason: 'required', message: 'q is required' });
+      const pathOf = (q) => { const names = []; for (let cur = q.folder_id; cur; cur = server.folders.find((f) => f.id === cur)?.parent_id) names.unshift(server.folders.find((f) => f.id === cur)?.name); return `/${names.join('/')}`; };
+      const hits = server.queries.filter((q) => q.host_id === host && words.every((w) => `${q.name}\n${q.description || ''}\n${q.sql}\n${pathOf(q)}`.toLowerCase().includes(w))).sort((a, b) => a.name.localeCompare(b.name));
+      return json(route, 200, { host_id: host, revision: server.revision, total: hits.length, truncated: hits.length > 100, results: hits.slice(0, 100).map((q) => ({ id: q.id, folder_id: q.folder_id, name: q.name, updated_at_ms: q.updated_at_ms, path: pathOf(q) })) });
+    }
+    if (method === 'GET' && path === '/export') {
+      const root = url.searchParams.get('folder_id');
+      const keep = new Set();
+      if (root) { const walk = (id) => { keep.add(id); for (const f of server.folders.filter((x) => x.parent_id === id)) walk(f.id); }; walk(root); }
+      return json(route, 200, {
+        host_id: host, revision: server.revision, writable, load_error: null,
+        folders: server.folders.filter((f) => f.host_id === host && (!root || keep.has(f.id))),
+        queries: server.queries.filter((q) => q.host_id === host && (!root || (q.folder_id && keep.has(q.folder_id)))),
       });
     }
     // The server has no history: a page asking for one is a bug.
@@ -2996,10 +3070,20 @@ test('several server libraries: one named root each (the first is the default), 
     requests.push(`${route.request().method()} ${url.search}`);
     const name = url.searchParams.get('library') || 'default';
     const writable = name === 'default';
+    const wanted = /\/queries\/([^/?]+)$/.exec(url.pathname);
+    if (wanted) {
+      // One query, whole: the page reads it when it is opened.
+      const found = (content[name] || []).find((q) => q.id === decodeURIComponent(wanted[1]));
+      return route.fulfill({ status: found ? 200 : 404, contentType: 'application/json', body: JSON.stringify(found ? { ...found, revision: 1, ancestors: [], path: '/' } : { error: 'not_found', error_code: 'not_found', message: 'no such query' }) });
+    }
+    const minimal = (content[name] || []).map((q) => ({ id: q.id, folder_id: q.folder_id, name: q.name, updated_at_ms: q.updated_at_ms }));
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ host_id: url.searchParams.get('host_id'), revision: 1, updated_at_ms: now, writable, load_error: null, folders: [], queries: content[name] || [] }),
+      body: JSON.stringify({
+        host_id: url.searchParams.get('host_id'), revision: 1, updated_at_ms: now, writable, load_error: null, parent_id: null, depth: 0, complete: true, next_cursor: null,
+        level_total: minimal.length, totals: { folders: 0, queries: minimal.length, parent_queries: minimal.length }, folders: [], queries: minimal,
+      }),
     });
   });
   await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] } });
@@ -3033,6 +3117,93 @@ test('several server libraries: one named root each (the first is the default), 
   // A query of a read-only library loads into the editor like any other.
   await loadSaved(page, 'Runbook one');
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 2 AS runbook');
+});
+
+// --- A large library of the server: pages, levels, and the SQL read when a query is opened ----------------
+
+const bigQuery = (i, folder = null, prefix = 'Query') => ({ id: `${folder || 'q'}_${i}`, folder_id: folder, name: `${prefix} ${String(i).padStart(3, '0')}`, description: `Number ${i}`, sql: `SELECT ${i} AS n`, host_id: HOST, created_at_ms: now, updated_at_ms: now });
+const emptyLocal = { version: 2, revision: 1, folders: [], queries: [] };
+const serverRows = (page) => tree(page).locator('li[data-kind="query"][data-store="server"]');
+
+test('a level that is larger than a page comes in windows of 100: the next one is read on demand', async ({ page }) => {
+  const queries = Array.from({ length: 250 }, (_, i) => bigQuery(i));
+  const server = await mockServerLibrary(page, { writable: true, library: { folders: [], queries } });
+  await seed(page, { 'chdash.queryLibrary.v2': emptyLocal });
+  await openLibrary(page);
+  // The storage says how many it holds (250), and shows the first 100: its page carries no SQL and no description.
+  await expect(node(page, SERVER_ROOT).locator(':scope > .qlRow .qlRow__count')).toHaveText('250 queries');
+  await expect(serverRows(page)).toHaveCount(100);
+  const more = tree(page).locator('[data-more]').first();
+  await expect(more).toContainText('Show 100 more');
+  expect(server.requests.filter((r) => r.method === 'GET' && !r.path.includes('/'))).toHaveLength(1);
+  await more.click();
+  await expect(serverRows(page)).toHaveCount(200);
+  await tree(page).locator('[data-more]').first().click();
+  await expect(serverRows(page)).toHaveCount(250);
+  await expect(tree(page).locator('[data-more]')).toHaveCount(0);
+  expect(server.requests.filter((r) => r.path.includes('cursor=')).map((r) => /cursor=(\d+)/.exec(r.path)[1])).toEqual(['100', '200']);
+  // The pane of the storage lists the first level too (200 at most, and says how many are left).
+  await selectItem(page, SERVER_ROOT);
+  await expect(preview(page).locator('.qlContents__item')).toHaveCount(200);
+  await expect(preview(page).locator('p.qlContents__more')).toContainText('50 more');
+});
+
+test('the SQL and the description of a query are read when it is opened, once; a library that fits in a page comes whole in one read', async ({ page }) => {
+  const queries = Array.from({ length: 30 }, (_, i) => bigQuery(i));
+  const server = await mockServerLibrary(page, { writable: true, library: { folders: [], queries } });
+  await seed(page, { 'chdash.queryLibrary.v2': emptyLocal });
+  await openLibrary(page);
+  await expect(serverRows(page)).toHaveCount(30);
+  expect(server.requests.filter((r) => r.method === 'GET')).toHaveLength(1);
+  // Nothing was read of the queries but their names.
+  expect(server.requests.some((r) => r.path.startsWith('/queries/'))).toBe(false);
+  await node(page, 'Query 005').locator(':scope > .qlRow').click();
+  await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 5 AS n');
+  await expect(preview(page).locator('.qlPreview__description')).toHaveText('Number 5');
+  await node(page, 'Query 006').locator(':scope > .qlRow').click();
+  await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 6 AS n');
+  await node(page, 'Query 005').locator(':scope > .qlRow').click();
+  await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 5 AS n');
+  // One read for each query that was opened, whatever the number of times it is shown.
+  expect(server.requests.filter((r) => r.path.startsWith('/queries/')).map((r) => r.path.split('?')[0]).sort()).toEqual(['/queries/q_5', '/queries/q_6']);
+  // Load puts it in the editor.
+  await previewAction(page, 'load').click();
+  await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 5 AS n');
+});
+
+test('a large library comes by levels: the folders first, the children of a folder when it is opened', async ({ page }) => {
+  const folders = Array.from({ length: 11 }, (_, i) => ({ id: `f_${i}`, host_id: HOST, parent_id: null, name: `Team ${String(i).padStart(2, '0')}`, created_at_ms: now, updated_at_ms: now }));
+  const queries = folders.flatMap((f) => Array.from({ length: 9 }, (_, j) => bigQuery(j, f.id, 'Run')));
+  const server = await mockServerLibrary(page, { writable: true, library: { folders, queries } });
+  await seed(page, { 'chdash.queryLibrary.v2': emptyLocal });
+  await openLibrary(page);
+  // 11 folders and 99 queries do not fit in a page (110 items): the page is the folders, each with its count of queries.
+  await expect(node(page, SERVER_ROOT).locator(':scope > .qlRow .qlRow__count')).toHaveText('99 queries');
+  await expect(tree(page).locator('li[data-kind="folder"][data-store="server"]')).toHaveCount(11);
+  await expect(serverRows(page)).toHaveCount(0);
+  await expect(node(page, 'Team 03').locator(':scope > .qlRow .qlRow__meta')).toHaveText('9 queries');
+  expect(server.requests.some((r) => r.path.includes('parent_id='))).toBe(false);
+  // Opening a folder reads its children, and only those.
+  await node(page, 'Team 03').locator(':scope > .qlRow .qlRow__twisty').click();
+  await expect(serverRows(page)).toHaveCount(9);
+  expect(server.requests.filter((r) => r.path.includes('parent_id=')).map((r) => /parent_id=([^&]+)/.exec(r.path)[1])).toEqual(['f_3']);
+  // Closed and opened again, it is not read again.
+  await node(page, 'Team 03').locator(':scope > .qlRow .qlRow__twisty').click();
+  await node(page, 'Team 03').locator(':scope > .qlRow .qlRow__twisty').click();
+  await expect(serverRows(page)).toHaveCount(9);
+  expect(server.requests.filter((r) => r.path.includes('parent_id='))).toHaveLength(1);
+});
+
+test('the search of a library of the server is made by the server: its answers carry their path, and one opens in its folder', async ({ page }) => {
+  const folders = [{ id: 'f_ops', host_id: HOST, parent_id: null, name: 'Operations', created_at_ms: now, updated_at_ms: now }];
+  const queries = [{ ...bigQuery(1, 'f_ops', 'Parts'), sql: 'SELECT table FROM system.parts' }, bigQuery(2)];
+  const server = await mockServerLibrary(page, { writable: true, library: { folders, queries } });
+  await seed(page, { 'chdash.queryLibrary.v2': emptyLocal });
+  await openLibrary(page);
+  await page.locator('#queryLibraryViewSaved .qlSearch__input').fill('system.parts');
+  await expect(tree(page).locator('li[data-kind="query"]')).toHaveCount(1);
+  await expect(tree(page).locator('.qlRow__path')).toContainText('Operations');
+  expect(server.requests.some((r) => r.path.startsWith('/search?') && r.path.includes('q=system.parts'))).toBe(true);
 });
 
 // --- Live server (optional) -------------------------------------------------
@@ -3078,7 +3249,7 @@ test('live server library: both roots; create, save, move within and across the 
   await showPanel(page);
   await expandFolder(page, `${stamp} folder`);
   await expect(node(page, `${stamp} query`)).toHaveAttribute('aria-level', '3');
-  let library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
+  let library = await page.evaluate(async (id) => (await fetch(`api/query-library/export?host_id=${encodeURIComponent(id)}`)).json(), host);
   expect(library.queries.find((q) => q.name === `${stamp} query`).host_id).toBe(host);
 
   // The run lands in this browser's History, for the host.
@@ -3096,13 +3267,13 @@ test('live server library: both roots; create, save, move within and across the 
   await pickPlace(dialog(page), 'local:');
   await dialog(page).getByRole('button', { name: 'Move' }).click();
   await expect(node(page, `${stamp} folder`)).toHaveAttribute('data-store', 'local');
-  library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
+  library = await page.evaluate(async (id) => (await fetch(`api/query-library/export?host_id=${encodeURIComponent(id)}`)).json(), host);
   expect(library.folders.some((f) => f.name === `${stamp} folder`)).toBe(false);
   expect(library.queries.some((q) => q.name === `${stamp} query`)).toBe(false);
   expect((await libraryState(page)).queries.find((q) => q.name === `${stamp} query`)).toMatchObject({ host_id: host, description: 'live check' });
   await node(page, `${stamp} folder`).locator(':scope > .qlRow').dragTo(node(page, LIVE_SERVER_ROOT).locator(':scope > .qlRow'));
   await expect(node(page, `${stamp} folder`)).toHaveAttribute('data-store', 'server');
-  library = await page.evaluate(async (id) => (await fetch(`api/query-library?host_id=${encodeURIComponent(id)}`)).json(), host);
+  library = await page.evaluate(async (id) => (await fetch(`api/query-library/export?host_id=${encodeURIComponent(id)}`)).json(), host);
   const folder = library.folders.find((f) => f.name === `${stamp} folder`);
   expect(library.queries.find((q) => q.name === `${stamp} query`)).toMatchObject({ folder_id: folder.id, sql: `SELECT '${stamp}' AS \`stamp\`` });
   expect((await libraryState(page)).folders.some((f) => f.name === `${stamp} folder`)).toBe(false);

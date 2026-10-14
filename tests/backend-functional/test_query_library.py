@@ -84,7 +84,7 @@ def ok(response: requests.Response, status: int = 200) -> dict:
 
 
 def library(host: str = HOST) -> dict:
-    return ok(w("GET", "/api/query-library", params={"host_id": host}))
+    return ok(w("GET", "/api/query-library/export", params={"host_id": host}))
 
 
 def make_folder(name: str, parent_id: str | None = None, host: str = HOST, **extra) -> dict:
@@ -618,7 +618,7 @@ def test_read_only_library():
     feature = ok(ro("GET", "/api/version"))["features"]["query_library"]
     assert (feature["enabled"], feature["writable"]) == (True, False)
     assert feature["libraries"] == [{"name": "default", "writable": False}]
-    lib = ok(ro("GET", "/api/query-library", params={"host_id": HOST}))
+    lib = ok(ro("GET", "/api/query-library/export", params={"host_id": HOST}))
     assert lib["writable"] is False and lib["load_error"] is None
     folder_id = lib["folders"][0]["id"] if lib["folders"] else "f_missing"
     query_id = lib["queries"][0]["id"] if lib["queries"] else "q_missing"
@@ -634,12 +634,12 @@ def test_read_only_library():
         response = ro(method, path, body=body)
         assert response.status_code == 403, (method, path, response.text)
         assert response.json()["error_code"] == "read_only"
-    assert ok(ro("GET", "/api/query-library", params={"host_id": HOST})) == lib
+    assert ok(ro("GET", "/api/query-library/export", params={"host_id": HOST})) == lib
 
     # No history route here either: the history is the browser's.
     assert ro("GET", "/api/query-library/history", params={"host_id": HOST}).status_code == 404
     assert ro("POST", "/api/query-library/history", body={"sql": "SELECT 1", "host_id": HOST}).status_code == 404
-    assert ok(ro("GET", "/api/query-library", params={"host_id": HOST}))["revision"] == lib["revision"]
+    assert ok(ro("GET", "/api/query-library/export", params={"host_id": HOST}))["revision"] == lib["revision"]
 
 
 # Version 1 of the file: folders have no host. Every entry without a host is
@@ -665,11 +665,11 @@ VERSION_1 = {
 
 
 def assert_version_1_migrated(get) -> None:
-    lib = ok(get("GET", "/api/query-library", params={"host_id": HOST}))
+    lib = ok(get("GET", "/api/query-library/export", params={"host_id": HOST}))
     assert lib["load_error"] is None
     assert lib["folders"] == []
     assert [(q["id"], q["folder_id"]) for q in lib["queries"]] == [("q_v1_parts", None)]
-    assert [q["id"] for q in ok(get("GET", "/api/query-library", params={"host_id": OTHER}))["queries"]] == ["q_v1_other"]
+    assert [q["id"] for q in ok(get("GET", "/api/query-library/export", params={"host_id": OTHER}))["queries"]] == ["q_v1_other"]
 
 
 @needs_data_dir
@@ -803,10 +803,10 @@ def test_several_libraries_are_listed_and_each_is_its_own_store(clean_library):
     assert features["enabled"] is True and features["writable"] is True
     assert [(item["name"], item["writable"]) for item in features["libraries"]] == [("default", True), ("reference", False)]
     made = make_folder("Only in the default library")
-    reference = ok(w("GET", "/api/query-library", params={"host_id": HOST, "library": "reference"}))
+    reference = ok(w("GET", "/api/query-library/export", params={"host_id": HOST, "library": "reference"}))
     assert reference["writable"] is False and reference["folders"] == [] and reference["queries"] == []
     assert [item["id"] for item in library()["folders"]] == [made["id"]]
-    assert ok(w("GET", "/api/query-library", params={"host_id": HOST, "library": "default"}))["folders"] == library()["folders"]
+    assert ok(w("GET", "/api/query-library/export", params={"host_id": HOST, "library": "default"}))["folders"] == library()["folders"]
 
 
 @needs_writable
@@ -827,3 +827,81 @@ def test_several_libraries_a_read_only_one_refuses_every_write_and_an_unknown_na
     for method, path in (("GET", "/api/query-library"), ("POST", "/api/query-library/folders")):
         unknown = w(method, path, body=body if method == "POST" else None, params={"host_id": HOST, "library": "missing"})
         assert unknown.status_code == 404 and unknown.json()["error_code"] == "unknown_library"
+
+
+# --- the bounded reads: a page of the tree, one query, a search, an export ----------------------------------------
+
+
+def page(**params) -> dict:
+    return ok(w("GET", "/api/query-library", params={"host_id": HOST, **params}))
+
+
+@needs_writable
+def test_the_page_has_the_minimal_data_and_no_sql(clean_library):
+    folder = make_folder("Operations")
+    inside = make_query("Active parts", "SELECT table FROM system.parts", folder["id"], description="Parts per table")
+    make_query("The answer", "SELECT 42 AS answer")
+    top = page()
+    # A small library comes whole in one answer, two levels deep, and nothing in it carries SQL or a description.
+    assert top["complete"] is True and top["next_cursor"] is None and top["depth"] == 1
+    assert {q["name"] for q in top["queries"]} == {"Active parts", "The answer"}
+    assert all(set(q) == {"id", "folder_id", "name", "updated_at_ms"} for q in top["queries"]), top["queries"]
+    assert set(top["folders"][0]) == {"id", "parent_id", "name", "updated_at_ms", "query_count", "child_count", "subfolder_count", "loaded"}
+    assert top["folders"][0]["query_count"] == 1 and top["folders"][0]["loaded"] is True
+    assert top["totals"] == {"folders": 1, "queries": 2, "parent_queries": 2}
+    assert top["limits"]["page_max"] == 100
+    # The SQL and the description come with one query, with the folders above it.
+    detail = ok(w("GET", f"/api/query-library/queries/{inside['id']}", params={"host_id": HOST}))
+    assert detail["sql"] == "SELECT table FROM system.parts" and detail["description"] == "Parts per table"
+    assert detail["ancestors"] == [folder["id"]] and detail["path"] == "/Operations"
+    assert w("GET", "/api/query-library/queries/q_missing", params={"host_id": HOST}).status_code == 404
+    assert w("GET", f"/api/query-library/queries/{inside['id']}", params={"host_id": OTHER}).status_code == 404
+
+
+@needs_writable
+def test_a_large_library_comes_by_levels_and_a_large_level_by_windows(clean_library):
+    # 11 folders of 9 queries: 110 items do not fit in a page, so the page is the folders; each folder is read on its own.
+    folders = [make_folder(f"Team {i:02d}") for i in range(11)]
+    for folder in folders:
+        for j in range(9):
+            make_query(f"Query {j}", f"SELECT {j}", folder["id"])
+    top = page()
+    assert len(top["folders"]) == 11 and top["queries"] == [] and top["depth"] == 0 and top["complete"] is False
+    assert all(f["loaded"] is False and f["query_count"] == 9 and f["child_count"] == 9 for f in top["folders"])
+    assert top["totals"]["queries"] == 99
+    child = page(parent_id=folders[3]["id"])
+    assert len(child["queries"]) == 9 and child["complete"] is True and child["parent_id"] == folders[3]["id"]
+    # One folder of 250 queries: windows of 100 at the same level, folders first.
+    big = make_folder("Big")
+    for j in range(250):
+        ok(w("POST", "/api/query-library/queries", body={"host_id": HOST, "folder_id": big["id"], "name": f"Q{j:03d}", "description": "", "sql": "SELECT 1"}), 201)
+    first = page(parent_id=big["id"])
+    assert len(first["queries"]) == 100 and first["next_cursor"] == 100 and first["level_total"] == 250 and first["complete"] is False
+    second = page(parent_id=big["id"], cursor=first["next_cursor"])
+    last = page(parent_id=big["id"], cursor=second["next_cursor"])
+    assert len(second["queries"]) == 100 and second["next_cursor"] == 200 and len(last["queries"]) == 50 and last["next_cursor"] is None
+    names = [q["name"] for p in (first, second, last) for q in p["queries"]]
+    assert names == [f"Q{j:03d}" for j in range(250)]
+    # The page size can be lowered, and never raised.
+    assert len(page(parent_id=big["id"], limit=10)["queries"]) == 10
+    assert len(page(parent_id=big["id"], limit=5000)["queries"]) == 100
+    assert w("GET", "/api/query-library", params={"host_id": HOST, "parent_id": "f_missing"}).status_code == 404
+
+
+@needs_writable
+def test_search_and_export(clean_library):
+    folder = make_folder("Operations")
+    make_query("Active parts", "SELECT table FROM system.parts", folder["id"], description="Parts per table")
+    make_query("The answer", "SELECT 42 AS answer")
+    found = ok(w("GET", "/api/query-library/search", params={"host_id": HOST, "q": "PARTS operations"}))
+    assert found["total"] == 1 and found["truncated"] is False
+    assert found["results"][0]["path"] == "/Operations" and "sql" not in found["results"][0]
+    assert ok(w("GET", "/api/query-library/search", params={"host_id": HOST, "q": "answer"}))["total"] == 1
+    assert ok(w("GET", "/api/query-library/search", params={"host_id": HOST, "q": "42"}))["results"][0]["name"] == "The answer"
+    assert ok(w("GET", "/api/query-library/search", params={"host_id": HOST, "q": "no such thing"}))["total"] == 0
+    assert w("GET", "/api/query-library/search", params={"host_id": HOST, "q": "  "}).status_code == 400
+    # The export of a folder: it and what is under it, with the SQL; without a folder, the whole library of the host.
+    one = ok(w("GET", "/api/query-library/export", params={"host_id": HOST, "folder_id": folder["id"]}))
+    assert [f["name"] for f in one["folders"]] == ["Operations"] and [q["name"] for q in one["queries"]] == ["Active parts"]
+    assert one["queries"][0]["sql"] == "SELECT table FROM system.parts"
+    assert len(ok(w("GET", "/api/query-library/export", params={"host_id": HOST}))["queries"]) == 2

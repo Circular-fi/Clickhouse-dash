@@ -177,6 +177,69 @@ function cleanText(value, max) {
 const hostOf = (item) => (typeof item?.host_id === "string" ? item.host_id : item?.host_id == null ? "" : String(item.host_id));
 const emptyLibrary = () => ({ revision: 0, folders: [], queries: [] });
 
+// A library of the server is read in pages (docs/query-library.md, "REST API"): what is loaded is a part of it, and each item has its minimal
+// data (a name, a place, a date; for a folder the counts under it), never its SQL. `partial` marks it. `loaded` holds the folders whose
+// children are in (the empty string is the top level), `next` the offset of the next window of a level that is larger than a page,
+// `levelTotal` how many that level holds, `details` the queries that were opened (their SQL and description), `found` the queries that a
+// search returned (they may not be loaded in their folder), `failed` the folders that could not be read. The browser's library is whole.
+const PAGE_SIZE = 100;
+const isPartial = (lib) => lib?.partial === true;
+function emptyPartialLibrary() {
+  return {
+    revision: 0, folders: [], queries: [], partial: true, totals: { folders: 0, queries: 0 },
+    loaded: new Set(), next: new Map(), levelTotal: new Map(), details: new Map(), found: new Map(), failed: new Set(),
+  };
+}
+// Read: the children of the folder were asked for (all of them, or a first window of a level that is larger than a page).
+const isRead = (lib, parentId) => !isPartial(lib) || lib.loaded.has(parentId || "") || lib.next.has(parentId || "");
+const hasMore = (lib, parentId) => isPartial(lib) && lib.next.has(parentId || "");
+// The SQL and the description of a query: its own in a whole library, the opened one in a partial library (null until it is read).
+const queryDetail = (lib, query) => (!query ? null : !isPartial(lib) ? query : lib.details.get(query.id) || null);
+const libraryQueryTotal = (lib) => (isPartial(lib) ? lib.totals.queries : lib.queries.length);
+const libraryFolderTotal = (lib) => (isPartial(lib) ? lib.totals.folders : lib.folders.length);
+
+// One answer of GET /api/query-library (the children of `parentId`) merged into a partial library.
+function mergePage(lib, data, parentId) {
+  const host = typeof data?.host_id === "string" ? data.host_id : "";
+  const count = (value) => Math.max(0, Number(value) || 0);
+  for (const f of Array.isArray(data?.folders) ? data.folders : []) {
+    if (!f || typeof f.id !== "string" || typeof f.name !== "string") continue;
+    const item = {
+      id: f.id, host_id: host, parent_id: typeof f.parent_id === "string" && f.parent_id ? f.parent_id : null, name: f.name,
+      created_at_ms: 0, updated_at_ms: Number(f.updated_at_ms) || 0,
+      query_count: count(f.query_count), child_count: count(f.child_count), subfolder_count: count(f.subfolder_count),
+    };
+    const at = lib.folders.findIndex((x) => x.id === item.id);
+    if (at >= 0) lib.folders[at] = item;
+    else lib.folders.push(item);
+    if (f.loaded === true) lib.loaded.add(item.id);
+    else lib.loaded.delete(item.id);
+  }
+  for (const q of Array.isArray(data?.queries) ? data.queries : []) {
+    if (!q || typeof q.id !== "string" || typeof q.name !== "string") continue;
+    const item = {
+      id: q.id, host_id: host, folder_id: typeof q.folder_id === "string" && q.folder_id ? q.folder_id : null, name: q.name,
+      created_at_ms: 0, updated_at_ms: Number(q.updated_at_ms) || 0,
+    };
+    const at = lib.queries.findIndex((x) => x.id === item.id);
+    if (at >= 0) lib.queries[at] = item;
+    else lib.queries.push(item);
+  }
+  const key = parentId || "";
+  if (data?.next_cursor != null) {
+    lib.next.set(key, Number(data.next_cursor));
+    lib.levelTotal.set(key, count(data.level_total));
+  } else {
+    lib.next.delete(key);
+    lib.levelTotal.delete(key);
+    lib.loaded.add(key);
+  }
+  lib.failed.delete(key);
+  lib.revision = Number(data?.revision) || 0;
+  if (data?.totals) lib.totals = { folders: count(data.totals.folders), queries: count(data.totals.queries) };
+  return lib;
+}
+
 // Every folder and query belongs to one host: one without a host_id is
 // dropped (docs/query-library.md, "Entries without a host").
 function normalizeLibrary(raw) {
@@ -238,7 +301,7 @@ function scopeToHost(lib, host) {
 }
 
 const folderById = (lib, id) => (id ? lib.folders.find((f) => f.id === id) || null : null);
-const queryById = (lib, id) => lib.queries.find((q) => q.id === id) || null;
+const queryById = (lib, id) => lib.queries.find((q) => q.id === id) || lib.found?.get(id) || null;
 const childFolders = (lib, parentId) => lib.folders.filter((f) => f.parent_id === (parentId || null)).sort(byName);
 const childQueries = (lib, folderId) => lib.queries.filter((q) => q.folder_id === (folderId || null)).sort(byName);
 
@@ -286,6 +349,8 @@ const folderPathText = (lib, id) => `/${folderPath(lib, id).join("/")}`;
 // for a library; it is kept while the library object is the same one.
 const queryCountCache = new WeakMap();
 function queryCounts(lib) {
+  // A partial library does not hold every query: each folder says how many are under it.
+  if (isPartial(lib)) return new Map(lib.folders.map((f) => [f.id, f.query_count || 0]));
   const signature = `${lib.revision}:${lib.folders.length}:${lib.queries.length}`;
   const hit = queryCountCache.get(lib);
   if (hit && hit.signature === signature) return hit.counts;
@@ -302,6 +367,11 @@ function queryCounts(lib) {
 const queriesText = (n) => (n ? format.countLabel(n, "query", "queries") : "Empty");
 
 function subtreeCounts(lib, id) {
+  // A partial library: the folders directly under it, and the queries under it, as the server counts them.
+  if (isPartial(lib)) {
+    const folder = folderById(lib, id);
+    return { folders: folder?.subfolder_count || 0, queries: folder?.query_count || 0 };
+  }
   let folders = 0;
   let queries = childQueries(lib, id).length;
   for (const child of childFolders(lib, id)) {
@@ -583,7 +653,8 @@ function errorFromResponse(status, payload) {
 }
 
 // library: the name of the server's library this adapter reads and writes (?library=); "" for the default one.
-function createServerAdapter(library = "") {
+// keepOpen(): the ids of the folders that the page shows open, which a reload brings back with their children.
+function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
   let revision = null;
   // The library this adapter loaded last: what a change was made from (change() compares it after a conflict).
   let known = null;
@@ -606,15 +677,80 @@ function createServerAdapter(library = "") {
 
   const enc = encodeURIComponent;
 
+  // One page: the children of a folder (none: the top level), at most PAGE_SIZE items, the minimal data of each; cursor is the offset in
+  // a level that is larger than a page.
+  const readPage = (parentId, cursor, signal) => {
+    const query = new URLSearchParams({ host_id: requireHost(), limit: String(PAGE_SIZE) });
+    if (parentId) query.set("parent_id", parentId);
+    if (cursor) query.set("cursor", String(cursor));
+    return request("GET", `?${query}`, undefined, { ifMatch: false, signal });
+  };
+
+  // The top level, and the folders that were open (a change reloads the library, and a folder that was open stays so).
   async function load({ signal } = {}) {
-    const data = await request("GET", `?host_id=${enc(requireHost())}`, undefined, { ifMatch: false, signal });
+    const data = await readPage(null, 0, signal);
     revision = Number.isFinite(Number(data.revision)) ? Number(data.revision) : null;
-    known = normalizeLibrary(data);
+    const lib = mergePage(emptyPartialLibrary(), data, null);
+    // Parents first: a folder that was open inside another one is read when that one is in.
+    let wanted = new Set(keepOpen());
+    for (let pass = 0; pass <= MAX_DEPTH && wanted.size; pass += 1) {
+      const now = [...wanted].filter((id) => lib.folders.some((f) => f.id === id) && !lib.loaded.has(id));
+      if (!now.length) break;
+      await Promise.all(now.map(async (id) => {
+        try {
+          mergePage(lib, await readPage(id, 0, signal), id);
+        } catch (err) {
+          if (util.isAbort(err)) throw err;
+          lib.failed.add(id);
+        }
+      }));
+      wanted = new Set([...wanted].filter((id) => !now.includes(id)));
+    }
+    known = lib;
     return {
-      library: known,
+      library: lib,
       writable: data.writable === true && !data.load_error,
       loadError: data.load_error ? String(data.load_error) : "",
     };
+  }
+
+  // The children of a folder (none: the top level) from `cursor`, merged into the library that was loaded last.
+  async function loadChildren(parentId, { cursor = 0, signal } = {}) {
+    const lib = known;
+    if (!lib) return null;
+    const data = await readPage(parentId, cursor, signal);
+    if (lib === known) mergePage(lib, data, parentId);
+    return lib;
+  }
+
+  // One query, whole.
+  async function getQuery(id, { signal } = {}) {
+    const data = await request("GET", `/queries/${enc(id)}?host_id=${enc(requireHost())}`, undefined, { ifMatch: false, signal });
+    return {
+      id: String(data.id), host_id: hostOf(data), folder_id: typeof data.folder_id === "string" && data.folder_id ? data.folder_id : null,
+      name: String(data.name), description: cleanText(data.description, READ_DESCRIPTION_CHARS), sql: String(data.sql),
+      created_at_ms: Number(data.created_at_ms) || 0, updated_at_ms: Number(data.updated_at_ms) || 0,
+      ancestors: Array.isArray(data.ancestors) ? data.ancestors.map(String) : [], path: typeof data.path === "string" ? data.path : "/",
+    };
+  }
+
+  // The queries that hold every word of `text` (names, descriptions, SQL and folder paths), at most 100, with their path.
+  async function searchQueries(text, { signal } = {}) {
+    const data = await request("GET", `/search?host_id=${enc(requireHost())}&q=${enc(text)}`, undefined, { ifMatch: false, signal });
+    return {
+      total: Number(data.total) || 0,
+      truncated: data.truncated === true,
+      results: (Array.isArray(data.results) ? data.results : []).filter((r) => r && typeof r.id === "string").map((r) => ({
+        id: r.id, host_id: requireHost(), folder_id: typeof r.folder_id === "string" && r.folder_id ? r.folder_id : null, name: String(r.name),
+        created_at_ms: 0, updated_at_ms: Number(r.updated_at_ms) || 0, path: typeof r.path === "string" ? r.path : "/",
+      })),
+    };
+  }
+
+  // A folder and everything under it with the SQL, as the copy to another storage takes it.
+  async function exportTree(folderId, { signal } = {}) {
+    const data = await request("GET", `/export?host_id=${enc(requireHost())}&folder_id=${enc(folderId)}`, undefined, { ifMatch: false, signal });
+    return subtreeOf(normalizeLibrary(data), folderId);
   }
 
   // When the item a change names was changed in the meantime (its own updated_at_ms moved), the retry after a
@@ -665,6 +801,10 @@ function createServerAdapter(library = "") {
   return {
     kind: "server",
     load,
+    loadChildren,
+    getQuery,
+    searchQueries,
+    exportTree,
     createFolder: (input) => change("POST", "/folders", { host_id: requireHost(), parent_id: input.parent_id || null, name: input.name }),
     updateFolder: (id, patch) => change("PATCH", `/folders/${enc(id)}`, patch, undefined, { kind: "folder", id }),
     deleteFolder: (id, { recursive = false } = {}) => change("DELETE", `/folders/${enc(id)}${recursive ? "?recursive=1" : ""}`, undefined, undefined, { kind: "folder", id }),
@@ -691,8 +831,11 @@ function freshHistoryState(q = "") {
 
 // One root: its adapter, the current host's library and its state. label and hint are what the tree and the preview say of it.
 function newStore(kind, adapter, writable, { label, hint }) {
-  return { kind, adapter, writable, label, hint, library: emptyLibrary(), loadError: "", fatal: "", loadedAt: 0 };
+  return { kind, adapter, writable, label, hint, library: adapter.kind === "server" ? emptyPartialLibrary() : emptyLibrary(), loadError: "", fatal: "", loadedAt: 0 };
 }
+
+// The ids of the folders of one root that are open (the keys of ctl.expanded are "<root>:<folder id>").
+const openFolders = (kind) => [...ctl.expanded].filter((key) => key.startsWith(`${kind}:`)).map((key) => key.slice(kind.length + 1));
 
 // Every root but the browser's is a library of the server.
 const isServerStore = (store) => store.kind !== LOCAL_STORE;
@@ -735,6 +878,85 @@ const anyEditable = () => storeList().some(editableStore);
 // Where a new folder or query goes by default: the first library of the server that can take it, else this browser's.
 const defaultStore = () => storeList().find((store) => isServerStore(store) && editableStore(store))?.kind || LOCAL_STORE;
 
+// ---- what a library of the server loads when it is asked for
+
+// The reads in flight, by what they read: a render asks for what it shows, and the same read is made once.
+const reading = new Map();
+const wanted = new Set();
+
+// A render of the whole library, and of the pane when it shows what was read.
+function shown() {
+  if (ctl.rendered.library) renderLibrary({ keepFocus: true });
+  else if (ctl.shown === "saved") renderPreview();
+}
+
+// The children of a folder (null: the top level) of a library of the server, read once; more: the next window of a level that is larger
+// than a page. Resolves when they are in (a failure is kept: the tree says so and offers to retry).
+function ensureChildren(storeKind, parentId, { more = false } = {}) {
+  const store = storeOf(storeKind);
+  const lib = store?.library;
+  if (!store || !isPartial(lib)) return Promise.resolve(false);
+  if (!more && isRead(lib, parentId)) return Promise.resolve(false);
+  const key = `children:${storeKind}:${parentId || ""}`;
+  if (reading.has(key)) return reading.get(key);
+  const cursor = more ? lib.next.get(parentId || "") || 0 : 0;
+  const job = store.adapter.loadChildren(parentId, { cursor })
+    .catch((err) => {
+      if (util.isAbort(err)) return null;
+      lib.failed.add(parentId || "");
+      return null;
+    })
+    .then(() => {
+      reading.delete(key);
+      shown();
+      return true;
+    });
+  reading.set(key, job);
+  return job;
+}
+
+// The SQL and the description of a query of a library of the server, read when the query is opened (the answer is kept with the library).
+function ensureDetail(storeKind, id) {
+  const store = storeOf(storeKind);
+  const lib = store?.library;
+  if (!store || !isPartial(lib)) return Promise.resolve(null);
+  if (lib.details.has(id)) return Promise.resolve(lib.details.get(id));
+  const key = `detail:${storeKind}:${id}`;
+  if (reading.has(key)) return reading.get(key);
+  const job = store.adapter.getQuery(id)
+    .then((detail) => {
+      lib.details.set(id, detail);
+      return detail;
+    })
+    .catch(() => null)
+    .then((detail) => {
+      reading.delete(key);
+      if (ctl.shown === "saved" && ctl.selection.saved === keyOf("query", storeKind, id)) renderPreview();
+      return detail;
+    });
+  reading.set(key, job);
+  return job;
+}
+
+// The query with its SQL and description, whichever the storage: the query itself in a whole library, the one that was read in a library of
+// the server; null (and a toast) when it cannot be read.
+async function fullQuery(storeKind, query) {
+  const store = storeOf(storeKind);
+  if (!store || !query) return null;
+  if (!isPartial(store.library)) return query;
+  const detail = await ensureDetail(storeKind, query.id);
+  if (!detail) toast("The query could not be read.", "error");
+  return detail;
+}
+
+// A folder with everything under it and the SQL, for a copy to another storage or an export.
+async function fullSubtree(storeKind, folderId) {
+  const store = storeOf(storeKind);
+  if (!store) return { folders: [], queries: [] };
+  if (!isPartial(store.library)) return subtreeOf(store.library, folderId);
+  return store.adapter.exportTree(folderId);
+}
+
 function saveUiPrefs() {
   writeJson(UI_KEY, { expanded: [...ctl.expanded].slice(-400), closedRoots: [...ctl.closedRoots], recentFolders: ctl.recent });
 }
@@ -776,7 +998,7 @@ function start() {
           const kind = index === 0 ? "server" : `server~${encodeURIComponent(library.name)}`;
           // The name is what the tree shows; a single library that was never named keeps the old "Shared server storage".
           const label = libraries.length === 1 && (!library.name || library.name === "default") ? DEFAULT_SERVER_LABEL : String(library.name);
-          ctl.stores[kind] = newStore(kind, createServerAdapter(index === 0 && !library.name ? "" : String(library.name)), library.writable === true, { label, hint: SERVER_HINT });
+          ctl.stores[kind] = newStore(kind, createServerAdapter(index === 0 && !library.name ? "" : String(library.name), { keepOpen: () => openFolders(kind) }), library.writable === true, { label, hint: SERVER_HINT });
           ctl.order.push(kind);
         });
       }
@@ -828,6 +1050,8 @@ function onHostChanged() {
   ctl.opened = null;
   ctl.editing = null;
   ctl.form = null;
+  searched.clear();
+  searchToken += 1;
   setPreviewStep(false);
   const historyShown = ctl.historyState.loaded || ctl.rendered.history;
   ctl.historyState = freshHistoryState(ctl.historyState.q);
@@ -929,8 +1153,11 @@ async function moveAcross(item, target, { inDialog = false, patch = null } = {})
   try {
     assertFolderTarget(dstLib, folderId);
     if (item.kind === "query") {
-      const query = queryById(srcLib, item.id);
-      if (!query) throw new LibraryError("not_found", "That query no longer exists.");
+      const listed = queryById(srcLib, item.id);
+      if (!listed) throw new LibraryError("not_found", "That query no longer exists.");
+      // A query of the server is read whole (its SQL) before it goes to another storage.
+      const query = isPartial(srcLib) ? await ensureDetail(item.store, listed.id) : listed;
+      if (!query) throw new LibraryError("server", "The query could not be read.");
       const input = { folder_id: folderId, name: query.name, description: query.description, sql: query.sql, ...(patch || {}) };
       input.name = validName(input.name);
       assertUniqueQuery(dstLib, folderId, input.name);
@@ -941,7 +1168,7 @@ async function moveAcross(item, target, { inDialog = false, patch = null } = {})
       if (!folder) throw new LibraryError("not_found", "That folder no longer exists.");
       if (folderDepth(dstLib, folderId) + subtreeHeight(srcLib, folder.id) > MAX_DEPTH) throw validation("target", `Folders nest at most ${MAX_DEPTH} levels deep.`);
       assertUniqueFolder(dstLib, folderId, folder.name);
-      copied = await dest.adapter.copyTree({ parent_id: folderId, ...subtreeOf(srcLib, folder.id) });
+      copied = await dest.adapter.copyTree({ parent_id: folderId, ...(await fullSubtree(item.store, folder.id)) });
     }
   } catch (err) {
     ctl.busy = false;
@@ -1123,7 +1350,9 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
       const walk = (parentId, parent, depth) => {
         for (const folder of childFolders(lib, parentId)) {
           if (moved.some((m) => m.store === store.kind && (folder.id === m.id || isInside(lib, folder.id, m.id)))) continue;
-          const node = { key: `${store.kind}:${folder.id}`, store, label: folder.name, depth, parent, children: [], locked: false, disabled: !writable || (moved.length > 0 && folderDepth(lib, folder.id) + height > MAX_DEPTH), root: false };
+          // lazy: a folder of the server whose subfolders were not read yet (they are read when it is opened).
+          const lazy = isPartial(lib) && !isRead(lib, folder.id) && (folder.subfolder_count || 0) > 0;
+          const node = { key: `${store.kind}:${folder.id}`, store, folderId: folder.id, label: folder.name, depth, parent, children: [], lazy, locked: false, disabled: !writable || (moved.length > 0 && folderDepth(lib, folder.id) + height > MAX_DEPTH), root: false };
           out.set(node.key, node);
           parent.children.push(node);
           walk(folder.id, node, depth + 1);
@@ -1145,7 +1374,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
   const reveal = (key) => {
     for (let n = nodes.get(key)?.parent; n; n = n.parent) expanded.add(n.key);
   };
-  const signatureOf = () => [...nodes.values()].map((n) => `${n.key}|${n.label}|${n.depth}|${n.disabled ? 1 : 0}`).join("\n");
+  const signatureOf = () => [...nodes.values()].map((n) => `${n.key}|${n.label}|${n.depth}|${n.disabled ? 1 : 0}|${n.lazy ? 1 : 0}`).join("\n");
   const firstChoice = (wanted) => {
     const fallback = `${defaultStore()}:`;
     if (wanted && usable(wanted)) return wanted;
@@ -1189,7 +1418,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
 
   const iconFor = (node) => {
     if (node.root) return icon(isServerStore(node.store) ? "server" : "local");
-    return icon(expanded.has(node.key) && node.children.length ? "folderOpen" : "folder");
+    return icon(expanded.has(node.key) && (node.children.length || node.lazy) ? "folderOpen" : "folder");
   };
   const pathText = (node) => chain(node).map((n) => n.label).join(" / ");
   // "/" for the top of a storage, "/Reports/Daily" for a folder (what the data attributes say, for tests and tools).
@@ -1225,12 +1454,12 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     li.setAttribute("aria-level", String(flat ? 1 : node.depth));
     li.setAttribute("aria-selected", String(node.key === value));
     if (node.disabled) li.setAttribute("aria-disabled", "true");
-    if (!flat && node.children.length) li.setAttribute("aria-expanded", String(expanded.has(node.key)));
+    if (!flat && (node.children.length || node.lazy)) li.setAttribute("aria-expanded", String(expanded.has(node.key)));
     li.style.setProperty("--depth", String(flat ? 0 : node.depth - 1));
     const row = h("div", { class: "qlPicker__row" });
     const twisty = h("span", { class: "qlPicker__twisty" });
     twisty.setAttribute("aria-hidden", "true");
-    if (!flat && node.children.length) twisty.dataset.twisty = "";
+    if (!flat && (node.children.length || node.lazy)) twisty.dataset.twisty = "";
     else twisty.classList.add("qlPicker__twisty--none");
     row.append(twisty, iconFor(node), h("span", { class: `qlPicker__name${node.root ? " qlPicker__name--root" : ""}` }, node.label));
     if (flat && node.parent) row.appendChild(h("span", { class: "qlPicker__path" }, chain(node.parent).map((n) => n.label).join(" / ")));
@@ -1325,11 +1554,14 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
   };
   const toggle = (key, open) => {
     const node = nodes.get(key);
-    if (!node || !node.children.length) return;
-    if (open === undefined ? expanded.has(key) : !open) expanded.delete(key);
-    else expanded.add(key);
+    if (!node || (!node.children.length && !node.lazy)) return;
+    const opening = open === undefined ? !expanded.has(key) : open;
+    if (opening) expanded.add(key);
+    else expanded.delete(key);
     render();
     itemFor(key)?.focus({ preventScroll: true });
+    // The subfolders of a folder of the server are read when it is opened first.
+    if (opening && node.lazy) void ensureChildren(node.store.kind, node.folderId).then(() => refreshPicker());
   };
 
   panel.addEventListener("click", (ev) => {
@@ -1384,7 +1616,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
         if (current.dataset.section !== "tree" || !node) break;
         ev.preventDefault();
         ev.stopPropagation();
-        if (node.children.length && expanded.has(node.key)) toggle(node.key, false);
+        if ((node.children.length || node.lazy) && expanded.has(node.key)) toggle(node.key, false);
         else if (node.parent) move(itemFor(node.parent.key));
         break;
       case "Enter":
@@ -1445,7 +1677,8 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
   };
   start();
 
-  return {
+  const refreshPicker = () => api.refresh();
+  const api = {
     el,
     name,
     get value() { return value; },
@@ -1477,6 +1710,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     },
     hasFocus: () => el.contains(document.activeElement),
   };
+  return api;
 }
 
 // Highlighted SQL, clipped (a prompt shows the start, the pane more):
@@ -1506,9 +1740,11 @@ function locOfKey(key) {
 const selectedLoc = () => locOfKey(ctl.selection.saved);
 
 // The saved query the editor holds (Ctrl+S updates it): { store, query }.
-function openedQuery() {
+async function openedQuery() {
   const store = ctl.opened ? storeOf(ctl.opened.store) : null;
-  const query = store ? queryById(store.library, ctl.opened.id) : null;
+  if (!store) return null;
+  // A query of the server may not be among the loaded ones: it is read by its id (with its description and its SQL).
+  const query = isPartial(store.library) ? await ensureDetail(store.kind, ctl.opened.id) : queryById(store.library, ctl.opened.id);
   return query ? { store: store.kind, query } : null;
 }
 
@@ -1864,7 +2100,7 @@ async function beginSave({ sql = null, fromHistory = null } = {}) {
     revealForm();
     return;
   }
-  const held = sql == null ? openedQuery() : null;
+  const held = sql == null ? await openedQuery() : null;
   const opened = held && editableStore(storeOf(held.store)) ? held : null;
   const where = opened ? { store: opened.store, folderId: opened.query.folder_id } : selectedLoc();
   const session = createPaneForm({
@@ -2181,6 +2417,7 @@ function buildLibraryShell(root) {
   const searchField = search.bind(input, (value) => {
     ctl.search = value;
     ctl.editing = null;
+    runSearch(value);
     renderTree();
   });
   input.addEventListener("keydown", (ev) => {
@@ -2253,20 +2490,58 @@ function renderNotice() {
 
 // The foot: the count of queries and the host. (Saving the editor's query is the editor's own button, beside the copy button.)
 function renderFoot() {
-  const total = storeList().reduce((n, store) => n + store.library.queries.length, 0);
+  const total = storeList().reduce((n, store) => n + libraryQueryTotal(store.library), 0);
   const count = format.countLabel(total, "query", "queries");
   libraryEls.count.textContent = ctl.host ? `${count}${MIDDOT}${ctl.host}` : count;
-  libraryEls.count.title = storeList().map((store) => `${rootLabel(store.kind)}: ${format.countLabel(store.library.queries.length, "query", "queries")}`).join("\n");
+  libraryEls.count.title = storeList().map((store) => `${rootLabel(store.kind)}: ${format.countLabel(libraryQueryTotal(store.library), "query", "queries")}`).join("\n");
 }
 
 // ---- search
+
+// The search of the libraries of the server is made by the server (names, descriptions, SQL and paths of every query, at most 100 answers):
+// the page does not hold them. The answer of each storage is kept with the words it answered.
+const searched = new Map();
+let searchToken = 0;
+function runSearch(text) {
+  const words = String(text || "").trim();
+  searched.clear();
+  const token = ++searchToken;
+  if (!words || !ctl.host) return;
+  for (const store of storeList()) {
+    if (!isPartial(store.library)) continue;
+    searched.set(store.kind, { words, loading: true, results: [], total: 0, truncated: false });
+    store.adapter.searchQueries(words).then((answer) => {
+      if (token !== searchToken) return;
+      searched.set(store.kind, { words, loading: false, ...answer });
+      store.library.found = new Map(answer.results.map((r) => [r.id, r]));
+    }).catch(() => {
+      if (token !== searchToken) return;
+      searched.set(store.kind, { words, loading: false, results: [], total: 0, truncated: false, failed: true });
+    }).then(() => {
+      if (token === searchToken && ctl.rendered.library && ctl.search.trim()) renderTree();
+    });
+  }
+}
 
 function searchMatches() {
   const terms = fold(ctl.search).split(/\s+/).filter(Boolean);
   if (!terms.length) return null;
   const out = [];
+  let loading = false;
+  let truncated = false;
+  let failed = false;
   for (const store of storeList()) {
     const lib = store.library;
+    if (isPartial(lib)) {
+      const answer = searched.get(store.kind);
+      if (!answer || answer.loading) loading = true;
+      if (answer?.truncated) truncated = true;
+      if (answer?.failed) failed = true;
+      for (const q of answer?.results || []) {
+        out.push({ store: store.kind, q, path: `${rootLabel(store.kind)} ${q.path}`, score: terms.filter((t) => fold(q.name).includes(t)).length });
+      }
+      continue;
+    }
     for (const q of lib.queries) {
       const path = `${rootLabel(store.kind)} ${folderPathText(lib, q.folder_id)}`;
       const hay = fold(`${q.name}\n${q.description}\n${q.sql}\n${folderPathText(lib, q.folder_id)}`);
@@ -2276,7 +2551,7 @@ function searchMatches() {
     }
   }
   out.sort((a, b) => b.score - a.score || byName(a.q, b.q));
-  return { terms, results: out };
+  return { terms, results: out, loading, truncated, failed };
 }
 
 function nameWithMarks(name, terms, tag = "span") {
@@ -2494,6 +2769,16 @@ function fileRow(kind, storeKind, entity, level, { terms = null, path = "" } = {
 function appendFolderChildren(parentEl, storeKind, folderId, level) {
   const lib = storeOf(storeKind).library;
   if (ctl.editing?.mode === "new" && ctl.editing.store === storeKind && (ctl.editing.parentId || null) === (folderId || null)) parentEl.appendChild(newFolderRow(level));
+  // A folder of the server that is open and not read yet is asked for after this render, and said in the meantime.
+  if (!isRead(lib, folderId)) {
+    if (lib.failed.has(folderId || "")) {
+      parentEl.appendChild(actionRow("Could not be read.", "Retry", { retry: "", store: storeKind, parent: folderId || "" }, level));
+    } else {
+      wanted.add(`${storeKind}\u0000${folderId || ""}`);
+      parentEl.appendChild(emptyFolderRow("Loading\u2026", level));
+    }
+    return;
+  }
   for (const folder of childFolders(lib, folderId)) {
     const li = fileRow("folder", storeKind, folder, level);
     if (folderIsOpen(storeKind, folder.id) && !(ctl.editing?.mode === "rename" && ctl.editing.key === li.dataset.key)) {
@@ -2515,6 +2800,22 @@ function appendFolderChildren(parentEl, storeKind, folderId, level) {
     parentEl.appendChild(li);
   }
   if (!ghostPlaced) parentEl.appendChild(ghostRow(level));
+  // A level that is larger than a page: the next window is read on demand.
+  if (hasMore(lib, folderId)) {
+    const left = Math.max(0, (lib.levelTotal.get(folderId || "") || 0) - childFolders(lib, folderId).length - childQueries(lib, folderId).length);
+    parentEl.appendChild(actionRow(`${format.count(left)} more`, `Show ${format.count(Math.min(left || PAGE_SIZE, PAGE_SIZE))} more`, { more: "", store: storeKind, parent: folderId || "" }, level));
+  }
+}
+
+// A row of the tree that says something and offers one action (a button that the tree's click handler knows by its data attribute).
+function actionRow(text, label, data, level) {
+  const li = h("li", { class: "qlTree__action" });
+  li.setAttribute("role", "none");
+  li.style.setProperty("--qlDepth", String(level));
+  const button = h("button", { class: "qlActionButton", type: "button" }, label);
+  for (const [name, value] of Object.entries(data)) button.dataset[name] = value;
+  li.append(h("span", { class: "qlTree__actionText" }, text), button);
+  return li;
 }
 
 function emptyFolderRow(text, level) {
@@ -2542,7 +2843,7 @@ function rootRow(store) {
     badge.prepend(icon("lock"));
     row.appendChild(badge);
   }
-  const n = store.library.queries.length;
+  const n = libraryQueryTotal(store.library);
   if (n) row.appendChild(h("span", { class: "qlRow__count" }, format.countLabel(n, "query", "queries")));
   li.appendChild(row);
   if (open) {
@@ -2571,7 +2872,9 @@ function renderTree({ keepFocus = false } = {}) {
   tree.classList.toggle("is-search", !!matches);
   if (matches) {
     for (const { store, q, path } of matches.results) tree.appendChild(fileRow("query", store, q, 1, { terms: matches.terms, path }));
-    if (!matches.results.length) tree.appendChild(emptyRow(`No saved query matches \u201c${ctl.search.trim()}\u201d.`));
+    if (matches.loading) tree.appendChild(emptyRow(matches.results.length ? "Searching the server\u2026" : "Searching\u2026"));
+    else if (!matches.results.length) tree.appendChild(emptyRow(matches.failed ? "The search could not be made." : `No saved query matches \u201c${ctl.search.trim()}\u201d.`));
+    if (matches.truncated) tree.appendChild(emptyRow("The server shows its first 100 answers: add a word to narrow the search."));
   } else if (ctl.host) {
     // Nothing saved is not a special screen: the roots, each saying it is empty.
     for (const store of storeList()) tree.appendChild(rootRow(store));
@@ -2579,6 +2882,13 @@ function renderTree({ keepFocus = false } = {}) {
   restoreSelection("saved");
   // The focus stays in the tree: on the highlighted row, else on the first.
   if (hadFocus && !tree.contains(document.activeElement)) (selectedItem("saved") || treeItems()[0])?.focus({ preventScroll: false });
+  // What the render showed as "Loading...": asked for now.
+  const asked = [...wanted];
+  wanted.clear();
+  for (const item of asked) {
+    const [kind, id] = item.split("\u0000");
+    void ensureChildren(kind, id || null);
+  }
 }
 
 function treeItems() {
@@ -2696,11 +3006,17 @@ function openRowMenu(li, { x = 0, y = 0, anchor = null } = {}) {
 
 // A folder and everything in it as a JSON file: the body POST /api/query-library/import takes (host_id,
 // folders, queries), so the file can be imported again.
-function exportFolder(item) {
+async function exportFolder(item) {
   const lib = storeOf(item.store)?.library;
   const folder = lib ? folderById(lib, item.id) : null;
   if (!folder) return;
-  const tree = subtreeOf(lib, folder.id);
+  let tree;
+  try {
+    tree = await fullSubtree(item.store, folder.id);
+  } catch (err) {
+    toast(util.errorText(err, "The folder could not be exported."), "error");
+    return;
+  }
   const payload = {
     host_id: ctl.host,
     folders: tree.folders.map((f) => ({ id: f.id, parent_id: f.parent_id, name: f.name })),
@@ -2712,10 +3028,22 @@ function exportFolder(item) {
 }
 
 // A search result, in its folder: the search is left and the folders above it open.
-function revealQuery(item) {
+async function revealQuery(item) {
   const store = storeOf(item.store);
   const query = store ? queryById(store.library, item.id) : null;
   if (!query) return;
+  // A library of the server holds the folders that were opened: the ones above this query are read, from the top level down.
+  if (isPartial(store.library)) {
+    const detail = await ensureDetail(item.store, item.id);
+    if (detail) {
+      let parent = null;
+      for (const folderId of detail.ancestors) {
+        await ensureChildren(item.store, parent);
+        parent = folderId;
+      }
+      await ensureChildren(item.store, parent);
+    }
+  }
   ctl.search = "";
   if (libraryEls.input) libraryEls.input.value = "";
   expandPath(item.store, query.folder_id);
@@ -2726,9 +3054,11 @@ function revealQuery(item) {
 
 // ---- clicks and keys
 
-function loadItem(li) {
+async function loadItem(li) {
   const entity = entityOf(li);
-  if (entity && li.dataset.kind === "query") openInEditor(entity, { store: li.dataset.store, savedQuery: entity });
+  if (!entity || li.dataset.kind !== "query") return;
+  const query = await fullQuery(li.dataset.store, entity);
+  if (query) openInEditor(query, { store: li.dataset.store, savedQuery: query });
 }
 
 // A click highlights the row (its preview on the right); a folder or a root also opens or closes. The
@@ -2736,6 +3066,15 @@ function loadItem(li) {
 // folder, its name opens its preview.
 function onTreeClick(ev) {
   const target = ev.target instanceof Element ? ev.target : null;
+  // "Show more" (the next window of a level that is larger than a page) and "Retry" (a folder that could not be read).
+  const action = target?.closest("[data-more], [data-retry]");
+  if (action) {
+    const lib = storeOf(action.dataset.store)?.library;
+    if (lib && "retry" in action.dataset) lib.failed.delete(action.dataset.parent || "");
+    void ensureChildren(action.dataset.store, action.dataset.parent || null, { more: "more" in action.dataset });
+    if (lib && "retry" in action.dataset) renderTree({ keepFocus: true });
+    return;
+  }
   const li = itemOf(target);
   if (!li || target.closest(".qlRow--edit")) return;
   const menuButton = target.closest('[data-action="row-menu"]');
@@ -2807,6 +3146,9 @@ function endTreePointer() {
 
 // The focus and the highlight move together (Tab back into the list).
 function onTreeFocus(ev) {
+  // A button of an action row ("Show more", "Retry") is not the row of the storage that holds it: the focus selects nothing, and the
+  // tree does not scroll under the pointer between the press and the click.
+  if (ev.target instanceof Element && ev.target.closest(".qlTree__action")) return;
   if (treePressed && ctl.form) return;
   const li = itemOf(ev.target);
   if (li && li.dataset.key !== ctl.selection.saved && !ev.target.closest(".qlRow--edit")) select("saved", li, { focus: false });
@@ -2918,7 +3260,12 @@ function editItem(li) {
   const entity = entityOf(li);
   if (!entity) return;
   if (li.dataset.kind === "folder") startRename(li);
-  else if (li.dataset.kind === "query") void beginEdit(li.dataset.store, entity);
+  else if (li.dataset.kind === "query") {
+    void fullQuery(li.dataset.store, entity).then((query) => {
+      if (query) return beginEdit(li.dataset.store, query);
+      return null;
+    });
+  }
 }
 
 // ---------------------------------------------------------- drag and drop
@@ -3153,6 +3500,11 @@ function onPreviewClick(ev) {
     openEntry(entry.dataset.openKey);
     return;
   }
+  const more = ev.target instanceof Element ? ev.target.closest("button[data-more]") : null;
+  if (more) {
+    void ensureChildren(more.dataset.store, more.dataset.parent || null, { more: true });
+    return;
+  }
   const button = ev.target instanceof Element ? ev.target.closest("button[data-action]") : null;
   if (!button) return;
   if (button.dataset.action === "back") {
@@ -3195,6 +3547,19 @@ function contentsText(counts) {
 
 // What a folder (folderId) or a storage (null) holds, one level down: its subfolders with their count of queries, then its
 // queries with their description and last change. The pane lists them, and a click opens one.
+// How a level that is larger than a page is read in the pane: the entries that are in, and a button for the rest.
+function entriesState(store, folderId) {
+  const lib = store.library;
+  if (!isPartial(lib)) return {};
+  if (!isRead(lib, folderId)) {
+    void ensureChildren(store.kind, folderId);
+    return { entriesLoading: !lib.failed.has(folderId || "") };
+  }
+  if (!hasMore(lib, folderId)) return {};
+  const left = Math.max(0, (lib.levelTotal.get(folderId || "") || 0) - childFolders(lib, folderId).length - childQueries(lib, folderId).length);
+  return { entriesMore: { left, store: store.kind, parent: folderId || "" } };
+}
+
 function entriesOf(store, folderId) {
   const lib = store.library;
   const counts = queryCounts(lib);
@@ -3230,7 +3595,7 @@ function savedPreview(key) {
   const lib = store.library;
   const canEdit = editableStore(store);
   if (sel.kind === "root") {
-    const meta = h("span", { class: "qlPreview__meta" }, contentsText({ queries: lib.queries.length, folders: lib.folders.length }));
+    const meta = h("span", { class: "qlPreview__meta" }, contentsText({ queries: libraryQueryTotal(lib), folders: libraryFolderTotal(lib) }));
     if (isServerStore(store) && !canEdit && ctl.host && !store.fatal) meta.append(MIDDOT, "Read-only");
     return {
       title: rootLabel(store.kind),
@@ -3239,6 +3604,7 @@ function savedPreview(key) {
       facts: ctl.host ? [["Host", ctl.host]] : [],
       error: store.fatal || (store.loadError ? `The library file could not be read (${store.loadError}): read-only.` : ""),
       entries: store.fatal ? null : entriesOf(store, null),
+      ...(store.fatal ? {} : entriesState(store, null)),
       entriesTitle: "In this library",
       entriesEmpty: canEdit ? "Nothing saved here yet. Save a query, or make a folder with New folder." : "Nothing is saved here.",
       tools: canEdit ? [{ label: "New folder", icon: "folderPlus", action: "new-subfolder", run: () => startNewFolder({ store: store.kind, parentId: null }) }] : [],
@@ -3255,6 +3621,7 @@ function savedPreview(key) {
       meta: updatedMeta(folder.updated_at_ms),
       facts: [["Path", `${rootLabel(store.kind)} ${folderPathText(lib, folder.id)}`], ["Contents", contentsText(subtreeCounts(lib, folder.id))]],
       entries: entriesOf(store, folder.id),
+      ...entriesState(store, folder.id),
       entriesTitle: "In this folder",
       entriesEmpty: canEdit ? "This folder is empty. Save a query into it, or make a subfolder." : "This folder is empty.",
       tools: canEdit ? [
@@ -3265,9 +3632,15 @@ function savedPreview(key) {
       ] : [],
     };
   }
-  const query = queryById(lib, sel.id);
-  if (!query) return null;
-  const item = { kind: "query", store: store.kind, id: query.id };
+  const listed = queryById(lib, sel.id);
+  if (!listed) return null;
+  const item = { kind: "query", store: store.kind, id: listed.id };
+  // The SQL and the description of a query of the server are read when it is opened: until then the pane says so.
+  const query = queryDetail(lib, listed);
+  if (!query) {
+    void ensureDetail(store.kind, listed.id);
+    return { title: listed.name, meta: updatedMeta(listed.updated_at_ms), facts: [], loading: true, tools: [], actions: [] };
+  }
   return {
     title: query.name,
     meta: updatedMeta(query.updated_at_ms),
@@ -3410,6 +3783,7 @@ function renderPreview() {
     content.appendChild(facts);
   }
   if (model.error) content.appendChild(h("div", { class: "qlPreview__error" }, oneLine(model.error, 600)));
+  if (model.loading) content.appendChild(h("p", { class: "qlPreview__loading" }, "Loading the query\u2026"));
   if (model.sql != null) content.appendChild(sqlPreview(model.sql, PANE_SQL_CHARS, { pane: true }));
   if (model.entries) content.appendChild(contentsList(model));
   pane.appendChild(content);
@@ -3437,8 +3811,8 @@ function contentsList(model) {
   wrap.setAttribute("aria-label", model.entriesTitle);
   wrap.appendChild(h("div", { class: "qlContents__label" }, model.entriesTitle));
   if (!model.entries.length) {
-    wrap.appendChild(h("p", { class: "qlContents__empty" }, model.entriesEmpty));
-    return wrap;
+    wrap.appendChild(h("p", { class: "qlContents__empty" }, model.entriesLoading ? "Loading\u2026" : model.entriesMore ? "" : model.entriesEmpty));
+    if (!model.entriesMore) return wrap;
   }
   const list = h("ul", { class: "qlContents__list" });
   for (const entry of model.entries.slice(0, CONTENTS_SHOWN)) {
@@ -3450,6 +3824,13 @@ function contentsList(model) {
     list.appendChild(h("li", null, button));
   }
   wrap.appendChild(list);
+  if (model.entriesMore) {
+    const more = h("button", { class: "qlActionButton qlContents__showMore", type: "button" }, `Show ${format.count(Math.min(model.entriesMore.left || PAGE_SIZE, PAGE_SIZE))} more (${format.count(model.entriesMore.left)} left)`);
+    more.dataset.more = "";
+    more.dataset.store = model.entriesMore.store;
+    more.dataset.parent = model.entriesMore.parent;
+    wrap.appendChild(more);
+  }
   if (model.entries.length > CONTENTS_SHOWN) {
     wrap.appendChild(h("p", { class: "qlContents__more" }, `${format.count(model.entries.length - CONTENTS_SHOWN)} more: use the list on the left or the search.`));
   }
@@ -3709,7 +4090,8 @@ function openedId(sqlText) {
 async function openSaved(id) {
   await start();
   for (const store of storeList()) {
-    const query = queryById(store.library, String(id || ""));
+    // A library of the server is asked for the query by its id: it may not be among the ones that were loaded.
+    const query = isPartial(store.library) ? await ensureDetail(store.kind, String(id || "")) : queryById(store.library, String(id || ""));
     if (!query) continue;
     setEditorSql(query.sql);
     ctl.opened = { store: store.kind, id: query.id, sql: String(query.sql) };

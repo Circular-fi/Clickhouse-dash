@@ -601,6 +601,9 @@ Server::Server(AppConfig cfg, bool start_background)
       return [this, route](const httplib::Request& req, httplib::Response& res) { handle_query_library(req, res, route); };
     };
     http_.Get("/api/query-library", library(QueryLibraryRoute::Get));
+    http_.Get("/api/query-library/search", library(QueryLibraryRoute::Search));
+    http_.Get("/api/query-library/export", library(QueryLibraryRoute::Export));
+    http_.Get(R"(/api/query-library/queries/([A-Za-z0-9_.\-]+))", library(QueryLibraryRoute::QueryGet));
     http_.Post("/api/query-library/folders", library(QueryLibraryRoute::FolderCreate));
     http_.Patch(R"(/api/query-library/folders/([A-Za-z0-9_.\-]+))", library(QueryLibraryRoute::FolderUpdate));
     http_.Delete(R"(/api/query-library/folders/([A-Za-z0-9_.\-]+))", library(QueryLibraryRoute::FolderDelete));
