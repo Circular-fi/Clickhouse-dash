@@ -446,6 +446,88 @@ test('New key: the form fits the dialog without a scroll, at the size of a small
   await screenshot(page, 'form-small');
 });
 
+test('New key: Max rows and Timeout stop at the largest value as the number is typed, and say who limits it (the MCP server or the ClickHouse user)', async ({ page }) => {
+  const limit = (value, source) => ({ value, source });
+  const server = newServer({
+    meta: {
+      limits: { ...META.limits, max_rows: 1000, query_timeout_seconds: 30 },
+      hosts: [
+        { name: 'prod', label: 'Production', healthy: true, mcp: { user: 'dashboard-arb', state: 'ok', error: '', reads_nothing: false, unavailable_tools: [], profile: { known: true, readonly: 2, max_execution_time: 30, max_result_rows: 500 }, limits: { max_rows: limit(500, 'clickhouse'), timeout_seconds: limit(30, 'both') } } },
+        { name: 'lab', label: 'Lab', healthy: true, mcp: { user: 'chdash_lab', state: 'ok', error: '', reads_nothing: false, unavailable_tools: [], profile: { known: true, readonly: 0, max_execution_time: 0, max_result_rows: 0 }, limits: { max_rows: limit(1000, 'mcp'), timeout_seconds: limit(30, 'mcp') } } },
+      ],
+    },
+  });
+  await open(page, server);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  const rows = d.locator('#mcpField-max_rows');
+  const timeout = d.locator('#mcpField-timeout_seconds');
+  const rowsHint = d.locator('#mcpFieldHint-max_rows');
+  const timeoutHint = d.locator('#mcpFieldHint-timeout_seconds');
+  // The first host: its ClickHouse user limits the rows (500) and the time is set by both.
+  await expect(rows).toHaveAttribute('max', '500');
+  await expect(rowsHint).toContainText('At most 500: limited by the ClickHouse user dashboard-arb');
+  await expect(rowsHint).toContainText('max_result_rows');
+  await expect(timeoutHint).toContainText('set by the MCP server (mcp.query_timeout_seconds) and by the ClickHouse user dashboard-arb');
+  // A number above the largest one is brought back to it at the keystroke, not when the form is sent.
+  await rows.click();
+  await page.keyboard.type('60');
+  await expect(rows).toHaveValue('60');
+  await page.keyboard.type('0');
+  await expect(rows).toHaveValue('500');
+  await expect(rowsHint).toHaveClass(/is-capped/);
+  await rows.fill('');
+  await page.keyboard.type('250');
+  await expect(rows).toHaveValue('250');
+  await expect(rowsHint).not.toHaveClass(/is-capped/);
+  await timeout.fill('99');
+  await expect(timeout).toHaveValue('30');
+  // Another host: its limits are the MCP server's, and a value that is too large for the new host is brought back.
+  await rows.fill('500');
+  await d.locator('label[for="mcpHost-1"]').click();
+  await expect(rows).toHaveAttribute('max', '1000');
+  await expect(rowsHint).toContainText('At most 1,000: limited by the MCP server (mcp.max_rows)');
+  await expect(rows).toHaveValue('500');
+  await d.locator('label[for="mcpHost-0"]').click();
+  await expect(rows).toHaveValue('500');
+  await rows.fill('500');
+  await d.locator('label[for="mcpHost-1"]').click();
+  await rows.fill('900');
+  await d.locator('label[for="mcpHost-0"]').click();
+  await expect(rows).toHaveValue('500');
+});
+
+test('New key: a single host is a fact, not a choice: nothing to click, its name centred with its health, label and MCP user', async ({ page }) => {
+  const server = newServer({
+    meta: {
+      hosts: [{ name: 'prod-local-dash', label: 'ClickHouse production arb', healthy: true, mcp: { user: 'dashboard-arb', state: 'ok', error: '', reads_nothing: false, unavailable_tools: [] } }],
+    },
+  });
+  await open(page, server);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  const fact = d.locator('.mcpHostOnly');
+  await expect(fact).toBeVisible();
+  await expect(fact.locator('.mcpHostOnly__name')).toHaveText('prod-local-dash');
+  await expect(fact.locator('.mcpHostOnly__label')).toHaveText('ClickHouse production arb');
+  await expect(fact.locator('.mcpHostOnly__note')).toHaveText('as dashboard-arb');
+  // No radio button is shown, and nothing in it answers a click.
+  await expect(d.locator('input[name="host"]:visible')).toHaveCount(0);
+  await expect(d.locator('label[for="mcpHost-0"]')).toHaveCount(0);
+  // The name is centred on the line of the dot, the icon and the label.
+  const centres = await fact.evaluate((el) => {
+    const mid = (node) => { const r = node.getBoundingClientRect(); return r.top + r.height / 2; };
+    return ['.mcpHostOnly__dot', '.mcpHostOnly__icon', '.mcpHostOnly__name', '.mcpHostOnly__label', '.mcpHostOnly__note'].map((sel) => mid(el.querySelector(sel)));
+  });
+  const box = await fact.boundingBox();
+  for (const centre of centres) expect(Math.abs(centre - (box.y + box.height / 2))).toBeLessThanOrEqual(2);
+  // The key is still made for that host.
+  await d.locator('#mcpField-name').fill('arb-reader');
+  await d.getByRole('button', { name: 'Create key' }).click();
+  const created = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
+  expect(created.body.hosts).toEqual(['prod-local-dash']);
+});
+
 test('New key: name, hosts in a column, data, and one card for each family of permissions', async ({ page }) => {
   await open(page);
   await page.locator('#mcpNewKey').click();

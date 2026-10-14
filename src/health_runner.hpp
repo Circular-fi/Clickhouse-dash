@@ -63,6 +63,11 @@ struct HostAccess {
   bool mcp_audited = false;
   bool mcp_connected = false;
   std::string mcp_error;
+  // The settings profile of the MCP user (read with the audit): what the limits of a key cannot exceed (0 = the profile sets none).
+  bool mcp_profile_known = false;
+  uint64_t mcp_readonly = 0;
+  double mcp_max_execution_time = 0;  // seconds
+  uint64_t mcp_max_result_rows = 0;
   // One sentence for each finding, for the logs and the hosts API.
   std::vector<std::string> warnings;
 };

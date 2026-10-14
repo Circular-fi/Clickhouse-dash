@@ -569,14 +569,33 @@ const mcpText = (value) => (typeof value === "string" ? value : "");
 const mcpList = (value) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
 const mcpLimit = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : null);
 
+// What a key of a host can ask for at most, and what binds it: "mcp" (the configuration of MCP), "clickhouse" (the settings profile of the
+// ClickHouse user of the host) or "both" (equal). null when the server did not say.
+function normalizeMcpHostLimit(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const value = mcpLimit(raw.value);
+  if (value == null) return null;
+  return { value, source: raw.source === "clickhouse" || raw.source === "both" ? raw.source : "mcp" };
+}
+
 function normalizeMcpHostUser(raw) {
   const mcp = raw && typeof raw === "object" ? raw : {};
   const state = mcp.state === "ok" || mcp.state === "unavailable" ? mcp.state : "unknown";
+  const profile = mcp.profile && typeof mcp.profile === "object" ? mcp.profile : {};
+  const caps = mcp.limits && typeof mcp.limits === "object" ? mcp.limits : {};
   return {
     user: mcpText(mcp.user),
     state,
     error: mcpText(mcp.error),
     readsNothing: mcp.reads_nothing === true,
+    // The settings profile of the MCP user (readonly, and the limits that it sets: 0 = none).
+    profile: {
+      known: profile.known === true,
+      readonly: Number(profile.readonly) || 0,
+      maxExecutionTime: Number(profile.max_execution_time) || 0,
+      maxResultRows: Number(profile.max_result_rows) || 0,
+    },
+    limits: { maxRows: normalizeMcpHostLimit(caps.max_rows), timeoutSeconds: normalizeMcpHostLimit(caps.timeout_seconds) },
     unavailableTools: (Array.isArray(mcp.unavailable_tools) ? mcp.unavailable_tools : []).map((item) => ({
       tool: mcpText(item?.tool),
       // Who lacks the grants: "MCP user" or "system user", and its name.

@@ -328,6 +328,7 @@ services:
         source: ./config/mcp.profile.hcl
         target: /config/chdash.hcl
         read_only: true
+      - mcp_profile_data:/data
     healthcheck: *instance_health
 
   chdash_system_disabled:
@@ -484,3 +485,4 @@ volumes:
   mcp_data:
   privileges_data:
   qlib_data:
+  mcp_profile_data:

@@ -132,12 +132,32 @@ function buildForm(meta) {
   const hostList = h("div", { class: "uiChecks mcpHostChecks", role: "radiogroup", "aria-label": "Host" });
   const usable = (host) => host.mcp.state !== "unavailable";
   const firstUsable = meta.hosts.findIndex(usable);
+  // One host only: there is nothing to choose, so it is shown as a fact (and not as a control that does nothing).
+  const onlyHost = meta.hosts.length === 1;
   meta.hosts.forEach((host, index) => {
     const down = !usable(host);
     const id = `mcpHost-${index}`;
     const input = h("input", { type: "radio", id, name: "host", value: host.name, disabled: down || null });
     input.checked = index === firstUsable;
     input.disabled = down;
+    if (onlyHost) {
+      // The radio stays, hidden, as the holder of the choice (the form reads the chosen host from it).
+      input.hidden = true;
+      input.dataset.field = "hosts";
+      const status = down ? "error" : host.healthy === false ? "warn" : host.healthy === true ? "ok" : "idle";
+      const dot = h("span", { class: `mcpHostOnly__dot mcpHostOnly__dot--${status}`, "aria-hidden": "true" });
+      const detail = down
+        ? h("span", { class: "mcpHostOnly__note mcpHostDown", title: host.mcp.error }, `${mcpUser(host)} cannot connect`)
+        : host.mcp.user ? h("span", { class: "mcpHostOnly__note" }, `as ${host.mcp.user}`) : null;
+      const fact = h("div", { class: "mcpHostOnly", title: down ? `${host.name}: ${host.mcp.error || "the MCP user cannot connect"}` : host.label || host.name },
+        input, dot, icon.el("database", { size: "sm", className: "mcpHostOnly__icon" }),
+        h("span", { class: "mcpHostOnly__name mcpMono" }, host.name),
+        host.label && host.label !== host.name ? h("span", { class: "mcpHostOnly__label" }, host.label) : null,
+        detail);
+      hostBoxes.push({ wrap: fact, input, host });
+      hostList.appendChild(fact);
+      return;
+    }
     const note = down
       ? h("span", { class: "uiCheck__note mcpHostDown", title: host.mcp.error }, `${mcpUser(host)} cannot connect`)
       : host.label && host.label !== host.name ? h("span", { class: "uiCheck__note" }, host.label) : null;
@@ -163,9 +183,49 @@ function buildForm(meta) {
   const number = (id, field, max, placeholder) => h("input", { id, class: "uiInput", type: "number", name: field, dataset: { field }, min: "1", max: max != null ? String(max) : null, step: "1", inputmode: "numeric", placeholder });
   const rows = number("mcpField-max_rows", "max_rows", limits.maxRows, limits.maxRows != null ? `Default ${format.count(limits.maxRows)}` : "Default");
   const timeout = number("mcpField-timeout_seconds", "timeout_seconds", limits.queryTimeoutSeconds, limits.queryTimeoutSeconds != null ? `Default ${limits.queryTimeoutSeconds} s` : "Default");
-  const limitsRow = h("div", { class: "mcpFieldRow" },
-    fieldWrap("max_rows", "Max rows", rows, { required: false }),
-    fieldWrap("timeout_seconds", "Timeout (s)", timeout, { required: false }));
+  const rowsField = fieldWrap("max_rows", "Max rows", rows, { required: false, hint: " " });
+  const timeoutField = fieldWrap("timeout_seconds", "Timeout (s)", timeout, { required: false, hint: " " });
+  const limitsRow = h("div", { class: "mcpFieldRow" }, rowsField, timeoutField);
+  // The largest value of a limit is the smaller of the configuration of MCP and the profile of the ClickHouse user of the host: the
+  // input stops at it as the number is typed, and the line under it says which of the two it is.
+  const limitInputs = [
+    { input: rows, wrap: rowsField, key: "maxRows", fallback: () => limits.maxRows, unit: "", config: "mcp.max_rows", profile: "max_result_rows", noun: "rows" },
+    { input: timeout, wrap: timeoutField, key: "timeoutSeconds", fallback: () => limits.queryTimeoutSeconds, unit: " s", config: "mcp.query_timeout_seconds", profile: "max_execution_time", noun: "seconds" },
+  ];
+  const limitNote = (item, host) => {
+    const cap = host?.mcp.limits[item.key];
+    const max = cap ? cap.value : item.fallback();
+    if (max == null) return { max: null, text: "" };
+    const amount = `${format.count(max)}${item.unit}`;
+    const user = host?.mcp.user ? ` ${host.mcp.user}` : "";
+    const by = !cap || cap.source === "mcp" ? `limited by the MCP server (${item.config})`
+      : cap.source === "clickhouse" ? `limited by the ClickHouse user${user} (its settings profile, ${item.profile})`
+      : `set by the MCP server (${item.config}) and by the ClickHouse user${user} (${item.profile})`;
+    // A profile with readonly = 1 refuses every limit that ChDash sends: the time is the profile's alone.
+    const refused = item.key === "timeoutSeconds" && host?.mcp.profile.readonly === 1 ? " This user's profile is readonly = 1: ClickHouse refuses the limits of ChDash, so only the profile bounds the time." : "";
+    return { max, text: `At most ${amount}: ${by}.${refused}` };
+  };
+  const syncLimits = (host) => {
+    for (const item of limitInputs) {
+      const { max, text } = limitNote(item, host);
+      item.input.max = max != null ? String(max) : "";
+      item.input.placeholder = max != null ? `Default ${format.count(max)}${item.unit}` : "Default";
+      const hint = $(".uiField__hint", item.wrap);
+      if (hint) hint.textContent = text;
+      // A value that a new choice of host makes too large is brought back at once.
+      if (max != null && item.input.value !== "" && Number(item.input.value) > max) item.input.value = String(max);
+    }
+  };
+  // As soon as the number is above the largest one, it becomes the largest one (no waiting for the form to be sent).
+  const capInput = (item) => {
+    const max = Number(item.input.max);
+    const hint = $(".uiField__hint", item.wrap);
+    const capped = item.input.value !== "" && Number.isFinite(max) && item.input.max !== "" && Number(item.input.value) > max;
+    if (capped) item.input.value = String(max);
+    hint?.classList.toggle("is-capped", capped);
+    if (capped && hint?.textContent) uiState.announce(hint.textContent);
+  };
+  for (const item of limitInputs) item.input.addEventListener("input", () => capInput(item));
 
   // Permissions: one card for each family. The check box of a card is all its tools; the arrow opens
   // the tools, one check box each.
@@ -236,6 +296,7 @@ function buildForm(meta) {
   const sync = () => {
     const everything = isEverything();
     const host = chosenHost();
+    syncLimits(host);
     const gaps = gapsOf(host);
     for (const box of toolBoxes) {
       const gap = gaps.get(box.tool.name);

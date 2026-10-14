@@ -16,7 +16,9 @@ health {
 }
 
 mcp {
-  enabled = true
+  enabled        = true
+  storage_file   = "/data/mcp_keys.json"
+  manage_from_ui = true
 
   max_rows              = 100
   max_result_bytes      = 20000

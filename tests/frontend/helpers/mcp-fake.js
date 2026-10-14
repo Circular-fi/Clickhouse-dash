@@ -45,6 +45,9 @@ export const GROUPS = [
   { id: 'sql', title: 'SQL', note: 'free SQL written by the client', sections: [] },
 ];
 
+// The settings profile of an MCP user that sets nothing, and the limits of a key of its host (the MCP server's, as the configuration says).
+const NO_PROFILE = { known: true, readonly: 0, max_execution_time: 0, max_result_rows: 0 };
+const LIMITS = { max_rows: { value: 1000, source: 'mcp' }, timeout_seconds: { value: 30, source: 'mcp' } };
 export const META = {
   enabled: true,
   endpoint_path: '/mcp',
@@ -56,12 +59,12 @@ export const META = {
   // The MCP user of each host: "ok" (it connects), "unavailable" (no key can read the host) or "unknown" (not checked yet);
   // and the tools that it cannot serve, with the grant that is missing.
   hosts: [
-    { name: 'prod', label: 'Production cluster', healthy: true, mcp: { user: 'chdash_mcp', state: 'ok', error: '', reads_nothing: false, unavailable_tools: [] } },
-    { name: 'staging', label: 'staging', healthy: false, mcp: { user: 'chdash_mcp', state: 'unavailable', error: 'Code: 516. Authentication failed', reads_nothing: false, unavailable_tools: [] } },
+    { name: 'prod', label: 'Production cluster', healthy: true, mcp: { user: 'chdash_mcp', state: 'ok', error: '', reads_nothing: false, profile: NO_PROFILE, limits: LIMITS, unavailable_tools: [] } },
+    { name: 'staging', label: 'staging', healthy: false, mcp: { user: 'chdash_mcp', state: 'unavailable', error: 'Code: 516. Authentication failed', reads_nothing: false, profile: NO_PROFILE, limits: LIMITS, unavailable_tools: [] } },
     {
       name: 'lab', label: 'Lab', healthy: null,
       mcp: {
-        user: 'chdash_lab', state: 'ok', error: '', reads_nothing: false,
+        user: 'chdash_lab', state: 'ok', error: '', reads_nothing: false, profile: NO_PROFILE, limits: LIMITS,
         unavailable_tools: [
           { tool: 'traces_search', role: 'system user', user: 'chdash_sys', grants: ['SELECT ON otel.otel_traces'], statement: 'GRANT SELECT ON otel.otel_traces TO chdash_sys;' },
           { tool: 'logs_search', role: 'system user', user: 'chdash_sys', grants: ['SELECT ON otel.otel_logs', 'SELECT ON system.parts'], statement: 'GRANT SELECT ON otel.otel_logs, system.parts TO chdash_sys;' },

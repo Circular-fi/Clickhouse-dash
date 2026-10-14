@@ -197,6 +197,37 @@ std::string error_code_of(const ChError& failure) {
   }
 }
 
+// What a key of a host can ask for at most: the smaller of the configuration of MCP and the profile of the ClickHouse user of the
+// host, and which of them binds ("mcp", "clickhouse", or "both" when they are equal). The page shows it and the key is refused above it.
+struct McpHostLimit {
+  int64_t value = 0;
+  const char* source = "mcp";
+};
+struct McpHostLimits {
+  McpHostLimit max_rows;
+  McpHostLimit timeout_seconds;
+};
+
+McpHostLimits mcp_host_limits(const McpSettings& settings, const HostAccess* access) {
+  McpHostLimits out;
+  out.max_rows.value = settings.max_rows;
+  out.timeout_seconds.value = settings.query_timeout_seconds;
+  if (!access || !access->mcp_profile_known) return out;
+  const auto bind = [](McpHostLimit* limit, int64_t profile) {
+    if (profile <= 0) return;
+    if (profile < limit->value) {
+      limit->value = profile;
+      limit->source = "clickhouse";
+    } else if (profile == limit->value) {
+      limit->source = "both";
+    }
+  };
+  bind(&out.max_rows, static_cast<int64_t>(std::min<uint64_t>(access->mcp_max_result_rows, static_cast<uint64_t>(INT64_MAX))));
+  // A fraction of a second is the second it is rounded up to (a limit of 0.5 s still lets a call ask for 1).
+  bind(&out.timeout_seconds, access->mcp_max_execution_time > 0 ? std::max<int64_t>(1, static_cast<int64_t>(access->mcp_max_execution_time)) : 0);
+  return out;
+}
+
 class ClickHouseMcpDatabase final : public McpDatabase {
 public:
   using HealthFn = std::function<std::optional<bool>(const std::string&)>;
@@ -596,6 +627,29 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("state"); w.String(!audited ? "unknown" : access->mcp_connected ? "ok" : "unavailable");
         w.Key("error"); put(w, access ? access->mcp_error : std::string());
         w.Key("reads_nothing"); w.Bool(audited && access->mcp_connected && access->mcp_reads_nothing);
+        // The settings profile of the MCP user, and what a key of this host can ask for at most (and what binds it).
+        w.Key("profile");
+        w.StartObject();
+        const bool profiled = access && access->mcp_audited && access->mcp_profile_known;
+        w.Key("known"); w.Bool(profiled);
+        w.Key("readonly"); w.Uint64(profiled ? access->mcp_readonly : 0);
+        w.Key("max_execution_time"); w.Double(profiled ? access->mcp_max_execution_time : 0);
+        w.Key("max_result_rows"); w.Uint64(profiled ? access->mcp_max_result_rows : 0);
+        w.EndObject();
+        const McpHostLimits caps = mcp_host_limits(s, access);
+        w.Key("limits");
+        w.StartObject();
+        w.Key("max_rows");
+        w.StartObject();
+        w.Key("value"); w.Int64(caps.max_rows.value);
+        w.Key("source"); w.String(caps.max_rows.source);
+        w.EndObject();
+        w.Key("timeout_seconds");
+        w.StartObject();
+        w.Key("value"); w.Int64(caps.timeout_seconds.value);
+        w.Key("source"); w.String(caps.timeout_seconds.source);
+        w.EndObject();
+        w.EndObject();
         w.Key("unavailable_tools");
         w.StartArray();
         if (access) {
@@ -877,6 +931,24 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       if (const auto err = mcp_parse_key_input(req.body, &input)) {
         api_error(res, 400, "validation", err->message, err->field, err->reason);
         return;
+      }
+      // A key can lower the limits of its host and never raise them: the limit of the MCP user's profile counts as the configuration's.
+      const HostsSnapshot health = health_ ? health_->snapshot() : HostsSnapshot{};
+      for (const auto& host_name : input.hosts.value_or(std::vector<std::string>{})) {
+        const HostAccess* access = nullptr;
+        for (const auto& item : health.hosts) {
+          if (item.id == host_name) access = &item.access;
+        }
+        const McpHostLimits caps = mcp_host_limits(cfg_.mcp, access);
+        const auto refuse = [&](const char* field, int64_t asked, const McpHostLimit& cap, const char* what) -> bool {
+          if (asked <= cap.value) return false;
+          const std::string by = std::string(cap.source) == "clickhouse" ? "the ClickHouse user of the host (its settings profile)" : "the MCP configuration";
+          api_error(res, 400, "validation", std::string(field) + " must be between 1 and " + std::to_string(cap.value) + ": " + what + " is limited by " + by,
+                    field, "range");
+          return true;
+        };
+        if (input.max_rows && refuse("max_rows", *input.max_rows, caps.max_rows, "the number of rows")) return;
+        if (input.timeout_seconds && refuse("timeout_seconds", *input.timeout_seconds, caps.timeout_seconds, "the time of a query")) return;
       }
       const auto result = store.create(input, now);
       if (!result.key) return write_failure(result);

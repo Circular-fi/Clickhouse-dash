@@ -240,6 +240,12 @@ static HostAccess audit_access(
       out.warnings.push_back("The " + who + " cannot connect: " + out.mcp_error);
     } else {
       out.mcp_connected = true;
+      // The profile of the user: the limits that a key can lower and never raise (the page says which one binds).
+      const ChSettingsProfile profile = ch_connection_profile(*mcp);
+      out.mcp_profile_known = profile.known;
+      out.mcp_readonly = profile.readonly;
+      out.mcp_max_execution_time = profile.max_execution_time;
+      out.mcp_max_result_rows = profile.max_result_rows;
       for (const auto& table : settings.mcp_reads) {
         bool known = false;
         const bool granted = check_grant(*mcp, "SELECT ON " + table, &known, budget);

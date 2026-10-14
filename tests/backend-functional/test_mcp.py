@@ -252,7 +252,7 @@ def test_meta_and_version():
     assert all(h["healthy"] in (True, False, None) for h in meta["hosts"])
     # What the MCP user of each host can do: "ok" once the audit ran, and the tools that it cannot serve.
     for host in meta["hosts"]:
-        assert set(host["mcp"]) == {"user", "state", "error", "reads_nothing", "unavailable_tools"}
+        assert set(host["mcp"]) == {"user", "state", "error", "reads_nothing", "profile", "limits", "unavailable_tools"}
         assert host["mcp"]["state"] in ("ok", "unknown") and host["mcp"]["user"] in ("chdash_mcp", "")
         assert host["mcp"]["unavailable_tools"] == []
     tools = {t["name"]: t for t in meta["tools"]}
@@ -1799,3 +1799,47 @@ def test_a_user_with_readonly_1_in_its_profile_serves_mcp_without_any_setting():
     never_refused_a_setting(ok_tool(PROFILE_URL, PROFILE_RO1, "list_databases"))
     result = ok_tool(PROFILE_URL, PROFILE_RO1, "run_query", {"sql": "SELECT number FROM system.numbers LIMIT 500"})
     assert result["row_count"] == 100 and result["truncated"] is True, result
+
+
+def profile_hosts() -> dict:
+    """The hosts of /api/mcp/meta, once the access audit has read the profile of each MCP user."""
+    deadline = time.time() + 60
+    while True:
+        meta = api_ok(m("GET", "/api/mcp/meta", base=PROFILE_URL))
+        hosts = {h["name"]: h for h in meta["hosts"]}
+        if all(h["mcp"]["state"] == "ok" and h["mcp"]["profile"]["known"] for h in hosts.values()) or time.time() > deadline:
+            return hosts
+        time.sleep(1)
+
+
+@needs_profile
+def test_the_page_says_what_a_key_can_ask_for_and_who_limits_it():
+    # The configuration of the instance: 100 rows and 5 seconds. The profile of ro2cap: 7 rows and 4 seconds, so the ClickHouse user
+    # binds; ro2 and ro1 set none of them, so the MCP server does.
+    hosts = profile_hosts()
+    assert hosts["ro2cap"]["mcp"]["limits"] == {"max_rows": {"value": 7, "source": "clickhouse"}, "timeout_seconds": {"value": 4, "source": "clickhouse"}}
+    assert hosts["ro2"]["mcp"]["limits"] == {"max_rows": {"value": 100, "source": "mcp"}, "timeout_seconds": {"value": 5, "source": "mcp"}}
+    assert hosts["ro2"]["mcp"]["profile"] == {"known": True, "readonly": 2, "max_execution_time": 0, "max_result_rows": 0}
+    assert hosts["ro2cap"]["mcp"]["profile"]["max_result_rows"] == 7 and hosts["ro2cap"]["mcp"]["profile"]["max_execution_time"] == 4
+    assert hosts["ro1"]["mcp"]["profile"]["readonly"] == 1
+
+
+@needs_profile
+def test_a_key_above_the_limit_of_the_clickhouse_user_is_refused_and_says_who_limits():
+    profile_hosts()
+    body = {"name": "above-profile", "hosts": ["ro2cap"], "tools": ["list_hosts"], "databases": ["*"], "max_rows": 8}
+    refused = m("POST", "/api/mcp/keys", base=PROFILE_URL, body=body)
+    assert refused.status_code == 400, refused.text
+    payload = refused.json()
+    assert payload["field"] == "max_rows" and payload["reason"] == "range", payload
+    assert "between 1 and 7" in payload["message"] and "ClickHouse user" in payload["message"], payload
+    body = {**body, "max_rows": 7, "timeout_seconds": 5}
+    refused = m("POST", "/api/mcp/keys", base=PROFILE_URL, body=body)
+    assert refused.status_code == 400 and refused.json()["field"] == "timeout_seconds", refused.text
+    assert "ClickHouse user" in refused.json()["message"]
+    # At the limit, and below it, a key is made. On a host without a limit in its profile the MCP configuration is the one that says.
+    made = m("POST", "/api/mcp/keys", base=PROFILE_URL, body={**body, "timeout_seconds": 4})
+    assert made.status_code == 201, made.text
+    assert m("DELETE", f"/api/mcp/keys/{made.json()['key']['id']}", base=PROFILE_URL).status_code == 200
+    plain = m("POST", "/api/mcp/keys", base=PROFILE_URL, body={"name": "above-config", "hosts": ["ro2"], "tools": ["list_hosts"], "databases": ["*"], "max_rows": 101})
+    assert plain.status_code == 400 and "MCP configuration" in plain.json()["message"], plain.text
