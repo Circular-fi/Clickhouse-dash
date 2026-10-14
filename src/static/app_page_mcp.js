@@ -22,9 +22,11 @@ import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
 // openKeyId: the key whose details show; filterText: the text of the keys filter (both survive a redraw of the list).
-const state = { meta: null, keys: [], status: "loading", error: null, access: null, openKeyId: "", filterText: "" };
+// usage: what each key did (the column Used, the deleted keys); deletedOpen, openDeletedId: the list of the deleted keys is open, and
+// the deleted key whose details show.
+const state = { meta: null, keys: [], status: "loading", error: null, access: null, usage: null, openKeyId: "", filterText: "", deletedOpen: false, openDeletedId: "" };
 // Every read is cancelable (util.latest): "mcp.state" is the meta and the keys (a load or a reload: the newest wins and
-// aborts the one in flight), "mcp.access" the counts of the data of the keys.
+// aborts the one in flight), "mcp.access" the counts of the data of the keys, "mcp.usage" what the keys did.
 const STATE_KEY = "mcp.state";
 const actions = () => ({
   onCreate: createKey,
@@ -34,8 +36,36 @@ const actions = () => ({
   onOpenChange: (id) => { state.openKeyId = id; },
   onFilter: (text) => { state.filterText = text; },
   keyDetails: (args) => mcpForm.keyDetails(args),
-  onDetailsClose: () => util.latest.cancelPrefix(mcpForm.REACH_SLOT),
+  onDetailsClose: () => mcpForm.cancelDetails(),
 });
+
+// The window of the column Used: the last 7 days (the last 24 hours when the retention is shorter).
+const usageWindow = () => (state.meta?.usage?.windows?.includes("7d") ? "7d" : state.meta?.usage?.defaultWindow || "24h");
+
+// What each key did, asked once for all the keys after the table is drawn: the column Used, and the deleted keys that keep usage.
+async function loadUsage() {
+  if (state.status !== "ready") {
+    util.latest.cancel("mcp.usage");
+    return;
+  }
+  const req = util.latest("mcp.usage");
+  try {
+    const usage = await api.getMcpUsageSummary({ window: usageWindow(), signal: req.signal });
+    if (!req.isCurrent()) return;
+    state.usage = usage;
+    showUsage();
+  } catch (error) {
+    if (!req.isCurrent()) return;
+    state.usage = null;
+    mcpView.fillUsage(dom.byId("mcpKeys"), null, util.errorText(error, "The use of the keys could not be read."));
+    mcpView.renderDeleted(dom.byId("mcpKeys"), null, liveView, actions());
+  }
+}
+
+function showUsage() {
+  mcpView.fillUsage(dom.byId("mcpKeys"), state.usage);
+  mcpView.renderDeleted(dom.byId("mcpKeys"), state.usage, liveView, actions());
+}
 
 // How many databases and tables each key reaches: asked once for all the keys, after the table is drawn, and written in
 // its cells (the table is not drawn again, so a key that is open stays open).
@@ -65,6 +95,8 @@ const liveView = Object.defineProperties({}, {
   error: { get: () => state.error, enumerable: true },
   openKeyId: { get: () => state.openKeyId, set: (value) => { state.openKeyId = value; }, enumerable: true },
   filterText: { get: () => state.filterText, enumerable: true },
+  deletedOpen: { get: () => state.deletedOpen, set: (value) => { state.deletedOpen = !!value; }, enumerable: true },
+  openDeletedId: { get: () => state.openDeletedId, set: (value) => { state.openDeletedId = value; }, enumerable: true },
 });
 
 function renderKeys({ refresh = false } = {}) {
@@ -73,7 +105,9 @@ function renderKeys({ refresh = false } = {}) {
   mcpView.renderKeys(dom.byId("mcpKeys"), liveView, actions());
   // The counts that are known show at once; they are asked again (the grants of a host are kept 60 s by the server).
   if (state.access) mcpView.fillAccess(dom.byId("mcpKeys"), state.access);
+  if (state.usage && state.status === "ready") showUsage();
   void loadAccess({ refresh });
+  void loadUsage();
 }
 
 // Nothing of the keys or the side column shows: the state is loading, off or in error.
@@ -134,7 +168,7 @@ async function reload(button = null) {
   const req = util.latest(STATE_KEY);
   if (button) {
     uiState.busy(button, true);
-    mcpForm.forgetReach();
+    mcpForm.forgetDetails();
   }
   try {
     const [meta, keys] = await Promise.all([api.getMcpMeta({ signal: req.signal }), api.getMcpKeys({ signal: req.signal })]);
@@ -276,6 +310,7 @@ import * as h_route_notice from "./app_route_notice.js";
 import * as h_boot from "./app_boot.js";
 import * as h_header from "./app_header.js";
 import * as h_mcp_view from "./app_mcp_view.js";
+import * as h_mcp_usage from "./app_mcp_usage.js";
 import * as h_ui_dialog from "./app_ui_dialog.js";
 import * as h_mcp_form from "./app_mcp_form.js";
 h_loader.loader.expose([
@@ -310,6 +345,7 @@ h_loader.loader.expose([
   h_boot,
   h_header,
   h_mcp_view,
+  h_mcp_usage,
   h_ui_dialog,
   h_mcp_form,
 ]);

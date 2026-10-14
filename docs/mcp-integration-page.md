@@ -13,8 +13,9 @@ The page has the same frame as System and Observability (the header, then one sc
 ```
 +-------------------------------------------------+------------------------------+
 | Access keys  11    [filter]      (refresh) [+ New key] | Connect a client             |
-| Name  Secret              Hosts Tools Data Limits    | Endpoint [ https://host/mcp ]|
-| name  a1b2c3d4-....-....   one line for each key  [x] | [Code|Desktop|Inspector|JSON] |
+| Name  Secret     Host Tools Data Limits Used         | Endpoint [ https://host/mcp ]|
+| name  a1b2c3d4-..  one line for each key        [x] | [Code|Desktop|Inspector|JSON] |
+| Used: ... (a note)    > Deleted keys 2               |                              |
 | ...                                                   | command / JSON               |
 |                                                       |------------------------------|
 |                                                       | Hosts                        |
@@ -23,7 +24,7 @@ The page has the same frame as System and Observability (the header, then one sc
 ```
 
 1. **The keys.** The part "Access keys": its heading (title, count, a filter from 10 keys, then **Refresh** and the primary **New key** at the right end), a note, an alert, then the keys table. It takes the left of the page.
-2. **The side column.** One bordered box of three blocks, 36% of the window wide (28 to 42 rem), beside the keys from 1366 px. It stays in view while the keys scroll. The panel keeps the room of its scrollbar (`scrollbar-gutter: stable`) whether the content scrolls or not, so opening the details of a key moves nothing sideways. A key is narrow (a name of 32 characters, a UUID), so the column takes the room: the commands and the JSON of the clients read on a few lines.
+2. **The side column.** One bordered box of three blocks, 36% of the window wide (28 to 42 rem), beside the keys from 1366 px. It stays in view while the keys scroll. The panel keeps the room of its scrollbar (`scrollbar-gutter: stable`) whether the content scrolls or not, so opening the details of a key moves nothing sideways. A key is narrow (a name of 32 characters, the start of its secret), so the column takes the room: the commands and the JSON of the clients read on a few lines.
    - **Connect a client.** The **Endpoint** (a read-only field with its copy button), then the tabs of the clients and one code block. Always open. See below.
    - **Hosts.** The hosts that have an `mcp_uri`: the name, the label (when it is not the name), the ClickHouse user that the tools of a key of this host run as (`chdash_mcp`) and a health badge (`healthy`, `down` or `unknown`). A host whose MCP user cannot connect shows a red **MCP user down** badge instead (its tooltip says why): no key can read it.
    - **Global limits.** A list of the global limits: label at the left, value at the right.
@@ -68,23 +69,24 @@ The header that carries the key is `mcp.auth_header` (`Authorization` by default
 
 The running text of the page (the notes, the tips of the tools) is justified when it takes several lines.
 
-Each key is one line of the table. The rows keep the order of the API (keys of the config file first). The table uses fixed columns: the name column is narrow (a name has 32 characters at most), the Hosts, Tools and Data columns are narrow so that the secret column can hold a whole UUID, and a cell that is too long ends in an ellipsis. The tooltip of the cell says all of it.
+Each key is one line of the table. The rows keep the order of the API (keys of the config file first). The table uses fixed columns: the name column is narrow (a name has 32 characters at most), the secret shows its start only, so that the column Used fits beside the others, and a cell that is too long ends in an ellipsis. The tooltip of the cell says all of it.
 
 | Column | Content |
 | --- | --- |
 | Name | The name, a button that opens the details of the key (so does a click on the row outside its buttons). The tooltip also says where the key comes from. |
-| Secret | The **first 8 characters** of the secret (its hint, which tells the keys apart), **the hyphens in clear**, and a **dot** for every other character (`3f2a9c1e-••••-••••-••••-••••••••••••`). The server sends this mask (`secret_mask`). The cell has no button: ChDash keeps only a hash of the secret. A key of a file that kept no hint shows dots only. |
+| Secret | The **first 8 characters** of the secret (its hint, which tells the keys apart), the next group of dots and an ellipsis: `3f2a9c1e-••••…`. The tooltip has the whole mask: the hint, **the hyphens in clear**, and a **dot** for every other character (`3f2a9c1e-••••-••••-••••-••••••••••••`, the `secret_mask` that the server sends), then why the secret cannot be shown. The cell has no button: ChDash keeps only a hash of the secret. A key of a file that kept no hint shows dots only. |
 | Host | The name of the host, in the code font, cut with an ellipsis. `None` when the key has no host. A key reads one host. In the warning color: a key of an older file that names several hosts ("2 hosts"), a host that has no `mcp_uri` any more, or a host whose MCP user cannot connect; the tooltip says which. |
 | Tools | `n/total` (out of the tools of the server), `All` or `None`. The tooltip lists them. |
 | Data | How many databases and tables the key reaches: `3 dbs · 142 tables`. It is what the MCP user of the key's host may read (`CHECK GRANT`), cut by the patterns of the key. The table is drawn first (the cell shows an ellipsis), then one request (`GET /api/mcp/access`) counts every key at once, whatever their number: the grants of a host are read once. In the warning colour when the key reaches nothing (`0 dbs · 0 tables`: the patterns match nothing that the user reads); a dash when the host cannot be counted (the MCP user cannot connect, or the request failed). The tooltip says what the number is (and how many tables are read in part) and lists the patterns. Refresh counts again. |
 | Limits | The rows and the timeout, as "100 · 5 s". A value that the key sets shows at full strength. A key without its own value shows the global limit in the muted color. A screen reader reads "(default)" after it. |
+| Used | When the key was last used and its tool calls in the last 7 days: `2 h ago · 1.2K` (`format.ago` in its short form, and the compact count). The table is drawn first (the cell shows an ellipsis), then one request (`GET /api/mcp/usage?window=7d`) reads the use of every key. **Never** when the key was never used and the counting covers its life (the usage is kept in `mcp.usage_file`, or the key is younger than the start of ChDash); a dash when the usage is in memory and the key is older than it (it may have been used before the start). Muted without a call in the window, in the warning colour when 5% of the calls failed or the rate limit refused a request. The tooltip has the time of the last use, the calls among the requests, the errors and the refusals. A note under the table says what the column counts and, when the usage is in memory, since when (a restart clears it). Refresh reads it again. |
 | Actions | **Delete**, a trash icon with no frame around it (like the gear icons), with a label for screen readers and a tooltip. A key that the page cannot delete (a key of the config file, or `manage_from_ui = false`) has nothing in this cell: no icon, no lock. The tooltip of the name says where the key comes from. |
 
-A key has no description, no expiry, no state and no "last used" column. A key is **made or deleted**: there is no edit, no disable and no rotation. To change a key, delete it and make a new one.
+A key has no description, no expiry and no state. Its use shows in the column **Used** and in the usage of its details. A key is **made or deleted**: there is no edit, no disable and no rotation. To change a key, delete it and make a new one.
 
 From 10 keys, the head of the part shows a filter. It matches the name and the source. The count shows "n of N" while the filter is on. The filter text stays after an action.
 
-The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 49 rem the box scrolls sideways. On a phone (600 px and below), each key is a card. The name is the first line, then the secret. The hosts, the tools, the data and the limits follow in two columns. **Delete** closes the card, 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
+The table is a compact data table (`.dataTable--compact`) in a hairline box (`.dataTableWrap`). Under 54 rem the box scrolls sideways. From 820 px down, Tools, Data, Limits and Used leave the table (the details of a key show them). On a phone (600 px and below), each key is a card. The name is the first line, then the secret. The hosts, the tools, the data, the limits and the use follow in two columns. **Delete** closes the card, 40 px high. The label of each cell shows above its value. The table keeps its roles for a screen reader.
 
 ### The secret of a key
 
@@ -121,7 +123,23 @@ A click on a key (its name, or its row outside the buttons) opens its details **
 
 Under the permissions, **Data it reads** answers the question "which databases and tables can this key reach?". For the host of the key, the page shows the MCP ClickHouse user (`as chdash_mcp`), the number of tables and databases, and a line that says why: the tables that the user reads (`CHECK GRANT`), and what the patterns of the key keep or leave out. Each database opens on its tables, and a table that the user reads only in part says "some columns". A host that cannot be checked says why. **Check again** asks the grants again (the answer is kept for `explorer.acl_cache_ttl_ms`, 60 s by default). The data comes from `GET /api/mcp/keys/<id>/access` (`docs/mcp.md`). What the key reaches is the grants of the MCP user cut by the key: the key never reads more than the user.
 
+Under it, **Usage** says what the key did (`docs/mcp.md`, "Usage of a key"), read when the details open (`GET /api/mcp/keys/<id>/usage`):
+
+- a **window**: the buttons `24 h`, `7 d`, `30 d`, `90 d` (and `365 d`), as far as `mcp.usage_retention_days` keeps them, `7 d` first. The window that the reader picks stays for the visit of the page, so two keys are compared on the same window. The heading says the dates of the window;
+- six tiles: the tool calls (and the requests), the errors (and their share: in the warning colour, in the danger colour from 5%), the refused requests (and how many by the rate limit), the time of a call (average and longest), the bytes returned (and the rows of the tools that build their SQL), the last use (and the first);
+- the calls of each hour (24 h) or day, with the errors in the danger colour (the shared sparkline), and the busiest hour or day;
+- three compact tables: the **tools** (calls with a bar of their share, errors, average time, bytes returned; the longest call is in the tooltip of the tool), the **results** (`ok`, the error codes, the refusals, with their share) and the **clients** (the name and the version that the client sent in `initialize`, its User-Agent, its requests, when it was first and last seen);
+- when the usage is in memory, a line says since when it is counted (a restart clears it); a key without a request in the window says so.
+
+Then **ClickHouse cost**, closed: what the statements of the key cost ClickHouse, read from `system.query_log` of its host (`GET /api/mcp/keys/<id>/cost`; `docs/mcp.md`, "The ClickHouse cost of a key"). It is read **only when it is opened** (a scan of the log), in the window of the usage (24 h, else 7 d), and kept a minute; **Check again** reads it anew. Six tiles (statements and failed ones, bytes and rows read, CPU, the peak of memory, the time, the bytes and rows returned), then the cost **by tool**, the **tables read** the most, and the cost **by user** (the MCP user, the system user, or another user in the warning colour). When the runner of the host may not read `query_log`, the block says so and shows the `GRANT` to give (a code block with its copy button); a window too large suggests 24 h. A line says that only the statements named for the key count. When `system.top_queries` is off, the block cannot open and says why.
+
+Each answer of the usage is kept a minute for its key and window: opening the details again shows it at once. Closing the details stops the reads in flight. Refresh forgets what was kept.
+
 The details only show. **Delete** is the button of the row. On a phone, the details are a block under the card of the key.
+
+## Deleted keys
+
+A deleted key keeps its usage until it is older than `mcp.usage_retention_days`. Under the keys, a line **Deleted keys** with their count, and how long their usage stays (in memory: until ChDash restarts), opens on them: one line each, with its name, its host, when it was deleted and its use (as the column Used). The table is built when the line opens. A deleted key opens its details under its line: its host, when it was deleted, then its **Usage** and its **ClickHouse cost**, as for a key. It has no permissions, no data and no Delete. The line is hidden when no deleted key keeps usage. The filter and the count of the keys do not see the deleted keys.
 
 ## The secret dialog
 
@@ -157,8 +175,9 @@ The confirmation names what the action touches: the hosts of the key. After the 
 | `src/static/app_page_mcp.js` | The controller: loads the state, draws the containers again, runs create and delete. |
 | `src/static/app_mcp_view.js` | The keys part (heading, table), the side column and the states. |
 | `src/static/app_mcp_form.js` | The make-a-key dialog, the details of a key (a node that the table puts in a row) and the secret dialog. |
+| `src/static/app_mcp_usage.js` | The usage of a key and the ClickHouse cost of its statements, the two sections at the end of its details. |
 | `src/static/app_ui_dialog.js` | `dialog.open`, with `validate` (the submit button is off while it answers a reason). |
-| `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `deleteMcpKey`. They hold every `/api/mcp/*` shape. |
+| `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `deleteMcpKey`, `getMcpUsageSummary`, `getMcpKeyUsage`, `getMcpKeyCost`. They hold every `/api/mcp/*` shape. |
 | `src/static/css/10-components/form.css`, `part.css` | The form kit and the part heading that the page shares with other pages. |
 | `src/static/css/20-features/mcp.css` | The styles of this page only (`style.mcp.css` is generated from it). |
 | `tests/frontend/specs/mcp-page.spec.js` | The Playwright spec, with a mocked API. |
@@ -166,7 +185,11 @@ The confirmation names what the action touches: the hosts of the key. After the 
 ## Decisions
 
 - The page has no visible title and no strip. The page switcher names the page, as on System. The endpoint is in the side column, where a client needs it, and New key is in the heading of the keys, where the keys are.
-- A key is one line, and its name column is narrow. A name has 32 characters at most and a secret is a UUID, so the room goes to the side column, which holds the commands of the clients.
+- A key is one line, and its name column is narrow. A name has 32 characters at most, so the room goes to the side column, which holds the commands of the clients.
+- The secret shows its start only (`3f2a9c1e-••••…`, decided 2026-10-14): the hint tells the keys apart, the whole mask is in the tooltip, and the column Used fits beside the others without a column that leaves at some widths.
+- The use of a key shows in the table and in its details, and there is no view of the usage of every key (decided 2026-10-14): the column says which keys are used and how much, the details say how. The column is one request for every key, for a fixed window (7 days); the details pick their window. The last use comes from the usage of the key: it survives a restart when `mcp.usage_file` is set. A key that the counting does not cover since its creation is a dash, not "Never".
+- The ClickHouse cost of a key is read only when its block is opened: it scans `system.query_log` of the host. The usage, counted by ChDash, is read when the details open.
+- A deleted key keeps its usage, and its line opens on it under the keys, so a key that leaked and was deleted can still be looked at. It is not a row of the keys table: its secret, tools, data and limits mean nothing, and the filter and the count stay about the keys that exist.
 - A key is made or deleted, never changed. An edit form, a switch and a rotation were three more things to build, explain and test for a key that costs one click to make again. To change a key, delete it and make a new one.
 - A key has no description and no expiry. A description was text that nobody read, and an expiry was a state that the page had to explain. Delete a key that you do not use any more.
 - A secret shows once, and ChDash keeps only its hash. A page that could show every secret again gave all the durable credentials to anyone who could reach the page (or to a site that tricked a browser into calling it). The cost is that a lost secret means a new key, which is one click (`docs/mcp.md`, "Secrets and the key file").

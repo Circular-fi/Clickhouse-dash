@@ -84,6 +84,26 @@ test('a key of the config file: its reach has the same shape, an unknown key and
   compare({ real: real.removal, fake: await call(page, 'DELETE', `/api/mcp/keys/${fakeConfig.id}`) }, 'delete of a config key');
 });
 
+test('the usage of the keys, the usage of a key and its cost: the same shape, the same refusals', async ({ page }) => {
+  await realPage(page);
+  const realConfig = (await call(page, 'GET', '/api/mcp/keys')).body.keys.find((key) => key.source === 'config');
+  const real = {
+    summary: await call(page, 'GET', '/api/mcp/usage?window=7d'),
+    usage: await call(page, 'GET', `/api/mcp/keys/${realConfig.id}/usage?window=24h`),
+    cost: await call(page, 'GET', `/api/mcp/keys/${realConfig.id}/cost?window=24h`),
+    unknown: await call(page, 'GET', '/api/mcp/keys/nope/usage'),
+    window: await call(page, 'GET', '/api/mcp/usage?window=48h'),
+  };
+  const fake = newServer();
+  await fakePage(page, fake);
+  const fakeConfig = fake.keys.find((key) => key.source === 'config');
+  compare({ real: real.summary, fake: await call(page, 'GET', '/api/mcp/usage?window=7d') }, 'usage of the keys');
+  compare({ real: real.usage, fake: await call(page, 'GET', `/api/mcp/keys/${fakeConfig.id}/usage?window=24h`) }, 'usage of a key');
+  compare({ real: real.cost, fake: await call(page, 'GET', `/api/mcp/keys/${fakeConfig.id}/cost?window=24h`) }, 'cost of a key');
+  compare({ real: real.unknown, fake: await call(page, 'GET', '/api/mcp/keys/nope/usage') }, 'usage of an unknown key');
+  compare({ real: real.window, fake: await call(page, 'GET', '/api/mcp/usage?window=48h') }, 'a window that the retention does not keep');
+});
+
 test('POST then DELETE /api/mcp/keys: the grant has the shape the page reads, and the secret is given once', async ({ page }) => {
   const make = { name: `${PROBE}-api`, hosts: ['local'], tools: ['list_hosts'], databases: ['*'] };
   await realPage(page);
@@ -118,7 +138,7 @@ test('the real page on the real server lists the config keys, makes a key, shows
   expect(secret).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   // Shown once: the list behind the dialog and the server's answers hold the mask only.
   const row = page.locator(`#mcpKeysBody tbody tr:has(.mcpKeyName:text-is("${PROBE}-page"))`);
-  await expect(row.locator('.mcpSecret__text')).toHaveText(/^[0-9a-f]{8}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}$/);
+  await expect(row.locator('.mcpSecret__text')).toHaveText(/^[0-9a-f]{8}-\u2022{4}\u2026$/);
   expect(JSON.stringify(await (await request.get(`${BASE}/api/mcp/keys`)).json())).not.toContain(secret);
   await d.getByRole('button', { name: 'Done' }).click();
   await expect(page.locator('dialog')).toHaveCount(0);

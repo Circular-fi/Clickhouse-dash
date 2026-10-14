@@ -23,8 +23,10 @@ test.afterEach(async ({ page }, testInfo) => {
 
 const shotsDir = `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/mcp-page`;
 // A secret that is not shown: its first 8 characters (the hint, to tell the keys apart), then dots for the rest, the hyphens of
-// the UUID kept.
+// the UUID kept (MASKED, in the title of the cell). The cell is short: the hint, the next group and an ellipsis (SHORT).
 const MASKED = /^[0-9a-f]{8}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}$/;
+const SHORT = /^[0-9a-f]{8}-\u2022{4}\u2026$/;
+const maskTitle = (hint) => new RegExp(`^${hint}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}\n`);
 
 async function open(page, server = newServer()) {
   await install(page, server);
@@ -220,7 +222,7 @@ test('the side column: the endpoint with a copy button, connect tabs, hosts with
 test('the keys table: one line for each key, its secret, scope and limits, and Delete as the only action', async ({ page }) => {
   await open(page);
   await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('5');
-  await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
+  await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Used', 'Actions']);
   await expect(rows(page)).toHaveCount(5);
   // Rows keep the order the API gives.
   await expect(rows(page).locator('.mcpKeyName')).toHaveText(['ops-all', 'ci-bot', 'reporting', 'second-ui-key', 'legacy']);
@@ -283,11 +285,13 @@ test('the details of a key: Observability is one card for each signal, with the 
 
 test('a key shows the first 8 characters of its secret, so that the keys can be told apart', async ({ page }) => {
   await open(page);
-  // The hint, then dots in the shape of a UUID; a key of a file that kept no hint has dots only.
-  await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText('a1b2c3d4-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022');
-  await expect(row(page, 'second-ui-key').locator('.mcpSecret__text')).toHaveText(/^9d4e6b20-\u2022{4}-/);
-  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toHaveText(MASKED);
-  await expect(row(page, 'legacy').locator('.mcpSecret__text')).toHaveText(/^\u2022{8}-\u2022{4}-\u2022{4}-\u2022{4}-\u2022{12}$/);
+  // The hint, the next group of dots and an ellipsis; the title has the whole shape of the UUID. A key of a file that kept no
+  // hint has dots only.
+  await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveText('a1b2c3d4-\u2022\u2022\u2022\u2022\u2026');
+  await expect(row(page, 'ci-bot').locator('.mcpSecret__text')).toHaveAttribute('title', maskTitle('a1b2c3d4'));
+  await expect(row(page, 'second-ui-key').locator('.mcpSecret__text')).toHaveText(/^9d4e6b20-\u2022{4}\u2026$/);
+  await expect(row(page, 'ops-all').locator('.mcpSecret__text')).toHaveText(SHORT);
+  await expect(row(page, 'legacy').locator('.mcpSecret__text')).toHaveText(/^\u2022{8}-\u2022{4}\u2026$/);
 });
 
 test('the data of a key is how many databases and tables it reaches, counted once for all the keys', async ({ page }) => {
@@ -348,8 +352,9 @@ test('the secret of a key is never shown again: no eye, no copy, no request for 
   const ui = row(page, 'ci-bot');
   const text = ui.locator('.mcpSecret__text');
   // The hint and dots, nothing else: the server keeps a hash of the secret, and no route gives the secret.
-  await expect(text).toHaveText(MASKED);
+  await expect(text).toHaveText(SHORT);
   await expect(text).toHaveAttribute('title', /ClickHouse Dash showed it once.*delete the key and make a new one/);
+  expect((await text.getAttribute('title')).split('\n')[0]).toMatch(MASKED);
   for (const name of ['ci-bot', 'ops-all', 'legacy']) {
     await expect(row(page, name).locator('td.mcpCell--secret button')).toHaveCount(0);
   }
@@ -514,16 +519,19 @@ test('New key: a single host is a fact, not a choice: nothing to click, its name
   // No radio button is shown, and nothing in it answers a click.
   await expect(d.locator('input[name="host"]:visible')).toHaveCount(0);
   await expect(d.locator('label[for="mcpHost-0"]')).toHaveCount(0);
-  // The name is centred on the line of the dot, the icon and the label.
-  const centres = await fact.evaluate((el) => {
-    const mid = (node) => { const r = node.getBoundingClientRect(); return r.top + r.height / 2; };
+  // The name is centred on the line of the dot, the icon and the label. The line and its parts are measured at the same
+  // instant: the dialog moves while it opens.
+  const offsets = await fact.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const mid = (node) => { const r = node.getBoundingClientRect(); return r.top + r.height / 2 - (box.top + box.height / 2); };
     return ['.mcpHostOnly__dot', '.mcpHostOnly__icon', '.mcpHostOnly__name', '.mcpHostOnly__label', '.mcpHostOnly__note'].map((sel) => mid(el.querySelector(sel)));
   });
-  const box = await fact.boundingBox();
-  for (const centre of centres) expect(Math.abs(centre - (box.y + box.height / 2))).toBeLessThanOrEqual(2);
+  for (const offset of offsets) expect(Math.abs(offset)).toBeLessThanOrEqual(2);
   // The key is still made for that host.
   await d.locator('#mcpField-name').fill('arb-reader');
   await d.getByRole('button', { name: 'Create key' }).click();
+  // The request leaves after the click: wait for it.
+  await expect.poll(() => server.calls.some((call) => call.method === 'POST' && call.path === '/keys')).toBe(true);
   const created = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
   expect(created.body.hosts).toEqual(['prod-local-dash']);
 });
@@ -767,7 +775,7 @@ test('create a key: the request, the one-time secret and its commands, nothing l
   await screenshot(page, 'secret-desktop');
   // The list behind it is already drawn again, with the first characters and dots only.
   await expect(row(page, 'analyst')).toHaveCount(1);
-  await expect(row(page, 'analyst').locator('.mcpSecret__text')).toHaveText(MASKED);
+  await expect(row(page, 'analyst').locator('.mcpSecret__text')).toHaveText(SHORT);
   await expect(row(page, 'analyst')).not.toContainText(SECRET);
   // Done: the dialog and every node that held the secret leave the page.
   await d.getByRole('button', { name: 'Done' }).click();
@@ -899,8 +907,8 @@ test('a key is made or deleted: nothing on the page changes it, and no request d
   await row(page, 'ci-bot').locator('[data-action="open"]').click();
   await expect(details(page)).toHaveCount(1);
   for (const label of ['Edit', 'Disable', 'Enable', 'Rotate', 'Rotate secret']) await expect(details(page).getByRole('button', { name: label })).toHaveCount(0);
-  // The details only show; the one button looks at the grants again.
-  await expect(details(page).getByRole('button')).toHaveText(['Check again']);
+  // The details only show: a button looks at the grants again, the windows of the usage, and the cost that opens.
+  await expect(details(page).getByRole('button')).toHaveText(['Check again', '24 h', '7 d', '30 d', '90 d', 'ClickHouse cost']);
   expect(server.calls.filter((call) => ['PATCH', 'PUT'].includes(call.method) || call.path.endsWith('/rotate'))).toHaveLength(0);
 });
 
@@ -1002,7 +1010,7 @@ test('desktop: the page does not scroll sideways, in both themes', async ({ page
   expect(bgs[0]).toMatch(/^rgb/);
 });
 
-test('the keys table loses Tools, Data and Limits from 820 px down, and the box does not scroll; a phone keeps every field in its card (UI-130)', async ({ page }) => {
+test('the keys table loses Tools, Data, Limits and Used from 820 px down, and the box does not scroll; a phone keeps every field in its card (UI-130)', async ({ page }) => {
   await open(page);
   const state = () => page.evaluate(() => {
     const wrap = document.querySelector('.mcpTableWrap');
@@ -1014,7 +1022,7 @@ test('the keys table loses Tools, Data and Limits from 820 px down, and the box 
     };
   });
   await page.setViewportSize({ width: 1100, height: 900 });
-  expect((await state()).heads).toEqual(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
+  expect((await state()).heads).toEqual(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Used', 'Actions']);
   await page.setViewportSize({ width: 820, height: 900 });
   let now = await state();
   expect(now.heads).toEqual(['Name', 'Secret', 'Host', 'Actions']);
@@ -1030,7 +1038,7 @@ test('the keys table loses Tools, Data and Limits from 820 px down, and the box 
   // A phone draws each key as a card with every field.
   await page.setViewportSize({ width: 390, height: 800 });
   now = await state();
-  expect(now.cells).toEqual(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
+  expect(now.cells).toEqual(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Used', 'Actions']);
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 });
 
@@ -1530,4 +1538,148 @@ test('a page restored from the back/forward cache reads the keys again', async (
   const before = server.calls.filter((call) => call.method === 'GET' && call.path === '/keys').length;
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
   await expect.poll(() => server.calls.filter((call) => call.method === 'GET' && call.path === '/keys').length).toBeGreaterThan(before);
+});
+
+// ---- the usage of the keys ---------------------------------------------------------------------------------------------------------
+
+const used = (page, name) => row(page, name).locator('.mcpUsedCell');
+const callsTo = (server, path) => server.calls.filter((call) => call.path === path).map((call) => call.query);
+
+test('the column Used: the last use and the tool calls of the last 7 days, read once for all the keys after the table', async ({ page }) => {
+  const server = newServer();
+  server.delay['GET /usage'] = 400;
+  await open(page, server);
+  // An ellipsis while the one request of the page runs, then the answer in every cell.
+  await expect(used(page, 'ci-bot')).toHaveText('…');
+  await expect(used(page, 'ci-bot')).toHaveText('1 d ago · 12');
+  expect(callsTo(server, '/usage')).toEqual(['?window=7d']);
+  await expect(used(page, 'ops-all')).toHaveText('2 min ago · 1.2K');
+  await expect(used(page, 'legacy')).toHaveText('3 h ago · 25');
+  await expect(used(page, 'second-ui-key')).toHaveText('10 d ago · 0');
+  // Counted for the whole life of the keys (a usage file): a key without a use was never used.
+  await expect(used(page, 'reporting')).toHaveText('Never');
+  // Muted without a call in the window; the warning colour for errors (3 of 12) or refusals of the rate limit.
+  await expect(used(page, 'reporting')).toHaveClass(/mcpMuted/);
+  await expect(used(page, 'second-ui-key')).toHaveClass(/mcpMuted/);
+  await expect(used(page, 'ci-bot')).toHaveClass(/mcpWarn/);
+  await expect(used(page, 'legacy')).toHaveClass(/mcpWarn/);
+  await expect(used(page, 'ops-all')).not.toHaveClass(/mcpWarn|mcpMuted/);
+  await expect(used(page, 'ci-bot')).toHaveAttribute('title', /^Last used .*\n12 tool calls in 20 requests in the last 7 days\.\n3 errors\.$/);
+  await expect(used(page, 'legacy')).toHaveAttribute('title', /2 refused by the rate limit\./);
+  await expect(page.locator('#mcpKeysBody th.mcpCell--used')).toHaveAttribute('title', 'When the key was last used, and its tool calls in the last 7 days');
+  await expect(page.locator('.mcpUsedNote')).toHaveText('Used: when each key was last used, and its tool calls in the last 7 days.');
+  // A key that is open stays open when the counts come, and Refresh reads them again.
+  await row(page, 'ops-all').locator('[data-action="open"]').click();
+  await page.locator('#mcpRefresh').click();
+  await expect.poll(() => callsTo(server, '/usage').length).toBe(2);
+  await expect(details(page)).toHaveCount(1);
+  await expect(used(page, 'ops-all')).toHaveText('2 min ago · 1.2K');
+});
+
+test('the column Used says when it cannot read the usage, and counted in memory it says since when', async ({ page }) => {
+  const failing = newServer();
+  failing.errors['GET /usage'] = { status: 503, body: { error_code: 'server_busy', message: 'Too many heavy requests.', retryable: true } };
+  await open(page, failing);
+  await expect(used(page, 'ci-bot')).toHaveText('—');
+  await expect(used(page, 'ci-bot')).toHaveAttribute('title', /Too many heavy requests/);
+  await expect(page.locator('.mcpUsedNote')).toBeHidden();
+
+  const memory = newServer();
+  memory.meta.usage = { ...memory.meta.usage, persisted: false, since: '2026-10-14T08:00:00Z' };
+  await open(page, memory);
+  await expect(page.locator('.mcpUsedNote')).toContainText('Counted in memory since');
+  await expect(page.locator('.mcpUsedNote')).toContainText('a restart of ClickHouse Dash clears it.');
+  // The key is older than the counting: not "Never" (it may have been used before the start), a dash that says why.
+  await expect(used(page, 'reporting')).toHaveText('—');
+  await expect(used(page, 'reporting')).toHaveAttribute('title', /^Not used since .*the usage is kept in memory\./);
+});
+
+test('the usage of a key in its details: a window, the tiles, the trend, the tools, the results and the clients', async ({ page }) => {
+  const server = await open(page);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const usage = details(page).locator('.mcpUsage');
+  await expect(usage.locator('.statTile')).toHaveCount(6);
+  await expect(usage.locator('.statTile').first()).toContainText('Tool calls');
+  await expect(usage.locator('.statTile').first()).toContainText('12');
+  await expect(usage.locator('.statTile').nth(1)).toHaveClass(/is-error/);  // 3 errors of 12 calls
+  expect(callsTo(server, '/keys/ui_0a1b2c3d4e5f/usage')).toEqual(['?window=7d']);
+  await expect(usage.getByRole('button', { name: '7 d' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(usage.locator('svg.sparkline')).toHaveCount(1);
+  await expect(usage.locator('svg.sparkline')).toHaveAttribute('aria-label', /Tool calls by day in the last 7 days/);
+  await expect(usage.locator('.mcpUsage__table').first()).toContainText('query_table');
+  await expect(usage).toContainText('table_not_allowed');
+  await expect(usage).toContainText('claude-code');
+  await expect(usage).toContainText('claude-code/2.1.3 (node)');
+  // Another window reads again, by the hour; the choice holds for another key.
+  await usage.getByRole('button', { name: '24 h' }).click();
+  await expect.poll(() => callsTo(server, '/keys/ui_0a1b2c3d4e5f/usage')).toEqual(['?window=7d', '?window=24h']);
+  await expect(usage.locator('svg.sparkline')).toHaveAttribute('aria-label', /Tool calls by hour in the last 24 hours/);
+  await row(page, 'ops-all').locator('[data-action="open"]').click();
+  await expect.poll(() => callsTo(server, '/keys/ops-all/usage')).toEqual(['?window=24h']);
+  // Opened again within a minute: what was read shows, with no request.
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpUsage .statTile')).toHaveCount(6);
+  expect(callsTo(server, '/keys/ui_0a1b2c3d4e5f/usage')).toHaveLength(2);
+  // A key without a request in the window says so.
+  await row(page, 'reporting').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpUsage__empty')).toHaveText('No request in the last 24 hours.');
+  // A phone keeps it in the page.
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await page.setViewportSize({ width: 390, height: 800 });
+  await expect(details(page).locator('.mcpUsage .statTile')).toHaveCount(6);
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+});
+
+test('the ClickHouse cost of a key is read only when it is opened, and says why the runner cannot read query_log', async ({ page }) => {
+  const server = await open(page);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const cost = details(page).locator('.mcpCost');
+  const toggle = cost.getByRole('button', { name: 'ClickHouse cost' });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(details(page).locator('.mcpUsage .statTile')).toHaveCount(6);
+  expect(server.calls.filter((call) => call.path.endsWith('/cost'))).toHaveLength(0);
+  await toggle.click();
+  await expect(cost.locator('.statTile')).toHaveCount(6);
+  expect(callsTo(server, '/keys/ui_0a1b2c3d4e5f/cost')).toEqual(['?window=7d']);
+  await expect(cost.locator('.statTile').first()).toContainText('12');
+  await expect(cost).toContainText('otel.otel_logs');
+  await expect(cost).toContainText('chdash_system');
+  await expect(cost).toContainText('system user');
+  // Check again reads system.query_log anew; the cost follows the window of the usage.
+  await cost.getByRole('button', { name: 'Check again' }).click();
+  await expect.poll(() => callsTo(server, '/keys/ui_0a1b2c3d4e5f/cost')).toEqual(['?window=7d', '?window=7d&refresh=1']);
+  await details(page).locator('.mcpUsage').getByRole('button', { name: '24 h' }).click();
+  await expect.poll(() => callsTo(server, '/keys/ui_0a1b2c3d4e5f/cost')).toEqual(['?window=7d', '?window=7d&refresh=1', '?window=24h']);
+  // A key whose runner may not read query_log: the reason and the GRANT to give.
+  await row(page, 'reporting').locator('[data-action="open"]').click();
+  const other = details(page).locator('.mcpCost');
+  await other.getByRole('button', { name: 'ClickHouse cost' }).click();
+  await expect(other.locator('.mcpCost__reason')).toHaveText('The runner account of the host may not read system.query_log.');
+  await expect(other.locator('.mcpCode__pre')).toHaveText('GRANT SELECT ON system.query_log TO chdash_runner');
+});
+
+test('a deleted key keeps its usage: a line under the keys opens on it, and its details show what it did and cost', async ({ page }) => {
+  const server = await open(page);
+  const block = page.locator('.mcpDeleted');
+  await expect(block).toBeVisible();
+  const toggle = block.locator('.mcpDeletedToggle');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toContainText('Deleted keys');
+  await expect(block).toContainText('Their usage stays 90 days.');
+  // The table is built when the line opens: until then the page has the table of the keys only.
+  await expect(page.locator('#mcpKeysBody table')).toHaveCount(1);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const line = block.locator('tbody tr[data-deleted-id="ui_dead00000001"]');
+  await expect(line.locator('.mcpKeyName')).toHaveText('old-bot');
+  await expect(line.locator('td.mcpCell--used')).toHaveText('2 d ago · 40');
+  await line.locator('[data-action="open"]').click();
+  const detail = block.locator('.mcpDetailRow');
+  await expect(detail.locator('.mcpUsage .statTile')).toHaveCount(6);
+  await expect(detail.locator('.mcpAbout')).toContainText('Deleted');
+  await expect(detail.locator('.mcpDetails__perms')).toHaveCount(0);
+  expect(callsTo(server, '/keys/ui_dead00000001/usage')).toEqual(['?window=7d']);
+  // The keys of the table are the live ones: the filter and the count do not see it.
+  await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('5');
+  await expect(page.locator('#mcpKeysBody tr[data-key-id="ui_dead00000001"]')).toHaveCount(0);
 });

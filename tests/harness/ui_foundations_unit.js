@@ -256,6 +256,13 @@ else {
   eq("ago days", format.ago(NOW - 3 * 86400000, { now: NOW }), "3 days ago");
   eq("ago future", format.ago(NOW + 5000, { now: NOW }), "0 seconds ago");
   eq("ago null", format.ago(null), DASH);
+  // short: the units of duration, for a narrow cell (the Used column of the MCP page).
+  eq("ago short seconds", format.ago(NOW - 45000, { now: NOW, short: true }), "45 s ago");
+  eq("ago short minutes", format.ago(NOW - 12 * 60000, { now: NOW, short: true }), "12 min ago");
+  eq("ago short hours", format.ago(NOW - 2 * 3600000 - 59 * 60000, { now: NOW, short: true }), "2 h ago");
+  eq("ago short days", format.ago(NOW - 40 * 86400000, { now: NOW, short: true }), "40 d ago");
+  eq("ago short years", format.ago(NOW - 400 * 86400000, { now: NOW, short: true }), "1 y ago");
+  eq("ago short future", format.ago(NOW + 5000, { now: NOW, short: true }), "0 s ago");
 
   // ------------------------------------------------- server DateTime text
   eq("parseTime UTC", format.parseTime("2026-09-12 14:29:57"), Date.UTC(2026, 8, 12, 14, 29, 57));

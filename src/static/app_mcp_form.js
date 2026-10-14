@@ -11,9 +11,12 @@
 //       submit(input) sends it (ns.api.createMcpKey) and returns the answer, which resolves the promise.
 //       A validation error of the server (err.mcp.field, err.mcp.reason) shows under its field and the
 //       dialog stays open; any other error shows at the foot of the dialog.
-//   ns.mcpForm.keyDetails({ meta, key })             the details of a key (a node): its facts and its permissions by family
+//   ns.mcpForm.keyDetails({ meta, key, deleted })    the details of a key (a node): its facts and its permissions by family
 //       The details of a key: its source, its hosts, its data, its limits and every permission it
-//       holds, by family, with what each one does. It is read-only.
+//       holds, by family, with what each one does, the data it reads, then what it did (its usage) and
+//       what its statements cost ClickHouse (app_mcp_usage.js). It is read-only. A deleted key (deleted:
+//       true) shows its host, when it was deleted, its usage and its cost only.
+//   ns.mcpForm.forgetDetails() / cancelDetails()     the next details read again (Refresh) / the reads in flight stop (they close)
 //   ns.mcpForm.showSecret({ meta, key, secret })   Promise<void>
 //       The panel after a create: the secret and the commands that connect a client. It is the only time
 //       the secret shows: the server keeps its hash, and no call gives it again. Nothing of it stays:
@@ -23,6 +26,7 @@
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { mcpUsage } from "./app_mcp_usage.js";
 import { mcpView } from "./app_mcp_view.js";
 import { copy } from "./app_ui_copy.js";
 import { dialog } from "./app_ui_dialog.js";
@@ -564,7 +568,16 @@ function reachBody(access) {
   return wrap;
 }
 
-function keyDetails({ meta, key }) {
+// A key that was deleted: its host and when, then what it did and what it cost (its usage stays for usage_retention_days).
+function deletedDetails(meta, key) {
+  const about = h("dl", { class: "mcpAbout" },
+    h("dt", null, "Host"), h("dd", null, key.hosts.length ? h("code", { class: "mcpChip" }, key.hosts[0]) : h("span", { class: "mcpMuted" }, "None")),
+    h("dt", null, "Deleted"), h("dd", { title: format.timeTitle(key.deletedAt) }, format.time(key.deletedAt, { precision: "min" })));
+  return h("div", { class: "mcpDetails mcpDetails--deleted" }, about, ...mcpUsage.sections(key, { meta }));
+}
+
+function keyDetails({ meta, key, deleted = false }) {
+  if (deleted) return deletedDetails(meta, key);
   const granted = grantedTools(meta, key);
   const held = new Set(granted.map((tool) => tool.name));
   const list = (values, allText) => {
@@ -634,7 +647,8 @@ function keyDetails({ meta, key }) {
   const body = h("div", { class: "mcpDetails" }, about,
     h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`),
       lostCount ? h("span", { class: "mcpWarn mcpLostCount", title: "The user that runs these tools on this host lacks a grant. The key keeps them; they answer with an error." }, `${lostCount} not served`) : null), perms),
-    reach);
+    // What the key may read, then what it did and what that cost.
+    reach, ...mcpUsage.sections(key, { meta }));
 
   return body;
 }
@@ -668,4 +682,14 @@ function showSecret({ meta, key, secret }) {
   });
 }
 
-export const mcpForm = Object.freeze({ openKeyForm, keyDetails, showSecret, REASON_TEXT, REACH_SLOT, forgetReach: () => reachCache.clear() });
+function forgetDetails() {
+  reachCache.clear();
+  mcpUsage.forget();
+}
+
+function cancelDetails() {
+  util.latest.cancelPrefix(REACH_SLOT);
+  mcpUsage.cancel();
+}
+
+export const mcpForm = Object.freeze({ openKeyForm, keyDetails, showSecret, REASON_TEXT, REACH_SLOT, forgetDetails, cancelDetails });

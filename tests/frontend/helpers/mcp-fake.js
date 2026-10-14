@@ -125,9 +125,93 @@ export const summaryOf = (keys) => ({
   }),
 });
 
+// What the keys did (GET /api/mcp/usage, /keys/<id>/usage): the answers end at USAGE_TO, so the page reads "2 min ago" whatever the clock.
+export const USAGE_TO = '2026-10-14T10:00:00Z';
+const WINDOW_FROM = { '24h': '2026-10-13T11:00:00Z', '7d': '2026-10-08T00:00:00Z', '30d': '2026-09-15T00:00:00Z', '90d': '2026-07-17T00:00:00Z' };
+export const USAGE_OF = {
+  'ops-all': { requests: 1300, calls: 1204, errors: 2, first_used_at: '2026-10-01T09:00:00Z', last_used_at: '2026-10-14T09:58:00Z' },
+  ui_0a1b2c3d4e5f: { requests: 20, calls: 12, errors: 3, first_used_at: '2026-10-09T08:00:00Z', last_used_at: '2026-10-13T10:00:00Z' },
+  ui_222222222222: { first_used_at: '2026-10-02T10:00:00Z', last_used_at: '2026-10-04T10:00:00Z' },
+  ui_legacy000000: { requests: 30, calls: 25, rate_limited: 2, first_used_at: '2026-10-10T10:00:00Z', last_used_at: '2026-10-14T07:00:00Z' },
+};
+// A deleted key that keeps its usage.
+export const DELETED = () => [{
+  id: 'ui_dead00000001', name: 'old-bot', host: 'prod', source: 'ui', deleted_at: '2026-10-12T08:00:00Z', requests: 50, calls: 40, errors: 0,
+  rate_limited: 0, rejected: 0, first_used_at: '2026-10-05T08:00:00Z', last_used_at: '2026-10-12T07:59:00Z',
+}];
+const usageLine = (owner, over = {}) => ({
+  id: owner.id, name: owner.name, host: owner.hosts.length === 1 ? owner.hosts[0] : '', source: owner.source, deleted_at: null,
+  requests: 0, calls: 0, errors: 0, rate_limited: 0, rejected: 0, first_used_at: null, last_used_at: null, ...over,
+});
+const usageWindow = (server, window) => ({
+  window, from: WINDOW_FROM[window] || WINDOW_FROM['7d'], to: USAGE_TO, since: server.meta.usage.since, persisted: server.meta.usage.persisted,
+  retention_days: server.meta.usage.retention_days,
+});
+export const usageSummaryOf = (server, window) => ({
+  ...usageWindow(server, window),
+  keys: [...server.keys.map((owner) => usageLine(owner, server.usageOf[owner.id])), ...server.deleted],
+});
+// One key: one point for each hour (24h) or day of the window, the calls in the last one.
+export function keyUsageOf(server, id, window) {
+  const owner = server.keys.find((k) => k.id === id);
+  const line = owner ? usageLine(owner, server.usageOf[owner.id]) : server.deleted.find((k) => k.id === id);
+  if (!line) return null;
+  const hourly = window === '24h';
+  const count = hourly ? 24 : Number.parseInt(window, 10) || 7;
+  const end = Date.parse(USAGE_TO);
+  const step = hourly ? 3600000 : 86400000;
+  const last = hourly ? end - step : Math.floor(end / step) * step;
+  const points = Array.from({ length: count }, (_, i) => {
+    const t = new Date(last - (count - 1 - i) * step).toISOString().replace('.000Z', 'Z');
+    const now = i === count - 1;
+    return { t, requests: now ? line.requests : 0, calls: now ? line.calls : 0, errors: now ? line.errors : 0 };
+  });
+  const used = line.calls > 0;
+  return {
+    id: line.id, name: line.name, host: line.host, source: line.source, deleted_at: line.deleted_at,
+    first_used_at: line.first_used_at, last_used_at: line.last_used_at, ...usageWindow(server, window),
+    totals: {
+      requests: line.requests, calls: line.calls, errors: line.errors, rate_limited: line.rate_limited, rejected: line.rejected,
+      duration_ms_avg: used ? 14 : null, duration_ms_max: used ? 380 : null, rows: line.calls * 3, bytes: line.requests * 1200,
+    },
+    series: { step: hourly ? 'hour' : 'day', points },
+    tools: used ? [
+      { tool: 'query_table', calls: line.calls - 2, errors: line.errors, duration_ms_avg: 15, duration_ms_max: 380, rows: line.calls * 3, bytes: line.calls * 1000 },
+      { tool: 'list_tables', calls: 2, errors: 0, duration_ms_avg: 3, duration_ms_max: 4, rows: 0, bytes: 900 },
+    ] : [],
+    statuses: used ? [{ status: 'ok', count: line.calls - line.errors }, ...(line.errors ? [{ status: 'table_not_allowed', count: line.errors }] : [])] : [],
+    clients: used ? [{ name: 'claude-code', version: '2.1.3', user_agent: 'claude-code/2.1.3 (node)', first_seen_at: line.first_used_at, last_seen_at: line.last_used_at, requests: line.requests }] : [],
+  };
+}
+// What the statements of a key cost ClickHouse (GET /api/mcp/keys/<id>/cost); the key `reporting` cannot be read (the runner lacks
+// the grant on system.query_log).
+export function costOf(server, id, window) {
+  const known = server.keys.some((k) => k.id === id) || server.deleted.some((k) => k.id === id);
+  if (!known) return null;
+  const base = {
+    id, host: 'prod', window, from: window === '7d' ? '2026-10-07T10:01:00Z' : '2026-10-13T10:01:00Z', to: '2026-10-14T10:01:00Z',
+    max_lookback_hours: 168, clamped: false, read_at: '2026-10-14T10:00:30Z', reason: '', error: '', statement: '', suggested_window: '',
+    tables_truncated: false, rows_truncated: false,
+  };
+  const zero = { statements: 0, failed: 0, canceled: 0, read_rows: 0, read_bytes: 0, result_rows: 0, result_bytes: 0, duration_ms: 0, cpu_ms: 0, memory_peak_bytes: 0 };
+  if (id === 'ui_111111111111') {
+    return { ...base, read_at: null, status: 'unavailable', reason: 'not_granted', error: 'Code: 497. chdash_runner: Not enough privileges.',
+      statement: 'GRANT SELECT ON system.query_log TO chdash_runner', totals: zero, identities: [], tools: [], tables: [] };
+  }
+  const figures = (statements, read) => ({ statements, failed: 1, canceled: 0, read_rows: read * 10, read_bytes: read * 1000, duration_ms: statements * 4, cpu_ms: statements, memory_peak_bytes: 4194304 });
+  return {
+    ...base, status: 'ok',
+    totals: { ...figures(12, 900), failed: 2, result_rows: 120, result_bytes: 64000 },
+    identities: [{ user: 'chdash_mcp', role: 'mcp', ...figures(10, 800) }, { user: 'chdash_system', role: 'system', ...figures(2, 100) }],
+    tools: [{ tool: 'query_table', ...figures(10, 800) }, { tool: 'traces_search', ...figures(2, 100) }],
+    tables: [{ name: 'otel.otel_logs', statements: 8 }, { name: 'analytics.events', statements: 2 }],
+  };
+}
+
 // The server: meta and keys in memory; every call recorded. `errors` makes the next call of a route fail.
 export function newServer(over = {}) {
-  const server = { keys: KEYS(), calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, access: reachOf, summary: summaryOf, ...over };
+  const server = { keys: KEYS(), calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, access: reachOf, summary: summaryOf,
+    usageOf: USAGE_OF, deleted: DELETED(), usage: usageSummaryOf, keyUsage: keyUsageOf, cost: costOf, ...over };
   server.meta = { ...structuredClone(META), ...(over.meta || {}) };
   return server;
 }
@@ -174,6 +258,19 @@ export async function install(page, server) {
       const created = key({ id: 'ui_aabbccddeeff', name: body.name, hosts: body.hosts, tools: body.tools, databases: body.databases, max_rows: body.max_rows ?? null, timeout_seconds: body.timeout_seconds ?? null, secret_hint: SECRET.slice(0, 8) });
       server.keys.push(created);
       return json(route, 201, { key: created, secret: SECRET });
+    }
+    if (method === 'GET' && path === '/usage') {
+      const window = url.searchParams.get('window') || server.meta.usage.default_window;
+      if (!server.meta.usage.windows.includes(window)) return json(route, 400, { error_code: 'validation', message: 'window must be one of the windows of the retention', retryable: false, field: 'window', reason: 'invalid' });
+      return json(route, 200, server.usage(server, window));
+    }
+    const usage = method === 'GET' ? /^\/keys\/([^/]+)\/(usage|cost)$/.exec(path) : null;
+    if (usage) {
+      const id = decodeURIComponent(usage[1]);
+      const window = url.searchParams.get('window') || (usage[2] === 'usage' ? server.meta.usage.default_window : '24h');
+      const answer = usage[2] === 'usage' ? server.keyUsage(server, id, window) : server.cost(server, id, window, url.searchParams.get('refresh') === '1');
+      if (!answer) return json(route, 404, { error_code: 'not_found', message: 'no such key', retryable: false });
+      return json(route, 200, answer);
     }
     const reach = method === 'GET' ? /^\/keys\/([^/]+)\/access$/.exec(path) : null;
     if (reach) {

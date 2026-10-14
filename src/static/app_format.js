@@ -451,11 +451,18 @@ function range(from, to, { precision = "auto" } = {}) {
   return `${day(fa)} ${clock(fa, a)} ${ARROW} ${sameDay ? "" : `${day(fb)} `}${clock(fb, b)}`;
 }
 
-// "5 minutes ago", "1 hour ago": the largest whole unit, never negative.
-function ago(ms, { now = NaN } = {}) {
+// "5 minutes ago", "1 hour ago": the largest whole unit, never negative. short: the units of duration ("45 s ago", "12 min ago",
+// "2 h ago", "6 d ago", then "1 y ago"), for a narrow cell.
+const SHORT_AGO = [[31536000000, "y"], [86400000, "d"], [3600000, "h"], [60000, "min"], [1000, "s"]];
+function ago(ms, { now = NaN, short = false } = {}) {
   const n = num(ms);
   if (!Number.isFinite(n)) return EMPTY;
   const delta = Math.max(0, (Number.isFinite(now) ? now : Date.now()) - n);
+  if (short) {
+    for (const [size, label] of SHORT_AGO) {
+      if (delta >= size || label === "s") return `${Math.floor(delta / size)} ${label} ago`;
+    }
+  }
   const units = [[31536000000, "year"], [2592000000, "month"], [604800000, "week"], [86400000, "day"], [3600000, "hour"], [60000, "minute"], [1000, "second"]];
   for (const [size, label] of units) {
     if (delta >= size || label === "second") {

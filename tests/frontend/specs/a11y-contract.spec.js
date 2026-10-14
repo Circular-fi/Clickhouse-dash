@@ -274,6 +274,13 @@ test('axe (dark): the MCP page has no violation', async ({ page }) => {
   await expect(page.locator('#mcpWorkspace')).toBeVisible();
   await page.waitForTimeout(1500);
   expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
+  // The details of a key, with what it did and what its statements cost ClickHouse.
+  await page.locator('#mcpKeysBody tbody tr[data-key-id] [data-action="open"]').first().click();
+  await expect(page.locator('.mcpUsage .mcpUsage__body')).toBeVisible();
+  await page.locator('.mcpCost').getByRole('button', { name: 'ClickHouse cost' }).click();
+  await expect(page.locator('.mcpCost__body')).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
 });
 
 // --- landmarks, headings, skip link ----------------------------------------------------------------------------

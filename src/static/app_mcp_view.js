@@ -8,6 +8,8 @@
 //   ns.mcpView.renderDisabled(el)                    the HCL extract that turns MCP on
 //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head (New key), note, table or state
 //   ns.mcpView.fillAccess(el, access, failure)       the counts of databases and tables in the Data cells (a Map of getMcpAccessSummary, or null)
+//   ns.mcpView.fillUsage(el, usage, failure)         the last use and the tool calls in the Used cells, and its note (getMcpUsageSummary, or null)
+//   ns.mcpView.renderDeleted(el, usage, view, actions)  the deleted keys that keep usage, under the keys (a line that opens on them)
 //   ns.mcpView.secretCell(key)                       the secret of a key as the page shows it: its hint and dots
 //   ns.mcpView.endpointUrl(meta)                     the full URL of the endpoint (the page's origin)
 //   ns.mcpView.commands(url, name, secret, header)   { cli, desktop, inspector, json } to connect a client; header is mcp.auth_header
@@ -362,14 +364,179 @@ const maskOf = (key) => {
   return /^[0-9a-f]{8}$/i.test(hint) ? `${hint}${MASK.slice(8)}` : MASK;
 };
 
+// The cell is short: the hint, the next group of the UUID and an ellipsis (the whole mask is in its title), so the column Used fits beside
+// the others.
 function secretCell(key) {
+  const mask = maskOf(key);
   const why = `The secret of ${key.name} is not kept: ClickHouse Dash showed it once, when it made the key. A lost secret cannot be found again: delete the key and make a new one.`;
-  return h("div", { class: "mcpSecret" }, h("span", { class: "mcpSecret__text", title: why }, maskOf(key)));
+  return h("div", { class: "mcpSecret" }, h("span", { class: "mcpSecret__text", title: `${mask}\n${why}` }, `${mask.slice(0, 13)}\u2026`));
+}
+
+// --- Usage ------------------------------------------------------------------------------
+
+// When a key was last used and its tool calls in a window (the column Used, a deleted key): asked once for all the keys after the
+// table is drawn (fillUsage), so the cell starts as an ellipsis.
+function usedCell(key) {
+  return h("span", { class: "mcpUsedCell mcpMuted", dataset: { keyId: key.id, createdAt: key.createdAt || "" }, title: "Reading the use of the key\u2026" }, "\u2026");
+}
+
+const WINDOW_TEXT = { "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days", "90d": "the last 90 days", "365d": "the last 365 days" };
+const windowText = (name) => WINDOW_TEXT[name] || "the window";
+const minuteTime = (ms) => format.time(ms, { precision: "min" });
+
+// Is the counting as old as the key? Then a key without a use was never used. In memory, the counting starts with the process: a key
+// older than it may have been used before.
+function countedWholeLife(usage, line, createdAt) {
+  if (!usage || usage.persisted) return true;
+  const created = createdAt ? Date.parse(createdAt) : NaN;
+  return Number.isFinite(created) && usage.since != null && usage.since <= created;
+}
+
+// The text, the colour and the title of the use of a key: "2 h ago · 1.2K" (its last use, its tool calls in the window).
+function usedView(line, usage, createdAt = "") {
+  const now = usage.to ?? Date.now();
+  const lines = [];
+  let text = EMPTY;
+  if (line.lastUsedAt != null) {
+    text = `${format.ago(line.lastUsedAt, { now, short: true })} \u00b7 ${format.compact(line.calls)}`;
+    lines.push(`Last used ${minuteTime(line.lastUsedAt)} (${format.ago(line.lastUsedAt, { now })}).`);
+  } else if (countedWholeLife(usage, line, createdAt)) {
+    text = "Never";
+    lines.push("Never used.");
+  } else {
+    lines.push(`Not used since ${minuteTime(usage.since)}, when ClickHouse Dash started: the usage is kept in memory.`);
+  }
+  lines.push(`${format.count(line.calls)} tool ${line.calls === 1 ? "call" : "calls"} in ${format.count(line.requests)} ${line.requests === 1 ? "request" : "requests"} in ${windowText(usage.window)}.`);
+  const trouble = [
+    line.errors ? `${format.count(line.errors)} ${line.errors === 1 ? "error" : "errors"}` : "",
+    line.rateLimited ? `${format.count(line.rateLimited)} refused by the rate limit` : "",
+    line.rejected ? `${format.count(line.rejected)} other ${line.rejected === 1 ? "refusal" : "refusals"}` : "",
+  ].filter(Boolean);
+  if (trouble.length) lines.push(`${trouble.join(", ")}.`);
+  const warn = line.rateLimited > 0 || (line.calls > 0 && line.errors / line.calls >= 0.05);
+  return { text, title: lines.join("\n"), muted: !line.calls, warn };
+}
+
+// Puts the use of each key in its cell (without drawing the table again, so the details that are open stay open), and says under the
+// table what the column counts. `usage` is the answer of ns.api.getMcpUsageSummary(), or null when it could not be read.
+function fillUsage(container, usage, failure = "") {
+  for (const node of $$(".mcpUsedCell", container)) {
+    const line = usage && usage.keys.get(node.dataset.keyId);
+    node.classList.remove("mcpMuted", "mcpWarn");
+    if (!line) {
+      node.textContent = EMPTY;
+      node.classList.add("mcpMuted");
+      node.title = failure || "The use of this key could not be read.";
+      continue;
+    }
+    const view = usedView(line, usage, node.dataset.createdAt);
+    node.textContent = view.text;
+    node.title = view.title;
+    if (view.warn) node.classList.add("mcpWarn");
+    else if (view.muted) node.classList.add("mcpMuted");
+  }
+  const head = $("th.mcpCell--used", container);
+  if (head && usage) head.title = `When the key was last used, and its tool calls in ${windowText(usage.window)}`;
+  const note = $(".mcpUsedNote", container);
+  if (note) {
+    note.textContent = !usage ? ""
+      : `Used: when each key was last used, and its tool calls in ${windowText(usage.window)}.` +
+        (usage.persisted ? "" : ` Counted in memory since ${minuteTime(usage.since)}: a restart of ClickHouse Dash clears it.`);
+    note.hidden = !usage;
+  }
+}
+
+// The deleted keys that keep usage (until mcp.usage_retention_days): a line under the keys that opens on them, each with what it did.
+// view.deletedOpen says whether the list is open and view.openDeletedId which key shows its details (the page keeps both).
+function renderDeleted(container, usage, view, actions) {
+  const block = $(".mcpDeleted", container);
+  if (!block) return;
+  const deleted = usage ? usage.deleted : [];
+  block.hidden = !deleted.length;
+  if (!deleted.length) {
+    block.replaceChildren();
+    return;
+  }
+  const listId = "mcpDeletedList";
+  const toggle = h("button", { type: "button", class: "mcpDeletedToggle", "aria-expanded": view.deletedOpen ? "true" : "false", "aria-controls": listId },
+    icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("span", null, "Deleted keys"),
+    h("span", { class: "mcpDeleted__count" }, String(deleted.length)));
+  const days = usage.retentionDays;
+  const head = h("h3", { class: "mcpDeleted__head" }, toggle,
+    h("span", { class: "mcpMuted" }, usage.persisted ? `Their usage stays ${format.count(days)} ${days === 1 ? "day" : "days"}.` : "Their usage stays until ClickHouse Dash restarts."));
+  const list = h("div", { class: "mcpDeleted__list", id: listId });
+  list.hidden = !view.deletedOpen;
+  // The table is built when the list opens: until then the page has one table, the one of the keys.
+  const fill = () => { if (!list.childElementCount) list.appendChild(deletedTable(deleted, usage, view, actions)); };
+  toggle.addEventListener("click", () => {
+    view.deletedOpen = !view.deletedOpen;
+    toggle.setAttribute("aria-expanded", view.deletedOpen ? "true" : "false");
+    list.hidden = !view.deletedOpen;
+    if (view.deletedOpen) fill();
+  });
+  if (view.deletedOpen) fill();
+  block.replaceChildren(head, list);
+}
+
+// The deleted keys, one line each: the name (it opens what the key did), its host, when it was deleted, and its use.
+function deletedTable(deleted, usage, view, actions) {
+  const kinds = [["Name", "name"], ["Host", "hosts"], ["Deleted", "deleted"], ["Used", "used"]];
+  const headRow = h("tr", { role: "row" }, ...kinds.map(([name, kind]) => {
+    const th = h("th", { class: `mcpCell--${kind}`, scope: "col" }, name);
+    th.setAttribute("role", "columnheader");
+    return th;
+  }));
+  const tbody = h("tbody", { role: "rowgroup" });
+  const asKey = (line) => ({ id: line.id, name: line.name, source: line.source, hosts: line.host ? [line.host] : [], tools: [], databases: [], deletedAt: line.deletedAt });
+  const close = () => {
+    actions.onDetailsClose?.();
+    for (const row of $$(".mcpDetailRow", tbody)) row.remove();
+    for (const row of $$("tr.is-open", tbody)) {
+      row.classList.remove("is-open");
+      $('[data-action="open"]', row)?.setAttribute("aria-expanded", "false");
+    }
+  };
+  const open = (line, row) => {
+    const cell = h("td", { class: "mcpDetailCell", colspan: String(kinds.length) }, actions.keyDetails({ meta: view.meta, key: asKey(line), deleted: true }));
+    cell.setAttribute("role", "cell");
+    row.after(h("tr", { class: "mcpDetailRow", id: `mcpDeletedDetail-${line.id}`, role: "row" }, cell));
+    row.classList.add("is-open");
+    $('[data-action="open"]', row)?.setAttribute("aria-expanded", "true");
+  };
+  for (const line of deleted) {
+    const cell = (label, kind, ...children) => {
+      const td = h("td", { class: `mcpCell--${kind}` }, ...children);
+      td.setAttribute("role", "cell");
+      td.dataset.label = label;
+      return td;
+    };
+    const opener = h("button", { type: "button", class: "mcpKeyOpen", dataset: { action: "open" }, title: `${line.name}\nDeleted: show what it did`, "aria-label": `Usage of the deleted key ${line.name}`, "aria-expanded": "false", "aria-controls": `mcpDeletedDetail-${line.id}` },
+      icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("strong", { class: "mcpKeyName" }, line.name));
+    const used = usedView(line, usage);
+    const row = h("tr", { role: "row", dataset: { deletedId: line.id } },
+      cell("Name", "name", opener),
+      cell("Host", "hosts", line.host ? h("span", { class: "mcpHostCell" }, line.host) : h("span", { class: "mcpMuted" }, "None")),
+      cell("Deleted", "deleted", h("span", { title: format.timeTitle(line.deletedAt) }, minuteTime(line.deletedAt))),
+      cell("Used", "used", h("span", { class: used.warn ? "mcpWarn" : used.muted ? "mcpMuted" : null, title: used.title }, used.text)));
+    opener.addEventListener("click", () => {
+      const wasOpen = view.openDeletedId === line.id;
+      close();
+      view.openDeletedId = wasOpen ? "" : line.id;
+      if (!wasOpen) open(line, row);
+    });
+    tbody.appendChild(row);
+    if (view.openDeletedId === line.id) open(line, row);
+  }
+  if (view.openDeletedId && !deleted.some((line) => line.id === view.openDeletedId)) view.openDeletedId = "";
+  const table = h("table", { class: "dataTable dataTable--compact mcpTable mcpDeletedTable", "aria-label": "Deleted keys" }, h("thead", { role: "rowgroup" }, headRow), tbody);
+  table.setAttribute("role", "table");
+  return h("div", { class: "dataTableWrap mcpTableWrap" }, table);
 }
 
 // [label, kind, tier]: a column that matters less leaves the table when the window is narrower than its tier's breakpoint ("mid": 820 px;
 // table.css, "Priority columns", UI-130). A key opens its details under its row, and a phone draws the card with every field.
-const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Host", "hosts"], ["Tools", "tools", "mid"], ["Data", "data", "mid"], ["Limits", "limits", "mid"], ["Actions", "actions"]];
+const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Host", "hosts"], ["Tools", "tools", "mid"], ["Data", "data", "mid"], ["Limits", "limits", "mid"], ["Used", "used", "mid"], ["Actions", "actions"]];
+const COLUMN_TITLES = { Used: "When the key was last used, and its tool calls in the last 7 days" };
 
 // The classes of a column's header and cells: its kind, and its tier when it has one.
 const columnClass = (kind) => {
@@ -403,6 +570,7 @@ function keyRow(key, meta, actions, reason) {
     cell("Tools", columnClass("tools"), listCell(key.tools, meta.tools.length, "tools")),
     cell("Data", columnClass("data"), dataCell(key)),
     cell("Limits", columnClass("limits"), limitsCell(key, meta)),
+    cell("Used", columnClass("used"), usedCell(key)),
     actionsCell);
 }
 
@@ -435,7 +603,7 @@ function showDetails(tbody, key, meta, actions) {
 function keysTable(keys, meta, actions, view) {
   const reason = manageReason(meta);
   const head = h("tr", null, ...COLUMNS.map(([name, kind]) => {
-    const th = h("th", { class: columnClass(kind) }, name === "Actions" ? h("span", { class: "srOnly" }, name) : name);
+    const th = h("th", { class: columnClass(kind), title: COLUMN_TITLES[name] || null }, name === "Actions" ? h("span", { class: "srOnly" }, name) : name);
     th.setAttribute("scope", "col");
     th.setAttribute("role", "columnheader");
     return th;
@@ -545,7 +713,11 @@ function renderKeys(container, view, actions) {
   } else {
     body.appendChild(keysTable(keys, meta, actions, view));
     body.appendChild(h("p", { class: "mcpNote mcpKeys__none", hidden: true }, "No key matches this filter."));
+    // What the column Used counts (fillUsage writes it).
+    body.appendChild(h("p", { class: "mcpNote mcpNote--fine mcpUsedNote", hidden: true }));
   }
+  // The deleted keys that keep usage (renderDeleted fills it once the usage is read).
+  if (view.status === "ready") body.appendChild(h("div", { class: "mcpDeleted", hidden: true }));
   container.replaceChildren(head, note, alert, body);
   if (filter) {
     filter.addEventListener("input", () => { actions.onFilter?.(filter.value); applyFilter(container, filter.value); });
@@ -553,4 +725,4 @@ function renderKeys(container, view, actions) {
   }
 }
 
-export const mcpView = Object.freeze({ renderSide, renderDisabled, renderKeys, fillAccess, secretCell, endpointUrl, authHeader, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });
+export const mcpView = Object.freeze({ renderSide, renderDisabled, renderKeys, fillAccess, fillUsage, renderDeleted, secretCell, endpointUrl, authHeader, commands, codeBlock, clientTabs, manageReason, HCL_EXAMPLE });

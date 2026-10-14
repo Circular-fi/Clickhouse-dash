@@ -562,12 +562,22 @@ async function getMetricsAttributes(params, { signal } = {}) {
 //   createMcpKey(input)           { key, secret }   (the secret comes once: no call gives it again)
 //   getMcpKeyAccess(id, {refresh})  the data that a key reaches: the tables of the MCP user of each host, cut by the key's patterns
 //   getMcpAccessSummary({refresh})  for each key, how many databases and tables it reaches (a Map by key id)
+//   getMcpUsageSummary({window})  what each key did in a window: { keys: Map by key id, deleted: [the deleted keys that keep usage] }
+//   getMcpKeyUsage(id, {window})  what one key did: totals, one point for each hour or day, tools, results, clients
+//   getMcpKeyCost(id, {window, refresh})  what the statements of a key cost ClickHouse (read from system.query_log)
 //   deleteMcpKey(id)              id
 // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
 // (the answer's `error`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools").
 const mcpText = (value) => (typeof value === "string" ? value : "");
 const mcpList = (value) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
 const mcpLimit = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : null);
+// A count of the usage or of the cost (a JSON number; a string of digits is read too). 0 when absent.
+const mcpCount = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : 0);
+// An ISO time of the server, as milliseconds; null when absent.
+const mcpTime = (value) => {
+  const ms = typeof value === "string" && value ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? ms : null;
+};
 
 // What a key of a host can ask for at most, and what binds it: "mcp" (the configuration of MCP), "clickhouse" (the settings profile of the
 // ClickHouse user of the host) or "both" (equal). null when the server did not say.
@@ -654,6 +664,21 @@ function normalizeMcpMeta(raw) {
       rateLimitPerMinute: mcpLimit(limits.rate_limit_per_minute),
     },
     namePattern: mcpText(meta.name_pattern) || "^[a-z0-9][a-z0-9_-]{0,31}$",
+    usage: normalizeMcpUsageMeta(meta.usage),
+  };
+}
+
+// Where the usage of the keys is kept (mcp.usage_file, or memory since the start), the windows of its answers, and those of the cost.
+function normalizeMcpUsageMeta(raw) {
+  const usage = raw && typeof raw === "object" ? raw : {};
+  const windows = mcpList(usage.windows);
+  return {
+    persisted: usage.persisted === true,
+    retentionDays: mcpCount(usage.retention_days),
+    windows: windows.length ? windows : ["24h"],
+    defaultWindow: mcpText(usage.default_window) || (windows.includes("7d") ? "7d" : "24h"),
+    since: mcpTime(usage.since),
+    costWindows: mcpList(usage.cost_windows),
   };
 }
 
@@ -777,6 +802,152 @@ async function getMcpAccessSummary({ refresh = false, signal } = {}) {
     });
   }
   return out;
+}
+
+// One line of the usage of a key in a window.
+function normalizeMcpUsageLine(item) {
+  return {
+    id: mcpText(item?.id),
+    name: mcpText(item?.name),
+    host: mcpText(item?.host),
+    source: item?.source === "config" ? "config" : "ui",
+    deletedAt: mcpTime(item?.deleted_at),
+    requests: mcpCount(item?.requests),
+    calls: mcpCount(item?.calls),
+    errors: mcpCount(item?.errors),
+    rateLimited: mcpCount(item?.rate_limited),
+    rejected: mcpCount(item?.rejected),
+    firstUsedAt: mcpTime(item?.first_used_at),
+    lastUsedAt: mcpTime(item?.last_used_at),
+  };
+}
+
+// The window of an answer of the usage: its name, from its start to the time of the answer, since when the usage is counted.
+const mcpUsageWindow = (payload) => ({
+  window: mcpText(payload?.window),
+  from: mcpTime(payload?.from),
+  to: mcpTime(payload?.to),
+  since: mcpTime(payload?.since),
+  persisted: payload?.persisted === true,
+  retentionDays: mcpCount(payload?.retention_days),
+});
+
+// What each key did in a window (GET /api/mcp/usage): `keys` is a Map of the id of a live key to its line; `deleted` the deleted keys that
+// still keep usage, the last deletion first.
+async function getMcpUsageSummary({ window = "", signal } = {}) {
+  const payload = await mcpRequest(`/usage${window ? `?window=${encodeURIComponent(window)}` : ""}`, { signal });
+  const keys = new Map();
+  const deleted = [];
+  for (const item of Array.isArray(payload?.keys) ? payload.keys : []) {
+    const line = normalizeMcpUsageLine(item);
+    if (!line.id) continue;
+    if (line.deletedAt != null) deleted.push(line);
+    else keys.set(line.id, line);
+  }
+  return { ...mcpUsageWindow(payload), keys, deleted };
+}
+
+// What one key did in a window (GET /api/mcp/keys/<id>/usage). `series.points` has one point for each hour or day of the window.
+async function getMcpKeyUsage(id, { window = "", signal } = {}) {
+  const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/usage${window ? `?window=${encodeURIComponent(window)}` : ""}`, { signal });
+  const totals = payload?.totals && typeof payload.totals === "object" ? payload.totals : {};
+  const series = payload?.series && typeof payload.series === "object" ? payload.series : {};
+  return {
+    id: mcpText(payload?.id),
+    name: mcpText(payload?.name),
+    host: mcpText(payload?.host),
+    source: payload?.source === "config" ? "config" : "ui",
+    deletedAt: mcpTime(payload?.deleted_at),
+    firstUsedAt: mcpTime(payload?.first_used_at),
+    lastUsedAt: mcpTime(payload?.last_used_at),
+    ...mcpUsageWindow(payload),
+    totals: {
+      requests: mcpCount(totals.requests),
+      calls: mcpCount(totals.calls),
+      errors: mcpCount(totals.errors),
+      rateLimited: mcpCount(totals.rate_limited),
+      rejected: mcpCount(totals.rejected),
+      durationMsAvg: mcpLimit(totals.duration_ms_avg),
+      durationMsMax: mcpLimit(totals.duration_ms_max),
+      rows: mcpCount(totals.rows),
+      bytes: mcpCount(totals.bytes),
+    },
+    series: {
+      step: series.step === "hour" ? "hour" : "day",
+      points: (Array.isArray(series.points) ? series.points : []).map((point) => ({
+        t: mcpTime(point?.t),
+        requests: mcpCount(point?.requests),
+        calls: mcpCount(point?.calls),
+        errors: mcpCount(point?.errors),
+      })).filter((point) => point.t != null),
+    },
+    tools: (Array.isArray(payload?.tools) ? payload.tools : []).map((tool) => ({
+      tool: mcpText(tool?.tool),
+      calls: mcpCount(tool?.calls),
+      errors: mcpCount(tool?.errors),
+      durationMsAvg: mcpLimit(tool?.duration_ms_avg),
+      durationMsMax: mcpLimit(tool?.duration_ms_max),
+      rows: mcpCount(tool?.rows),
+      bytes: mcpCount(tool?.bytes),
+    })).filter((tool) => tool.tool),
+    statuses: (Array.isArray(payload?.statuses) ? payload.statuses : []).map((item) => ({
+      status: mcpText(item?.status),
+      count: mcpCount(item?.count),
+    })).filter((item) => item.status),
+    clients: (Array.isArray(payload?.clients) ? payload.clients : []).map((client) => ({
+      name: mcpText(client?.name),
+      version: mcpText(client?.version),
+      userAgent: mcpText(client?.user_agent),
+      firstSeenAt: mcpTime(client?.first_seen_at),
+      lastSeenAt: mcpTime(client?.last_seen_at),
+      requests: mcpCount(client?.requests),
+    })),
+  };
+}
+
+// The figures of a part of the cost of a key.
+const mcpCostFigures = (raw) => ({
+  statements: mcpCount(raw?.statements),
+  failed: mcpCount(raw?.failed),
+  canceled: mcpCount(raw?.canceled),
+  readRows: mcpCount(raw?.read_rows),
+  readBytes: mcpCount(raw?.read_bytes),
+  resultRows: mcpCount(raw?.result_rows),
+  resultBytes: mcpCount(raw?.result_bytes),
+  durationMs: mcpCount(raw?.duration_ms),
+  cpuMs: mcpCount(raw?.cpu_ms),
+  memoryPeakBytes: mcpCount(raw?.memory_peak_bytes),
+});
+
+// What the statements of a key cost ClickHouse in a window (GET /api/mcp/keys/<id>/cost), read from system.query_log of its host.
+// status "unavailable" says why in `reason` (with the GRANT `statement` when the runner may not read query_log).
+async function getMcpKeyCost(id, { window = "", refresh = false, signal } = {}) {
+  const query = [window ? `window=${encodeURIComponent(window)}` : "", refresh ? "refresh=1" : ""].filter(Boolean).join("&");
+  const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/cost${query ? `?${query}` : ""}`, { signal });
+  return {
+    id: mcpText(payload?.id),
+    host: mcpText(payload?.host),
+    window: mcpText(payload?.window),
+    from: mcpTime(payload?.from),
+    to: mcpTime(payload?.to),
+    maxLookbackHours: mcpCount(payload?.max_lookback_hours),
+    clamped: payload?.clamped === true,
+    readAt: mcpTime(payload?.read_at),
+    status: payload?.status === "ok" ? "ok" : "unavailable",
+    reason: mcpText(payload?.reason),
+    error: mcpText(payload?.error),
+    statement: mcpText(payload?.statement),
+    suggestedWindow: mcpText(payload?.suggested_window),
+    totals: mcpCostFigures(payload?.totals),
+    identities: (Array.isArray(payload?.identities) ? payload.identities : []).map((item) => ({
+      user: mcpText(item?.user),
+      role: item?.role === "mcp" || item?.role === "system" ? item.role : "other",
+      ...mcpCostFigures(item),
+    })),
+    tools: (Array.isArray(payload?.tools) ? payload.tools : []).map((item) => ({ tool: mcpText(item?.tool), ...mcpCostFigures(item) })).filter((item) => item.tool),
+    tables: (Array.isArray(payload?.tables) ? payload.tables : []).map((item) => ({ name: mcpText(item?.name), statements: mcpCount(item?.statements) })).filter((item) => item.name),
+    tablesTruncated: payload?.tables_truncated === true,
+  };
 }
 
 async function deleteMcpKey(id, { signal } = {}) {
@@ -949,6 +1120,6 @@ export const api = { resolveUrl, request, getJson, postJson, getHosts, getVersio
   getTraceServices, getTraceServicesDb,
   searchTraceSpans, getTraceSpan,
   getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-  getMcpMeta, getMcpKeys, createMcpKey, getMcpKeyAccess, getMcpAccessSummary, deleteMcpKey,
+  getMcpMeta, getMcpKeys, createMcpKey, getMcpKeyAccess, getMcpAccessSummary, getMcpUsageSummary, getMcpKeyUsage, getMcpKeyCost, deleteMcpKey,
   humanizeErrors,
 };

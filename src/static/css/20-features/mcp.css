@@ -265,10 +265,10 @@ body[data-page="mcp"] #mcpPanel {
 }
 
 /* A key is one line: the fixed columns are narrow, the name takes the rest, and a cell that is too
-   long ends in an ellipsis (its title says all of it). Under 49 rem the box scrolls sideways. */
+   long ends in an ellipsis (its title says all of it). Under 54 rem the box scrolls sideways. */
 .mcpTable {
   width: 100%;
-  min-width: 54.75rem;
+  min-width: 54rem;
   table-layout: fixed;
 }
 
@@ -300,11 +300,13 @@ body[data-page="mcp"] #mcpPanel {
 }
 
 .mcpTable .mcpCell--name { width: 7.5rem; }
-.mcpTable .mcpCell--secret { width: 17rem; }
+.mcpTable .mcpCell--secret { width: 7.75rem; }
 .mcpTable .mcpCell--hosts { width: 6rem; }
 .mcpTable .mcpCell--tools { width: 3.5rem; }
 .mcpTable .mcpCell--data { width: 8.75rem; }
-.mcpTable .mcpCell--limits { width: 4.75rem; }
+.mcpTable .mcpCell--limits { width: 5.5rem; }
+.mcpTable .mcpCell--used { width: 8.5rem; }
+.mcpTable .mcpCell--deleted { width: 9rem; }
 .mcpTable .mcpCell--actions { width: 3.25rem; }
 
 /* A key that cannot be deleted: the lock stands where the Delete icon would be. */
@@ -707,6 +709,148 @@ body[data-page="mcp"] #mcpPanel {
   justify-content: space-between;
 }
 
+/* What the key did and what its statements cost ClickHouse (app_mcp_usage.js): two sections under the data it reads. */
+.mcpUsage,
+.mcpCost {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: var(--space-10);
+  border-top: 1px solid var(--border);
+}
+
+.mcpUsage__head,
+.mcpCost__head {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.mcpUsage__range,
+.mcpCost__range {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+}
+
+.mcpUsage__windows,
+.mcpCost__refresh {
+  margin-left: auto;
+}
+
+.mcpUsage__body,
+.mcpCost__body {
+  display: grid;
+  gap: var(--space-10);
+  min-width: 0;
+}
+
+.mcpUsage__body[hidden],
+.mcpCost__body[hidden] {
+  display: none;
+}
+
+.mcpUsage__tiles {
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+}
+
+.mcpUsage__trendRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.mcpUsage__trend {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 2.5rem;
+}
+
+.mcpUsage__peak {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+/* The first table (the tools, the cost by tool) is the widest: three fifths of the line. */
+.mcpUsage__tables {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+  gap: var(--space-12);
+}
+
+.mcpUsage__block {
+  min-width: 0;
+}
+
+.mcpUsage__title {
+  margin: 0 0 var(--space-4);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.mcpUsage__table {
+  width: 100%;
+}
+
+.mcpUsage__agent {
+  display: inline-block;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.mcpCostToggle,
+.mcpDeletedToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mcpCostToggle:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+/* The deleted keys that keep usage: a line under the keys that opens on them. */
+.mcpDeleted {
+  margin-top: var(--space-12);
+}
+
+.mcpDeleted__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-8);
+  margin: 0 0 var(--space-8);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.mcpDeleted__head > .mcpMuted {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+}
+
+.mcpDeleted__count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-regular);
+}
+
+.mcpTable.mcpDeletedTable {
+  min-width: 0;
+}
+
 .mcpReachHosts {
   display: grid;
   gap: var(--space-12);
@@ -946,7 +1090,8 @@ body[data-page="mcp"] #mcpPanel {
 
 /* A phone: each key is a card, the label of each cell above its value. */
 @media (max-width: 600px) {
-  .mcpGranted {
+  .mcpGranted,
+  .mcpUsage__tables {
     grid-template-columns: minmax(0, 1fr);
   }
   .mcpKeys__head .mcpKeys__actions {
@@ -1024,7 +1169,9 @@ body[data-page="mcp"] #mcpPanel {
   .mcpTable > tbody > tr > td.mcpCell--hosts,
   .mcpTable > tbody > tr > td.mcpCell--tools,
   .mcpTable > tbody > tr > td.mcpCell--data,
-  .mcpTable > tbody > tr > td.mcpCell--limits { order: 4; }
+  .mcpTable > tbody > tr > td.mcpCell--limits,
+  .mcpTable > tbody > tr > td.mcpCell--used,
+  .mcpTable > tbody > tr > td.mcpCell--deleted { order: 4; }
   .mcpTable > tbody > tr > td.mcpCell--actions {
     order: 5;
     grid-column: 1 / -1;
