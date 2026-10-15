@@ -21,6 +21,7 @@
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
 #include "mcp_usage.hpp"
+#include "mcp_usage_store.hpp"
 #include "json_text.hpp"
 
 #include <rapidjson/stringbuffer.h>
@@ -107,13 +108,13 @@ bool allow_from_page(const httplib::Request& req, httplib::Response& res) {
   return false;
 }
 
-// The parameters of GET /api/mcp/usage/overview besides the window: `group`, and the filters `key`, `method`, `client`, `result` and
-// `type`, each of them repeatable, checked by mcp_usage_overview_check. A name that the route does not read is refused (400 validation,
+// The parameters of GET /api/mcp/usage/overview besides the window: `group`, and the filters `key`, `method`, `client`, `instance`, `result`
+// and `type`, each of them repeatable, checked by mcp_usage_overview_check. A name that the route does not read is refused (400 validation,
 // reason unknown), so a typo is an error and not a filter that does nothing (the old `split` is one). Nullopt when they are valid.
 std::optional<McpValidationError> read_usage_overview_query(const httplib::Request& req, McpUsageOverviewQuery* query) {
   for (const auto& item : req.params) {
     if (item.first != "window" && item.first != "group" && item.first != "key" && item.first != "method" && item.first != "client" &&
-        item.first != "result" && item.first != "type") {
+        item.first != "instance" && item.first != "result" && item.first != "type") {
       return McpValidationError{item.first, "unknown", "unknown parameter: " + item.first};
     }
   }
@@ -127,6 +128,7 @@ std::optional<McpValidationError> read_usage_overview_query(const httplib::Reque
   query->keys = values("key");
   query->methods = values("method");
   query->clients = values("client");
+  query->instances = values("instance");
   query->results = values("result");
   query->types = values("type");
   return mcp_usage_overview_check(query);
@@ -415,6 +417,89 @@ void audit(const std::string& key, const std::string& what, const std::string& h
 
 } // namespace
 
+// ---- the analysis of the keys ---------------------------------------------------------------------------------
+
+// What the analysis tools ask of the server (mcp_tools.hpp): the state of the rate limit of a key, its usage and its cost, and the usage of every
+// key. A class of Server, so that it reads what the routes of the page read, and the tools never see Server. It holds no state of its own.
+class Server::McpAnalysisPort final : public McpAnalysis {
+public:
+  explicit McpAnalysisPort(Server& server) : server_(server) {}
+
+  McpToolAvailability availability() const override { return server_.mcp_tool_availability(); }
+
+  std::vector<std::string> usage_windows() const override {
+    if (!server_.mcp_usage_) return {};
+    return mcp_usage_windows(server_.cfg_.mcp.usage.retention_days);
+  }
+
+  McpAnalysisLimits limits(const McpKey& key) override {
+    McpAnalysisLimits out;
+    if (server_.mcp_usage_) out.instance = server_.mcp_usage_->instance();
+    out.rate = server_.mcp_rate_.peek(key.id, steady_ms(), server_.cfg_.mcp.rate_limit_per_minute);
+    // What a key of its host can ask for at most, with who sets it: the same figures as `limits` of the host in the meta. A key of an older file
+    // that names several hosts has the first one's.
+    const HostsSnapshot health = server_.health_ ? server_.health_->snapshot() : HostsSnapshot{};
+    const HostAccess* access = nullptr;
+    for (const auto& item : health.hosts) {
+      if (!key.hosts.empty() && item.id == key.hosts.front()) access = &item.access;
+    }
+    const McpHostLimits caps = mcp_host_limits(server_.cfg_.mcp, access);
+    out.max_rows.value = caps.max_rows.value;
+    out.max_rows.source = caps.max_rows.source;
+    out.timeout_seconds.value = caps.timeout_seconds.value;
+    out.timeout_seconds.source = caps.timeout_seconds.source;
+    return out;
+  }
+
+  std::string my_usage(const McpKey& key, const std::string& window_name, const McpUsageDetailQuery& query, int64_t now) override {
+    McpUsage& usage = need_usage();
+    const McpUsageWindow window = window_of(window_name, now);
+    const McpUsageKeyRef self = mcp_usage_key_ref(key);  // it just authenticated: it exists
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    usage.write_detail(w, key.id, &self, window, now, query);
+    return std::string(sb.GetString(), sb.GetSize());
+  }
+
+  std::string my_cost(const McpKey& key, const std::string& window_name, int64_t now) override {
+    return server_.mcp_tool_cost(key, window_name, now);
+  }
+
+  std::string all_usage(const std::string& window_name, const McpUsageOverviewQuery& query, int64_t now) override {
+    McpUsage& usage = need_usage();
+    // The double lock again: the tool names the key, and the configuration must allow it (mcp.usage.all_keys).
+    if (!server_.cfg_.mcp.usage.all_keys) {
+      throw McpAnalysisError("not_enabled", "reading the usage of all the keys is off: the administrator must set mcp.usage.all_keys in the ChDash configuration");
+    }
+    const McpUsageWindow window = window_of(window_name, now);
+    std::vector<McpUsageKeyRef> live;
+    for (const auto& key : server_.mcp_keys_->list()) live.push_back(mcp_usage_key_ref(key));
+    rapidjson::StringBuffer sb;
+    Writer w(sb);
+    usage.write_overview(w, query, live, window, now);
+    return std::string(sb.GetString(), sb.GetSize());
+  }
+
+private:
+  McpUsage& need_usage() const {
+    if (!server_.mcp_usage_) throw McpAnalysisError("not_enabled", "the usage of the keys is off: the administrator must set mcp.usage.enabled in the ChDash configuration");
+    return *server_.mcp_usage_;
+  }
+
+  // The tool checked the window against `usage_windows()`; a name that the retention does not keep is refused here too.
+  McpUsageWindow window_of(const std::string& name, int64_t now) const {
+    const int64_t retention = server_.cfg_.mcp.usage.retention_days;
+    if (const auto window = mcp_usage_window(name, retention, now)) return *window;
+    std::string names;
+    for (const auto& offered : mcp_usage_windows(retention)) names += (names.empty() ? "" : ", ") + offered;
+    throw McpAnalysisError("invalid_argument", "window must be one of " + names);
+  }
+
+  Server& server_;
+};
+
+McpToolAvailability Server::mcp_tool_availability() const { return {mcp_usage_ != nullptr, cfg_.mcp.usage.all_keys}; }
+
 // ---- setup -----------------------------------------------------------------------------------
 
 void Server::init_mcp() {
@@ -453,16 +538,19 @@ void Server::init_mcp() {
     return std::nullopt;
   };
   mcp_keys_ = std::make_unique<McpKeyStore>(std::move(store));
-  // What each key did: read from its file (an invalid file stopped the start in config.cpp), then the keys that are gone
-  // since the last run are deleted from now on.
-  McpUsageOptions usage;
-  usage.file = cfg_.mcp.usage_file;
-  usage.retention_days = cfg_.mcp.usage_retention_days;
+  // What each key did, when the usage is on (mcp.usage.enabled): the state of this instance is read from its file (an invalid file stopped
+  // the start in config.cpp), then the keys that are gone since the last run are deleted from now on. The files of the other instances are
+  // read by the background loop. When it is off nothing is counted: there is no usage object.
   const int64_t started = unix_seconds();
-  mcp_usage_ = std::make_unique<McpUsage>(std::move(usage), started);
-  std::vector<McpUsageKeyRef> live;
-  for (const auto& key : mcp_keys_->list()) live.push_back(mcp_usage_key_ref(key));
-  mcp_usage_->sync_live_keys(live, started);
+  if (cfg_.mcp.usage.enabled) {
+    McpUsageOptions usage;
+    usage.store = std::make_shared<McpUsageFileStore>(cfg_.mcp.usage.dir, cfg_.mcp.usage.instance);  // the only storage mode: files
+    usage.retention_days = cfg_.mcp.usage.retention_days;
+    mcp_usage_ = std::make_unique<McpUsage>(std::move(usage), started);
+    std::vector<McpUsageKeyRef> live;
+    for (const auto& key : mcp_keys_->list()) live.push_back(mcp_usage_key_ref(key));
+    mcp_usage_->sync_live_keys(live, started);
+  }
 
   // `this`, never a local: the callback outlives the constructor.
   mcp_db_ = std::make_unique<ClickHouseMcpDatabase>(
@@ -491,14 +579,16 @@ void Server::init_mcp() {
     if (!host.mcp_uri.empty()) tools.observability_by_host[host.id] = mcp_observability_config(host.otel);
   }
   mcp_api_ = std::make_unique<InProcessMcpApi>(*this);
-  mcp_tools_ = std::make_unique<McpTools>(std::move(tools), *mcp_db_, mcp_api_.get());
+  mcp_analysis_ = std::make_unique<McpAnalysisPort>(*this);
+  mcp_tools_ = std::make_unique<McpTools>(std::move(tools), *mcp_db_, mcp_api_.get(), mcp_analysis_.get());
 }
 
 void Server::save_mcp_usage(bool force) {
   if (!mcp_usage_) return;
   const int64_t now = unix_seconds();
+  // The loop writes the state of this instance every minute when it changed, and reads the others' files when they did.
   if (force) mcp_usage_->save(now);
-  else mcp_usage_->save_if_due(now);
+  else mcp_usage_->tick(now);
 }
 
 // ---- POST /mcp ----------------------------------------------------------------------------------
@@ -767,6 +857,9 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.EndObject();
       }
       w.EndArray();
+      // The catalog with how each tool is given: `always` (every key has it, whatever its list says), `explicit_only` ("*" does not give it) and
+      // `available` (the configuration offers it now: the tools of the usage need the usage, the one of all the keys needs mcp.usage.all_keys too).
+      const McpToolAvailability availability = mcp_tool_availability();
       w.Key("tools");
       w.StartArray();
       for (const auto& tool : mcp_tool_catalog()) {
@@ -776,6 +869,9 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("section"); put(w, tool.section ? tool.section : "");
         w.Key("description"); put(w, tool.description);
         w.Key("needs_all_data"); w.Bool(tool.needs_all_data);
+        w.Key("always"); w.Bool(tool.always);
+        w.Key("explicit_only"); w.Bool(tool.explicit_only);
+        w.Key("available"); w.Bool(mcp_tool_available(tool, availability));
         w.EndObject();
       }
       w.EndArray();
@@ -790,17 +886,22 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       w.Key("rate_limit_per_minute"); w.Int64(s.rate_limit_per_minute);
       w.EndObject();
       w.Key("name_pattern"); w.String(kMcpNamePattern);
-      // The usage of the keys (mcp_usage.hpp): kept in mcp.usage_file or in memory since the start, and the windows of its answers.
+      // The usage of the keys (mcp_usage.hpp): off, or kept in files by instance (mcp.usage), and the windows of its answers.
       w.Key("usage");
       w.StartObject();
-      w.Key("persisted"); w.Bool(mcp_usage_ && mcp_usage_->persisted());
-      w.Key("retention_days"); w.Int64(s.usage_retention_days);
-      w.Key("windows");
-      w.StartArray();
-      for (const auto& window : mcp_usage_windows(s.usage_retention_days)) put(w, window);
-      w.EndArray();
-      w.Key("default_window"); put(w, mcp_usage_default_window(s.usage_retention_days));
-      w.Key("since"); put(w, mcp_iso_utc(mcp_usage_ ? mcp_usage_->since() : now));
+      w.Key("enabled"); w.Bool(mcp_usage_ != nullptr);
+      if (mcp_usage_) {
+        const McpUsageSettings& usage = s.usage;
+        w.Key("storage"); put(w, usage.storage);
+        w.Key("instance"); put(w, mcp_usage_->instance());
+        w.Key("retention_days"); w.Int64(usage.retention_days);
+        w.Key("windows");
+        w.StartArray();
+        for (const auto& window : mcp_usage_windows(usage.retention_days)) put(w, window);
+        w.EndArray();
+        w.Key("default_window"); put(w, mcp_usage_default_window(usage.retention_days));
+        w.Key("since"); put(w, mcp_iso_utc(mcp_usage_->since()));
+      }
       // The windows of the ClickHouse cost of a key (api_mcp_cost.cpp): none when System > Queries is off (it reads query_log the same way).
       w.Key("cost_windows");
       w.StartArray();
@@ -808,6 +909,10 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         for (const auto& window : mcp_cost_windows()) put(w, window);
       }
       w.EndArray();
+      // Whether a key can read the usage of all the keys (the tool mcp_analysis_all_usage): the usage must be on.
+      if (mcp_usage_) {
+        w.Key("all_keys"); w.Bool(s.usage.all_keys);
+      }
       w.EndObject();
     }
     w.EndObject();
@@ -844,7 +949,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     w.StartObject();
     w.Key("keys");
     w.StartArray();
-    // When a key was last used is its usage's: kept in mcp.usage_file when it is set.
+    // When a key was last used is its usage's (all the instances): none when the usage is off.
     const auto last_used = mcp_usage_ ? mcp_usage_->last_used_all() : std::unordered_map<std::string, int64_t>{};
     for (const auto& key : store.list()) {
       const auto used = last_used.find(key.id);
@@ -1014,10 +1119,11 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     return;
   }
   // What the keys did (mcp_usage.hpp): every key in one answer (the Used column of the page), one key (its details), and every
-  // key cut by key, method, client, result and type (the Usage tab), in a window of the usage. A read of the page, as the access
-  // above; it never holds SQL, data or a secret.
+  // key cut by key, method, client, instance, result and type (the Usage tab), in a window of the usage, with every instance summed. A read
+  // of the page, as the access above; it never holds SQL, data, a secret or an address. Off (mcp.usage.enabled): 404 not_enabled.
   if (route == McpApiRoute::Usage || route == McpApiRoute::KeyUsage || route == McpApiRoute::UsageOverview) {
-    const int64_t retention = cfg_.mcp.usage_retention_days;
+    if (!mcp_usage_) return api_error(res, 404, "not_enabled", "the usage of the keys is off: mcp.usage.enabled");
+    const int64_t retention = cfg_.mcp.usage.retention_days;
     const std::string asked = req.has_param("window") ? req.get_param_value("window") : std::string();
     const auto window = mcp_usage_window(asked.empty() ? mcp_usage_default_window(retention) : asked, retention, now);
     if (!window) {
@@ -1098,7 +1204,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     case McpApiRoute::KeyDelete: {
       const auto result = store.remove(id);
       if (!result.key) return write_failure(result);
-      // Its usage stays until it is older than mcp.usage_retention_days.
+      // Its usage stays until it is older than mcp.usage.retention_days.
       if (mcp_usage_) mcp_usage_->mark_deleted(mcp_usage_key_ref(*result.key), now);
       audit("-", "keys/delete", "", "ok:" + id, 0, 0);
       rapidjson::StringBuffer sb;

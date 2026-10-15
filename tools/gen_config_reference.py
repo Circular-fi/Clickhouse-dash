@@ -19,7 +19,7 @@ OUT = ROOT / "docs" / "configuration-reference.md"
 BLOCK_ORDER = [
     "server", "query", "client_pool", "generated_queries", "admission", "format_cache", "health", "explorer", "explorer.graph",
     "system", "analysis", "export", "query_library", "observability", "observability.traces", "observability.logs",
-    "observability.metrics", "mcp",
+    "observability.metrics", "mcp", "mcp.usage",
 ]
 
 

@@ -21,10 +21,12 @@ std::vector<std::string> mcp_data_tables(const McpObservabilityConfig& config, u
 }
 
 McpToolOutcome McpTools::call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments,
-                                   int64_t) {
+                                   int64_t now) {
   using namespace mcp_tools;
   Ctx ctx = make_ctx(key, config_, db_, tool);
   ctx.api = api_;
+  ctx.analysis = analysis_;
+  ctx.now = now;
   McpToolOutcome outcome;
   try {
     std::string json;
@@ -43,6 +45,9 @@ McpToolOutcome McpTools::call_tool(const McpKey& key, const std::string& tool, c
     else if (tool == "query_metric") json = tool_query_metric(ctx, arguments);
     else if (tool == "run_query") json = tool_run_query(ctx, arguments);
     else if (tool == "explain_query") json = tool_explain_query(ctx, arguments);
+    else if (tool == "mcp_analysis_my_limits") json = tool_analysis_my_limits(ctx, arguments);
+    else if (tool == "mcp_analysis_my_usage") json = tool_analysis_my_usage(ctx, arguments);
+    else if (tool == "mcp_analysis_all_usage") json = tool_analysis_all_usage(ctx, arguments);
     else return mcp_tool_error("unknown_tool", "unknown tool " + tool);
     outcome.json = std::move(json);
   } catch (const ToolFailure& failure) {

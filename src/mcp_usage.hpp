@@ -3,22 +3,27 @@
 // The usage of the MCP keys (docs/mcp.md, "Usage of a key"): what ChDash saw of the requests of each key, counted where a
 // call writes its audit line (Server::handle_mcp_post). One entry for each key that was used:
 // - its requests in six tiers of buckets, one for the step of each window: by the minute (the last hour), by 5 minutes (6 hours), by
-//   15 minutes (24 hours), by 3 hours (7 days), by 12 hours (30 days) and by the UTC day (mcp.usage_retention_days). A tier is kept
+//   15 minutes (24 hours), by 3 hours (7 days), by 12 hours (30 days) and by the UTC day (mcp.usage.retention_days). A tier is kept
 //   only when the retention reaches its window, and a window reads its own tier: nothing is summed to a larger step. A bucket holds
 //   cells: the requests that share a type (a tool call, a protocol request, a 429, a refusal), a client (the name that it gave), a
 //   method (the tool, or the JSON-RPC method) and a result, with their count, time, rows and bytes. Everything that is shown is summed
 //   from the cells;
 // - its clients: the clientInfo of `initialize` and the User-Agent of the requests, kept for their life apart from the cells.
-// A deleted key keeps its entry until its last day is older than the retention. Never SQL, never data, never a secret.
-// The entries are kept in mcp.usage_file, written every minute when something changed and at the stop, atomically (a
-// temporary file, fsync, rename, mode 0600), or in memory only when it is not set. One process owns the file: two
-// instances that share it overwrite each other's counts. A file that is not valid stops the start; it is never rewritten.
+// A deleted key keeps its entry until its last day is older than the retention. Never SQL, never data, never a secret, never an address.
+//
+// Each ChDash (an instance) counts its own state, and a store (mcp_usage_store.hpp) keeps it: the files mode writes it every minute when
+// something changed and at the stop, in a directory that several instances can share, one file for each instance. The other instances'
+// files are read again in the background, never in a request, and their states are swapped in whole: an answer sums this instance and the
+// others, by cell, and the instance that a cell comes from is a dimension of the overview. A file of this instance that is not valid
+// stops the start and is never rewritten; a file of another instance that is not valid is skipped and listed with its reason.
 
 #include "mcp_keys.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -28,12 +33,16 @@
 
 namespace chdash {
 
+class McpUsageStore;
+
 inline constexpr int kMcpUsageFileVersion = 1;
 inline constexpr int64_t kMcpUsageMaxRetentionDays = 365;
 // The tiers of an entry: m1, m5, m15, h3, h12 and d1 (the steps of 1 minute, 5 minutes, 15 minutes, 3 hours, 12 hours and 1 day).
 inline constexpr size_t kMcpUsageTiers = 6;
 // The values of each filter of the overview.
 inline constexpr size_t kMcpUsageOverviewMaxValues = 20;
+// The rows of each list of an answer when the caller does not ask for fewer.
+inline constexpr size_t kMcpUsageFacetRows = 200;
 
 // What a request of a key was. The order is the one of the types in the answers.
 enum class McpUsageKind {
@@ -52,7 +61,7 @@ struct McpUsageEvent {
   int64_t at = 0;               // Unix seconds
   McpUsageKind kind = McpUsageKind::Request;
   // Request: the JSON-RPC method of the message, empty when it could not be read. It is counted when it is one of the methods
-  // of the protocol (mcp_usage.cpp) and as "other" otherwise: a text that a client chose is never kept.
+  // of the protocol (mcp_usage_state.cpp) and as "other" otherwise: a text that a client chose is never kept.
   std::string_view method;
   std::string_view tool;        // ToolCall: the name of the tool
   std::string_view status;      // ok, the error code of the tool, rpc_error_<n>, or <http status>_<reason>
@@ -77,7 +86,11 @@ McpUsageKeyRef mcp_usage_key_ref(const McpKey& key);
 bool mcp_valid_key_id(std::string_view id);
 
 struct McpUsageOptions {
-  std::string file;  // empty: in memory only, since the start
+  // Where the state of this instance is kept and the states of the others are read. Null: nothing outlives the process and no other
+  // instance is read (the unit tests; the server always has one when the usage is on).
+  std::shared_ptr<McpUsageStore> store;
+  // The name of this instance when there is no store; with a store, the name of the store.
+  std::string instance = "local";
   int64_t retention_days = 90;
   size_t max_deleted = 1000;    // entries of deleted keys; the oldest deletion goes first
   size_t max_cells = 1000000;   // cells of all the buckets; a new one past it is counted in the overflow cell of its type
@@ -103,19 +116,41 @@ std::optional<McpUsageWindow> mcp_usage_window(std::string_view name, int64_t re
 // Printable ASCII (another byte is "?"), the spaces at both ends removed, at most `max_bytes`.
 std::string mcp_usage_clean(std::string_view text, size_t max_bytes);
 
-// Throws std::runtime_error (a message without the content of the file) when `path` is not a usage file of this ChDash,
-// or when the directory of an absent file does not exist.
-void mcp_check_usage_file(const std::string& path);
+// The rule of the name of an instance, and of the value of the filter `instance`: [A-Za-z0-9._-], 1 to 64 bytes.
+bool mcp_valid_usage_instance(std::string_view instance);
+
+// An instance that an answer reads, and how it went. `ok`: its state is read (this instance: its own); `skipped`: its file was not valid (the
+// reason says why: it is never read); `conflict`: this instance cannot write its file because another process writes the same name (its
+// counts stay in memory).
+struct McpUsageInstance {
+  std::string instance;
+  int64_t written_at = 0;  // Unix seconds, when its file was last written (0: not yet)
+  std::string status;
+  std::string reason;
+};
 
 // The parameters of GET /api/mcp/usage/overview (its window apart): what the series is grouped by, and the filters. A value
 // of a filter keeps the requests that have it; the values of a dimension are OR, the dimensions are AND.
 struct McpUsageOverviewQuery {
-  std::string group = "method";  // key, method, client, result or type
-  std::vector<std::string> keys;     // the ids of keys
-  std::vector<std::string> methods;  // a tool or a method of the protocol: [A-Za-z0-9_/]{1,64}
-  std::vector<std::string> clients;  // a client name: printable ASCII, 1 to 64 bytes, no space at either end
-  std::vector<std::string> results;  // [a-z0-9_]{1,64}
-  std::vector<std::string> types;    // call, request, limited or rejected
+  std::string group = "method";  // key, method, client, result, type or instance
+  std::vector<std::string> keys;       // the ids of keys
+  std::vector<std::string> methods;    // a tool or a method of the protocol: [A-Za-z0-9_/]{1,64}
+  std::vector<std::string> clients;    // a client name: printable ASCII, 1 to 64 bytes, no space at either end
+  std::vector<std::string> instances;  // an instance: [A-Za-z0-9._-]{1,64}
+  std::vector<std::string> results;    // [a-z0-9_]{1,64}
+  std::vector<std::string> types;      // call, request, limited or rejected
+  // For a caller that is not a page (the tools of MCP): the rows of each list (0: kMcpUsageFacetRows; the values that were chosen are always
+  // kept), and whether the series is made (it is the largest part of an answer).
+  size_t limit = 0;
+  bool series = true;
+};
+
+// What the details of one key read besides its window: the instances that it sums (none: all of them), the rows of each list (0: all), and
+// whether the series is made.
+struct McpUsageDetailQuery {
+  std::vector<std::string> instances;
+  size_t limit = 0;
+  bool series = true;
 };
 
 // The rules of the parameters of the overview: a value that is repeated counts once, then each one is checked. Nullopt when
@@ -124,47 +159,62 @@ std::optional<McpValidationError> mcp_usage_overview_check(McpUsageOverviewQuery
 
 class McpUsage {
 public:
-  // Reads the file (an absent file is no usage yet). Throws std::runtime_error when it is not valid.
+  // Reads the state of this instance from the store (nothing stored yet is no usage yet). Throws std::runtime_error when it is not valid.
   McpUsage(McpUsageOptions options, int64_t now);
   McpUsage(const McpUsage&) = delete;
   McpUsage& operator=(const McpUsage&) = delete;
 
-  bool persisted() const { return !options_.file.empty(); }
+  // The name of this instance.
+  const std::string& instance() const { return instance_; }
   int64_t retention_days() const { return options_.retention_days; }
-  // Since when the usage is counted: the first start with this file, or the start of the process without one.
-  int64_t since() const { return since_; }
+  // Since when the usage is counted: the earliest start of counting of the instances that are read (the first start of each one with its
+  // file, or the start of the process without one).
+  int64_t since() const;
 
   // At the start: the entry of a key that is gone is deleted from now on; a key of the configuration that is back takes
-  // its entry again.
+  // its entry again. Only the state of this instance changes.
   void sync_live_keys(const std::vector<McpUsageKeyRef>& live, int64_t now);
   void record(const McpUsageEvent& event);
   // The key is deleted: its entry stays until its last day is older than the retention. A key that was never used gets an
   // empty entry for 2 hours, so a call that was running when it was deleted is counted as deleted.
   void mark_deleted(const McpUsageKeyRef& key, int64_t now);
 
+  // When each key was last used, on any instance that is read.
   std::unordered_map<std::string, int64_t> last_used_all() const;
-  // The key as its entry names it (a deleted key too); nullopt when it has none.
+  // The key as an entry names it (a deleted key too, a key that only another instance saw too); nullopt when none has it.
   std::optional<McpUsageKeyRef> entry_key(const std::string& id) const;
 
-  // GET /api/mcp/usage: the live keys in this order (zeros for a key that was not used), then the deleted keys that still
-  // have usage, the last deletion first.
+  // The instances that the answers read: this one first, then the others by name.
+  std::vector<McpUsageInstance> instances() const;
+
+  // GET /api/mcp/usage: the live keys in this order (zeros for a key that was not used), then the keys that are not live here and that still
+  // have usage: the deleted ones, the last deletion first, then the ones that only another instance knows, the last use first. Every
+  // instance is summed.
   void write_list(McpJsonWriter& w, const std::vector<McpUsageKeyRef>& live, const McpUsageWindow& window, int64_t now) const;
   // GET /api/mcp/keys/<id>/usage. `live` is the key when it exists. False when the key exists nowhere (404).
-  bool write_detail(McpJsonWriter& w, const std::string& id, const McpUsageKeyRef* live, const McpUsageWindow& window,
-                    int64_t now) const;
+  bool write_detail(McpJsonWriter& w, const std::string& id, const McpUsageKeyRef* live, const McpUsageWindow& window, int64_t now,
+                    const McpUsageDetailQuery& query = {}) const;
   // GET /api/mcp/usage/overview: the requests of every key in a window, cut by the filters of `query` (checked by
   // mcp_usage_overview_check): the totals and the series with all of them, and each facet (the keys, the methods, the clients, the
-  // results, the types) with all of them but its own. The clients are those of the cells of the window; their versions and their last
-  // sight come from the clients that the keys of the filter saw. `live` names the keys that exist. One entry at a time under the
+  // instances, the results, the types) with all of them but its own. The clients are those of the cells of the window; their versions and
+  // their last sight come from the clients that the keys of the filter saw. `live` names the keys that exist. One entry at a time under the
   // lock, as save() does.
   void write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& query, const std::vector<McpUsageKeyRef>& live,
                       const McpUsageWindow& window, int64_t now) const;
 
-  // Drops what is older than the retention, then writes the file when something changed. False when the write failed:
-  // the next save tries again.
+  // Drops what is older than the retention, then writes the state of this instance when something changed. False when the write failed
+  // or when another process writes the same instance: the next save tries again.
   bool save(int64_t now);
-  // save() when the last one is a minute old (5 minutes when the file is larger than 8 MiB).
+  // save() when the last one is a minute old (5 minutes when the state is larger than 8 MiB).
   bool save_if_due(int64_t now);
+  // Reads again the files of the other instances that changed, and removes the file of an instance that is gone. Never in a request.
+  void refresh_others(int64_t now);
+  // refresh_others() when the last one is a minute old.
+  void refresh_if_due(int64_t now);
+  // What the background loop calls: save_if_due() and refresh_if_due().
+  void tick(int64_t now);
+  // Stops a refresh that is running and the next ones (the stop of the server): the file that it reads is left as it was.
+  void cancel() { cancel_.store(true, std::memory_order_relaxed); }
 
   // The requests of one type, one client, one method and one result, in one bucket. `key` is kind << 36 | client << 24 | method << 12 |
   // result: the client is an id of the ClientNames, the method and the result are ids of the Names.
@@ -176,7 +226,7 @@ public:
     uint64_t rows = 0;
     uint64_t bytes = 0;
   };
-  // The nine totals of some cells (add_to_counters in mcp_usage.cpp is the one place that says what each one counts).
+  // The nine totals of some cells (add_to_counters in mcp_usage_state.cpp is the one place that says what each one counts).
   struct Counters {
     uint64_t requests = 0;
     uint64_t calls = 0;
@@ -211,7 +261,7 @@ public:
     // days or more) and d1 the last retention_days days.
     std::array<std::vector<Bucket>, kMcpUsageTiers> tiers;
     // The ids of the clients that its cells use (not other and unknown), at most 16: a key does not use more over its retention.
-    // Made again from the cells when the file is read and when a day of d1 goes.
+    // Made again from the cells when the state is read and when a day of d1 goes.
     std::vector<uint16_t> client_ids;
   };
   // The names of the methods and of the results: an id of 12 bits in the cells. The fixed names come first (0 other, 1 ok, the
@@ -232,20 +282,33 @@ public:
     ClientNames();
     uint16_t intern(std::string_view name);
   };
+  // The state of one instance: its own while it counts, or one that a store read (then it never changes: it is swapped in whole).
   struct State {
     int64_t since = 0;
+    int64_t written_at = 0;  // the header of the file that it was read from (0: it was not)
     Names names;
     ClientNames clients;
     std::unordered_map<std::string, Entry> entries;
     size_t cells = 0;
   };
+  // What a store says of another instance: its state, or why that was not read.
+  struct Other {
+    std::string instance;
+    int64_t written_at = 0;
+    int64_t since = 0;
+    std::string status;  // ok or skipped
+    std::string reason;
+    std::shared_ptr<const State> state;  // null when it was skipped
+  };
 
 private:
   void prune_locked(int64_t now);
   void cap_deleted_locked();
-  void write_entry_locked(McpJsonWriter& w, const Entry& entry) const;
+  std::shared_ptr<const std::vector<Other>> others_snapshot() const;
 
   McpUsageOptions options_;
+  std::shared_ptr<McpUsageStore> store_;
+  std::string instance_;
   int64_t since_ = 0;
   // write_mu_ makes the saves one at a time; mu_ guards state_ and is never held while the file is written.
   std::mutex write_mu_;
@@ -254,6 +317,15 @@ private:
   bool dirty_ = false;
   int64_t last_save_ = 0;
   size_t last_size_ = 0;
+  int64_t written_at_ = 0;   // the last time that the state of this instance was written, or read
+  bool conflict_ = false;    // the last save found another process that writes this instance
+  std::string conflict_reason_;
+  // The other instances: read by the background loop, swapped in whole under others_mu_, never changed after.
+  std::mutex refresh_mu_;
+  int64_t last_refresh_ = 0;
+  mutable std::mutex others_mu_;
+  std::shared_ptr<const std::vector<Other>> others_;
+  std::atomic<bool> cancel_{false};
 };
 
 } // namespace chdash

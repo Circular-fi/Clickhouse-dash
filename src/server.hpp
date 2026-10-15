@@ -96,6 +96,21 @@ struct QueryLibrarySettings {
 
 };
 
+// What each key did (docs/mcp.md, "Usage of a key"): the mcp { usage { } } block. Off by default: then nothing is counted.
+struct McpUsageSettings {
+  bool enabled = false;
+  // Where the usage is kept: "files" (a directory that several ChDash can share; a database comes later).
+  std::string storage = "files";
+  // The directory of the files. Required when the usage is on.
+  std::string dir;
+  // The name of this ChDash in the files: [A-Za-z0-9._-], at most 64 bytes. Empty = the host name (the loader of the configuration fills it).
+  std::string instance;
+  // Days of usage kept for each key, also after the key is deleted.
+  int64_t retention_days = 90;
+  // Whether a key can read the usage of all the keys, of all the instances (the tools of MCP: mcp_analysis_all_usage).
+  bool all_keys = false;
+};
+
 // The MCP endpoint (POST /mcp), its keys and its limits (docs/mcp.md). Off by
 // default. Every limit is a global cap that a key may only lower.
 struct McpSettings {
@@ -104,10 +119,7 @@ struct McpSettings {
   std::string storage_file;
   // false: the page is read-only and every key write answers 403 manage_disabled.
   bool manage_from_ui = true;
-  // The JSON file of the usage of the keys (mcp_usage.hpp); empty = the usage is in memory, since the start.
-  std::string usage_file;
-  // Days of usage kept for each key, also after the key is deleted.
-  int64_t usage_retention_days = 90;
+  McpUsageSettings usage;
   // The request header that carries the key. "Authorization" takes "Bearer <key>". Another name (for
   // a deployment where a proxy in front already uses Authorization) takes the key alone, or "Bearer <key>".
   std::string auth_header = "Authorization";
@@ -380,6 +392,11 @@ private:
   std::optional<Admission::Ticket> admit(WorkClass work, const httplib::Request& req, httplib::Response& res);
   // The same for a host that the handler found itself (a route that names no host_id: the cost of an MCP key reads the host of the key).
   std::optional<Admission::Ticket> admit(WorkClass work, const std::string& host_id, const httplib::Request& req, httplib::Response& res);
+  // The place itself, with no answer to write: the same wait, which ends when `stop` says so. The cost of a key that an MCP tool reads has no
+  // route to answer (api_mcp_cost.cpp).
+  std::optional<Admission::Ticket> acquire_ticket(WorkClass work, const std::string& host_id, const std::function<bool()>& stop);
+  // What admit() answers when no place came: 503 server_busy, or server_stopping when the server stops.
+  void send_no_place(httplib::Response& res);
   // The host that a request names, for the key of its place: its id when configured, else "-".
   std::string admission_host(const httplib::Request& req) const;
 
@@ -476,12 +493,31 @@ private:
   // keys exist only when mcp.enabled = true; /api/mcp/meta always answers.
   void init_mcp();
   void handle_mcp_post(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader);
-  // Writes the usage file of the MCP keys: when a minute has passed (force = false), or now (the stop).
+  // The usage of the MCP keys (what the reaper loop calls): the file of this instance when a minute has passed and something changed, and the
+  // files of the other instances when a minute has passed (force = false); or the file of this instance now (force, the stop).
   void save_mcp_usage(bool force);
   void handle_mcp_not_allowed(const httplib::Request& req, httplib::Response& res);
   void handle_api_mcp(const httplib::Request& req, httplib::Response& res, McpApiRoute route);
   // GET /api/mcp/keys/<id>/cost (api_mcp_cost.cpp): called by handle_api_mcp, after the guard of the page.
   void handle_mcp_key_cost(const httplib::Request& req, httplib::Response& res, int64_t now);
+  // The cost of a key as the page and the tool read it (api_mcp_cost.cpp): the 60 s cache, and the read of system.query_log with the runner
+  // account of the host, holding a place of heavy work. `json` is the answer; `busy` (no place came in time) or `stopping` (the server stops)
+  // say that nothing was read and `json` is empty. `for_page`: the page's answer, with the text of an error and the GRANT statement; else the
+  // tool's, which has neither (they are for the administrator).
+  struct McpCostAnswer {
+    std::string json;
+    std::string status;  // "ok", or why there is no cost (no_host, not_granted, window_too_large, ...): for the audit line
+    bool busy = false;
+    bool stopping = false;
+  };
+  McpCostAnswer answer_mcp_cost(const std::string& key_id, const std::string& host_id, const McpCostWindow& window, bool refresh, bool for_page,
+                                const std::function<bool()>& stop, int64_t now);
+  // The cost of the key that an MCP tool asks for, for a window of its usage: a JSON object that says why when there is none (api_mcp_cost.cpp).
+  std::string mcp_tool_cost(const McpKey& key, const std::string& usage_window, int64_t now);
+  // What the configuration turns on for the tools that need the usage (mcp_scope.hpp): the usage is counted, and all the keys may be read.
+  McpToolAvailability mcp_tool_availability() const;
+  // The analysis tools reach the usage, the rate limit and the cost through this port (api_mcp.cpp), never Server itself.
+  class McpAnalysisPort;
 
   void session_reaper_loop();
   void reap_sessions_once();
@@ -541,10 +577,12 @@ private:
   std::vector<std::unique_ptr<QueryLibraryStore>> query_libraries_;
   // Only constructed when mcp.enabled = true. The database outlives the tools that use it.
   std::unique_ptr<McpKeyStore> mcp_keys_;
-  // What each key did (mcp_usage.hpp): counted in handle_mcp_post, saved by the reaper every minute and at the stop.
+  // What each key did (mcp_usage.hpp): counted in handle_mcp_post, saved by the reaper every minute and at the stop. Null when the usage is off
+  // (mcp.usage.enabled = false): nothing is counted then.
   std::unique_ptr<McpUsage> mcp_usage_;
   std::unique_ptr<McpDatabase> mcp_db_;
   std::unique_ptr<McpApiClient> mcp_api_;
+  std::unique_ptr<McpAnalysis> mcp_analysis_;
   std::unique_ptr<McpTools> mcp_tools_;
   McpRateLimiter mcp_rate_;
 

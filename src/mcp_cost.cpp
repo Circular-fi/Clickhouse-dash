@@ -13,7 +13,7 @@ namespace {
 
 // The time of one read, as for a section of System > Queries: a window of a busy server ends with window_too_large instead.
 constexpr int kCostSeconds = 15;
-// The (user, tool) pairs that one read groups: far more than a key has (a user or two, 61 tools at most).
+// The (user, tool) pairs that one read groups: far more than a key has (a user or two, 64 tools at most).
 constexpr uint64_t kCostGroups = 10000;
 
 int64_t window_seconds(std::string_view name) {

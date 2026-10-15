@@ -7,6 +7,7 @@
 #include "mcp_keys.hpp"
 #include "mcp_scope.hpp"
 #include "mcp_usage.hpp"
+#include "mcp_usage_store.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -483,8 +484,12 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
   const HclObject* mcp = optional_block(root, "mcp", source);
   if (!mcp) return;
   McpSettings& out = cfg.mcp;
-  validate_blocks(*mcp, "mcp", {"key"});
+  validate_blocks(*mcp, "mcp", {"key", "usage"});
   config::apply_block(cfg, *mcp, "mcp", "mcp");
+  if (const auto* usage = optional_block(*mcp, "usage", "mcp")) {
+    validate_blocks(*usage, "mcp.usage", {});
+    config::apply_block(cfg, *usage, "mcp.usage", "mcp.usage");
+  }
   if (auto v = string_attr(*mcp, "auth_header", "mcp")) {
     // An HTTP field name (letters, digits and hyphens), not one that the request needs for itself.
     static const std::set<std::string> reserved = {"content-type", "content-length", "host", "origin", "accept", "connection", "transfer-encoding",
@@ -570,24 +575,38 @@ void load_mcp(AppConfig& cfg, const HclObject& root, std::string_view source) {
       }
     }
   }
-  // 8. The usage file is a file of its own (not the key file, not a library), and a usage file of this ChDash (it is never
-  // rewritten when it is not); its directory exists.
-  if (!out.usage_file.empty()) {
+  // 8. The usage: the name of this instance, and a directory where its file can be written and the files of the others read. The file of
+  // this instance is a file of its own (not the key file, not a library) and a usage file of this ChDash: it is never rewritten when it is
+  // not valid.
+  McpUsageSettings& usage = out.usage;
+  if (usage.enabled) {
+    if (usage.instance.empty()) {
+      const std::string host_name = mcp_usage_host_name();
+      if (!mcp_valid_usage_instance(host_name)) {
+        throw std::runtime_error("mcp.usage.instance: the host name \"" + host_name +
+                                 "\" is not the name of an instance (1 to 64 characters of A-Z a-z 0-9 . _ -): set mcp.usage.instance");
+      }
+      usage.instance = host_name;
+    } else if (!mcp_valid_usage_instance(usage.instance)) {
+      throw std::runtime_error("mcp.usage.instance \"" + usage.instance + "\" must be 1 to 64 characters of A-Z a-z 0-9 . _ -");
+    }
+    if (usage.dir.empty()) throw std::runtime_error("mcp.usage.dir is required when mcp.usage.enabled = true");
+    const std::string file = usage.dir + "/" + McpUsageFileStore::file_name(usage.instance);
     const auto same = [](const std::string& a, const std::string& b) {
       return std::filesystem::path(a).lexically_normal() == std::filesystem::path(b).lexically_normal();
     };
-    if (!out.storage_file.empty() && same(out.usage_file, out.storage_file)) {
-      throw std::runtime_error("mcp.usage_file " + out.usage_file + " is the key file (mcp.storage_file): the usage needs a file of its own");
+    if (!out.storage_file.empty() && same(file, out.storage_file)) {
+      throw std::runtime_error("mcp.usage.dir " + usage.dir + ": " + file + " is the key file (mcp.storage_file): the usage needs a file of its own");
     }
     for (const auto& library : cfg.query_libraries) {
-      if (same(out.usage_file, library.file)) {
-        throw std::runtime_error("mcp.usage_file " + out.usage_file + " is the file of the query library " + library.name + ": the usage needs a file of its own");
+      if (same(file, library.file)) {
+        throw std::runtime_error("mcp.usage.dir " + usage.dir + ": " + file + " is the file of the query library " + library.name + ": the usage needs a file of its own");
       }
     }
     try {
-      mcp_check_usage_file(out.usage_file);
+      mcp_check_usage_dir(usage.dir, usage.instance);
     } catch (const std::exception& error) {
-      throw std::runtime_error("mcp.usage_file " + out.usage_file + ": " + error.what() + " (the file is not changed)");
+      throw std::runtime_error("mcp.usage.dir " + usage.dir + ": " + error.what());
     }
   }
 }

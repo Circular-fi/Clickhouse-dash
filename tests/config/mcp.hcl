@@ -15,8 +15,17 @@ health {
 mcp {
   enabled        = true
   storage_file   = "/data/mcp_keys.json"
-  usage_file     = "/data/mcp_usage.json"
   manage_from_ui = true
+
+  # The usage of the keys: the file of this instance is /data/chdash-mcp-test.jsonl.zst (a name that the tests know: the host name of a
+  # container changes). Other instances can share /data: the tests put the files of a few instances there.
+  # all_keys is on: a key that names mcp_analysis_all_usage reads the usage of every key (the tests make such keys; "*" never gives it).
+  usage {
+    enabled  = true
+    dir      = "/data"
+    instance = "chdash-mcp-test"
+    all_keys = true
+  }
 
   max_rows              = 100
   max_result_bytes      = 20000

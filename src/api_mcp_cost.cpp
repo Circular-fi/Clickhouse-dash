@@ -2,6 +2,10 @@
 // statement of a call of the key is named for it (its query_id, mcp_cost.hpp); this route reads system.query_log of the host of the key
 // with the RUNNER account and the bounds of System > Queries, as that page does (the MCP user never reads query_log), and keeps the answer
 // 60 s. A read of the page: handle_api_mcp checked its guard. Never SQL, never data: counts, users, tools and the names of the tables.
+//
+// The tool mcp_analysis_my_usage reads the same cost for its own key (Server::mcp_tool_cost): the same cache and the same read (answer_mcp_cost),
+// written for a client that is no administrator. The tool runs on the thread of POST /mcp, whose scope is no scope of MCP (it has no query_id
+// of a key): the read of system.query_log is not a statement of the key, so it is never counted in the cost that it reads.
 
 #include "server.hpp"
 
@@ -105,10 +109,15 @@ struct Unavailable {
   std::string suggested_window;
 };
 
+// The answer of the page (`for_page`): the id of the key, why there is no cost, and the text of the error and the GRANT statement for the
+// administrator. The answer of the tool has none of these: the id is the caller's own, and a cost that cannot be read has its own object
+// (write_tool_unavailable).
 void write_answer(Writer& w, const std::string& id, const std::string& host, const McpCostWindow& window, int64_t max_lookback_hours,
-                  const McpCost* cost, const Unavailable& unavailable, const std::string& mcp_user, const std::string& system_user) {
+                  const McpCost* cost, const Unavailable& unavailable, const std::string& mcp_user, const std::string& system_user, bool for_page) {
   w.StartObject();
-  w.Key("id"); put(w, id);
+  if (for_page) {
+    w.Key("id"); put(w, id);
+  }
   w.Key("host"); put(w, host);
   const McpCostWindow& read = cost ? cost->window : window;
   w.Key("window"); put(w, read.name);
@@ -120,10 +129,12 @@ void write_answer(Writer& w, const std::string& id, const std::string& host, con
   if (cost) put(w, mcp_iso_utc(cost->read_at_s));
   else w.Null();
   w.Key("status"); w.String(cost ? "ok" : "unavailable");
-  w.Key("reason"); put(w, unavailable.reason);
-  w.Key("error"); put(w, unavailable.error.substr(0, 300));
-  w.Key("statement"); put(w, unavailable.statement);
-  w.Key("suggested_window"); put(w, unavailable.suggested_window);
+  if (for_page) {
+    w.Key("reason"); put(w, unavailable.reason);
+    w.Key("error"); put(w, unavailable.error.substr(0, 300));
+    w.Key("statement"); put(w, unavailable.statement);
+    w.Key("suggested_window"); put(w, unavailable.suggested_window);
+  }
 
   // The rows by user and tool, summed by user (the identities) and by tool. A tool that is not of the catalog (a query_id that another
   // user of ClickHouse made up) is "other"; a user that is neither of the host's MCP identities is "other" too.
@@ -182,6 +193,40 @@ void write_answer(Writer& w, const std::string& id, const std::string& host, con
   w.EndObject();
 }
 
+// What a client reads when the cost cannot be read, in ChDash's own words: a ClickHouse error can name a server, and the GRANT statement names the
+// account of the runner, which the administrator reads on the page.
+std::string tool_reason_text(const std::string& reason, const std::string& suggested_window) {
+  if (reason == "no_host") return "the host of the key is not configured";
+  if (reason == "runner_unavailable") return "ChDash cannot connect to the account that reads system.query_log on the host of the key";
+  if (reason == "not_granted") {
+    return "the account that ChDash reads system.query_log with cannot read it: the administrator must grant it SELECT on system.query_log";
+  }
+  if (reason == "disabled") return "system.query_log does not exist on the host of the key";
+  if (reason == "window_too_large") {
+    return "the window holds more of system.query_log than ChDash reads in one go" +
+           (suggested_window.empty() ? std::string() : ": ask for a window of " + suggested_window);
+  }
+  if (reason == "readonly_account") return "the account that ChDash reads system.query_log with refuses the settings of the read";
+  if (reason == "unsupported") return "system.query_log of this ClickHouse server lacks a column that the read needs";
+  if (reason == "busy") return "too many heavy reads are running for the host of the key: ask again in a moment";
+  if (reason == "stopping") return "ChDash is stopping";
+  return "the read of system.query_log failed: the administrator finds why on the page of the key (the cost of a key)";
+}
+
+// The answer of the tool for a cost that cannot be read: no figures (zeros would read as "no cost"), the reason and a sentence.
+void write_tool_unavailable(Writer& w, const std::string& host, const McpCostWindow& window, const Unavailable& unavailable) {
+  w.StartObject();
+  w.Key("host"); put(w, host);
+  w.Key("window"); put(w, window.name);
+  w.Key("status"); w.String("unavailable");
+  w.Key("reason"); put(w, unavailable.reason);
+  w.Key("message"); put(w, tool_reason_text(unavailable.reason, unavailable.suggested_window));
+  if (!unavailable.suggested_window.empty()) {
+    w.Key("suggested_window"); put(w, unavailable.suggested_window);
+  }
+  w.EndObject();
+}
+
 } // namespace
 
 void Server::handle_mcp_key_cost(const httplib::Request& req, httplib::Response& res, int64_t now) {
@@ -213,25 +258,50 @@ void Server::handle_mcp_key_cost(const httplib::Request& req, httplib::Response&
   const auto window = mcp_cost_window(asked.empty() ? "24h" : asked, cfg_.system.query_log_max_lookback_hours, now);
   if (!window) return fail(res, 400, "validation", "window must be 1h, 6h, 24h or 7d", "window", "invalid");
 
+  const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
+  // A read that the browser abandons stops, and so does the wait for a place of heavy work.
+  const std::function<bool()> stop = [this, &req] { return stopping() || (req.is_connection_closed && req.is_connection_closed()); };
+  const McpCostAnswer answer = answer_mcp_cost(id, host_id, *window, refresh, true, stop, now);
+  if (answer.busy || answer.stopping) {
+    send_no_place(res);
+    no_store(res);
+    return;
+  }
+  // The audit line of the page's reads of a key (api_mcp.cpp writes the others).
+  const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+  log_event(LogLevel::Info, "mcp.call",
+            {{"key", "-"}, {"call", "keys/cost"}, {"host", host_id.empty() ? std::string("-") : host_id}, {"status", answer.status + ":" + id},
+             {"duration_ms", static_cast<int64_t>(duration_ms)}, {"rows", static_cast<uint64_t>(0)}});
+  res.status = 200;
+  no_store(res);
+  res.set_content(answer.json.data(), answer.json.size(), "application/json");
+}
+
+// The read that the page and the tool share: the cache, the runner account, the heavy work of a host. `host_id` is the host of the key.
+Server::McpCostAnswer Server::answer_mcp_cost(const std::string& key_id, const std::string& host_id, const McpCostWindow& window, bool refresh,
+                                              bool for_page, const std::function<bool()>& stop, int64_t now) {
+  McpCostAnswer out;
+  const int64_t lookback = cfg_.system.query_log_max_lookback_hours;
   const HostSpec* host = host_id.empty() ? nullptr : find_host(cfg_.hosts, host_id);
   rapidjson::StringBuffer sb;
   Writer w(sb);
-  std::string status = "ok";
+  out.status = "ok";
   if (!host) {
     Unavailable unavailable{"no_host", "the host of the key is not configured", "", ""};
-    write_answer(w, id, host_id, *window, cfg_.system.query_log_max_lookback_hours, nullptr, unavailable, "", "");
-    status = "no_host";
+    if (for_page) write_answer(w, key_id, host_id, window, lookback, nullptr, unavailable, "", "", true);
+    else write_tool_unavailable(w, host_id, window, unavailable);
+    out.status = "no_host";
   } else {
     // A scan of query_log is heavy work for the host, as System > Queries is.
-    const auto ticket = admit(WorkClass::Heavy, host->id, req, res);
+    const auto ticket = acquire_ticket(WorkClass::Heavy, host->id, stop);
     if (!ticket) {
-      no_store(res);
-      return;
+      out.stopping = stopping();
+      out.busy = !out.stopping;
+      return out;
     }
-    const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
     const uint64_t max_rows = cfg_.system.query_log_max_rows;
     const auto result = mcp_cost_cache_.get(
-        host->id + '\x1f' + id + '\x1f' + window->name,
+        host->id + '\x1f' + key_id + '\x1f' + window.name,
         [&](McpCost& value, std::string& code, std::string& message) {
           std::string error;
           auto db = open_system_runner_executor(*host, &error);
@@ -241,7 +311,7 @@ void Server::handle_mcp_key_cost(const httplib::Request& req, httplib::Response&
             return false;
           }
           try {
-            value = mcp_read_cost(*db, id, *window, max_rows, now);
+            value = mcp_read_cost(*db, key_id, window, max_rows, now);
             return true;
           } catch (const std::exception& e) {
             db->invalidate();
@@ -257,20 +327,45 @@ void Server::handle_mcp_key_cost(const httplib::Request& req, httplib::Response&
       unavailable.reason = result.error_code.empty() ? "failed" : result.error_code;
       unavailable.error = result.error_message;
       if (unavailable.reason == "not_granted") unavailable.statement = monitor_grant_hint("query_log", user_of(host->runner_uri), "runner user");
-      if (unavailable.reason == "window_too_large" && window->name == "7d") unavailable.suggested_window = "24h";
-      status = unavailable.reason;
+      if (unavailable.reason == "window_too_large" && window.name == "7d") unavailable.suggested_window = "24h";
+      out.status = unavailable.reason;
     }
-    write_answer(w, id, host->id, *window, cfg_.system.query_log_max_lookback_hours, cost, unavailable, user_of(host->mcp_uri),
-                 user_of(host->system_uri.empty() ? host->runner_uri : host->system_uri));
+    if (for_page || cost) {
+      write_answer(w, key_id, host->id, window, lookback, cost, unavailable, user_of(host->mcp_uri),
+                   user_of(host->system_uri.empty() ? host->runner_uri : host->system_uri), for_page);
+    } else {
+      write_tool_unavailable(w, host->id, window, unavailable);
+    }
   }
-  // The audit line of the page's reads of a key (api_mcp.cpp writes the others).
-  const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-  log_event(LogLevel::Info, "mcp.call",
-            {{"key", "-"}, {"call", "keys/cost"}, {"host", host_id.empty() ? std::string("-") : host_id}, {"status", status + ":" + id},
-             {"duration_ms", static_cast<int64_t>(duration_ms)}, {"rows", static_cast<uint64_t>(0)}});
-  res.status = 200;
-  no_store(res);
-  res.set_content(sb.GetString(), sb.GetSize(), "application/json");
+  out.json.assign(sb.GetString(), sb.GetSize());
+  return out;
+}
+
+// The cost of the key that the tool mcp_analysis_my_usage asks for, a JSON object. The window of the usage is the one of the cost when the cost
+// has it (1h, 6h, 24h, 7d), else 7d, the longest (the object says the window that it read). A cost that cannot be read says why, in its status:
+// the tool still gives the usage.
+std::string Server::mcp_tool_cost(const McpKey& key, const std::string& usage_window, int64_t now) {
+  rapidjson::StringBuffer sb;
+  Writer w(sb);
+  if (!cfg_.system.top_queries_enabled()) {
+    w.StartObject();
+    w.Key("status"); w.String("not_enabled");
+    w.Key("message"); w.String("the cost of a key reads system.query_log as System > Queries does, and system.top_queries is off in the ChDash configuration");
+    w.EndObject();
+    return std::string(sb.GetString(), sb.GetSize());
+  }
+  const bool as_asked = usage_window == "1h" || usage_window == "6h" || usage_window == "24h" || usage_window == "7d";
+  const auto window = mcp_cost_window(as_asked ? usage_window : "7d", cfg_.system.query_log_max_lookback_hours, now);
+  // The stop of the call: the client of MCP went away, or the server stops (the scope of POST /mcp says so).
+  std::function<bool()> stop = [this] { return stopping(); };
+  if (const ChQueryLimits* scope = ChQueryScope::current(); scope && scope->canceled) stop = scope->canceled;
+  const McpCostAnswer answer = answer_mcp_cost(key.id, key.hosts.empty() ? std::string() : key.hosts.front(), *window, false, false, stop, now);
+  if (answer.busy || answer.stopping) {
+    Unavailable unavailable{answer.stopping ? "stopping" : "busy", "", "", ""};
+    write_tool_unavailable(w, key.hosts.empty() ? std::string() : key.hosts.front(), *window, unavailable);
+    return std::string(sb.GetString(), sb.GetSize());
+  }
+  return answer.json;
 }
 
 } // namespace chdash

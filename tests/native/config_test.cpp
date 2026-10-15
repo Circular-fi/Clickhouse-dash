@@ -10,7 +10,9 @@
 #include "config_schema.hpp"
 #include "ch_uri.hpp"
 #include "hcl.hpp"
+#include "mcp_usage_store.hpp"
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cstdlib>
@@ -239,6 +241,90 @@ void test_values_and_derived_settings() {
   CHECK(worker && listen && mode);
 }
 
+// ---- the usage of the MCP keys: mcp { usage { } } ----
+
+void test_mcp_usage_block() {
+  // The defaults of the block, and the ranges that the table gives: nothing is counted unless it is turned on.
+  const AppConfig defaults = load("");
+  CHECK(!defaults.mcp.usage.enabled);
+  CHECK_EQ(defaults.mcp.usage.storage, std::string("files"));
+  CHECK_EQ(defaults.mcp.usage.dir, std::string(""));
+  CHECK_EQ(defaults.mcp.usage.instance, std::string(""));
+  CHECK_EQ(defaults.mcp.usage.retention_days, int64_t(90));
+  CHECK(!defaults.mcp.usage.all_keys);
+  std::set<std::string> keys;
+  for (const auto& key : config::schema()) {
+    if (key.block != "mcp.usage") continue;
+    keys.insert(key.key);
+    CHECK(!key.read_by_code);
+    if (key.key == "retention_days") CHECK_EQ(key.range, std::string("1 to 365"));
+    if (key.key == "storage") CHECK_EQ(key.type, std::string("one of files"));
+    CHECK_EQ(key.declared_default, key.def);
+  }
+  CHECK(keys == std::set<std::string>({"enabled", "storage", "dir", "instance", "retention_days", "all_keys"}));
+  CHECK(config::keys_of("mcp").size() > 0);
+  for (const auto& key : config::schema()) {
+    CHECK(key.block + "." + key.key != "mcp.usage_file" && key.block + "." + key.key != "mcp.usage_retention_days");  // replaced by the block
+  }
+  CHECK_EQ(load("mcp { usage { retention_days = 1 } }").mcp.usage.retention_days, int64_t(1));
+  CHECK_EQ(load("mcp { usage { retention_days = 365 } }").mcp.usage.retention_days, int64_t(365));
+  CHECK(contains(error_of("mcp { usage { retention_days = 0 } }"), "mcp.usage.retention_days must be between 1 and 365, not 0 (days)"));
+  CHECK(contains(error_of("mcp { usage { retention_days = 366 } }"), "mcp.usage.retention_days must be between 1 and 365, not 366"));
+  CHECK(contains(error_of("mcp { usage { storage = \"database\" } }"), "mcp.usage.storage must be files, not \"database\""));
+  CHECK(contains(error_of("mcp { usage { enabled = 1 } }"), "mcp.usage.enabled must be a boolean"));
+  CHECK(contains(error_of("mcp { usage { dir = 5 } }"), "mcp.usage.dir must be a string"));
+  CHECK(contains(error_of("mcp { usage { bogus = 1 } }"), "mcp.usage: unknown attribute bogus"));
+  CHECK(contains(error_of("mcp { usage { extra { } } }"), "mcp.usage: unknown block extra"));
+  CHECK(contains(error_of("mcp { usage { } usage { } }"), "block usage must appear exactly once"));
+  CHECK(contains(error_of("mcp { usage_file = \"/x\" }"), "mcp: unknown attribute usage_file"));  // the old keys are gone
+  CHECK(contains(error_of("mcp { usage_retention_days = 7 }"), "mcp: unknown attribute usage_retention_days"));
+  // Off: not checked (a block that is off may name a directory that is not there).
+  CHECK_EQ(error_of("mcp { usage { enabled = false\n dir = \"/no/such/dir\"\n instance = \"not valid\" } }"), std::string(""));
+
+  // On, with MCP on: the directory and the name of the instance are checked.
+  const std::string mcp_hosts = "clickhouse { host { name = \"h\"\n runner_uri = \"clickhouse://r:p@h:9000\"\n system_uri = \"clickhouse://s:p@h:9000\"\n "
+                                "mcp_uri = \"clickhouse://m:p@h:9000\" } }\n";
+  const std::string key = "key { name = \"k\"\n secret = \"a11da7a0-0000-4000-8000-000000000001\"\n hosts = [\"h\"]\n tools = [\"*\"]\n databases = [\"*\"] }\n";
+  const auto usage = [&](const std::string& attrs) { return "mcp { enabled = true\n" + key + "usage {\n" + attrs + "\n}\n}\n" + mcp_hosts; };
+  const std::string usage_dir = dir + "/usage";
+  ::mkdir(usage_dir.c_str(), 0700);
+  const AppConfig on = [&] {
+    const std::string path = dir + "/usage.hcl";
+    write_file(path, usage(" enabled = true\n dir = \"" + usage_dir + "\"\n instance = \"chdash-0\"\n retention_days = 30\n all_keys = true"));
+    return load_config_from_file(path);
+  }();
+  CHECK(on.mcp.usage.enabled);
+  CHECK_EQ(on.mcp.usage.dir, usage_dir);
+  CHECK_EQ(on.mcp.usage.instance, std::string("chdash-0"));
+  CHECK_EQ(on.mcp.usage.retention_days, int64_t(30));
+  CHECK(on.mcp.usage.all_keys);
+  bool named = false;
+  for (const auto& [name, value] : config::effective_values(on)) {
+    if (name == "mcp.usage.instance") named = value == "chdash-0";
+  }
+  CHECK(named);
+  const auto failure = [&](const std::string& attrs) { return error_of(usage(attrs), false); };
+  CHECK(contains(failure(" enabled = true\n instance = \"chdash-0\""), "mcp.usage.dir is required when mcp.usage.enabled = true"));
+  CHECK(contains(failure(" enabled = true\n instance = \"chdash-0\"\n dir = \"" + dir + "/missing\""), "mcp.usage.dir " + dir + "/missing: the directory does not exist"));
+  CHECK(contains(failure(" enabled = true\n instance = \"has space\"\n dir = \"" + usage_dir + "\""), "mcp.usage.instance \"has space\" must be 1 to 64 characters"));
+  CHECK(contains(failure(" enabled = true\n instance = \"" + std::string(65, 'x') + "\"\n dir = \"" + usage_dir + "\""), "mcp.usage.instance"));
+  // An instance that has no name is called by the host name, when that is a name of an instance.
+  const std::string host_name = mcp_usage_host_name();
+  if (mcp_valid_usage_instance(host_name)) {
+    const std::string path = dir + "/usage-host.hcl";
+    write_file(path, usage(" enabled = true\n dir = \"" + usage_dir + "\""));
+    CHECK_EQ(load_config_from_file(path).mcp.usage.instance, host_name);
+  }
+  // The usage of an instance that is not valid is never rewritten: the start stops, and the file is as it was.
+  write_file(usage_dir + "/chdash-1.jsonl.zst", "not a zstd file");
+  const std::string message = failure(" enabled = true\n instance = \"chdash-1\"\n dir = \"" + usage_dir + "\"");
+  CHECK(contains(message, "chdash-1.jsonl.zst") && contains(message, "the file is not changed"));
+  std::ifstream still(usage_dir + "/chdash-1.jsonl.zst", std::ios::binary);
+  std::stringstream content;
+  content << still.rdbuf();
+  CHECK_EQ(content.str(), std::string("not a zstd file"));
+}
+
 // ---- the URIs of the hosts (ARCH-B-104) ----
 
 std::string host_error(const std::string& runner_uri, const std::string& extra = "") {
@@ -339,6 +425,7 @@ int main() {
   test_the_bounds_of_every_number();
   test_types_unknown_keys_and_enums();
   test_values_and_derived_settings();
+  test_mcp_usage_block();
   test_uris();
   test_hcl();
   std::cout << g_checks << " checks, " << g_failures << " failures" << std::endl;

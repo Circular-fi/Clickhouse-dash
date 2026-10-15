@@ -42,6 +42,17 @@ std::optional<bool> opt_bool(const rapidjson::Value& args, const char* name) {
   return it->value.GetBool();
 }
 
+int64_t opt_int(const rapidjson::Value& args, const char* name, int64_t lo, int64_t hi, int64_t fallback) {
+  const auto it = args.FindMember(name);
+  if (it == args.MemberEnd() || it->value.IsNull()) return fallback;
+  if (!it->value.IsInt64()) fail("invalid_argument", std::string(name) + " must be a whole number");
+  const int64_t value = it->value.GetInt64();
+  if (value < lo || value > hi) {
+    fail("invalid_argument", std::string(name) + " must be between " + std::to_string(lo) + " and " + std::to_string(hi));
+  }
+  return value;
+}
+
 // ---- the call context ------------------------------------------------------------------------
 
 std::vector<std::string> key_hosts(const McpKey& key, const McpToolsConfig& config) {
@@ -71,7 +82,7 @@ void resolve_host(Ctx& ctx, const rapidjson::Value& args) {
 }
 
 Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db, const std::string& tool) {
-  Ctx ctx{key, config, db, nullptr, "", 0, {}, {}, {}, {}, 0};
+  Ctx ctx{key, config, db, nullptr, nullptr, 0, "", 0, {}, {}, {}, {}, 0};
   ctx.max_rows = config.max_rows;
   if (key.max_rows) ctx.max_rows = std::min(ctx.max_rows, *key.max_rows);
   int64_t timeout = config.query_timeout_seconds;

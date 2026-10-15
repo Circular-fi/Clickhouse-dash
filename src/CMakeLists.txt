@@ -72,7 +72,7 @@ if (CHDASH_BUILD_CODEC_TESTS)
 endif()
 
 # The tools of MCP: the dispatch, what the tools share, and the tools by family.
-set(CHDASH_MCP_TOOL_SOURCES mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp)
+set(CHDASH_MCP_TOOL_SOURCES mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp mcp_tools_analysis.cpp)
 
 # The query library: the store, the file format, the rules of the tree, the import, the reading of a request.
 set(CHDASH_QUERY_LIBRARY_SOURCES query_library.cpp query_library_file.cpp query_library_import.cpp query_library_read.cpp query_library_request.cpp query_library_rules.cpp)
@@ -89,7 +89,7 @@ if (CHDASH_BUILD_MCP_TESTS)
   # and the startup errors of the mcp { } block (no ClickHouse server needed). Also the HTTP hardening
   # (the guard of the writes, the page policy, the asset versions), the random source and the log lines.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
-    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_usage.cpp mcp_sql.cpp mcp_protocol.cpp ${CHDASH_MCP_TOOL_SOURCES}
+    mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_usage.cpp mcp_usage_state.cpp mcp_usage_store.cpp mcp_sql.cpp mcp_protocol.cpp ${CHDASH_MCP_TOOL_SOURCES}
     error_envelope.cpp request_context.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
@@ -229,7 +229,7 @@ endif()
 if (CHDASH_BUILD_CONFIG_TESTS)
   # The configuration file: the table of keys and their bounds, the errors, the derived values, the URIs, the HCL parser.
   add_executable(chdash_config_test ../tests/native/config_test.cpp
-    config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ch_query.cpp error_envelope.cpp mcp_keys.cpp mcp_usage.cpp mcp_scope.cpp mcp_api_tools.cpp mcp_identity.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} jwt.cpp
+    config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ch_query.cpp error_envelope.cpp mcp_keys.cpp mcp_usage.cpp mcp_usage_state.cpp mcp_usage_store.cpp mcp_scope.cpp mcp_api_tools.cpp mcp_identity.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} jwt.cpp
     secure_random.cpp log.cpp health_runner.cpp ch_client_pool.cpp)
   target_include_directories(chdash_config_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_config_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
@@ -423,6 +423,8 @@ if (CHDASH_BUILD_APP)
     mcp_api_tools.cpp
     mcp_keys.cpp
     mcp_usage.cpp
+    mcp_usage_state.cpp
+    mcp_usage_store.cpp
     mcp_sql.cpp
     mcp_protocol.cpp
     ${CHDASH_MCP_TOOL_SOURCES}

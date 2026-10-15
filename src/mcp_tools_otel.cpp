@@ -19,17 +19,6 @@ namespace mcp_tools {
 
 namespace {
 
-int64_t opt_int(const rapidjson::Value& args, const char* name, int64_t lo, int64_t hi, int64_t fallback) {
-  const auto it = args.FindMember(name);
-  if (it == args.MemberEnd() || it->value.IsNull()) return fallback;
-  if (!it->value.IsInt64()) fail("invalid_argument", std::string(name) + " must be a whole number");
-  const int64_t value = it->value.GetInt64();
-  if (value < lo || value > hi) {
-    fail("invalid_argument", std::string(name) + " must be between " + std::to_string(lo) + " and " + std::to_string(hi));
-  }
-  return value;
-}
-
 std::string qualified(const std::string& database, const std::string& table) {
   return sql::quote_ident(database) + "." + sql::quote_ident(table);
 }

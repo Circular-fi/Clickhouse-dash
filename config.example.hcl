@@ -257,10 +257,16 @@ mcp {
   # storage_file = "/var/lib/chdash/mcp_keys.json"
   manage_from_ui = true  # false: the page is read-only
   # auth_header  = "Authorization"  # the header of the key; a name like "X-ChDash-Key" when a proxy in front uses Authorization
-  # What each key did (calls, errors, clients), written every minute and at the stop. Without it, the usage is
-  # in memory and a restart clears it. The directory must exist; a file of its own (not storage_file).
-  # usage_file         = "/var/lib/chdash/mcp_usage.json"
-  usage_retention_days = 90  # days of usage kept for each key, also after it is deleted (1 to 365)
+  # What each key did (calls, errors, clients). Off by default: nothing is counted. When it is on, each ChDash (an instance)
+  # keeps its counts in a file of its own in a directory that several ChDash can share; every answer adds up the instances.
+  usage {
+    enabled        = false
+    # storage      = "files"                    # the only mode for now: JSON Lines compressed with zstd
+    # dir          = "/var/lib/chdash/usage"    # required when enabled. It must exist and ChDash must create files in it
+    # instance     = "chdash-0"                 # the name of this ChDash in the files (A-Z a-z 0-9 . _ -); default: the host name
+    retention_days = 90                         # days of usage kept for each key, also after it is deleted (1 to 365)
+    # all_keys     = false                      # true: a key that has mcp_analysis_all_usage in its tools reads the usage of all the keys
+  }
 
   # Global caps. A key can only lower max_rows and timeout_seconds.
   max_rows              = 1000

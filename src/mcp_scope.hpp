@@ -36,6 +36,22 @@ struct McpToolSection {
 // In the order of the page.
 const std::vector<McpToolSection>& mcp_tool_sections();
 
+// What a tool needs of the configuration to exist (McpToolInfo::needs): a set of these flags.
+enum McpToolNeeds : unsigned {
+  kMcpNeedsNothing = 0,
+  kMcpNeedsUsage = 1,    // mcp.usage.enabled: the usage of the keys is counted
+  kMcpNeedsAllKeys = 2,  // mcp.usage.all_keys, which only counts with the usage: a key may read the usage of every key
+};
+
+// What the configuration turns on, for the tools that need something of it. A tool whose needs are not met is not offered: tools/list leaves it
+// out and tools/call answers `not_enabled`, also for a key that holds it.
+struct McpToolAvailability {
+  bool usage = false;
+  bool all_keys = false;
+  // Everything on: what a key is entitled to, whatever the configuration turns on.
+  static McpToolAvailability everything() { return {true, true}; }
+};
+
 struct McpToolInfo {
   const char* name;
   // The id of a group of mcp_tool_groups().
@@ -49,10 +65,21 @@ struct McpToolInfo {
   const McpApiTool* api = nullptr;
   // A section of the family (mcp_tool_sections), or null.
   const char* section = nullptr;
+  // Every key has the tool, whatever its list of tools says (an empty list too): the analysis of the key's own limits and usage.
+  bool always = false;
+  // "*" does not include the tool: a key has it only when its list of tools names it.
+  bool explicit_only = false;
+  // What the tool needs of the configuration (McpToolNeeds).
+  unsigned needs = kMcpNeedsNothing;
 };
 
 const std::vector<McpToolInfo>& mcp_tool_catalog();
 const McpToolInfo* mcp_find_tool(std::string_view name);
+
+// Whether the configuration offers the tool now (its needs are met).
+bool mcp_tool_available(const McpToolInfo& tool, const McpToolAvailability& availability);
+// Why it does not, as a sentence for a client (the setting that is off); empty when the tool is offered.
+std::string mcp_tool_unavailable_reason(const McpToolInfo& tool, const McpToolAvailability& availability);
 
 // What a tool reads besides the tables that the key lets it see: a set of these flags.
 enum McpReads : unsigned {
@@ -105,11 +132,15 @@ bool mcp_scope_host_allowed(const std::vector<std::string>& hosts, std::string_v
 std::vector<std::string> mcp_scope_hosts(const std::vector<std::string>& hosts,
                                          const std::vector<std::string>& available);
 
-// The tools the key holds: `*` expands to every tool the key may hold, unknown
-// names drop, and the SQL tools drop unless the data scope is `*`.
+// The tools the key holds, in the order of the catalog: `*` expands to every tool the key may hold but those that `*` does not give
+// (explicit_only), a tool that every key has (always) is there whatever the list says, unknown names drop, and the SQL tools drop unless
+// the data scope is `*`. A tool that `availability` does not offer drops too: the default holds what the key is entitled to, whatever the
+// configuration turns on.
 std::vector<std::string> mcp_effective_tools(const std::vector<std::string>& tools,
-                                             const std::vector<std::string>& databases);
+                                             const std::vector<std::string>& databases,
+                                             const McpToolAvailability& availability = McpToolAvailability::everything());
 
+// The key is entitled to the tool (its list and its data scope), whether or not the configuration offers it now (mcp_tool_available).
 bool mcp_scope_tool_allowed(const std::vector<std::string>& tools, const std::vector<std::string>& databases,
                             std::string_view tool);
 

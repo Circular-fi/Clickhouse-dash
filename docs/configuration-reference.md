@@ -218,8 +218,6 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 | `enabled` | boolean | `false` |  | Serve the MCP endpoint, POST /mcp. |
 | `storage_file` | text |  |  | The JSON file of the keys that are made on the MCP page. |
 | `manage_from_ui` | boolean | `true` |  | Allow the MCP page to make and delete keys. When false, a change is refused with 403 manage_disabled. |
-| `usage_file` | text |  |  | The JSON file of the usage of the keys, written every minute and at the stop. Empty: the usage is in memory, since the start. |
-| `usage_retention_days` | integer | `90` | 1 to 365 days | How long the usage of a key is kept (also after the key is deleted). It is kept by the minute, 5 minutes and 15 minutes up to the day, then by 3 hours (from 7 days), by 12 hours (from 30 days) and by the day. |
 | `max_rows` | integer | `1000` | 1 to 1000000 rows | Rows that a call returns, at most. A key can lower it. |
 | `max_result_bytes` | integer | `1048576` | 1024 to 268435456 bytes | Bytes that a call returns, at most. |
 | `query_timeout_seconds` | integer | `30` | 1 to 3600 seconds | The time of one call. A key can lower it. |
@@ -227,3 +225,14 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 | `max_memory_bytes` | integer | `1073741824` | 16777216 to 1099511627776 bytes | max_memory_usage of a call. |
 | `max_rows_to_read` | integer | `0` | 0 to 1000000000000000 rows | max_rows_to_read of a call. 0 = no limit from ChDash. |
 | `rate_limit_per_minute` | integer | `600` | 0 to 1000000 calls | Calls that one key may make in one minute. 0 = no limit. |
+
+## `mcp.usage`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `enabled` | boolean | `false` |  | Count what each key does (requests, errors, clients, time, rows, bytes) and keep it. Off: nothing is counted, the routes of the usage answer 404 not_enabled, and the Keys table has no Used column. |
+| `storage` | one of files | `files` |  | Where the usage is kept. Only files exists for now: one file for each instance of ChDash, in the directory dir. A database will come later. |
+| `dir` | text |  |  | The directory of the usage files. Required when the usage is on. It must exist, and ChDash must be able to create files in it. Several ChDash can share it: each one writes its own file (the name of its instance and .jsonl.zst) and reads the others, so the answers add up the instances. |
+| `instance` | text |  |  | The name of this ChDash in the usage files: 1 to 64 characters of A-Z a-z 0-9 . _ -. Two instances that run at the same time must not share it. Empty: the host name of the machine (the start fails when it is not a valid name: set this key). |
+| `retention_days` | integer | `90` | 1 to 365 days | How long the usage of a key is kept (also after the key is deleted). It is kept by the minute, 5 minutes and 15 minutes up to the day, then by 3 hours (from 7 days), by 12 hours (from 30 days) and by the day. |
+| `all_keys` | boolean | `false` |  | Let a key read the usage of all the keys of all the instances (the tool mcp_analysis_all_usage, which the tools of the key must also name). Never the ClickHouse cost of another key. |

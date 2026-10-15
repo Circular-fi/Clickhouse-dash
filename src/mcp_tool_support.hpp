@@ -39,6 +39,8 @@ void reject_unknown(const rapidjson::Value& args, std::initializer_list<const ch
 std::optional<std::string> opt_string(const rapidjson::Value& args, const char* name, size_t max_bytes = 4096);
 std::string req_string(const rapidjson::Value& args, const char* name, size_t max_bytes = 4096);
 std::optional<bool> opt_bool(const rapidjson::Value& args, const char* name);
+// A whole number in [lo, hi], `fallback` when the argument is absent or null.
+int64_t opt_int(const rapidjson::Value& args, const char* name, int64_t lo, int64_t hi, int64_t fallback);
 
 // ---- the call context ----
 struct Ctx {
@@ -46,6 +48,10 @@ struct Ctx {
   const McpToolsConfig& config;
   McpDatabase& db;
   McpApiClient* api = nullptr;
+  // The analysis of the keys (mcp_tools_analysis.cpp): the rate limit, the usage and the cost. Null when the server offers none.
+  McpAnalysis* analysis = nullptr;
+  // The time of the call, in Unix seconds.
+  int64_t now = 0;
   std::string host;
   int64_t max_rows = 0;
   McpDbLimits user_limits;

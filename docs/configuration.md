@@ -491,6 +491,12 @@ mcp {
   rate_limit_per_minute = 600
   allowed_origins       = []
 
+  usage {
+    enabled  = true
+    dir      = "/var/lib/chdash/usage"
+    instance = "chdash-0"
+  }
+
   key {
     name      = "ci-bot"
     secret    = "3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f"
@@ -505,6 +511,7 @@ mcp {
 - Each `key` block has a `name`, one host in `hosts`, and exactly one of `secret` and `secret_file` (a UUID version 4; a hash alone, `secret_sha256`, is refused). The keys of the page are in `storage_file` (the hash and the first 8 characters of the secret, mode 0600; ChDash never stores a secret, and the page shows it once, when you make the key). The two sources add up.
 - A host without `mcp_uri` is invisible to MCP. The password of the MCP user is in `mcp_uri`. It never falls back to the runner or system credentials, nor to `password_file`.
 - Each limit is a global cap. A key can only lower `max_rows` and `timeout_seconds`.
+- The `usage {}` block turns on the usage of the keys (what each key did). It is off by default: nothing is counted. When it is on, `dir` is required: a directory that exists and where ChDash can create files. Each ChDash keeps its counts in a file of its own there (`<instance>.jsonl.zst`, JSON Lines compressed with zstd), and several ChDash can share the directory: the answers sum them. `instance` names this ChDash (the host name by default), `retention_days` (default 90) says how long the usage is kept, `all_keys` lets a key read the usage of all the keys (refer to [`docs/mcp.md`](mcp.md#the-usage-block)).
 - `/api/version` reports `features.mcp = {enabled}`. `/api/mcp/meta` always answers.
 
 [`docs/mcp.md`](mcp.md) describes the keys, the tools, the endpoint, the API, the grants of the ClickHouse user and the startup errors.

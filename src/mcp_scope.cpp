@@ -8,7 +8,8 @@ namespace chdash {
 
 const std::vector<McpToolGroup>& mcp_tool_groups() {
   // What a person thinks of: the data, the Explorer page, the System page, Observability (traces, logs and metrics), the
-  // Query page, and free SQL. A family has at least two tools, so no card is a lone check box.
+  // Query page, free SQL, and the analysis of the keys themselves. A family has at least two tools, so no card is a lone
+  // check box (the analysis has one only while the usage is off: the page lists the tools that are offered).
   static const std::vector<McpToolGroup> groups = {
       {"data", "Data", "hosts, databases, tables and columns, and the rows of a table that ClickHouse Dash selects"},
       {"explorer", "Explorer", "the Explorer page: catalog, tables, functions, storage and lineage"},
@@ -16,6 +17,7 @@ const std::vector<McpToolGroup>& mcp_tool_groups() {
       {"observability", "Observability", "traces, logs and metrics: the pages and the simple search tools"},
       {"query", "Query", "the Query page: saved queries, the SQL formatter and the record of a run"},
       {"sql", "SQL", "free SQL written by the client"},
+      {"mcp_analysis", "MCP analysis", "your own limits and usage, and the usage of all the keys"},
   };
   return groups;
 }
@@ -104,6 +106,32 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
     for (const auto& api : mcp_api_tools()) {
       all.push_back({api.name, api.group, api.title, api.description, false, &api, api.section});
     }
+    // The analysis of the keys themselves (the tools of the mcp_analysis family). Every key has the first two, whatever its list of tools
+    // says: a key may always know its own limits, and its own usage once the usage is counted. The last one shows other keys (their names,
+    // hosts, clients and activity): `*` does not give it, the list of the key must name it, and the configuration must allow it
+    // (mcp.usage.all_keys).
+    // Columns after the description: needs_all_data, api, section, always, explicit_only, needs.
+    all.push_back({"mcp_analysis_my_limits", "mcp_analysis", "My limits",
+                   "The limits of your key: calls per minute and what is left, rows, seconds, and the size caps, each with its source. The "
+                   "rate limit is per ChDash instance, and the call that asks has already taken its token. `source` is `key` (your key lowers "
+                   "the cap), `mcp` (the ChDash configuration), `clickhouse` (the settings profile of the ClickHouse user of your host) or "
+                   "`both` (the last two are equal). `null` means no limit. No argument.",
+                   false, nullptr, nullptr, true, false, kMcpNeedsNothing});
+    all.push_back({"mcp_analysis_my_usage", "mcp_analysis", "My usage",
+                   "What your own key did in a window: requests, errors, time, rows and bytes, by tool, error code and client. The ChDash "
+                   "instances that share the usage are summed. `window` is 1h, 6h, 24h (default), 7d, 30d, 90d or 365d, as far as the "
+                   "retention goes. `series` adds one point for each step of the window. `include_cost` adds what the statements of your key "
+                   "cost ClickHouse (read from system.query_log; a window of 30d or more reads 7d; kept 60 seconds). `instance` is a list of "
+                   "instance names to sum. The call that asks is not in the answer yet.",
+                   false, nullptr, nullptr, true, false, kMcpNeedsUsage});
+    all.push_back({"mcp_analysis_all_usage", "mcp_analysis", "Usage of all keys",
+                   "What all the keys of all the ChDash instances did in a window: requests, errors and time, by key, method, client and "
+                   "instance. Each list has the most requests first. `window` is 1h, 6h, 24h (default), 7d, 30d, 90d or 365d, as far as the "
+                   "retention goes. `group` is key (default), method, client or instance: what `series` is grouped by. `key` (the ids of keys), "
+                   "`method`, `client` and `instance` filter: lists of at most 20 values. `limit` is the rows of each list (20 by default, at "
+                   "most 200). `series` adds the points of the largest groups. The names, hosts and clients of other keys are in the answer; "
+                   "their ClickHouse cost never is.",
+                   false, nullptr, nullptr, false, true, kMcpNeedsUsage | kMcpNeedsAllKeys});
     return all;
   }();
   return tools;
@@ -126,6 +154,22 @@ const McpToolInfo* mcp_find_tool(std::string_view name) {
     if (name == tool.name) return &tool;
   }
   return nullptr;
+}
+
+bool mcp_tool_available(const McpToolInfo& tool, const McpToolAvailability& availability) {
+  // Reading all the keys is a part of the usage: it never exists without it.
+  if ((tool.needs & (kMcpNeedsUsage | kMcpNeedsAllKeys)) != 0 && !availability.usage) return false;
+  if ((tool.needs & kMcpNeedsAllKeys) != 0 && !availability.all_keys) return false;
+  return true;
+}
+
+std::string mcp_tool_unavailable_reason(const McpToolInfo& tool, const McpToolAvailability& availability) {
+  if (mcp_tool_available(tool, availability)) return {};
+  if (!availability.usage) {
+    return std::string("the usage of the keys is off, so the tool ") + tool.name + " is not offered: the administrator must set mcp.usage.enabled in the ChDash configuration";
+  }
+  return std::string("reading the usage of all the keys is off, so the tool ") + tool.name +
+         " is not offered: the administrator must set mcp.usage.all_keys in the ChDash configuration";
 }
 
 bool mcp_glob_match(std::string_view pattern, std::string_view text) {
@@ -266,13 +310,17 @@ std::vector<std::string> mcp_scope_hosts(const std::vector<std::string>& hosts,
 }
 
 std::vector<std::string> mcp_effective_tools(const std::vector<std::string>& tools,
-                                             const std::vector<std::string>& databases) {
+                                             const std::vector<std::string>& databases,
+                                             const McpToolAvailability& availability) {
   const bool all_data = mcp_scope_all_data(databases);
   const bool wildcard = std::find(tools.begin(), tools.end(), "*") != tools.end();
   std::vector<std::string> out;
   for (const auto& tool : mcp_tool_catalog()) {
     if (tool.needs_all_data && !all_data) continue;
-    if (wildcard || std::find(tools.begin(), tools.end(), tool.name) != tools.end()) out.emplace_back(tool.name);
+    if (!mcp_tool_available(tool, availability)) continue;
+    // A tool that every key has needs no word of the list, one that "*" does not give needs its name, the others follow the list.
+    const bool named = std::find(tools.begin(), tools.end(), tool.name) != tools.end();
+    if (tool.always || named || (wildcard && !tool.explicit_only)) out.emplace_back(tool.name);
   }
   return out;
 }

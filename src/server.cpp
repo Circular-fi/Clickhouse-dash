@@ -691,6 +691,8 @@ Server::~Server() {
     std::lock_guard<std::mutex> lk(session_reaper_mu_);
     session_reaper_stop_.store(true, std::memory_order_relaxed);
   }
+  // A read of the files of the other instances that the loop is in ends at once: the stop does not wait for a large file.
+  if (mcp_usage_) mcp_usage_->cancel();
   session_reaper_cv_.notify_all();
   if (session_reaper_thread_.joinable()) session_reaper_thread_.join();
   // The calls have ended (run() returned after the workers): the last counts of the MCP keys are written.
@@ -774,7 +776,8 @@ void Server::session_reaper_loop() {
     }
     if (session_reaper_stop_.load(std::memory_order_relaxed)) break;
     reap_sessions_once();
-    // The usage of the MCP keys: its file every minute when something changed (mcp_usage.hpp).
+    // The usage of the MCP keys: the file of this instance every minute when something changed, and the files of the others when
+    // they changed (mcp_usage.hpp).
     save_mcp_usage(false);
     const auto now = std::chrono::steady_clock::now();
     if (cfg_.server.stats_log_interval_ms > 0 && now - last_stats_log_ >= std::chrono::milliseconds(cfg_.server.stats_log_interval_ms)) {
@@ -951,14 +954,21 @@ std::optional<Admission::Ticket> Server::admit(WorkClass work, const httplib::Re
 }
 
 std::optional<Admission::Ticket> Server::admit(WorkClass work, const std::string& host_id, const httplib::Request& req, httplib::Response& res) {
+  auto ticket = acquire_ticket(work, host_id, [this, &req] { return stopping() || (req.is_connection_closed && req.is_connection_closed()); });
+  if (ticket) return ticket;
+  send_no_place(res);
+  return std::nullopt;
+}
+
+std::optional<Admission::Ticket> Server::acquire_ticket(WorkClass work, const std::string& host_id, const std::function<bool()>& stop) {
   const AdmissionSettings& limits = cfg_.admission;
   const char* name = work == WorkClass::Analysis ? "analysis" : work == WorkClass::Mcp ? "mcp" : "heavy";
   const size_t max = work == WorkClass::Analysis ? limits.analysis_per_host : work == WorkClass::Mcp ? limits.mcp_max : limits.heavy_per_host;
   const std::string key = std::string(name) + '\x1f' + host_id;
-  auto ticket = admission_.acquire(key, max, std::chrono::milliseconds(limits.wait_ms), [this, &req] {
-    return stopping() || (req.is_connection_closed && req.is_connection_closed());
-  });
-  if (ticket) return ticket;
+  return admission_.acquire(key, max, std::chrono::milliseconds(limits.wait_ms), stop);
+}
+
+void Server::send_no_place(httplib::Response& res) {
   if (!stopping()) {
     res.set_header("Retry-After", "1");
     ApiError busy;
@@ -970,7 +980,6 @@ std::optional<Admission::Ticket> Server::admit(WorkClass work, const std::string
   } else {
     json_error(res, 503, "server_stopping", "the server is stopping");
   }
-  return std::nullopt;
 }
 
 ChQueryLimits Server::user_sql_limits(const httplib::Request& req, std::string log_comment) const {

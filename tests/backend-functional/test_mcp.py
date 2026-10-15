@@ -3,13 +3,13 @@
 Instances (tests needing one that is not configured are skipped, so the default compose run, one
 chdash_source with the feature disabled, only runs the disabled checks):
 - API_BASE_URL (or MCP_DISABLED_BASE_URL): MCP disabled, every route answers as documented.
-- MCP_BASE_URL: tests/config/mcp.hcl, with an empty writable directory mounted at /data.
-- MCP_DATA_DIR: that /data as seen by pytest (file mode, hash only, storage errors).
+- MCP_BASE_URL: tests/config/mcp.hcl, with an empty writable directory mounted at /data (its usage file is chdash-mcp-test.jsonl.zst).
+- MCP_DATA_DIR: that /data as seen by pytest (file mode, hash only, storage errors, the usage files of the instances).
 - MCP_RESTART_CMD: a command restarting that instance (keys survive a restart).
 - MCP_LOGS_CMD: a command printing that instance's log (the audit lines).
 - MCP_RO_BASE_URL / MCP_RO_DATA_DIR: tests/config/mcp.readonly.hcl, /data holding a copy of
   tests/config/mcp.seed.json as mcp_keys.json.
-- MCP_NOSTORAGE_BASE_URL: tests/config/mcp.nostorage.hcl.
+- MCP_NOSTORAGE_BASE_URL: tests/config/mcp.nostorage.hcl (no storage file, and the usage of the keys is off).
 - MCP_STARTUP_CMD: a command that runs the REAL binary on a config file, with {dir} (the directory
   that holds the file) and {name} (its name), for the startup errors; for example
   docker run --rm -v {dir}:/cfg:ro --entrypoint /app/chdash chdash-m3b-app:local --config /cfg/{name}
@@ -27,6 +27,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -68,6 +69,8 @@ PROFILE_RO2CAP_LOW = "20a7c0de-0000-4000-8000-000000000003"
 PROFILE_RO1 = "20a7c0de-0000-4000-8000-000000000004"
 # Of tests/config/mcp.nostorage.hcl.
 ONLY_KEY = "0a17e100-0000-4000-8000-000000000008"
+# Of tests/config/mcp.readonly.hcl.
+CFG_READER = "cf9eead0-0000-4000-8000-00000000000a"
 # Of tests/config/mcp.seed.json.
 SEED = "5eed0000-0000-4000-8000-000000000009"
 # The secret of a page key: a version 4 UUID.
@@ -262,11 +265,12 @@ def test_meta_and_version():
     tools = {t["name"]: t for t in meta["tools"]}
     assert list(tools)[:5] == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
     groups = [g["id"] for g in meta["tool_groups"]]
-    assert groups == ["data", "explorer", "system", "observability", "query", "sql"]
+    assert groups == ["data", "explorer", "system", "observability", "query", "sql", "mcp_analysis"]
     assert all(set(g) == {"id", "title", "note", "sections"} and g["title"] and g["note"] for g in meta["tool_groups"])
+    assert [g["title"] for g in meta["tool_groups"]][-1] == "MCP analysis"
     # Observability has a section for each signal; the other families have none.
     assert {g["id"]: [s["id"] for s in g["sections"]] for g in meta["tool_groups"]} == {
-        "data": [], "explorer": [], "system": [], "observability": ["traces", "logs", "metrics"], "query": [], "sql": []}
+        "data": [], "explorer": [], "system": [], "observability": ["traces", "logs", "metrics"], "query": [], "sql": [], "mcp_analysis": []}
     assert {t["group"] for t in meta["tools"]} <= set(groups)
     # No card is a lone check box: a family has at least two tools.
     assert all(sum(1 for t in meta["tools"] if t["group"] == g) >= 2 for g in groups)
@@ -277,9 +281,11 @@ def test_meta_and_version():
     assert {observability[n] for n in ("list_metrics", "query_metric", "metrics_series")} == {"metrics"}
     assert set(observability.values()) == {"traces", "logs", "metrics"}
     assert all(t["section"] == "" for t in meta["tools"] if t["group"] != "observability")
-    # The usage of the keys: kept in mcp.usage_file, and the windows of its answers.
+    # The usage of the keys (mcp.usage): kept in files by instance, the windows of its answers, and whether a key may read all of it.
     usage = meta["usage"]
-    assert usage["persisted"] is True and usage["retention_days"] == 90
+    assert set(usage) == {"enabled", "storage", "instance", "retention_days", "windows", "default_window", "since", "cost_windows", "all_keys"}
+    assert usage["enabled"] is True and usage["storage"] == "files" and usage["instance"] == "chdash-mcp-test" and usage["all_keys"] is True
+    assert "persisted" not in usage and usage["retention_days"] == 90
     assert usage["windows"] == ["1h", "6h", "24h", "7d", "30d", "90d"] and usage["default_window"] == "7d"
     assert usage["since"].endswith("Z")
     # The windows of the ClickHouse cost of a key (System > Queries is on: it reads query_log the same way).
@@ -300,6 +306,15 @@ def test_meta_and_version():
         assert name in api_tools
     assert [n for n, t in tools.items() if t["needs_all_data"] and t["group"] == "sql"] == ["run_query", "explain_query"]
     assert all(isinstance(t["description"], str) and t["description"] for t in meta["tools"])
+    # How each tool is given: `always` (every key has it, whatever its list says), `explicit_only` ("*" does not give it) and `available` (the
+    # configuration offers it now: the usage is on, and so is mcp.usage.all_keys, here). The analysis of the keys is the only family with flags.
+    assert all(set(t) == {"name", "group", "section", "description", "needs_all_data", "always", "explicit_only", "available"} for t in meta["tools"])
+    assert all(isinstance(t[flag], bool) for t in meta["tools"] for flag in ("always", "explicit_only", "available"))
+    assert list(tools)[-3:] == ["mcp_analysis_my_limits", "mcp_analysis_my_usage", "mcp_analysis_all_usage"]
+    assert {n for n, t in tools.items() if t["always"]} == {"mcp_analysis_my_limits", "mcp_analysis_my_usage"}
+    assert {n for n, t in tools.items() if t["explicit_only"]} == {"mcp_analysis_all_usage"}
+    assert {t["group"] for t in meta["tools"] if t["always"] or t["explicit_only"]} == {"mcp_analysis"}
+    assert all(t["available"] for t in meta["tools"])
     assert meta["limits"] == {
         "max_rows": 100, "max_result_bytes": 20000, "query_timeout_seconds": 5, "max_sql_bytes": 2048,
         "max_memory_bytes": 536870912, "max_rows_to_read": 5000000, "rate_limit_per_minute": 120,
@@ -454,17 +469,19 @@ def test_tools_list_is_filtered_by_the_key():
     def names(key):
         return [t["name"] for t in rpc(MCP_URL, key, "tools/list").json()["result"]["tools"]]
 
-    every = [t["name"] for t in api_ok(m("GET", "/api/mcp/meta"))["tools"]]
-    assert names(ALL) == every  # a key with "*" and all the data holds every tool, API tools included
-    assert names(WEATHER) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
+    meta_tools = api_ok(m("GET", "/api/mcp/meta"))["tools"]
+    every = [t["name"] for t in meta_tools if t["available"] and not t["explicit_only"]]
+    assert names(ALL) == every  # a key with "*" and all the data holds every tool, API tools included, but the one that a key must name
+    assert "mcp_analysis_all_usage" not in names(ALL)
+    # The tools that every key has (its limits, its usage) come with any list of tools, after the tools of the list.
+    assert names(WEATHER) == ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"] + ANALYSIS
     # "*" never grants SQL without all data; it grants the observability tools, which read the otel tables.
     # A key with "*" holds every tool except the ones that need all the data (the SQL tools).
-    meta_tools = api_ok(m("GET", "/api/mcp/meta"))["tools"]
-    assert names(OTEL) == [t["name"] for t in meta_tools if not t["needs_all_data"]]
+    assert names(OTEL) == [t["name"] for t in meta_tools if not t["needs_all_data"] and t["available"] and not t["explicit_only"]]
     assert not [n for n in names(OTEL) if n in ("run_query", "explain_query")]
     assert {"explorer_graph", "explorer_storage", "explorer_names"} <= set(names(OTEL))
     assert {"system_overview", "traces_search", "logs_search", "metrics_series", "search_traces"} <= set(names(OTEL))
-    assert names(HOSTS_ONLY) == ["list_hosts"]
+    assert names(HOSTS_ONLY) == ["list_hosts"] + ANALYSIS
     for tool in rpc(MCP_URL, ALL, "tools/list").json()["result"]["tools"]:
         assert tool["inputSchema"]["type"] == "object"
         assert tool["description"]
@@ -510,6 +527,336 @@ def test_rate_limit_per_key():
     assert post_mcp(MCP_URL, RATE, body).status_code == 200
     # The refusal counts in the usage of the key.
     assert usage_of("rate-test")["totals"]["rate_limited"] >= limited_before + 1
+
+
+# ---- the analysis of the keys (mcp_analysis_*) --------------------------------------------------------------------------------------------
+
+# The tools that every key has while the usage is on: a key reads its own limits, and its own usage. A third one, the usage of all the keys,
+# is given only to a key whose list names it, and only while mcp.usage.all_keys is on.
+ANALYSIS = ["mcp_analysis_my_limits", "mcp_analysis_my_usage"]
+ANALYSIS_ALL = [*ANALYSIS, "mcp_analysis_all_usage"]
+
+
+def tool_names(base: str, key: str | None, headers: dict | None = None) -> list[str]:
+    """The names of tools/list for a key."""
+    return [t["name"] for t in rpc(base, key, "tools/list", headers=headers).json()["result"]["tools"]]
+
+
+@needs_mcp
+def test_my_limits_says_the_limits_of_the_key_and_where_each_one_comes_from():
+    # The limits of tests/config/mcp.hcl: 100 rows, 5 seconds, 20000 bytes, 2048 SQL bytes, 512 MiB of memory, 5 million rows to read, 120 calls a minute.
+    meta = api_ok(m("GET", "/api/mcp/meta"))
+    local = next(h for h in meta["hosts"] if h["name"] == "local")
+    result = ok_tool(MCP_URL, WEATHER, "mcp_analysis_my_limits")
+    assert set(result) == {"key", "instance", "rate_limit", "max_rows", "timeout_seconds", "max_result_bytes", "max_sql_bytes", "max_memory_bytes", "max_rows_to_read"}
+    assert result["key"] == {"id": "weather-only", "name": "weather-only", "host": "local"}
+    assert result["instance"] == "chdash-mcp-test"
+    # The key lowers nothing: the cap of its host, with the figures that the page gives for that host (the smaller of the MCP configuration and the
+    # settings profile of the MCP user, and who sets it).
+    assert result["max_rows"] == local["mcp"]["limits"]["max_rows"] and result["timeout_seconds"] == local["mcp"]["limits"]["timeout_seconds"]
+    assert result["max_rows"]["value"] <= MAX_ROWS and result["timeout_seconds"]["value"] <= 5
+    assert result["max_rows"]["source"] in ("mcp", "clickhouse", "both")
+    # The other caps are the ones of the configuration.
+    assert result["max_result_bytes"] == {"value": MAX_BYTES, "source": "mcp"}
+    assert result["max_sql_bytes"] == {"value": MAX_SQL, "source": "mcp"}
+    assert result["max_memory_bytes"] == {"value": 536870912, "source": "mcp"}
+    assert result["max_rows_to_read"] == {"value": 5000000, "source": "mcp"}
+    # A key that lowers a cap has its own value, and says so. The key of the second host names its host.
+    limited = ok_tool(MCP_URL, LIMITED, "mcp_analysis_my_limits")
+    assert limited["max_rows"] == {"value": 5, "source": "key"} and limited["timeout_seconds"] == {"value": 1, "source": "key"}, limited
+    assert ok_tool(MCP_URL, OTEL, "mcp_analysis_my_limits")["max_rows"] == {"value": 10, "source": "key"}
+    assert ok_tool(MCP_URL, SECOND, "mcp_analysis_my_limits")["key"]["host"] == "second"
+    # It takes no argument.
+    fail_tool(MCP_URL, WEATHER, "mcp_analysis_my_limits", {"host": "local"}, "invalid_argument")
+    # Never a secret.
+    assert WEATHER not in json.dumps(result) and WEATHER[9:] not in json.dumps(result)
+
+
+@needs_mcp
+def test_my_limits_says_how_much_of_the_rate_limit_is_left():
+    key, secret = make_key(new_key_body("analysis-rate", tools=["list_hosts"]))
+    try:
+        first = ok_tool(MCP_URL, secret, "mcp_analysis_my_limits")["rate_limit"]
+        # 120 a minute on this instance. A fresh bucket holds 120 and the call that asks has taken its token.
+        assert set(first) == {"per_minute", "scope", "remaining", "next_call_in_seconds", "full_in_seconds"}
+        assert first["per_minute"] == 120 and first["scope"] == "instance"
+        assert 117 <= first["remaining"] <= 119, first
+        assert first["next_call_in_seconds"] == 0 and 0 <= first["full_in_seconds"] <= 3, first
+        for _ in range(5):
+            assert rpc(MCP_URL, secret, "ping").status_code == 200
+        later = ok_tool(MCP_URL, secret, "mcp_analysis_my_limits")["rate_limit"]
+        assert later["remaining"] < first["remaining"], (first, later)
+        assert later["next_call_in_seconds"] == 0 and 1 <= later["full_in_seconds"] <= 20, later
+        # Looking takes a token as any call does, and no more (the bucket refills 2 a second): the next look is not above the last one.
+        again = ok_tool(MCP_URL, secret, "mcp_analysis_my_limits")["rate_limit"]
+        assert again["remaining"] <= later["remaining"] + 1, (later, again)
+    finally:
+        drop_key(key["id"])
+
+
+@needs_mcp
+def test_a_key_with_no_tool_has_the_analysis_of_its_own_limits_and_usage():
+    key, secret = make_key(new_key_body("analysis-empty", tools=[]))
+    try:
+        assert tool_names(MCP_URL, secret) == ANALYSIS
+        assert ok_tool(MCP_URL, secret, "mcp_analysis_my_limits")["key"]["name"] == "analysis-empty"
+        assert ok_tool(MCP_URL, secret, "mcp_analysis_my_usage")["name"] == "analysis-empty"
+        fail_tool(MCP_URL, secret, "list_hosts", {}, "tool_not_allowed")
+        fail_tool(MCP_URL, secret, "mcp_analysis_all_usage", {}, "tool_not_allowed")
+        # Naming them is harmless.
+        named, named_secret = make_key(new_key_body("analysis-named", tools=ANALYSIS))
+        try:
+            assert tool_names(MCP_URL, named_secret) == ANALYSIS
+        finally:
+            drop_key(named["id"])
+    finally:
+        drop_key(key["id"])
+
+
+@needs_mcp
+def test_my_usage_is_the_usage_of_the_key_as_the_page_gives_it():
+    key, secret = make_key(new_key_body("analysis-usage", tools=["list_hosts", "query_table"]))
+    try:
+        assert ok_tool(MCP_URL, secret, "list_hosts")["hosts"]
+        fail_tool(MCP_URL, secret, "query_table", {"host": "local", "database": "otel", "table": "otel_traces", "limit": 1}, "table_not_allowed")
+        # What the page gives for the key, read just before: the call that asks is not in the answer yet.
+        before = usage_of(key["id"])
+        mine = ok_tool(MCP_URL, secret, "mcp_analysis_my_usage")
+        assert set(mine) == {"id", "name", "host", "source", "deleted_at", "elsewhere", "window", "from", "to", "since", "retention_days", "instances",
+                             "first_used_at", "last_used_at", "totals", "tools", "statuses", "clients", "omitted"}, set(mine)
+        assert mine["id"] == key["id"] and mine["name"] == "analysis-usage" and mine["host"] == "local" and mine["source"] == "ui"
+        assert mine["elsewhere"] is False and mine["deleted_at"] is None
+        assert mine["window"] == "24h" and mine["totals"] == before["totals"], (mine["totals"], before["totals"])
+        assert mine["totals"]["calls"] == 2 and mine["totals"]["errors"] == 1
+        assert {t["tool"]: (t["calls"], t["errors"]) for t in mine["tools"]} == {"list_hosts": (1, 0), "query_table": (1, 1)}
+        assert {s["status"]: s["count"] for s in mine["statuses"]} == {"ok": 1, "table_not_allowed": 1}
+        assert mine["clients"] == before["clients"] and mine["first_used_at"] == before["first_used_at"]
+        assert mine["omitted"] == {"tools": 0, "statuses": 0, "clients": 0}  # the rows of each list are limited (20), and it says how many were left out
+        # The instances that it sums, as the page says.
+        assert mine["instances"][0]["instance"] == "chdash-mcp-test" and mine["instances"][0]["status"] == "ok" and mine["instances"][0]["reason"] == ""
+        # The series and the cost only when asked.
+        assert "series" not in mine and "cost" not in mine
+        # It counts as any call of the key.
+        after = usage_of(key["id"])
+        assert after["totals"]["calls"] == 3 and {t["tool"] for t in after["tools"]} == {"list_hosts", "query_table", "mcp_analysis_my_usage"}
+
+        # A window, with the series: one point for each step of the window.
+        hour = ok_tool(MCP_URL, secret, "mcp_analysis_my_usage", {"window": "1h", "series": True})
+        assert hour["window"] == "1h" and hour["series"]["step"] == 60 and len(hour["series"]["points"]) == 60
+        assert sum(p["calls"] for p in hour["series"]["points"]) == hour["totals"]["calls"] == 3
+        for window, step, points in (("6h", 300, 72), ("24h", 900, 96), ("7d", 10800, 56), ("30d", 43200, 60), ("90d", 86400, 90)):
+            each = ok_tool(MCP_URL, secret, "mcp_analysis_my_usage", {"window": window, "series": True})
+            assert each["series"]["step"] == step and len(each["series"]["points"]) == points, window
+        # The instances to sum: this one (the only one here) gives the same answer as all of them, a name that nothing has gives none.
+        page = usage_of(key["id"])
+        this = ok_tool(MCP_URL, secret, "mcp_analysis_my_usage", {"instance": ["chdash-mcp-test", "chdash-mcp-test"]})
+        assert this["totals"] == page["totals"]
+        nobody = ok_tool(MCP_URL, secret, "mcp_analysis_my_usage", {"instance": ["no-such-instance"]})
+        assert nobody["totals"]["requests"] == 0 and nobody["totals"]["calls"] == 0 and nobody["tools"] == []
+
+        # Arguments that are not valid are `invalid_argument`, and the message says the rule.
+        for arguments, fragment in (
+            ({"window": "2h"}, "window must be one of"),
+            ({"window": "365d"}, "window must be one of"),  # the retention of this instance (90 days) does not keep it
+            ({"series": "yes"}, "series must be true or false"),
+            ({"include_cost": 1}, "include_cost must be true or false"),
+            ({"instance": "chdash-mcp-test"}, "instance must be a list of strings"),
+            ({"instance": ["a b"]}, "instance must be an instance"),
+            ({"instance": [f"i{n}" for n in range(21)]}, "instance takes at most 20 values"),
+            ({"nope": 1}, "unknown argument nope"),
+            ({"key": "ui_0a1b2c3d4e5f"}, "unknown argument key"),  # the usage of its own key, never another's
+        ):
+            refused = fail_tool(MCP_URL, secret, "mcp_analysis_my_usage", arguments, "invalid_argument")
+            assert fragment in refused["message"], (arguments, refused)
+        # Never a secret, never SQL, never an address.
+        text = json.dumps([mine, hour, nobody])
+        assert secret not in text and secret[9:] not in text and "SELECT" not in text
+    finally:
+        drop_key(key["id"])
+
+
+@needs_clickhouse
+def test_my_usage_gives_the_cost_of_the_key_when_asked_and_never_counts_its_own_read():
+    key, secret = make_key(new_key_body("analysis-cost", tools=["list_databases", "list_tables"], databases=["chdash_ui"]))
+    try:
+        assert ok_tool(MCP_URL, secret, "list_databases")["databases"]
+        assert ok_tool(MCP_URL, secret, "list_tables", {"database": "chdash_ui"})["count"] >= 1
+        ch("SYSTEM FLUSH LOGS")
+        assert "cost" not in ok_tool(MCP_URL, secret, "mcp_analysis_my_usage")  # by default it is not read: it reads system.query_log
+        asked = ok_tool(MCP_URL, secret, "mcp_analysis_my_usage", {"include_cost": True})
+        cost = asked["cost"]
+        # The cost of the page, for the key itself: no id, no text of an error, no GRANT statement (they are for the administrator).
+        assert set(cost) == {"host", "window", "from", "to", "max_lookback_hours", "clamped", "read_at", "status", "totals", "identities", "tools",
+                             "tables", "tables_truncated", "rows_truncated"}, set(cost)
+        assert cost["status"] == "ok" and cost["host"] == "local" and cost["window"] == "24h" and cost["clamped"] is False and cost["read_at"].endswith("Z")
+        assert cost["totals"]["statements"] >= 2, cost["totals"]
+        assert {"list_databases", "list_tables"} <= {t["tool"] for t in cost["tools"]}, cost["tools"]
+        assert {i["user"]: i["role"] for i in cost["identities"]}.get("chdash_mcp") == "mcp"
+        # Its own read of system.query_log is no statement of the key: it is never in the cost that it reads, and query_log holds no statement
+        # that is named for the key and reads query_log.
+        assert not {t["tool"] for t in cost["tools"]} & set(ANALYSIS_ALL), cost["tools"]
+        assert "system.query_log" not in {t["name"] for t in cost["tables"]}, cost["tables"]
+        ch("SYSTEM FLUSH LOGS")
+        prefix = f"chdash-mcp/{key['id']}/"
+        named = ch("SELECT toString(count()) FROM system.query_log WHERE event_date >= yesterday() "
+                   f"AND (startsWith(query_id, '{prefix}mcp_analysis_') OR (startsWith(query_id, '{prefix}') AND query LIKE '%FROM system.query_log%')) FORMAT TSV").strip()
+        assert named == "0", named
+        # The same read as the page's, with the same cache: the page, asked within the minute, answers with the read of the tool.
+        page = api_ok(m("GET", f"/api/mcp/keys/{key['id']}/cost?window=24h"))
+        assert page["read_at"] == cost["read_at"] and page["totals"] == cost["totals"] and page["id"] == key["id"]
+        # The windows of the cost are 1h, 6h, 24h and 7d: a longer window of the usage reads 7d, and the cost says it.
+        month = ok_tool(MCP_URL, secret, "mcp_analysis_my_usage", {"window": "30d", "include_cost": True})
+        assert month["window"] == "30d" and month["cost"]["window"] == "7d" and month["cost"]["status"] == "ok", month["cost"]
+        for window in ("1h", "6h", "7d"):
+            assert ok_tool(MCP_URL, secret, "mcp_analysis_my_usage", {"window": window, "include_cost": True})["cost"]["window"] == window
+        assert secret not in json.dumps(asked) and "SELECT" not in json.dumps(asked)
+    finally:
+        drop_key(key["id"])
+
+
+@needs_mcp
+def test_all_usage_is_the_usage_of_every_key_for_a_key_that_names_it():
+    reader, reader_secret = make_key(new_key_body("analysis-reader", tools=["mcp_analysis_all_usage"]))
+    other, other_secret = make_key(new_key_body("analysis-other", tools=["list_hosts"]))
+    try:
+        for _ in range(3):
+            assert ok_tool(MCP_URL, other_secret, "list_hosts")["hosts"]
+        ok_tool(MCP_URL, reader_secret, "mcp_analysis_my_limits")  # the reader has requests too: two keys have usage
+        # Who has it: the key whose list names it. "*" does not give it, and a key that lacks it is not told that it is off.
+        assert tool_names(MCP_URL, reader_secret) == ANALYSIS_ALL
+        assert "mcp_analysis_all_usage" not in tool_names(MCP_URL, ALL)
+        fail_tool(MCP_URL, ALL, "mcp_analysis_all_usage", {}, "tool_not_allowed")
+        meta = api_ok(m("GET", "/api/mcp/meta"))
+        flags = next(t for t in meta["tools"] if t["name"] == "mcp_analysis_all_usage")
+        assert (flags["always"], flags["explicit_only"], flags["available"], flags["needs_all_data"]) == (False, True, True, False)
+
+        # The overview of every key, with the shape of the page's, without the series.
+        everything = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage")
+        assert set(everything) == OVERVIEW_FIELDS - {"series"}, set(everything)
+        assert everything["window"] == "24h" and everything["group"] == "key"
+        assert everything["filters"] == {name: [] for name in OVERVIEW_FILTERS}
+        assert everything["totals"]["requests"] >= 4 and everything["totals"]["keys"] >= 2
+        assert len(everything["keys"]) <= 20 and len(everything["methods"]) <= 20 and len(everything["clients"]) <= 20
+        assert set(everything["omitted"]) == {"keys", "methods", "results", "clients", "instances"}
+        # The names, the hosts and the clients of the other keys are in it (it is why the key must name the tool): the cut to one key.
+        mine = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"key": [other["id"]], "group": "method"})
+        assert mine["filters"]["key"] == [other["id"]] and mine["group"] == "method" and "series" not in mine
+        assert mine["totals"]["requests"] == 3 and mine["totals"]["calls"] == 3 and mine["totals"]["active_keys"] == 1
+        # The list of keys applies every filter but its own (the other keys stay listed, to be added); the key that was chosen is always in it.
+        row = next(r for r in mine["keys"] if r["id"] == other["id"])
+        assert (row["name"], row["host"], row["source"], row["calls"], row["deleted_at"], row["elsewhere"]) == ("analysis-other", "local", "ui", 3, None, False)
+        assert [(r["method"], r["kind"], r["requests"]) for r in mine["methods"]] == [("list_hosts", "call", 3)]
+        assert [c["client"] for c in mine["clients"]] == ["chdash-backend-functional"]
+        # The page gives the same figures for the same cut.
+        page = overview(("window", "24h"), ("group", "method"), ("key", other["id"]))
+        assert (page["totals"], page["methods"], page["clients"]) == (mine["totals"], mine["methods"], mine["clients"])
+        assert next(r for r in page["keys"] if r["id"] == other["id"]) == row
+        # The series only when asked, and it adds up as the page's does.
+        series = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"key": [other["id"]], "series": True, "window": "6h"})
+        assert series["series"]["step"] == 300 and len(series["series"]["t"]) == 72
+        assert [g["id"] for g in series["series"]["groups"]] == [other["id"]] and series["series"]["groups"][0]["label"] == "analysis-other"
+        check_series_adds_up(series)
+        # The rows of each list are limited, and the answer says how many were left out.
+        one = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"limit": 1})
+        assert len(one["keys"]) == 1 and one["omitted"]["keys"] >= 1, one["omitted"]
+        # The groups and the filters: a client, an instance (the only one here), and one that nothing has.
+        by_client = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"key": [other["id"]], "group": "client", "client": ["chdash-backend-functional"]})
+        assert by_client["group"] == "client" and by_client["totals"]["requests"] == 3
+        by_instance = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"key": [other["id"]], "group": "instance", "instance": ["chdash-mcp-test"]})
+        assert by_instance["group"] == "instance" and by_instance["totals"]["requests"] == 3
+        assert by_instance["instances"][0]["instance"] == "chdash-mcp-test" and by_instance["instances"][0]["requests"] == 3
+        none = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"key": [other["id"]], "instance": ["chdash-nobody"]})
+        assert none["totals"]["requests"] == 0
+        for window in ("1h", "7d", "30d", "90d"):
+            assert ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"window": window})["window"] == window
+
+        # Arguments that are not valid are `invalid_argument`, and the message says the rule. The cost of another key is never an option.
+        for arguments, fragment in (
+            ({"window": "2h"}, "window must be one of"),
+            ({"window": "365d"}, "window must be one of"),
+            ({"group": "result"}, "group must be key, method, client or instance"),
+            ({"group": "nope"}, "group must be key, method, client or instance"),
+            ({"limit": 0}, "limit must be between 1 and 200"),
+            ({"limit": 201}, "limit must be between 1 and 200"),
+            ({"key": ["Bad Key"]}, "key must be the id of a key"),
+            ({"key": ["k"] * 21}, "key takes at most 20 values"),
+            ({"method": ["bad method"]}, "method must be a tool or a method of the protocol"),
+            ({"client": [" lead"]}, "client must be a client name"),
+            ({"instance": ["a/b"]}, "instance must be an instance"),
+            ({"result": ["ok"]}, "unknown argument result"),
+            ({"include_cost": True}, "unknown argument include_cost"),
+        ):
+            refused = fail_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", arguments, "invalid_argument")
+            assert fragment in refused["message"], (arguments, refused)
+        # It counts as any call, and shows no secret, no SQL and no cost.
+        assert "mcp_analysis_all_usage" in {t["tool"] for t in usage_of(reader["id"])["tools"]}
+        text = json.dumps([everything, mine, series, one])
+        assert reader_secret not in text and other_secret not in text and "SELECT" not in text
+        assert '"cost"' not in text  # never the cost of a key through this tool: it lists the tables that the key reads
+        # A key that does not name the tool does not have it (last, so that the calls of `other` above are the three that were counted).
+        fail_tool(MCP_URL, other_secret, "mcp_analysis_all_usage", {}, "tool_not_allowed")
+    finally:
+        drop_key(reader["id"])
+        drop_key(other["id"])
+
+
+@needs_profile
+def test_my_limits_names_who_binds_each_cap_on_a_host_with_a_profile():
+    profile_hosts()  # the audit has read the settings profile of each MCP user
+    # ro2cap: its profile sets 7 rows and 4 seconds, so the ClickHouse user binds. ro2cap-low: a key of 3 rows lowers it more. ro2: nothing in
+    # the profile, so the MCP configuration (100 rows, 5 seconds) binds.
+    capped = ok_tool(PROFILE_URL, PROFILE_RO2CAP, "mcp_analysis_my_limits")
+    assert capped["max_rows"] == {"value": 7, "source": "clickhouse"} and capped["timeout_seconds"] == {"value": 4, "source": "clickhouse"}, capped
+    low = ok_tool(PROFILE_URL, PROFILE_RO2CAP_LOW, "mcp_analysis_my_limits")
+    assert low["max_rows"] == {"value": 3, "source": "key"} and low["timeout_seconds"] == {"value": 4, "source": "clickhouse"}, low
+    plain = ok_tool(PROFILE_URL, PROFILE_RO2, "mcp_analysis_my_limits")
+    assert plain["max_rows"] == {"value": 100, "source": "mcp"} and plain["timeout_seconds"] == {"value": 5, "source": "mcp"}, plain
+    assert plain["key"] == {"id": "ro2", "name": "ro2", "host": "ro2"} and plain["rate_limit"]["per_minute"] == 600
+    # This instance has no usage block: the usage is off. The instance has no name, the limits are still answered, and the tool of the usage is
+    # not offered.
+    assert plain["instance"] is None
+    assert "mcp_analysis_my_usage" not in tool_names(PROFILE_URL, PROFILE_RO2) and "mcp_analysis_my_limits" in tool_names(PROFILE_URL, PROFILE_RO2)
+    assert fail_tool(PROFILE_URL, PROFILE_RO2, "mcp_analysis_my_usage", {}, "not_enabled")["message"]
+
+
+@needs_nostorage
+def test_the_tools_of_the_usage_are_not_offered_while_the_usage_is_off():
+    headers = {"X-ChDash-Key": ONLY_KEY}
+    meta = api_ok(m("GET", "/api/mcp/meta", base=NOSTORAGE_URL))
+    flags = {t["name"]: (t["always"], t["explicit_only"], t["available"]) for t in meta["tools"] if t["group"] == "mcp_analysis"}
+    assert flags == {"mcp_analysis_my_limits": (True, False, True), "mcp_analysis_my_usage": (True, False, False), "mcp_analysis_all_usage": (False, True, False)}
+    # only-key names mcp_analysis_all_usage; the usage is off, so it is not listed, and only the limits are given to every key.
+    assert tool_names(NOSTORAGE_URL, None, headers) == ["list_hosts", "list_databases", "mcp_analysis_my_limits"]
+
+    def call(name: str) -> dict:
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {}}}
+        response = post_mcp(NOSTORAGE_URL, None, body, headers=headers)
+        assert response.status_code == 200, response.text
+        return response.json()["result"]
+
+    limits = call("mcp_analysis_my_limits")
+    assert limits["isError"] is False
+    assert limits["structuredContent"]["instance"] is None and limits["structuredContent"]["rate_limit"]["per_minute"] == 600
+    for name in ("mcp_analysis_my_usage", "mcp_analysis_all_usage"):
+        refused = call(name)
+        assert refused["isError"] is True and refused["structuredContent"]["error"] == "not_enabled", (name, refused)
+        assert "mcp.usage.enabled" in refused["structuredContent"]["message"]
+
+
+@needs_ro
+def test_reading_all_the_keys_is_off_while_all_keys_is_off():
+    # The usage is on here, and mcp.usage.all_keys is not: cfg-reader names mcp_analysis_all_usage and still does not have it.
+    meta = api_ok(m("GET", "/api/mcp/meta", base=RO_URL))
+    assert meta["usage"]["enabled"] is True and meta["usage"]["all_keys"] is False
+    flags = {t["name"]: t["available"] for t in meta["tools"] if t["group"] == "mcp_analysis"}
+    assert flags == {"mcp_analysis_my_limits": True, "mcp_analysis_my_usage": True, "mcp_analysis_all_usage": False}
+    assert tool_names(RO_URL, CFG_READER) == ["list_hosts", "list_databases", *ANALYSIS]
+    refused = fail_tool(RO_URL, CFG_READER, "mcp_analysis_all_usage", {}, "not_enabled")
+    assert "mcp.usage.all_keys" in refused["message"]
+    assert ok_tool(RO_URL, CFG_READER, "mcp_analysis_my_usage")["name"] == "cfg-reader"
+    assert ok_tool(RO_URL, CFG_READER, "mcp_analysis_my_limits")["instance"] == "chdash-mcp-ro"
+    # A key that does not name it is not told that it is off: it does not have it.
+    fail_tool(RO_URL, SEED, "mcp_analysis_all_usage", {}, "tool_not_allowed")
 
 
 # ---- schema tools -----------------------------------------------------------------------------------------------------
@@ -963,7 +1310,7 @@ def test_key_lifecycle():
         assert secret not in json.dumps(listed)
         assert any(k["id"] == key["id"] for k in listed["keys"])
         # The secret works at once, with the scope of the key.
-        assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["list_hosts", "query_table"]
+        assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["list_hosts", "query_table"] + ANALYSIS
         assert [h["name"] for h in ok_tool(MCP_URL, secret, "list_hosts")["hosts"]] == ["local"]
         fail_tool(MCP_URL, secret, "query_table", {"host": "local", "database": "chdash_ui", "table": "weather_observations"}, "table_not_allowed")
         again = next(k for k in api_ok(m("GET", "/api/mcp/keys"))["keys"] if k["id"] == key["id"])
@@ -1005,7 +1352,11 @@ def test_usage_of_a_key():
 
         usage = usage_of(key["id"])
         assert usage["id"] == key["id"] and usage["name"] == "usage-key" and usage["host"] == "local" and usage["source"] == "ui"
-        assert usage["window"] == "24h" and usage["persisted"] is True and usage["retention_days"] == 90
+        assert usage["window"] == "24h" and "persisted" not in usage and usage["retention_days"] == 90
+        # The instances that the answer sums: this one first, how its state is, and when its file was last written.
+        assert set(usage["instances"][0]) == {"instance", "written_at", "status", "reason"}
+        assert usage["instances"][0]["instance"] == "chdash-mcp-test" and usage["instances"][0]["status"] == "ok" and usage["instances"][0]["reason"] == ""
+        assert usage["elsewhere"] is False
         totals = usage["totals"]
         assert totals["requests"] == 6 and totals["calls"] == 2, totals
         assert totals["errors"] == 2 and totals["rejected"] == 1 and totals["rate_limited"] == 0, totals
@@ -1024,7 +1375,8 @@ def test_usage_of_a_key():
         assert usage["first_used_at"] <= usage["last_used_at"]
         # The column of the page: every key in one answer, the same counts.
         summary = api_ok(m("GET", "/api/mcp/usage?window=7d"))
-        assert summary["window"] == "7d" and summary["persisted"] is True
+        assert summary["window"] == "7d" and "persisted" not in summary
+        assert summary["instances"][0]["instance"] == "chdash-mcp-test" and summary["instances"][0]["status"] == "ok"
         row = next(k for k in summary["keys"] if k["id"] == key["id"])
         assert (row["requests"], row["calls"], row["errors"], row["rejected"]) == (6, 2, 2, 1)
         ids = [k["id"] for k in summary["keys"]]
@@ -1055,13 +1407,15 @@ def test_usage_of_a_key():
         drop_key(key["id"])
 
 
-OVERVIEW_FIELDS = {"window", "from", "to", "since", "persisted", "retention_days", "group", "filters", "totals", "series", "keys", "methods",
+OVERVIEW_FIELDS = {"window", "from", "to", "since", "retention_days", "instances", "group", "filters", "totals", "series", "keys", "methods",
                    "results", "types", "clients", "omitted"}
-OVERVIEW_FILTERS = ("key", "method", "client", "result", "type")
+OVERVIEW_FILTERS = ("key", "method", "client", "instance", "result", "type")
 SERIES_METRICS = ("requests", "errors", "calls", "duration_ms_sum", "bytes")
 OVERVIEW_TOTALS = {"requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg", "duration_ms_max", "rows", "bytes", "active_keys", "keys"}
-OVERVIEW_KEY = {"id", "name", "host", "source", "deleted_at", "requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg",
+OVERVIEW_KEY = {"id", "name", "host", "source", "deleted_at", "elsewhere", "requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg",
                 "duration_ms_max", "rows", "bytes", "last_used_at"}
+OVERVIEW_INSTANCE = {"instance", "status", "reason", "written_at", "requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg",
+                     "duration_ms_max", "rows", "bytes", "keys"}
 OVERVIEW_METHOD = {"method", "kind", "requests", "errors", "duration_ms_avg", "duration_ms_max", "rows", "bytes", "keys"}
 OVERVIEW_CLIENT = {"client", "requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg", "duration_ms_max", "rows", "bytes",
                    "keys", "versions", "last_seen_at"}
@@ -1142,9 +1496,9 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         both = [("key", a["id"]), ("key", b["id"])]
         doc = overview(("window", "24h"), *both)
         assert set(doc) == OVERVIEW_FIELDS
-        assert doc["window"] == "24h" and doc["persisted"] is True and doc["retention_days"] == 90 and doc["group"] == "method"
+        assert doc["window"] == "24h" and doc["retention_days"] == 90 and doc["group"] == "method"
         assert doc["from"].endswith("Z") and doc["to"].endswith("Z") and doc["since"].endswith("Z")
-        assert doc["filters"] == {"key": [a["id"], b["id"]], "method": [], "client": [], "result": [], "type": []}
+        assert doc["filters"] == {"key": [a["id"], b["id"]], "method": [], "client": [], "instance": [], "result": [], "type": []}
         totals = doc["totals"]
         assert set(totals) == OVERVIEW_TOTALS
         assert (totals["requests"], totals["calls"], totals["errors"], totals["rate_limited"], totals["rejected"]) == (17, 8, 6, 0, 1), totals
@@ -1204,10 +1558,15 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         assert [(c["client"], c["keys"], c["requests"], c["calls"], c["errors"], c["versions"]) for c in doc["clients"]] == [
             ("overview-client", 1, 13, 6, 5, ["9.9"]), ("other-client", 1, 4, 2, 1, ["1.0"])]
         assert all(c["last_seen_at"].endswith("Z") for c in doc["clients"])
-        assert doc["omitted"] == {"keys": 0, "methods": 0, "results": 0, "clients": 0}
+        assert doc["omitted"] == {"keys": 0, "methods": 0, "results": 0, "clients": 0, "instances": 0}
+        # The instances (a facet too): this one first, with the counters of the requests that the filters keep, and how its state is.
+        assert all(set(row) == OVERVIEW_INSTANCE for row in doc["instances"])
+        mine_instance = doc["instances"][0]
+        assert mine_instance["instance"] == "chdash-mcp-test" and mine_instance["status"] == "ok" and mine_instance["reason"] == ""
+        assert (mine_instance["requests"], mine_instance["calls"], mine_instance["errors"]) == (17, 8, 6) and mine_instance["keys"] == 2
 
         # Every group: the groups and `rest` add up to the requests, for the five metrics. The label of a key is its name.
-        for group in ("key", "method", "client", "result", "type"):
+        for group in ("key", "method", "client", "result", "type", "instance"):
             by = overview(("window", "24h"), ("group", group), *both)
             assert by["group"] == group and by["totals"]["requests"] == 17
             assert sum(g["total"] for g in by["series"]["groups"]) + by["series"]["rest"]["total"] == 17, group
@@ -1221,8 +1580,18 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         by_client = overview(("window", "24h"), ("group", "client"), *both)["series"]
         assert [(g["id"], g["label"], g["total"]) for g in by_client["groups"]] == [("overview-client", "overview-client", 13), ("other-client", "other-client", 4)]
         # The bars add up to the requests at each point, whatever the group.
-        for group in ("key", "type", "result", "client"):
+        by_instance = overview(("window", "24h"), ("group", "instance"), *both)["series"]
+        assert [(g["id"], g["label"], g["total"]) for g in by_instance["groups"]] == [("chdash-mcp-test", "chdash-mcp-test", 17)]
+        for group in ("key", "type", "result", "client", "instance"):
             assert points_of(overview(("window", "24h"), ("group", group), *both)) == points_of(doc)
+        # A filter on the instance: this one keeps everything; another one (that is not there) keeps nothing, and is in the facet at 0.
+        here = overview(("window", "24h"), ("instance", "chdash-mcp-test"), *both)
+        assert here["totals"]["requests"] == 17 and here["filters"]["instance"] == ["chdash-mcp-test"]
+        nobody = overview(("window", "24h"), ("instance", "no-such-instance"), *both)
+        assert nobody["totals"]["requests"] == 0 and nobody["keys"] != [] and all(row["requests"] == 0 for row in nobody["keys"])
+        ghost = next(row for row in nobody["instances"] if row["instance"] == "no-such-instance")
+        assert ghost["status"] == "unknown" and ghost["requests"] == 0 and ghost["written_at"] is None
+        assert next(row for row in nobody["instances"] if row["instance"] == "chdash-mcp-test")["requests"] == 17  # the facet ignores its own filter
         # A filter on the client: the totals follow it, the facet of the clients does not.
         mine = overview(("window", "24h"), ("client", "other-client"), *both)
         assert mine["totals"]["requests"] == 4 and mine["filters"]["client"] == ["other-client"]
@@ -1396,6 +1765,7 @@ def test_the_usage_overview_refuses_what_it_does_not_read():
     invalid([("group", "")], "group", "invalid")
     invalid([("group", "nope")], "group", "invalid")
     invalid([("group", "Client")], "group", "invalid")
+    invalid([("group", "instances")], "group", "invalid")
     invalid([("nope", "1")], "nope", "unknown")
     invalid([("limit", "5")], "limit", "unknown")
     invalid([("clients", "x")], "clients", "unknown")  # the filter is `client`
@@ -1410,11 +1780,15 @@ def test_the_usage_overview_refuses_what_it_does_not_read():
     invalid([("client", "x" * 65)], "client", "invalid")
     invalid([("client", "caf\u00e9")], "client", "invalid")
     invalid([("client", "line\nbreak")], "client", "invalid")
+    invalid([("instance", "has space")], "instance", "invalid")
+    invalid([("instance", "")], "instance", "invalid")
+    invalid([("instance", "x" * 65)], "instance", "invalid")
+    invalid([("instance", "a/b")], "instance", "invalid")
     invalid([("result", "Not-A-Result")], "result", "invalid")
     invalid([("result", "a/b")], "result", "invalid")
     invalid([("type", "tool")], "type", "invalid")
     invalid([("type", "call"), ("type", "refused")], "type", "invalid")
-    for field, value in (("key", "key-{}"), ("method", "method_{}"), ("client", "client {}"), ("result", "result_{}")):
+    for field, value in (("key", "key-{}"), ("method", "method_{}"), ("client", "client {}"), ("instance", "instance-{}"), ("result", "result_{}")):
         invalid([(field, value.format(i)) for i in range(21)], field, "too_many")
         # Twenty are fine, and a value that is repeated counts once.
         assert overview(*[(field, value.format(i)) for i in range(20)])["totals"]["requests"] == 0
@@ -1426,12 +1800,13 @@ def test_the_usage_overview_refuses_what_it_does_not_read():
     invalid([("nope", "1"), ("group", "x")], "nope", "unknown")
     invalid([("group", "x"), ("key", "Bad Key")], "group", "invalid")
     invalid([("key", "Bad Key"), ("client", " x")], "key", "invalid")
-    invalid([("client", " x"), ("result", "A")], "client", "invalid")
+    invalid([("client", " x"), ("instance", "a b")], "client", "invalid")
+    invalid([("instance", "a b"), ("result", "A")], "instance", "invalid")
     # Without a parameter: the default window of the meta, the group by method.
     plain = overview()
     meta = api_ok(m("GET", "/api/mcp/meta"))["usage"]
     assert plain["window"] == meta["default_window"] and plain["group"] == "method" and "split" not in plain
-    assert plain["filters"] == {"key": [], "method": [], "client": [], "result": [], "type": []}
+    assert plain["filters"] == {"key": [], "method": [], "client": [], "instance": [], "result": [], "type": []}
     # The route of the page is a read of the page only, like the others.
     for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Origin": "https://evil.example.com"}):
         api_error(m("GET", "/api/mcp/usage/overview", headers=headers), 403, "cross_site_request")
@@ -1581,58 +1956,116 @@ def test_key_file_holds_the_hash_never_the_secret_and_is_private():
         drop_key(key["id"])
 
 
+USAGE_INSTANCE = "chdash-mcp-test"
+USAGE_STEPS = {"m1": 60, "m5": 300, "m15": 900, "h3": 10800, "h12": 43200, "d1": 86400}
+ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
+
+
+def zstd_frame(text: bytes) -> bytes:
+    """A zstd frame that holds `text` in one raw block (no compression): a file that a test writes for ChDash to read, without the zstd command."""
+    assert len(text) < 65792  # the size of the frame is in the 2 bytes of its header
+    size = len(text)
+    header = bytes([0x20, size]) if size < 256 else bytes([0x60]) + (size - 256).to_bytes(2, "little")  # a single segment, its size in 1 or 2 bytes
+    return ZSTD_MAGIC + header + (1 | (size << 3)).to_bytes(3, "little") + text
+
+
+def usage_text(path: Path) -> str:
+    """The text of a usage file: JSON Lines compressed with zstd (the zstd command of the test image decompresses it)."""
+    command = shutil.which("zstd")
+    if not command:
+        pytest.skip("the zstd command is not installed")
+    packed = path.read_bytes()
+    assert packed[:4] == ZSTD_MAGIC, "not a zstd stream"
+    text = subprocess.run([command, "-dc"], input=packed, capture_output=True, check=True, timeout=30).stdout.decode()
+    assert text.endswith("\n") and "\n\n" not in text
+    return text
+
+
+def usage_rows(path: Path) -> list[dict]:
+    return [json.loads(line) for line in usage_text(path).splitlines()]
+
+
+def usage_file_lines(instance: str, written_at: int, *, key: str = "ui_0a1b2c3d4e5f", count: int = 3, since: int | None = None, version: int = 1) -> list[dict]:
+    """The rows of the file of another instance: a header, a key and a cell of one day (what the current day of 90 reads)."""
+    today = written_at - written_at % 86400
+    return [
+        {"type": "header", "instance": instance, "format": "chdash-mcp-usage", "version": version, "boot": f"{instance}-boot", "since": since or written_at - 3600,
+         "written_at": written_at, "retention_days": 90},
+        {"type": "key", "instance": instance, "key": key, "name": "elsewhere-key", "host": "local", "source": "ui", "first_used": written_at - 60,
+         "last_used": written_at - 30, "deleted_at": 0},
+        {"type": "cell", "instance": instance, "key": key, "tier": "d1", "start": today, "kind": "call", "client": "other-instance-client", "method": "list_hosts",
+         "result": "ok", "count": count, "duration_ms_sum": 30, "duration_ms_max": 20, "rows": 3, "bytes": 300},
+    ]
+
+
+def write_usage_rows(path: Path, rows: list[dict]) -> None:
+    path.write_bytes(zstd_frame("".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows).encode()))
+    os.chmod(path, 0o644)
+
+
 @needs_data_dir
 def test_usage_file_holds_counts_never_secrets():
-    # The usage file: written by the stop and every minute (mode 0600), counts and names, never a secret or SQL.
+    # The usage file of this instance: JSON Lines compressed with zstd, written by the stop and every minute (mode 0600), counts and names, never
+    # a secret or SQL. Every line is a flat object with its type and its instance.
     key, secret = make_key(new_key_body("usage-file", tools=["list_hosts"]))
     try:
         assert ok_tool(MCP_URL, secret, "list_hosts")["count"] == 1
-        path = Path(DATA_DIR) / "mcp_usage.json"
+        path = Path(DATA_DIR) / f"{USAGE_INSTANCE}.jsonl.zst"
         deadline = time.time() + 75
+        rows: list[dict] = []
         while time.time() < deadline:
-            if path.exists() and key["id"] in path.read_text():
-                break
+            if path.exists():
+                rows = usage_rows(path)
+                if any(r["type"] == "key" and r["key"] == key["id"] for r in rows):
+                    break
             time.sleep(1)
-        assert path.exists() and key["id"] in path.read_text(), "the usage file was not written within a minute"
+        assert any(r["type"] == "key" and r["key"] == key["id"] for r in rows), "the usage file was not written within a minute"
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
-        text = path.read_text()
+        text = usage_text(path)
         assert secret not in text and secret[9:] not in text and "SELECT" not in text
-        document = json.loads(text)
-        assert document["version"] == 1 and document["since"].endswith("Z")
-        entry = next(e for e in document["keys"] if e["id"] == key["id"])
-        assert entry["name"] == "usage-file" and entry["host"] == "local" and entry["source"] == "ui" and entry["deleted_at"] is None
-        # An entry has the six tiers (m1, m5, m15, h3, h12, d1: the steps of 1 minute, 5 minutes, 15 minutes, 3 hours, 12 hours, 1 day), and
-        # a bucket is its start and its cells: [type, client, method, result, count, duration sum, duration max, rows, bytes].
-        steps = {"m1": 60, "m5": 300, "m15": 900, "h3": 10800, "h12": 43200, "d1": 86400}
-        assert "hours" not in entry and "days" not in entry and all(isinstance(entry[tier], list) for tier in steps)
-        for tier, step in steps.items():
-            bucket = entry[tier][-1]  # the retention of this instance is 90 days: every tier is kept
-            assert len(bucket) == 2 and bucket[0] % step == 0, tier
-            assert all(len(cell) == 9 for cell in bucket[1]), tier
-        cells = {tuple(cell[:4]): cell[4:] for cell in entry["m1"][-1][1]}
-        assert len(cells[("call", "chdash-backend-functional", "list_hosts", "ok")]) == 5 and cells[("call", "chdash-backend-functional", "list_hosts", "ok")][0] >= 1
-        # The key made one call: it is in each tier, as the same cell.
-        assert all([cell[:4] for cell in entry[tier][-1][1]] == [list(cell_key) for cell_key in cells] for tier in steps)
-        # Nothing that a client chose is in the file, for any key: a method of a request is one of the protocol (or "other", "invalid",
-        # for a message that could not be read), a result is of the shape that the file keeps, and a client is printable ASCII (1 to 64 bytes,
-        # no space at either end): its name, or the product of its User-Agent.
+        # The first line is the header; every line is flat (text and whole numbers) and says its instance.
+        header = rows[0]
+        assert set(header) == {"type", "instance", "format", "version", "boot", "since", "written_at", "retention_days"}
+        assert header["type"] == "header" and header["format"] == "chdash-mcp-usage" and header["version"] == 1 and header["retention_days"] == 90
+        assert header["instance"] == USAGE_INSTANCE and header["boot"] and 0 < header["since"] <= header["written_at"]
+        assert all(r["instance"] == USAGE_INSTANCE and r["type"] in ("header", "key", "client", "cell") for r in rows)
+        assert all(isinstance(v, (str, int)) and not isinstance(v, bool) for r in rows for v in r.values())
+        entry = next(r for r in rows if r["type"] == "key" and r["key"] == key["id"])
+        assert set(entry) == {"type", "instance", "key", "name", "host", "source", "first_used", "last_used", "deleted_at"}
+        assert entry["name"] == "usage-file" and entry["host"] == "local" and entry["source"] == "ui" and entry["deleted_at"] == 0
+        assert 0 < entry["first_used"] <= entry["last_used"]
+        for r in (r for r in rows if r["type"] == "client"):
+            assert set(r) == {"type", "instance", "key", "name", "version", "user_agent", "first_seen", "last_seen", "requests"} and r["requests"] >= 1
+        # A cell for each of the six tiers (m1, m5, m15, h3, h12, d1: the steps of 1 minute, 5 minutes, 15 minutes, 3 hours, 12 hours, 1 day;
+        # the retention of this instance is 90 days: every tier is kept): the same cell in each of them.
+        cells = [r for r in rows if r["type"] == "cell"]
+        assert all(set(c) == {"type", "instance", "key", "tier", "start", "kind", "client", "method", "result", "count", "duration_ms_sum",
+                              "duration_ms_max", "rows", "bytes"} for c in cells)
+        mine = [c for c in cells if c["key"] == key["id"]]
+        assert {c["tier"] for c in mine} == set(USAGE_STEPS)
+        assert all(c["start"] % USAGE_STEPS[c["tier"]] == 0 for c in cells)
+        listed = {tier: [(c["kind"], c["client"], c["method"], c["result"]) for c in mine if c["tier"] == tier] for tier in USAGE_STEPS}
+        assert listed["m1"] == [("call", "chdash-backend-functional", "list_hosts", "ok")] and all(v == listed["m1"] for v in listed.values())
+        assert all(c["count"] >= 1 for c in mine if c["method"] == "list_hosts")
+        # Nothing that a client chose is in the file, for any key: a method of a request is one of the protocol (or "other", "invalid", for a
+        # message that could not be read), a result is of the shape that the file keeps, and a client is printable ASCII (1 to 64 bytes, no
+        # space at either end): its name, or the product of its User-Agent.
         known = {"initialize", "ping", "tools/list", "tools/call", "response", "notifications/initialized", "notifications/cancelled",
                  "notifications/progress", "notifications/roots/list_changed", "resources/list", "resources/read", "resources/templates/list",
-                 "resources/subscribe", "resources/unsubscribe", "prompts/list", "prompts/get", "completion/complete", "logging/setLevel",
-                 "other", "invalid"}
-        for each in document["keys"]:
-            assert len({client for tier in steps for bucket in each[tier] for kind, client, *_ in bucket[1] if client not in ("other", "unknown")}) <= 16
-            for tier, step in steps.items():
-                for bucket in each[tier]:
-                    assert len(bucket) == 2 and bucket[0] % step == 0
-                    for kind, client, method, result, *counts in bucket[1]:
-                        assert kind in ("call", "request", "limited", "rejected") and len(counts) == 5 and counts[0] >= 1
-                        assert re.fullmatch(r"[A-Za-z0-9_/]{1,64}", method) and re.fullmatch(r"[a-z0-9_]{1,64}", result), (method, result)
-                        assert re.fullmatch(r"[\x20-\x7e]{1,64}", client) and client == client.strip(" "), client
-                        if kind == "request":
-                            assert method in known, method
-                        if kind in ("limited", "rejected"):
-                            assert method == "unread" and result != "ok", (kind, method, result)
+                 "resources/subscribe", "resources/unsubscribe", "prompts/list", "prompts/get", "completion/complete",
+                 "logging/setLevel", "other", "invalid"}
+        by_key: dict[str, set] = {}
+        for c in cells:
+            assert c["kind"] in ("call", "request", "limited", "rejected") and c["count"] >= 1
+            assert re.fullmatch(r"[A-Za-z0-9_/]{1,64}", c["method"]) and re.fullmatch(r"[a-z0-9_]{1,64}", c["result"]), (c["method"], c["result"])
+            assert re.fullmatch(r"[\x20-\x7e]{1,64}", c["client"]) and c["client"] == c["client"].strip(" "), c["client"]
+            if c["kind"] == "request":
+                assert c["method"] in known, c["method"]
+            if c["kind"] in ("limited", "rejected"):
+                assert c["method"] == "unread" and c["result"] != "ok", (c["kind"], c["method"], c["result"])
+            if c["client"] not in ("other", "unknown"):
+                by_key.setdefault(c["key"], set()).add(c["client"])
+        assert all(len(names) <= 16 for names in by_key.values())
     finally:
         drop_key(key["id"])
 
@@ -1718,7 +2151,7 @@ def test_read_only_instance():
     assert seen["totals"]["requests"] >= 1 and seen["filters"]["key"] == ["ui_0a1b2c3d4e5f"] and seen["totals"]["active_keys"] == 1
     assert any(row["id"] == "ui_0a1b2c3d4e5f" and row["source"] == "ui" for row in seen["keys"])
     assert any(row["method"] == "ping" and row["kind"] == "request" for row in seen["methods"])
-    assert [t["name"] for t in rpc(RO_URL, SEED, "tools/list").json()["result"]["tools"]] == ["list_databases", "list_tables", "describe_table", "query_table"]
+    assert [t["name"] for t in rpc(RO_URL, SEED, "tools/list").json()["result"]["tools"]] == ["list_databases", "list_tables", "describe_table", "query_table"] + ANALYSIS
     assert ok_tool(RO_URL, SEED, "list_tables", {})["tables"]
     # Every write is refused.
     api_error(m("POST", "/api/mcp/keys", base=RO_URL, body=new_key_body()), 403, "manage_disabled")
@@ -1737,8 +2170,9 @@ def test_read_only_instance():
 @needs_nostorage
 def test_no_storage_instance():
     meta = api_ok(m("GET", "/api/mcp/meta", base=NOSTORAGE_URL))
-    # No usage_file: the usage is in memory, since the start.
-    assert meta["usage"]["persisted"] is False
+    # No usage block: the usage is off. The meta says so (and the windows of the cost, which does not depend on it).
+    assert meta["usage"]["enabled"] is False and set(meta["usage"]) == {"enabled", "cost_windows"}
+    assert meta["usage"]["cost_windows"] == ["1h", "6h", "24h", "7d"]
     assert meta["storage_configured"] is False and meta["manage_from_ui"] is True and meta["can_manage"] is False
     assert [k["name"] for k in api_ok(m("GET", "/api/mcp/keys", base=NOSTORAGE_URL))["keys"]] == ["only-key"]
     api_error(m("POST", "/api/mcp/keys", base=NOSTORAGE_URL, body=new_key_body()), 409, "storage_not_configured")
@@ -1757,12 +2191,16 @@ def test_no_storage_instance():
         assert "WWW-Authenticate" not in response.headers
     result = post_mcp(NOSTORAGE_URL, None, list_hosts, headers={"X-ChDash-Key": ONLY_KEY}).json()["result"]
     assert [h["name"] for h in result["structuredContent"]["hosts"]] == ["local"]
-    # The usage is in memory since the start, and the Usage tab reads it.
-    seen = api_ok(m("GET", "/api/mcp/usage/overview", base=NOSTORAGE_URL))
-    assert seen["persisted"] is False and seen["totals"]["requests"] >= 4 and seen["totals"]["calls"] >= 1
-    assert [row["id"] for row in seen["keys"]] == ["only-key"]
-    assert {"ping": "request", "list_hosts": "call"}.items() <= {row["method"]: row["kind"] for row in seen["methods"]}.items()
-    assert seen["totals"]["keys"] == 1
+    # The usage is off: nothing is counted (the keys have no last use), and the routes of the usage say so.
+    assert [k["last_used_at"] for k in api_ok(m("GET", "/api/mcp/keys", base=NOSTORAGE_URL))["keys"]] == [None]
+    for path in ("/api/mcp/usage", "/api/mcp/usage/overview", "/api/mcp/keys/only-key/usage"):
+        response = m("GET", path, base=NOSTORAGE_URL)
+        api_error(response, 404, "not_enabled")
+        assert "mcp.usage.enabled" in response.json()["message"], path
+    api_error(m("GET", "/api/mcp/usage?window=48h", base=NOSTORAGE_URL), 404, "not_enabled")  # off before the window is read
+    # The cost of a key does not depend on it: its route is not the one of the usage.
+    cost = m("GET", "/api/mcp/keys/only-key/cost", base=NOSTORAGE_URL)
+    assert cost.status_code == 200 or "mcp.usage.enabled" not in cost.text
 
 
 # ---- what a key reaches (GET /api/mcp/keys/<id>/access) -------------------------------------------------------------
@@ -1950,28 +2388,55 @@ def test_startup_error_3_storage_file():
     assert_config_error(start_binary('mcp {\n enabled = true\n storage_file = "/no/such/dir/keys.json"\n}\n' + HOSTS), "storage_file", "does not exist")
 
 
+def usage_bytes(rows: list[dict]) -> bytes:
+    """The bytes of a usage file that holds these rows (a zstd frame; see zstd_frame)."""
+    return zstd_frame("".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows).encode())
+
+
 @needs_startup
-def test_startup_error_8_usage_file():
-    # The key file is no usage file; a usage file of another shape is refused and never rewritten; its directory must exist.
-    same = 'mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n usage_file = "@DIR@/keys.json"\n' + KEY % "" + "}\n" + HOSTS
-    assert_config_error(start_binary(same), "mcp.usage_file", "key file")
-    entry = ('{"id": "k", "name": "k", "source": "config", "host": "local", "first_used_at": null, "last_used_at": null, "deleted_at": null, "clients": [], %s}')
-    old_layout = '{"version": 1, "since": "2026-10-01T00:00:00Z", "keys": [' + entry % '"hours": [], "days": []' + ']}'  # no tiers
-    old_cell = '{"version": 1, "since": "2026-10-01T00:00:00Z", "keys": [' + entry % (
-        '"m1": [], "m5": [], "m15": [], "h3": [], "h12": [], "d1": [[86400, [["call", "list_hosts", "ok", 1, 0, 0, 0, 0]]]]') + ']}'  # no client
-    bad_step = '{"version": 1, "since": "2026-10-01T00:00:00Z", "keys": [' + entry % '"m1": [], "m5": [[360, []]], "m15": [], "h3": [], "h12": [], "d1": []' + ']}'
-    for content, fragment in (('{"version": 2, "since": "2026-10-01T00:00:00Z", "keys": []}', "version must be 1"),
-                              (old_layout, "m1 is missing"), (old_cell, "cell"), (bad_step, "m5")):
+def test_startup_error_8_usage():
+    # The usage (mcp { usage { } }): a directory that exists and that holds the files of the instances, a name of this instance, and a file of
+    # this instance that is a usage file of this ChDash (it is never rewritten when it is not).
+    def usage(attrs: str) -> str:
+        return "mcp {\n enabled = true\n" + KEY % "" + " usage {\n" + attrs + "\n }\n}\n" + HOSTS
+
+    named = ' enabled = true\n instance = "chdash-0"\n'
+    assert_config_error(start_binary(usage(named)), "mcp.usage.dir", "required")
+    assert_config_error(start_binary(usage(named + ' dir = "/no/such/dir"')), "mcp.usage.dir", "does not exist")
+    assert_config_error(start_binary(usage(named + ' dir = "@DIR@/a-file"'), files={"a-file": "x"}), "mcp.usage.dir", "not a directory")
+    for name in ("has space", "a/b", "x" * 65):
+        assert_config_error(start_binary(usage(' enabled = true\n dir = "@DIR@"\n instance = "%s"' % name)), "mcp.usage.instance")
+    # Another mode of storage is not offered; the keys that the block replaced are not read any more.
+    assert_config_error(start_binary(usage(named + ' dir = "@DIR@"\n storage = "database"')), "mcp.usage.storage", "files")
+    assert_config_error(start_binary(usage(named + ' dir = "@DIR@"\n retention_days = 366')), "mcp.usage.retention_days")
+    assert_config_error(start_binary('mcp {\n enabled = true\n usage_file = "@DIR@/usage.json"\n' + KEY % "" + "}\n" + HOSTS), "unknown attribute usage_file")
+    assert_config_error(start_binary('mcp {\n enabled = true\n usage_retention_days = 30\n' + KEY % "" + "}\n" + HOSTS), "unknown attribute usage_retention_days")
+    # A file of this instance that is not valid stops the start, and is never rewritten.
+    now = int(time.time())
+    good = usage_file_lines("chdash-0", now)
+    no_key_row = [good[0], good[2]]  # a cell of a key that has no key row
+    bad_step = [good[0], good[1], {**good[2], "tier": "m5", "start": 360}]
+    cases = (
+        (b"this is not a zstd stream", "not a zstd file"),
+        (usage_bytes(usage_file_lines("chdash-0", now, version=2)), "version must be 1"),
+        (usage_bytes(usage_file_lines("someone-else", now)), "another instance"),
+        (usage_bytes(no_key_row), "no key row"),
+        (usage_bytes(bad_step), "multiple of 300"),
+        (usage_bytes(good[1:]), "must be the header"),
+        (usage_bytes([good[0], good[0]]), "second header"),
+        (usage_bytes([good[0], {"type": "bogus", "instance": "chdash-0"}]), "type that is not known"),
+    )
+    for content, fragment in cases:
         with tempfile.TemporaryDirectory() as tmp:
             os.chmod(tmp, 0o755)
-            (Path(tmp) / "usage.json").write_text(content)
-            os.chmod(Path(tmp) / "usage.json", 0o644)
-            (Path(tmp) / "chdash.hcl").write_text(('mcp {\n enabled = true\n usage_file = "@DIR@/usage.json"\n' + KEY % "" + "}\n" + HOSTS).replace("@DIR@", config_dir(tmp)))
+            (Path(tmp) / "chdash-0.jsonl.zst").write_bytes(content)
+            os.chmod(Path(tmp) / "chdash-0.jsonl.zst", 0o644)
+            config = usage(named + ' dir = "@DIR@"').replace("@DIR@", config_dir(tmp))
+            (Path(tmp) / "chdash.hcl").write_text(config)
             os.chmod(Path(tmp) / "chdash.hcl", 0o644)
             result = subprocess.run(STARTUP_CMD.format(dir=shlex.quote(tmp), name="chdash.hcl"), shell=True, capture_output=True, text=True, timeout=60)
-            assert_config_error(result, "mcp.usage_file", fragment, "the file is not changed")
-            assert (Path(tmp) / "usage.json").read_text() == content
-    assert_config_error(start_binary('mcp {\n enabled = true\n usage_file = "/no/such/dir/usage.json"\n' + KEY % "" + "}\n" + HOSTS), "usage_file", "does not exist")
+            assert_config_error(result, "mcp.usage.dir", "chdash-0.jsonl.zst", fragment, "the file is not changed")
+            assert (Path(tmp) / "chdash-0.jsonl.zst").read_bytes() == content
 
 
 @needs_startup
@@ -2183,7 +2648,7 @@ def test_the_explorer_tools_follow_the_patterns_of_the_key():
             fail_tool(MCP_URL, secret, "explorer_table", {"host": "local", "params": params}, "invalid_argument")
         # Tools that read no data answer; the ones about the server are not in the key.
         assert ok_tool(MCP_URL, secret, "format_sql", {"host": "local", "body": {"sqls": ["select 1"]}})
-        assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == tools
+        assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == tools + ANALYSIS
         # The graph, the storage and the names are read as the pages read them (the MCP user decides what is visible, the
         # system user adds the figures): any key may hold them. The SQL tools still need all the data.
         response = m("POST", "/api/mcp/keys", body=new_key_body("explorer-graph", tools=["explorer_graph"], databases=["chdash_ui"]))
@@ -2388,7 +2853,7 @@ def test_api_tools_need_all_the_data():
             drop_key(made["id"])
     key, secret = make_key(new_key_body("api-wide", tools=["explorer_catalog", "system_overview"], databases=["*"]))
     try:
-        assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["explorer_catalog", "system_overview"]
+        assert [t["name"] for t in rpc(MCP_URL, secret, "tools/list").json()["result"]["tools"]] == ["explorer_catalog", "system_overview"] + ANALYSIS
         assert ok_tool(MCP_URL, secret, "explorer_catalog", {"host": "local"})["host_id"] == "local"
         # A tool that the key does not hold is refused, an API tool as any other.
         fail_tool(MCP_URL, secret, "system_disks", {"host": "local"}, "tool_not_allowed")
@@ -2529,3 +2994,75 @@ def test_a_key_above_the_limit_of_the_clickhouse_user_is_refused_and_says_who_li
     assert m("DELETE", f"/api/mcp/keys/{made.json()['key']['id']}", base=PROFILE_URL).status_code == 200
     plain = m("POST", "/api/mcp/keys", base=PROFILE_URL, body={"name": "above-config", "hosts": ["ro2"], "tools": ["list_hosts"], "databases": ["*"], "max_rows": 101})
     assert plain.status_code == 400 and "MCP configuration" in plain.json()["message"], plain.text
+
+
+@needs_data_dir
+def test_the_usage_of_the_instances_that_share_the_directory_is_summed():
+    # The instances share the directory of the usage: this one writes its own file and reads the others about every minute (never in a request),
+    # and every answer sums them. Two files of other instances are put there, one that is valid and one that is not, and a link to the first
+    # one, which is never read. The files are removed at the end, and the answers stop listing them at the next read.
+    directory = Path(DATA_DIR)
+    now = int(time.time())
+    key_id = "ui_5f5f5f5f5f5f"
+    other, broken, linked = directory / "functional-other.jsonl.zst", directory / "functional-broken.jsonl.zst", directory / "functional-linked.jsonl.zst"
+
+    def listed(doc: dict) -> list:
+        return [row["instance"] for row in doc["instances"]]
+
+    try:
+        write_usage_rows(other, usage_file_lines("functional-other", now, key=key_id, count=3))
+        broken.write_bytes(b"this is not a zstd stream")
+        os.chmod(broken, 0o644)
+        os.symlink(other.name, linked)
+        deadline = time.time() + 100
+        doc = overview(("window", "90d"), ("key", key_id))
+        while "functional-other" not in listed(doc) and time.time() < deadline:
+            time.sleep(2)
+            doc = overview(("window", "90d"), ("key", key_id))
+        assert listed(doc) == [USAGE_INSTANCE, "functional-broken", "functional-other"], doc["instances"]
+        rows = {row["instance"]: row for row in doc["instances"]}
+        assert all(set(row) == OVERVIEW_INSTANCE for row in rows.values())
+        # The instances that are read: this one, which is not written yet for this key; the one that is valid, with its counts and its keys.
+        assert rows[USAGE_INSTANCE]["status"] == "ok" and rows[USAGE_INSTANCE]["requests"] == 0
+        assert rows["functional-other"]["status"] == "ok" and rows["functional-other"]["reason"] == ""
+        assert (rows["functional-other"]["requests"], rows["functional-other"]["calls"], rows["functional-other"]["keys"]) == (3, 3, 1)
+        assert rows["functional-other"]["written_at"].endswith("Z") and abs(parse_time(rows["functional-other"]["written_at"]) - now) <= 1
+        # The one that is not valid is skipped, with its reason, and counts for nothing; the link is not listed.
+        assert rows["functional-broken"]["status"] == "skipped" and "zstd" in rows["functional-broken"]["reason"]
+        assert rows["functional-broken"]["requests"] == 0 and rows["functional-broken"]["written_at"] is None
+        assert "this is not a zstd stream" not in json.dumps(doc)
+        # The key that only the other instance knows: its recorded name, "elsewhere", with the counts that its file says.
+        assert doc["totals"]["requests"] == 3 and doc["totals"]["active_keys"] == 1
+        row = next(k for k in doc["keys"] if k["id"] == key_id)
+        assert (row["name"], row["elsewhere"], row["deleted_at"], row["requests"]) == ("elsewhere-key", True, None, 3)
+        assert [c["client"] for c in doc["clients"]] == ["other-instance-client"]
+        assert parse_time(doc["since"]) <= now - 3599  # the earliest start of counting of the instances that are read
+        assert parse_time(api_ok(m("GET", "/api/mcp/meta"))["usage"]["since"]) <= now - 3599
+        # The details of that key, and the list of the page, add the instances up the same way.
+        detail = usage_of(key_id, "90d")
+        assert detail["elsewhere"] is True and detail["deleted_at"] is None and detail["name"] == "elsewhere-key" and detail["totals"]["calls"] == 3
+        assert [i["instance"] for i in detail["instances"]] == [USAGE_INSTANCE, "functional-broken", "functional-other"]
+        summary = api_ok(m("GET", "/api/mcp/usage?window=90d"))
+        assert [i["status"] for i in summary["instances"]] == ["ok", "skipped", "ok"]
+        row = next(k for k in summary["keys"] if k["id"] == key_id)
+        assert row["elsewhere"] is True and row["requests"] == 3 and row["deleted_at"] is None
+        assert all(k["elsewhere"] is False for k in summary["keys"] if k["id"] != key_id and k["deleted_at"] is None)
+        # The filter and the group by instance.
+        only = overview(("window", "90d"), ("key", key_id), ("instance", "functional-other"))
+        assert only["totals"]["requests"] == 3 and only["filters"]["instance"] == ["functional-other"]
+        assert listed(only) == listed(doc)  # the facet of the instances ignores its own filter
+        here = overview(("window", "90d"), ("key", key_id), ("instance", USAGE_INSTANCE))
+        assert here["totals"]["requests"] == 0
+        grouped = overview(("window", "90d"), ("key", key_id), ("group", "instance"))
+        assert [(g["id"], g["label"], g["total"]) for g in grouped["series"]["groups"]] == [("functional-other", "functional-other", 3)]
+        check_series_adds_up(grouped)
+    finally:
+        for path in (linked, broken, other):
+            path.unlink(missing_ok=True)
+    # The next read of the directory no longer lists them.
+    deadline = time.time() + 100
+    while time.time() < deadline:
+        if listed(overview(("window", "90d"), ("key", key_id))) == [USAGE_INSTANCE]:
+            return
+        time.sleep(2)
+    raise AssertionError(f"the instances that were removed are still listed: {overview(('window', '90d'))['instances']}")

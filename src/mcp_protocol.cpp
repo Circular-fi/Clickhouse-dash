@@ -28,6 +28,7 @@ const char* const kInstructions =
     "run_query and explain_query exist only when your key allows free SQL. "
     "The tools of the other groups (explorer_*, system_*, traces_*, logs_*, metrics_*) call the same functions as "
     "the ChDash pages: pass the query parameters in `params`. "
+    "mcp_analysis_my_limits tells the limits of your own key, and mcp_analysis_my_usage (while ChDash counts the usage) what it did. "
     "Every result has caps on rows and bytes; `truncated` is true when something was cut. "
     "A tool failure comes back with isError true and {\"error\": code, \"message\": text}.";
 
@@ -98,13 +99,14 @@ std::string initialize_result(const std::string& version, const McpServerInfo& i
   return std::string(sb.GetString(), sb.GetSize());
 }
 
-std::string tools_list_result(const McpKey& key) {
+std::string tools_list_result(const McpKey& key, const McpToolAvailability& availability) {
   rapidjson::StringBuffer sb;
   Writer w(sb);
   w.StartObject();
   w.Key("tools");
   w.StartArray();
-  for (const auto& name : mcp_effective_tools(key.tools, key.databases)) {
+  // What the key holds and the configuration offers: the tools of the analysis of the usage are left out while the usage is off.
+  for (const auto& name : mcp_effective_tools(key.tools, key.databases, availability)) {
     const McpToolInfo* info = mcp_find_tool(name);
     if (!info) continue;
     const char* schema = mcp_tool_input_schema(name);
@@ -323,6 +325,29 @@ const char* mcp_tool_input_schema(std::string_view tool) {
       ",\"aggregation\":{\"type\":\"string\",\"enum\":[\"avg\",\"min\",\"max\",\"sum\",\"last\",\"count\"],\"default\":\"avg\"}"
       ",\"step_seconds\":{\"type\":\"integer\",\"minimum\":1,\"description\":\"The width of a point. Default: the window divided by 100, at least 10 s.\"}},"
       "\"required\":[\"metric\"],\"additionalProperties\":false}";
+  // The analysis of the keys (mcp_tools_analysis.cpp). The window is one that the retention of the usage keeps: the others are `invalid_argument`.
+  static const std::string usage_window =
+      "\"window\":{\"type\":\"string\",\"enum\":[\"1h\",\"6h\",\"24h\",\"7d\",\"30d\",\"90d\",\"365d\"],\"default\":\"24h\","
+      "\"description\":\"The period to sum, ending now. 7d and longer need mcp.usage.retention_days of that many days.\"}";
+  static const std::string usage_series =
+      "\"series\":{\"type\":\"boolean\",\"default\":false,\"description\":\"Add one point for each step of the window (the answer is larger).\"}";
+  static const auto names_of = [](const char* name, const char* what) {
+    return std::string("\"") + name + "\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"maxItems\":20,\"description\":\"" + what + "\"}";
+  };
+  static const std::string usage_instances = names_of("instance", "Only these ChDash instances (their names). Omit for all of them.");
+  static const std::string my_usage = "{\"type\":\"object\",\"properties\":{" + usage_window + "," + usage_series +
+      ",\"include_cost\":{\"type\":\"boolean\",\"default\":false,\"description\":\"Add what the statements of your key cost ClickHouse. It reads system.query_log, so it takes longer.\"}," +
+      usage_instances + "},\"additionalProperties\":false}";
+  static const std::string all_usage = "{\"type\":\"object\",\"properties\":{" + usage_window +
+      ",\"group\":{\"type\":\"string\",\"enum\":[\"key\",\"method\",\"client\",\"instance\"],\"default\":\"key\",\"description\":\"What the series is grouped by.\"}," +
+      names_of("key", "Only these keys (their ids).") + "," +
+      names_of("method", "Only these methods: a tool, or a method of the protocol such as tools/list.") + "," +
+      names_of("client", "Only these clients (the names that they gave).") + "," + usage_instances + "," + usage_series +
+      ",\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":200,\"default\":20,\"description\":\"Rows of each list.\"}},\"additionalProperties\":false}";
+  static const std::string my_limits = R"({"type":"object","properties":{},"additionalProperties":false})";
+  if (tool == "mcp_analysis_my_limits") return my_limits.c_str();
+  if (tool == "mcp_analysis_my_usage") return my_usage.c_str();
+  if (tool == "mcp_analysis_all_usage") return all_usage.c_str();
   if (tool == "list_services") return list_services.c_str();
   if (tool == "search_traces") return search_traces.c_str();
   if (tool == "get_trace") return get_trace.c_str();
@@ -424,7 +449,7 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     return result;
   }
   if (name == "tools/list") {
-    result.body = result_body(*id, tools_list_result(key));
+    result.body = result_body(*id, tools_list_result(key, backend.availability()));
     return result;
   }
   if (name == "tools/call") {
@@ -432,7 +457,8 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     const auto tool = params->FindMember("name");
     if (tool == params->MemberEnd() || !tool->value.IsString()) return fail(id, kRpcInvalidParams, "tools/call needs params.name");
     const std::string tool_name(tool->value.GetString(), tool->value.GetStringLength());
-    if (!mcp_find_tool(tool_name)) return fail(id, kRpcInvalidParams, "Unknown tool: " + tool_name);
+    const McpToolInfo* tool_info = mcp_find_tool(tool_name);
+    if (!tool_info) return fail(id, kRpcInvalidParams, "Unknown tool: " + tool_name);
 
     static const rapidjson::Value no_arguments(rapidjson::kObjectType);
     const rapidjson::Value* arguments = &no_arguments;
@@ -442,8 +468,12 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     }
     result.tool = tool_name;
     result.tool_called = true;
+    // The key is entitled to the tool (its list, its data), then the configuration must offer it: a tool that the usage needs, while the usage is
+    // off, is `not_enabled` for the key that holds it (and `tool_not_allowed` for the key that does not).
     if (!mcp_scope_tool_allowed(key.tools, key.databases, tool_name)) {
       result.outcome = mcp_tool_error("tool_not_allowed", "this key cannot use the tool " + tool_name);
+    } else if (const std::string off = mcp_tool_unavailable_reason(*tool_info, backend.availability()); !off.empty()) {
+      result.outcome = mcp_tool_error("not_enabled", off);
     } else {
       try {
         result.outcome = backend.call_tool(key, tool_name, *arguments, now);

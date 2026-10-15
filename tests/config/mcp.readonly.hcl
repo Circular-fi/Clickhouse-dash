@@ -16,11 +16,19 @@ mcp {
   storage_file   = "/data/mcp_keys.json"
   manage_from_ui = false
 
+  # The usage is read on an instance whose keys are read-only too: a count is not a change of the keys. all_keys is off (the default):
+  # cfg-reader names mcp_analysis_all_usage and still does not have it (`not_enabled`).
+  usage {
+    enabled  = true
+    dir      = "/data"
+    instance = "chdash-mcp-ro"
+  }
+
   key {
     name      = "cfg-reader"
     secret    = "cf9eead0-0000-4000-8000-00000000000a"
     hosts     = ["local"]
-    tools     = ["list_hosts", "list_databases"]
+    tools     = ["list_hosts", "list_databases", "mcp_analysis_all_usage"]
     databases = ["*"]
   }
 }

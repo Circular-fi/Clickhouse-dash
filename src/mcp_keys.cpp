@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -245,6 +246,8 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
     }
   }
 
+  // The tools of the analysis of the keys (mcp_analysis_*) are names like the others: they read no table, so any data scope will do, and a key may
+  // name one that every key has (it is harmless) or one that the configuration does not offer yet (tools/list and tools/call decide, at run time).
   if (has_duplicates(key.tools)) return verr("tools", "duplicate", "tools lists a name twice");
   const bool all_data = mcp_scope_all_data(key.databases);
   for (const auto& tool : key.tools) {
@@ -743,6 +746,28 @@ bool McpRateLimiter::allow(const std::string& key_id, int64_t now_ms, int64_t pe
     *retry_after_seconds = std::max(1, static_cast<int>(wait_ms / 1000.0) + 1);
   }
   return false;
+}
+
+McpRateStatus McpRateLimiter::peek(const std::string& key_id, int64_t now_ms, int64_t per_minute) {
+  McpRateStatus status;
+  if (per_minute <= 0) return status;
+  status.per_minute = per_minute;
+  const double capacity = static_cast<double>(per_minute);
+  const double rate = capacity / 60000.0;  // tokens per millisecond
+  // The same arithmetic as allow(), on a copy: a key that has no bucket yet has a full one.
+  double tokens = capacity;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto it = buckets_.find(key_id);
+    if (it != buckets_.end()) {
+      tokens = std::min(capacity, it->second.tokens);
+      if (now_ms > it->second.at_ms) tokens = std::min(capacity, tokens + static_cast<double>(now_ms - it->second.at_ms) * rate);
+    }
+  }
+  status.remaining = static_cast<int64_t>(tokens);  // whole calls: the fraction of a token is not a call
+  if (tokens < 1.0) status.next_call_in_seconds = std::max(1, static_cast<int>((1.0 - tokens) / rate / 1000.0) + 1);
+  if (tokens < capacity) status.full_in_seconds = std::max<int64_t>(1, static_cast<int64_t>(std::ceil((capacity - tokens) / rate / 1000.0)));
+  return status;
 }
 
 } // namespace chdash

@@ -1,5 +1,7 @@
 # MCP with config keys only: no storage_file, so a key cannot be made from the page
 # (409 storage_not_configured). The key travels in X-ChDash-Key (mcp.auth_header), not in Authorization.
+# No usage block: the usage of the keys is off (nothing is counted, its routes answer 404 not_enabled, and the tools of the usage are not
+# offered: only-key names mcp_analysis_all_usage, which is then `not_enabled`).
 # Used by test_mcp.py (MCP_NOSTORAGE_BASE_URL).
 server {
   listen_host = "0.0.0.0"
@@ -19,7 +21,7 @@ mcp {
     name      = "only-key"
     secret    = "0a17e100-0000-4000-8000-000000000008"
     hosts     = ["local"]
-    tools     = ["list_hosts", "list_databases"]
+    tools     = ["list_hosts", "list_databases", "mcp_analysis_all_usage"]
     databases = ["*"]
   }
 }

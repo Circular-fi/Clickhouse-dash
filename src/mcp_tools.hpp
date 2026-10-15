@@ -1,9 +1,10 @@
 #pragma once
 
-// The MCP tools (docs/mcp.md): schema, read, observability and SQL. They reach ClickHouse only through
-// McpDatabase, so the native tests drive them with a fake database.
+// The MCP tools (docs/mcp.md): schema, read, observability, SQL and the analysis of the keys. They reach ClickHouse only through
+// McpDatabase, and the usage, the rate limit and the cost only through McpAnalysis, so the native tests drive them with fakes.
 
 #include "mcp_protocol.hpp"
+#include "mcp_usage.hpp"
 
 #include <cstdint>
 #include <map>
@@ -88,6 +89,57 @@ public:
   virtual McpApiResponse call(const McpApiRequest& request) = 0;
 };
 
+// What the analysis tools (mcp_tools_analysis.cpp) ask of the server: the state of the rate limit of a key, the usage of the keys and the
+// ClickHouse cost of a key. They never reach Server (api_mcp.cpp implements this, with the usage, the limiter and the cost cache): the
+// native tests answer it with a fake. A failure is a McpAnalysisError, which the tool turns into its own error.
+//
+// A cap that a key meets, and what binds it: `key` (its own limit), `mcp` (the configuration of MCP), `clickhouse` (the settings profile of
+// the MCP user of its host) or `both` (the last two are equal).
+struct McpAnalysisCap {
+  int64_t value = 0;
+  std::string source = "mcp";
+};
+
+// What the server knows of the limits of a key, which the tools do not (they know the configuration of MCP and the key).
+struct McpAnalysisLimits {
+  // The name of this ChDash in the usage; empty when the usage is off (an instance has a name only then).
+  std::string instance;
+  // The bucket of the key on this instance (the call in progress has taken its token).
+  McpRateStatus rate;
+  // The largest `max_rows` and `timeout_seconds` of a key of its host: the smaller of the configuration and the profile of the MCP user.
+  McpAnalysisCap max_rows;
+  McpAnalysisCap timeout_seconds;
+};
+
+// code: not_enabled (the usage is off, or reading all the keys), invalid_argument.
+class McpAnalysisError : public std::runtime_error {
+public:
+  McpAnalysisError(std::string code, const std::string& message) : std::runtime_error(message), code_(std::move(code)) {}
+  const std::string& code() const { return code_; }
+
+private:
+  std::string code_;
+};
+
+class McpAnalysis {
+public:
+  virtual ~McpAnalysis() = default;
+  // What the configuration turns on: the usage of the keys, and the reading of all of it.
+  virtual McpToolAvailability availability() const = 0;
+  // The windows of the usage that its retention keeps (1h, 6h, 24h, then 7d, 30d, 90d, 365d as far as it goes); empty when the usage is off.
+  virtual std::vector<std::string> usage_windows() const = 0;
+  virtual McpAnalysisLimits limits(const McpKey& key) = 0;
+  // The JSON object of the usage of the key in `window`, as the page gives it (mcp_usage.hpp), with every instance summed or the ones that
+  // `query` names.
+  virtual std::string my_usage(const McpKey& key, const std::string& window, const McpUsageDetailQuery& query, int64_t now) = 0;
+  // The JSON object of what the statements of the key cost ClickHouse, for the window of the usage (the page's cost reads 1h, 6h, 24h and 7d:
+  // a longer window reads 7d and says so). It never throws for a cost that cannot be read: its `status` says why. Outside the scope of the MCP
+  // call, so that its own read of system.query_log is not a statement of the key.
+  virtual std::string my_cost(const McpKey& key, const std::string& window, int64_t now) = 0;
+  // The JSON object of the usage of every key of every instance in `window`, cut and grouped by `query`. Never a cost.
+  virtual std::string all_usage(const std::string& window, const McpUsageOverviewQuery& query, int64_t now) = 0;
+};
+
 struct McpHostInfo {
   std::string name;
   std::string label;
@@ -139,9 +191,11 @@ inline constexpr size_t kMcpCreateQueryMaxBytes = 64 * 1024;
 
 class McpTools : public McpToolBackend {
 public:
-  McpTools(McpToolsConfig config, McpDatabase& database, McpApiClient* api = nullptr)
-      : config_(std::move(config)), db_(database), api_(api) {}
+  // `analysis` null: the tools of the analysis of the keys say `not_enabled`, and the usage is off.
+  McpTools(McpToolsConfig config, McpDatabase& database, McpApiClient* api = nullptr, McpAnalysis* analysis = nullptr)
+      : config_(std::move(config)), db_(database), api_(api), analysis_(analysis) {}
 
+  McpToolAvailability availability() const override { return analysis_ ? analysis_->availability() : McpToolAvailability{}; }
   McpToolOutcome call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments,
                            int64_t now) override;
 
@@ -149,6 +203,7 @@ private:
   McpToolsConfig config_;
   McpDatabase& db_;
   McpApiClient* api_;
+  McpAnalysis* analysis_;
 };
 
 } // namespace chdash

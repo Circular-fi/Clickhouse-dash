@@ -198,11 +198,21 @@ private:
 
 // ---- the rate limit -----------------------------------------------------------
 
+// How a key stands with the rate limit now (McpRateLimiter::peek): what a call could use of its bucket.
+struct McpRateStatus {
+  int64_t per_minute = 0;             // the limit; 0 = no limit (then the figures below are 0)
+  int64_t remaining = 0;              // the whole calls that fit now
+  int64_t next_call_in_seconds = 0;   // 0 when a call fits now; else when the next token comes
+  int64_t full_in_seconds = 0;        // when the bucket is full again (0 when it is)
+};
+
 // One token bucket per key: a burst of `per_minute` calls, refilled evenly over a minute.
 class McpRateLimiter {
 public:
   // `per_minute` 0 = no limit. On refusal, `retry_after_seconds` says when one call fits.
   bool allow(const std::string& key_id, int64_t now_ms, int64_t per_minute, int* retry_after_seconds);
+  // The bucket of the key as it stands at `now_ms`, with no token taken (a key that has no bucket yet has a full one).
+  McpRateStatus peek(const std::string& key_id, int64_t now_ms, int64_t per_minute);
 
 private:
   struct Bucket {

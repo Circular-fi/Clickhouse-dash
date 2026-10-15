@@ -5,6 +5,7 @@
 // The tools sit behind McpToolBackend, so a fake backend can drive the tests.
 
 #include "mcp_keys.hpp"
+#include "mcp_scope.hpp"
 
 #include <rapidjson/document.h>
 
@@ -48,7 +49,10 @@ McpToolOutcome mcp_tool_error(const std::string& code, const std::string& messag
 class McpToolBackend {
 public:
   virtual ~McpToolBackend() = default;
-  // `tool` is a tool of the catalog that the key holds. `arguments` is an object.
+  // What the configuration turns on for the tools that need something of it (the usage of the keys, the reading of all of it): a tool whose
+  // needs are not met is not listed, and a call to it is `not_enabled`. Nothing is on by default.
+  virtual McpToolAvailability availability() const { return {}; }
+  // `tool` is a tool of the catalog that the key holds and that the configuration offers. `arguments` is an object. `now` is Unix seconds.
   virtual McpToolOutcome call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments,
                                    int64_t now) = 0;
 };
