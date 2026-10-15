@@ -315,6 +315,8 @@ enum class McpApiRoute {
   // The usage of every key in a window (the Used column), and of one key (its details).
   Usage,
   KeyUsage,
+  // The requests of every key cut by method, result and type, with filters (the Usage tab).
+  UsageOverview,
   // What the statements of one key cost ClickHouse, read from system.query_log (api_mcp_cost.cpp).
   KeyCost,
 };

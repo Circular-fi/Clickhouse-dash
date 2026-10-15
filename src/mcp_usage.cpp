@@ -10,12 +10,16 @@
 #include <rapidjson/writer.h>
 
 #include <algorithm>
+#include <array>
+#include <bitset>
 #include <cerrno>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
+#include <tuple>
 #include <unordered_set>
 
 namespace chdash {
@@ -27,9 +31,8 @@ constexpr int64_t kHour = 3600;
 constexpr int64_t kDay = 86400;
 constexpr int64_t kHours = 24;
 constexpr size_t kMaxFileBytes = 128u * 1024 * 1024;
-constexpr size_t kMaxNames = 4096;
-constexpr size_t kToolsPerBucket = 256;
-constexpr size_t kResultsPerBucket = 32;
+constexpr size_t kMaxNames = 4096;  // the id of a name has 12 bits
+constexpr size_t kCellsPerBucket = 512;
 constexpr int64_t kTombstoneSeconds = 2 * kHour;
 constexpr size_t kNameBytes = 64;
 constexpr size_t kClientNameBytes = 128;
@@ -39,7 +42,27 @@ constexpr size_t kHostBytes = 256;
 constexpr int64_t kSaveEvery = 60;
 constexpr int64_t kSaveEveryLarge = 300;
 constexpr size_t kLargeFile = 8u * 1024 * 1024;
-constexpr size_t kBucketFields = 12;  // start, 9 counters, the tools, the results
+constexpr size_t kBucketFields = 2;  // start, the cells
+constexpr size_t kCellFields = 8;    // type, method, result, count, duration sum, duration max, rows, bytes
+
+// The methods of the protocol that a request is counted under (docs/mcp.md, "Usage of a key"). Any other method is "other":
+// a notification accepts any name, and a text that a client chose would fill the names for the whole retention.
+constexpr const char* kProtocolMethods[] = {
+    "initialize", "ping", "tools/list", "tools/call", "response", "notifications/initialized", "notifications/cancelled",
+    "notifications/progress", "notifications/roots/list_changed", "resources/list", "resources/read", "resources/templates/list",
+    "resources/subscribe", "resources/unsubscribe", "prompts/list", "prompts/get", "completion/complete", "logging/setLevel"};
+constexpr size_t kProtocolMethodCount = sizeof(kProtocolMethods) / sizeof(kProtocolMethods[0]);
+
+// The fixed names, as ids: other, ok, the methods, then the two that stand for a request without a method.
+constexpr uint16_t kNameOther = 0;
+constexpr uint16_t kNameOk = 1;
+constexpr uint16_t kNameFirstMethod = 2;
+constexpr uint16_t kNameInvalid = static_cast<uint16_t>(kNameFirstMethod + kProtocolMethodCount);  // the message could not be read
+constexpr uint16_t kNameUnread = static_cast<uint16_t>(kNameInvalid + 1);  // refused before the message was read
+
+// The types of a cell, in the order of McpUsageKind.
+constexpr const char* kKindNames[] = {"call", "request", "limited", "rejected"};
+constexpr size_t kKinds = sizeof(kKindNames) / sizeof(kKindNames[0]);
 
 int64_t floor_to(int64_t t, int64_t step) {
   const int64_t r = t % step;
@@ -63,14 +86,113 @@ bool valid_name(std::string_view name) {
   return !name.empty() && name.size() <= kNameBytes && std::all_of(name.begin(), name.end(), name_char);
 }
 
-// A key of the configuration (its name) or of the page (ui_ and 12 hexadecimal digits).
-bool valid_key_id(std::string_view id) {
-  if (mcp_valid_key_name(id)) return true;
-  if (id.size() != 15 || id.substr(0, 3) != "ui_") return false;
-  return std::all_of(id.begin() + 3, id.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+// A method of the file: [A-Za-z0-9_/], at most 64 bytes (logging/setLevel has a capital and a slash).
+bool valid_method(std::string_view name) {
+  return !name.empty() && name.size() <= kNameBytes &&
+         std::all_of(name.begin(), name.end(), [](char c) { return name_char(c) || (c >= 'A' && c <= 'Z') || c == '/'; });
 }
 
-size_t cells_of(const Usage::Bucket& bucket) { return bucket.tools.size() + bucket.results.size(); }
+// The id of a method of the protocol (the text must be exactly one of them), "other" for any other text.
+uint16_t protocol_method(std::string_view method) {
+  for (size_t i = 0; i < kProtocolMethodCount; ++i) {
+    if (method == kProtocolMethods[i]) return static_cast<uint16_t>(kNameFirstMethod + i);
+  }
+  return kNameOther;
+}
+
+int kind_index(std::string_view name) {
+  for (size_t i = 0; i < kKinds; ++i) {
+    if (name == kKindNames[i]) return static_cast<int>(i);
+  }
+  return -1;
+}
+
+uint32_t cell_key(McpUsageKind kind, uint16_t method, uint16_t result) {
+  return static_cast<uint32_t>(kind) << 24 | static_cast<uint32_t>(method) << 12 | result;
+}
+McpUsageKind kind_of(uint32_t key) { return static_cast<McpUsageKind>(key >> 24); }
+uint16_t method_of(uint32_t key) { return static_cast<uint16_t>((key >> 12) & 0xfff); }
+uint16_t result_of(uint32_t key) { return static_cast<uint16_t>(key & 0xfff); }
+
+// The cell of an event: its type, its method and its result. The names that this adds (a tool, a result) come from the
+// catalog and from the code of ChDash: a method of the protocol is looked up, never added.
+uint32_t cell_key_of(Usage::Names& names, const McpUsageEvent& event) {
+  uint16_t method = kNameUnread;
+  if (event.kind == McpUsageKind::ToolCall) method = names.intern(clean_name(event.tool));
+  else if (event.kind == McpUsageKind::Request) method = event.method.empty() ? kNameInvalid : protocol_method(event.method);
+  const uint16_t result = event.status == "ok" ? kNameOk : names.intern(clean_name(event.status));
+  return cell_key(event.kind, method, result);
+}
+
+// Where the requests of a cell go when no cell can be made for them: the cell of their type with the method "other" and
+// the result "ok" or "other". No cap stops it (at most 6 for a bucket), so a total stays exact.
+uint32_t overflow_key(uint32_t key) {
+  return cell_key(kind_of(key), kNameOther, result_of(key) == kNameOk ? kNameOk : kNameOther);
+}
+
+// A tool call or a protocol request that did not end ok. A refusal (429, 400, 413, 415) is counted apart.
+bool is_error(uint32_t key) {
+  const McpUsageKind kind = kind_of(key);
+  return (kind == McpUsageKind::ToolCall || kind == McpUsageKind::Request) && result_of(key) != kNameOk;
+}
+
+// The nine totals: what each one counts is said here and nowhere else. The requests are all the cells; the calls, the errors,
+// the 429 and the refusals count by type; the time is the one of the tool calls (a protocol request has its own time in its
+// cell, which a page shows for its method, but it is no tool call).
+void add_to_counters(Usage::Counters& into, const Usage::Cell& cell) {
+  into.requests += cell.count;
+  into.rows += cell.rows;
+  into.bytes += cell.bytes;
+  if (is_error(cell.key)) into.errors += cell.count;
+  switch (kind_of(cell.key)) {
+    case McpUsageKind::ToolCall:
+      into.calls += cell.count;
+      into.duration_ms_sum += cell.duration_ms_sum;
+      into.duration_ms_max = std::max(into.duration_ms_max, cell.duration_ms_max);
+      break;
+    case McpUsageKind::Request:
+      break;
+    case McpUsageKind::RateLimited:
+      into.rate_limited += cell.count;
+      break;
+    case McpUsageKind::Rejected:
+      into.rejected += cell.count;
+      break;
+  }
+}
+
+Usage::Counters totals_of(const Usage::Bucket& bucket) {
+  Usage::Counters total;
+  for (const auto& cell : bucket.cells) add_to_counters(total, cell);
+  return total;
+}
+
+// The figures of the cells of a row (a tool, a method, a result): the time is the one of every request of the row.
+struct Figures {
+  uint64_t requests = 0;
+  uint64_t errors = 0;
+  uint64_t duration_ms_sum = 0;
+  uint64_t duration_ms_max = 0;
+  uint64_t rows = 0;
+  uint64_t bytes = 0;
+  uint64_t keys = 0;             // the keys that have a request in the row
+  size_t last_entry = SIZE_MAX;  // the entry that was counted last: the entries are walked one after the other
+};
+
+void add_figures(Figures& into, const Usage::Cell& cell, size_t entry) {
+  into.requests += cell.count;
+  if (is_error(cell.key)) into.errors += cell.count;
+  into.duration_ms_sum += cell.duration_ms_sum;
+  into.duration_ms_max = std::max(into.duration_ms_max, cell.duration_ms_max);
+  into.rows += cell.rows;
+  into.bytes += cell.bytes;
+  if (into.last_entry != entry) {
+    ++into.keys;
+    into.last_entry = entry;
+  }
+}
+
+size_t cells_of(const Usage::Bucket& bucket) { return bucket.cells.size(); }
 
 void take_cells(size_t* cells, size_t count) { *cells -= std::min(*cells, count); }
 
@@ -96,78 +218,42 @@ bool drop_before(std::vector<Usage::Bucket>& buckets, int64_t first_kept, size_t
   return true;
 }
 
-// The cell of `id`. A new cell past the caps (of the bucket, of all the buckets) is the cell "other" (id 0).
-template <typename T>
-T& cell_of(std::vector<std::pair<uint16_t, T>>& cells, uint16_t id, size_t per_bucket, size_t* used, size_t max_cells) {
-  for (auto& item : cells) {
-    if (item.first == id) return item.second;
+// Whether a bucket has its 512 cells. The overflow cells (at most 6) are not among them, so a bucket that is written and read
+// again keeps the same cells.
+bool bucket_full(const Usage::Bucket& bucket) {
+  if (bucket.cells.size() < kCellsPerBucket) return false;
+  const auto overflow = std::count_if(bucket.cells.begin(), bucket.cells.end(), [](const Usage::Cell& cell) { return cell.key == overflow_key(cell.key); });
+  return bucket.cells.size() - static_cast<size_t>(overflow) >= kCellsPerBucket;
+}
+
+// The cell of `key` (the cells are sorted by key). A new cell past the caps (of the bucket, of all the buckets) is the overflow
+// cell of its type, which no cap stops.
+Usage::Cell& cell_of(Usage::Bucket& bucket, uint32_t key, size_t* used, size_t max_cells) {
+  const auto find = [&bucket](uint32_t wanted) {
+    return std::lower_bound(bucket.cells.begin(), bucket.cells.end(), wanted, [](const Usage::Cell& cell, uint32_t k) { return cell.key < k; });
+  };
+  auto at = find(key);
+  if (at != bucket.cells.end() && at->key == key) return *at;
+  if (key != overflow_key(key) && (bucket_full(bucket) || *used >= max_cells)) {
+    key = overflow_key(key);
+    at = find(key);
+    if (at != bucket.cells.end() && at->key == key) return *at;
   }
-  if (id != 0 && (cells.size() + 1 >= per_bucket || *used >= max_cells)) return cell_of(cells, 0, SIZE_MAX, used, SIZE_MAX);
-  cells.emplace_back(id, T{});
+  Usage::Cell fresh;
+  fresh.key = key;
+  at = bucket.cells.insert(at, fresh);
   ++*used;
-  return cells.back().second;
+  return *at;
 }
 
-void add_counters(Usage::Counters& into, const Usage::Counters& add) {
-  into.requests += add.requests;
-  into.calls += add.calls;
-  into.errors += add.errors;
-  into.rate_limited += add.rate_limited;
-  into.rejected += add.rejected;
-  into.duration_ms_sum += add.duration_ms_sum;
-  into.duration_ms_max = std::max(into.duration_ms_max, add.duration_ms_max);
-  into.rows += add.rows;
-  into.bytes += add.bytes;
-}
-
-void add_cell(Usage::Cell& into, const Usage::Cell& add) {
-  into.calls += add.calls;
-  into.errors += add.errors;
-  into.duration_ms_sum += add.duration_ms_sum;
-  into.duration_ms_max = std::max(into.duration_ms_max, add.duration_ms_max);
-  into.rows += add.rows;
-  into.bytes += add.bytes;
-}
-
-struct Recorded {
-  bool ok = false;
-  bool count_result = false;
-  uint16_t tool = 0;
-  uint16_t result = 0;
-};
-
-void add_event(Usage::Bucket& bucket, const McpUsageEvent& event, const Recorded& what, size_t* cells, size_t max_cells) {
-  Usage::Counters& total = bucket.total;
-  ++total.requests;
-  total.bytes += event.bytes;
-  switch (event.kind) {
-    case McpUsageKind::ToolCall: {
-      const auto ms = static_cast<uint64_t>(std::max<int64_t>(0, event.duration_ms));
-      ++total.calls;
-      if (!what.ok) ++total.errors;
-      total.duration_ms_sum += ms;
-      total.duration_ms_max = std::max(total.duration_ms_max, ms);
-      total.rows += event.rows;
-      Usage::Cell& cell = cell_of(bucket.tools, what.tool, kToolsPerBucket, cells, max_cells);
-      ++cell.calls;
-      if (!what.ok) ++cell.errors;
-      cell.duration_ms_sum += ms;
-      cell.duration_ms_max = std::max(cell.duration_ms_max, ms);
-      cell.rows += event.rows;
-      cell.bytes += event.bytes;
-      break;
-    }
-    case McpUsageKind::Request:
-      if (!what.ok) ++total.errors;
-      break;
-    case McpUsageKind::RateLimited:
-      ++total.rate_limited;
-      break;
-    case McpUsageKind::Rejected:
-      ++total.rejected;
-      break;
-  }
-  if (what.count_result) ++cell_of(bucket.results, what.result, kResultsPerBucket, cells, max_cells);
+void add_event(Usage::Bucket& bucket, const McpUsageEvent& event, uint32_t key, size_t* cells, size_t max_cells) {
+  Usage::Cell& cell = cell_of(bucket, key, cells, max_cells);
+  const auto ms = static_cast<uint64_t>(std::max<int64_t>(0, event.duration_ms));
+  ++cell.count;
+  cell.duration_ms_sum += ms;
+  cell.duration_ms_max = std::max(cell.duration_ms_max, ms);
+  if (event.kind == McpUsageKind::ToolCall) cell.rows += event.rows;
+  cell.bytes += event.bytes;
 }
 
 // The client of a request: an initialize with clientInfo is the client of that name, version and User-Agent (or the client
@@ -241,38 +327,45 @@ uint64_t count_of(const rapidjson::Value& value, const std::string& where) {
   return value.GetUint64();
 }
 
+std::string_view view_of(const rapidjson::Value& value) { return std::string_view(value.GetString(), value.GetStringLength()); }
+
+// The cells of a bucket: [[type, method, result, count, duration sum, duration max, rows, bytes], ...]. A cell that is a
+// duplicate adds to the first one, a cell without request is ignored, and the cells past the cap of a bucket go to the
+// overflow cell of their type: no request is lost.
+void cells_into(Usage::Bucket* bucket, const rapidjson::Value& cells, const std::string& at, Usage::State* state) {
+  for (const auto& item : cells.GetArray()) {
+    if (!item.IsArray() || item.Size() != kCellFields) file_error(at + " has a cell that is not a type, a method, a result and 5 counts");
+    if (!item[0].IsString() || !item[1].IsString() || !item[2].IsString()) file_error(at + " has a cell whose type, method and result are not text");
+    const int kind = kind_index(view_of(item[0]));
+    if (kind < 0) file_error(at + " has a cell of a type that is not known");
+    if (!valid_method(view_of(item[1]))) file_error(at + " has a method that is not valid");
+    if (!valid_name(view_of(item[2]))) file_error(at + " has a result that is not valid");
+    uint64_t counts[5];
+    for (rapidjson::SizeType i = 0; i < 5; ++i) counts[i] = count_of(item[i + 3], at);
+    if (counts[0] == 0) continue;
+    const uint32_t key = cell_key(static_cast<McpUsageKind>(kind), state->names.intern(view_of(item[1])), state->names.intern(view_of(item[2])));
+    Usage::Cell& cell = cell_of(*bucket, key, &state->cells, SIZE_MAX);
+    cell.count += counts[0];
+    cell.duration_ms_sum += counts[1];
+    cell.duration_ms_max = std::max(cell.duration_ms_max, counts[2]);
+    cell.rows += counts[3];
+    cell.bytes += counts[4];
+  }
+}
+
 std::vector<Usage::Bucket> buckets_of(const rapidjson::Value& value, const std::string& where, int64_t step, Usage::State* state) {
   if (!value.IsArray()) file_error(where + " must be an array");
   std::vector<Usage::Bucket> out;
   size_t index = 0;
   for (const auto& item : value.GetArray()) {
     const std::string at = where + "[" + std::to_string(index++) + "]";
-    if (!item.IsArray() || item.Size() != kBucketFields) file_error(at + " must be an array of 12 fields");
+    if (!item.IsArray() || item.Size() != kBucketFields) file_error(at + " must be an array of 2 fields: the start and the cells");
     Usage::Bucket bucket;
     if (!item[0].IsInt64() || item[0].GetInt64() <= 0 || item[0].GetInt64() % step != 0) file_error(at + " must start on a whole " + (step == kHour ? "hour" : "day"));
     bucket.start = item[0].GetInt64();
     if (!out.empty() && out.back().start >= bucket.start) file_error(at + " is not after the bucket before it");
-    uint64_t* counters[] = {&bucket.total.requests, &bucket.total.calls, &bucket.total.errors, &bucket.total.rate_limited, &bucket.total.rejected,
-                            &bucket.total.duration_ms_sum, &bucket.total.duration_ms_max, &bucket.total.rows, &bucket.total.bytes};
-    for (size_t i = 0; i < 9; ++i) *counters[i] = count_of(item[static_cast<rapidjson::SizeType>(i + 1)], at);
-    if (!item[10].IsObject() || !item[11].IsObject()) file_error(at + " must end with the tools and the results (objects)");
-    for (const auto& tool : item[10].GetObject()) {
-      const std::string name(tool.name.GetString(), tool.name.GetStringLength());
-      if (!valid_name(name)) file_error(at + " has a tool name that is not valid");
-      if (!tool.value.IsArray() || tool.value.Size() != 6) file_error(at + " has a tool whose cell is not 6 counts");
-      Usage::Cell cell;
-      uint64_t* fields[] = {&cell.calls, &cell.errors, &cell.duration_ms_sum, &cell.duration_ms_max, &cell.rows, &cell.bytes};
-      for (rapidjson::SizeType i = 0; i < 6; ++i) *fields[i] = count_of(tool.value[i], at);
-      if (bucket.tools.size() >= kToolsPerBucket) continue;
-      add_cell(cell_of(bucket.tools, state->names.intern(name), SIZE_MAX, &state->cells, SIZE_MAX), cell);
-    }
-    for (const auto& result : item[11].GetObject()) {
-      const std::string name(result.name.GetString(), result.name.GetStringLength());
-      if (!valid_name(name)) file_error(at + " has a result name that is not valid");
-      const uint64_t count = count_of(result.value, at);
-      if (bucket.results.size() >= kResultsPerBucket) continue;
-      cell_of(bucket.results, state->names.intern(name), SIZE_MAX, &state->cells, SIZE_MAX) += count;
-    }
+    if (!item[1].IsArray()) file_error(at + " must end with the cells (an array)");
+    cells_into(&bucket, item[1], at, state);
     out.push_back(std::move(bucket));
   }
   return out;
@@ -296,7 +389,7 @@ void parse_usage(std::string_view text, Usage::State* state, size_t max_clients)
     if (!item.IsObject()) file_error(where + " must be an object");
     Usage::Entry entry;
     entry.key.id = text_of(member(item, "id", where), where + ".id", 32);
-    if (!valid_key_id(entry.key.id)) file_error(where + ".id is not the id of a key");
+    if (!mcp_valid_key_id(entry.key.id)) file_error(where + ".id is not the id of a key");
     entry.key.name = text_of(member(item, "name", where), where + ".name", kMcpNameMaxBytes);
     if (!mcp_valid_key_name(entry.key.name)) file_error(where + ".name is not the name of a key");
     entry.key.source = text_of(member(item, "source", where), where + ".source", 16);
@@ -371,22 +464,16 @@ void put_time(McpJsonWriter& w, const char* name, int64_t seconds) {
 void put_bucket(McpJsonWriter& w, const Usage::Bucket& bucket, const Usage::Names& names) {
   w.StartArray();
   w.Int64(bucket.start);
-  const Usage::Counters& t = bucket.total;
-  for (const uint64_t value : {t.requests, t.calls, t.errors, t.rate_limited, t.rejected, t.duration_ms_sum, t.duration_ms_max, t.rows, t.bytes}) w.Uint64(value);
-  w.StartObject();
-  for (const auto& [id, cell] : bucket.tools) {
-    write_json_key(w, names.by_id[id]);
+  w.StartArray();
+  for (const auto& cell : bucket.cells) {
     w.StartArray();
-    for (const uint64_t value : {cell.calls, cell.errors, cell.duration_ms_sum, cell.duration_ms_max, cell.rows, cell.bytes}) w.Uint64(value);
+    w.String(kKindNames[static_cast<size_t>(kind_of(cell.key))]);
+    put(w, names.by_id[method_of(cell.key)]);
+    put(w, names.by_id[result_of(cell.key)]);
+    for (const uint64_t value : {cell.count, cell.duration_ms_sum, cell.duration_ms_max, cell.rows, cell.bytes}) w.Uint64(value);
     w.EndArray();
   }
-  w.EndObject();
-  w.StartObject();
-  for (const auto& [id, count] : bucket.results) {
-    write_json_key(w, names.by_id[id]);
-    w.Uint64(count);
-  }
-  w.EndObject();
+  w.EndArray();
   w.EndArray();
 }
 
@@ -402,7 +489,8 @@ Usage::Counters window_total(const Usage::Entry* entry, const McpUsageWindow& wi
   Usage::Counters total;
   if (!entry) return total;
   for (const auto& bucket : window_buckets(*entry, window)) {
-    if (in_window(bucket, window)) add_counters(total, bucket.total);
+    if (!in_window(bucket, window)) continue;
+    for (const auto& cell : bucket.cells) add_to_counters(total, cell);
   }
   return total;
 }
@@ -438,15 +526,525 @@ void put_summary(McpJsonWriter& w, const McpUsageKeyRef& key, const Usage::Entry
   w.EndObject();
 }
 
+// The average over `count` (null when there is none), rounded.
 void put_average(McpJsonWriter& w, const char* name, uint64_t sum, uint64_t count) {
   w.Key(name);
   if (count == 0) w.Null();
   else w.Uint64((sum + count / 2) / count);
 }
 
+// A figure that has no value when `has` is false (the largest time of nothing).
+void put_largest(McpJsonWriter& w, const char* name, bool has, uint64_t value) {
+  w.Key(name);
+  if (!has) w.Null();
+  else w.Uint64(value);
+}
+
+// The nine totals as the members of an object, in the order of the answers: the time is the one of the tool calls.
+void put_counters(McpJsonWriter& w, const Usage::Counters& total) {
+  w.Key("requests"); w.Uint64(total.requests);
+  w.Key("calls"); w.Uint64(total.calls);
+  w.Key("errors"); w.Uint64(total.errors);
+  w.Key("rate_limited"); w.Uint64(total.rate_limited);
+  w.Key("rejected"); w.Uint64(total.rejected);
+  put_average(w, "duration_ms_avg", total.duration_ms_sum, total.calls);
+  put_largest(w, "duration_ms_max", total.calls != 0, total.duration_ms_max);
+  w.Key("rows"); w.Uint64(total.rows);
+  w.Key("bytes"); w.Uint64(total.bytes);
+}
+
+// ---- the overview ----------------------------------------------------------------------------------
+
+constexpr size_t kFacetRows = 200;
+constexpr size_t kClientRows = 50;
+constexpr size_t kSeriesGroups = 8;
+
+enum class Split { Key, Method, Result, Type };
+
+Split split_of(const std::string& name) {
+  if (name == "key") return Split::Key;
+  if (name == "result") return Split::Result;
+  if (name == "type") return Split::Type;
+  return Split::Method;
+}
+
+// The kind of a row of the methods: a tool, a method of the protocol, or what was refused before its message was read.
+enum RowKind : uint8_t { kRowCall, kRowRequest, kRowRefused };
+constexpr size_t kRowKinds = 3;
+constexpr const char* kRowKindNames[] = {"call", "request", "refused"};
+
+RowKind row_kind_of(McpUsageKind kind) {
+  switch (kind) {
+    case McpUsageKind::ToolCall: return kRowCall;
+    case McpUsageKind::Request: return kRowRequest;
+    case McpUsageKind::RateLimited:
+    case McpUsageKind::Rejected: break;
+  }
+  return kRowRefused;
+}
+
+// The kind of the row of a method that nothing used in the window: it is only known by its name.
+RowKind row_kind_named(const std::string& method) {
+  if (method == "unread") return kRowRefused;
+  if (method == "other" || method == "invalid" || protocol_method(method) != kNameOther) return kRowRequest;
+  return kRowCall;
+}
+
+// What the filters keep, in the terms of the cells. A value that no cell has (a key that is not there, a name that was never
+// counted) is in no set: the filter then keeps nothing.
+struct Filter {
+  bool keys_on = false;
+  std::unordered_set<std::string> keys;
+  bool methods_on = false;
+  std::bitset<kMaxNames> methods;
+  bool results_on = false;
+  std::bitset<kMaxNames> results;
+  bool types_on = false;
+  std::array<bool, kKinds> types{};
+
+  bool key(const std::string& id) const { return !keys_on || keys.count(id) != 0; }
+  bool method(uint16_t id) const { return !methods_on || methods.test(id); }
+  bool result(uint16_t id) const { return !results_on || results.test(id); }
+  bool type(McpUsageKind kind) const { return !types_on || types[static_cast<size_t>(kind)]; }
+};
+
+struct KeyRow {
+  std::string id;
+  std::string name;
+  std::string host;
+  std::string source;
+  int64_t deleted_at = 0;
+  int64_t last_used = 0;
+  Usage::Counters counters;
+  bool selected = false;
+};
+
+struct ClientRow {
+  std::string name;
+  std::string version;
+  std::string user_agent;
+  uint64_t keys = 0;
+  uint64_t requests = 0;
+  int64_t first_seen = 0;
+  int64_t last_seen = 0;
+  size_t last_entry = SIZE_MAX;
+};
+
+// Everything that the entries add to an answer. An entry is walked once: the totals and the series with all the filters, each
+// facet with all the filters but its own, the clients with the filter of the keys. The rows are indexed by id: a cell costs a few
+// additions, whatever the number of rows.
+struct Tally {
+  Tally(const Filter& f, const McpUsageWindow& w, Split s, size_t entries)
+      : filter(f),
+        window(w),
+        split(s),
+        methods(kRowKinds * kMaxNames),
+        results(kMaxNames),
+        series(s == Split::Key ? entries : s == Split::Type ? kKinds : kMaxNames) {}
+  const Filter& filter;
+  const McpUsageWindow& window;
+  Split split;
+  Usage::Counters totals;
+  size_t active_keys = 0;  // the keys that have a request that every filter keeps
+  std::unordered_map<std::string, KeyRow> keys;
+  std::vector<Figures> methods;  // by kind of row and method: kind * kMaxNames + method
+  std::vector<Figures> results;  // by result
+  std::array<uint64_t, kKinds> types{};
+  // The requests at each point of the window, by group: the entry (its index) for a split by key, else the method, the
+  // result or the type. A group without a request has no points.
+  std::vector<std::vector<uint64_t>> series;
+  std::map<std::string, ClientRow> clients;
+};
+
+// The clients that the filter of the keys keeps, grouped as a person names them: by name and version, or by User-Agent for a
+// client that gave no name. The group shows the client that was seen last.
+void tally_clients(Tally& t, size_t index, const Usage::Entry& entry) {
+  for (const auto& client : entry.clients) {
+    const std::string group = client.name.empty() ? "u\x1f" + client.user_agent : "n\x1f" + client.name + "\x1f" + client.version;
+    ClientRow& row = t.clients[group];
+    const bool fresh = row.last_entry == SIZE_MAX;
+    if (fresh || client.last_seen > row.last_seen) {
+      row.name = client.name;
+      row.version = client.version;
+      row.user_agent = client.user_agent;
+    }
+    row.first_seen = fresh ? client.first_seen : std::min(row.first_seen, client.first_seen);
+    row.last_seen = fresh ? client.last_seen : std::max(row.last_seen, client.last_seen);
+    row.requests += client.requests;
+    if (row.last_entry != index) {
+      ++row.keys;
+      row.last_entry = index;
+    }
+  }
+}
+
+// Adds an entry (the `index`-th of the sorted ids) to the tally. `live` is the key when it exists.
+void tally_entry(Tally& t, size_t index, const std::string& id, const Usage::Entry& entry, const McpUsageKeyRef* live) {
+  const Filter& f = t.filter;
+  const bool key_kept = f.key(id);
+  if (key_kept) tally_clients(t, index, entry);
+  Usage::Counters mine;  // the facet of the keys: every filter but the one of the keys
+  bool any = false;
+  for (const auto& bucket : window_buckets(entry, t.window)) {
+    if (!in_window(bucket, t.window)) continue;
+    const auto point = static_cast<size_t>((bucket.start - t.window.from) / t.window.step);
+    for (const auto& cell : bucket.cells) {
+      const McpUsageKind kind = kind_of(cell.key);
+      const uint16_t method = method_of(cell.key);
+      const uint16_t result = result_of(cell.key);
+      const bool by_method = f.method(method);
+      const bool by_result = f.result(result);
+      const bool by_type = f.type(kind);
+      if (by_method && by_result && by_type) add_to_counters(mine, cell);
+      if (!key_kept) continue;
+      if (by_result && by_type) add_figures(t.methods[row_kind_of(kind) * kMaxNames + method], cell, index);
+      if (by_method && by_type) add_figures(t.results[result], cell, index);
+      if (by_method && by_result) t.types[static_cast<size_t>(kind)] += cell.count;
+      if (!(by_method && by_result && by_type)) continue;
+      any = true;
+      add_to_counters(t.totals, cell);
+      uint32_t group = 0;
+      switch (t.split) {
+        case Split::Key: group = static_cast<uint32_t>(index); break;
+        case Split::Method: group = method; break;
+        case Split::Result: group = result; break;
+        case Split::Type: group = static_cast<uint32_t>(kind); break;
+      }
+      std::vector<uint64_t>& values = t.series[group];
+      if (values.empty()) values.assign(t.window.points, 0);
+      values[point] += cell.count;
+    }
+  }
+  if (any) ++t.active_keys;
+  const bool selected = f.keys_on && f.keys.count(id) != 0;
+  if (mine.requests == 0 && !selected) return;
+  KeyRow& row = t.keys[id];
+  const McpUsageKeyRef& named = live ? *live : entry.key;
+  row.id = id;
+  row.name = named.name;
+  row.host = named.host;
+  row.source = named.source;
+  row.deleted_at = live ? 0 : entry.deleted_at;
+  row.last_used = entry.last_used;
+  row.counters = mine;
+  row.selected = selected;
+}
+
+// The facet rows to show: the first ones, and the selected ones after them. Returns how many were left out.
+template <typename Row>
+size_t cap_rows(std::vector<Row>* rows, size_t most) {
+  const size_t before = rows->size();
+  size_t kept = 0;
+  for (size_t i = 0; i < rows->size(); ++i) {
+    if (i >= most && !(*rows)[i].selected) continue;
+    if (kept != i) (*rows)[kept] = std::move((*rows)[i]);
+    ++kept;
+  }
+  rows->resize(kept);
+  return before - kept;
+}
+
+struct MethodRow {
+  std::string method;
+  uint8_t kind = kRowCall;
+  Figures figures;
+  bool selected = false;
+};
+
+struct ResultRow {
+  std::string result;
+  Figures figures;
+  bool selected = false;
+};
+
+struct SeriesGroup {
+  std::string id;
+  std::string label;
+  uint64_t total = 0;
+  std::vector<uint64_t> values;
+};
+
+bool listed(const std::vector<std::string>& values, const std::string& value) {
+  return std::find(values.begin(), values.end(), value) != values.end();
+}
+
+void put_values(McpJsonWriter& w, const std::vector<uint64_t>& values) {
+  w.StartArray();
+  for (const uint64_t value : values) w.Uint64(value);
+  w.EndArray();
+}
+
+void put_strings(McpJsonWriter& w, const std::vector<std::string>& values) {
+  w.StartArray();
+  for (const auto& value : values) put(w, value);
+  w.EndArray();
+}
+
+// The groups of the series, from the requests that were counted at each point. A split by a dimension that is filtered shows
+// the values that were chosen, in their order (a value without a request is a line of zeros); else the 8 largest groups
+// (the same total: the smaller id first), and the others summed in `rest`.
+void put_series(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& query, const std::vector<std::string>& names,
+                const std::vector<std::string>& ids, const std::unordered_map<std::string, std::string>& key_names) {
+  const size_t points = t.window.points;
+  const auto id_of = [&](uint32_t group) -> std::string {
+    switch (t.split) {
+      case Split::Key: return ids[group];
+      case Split::Method:
+      case Split::Result: return names[group];
+      case Split::Type: break;
+    }
+    return kKindNames[group];
+  };
+  const auto label_of = [&](const std::string& id) -> std::string {
+    if (t.split != Split::Key) return id;
+    const auto it = key_names.find(id);
+    return it == key_names.end() ? id : it->second;
+  };
+  const std::vector<std::string>* chosen = nullptr;
+  switch (t.split) {
+    case Split::Key: chosen = &query.keys; break;
+    case Split::Method: chosen = &query.methods; break;
+    case Split::Result: chosen = &query.results; break;
+    case Split::Type: chosen = &query.types; break;
+  }
+  // The groups that have requests, by id.
+  struct Counted {
+    std::string id;
+    uint64_t total = 0;
+    const std::vector<uint64_t>* values = nullptr;
+  };
+  std::vector<Counted> counted;
+  for (size_t group = 0; group < t.series.size(); ++group) {
+    const std::vector<uint64_t>& values = t.series[group];
+    if (values.empty()) continue;
+    Counted item;
+    item.id = id_of(static_cast<uint32_t>(group));
+    for (const uint64_t value : values) item.total += value;
+    item.values = &values;
+    counted.push_back(std::move(item));
+  }
+  std::vector<SeriesGroup> groups;
+  SeriesGroup rest;
+  rest.values.assign(points, 0);
+  size_t folded = 0;
+  const auto show = [&](const std::string& id, const Counted* item) {
+    SeriesGroup group;
+    group.id = id;
+    group.label = label_of(id);
+    group.total = item ? item->total : 0;
+    group.values = item ? *item->values : std::vector<uint64_t>(points, 0);
+    groups.push_back(std::move(group));
+  };
+  if (!chosen->empty()) {
+    for (const auto& id : *chosen) {
+      const auto it = std::find_if(counted.begin(), counted.end(), [&](const Counted& item) { return item.id == id; });
+      show(id, it == counted.end() ? nullptr : &*it);
+    }
+  } else {
+    std::sort(counted.begin(), counted.end(), [](const Counted& a, const Counted& b) { return a.total != b.total ? a.total > b.total : a.id < b.id; });
+    for (size_t i = 0; i < counted.size(); ++i) {
+      if (i < kSeriesGroups) {
+        show(counted[i].id, &counted[i]);
+        continue;
+      }
+      ++folded;
+      rest.total += counted[i].total;
+      for (size_t p = 0; p < points; ++p) rest.values[p] += (*counted[i].values)[p];
+    }
+  }
+  w.Key("series");
+  w.StartObject();
+  w.Key("step"); w.String(t.window.step == kHour ? "hour" : "day");
+  w.Key("t");
+  w.StartArray();
+  for (size_t i = 0; i < points; ++i) put(w, mcp_iso_utc(t.window.from + static_cast<int64_t>(i) * t.window.step));
+  w.EndArray();
+  w.Key("groups");
+  w.StartArray();
+  for (const auto& group : groups) {
+    w.StartObject();
+    w.Key("id"); put(w, group.id);
+    w.Key("label"); put(w, group.label);
+    w.Key("total"); w.Uint64(group.total);
+    w.Key("values"); put_values(w, group.values);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("rest");
+  w.StartObject();
+  w.Key("groups"); w.Uint64(folded);
+  w.Key("total"); w.Uint64(rest.total);
+  w.Key("values"); put_values(w, rest.values);
+  w.EndObject();
+  w.EndObject();
+}
+
+// The facets and the clients, after the totals and the series.
+void put_facets(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& query, const std::vector<std::string>& names,
+                const std::vector<McpUsageKeyRef>& live) {
+  // The keys: those that have a request (every filter but their own), and the ones that were chosen.
+  std::vector<KeyRow> keys;
+  for (const auto& item : t.keys) keys.push_back(item.second);
+  for (const auto& id : query.keys) {
+    if (t.keys.count(id)) continue;
+    KeyRow row;
+    row.id = id;
+    row.name = id;  // a key that is not there (its usage is gone) is known by its id
+    row.selected = true;
+    for (const auto& ref : live) {
+      if (ref.id != id) continue;
+      row.name = ref.name;
+      row.host = ref.host;
+      row.source = ref.source;
+    }
+    keys.push_back(std::move(row));
+  }
+  std::sort(keys.begin(), keys.end(), [](const KeyRow& a, const KeyRow& b) {
+    if (a.counters.requests != b.counters.requests) return a.counters.requests > b.counters.requests;
+    return a.name != b.name ? a.name < b.name : a.id < b.id;
+  });
+  const size_t keys_omitted = cap_rows(&keys, kFacetRows);
+
+  std::vector<MethodRow> methods;
+  for (size_t i = 0; i < t.methods.size(); ++i) {
+    if (t.methods[i].requests == 0) continue;
+    MethodRow row;
+    row.method = names[i % kMaxNames];
+    row.kind = static_cast<uint8_t>(i / kMaxNames);
+    row.figures = t.methods[i];
+    row.selected = listed(query.methods, row.method);
+    methods.push_back(std::move(row));
+  }
+  for (const auto& method : query.methods) {
+    const bool counted = std::any_of(methods.begin(), methods.end(), [&](const MethodRow& row) { return row.method == method; });
+    if (counted) continue;
+    MethodRow row;
+    row.method = method;
+    row.kind = row_kind_named(method);
+    row.selected = true;
+    methods.push_back(std::move(row));
+  }
+  std::sort(methods.begin(), methods.end(), [](const MethodRow& a, const MethodRow& b) {
+    if (a.figures.requests != b.figures.requests) return a.figures.requests > b.figures.requests;
+    return a.method != b.method ? a.method < b.method : a.kind < b.kind;
+  });
+  const size_t methods_omitted = cap_rows(&methods, kFacetRows);
+
+  std::vector<ResultRow> results;
+  for (size_t id = 0; id < t.results.size(); ++id) {
+    if (t.results[id].requests == 0) continue;
+    ResultRow row;
+    row.result = names[id];
+    row.figures = t.results[id];
+    row.selected = listed(query.results, row.result);
+    results.push_back(std::move(row));
+  }
+  for (const auto& result : query.results) {
+    const bool counted = std::any_of(results.begin(), results.end(), [&](const ResultRow& row) { return row.result == result; });
+    if (counted) continue;
+    ResultRow row;
+    row.result = result;
+    row.selected = true;
+    results.push_back(std::move(row));
+  }
+  std::sort(results.begin(), results.end(), [](const ResultRow& a, const ResultRow& b) {
+    return a.figures.requests != b.figures.requests ? a.figures.requests > b.figures.requests : a.result < b.result;
+  });
+  const size_t results_omitted = cap_rows(&results, kFacetRows);
+
+  std::vector<const ClientRow*> clients;
+  for (const auto& item : t.clients) clients.push_back(&item.second);
+  std::sort(clients.begin(), clients.end(), [](const ClientRow* a, const ClientRow* b) {
+    if (a->last_seen != b->last_seen) return a->last_seen > b->last_seen;
+    return std::tie(a->name, a->version, a->user_agent) < std::tie(b->name, b->version, b->user_agent);
+  });
+  const size_t clients_omitted = clients.size() > kClientRows ? clients.size() - kClientRows : 0;
+  if (clients_omitted != 0) clients.resize(kClientRows);
+
+  w.Key("keys");
+  w.StartArray();
+  for (const auto& row : keys) {
+    w.StartObject();
+    put_key(w, McpUsageKeyRef{row.id, row.name, row.host, row.source}, row.deleted_at);
+    put_counters(w, row.counters);
+    put_time(w, "last_used_at", row.last_used);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("methods");
+  w.StartArray();
+  for (const auto& row : methods) {
+    const Figures& f = row.figures;
+    w.StartObject();
+    w.Key("method"); put(w, row.method);
+    w.Key("kind"); w.String(kRowKindNames[row.kind]);
+    w.Key("requests"); w.Uint64(f.requests);
+    w.Key("errors"); w.Uint64(f.errors);
+    put_average(w, "duration_ms_avg", f.duration_ms_sum, f.requests);
+    put_largest(w, "duration_ms_max", f.requests != 0, f.duration_ms_max);
+    w.Key("rows"); w.Uint64(f.rows);
+    w.Key("bytes"); w.Uint64(f.bytes);
+    w.Key("keys"); w.Uint64(f.keys);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("results");
+  w.StartArray();
+  for (const auto& row : results) {
+    w.StartObject();
+    w.Key("result"); put(w, row.result);
+    w.Key("count"); w.Uint64(row.figures.requests);
+    w.Key("keys"); w.Uint64(row.figures.keys);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("types");
+  w.StartArray();
+  for (size_t i = 0; i < kKinds; ++i) {
+    w.StartObject();
+    w.Key("type"); w.String(kKindNames[i]);
+    w.Key("requests"); w.Uint64(t.types[i]);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("clients");
+  w.StartArray();
+  for (const ClientRow* client : clients) {
+    w.StartObject();
+    w.Key("name"); put(w, client->name);
+    w.Key("version"); put(w, client->version);
+    w.Key("user_agent"); put(w, client->user_agent);
+    w.Key("keys"); w.Uint64(client->keys);
+    w.Key("requests"); w.Uint64(client->requests);
+    put_time(w, "first_seen_at", client->first_seen);
+    put_time(w, "last_seen_at", client->last_seen);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("omitted");
+  w.StartObject();
+  w.Key("keys"); w.Uint64(keys_omitted);
+  w.Key("methods"); w.Uint64(methods_omitted);
+  w.Key("results"); w.Uint64(results_omitted);
+  w.Key("clients"); w.Uint64(clients_omitted);
+  w.EndObject();
+}
+
 } // namespace
 
 // ---- names, windows, text -------------------------------------------------------------------------
+
+McpUsage::Names::Names() {
+  const auto add = [this](const char* name) {
+    ids.emplace(name, static_cast<uint16_t>(by_id.size()));
+    by_id.emplace_back(name);
+  };
+  add("other");
+  add("ok");
+  for (const char* method : kProtocolMethods) add(method);
+  add("invalid");
+  add("unread");
+}
 
 uint16_t McpUsage::Names::intern(std::string_view name) {
   const std::string text(name);
@@ -460,6 +1058,12 @@ uint16_t McpUsage::Names::intern(std::string_view name) {
 
 McpUsageKeyRef mcp_usage_key_ref(const McpKey& key) {
   return McpUsageKeyRef{key.id, key.name, key.hosts.size() == 1 ? key.hosts.front() : std::string(), key.source};
+}
+
+bool mcp_valid_key_id(std::string_view id) {
+  if (mcp_valid_key_name(id)) return true;
+  if (id.size() != 15 || id.substr(0, 3) != "ui_") return false;
+  return std::all_of(id.begin() + 3, id.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
 }
 
 std::vector<std::string> mcp_usage_windows(int64_t retention_days) {
@@ -508,6 +1112,35 @@ void mcp_check_usage_file(const std::string& path) {
   if (!text) return;
   Usage::State state;
   parse_usage(*text, &state, SIZE_MAX);
+}
+
+std::optional<McpValidationError> mcp_usage_overview_check(McpUsageOverviewQuery* query) {
+  const auto bad = [](const char* field, const char* reason, std::string message) {
+    return McpValidationError{field, reason, std::move(message)};
+  };
+  if (query->split != "key" && query->split != "method" && query->split != "result" && query->split != "type") {
+    return bad("split", "invalid", "split must be key, method, result or type");
+  }
+  const auto check = [&](const char* field, std::vector<std::string>* values, bool (*valid)(const std::string&),
+                         const char* rule) -> std::optional<McpValidationError> {
+    std::vector<std::string> once;
+    for (auto& value : *values) {
+      if (!listed(once, value)) once.push_back(std::move(value));
+    }
+    *values = std::move(once);
+    if (values->size() > kMcpUsageOverviewMaxValues) {
+      return bad(field, "too_many", std::string(field) + " takes at most " + std::to_string(kMcpUsageOverviewMaxValues) + " values");
+    }
+    for (const auto& value : *values) {
+      if (!valid(value)) return bad(field, "invalid", std::string(field) + " must be " + rule);
+    }
+    return std::nullopt;
+  };
+  if (const auto error = check("key", &query->keys, [](const std::string& v) { return mcp_valid_key_id(v); }, "the id of a key")) return error;
+  if (const auto error = check("method", &query->methods, [](const std::string& v) { return valid_method(v); }, "a tool or a method of the protocol (A-Z a-z 0-9 _ /, at most 64)")) return error;
+  if (const auto error = check("result", &query->results, [](const std::string& v) { return valid_name(v); }, "a result (a-z 0-9 _, at most 64)")) return error;
+  if (const auto error = check("type", &query->types, [](const std::string& v) { return kind_index(v) >= 0; }, "call, request, limited or rejected")) return error;
+  return std::nullopt;
 }
 
 // ---- the store ------------------------------------------------------------------------------------
@@ -566,15 +1199,11 @@ void McpUsage::record(const McpUsageEvent& event) {
   if (entry.first_used == 0 || event.at < entry.first_used) entry.first_used = event.at;
   entry.last_used = std::max(entry.last_used, event.at);
 
-  Recorded what;
-  what.ok = event.status == "ok";
-  what.count_result = event.kind == McpUsageKind::ToolCall || !what.ok;
-  if (event.kind == McpUsageKind::ToolCall) what.tool = state_.names.intern(clean_name(event.tool));
-  if (what.count_result) what.result = state_.names.intern(clean_name(event.status));
+  const uint32_t key = cell_key_of(state_.names, event);
   const int64_t hour = floor_to(event.at, kHour);
   const int64_t day = floor_to(event.at, kDay);
-  add_event(bucket_at(entry.hours, hour), event, what, &state_.cells, options_.max_cells);
-  add_event(bucket_at(entry.days, day), event, what, &state_.cells, options_.max_cells);
+  add_event(bucket_at(entry.hours, hour), event, key, &state_.cells, options_.max_cells);
+  add_event(bucket_at(entry.days, day), event, key, &state_.cells, options_.max_cells);
   // The memory stays bounded between two saves.
   drop_before(entry.hours, floor_to(entry.hours.back().start, kHour) - (kHours - 1) * kHour, &state_.cells);
   drop_before(entry.days, entry.days.back().start - (options_.retention_days - 1) * kDay, &state_.cells);
@@ -650,25 +1279,32 @@ std::optional<McpUsageKeyRef> McpUsage::entry_key(const std::string& id) const {
 }
 
 void McpUsage::write_list(McpJsonWriter& w, const std::vector<McpUsageKeyRef>& live, const McpUsageWindow& window, int64_t now) const {
-  std::lock_guard<std::mutex> lock(mu_);
   w.StartObject();
   put_head(w, window, now, since_, persisted(), options_.retention_days);
   w.Key("keys");
   w.StartArray();
-  std::unordered_set<std::string> listed;
+  // One entry at a time under the lock: the sum of a window walks the cells of an entry, and a call that is counted
+  // meanwhile waits for one entry, never for all of them.
+  std::unordered_set<std::string> listed_ids;
   for (const auto& key : live) {
-    listed.insert(key.id);
+    listed_ids.insert(key.id);
+    std::lock_guard<std::mutex> lock(mu_);
     const auto it = state_.entries.find(key.id);
     put_summary(w, key, it == state_.entries.end() ? nullptr : &it->second, 0, window);
   }
-  std::vector<const Entry*> deleted;
-  for (const auto& [id, entry] : state_.entries) {
-    if (entry.deleted_at != 0 && !entry.days.empty() && !listed.count(id)) deleted.push_back(&entry);
+  std::vector<std::pair<int64_t, std::string>> deleted;  // when, which
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    for (const auto& [id, entry] : state_.entries) {
+      if (entry.deleted_at != 0 && !entry.days.empty() && !listed_ids.count(id)) deleted.emplace_back(entry.deleted_at, id);
+    }
   }
-  std::sort(deleted.begin(), deleted.end(), [](const Entry* a, const Entry* b) {
-    return a->deleted_at != b->deleted_at ? a->deleted_at > b->deleted_at : a->key.id < b->key.id;
-  });
-  for (const Entry* entry : deleted) put_summary(w, entry->key, entry, entry->deleted_at, window);
+  std::sort(deleted.begin(), deleted.end(), [](const auto& a, const auto& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
+  for (const auto& item : deleted) {
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto it = state_.entries.find(item.second);
+    if (it != state_.entries.end() && it->second.deleted_at != 0) put_summary(w, it->second.key, &it->second, it->second.deleted_at, window);
+  }
   w.EndArray();
   w.EndObject();
 }
@@ -685,23 +1321,12 @@ bool McpUsage::write_detail(McpJsonWriter& w, const std::string& id, const McpUs
   put_time(w, "first_used_at", entry ? entry->first_used : 0);
   put_time(w, "last_used_at", entry ? entry->last_used : 0);
 
-  const Counters total = window_total(entry, window);
   w.Key("totals");
   w.StartObject();
-  w.Key("requests"); w.Uint64(total.requests);
-  w.Key("calls"); w.Uint64(total.calls);
-  w.Key("errors"); w.Uint64(total.errors);
-  w.Key("rate_limited"); w.Uint64(total.rate_limited);
-  w.Key("rejected"); w.Uint64(total.rejected);
-  put_average(w, "duration_ms_avg", total.duration_ms_sum, total.calls);
-  w.Key("duration_ms_max");
-  if (total.calls == 0) w.Null();
-  else w.Uint64(total.duration_ms_max);
-  w.Key("rows"); w.Uint64(total.rows);
-  w.Key("bytes"); w.Uint64(total.bytes);
+  put_counters(w, window_total(entry, window));
   w.EndObject();
 
-  // One point for each step of the window, from its start: a step without a bucket has no call.
+  // One point for each step of the window, from its start: a step without a bucket has no request.
   w.Key("series");
   w.StartObject();
   w.Key("step"); w.String(window.step == kHour ? "hour" : "day");
@@ -713,41 +1338,45 @@ bool McpUsage::write_detail(McpJsonWriter& w, const std::string& id, const McpUs
   for (size_t i = 0; i < window.points; ++i) {
     const int64_t t = window.from + static_cast<int64_t>(i) * window.step;
     while (next < buckets.size() && buckets[next].start < t) ++next;
-    const Counters* point = next < buckets.size() && buckets[next].start == t ? &buckets[next].total : nullptr;
+    const Counters point = next < buckets.size() && buckets[next].start == t ? totals_of(buckets[next]) : Counters{};
     w.StartObject();
     w.Key("t"); put(w, mcp_iso_utc(t));
-    w.Key("requests"); w.Uint64(point ? point->requests : 0);
-    w.Key("calls"); w.Uint64(point ? point->calls : 0);
-    w.Key("errors"); w.Uint64(point ? point->errors : 0);
+    w.Key("requests"); w.Uint64(point.requests);
+    w.Key("calls"); w.Uint64(point.calls);
+    w.Key("errors"); w.Uint64(point.errors);
     w.EndObject();
   }
   w.EndArray();
   w.EndObject();
 
-  // The tools and the results of the window, the most frequent first.
-  std::unordered_map<uint16_t, Cell> tools;
+  // The tools (the tool calls, by tool) and the results (every cell but the successful protocol requests) of the window,
+  // the most frequent first.
+  std::unordered_map<uint16_t, Figures> tools;
   std::unordered_map<uint16_t, uint64_t> results;
   for (const auto& bucket : buckets) {
     if (!in_window(bucket, window)) continue;
-    for (const auto& [name, cell] : bucket.tools) add_cell(tools[name], cell);
-    for (const auto& [name, count] : bucket.results) results[name] += count;
+    for (const auto& cell : bucket.cells) {
+      const McpUsageKind kind = kind_of(cell.key);
+      if (kind == McpUsageKind::ToolCall) add_figures(tools[method_of(cell.key)], cell, 0);
+      if (kind != McpUsageKind::Request || result_of(cell.key) != kNameOk) results[result_of(cell.key)] += cell.count;
+    }
   }
-  std::vector<std::pair<std::string, Cell>> tool_rows;
-  for (const auto& [name, cell] : tools) tool_rows.emplace_back(state_.names.by_id[name], cell);
+  std::vector<std::pair<std::string, Figures>> tool_rows;
+  for (const auto& [name, figures] : tools) tool_rows.emplace_back(state_.names.by_id[name], figures);
   std::sort(tool_rows.begin(), tool_rows.end(), [](const auto& a, const auto& b) {
-    return a.second.calls != b.second.calls ? a.second.calls > b.second.calls : a.first < b.first;
+    return a.second.requests != b.second.requests ? a.second.requests > b.second.requests : a.first < b.first;
   });
   w.Key("tools");
   w.StartArray();
-  for (const auto& [name, cell] : tool_rows) {
+  for (const auto& [name, figures] : tool_rows) {
     w.StartObject();
     w.Key("tool"); put(w, name);
-    w.Key("calls"); w.Uint64(cell.calls);
-    w.Key("errors"); w.Uint64(cell.errors);
-    put_average(w, "duration_ms_avg", cell.duration_ms_sum, cell.calls);
-    w.Key("duration_ms_max"); w.Uint64(cell.duration_ms_max);
-    w.Key("rows"); w.Uint64(cell.rows);
-    w.Key("bytes"); w.Uint64(cell.bytes);
+    w.Key("calls"); w.Uint64(figures.requests);
+    w.Key("errors"); w.Uint64(figures.errors);
+    put_average(w, "duration_ms_avg", figures.duration_ms_sum, figures.requests);
+    w.Key("duration_ms_max"); w.Uint64(figures.duration_ms_max);
+    w.Key("rows"); w.Uint64(figures.rows);
+    w.Key("bytes"); w.Uint64(figures.bytes);
     w.EndObject();
   }
   w.EndArray();
@@ -784,6 +1413,77 @@ bool McpUsage::write_detail(McpJsonWriter& w, const std::string& id, const McpUs
   w.EndArray();
   w.EndObject();
   return true;
+}
+
+void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& query, const std::vector<McpUsageKeyRef>& live,
+                              const McpUsageWindow& window, int64_t now) const {
+  // 1. Under the lock: the filters as ids (a name that was never counted is in no set: it keeps nothing), and the entries.
+  Filter filter;
+  filter.keys_on = !query.keys.empty();
+  filter.keys.insert(query.keys.begin(), query.keys.end());
+  filter.methods_on = !query.methods.empty();
+  filter.results_on = !query.results.empty();
+  filter.types_on = !query.types.empty();
+  for (const auto& type : query.types) {
+    if (const int kind = kind_index(type); kind >= 0) filter.types[static_cast<size_t>(kind)] = true;
+  }
+  std::vector<std::string> ids;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    for (const auto& method : query.methods) {
+      if (const auto it = state_.names.ids.find(method); it != state_.names.ids.end()) filter.methods.set(it->second);
+    }
+    for (const auto& result : query.results) {
+      if (const auto it = state_.names.ids.find(result); it != state_.names.ids.end()) filter.results.set(it->second);
+    }
+    ids.reserve(state_.entries.size());
+    for (const auto& item : state_.entries) ids.push_back(item.first);
+  }
+  std::sort(ids.begin(), ids.end());
+
+  // 2. One entry at a time under the lock again, found again by its id (it may be gone): a call that is counted meanwhile waits
+  // for one entry, never for all of them. Nothing that points into an entry or into the names outlives its lock.
+  Tally tally(filter, window, split_of(query.split), ids.size());
+  std::unordered_map<std::string, const McpUsageKeyRef*> live_by_id;
+  for (const auto& key : live) live_by_id.emplace(key.id, &key);
+  for (size_t i = 0; i < ids.size(); ++i) {
+    std::lock_guard<std::mutex> lock(mu_);
+    const auto it = state_.entries.find(ids[i]);
+    if (it == state_.entries.end()) continue;
+    const auto named = live_by_id.find(ids[i]);
+    tally_entry(tally, i, ids[i], it->second, named == live_by_id.end() ? nullptr : named->second);
+  }
+
+  // 3. Under a last lock: the names, which grow (and move) while calls are counted.
+  std::vector<std::string> names;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    names = state_.names.by_id;
+  }
+
+  std::unordered_map<std::string, std::string> key_names;
+  for (const auto& key : live) key_names.emplace(key.id, key.name);
+  for (const auto& item : tally.keys) key_names[item.first] = item.second.name;
+
+  w.StartObject();
+  put_head(w, window, now, since_, persisted(), options_.retention_days);
+  w.Key("split"); put(w, query.split);
+  w.Key("filters");
+  w.StartObject();
+  w.Key("key"); put_strings(w, query.keys);
+  w.Key("method"); put_strings(w, query.methods);
+  w.Key("result"); put_strings(w, query.results);
+  w.Key("type"); put_strings(w, query.types);
+  w.EndObject();
+  w.Key("totals");
+  w.StartObject();
+  put_counters(w, tally.totals);
+  w.Key("active_keys"); w.Uint64(tally.active_keys);
+  w.Key("keys"); w.Uint64(live.size());
+  w.EndObject();
+  put_series(w, tally, query, names, ids, key_names);
+  put_facets(w, tally, query, names, live);
+  w.EndObject();
 }
 
 void McpUsage::write_entry_locked(McpJsonWriter& w, const Entry& entry) const {

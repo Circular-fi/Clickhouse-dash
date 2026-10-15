@@ -107,6 +107,30 @@ bool allow_from_page(const httplib::Request& req, httplib::Response& res) {
   return false;
 }
 
+// The parameters of GET /api/mcp/usage/overview besides the window: `split`, and the filters `key`, `method`, `result` and `type`,
+// each of them repeatable, checked by mcp_usage_overview_check. A name that the route does not read is refused (400 validation,
+// reason unknown), so a typo is an error and not a filter that does nothing. Nullopt when they are valid.
+std::optional<McpValidationError> read_usage_overview_query(const httplib::Request& req, McpUsageOverviewQuery* query) {
+  for (const auto& item : req.params) {
+    if (item.first != "window" && item.first != "split" && item.first != "key" && item.first != "method" && item.first != "result" &&
+        item.first != "type") {
+      return McpValidationError{item.first, "unknown", "unknown parameter: " + item.first};
+    }
+  }
+  if (req.has_param("split")) query->split = req.get_param_value("split");
+  const auto values = [&](const char* name) {
+    std::vector<std::string> out;
+    const auto range = req.params.equal_range(name);
+    for (auto it = range.first; it != range.second; ++it) out.push_back(it->second);
+    return out;
+  };
+  query->keys = values("key");
+  query->methods = values("method");
+  query->results = values("result");
+  query->types = values("type");
+  return mcp_usage_overview_check(query);
+}
+
 bool origin_listed(const std::string& origin, const std::vector<std::string>& allowed) {
   std::string normalized = lower_ascii(origin);
   while (!normalized.empty() && normalized.back() == '/') normalized.pop_back();
@@ -535,6 +559,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     event.key_source = key.source;
     event.at = now;
     event.kind = kind;
+    if (result) event.method = result->method;
     if (result && result->tool_called) event.tool = result->tool;
     event.status = status;
     event.duration_ms = duration;
@@ -987,9 +1012,10 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     api_ok(res, 200, sb);
     return;
   }
-  // What the keys did (mcp_usage.hpp): every key in one answer (the Used column of the page) and one key (its details), in a
-  // window of the usage. A read of the page, as the access above; it never holds SQL, data or a secret.
-  if (route == McpApiRoute::Usage || route == McpApiRoute::KeyUsage) {
+  // What the keys did (mcp_usage.hpp): every key in one answer (the Used column of the page), one key (its details), and every
+  // key cut by method, result and type (the Usage tab), in a window of the usage. A read of the page, as the access above; it
+  // never holds SQL, data or a secret.
+  if (route == McpApiRoute::Usage || route == McpApiRoute::KeyUsage || route == McpApiRoute::UsageOverview) {
     const int64_t retention = cfg_.mcp.usage_retention_days;
     const std::string asked = req.has_param("window") ? req.get_param_value("window") : std::string();
     const auto window = mcp_usage_window(asked.empty() ? mcp_usage_default_window(retention) : asked, retention, now);
@@ -1005,6 +1031,13 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     if (route == McpApiRoute::Usage) {
       mcp_usage_->write_list(w, live, *window, now);
       audit("-", "keys/usage-summary", "", "ok", 0, 0);
+    } else if (route == McpApiRoute::UsageOverview) {
+      McpUsageOverviewQuery query;
+      if (const auto error = read_usage_overview_query(req, &query)) {
+        return api_error(res, 400, "validation", error->message, error->field, error->reason);
+      }
+      mcp_usage_->write_overview(w, query, live, *window, now);
+      audit("-", "keys/usage-overview", "", "ok", 0, 0);
     } else {
       const std::string wanted = req.matches.size() > 1 ? std::string(req.matches[1]) : std::string();
       const McpUsageKeyRef* key = nullptr;
@@ -1082,6 +1115,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     case McpApiRoute::AccessSummary:
     case McpApiRoute::Usage:
     case McpApiRoute::KeyUsage:
+    case McpApiRoute::UsageOverview:
     case McpApiRoute::KeyCost:
       break;
   }

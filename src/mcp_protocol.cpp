@@ -52,6 +52,9 @@ std::string rpc_error_body(const rapidjson::Value* id, int code, const std::stri
   return std::string(sb.GetString(), sb.GetSize());
 }
 
+// The longest method that the audit line and the usage show: the client chooses it.
+constexpr size_t kMaxMethodShownBytes = 128;
+
 McpRpcResult rpc_error(const rapidjson::Value* id, int code, const std::string& message, int http_status = 200) {
   McpRpcResult result;
   result.http_status = http_status;
@@ -369,31 +372,39 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
   }
   if (!method->IsString()) return rpc_error(nullptr, kRpcInvalidRequest, "method must be a string", 400);
   const std::string name(method->GetString(), method->GetStringLength());
+  // From here the method is read: the audit line and the usage name it, also when the message fails. A client chooses it and a
+  // notification takes any name, so it is cut.
+  const std::string shown = name.substr(0, kMaxMethodShownBytes);
+  const auto fail = [&](const rapidjson::Value* error_id, int code, const std::string& message, int http_status = 200) {
+    McpRpcResult error = rpc_error(error_id, code, message, http_status);
+    error.method = shown;
+    return error;
+  };
 
   if (!id) {
     McpRpcResult accepted;  // a notification
     accepted.http_status = 202;
-    accepted.method = name;
+    accepted.method = shown;
     return accepted;
   }
   if (!(id->IsString() || id->IsInt64() || id->IsUint64())) {
-    return rpc_error(nullptr, kRpcInvalidRequest, "id must be a string or an integer", 400);
+    return fail(nullptr, kRpcInvalidRequest, "id must be a string or an integer", 400);
   }
 
   McpRpcResult result;
-  result.method = name;
+  result.method = shown;
   const rapidjson::Value* params = member("params");
-  if (params && !params->IsObject()) return rpc_error(id, kRpcInvalidParams, "params must be an object");
+  if (params && !params->IsObject()) return fail(id, kRpcInvalidParams, "params must be an object");
 
   if (name == "ping") {
     result.body = result_body(*id, "{}");
     return result;
   }
   if (name == "initialize") {
-    if (!params) return rpc_error(id, kRpcInvalidParams, "initialize needs params.protocolVersion");
+    if (!params) return fail(id, kRpcInvalidParams, "initialize needs params.protocolVersion");
     const auto requested = params->FindMember("protocolVersion");
     if (requested == params->MemberEnd() || !requested->value.IsString()) {
-      return rpc_error(id, kRpcInvalidParams, "initialize needs params.protocolVersion");
+      return fail(id, kRpcInvalidParams, "initialize needs params.protocolVersion");
     }
     const std::string asked(requested->value.GetString(), requested->value.GetStringLength());
     const auto& supported = mcp_protocol_versions();
@@ -417,16 +428,16 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     return result;
   }
   if (name == "tools/call") {
-    if (!params) return rpc_error(id, kRpcInvalidParams, "tools/call needs params.name");
+    if (!params) return fail(id, kRpcInvalidParams, "tools/call needs params.name");
     const auto tool = params->FindMember("name");
-    if (tool == params->MemberEnd() || !tool->value.IsString()) return rpc_error(id, kRpcInvalidParams, "tools/call needs params.name");
+    if (tool == params->MemberEnd() || !tool->value.IsString()) return fail(id, kRpcInvalidParams, "tools/call needs params.name");
     const std::string tool_name(tool->value.GetString(), tool->value.GetStringLength());
-    if (!mcp_find_tool(tool_name)) return rpc_error(id, kRpcInvalidParams, "Unknown tool: " + tool_name);
+    if (!mcp_find_tool(tool_name)) return fail(id, kRpcInvalidParams, "Unknown tool: " + tool_name);
 
     static const rapidjson::Value no_arguments(rapidjson::kObjectType);
     const rapidjson::Value* arguments = &no_arguments;
     if (const auto it = params->FindMember("arguments"); it != params->MemberEnd() && !it->value.IsNull()) {
-      if (!it->value.IsObject()) return rpc_error(id, kRpcInvalidParams, "arguments must be an object");
+      if (!it->value.IsObject()) return fail(id, kRpcInvalidParams, "arguments must be an object");
       arguments = &it->value;
     }
     result.tool = tool_name;
@@ -445,7 +456,7 @@ McpRpcResult mcp_handle_message(std::string_view body, const McpKey& key, McpToo
     result.body = tool_call_body(*id, result.outcome, protocol_has_structured_content(protocol_version));
     return result;
   }
-  return rpc_error(id, kRpcMethodNotFound, "method not found: " + name);
+  return fail(id, kRpcMethodNotFound, "method not found: " + name);
 }
 
 } // namespace chdash

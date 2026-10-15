@@ -492,8 +492,10 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get(R"(/observability/.*)", redirect_to_first_view);
   }
 
-  // The MCP page shell is always served (its "MCP disabled" state shows the HCL to turn it on); 404 while mcp.html is absent.
-  http_.Get("/mcp-integration", serve_view_shell("mcp.html"));
+  // The MCP section is two pages, always served (their "MCP disabled" state shows the HCL to turn it on): /mcp-integration, the keys
+  // (mcp.html), and /mcp-integration/usage, the usage of all the keys (mcpusage.html). 404 while the shell file is absent.
+  http_.Get(R"(/mcp-integration/?)", serve_view_shell("mcp.html"));
+  http_.Get(R"(/mcp-integration/usage/?)", serve_view_shell("mcpusage.html"));
 
   http_.Get(R"(/static/.*)", [&](const auto& req, auto& res) {
     if (!try_serve_embedded(req, res) && !try_serve_fs(req, res, *fs_static_cache_)) {
@@ -626,6 +628,7 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/access)", mcp_api(McpApiRoute::KeyAccess));
     http_.Get("/api/mcp/access", mcp_api(McpApiRoute::AccessSummary));
     http_.Get("/api/mcp/usage", mcp_api(McpApiRoute::Usage));
+    http_.Get("/api/mcp/usage/overview", mcp_api(McpApiRoute::UsageOverview));
     http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/usage)", mcp_api(McpApiRoute::KeyUsage));
     http_.Get(R"(/api/mcp/keys/([A-Za-z0-9_.\-]+)/cost)", mcp_api(McpApiRoute::KeyCost));
   }

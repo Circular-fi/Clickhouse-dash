@@ -57,7 +57,8 @@ struct McpRpcResult {
   // 202 with no body: a notification or a response of the client.
   int http_status = 200;
   std::string body;
-  // For the audit line.
+  // For the audit line and the usage. The method of a message whose method was read, also when it failed (at most 128 bytes); empty
+  // when the message could not be read (not JSON, a batch, no "jsonrpc": "2.0", a method that is not text).
   std::string method;
   std::string tool;
   bool tool_called = false;

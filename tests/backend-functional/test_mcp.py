@@ -221,15 +221,17 @@ def test_disabled_instance_answers_as_documented():
     meta = api_ok(m("GET", "/api/mcp/meta", base=DISABLED_URL))
     assert meta == {"enabled": False}
     for method, path in [("GET", "/api/mcp/keys"), ("POST", "/api/mcp/keys"), ("DELETE", "/api/mcp/keys/ui_000000000000"),
-                         ("GET", "/api/mcp/keys/ui_000000000000/access"), ("GET", "/api/mcp/usage"), ("GET", "/api/mcp/keys/ui_000000000000/usage"),
-                         ("GET", "/api/mcp/keys/ui_000000000000/cost")]:
+                         ("GET", "/api/mcp/keys/ui_000000000000/access"), ("GET", "/api/mcp/usage"), ("GET", "/api/mcp/usage/overview"),
+                         ("GET", "/api/mcp/keys/ui_000000000000/usage"), ("GET", "/api/mcp/keys/ui_000000000000/cost")]:
         body = {"name": "x"} if method == "POST" else None
         api_error(m(method, path, base=DISABLED_URL, body=body), 404, "mcp_disabled")
     # No route gives a secret again (SEC-009), on any instance.
     assert m("GET", "/api/mcp/keys/ui_000000000000/secret", base=DISABLED_URL).status_code == 404
     assert m("POST", "/mcp", base=DISABLED_URL, body={}).status_code == 404
-    # The page shell is served even when MCP is off (its "disabled" state shows the HCL); 404 only while mcp.html is absent.
-    assert m("GET", "/mcp-integration", base=DISABLED_URL).status_code in (200, 404)
+    # The two pages of the section are served even when MCP is off (their "disabled" state shows the HCL); 404 only while the shell
+    # file (mcp.html, mcpusage.html) is absent.
+    for page in ("/mcp-integration", "/mcp-integration/", "/mcp-integration/usage", "/mcp-integration/usage/"):
+        assert m("GET", page, base=DISABLED_URL).status_code in (200, 404), page
     version = m("GET", "/api/version", base=DISABLED_URL).json()
     assert version["features"]["mcp"] == {"enabled": False}
 
@@ -306,8 +308,9 @@ def test_meta_and_version():
     assert "allowed_origins" not in meta and ORIGIN not in json.dumps(meta)
     version = m("GET", "/api/version").json()
     assert version["features"]["mcp"] == {"enabled": True}
-    # The page route is a normal shell: 200 once the page exists, 404 before (the shell file belongs to the page).
-    assert m("GET", "/mcp-integration").status_code in (200, 404)
+    # The page routes are normal shells: 200 once the page exists, 404 before (the shell file belongs to the page).
+    for page in ("/mcp-integration", "/mcp-integration/", "/mcp-integration/usage", "/mcp-integration/usage/"):
+        assert m("GET", page).status_code in (200, 404), page
 
 
 # ---- the endpoint ---------------------------------------------------------------------------------------------------
@@ -868,6 +871,11 @@ def test_audit_lines_never_hold_sql_or_data():
     marker = f"audit_marker_{uuid.uuid4().hex[:8]}"
     ok_tool(MCP_URL, ALL, "run_query", {"host": "local", "sql": f"SELECT '{marker}' AS secret_value"})
     post_mcp(MCP_URL, "chm_nope", {"jsonrpc": "2.0", "id": 1, "method": "ping"})
+    # A JSON-RPC error names its method; a message that could not be read has none ("request"); a method is cut at 128 bytes.
+    # The key that only lists hosts: the all-data key has spent its rate limit (120 a minute) by this time of the run.
+    assert rpc(MCP_URL, HOSTS_ONLY, "resources/list").json()["error"]["code"] == -32601
+    assert rpc(MCP_URL, HOSTS_ONLY, "m" * 300).json()["error"]["code"] == -32601
+    assert post_mcp(MCP_URL, HOSTS_ONLY, None, raw="{not json").status_code == 400
     time.sleep(0.3)
     log = subprocess.run(LOGS_CMD, shell=True, capture_output=True, text=True, timeout=30)
     text = log.stdout + log.stderr
@@ -879,6 +887,9 @@ def test_audit_lines_never_hold_sql_or_data():
     last = calls[-1]
     assert last["key"] == "all-data" and last["host"] == "local" and last["status"] == "ok" and "duration_ms" in last and last["rows"] == 1
     assert any(e["status"] == "401_unknown" for e in events)
+    assert any(e["call"] == "resources/list" and e["status"] == "rpc_error_32601" and e["key"] == "hosts-only" for e in events)
+    assert any(e["call"] == "m" * 128 and e["status"] == "rpc_error_32601" for e in events) and "m" * 129 not in text
+    assert any(e["call"] == "request" and e["status"] == "rpc_error_32700" and e["key"] == "hosts-only" for e in events)
     assert ALL not in text and "chm_nope" not in text
 
 
@@ -1032,6 +1043,230 @@ def test_usage_of_a_key():
         drop_key(key["id"])
 
 
+OVERVIEW_FIELDS = {"window", "from", "to", "since", "persisted", "retention_days", "split", "filters", "totals", "series", "keys", "methods",
+                   "results", "types", "clients", "omitted"}
+OVERVIEW_TOTALS = {"requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg", "duration_ms_max", "rows", "bytes", "active_keys", "keys"}
+OVERVIEW_KEY = {"id", "name", "host", "source", "deleted_at", "requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg",
+                "duration_ms_max", "rows", "bytes", "last_used_at"}
+OVERVIEW_METHOD = {"method", "kind", "requests", "errors", "duration_ms_avg", "duration_ms_max", "rows", "bytes", "keys"}
+OVERVIEW_CLIENT = {"name", "version", "user_agent", "keys", "requests", "first_seen_at", "last_seen_at"}
+
+
+def overview(*params, base: str | None = None) -> dict:
+    """GET /api/mcp/usage/overview, the Usage tab. `params` are (name, value) pairs: a filter can repeat."""
+    return api_ok(m("GET", "/api/mcp/usage/overview", params=list(params), base=base or MCP_URL))
+
+
+def overview_rows(rows: list, by: str, field: str) -> dict:
+    return {row[by]: row[field] for row in rows}
+
+
+def points_of(doc: dict) -> list:
+    """The requests at each point of a series: the groups and `rest` added up."""
+    series = doc["series"]
+    return [sum(g["values"][i] for g in series["groups"]) + series["rest"]["values"][i] for i in range(len(series["t"]))]
+
+
+@needs_mcp
+def test_the_usage_overview_cuts_the_requests_of_all_keys():
+    # The requests of two keys, as two clients make them: a session, an unknown method, a notification, tool calls that end with
+    # their codes, a message that cannot be read, and a request that is refused before it is read.
+    a, secret_a = make_key(new_key_body("overview-a", tools=["list_hosts", "run_query"], databases=["*"]))
+    b, secret_b = make_key(new_key_body("overview-b", tools=["list_hosts", "query_table"]))
+    agent_a, agent_b = {"User-Agent": "overview-agent/1"}, {"User-Agent": "overview-agent/2"}
+
+    def call(secret, agent, name, arguments=None):
+        response = rpc(MCP_URL, secret, "tools/call", {"name": name, "arguments": arguments or {}}, headers=agent)
+        assert response.status_code == 200, response.text
+        return response.json()["result"]
+
+    try:
+        init = {"protocolVersion": "2025-06-18", "clientInfo": {"name": "overview-client", "version": "9.9"}}
+        assert rpc(MCP_URL, secret_a, "initialize", init, headers=agent_a).status_code == 200
+        assert post_mcp(MCP_URL, secret_a, {"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=agent_a).status_code == 202
+        assert rpc(MCP_URL, secret_a, "tools/list", headers=agent_a).status_code == 200
+        assert rpc(MCP_URL, secret_a, "resources/list", headers=agent_a).json()["error"]["code"] == -32601
+        assert post_mcp(MCP_URL, secret_a, {"jsonrpc": "2.0", "method": "notifications/made-up-by-a-client"}, headers=agent_a).status_code == 202
+        for _ in range(2):
+            assert call(secret_a, agent_a, "list_hosts")["isError"] is False
+        assert call(secret_a, agent_a, "run_query", {"host": "local", "sql": "SELECT 1"})["isError"] is False
+        for sql, code in (("SELECT 1; SELECT 2", "multiple_statements"), ("DROP TABLE chdash_ui.memory_weather", "statement_not_allowed"),
+                          ("SELECT 1 SETTINGS readonly = 0", "clause_not_allowed")):
+            result = call(secret_a, agent_a, "run_query", {"host": "local", "sql": sql})
+            assert result["isError"] is True and result["structuredContent"]["error"] == code
+        assert post_mcp(MCP_URL, secret_a, None, raw="{not json", headers=agent_a).status_code == 400
+        refused = SESSION.post(f"{MCP_URL}/mcp", data="{}", headers={"Authorization": f"Bearer {secret_a}", "Content-Type": "text/plain", **agent_a}, timeout=10)
+        assert refused.status_code == 415
+        # Key A: 13 requests, 6 tool calls, 5 errors (3 tools, 2 JSON-RPC), 1 refusal.
+        other = {"protocolVersion": "2025-06-18", "clientInfo": {"name": "other-client", "version": "1.0"}}
+        assert rpc(MCP_URL, secret_b, "initialize", other, headers=agent_b).status_code == 200
+        assert rpc(MCP_URL, secret_b, "ping", headers=agent_b).status_code == 200
+        assert call(secret_b, agent_b, "list_hosts")["isError"] is False
+        result = call(secret_b, agent_b, "query_table", {"host": "local", "database": "otel", "table": "otel_traces", "limit": 1})
+        assert result["isError"] is True and result["structuredContent"]["error"] == "table_not_allowed"
+        # Key B: 4 requests, 2 tool calls, 1 error.
+
+        both = [("key", a["id"]), ("key", b["id"])]
+        doc = overview(("window", "24h"), *both)
+        assert set(doc) == OVERVIEW_FIELDS
+        assert doc["window"] == "24h" and doc["persisted"] is True and doc["retention_days"] == 90 and doc["split"] == "method"
+        assert doc["from"].endswith("Z") and doc["to"].endswith("Z") and doc["since"].endswith("Z")
+        assert doc["filters"] == {"key": [a["id"], b["id"]], "method": [], "result": [], "type": []}
+        totals = doc["totals"]
+        assert set(totals) == OVERVIEW_TOTALS
+        assert (totals["requests"], totals["calls"], totals["errors"], totals["rate_limited"], totals["rejected"]) == (17, 8, 6, 0, 1), totals
+        assert totals["active_keys"] == 2 and totals["keys"] == len(api_ok(m("GET", "/api/mcp/keys"))["keys"])
+        assert totals["duration_ms_max"] >= totals["duration_ms_avg"] >= 0 and totals["bytes"] > 0
+        # The series: 24 points; at most 8 groups, the others summed in `rest`; the bars add up to the tile, at each point.
+        series = doc["series"]
+        assert set(series) == {"step", "t", "groups", "rest"} and series["step"] == "hour" and len(series["t"]) == 24
+        assert all(set(group) == {"id", "label", "total", "values"} for group in series["groups"]) and set(series["rest"]) == {"groups", "total", "values"}
+        assert [(g["id"], g["total"]) for g in series["groups"]] == [
+            ("run_query", 4), ("list_hosts", 3), ("initialize", 2), ("invalid", 1), ("notifications/initialized", 1), ("other", 1), ("ping", 1),
+            ("query_table", 1)]
+        assert series["rest"]["groups"] == 3 and series["rest"]["total"] == 3  # resources/list, tools/list, unread
+        assert all(len(g["values"]) == 24 for g in series["groups"]) and len(series["rest"]["values"]) == 24
+        assert sum(points_of(doc)) == 17
+        # The keys: the most requests first, with what each one did. The facet of the keys ignores the filter of the keys, so the
+        # other keys of the instance that were used in 24 hours are in it too.
+        assert all(set(row) == OVERVIEW_KEY for row in doc["keys"])
+        mine = [row for row in doc["keys"] if row["id"] in (a["id"], b["id"])]
+        assert [(row["id"], row["name"], row["requests"], row["calls"], row["errors"], row["rejected"]) for row in mine] == [
+            (a["id"], "overview-a", 13, 6, 5, 1), (b["id"], "overview-b", 4, 2, 1, 0)]
+        assert mine[0]["host"] == "local" and mine[0]["source"] == "ui" and mine[0]["deleted_at"] is None and mine[0]["last_used_at"]
+        requests_of = [row["requests"] for row in doc["keys"]]
+        assert requests_of == sorted(requests_of, reverse=True)
+        # The methods: a tool is a "call", a method of the protocol a "request", what was refused before it was read is "refused".
+        assert all(set(row) == OVERVIEW_METHOD for row in doc["methods"])
+        kinds = overview_rows(doc["methods"], "method", "kind")
+        assert kinds == {"list_hosts": "call", "run_query": "call", "query_table": "call", "initialize": "request", "tools/list": "request",
+                         "resources/list": "request", "notifications/initialized": "request", "other": "request", "ping": "request",
+                         "invalid": "request", "unread": "refused"}, kinds
+        counts = overview_rows(doc["methods"], "method", "requests")
+        assert counts == {"list_hosts": 3, "run_query": 4, "query_table": 1, "initialize": 2, "tools/list": 1, "resources/list": 1,
+                          "notifications/initialized": 1, "other": 1, "ping": 1, "invalid": 1, "unread": 1}, counts
+        assert [row["method"] for row in doc["methods"]][:3] == ["run_query", "list_hosts", "initialize"]
+        assert overview_rows(doc["methods"], "method", "errors")["run_query"] == 3 and overview_rows(doc["methods"], "method", "keys")["list_hosts"] == 2
+        init_row = next(row for row in doc["methods"] if row["method"] == "initialize")
+        assert init_row["duration_ms_avg"] is not None and init_row["duration_ms_max"] >= init_row["duration_ms_avg"] >= 0  # the latency of initialize
+        # The results cover all the requests (the successful protocol requests too); the types are four, in order.
+        assert overview_rows(doc["results"], "result", "count") == {
+            "ok": 10, "rpc_error_32601": 1, "rpc_error_32700": 1, "multiple_statements": 1, "statement_not_allowed": 1, "clause_not_allowed": 1,
+            "table_not_allowed": 1, "415_unsupported_media_type": 1}
+        assert doc["results"][0] == {"result": "ok", "count": 10, "keys": 2}
+        assert doc["types"] == [{"type": "call", "requests": 8}, {"type": "request", "requests": 8}, {"type": "limited", "requests": 0},
+                                {"type": "rejected", "requests": 1}]
+        # The clients of the keys: by name and version; the filter of the keys applies, the window does not.
+        assert all(set(row) == OVERVIEW_CLIENT for row in doc["clients"])
+        assert [(c["name"], c["version"], c["user_agent"], c["keys"], c["requests"]) for c in doc["clients"]] == [
+            ("other-client", "1.0", "overview-agent/2", 1, 4), ("overview-client", "9.9", "overview-agent/1", 1, 13)]
+        assert doc["omitted"] == {"keys": 0, "methods": 0, "results": 0, "clients": 0}
+
+        # Every split: the groups and `rest` add up to the requests. The label of a key is its name.
+        for split in ("key", "method", "result", "type"):
+            by = overview(("window", "24h"), ("split", split), *both)
+            assert by["split"] == split and by["totals"]["requests"] == 17
+            assert sum(g["total"] for g in by["series"]["groups"]) + by["series"]["rest"]["total"] == 17, split
+        by_key = overview(("window", "24h"), ("split", "key"), *both)["series"]
+        assert [(g["id"], g["label"], g["total"]) for g in by_key["groups"]] == [(a["id"], "overview-a", 13), (b["id"], "overview-b", 4)]
+        by_result = overview(("window", "24h"), ("split", "result"), *both)["series"]
+        assert len(by_result["groups"]) == 8 and by_result["rest"]["groups"] == 0 and by_result["groups"][0]["id"] == "ok"
+        by_type = overview(("window", "24h"), ("split", "type"), *both)["series"]
+        assert [(g["id"], g["label"], g["total"]) for g in by_type["groups"]] == [("call", "call", 8), ("request", "request", 8), ("rejected", "rejected", 1)]
+        # The bars add up to the requests at each point, whatever the split.
+        assert points_of(overview(("window", "24h"), ("split", "key"), *both)) == points_of(doc)
+        assert points_of(overview(("window", "24h"), ("split", "type"), *both)) == points_of(doc)
+        assert points_of(overview(("window", "24h"), ("split", "result"), *both)) == points_of(doc)
+
+        # A filter on the method: run_query lists the codes that it ended with. The facet of the methods ignores its own filter.
+        run = overview(("window", "24h"), ("method", "run_query"), *both)
+        assert run["totals"]["requests"] == 4 and run["totals"]["errors"] == 3 and run["totals"]["active_keys"] == 1
+        assert overview_rows(run["results"], "result", "count") == {"ok": 1, "multiple_statements": 1, "statement_not_allowed": 1, "clause_not_allowed": 1}
+        rows = overview_rows(run["keys"], "id", "requests")  # every key that ran run_query, and the keys that were chosen
+        assert rows[a["id"]] == 4 and rows[b["id"]] == 0
+        assert overview_rows(run["methods"], "method", "requests") == counts
+        assert [g["id"] for g in run["series"]["groups"]] == ["run_query"] and run["series"]["rest"]["groups"] == 0
+        assert overview_rows(run["types"], "type", "requests") == {"call": 4, "request": 0, "limited": 0, "rejected": 0}
+        # Filters of two dimensions are AND, the values of one are OR. A facet ignores its own filter only.
+        crossed = overview(("window", "24h"), ("type", "request"), ("result", "ok"), ("key", a["id"]))
+        assert crossed["totals"]["requests"] == 4 and crossed["totals"]["calls"] == 0  # initialize, notifications/initialized, tools/list, other
+        assert {row["method"] for row in crossed["methods"]} == {"initialize", "notifications/initialized", "tools/list", "other"}
+        assert overview_rows(crossed["results"], "result", "count") == {"ok": 4, "rpc_error_32601": 1, "rpc_error_32700": 1}
+        either = overview(("window", "24h"), ("method", "ping"), ("method", "resources/list"), *both)
+        assert either["totals"]["requests"] == 2 and [g["id"] for g in either["series"]["groups"]] == ["ping", "resources/list"]
+        refusals = overview(("window", "24h"), ("type", "rejected"), *both)
+        assert refusals["totals"]["requests"] == 1 and refusals["totals"]["rejected"] == 1 and refusals["totals"]["calls"] == 0
+        assert [(row["method"], row["kind"]) for row in refusals["methods"]] == [("unread", "refused")]
+        assert overview_rows(refusals["results"], "result", "count") == {"415_unsupported_media_type": 1}
+        # A value that was chosen stays in its facet at 0: ping is a request of key B, not of key A.
+        zero = overview(("window", "24h"), ("method", "ping"), ("key", a["id"]))
+        assert zero["totals"]["requests"] == 0 and zero["totals"]["duration_ms_avg"] is None and zero["totals"]["duration_ms_max"] is None
+        rows = overview_rows(zero["keys"], "id", "requests")  # the keys that pinged in 24 hours (the other tests use the instance too)
+        assert rows[a["id"]] == 0 and rows[b["id"]] == 1
+        assert next(row for row in zero["methods"] if row["method"] == "ping")["requests"] == 0
+        assert [g["id"] for g in zero["series"]["groups"]] == ["ping"] and sum(zero["series"]["groups"][0]["values"]) == 0
+        ghost = overview(("window", "24h"), ("key", "ui_000000000000"), ("method", "no_such_tool"), ("result", "no_such_result"))
+        assert ghost["totals"]["requests"] == 0 and ghost["keys"][0]["id"] == "ui_000000000000" and ghost["keys"][0]["name"] == "ui_000000000000"
+        assert [(row["method"], row["kind"], row["requests"]) for row in ghost["methods"]] == [("no_such_tool", "call", 0)]
+        assert ghost["results"] == [{"result": "no_such_result", "count": 0, "keys": 0}]
+
+        # The window: 7 days is by the day.
+        week = overview(("window", "7d"), *both)
+        assert week["window"] == "7d" and week["series"]["step"] == "day" and len(week["series"]["t"]) == 7 and week["totals"]["requests"] == 17
+        # A key that is deleted keeps its usage: it stays in the keys with when it was deleted, and answers to its filter.
+        drop_key(a["id"])
+        gone = overview(("window", "24h"), ("key", a["id"]))
+        assert gone["totals"]["requests"] == 13 and gone["totals"]["active_keys"] == 1 and gone["totals"]["keys"] == totals["keys"] - 1
+        row = next(row for row in gone["keys"] if row["id"] == a["id"])
+        assert row["deleted_at"] and row["name"] == "overview-a" and row["requests"] == 13
+        assert [c["name"] for c in gone["clients"]] == ["overview-client"]
+        # Never a secret, never SQL.
+        text = json.dumps(doc) + json.dumps(run) + json.dumps(gone)
+        assert secret_a not in text and secret_b not in text and "SELECT" not in text and "DROP TABLE" not in text
+    finally:
+        drop_key(a["id"])
+        drop_key(b["id"])
+
+
+@needs_mcp
+def test_the_usage_overview_refuses_what_it_does_not_read():
+    # 400 validation with the parameter and the reason; a typo is an error, not a filter that does nothing.
+    def invalid(params, field, reason):
+        api_error(m("GET", "/api/mcp/usage/overview", params=params), 400, "validation", field=field, reason=reason)
+
+    invalid([("window", "48h")], "window", "invalid")
+    invalid([("window", "365d")], "window", "invalid")  # the retention of this instance is 90 days
+    invalid([("split", "keys")], "split", "invalid")
+    invalid([("split", "")], "split", "invalid")
+    invalid([("nope", "1")], "nope", "unknown")
+    invalid([("limit", "5")], "limit", "unknown")
+    invalid([("key", "Bad Key")], "key", "invalid")
+    invalid([("key", "ui_zzzzzzzzzzzz")], "key", "invalid")
+    invalid([("key", "")], "key", "invalid")
+    invalid([("method", "has space")], "method", "invalid")
+    invalid([("method", "x" * 65)], "method", "invalid")
+    invalid([("result", "Not-A-Result")], "result", "invalid")
+    invalid([("result", "a/b")], "result", "invalid")
+    invalid([("type", "tool")], "type", "invalid")
+    invalid([("type", "call"), ("type", "refused")], "type", "invalid")
+    for field, value in (("key", "key-{}"), ("method", "method_{}"), ("result", "result_{}")):
+        invalid([(field, value.format(i)) for i in range(21)], field, "too_many")
+        # Twenty are fine, and a value that is repeated counts once.
+        assert overview(*[(field, value.format(i)) for i in range(20)])["totals"]["requests"] == 0
+        assert overview(*[(field, value.format(0))] * 30)["filters"][field] == [value.format(0)]
+    # Every value of every dimension is checked, in the order: the window, the unknown names, the split, the filters.
+    invalid([("window", "48h"), ("nope", "1")], "window", "invalid")
+    invalid([("nope", "1"), ("split", "x")], "nope", "unknown")
+    # Without a parameter: the default window of the meta, the split by method.
+    plain = overview()
+    meta = api_ok(m("GET", "/api/mcp/meta"))["usage"]
+    assert plain["window"] == meta["default_window"] and plain["split"] == "method" and plain["filters"] == {"key": [], "method": [], "result": [], "type": []}
+    # The route of the page is a read of the page only, like the others.
+    for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Origin": "https://evil.example.com"}):
+        api_error(m("GET", "/api/mcp/usage/overview", headers=headers), 403, "cross_site_request")
+    assert m("GET", "/api/mcp/usage/overview", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 200
+
+
 @needs_mcp
 def test_key_validation_errors():
     def invalid(body, field, reason, method="POST", path="/api/mcp/keys"):
@@ -1126,6 +1361,7 @@ def test_key_routes_cross_site_guard():
             api_error(m("GET", path + "/usage", headers=headers), 403, "cross_site_request")
             api_error(m("GET", path + "/cost", headers=headers), 403, "cross_site_request")
             api_error(m("GET", "/api/mcp/usage", headers=headers), 403, "cross_site_request")
+            api_error(m("GET", "/api/mcp/usage/overview", headers=headers), 403, "cross_site_request")
         # Same origin passes, by the browser's header or by Origin = Host.
         host = MCP_URL.split("//", 1)[1]
         for headers in ({"Sec-Fetch-Site": "same-origin"}, {"Origin": f"http://{host}"}, {"Sec-Fetch-Site": "none"}):
@@ -1194,9 +1430,29 @@ def test_usage_file_holds_counts_never_secrets():
         assert document["version"] == 1 and document["since"].endswith("Z")
         entry = next(e for e in document["keys"] if e["id"] == key["id"])
         assert entry["name"] == "usage-file" and entry["host"] == "local" and entry["source"] == "ui" and entry["deleted_at"] is None
+        # A bucket is its start and its cells: [type, method, result, count, duration sum, duration max, rows, bytes].
         hour = entry["hours"][-1]
-        assert len(hour) == 12 and hour[0] % 3600 == 0 and hour[10]["list_hosts"][0] >= 1
-        assert len(entry["days"][-1]) == 12 and entry["days"][-1][0] % 86400 == 0
+        assert len(hour) == 2 and hour[0] % 3600 == 0
+        cells = {tuple(cell[:3]): cell[3:] for cell in hour[1]}
+        assert len(cells[("call", "list_hosts", "ok")]) == 5 and cells[("call", "list_hosts", "ok")][0] >= 1
+        day = entry["days"][-1]
+        assert len(day) == 2 and day[0] % 86400 == 0 and [cell[:3] for cell in day[1]] == [list(key) for key in cells]
+        # Nothing that a client chose is in the file, for any key: a method of a request is one of the protocol (or "other", "invalid",
+        # for a message that could not be read) and every name is of the shape that the file keeps.
+        known = {"initialize", "ping", "tools/list", "tools/call", "response", "notifications/initialized", "notifications/cancelled",
+                 "notifications/progress", "notifications/roots/list_changed", "resources/list", "resources/read", "resources/templates/list",
+                 "resources/subscribe", "resources/unsubscribe", "prompts/list", "prompts/get", "completion/complete", "logging/setLevel",
+                 "other", "invalid"}
+        for each in document["keys"]:
+            for bucket in each["hours"] + each["days"]:
+                assert len(bucket) == 2
+                for kind, method, result, *counts in bucket[1]:
+                    assert kind in ("call", "request", "limited", "rejected") and len(counts) == 5 and counts[0] >= 1
+                    assert re.fullmatch(r"[A-Za-z0-9_/]{1,64}", method) and re.fullmatch(r"[a-z0-9_]{1,64}", result), (method, result)
+                    if kind == "request":
+                        assert method in known, method
+                    if kind in ("limited", "rejected"):
+                        assert method == "unread" and result != "ok", (kind, method, result)
     finally:
         drop_key(key["id"])
 
@@ -1277,6 +1533,11 @@ def test_read_only_instance():
     assert rpc(RO_URL, SEED, "ping").status_code == 200
     assert api_ok(m("GET", "/api/mcp/keys/ui_0a1b2c3d4e5f/usage", base=RO_URL))["totals"]["requests"] >= 1
     assert any(k["id"] == "ui_0a1b2c3d4e5f" for k in api_ok(m("GET", "/api/mcp/usage", base=RO_URL))["keys"])
+    # The Usage tab reads too, on an instance where the keys are read-only: a read, not a change.
+    seen = api_ok(m("GET", "/api/mcp/usage/overview", base=RO_URL, params=[("key", "ui_0a1b2c3d4e5f")]))
+    assert seen["totals"]["requests"] >= 1 and seen["filters"]["key"] == ["ui_0a1b2c3d4e5f"] and seen["totals"]["active_keys"] == 1
+    assert any(row["id"] == "ui_0a1b2c3d4e5f" and row["source"] == "ui" for row in seen["keys"])
+    assert any(row["method"] == "ping" and row["kind"] == "request" for row in seen["methods"])
     assert [t["name"] for t in rpc(RO_URL, SEED, "tools/list").json()["result"]["tools"]] == ["list_databases", "list_tables", "describe_table", "query_table"]
     assert ok_tool(RO_URL, SEED, "list_tables", {})["tables"]
     # Every write is refused.
@@ -1316,6 +1577,12 @@ def test_no_storage_instance():
         assert "WWW-Authenticate" not in response.headers
     result = post_mcp(NOSTORAGE_URL, None, list_hosts, headers={"X-ChDash-Key": ONLY_KEY}).json()["result"]
     assert [h["name"] for h in result["structuredContent"]["hosts"]] == ["local"]
+    # The usage is in memory since the start, and the Usage tab reads it.
+    seen = api_ok(m("GET", "/api/mcp/usage/overview", base=NOSTORAGE_URL))
+    assert seen["persisted"] is False and seen["totals"]["requests"] >= 4 and seen["totals"]["calls"] >= 1
+    assert [row["id"] for row in seen["keys"]] == ["only-key"]
+    assert {"ping": "request", "list_hosts": "call"}.items() <= {row["method"]: row["kind"] for row in seen["methods"]}.items()
+    assert seen["totals"]["keys"] == 1
 
 
 # ---- what a key reaches (GET /api/mcp/keys/<id>/access) -------------------------------------------------------------

@@ -170,7 +170,7 @@ ChDash has no login. A page of another site must not be able to use the browser 
 - Without `Sec-Fetch-Site` (an older browser), an `Origin` header must name this server: the `Host` header, or the first `X-Forwarded-Host`. Otherwise the answer is 403 `cross_site_request`. A proxy that changes `Host` must set `X-Forwarded-Host`.
 - A request with a body must send `Content-Type: application/json`. Otherwise the answer is 415 `unsupported_media_type`. A page of another site cannot send this type without a CORS preflight, and ChDash never allows a preflight.
 
-A client that is not a browser (curl, a script, a test) sends neither header and passes. `POST /mcp` has its own rules (`mcp.allowed_origins`, docs/mcp.md). The routes of the MCP page that show a secret, what a key reaches, what it did or what it cost (`GET .../secret`, `GET .../access`, `GET /api/mcp/access`, `GET /api/mcp/usage`, `GET .../usage`, `GET .../cost`) also refuse a cross-site request.
+A client that is not a browser (curl, a script, a test) sends neither header and passes. `POST /mcp` has its own rules (`mcp.allowed_origins`, docs/mcp.md). The routes of the MCP page that show a secret, what a key reaches, what it did or what it cost (`GET .../secret`, `GET .../access`, `GET /api/mcp/access`, `GET /api/mcp/usage`, `GET /api/mcp/usage/overview`, `GET .../usage`, `GET .../cost`) also refuse a cross-site request.
 
 ### Static assets
 

@@ -636,6 +636,7 @@ struct UsageCall {
   std::string id = "k1";
   int64_t at = 0;
   McpUsageKind kind = McpUsageKind::ToolCall;
+  std::string method;  // Request: the JSON-RPC method of the message
   std::string tool;
   std::string status = "ok";
   int64_t duration_ms = 0;
@@ -654,6 +655,7 @@ void usage_record(McpUsage& usage, const UsageCall& call) {
   event.key_source = "config";
   event.at = call.at;
   event.kind = call.kind;
+  event.method = call.method;
   event.tool = call.tool;
   event.status = call.status;
   event.duration_ms = call.duration_ms;
@@ -695,6 +697,205 @@ uint64_t usage_count(const rapidjson::Value& rows, const char* by, const std::st
   return 0;
 }
 
+// The first day of the first entry of a usage file, as the cells "type/method/result:count", sorted.
+std::vector<std::string> usage_file_cells(const rapidjson::Value& entry) {
+  std::vector<std::string> out;
+  for (const auto& cell : entry["days"][0][1].GetArray()) {
+    out.push_back(std::string(cell[0].GetString()) + "/" + cell[1].GetString() + "/" + cell[2].GetString() + ":" + std::to_string(cell[3].GetUint64()));
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+// The file of a usage that is saved now.
+rapidjson::Document usage_file_of(McpUsage& usage, const std::string& file, int64_t now) {
+  CHECK(usage.save(now));
+  return parse(read_file(file));
+}
+
+// Whether a usage file of this text stops the start (and is never rewritten).
+bool usage_file_refused(const std::string& file, const std::string& content, int64_t now) {
+  write_file(file, content);
+  bool threw = false;
+  try {
+    McpUsageOptions options;
+    options.file = file;
+    McpUsage usage(options, now);
+  } catch (const std::exception&) {
+    threw = true;
+  }
+  bool checked = false;
+  try {
+    mcp_check_usage_file(file);
+  } catch (const std::exception&) {
+    checked = true;
+  }
+  CHECK_EQ(read_file(file), content);
+  return threw && checked;
+}
+
+// The requests of the keys k1, k2 and a deleted key, as three clients would make them, in the order of the time (a clock that
+// goes back counts in the last bucket). The usage must be opened at `now - 4 days` or before, for a retention of 30 days.
+// k1: 12 requests, 2 of them 3 days ago; k2: 7; gone: 4, yesterday, and deleted after them. `now` is a whole hour.
+void usage_scenario(McpUsage& usage, int64_t now) {
+  const int64_t day = 86400;
+  const std::string code = "claude-code/2.1.0 (node)";
+  const std::string ai = "claude-ai/0.1";
+  const auto tool = [&](const std::string& id, int64_t at, const std::string& name, const std::string& status, int64_t ms, uint64_t rows,
+                        uint64_t bytes, const std::string& agent) {
+    UsageCall call;
+    call.id = id;
+    call.at = at;
+    call.tool = name;
+    call.status = status;
+    call.duration_ms = ms;
+    call.rows = rows;
+    call.bytes = bytes;
+    call.user_agent = agent;
+    usage_record(usage, call);
+  };
+  const auto request = [&](const std::string& id, int64_t at, const std::string& method, const std::string& status, int64_t ms, uint64_t bytes,
+                           const std::string& agent, const std::string& client = "", const std::string& version = "") {
+    UsageCall call;
+    call.id = id;
+    call.at = at;
+    call.kind = McpUsageKind::Request;
+    call.method = method;
+    call.status = status;
+    call.duration_ms = ms;
+    call.bytes = bytes;
+    call.user_agent = agent;
+    call.client_name = client;
+    call.client_version = version;
+    usage_record(usage, call);
+  };
+  const auto refused = [&](const std::string& id, int64_t at, McpUsageKind kind, const std::string& status, uint64_t bytes, const std::string& agent) {
+    UsageCall call;
+    call.id = id;
+    call.at = at;
+    call.kind = kind;
+    call.status = status;
+    call.bytes = bytes;
+    call.user_agent = agent;
+    usage_record(usage, call);
+  };
+  for (int i = 0; i < 2; ++i) tool("k1", now - 3 * day + 5 + i, "list_hosts", "ok", 10, 2, 100, "agent/1");
+  for (int i = 0; i < 4; ++i) tool("gone", now - day + 5 + i, "list_hosts", "ok", 5, 0, 80, "agent/1");
+  request("k1", now + 1, "initialize", "ok", 40, 300, code, "claude-code", "2.1.0");
+  request("k1", now + 2, "tools/list", "ok", 7, 200, code);
+  for (int i = 0; i < 3; ++i) tool("k1", now + 3 + i, "list_hosts", "ok", 10, 2, 100, code);
+  for (int i = 0; i < 2; ++i) tool("k1", now + 6 + i, "run_query", "ok", 50, 4, 500, code);
+  tool("k1", now + 8, "run_query", "timeout", 30, 0, 100, code);
+  request("k1", now + 9, "resources/list", "rpc_error_32601", 2, 110, code);
+  refused("k1", now + 10, McpUsageKind::RateLimited, "429_rate_limited", 50, code);
+  request("k2", now + 20, "initialize", "ok", 30, 250, ai, "claude-ai", "0.1");
+  for (int i = 0; i < 2; ++i) tool("k2", now + 21 + i, "list_hosts", "ok", 12, 2, 100, ai);
+  tool("k2", now + 23, "run_query", "query_failed", 20, 0, 90, ai);
+  refused("k2", now + 24, McpUsageKind::Rejected, "415_unsupported_media_type", 60, ai);
+  request("k2", now + 25, "notifications/initialized", "ok", 1, 0, ai);
+  request("k2", now + 26, "notifications/x-secret-thing", "ok", 1, 0, ai);
+  usage.mark_deleted(usage_key("gone"), now + 100);
+}
+
+// The overview of a usage for a query that must be valid.
+rapidjson::Document usage_overview(const McpUsage& usage, const std::vector<std::string>& live, const std::string& window, int64_t now,
+                                   McpUsageOverviewQuery query = {}) {
+  const auto wrong = mcp_usage_overview_check(&query);
+  CHECK(!wrong.has_value());
+  std::vector<McpUsageKeyRef> keys;
+  for (const auto& id : live) keys.push_back(usage_key(id));
+  rapidjson::StringBuffer sb;
+  McpJsonWriter w(sb);
+  usage.write_overview(w, query, keys, *mcp_usage_window(window, usage.retention_days(), now), now);
+  return parse(sb.GetString());
+}
+
+// The row of an array of an answer whose `by` is `name`, or null.
+const rapidjson::Value* usage_row(const rapidjson::Value& rows, const char* by, const std::string& name) {
+  for (const auto& row : rows.GetArray()) {
+    if (std::string(row[by].GetString()) == name) return &row;
+  }
+  return nullptr;
+}
+
+uint64_t usage_figure(const rapidjson::Value& rows, const char* by, const std::string& name, const char* field) {
+  const rapidjson::Value* row = usage_row(rows, by, name);
+  CHECK(row != nullptr);
+  return row ? (*row)[field].GetUint64() : 0;
+}
+
+// The sum of the values of an array of counts.
+uint64_t usage_sum(const rapidjson::Value& values) {
+  uint64_t sum = 0;
+  for (const auto& value : values.GetArray()) sum += value.GetUint64();
+  return sum;
+}
+
+// What every answer holds: the groups and the rest add up to the requests, at each point and in all, and the points are the ones of
+// the window. Returns the requests at each point.
+std::vector<uint64_t> check_series(const rapidjson::Value& doc) {
+  const auto& series = doc["series"];
+  const size_t points = series["t"].Size();
+  std::vector<uint64_t> at(points, 0);
+  uint64_t all = 0;
+  const auto add = [&](const rapidjson::Value& group) {
+    CHECK_EQ(group["values"].Size(), static_cast<rapidjson::SizeType>(points));
+    CHECK_EQ(usage_sum(group["values"]), group["total"].GetUint64());
+    all += group["total"].GetUint64();
+    for (size_t p = 0; p < points && p < group["values"].Size(); ++p) at[p] += group["values"][static_cast<rapidjson::SizeType>(p)].GetUint64();
+  };
+  for (const auto& group : series["groups"].GetArray()) add(group);
+  add(series["rest"]);
+  CHECK_EQ(all, doc["totals"]["requests"].GetUint64());
+  CHECK_EQ(series["step"].GetString() == std::string("hour"), points == 24);
+  return at;
+}
+
+// What every answer holds without a filter: each facet adds up to the requests.
+void check_facets_add_up(const rapidjson::Value& doc) {
+  const uint64_t requests = doc["totals"]["requests"].GetUint64();
+  uint64_t keys = 0;
+  uint64_t methods = 0;
+  uint64_t results = 0;
+  uint64_t types = 0;
+  for (const auto& row : doc["keys"].GetArray()) keys += row["requests"].GetUint64();
+  for (const auto& row : doc["methods"].GetArray()) methods += row["requests"].GetUint64();
+  for (const auto& row : doc["results"].GetArray()) results += row["count"].GetUint64();
+  for (const auto& row : doc["types"].GetArray()) types += row["requests"].GetUint64();
+  CHECK_EQ(keys, requests);
+  CHECK_EQ(methods, requests);
+  CHECK_EQ(results, requests);
+  CHECK_EQ(types, requests);
+}
+
+// Whether the series and every facet add up to the requests, as one answer (no CHECK inside: the test that counts while the overview
+// reads has loops whose length depends on the time, and its number of checks must not).
+bool usage_overview_adds_up(const rapidjson::Value& doc) {
+  const uint64_t requests = doc["totals"]["requests"].GetUint64();
+  uint64_t series = doc["series"]["rest"]["total"].GetUint64();
+  for (const auto& group : doc["series"]["groups"].GetArray()) series += group["total"].GetUint64();
+  uint64_t keys = 0;
+  uint64_t methods = 0;
+  uint64_t results = 0;
+  uint64_t types = 0;
+  for (const auto& row : doc["keys"].GetArray()) keys += row["requests"].GetUint64();
+  for (const auto& row : doc["methods"].GetArray()) methods += row["requests"].GetUint64();
+  for (const auto& row : doc["results"].GetArray()) results += row["count"].GetUint64();
+  for (const auto& row : doc["types"].GetArray()) types += row["requests"].GetUint64();
+  return series == requests && keys == requests && methods == requests && results == requests && types == requests;
+}
+
+McpUsageOverviewQuery usage_query(const std::string& split, std::vector<std::string> keys = {}, std::vector<std::string> methods = {},
+                                  std::vector<std::string> results = {}, std::vector<std::string> types = {}) {
+  McpUsageOverviewQuery query;
+  query.split = split;
+  query.keys = std::move(keys);
+  query.methods = std::move(methods);
+  query.results = std::move(results);
+  query.types = std::move(types);
+  return query;
+}
+
 void test_usage(const std::string& dir) {
   // A whole hour (2027-01-15T10:00:00Z).
   const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;
@@ -725,6 +926,14 @@ void test_usage(const std::string& dir) {
   CHECK_EQ(mcp_usage_clean("  a\x01" "b\xc3\xa9  ", 64), std::string("a?b??"));
   CHECK_EQ(mcp_usage_clean("abcdef", 3), std::string("abc"));
   CHECK_EQ(mcp_usage_clean("   ", 8), std::string(""));
+  // The ids of keys: a name of the configuration, or ui_ and 12 hexadecimal digits.
+  CHECK(mcp_valid_key_id("all-data"));
+  CHECK(mcp_valid_key_id("ui_0a1b2c3d4e5f"));
+  CHECK(!mcp_valid_key_id(""));
+  CHECK(!mcp_valid_key_id("ui_0A1B2C3D4E5F"));
+  CHECK(!mcp_valid_key_id("ui_0a1b2c3d4e5"));
+  CHECK(!mcp_valid_key_id("ui_zzzzzzzzzzzz"));
+  CHECK(!mcp_valid_key_id("Bad Key"));
 
   // What a key did, in memory only.
   {
@@ -739,13 +948,16 @@ void test_usage(const std::string& dir) {
 
     UsageCall init;
     init.kind = McpUsageKind::Request;
+    init.method = "initialize";
     init.at = now + 10;
     init.client_name = "claude-code";
     init.client_version = "2.1.0";
     init.user_agent = "claude-code/2.1.0 (node)";
     init.bytes = 300;
+    init.duration_ms = 40;  // a protocol request has its time in its cell, but it is no tool call: the totals never count it
     usage_record(usage, init);
     UsageCall list = init;
+    list.method = "tools/list";
     list.client_name.clear();
     list.client_version.clear();
     list.at = now + 11;
@@ -777,6 +989,7 @@ void test_usage(const std::string& dir) {
     usage_record(usage, rejected);
     UsageCall rpc;
     rpc.kind = McpUsageKind::Request;
+    rpc.method = "resources/list";
     rpc.status = "rpc_error_32601";
     rpc.at = now + 40;
     usage_record(usage, rpc);
@@ -794,7 +1007,7 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(totals["errors"].GetUint64(), uint64_t(2));  // the tool that failed and the JSON-RPC error
     CHECK_EQ(totals["rate_limited"].GetUint64(), uint64_t(1));
     CHECK_EQ(totals["rejected"].GetUint64(), uint64_t(1));
-    CHECK_EQ(totals["duration_ms_avg"].GetUint64(), uint64_t(21));
+    CHECK_EQ(totals["duration_ms_avg"].GetUint64(), uint64_t(21));  // the two tool calls: the 40 ms requests are not in it
     CHECK_EQ(totals["duration_ms_max"].GetUint64(), uint64_t(30));
     CHECK_EQ(totals["rows"].GetUint64(), uint64_t(5));
     CHECK_EQ(totals["bytes"].GetUint64(), uint64_t(300 + 300 + 1000 + 100 + 50 + 50));
@@ -804,12 +1017,15 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(std::string(doc["series"]["points"][23]["t"].GetString()), mcp_iso_utc(now));
     CHECK_EQ(doc["series"]["points"][23]["calls"].GetUint64(), uint64_t(2));
     CHECK_EQ(doc["series"]["points"][23]["requests"].GetUint64(), uint64_t(7));
+    CHECK_EQ(doc["series"]["points"][23]["errors"].GetUint64(), uint64_t(2));
     CHECK_EQ(doc["series"]["points"][0]["calls"].GetUint64(), uint64_t(0));
     // The tools (the most called first, then by name) and the results: the calls, and the requests that failed.
     CHECK_EQ(doc["tools"].Size(), 2u);
     CHECK_EQ(std::string(doc["tools"][0]["tool"].GetString()), std::string("query_table"));
     CHECK_EQ(usage_count(doc["tools"], "tool", "run_query", "errors"), uint64_t(1));
     CHECK_EQ(usage_count(doc["tools"], "tool", "query_table", "rows"), uint64_t(5));
+    CHECK_EQ(usage_count(doc["tools"], "tool", "query_table", "duration_ms_avg"), uint64_t(12));
+    CHECK_EQ(usage_count(doc["tools"], "tool", "run_query", "duration_ms_max"), uint64_t(30));
     CHECK_EQ(usage_count(doc["statuses"], "status", "ok", "count"), uint64_t(1));
     CHECK_EQ(usage_count(doc["statuses"], "status", "timeout", "count"), uint64_t(1));
     CHECK_EQ(usage_count(doc["statuses"], "status", "429_rate_limited", "count"), uint64_t(1));
@@ -830,6 +1046,7 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(std::string(listed["keys"][0]["id"].GetString()), std::string("k2"));
     CHECK_EQ(listed["keys"][0]["calls"].GetUint64(), uint64_t(0));
     CHECK(listed["keys"][0]["last_used_at"].IsNull());
+    CHECK_EQ(listed["keys"][1]["requests"].GetUint64(), uint64_t(7));
     CHECK_EQ(listed["keys"][1]["calls"].GetUint64(), uint64_t(2));
     CHECK_EQ(listed["keys"][1]["errors"].GetUint64(), uint64_t(2));
     CHECK_EQ(listed["keys"][1]["rate_limited"].GetUint64(), uint64_t(1));
@@ -948,12 +1165,14 @@ void test_usage(const std::string& dir) {
     for (int i = 0; i < 9; ++i) {
       UsageCall call;
       call.kind = McpUsageKind::Request;
+      call.method = "ping";
       call.at = now + i;
       call.user_agent = "agent/" + std::to_string(i);
       usage_record(usage, call);
     }
     UsageCall named;
     named.kind = McpUsageKind::Request;
+    named.method = "initialize";
     named.at = now + 20;
     named.user_agent = "agent/8";
     named.client_name = "inspector";
@@ -964,23 +1183,6 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(std::string(doc["clients"][0]["name"].GetString()), std::string("inspector"));
     CHECK_EQ(doc["clients"][0]["requests"].GetUint64(), uint64_t(2));
     for (const auto& client : doc["clients"].GetArray()) CHECK(std::string(client["user_agent"].GetString()) != "agent/0");
-  }
-
-  // The cells past the cap count as "other".
-  {
-    McpUsageOptions options;
-    options.max_cells = 3;
-    McpUsage usage(options, now);
-    for (const char* status : {"a_error", "b_error", "c_error", "d_error"}) {
-      UsageCall call;
-      call.at = now;
-      call.tool = "list_hosts";
-      call.status = status;
-      usage_record(usage, call);
-    }
-    const auto doc = parse(usage_detail(usage, "k1", true, "24h", now));
-    CHECK_EQ(usage_count(doc["statuses"], "status", "other", "count"), uint64_t(3));
-    CHECK_EQ(usage_count(doc["statuses"], "status", "a_error", "count"), uint64_t(1));
   }
 
   // The file: written atomically (0600, no temporary file left), only when something changed, read back by the next start.
@@ -1005,7 +1207,17 @@ void test_usage(const std::string& dir) {
       const auto doc = parse(read_file(file));
       CHECK_EQ(doc["version"].GetInt(), 1);
       CHECK_EQ(std::string(doc["since"].GetString()), mcp_iso_utc(now));
-      CHECK_EQ(doc["keys"][0]["hours"][0].Size(), 12u);
+      // A bucket is its start and its cells: [type, method, result, count, duration sum, duration max, rows, bytes].
+      const auto& bucket = doc["keys"][0]["hours"][0];
+      CHECK_EQ(bucket.Size(), 2u);
+      CHECK_EQ(bucket[0].GetInt64(), now);
+      CHECK_EQ(bucket[1].Size(), 1u);
+      CHECK_EQ(bucket[1][0].Size(), 8u);
+      CHECK_EQ(std::string(bucket[1][0][0].GetString()), std::string("call"));
+      CHECK_EQ(std::string(bucket[1][0][1].GetString()), std::string("query_table"));
+      CHECK_EQ(std::string(bucket[1][0][2].GetString()), std::string("table_not_allowed"));
+      CHECK_EQ(bucket[1][0][3].GetUint64(), uint64_t(1));
+      CHECK_EQ(doc["keys"][0]["days"][0].Size(), 2u);
       // Nothing changed: the file is not written again.
       const std::string before = read_file(file);
       CHECK(usage.save(now + 7));
@@ -1029,49 +1241,829 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(std::string(doc["clients"][0]["name"].GetString()), std::string("claude-code"));
     CHECK_EQ(again.last_used_all().at("k1"), now + 5);
   }
+}
 
-  // A file that is not a usage file of this ChDash stops the start, and is never rewritten.
+// The method of a request, the cells, and the caps that keep them bounded.
+void test_usage_cells(const std::string& dir) {
+  const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;
+  const std::string file = dir + "/cells.json";
+  McpUsageOptions options;
+  options.file = file;
+
+  // The method of a request: a method of the protocol as it is (exact, case sensitive), "other" for any other, "invalid" when
+  // the message could not be read, "unread" for what was refused before it was read. A tool is the name of the tool.
   {
-    const std::string file = dir + "/bad-usage.json";
+    McpUsage usage(options, now);
+    const auto request = [&](const std::string& method, const std::string& status = "ok") {
+      UsageCall call;
+      call.at = now + 1;
+      call.kind = McpUsageKind::Request;
+      call.method = method;
+      call.status = status;
+      usage_record(usage, call);
+    };
+    for (const char* method : {"initialize", "ping", "tools/list", "tools/call", "response", "notifications/initialized", "notifications/cancelled",
+                               "notifications/progress", "notifications/roots/list_changed", "resources/list", "resources/read",
+                               "resources/templates/list", "resources/subscribe", "resources/unsubscribe", "prompts/list", "prompts/get",
+                               "completion/complete", "logging/setLevel"}) {
+      request(method);
+    }
+    request("Initialize");  // the method is exact
+    request("tools/List");
+    request("logging/setlevel");
+    request("notifications/x");
+    request("sampling/createMessage");
+    request("");  // a message that could not be read
+    request("", "rpc_error_32700");
+    request("tools/call", "rpc_error_32602");  // a tools/call that failed before a tool
+    UsageCall tool;
+    tool.at = now + 2;
+    tool.tool = "List_Hosts";  // a tool is kept as [a-z0-9_]
+    usage_record(usage, tool);
+    UsageCall limited;
+    limited.at = now + 3;
+    limited.kind = McpUsageKind::RateLimited;
+    limited.method = "tools/call";  // never read: a request that is refused has no method
+    limited.status = "429_rate_limited";
+    usage_record(usage, limited);
+    UsageCall rejected = limited;
+    rejected.kind = McpUsageKind::Rejected;
+    rejected.method = "";
+    rejected.status = "400_unreadable";
+    usage_record(usage, rejected);
+    const auto doc = usage_file_of(usage, file, now + 5);
+    const auto cells = usage_file_cells(doc["keys"][0]);
+    std::vector<std::string> want = {
+        "call/list_hosts/ok:1",
+        "rejected/unread/400_unreadable:1",
+        "limited/unread/429_rate_limited:1",
+        "request/other/ok:5",  // Initialize, tools/List, logging/setlevel, a notification and a request that no one knows
+        "request/invalid/ok:1",
+        "request/invalid/rpc_error_32700:1",
+        "request/tools/call/rpc_error_32602:1",
+    };
+    for (const char* method : {"initialize", "ping", "tools/list", "tools/call", "response", "notifications/initialized", "notifications/cancelled",
+                               "notifications/progress", "notifications/roots/list_changed", "resources/list", "resources/read",
+                               "resources/templates/list", "resources/subscribe", "resources/unsubscribe", "prompts/list", "prompts/get",
+                               "completion/complete", "logging/setLevel"}) {
+      want.push_back(std::string("request/") + method + "/ok:1");
+    }
+    std::sort(want.begin(), want.end());
+    CHECK(cells == want);
+    if (cells != want) {
+      for (const auto& cell : cells) std::cerr << "  got " << cell << "\n";
+    }
+  }
+
+  // A text that a client chose is never kept: 5000 notifications with 5000 names are one cell, in a file that stays small.
+  {
+    std::filesystem::remove(file);
+    McpUsage usage(options, now);
+    for (int i = 0; i < 5000; ++i) {
+      UsageCall call;
+      call.at = now + 1;
+      call.kind = McpUsageKind::Request;
+      call.method = "notifications/name-" + std::to_string(i);
+      usage_record(usage, call);
+    }
+    const auto doc = usage_file_of(usage, file, now + 5);
+    CHECK(usage_file_cells(doc["keys"][0]) == std::vector<std::string>({"request/other/ok:5000"}));
+    CHECK(read_file(file).size() < 2000);
+  }
+
+  // The caps: a bucket keeps 512 cells, and a request that has no cell goes to the overflow cell of its type, so the totals are exact.
+  {
+    std::filesystem::remove(file);
+    McpUsage usage(options, now);
+    const int tools = 600;
+    for (int i = 0; i < tools; ++i) {
+      UsageCall call;
+      call.at = now + 1;
+      call.tool = "tool_" + std::to_string(i);
+      call.duration_ms = 3;
+      call.bytes = 10;
+      call.rows = 1;
+      usage_record(usage, call);
+    }
+    // An error of a tool past the cap is counted as an error: its overflow cell is (call, other, other).
+    for (int i = 0; i < 5; ++i) {
+      UsageCall call;
+      call.at = now + 2;
+      call.tool = "tool_new_" + std::to_string(i);
+      call.status = "failed_" + std::to_string(i);
+      call.duration_ms = 9;
+      usage_record(usage, call);
+    }
+    const auto doc = parse(usage_detail(usage, "k1", true, "24h", now + 10));
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(tools + 5));
+    CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(tools + 5));
+    CHECK_EQ(doc["totals"]["errors"].GetUint64(), uint64_t(5));
+    CHECK_EQ(doc["totals"]["rows"].GetUint64(), uint64_t(tools));
+    CHECK_EQ(doc["totals"]["bytes"].GetUint64(), uint64_t(tools * 10));
+    CHECK_EQ(doc["totals"]["duration_ms_max"].GetUint64(), uint64_t(9));
+    // The tools: the 512 that had a cell, and "other" for the rest (ok and error).
+    CHECK_EQ(doc["tools"].Size(), 513u);
+    CHECK_EQ(usage_count(doc["tools"], "tool", "other", "calls"), uint64_t(tools - 512 + 5));
+    CHECK_EQ(usage_count(doc["tools"], "tool", "other", "errors"), uint64_t(5));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "ok", "count"), uint64_t(tools));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "other", "count"), uint64_t(5));
+    const auto saved = usage_file_of(usage, file, now + 20);
+    CHECK_EQ(saved["keys"][0]["days"][0][1].Size(), 514u);  // 512, and the two cells of overflow
+    // It reads back as it was written: the overflow cells are not among the 512 of a bucket, so nothing folds again.
+    McpUsage again(options, now + 30);
+    CHECK_EQ(usage_detail(again, "k1", true, "24h", now + 30), usage_detail(usage, "k1", true, "24h", now + 30));
+  }
+
+  // The names are 4096 at most (a cell holds a name in 12 bits): a tool past them is counted as "other", and the totals stay exact.
+  {
+    McpUsage usage(McpUsageOptions{}, now);
+    for (int k = 0; k < 10; ++k) {
+      for (int t = 0; t < 500; ++t) {
+        UsageCall call;
+        call.id = "key-" + std::to_string(k);
+        call.at = now;
+        call.tool = "tool_" + std::to_string(k) + "_" + std::to_string(t);
+        usage_record(usage, call);
+      }
+    }
+    const auto doc = usage_overview(usage, {}, "24h", now);
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(5000));
+    CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(5000));
+    CHECK_EQ(doc["methods"].Size(), 200u);  // the facet is cut at 200 rows
+    CHECK(doc["omitted"]["methods"].GetUint64() > 3000);
+    // The first key has its 500 tools; the last has none left to name: all its calls are "other".
+    const auto first = parse(usage_detail(usage, "key-0", false, "24h", now));
+    CHECK_EQ(first["tools"].Size(), 500u);
+    CHECK_EQ(usage_count(first["tools"], "tool", "other", "calls"), uint64_t(0));
+    const auto last = parse(usage_detail(usage, "key-9", false, "24h", now));
+    CHECK_EQ(last["tools"].Size(), 1u);
+    CHECK_EQ(usage_count(last["tools"], "tool", "other", "calls"), uint64_t(500));
+    CHECK_EQ(last["totals"]["calls"].GetUint64(), uint64_t(500));
+  }
+
+  // The cap of all the buckets: the cells that it stops are the overflow cell of their type.
+  {
+    McpUsageOptions small;
+    small.max_cells = 2;
+    McpUsage usage(small, now);
+    for (const char* status : {"a_error", "b_error", "c_error", "d_error"}) {
+      UsageCall call;
+      call.at = now;
+      call.tool = "list_hosts";
+      call.status = status;
+      usage_record(usage, call);
+    }
+    const auto doc = parse(usage_detail(usage, "k1", true, "24h", now));
+    CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(4));
+    CHECK_EQ(doc["totals"]["errors"].GetUint64(), uint64_t(4));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "other", "count"), uint64_t(3));
+    CHECK_EQ(usage_count(doc["statuses"], "status", "a_error", "count"), uint64_t(1));
+    // The overflow of a request that is refused is a cell of its own type, never a successful call.
+    UsageCall limited;
+    limited.at = now;
+    limited.kind = McpUsageKind::RateLimited;
+    limited.status = "429_rate_limited";
+    usage_record(usage, limited);
+    const auto again = parse(usage_detail(usage, "k1", true, "24h", now));
+    CHECK_EQ(again["totals"]["rate_limited"].GetUint64(), uint64_t(1));
+    CHECK_EQ(again["totals"]["requests"].GetUint64(), uint64_t(5));
+  }
+
+  // The file as it is read: the cells are validated, the duplicates add up, a cell without request is ignored, and what is past
+  // the cap of a bucket folds into the overflow cell.
+  {
+    const std::string bad = dir + "/bad-usage.json";
     const std::string since = R"({"version":1,"since":"2026-10-01T00:00:00Z","keys":[)";
     const std::string entry = R"({"id":"k1","name":"k1","source":"config","host":"prod","first_used_at":null,"last_used_at":null,"deleted_at":null,"clients":[],)";
+    const std::string hour = std::to_string(now - 3600);
+    const std::string today = std::to_string(now - now % 86400);
+    const auto day_with = [&](const std::string& cells) { return since + entry + R"("hours":[],"days":[[)" + today + ",[" + cells + R"(]]]}]})"; };
     for (const std::string& content : std::vector<std::string>{
              "not json", "[]", R"({"version":2,"since":"2026-10-01T00:00:00Z","keys":[]})", R"({"version":1,"keys":[]})", since + "{}]}",
-             since + entry + R"("hours":[[1,0,0,0,0,0,0,0,0,0,{},{}]],"days":[]}]})",
-             since + entry + R"("hours":[],"days":[[86400,0,0,0,0,0,0,0,0,0,{"Bad Name":[1,0,0,0,0,0]},{}]]}]})",
-             since + entry + R"("hours":[],"days":[[172800,0,0,0,0,0,0,0,0,0,{},{}],[86400,0,0,0,0,0,0,0,0,0,{},{}]]}]})",
+             // the first format of the file had a bucket of 12 fields
+             since + entry + R"("hours":[[)" + hour + R"(,0,0,0,0,0,0,0,0,0,{},{}]],"days":[]}]})",
+             since + entry + R"("hours":[[)" + hour + R"(]],"days":[]}]})",
+             since + entry + R"("hours":[[)" + hour + R"(,{}]],"days":[]}]})",
+             since + entry + R"("hours":[[1,[]]],"days":[]}]})",
+             since + entry + R"("hours":[],"days":[[172800,[]],[86400,[]]]}]})",
+             day_with(R"(["bogus","list_hosts","ok",1,0,0,0,0])"),                  // a type that is not known
+             day_with(R"(["call","list hosts","ok",1,0,0,0,0])"),                    // a method with a space
+             day_with(R"(["call","","ok",1,0,0,0,0])"),                              // no method
+             day_with(R"(["call","list_hosts","a/b",1,0,0,0,0])"),                   // a result with a slash
+             day_with(R"(["call","list_hosts","Ok",1,0,0,0,0])"),                    // a result with a capital
+             day_with(R"(["call","list_hosts","ok",1,0,0,0])"),                      // a cell of 7 fields
+             day_with(R"(["call","list_hosts","ok",1,0,0,0,0,0])"),                  // a cell of 9 fields
+             day_with(R"(["call","list_hosts","ok",-1,0,0,0,0])"),                   // a count that is negative
+             day_with(R"(["call","list_hosts","ok",1,"0",0,0,0])"),                  // a count that is text
+             day_with(R"(["call","list_hosts","ok",1,0,0,0,1.5])"),                  // a count that is not whole
+             day_with(R"([1,"list_hosts","ok",1,0,0,0,0])"),                         // a type that is not text
+             day_with(R"(["call",5,"ok",1,0,0,0,0])"),                               // a method that is not text
+             day_with(R"("call")"),                                                  // a cell that is not an array
+             since + entry + R"("hours":[],"days":[[)" + today + R"(,[],0]]}]})",    // a bucket of 3 fields
              since + entry + R"("hours":[],"days":[]},)" + entry + R"("hours":[],"days":[]}]})"}) {
-      write_file(file, content);
-      bool threw = false;
-      try {
-        McpUsageOptions options;
-        options.file = file;
-        McpUsage usage(options, now);
-      } catch (const std::exception&) {
-        threw = true;
-      }
-      CHECK(threw);
-      threw = false;
-      try {
-        mcp_check_usage_file(file);
-      } catch (const std::exception&) {
-        threw = true;
-      }
-      CHECK(threw);
-      CHECK_EQ(read_file(file), content);
+      CHECK(usage_file_refused(bad, content, now));
     }
-    // A valid entry reads.
-    write_file(file, since + entry + R"("hours":[],"days":[[86400,1,1,0,0,0,3,3,0,10,{"list_hosts":[1,0,3,3,0,10]},{"ok":1}]]}]})");
-    mcp_check_usage_file(file);
-    bool threw = false;
-    try {
-      mcp_check_usage_file(dir + "/no-such-dir/usage.json");
-    } catch (const std::exception& e) {
-      threw = contains(e.what(), "does not exist");
+    // A method of the protocol with a capital and a slash, an unknown tool and a result that no code of ChDash makes are valid.
+    write_file(bad, day_with(R"(["request","logging/setLevel","ok",2,3,2,0,10],["call","a_tool_we_never_heard_of","a_new_error",1,1,1,0,0])"));
+    {
+      McpUsageOptions read;
+      read.file = bad;
+      McpUsage usage(read, now);
+      const auto doc = parse(usage_detail(usage, "k1", true, "7d", now));
+      CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(3));
+      CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(1));
+      CHECK_EQ(doc["totals"]["errors"].GetUint64(), uint64_t(1));
+      CHECK_EQ(usage_count(doc["tools"], "tool", "a_tool_we_never_heard_of", "errors"), uint64_t(1));
     }
-    CHECK(threw);
-    mcp_check_usage_file(dir + "/not-yet.json");  // absent in a directory that exists: no usage yet
+    // The duplicates add up (the largest time is the largest), a cell without request is ignored.
+    write_file(bad, day_with(R"(["call","list_hosts","ok",1,10,10,3,100],["call","list_hosts","ok",2,40,30,4,200],["call","list_hosts","ok",0,99,99,9,9],["call","other_tool","ok",0,0,0,0,0])"));
+    {
+      McpUsageOptions read;
+      read.file = bad;
+      McpUsage usage(read, now);
+      const auto doc = parse(usage_detail(usage, "k1", true, "7d", now));
+      CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(3));
+      CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(3));
+      CHECK_EQ(doc["totals"]["duration_ms_max"].GetUint64(), uint64_t(30));
+      CHECK_EQ(doc["totals"]["duration_ms_avg"].GetUint64(), uint64_t(17));
+      CHECK_EQ(doc["totals"]["rows"].GetUint64(), uint64_t(7));
+      CHECK_EQ(doc["totals"]["bytes"].GetUint64(), uint64_t(300));
+      CHECK_EQ(doc["tools"].Size(), 1u);
+    }
+    // More cells than the cap of a bucket: the ones past it fold into the overflow cell of their type, nothing is dropped.
+    std::string cells;
+    for (int i = 0; i < 600; ++i) cells += (i ? "," : "") + std::string(R"(["call","t)") + std::to_string(i) + R"(","ok",1,2,2,0,1])";
+    cells += R"(,["request","ping","ok",4,0,0,0,0])";
+    write_file(bad, day_with(cells));
+    {
+      McpUsageOptions read;
+      read.file = bad;
+      McpUsage usage(read, now);
+      const auto doc = parse(usage_detail(usage, "k1", true, "7d", now));
+      CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(604));
+      CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(600));
+      CHECK_EQ(doc["totals"]["bytes"].GetUint64(), uint64_t(600));
+      CHECK_EQ(doc["tools"].Size(), 513u);  // 512 tools, and "other": the 88 that the cap left out
+      CHECK_EQ(usage_count(doc["tools"], "tool", "other", "calls"), uint64_t(600 - 512));
+      CHECK_EQ(usage_count(doc["tools"], "tool", "t0", "calls"), uint64_t(1));
+      CHECK_EQ(usage_count(doc["tools"], "tool", "t511", "calls"), uint64_t(1));
+      CHECK_EQ(usage_count(doc["tools"], "tool", "t512", "calls"), uint64_t(0));
+      // The ping came after the 512 cells: it is counted in the overflow cell of the requests.
+      const auto overview = usage_overview(usage, {"k1"}, "7d", now);
+      uint64_t calls_other = 0;
+      uint64_t requests_other = 0;
+      for (const auto& row : overview["methods"].GetArray()) {
+        if (std::string(row["method"].GetString()) != "other") continue;
+        (std::string(row["kind"].GetString()) == "call" ? calls_other : requests_other) += row["requests"].GetUint64();
+      }
+      CHECK_EQ(calls_other, uint64_t(88));
+      CHECK_EQ(requests_other, uint64_t(4));
+      CHECK(usage_row(overview["methods"], "method", "ping") == nullptr);
+    }
   }
+}
+
+// The names of the rows of an array of an answer, in their order.
+std::vector<std::string> usage_names(const rapidjson::Value& rows, const char* by) {
+  std::vector<std::string> out;
+  for (const auto& row : rows.GetArray()) out.push_back(row[by].GetString());
+  return out;
+}
+
+// GET /api/mcp/usage/overview: the totals and the series with all the filters, each facet with all the filters but its own.
+void test_usage_overview() {
+  const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;
+  const int64_t day = 86400;
+  const int64_t today = now - now % day;
+  McpUsageOptions options;
+  options.retention_days = 30;
+  McpUsage usage(options, now - 4 * day);
+  usage_scenario(usage, now);
+  const std::vector<std::string> live = {"k1", "k2"};
+  const auto names = [](const std::vector<std::string>& values) { return values; };
+
+  // Without a filter, in 7 days: all the requests, and every facet adds up to them.
+  {
+    const auto doc = usage_overview(usage, live, "7d", now);
+    CHECK_EQ(std::string(doc["window"].GetString()), std::string("7d"));
+    CHECK_EQ(std::string(doc["from"].GetString()), mcp_iso_utc(today - 6 * day));
+    CHECK_EQ(std::string(doc["to"].GetString()), mcp_iso_utc(now));
+    CHECK_EQ(std::string(doc["since"].GetString()), mcp_iso_utc(now - 4 * day));
+    CHECK(!doc["persisted"].GetBool());
+    CHECK_EQ(doc["retention_days"].GetInt64(), int64_t(30));
+    CHECK_EQ(std::string(doc["split"].GetString()), std::string("method"));
+    for (const char* dimension : {"key", "method", "result", "type"}) {
+      CHECK(doc["filters"][dimension].IsArray());
+      CHECK_EQ(doc["filters"][dimension].Size(), 0u);
+    }
+    const auto& totals = doc["totals"];
+    CHECK_EQ(totals["requests"].GetUint64(), uint64_t(23));
+    CHECK_EQ(totals["calls"].GetUint64(), uint64_t(15));
+    CHECK_EQ(totals["errors"].GetUint64(), uint64_t(3));
+    CHECK_EQ(totals["rate_limited"].GetUint64(), uint64_t(1));
+    CHECK_EQ(totals["rejected"].GetUint64(), uint64_t(1));
+    CHECK_EQ(totals["duration_ms_avg"].GetUint64(), uint64_t(16));  // the 15 tool calls (244 ms): the time of the requests is not in it
+    CHECK_EQ(totals["duration_ms_max"].GetUint64(), uint64_t(50));
+    CHECK_EQ(totals["rows"].GetUint64(), uint64_t(22));
+    CHECK_EQ(totals["bytes"].GetUint64(), uint64_t(3180));
+    CHECK_EQ(totals["active_keys"].GetUint64(), uint64_t(3));  // k1, k2 and the deleted key
+    CHECK_EQ(totals["keys"].GetUint64(), uint64_t(2));         // the keys that exist
+    // The totals are those of the details of the keys.
+    uint64_t detail_requests = 0;
+    for (const char* id : {"k1", "k2", "gone"}) detail_requests += parse(usage_detail(usage, id, false, "7d", now))["totals"]["requests"].GetUint64();
+    CHECK_EQ(detail_requests, totals["requests"].GetUint64());
+
+    const auto at = check_series(doc);
+    check_facets_add_up(doc);
+    CHECK_EQ(at.size(), size_t(7));
+    CHECK_EQ(std::string(doc["series"]["t"][6].GetString()), mcp_iso_utc(today));
+    CHECK_EQ(at[6], uint64_t(17));  // today: k1 10, k2 7
+    CHECK_EQ(at[5], uint64_t(4));   // yesterday: the deleted key
+    CHECK_EQ(at[3], uint64_t(2));   // 3 days ago: k1
+    CHECK_EQ(at[0] + at[1] + at[2] + at[4], uint64_t(0));
+    // 8 methods: no `rest`. The groups are the largest first, then by name.
+    CHECK(usage_names(doc["series"]["groups"], "id") == names({"list_hosts", "run_query", "initialize", "unread", "notifications/initialized", "other",
+                                                               "resources/list", "tools/list"}));
+    CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), uint64_t(0));
+    CHECK_EQ(doc["series"]["rest"]["total"].GetUint64(), uint64_t(0));
+    for (const auto& group : doc["series"]["groups"].GetArray()) CHECK_EQ(std::string(group["id"].GetString()), std::string(group["label"].GetString()));
+    // list_hosts, the largest group, by day: 3 days ago k1 2, yesterday the deleted key 4, today k1 3 and k2 2.
+    CHECK_EQ(doc["series"]["groups"][0]["values"][6].GetUint64(), uint64_t(5));
+    CHECK_EQ(doc["series"]["groups"][0]["values"][5].GetUint64(), uint64_t(4));
+    CHECK_EQ(doc["series"]["groups"][0]["values"][3].GetUint64(), uint64_t(2));
+
+    // The keys: the most requests first, the deleted key with when it was deleted.
+    CHECK(usage_names(doc["keys"], "id") == names({"k1", "k2", "gone"}));
+    const auto& k1 = doc["keys"][0];
+    CHECK_EQ(k1["requests"].GetUint64(), uint64_t(12));
+    CHECK_EQ(k1["calls"].GetUint64(), uint64_t(8));
+    CHECK_EQ(k1["errors"].GetUint64(), uint64_t(2));
+    CHECK_EQ(k1["rate_limited"].GetUint64(), uint64_t(1));
+    CHECK_EQ(k1["rejected"].GetUint64(), uint64_t(0));
+    CHECK_EQ(k1["duration_ms_avg"].GetUint64(), uint64_t(23));  // (160 + 20) ms over 8 calls
+    CHECK_EQ(k1["duration_ms_max"].GetUint64(), uint64_t(50));
+    CHECK_EQ(k1["rows"].GetUint64(), uint64_t(18));
+    CHECK_EQ(k1["bytes"].GetUint64(), uint64_t(2260));
+    CHECK_EQ(std::string(k1["name"].GetString()), std::string("k1"));
+    CHECK_EQ(std::string(k1["host"].GetString()), std::string("prod"));
+    CHECK_EQ(std::string(k1["source"].GetString()), std::string("config"));
+    CHECK(k1["deleted_at"].IsNull());
+    CHECK_EQ(std::string(k1["last_used_at"].GetString()), mcp_iso_utc(now + 10));
+    const auto& gone = doc["keys"][2];
+    CHECK_EQ(gone["requests"].GetUint64(), uint64_t(4));
+    CHECK_EQ(std::string(gone["deleted_at"].GetString()), mcp_iso_utc(now + 100));
+    CHECK_EQ(gone["rate_limited"].GetUint64(), uint64_t(0));
+
+    // The methods: a row for each type and method. A tool is a "call", a method of the protocol a "request", what was refused before
+    // it was read is "refused". The time of a protocol request is its own (the latency of initialize).
+    CHECK_EQ(doc["methods"].Size(), 8u);
+    const auto* hosts = usage_row(doc["methods"], "method", "list_hosts");
+    CHECK(hosts != nullptr);
+    CHECK_EQ(std::string((*hosts)["kind"].GetString()), std::string("call"));
+    CHECK_EQ((*hosts)["requests"].GetUint64(), uint64_t(11));
+    CHECK_EQ((*hosts)["keys"].GetUint64(), uint64_t(3));
+    CHECK_EQ((*hosts)["errors"].GetUint64(), uint64_t(0));
+    CHECK_EQ((*hosts)["rows"].GetUint64(), uint64_t(14));  // k1 5 calls with 2, k2 2 calls with 2
+    CHECK_EQ(usage_figure(doc["methods"], "method", "run_query", "requests"), uint64_t(4));
+    CHECK_EQ(usage_figure(doc["methods"], "method", "run_query", "errors"), uint64_t(2));
+    CHECK_EQ(usage_figure(doc["methods"], "method", "run_query", "keys"), uint64_t(2));
+    CHECK_EQ(usage_figure(doc["methods"], "method", "run_query", "duration_ms_avg"), uint64_t(38));  // (100 + 30 + 20) ms over 4
+    CHECK_EQ(usage_figure(doc["methods"], "method", "run_query", "duration_ms_max"), uint64_t(50));
+    const auto* init = usage_row(doc["methods"], "method", "initialize");
+    CHECK(init != nullptr);
+    CHECK_EQ(std::string((*init)["kind"].GetString()), std::string("request"));
+    CHECK_EQ((*init)["requests"].GetUint64(), uint64_t(2));
+    CHECK_EQ((*init)["duration_ms_avg"].GetUint64(), uint64_t(35));
+    CHECK_EQ((*init)["duration_ms_max"].GetUint64(), uint64_t(40));
+    CHECK_EQ((*init)["bytes"].GetUint64(), uint64_t(550));
+    CHECK_EQ(std::string((*usage_row(doc["methods"], "method", "tools/list"))["kind"].GetString()), std::string("request"));
+    CHECK_EQ(usage_figure(doc["methods"], "method", "resources/list", "errors"), uint64_t(1));
+    CHECK_EQ(std::string((*usage_row(doc["methods"], "method", "other"))["kind"].GetString()), std::string("request"));  // the unknown notification
+    CHECK_EQ(usage_figure(doc["methods"], "method", "other", "requests"), uint64_t(1));
+    CHECK_EQ(std::string((*usage_row(doc["methods"], "method", "unread"))["kind"].GetString()), std::string("refused"));
+    CHECK_EQ(usage_figure(doc["methods"], "method", "unread", "requests"), uint64_t(2));
+    CHECK_EQ(usage_figure(doc["methods"], "method", "unread", "keys"), uint64_t(2));
+    CHECK_EQ(usage_figure(doc["methods"], "method", "unread", "errors"), uint64_t(0));  // a refusal is not an error
+    CHECK_EQ(std::string(doc["methods"][0]["method"].GetString()), std::string("list_hosts"));  // the most requests first
+
+    // The results: all the requests, the successful protocol requests too.
+    CHECK_EQ(usage_figure(doc["results"], "result", "ok", "count"), uint64_t(18));
+    CHECK_EQ(usage_figure(doc["results"], "result", "ok", "keys"), uint64_t(3));
+    for (const char* result : {"timeout", "rpc_error_32601", "429_rate_limited", "query_failed", "415_unsupported_media_type"}) {
+      CHECK_EQ(usage_figure(doc["results"], "result", result, "count"), uint64_t(1));
+    }
+    CHECK_EQ(doc["results"].Size(), 6u);
+    CHECK_EQ(std::string(doc["results"][0]["result"].GetString()), std::string("ok"));
+    CHECK_EQ(std::string(doc["results"][1]["result"].GetString()), std::string("415_unsupported_media_type"));  // then by name
+
+    // The types: the four of them, in their order.
+    CHECK(usage_names(doc["types"], "type") == names({"call", "request", "limited", "rejected"}));
+    CHECK_EQ(usage_figure(doc["types"], "type", "call", "requests"), uint64_t(15));
+    CHECK_EQ(usage_figure(doc["types"], "type", "request", "requests"), uint64_t(6));
+    CHECK_EQ(usage_figure(doc["types"], "type", "limited", "requests"), uint64_t(1));
+    CHECK_EQ(usage_figure(doc["types"], "type", "rejected", "requests"), uint64_t(1));
+
+    // The clients of all the keys: by name and version, or by User-Agent when there is no name; the last seen first.
+    CHECK_EQ(doc["clients"].Size(), 3u);
+    CHECK_EQ(std::string(doc["clients"][0]["name"].GetString()), std::string("claude-ai"));
+    CHECK_EQ(doc["clients"][0]["requests"].GetUint64(), uint64_t(7));
+    CHECK_EQ(std::string(doc["clients"][0]["first_seen_at"].GetString()), mcp_iso_utc(now + 20));
+    CHECK_EQ(std::string(doc["clients"][0]["last_seen_at"].GetString()), mcp_iso_utc(now + 26));
+    CHECK_EQ(std::string(doc["clients"][1]["name"].GetString()), std::string("claude-code"));
+    CHECK_EQ(std::string(doc["clients"][1]["version"].GetString()), std::string("2.1.0"));
+    CHECK_EQ(std::string(doc["clients"][1]["user_agent"].GetString()), std::string("claude-code/2.1.0 (node)"));
+    CHECK_EQ(doc["clients"][1]["requests"].GetUint64(), uint64_t(10));
+    CHECK_EQ(std::string(doc["clients"][2]["name"].GetString()), std::string(""));
+    CHECK_EQ(std::string(doc["clients"][2]["user_agent"].GetString()), std::string("agent/1"));
+    CHECK_EQ(doc["clients"][2]["keys"].GetUint64(), uint64_t(2));  // k1 and the deleted key: one client by User-Agent
+    CHECK_EQ(doc["clients"][2]["requests"].GetUint64(), uint64_t(6));
+    CHECK_EQ(std::string(doc["clients"][2]["first_seen_at"].GetString()), mcp_iso_utc(now - 3 * day + 5));
+    for (const char* facet : {"keys", "methods", "results", "clients"}) CHECK_EQ(doc["omitted"][facet].GetUint64(), uint64_t(0));
+  }
+
+  // The last 24 hours: by the hour, today's requests only.
+  {
+    const auto doc = usage_overview(usage, live, "24h", now);
+    CHECK_EQ(std::string(doc["series"]["step"].GetString()), std::string("hour"));
+    CHECK_EQ(doc["series"]["t"].Size(), 24u);
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(17));
+    CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(9));
+    CHECK_EQ(doc["totals"]["active_keys"].GetUint64(), uint64_t(2));
+    const auto at = check_series(doc);
+    check_facets_add_up(doc);
+    CHECK_EQ(at[23], uint64_t(17));
+    CHECK(usage_names(doc["keys"], "id") == names({"k1", "k2"}));  // a key without a request is not a row
+    // The clients do not depend on the window: the deleted key's one is there.
+    CHECK_EQ(doc["clients"].Size(), 3u);
+  }
+
+  // A filter on the type: the totals, the series and the other facets follow it; the facet of the types does not.
+  {
+    const auto doc = usage_overview(usage, live, "7d", now, usage_query("method", {}, {}, {}, {"call"}));
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(15));
+    CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(15));
+    check_series(doc);
+    CHECK(usage_names(doc["methods"], "method") == names({"list_hosts", "run_query"}));
+    CHECK_EQ(usage_figure(doc["keys"], "id", "k1", "requests"), uint64_t(8));
+    CHECK_EQ(usage_figure(doc["keys"], "id", "k2", "requests"), uint64_t(3));
+    CHECK_EQ(usage_figure(doc["keys"], "id", "gone", "requests"), uint64_t(4));
+    CHECK_EQ(usage_figure(doc["results"], "result", "ok", "count"), uint64_t(13));
+    CHECK_EQ(doc["results"].Size(), 3u);
+    CHECK_EQ(usage_figure(doc["types"], "type", "call", "requests"), uint64_t(15));
+    CHECK_EQ(usage_figure(doc["types"], "type", "request", "requests"), uint64_t(6));  // its own filter does not cut it
+    CHECK_EQ(usage_figure(doc["types"], "type", "limited", "requests"), uint64_t(1));
+    CHECK_EQ(doc["filters"]["type"].Size(), 1u);
+    // The series by type, when the type is filtered: the groups are the types that were chosen.
+    const auto split = usage_overview(usage, live, "7d", now, usage_query("type", {}, {}, {}, {"rejected", "call"}));
+    CHECK(usage_names(split["series"]["groups"], "id") == names({"rejected", "call"}));
+    CHECK_EQ(split["series"]["groups"][0]["total"].GetUint64(), uint64_t(1));
+    CHECK_EQ(split["series"]["groups"][1]["total"].GetUint64(), uint64_t(15));
+    CHECK_EQ(split["totals"]["requests"].GetUint64(), uint64_t(16));
+    check_series(split);
+  }
+
+  // A filter on the method: what the key ran, and the codes that it ended with.
+  {
+    const auto doc = usage_overview(usage, live, "7d", now, usage_query("method", {}, {"run_query"}));
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(4));
+    CHECK_EQ(doc["totals"]["errors"].GetUint64(), uint64_t(2));
+    CHECK_EQ(doc["totals"]["active_keys"].GetUint64(), uint64_t(2));
+    check_series(doc);
+    // The groups of a split by the filtered dimension are the values that were chosen.
+    CHECK(usage_names(doc["series"]["groups"], "id") == names({"run_query"}));
+    CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), uint64_t(0));
+    // Its error codes (the results that ignore their own filter only).
+    CHECK(usage_names(doc["results"], "result") == names({"ok", "query_failed", "timeout"}));
+    CHECK_EQ(usage_figure(doc["results"], "result", "ok", "count"), uint64_t(2));
+    CHECK_EQ(usage_figure(doc["keys"], "id", "k1", "requests"), uint64_t(3));
+    CHECK_EQ(usage_figure(doc["keys"], "id", "k2", "requests"), uint64_t(1));
+    CHECK(usage_row(doc["keys"], "id", "gone") == nullptr);
+    // The facet of the methods ignores its own filter: the other methods stay, and can be added.
+    CHECK_EQ(doc["methods"].Size(), 8u);
+    CHECK_EQ(usage_figure(doc["methods"], "method", "list_hosts", "requests"), uint64_t(11));
+    CHECK_EQ(usage_figure(doc["types"], "type", "call", "requests"), uint64_t(4));
+    CHECK_EQ(usage_figure(doc["types"], "type", "request", "requests"), uint64_t(0));
+  }
+
+  // Filters of two dimensions are AND; the values of one are OR. A value that was chosen stays in its facet at 0.
+  {
+    const auto doc = usage_overview(usage, live, "7d", now, usage_query("method", {}, {"list_hosts"}, {"timeout"}));
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(0));
+    CHECK(doc["totals"]["duration_ms_avg"].IsNull());
+    CHECK(doc["totals"]["duration_ms_max"].IsNull());
+    CHECK_EQ(doc["totals"]["active_keys"].GetUint64(), uint64_t(0));
+    CHECK(usage_names(doc["series"]["groups"], "id") == names({"list_hosts"}));
+    CHECK_EQ(doc["series"]["groups"][0]["total"].GetUint64(), uint64_t(0));
+    CHECK_EQ(doc["series"]["groups"][0]["values"].Size(), 7u);
+    check_series(doc);
+    // methods: the requests that ended with timeout (any method), and list_hosts, which was chosen
+    CHECK(usage_names(doc["methods"], "method") == names({"run_query", "list_hosts"}));
+    CHECK_EQ(usage_figure(doc["methods"], "method", "list_hosts", "requests"), uint64_t(0));
+    CHECK(usage_row(doc["methods"], "method", "list_hosts")->HasMember("duration_ms_avg"));
+    CHECK((*usage_row(doc["methods"], "method", "list_hosts"))["duration_ms_avg"].IsNull());
+    CHECK_EQ(std::string((*usage_row(doc["methods"], "method", "list_hosts"))["kind"].GetString()), std::string("call"));
+    // results: the requests of list_hosts, and the timeout that was chosen
+    CHECK(usage_names(doc["results"], "result") == names({"ok", "timeout"}));
+    CHECK_EQ(usage_figure(doc["results"], "result", "ok", "count"), uint64_t(11));
+    CHECK_EQ(usage_figure(doc["results"], "result", "timeout", "count"), uint64_t(0));
+    CHECK_EQ(doc["keys"].Size(), 0u);
+    for (const auto& row : doc["types"].GetArray()) CHECK_EQ(row["requests"].GetUint64(), uint64_t(0));
+    // The values of a dimension are OR.
+    const auto either = usage_overview(usage, live, "7d", now, usage_query("method", {}, {"run_query", "tools/list", "ping"}));
+    CHECK_EQ(either["totals"]["requests"].GetUint64(), uint64_t(5));
+    CHECK(usage_names(either["series"]["groups"], "id") == names({"run_query", "tools/list", "ping"}));  // in the order of the request, ping at 0
+    CHECK_EQ(either["series"]["groups"][2]["total"].GetUint64(), uint64_t(0));
+    check_series(either);
+    // A method of the protocol that nothing called is a "request" row at 0, "unread" is "refused", a name that is no method is a tool.
+    CHECK_EQ(std::string((*usage_row(either["methods"], "method", "ping"))["kind"].GetString()), std::string("request"));
+    const auto kinds = usage_overview(usage, live, "7d", now, usage_query("method", {}, {"unread", "initialize", "list_tables"}, {"nothing_like_it"}));
+    CHECK_EQ(std::string((*usage_row(kinds["methods"], "method", "unread"))["kind"].GetString()), std::string("refused"));
+    CHECK_EQ(std::string((*usage_row(kinds["methods"], "method", "initialize"))["kind"].GetString()), std::string("request"));
+    CHECK_EQ(std::string((*usage_row(kinds["methods"], "method", "list_tables"))["kind"].GetString()), std::string("call"));
+  }
+
+  // Values that nothing has: they keep nothing, and they are in their facet at 0 (a key that is not there is known by its id).
+  {
+    const auto doc = usage_overview(usage, live, "7d", now, usage_query("key", {"ui_000000000000", "k2"}, {"nope"}, {"nothing_here"}));
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(0));
+    CHECK(usage_names(doc["series"]["groups"], "id") == names({"ui_000000000000", "k2"}));
+    CHECK_EQ(std::string(doc["series"]["groups"][0]["label"].GetString()), std::string("ui_000000000000"));
+    CHECK_EQ(std::string(doc["series"]["groups"][1]["label"].GetString()), std::string("k2"));
+    check_series(doc);
+    CHECK(usage_names(doc["keys"], "id") == names({"k2", "ui_000000000000"}));  // no request: by name
+    const auto* ghost = usage_row(doc["keys"], "id", "ui_000000000000");
+    CHECK(ghost != nullptr);
+    CHECK_EQ(std::string((*ghost)["name"].GetString()), std::string("ui_000000000000"));
+    CHECK_EQ((*ghost)["requests"].GetUint64(), uint64_t(0));
+    CHECK((*ghost)["deleted_at"].IsNull());
+    CHECK((*ghost)["last_used_at"].IsNull());
+    CHECK_EQ(std::string((*usage_row(doc["keys"], "id", "k2"))["name"].GetString()), std::string("k2"));
+    CHECK(usage_names(doc["methods"], "method") == names({"nope"}));
+    CHECK_EQ(std::string(doc["methods"][0]["kind"].GetString()), std::string("call"));
+    CHECK(usage_names(doc["results"], "result") == names({"nothing_here"}));
+    CHECK_EQ(doc["results"][0]["count"].GetUint64(), uint64_t(0));
+  }
+
+  // A deleted key: in the keys with when it was deleted, and a filter on it cuts the clients too.
+  {
+    const auto doc = usage_overview(usage, live, "7d", now, usage_query("key", {"gone"}));
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(4));
+    CHECK_EQ(doc["totals"]["active_keys"].GetUint64(), uint64_t(1));
+    CHECK(usage_names(doc["series"]["groups"], "id") == names({"gone"}));
+    CHECK_EQ(std::string(doc["series"]["groups"][0]["label"].GetString()), std::string("gone"));
+    CHECK_EQ(usage_figure(doc["keys"], "id", "k1", "requests"), uint64_t(12));  // the facet of the keys ignores its own filter
+    CHECK_EQ(std::string((*usage_row(doc["keys"], "id", "gone"))["deleted_at"].GetString()), mcp_iso_utc(now + 100));
+    CHECK_EQ(doc["clients"].Size(), 1u);
+    CHECK_EQ(std::string(doc["clients"][0]["user_agent"].GetString()), std::string("agent/1"));
+    CHECK_EQ(doc["clients"][0]["keys"].GetUint64(), uint64_t(1));
+    CHECK_EQ(doc["clients"][0]["requests"].GetUint64(), uint64_t(4));
+    // In 24 hours it did nothing: a row at 0, as a key that was chosen.
+    const auto hours = usage_overview(usage, live, "24h", now, usage_query("method", {"gone"}));
+    CHECK_EQ(hours["totals"]["requests"].GetUint64(), uint64_t(0));
+    const auto* row = usage_row(hours["keys"], "id", "gone");
+    CHECK(row != nullptr);
+    CHECK_EQ((*row)["requests"].GetUint64(), uint64_t(0));
+    CHECK_EQ(std::string((*row)["deleted_at"].GetString()), mcp_iso_utc(now + 100));
+    CHECK(!(*row)["last_used_at"].IsNull());
+    CHECK_EQ(hours["clients"].Size(), 1u);  // the window does not cut the clients
+  }
+
+  // The clients answer to the filter of the keys only: not to the window, the method, the result or the type.
+  {
+    const auto whole = usage_overview(usage, live, "7d", now, usage_query("method", {"k2"}));
+    CHECK_EQ(whole["clients"].Size(), 1u);
+    CHECK_EQ(std::string(whole["clients"][0]["name"].GetString()), std::string("claude-ai"));
+    CHECK_EQ(whole["clients"][0]["requests"].GetUint64(), uint64_t(7));
+    const auto cut = usage_overview(usage, live, "24h", now, usage_query("result", {"k2"}, {"ping"}, {"timeout"}, {"limited"}));
+    CHECK_EQ(cut["totals"]["requests"].GetUint64(), uint64_t(0));
+    CHECK_EQ(cut["clients"].Size(), 1u);
+    CHECK_EQ(cut["clients"][0]["requests"].GetUint64(), uint64_t(7));
+    CHECK_EQ(std::string(cut["clients"][0]["version"].GetString()), std::string("0.1"));
+  }
+
+  // A split by key: the labels are the names. A split by result or by type: the id is the label.
+  {
+    const auto by_key = usage_overview(usage, live, "7d", now, usage_query("key"));
+    CHECK(usage_names(by_key["series"]["groups"], "id") == names({"k1", "k2", "gone"}));
+    CHECK(usage_names(by_key["series"]["groups"], "label") == names({"k1", "k2", "gone"}));
+    CHECK_EQ(by_key["series"]["groups"][0]["total"].GetUint64(), uint64_t(12));
+    check_series(by_key);
+    const auto ordered = usage_overview(usage, live, "7d", now, usage_query("key", {"k2", "k1"}));
+    CHECK(usage_names(ordered["series"]["groups"], "id") == names({"k2", "k1"}));  // the order of the filter, not of the totals
+    const auto by_result = usage_overview(usage, live, "7d", now, usage_query("result"));
+    CHECK(usage_names(by_result["series"]["groups"], "id") ==
+          names({"ok", "415_unsupported_media_type", "429_rate_limited", "query_failed", "rpc_error_32601", "timeout"}));
+    CHECK_EQ(by_result["series"]["groups"][0]["total"].GetUint64(), uint64_t(18));
+    check_series(by_result);
+    const auto by_type = usage_overview(usage, live, "7d", now, usage_query("type"));
+    CHECK(usage_names(by_type["series"]["groups"], "id") == names({"call", "request", "limited", "rejected"}));
+    CHECK(usage_names(by_type["series"]["groups"], "label") == names({"call", "request", "limited", "rejected"}));
+    check_series(by_type);
+  }
+
+  // No usage at all: zeros, the four types, nothing else.
+  {
+    McpUsage empty(options, now);
+    const auto doc = usage_overview(empty, live, "7d", now);
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(0));
+    CHECK(doc["totals"]["duration_ms_avg"].IsNull());
+    CHECK_EQ(doc["totals"]["keys"].GetUint64(), uint64_t(2));
+    CHECK_EQ(doc["series"]["groups"].Size(), 0u);
+    CHECK_EQ(doc["series"]["rest"]["values"].Size(), 7u);
+    CHECK_EQ(doc["keys"].Size(), 0u);
+    CHECK_EQ(doc["methods"].Size(), 0u);
+    CHECK_EQ(doc["results"].Size(), 0u);
+    CHECK_EQ(doc["types"].Size(), 4u);
+    CHECK_EQ(doc["clients"].Size(), 0u);
+    check_series(doc);
+  }
+}
+
+// The 8 largest groups of the series, and the others summed in `rest`; the caps of the facets and of the clients.
+void test_usage_overview_caps() {
+  const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;
+  const int64_t day = 86400;
+  McpUsageOptions options;
+  options.retention_days = 30;
+
+  // 10 tools: the 8 largest, the tie of the 8th and 9th by name, the others in `rest` at each point.
+  {
+    McpUsage usage(options, now - day);
+    const int counts[] = {10, 9, 8, 7, 6, 5, 4, 3, 3, 1};
+    for (int pass = 0; pass < 2; ++pass) {  // the older hour first: the time goes forward
+      for (int i = 0; i < 10; ++i) {
+        const int here = pass == 0 ? counts[i] / 2 : counts[i] - counts[i] / 2;
+        for (int n = 0; n < here; ++n) {
+          UsageCall call;
+          call.at = pass == 0 ? now - 3600 : now;
+          call.tool = "t" + std::to_string(i);
+          usage_record(usage, call);
+        }
+      }
+    }
+    const auto doc = usage_overview(usage, {"k1"}, "24h", now);
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(56));
+    CHECK_EQ(doc["series"]["groups"].Size(), 8u);
+    CHECK(usage_names(doc["series"]["groups"], "id") == std::vector<std::string>({"t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"}));
+    CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), uint64_t(2));
+    CHECK_EQ(doc["series"]["rest"]["total"].GetUint64(), uint64_t(4));  // t8 and t9
+    CHECK_EQ(doc["series"]["rest"]["values"][22].GetUint64(), uint64_t(1));
+    CHECK_EQ(doc["series"]["rest"]["values"][23].GetUint64(), uint64_t(3));
+    const auto at = check_series(doc);
+    CHECK_EQ(at[22], uint64_t(25));
+    CHECK_EQ(at[23], uint64_t(31));
+    CHECK_EQ(doc["methods"].Size(), 10u);  // the facet shows every one
+    // A split by a dimension that is filtered shows the values that were chosen, not the 8 largest.
+    const auto chosen = usage_overview(usage, {"k1"}, "24h", now, usage_query("method", {}, {"t9", "zzz", "t0"}));
+    CHECK(usage_names(chosen["series"]["groups"], "id") == std::vector<std::string>({"t9", "zzz", "t0"}));
+    CHECK_EQ(chosen["series"]["groups"][1]["total"].GetUint64(), uint64_t(0));
+    CHECK_EQ(chosen["series"]["rest"]["groups"].GetUint64(), uint64_t(0));
+    CHECK_EQ(chosen["series"]["rest"]["total"].GetUint64(), uint64_t(0));
+    CHECK_EQ(chosen["totals"]["requests"].GetUint64(), uint64_t(11));
+    check_series(chosen);
+    // More than 8 values chosen: all of them, and no `rest`.
+    std::vector<std::string> all;
+    for (int i = 0; i < 10; ++i) all.push_back("t" + std::to_string(i));
+    const auto everyone = usage_overview(usage, {"k1"}, "24h", now, usage_query("method", {}, all));
+    CHECK_EQ(everyone["series"]["groups"].Size(), 10u);
+    CHECK_EQ(everyone["series"]["rest"]["groups"].GetUint64(), uint64_t(0));
+    check_series(everyone);
+  }
+
+  // At most 200 rows for each facet (the values that were chosen are always there) and 50 clients; `omitted` counts what was cut.
+  {
+    McpUsage usage(options, now - day);
+    std::vector<std::string> keys;
+    std::vector<std::string> results;
+    for (int i = 0; i < 250; ++i) {
+      UsageCall call;
+      call.id = "key-" + std::to_string(i);
+      call.at = now + i;
+      call.tool = "run_query";
+      call.status = "err_" + std::to_string(i);
+      call.user_agent = "agent/" + std::to_string(i);
+      usage_record(usage, call);
+      keys.push_back(call.id);
+      results.push_back(call.status);
+    }
+    std::sort(keys.begin(), keys.end());
+    std::sort(results.begin(), results.end());
+    const auto doc = usage_overview(usage, {}, "24h", now);
+    CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(250));
+    CHECK_EQ(doc["totals"]["active_keys"].GetUint64(), uint64_t(250));
+    CHECK_EQ(doc["keys"].Size(), 200u);
+    CHECK_EQ(doc["omitted"]["keys"].GetUint64(), uint64_t(50));
+    CHECK_EQ(std::string(doc["keys"][0]["id"].GetString()), keys.front());  // the same requests: by name
+    CHECK_EQ(doc["results"].Size(), 200u);
+    CHECK_EQ(doc["omitted"]["results"].GetUint64(), uint64_t(50));
+    CHECK_EQ(doc["methods"].Size(), 1u);
+    CHECK_EQ(doc["omitted"]["methods"].GetUint64(), uint64_t(0));
+    CHECK_EQ(doc["clients"].Size(), 50u);
+    CHECK_EQ(doc["omitted"]["clients"].GetUint64(), uint64_t(200));
+    CHECK_EQ(doc["series"]["groups"].Size(), 1u);
+    // The values that were chosen are kept, however far they come (a facet ignores its own filter, so the others stay).
+    const auto kept_key = usage_overview(usage, {}, "24h", now, usage_query("method", {keys.back()}));
+    CHECK_EQ(kept_key["keys"].Size(), 201u);
+    CHECK_EQ(kept_key["omitted"]["keys"].GetUint64(), uint64_t(49));
+    CHECK(usage_row(kept_key["keys"], "id", keys.back()) != nullptr);
+    CHECK_EQ(kept_key["totals"]["requests"].GetUint64(), uint64_t(1));
+    CHECK_EQ(kept_key["clients"].Size(), 1u);
+    const auto kept_result = usage_overview(usage, {}, "24h", now, usage_query("method", {}, {}, {results.back()}));
+    CHECK_EQ(kept_result["results"].Size(), 201u);
+    CHECK_EQ(kept_result["omitted"]["results"].GetUint64(), uint64_t(49));
+    CHECK(usage_row(kept_result["results"], "result", results.back()) != nullptr);
+    CHECK_EQ(kept_result["totals"]["requests"].GetUint64(), uint64_t(1));
+  }
+}
+
+// The rules of the parameters of the overview (the route answers 400 validation, with the field and the reason, when one fails).
+void test_usage_overview_check() {
+  const auto check = [](McpUsageOverviewQuery query) { return mcp_usage_overview_check(&query); };
+  const auto fails = [&](McpUsageOverviewQuery query, const char* field, const char* reason) {
+    const auto error = mcp_usage_overview_check(&query);
+    CHECK(error.has_value());
+    if (!error) return;
+    CHECK_EQ(error->field, std::string(field));
+    CHECK_EQ(error->reason, std::string(reason));
+    CHECK(!error->message.empty());
+  };
+  CHECK(!check(McpUsageOverviewQuery{}).has_value());
+  for (const char* split : {"key", "method", "result", "type"}) CHECK(!check(usage_query(split)).has_value());
+  for (const char* split : {"", "Method", "keys", "methods", "key,method", "none"}) fails(usage_query(split), "split", "invalid");
+
+  CHECK(!check(usage_query("key", {"all-data", "ui_0a1b2c3d4e5f", "a"})).has_value());
+  for (const char* key : {"", "Bad Key", "ui_xyz", "ui_0A1B2C3D4E5F", "ui_0a1b2c3d4e5", "-lead", "a/b", "has space"}) fails(usage_query("key", {key}), "key", "invalid");
+  fails(usage_query("key", {std::string(33, 'a')}), "key", "invalid");
+
+  CHECK(!check(usage_query("method", {}, {"list_hosts", "logging/setLevel", "notifications/roots/list_changed", "A_b/c", std::string(64, 'x')})).has_value());
+  for (const char* method : {"", "has space", "tools/call:run_query", "a-b", "a.b", "caf\xc3\xa9", "a\nb"}) fails(usage_query("method", {}, {method}), "method", "invalid");
+  fails(usage_query("method", {}, {std::string(65, 'x')}), "method", "invalid");
+
+  CHECK(!check(usage_query("result", {}, {}, {"ok", "rpc_error_32601", "429_rate_limited", std::string(64, 'x')})).has_value());
+  for (const char* result : {"", "Ok", "a/b", "a b", "a-b", "caf\xc3\xa9"}) fails(usage_query("result", {}, {}, {result}), "result", "invalid");
+  fails(usage_query("result", {}, {}, {std::string(65, 'x')}), "result", "invalid");
+
+  CHECK(!check(usage_query("type", {}, {}, {}, {"call", "request", "limited", "rejected"})).has_value());
+  for (const char* type : {"", "Call", "tool", "refused", "calls", "call,request"}) fails(usage_query("type", {}, {}, {}, {type}), "type", "invalid");
+
+  // At most 20 values for each dimension; a value that is repeated counts once.
+  std::vector<std::string> keys;
+  std::vector<std::string> methods;
+  std::vector<std::string> results;
+  for (int i = 0; i < 21; ++i) {
+    keys.push_back("key-" + std::to_string(i));
+    methods.push_back("method_" + std::to_string(i));
+    results.push_back("result_" + std::to_string(i));
+  }
+  const auto first = [](const std::vector<std::string>& values) { return std::vector<std::string>(values.begin(), values.begin() + 20); };
+  CHECK(!check(usage_query("key", first(keys), first(methods), first(results))).has_value());
+  fails(usage_query("key", keys), "key", "too_many");
+  fails(usage_query("key", {}, methods), "method", "too_many");
+  fails(usage_query("key", {}, {}, results), "result", "too_many");
+  CHECK(!check(usage_query("key", {}, {}, {}, {"call", "request", "limited", "rejected", "call"})).has_value());  // the 5th is a repeat
+  fails(usage_query("key", {}, {}, {}, results), "type", "too_many");  // the number comes before the values
+  {
+    McpUsageOverviewQuery query = usage_query("method", std::vector<std::string>(30, "k1"), {"b", "a", "b", "a", "c"});
+    CHECK(!mcp_usage_overview_check(&query).has_value());
+    CHECK(query.keys == std::vector<std::string>({"k1"}));
+    CHECK(query.methods == std::vector<std::string>({"b", "a", "c"}));  // the first occurrence, in the order of the request
+  }
+  // The first rule that fails is the answer: the split, then the keys, the methods, the results and the types.
+  fails(usage_query("nope", {"Bad Key"}, {"has space"}), "split", "invalid");
+  fails(usage_query("key", {"Bad Key"}, {"has space"}, {"A"}, {"x"}), "key", "invalid");
+  fails(usage_query("key", {}, {"has space"}, {"A"}, {"x"}), "method", "invalid");
+  fails(usage_query("key", {}, {}, {"A"}, {"x"}), "result", "invalid");
+}
+
+// Counting while the overview reads: an entry at a time, never a name read outside the lock (the names grow and move).
+void test_usage_overview_while_counting() {
+  const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;
+  McpUsageOptions options;
+  options.retention_days = 7;
+  McpUsage usage(options, now);
+  const int events = 20000;
+  std::thread counter([&] {
+    for (int i = 0; i < events; ++i) {
+      UsageCall call;
+      call.id = "k" + std::to_string(i % 7);
+      call.at = now + 1;
+      call.tool = "tool_" + std::to_string(i % 150);  // under the 200 rows of a facet: the facets add up to the requests
+      if (i % 5 == 0) call.status = "err_" + std::to_string(i % 40);
+      call.user_agent = "agent/" + std::to_string(i % 3);
+      usage_record(usage, call);
+    }
+  });
+  const std::vector<std::string> live = {"k0", "k1", "k2", "k3", "k4", "k5", "k6"};
+  for (int i = 0; i < 40; ++i) {
+    const auto doc = usage_overview(usage, live, "24h", now + 1, usage_query(i % 2 ? "key" : "method"));
+    CHECK(usage_overview_adds_up(doc));
+  }
+  counter.join();
+  const auto doc = usage_overview(usage, live, "24h", now + 1);
+  CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(events));
+  CHECK_EQ(doc["totals"]["active_keys"].GetUint64(), uint64_t(7));
+  check_series(doc);
+  check_facets_add_up(doc);
 }
 
 void test_rate_limiter() {
@@ -1543,6 +2535,59 @@ void test_protocol() {
   CHECK_EQ(mcp_handle_message(R"({"jsonrpc":"2.0","id":{"a":1},"method":"ping"})", all, backend, info, now).http_status, 400);
   CHECK_EQ(mcp_handle_message(R"({"jsonrpc":"2.0","id":1.5,"method":"ping"})", all, backend, info, now).http_status, 400);
   CHECK_EQ(parse(mcp_handle_message(R"({"jsonrpc":"2.0","id":1,"method":"ping","params":5})", all, backend, info, now).body)["error"]["code"].GetInt(), kRpcInvalidParams);
+
+  // The result names the method of the message, also when it fails: the audit line and the usage show it. A message that could
+  // not be read has none.
+  {
+    const auto method_of = [&](const std::string& body) { return mcp_handle_message(body, all, backend, info, now).method; };
+    CHECK_EQ(method_of(rpc("ping")), std::string("ping"));
+    CHECK_EQ(method_of(rpc("initialize", R"({"protocolVersion":"2025-06-18"})")), std::string("initialize"));
+    CHECK_EQ(method_of(rpc("tools/list")), std::string("tools/list"));
+    CHECK_EQ(method_of(rpc("tools/call", R"({"name":"list_hosts"})")), std::string("tools/call"));
+    CHECK_EQ(method_of(R"({"jsonrpc":"2.0","method":"notifications/initialized"})"), std::string("notifications/initialized"));
+    CHECK_EQ(method_of(R"({"jsonrpc":"2.0","id":5,"result":{}})"), std::string("response"));
+    // A JSON-RPC error of a message that was read: the method that failed.
+    CHECK_EQ(method_of(rpc("resources/list")), std::string("resources/list"));
+    CHECK_EQ(method_of(rpc("nope/nothing")), std::string("nope/nothing"));
+    CHECK_EQ(method_of(rpc("initialize")), std::string("initialize"));
+    CHECK_EQ(method_of(rpc("initialize", "{}")), std::string("initialize"));
+    CHECK_EQ(method_of(rpc("tools/call", "{}")), std::string("tools/call"));
+    CHECK_EQ(method_of(rpc("tools/call", R"({"name":"nope"})")), std::string("tools/call"));
+    CHECK_EQ(method_of(rpc("tools/call", R"({"name":"list_hosts","arguments":[]})")), std::string("tools/call"));
+    CHECK_EQ(method_of(R"({"jsonrpc":"2.0","id":1,"method":"ping","params":5})"), std::string("ping"));
+    {
+      const auto r = mcp_handle_message(R"({"jsonrpc":"2.0","id":{"a":1},"method":"ping"})", all, backend, info, now);
+      CHECK_EQ(r.http_status, 400);
+      CHECK_EQ(r.rpc_error, kRpcInvalidRequest);
+      CHECK_EQ(r.method, std::string("ping"));
+      CHECK(!r.tool_called);
+    }
+    {
+      const auto r = mcp_handle_message(rpc("tools/call", R"({"name":"nope"})"), all, backend, info, now);
+      CHECK_EQ(r.rpc_error, kRpcInvalidParams);
+      CHECK(!r.tool_called);  // it failed before a tool
+    }
+    // No method: not JSON, a batch, not an object, no "jsonrpc": "2.0", no method, a method that is not text.
+    const std::vector<std::string> unread = {"not json", "[]", "[" + rpc("ping") + "]", "3", R"({"id":1,"method":"ping"})",
+                                             R"({"jsonrpc":"1.0","id":1,"method":"ping"})", R"({"jsonrpc":"2.0","id":1})",
+                                             R"({"jsonrpc":"2.0","id":1,"method":5})"};
+    for (const auto& body : unread) {
+      const auto r = mcp_handle_message(body, all, backend, info, now);
+      CHECK(r.method.empty());
+      CHECK(r.rpc_error != 0);
+    }
+    // The client chooses the method, and a notification takes any: at most 128 bytes (the answer of the error keeps the whole name).
+    const std::string long_name(300, 'x');
+    const auto cut = mcp_handle_message(rpc(long_name), all, backend, info, now);
+    CHECK_EQ(cut.rpc_error, kRpcMethodNotFound);
+    CHECK_EQ(cut.method, std::string(128, 'x'));
+    CHECK(contains(cut.body, long_name));
+    const auto note = mcp_handle_message("{\"jsonrpc\":\"2.0\",\"method\":\"" + long_name + "\"}", all, backend, info, now);
+    CHECK_EQ(note.http_status, 202);
+    CHECK_EQ(note.method, std::string(128, 'x'));
+    CHECK_EQ(method_of(rpc(std::string(128, 'y'))), std::string(128, 'y'));
+    CHECK_EQ(method_of(rpc(std::string(129, 'y'))), std::string(128, 'y'));
+  }
 }
 
 struct FakeDb : McpDatabase {
@@ -3280,6 +4325,11 @@ int main() {
   }
   test_store_startup_errors(make_temp_dir());
   test_usage(make_temp_dir());
+  test_usage_cells(make_temp_dir());
+  test_usage_overview();
+  test_usage_overview_caps();
+  test_usage_overview_check();
+  test_usage_overview_while_counting();
   test_rate_limiter();
   test_sql_scanner();
   test_sql_quoting_and_types();
