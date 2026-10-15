@@ -4,6 +4,7 @@ import { runSuccessfulQuery } from '../helpers/app.js';
 import { appReady } from '../helpers/modules.js';
 import { requireInstance } from '../helpers/instances.js';
 import { mockTraceResults, SYNTHETIC_TRACES } from '../helpers/traces.js';
+import { INSTANCES, install, newServer, setUsage } from '../helpers/mcp-fake.js';
 
 // Accessibility contract (docs/ui-foundations.md, "Accessibility"): in both themes, the colours that carry
 // meaning reach their WCAG ratio (text 4.5:1, the edge of a field 3:1, the focus ring 3:1), the pages give axe
@@ -283,10 +284,12 @@ test('axe (dark): the MCP page has no violation', async ({ page }) => {
   expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
 });
 
-// The Usage tab of the MCP pages has a filter bar (Group by and three lists of check boxes, the window, Refresh), four charts with their
+// The Usage tab of the MCP pages has a filter bar (Group by and four lists of check boxes, the window, Refresh), four charts with their
 // legends, filter chips and four tables. Usage is made first on the instance, with the key of the config file that reads everything (an
 // initialize that names a client, tools/list, a tool call, a method that nobody knows and a notification), so that every part has something
-// to show. Both themes: the muted hints and the warning colours are on the tab.
+// to show. Both themes: the muted hints and the warning colours are on the tab. The instance of the contract is one key, one instance and a
+// few clients, whatever ran on it before: a list that has one value is off (disabled in place, a pick cannot be made), and a row of a table that
+// has one value is not a filter, so what is offered is asked of the page and not assumed.
 const MCP_ALL_DATA_KEY = 'a11da7a0-0000-4000-8000-000000000001';
 
 async function makeMcpUsage(request, base) {
@@ -316,13 +319,20 @@ for (const theme of THEMES) {
     await page.locator('.mcpOverview__chart .chartCore__legendItem[aria-pressed="false"]').first().click();
     await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(1);
     await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
-    await page.locator('tr[data-dimension="result"]').first().click();
+    // The rows that can be picked: the method table has every filter but its own, so the other methods are rows to pick whatever the legend chose.
+    await page.locator('tr.is-pickable[data-dimension="method"]:not(.is-selected)').first().click();
     await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(2);
     await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
     await page.waitForTimeout(600);
     expect(await violations()).toEqual([]);
-    // The lists of the bar are dialogs of check boxes, open: they have no violation, and a pick leaves none either (the chips and the box).
-    for (const dimension of ['key', 'method', 'client']) {
+    // The lists of the bar are dialogs of check boxes, open: they have no violation, and a pick leaves none either (the chips and the box). A list
+    // that has one value is off: it cannot be opened (its button is disabled, with its title), and that state has no violation either.
+    const off = [];
+    for (const dimension of ['key', 'method', 'client', 'instance']) {
+      if (await page.locator(`#mcpPickerButton-${dimension}`).isDisabled()) {
+        off.push(dimension);
+        continue;
+      }
       await page.locator(`#mcpPickerButton-${dimension}`).click();
       await expect(page.locator(`#mcpPickerMenu-${dimension}`)).toBeVisible();
       await page.waitForTimeout(400);
@@ -330,15 +340,18 @@ for (const theme of THEMES) {
       await page.keyboard.press('Escape');
       await expect(page.locator(`#mcpPickerMenu-${dimension}`)).toBeHidden();
     }
-    // A pick in a list is one more chip (the lists keep every filter but their own: the client that the others leave may be none).
+    expect(await violations(), `the lists that are off (${off.join(', ') || 'none'})`).toEqual([]);
+    // A pick in a list is one more chip (the lists keep every filter but their own: the client that the others leave may be none, or one).
     const chipsBefore = await page.locator('.mcpOverview__chips .chip').count();
-    await page.locator('#mcpPickerButton-client').click();
-    const boxes = page.locator('#mcpPickerMenu-client input[type="checkbox"]');
-    if (await boxes.count()) {
-      await boxes.first().check();
-      await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(chipsBefore + 1);
+    if (!(await page.locator('#mcpPickerButton-client').isDisabled())) {
+      await page.locator('#mcpPickerButton-client').click();
+      const boxes = page.locator('#mcpPickerMenu-client input[type="checkbox"]:not(:checked)');
+      if (await boxes.count()) {
+        await boxes.first().check();
+        await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(chipsBefore + 1);
+      }
+      await page.keyboard.press('Escape');
     }
-    await page.keyboard.press('Escape');
     // The page reads when the clicks of a list pause.
     await page.waitForTimeout(600);
     await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
@@ -353,6 +366,121 @@ for (const theme of THEMES) {
     await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
     await page.waitForTimeout(600);
     expect(await violations()).toEqual([]);
+  });
+}
+
+// The instances that share the usage directory (docs/mcp-integration-page.md, "Instances"): the note "2 instances" with its list, the Instance list
+// of the bar and its badges, the warnings above the tiles (a file that was skipped, a name that two ChDash write under), and the state "Usage is
+// off". The instance of the contract has one directory, one instance and the usage on, so none of these can be made there: they run against the
+// in-memory server of the page specs (helpers/mcp-fake.js), which mcp-contract.spec.js keeps in the shape of the real answers.
+const mcpViolations = async (page) => (await new AxeBuilder({ page }).analyze()).violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
+const mcpSettled = (page) => expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
+
+for (const theme of THEMES) {
+  test(`axe (${theme}): the MCP Usage tab with two instances has no violation, with the note and its list and the Instance list open`, async ({ page }) => {
+    await useTheme(page, theme);
+    await install(page, newServer());
+    await page.goto('/mcp-integration/usage');
+    await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+    await mcpSettled(page);
+    await expect(page.locator('.mcpInstances__button')).toHaveText('2 instances');
+    expect(await mcpViolations(page), 'the tab').toEqual([]);
+    // The note opens a list of the instances in a popover: the focus goes in, Escape closes it and gives the focus back.
+    await page.locator('.mcpInstances__button').click();
+    await expect(page.locator('.mcpInstancesList')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await mcpViolations(page), 'the list of the instances').toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.mcpInstancesList')).toBeHidden();
+    await expect(page.locator('.mcpInstances__button')).toBeFocused();
+    // The Instance list of the bar is offered with two instances: a dialog of check boxes, then a pick and its chip.
+    await expect(page.locator('#mcpPickerButton-instance')).toBeEnabled();
+    await page.locator('#mcpPickerButton-instance').click();
+    await expect(page.locator('#mcpPickerMenu-instance')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await mcpViolations(page), 'the Instance list').toEqual([]);
+    await page.locator('#mcpPickerMenu-instance input[type="checkbox"]').first().check();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(1);
+    await page.waitForTimeout(600);
+    await mcpSettled(page);
+    expect(await mcpViolations(page), 'with an instance filter').toEqual([]);
+  });
+
+  test(`axe (${theme}): the warnings about the instances (a skipped file, a name in conflict) and their badges have no violation`, async ({ page }) => {
+    const server = newServer();
+    const [mine] = INSTANCES();
+    server.instances = [
+      { ...mine, status: 'conflict', reason: 'another process writes this instance' },
+      { instance: 'chdash-1', written_at: null, status: 'skipped', reason: 'invalid' },
+      { instance: 'chdash-2', written_at: '2026-10-14T09:57:00Z', status: 'skipped', reason: 'too_large' },
+    ];
+    await useTheme(page, theme);
+    await install(page, server);
+    await page.goto('/mcp-integration/usage');
+    await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+    await mcpSettled(page);
+    // One banner for the conflict and one for the two skipped files, above the tiles; they are notices, not alerts.
+    await expect(page.locator('.mcpOverview__warnings .uiBanner--warn')).toHaveCount(2);
+    await expect(page.locator('.mcpOverview__warnings .uiBanner--warn').first()).toHaveAttribute('role', 'status');
+    expect(await mcpViolations(page), 'the warnings').toEqual([]);
+    await page.locator('#mcpPickerButton-instance').click();
+    await expect(page.locator('#mcpPickerMenu-instance')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await mcpViolations(page), 'the Instance list with the badges of the files that are not read').toEqual([]);
+    await page.keyboard.press('Escape');
+    await page.locator('.mcpInstances__button').click();
+    await expect(page.locator('.mcpInstancesList')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await mcpViolations(page), 'the list of the instances with its badges').toEqual([]);
+  });
+
+  test(`axe (${theme}): the usage that is off has no violation: the state of the Usage tab and the keys without their Used column`, async ({ page }) => {
+    const server = setUsage(newServer(), { enabled: false });
+    await useTheme(page, theme);
+    await install(page, server);
+    await page.goto('/mcp-integration/usage');
+    await expect(page.locator('#mcpUsageOff')).toBeVisible();
+    await expect(page.locator('#mcpUsageOff .uiState__title')).toHaveText('Usage is off');
+    await page.waitForTimeout(500);
+    expect(await mcpViolations(page), 'the Usage tab, usage off').toEqual([]);
+    // The keys: no column Used, no note about it; the ClickHouse cost of a key stays in its details.
+    await page.goto('/mcp-integration');
+    await expect(page.locator('#mcpKeysBody tbody tr[data-key-id]').first()).toBeVisible();
+    await expect(page.locator('#mcpKeysBody th', { hasText: /^Used$/ })).toHaveCount(0);
+    await page.waitForTimeout(500);
+    expect(await mcpViolations(page), 'the keys, usage off').toEqual([]);
+    await page.locator('#mcpKeysBody tbody tr[data-key-id] [data-action="open"]').first().click();
+    await expect(page.locator('.mcpCost')).toBeVisible();
+    await page.locator('.mcpCost').getByRole('button', { name: 'ClickHouse cost' }).click();
+    await expect(page.locator('.mcpCost__body')).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(await mcpViolations(page), 'the details of a key, usage off').toEqual([]);
+  });
+
+  // The form of a key has the card of the analysis of the key's own limits and usage: two tools that every key has (checked and locked, "Every key has it")
+  // and, as mcp.usage.all_keys is on on this instance, the one a key must name (off by default): a card that is open, with a locked box among them.
+  test(`axe (${theme}): the New key form with its MCP analysis card has no violation`, async ({ page }) => {
+    const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
+    requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
+    await useTheme(page, theme);
+    await page.goto(`${base}/mcp-integration`);
+    await expect(page.locator('#mcpWorkspace')).toBeVisible();
+    await page.locator('#mcpNewKey').click();
+    const dialog = page.locator('dialog.mcpDialog[open]');
+    await expect(dialog).toBeVisible();
+    const card = dialog.locator('.mcpGroup[data-group="mcp_analysis"]');
+    await expect(card).toBeVisible();
+    await expect(card.locator('#mcpTool-mcp_analysis_my_limits')).toBeChecked();
+    await expect(card.locator('#mcpTool-mcp_analysis_my_limits')).toBeDisabled();
+    await expect(card.locator('#mcpTool-mcp_analysis_all_usage')).not.toBeChecked();
+    await expect(card.locator('#mcpTool-mcp_analysis_all_usage')).toBeEnabled();
+    await page.waitForTimeout(400);
+    expect(await mcpViolations(page), 'the form with its analysis card').toEqual([]);
+    // The tool that "*" leaves out is ticked by hand: no violation either, and the card says how many tools it has.
+    await card.locator('#mcpTool-mcp_analysis_all_usage').check();
+    await expect(card.locator('.mcpGroup__count')).toHaveText('3/3');
+    expect(await mcpViolations(page), 'the form with the usage of all the keys ticked').toEqual([]);
   });
 }
 

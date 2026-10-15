@@ -557,19 +557,27 @@ async function getMetricsAttributes(params, { signal } = {}) {
 // --- MCP integration (docs/mcp.md, app_page_mcp.js) -------------------------------
 // The one place that knows the JSON of /api/mcp/*: the page's modules read the shapes
 // normalized here and never the raw answers, so a change of the server's JSON is fixed here.
-//   getMcpMeta()                  the state, endpoint, hosts, tool groups, tools and limits ({ enabled: false } when off)
+//   getMcpMeta()                  the state, endpoint, hosts, tool groups, tools and limits ({ enabled: false } when off). `usage` says whether the
+//                                 usage is counted (`usage.enabled`: mcp.usage in the config), as which instance, and for how long; a tool says
+//                                 whether every key has it (`always`), whether "*" leaves it out (`explicitOnly`) and whether it is offered now
 //   getMcpKeys()                  [key]
 //   createMcpKey(input)           { key, secret }   (the secret comes once: no call gives it again)
 //   getMcpKeyAccess(id, {refresh})  the data that a key reaches: the tables of the MCP user of each host, cut by the key's patterns
 //   getMcpAccessSummary({refresh})  for each key, how many databases and tables it reaches (a Map by key id)
-//   getMcpUsageSummary({window})  what each key did in a window: { keys: Map by key id, deleted: [the deleted keys that keep usage] }
+//   getMcpUsageSummary({window})  what each key did in a window: { keys: Map by key id, others: [the keys that are not in the list of keys: the
+//                                 deleted ones, which keep usage, and those that only another instance knows (`elsewhere`)], instances }
 //   getMcpKeyUsage(id, {window})  what one key did: totals, one point for each step of the window (1 min to 1 day), tools, results, clients
-//   getMcpUsageOverview({window, group, filters})  what every key did, cut by key, method, client, result and type (the Usage tab): totals,
-//                                 a series of five figures for each group of `group` (key, method or client), one table for each dimension
+//   getMcpUsageOverview({window, group, filters})  what every key did, cut by key, method, client, instance, result and type (the Usage tab):
+//                                 totals, a series of five figures for each group of `group` (key, method or client), one table for each
+//                                 dimension, and the instances with their figures (the facet of the filter by instance)
 //   getMcpKeyCost(id, {window, refresh})  what the statements of a key cost ClickHouse (read from system.query_log)
 //   deleteMcpKey(id)              id
 // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
-// (the answer's `error`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools").
+// (the answer's `error_code`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools"). A usage route of a
+// server that has the usage off answers 404 with the code `not_enabled`: the page does not ask while `meta.usage.enabled` is false, and takes
+// that answer (the meta is older than a restart) as "Usage is off".
+// The usage answers say which instances they sum (`instances`, this one first): a ChDash that shares mcp.usage.dir with others counts the files
+// of all of them.
 const mcpText = (value) => (typeof value === "string" ? value : "");
 const mcpList = (value) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
 const mcpLimit = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : null);
@@ -655,6 +663,12 @@ function normalizeMcpMeta(raw) {
       section: mcpText(tool?.section),
       description: mcpText(tool?.description),
       needsAllData: tool?.needs_all_data === true,
+      // Every key has it, whatever its list of tools says (the tools of the analysis of the key's own limits and usage).
+      always: tool?.always === true,
+      // "*" does not give it: a key has it only when its list names it.
+      explicitOnly: tool?.explicit_only === true,
+      // The server offers it now (the usage is on, the setting that it needs is on): a tool that is not offered is not shown.
+      available: tool?.available !== false,
     })).filter((tool) => tool.name),
     limits: {
       maxRows: mcpLimit(limits.max_rows),
@@ -670,17 +684,23 @@ function normalizeMcpMeta(raw) {
   };
 }
 
-// Where the usage of the keys is kept (mcp.usage_file, or memory since the start), the windows of its answers, and those of the cost.
+// The usage of the keys (mcp.usage in the config): whether it is counted, where (`storage`: the files of a directory that several ChDash may
+// share), as which instance, for how long, the windows of its answers and those of the cost. The cost does not depend on the usage: a usage
+// that is off sends the windows of the cost only. `allKeys`: the setting that lets a key read the usage of all the keys.
 function normalizeMcpUsageMeta(raw) {
   const usage = raw && typeof raw === "object" ? raw : {};
   const windows = mcpList(usage.windows);
+  const on = usage.enabled === true;
   return {
-    persisted: usage.persisted === true,
-    retentionDays: mcpCount(usage.retention_days),
-    windows: windows.length ? windows : ["24h"],
-    defaultWindow: mcpText(usage.default_window) || (windows.includes("7d") ? "7d" : "24h"),
-    since: mcpTime(usage.since),
+    enabled: on,
+    storage: on ? mcpText(usage.storage) || "files" : "",
+    instance: on ? mcpText(usage.instance) : "",
+    retentionDays: on ? mcpCount(usage.retention_days) : 0,
+    windows: on && windows.length ? windows : ["24h"],
+    defaultWindow: on ? mcpText(usage.default_window) || (windows.includes("7d") ? "7d" : "24h") : "24h",
+    since: on ? mcpTime(usage.since) : null,
     costWindows: mcpList(usage.cost_windows),
+    allKeys: on && usage.all_keys === true,
   };
 }
 
@@ -806,7 +826,8 @@ async function getMcpAccessSummary({ refresh = false, signal } = {}) {
   return out;
 }
 
-// One line of the usage of a key in a window.
+// One line of the usage of a key in a window. `elsewhere`: the key is not in this instance's list of keys, only another instance knows it
+// (its usage came from the file of that instance).
 function normalizeMcpUsageLine(item) {
   return {
     id: mcpText(item?.id),
@@ -814,6 +835,7 @@ function normalizeMcpUsageLine(item) {
     host: mcpText(item?.host),
     source: item?.source === "config" ? "config" : "ui",
     deletedAt: mcpTime(item?.deleted_at),
+    elsewhere: item?.elsewhere === true,
     requests: mcpCount(item?.requests),
     calls: mcpCount(item?.calls),
     errors: mcpCount(item?.errors),
@@ -824,29 +846,43 @@ function normalizeMcpUsageLine(item) {
   };
 }
 
-// The window of an answer of the usage: its name, from its start to the time of the answer, since when the usage is counted.
+// An instance that an answer of the usage sums, as the server lists it (this one first): the last write of its file, and whether the file could
+// be read. `skipped`: a file that is not valid, of another version or too large is left out of the figures, with the `reason`; `conflict`: another
+// ChDash writes under the name of this instance, so this one does not save its counts.
+function normalizeMcpInstance(item) {
+  return {
+    instance: mcpText(item?.instance),
+    status: item?.status === "skipped" || item?.status === "conflict" ? item.status : "ok",
+    reason: mcpText(item?.reason),
+    writtenAt: mcpTime(item?.written_at),
+  };
+}
+
+// The window of an answer of the usage: its name, from its start to the time of the answer, since when the usage is counted, and the instances
+// that it sums.
 const mcpUsageWindow = (payload) => ({
   window: mcpText(payload?.window),
   from: mcpTime(payload?.from),
   to: mcpTime(payload?.to),
   since: mcpTime(payload?.since),
-  persisted: payload?.persisted === true,
   retentionDays: mcpCount(payload?.retention_days),
+  instances: (Array.isArray(payload?.instances) ? payload.instances : []).map(normalizeMcpInstance).filter((item) => item.instance),
 });
 
-// What each key did in a window (GET /api/mcp/usage): `keys` is a Map of the id of a live key to its line; `deleted` the deleted keys that
-// still keep usage, the last deletion first.
+// What each key did in a window (GET /api/mcp/usage): `keys` is a Map of the id of a live key to its line; `others` the keys that are not
+// in this instance's list, the last deletion first: the deleted keys that still keep usage (`deletedAt`), and the keys that only another
+// instance knows (`elsewhere`).
 async function getMcpUsageSummary({ window = "", signal } = {}) {
   const payload = await mcpRequest(`/usage${window ? `?window=${encodeURIComponent(window)}` : ""}`, { signal });
   const keys = new Map();
-  const deleted = [];
+  const others = [];
   for (const item of Array.isArray(payload?.keys) ? payload.keys : []) {
     const line = normalizeMcpUsageLine(item);
     if (!line.id) continue;
-    if (line.deletedAt != null) deleted.push(line);
+    if (line.deletedAt != null || line.elsewhere) others.push(line);
     else keys.set(line.id, line);
   }
-  return { ...mcpUsageWindow(payload), keys, deleted };
+  return { ...mcpUsageWindow(payload), keys, others };
 }
 
 // The step of a series, in seconds (60 for a minute, 86400 for a day): a window is cut in steps of its own (1 h by the minute, 6 h by 5
@@ -911,14 +947,16 @@ async function getMcpKeyUsage(id, { window = "", signal } = {}) {
   };
 }
 
-// The five dimensions that the Usage tab filters by, in the order of its filter parameters (it groups by key, method or client).
-const MCP_USAGE_DIMENSIONS = ["key", "method", "client", "result", "type"];
+// The six dimensions that the Usage tab filters by, in the order of its filter parameters (it groups by key, method or client).
+const MCP_USAGE_DIMENSIONS = ["key", "method", "client", "instance", "result", "type"];
 
-// What every key did in a window (GET /api/mcp/usage/overview), cut by `filters` ({ key, method, client, result, type }: lists of values,
-// any of the values of one dimension and all the dimensions together; each a repeated parameter). The totals and the series have every
+// What every key did in a window (GET /api/mcp/usage/overview), cut by `filters` ({ key, method, client, instance, result, type }: lists of
+// values, any of the values of one dimension and all the dimensions together; each a repeated parameter). The totals and the series have every
 // filter; each table of a dimension has all but its own, so a filter shows its alternatives. `series.groups` are the biggest groups of
 // `group` (`rest` is what the others add up to), each with five series of one value for each step of the window (`series.t`): the
-// requests, the errors, the tool calls, the time of the tool calls added up (ms) and the bytes returned.
+// requests, the errors, the tool calls, the time of the tool calls added up (ms) and the bytes returned. `instances` is the facet of the
+// instance: every instance that the server knows, with the state of its file and its figures (an instance that has no request in the view
+// is there with zeros), not the plain list of the other answers.
 async function getMcpUsageOverview({ window = "", group = "", filters = {}, signal } = {}) {
   const params = new URLSearchParams();
   if (window) params.set("window", window);
@@ -1024,8 +1062,21 @@ async function getMcpUsageOverview({ window = "", group = "", filters = {}, sign
       versions: mcpList(item?.versions),
       lastSeenAt: mcpTime(item?.last_seen_at),
     })).filter((item) => item.client),
+    instances: list(payload?.instances).map((item) => ({
+      ...normalizeMcpInstance(item),
+      requests: mcpCount(item?.requests),
+      calls: mcpCount(item?.calls),
+      errors: mcpCount(item?.errors),
+      rateLimited: mcpCount(item?.rate_limited),
+      rejected: mcpCount(item?.rejected),
+      durationMsAvg: mcpLimit(item?.duration_ms_avg),
+      durationMsMax: mcpLimit(item?.duration_ms_max),
+      rows: mcpCount(item?.rows),
+      bytes: mcpCount(item?.bytes),
+      keys: mcpCount(item?.keys),
+    })).filter((item) => item.instance),
     // The rows that the server cut (200 for a table); a value that a filter selects is never cut.
-    omitted: { keys: mcpCount(omitted.keys), methods: mcpCount(omitted.methods), results: mcpCount(omitted.results), clients: mcpCount(omitted.clients) },
+    omitted: { keys: mcpCount(omitted.keys), methods: mcpCount(omitted.methods), results: mcpCount(omitted.results), clients: mcpCount(omitted.clients), instances: mcpCount(omitted.instances) },
   };
 }
 

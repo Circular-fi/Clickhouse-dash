@@ -1,7 +1,7 @@
 // The filter bar of the Usage tab (app_mcp_overview.js, docs/mcp-integration-page.md, "The Usage tab"): the bar of Observability and System
 // (app_ui_filterbar.js), under the row of the two MCP pages. Left to right: Group by (key, method or client: what the four charts are
-// grouped by), then a picker for each of the three dimensions that have a list of values to choose from (Key, Method, Client), and at the
-// right end the window and Refresh. A choice applies at once. The result and the type are filters too, but they are picked in the tables
+// grouped by), then a picker for each of the four dimensions that have a list of values to choose from (Key, Method, Client, Instance), and at
+// the right end the window and Refresh. A choice applies at once. The result and the type are filters too, but they are picked in the tables
 // and in the legends, never here.
 //
 //   mcpBar.create({ groups, labelOf(dimension, value), onGroup(value), onWindow(value), onPick(dimension, value), onClear(dimension),
@@ -13,17 +13,19 @@
 //   bar.sync({ group, window, filters, data, offered })   what the model says, quietly: the group, the window, the button of each picker,
 //                                  and its list when it is open. `data` (an answer, or null) gives the values of the lists and their counts:
 //                                  the facet of each dimension has every filter but its own, so a list shows what else can be picked.
-//                                  `offered` ({ key, method, client }: booleans, all true when it is left out) says which lists can be used:
-//                                  a dimension that has fewer than two values in the answer, and no filter, has nothing to choose from.
+//                                  `offered` ({ key, method, client, instance }: booleans, all true when it is left out) says which lists can
+//                                  be used: a dimension that has fewer than two values in the answer, and no filter, has nothing to choose from.
 //   bar.mountSummary({ describe })  the phone fold (app_ui_filterbar.js): call it once the chips row is right after the form
 //
 // A picker is a multiple choice like the Service picker of Logs (ns.menu.multi): a check box for each value with its number of requests, an
 // "All ..." action that clears the dimension, and a field that narrows a long list. A dimension takes 20 values at most. A picker that has
 // nothing to choose from (one value or none, and no filter on) is off and keeps its place: its button says the value ("Client · claude-code")
-// or "Client · none", and its title why.
+// or "Client · none", and its title why. The instances are those of the usage directory (every ChDash that writes to it, this one first): with
+// one instance, the list is off ("Instance · chdash-0"); a file that is not read is badged in its row.
 
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { mcpInstances } from "./app_mcp_instances.js";
 import { badge } from "./app_ui_badge.js";
 import { filterBar } from "./app_ui_filterbar.js";
 import { menu } from "./app_ui_menu.js";
@@ -42,13 +44,18 @@ const PICKERS = [
   { dimension: "key", label: "Key", noun: "keys", one: "key", all: "All keys" },
   { dimension: "method", label: "Method", noun: "methods", one: "method", all: "All methods" },
   { dimension: "client", label: "Client", noun: "clients", one: "client", all: "All clients" },
+  { dimension: "instance", label: "Instance", noun: "instances", one: "instance", all: "All instances" },
 ];
 
-// The values of a list, from the facet of the answer: what the check box says, its count, and what makes the row different.
+// The values of a list, from the facet of the answer: what the check box says, its count, what makes the row different (muted), and a
+// badge when the row needs one ({ text, title }: a deleted key, an instance whose file is not read).
 const FACETS = {
-  key: (data) => data.keys.map((row) => ({ value: row.id, label: row.name, count: row.requests, deleted: row.deletedAt != null, title: row.name === row.id ? row.name : `${row.name}\n${row.id}` })),
+  key: (data) => data.keys.map((row) => ({ value: row.id, label: row.name, count: row.requests, title: row.name === row.id ? row.name : `${row.name}\n${row.id}`,
+    badge: row.deletedAt != null ? { text: "deleted", title: "The key was deleted: its usage stays until the retention ends" } : null })),
   method: (data) => data.methods.map((row) => ({ value: row.method, label: row.method, count: row.requests, muted: row.kind !== "call", title: row.method })),
   client: (data) => data.clients.map((row) => ({ value: row.client, label: row.client, count: row.requests, title: row.client })),
+  instance: (data) => data.instances.map((row) => ({ value: row.instance, label: row.instance, count: row.requests, title: row.instance,
+    badge: row.status === "ok" ? null : { text: row.status === "conflict" ? "conflict" : "skipped", title: mcpInstances.problem(row) } })),
 };
 
 // A count of a list: all its digits up to a million ("1,013"), then compact.
@@ -131,7 +138,7 @@ function picker(bar, spec, { labelOf, onPick, onClear }) {
     return h("label", { class: ["mcpPicker__option", row.muted && "is-muted"], title: row.title || null, dataset: { text: `${row.label} ${row.value}`.toLowerCase() } },
       h("input", { type: "checkbox", value: row.value }),
       h("span", { class: "mcpPicker__name" }, row.label),
-      row.deleted ? badge.el("deleted", { tone: "warn", size: "sm", title: "The key was deleted: its usage stays until the retention ends" }) : null,
+      row.badge ? badge.el(row.badge.text, { tone: "warn", size: "sm", title: row.badge.title }) : null,
       h("span", { class: "mcpPicker__count" }, row.count == null ? "" : figure(row.count)));
   }
 

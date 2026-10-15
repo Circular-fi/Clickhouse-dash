@@ -602,6 +602,19 @@ body[data-page="mcp"] #mcpPanel {
   font-weight: var(--fw-semibold);
 }
 
+/* A family with no plain tool (the analysis of the key's own limits and usage) has a title and no box. */
+.mcpGroup__head > .mcpGroup__title {
+  flex: none;
+  min-width: 7rem;
+  font-weight: var(--fw-semibold);
+}
+
+/* A tool that every key has: checked and locked, but not greyed out as a tool that cannot be given is (its note is what it has to say). */
+.uiCheck.is-always,
+.uiCheck.is-always > input {
+  cursor: default;
+}
+
 .mcpGroup__note {
   flex: 1 1 0;
   min-width: 0;
@@ -731,8 +744,18 @@ body[data-page="mcp"] #mcpPanel {
 }
 
 .mcpUsage__windows,
+.mcpCost__windows,
 .mcpCost__refresh {
   margin-left: auto;
+}
+
+/* Without the usage the cost has its own buttons of window, and Check again follows them. */
+.mcpCost__windows[hidden] {
+  display: none;
+}
+
+.mcpCost__windows + .mcpCost__refresh {
+  margin-left: 0;
 }
 
 .mcpUsage__body,
@@ -1742,4 +1765,150 @@ body[data-page="mcp"] #mcpPanel {
 .mcpOverview__notes {
   display: grid;
   gap: var(--space-4);
+}
+
+/* The instances that the usage sums (app_mcp_instances.js, docs/mcp-integration-page.md, "Instances"): ChDash instances that share the usage
+   directory add up. "3 instances" stands after the dates in the head of the Usage tab, and "Summed over 3 instances" in the head of the usage
+   of a key; the words are a button that opens the list in a popover. */
+.mcpInstances {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+}
+
+.mcpInstances[hidden] {
+  display: none;
+}
+
+.mcpInstances__button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.mcpInstances__button:hover,
+.mcpInstances__button[aria-expanded="true"] {
+  color: var(--text);
+}
+
+/* The list: one line for each instance, its name (and what is wrong with its file) at the left, when it wrote last at the right. */
+.mcpInstancesPopover {
+  width: min(28rem, calc(100vw - 16px));
+  padding: var(--space-10) var(--space-12);
+}
+
+.mcpInstancesList {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.mcpInstancesList__rows {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mcpInstancesList__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-12);
+  padding-block: var(--space-4);
+}
+
+.mcpInstancesList__row + .mcpInstancesList__row {
+  border-top: 1px solid var(--border);
+}
+
+.mcpInstancesList__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-6);
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+.mcpInstancesList__name > code {
+  font-family: var(--font-mono);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.mcpInstancesList__meta {
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+  /* The head wraps on a phone: "3 instances" may stand alone on a line, where a dot before it would hang. */
+  .mcpInstances__sep {
+    display: none;
+  }
+  .mcpInstancesList__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mcpInstancesList__meta {
+    white-space: normal;
+  }
+}
+
+/* The warnings about the instances (a file that is left out of the sum, a name that two ChDash write under): boxes above the figures of the
+   Usage tab, above the tiles of the usage of a key, and under the table of the keys. */
+.mcpOverview__warnings,
+.mcpUsage__warnings,
+.mcpUsedWarn {
+  display: grid;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.mcpOverview__warnings[hidden],
+.mcpUsage__warnings[hidden],
+.mcpUsedWarn[hidden] {
+  display: none;
+}
+
+.mcpUsedNote + .mcpUsedWarn {
+  margin-top: var(--space-8);
+}
+
+/* "Usage is off" (Usage tab): calm, in the width of the "Turn MCP on" state; the state is its lead and the HCL block follows. */
+.mcpUsageOff {
+  display: grid;
+  gap: var(--space-8);
+}
+
+.mcpUsageOff > .uiState {
+  justify-items: start;
+  padding: var(--space-8) 0;
+  text-align: left;
+}
+
+.mcpUsageOff .uiState__title {
+  font-size: var(--fs-xl);
+}
+
+.mcpUsageOff .uiState__body {
+  max-width: none;
+  color: var(--text);
+  font-size: var(--fs-md);
+}
+
+.mcpUsageOff__config {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
 }

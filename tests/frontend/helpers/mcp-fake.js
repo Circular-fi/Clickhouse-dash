@@ -3,13 +3,21 @@ import { expect } from '@playwright/test';
 // The in-memory MCP server that the mcp-page spec runs the page against (the JSON of /api/mcp/*, as docs/mcp-integration-page.md
 // fixes it). mcp-contract.spec.js runs the same routes against a real instance and compares the shapes of the answers with the
 // ones this server gives: a change of the real JSON that this file does not follow fails there.
+// The usage has three states here, as on the real server: on with two instances that share the usage directory (the default: `chdash-0`, this
+// one, and `chdash-1`, each cell of the usage says which file it comes from), on with one (`oneInstance(server)`), and off (`setUsage(server,
+// { enabled: false })`: the usage routes answer 404 `not_enabled`, and the tools of the analysis of the usage are not offered). A spec sets
+// `server.instances` (the state of each file: ok, skipped, conflict) and `server.elsewhere` (the keys that only another instance knows).
 
 export const SECRET = '3f2a9c1e-7b4d-4e8a-9a6f-5c0d2b1e7a34';
 
-// A few tools of each family of the server's table (the real one has 61): enough to see how the page draws
+// A few tools of each family of the server's table (the real one has 64): enough to see how the page draws
 // families, locks and counts.
-// `section`: the sub-heading of a family that has sections (Observability: traces, logs, metrics).
-export const T = (name, group, description, needs = false, section = '') => ({ name, group, section, description, needs_all_data: needs });
+// `section`: the sub-heading of a family that has sections (Observability: traces, logs, metrics). `flags`: `always` (every key has the tool,
+// whatever its list says), `explicit_only` ("*" does not give it: a key has it only when its list names it) and `available` (the server offers
+// it now: the tools of the analysis of the usage need the usage, and the one of all the keys needs mcp.usage.all_keys too).
+export const T = (name, group, description, needs = false, section = '', flags = {}) => ({
+  name, group, section, description, needs_all_data: needs, always: false, explicit_only: false, available: true, ...flags,
+});
 export const TOOLS = [
   T('list_hosts', 'data', 'Hosts of the key and their health.'),
   T('list_databases', 'data', 'Databases the key can see.'),
@@ -34,6 +42,9 @@ export const TOOLS = [
   T('format_sql', 'query', 'Format SQL text like the Format button.'),
   T('run_query', 'sql', 'One SELECT, WITH, SHOW, DESCRIBE, EXISTS or EXPLAIN.', true),
   T('explain_query', 'sql', 'EXPLAIN of a query.', true),
+  T('mcp_analysis_my_limits', 'mcp_analysis', 'The limits of your key: the rate, the rows, the timeout and the sizes.', false, '', { always: true }),
+  T('mcp_analysis_my_usage', 'mcp_analysis', 'What your key did: the totals, the tools, the errors and the clients.', false, '', { always: true }),
+  T('mcp_analysis_all_usage', 'mcp_analysis', 'What all the keys of all the instances did.', false, '', { explicit_only: true }),
 ];
 export const SECTIONS = [{ id: 'traces', title: 'Traces' }, { id: 'logs', title: 'Logs' }, { id: 'metrics', title: 'Metrics' }];
 export const GROUPS = [
@@ -43,6 +54,7 @@ export const GROUPS = [
   { id: 'observability', title: 'Observability', note: 'traces, logs and metrics: the pages and the simple tools', sections: SECTIONS },
   { id: 'query', title: 'Query', note: 'the Query page', sections: [] },
   { id: 'sql', title: 'SQL', note: 'free SQL written by the client', sections: [] },
+  { id: 'mcp_analysis', title: 'MCP analysis', note: 'your own limits and usage, and the usage of all the keys', sections: [] },
 ];
 
 // The settings profile of an MCP user that sets nothing, and the limits of a key of its host (the MCP server's, as the configuration says).
@@ -74,12 +86,35 @@ export const META = {
     },
   ],
   tool_groups: GROUPS,
-  tools: TOOLS,
+  // The analysis of the usage is offered while the usage is on; the usage of all the keys needs mcp.usage.all_keys (off here: setUsage turns it on).
+  tools: TOOLS.map((tool) => (tool.name === 'mcp_analysis_all_usage' ? { ...tool, available: false } : tool)),
   limits: { max_rows: 1000, max_result_bytes: 1048576, query_timeout_seconds: 30, max_sql_bytes: 65536, max_memory_bytes: 1073741824, max_rows_to_read: 0, rate_limit_per_minute: 600 },
   name_pattern: '^[a-z0-9][a-z0-9_-]{0,31}$',
-  // The usage of the keys (mcp_usage.hpp): kept in mcp.usage_file, and the windows of its answers.
-  usage: { persisted: true, retention_days: 90, windows: ['1h', '6h', '24h', '7d', '30d', '90d'], default_window: '7d', since: '2026-10-01T08:00:00Z', cost_windows: ['1h', '6h', '24h', '7d'] },
+  // The usage of the keys (mcp.usage in the config): on, kept in the files of a directory that several ChDash may share, and the windows of its
+  // answers; off, only the windows of the cost stay (usageMeta below). `all_keys`: a key may be given the usage of all the keys.
+  usage: usageMeta(),
 };
+
+// The `usage` of the meta: on (this instance, the retention, the windows) or off (the windows of the cost only).
+export function usageMeta({ enabled = true, allKeys = false } = {}) {
+  if (!enabled) return { enabled: false, cost_windows: ['1h', '6h', '24h', '7d'] };
+  return {
+    enabled: true, storage: 'files', instance: 'chdash-0', retention_days: 90, windows: ['1h', '6h', '24h', '7d', '30d', '90d'], default_window: '7d',
+    since: '2026-10-01T08:00:00Z', cost_windows: ['1h', '6h', '24h', '7d'], all_keys: allKeys,
+  };
+}
+
+// Turns the usage of a server on or off, and the setting of all the keys: the usage block of the meta and the tools that depend on them
+// (the tools of the analysis of the usage are offered only while the usage is on, the one of all the keys only with `all_keys`).
+export function setUsage(server, options = {}) {
+  server.meta.usage = usageMeta(options);
+  const { enabled = true, allKeys = false } = options;
+  for (const tool of server.meta.tools) {
+    if (tool.name === 'mcp_analysis_my_usage') tool.available = enabled;
+    if (tool.name === 'mcp_analysis_all_usage') tool.available = enabled && allKeys;
+  }
+  return server;
+}
 
 // The mask of a secret as the server sends it (mcp_secret_mask): the shape of a UUID, the hint in clear.
 export const maskOf = (hint) => (/^[0-9a-f]{8}$/.test(hint) ? hint : '\u2022'.repeat(8)) + '-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-\u2022\u2022\u2022\u2022-' + '\u2022'.repeat(12);
@@ -147,22 +182,43 @@ export const DELETED = () => [{
   id: 'ui_dead00000001', name: 'old-bot', host: 'prod', source: 'ui', deleted_at: '2026-10-12T08:00:00Z', requests: 50, calls: 40, errors: 0,
   rate_limited: 0, rejected: 0, first_used_at: '2026-10-05T08:00:00Z', last_used_at: '2026-10-12T07:59:00Z',
 }];
+// A key that only another instance knows (`elsewhere`): made on the page of another ChDash that shares the usage directory. The answer that
+// lists the usage of the keys has it with the deleted ones; none by default (a spec or a picture sets `server.elsewhere`).
+export const ELSEWHERE = () => [{
+  id: 'ui_ee0000000001', name: 'etl-bot', host: 'prod', source: 'ui', deleted_at: null, elsewhere: true, requests: 15, calls: 12, errors: 0,
+  rate_limited: 0, rejected: 0, first_used_at: '2026-10-11T08:00:00Z', last_used_at: '2026-10-14T09:00:00Z',
+}];
+
+// The instances that share the usage directory, as every answer of the usage lists them (this one first): the last write of the file of each,
+// and whether it could be read ("ok", "skipped": its file is left out of the sums, "conflict": another ChDash writes under the name of this
+// one). A spec sets `server.instances`; `oneInstance(server)` is a server that has this one only.
+export const INSTANCES = () => [
+  { instance: 'chdash-0', written_at: '2026-10-14T09:59:30Z', status: 'ok', reason: '' },
+  { instance: 'chdash-1', written_at: '2026-10-14T09:58:50Z', status: 'ok', reason: '' },
+];
+export function oneInstance(server) {
+  server.instances = INSTANCES().slice(0, 1);
+  for (const c of server.cells) c.instance = 'chdash-0';
+  return server;
+}
 const usageLine = (owner, over = {}) => ({
-  id: owner.id, name: owner.name, host: owner.hosts.length === 1 ? owner.hosts[0] : '', source: owner.source, deleted_at: null,
+  id: owner.id, name: owner.name, host: owner.hosts.length === 1 ? owner.hosts[0] : '', source: owner.source, deleted_at: null, elsewhere: false,
   requests: 0, calls: 0, errors: 0, rate_limited: 0, rejected: 0, first_used_at: null, last_used_at: null, ...over,
 });
 const usageWindow = (server, window) => ({
-  window, from: new Date(geometry(window).from).toISOString().replace('.000Z', 'Z'), to: USAGE_TO, since: server.meta.usage.since, persisted: server.meta.usage.persisted,
-  retention_days: server.meta.usage.retention_days,
+  window, from: new Date(geometry(window).from).toISOString().replace('.000Z', 'Z'), to: USAGE_TO, since: server.meta.usage.since,
+  retention_days: server.meta.usage.retention_days, instances: server.instances,
 });
 export const usageSummaryOf = (server, window) => ({
   ...usageWindow(server, window),
-  keys: [...server.keys.map((owner) => usageLine(owner, server.usageOf[owner.id])), ...server.deleted],
+  // Every line says whether only another instance knows the key (`elsewhere`), as the real answer does.
+  keys: [...server.keys.map((owner) => usageLine(owner, server.usageOf[owner.id])), ...server.deleted.map((line) => ({ elsewhere: false, ...line })),
+    ...server.elsewhere.map((line) => ({ elsewhere: true, ...line }))],
 });
 // One key: one point for each step of the window (1 min to 1 day), the calls in the last one.
 export function keyUsageOf(server, id, window) {
   const owner = server.keys.find((k) => k.id === id);
-  const line = owner ? usageLine(owner, server.usageOf[owner.id]) : server.deleted.find((k) => k.id === id);
+  const line = owner ? usageLine(owner, server.usageOf[owner.id]) : [...server.deleted, ...server.elsewhere].find((k) => k.id === id);
   if (!line) return null;
   const { step, points: count, stepMs, from } = geometry(window);
   const points = Array.from({ length: count }, (_, i) => {
@@ -172,7 +228,7 @@ export function keyUsageOf(server, id, window) {
   });
   const used = line.calls > 0;
   return {
-    id: line.id, name: line.name, host: line.host, source: line.source, deleted_at: line.deleted_at,
+    id: line.id, name: line.name, host: line.host, source: line.source, deleted_at: line.deleted_at, elsewhere: line.elsewhere === true,
     first_used_at: line.first_used_at, last_used_at: line.last_used_at, ...usageWindow(server, window),
     totals: {
       requests: line.requests, calls: line.calls, errors: line.errors, rate_limited: line.rate_limited, rejected: line.rejected,
@@ -190,7 +246,7 @@ export function keyUsageOf(server, id, window) {
 // What the statements of a key cost ClickHouse (GET /api/mcp/keys/<id>/cost); the key `reporting` cannot be read (the runner lacks
 // the grant on system.query_log).
 export function costOf(server, id, window) {
-  const known = server.keys.some((k) => k.id === id) || server.deleted.some((k) => k.id === id);
+  const known = server.keys.some((k) => k.id === id) || server.deleted.some((k) => k.id === id) || server.elsewhere.some((k) => k.id === id);
   if (!known) return null;
   const hours = { '1h': 1, '6h': 6, '24h': 24, '7d': 168 }[window] || 24;
   const base = {
@@ -217,25 +273,25 @@ export function costOf(server, id, window) {
 // What the keys did, as the server keeps it: cells of one key in one minute, by kind (call, request, limited, rejected), client, method and
 // result. The answers are computed from them by the rules of the contract (docs/mcp-integration-page.md, "The Usage tab"): the window is
 // `points` steps of its own (1 h by the minute ... 90 d by the day) and a cell is in the step that holds its minute; every filter cuts the totals
-// and the series; a facet (keys, methods, results, types, clients) has all the filters but its own, lists a value that a filter picks whatever
-// its count, and keeps 200 rows; the series has five figures for each group (the requests, the errors, the tool calls and their time, the
+// and the series; a facet (keys, methods, results, types, clients, instances) has all the filters but its own, lists a value that a filter picks
+// whatever its count, and keeps 200 rows (the instances are every instance that the server knows, with zeros when it has no request); the series has five figures for each group (the requests, the errors, the tool calls and their time, the
 // bytes), the 8 biggest groups of the dimension that it groups by (the values that are picked, when that dimension is filtered) and the others
 // summed as `rest`. The checks are in the order of the real route (the window, a name that is not a parameter, the group, then each dimension:
 // de-duplicated, at most 20, valid), and a key has one last use for every window and every filter (mcp-contract.spec.js compares the shapes
 // with the real answers). A spec changes `server.cells` (a list of what the keys did) or `server.overview` (the whole answer).
-// A cell: [key id, minute, kind, client, method, result, count, the time of the calls added up (ms), the longest (ms), rows, bytes]. A client
-// that a cell leaves out is `unknown`.
-export const cell = (keyId, at, kind, client, method, result, count, ms = 0, max = 0, rows = 0, bytes = 0) => ({ key: keyId, at: Date.parse(`${at}:00Z`), kind, client, method, result, count, ms, max, rows, bytes });
+// A cell: [key id, minute, kind, client, method, result, count, the time of the calls added up (ms), the longest (ms), rows, bytes, instance].
+// A client that a cell leaves out is `unknown`; the instance is the one whose file holds the cell (this one, `chdash-0`, by default).
+export const cell = (keyId, at, kind, client, method, result, count, ms = 0, max = 0, rows = 0, bytes = 0, instance = 'chdash-0') => ({ key: keyId, at: Date.parse(`${at}:00Z`), kind, client, method, result, count, ms, max, rows, bytes, instance });
 export const CELLS = () => [
   // ops-all, the busy key of the config file: the last hour (by the minute), 6 h, 24 h, 7 d and 30 d
   cell('ops-all', '2026-10-14T09:31', 'call', 'claude-code', 'query_table', 'ok', 400, 6000, 380, 1200, 400000),
   cell('ops-all', '2026-10-14T09:31', 'call', 'claude-code', 'query_table', 'table_not_allowed', 2, 8, 5, 0, 600),
-  cell('ops-all', '2026-10-14T09:58', 'call', 'mcp-inspector', 'list_hosts', 'ok', 40, 160, 9, 0, 24000),
-  cell('ops-all', '2026-10-14T09:15', 'request', 'mcp-inspector', 'tools/list', 'ok', 60, 90, 4, 0, 300000),
-  cell('ops-all', '2026-10-14T09:15', 'request', 'mcp-inspector', 'initialize', 'ok', 20, 60, 6, 0, 8000),
+  cell('ops-all', '2026-10-14T09:58', 'call', 'mcp-inspector', 'list_hosts', 'ok', 40, 160, 9, 0, 24000, 'chdash-1'),
+  cell('ops-all', '2026-10-14T09:15', 'request', 'mcp-inspector', 'tools/list', 'ok', 60, 90, 4, 0, 300000, 'chdash-1'),
+  cell('ops-all', '2026-10-14T09:15', 'request', 'mcp-inspector', 'initialize', 'ok', 20, 60, 6, 0, 8000, 'chdash-1'),
   cell('ops-all', '2026-10-14T09:44', 'request', 'claude-code', 'ping', 'ok', 100, 50, 2, 0, 4000),
-  cell('ops-all', '2026-10-14T08:20', 'call', 'claude-code', 'run_query', 'ok', 30, 3600, 900, 3000, 90000),
-  cell('ops-all', '2026-10-14T08:20', 'call', 'claude-code', 'run_query', 'sql_error', 5, 150, 60, 0, 2500),
+  cell('ops-all', '2026-10-14T08:20', 'call', 'claude-code', 'run_query', 'ok', 30, 3600, 900, 3000, 90000, 'chdash-1'),
+  cell('ops-all', '2026-10-14T08:20', 'call', 'claude-code', 'run_query', 'sql_error', 5, 150, 60, 0, 2500, 'chdash-1'),
   cell('ops-all', '2026-10-13T15:40', 'call', 'claude-code', 'describe_table', 'ok', 25, 250, 30, 0, 50000),
   cell('ops-all', '2026-10-13T15:40', 'request', 'claude-code', 'notifications/initialized', 'ok', 20, 10, 1, 0, 0),
   // 7 d and 30 d
@@ -250,9 +306,9 @@ export const CELLS = () => [
   cell('ui_0a1b2c3d4e5f', '2026-10-13T12:20', 'request', 'Visual Studio Code', 'initialize', 'ok', 3, 9, 4, 0, 1200),
   cell('ui_0a1b2c3d4e5f', '2026-10-13T12:20', 'request', 'Visual Studio Code', 'tools/list', 'ok', 5, 10, 3, 0, 20000),
   // legacy: no clientInfo, the User-Agent of python-httpx; a refusal of the rate limit, and a method that the vocabulary does not know
-  cell('ui_legacy000000', '2026-10-14T07:30', 'call', 'python-httpx', 'list_hosts', 'ok', 25, 100, 8, 0, 15000),
-  cell('ui_legacy000000', '2026-10-14T07:30', 'limited', 'python-httpx', 'unread', '429_rate_limited', 2, 0, 0, 0, 200),
-  cell('ui_legacy000000', '2026-10-14T07:30', 'request', 'python-httpx', 'other', 'rpc_error_32601', 1, 1, 1, 0, 150),
+  cell('ui_legacy000000', '2026-10-14T07:30', 'call', 'python-httpx', 'list_hosts', 'ok', 25, 100, 8, 0, 15000, 'chdash-1'),
+  cell('ui_legacy000000', '2026-10-14T07:30', 'limited', 'python-httpx', 'unread', '429_rate_limited', 2, 0, 0, 0, 200, 'chdash-1'),
+  cell('ui_legacy000000', '2026-10-14T07:30', 'request', 'python-httpx', 'other', 'rpc_error_32601', 1, 1, 1, 0, 150, 'chdash-1'),
   // a deleted key keeps its usage; its client said nothing about itself
   cell('ui_dead00000001', '2026-10-12T07:30', 'call', 'unknown', 'query_table', 'ok', 40, 600, 50, 120, 40000),
   cell('ui_dead00000001', '2026-10-12T07:30', 'rejected', 'unknown', 'unread', '413_payload_too_large', 1, 0, 0, 0, 120),
@@ -269,11 +325,12 @@ export const CLIENTS = () => [
   { key: 'ui_legacy000000', client: 'python-httpx', version: '0.27.0', first: '2026-10-10T10:00:00Z', last: '2026-10-14T07:30:00Z' },
 ];
 
-const DIMENSIONS = ['key', 'method', 'client', 'result', 'type'];
+const DIMENSIONS = ['key', 'method', 'client', 'instance', 'result', 'type'];
 const VALID = {
   key: /^[a-z0-9][a-z0-9_-]*$/,
   method: /^[A-Za-z0-9_/]{1,64}$/,
   client: /^[\x21-\x7e](?:[\x20-\x7e]{0,62}[\x21-\x7e])?$/,
+  instance: /^[A-Za-z0-9._-]{1,64}$/,
   result: /^[a-z0-9_]{1,64}$/,
   type: /^(?:call|request|limited|rejected)$/,
 };
@@ -301,7 +358,7 @@ export function overviewOf(server, params) {
     if (!['window', 'group', ...DIMENSIONS].includes(name)) return invalid(name, 'unknown', `unknown parameter: ${name}`);
   }
   const group = params.has('group') ? params.get('group') : 'method';
-  if (!DIMENSIONS.includes(group)) return invalid('group', 'invalid', 'group must be key, method, client, result or type');
+  if (!DIMENSIONS.includes(group)) return invalid('group', 'invalid', 'group must be key, method, client, instance, result or type');
   // Each dimension: the repeated values once each (the first one stays), at most 20, each one valid.
   const filters = {};
   for (const dimension of DIMENSIONS) {
@@ -312,9 +369,9 @@ export function overviewOf(server, params) {
   }
 
   const { step, points, stepMs, from } = geometry(window);
-  const names = new Map([...server.keys, ...server.deleted].map((owner) => [owner.id, owner.name]));
+  const names = new Map([...server.keys, ...server.deleted, ...server.elsewhere].map((owner) => [owner.id, owner.name]));
   const clientOf = (c) => c.client || 'unknown';
-  const valueOf = (dimension, c) => (dimension === 'key' ? c.key : dimension === 'type' ? c.kind : dimension === 'client' ? clientOf(c) : c[dimension]);
+  const valueOf = (dimension, c) => (dimension === 'key' ? c.key : dimension === 'type' ? c.kind : dimension === 'client' ? clientOf(c) : dimension === 'instance' ? c.instance || 'chdash-0' : c[dimension]);
   // The cells of the window that every filter but `skip` lets through.
   const inWindow = server.cells.filter((c) => c.at >= from && c.at < from + points * stepMs);
   const cut = (skip) => inWindow.filter((c) => DIMENSIONS.every((dimension) => dimension === skip || !filters[dimension].length || filters[dimension].includes(valueOf(dimension, c))));
@@ -339,7 +396,8 @@ export function overviewOf(server, params) {
   // The totals and the series: every filter. A step has the requests and the bytes of every request, the errors, the calls and the time of
   // the calls from the cells that count them.
   const all = cut(null);
-  const totals = { ...figures(all), active_keys: distinct(all, 'key'), keys: server.keys.length };
+  // `keys`: the keys that exist, those of this instance and those that only another instance knows (not the deleted ones), whichever instance answers.
+  const totals = { ...figures(all), active_keys: distinct(all, 'key'), keys: server.keys.length + server.elsewhere.length };
   const metric = (list, pick, keep = () => true) => {
     const out = new Array(points).fill(0);
     for (const c of list) if (keep(c)) out[Math.floor((c.at - from) / stepMs)] += pick(c);
@@ -381,10 +439,12 @@ export function overviewOf(server, params) {
   const keys = facet('key', 'id', (c) => c.key, (id, list) => {
     const owner = server.keys.find((k) => k.id === id);
     const gone = server.deleted.find((k) => k.id === id);
+    const apart = server.elsewhere.find((k) => k.id === id);
     const own = server.cells.filter((c) => c.key === id);
     return {
-      id, name: names.get(id) || id, host: owner && owner.hosts.length === 1 ? owner.hosts[0] : gone ? gone.host : '', source: (owner || gone || { source: '' }).source,
-      deleted_at: gone ? gone.deleted_at : null, ...figures(list), last_used_at: newest(own.map((c) => c.at)),
+      id, name: names.get(id) || id, host: owner && owner.hosts.length === 1 ? owner.hosts[0] : (gone || apart) ? (gone || apart).host : '',
+      source: (owner || gone || apart || { source: '' }).source,
+      deleted_at: gone ? gone.deleted_at : null, elsewhere: !owner && !gone && !!apart, ...figures(list), last_used_at: newest(own.map((c) => c.at)),
     };
   }, (a, b) => b.requests - a.requests || (a.name < b.name ? -1 : 1));
   // A method row has times when it has requests (the refused ones too), and none when a filter picked a method that nothing matches.
@@ -405,11 +465,23 @@ export function overviewOf(server, params) {
     return { client: id, ...figures(list), keys: owners.size, versions: [...new Set(kept.map((record) => record.version))].slice(0, 5), last_seen_at: kept.length ? kept[0].last : null };
   }, (a, b) => b.requests - a.requests || (a.client < b.client ? -1 : 1));
 
+  // Every instance that the server knows, this one first, with the state of its file and its figures (zeros when it has no request in the view),
+  // and the ones that a filter picks.
+  const instanceList = cut('instance');
+  const known = server.instances.map((item) => item.instance);
+  for (const c of server.cells) if (!known.includes(valueOf('instance', c))) known.push(valueOf('instance', c));
+  const instances = [...new Set([...known, ...filters.instance])].map((id) => {
+    const info = server.instances.find((item) => item.instance === id);
+    const list = instanceList.filter((c) => valueOf('instance', c) === id);
+    return { instance: id, status: info ? info.status : known.includes(id) ? 'ok' : 'unknown', reason: info ? info.reason : '', written_at: info ? info.written_at : null, ...figures(list), keys: distinct(list, 'key') };
+  });
+  omitted.instance = 0;
+
   return {
     status: 200,
     body: {
-      ...usageWindow(server, window), group, filters, totals, series, keys, methods, results, types, clients,
-      omitted: { keys: omitted.key, methods: omitted.method, results: omitted.result, clients: omitted.client },
+      ...usageWindow(server, window), group, filters, totals, series, keys, methods, results, types, clients, instances,
+      omitted: { keys: omitted.key, methods: omitted.method, results: omitted.result, clients: omitted.client, instances: omitted.instance },
     },
   };
 }
@@ -417,7 +489,7 @@ export function overviewOf(server, params) {
 // The server: meta and keys in memory; every call recorded. `errors` makes the next call of a route fail.
 export function newServer(over = {}) {
   const server = { keys: KEYS(), calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, access: reachOf, summary: summaryOf,
-    usageOf: USAGE_OF, deleted: DELETED(), usage: usageSummaryOf, keyUsage: keyUsageOf, cost: costOf, cells: CELLS(), clients: CLIENTS(), overview: overviewOf, ...over };
+    usageOf: USAGE_OF, deleted: DELETED(), elsewhere: [], instances: INSTANCES(), usage: usageSummaryOf, keyUsage: keyUsageOf, cost: costOf, cells: CELLS(), clients: CLIENTS(), overview: overviewOf, ...over };
   server.meta = { ...structuredClone(META), ...(over.meta || {}) };
   return server;
 }
@@ -460,6 +532,9 @@ export async function install(page, server) {
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     if (method === 'GET' && path === '/meta') return json(route, 200, server.meta);
     if (!server.meta.enabled) return json(route, 404, { error_code: 'mcp_disabled', message: 'MCP is turned off.', retryable: false });
+    // The usage is off (mcp.usage.enabled): its three routes answer 404 not_enabled. The cost of a key does not depend on it.
+    const usageRoute = method === 'GET' && (path === '/usage' || path === '/usage/overview' || /^\/keys\/[^/]+\/usage$/.test(path));
+    if (usageRoute && !server.meta.usage.enabled) return json(route, 404, { error_code: 'not_enabled', message: 'The usage of the keys is off (mcp.usage.enabled is false).', retryable: false });
     if (method === 'GET' && path === '/keys') return json(route, 200, { keys: server.keys });
     if (method === 'GET' && path === '/access') return json(route, 200, server.summary(server.keys));
     if (method === 'POST' && path === '/keys') {

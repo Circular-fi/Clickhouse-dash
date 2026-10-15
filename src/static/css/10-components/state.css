@@ -120,6 +120,14 @@
   color: var(--text);
 }
 
+/* A warning (level "warn"): something is wrong and the view still works (an instance file of the MCP usage that was left out of the
+   figures). The warning tint, the text colour. */
+.uiBanner--warn {
+  border-bottom-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+  background: var(--warning-bg);
+  color: var(--text);
+}
+
 /* Inside a padded view (the Explorer Storage view): a box, not a strip. */
 .uiBanner--inset {
   padding: var(--space-6) var(--space-10);
@@ -128,6 +136,8 @@
 }
 
 .uiBanner--inset.uiBanner--info { border-color: var(--border); }
+
+.uiBanner--inset.uiBanner--warn { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
 
 /* The Query result error: the server's sentence, cleaned up
    (util.queryErrorParts), in mono as the server wrote it; long parser text

@@ -10,7 +10,8 @@
 // changed). The details of a key open under its row (app_mcp_view.js). The keys (#mcpKeys, with the New key and Refresh buttons in its heading) and
 // the side column (#mcpSide) are drawn again after every change; #mcpState holds the loading, the
 // error and the "MCP is off" states. The page list of the switcher shows MCP only when /api/version reports
-// features.mcp.enabled; a page opened with MCP off shows the HCL block that turns it on.
+// features.mcp.enabled; a page opened with MCP off shows the HCL block that turns it on. While the usage is off (meta.usage.enabled) the keys
+// have no column Used, no line of keys that keep usage and no usage in their details (the ClickHouse cost stays), and nothing reads it.
 
 import "./app_common.js";
 import { api } from "./app_api.js";
@@ -24,8 +25,8 @@ import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
 // openKeyId: the key whose details show; filterText: the text of the keys filter (both survive a redraw of the list).
-// usage: what each key did (the column Used, the deleted keys); deletedOpen, openDeletedId: the list of the deleted keys is open, and
-// the deleted key whose details show.
+// usage: what each key did (the column Used, the keys that keep usage); deletedOpen, openDeletedId: the list of the keys that keep usage is
+// open, and the key of that list whose details show.
 const state = { meta: null, keys: [], status: "loading", error: null, access: null, usage: null, openKeyId: "", filterText: "", deletedOpen: false, openDeletedId: "" };
 // Every read is cancelable (util.latest): "mcp.state" is the meta and the keys (a load or a reload: the newest wins and
 // aborts the one in flight), "mcp.access" the counts of the data of the keys, "mcp.usage" what the keys did.
@@ -44,9 +45,10 @@ const actions = () => ({
 // The window of the column Used: the last 7 days (the last 24 hours when the retention is shorter).
 const usageWindow = () => (state.meta?.usage?.windows?.includes("7d") ? "7d" : state.meta?.usage?.defaultWindow || "24h");
 
-// What each key did, asked once for all the keys after the table is drawn: the column Used, and the deleted keys that keep usage.
+// What each key did, asked once for all the keys after the table is drawn: the column Used, and the keys that keep usage without being in the
+// list (deleted, or known to another instance only). Nothing is asked while the usage is off.
 async function loadUsage() {
-  if (state.status !== "ready") {
+  if (state.status !== "ready" || !state.meta?.usage?.enabled) {
     util.latest.cancel("mcp.usage");
     return;
   }
@@ -59,6 +61,12 @@ async function loadUsage() {
   } catch (error) {
     if (!req.isCurrent()) return;
     state.usage = null;
+    // The usage was turned off after the meta was read (a restart): the keys are drawn again as they are with the usage off.
+    if (error?.mcp?.code === "not_enabled") {
+      state.meta = { ...state.meta, usage: { ...state.meta.usage, enabled: false } };
+      renderKeys();
+      return;
+    }
     mcpView.fillUsage(dom.byId("mcpKeys"), null, util.errorText(error, "The use of the keys could not be read."));
     mcpView.renderDeleted(dom.byId("mcpKeys"), null, liveView, actions());
   }
@@ -312,6 +320,7 @@ import * as h_api from "./app_api.js";
 import * as h_route_notice from "./app_route_notice.js";
 import * as h_boot from "./app_boot.js";
 import * as h_header from "./app_header.js";
+import * as h_mcp_instances from "./app_mcp_instances.js";
 import * as h_mcp_view from "./app_mcp_view.js";
 import * as h_mcp_usage from "./app_mcp_usage.js";
 import * as h_ui_dialog from "./app_ui_dialog.js";
@@ -347,6 +356,7 @@ h_loader.loader.expose([
   h_route_notice,
   h_boot,
   h_header,
+  h_mcp_instances,
   h_mcp_view,
   h_mcp_usage,
   h_ui_dialog,

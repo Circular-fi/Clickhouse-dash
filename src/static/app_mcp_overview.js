@@ -1,14 +1,17 @@
 // The Usage tab of the MCP pages (mcpusage.html, /mcp-integration/usage, docs/mcp-integration-page.md, "The Usage tab"): what every key did.
-// A filter bar at the top (app_mcp_bar.js: Group by key, method or client, a picker for each of the three, the window, Refresh), the tiles of
+// A filter bar at the top (app_mcp_bar.js: Group by key, method or client, a picker for each of the four, the window, Refresh), the tiles of
 // the whole, four charts over time that the Group by groups (app_mcp_charts.js: the requests, the errors, the time of a call and the bytes
 // returned), and a table for each of the four dimensions that the tables list (key, method, client, result). A filter is a value of a
 // dimension: a chip, a picker of the bar, an entry of a chart legend or a row of a table adds or removes it, and every figure of the page
-// follows (the values of one dimension match any of them, the dimensions all of them).
-// The whole state is in the address (?window=&group=&key=&method=&client=&result=&type=, one parameter for each value): a link says what it
-// shows, and Back and Forward walk through the filters. Nothing runs on a timer: the usage is read when the page opens, on a change and
-// with Refresh (the pickers of the bar wait for the clicks to pause, once, before they read).
+// follows (the values of one dimension match any of them, the dimensions all of them). The instance is a dimension of the bar and the chips
+// only: ChDash instances that share the usage directory add up (app_mcp_instances.js), and the filter cuts one of them out.
+// The whole state is in the address (?window=&group=&key=&method=&client=&instance=&result=&type=, one parameter for each value): a link says
+// what it shows, and Back and Forward walk through the filters. Nothing runs on a timer: the usage is read when the page opens, on a change
+// and with Refresh (the pickers of the bar wait for the clicks to pause, once, before they read).
 //
-//   ns.mcpOverview.show(root, { meta })   draws the tab in `root` the first time, then reads the usage (again when it is shown again)
+//   ns.mcpOverview.show(root, { meta, onOff })   draws the tab in `root` the first time, then reads the usage (again when it is shown again);
+//                                         onOff() is called when the server says that the usage is off (404 not_enabled: the meta is older
+//                                         than a restart): the caller hides the tab and says so
 //   ns.mcpOverview.hide()                 hides the tab and stops its reads
 //
 // The server (app_api.js, getMcpUsageOverview) cuts the usage. The tiles and the charts have every filter. The table of a dimension, and the
@@ -20,12 +23,17 @@
 //
 // Nothing moves when a filter is added or removed, or when the next answer comes: the chips are one line that is always there (a hint when
 // there is no filter), the cards of the charts keep one height (app_mcp_charts.js), and so do the tiles (mcp.css).
+//
+// The instances: with two or more, the head says "3 instances" (a button that lists them with their last write and their requests in the view),
+// and a file that is left out of the sum, or a name that two ChDash write under, is a warning above the tiles. Both come from the answer's
+// `instances`, which no filter but the instance's own changes, so they stay put while the filters do.
 
 import { api } from "./app_api.js";
 import { dom, h, shell } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { mcpBar } from "./app_mcp_bar.js";
 import { mcpCharts } from "./app_mcp_charts.js";
+import { mcpInstances } from "./app_mcp_instances.js";
 import { router } from "./app_router.js";
 import { badge } from "./app_ui_badge.js";
 import { stat } from "./app_ui_stat.js";
@@ -37,25 +45,27 @@ const EMPTY = format.EMPTY;
 const SLOT = "mcp.overview";
 const PATH = "/mcp-integration/usage";
 // The dimensions that a filter has, in the order of the address; the charts are grouped by one of the first three (what the bar offers).
-const DIMENSIONS = ["key", "method", "client", "result", "type"];
+const DIMENSIONS = ["key", "method", "client", "instance", "result", "type"];
 const GROUPS = [{ value: "key", label: "Key" }, { value: "method", label: "Method" }, { value: "client", label: "Client" }];
 const DEFAULT_GROUP = "method";
 // The server takes 20 values of a kind at most (a 400 `too_many` above).
 const MAX_VALUES = mcpBar.MAX_VALUES;
 // What the server accepts for a value of each dimension (a 400 `invalid` for the others): the id of a key (the name of a key of the
 // configuration, which never starts with "ui_", or "ui_" and 12 hexadecimal digits), the name of a tool or of a method of the protocol, the
-// name of a client (printable ASCII, 1 to 64 characters, no space at either end), a result code, a type.
+// name of a client (printable ASCII, 1 to 64 characters, no space at either end), the name of an instance (the name of its file: letters,
+// digits, dot, hyphen and underscore, 1 to 64 characters), a result code, a type.
 const VALID = {
   key: /^(?:ui_[0-9a-f]{12}|(?!ui_)[a-z0-9][a-z0-9_-]{0,31})$/,
   method: /^[A-Za-z0-9_/]{1,64}$/,
   client: /^[\x21-\x7e](?:[\x20-\x7e]{0,62}[\x21-\x7e])?$/,
+  instance: /^[A-Za-z0-9._-]{1,64}$/,
   result: /^[a-z0-9_]{1,64}$/,
   type: /^(?:call|request|limited|rejected)$/,
 };
-const DIMENSION_LABEL = { key: "Key", method: "Method", client: "Client", result: "Result", type: "Type" };
+const DIMENSION_LABEL = { key: "Key", method: "Method", client: "Client", instance: "Instance", result: "Result", type: "Type" };
 // The values that an answer lists for a dimension that can be picked (its facet: every filter but its own). The type has no list, row or
-// legend to pick it from.
-const FACET = { key: (data) => data.keys, method: (data) => data.methods, client: (data) => data.clients, result: (data) => data.results };
+// legend to pick it from, and the instance has no table or legend: its list is in the bar.
+const FACET = { key: (data) => data.keys, method: (data) => data.methods, client: (data) => data.clients, instance: (data) => data.instances, result: (data) => data.results };
 // The four kinds of request (the `type` of the server): what each one is, for the chip and the tooltip.
 const TYPE_LABEL = { call: "Tool calls", request: "Protocol", limited: "Rate limited", rejected: "Rejected" };
 const TYPE_TITLE = {
@@ -95,7 +105,7 @@ const model = {
   meta: null,
   window: "",
   group: DEFAULT_GROUP,
-  filters: { key: [], method: [], client: [], result: [], type: [] },
+  filters: { key: [], method: [], client: [], instance: [], result: [], type: [] },
   data: null,
   error: null,
   loading: false,
@@ -107,6 +117,9 @@ const model = {
 const els = { blocks: {} };
 let bar = null;
 let charts = null;
+let instances = null;
+// What the caller does when the server says that the usage is off.
+let onOff = null;
 // The chips on screen (their values and names), to draw them again only when they change.
 let chipsDrawn = "";
 let chipsShown = [];
@@ -229,6 +242,12 @@ async function load() {
   } catch (error) {
     if (!req.isCurrent() || util.isAbort(error)) return;
     model.data = null;
+    // The usage was turned off after the meta was read (a restart): the tab is the "Usage is off" state, not an error.
+    if (error?.mcp?.code === "not_enabled" && onOff) {
+      model.loading = false;
+      onOff();
+      return;
+    }
     model.error = error;
   } finally {
     if (req.isCurrent()) model.loading = false;
@@ -244,8 +263,9 @@ async function load() {
 
 // --- Page ----------------------------------------------------------------------------------
 
-function show(root, { meta }) {
+function show(root, { meta, onOff: off = null }) {
   model.meta = meta;
+  onOff = off;
   if (!mounted) {
     mounted = true;
     build(root);
@@ -266,6 +286,7 @@ function hide() {
   if (!mounted) return;
   scheduleChange.cancel();
   charts.destroy();
+  instances.destroy();
   // Shown again, the tab reads again and says so: it does not show what it read before.
   model.data = null;
   model.error = null;
@@ -291,6 +312,7 @@ function describe() {
 function build(root) {
   els.root = root;
   els.range = h("span", { class: "mcpMuted mcpOverview__range" });
+  instances = mcpInstances.create();
   bar = mcpBar.create({
     groups: GROUPS,
     labelOf: valueLabel,
@@ -327,11 +349,12 @@ function build(root) {
     h("div", { class: "mcpOverview__col" }, blockOf("results"), blockOf("clients")));
   els.tables.addEventListener("click", onRowClick);
   els.notes = h("div", { class: "mcpOverview__notes" });
-  els.content = h("div", { class: "mcpOverview__content" }, els.tiles, els.charts, els.tables, els.notes);
+  els.warnings = h("div", { class: "mcpOverview__warnings", hidden: true });
+  els.content = h("div", { class: "mcpOverview__content" }, els.warnings, els.tiles, els.charts, els.tables, els.notes);
   els.body = h("div", { class: "mcpOverview__body" }, els.state, els.content);
 
   root.replaceChildren(h("section", { class: "pagePart mcpOverview__part", "aria-labelledby": "mcpOverviewTitle" },
-    h("div", { class: "pagePart__head mcpOverview__head" }, h("h2", { class: "pagePart__title", id: "mcpOverviewTitle" }, "Usage of all keys"), els.range),
+    h("div", { class: "pagePart__head mcpOverview__head" }, h("h2", { class: "pagePart__title", id: "mcpOverviewTitle" }, "Usage of all keys"), els.range, instances.el),
     els.body));
 }
 
@@ -348,6 +371,7 @@ function render() {
     showState(true);
   } else if (!model.loading) {
     showState(false);
+    mcpInstances.warn(els.warnings, model.data.instances);
     renderTiles(model.data);
     renderCharts(model.data);
     for (const id of Object.keys(TABLES)) renderTable(id);
@@ -366,10 +390,13 @@ function showState(on) {
 
 function syncControls() {
   bar.sync({ group: model.group, window: model.window, filters: model.filters, data: model.data,
-    offered: { key: offered("key"), method: offered("method"), client: offered("client") } });
+    offered: { key: offered("key"), method: offered("method"), client: offered("client"), instance: offered("instance") } });
   const data = model.data;
   const from = data && data.since != null && data.from != null ? Math.max(data.from, data.since) : data?.from;
   els.range.textContent = data && from != null && data.to != null ? format.range(from, data.to) : "";
+  // "3 instances" in the head, from the answer that is on screen (nothing before the first one).
+  instances.update(data ? data.instances : [], { me: model.meta?.usage?.instance || "", now: data?.to ?? NaN,
+    requests: data ? new Map(data.instances.map((row) => [row.instance, row.requests])) : null });
   renderChips();
 }
 
@@ -716,8 +743,7 @@ function renderTable(id) {
 
 function renderNotes(data) {
   const notes = [];
-  if (!data.persisted) notes.push(`Counted in memory${data.since != null ? ` since ${minute(data.since)}` : ""}, when ClickHouse Dash started: a restart clears it.`);
-  else if (data.since != null && data.from != null && data.since > data.from) notes.push(`Counted since ${minute(data.since)}.`);
+  if (data.since != null && data.from != null && data.since > data.from) notes.push(`Counted since ${minute(data.since)}.`);
   notes.push("The rows are those of the tools that build their own SQL: an API tool counts no row.");
   h.replace(els.notes, notes.map((text) => h("p", { class: "mcpNote mcpNote--fine" }, text)));
 }

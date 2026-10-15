@@ -4,17 +4,19 @@ import { installObservers, unexpectedFailures } from '../helpers/observability.j
 import { horizontalOverflow } from '../helpers/app.js';
 import { chartJson } from '../helpers/charts.js';
 import { fetchedModules } from '../helpers/modules.js';
-import { CELLS, META, cell, geometry, install, newServer, overviewOf } from '../helpers/mcp-fake.js';
+import { CELLS, META, cell, geometry, install, newServer, oneInstance, overviewOf, setUsage } from '../helpers/mcp-fake.js';
 
 // The Usage tab of the MCP pages (mcpusage.html, /mcp-integration/usage, docs/mcp-integration-page.md, "The Usage tab"): what every key did,
-// cut by key, method, client, result and type. The server side is the in-memory server of helpers/mcp-fake.js, which computes the answers of
-// GET /api/mcp/usage/overview from a small list of cells by the rules of the contract (the windows and their steps, the facets, the series
-// with five figures and `rest`, the filters and the refusals are real), so the page is tested against behaviour and not against one frozen
-// answer. mcp-contract.spec.js compares that answer with the real one.
+// cut by key, method, client, instance, result and type. The server side is the in-memory server of helpers/mcp-fake.js, which computes the
+// answers of GET /api/mcp/usage/overview from a small list of cells by the rules of the contract (the windows and their steps, the facets, the
+// series with five figures and `rest`, the filters and the refusals are real), so the page is tested against behaviour and not against one
+// frozen answer. mcp-contract.spec.js compares that answer with the real one.
 // The cells of the fake: 1,101 requests in the last 7 days (889 tool calls, 11 errors, 3 refused), 622 of them in the last hour, four keys of
-// five (one deleted), ten methods, six results, five clients; the last answer is at 2026-10-14T10:00:00Z, so "2 min ago" reads the same
-// whatever the clock. The windows are the server's: 1 h by the minute, 6 h by 5 minutes, 24 h by 15 minutes, 7 d by 3 hours, 30 d by 12 hours,
-// 90 d (and 365 d) by the UTC day.
+// five (one deleted), ten methods, six results, five clients, two instances (chdash-0 wrote 918 of the requests, chdash-1 183); the last
+// answer is at 2026-10-14T10:00:00Z, so "2 min ago" reads the same whatever the clock. The windows are the server's: 1 h by the minute, 6 h
+// by 5 minutes, 24 h by 15 minutes, 7 d by 3 hours, 30 d by 12 hours, 90 d (and 365 d) by the UTC day. The usage has the three states of the
+// server: on with two instances (the default), on with one (`oneInstance`) and off (`setUsage`: the tab says "Usage is off" and asks for
+// nothing but the meta).
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -61,7 +63,45 @@ const legendIds = (page, id = 'requests') => legend(page, id).evaluateAll((items
 const entry = (page, series, id = 'requests') => chartBox(page, id).locator(`.chartCore__legendItem[data-series="${series}"]`);
 const swatch = (page, series, id = 'requests') => entry(page, series, id).locator('i').evaluate((el) => getComputedStyle(el).backgroundColor);
 const titles = (page) => Promise.all(CHARTS.map((id) => card(page, id).locator('.chartCard__title').textContent()));
-// The bar: Group by, the three lists, the window, Refresh.
+// The height of each of the four cards: the same for all of them, whatever they hold (a chart, a legend that scrolls, an empty chart, an empty window).
+const cardHeights = (page) => page.locator('.mcpOverview__card').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+// Two lists of measures (px) are the same one within half a pixel, entry by entry: the pairs that differ are in the message of the failure.
+const expectNear = (actual, expected, message) => {
+  expect(actual, message).toHaveLength(expected.length);
+  expect(actual.map((value, i) => [value, expected[i]]).filter(([a, b]) => !(Math.abs(a - b) <= 0.5)), message).toEqual([]);
+};
+// Where the parts of the page stand, for the cases that say that nothing moves: the tops of the tiles, of the cards and of the tables counted from
+// the head of the tab (so that the scroll of the panel does not count), their heights, and the chips row and the panel from the top of the
+// window (they are out of what scrolls). `busy` says whether a read was running when the measures were taken (all are taken in one go).
+const layout = (page) => page.evaluate(() => {
+  const box = (el) => el.getBoundingClientRect();
+  const origin = box(document.querySelector('.mcpOverview__head')).top;
+  const tops = (selector) => [...document.querySelectorAll(selector)].map((el) => box(el).top - origin);
+  const heights = (selector) => [...document.querySelectorAll(selector)].map((el) => box(el).height);
+  const chipsRow = box(document.querySelector('.mcpOverview__filters'));
+  const tables = document.querySelector('.mcpOverview__tables');
+  const blocks = [...tables.querySelectorAll('.mcpOverview__block')];
+  // The first table of each column never moves (the one under it follows the length of the one above): one column under 1280 px, two from there.
+  const firsts = getComputedStyle(tables).gridTemplateColumns.split(' ').length === 2 ? [blocks[0], blocks[2]] : [blocks[0]];
+  return {
+    busy: document.querySelector('.mcpOverview__body').getAttribute('aria-busy') === 'true',
+    stands: {
+      'the chips row': [chipsRow.top, chipsRow.height],
+      'the panel': [box(document.querySelector('#mcpPanel')).top],
+      'the tiles': tops('.mcpOverview__tiles .statTile'),
+      'the height of the tiles': heights('.mcpOverview__tiles .statTile'),
+      'the cards': tops('.mcpOverview__card'),
+      'the height of the cards': heights('.mcpOverview__card'),
+      'the tables': [box(tables).top - origin, ...firsts.map((el) => box(el).top - origin)],
+    },
+  };
+});
+// What of `now` is not what `base` says, by more than half a pixel, as sentences ([] when nothing moved).
+const moved = (base, now) => Object.entries(base).flatMap(([name, values]) => values
+  .map((value, i) => [`${name}[${i}]`, value, now[name]?.[i]])
+  .filter(([, before, after]) => !(Math.abs(before - after) <= 0.5))
+  .map(([label, before, after]) => `${label}: ${before.toFixed(1)} -> ${Number(after).toFixed(1)}`));
+// The bar: Group by, the four lists (key, method, client, instance), the window, Refresh.
 const groupButton = (page) => page.locator('#mcpGroupButton');
 const groupOption = (page, value) => page.locator(`.mcpBar__groupPicker .tracePicker__option[data-value="${value}"]`);
 const pickGroup = async (page, value) => {
@@ -103,8 +143,9 @@ test('the Usage page is a page of its own, and the row of links joins it to the 
   state.scripts = await fetchedModules(page);
   expect(state.page).toBe('mcpusage');
   expect(state.sheets).toEqual(['style.mcpusage.css']);
-  // The bar is the shared filter bar (app_ui_filterbar.js) and the charts the shared engine; the pages of other families are not loaded.
-  for (const name of ['app_page_mcpusage.js', 'app_mcp_overview.js', 'app_mcp_bar.js', 'app_mcp_charts.js', 'app_mcp_view.js', 'app_ui_filterbar.js', 'app_chart_core.js', 'app_api.js']) expect(state.scripts, name).toContain(name);
+  // The bar is the shared filter bar (app_ui_filterbar.js) and the charts the shared engine; the instances (the "2 instances" note and the
+  // warnings, app_mcp_instances.js) are a module of the page; the pages of other families are not loaded.
+  for (const name of ['app_page_mcpusage.js', 'app_mcp_overview.js', 'app_mcp_bar.js', 'app_mcp_charts.js', 'app_mcp_instances.js', 'app_mcp_view.js', 'app_ui_filterbar.js', 'app_chart_core.js', 'app_api.js']) expect(state.scripts, name).toContain(name);
   for (const name of ['app_page_mcp.js', 'app_mcp_form.js', 'app_mcp_usage.js', 'app_ui_dialog.js', 'app_logs.js', 'app_system_view.js', 'app_explorer.js']) expect(state.scripts, name).not.toContain(name);
   expect(new Set(state.scripts).size).toBe(state.scripts.length);
   await expect(page.locator('#hostPicker')).toBeHidden();
@@ -117,28 +158,41 @@ test('the Usage page is a page of its own, and the row of links joins it to the 
   await expect(page.locator('#mcpTabs [aria-current="page"]')).toHaveText('Usage');
   await expect(page.locator('#mcpTab-usage')).toHaveClass(/is-active/);
   await expect(page.locator('.mcpPage__nav')).toHaveAttribute('aria-label', 'MCP sections');
-  // The row is the nav row of the page, as System's is: as tall as it, under the header; the filter bar is right under it, the panel under
-  // the bar (no filter, no chips row), and the bar is not part of what a drawer starts under (--shell-top).
+  // The row is the nav row of the page, as System's is: as tall as it, under the header; the filter bar is right under it, then the chips row
+  // (always there, 35 px: with no filter it holds a hint), then the panel, which starts 35 px under the bar; the bar is not part of what a
+  // drawer starts under (--shell-top).
   const stack = await page.evaluate(() => {
     const box = (selector) => document.querySelector(selector).getBoundingClientRect();
     return {
       height: box('.mcpPage__nav').height,
       top: box('.mcpPage__nav').top - box('body > .appHeader').bottom,
       barTop: box('#mcpBar').top - box('.mcpPage__nav').bottom,
-      // No filter: the chips row is hidden, and the panel starts where the bar ends.
+      // No filter, and the row is there all the same: right under the bar, 35 px high, and the panel starts under it.
+      chipsTop: box('.mcpOverview__filters').top - box('#mcpBar').bottom,
+      chipsHeight: box('.mcpOverview__filters').height,
       panelTop: box('#mcpPanel').top - box('#mcpBar').bottom,
+      panelUnderChips: box('#mcpPanel').top - box('.mcpOverview__filters').bottom,
       // --shell-top (app_dom.js) is the bottom of the header and of the nav row: what a drawer or a panel starts under.
       shellTop: parseFloat(document.documentElement.style.getPropertyValue('--shell-top')) - box('.mcpPage__nav').bottom,
-      // The bar, its chips and the panel are siblings of the row, in the page: the panel is the one scroller.
+      // The bar, its chips and the panel are siblings of the row, in the page: the panel is the one scroller. The chips row was a sibling
+      // already when it was hidden with no filter: the DOM has not changed, the row is shown now.
       siblings: [...document.querySelector('#mcpPage').children].filter((el) => el.tagName !== 'SCRIPT').map((el) => (el.matches('.mcpOverview__filters') ? 'chips' : el.id || el.className.split(' ')[0])),
     };
   });
   expect(Math.round(stack.height)).toBe(40);
   expect(Math.abs(stack.top)).toBeLessThanOrEqual(0.5);
   expect(Math.abs(stack.barTop)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(stack.panelTop)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(stack.chipsTop)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(stack.chipsHeight - 35)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(stack.panelTop - 35)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(stack.panelUnderChips)).toBeLessThanOrEqual(0.5);
   expect(Math.abs(stack.shellTop)).toBeLessThanOrEqual(1);
   expect(stack.siblings).toEqual(['mcpPage__nav', 'mcpBar', 'chips', 'mcpPanel']);
+  // With no filter the row says so: a hint, no chip, no "Clear filters".
+  await expect(page.locator('.mcpOverview__filters')).toBeVisible();
+  await expect(page.locator('.mcpOverview__filtersHint')).toHaveText('No filters. Pick a value in a list, a legend or a table.');
+  await expect(page.locator('.mcpOverview__chips')).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Clear filters' })).toBeHidden();
   // The link of the row opens the Keys page, which has the same row with Keys current, and back.
   await page.locator('#mcpTab-keys').click();
   await expect(page).toHaveURL(/\/mcp-integration$/);
@@ -149,32 +203,37 @@ test('the Usage page is a page of its own, and the row of links joins it to the 
   await expect(page.locator('#mcpTab-usage')).not.toHaveClass(/is-active/);
   await expect(page.locator('#navMcpLink')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#mcpBar')).toHaveCount(0);
+  // The Keys page has the instances module too (the "Summed over N instances" notes and the warnings of its table), and not the charts.
+  const keysModules = await fetchedModules(page);
+  expect(keysModules).toContain('app_mcp_instances.js');
+  expect(keysModules).not.toContain('app_mcp_overview.js');
   await page.locator('#mcpTab-usage').click();
   await expect(page).toHaveURL(/\/mcp-integration\/usage$/);
   await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
 });
 
-test('the filter bar: Group by and a list for each of key, method and client at the left, the window and Refresh at the right', async ({ page }) => {
+test('the filter bar: Group by and a list for each of key, method, client and instance at the left, the window and Refresh at the right', async ({ page }) => {
   await open(page);
   // The bar of Observability and System: its lead has the pickers, its tail the window and the action.
   const bar = page.locator('#mcpBar');
   await expect(bar).toHaveClass(/obsFilterBar/);
-  expect(await bar.locator('.obsFilterBar__lead .tracePicker__button').evaluateAll((els) => els.map((el) => el.textContent))).toEqual(['Group by · Method', 'Key · All', 'Method · All', 'Client · All']);
+  // Five controls in the lead: Group by, then a list for each of the four dimensions that have one.
+  expect(await bar.locator('.obsFilterBar__lead .tracePicker__button').evaluateAll((els) => els.map((el) => el.textContent))).toEqual(['Group by · Method', 'Key · All', 'Method · All', 'Client · All', 'Instance · All']);
   await expect(bar.locator('.obsFilterBar__tail .mcpBar__windows')).toBeVisible();
   await expect(bar.locator('.obsFilterBar__tail #mcpRefresh')).toBeVisible();
   await expect(page.locator('#mcpRefresh')).toHaveAttribute('aria-label', 'Refresh the usage');
   await expect(page.locator('#mcpRefresh')).toHaveAttribute('type', 'submit');
-  // Left to right: the four lists, the window, Refresh; one row from 1101 px.
+  // Left to right: Group by and the four lists, the window, Refresh; one row from 1101 px (the widths are measured in the case of the sideways scroll).
   const xs = await bar.locator('.tracePicker__button, .mcpBar__windows, #mcpRefresh').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().left)));
   expect(xs).toEqual([...xs].sort((a, b) => a - b));
   expect(await bar.evaluate((el) => Math.round(el.getBoundingClientRect().height))).toBeLessThanOrEqual(52);
-  // Group by is one choice among three (a list of its own); the others are check boxes in a dialog.
+  // Group by is one choice among three (a list of its own, the instance is not one of them); the four others are check boxes in a dialog.
   await groupButton(page).click();
   await expect(page.locator('.mcpBar__groupPicker .tracePicker__option')).toHaveText(['Key', 'Method', 'Client']);
   await expect(groupOption(page, 'method')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.mcpBar__groupPicker [role="listbox"]')).toHaveAttribute('aria-label', 'Group by');
   await page.keyboard.press('Escape');
-  for (const dimension of ['key', 'method', 'client']) {
+  for (const dimension of ['key', 'method', 'client', 'instance']) {
     await expect(pickerButton(page, dimension)).toHaveAttribute('aria-haspopup', 'dialog');
     await expect(pickerButton(page, dimension)).toHaveAttribute('aria-controls', `mcpPickerMenu-${dimension}`);
     await expect(pickerMenu(page, dimension)).toHaveAttribute('role', 'dialog');
@@ -552,11 +611,16 @@ test('a group keeps its colour: it comes from its name, not from its rank, in ev
 
 test('filters are chips: a legend entry, a list of the bar, a row and a chip add them, a chip removes one, "Clear filters" all of them', async ({ page }) => {
   const server = await open(page);
-  await expect(page.locator('.mcpOverview__filters')).toBeHidden();
+  // The row is there before any filter (the page never changes its height for one): a hint, no chip and no "Clear filters".
+  await expect(page.locator('.mcpOverview__filters')).toBeVisible();
+  await expect(page.locator('.mcpOverview__filtersHint')).toBeVisible();
+  await expect(page.locator('.mcpOverview__chips')).toBeHidden();
   // A row of a table picks its value. The chips say it, the address keeps it, and the page reads again with the filter.
   await row(page, 'key', 'ops-all').click();
   await expect(chips(page)).toHaveCount(1);
   await settled(page);
+  await expect(page.locator('.mcpOverview__filtersHint')).toBeHidden();
+  await expect(page.locator('.mcpOverview__chips')).toBeVisible();
   expect(await chipLabels(page)).toEqual(['Remove filter Key = ops-all']);
   await expect(chips(page).first()).toHaveText('Key=ops-all');
   await expect(page).toHaveURL(/\/mcp-integration\/usage\?key=ops-all$/);
@@ -568,11 +632,14 @@ test('filters are chips: a legend entry, a list of the bar, a row and a chip add
   })).toEqual([0, 0]);
   // One chip has no "Clear filters": removing it is as short.
   await expect(page.getByRole('button', { name: 'Clear filters' })).toHaveCount(0);
-  await row(page, 'method', 'list_hosts').click();
+  // The picks go key, result, client, method: a table lists what else can be picked, and a dimension that has one value left is not offered
+  // (its rows are plain lines), so each pick keeps two values or more in the table of the next one: ops-all has the results ok, sql_error and
+  // table_not_allowed; with ok it has two clients; with one of them it has three methods.
+  await row(page, 'result', 'ok').click();
   await settled(page);
   await row(page, 'client', 'mcp-inspector').click();
   await settled(page);
-  await row(page, 'result', 'ok').click();
+  await row(page, 'method', 'list_hosts').click();
   await expect(chips(page)).toHaveCount(4);
   await settled(page);
   // The chips follow the order of the dimensions (the address's), not the order of the picks.
@@ -601,7 +668,10 @@ test('filters are chips: a legend entry, a list of the bar, a row and a chip add
   await settled(page);
   await page.getByRole('button', { name: 'Clear filters' }).click();
   await expect(chips(page)).toHaveCount(0);
-  await expect(page.locator('.mcpOverview__filters')).toBeHidden();
+  // The row stays (35 px, the hint back in it): it does not go with the filters.
+  await expect(page.locator('.mcpOverview__filters')).toBeVisible();
+  await expect(page.locator('.mcpOverview__filtersHint')).toBeVisible();
+  await expect(page.locator('.mcpOverview__chips')).toBeHidden();
   await expect(page).toHaveURL(/\/mcp-integration\/usage\?group=client$/);
   await settled(page);
   expect(reads(server).at(-1)).toBe('?window=7d&group=client');
@@ -651,7 +721,8 @@ test('a table lists its alternatives: it has every filter but its own, and a val
   // A picked value that nothing matches (a key that was never used) is in its table at 0, marked, with the name of the key on its chip.
   await page.goto('/mcp-integration/usage?key=ui_111111111111');
   await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
-  await expect(page.locator('.mcpOverview__empty .uiState--empty .uiState__title')).toHaveText('No request has all these filters');
+  // The window has no request with this filter: the Requests card says so (the four cards stay, see "an empty window").
+  await expect(card(page, 'requests').locator('.uiState--empty .uiState__title')).toHaveText('No request has all these filters');
   expect(await picked(page, 'key')).toEqual(['ops-all', 'ui_dead00000001', 'ui_legacy000000', 'ui_0a1b2c3d4e5f', 'ui_111111111111']);
   await expect(row(page, 'key', 'ui_111111111111').locator('td').first()).toHaveText('0');
   await expect(row(page, 'key', 'ui_111111111111')).toHaveClass(/is-selected/);
@@ -664,9 +735,9 @@ test('a table lists its alternatives: it has every filter but its own, and a val
   await expect(row(page, 'method', 'nothing')).toHaveClass(/is-selected/);
   await expect(row(page, 'method', 'nothing').locator('th code')).toHaveText('nothing');
   await expect(row(page, 'method', 'nothing').locator('td')).toHaveText(['0', '0', '—', '—', '0 B', '0']);
-  // Nothing has the method: the keys say so, and the charts say that no request has all the filters.
+  // Nothing has the method: the keys say so, and the Requests card says that no request has all the filters.
   await expect(block(page, 'keys').locator('.mcpOverview__none')).toHaveText('No key sent a request in this view.');
-  await expect(page.locator('.mcpOverview__empty .uiState--empty .uiState__title')).toHaveText('No request has all these filters');
+  await expect(card(page, 'requests').locator('.uiState--empty .uiState__title')).toHaveText('No request has all these filters');
   expect(await legendIds(page)).toEqual([]);
   // A client that nobody made is in its table at 0 too, with no version and no sight.
   await page.goto('/mcp-integration/usage?client=nobody');
@@ -722,8 +793,10 @@ test('a row filters by a click and by the keyboard, and the keyboard stays on th
   await row(page, 'key', 'ui_dead00000001').locator('.badge').click();
   await expect(chips(page)).toHaveCount(1);
   await settled(page);
-  // The table of clients has the key filter: the one client of the deleted key.
-  expect(await picked(page, 'client')).toEqual(['unknown']);
+  // The table of clients has the key filter: the one client of the deleted key. One value is nothing to choose from, so its row is a line to
+  // read and not a filter (no value, no tabindex: see "a dimension that has one value is not offered").
+  await expect(block(page, 'clients').locator('tbody th')).toHaveText(['unknown']);
+  expect(await picked(page, 'client')).toEqual([]);
 });
 
 test('the tables sort by their headers, and the sort stays while the filters change', async ({ page }) => {
@@ -1114,41 +1187,75 @@ test('a chart by the UTC day is labelled by its dates, never by hours; the chart
   }
 });
 
-test('an empty window says so once for the four charts, and a filter that matches nothing offers to clear them', async ({ page }) => {
+test('an empty window keeps the four cards at the height they have with data: the Requests card says why, with "Clear filters" when filters are on, and the lists that have nothing say none', async ({ page }) => {
+  // The height of the four cards with data: the reference of every state below.
+  await open(page);
+  const withData = await cardHeights(page);
+  expect(withData).toHaveLength(4);
+  expect(withData[0]).toBeGreaterThan(250);
+  expectNear(withData, Array(4).fill(withData[0]), 'with data, the four cards');
+
   const server = newServer();
   server.cells = [];
   await open(page, '', server);
-  // Nothing counted: the tiles say 0 and one sentence says why, in place of the four charts; the tables say what they list.
+  // Nothing counted: the tiles say 0, and the four cards are still there, as tall as with data. The Requests card has the sentence, the three
+  // others say what they count; the tables say what they list.
   expect(await tiles(page)).toMatchObject({ Requests: ['0', 'in the last 7 days'], 'Tool calls': ['0', ''], 'Call time': ['—', ''], Returned: ['0 B', ''], 'Active keys': ['0', 'of 5 keys'] });
-  await expect(page.locator('.mcpOverview__empty .uiState--empty .uiState__title')).toHaveText('No request in the last 7 days');
-  await expect(page.locator('.mcpOverview__empty .uiState--empty .uiState__body')).toHaveText('Nothing was counted in this window.');
-  await expect(page.locator('.mcpOverview__empty .uiState button')).toHaveCount(0);
-  await expect(page.locator('.mcpOverview__charts')).toBeHidden();
+  await expect(page.locator('.mcpOverview__charts')).toBeVisible();
+  await expect(page.locator('.mcpOverview__card')).toHaveCount(4);
+  expectNear(await cardHeights(page), withData, 'an empty window, the four cards');
+  const requests = card(page, 'requests');
+  await expect(requests.locator('.uiState--empty .uiState__title')).toHaveText('No request in the last 7 days');
+  await expect(requests.locator('.uiState--empty .uiState__body')).toHaveText('Nothing was counted in this window.');
+  await expect(requests.locator('.uiState button')).toHaveCount(0);
+  await expect(card(page, 'errors').locator('.uiState--empty .uiState__title')).toHaveText('No errors in this window');
+  await expect(card(page, 'time').locator('.uiState--empty .uiState__title')).toHaveText('No tool calls in this window');
+  await expect(card(page, 'bytes').locator('.uiState--empty .uiState__title')).toHaveText('Nothing was returned in this window');
+  await expect(page.locator('.mcpOverview__card .uiState--empty')).toHaveCount(4);
   await expect(page.locator('.mcpOverview__chart .chartCore')).toHaveCount(0);
-  await expect(page.locator('.mcpOverview__empty')).toHaveCount(1);
+  // The cards keep their title and their step: they say what is not there. The sentence is not above the cards (the old one-for-all box).
+  expect(await titles(page)).toEqual(['Requests by method', 'Errors by method', 'Call time by method', 'Returned by method']);
+  for (const id of CHARTS) await expect(card(page, id).locator('.chartCard__meta')).toHaveText('by 3 hours');
+  await expect(page.locator('.mcpOverview__empty')).toHaveCount(0);
   await expect(block(page, 'keys').locator('.mcpOverview__none')).toHaveText('No key sent a request in this view.');
   await expect(block(page, 'methods').locator('.mcpOverview__none')).toHaveText('No method was called in this view.');
   await expect(block(page, 'results').locator('.mcpOverview__none')).toHaveText('No result in this view.');
   await expect(block(page, 'clients').locator('.mcpOverview__none')).toHaveText('No client sent a request in this view.');
   await expect(block(page, 'keys').locator('.pagePart__count')).toHaveText('');
-  // The lists of the bar have nothing to offer either, and say so.
-  const keyMenu = await openPicker(page, 'key');
-  await expect(keyMenu.locator('.mcpPicker__option')).toHaveCount(0);
-  await expect(keyMenu.locator('.mcpPicker__none')).toHaveText('No keys in this view.');
+  // The lists of the bar that have nothing to offer are off, and say none (and why in their title). The instances are every instance that the
+  // server knows: the list has the two of them, with no request, so it is still a list to open.
+  for (const [dimension, label, one] of [['key', 'Key', 'key'], ['method', 'Method', 'method'], ['client', 'Client', 'client']]) {
+    await expect(pickerButton(page, dimension)).toHaveText(`${label} · none`);
+    await expect(pickerButton(page, dimension)).toBeDisabled();
+    await expect(pickerButton(page, dimension)).toHaveAttribute('title', `No ${one} in this view`);
+  }
+  await expect(pickerButton(page, 'instance')).toHaveText('Instance · All');
+  await expect(pickerButton(page, 'instance')).toBeEnabled();
+  const instances = await openPicker(page, 'instance');
+  await expect(instances.locator('.mcpPicker__name')).toHaveText(['chdash-0', 'chdash-1']);
+  await expect(instances.locator('.mcpPicker__count')).toHaveText(['0', '0']);
   await page.keyboard.press('Escape');
-  // With a filter: the same, and "Clear filters" takes it away.
+
+  // With a filter: the same sentence says that no request has all of them, "Clear filters" is in the card, and the card is as tall as ever.
   await page.goto('/mcp-integration/usage?method=run_query&window=24h');
   await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
-  await expect(page.locator('.mcpOverview__empty .uiState--empty .uiState__title')).toHaveText('No request has all these filters');
-  await expect(page.locator('.mcpOverview__empty .uiState--empty .uiState__body')).toHaveText('Nothing in the last 24 hours matches them.');
+  await expect(requests.locator('.uiState--empty .uiState__title')).toHaveText('No request has all these filters');
+  await expect(requests.locator('.uiState--empty .uiState__body')).toHaveText('Nothing in the last 24 hours matches them.');
+  await expect(requests.getByRole('button', { name: 'Clear filters' })).toBeVisible();
+  expectNear(await cardHeights(page), withData, 'an empty window with a filter, the four cards');
+  // The list of the dimension that has a filter stays a list (so that it can be taken off), the others say none.
+  await expect(pickerButton(page, 'method')).toHaveText('Method · run_query');
+  await expect(pickerButton(page, 'method')).toBeEnabled();
+  await expect(pickerButton(page, 'key')).toHaveText('Key · none');
   server.cells = CELLS();
-  await page.locator('.mcpOverview__empty .uiState button').click();
+  await requests.getByRole('button', { name: 'Clear filters' }).click();
   await expect(chips(page)).toHaveCount(0);
   await expect(page).toHaveURL(/\/mcp-integration\/usage\?window=24h$/);
-  await expect(page.locator('.mcpOverview__charts')).toBeVisible();
   await expect(page.locator('.mcpOverview__chart .chartCore')).toHaveCount(4);
-  await expect(page.locator('.mcpOverview__empty')).toBeHidden();
+  await expect(page.locator('.mcpOverview__card .uiState--empty')).toHaveCount(0);
   await expect(pressedWindow(page)).toBeFocused();
+  await settled(page);
+  expectNear(await cardHeights(page), withData, 'with data again, the four cards');
   await screenshot(page, 'usage-empty');
 });
 
@@ -1169,6 +1276,215 @@ test('a chart that has nothing to draw says so in its card: no errors, no tool c
   await open(page, '', silent);
   await expect(card(page, 'bytes').locator('.uiState--empty .uiState__title')).toHaveText('Nothing was returned in this window');
   await expect(chartBox(page, 'requests').locator('.chartCore')).toHaveCount(1);
+});
+
+// ---- a filter never moves the page ----------------------------------------------------------------------------------------------------
+// The chips row is one line that is always there, the four cards have one height, a tile keeps the room of its sub line: adding or removing a
+// filter, and the answer that follows, change what the figures say and nothing of where they stand.
+
+// A walk through the five ways to change a filter, one after the other: a list of the bar (key ops-all), a row of a table (result ok), a
+// legend entry (method ping: two charts have nothing to draw then), the x of a chip and "Clear filters". The picks go in this order because a
+// table lists what else can be picked and a dimension with one value left is not offered: each one leaves two values or more in what the next
+// uses. For each, the read is slowed down (1.2 s): the page is measured while it runs (the chips are the new ones, the figures the old ones,
+// dimmed) and once it is drawn, and `base` is where everything stood before: nothing may be elsewhere. `after()` is a check of the case
+// that runs when the step is drawn.
+async function walkFilters(page, server, base, after = async () => {}) {
+  const steps = [
+    ['a list of the bar', 1, async () => {
+      const menu = await openPicker(page, 'key');
+      await menu.getByRole('checkbox', { name: /^ops-all/ }).check();
+      await page.keyboard.press('Escape');
+    }],
+    ['a row of a table', 2, () => row(page, 'result', 'ok').click()],
+    ['a legend entry', 3, () => entry(page, 'method:ping').click()],
+    ['the x of a chip', 2, () => page.getByRole('button', { name: 'Remove filter Result = ok' }).click()],
+    ['"Clear filters"', 0, () => page.getByRole('button', { name: 'Clear filters' }).click()],
+  ];
+  const before = reads(server).length;
+  server.delay['GET /usage/overview'] = 1200;
+  for (const [name, count, act] of steps) {
+    await act();
+    await expect(chips(page), name).toHaveCount(count);
+    let reading;
+    await expect.poll(async () => { reading = await layout(page); return reading.busy; }, { intervals: [50, 100], message: `${name}: the read runs` }).toBe(true);
+    expect(moved(base.stands, reading.stands), `${name}, while it reads`).toEqual([]);
+    await settled(page);
+    const drawn = await layout(page);
+    expect(drawn.busy).toBe(false);
+    expect(moved(base.stands, drawn.stands), `${name}, once it is drawn`).toEqual([]);
+    await after(name);
+  }
+  server.delay['GET /usage/overview'] = 0;
+  // One read for each step: nothing else read, and back to no filter the row has its hint again, as at the start.
+  expect(reads(server)).toHaveLength(before + steps.length);
+  await expect(page.locator('.mcpOverview__filtersHint')).toBeVisible();
+}
+
+for (const width of [1440, 1100, 820, 390]) {
+  test(`nothing moves when a filter is added or removed, from a list, a row, a legend, a chip or Clear filters, while the read runs and once it is drawn (${width} px)`, async ({ page }) => {
+    // A phone folds its bar when the page opens, so the window has its size before the page loads, and the bar is unfolded to reach its lists.
+    await page.setViewportSize({ width, height: 900 });
+    const server = await open(page);
+    if (width <= 600) await page.locator('#mcpBar .obsFilterSummary').click();
+    const base = await layout(page);
+    expect(base.busy).toBe(false);
+    // With no filter the row is its 35 px, and the tiles, the cards and the tables stand where the others will find them.
+    expect(base.stands['the chips row'][1]).toBeCloseTo(35, 0);
+    expect(base.stands['the tiles']).toHaveLength(7);
+    expect(base.stands['the cards']).toHaveLength(4);
+    await walkFilters(page, server, base);
+  });
+}
+
+test('the four cards have one height in every state: with data, filtered, with a chart that has nothing to draw, and for an empty window', async ({ page }) => {
+  const nothing = (server) => { server.cells = []; return server; };
+  // [state, address, server, how many cards say that they have nothing to draw]
+  const states = [
+    ['with data', '', newServer(), 0],
+    ['filtered, a legend of three', '?key=ui_0a1b2c3d4e5f', newServer(), 0],
+    ['two charts with nothing to draw (ping has no error and no call)', '?method=ping', newServer(), 2],
+    ['a filter that matches nothing', '?method=run_query', nothing(newServer()), 4],
+    ['an empty window', '', nothing(newServer()), 4],
+  ];
+  for (const width of [1440, 820, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    let reference = null;
+    for (const [state, query, server, empty] of states) {
+      await open(page, query, server);
+      await settled(page);
+      await expect(page.locator('.mcpOverview__card .uiState--empty'), `${width} px, ${state}`).toHaveCount(empty);
+      const heights = await cardHeights(page);
+      // The card of the first state is the one that the others have: tall enough for a plot of 200 px and a legend of three lines (four on a phone).
+      reference ??= heights[0];
+      expect(reference, `${width} px`).toBeGreaterThan(280);
+      expectNear(heights, Array(4).fill(reference), `${width} px, ${state}`);
+    }
+  }
+});
+
+test('a legend of more than three lines scrolls inside its card, which does not grow (four lines on a phone)', async ({ page }) => {
+  // Twelve tools with long names: the eight biggest are entries of a line each (and "4 more"), far past the room of three lines.
+  const long = newServer();
+  long.cells = Array.from({ length: 12 }, (_, i) => cell('ops-all', '2026-10-14T09:30', 'call', 'claude-code', `a_very_long_tool_name_for_the_legend_of_the_chart_${String(i).padStart(2, '0')}`, 'ok', 50 - i, 100, 20, 1, 1000 + i));
+  for (const [width, lines] of [[1440, 3], [390, 4]]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const reference = await cardHeights(page);
+    await open(page, '', long);
+    await settled(page);
+    // The room of the lines: 20 px an entry, 2 px between two, 2 px of margin above and below.
+    const room = lines * 20 + (lines - 1) * 2 + 4;
+    const boxes = await page.locator('.mcpOverview__card .chartCore__legendList').evaluateAll((els) => els.map((el) => ({
+      card: el.closest('.mcpOverview__card').dataset.card, shown: el.clientHeight, content: el.scrollHeight, overflow: getComputedStyle(el).overflowY, entries: el.children.length,
+    })));
+    // The errors of the calls: none, the card says so; the three others have the eight biggest tools and "4 more".
+    expect(boxes.map((box) => box.card), `${width} px`).toEqual(['requests', 'time', 'bytes']);
+    for (const box of boxes) {
+      expect(box.entries, `${width} px, ${box.card}`).toBe(9);
+      expect(Math.abs(box.shown - room), `${width} px, ${box.card}: the room of ${lines} lines`).toBeLessThanOrEqual(1);
+      expect(box.content, `${width} px, ${box.card}: more than the room`).toBeGreaterThan(box.shown + 40);
+      expect(box.overflow, `${width} px, ${box.card}`).toBe('auto');
+    }
+    // The card is the height of the others: the legend scrolls in it. The entries are buttons, and the keyboard reaches one that is below the
+    // room: the legend scrolls to it (and the card stays as it is).
+    expectNear(await cardHeights(page), reference, `${width} px, long legends`);
+    const last = entry(page, 'method:a_very_long_tool_name_for_the_legend_of_the_chart_07');
+    await expect(last).toBeEnabled();
+    const before = await page.locator('.mcpOverview__chart[data-chart="requests"] .chartCore__legendList').evaluate((el) => el.scrollTop);
+    expect(before).toBe(0);
+    await last.focus();
+    await expect(last).toBeFocused();
+    expect(await page.locator('.mcpOverview__chart[data-chart="requests"] .chartCore__legendList').evaluate((el) => el.scrollTop), `${width} px: the legend scrolled to the entry`).toBeGreaterThan(0);
+    expectNear(await cardHeights(page), reference, `${width} px, a legend scrolled`);
+    // The entry is still a filter: Enter picks it, from the part of the legend that was hidden.
+    await page.keyboard.press('Enter');
+    await expect(chips(page)).toHaveText(['Method=a_very_long_tool_name_for_the_legend_of_the_chart_07']);
+    await settled(page);
+    expectNear(await cardHeights(page), reference, `${width} px, filtered`);
+  }
+});
+
+test('twenty chips are one line of the same 35 px: the list scrolls sideways, fading where it hides some, and "Clear filters" stays in view', async ({ page }) => {
+  const many = Array.from({ length: 20 }, (_, i) => `search_traces_${String(i).padStart(2, '0')}`);
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    if (width <= 600) await page.locator('#mcpBar .obsFilterSummary').click();
+    const none = await layout(page);
+    expect(none.stands['the chips row'][1]).toBeCloseTo(35, 0);
+    // The most that a kind of filter takes, by the address: the 20 chips come with it. The method is a value that nobody called: nothing is
+    // counted, and the layout is the one of an empty window.
+    await page.goto(`/mcp-integration/usage?${many.map((name) => `method=${name}`).join('&')}`);
+    await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+    await expect(chips(page)).toHaveCount(20);
+    if (width <= 600) await page.locator('#mcpBar .obsFilterSummary').click();
+    await settled(page);
+    const list = page.locator('.mcpOverview__chips');
+    // The one of the row (the empty card of the Requests has a button of the same name).
+    const clear = page.locator('.mcpOverview__filters').getByRole('button', { name: 'Clear filters' });
+    const m = await page.evaluate(() => {
+      const row = document.querySelector('.mcpOverview__filters');
+      const chipsList = row.querySelector('.mcpOverview__chips');
+      const box = (el) => el.getBoundingClientRect();
+      return {
+        row: box(row), list: box(chipsList), clear: box(row.querySelector('.chips__clear')),
+        hidden: chipsList.scrollWidth - chipsList.clientWidth, overflow: getComputedStyle(chipsList).overflowX,
+        // Every chip is on the same line: none wraps under the others.
+        lines: new Set([...chipsList.children].map((el) => Math.round(box(el).top))).size,
+      };
+    });
+    // One line of 35 px that scrolls: the chips are much wider than the window, none is on a second line, the box of the list is as tall as the row.
+    expect(m.row.height, `${width} px: the row`).toBeCloseTo(35, 0);
+    expect(m.lines, `${width} px: one line of chips`).toBe(1);
+    expect(m.hidden, `${width} px: what the list hides`).toBeGreaterThan(m.list.width);
+    expect(m.overflow).toBe('auto');
+    await expect(list).toHaveClass(/has-edge-end/);
+    await expect(list).not.toHaveClass(/has-edge-start/);
+    // "Clear filters" is beside the list, in the row, in view (it does not scroll with the chips).
+    await expect(clear).toBeVisible();
+    await expect(clear).toBeInViewport({ ratio: 0.99 });
+    expect(m.clear.left, `${width} px: Clear filters is after the list`).toBeGreaterThanOrEqual(m.list.right - 1);
+    expect(m.clear.right, `${width} px: Clear filters is in the row`).toBeLessThanOrEqual(m.row.right);
+    expect(await horizontalOverflow(page), `${width} px: the page`).toBeLessThanOrEqual(0);
+    // The page stands as it stood with no filter (the cards of the empty window are as tall as the ones with data).
+    expect(moved(none.stands, (await layout(page)).stands), `${width} px: with 20 chips`).toEqual([]);
+    // The list scrolls to its end: the fade changes sides, "Clear filters" has not moved.
+    await list.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
+    await expect(list).toHaveClass(/has-edge-start/);
+    await expect(list).not.toHaveClass(/has-edge-end/);
+    await expect(chips(page).last()).toBeInViewport({ ratio: 0.99 });
+    await expect(clear).toBeInViewport({ ratio: 0.99 });
+    const after = await clear.boundingBox();
+    expect(Math.abs(after.x - m.clear.left), `${width} px: Clear filters after the scroll`).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(after.y - m.clear.top), `${width} px: Clear filters after the scroll`).toBeLessThanOrEqual(0.5);
+  }
+});
+
+test('a tile that has no sub line keeps the height and the place of the tiles that have one, with one tile or several to a line', async ({ page }) => {
+  const nothing = newServer();
+  nothing.cells = [];
+  // [state, address, server, the tiles that have no sub line]: ping has no call and no row; an empty window has no call, no error and no byte.
+  const states = [
+    ['no call and no row', '?method=ping', newServer(), ['Call time', 'Returned']],
+    ['an empty window', '', nothing, ['Tool calls', 'Errors', 'Call time', 'Returned']],
+  ];
+  const sizes = ['the tiles', 'the height of the tiles'];
+  const only = (stands) => Object.fromEntries(sizes.map((name) => [name, stands[name]]));
+  for (const width of [1440, 1100, 820, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(page);
+    const full = only((await layout(page)).stands);
+    expect(await tiles(page), `${width} px`).toMatchObject({ 'Tool calls': [expect.any(String), '80.7% of the requests'], 'Call time': [expect.any(String), 'max 900 ms'], Returned: [expect.any(String), '5,247 rows'] });
+    for (const [state, query, server, quiet] of states) {
+      await open(page, query, server);
+      await settled(page);
+      // The premise: the tiles that say nothing under their figure are those, and the other tiles still have their line.
+      const bare = await page.locator('.mcpOverview__tiles .statTile').evaluateAll((els) => els.filter((el) => !el.querySelector('.statTile__sub')).map((el) => el.querySelector('.statTile__label').textContent));
+      expect(bare, `${width} px, ${state}`).toEqual(quiet);
+      // Each tile has the height of its tile with data, and stands where it stood (a row of tiles that all lack their line is as tall as the others).
+      expect(moved(full, only((await layout(page)).stands)), `${width} px, ${state}`).toEqual([]);
+    }
+  }
 });
 
 test('the time of a call is an average that the legend gives over the window, not a sum of the averages of the steps', async ({ page }) => {
@@ -1303,22 +1619,100 @@ test('MCP off: both tabs show how to turn it on, and nothing reads the usage', a
   await expect(page.locator('#mcpBar')).toBeVisible();
 });
 
-test('the counting says since when: in memory since the start of ClickHouse Dash, and what an answer left out of its tables', async ({ page }) => {
+test('usage off: the tab says "Usage is off" and shows the block that turns it on; no bar, no tiles, and the page asks for nothing but the meta', async ({ page }) => {
   const server = newServer();
-  server.meta.usage = { ...server.meta.usage, persisted: false, since: '2026-10-14T08:00:00Z' };
+  setUsage(server, { enabled: false });
+  await install(page, server);
+  await page.goto('/mcp-integration/usage');
+  const off = page.locator('#mcpUsageOff');
+  await expect(off).toBeVisible();
+  await expect(off.locator('.uiState--empty .uiState__title')).toHaveText('Usage is off');
+  await expect(off.locator('.uiState__body')).toContainText('ClickHouse Dash does not count what the keys do, so there is nothing to show here.');
+  await expect(off.locator('.uiState__body')).toContainText('by key, method, client and instance');
+  // What to do: the block of the config file that turns it on, with its copy button, and what the directory needs.
+  await expect(off.locator('.mcpNote').first()).toHaveText('Add this to the config file, then restart ClickHouse Dash:');
+  expect(await off.locator('.mcpCode__pre').textContent()).toBe('mcp {\n  usage {\n    enabled = true\n    dir     = "/var/lib/chdash/mcp-usage"\n  }\n}');
+  await expect(off.getByRole('button', { name: 'Copy the HCL block' })).toBeVisible();
+  await expect(off.locator('.mcpNote').last()).toContainText('The directory must exist and be writable.');
+  await expect(off.locator('.mcpNote').last()).toContainText('retention_days (90 by default)');
+  // The row of the two pages stays; nothing else of the tab is there: no bar, no chips, no tiles, no charts, no tables.
+  await expect(page.locator('h1')).toHaveText('MCP usage');
+  await expect(page.locator('#mcpTabs a')).toHaveText(['Keys', 'Usage']);
+  await expect(page.locator('#mcpTab-usage')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('#mcpBar')).toHaveCount(0);
+  await expect(page.locator('.mcpOverview__filters')).toHaveCount(0);
+  await expect(page.locator('.mcpOverview__tiles')).toHaveCount(0);
+  await expect(page.locator('.mcpOverview__card')).toHaveCount(0);
+  await expect(page.locator('#mcpOverview')).toBeHidden();
+  // The page does not ask for what is off: the meta is the only request, and nothing reads later either.
+  await page.waitForTimeout(600);
+  expect(server.calls.map((call) => `${call.method} ${call.path}`)).toEqual(['GET /meta']);
+  await screenshot(page, 'usage-off');
+});
+
+test('a read that answers "not_enabled" (the usage was turned off after the meta was read) ends in the same "Usage is off" state', async ({ page }) => {
+  const server = newServer();
+  server.errors['GET /usage/overview'] = { status: 404, body: { error_code: 'not_enabled', message: 'The usage of the keys is off (mcp.usage.enabled is false).', retryable: false } };
+  await install(page, server);
+  await page.goto('/mcp-integration/usage');
+  // The meta said that the usage is on, so the page asked for it, and the answer ended the tab in the state of a usage that is off: not an error.
+  const off = page.locator('#mcpUsageOff');
+  await expect(off).toBeVisible();
+  await expect(off.locator('.uiState--empty .uiState__title')).toHaveText('Usage is off');
+  expect(await off.locator('.mcpCode__pre').textContent()).toBe('mcp {\n  usage {\n    enabled = true\n    dir     = "/var/lib/chdash/mcp-usage"\n  }\n}');
+  await expect(page.locator('.uiState--error')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+  // The bar and the chips were drawn before the answer: they are hidden with the tab, and so are the figures.
+  await expect(page.locator('#mcpBar')).toBeHidden();
+  await expect(page.locator('.mcpOverview__filters')).toBeHidden();
+  await expect(page.locator('#mcpOverview')).toBeHidden();
+  await expect(page.locator('#mcpTabs a')).toHaveText(['Keys', 'Usage']);
+  await page.waitForTimeout(600);
+  expect(server.calls.map((call) => `${call.method} ${call.path}`)).toEqual(['GET /meta', 'GET /usage/overview']);
+});
+
+test('the counting says since when, for a window that starts before it, and the tables say what an answer left out', async ({ page }) => {
+  // The counting began on Oct 1 08:00 (the default meta): the last 7 days start after it and say nothing, the last 30 days start before it.
+  await open(page);
+  const notes = page.locator('.mcpOverview__notes p');
+  await expect(notes).toHaveText(['The rows are those of the tools that build their own SQL: an API tool counts no row.']);
+  await windowButton(page, '30 d').click();
+  await expect(pressedWindow(page)).toHaveText('30 d');
+  await settled(page);
+  await expect(notes).toHaveText(['Counted since Oct 1 08:00.', 'The rows are those of the tools that build their own SQL: an API tool counts no row.']);
+  await expect(page.locator('.mcpOverview__range')).toHaveText('Oct 1 08:00 → Oct 14 10:00');
+
+  // The counting began at 08:00 today: the last 7 days, 24 hours and 6 hours start before it; the last hour starts at 09:01, after it. The
+  // note is the same whether the usage is kept in files or not: it says when the counting began and nothing about a restart or the memory.
+  const server = newServer();
+  server.meta.usage = { ...server.meta.usage, since: '2026-10-14T08:00:00Z' };
+  // The tables that the server cut, as the contract has them (one count for each list, the instances included).
   server.overview = (srv, params) => {
     const answer = overviewOf(srv, params);
-    if (answer.status === 200) answer.body.omitted = { keys: 0, methods: 12, results: 0, clients: 3 };
+    if (answer.status === 200) answer.body.omitted = { keys: 0, methods: 12, results: 0, clients: 3, instances: 0 };
     return answer;
   };
   await open(page, '', server);
-  await expect(page.locator('.mcpOverview__notes')).toContainText('Counted in memory since Oct 14 08:00, when ClickHouse Dash started: a restart clears it.');
+  await expect(notes).toHaveText(['Counted since Oct 14 08:00.', 'The rows are those of the tools that build their own SQL: an API tool counts no row.']);
+  await expect(page.locator('.mcpOverview__notes')).not.toContainText(/memory|restart|persist/i);
   await expect(page.locator('.mcpOverview__range')).toHaveText('Oct 14 08:00 → 10:00');
   // The rows that the server cut: "N more methods not shown" under the table, nothing under the others.
   await expect(block(page, 'methods').locator('.mcpNote--fine').first()).toHaveText('12 more methods not shown.');
   await expect(block(page, 'clients').locator('.mcpNote--fine').first()).toHaveText('3 more clients not shown.');
   await expect(block(page, 'keys').locator('.mcpNote--fine')).toBeHidden();
   await expect(block(page, 'results').locator('.mcpNote--fine')).toBeHidden();
+  for (const [label, range] of [['24 h', 'Oct 14 08:00 → 10:00'], ['6 h', 'Oct 14 08:00 → 10:00']]) {
+    await windowButton(page, label).click();
+    await expect(pressedWindow(page)).toHaveText(label);
+    await settled(page);
+    await expect(notes.first(), label).toHaveText('Counted since Oct 14 08:00.');
+    await expect(page.locator('.mcpOverview__range'), label).toHaveText(range);
+  }
+  await windowButton(page, '1 h').click();
+  await expect(pressedWindow(page)).toHaveText('1 h');
+  await settled(page);
+  await expect(notes).toHaveText(['The rows are those of the tools that build their own SQL: an API tool counts no row.']);
+  await expect(page.locator('.mcpOverview__range')).toHaveText('Oct 14 09:01 → 10:00');
 });
 
 test('Refresh reads again, nothing else does: no timer, and the figures stay (dimmed) while it runs', async ({ page }) => {
@@ -1372,9 +1766,9 @@ test('a page restored from the back/forward cache reads again', async ({ page })
   await expect(page.locator('#mcpBar')).toBeVisible();
 });
 
-test('desktop and phone: the page has no sideways scroll at 1920, 1440, 1280, 1100, 820 and 390 px, the bar wraps and the charts take one column or two', async ({ page }) => {
+test('desktop and phone: the page has no sideways scroll at 1920, 1440, 1280, 1101, 1100, 820 and 390 px, the bar wraps and the charts take one column or two', async ({ page }) => {
   await open(page, '?key=ops-all');
-  for (const [width, height] of [[1920, 1000], [1440, 900], [1280, 800], [1100, 800], [820, 800], [390, 844]]) {
+  for (const [width, height] of [[1920, 1000], [1440, 900], [1280, 800], [1101, 800], [1100, 800], [820, 800], [390, 844]]) {
     await page.setViewportSize({ width, height });
     await expect(chartBox(page).locator('.chartCore')).toBeVisible();
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -1386,6 +1780,12 @@ test('desktop and phone: the page has no sideways scroll at 1920, 1440, 1280, 11
         panel: panel.scrollWidth - panel.clientWidth,
         bar: bar.scrollWidth - bar.clientWidth,
         barHeight: Math.round(bar.getBoundingClientRect().height),
+        // The seven controls of the bar: Group by and the four lists (the lead), the window and Refresh (the tail), left to right, with the
+        // middle of each and its right edge.
+        controls: [...bar.querySelectorAll('.tracePicker__button, .mcpBar__windows, #mcpRefresh')].map((el) => {
+          const box = el.getBoundingClientRect();
+          return { middle: box.top + box.height / 2, right: box.right, width: box.width };
+        }),
         // A table that is wider than its box scrolls inside it: the four fit from 820 px, in one column and in two (from 1280 px).
         wraps: [...document.querySelectorAll('.mcpOverview__wrap')].map((el) => el.scrollWidth - el.clientWidth),
         columns: getComputedStyle(document.querySelector('.mcpOverview__tables')).gridTemplateColumns.split(' ').length,
@@ -1405,9 +1805,23 @@ test('desktop and phone: the page has no sideways scroll at 1920, 1440, 1280, 11
     // The four charts have the width of a column, and the same one.
     expect(new Set(m.charts).size, `${width}: the charts`).toBe(1);
     expect(m.charts[0], `${width}: a chart`).toBeGreaterThan(width > 1100 ? width / 2 - 60 : width - 64);
-    // One row of the bar from 1101 px; two (the lead, then the tail) below, as the bars of System; the chips as wide as the bar.
-    if (width > 1100) expect(m.barHeight, `${width}: the bar`).toBeLessThanOrEqual(52);
-    else expect(m.barHeight, `${width}: the bar`).toBeGreaterThan(70);
+    // One row of the bar from 1101 px (48 px high: Group by, the four lists, the window and Refresh, all seven on one line, each list at least
+    // 120 px wide); from 1100 px down, two (the lead with the five lists, then the tail with the window and Refresh; 87 px), as the bars of
+    // System. The chips are as wide as the bar, and nothing of the bar is past the window.
+    expect(m.controls, `${width}: the controls of the bar`).toHaveLength(7);
+    expect(Math.max(...m.controls.map((control) => control.right)), `${width}: the right end of the bar`).toBeLessThanOrEqual(width);
+    const rows = new Set(m.controls.map((control) => Math.round(control.middle / 4)));
+    if (width > 1100) {
+      expect(m.barHeight, `${width}: the bar`).toBeLessThanOrEqual(52);
+      expect(Math.max(...m.controls.map((control) => control.middle)) - Math.min(...m.controls.map((control) => control.middle)), `${width}: one row`).toBeLessThanOrEqual(2);
+      expect(Math.min(...m.controls.slice(0, 5).map((control) => control.width)), `${width}: the narrowest list`).toBeGreaterThanOrEqual(119);
+    } else {
+      expect(m.barHeight, `${width}: the bar`).toBeGreaterThan(70);
+      // The five of the lead share a row down to 761 px, the tail is under them; the lists wrap two to a row only from 760 px down.
+      if (width >= 761) expect(m.controls.slice(0, 5).map((control) => Math.round(control.middle)), `${width}: the lead is one row`).toEqual(Array(5).fill(Math.round(m.controls[0].middle)));
+      expect(m.controls[5].middle, `${width}: the window is under the lists`).toBeGreaterThan(m.controls[0].middle + 20);
+      expect(rows.size, `${width}: two rows or more`).toBeGreaterThanOrEqual(2);
+    }
     expect(m.chips, `${width}: the chips`).toBeGreaterThan(width - 4);
   }
   // On a phone a table that is wider than its box scrolls in it, and the box says so (the faded edge).
@@ -1431,15 +1845,18 @@ test('a phone folds the bar into one line, the window and the group and how many
   await summary.click();
   await expect(summary).toHaveAttribute('aria-expanded', 'true');
   await expect(summary).toHaveText('Hide the filters');
-  for (const button of [groupButton(page), pickerButton(page, 'key'), pickerButton(page, 'method'), pickerButton(page, 'client'), windowButton(page, '24 h'), page.locator('#mcpRefresh')]) await expect(button).toBeVisible();
+  for (const button of [groupButton(page), pickerButton(page, 'key'), pickerButton(page, 'method'), pickerButton(page, 'client'), pickerButton(page, 'instance'), windowButton(page, '24 h'), page.locator('#mcpRefresh')]) await expect(button).toBeVisible();
   await expect(chips(page)).toHaveCount(2);
   await expect(page.locator('.mcpOverview__filters')).toBeVisible();
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
-  // A list opens inside the window, whatever the width of the field that it hangs from.
-  const menu = await openPicker(page, 'method');
-  const inside = await menu.evaluate((el) => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= document.documentElement.clientWidth; });
-  expect(inside).toBe(true);
-  await page.keyboard.press('Escape');
+  // A list opens inside the window, whatever the width of the field that it hangs from (the Method list is at the left, the Instance list is
+  // alone on the last row of the lead).
+  for (const dimension of ['method', 'instance']) {
+    const menu = await openPicker(page, dimension);
+    const inside = await menu.evaluate((el) => { const r = el.getBoundingClientRect(); return r.left >= 0 && r.right <= document.documentElement.clientWidth; });
+    expect(inside, `the ${dimension} list`).toBe(true);
+    await page.keyboard.press('Escape');
+  }
   await screenshot(page, 'usage-phone-bar');
   // The line follows a change of the window; Refresh (the action of the bar) folds it again.
   await windowButton(page, '24 h').click();
@@ -1449,6 +1866,36 @@ test('a phone folds the bar into one line, the window and the group and how many
   await expect(summary).toHaveText('Last 24 hours · by method · 2 filters');
   await expect(page.locator('#mcpBar .obsFilterBar__lead')).toBeHidden();
   expect(reads(server).at(-1)).toBe('?window=24h&group=method&key=ops-all&client=claude-code');
+});
+
+test('the phone line counts the instance chip like the other filters, and the Instance list is in the unfolded bar', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const server = await open(page, '?instance=chdash-1');
+  const summary = page.locator('#mcpBar .obsFilterSummary');
+  // One chip, one filter (the singular): the line says "1 filter", the group and the window are not filters.
+  await expect(summary).toHaveText('Last 7 days · by method · 1 filter');
+  await expect(page.locator('.mcpOverview__filters')).toBeHidden();
+  await summary.click();
+  await expect(chips(page)).toHaveText(['Instance=chdash-1']);
+  expect(await chipLabels(page)).toEqual(['Remove filter Instance = chdash-1']);
+  await expect(pickerButton(page, 'instance')).toHaveText('Instance · chdash-1');
+  // The list is a filter and a chip is one: a second filter from the bar makes two, and Refresh folds the bar over the new line.
+  const keys = await openPicker(page, 'key');
+  await keys.getByRole('checkbox', { name: /^ops-all/ }).check();
+  await expect(chips(page)).toHaveText(['Key=ops-all', 'Instance=chdash-1']);
+  await page.keyboard.press('Escape');
+  await settled(page);
+  await expect.poll(() => reads(server).at(-1)).toBe('?window=7d&group=method&key=ops-all&instance=chdash-1');
+  await page.locator('#mcpRefresh').click();
+  await expect(summary).toHaveAttribute('aria-expanded', 'false');
+  await expect(summary).toHaveText('Last 7 days · by method · 2 filters');
+  // An instance that is not a filter is not counted: the chip goes (its x), the line follows.
+  await summary.click();
+  await page.getByRole('button', { name: 'Remove filter Instance = chdash-1' }).click();
+  await expect(chips(page)).toHaveText(['Key=ops-all']);
+  await settled(page);
+  await page.locator('#mcpRefresh').click();
+  await expect(summary).toHaveText('Last 7 days · by method · 1 filter');
 });
 
 test('both themes: the bar, the lists, the charts, the tiles and the tables read in the light theme and in the dark one', async ({ page }) => {
@@ -1485,27 +1932,87 @@ test('both themes: the bar, the lists, the charts, the tiles and the tables read
   }
 });
 
-// The shared checks of the accessibility contract (axe) on the fake server, which any instance can run: the bar, its lists open, the chips,
-// the legends and the tables, in both themes. a11y-contract.spec.js runs the same on the real server.
+// The shared checks of the accessibility contract (axe) on the fake server, which any instance can run: the bar, its lists open (the Instance
+// list and the popover of the instances too), the chips, the legends and the tables, a view with lists that are off, the warnings about the
+// instances and the "Usage is off" state, in both themes. a11y-contract.spec.js runs the same on the real server.
+const axeViolations = (page) => new AxeBuilder({ page }).analyze().then((result) => result.violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) })));
+
 for (const theme of ['dark', 'light']) {
-  test(`axe (${theme}): the bar, its lists open, the chips, the four charts and the tables have no violation`, async ({ page }) => {
+  test(`axe (${theme}): the bar, its lists open, the instances, the chips, the four charts and the tables have no violation`, async ({ page }) => {
     await page.addInitScript((value) => localStorage.setItem('chdash.theme', value), theme);
     await open(page, '?key=ops-all&client=claude-code');
     await page.waitForTimeout(1200);
-    const violations = async () => (await new AxeBuilder({ page }).analyze()).violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
-    expect(await violations()).toEqual([]);
-    for (const dimension of ['key', 'method', 'client']) {
+    expect(await axeViolations(page)).toEqual([]);
+    for (const dimension of ['key', 'method', 'client', 'instance']) {
       await openPicker(page, dimension);
       await page.waitForTimeout(300);
-      expect(await violations(), `the ${dimension} list`).toEqual([]);
+      expect(await axeViolations(page), `the ${dimension} list`).toEqual([]);
       await page.keyboard.press('Escape');
       await expect(pickerMenu(page, dimension)).toBeHidden();
     }
     await groupButton(page).click();
     await expect(groupOption(page, 'client')).toBeVisible();
     await page.waitForTimeout(300);
-    expect(await violations(), 'Group by').toEqual([]);
+    expect(await axeViolations(page), 'Group by').toEqual([]);
     await page.keyboard.press('Escape');
+    // "2 instances" in the head opens the list of the instances in a popover.
+    await page.locator('.mcpInstances__button').click();
+    await expect(page.locator('.mcpInstancesPopover')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await axeViolations(page), 'the instances popover').toEqual([]);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.mcpInstancesPopover')).toHaveCount(0);
+  });
+
+  test(`axe (${theme}): a view with lists that are off, and locked legend entries, has no violation`, async ({ page }) => {
+    await page.addInitScript((value) => localStorage.setItem('chdash.theme', value), theme);
+    // ping has one key and one client (their lists are off, dimmed, with a title that says why) and, grouped by client, one locked legend entry.
+    await open(page, '?method=ping&group=client');
+    await expect(pickerButton(page, 'key')).toBeDisabled();
+    await expect(pickerButton(page, 'client')).toBeDisabled();
+    await expect(entry(page, 'client:claude-code')).toBeDisabled();
+    await page.waitForTimeout(1200);
+    expect(await axeViolations(page), 'lists that are off').toEqual([]);
+    // The one that has a choice still opens: the list of the instances (both of them are known) with the check boxes.
+    await openPicker(page, 'instance');
+    await page.waitForTimeout(300);
+    expect(await axeViolations(page), 'the list that is on, beside the ones that are off').toEqual([]);
+  });
+
+  test(`axe (${theme}): the warnings about the instances (a skipped file and a conflict) have no violation`, async ({ page }) => {
+    await page.addInitScript((value) => localStorage.setItem('chdash.theme', value), theme);
+    const server = newServer();
+    server.instances = [
+      { instance: 'chdash-0', written_at: '2026-10-14T09:59:30Z', status: 'conflict', reason: 'another process writes chdash-0.jsonl.zst' },
+      { instance: 'chdash-1', written_at: '2026-10-14T09:58:50Z', status: 'skipped', reason: 'invalid' },
+    ];
+    await open(page, '', server);
+    // A conflict (its reason behind "Why") and a skipped file: two boxes above the tiles, amber, in a live region that waits its turn.
+    await expect(page.locator('.mcpOverview__warnings .uiBanner--warn')).toHaveCount(2);
+    await page.locator('.mcpOverview__warnings summary').click();
+    await page.waitForTimeout(1200);
+    expect(await axeViolations(page), 'the warnings').toEqual([]);
+    // The list of the bar and the popover show the same two instances, each with a badge (skipped, conflict).
+    await openPicker(page, 'instance');
+    await expect(pickerMenu(page, 'instance').locator('.badge')).toHaveText(['conflict', 'skipped']);
+    await page.waitForTimeout(300);
+    expect(await axeViolations(page), 'the Instance list with its badges').toEqual([]);
+    await page.keyboard.press('Escape');
+    await page.locator('.mcpInstances__button').click();
+    await expect(page.locator('.mcpInstancesPopover .badge')).toHaveText(['conflict', 'skipped']);
+    await page.waitForTimeout(300);
+    expect(await axeViolations(page), 'the instances popover with its badges').toEqual([]);
+  });
+
+  test(`axe (${theme}): the "Usage is off" state has no violation`, async ({ page }) => {
+    await page.addInitScript((value) => localStorage.setItem('chdash.theme', value), theme);
+    const server = newServer();
+    setUsage(server, { enabled: false });
+    await install(page, server);
+    await page.goto('/mcp-integration/usage');
+    await expect(page.locator('#mcpUsageOff')).toBeVisible();
+    await page.waitForTimeout(1200);
+    expect(await axeViolations(page)).toEqual([]);
   });
 }
 
@@ -1676,12 +2183,20 @@ test('the Client list: the clients with their requests, a name with spaces is on
   await expect.poll(() => reads(server).at(-1)).toBe('?window=7d&group=method&client=Visual+Studio+Code');
   await settled(page);
   expect(await tiles(page)).toMatchObject({ Requests: ['8', 'in the last 7 days'] });
-  // The Key list now has the clients filter: the keys that this client used (ci-bot), and the check boxes of the Client list stay on.
+  // The Key list now has the client filter: one key used this client (ci-bot), so there is nothing to choose from and the list is off (it says
+  // the key, and why in its title); the table of the keys has that one line, which is not a filter. The Method list has the filter too: the
+  // two methods that the client called.
   await page.keyboard.press('Escape');
-  const keys = await openPicker(page, 'key');
-  await expect(keys.locator('.mcpPicker__name')).toHaveText(['ci-bot']);
-  await expect(keys.locator('.mcpPicker__count')).toHaveText(['8']);
+  await expect(pickerButton(page, 'key')).toBeDisabled();
+  await expect(pickerButton(page, 'key')).toHaveText('Key · ci-bot');
+  await expect(pickerButton(page, 'key')).toHaveAttribute('title', 'Only one key in this view');
+  await expect(block(page, 'keys').locator('tbody th')).toHaveText(['ci-bot']);
+  await expect(block(page, 'keys').locator('tbody td').first()).toHaveText('8');
+  const methods = await openPicker(page, 'method');
+  await expect(methods.locator('.mcpPicker__name')).toHaveText(['tools/list', 'initialize']);
+  await expect(methods.locator('.mcpPicker__count')).toHaveText(['5', '3']);
   await page.keyboard.press('Escape');
+  // The check boxes of the Client list stay on, with the other clients still there to pick.
   const clients = await openPicker(page, 'client');
   await expect(clients.locator('.mcpPicker__name')).toHaveText(['claude-code', 'mcp-inspector', 'unknown', 'python-httpx', 'Visual Studio Code']);
   await expect(clients.locator('input:checked')).toHaveCount(1);
@@ -1795,4 +2310,738 @@ test('Group by is a list of its own like the Order by of System Queries: one cho
   // The page and its lists have no other control that groups: the chart has no switch of its own.
   await expect(page.locator('.mcpOverview__split')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Methods', exact: true })).toHaveCount(0);
+});
+
+// ---- a dimension that has nothing to choose from ----------------------------------------------------------------------------------------
+// A dimension whose facet has fewer than two values, and no filter of its own, is not offered: its list in the bar is off and says the value (or
+// none), the rows of its table are lines to read and the entries of a legend grouped by it are locked. A filter on the dimension keeps all of it
+// offered, so that the filter can be taken off. (The legacy key has no address: its id is not `ui_` and 12 hexadecimal digits, which the page
+// drops from an address as the server would refuse it, so a case that needs it picks it in a list.)
+
+// What a list of the bar shows: its words, its title, whether it is off for the keyboard and for a screen reader.
+const pickerState = (page, dimension) => pickerButton(page, dimension).evaluate((el) => ({
+  text: el.textContent, title: el.title, disabled: el.disabled, ariaDisabled: el.getAttribute('aria-disabled'), off: el.closest('.mcpPicker').classList.contains('is-disabled'),
+}));
+// What a row of a table says about being a filter.
+const rowsOf = (page, id) => block(page, id).locator('tbody tr').evaluateAll((rows) => rows.map((tr) => ({
+  pickable: tr.classList.contains('is-pickable'), tabindex: tr.getAttribute('tabindex'), dimension: tr.dataset.dimension ?? null, value: tr.dataset.value ?? null, selected: tr.getAttribute('aria-selected'),
+})));
+const hintHidden = (page, id) => block(page, id).locator('.mcpOverview__hint').isHidden();
+
+test('one client is no choice: the Client list is off and says the client, its rows are lines to read, and the entries of a chart by client are locked', async ({ page }) => {
+  const server = await open(page, '?group=client');
+  // All the clients are offered until a key is picked: the legacy key is the one of python-httpx alone.
+  expect(await pickerState(page, 'client')).toMatchObject({ text: 'Client · All', title: 'All clients', disabled: false, off: false });
+  const keys = await openPicker(page, 'key');
+  await keys.getByRole('checkbox', { name: /^legacy/ }).check();
+  await page.keyboard.press('Escape');
+  await expect(chips(page)).toHaveText(['Key=legacy']);
+  await expect.poll(() => reads(server).at(-1)).toBe('?window=7d&group=client&key=ui_legacy000000');
+  await settled(page);
+  // The list is off in its place: no arrow, dimmed, not in the tab order; it says the client, and its title says why.
+  expect(await pickerState(page, 'client')).toEqual({ text: 'Client · python-httpx', title: 'Only one client in this view', disabled: true, ariaDisabled: 'true', off: true });
+  await expect(pickerButton(page, 'client')).toBeDisabled();
+  // The other lists have what to choose from (the key that was picked has three methods, and two instances are known).
+  expect(await pickerState(page, 'key')).toMatchObject({ text: 'Key · legacy', disabled: false, off: false });
+  expect(await pickerState(page, 'method')).toMatchObject({ text: 'Method · All', disabled: false });
+  expect(await pickerState(page, 'instance')).toMatchObject({ text: 'Instance · All', disabled: false });
+  // The row of the table of clients is a line to read: no class, no tab stop, no value, no mark, and its hint is gone; the other tables keep theirs.
+  expect(await rowsOf(page, 'clients')).toEqual([{ pickable: false, tabindex: null, dimension: null, value: null, selected: null }]);
+  await expect(block(page, 'clients').locator('tbody th')).toHaveText(['python-httpx 0.27.0']);
+  expect(await hintHidden(page, 'clients')).toBe(true);
+  for (const id of ['keys', 'methods', 'results']) {
+    expect(await hintHidden(page, id), id).toBe(false);
+    expect((await rowsOf(page, id)).every((item) => item.pickable && item.dimension), id).toBe(true);
+  }
+  // A click on it filters nothing: no chip beyond the key's, no read.
+  const count = server.calls.length;
+  await block(page, 'clients').locator('tbody tr').click();
+  await page.waitForTimeout(300);
+  await expect(chips(page)).toHaveCount(1);
+  expect(server.calls).toHaveLength(count);
+  // The four charts are grouped by client: the one entry of each legend is locked (a button that is off, no aria-pressed, a title that says why).
+  for (const id of CHARTS) {
+    await expect(legend(page, id), id).toHaveCount(1);
+    await expect(entry(page, 'client:python-httpx', id), id).toBeDisabled();
+    await expect(entry(page, 'client:python-httpx', id), id).not.toHaveAttribute('aria-pressed', /.*/);
+    await expect(entry(page, 'client:python-httpx', id), id).toHaveAttribute('title', 'Only one client in this view');
+  }
+  // It cannot be pressed: not by a click either, and the address and the chips are as they were.
+  await entry(page, 'client:python-httpx').click({ force: true });
+  await page.waitForTimeout(300);
+  await expect(chips(page)).toHaveCount(1);
+  expect(server.calls).toHaveLength(count);
+  expect(new URL(page.url()).searchParams.getAll('client')).toEqual([]);
+  await screenshot(page, 'usage-one-client');
+});
+
+test('a dimension that has one value only is a line in a table and a list that is off, from the address too: the key of a deleted bot has one client, unknown', async ({ page }) => {
+  // The address route to a single value: the deleted key made its requests with a client that said nothing about itself.
+  await open(page, '?key=ui_dead00000001');
+  expect(await pickerState(page, 'client')).toEqual({ text: 'Client · unknown', title: 'Only one client in this view', disabled: true, ariaDisabled: 'true', off: true });
+  expect(await pickerState(page, 'key')).toMatchObject({ text: 'Key · old-bot', title: 'old-bot', disabled: false });
+  await expect(block(page, 'clients').locator('tbody th')).toHaveText(['unknown']);
+  expect(await rowsOf(page, 'clients')).toEqual([{ pickable: false, tabindex: null, dimension: null, value: null, selected: null }]);
+  // The key was picked: its own table keeps all the keys to pick from, and a filter keeps its list a list.
+  expect((await rowsOf(page, 'keys')).filter((item) => item.pickable)).toHaveLength(4);
+  await expect(row(page, 'key', 'ui_dead00000001')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('ping has one key and one client: their lists are off, the lists that have a choice stay, and Tab goes past the lists that are off', async ({ page }) => {
+  await open(page, '?method=ping');
+  // The protocol method ping was sent by ops-all, through claude-code, and ended ok: three dimensions with one value each.
+  expect(await pickerState(page, 'key')).toEqual({ text: 'Key · ops-all', title: 'Only one key in this view', disabled: true, ariaDisabled: 'true', off: true });
+  expect(await pickerState(page, 'client')).toEqual({ text: 'Client · claude-code', title: 'Only one client in this view', disabled: true, ariaDisabled: 'true', off: true });
+  // The method has a filter, so its list stays a list (to take ping off); both instances are known, so that list stays too.
+  expect(await pickerState(page, 'method')).toMatchObject({ text: 'Method · ping', title: 'ping', disabled: false, off: false });
+  expect(await pickerState(page, 'instance')).toMatchObject({ text: 'Instance · All', title: 'All instances', disabled: false, off: false });
+  // The tables follow: the keys, the results and the clients are lines to read (one each), the methods are rows to pick (the filter is on).
+  for (const id of ['keys', 'results', 'clients']) {
+    const rows = await rowsOf(page, id);
+    expect(rows, id).toHaveLength(1);
+    expect(rows[0].pickable, id).toBe(false);
+    expect(await hintHidden(page, id), id).toBe(true);
+  }
+  expect((await rowsOf(page, 'methods')).every((item) => item.pickable), 'methods').toBe(true);
+  expect(await hintHidden(page, 'methods')).toBe(false);
+  await expect(block(page, 'keys').locator('tbody th')).toHaveText(['ops-all']);
+  await expect(block(page, 'results').locator('tbody th')).toHaveText(['ok']);
+  // From Group by the keyboard goes to the Method list, then the Instance list, and is not stopped by the two lists that are off.
+  await groupButton(page).focus();
+  await page.keyboard.press('Tab');
+  await expect(pickerButton(page, 'method')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(pickerButton(page, 'instance')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(windowButton(page, '1 h')).toBeFocused();
+  // And back: Shift+Tab from the window to the Instance list, the Method list, then Group by (a list that is off is not a stop either way).
+  await page.keyboard.press('Shift+Tab');
+  await expect(pickerButton(page, 'instance')).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(pickerButton(page, 'method')).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(groupButton(page)).toBeFocused();
+});
+
+test('a filter on a dimension keeps it offered, so that it can be taken off: the list, the row and the legend entry work, and go off with the filter', async ({ page }) => {
+  // ci-bot made all the requests of Visual Studio Code: with the key and the client picked, the key has one value in its facet, and a filter.
+  await open(page, '?group=key&key=ui_0a1b2c3d4e5f&client=Visual%20Studio%20Code');
+  expect(await pickerState(page, 'key')).toEqual({ text: 'Key · ci-bot', title: 'ci-bot', disabled: false, ariaDisabled: 'false', off: false });
+  const menu = await openPicker(page, 'key');
+  await expect(menu.locator('.mcpPicker__name')).toHaveText(['ci-bot']);
+  await expect(menu.getByRole('checkbox', { name: /^ci-bot/ })).toBeChecked();
+  await page.keyboard.press('Escape');
+  // Its table has the one key as a row to pick (it is marked, and it lets the filter go), its hint is there, and the legend entry is a button that is pressed.
+  expect(await rowsOf(page, 'keys')).toEqual([{ pickable: true, tabindex: '0', dimension: 'key', value: 'ui_0a1b2c3d4e5f', selected: 'true' }]);
+  expect(await hintHidden(page, 'keys')).toBe(false);
+  await expect(entry(page, 'key:ui_0a1b2c3d4e5f')).toBeEnabled();
+  await expect(entry(page, 'key:ui_0a1b2c3d4e5f')).toHaveAttribute('aria-pressed', 'true');
+  await expect(entry(page, 'key:ui_0a1b2c3d4e5f')).toHaveAttribute('title', 'Stop filtering by key ci-bot');
+  // The chip lets the key go: the client picked still leaves one key, so the dimension is not offered any more.
+  await page.getByRole('button', { name: 'Remove filter Key = ci-bot' }).click();
+  await expect(chips(page)).toHaveText(['Client=Visual Studio Code']);
+  await settled(page);
+  expect(await pickerState(page, 'key')).toEqual({ text: 'Key · ci-bot', title: 'Only one key in this view', disabled: true, ariaDisabled: 'true', off: true });
+  expect(await rowsOf(page, 'keys')).toEqual([{ pickable: false, tabindex: null, dimension: null, value: null, selected: null }]);
+  expect(await hintHidden(page, 'keys')).toBe(true);
+  await expect(entry(page, 'key:ui_0a1b2c3d4e5f')).toBeDisabled();
+  await expect(entry(page, 'key:ui_0a1b2c3d4e5f')).toHaveAttribute('title', 'Only one key in this view');
+  // And the same dimension is offered again as soon as the answer has a second value: the client filter taken off lists all the keys.
+  await page.getByRole('button', { name: 'Remove filter Client = Visual Studio Code' }).click();
+  await expect(chips(page)).toHaveCount(0);
+  await settled(page);
+  expect(await pickerState(page, 'key')).toMatchObject({ text: 'Key · All', title: 'All keys', disabled: false, off: false });
+  expect((await rowsOf(page, 'keys')).every((item) => item.pickable)).toBe(true);
+  await expect(entry(page, 'key:ops-all')).toBeEnabled();
+});
+
+test('unticking the last value of an open list keeps the list open, as it was; it is off once it closes', async ({ page }) => {
+  await open(page, '?key=ui_0a1b2c3d4e5f&client=Visual%20Studio%20Code');
+  const key = pickerButton(page, 'key');
+  const menu = await openPicker(page, 'key');
+  await menu.getByRole('checkbox', { name: /^ci-bot/ }).uncheck();
+  // The filter is gone and the dimension has one value: the list does not shut under the pointer. The page reads without the key filter.
+  await expect(chips(page)).toHaveText(['Client=Visual Studio Code']);
+  await expect.poll(() => new URL(page.url()).searchParams.getAll('key')).toEqual([]);
+  await settled(page);
+  await expect(menu).toBeVisible();
+  await expect(key).toHaveAttribute('aria-expanded', 'true');
+  await expect(key).toBeEnabled();
+  await expect(key).toHaveText('Key · All');
+  await expect(menu.locator('.mcpPicker__name')).toHaveText(['ci-bot']);
+  await expect(menu.getByRole('checkbox', { name: /^ci-bot/ })).not.toBeChecked();
+  // The next pick is still possible: ticking the key puts the filter back (and the list is what it was).
+  await menu.getByRole('checkbox', { name: /^ci-bot/ }).check();
+  await expect(chips(page)).toHaveText(['Key=ci-bot', 'Client=Visual Studio Code']);
+  await settled(page);
+  await expect(menu).toBeVisible();
+  await expect(key).toHaveText('Key · ci-bot');
+  await expect(key).toBeEnabled();
+  // Unticked again, and closed: the list is off, in its place, and says the key.
+  await menu.getByRole('checkbox', { name: /^ci-bot/ }).uncheck();
+  await expect(chips(page)).toHaveText(['Client=Visual Studio Code']);
+  await settled(page);
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  expect(await pickerState(page, 'key')).toEqual({ text: 'Key · ci-bot', title: 'Only one key in this view', disabled: true, ariaDisabled: 'true', off: true });
+});
+
+test('a list that is open when its dimension has no value any more stays open and says so; it reads none once it closes', async ({ page }) => {
+  const server = await open(page);
+  const menu = await openPicker(page, 'method');
+  await expect(menu.locator('.mcpPicker__option')).toHaveCount(10);
+  // The next answer has no request at all. The page reads again from the code of the button (a press outside the list would close it, as it does).
+  server.cells = [];
+  await page.evaluate(() => document.querySelector('#mcpRefresh').click());
+  await expect(menu.locator('.mcpPicker__option')).toHaveCount(0);
+  await expect(menu.locator('.mcpPicker__none')).toHaveText('No methods in this view.');
+  await expect(menu).toBeVisible();
+  await expect(pickerButton(page, 'method')).toBeEnabled();
+  // Closed, the list is off in its place and says none; the lists that were not open were off already.
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  expect(await pickerState(page, 'method')).toEqual({ text: 'Method · none', title: 'No method in this view', disabled: true, ariaDisabled: 'true', off: true });
+  expect(await pickerState(page, 'key')).toMatchObject({ text: 'Key · none', disabled: true });
+});
+
+// ---- the instances ----------------------------------------------------------------------------------------------------------------------
+// ChDash instances that share the usage directory add up (docs/mcp-integration-page.md, "Instances"). The fake has two: chdash-0, this one
+// (918 of the 1,101 requests of the last 7 days), and chdash-1 (183); `server.instances` is the state of each file, `oneInstance(server)` leaves one.
+
+const instanceRows = (page) => page.locator('.mcpInstancesPopover .mcpInstancesList__row');
+const popoverBadges = (page) => page.locator('.mcpInstancesPopover .badge');
+const openInstances = async (page) => {
+  await page.locator('.mcpInstances__button').click();
+  await expect(page.locator('.mcpInstancesPopover')).toBeVisible();
+  return page.locator('.mcpInstancesPopover');
+};
+// The state of the files of the instances: chdash-0 (this one) and the others as `others` says ([name, status, reason]).
+const filesOf = (me, others) => [
+  { instance: 'chdash-0', written_at: '2026-10-14T09:59:30Z', status: me[0], reason: me[1] },
+  ...others.map(([instance, status, reason], i) => ({ instance, written_at: status === 'ok' ? '2026-10-14T09:58:50Z' : `2026-10-14T0${i + 1}:00:00Z`, status, reason })),
+];
+
+test('the Instance list: every instance with its requests, the other filters cut the counts but not the instances, and a pick is a filter', async ({ page }) => {
+  const server = await open(page);
+  const instance = pickerButton(page, 'instance');
+  await expect(instance).toHaveText('Instance · All');
+  await expect(instance).toHaveAttribute('title', 'All instances');
+  const menu = await openPicker(page, 'instance');
+  // The two instances that the server knows, the one with the most requests first, each with its requests in the window; none is checked, and
+  // two values are not a long list (no field to narrow it).
+  await expect(menu.locator('.mcpPicker__name')).toHaveText(['chdash-0', 'chdash-1']);
+  await expect(menu.locator('.mcpPicker__count')).toHaveText(['918', '183']);
+  await expect(menu.locator('input:checked')).toHaveCount(0);
+  await expect(menu.locator('.badge')).toHaveCount(0);
+  await expect(menu.getByRole('button', { name: 'All instances' })).toBeVisible();
+  await expect(menu.locator('.mcpPicker__search')).toBeHidden();
+  await expect(menu).toHaveAttribute('aria-label', 'Instance filter');
+  await expect(menu.getByRole('group', { name: 'Instance' })).toBeVisible();
+  await expect(menu.getByRole('checkbox', { name: /^chdash-1 183$/ })).toBeVisible();
+  // A pick: the button, the chip and the address follow at once, the page reads when the clicks pause, and every figure has the filter.
+  await menu.getByRole('checkbox', { name: /^chdash-1/ }).check();
+  await expect(instance).toHaveText('Instance · chdash-1');
+  await expect(instance).toHaveAttribute('title', 'chdash-1');
+  await expect(chips(page)).toHaveText(['Instance=chdash-1']);
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?instance=chdash-1$/);
+  await settled(page);
+  expect(reads(server)).toEqual(['?window=7d&group=method', '?window=7d&group=method&instance=chdash-1']);
+  expect(await tiles(page)).toMatchObject({ Requests: ['183', 'in the last 7 days'], 'Active keys': ['2', 'of 5 keys'] });
+  // The list has every filter but its own: the instance that is picked does not cut it, both are still there to pick, with their counts.
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('.mcpPicker__name')).toHaveText(['chdash-0', 'chdash-1']);
+  await expect(menu.locator('.mcpPicker__count')).toHaveText(['918', '183']);
+  await expect(menu.getByRole('checkbox', { name: /^chdash-1/ })).toBeChecked();
+  // The other lists have the filter of the instance: the keys that wrote to chdash-1 (ops-all and legacy), the clients and the methods too.
+  await page.keyboard.press('Escape');
+  const keys = await openPicker(page, 'key');
+  await expect(keys.locator('.mcpPicker__name')).toHaveText(['ops-all', 'legacy']);
+  await expect(keys.locator('.mcpPicker__count')).toHaveText(['155', '28']);
+  await page.keyboard.press('Escape');
+  // And the other way round: a key cuts the counts of the instances, not the instances. ops-all has 857 requests in chdash-0 and 155 in chdash-1.
+  await chips(page).first().locator('.chip__remove').click();
+  await settled(page);
+  await row(page, 'key', 'ops-all').click();
+  await settled(page);
+  const again = await openPicker(page, 'instance');
+  await expect(again.locator('.mcpPicker__name')).toHaveText(['chdash-0', 'chdash-1']);
+  await expect(again.locator('.mcpPicker__count')).toHaveText(['857', '155']);
+  // A key that never wrote to an instance leaves it listed, with 0 (the server lists every instance that it knows): the legacy key wrote to
+  // chdash-1 only (28 requests), so chdash-0 is last.
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Remove filter Key = ops-all' }).click();
+  await settled(page);
+  await row(page, 'key', 'ui_legacy000000').click();
+  await expect(chips(page)).toHaveText(['Key=legacy']);
+  await settled(page);
+  const none = await openPicker(page, 'instance');
+  await expect(none.locator('.mcpPicker__name')).toHaveText(['chdash-1', 'chdash-0']);
+  await expect(none.locator('.mcpPicker__count')).toHaveText(['28', '0']);
+  await screenshot(page, 'usage-picker-instance');
+});
+
+test('"All instances" clears the filter, and an instance whose file is not read has its badge in the list, with the reason in its title', async ({ page }) => {
+  const server = newServer();
+  server.instances = filesOf(['conflict', 'another process writes chdash-0.jsonl.zst'], [['chdash-1', 'skipped', 'too_large']]);
+  await open(page, '?instance=chdash-1', server);
+  const menu = await openPicker(page, 'instance');
+  // The two files are not read the same way: the one of this instance is in conflict (another ChDash writes under its name), the other is skipped.
+  await expect(menu.locator('.mcpPicker__option', { hasText: 'chdash-0' }).locator('.badge')).toHaveText('conflict');
+  await expect(menu.locator('.mcpPicker__option', { hasText: 'chdash-1' }).locator('.badge')).toHaveText('skipped');
+  await expect(menu.locator('.mcpPicker__option', { hasText: 'chdash-0' }).locator('.badge')).toHaveAttribute('title', 'Another ChDash writes as chdash-0: this instance does not save its counts.');
+  await expect(menu.locator('.mcpPicker__option', { hasText: 'chdash-1' }).locator('.badge')).toHaveAttribute('title', 'chdash-1: its file was skipped (too large), so its counts are not in these figures.');
+  // "All instances" lets the filter go: the button, the box, the chip and the address say it at once, the read follows.
+  await expect(menu.getByRole('checkbox', { name: /^chdash-1/ })).toBeChecked();
+  await menu.getByRole('button', { name: 'All instances' }).click();
+  await expect(pickerButton(page, 'instance')).toHaveText('Instance · All');
+  await expect(menu.locator('input:checked')).toHaveCount(0);
+  await expect(chips(page)).toHaveCount(0);
+  await expect(page).toHaveURL(/\/mcp-integration\/usage$/);
+  await settled(page);
+  expect(reads(server).at(-1)).toBe('?window=7d&group=method');
+  await expect(menu).toBeVisible();
+});
+
+test('a crowd of instances: the list has a field that narrows it past 12, and takes 20 values at most', async ({ page }) => {
+  // 25 instances share the directory, each with requests of its own (chdash-24 has the most).
+  const server = newServer();
+  server.instances = Array.from({ length: 25 }, (_, i) => ({ instance: `chdash-${i}`, written_at: '2026-10-14T09:59:00Z', status: 'ok', reason: '' }));
+  server.cells = server.instances.map(({ instance }, i) => cell('ops-all', '2026-10-14T08:00', 'call', 'claude-code', 'query_table', 'ok', 1 + i, 5, 5, 1, 100, instance));
+  await open(page, '', server);
+  await expect(page.locator('.mcpInstances__button')).toHaveText('25 instances');
+  const menu = await openPicker(page, 'instance');
+  await expect(menu.locator('.mcpPicker__option')).toHaveCount(25);
+  await expect(menu.locator('.mcpPicker__name').first()).toHaveText('chdash-24');
+  await expect(menu.locator('.mcpPicker__count').first()).toHaveText('25');
+  const search = menu.locator('.mcpPicker__search');
+  await expect(search).toBeVisible();
+  await expect(search).toHaveAttribute('aria-label', 'Filter the list of instances');
+  await expect(search).toHaveAttribute('placeholder', 'Filter instances');
+  // Typing narrows the list to the names that hold the text, whatever the case; a text that nothing holds says so.
+  await search.fill('CHDASH-2');
+  await expect(menu.locator('.mcpPicker__option:not([hidden])')).toHaveCount(6);
+  await expect(menu.locator('.mcpPicker__option:not([hidden]) .mcpPicker__name')).toHaveText(['chdash-24', 'chdash-23', 'chdash-22', 'chdash-21', 'chdash-20', 'chdash-2']);
+  await search.fill('zzz');
+  await expect(menu.locator('.mcpPicker__option:not([hidden])')).toHaveCount(0);
+  await expect(menu.locator('.mcpPicker__none')).toHaveText('Nothing matches "zzz".');
+  await search.fill('');
+  await expect(menu.locator('.mcpPicker__option:not([hidden])')).toHaveCount(25);
+  // Enter in the field is no submit, and Down goes on to the first value that is shown.
+  const count = reads(server).length;
+  await search.fill('chdash-1');
+  await search.press('Enter');
+  await page.waitForTimeout(400);
+  expect(reads(server)).toHaveLength(count);
+  await search.press('ArrowDown');
+  await expect(menu.locator('.mcpPicker__option:not([hidden]) input').first()).toBeFocused();
+  // 20 values at most: the 20th pick disables the boxes that are not checked, and says why; a box that is let go enables them again.
+  await search.fill('');
+  await menu.evaluate((el) => {
+    for (const input of [...el.querySelectorAll('input[type="checkbox"]')].slice(0, 20)) input.click();
+  });
+  await expect(menu.locator('input:checked')).toHaveCount(20);
+  await expect(menu.locator('input:disabled')).toHaveCount(5);
+  await expect(menu.locator('input:checked:disabled')).toHaveCount(0);
+  await expect(menu.locator('.mcpPicker__note')).toHaveText('A filter takes 20 values at most.');
+  await expect(chips(page)).toHaveCount(20);
+  await expect(pickerButton(page, 'instance')).toHaveText('Instance · 20 selected');
+  await expect.poll(() => new URL(page.url()).searchParams.getAll('instance').length).toBe(20);
+  await settled(page);
+  expect(reads(server).at(-1).split('&').filter((part) => part.startsWith('instance=')).length).toBe(20);
+  await menu.locator('input:checked').first().uncheck();
+  await expect(menu.locator('input:disabled')).toHaveCount(0);
+  await expect(menu.locator('.mcpPicker__note')).toBeHidden();
+  await expect(chips(page)).toHaveCount(19);
+  // The note of the head says how many instances there are, and the popover has each of them.
+  await page.keyboard.press('Escape');
+  await openInstances(page);
+  await expect(instanceRows(page)).toHaveCount(25);
+  await expect(instanceRows(page).first()).toHaveAttribute('data-instance', 'chdash-0');
+});
+
+test('the Instance list picks like the others: ticks that come together are one read and one entry of the history, ticks that cancel out are none, and the keyboard opens it, picks and closes it', async ({ page }) => {
+  const server = await open(page);
+  const instance = pickerButton(page, 'instance');
+  const box = (value) => pickerMenu(page, 'instance').locator(`input[value="${value}"]`);
+  const before = await page.evaluate(() => history.length);
+  const menu = await openPicker(page, 'instance');
+  // Two ticks that come together (a person ticking a few boxes) are one read and one entry of the history.
+  await menu.evaluate((el) => { for (const input of el.querySelectorAll('input[type="checkbox"]')) input.click(); });
+  await expect(instance).toHaveText('Instance · 2 selected');
+  await expect(instance).toHaveAttribute('title', 'chdash-0, chdash-1');
+  await expect(chips(page)).toHaveText(['Instance=chdash-0', 'Instance=chdash-1']);
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?instance=chdash-0&instance=chdash-1$/);
+  await settled(page);
+  expect(reads(server)).toEqual(['?window=7d&group=method', '?window=7d&group=method&instance=chdash-0&instance=chdash-1']);
+  expect((await page.evaluate(() => history.length)) - before).toBe(1);
+  // A box ticked and cleared before the clicks pause leaves the state as it was: no read and no entry of the history.
+  await menu.evaluate((el) => { const input = el.querySelector('input[value="chdash-1"]'); input.click(); input.click(); });
+  await page.waitForTimeout(500);
+  await expect(instance).toHaveText('Instance · 2 selected');
+  expect(reads(server)).toHaveLength(2);
+  expect((await page.evaluate(() => history.length)) - before).toBe(1);
+  await page.keyboard.press('Escape');
+  // From the keyboard: Down opens the list on its first control, "All instances", and Down again reaches the first value, which Space ticks.
+  await page.goto('/mcp-integration/usage');
+  await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+  await instance.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu).toBeVisible();
+  await expect(instance).toHaveAttribute('aria-expanded', 'true');
+  await expect(menu.getByRole('button', { name: 'All instances' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(box('chdash-0')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(box('chdash-1')).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(instance).toHaveText('Instance · chdash-1');
+  await expect(box('chdash-1')).toBeChecked();
+  await expect.poll(() => reads(server).at(-1)).toBe('?window=7d&group=method&instance=chdash-1');
+  await settled(page);
+  // The box keeps the focus through the read that follows its pick, and Escape gives the focus back to the button.
+  await expect(box('chdash-1')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(instance).toHaveAttribute('aria-expanded', 'false');
+  await expect(instance).toBeFocused();
+});
+
+test('one instance is no choice: the Instance list is off and says it, nothing says "instances", and a conflict is still a warning', async ({ page }) => {
+  const server = oneInstance(newServer());
+  await open(page, '', server);
+  // Everything is that one instance's: the figures are the same, the list is off in its place (no arrow, dimmed, not a stop of the keyboard).
+  expect(await pickerState(page, 'instance')).toEqual({ text: 'Instance · chdash-0', title: 'Only one instance in this view', disabled: true, ariaDisabled: 'true', off: true });
+  expect(await tiles(page)).toMatchObject({ Requests: ['1,101', 'in the last 7 days'] });
+  await expect(pickerButton(page, 'key')).toBeEnabled();
+  // Fewer than two instances: nothing is summed, so the head has no "N instances" and no warning is shown.
+  await expect(page.locator('.mcpInstances')).toBeHidden();
+  await expect(page.locator('.mcpInstances__button')).toBeHidden();
+  await expect(page.locator('.mcpOverview__head')).not.toContainText('instances');
+  await expect(page.locator('.mcpOverview__warnings')).toBeHidden();
+  await expect(page.locator('.mcpOverview__warnings .uiBanner')).toHaveCount(0);
+  // The keyboard goes past the list that is off, from the Client list to the window.
+  await pickerButton(page, 'client').focus();
+  await page.keyboard.press('Tab');
+  await expect(windowButton(page, '1 h')).toBeFocused();
+  // A conflict is about this instance: another ChDash writes under its name, so its counts are not saved. It shows even with one instance.
+  const conflict = oneInstance(newServer());
+  conflict.instances[0] = { ...conflict.instances[0], status: 'conflict', reason: 'another process writes chdash-0.jsonl.zst' };
+  await open(page, '', conflict);
+  await expect(page.locator('.mcpOverview__warnings .uiBanner--warn .uiBanner__text')).toHaveText('Another ChDash writes as chdash-0: this instance does not save its counts. Give each instance its own name (mcp.usage.instance).');
+  await expect(page.locator('.mcpOverview__warnings .uiBanner__summary')).toHaveText('Why');
+  await expect(page.locator('.mcpInstances')).toBeHidden();
+  expect(await pickerState(page, 'instance')).toMatchObject({ text: 'Instance · chdash-0', disabled: true });
+});
+
+test('the instance is in the address: read on load, in the order of the dimensions, written by a change, taken off by its chip, walked by Back and Forward', async ({ page }) => {
+  // The address names the instance after the key and before the result; the chips and the reads have the order of the dimensions.
+  const server = await open(page, '?result=ok&instance=chdash-1&key=ops-all');
+  expect(reads(server)).toEqual(['?window=7d&group=method&key=ops-all&instance=chdash-1&result=ok']);
+  expect(await chipLabels(page)).toEqual(['Remove filter Key = ops-all', 'Remove filter Instance = chdash-1', 'Remove filter Result = ok']);
+  await expect(chips(page)).toHaveText(['Key=ops-all', 'Instance=chdash-1', 'Result=ok']);
+  await expect(chips(page).nth(1)).toHaveAttribute('title', 'Instance = chdash-1');
+  await expect(pickerButton(page, 'instance')).toHaveText('Instance · chdash-1');
+  // ops-all in chdash-1 that ended ok: 150 requests (155 less the 5 of run_query that ended in sql_error).
+  expect(await tiles(page)).toMatchObject({ Requests: ['150', 'in the last 7 days'] });
+  // An address that has nothing to fix is left as it was written; a change writes it in the order of the dimensions.
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?result=ok&instance=chdash-1&key=ops-all$/);
+  await windowButton(page, '24 h').click();
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?window=24h&key=ops-all&instance=chdash-1&result=ok$/);
+  await settled(page);
+  // The chip lets the instance go: the address and the list follow.
+  await page.getByRole('button', { name: 'Remove filter Instance = chdash-1' }).click();
+  await expect(chips(page)).toHaveText(['Key=ops-all', 'Result=ok']);
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?window=24h&key=ops-all&result=ok$/);
+  await expect(pickerButton(page, 'instance')).toHaveText('Instance · All');
+  await settled(page);
+  expect(reads(server).at(-1)).toBe('?window=24h&group=method&key=ops-all&result=ok');
+  // All six dimensions in an address, in no order: the chips, and the reads that the page makes, have the order of the dimensions, the instance
+  // between the client and the result.
+  await page.goto('/mcp-integration/usage?type=call&result=ok&instance=chdash-1&client=claude-code&method=query_table&key=ops-all');
+  await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+  expect(await chipLabels(page)).toEqual(['Remove filter Key = ops-all', 'Remove filter Method = query_table', 'Remove filter Client = claude-code', 'Remove filter Instance = chdash-1', 'Remove filter Result = ok', 'Remove filter Type = Tool calls']);
+  expect(reads(server).at(-1)).toBe('?window=7d&group=method&key=ops-all&method=query_table&client=claude-code&instance=chdash-1&result=ok&type=call');
+  // A fresh load of an address with the instance reads it.
+  await page.goto('/mcp-integration/usage?instance=chdash-1');
+  await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+  await expect(chips(page)).toHaveText(['Instance=chdash-1']);
+  // Back and Forward walk through it: a pick in the list is an entry of the history.
+  const menu = await openPicker(page, 'instance');
+  await menu.getByRole('checkbox', { name: /^chdash-0/ }).check();
+  await expect(chips(page)).toHaveText(['Instance=chdash-1', 'Instance=chdash-0']);
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?instance=chdash-1&instance=chdash-0$/);
+  await settled(page);
+  expect(reads(server).at(-1)).toBe('?window=7d&group=method&instance=chdash-1&instance=chdash-0');
+  expect(await tiles(page)).toMatchObject({ Requests: ['1,101', 'in the last 7 days'] });
+  await page.keyboard.press('Escape');
+  await page.goBack();
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?instance=chdash-1$/);
+  await expect(chips(page)).toHaveText(['Instance=chdash-1']);
+  await expect(pickerButton(page, 'instance')).toHaveText('Instance · chdash-1');
+  await settled(page);
+  expect(reads(server).at(-1)).toBe('?window=7d&group=method&instance=chdash-1');
+  expect(await tiles(page)).toMatchObject({ Requests: ['183', 'in the last 7 days'] });
+  await page.goForward();
+  await expect(chips(page)).toHaveText(['Instance=chdash-1', 'Instance=chdash-0']);
+  await expect(pickerButton(page, 'instance')).toHaveText('Instance · 2 selected');
+  await settled(page);
+  expect(reads(server).at(-1)).toBe('?window=7d&group=method&instance=chdash-1&instance=chdash-0');
+});
+
+test('an instance that the page cannot use is dropped from the address at load: its characters, its length, a repeat, and more than 20 of them', async ({ page }) => {
+  // An instance is 1 to 64 characters of letters, digits, dot, hyphen and underscore (the name of its file): a space, a slash, a name of 65.
+  const server = await open(page, `?instance=bad%20name&instance=chdash-1&instance=a%2Fb&instance=chdash-1&instance=${'x'.repeat(65)}&instance=old_node.2-a&instance=${'y'.repeat(64)}`);
+  // The valid ones stay, once each, in the order that the address gave; the address is replaced, not pushed, and the page reads once, for them.
+  await expect(page).toHaveURL(new RegExp(`/mcp-integration/usage\\?instance=chdash-1&instance=old_node\\.2-a&instance=${'y'.repeat(64)}$`));
+  expect(reads(server)).toEqual([`?window=7d&group=method&instance=chdash-1&instance=old_node.2-a&instance=${'y'.repeat(64)}`]);
+  expect(await chipLabels(page)).toEqual(['Remove filter Instance = chdash-1', 'Remove filter Instance = old_node.2-a', `Remove filter Instance = ${'y'.repeat(64)}`]);
+  expect(await page.evaluate(() => history.length)).toBeLessThanOrEqual(2);
+  // A kind of filter takes 20 values: the 20 first of 25 stay.
+  const many = Array.from({ length: 25 }, (_, i) => `node-${String(i).padStart(2, '0')}`);
+  const other = newServer();
+  await install(page, other);
+  await page.goto(`/mcp-integration/usage?${many.map((name) => `instance=${name}`).join('&')}`);
+  await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+  await expect(chips(page)).toHaveCount(20);
+  expect(new URL(page.url()).searchParams.getAll('instance')).toEqual(many.slice(0, 20));
+  expect(reads(other)).toEqual([`?window=7d&group=method&${many.slice(0, 20).map((name) => `instance=${name}`).join('&')}`]);
+  // The instance is a filter and not a group of the charts (the bar groups by key, method or client): `group=instance` is a group that the bar does
+  // not offer, so it is dropped, and the filter stays.
+  await page.goto('/mcp-integration/usage?group=instance&instance=chdash-1');
+  await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?instance=chdash-1$/);
+  await expect(groupButton(page)).toHaveText('Group by · Method');
+  await expect(chips(page)).toHaveText(['Instance=chdash-1']);
+  expect(reads(other).at(-1)).toBe('?window=7d&group=method&instance=chdash-1');
+  // An address with nothing to fix is left as it was written.
+  await page.goto('/mcp-integration/usage?instance=chdash-0&instance=chdash-1');
+  await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?instance=chdash-0&instance=chdash-1$/);
+  await expect(chips(page)).toHaveText(['Instance=chdash-0', 'Instance=chdash-1']);
+});
+
+test('"2 instances" in the head is a button that opens the list of the instances: this one first, when each wrote and its requests in the view; Escape closes it and the focus goes back', async ({ page }) => {
+  const server = await open(page, '?key=ops-all');
+  const button = page.locator('.mcpInstances__button');
+  // After the title and the dates, in the head of the tab: a button that opens a dialog.
+  await expect(button).toHaveText('2 instances');
+  await expect(button).toHaveAttribute('type', 'button');
+  await expect(button).toHaveAttribute('aria-haspopup', 'dialog');
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await expect(button).toHaveAttribute('title', 'The usage is summed over 2 instances. Open the list.');
+  const [title, range, note] = await page.locator('#mcpOverviewTitle, .mcpOverview__range, .mcpInstances__button').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().left));
+  expect(title).toBeLessThan(range);
+  expect(range).toBeLessThan(note);
+  const popover = await openInstances(page);
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  await expect(popover).toHaveAttribute('role', 'dialog');
+  await expect(popover).toHaveAttribute('aria-label', 'Instances of the usage');
+  await expect(popover).toBeFocused();
+  await expect(popover.locator('.mcpInstancesList__lead')).toHaveText('The usage is summed over 2 instances: each one saves the file of its own in the usage directory and reads the files of the others.');
+  await expect(popover.getByRole('list', { name: 'Instances' })).toBeVisible();
+  const rows = instanceRows(page);
+  await expect(rows).toHaveCount(2);
+  expect(await rows.evaluateAll((els) => els.map((el) => [el.dataset.instance, el.dataset.status]))).toEqual([['chdash-0', 'ok'], ['chdash-1', 'ok']]);
+  // This one first, and marked; each says when its file was last written (from the time of the answer, with the exact time in its title) and its
+  // requests in this view, which has the filter of the key: 857 in chdash-0 and 155 in chdash-1.
+  await expect(rows.nth(0).locator('code')).toHaveText('chdash-0');
+  await expect(rows.nth(0).locator('.mcpInstancesList__name')).toContainText('this instance');
+  await expect(rows.nth(1).locator('.mcpInstancesList__name')).not.toContainText('this instance');
+  await expect(rows.nth(0).locator('.mcpInstancesList__meta')).toHaveText('wrote 30 s ago · 857 requests');
+  await expect(rows.nth(1).locator('.mcpInstancesList__meta')).toHaveText('wrote 1 min ago · 155 requests');
+  await expect(rows.nth(0).locator('.mcpInstancesList__meta')).toHaveAttribute('title', /^2026-10-14T09:59:30\.000Z/);
+  await expect(popover.locator('.badge')).toHaveCount(0);
+  // Escape closes it, and the keyboard is back on the button.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.mcpInstancesPopover')).toHaveCount(0);
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await expect(button).toBeFocused();
+  // The button opens and closes it; a press outside closes it too.
+  await button.click();
+  await expect(popover).toBeVisible();
+  await button.click();
+  await expect(popover).toHaveCount(0);
+  await button.click();
+  await expect(popover).toBeVisible();
+  await page.locator('.mcpOverview__range').click();
+  await expect(popover).toHaveCount(0);
+  // A list that is open follows the next answer, and the focus stays where it was: chdash-1 has no request any more when the page reads again.
+  await button.click();
+  await expect(popover).toBeFocused();
+  server.cells = server.cells.filter((item) => item.instance !== 'chdash-1');
+  await page.evaluate(() => document.querySelector('#mcpRefresh').click());
+  await expect(rows.nth(1).locator('.mcpInstancesList__meta')).toHaveText('wrote 1 min ago · 0 requests');
+  await expect(rows.nth(0).locator('.mcpInstancesList__meta')).toHaveText('wrote 30 s ago · 857 requests');
+  await expect(popover).toBeVisible();
+  await expect(popover).toBeFocused();
+});
+
+// ---- the warnings about the files that are not read ----------------------------------------------------------------------------------------
+
+const warnings = (page) => page.locator('.mcpOverview__warnings .uiBanner');
+
+test('a skipped file is a warning above the tiles, a notice that waits its turn; it comes from the answer, so no filter takes it away or draws it again', async ({ page }) => {
+  const server = newServer();
+  server.instances = filesOf(['ok', ''], [['chdash-1', 'skipped', 'invalid']]);
+  await open(page, '', server);
+  // One box: amber (the level warn of the banner), a status and not an alert, with the sentence and no "Why" (a skipped file has no more to say).
+  await expect(warnings(page)).toHaveCount(1);
+  await expect(warnings(page)).toHaveClass(/uiBanner--warn/);
+  await expect(warnings(page)).toHaveAttribute('role', 'status');
+  await expect(warnings(page).locator('.uiBanner__text')).toHaveText('chdash-1: its file was skipped (invalid), so its counts are not in these figures.');
+  await expect(warnings(page).locator('details')).toHaveCount(0);
+  await expect(page.locator('.mcpOverview__warnings')).toBeVisible();
+  // Above the tiles, under the head of the tab.
+  const stack = await page.evaluate(() => {
+    const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+    return { head: box('.mcpOverview__head').bottom, warning: [box('.mcpOverview__warnings').top, box('.mcpOverview__warnings').bottom], tiles: box('.mcpOverview__tiles').top };
+  });
+  expect(stack.warning[0]).toBeGreaterThanOrEqual(stack.head - 0.5);
+  expect(stack.warning[1]).toBeLessThanOrEqual(stack.tiles + 0.5);
+  // The note of the head and its list say the same: the instance has the badge, and the reason in a word.
+  const popover = await openInstances(page);
+  await expect(instanceRows(page).nth(1)).toHaveAttribute('data-status', 'skipped');
+  await expect(instanceRows(page).nth(1).locator('.badge')).toHaveText('skipped');
+  await expect(instanceRows(page).nth(1).locator('.badge')).toHaveAttribute('title', 'chdash-1: its file was skipped (invalid), so its counts are not in these figures.');
+  await expect(instanceRows(page).nth(1).locator('.mcpInstancesList__name')).toContainText('invalid');
+  await expect(instanceRows(page).nth(0).locator('.badge')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  // The warning is the answer's `instances`, which the filters do not cut: it is there after each change, and it is the same box (a box that was
+  // drawn again would not have the mark).
+  await warnings(page).evaluate((el) => { el.dataset.mark = 'first'; });
+  await row(page, 'key', 'ops-all').click();
+  await expect(chips(page)).toHaveCount(1);
+  await settled(page);
+  await expect(warnings(page)).toHaveCount(1);
+  await expect(warnings(page)).toHaveAttribute('data-mark', 'first');
+  const menu = await openPicker(page, 'instance');
+  await menu.getByRole('checkbox', { name: /^chdash-0/ }).check();
+  await expect(chips(page)).toHaveCount(2);
+  await settled(page);
+  await expect(warnings(page)).toHaveAttribute('data-mark', 'first');
+  await expect(warnings(page).locator('.uiBanner__text')).toHaveText('chdash-1: its file was skipped (invalid), so its counts are not in these figures.');
+  await page.keyboard.press('Escape');
+  // With the filter of the instance, the file that is left out stays listed in the list of the bar, with its badge.
+  const again = await openPicker(page, 'instance');
+  await expect(again.locator('.mcpPicker__option', { hasText: 'chdash-1' }).locator('.badge')).toHaveText('skipped');
+});
+
+test('a conflict is a warning of its own, with the reason of the server behind "Why", and its instance has the badge in the lists', async ({ page }) => {
+  const server = newServer();
+  server.instances = filesOf(['conflict', 'another process writes chdash-0.jsonl.zst'], [['chdash-1', 'ok', '']]);
+  await open(page, '', server);
+  await expect(warnings(page)).toHaveCount(1);
+  await expect(warnings(page)).toHaveClass(/uiBanner--warn/);
+  await expect(warnings(page)).toHaveAttribute('role', 'status');
+  await expect(warnings(page).locator('.uiBanner__text')).toHaveText('Another ChDash writes as chdash-0: this instance does not save its counts. Give each instance its own name (mcp.usage.instance).');
+  // The reason is behind "Why": closed at first, the sentence of the server when it opens.
+  const why = warnings(page).locator('details');
+  await expect(why.locator('summary')).toHaveText('Why');
+  await expect(why).not.toHaveAttribute('open', /.*/);
+  await expect(why.locator('.uiBanner__more')).toBeHidden();
+  await why.locator('summary').click();
+  await expect(why.locator('.uiBanner__more')).toBeVisible();
+  await expect(why.locator('.uiBanner__more')).toHaveText('another process writes chdash-0.jsonl.zst');
+  // The popover has the badge on this instance, with the sentence in its title (the reason of a conflict is too long for a word).
+  await openInstances(page);
+  await expect(instanceRows(page).nth(0)).toHaveAttribute('data-status', 'conflict');
+  await expect(instanceRows(page).nth(0).locator('.badge')).toHaveText('conflict');
+  await expect(instanceRows(page).nth(0).locator('.badge')).toHaveAttribute('title', 'Another ChDash writes as chdash-0: this instance does not save its counts.');
+  await expect(instanceRows(page).nth(0).locator('.mcpInstancesList__name')).not.toContainText('another process');
+  // A filter keeps the warning, open as it was (the box is not drawn again).
+  await page.keyboard.press('Escape');
+  await row(page, 'key', 'ops-all').click();
+  await expect(chips(page)).toHaveCount(1);
+  await settled(page);
+  await expect(why).toHaveAttribute('open', /.*/);
+  await expect(why.locator('.uiBanner__more')).toBeVisible();
+});
+
+test('several skipped files are one sentence that names the first three, a conflict is another warning above it, and the list of the instances has each file', async ({ page }) => {
+  const server = newServer();
+  server.instances = filesOf(['ok', ''], [
+    ['chdash-1', 'ok', ''], ['chdash-2', 'skipped', 'invalid'], ['chdash-3', 'skipped', 'too_large'], ['chdash-4', 'skipped', 'invalid'],
+    ['chdash-5', 'skipped', 'too_large'], ['chdash-6', 'skipped', 'invalid'],
+  ]);
+  await open(page, '', server);
+  await expect(page.locator('.mcpInstances__button')).toHaveText('7 instances');
+  await expect(warnings(page)).toHaveCount(1);
+  await expect(warnings(page).locator('.uiBanner__text')).toHaveText('5 instance files were skipped, so their counts are not in these figures: chdash-2 (invalid), chdash-3 (too large), chdash-4 (invalid) and 2 more.');
+  // The list has each of the seven, with the reason of a skipped file in a word.
+  await openInstances(page);
+  await expect(instanceRows(page)).toHaveCount(7);
+  expect(await instanceRows(page).evaluateAll((els) => els.map((el) => `${el.dataset.instance} ${el.dataset.status}`))).toEqual([
+    'chdash-0 ok', 'chdash-1 ok', 'chdash-2 skipped', 'chdash-3 skipped', 'chdash-4 skipped', 'chdash-5 skipped', 'chdash-6 skipped',
+  ]);
+  await expect(popoverBadges(page)).toHaveText(['skipped', 'skipped', 'skipped', 'skipped', 'skipped']);
+  await expect(instanceRows(page).nth(3).locator('.mcpInstancesList__name')).toContainText('too large');
+  await page.keyboard.press('Escape');
+  // Two skipped files make the plural of two, and a conflict is its own warning, first.
+  const some = newServer();
+  some.instances = filesOf(['conflict', 'another process writes chdash-0.jsonl.zst'], [['chdash-1', 'ok', ''], ['chdash-2', 'skipped', 'invalid'], ['chdash-3', 'skipped', 'too_large']]);
+  await open(page, '', some);
+  await expect(warnings(page)).toHaveCount(2);
+  await expect(warnings(page).locator('.uiBanner__text')).toHaveText([
+    'Another ChDash writes as chdash-0: this instance does not save its counts. Give each instance its own name (mcp.usage.instance).',
+    '2 instance files were skipped, so their counts are not in these figures: chdash-2 (invalid), chdash-3 (too large).',
+  ]);
+});
+
+test('a warning moves nothing when a filter changes: the tiles, the cards and the tables stand where they stood, while the read runs and once it is drawn', async ({ page }) => {
+  // A conflict and a skipped file: two boxes above the tiles, from the first answer to the last. They are in the answer's `instances`, so a
+  // filter neither shows nor hides them, and the walk through the five ways to change a filter finds everything where it was.
+  const server = newServer();
+  server.instances = filesOf(['conflict', 'another process writes chdash-0.jsonl.zst'], [['chdash-1', 'skipped', 'invalid']]);
+  await open(page, '', server);
+  await expect(warnings(page)).toHaveCount(2);
+  await warnings(page).evaluateAll((els) => els.forEach((el, i) => { el.dataset.mark = String(i); }));
+  const base = await layout(page);
+  // The tiles stand under the two boxes: lower than they do with no warning, by their height and their gap.
+  const box = await page.locator('.mcpOverview__warnings').evaluate((el) => el.getBoundingClientRect().height);
+  expect(box).toBeGreaterThan(40);
+  await walkFilters(page, server, base, async () => {
+    // Drawn for each step, and each time the same two boxes, in the same place.
+    await expect(warnings(page)).toHaveCount(2);
+    await expect(warnings(page).first()).toHaveAttribute('data-mark', '0');
+    await expect(warnings(page).last()).toHaveAttribute('data-mark', '1');
+    expect(await page.locator('.mcpOverview__warnings').evaluate((el) => el.getBoundingClientRect().height)).toBeCloseTo(box, 0);
+  });
+});
+
+test('a phone: "2 instances" has a line of its own, its list opens inside the window, and the warnings fit it', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const server = newServer();
+  server.instances = filesOf(['conflict', 'another process writes chdash-0.jsonl.zst'], [['chdash-1', 'skipped', 'invalid']]);
+  await open(page, '', server);
+  // The head wraps on a phone: the dot that stands before "2 instances" on a desktop is gone (it would hang at the end of a line), and the note
+  // begins a line of its own, under the title and the dates.
+  await expect(page.locator('.mcpInstances__sep')).toBeHidden();
+  const head = await page.locator('.mcpOverview__head').evaluate((el) => {
+    const box = (node) => node.getBoundingClientRect();
+    return { left: box(el).left, range: box(el.querySelector('.mcpOverview__range')), note: box(el.querySelector('.mcpInstances__button')) };
+  });
+  expect(Math.abs(head.note.left - head.left)).toBeLessThanOrEqual(1);
+  expect(head.note.top).toBeGreaterThanOrEqual(head.range.bottom - 1);
+  // The list opens inside the window, and nothing of it is wider than it is.
+  const popover = await openInstances(page);
+  const inside = await popover.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    return { left: box.left, right: box.right, clipped: el.scrollWidth - el.clientWidth, rows: [...el.querySelectorAll('.mcpInstancesList__row')].map((item) => item.scrollWidth - item.clientWidth), width: document.documentElement.clientWidth };
+  });
+  expect(inside.left).toBeGreaterThanOrEqual(0);
+  expect(inside.right).toBeLessThanOrEqual(inside.width);
+  expect(inside.clipped).toBeLessThanOrEqual(0);
+  expect(inside.rows).toEqual([0, 0]);
+  await page.keyboard.press('Escape');
+  // The two warnings (a conflict, a skipped file) are boxes as wide as the window at most, and the page has no sideways scroll.
+  const boxes = await warnings(page).evaluateAll((els) => els.map((el) => ({ left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right, clipped: el.scrollWidth - el.clientWidth })));
+  expect(boxes).toHaveLength(2);
+  for (const item of boxes) {
+    expect(item.left).toBeGreaterThanOrEqual(0);
+    expect(item.right).toBeLessThanOrEqual(390);
+    expect(item.clipped).toBeLessThanOrEqual(0);
+  }
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
 });

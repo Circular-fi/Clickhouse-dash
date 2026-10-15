@@ -23,8 +23,10 @@
 //       Query result error (a server sentence, util.queryErrorParts);
 //       `details` puts long server text (the parser's expected tokens)
 //       behind a closed <details> toggle named `detailsLabel`; level
-//       "info" is a neutral notice (role=status); `inset` boxes it inside
-//       a padded view.
+//       "info" is a neutral notice and "warn" a warning (something is wrong
+//       and the view still works: amber, the MCP Usage instance whose file
+//       was left out), both role=status; `inset` boxes it inside a padded
+//       view.
 //   busy(el, on, { label })
 //       The one loading convention: is-loading and aria-busy on the
 //       element; a button is also disabled and shows its spinner.
@@ -141,8 +143,9 @@ function banner(container, { message = "", retry = null, verbatim = false, level
   container.classList.toggle("uiBanner--verbatim", !!verbatim);
   container.classList.toggle("uiBanner--inset", !!inset);
   container.classList.toggle("uiBanner--info", level === "info");
-  // An error interrupts (alert); a notice (level "info") waits its turn (status).
-  container.setAttribute("role", level === "info" ? "status" : "alert");
+  container.classList.toggle("uiBanner--warn", level === "warn");
+  // An error interrupts (alert); a notice (level "info") or a warning (level "warn") waits its turn (status).
+  container.setAttribute("role", level === "info" || level === "warn" ? "status" : "alert");
   if (!container.dataset.uiBanner) {
     container.dataset.uiBanner = "1";
     container.addEventListener("click", onBannerClick);

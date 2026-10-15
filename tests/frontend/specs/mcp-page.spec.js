@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { horizontalOverflow } from '../helpers/app.js';
 import { fetchedModules } from '../helpers/modules.js';
-import { GROUPS, KEYS, META, SECRET, SECTIONS, TOOLS, T, costOf, install, json, key, maskOf, newServer, reachOf, summaryOf } from '../helpers/mcp-fake.js';
+import { ELSEWHERE, GROUPS, KEYS, META, SECRET, SECTIONS, TOOLS, T, costOf, install, json, key, maskOf, newServer, oneInstance, reachOf, setUsage, summaryOf } from '../helpers/mcp-fake.js';
 
 // The MCP integration page (mcp.html, /mcp-integration, docs/mcp-integration-page.md): the access keys
 // of the MCP server built into ChDash, and how to connect a client. The server side is a small in-memory
@@ -75,7 +75,8 @@ test('the page is a page of its own: shell, modules, one heading, no host picker
   state.scripts = await fetchedModules(page);
   expect(state.page).toBe('mcp');
   expect(state.sheets).toEqual(['style.mcp.css']);
-  for (const name of ['app_page_mcp.js', 'app_mcp_view.js', 'app_mcp_form.js', 'app_api.js']) expect(state.scripts, name).toContain(name);
+  // app_mcp_instances.js (the note "Summed over 2 instances" and its warnings) is a module of Keys too: the usage of a key and the column Used need it.
+  for (const name of ['app_page_mcp.js', 'app_mcp_view.js', 'app_mcp_form.js', 'app_mcp_usage.js', 'app_mcp_instances.js', 'app_api.js']) expect(state.scripts, name).toContain(name);
   for (const name of ['app_explorer.js', 'app_system_view.js', 'app_traces.js', 'app_logs.js', 'app_sql.js', 'app_ui_filterbar.js', 'app_mcp_overview.js', 'app_mcp_bar.js', 'app_mcp_charts.js', 'app_chart_core.js', 'app_page_mcpusage.js']) expect(state.scripts, name).not.toContain(name);
   expect(new Set(state.scripts).size).toBe(state.scripts.length);
   // Not tied to a host: the picker is not on screen, the switcher and the theme are.
@@ -213,6 +214,8 @@ test('the side column: the endpoint with a copy button, connect tabs, hosts with
   await expect(limits).toContainText('1,000');
   await expect(limits).toContainText('30 s');
   await expect(limits).toContainText('No limit');
+  // The rate limit is a counter of each instance: every ChDash that shares the usage directory has its own, and the note says so.
+  await expect(page.locator('#mcpLimitsBlock .mcpNote')).toHaveText('A key can lower the rows and the timeout. It never raises them. The request limit counts for each key, on each instance.');
   // "Connect a client" is always open, with the commands built from the real origin.
   await expect(connect.getByRole('group', { name: 'Client' }).getByRole('button')).toHaveText(['Claude Code', 'Desktop', 'Inspector', 'JSON']);
   await expect(connect.locator('.mcpClients__panel:not([hidden]) .mcpCode__pre')).toContainText(`claude mcp add --transport http chdash-name ${origin}/mcp --header "Authorization: Bearer <secret>"`);
@@ -237,23 +240,27 @@ test('the keys table: one line for each key, its secret, scope and limits, and D
   for (const gone of ['Expires', 'Last used', 'Source', 'Description', 'State']) await expect(page.locator('#mcpKeysBody thead')).not.toContainText(gone);
   // The host is its name (a key reads one host); tools read "n/total", "All" or "None"; data has no total, so it is "All",
   // "None" or a count of patterns. A key of an older file that names several hosts says "n hosts" in the warning colour.
+  // The tools count the two that every key has (mcp_analysis_my_limits and mcp_analysis_my_usage), out of the 25 that this server offers
+  // (the third tool of the analysis is not offered while mcp.usage.all_keys is off).
   await expect(cells('ops-all').nth(2)).toHaveText('prod');
   await expect(cells('ops-all').nth(3)).toHaveText('All');
+  // "*" leaves nothing out here: the tool that "*" never gives is not offered, so the title has nothing to say about it.
+  await expect(cells('ops-all').nth(3).locator('.mcpMuted')).toHaveAttribute('title', 'All tools');
   // The data is how many databases and tables the key reaches (counted by the server, once for all the keys).
   await expect(cells('ops-all').nth(4)).toHaveText('2 dbs \u00b7 4 tables');
   // The key's own limits read at full strength: 200 rows, 10 s.
   await expect(cells('ops-all').nth(5)).toHaveText('200 · 10 s');
   await expect(cells('ci-bot').nth(2)).toHaveText('prod');
   await expect(cells('ci-bot').nth(2).locator('.mcpHostCell')).toHaveAttribute('title', 'prod');
-  await expect(cells('ci-bot').nth(3)).toHaveText('2/23');
-  await expect(cells('ci-bot').nth(3).locator('.mcpMono')).toHaveAttribute('title', 'list_databases, query_table');
+  await expect(cells('ci-bot').nth(3)).toHaveText('4/25');
+  await expect(cells('ci-bot').nth(3).locator('.mcpMono')).toHaveAttribute('title', 'list_databases, query_table, mcp_analysis_my_limits, mcp_analysis_my_usage');
   await expect(cells('ci-bot').nth(4)).toHaveText('2 dbs \u00b7 4 tables');
   await expect(cells('ci-bot').nth(4).locator('.mcpDataCell')).toHaveAttribute('title', /Data patterns: otel, analytics\.events/);
   await expect(cells('reporting').nth(2)).toHaveText('2 hosts');
   await expect(cells('reporting').nth(2).locator('.mcpWarn')).toHaveAttribute('title', /prod, staging\nA key reads one host now/);
-  await expect(cells('reporting').nth(3)).toHaveText('3/23');
+  await expect(cells('reporting').nth(3)).toHaveText('5/25');
   await expect(cells('reporting').nth(4)).toHaveText('2 dbs \u00b7 4 tables');
-  await expect(cells('legacy').nth(3)).toHaveText('1/23');
+  await expect(cells('legacy').nth(3)).toHaveText('3/25');
   // The global limit that a key inherits reads muted and a screen reader hears "(default)".
   await expect(cells('ci-bot').nth(5)).toContainText('1,000 (default)');
   await expect(cells('ci-bot').nth(5).locator('.mcpMuted').first()).toContainText('1,000');
@@ -280,8 +287,11 @@ test('the details of a key: Observability is one card for each signal, with the 
   server.keys.push(key({ id: 'ui_obs', name: 'obs-key', tools: ['search_traces', 'search_logs', 'query_metric', 'traces_search'], databases: ['*'] }));
   await open(page, server);
   await row(page, 'obs-key').locator('[data-action="open"]').click();
-  const cards = details(page).locator('.mcpGrantGroup:has(.mcpGrant)');
+  // The cards that hold a tool of the key: the three signals, and the analysis (a key holds the two tools that every key has, listed or not).
+  const cards = details(page).locator('.mcpGrantGroup:has(.mcpGrant)[data-group^="observability"]');
   await expect(cards.locator('.mcpGrantGroup__title')).toHaveText(['Observability - Traces', 'Observability - Logs', 'Observability - Metrics']);
+  await expect(details(page).locator('.mcpGrantGroup:has(.mcpGrant)')).toHaveCount(4);
+  await expect(details(page).locator('[data-group="mcp_analysis"] .mcpGrant__name')).toHaveText(['mcp_analysis_my_limits', 'mcp_analysis_my_usage']);
   await expect(details(page).locator('[data-group="observability-traces"] .mcpGrantGroup__count')).toHaveText('2 of 5');
   await expect(details(page).locator('[data-group="observability-logs"] .mcpGrantGroup__count')).toHaveText('1 of 2');
   await expect(details(page).locator('[data-group="observability-metrics"] .mcpGrantGroup__count')).toHaveText('1 of 3');
@@ -576,10 +586,13 @@ test('New key: name, hosts in a column, data, and one card for each family of pe
   // Permissions: one card for each family of the server, in its order, set apart by a border; a check box,
   // never a choice between two levels.
   await expect(d.locator('.mcpGroup__head .uiCheck')).toHaveText(['Data', 'Explorer', 'System', 'Observability - Traces', 'Observability - Logs', 'Observability - Metrics', 'Query', 'SQL']);
-  await expect(d.locator('.mcpGroup')).toHaveCount(8);
+  // The ninth card, the analysis of the usage, has a title and no box of its own: it holds tools that every key has or that a key names (see its own cases).
+  await expect(d.locator('.mcpGroup')).toHaveCount(9);
+  expect(await d.locator('.mcpGroup').evaluateAll((els) => els.map((el) => el.dataset.group))).toEqual(['data', 'explorer', 'system', ...SIGNALS, 'query', 'sql', 'mcp_analysis']);
+  await expect(d.locator('.mcpGroup__head .mcpGroup__title')).toHaveText(['MCP analysis']);
   // Every family has at least two tools, so every card has an arrow and no card is a lone check box.
   await expect(d.locator('.mcpGroup--single')).toHaveCount(0);
-  await expect(d.locator('.mcpGroup__toggle')).toHaveCount(8);
+  await expect(d.locator('.mcpGroup__toggle')).toHaveCount(9);
   expect(await d.locator('.mcpGroup').first().evaluate((el) => getComputedStyle(el).borderTopWidth)).toBe('1px');
   await expect(d.locator('select')).toHaveCount(0);
   // The data tools start on; the other families start off.
@@ -807,7 +820,189 @@ test('a key made with all the data can hold the API tools', async ({ page }) => 
   const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
   expect(post.body.databases).toEqual(['*']);
   expect(post.body.tools).toEqual(expect.arrayContaining(['explorer_catalog', 'explorer_table', 'system_overview', 'traces_search', 'logs_search', 'metrics_series', 'query_library', 'format_sql', 'run_query', 'explain_query', 'list_hosts']));
-  expect(post.body.tools).toHaveLength(23);  // every family
+  // Every family that has a box: the two tools that every key has are checked and locked, and never sent.
+  expect(post.body.tools).toHaveLength(23);
+  expect(post.body.tools).not.toContain('mcp_analysis_my_limits');
+  expect(post.body.tools).not.toContain('mcp_analysis_my_usage');
+});
+
+// The analysis of the usage in the key form. `mcp_analysis` is a family of the server's table like the others; its tools are drawn by the flags of
+// the catalog (`always`: every key has it, `explicit_only`: "*" does not give it, `available`: the server offers it now), never by their names.
+const DATA_TOOLS = ['list_hosts', 'list_databases', 'list_tables', 'describe_table', 'query_table'];
+
+test('New key: the analysis card is open, the two tools that every key has are checked and locked, and the tool of all the keys is off', async ({ page }) => {
+  const server = setUsage(newServer(), { allKeys: true });
+  await open(page, server);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  const card = d.locator('[data-group="mcp_analysis"]');
+  // The last card, with a title and no box of its own (no tool of it is chosen as a whole), open at once so that nothing hides what the key will
+  // hold; the other families stay behind their arrow.
+  await expect(d.locator('.mcpGroup').last()).toHaveAttribute('data-group', 'mcp_analysis');
+  await expect(card.locator('.mcpGroup__title')).toHaveText('MCP analysis');
+  await expect(d.locator('#mcpGroup-mcp_analysis')).toHaveCount(0);
+  await expect(card.locator('.mcpGroup__toggle')).toHaveAttribute('aria-expanded', 'true');
+  await expect(d.locator('#mcpGroupBody-mcp_analysis')).toBeVisible();
+  await expect(d.locator('#mcpGroupBody-data')).toBeHidden();
+  await expect(d.locator('#mcpGroupBody-mcp_analysis .uiCheck__label')).toHaveText(['mcp_analysis_my_limits', 'mcp_analysis_my_usage', 'mcp_analysis_all_usage']);
+  // The tools that every key has: on and locked, and the label says so (a screen reader hears it with the name of the tool).
+  for (const name of ['mcp_analysis_my_limits', 'mcp_analysis_my_usage']) {
+    const box = d.locator(`#mcpTool-${name}`);
+    await expect(box).toBeChecked();
+    await expect(box).toBeDisabled();
+    await expect(d.locator(`label[for="mcpTool-${name}"]`)).toHaveClass(/is-always/);
+    await expect(d.locator(`label[for="mcpTool-${name}"] .uiCheck__note`)).toHaveText('Every key has it');
+    await expect(box).toHaveAccessibleName(new RegExp(`${name}\\s*Every key has it`));
+  }
+  // The tool that "*" does not give: off, free to tick, and its label says that "*" leaves it out.
+  const all = d.locator('#mcpTool-mcp_analysis_all_usage');
+  await expect(all).not.toBeChecked();
+  await expect(all).toBeEnabled();
+  await expect(d.locator('label[for="mcpTool-mcp_analysis_all_usage"] .uiCheck__note')).toHaveText('"*" does not include it');
+  await expect(all).toHaveAccessibleName(/"\*" does not include it/);
+  // Two of the three are on, and nothing is locked out of the family, so its head has no reason to give.
+  await expect(card.locator('.mcpGroup__count')).toHaveText('2/3');
+  await expect(card.locator('.mcpGroup__reason')).toBeHidden();
+  // No box ticks it, and none unticks the two that every key has: the card has no box, and the box of another family is that family's.
+  const families = ['data', 'explorer', 'system', ...SIGNALS, 'query', 'sql'];
+  await d.locator('#mcpField-databases').fill('*');
+  for (const id of families) await family(d, id).check();
+  await expect(all).not.toBeChecked();
+  await expect(card.locator('.mcpGroup__count')).toHaveText('2/3');
+  for (const id of families) await family(d, id).uncheck();
+  await expect(all).not.toBeChecked();
+  await expect(d.locator('#mcpTool-mcp_analysis_my_limits')).toBeChecked();
+  await expect(d.locator('#mcpTool-mcp_analysis_my_usage')).toBeChecked();
+  await expect(card.locator('.mcpGroup__count')).toHaveText('2/3');
+});
+
+test('New key: the tools that every key has are never sent and make no permission, and the tool of all the keys is not sent while it is off', async ({ page }) => {
+  const server = setUsage(newServer(), { allKeys: true });
+  await open(page, server);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await fillValid(d);
+  const create = d.getByRole('button', { name: 'Create key' });
+  // Without a tool of its own the key is not valid, though two tools are checked: they are the key's whatever it says, not a choice.
+  await d.locator('#mcpGroup-data').uncheck();
+  await expect(d.locator('#mcpTool-mcp_analysis_my_limits')).toBeChecked();
+  await expect(create).toBeDisabled();
+  await expect(create).toHaveAttribute('title', /at least one permission/);
+  await d.locator('#mcpGroup-data').check();
+  await expect(create).toBeEnabled();
+  await create.click();
+  await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
+  expect(post.body.tools).toEqual(DATA_TOOLS);
+});
+
+test('New key: the tool of all the keys is sent when it is ticked, and only then, with no tool that every key has', async ({ page }) => {
+  const server = setUsage(newServer(), { allKeys: true });
+  await open(page, server);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await fillValid(d);
+  const all = d.locator('#mcpTool-mcp_analysis_all_usage');
+  const count = d.locator('[data-group="mcp_analysis"] .mcpGroup__count');
+  await all.check();
+  await expect(count).toHaveText('3/3');
+  await all.uncheck();
+  await expect(count).toHaveText('2/3');
+  await all.check();
+  await expect(count).toHaveText('3/3');
+  await d.getByRole('button', { name: 'Create key' }).click();
+  await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
+  expect(post.body.tools).toEqual([...DATA_TOOLS, 'mcp_analysis_all_usage']);
+  expect(post.body.tools).not.toContain('mcp_analysis_my_limits');
+  expect(post.body.tools).not.toContain('mcp_analysis_my_usage');
+  // The list behind the dialog: the key holds the two tools that every key has and the one that it named, with its data tools (8 of 26).
+  await d.getByRole('button', { name: 'Done' }).click();
+  await expect(row(page, 'analyst').locator('td').nth(3)).toHaveText('8/26');
+  await expect(row(page, 'analyst').locator('td').nth(3).locator('.mcpMono')).toHaveAttribute('title', `${DATA_TOOLS.join(', ')}, mcp_analysis_my_limits, mcp_analysis_my_usage, mcp_analysis_all_usage`);
+});
+
+test('New key: a tool that "*" does not give is a choice of its own in any family: the box of the family neither ticks nor unticks it', async ({ page }) => {
+  // The page knows no tool by its name: the flag of the catalog is what says it. Here a family that has a box (Data) holds such a tool too.
+  const server = newServer();
+  server.meta.tools.push(T('data_audit', 'data', 'Reads what the other tools of the family do not.', false, '', { explicit_only: true }));
+  await open(page, server);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  await fillValid(d);
+  const audit = d.locator('#mcpTool-data_audit');
+  const box = d.locator('#mcpGroup-data');
+  const count = d.locator('[data-group="data"] .mcpGroup__count');
+  // The card is open at once, as it holds a tool to name; Data starts on, without the tool that must be named.
+  await expect(d.locator('#mcpGroupBody-data')).toBeVisible();
+  await expect(box).toBeChecked();
+  await expect(audit).not.toBeChecked();
+  await expect(audit).toBeEnabled();
+  await expect(d.locator('label[for="mcpTool-data_audit"] .uiCheck__note')).toHaveText('"*" does not include it');
+  await expect(count).toHaveText('5/6');
+  // The box clears the plain tools and sets them again; the tool to name stays off.
+  await box.uncheck();
+  await expect(count).toHaveText('0/6');
+  await box.check();
+  await expect(count).toHaveText('5/6');
+  await expect(audit).not.toBeChecked();
+  // Ticked by hand it stays on when the box is cleared (the box is the plain tools), and the box does not need it to be ticked.
+  await audit.check();
+  await expect(count).toHaveText('6/6');
+  await expect(box).toBeChecked();
+  await box.uncheck();
+  await expect(audit).toBeChecked();
+  await expect(count).toHaveText('1/6');
+  await box.check();
+  await expect(count).toHaveText('6/6');
+  await d.getByRole('button', { name: 'Create key' }).click();
+  await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
+  expect(post.body.tools).toEqual([...DATA_TOOLS, 'data_audit']);
+});
+
+test('New key: the tool of all the keys is not offered while mcp.usage.all_keys is off, and the card holds the two tools that every key has', async ({ page }) => {
+  await open(page);  // all_keys is off in the fake by default: the catalog says that the tool is not available
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  const card = d.locator('[data-group="mcp_analysis"]');
+  await expect(d.locator('#mcpTool-mcp_analysis_all_usage')).toHaveCount(0);
+  await expect(d.locator('#mcpGroupBody-mcp_analysis .uiCheck__label')).toHaveText(['mcp_analysis_my_limits', 'mcp_analysis_my_usage']);
+  await expect(card.locator('.mcpGroup__count')).toHaveText('2/2');
+  // Two tools that are given and nothing to choose: still a card of its own, open, that locks nothing.
+  await expect(card.locator('.mcpGroup__toggle')).toHaveAttribute('aria-expanded', 'true');
+  await expect(card.locator('.mcpGroup__reason')).toBeHidden();
+  await expect(d.locator('#mcpGroup-mcp_analysis')).toHaveCount(0);
+  await expect(d.locator('#mcpTool-mcp_analysis_my_limits')).toBeDisabled();
+  await expect(d.locator('#mcpTool-mcp_analysis_my_usage')).toBeDisabled();
+});
+
+test('New key: with the usage off the analysis card is the one tool that every key has, with no arrow, and nothing of the usage is offered', async ({ page }) => {
+  const server = setUsage(newServer(), { enabled: false });
+  await open(page, server);
+  await page.locator('#mcpNewKey').click();
+  const d = dialog(page);
+  const card = d.locator('[data-group="mcp_analysis"]');
+  // Nothing is counted, so the analysis of the usage is not offered: only the tool that reads the limits of the key.
+  await expect(d.locator('[id^="mcpTool-mcp_analysis"]')).toHaveCount(1);
+  await expect(d.locator('#mcpTool-mcp_analysis_my_limits')).toBeChecked();
+  await expect(d.locator('#mcpTool-mcp_analysis_my_limits')).toBeDisabled();
+  await expect(d.locator('#mcpTool-mcp_analysis_my_usage')).toHaveCount(0);
+  await expect(d.locator('#mcpTool-mcp_analysis_all_usage')).toHaveCount(0);
+  // A family of one tool is the tool: a check box in the head, no arrow, no count, and the note says that every key has it.
+  await expect(d.locator('.mcpGroup')).toHaveCount(9);
+  await expect(card).toHaveClass(/mcpGroup--single/);
+  await expect(d.locator('.mcpGroup--single')).toHaveCount(1);
+  await expect(card.locator('.mcpGroup__toggle, .mcpGroup__count')).toHaveCount(0);
+  await expect(d.locator('.mcpGroup__toggle')).toHaveCount(8);
+  await expect(card.locator('.uiCheck__note')).toHaveText('Every key has it');
+  await expect(card.locator('.mcpGroup__reason')).toBeHidden();
+  // Not sent: the key is made with its data tools alone.
+  await fillValid(d);
+  await d.getByRole('button', { name: 'Create key' }).click();
+  await expect(d.locator('#mcpSecret')).toHaveValue(SECRET);
+  const post = server.calls.find((call) => call.method === 'POST' && call.path === '/keys');
+  expect(post.body.tools).toEqual(DATA_TOOLS);
 });
 
 test('the secret panel closes with Escape and the close button, and clears the DOM the same way', async ({ page }) => {
@@ -914,8 +1109,9 @@ test('a key is made or deleted: nothing on the page changes it, and no request d
   await row(page, 'ci-bot').locator('[data-action="open"]').click();
   await expect(details(page)).toHaveCount(1);
   for (const label of ['Edit', 'Disable', 'Enable', 'Rotate', 'Rotate secret']) await expect(details(page).getByRole('button', { name: label })).toHaveCount(0);
-  // The details only show: a button looks at the grants again, the windows of the usage, and the cost that opens.
-  await expect(details(page).getByRole('button')).toHaveText(['Check again', '1 h', '6 h', '24 h', '7 d', '30 d', '90 d', 'ClickHouse cost']);
+  // The details only show: a button looks at the grants again, the list of the instances that the usage sums (two here), the windows of the
+  // usage, and the cost that opens.
+  await expect(details(page).getByRole('button')).toHaveText(['Check again', 'Summed over 2 instances', '1 h', '6 h', '24 h', '7 d', '30 d', '90 d', 'ClickHouse cost']);
   expect(server.calls.filter((call) => ['PATCH', 'PUT'].includes(call.method) || call.path.endsWith('/rotate'))).toHaveLength(0);
 });
 
@@ -1110,14 +1306,18 @@ test('a click on a key opens its details under it, one key at a time: source, ho
   await expect(about.locator('.mcpChip')).toHaveText(['prod', 'otel', 'analytics.events']);
   await expect(about).toContainText('1,000 (default)');
   await expect(about).toContainText('30 s (default)');
-  // Every family of the server is listed with what the key holds in it; the tools it holds are named.
-  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('2 of 23');
+  // Every family of the server is listed with what the key holds in it; the tools it holds are named. The key lists 2 tools and holds 4: the
+  // two that every key has (the analysis of its own limits and usage) count as well, out of the 25 that the server offers.
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('4 of 25');
   // The families sit in two balanced columns (one after the other in the page's source), every family once.
-  expect((await d.locator('.mcpGrantGroup__title').allTextContents()).sort()).toEqual(['Data', 'Explorer', 'Observability - Logs', 'Observability - Metrics', 'Observability - Traces', 'Query', 'SQL', 'System']);
+  expect((await d.locator('.mcpGrantGroup__title').allTextContents()).sort()).toEqual(['Data', 'Explorer', 'MCP analysis', 'Observability - Logs', 'Observability - Metrics', 'Observability - Traces', 'Query', 'SQL', 'System']);
   await expect(d.locator('[data-group="data"] .mcpGrantGroup__count')).toHaveText('2 of 5');
   await expect(d.locator('[data-group="explorer"] .mcpGrantGroup__count')).toHaveText('0 of 2');
-  await expect(d.locator('.mcpGrant .mcpGrant__name')).toHaveText(['list_databases', 'query_table']);
+  await expect(d.locator('[data-group="mcp_analysis"] .mcpGrantGroup__count')).toHaveText('2 of 2');
+  await expect(d.locator('.mcpGrant .mcpGrant__name')).toHaveText(['list_databases', 'query_table', 'mcp_analysis_my_limits', 'mcp_analysis_my_usage']);
   await expect(d.locator('.mcpGrant[data-tool="query_table"]')).toContainText('Rows of one table');
+  // A tool that every key has says so where the others say what they do.
+  await expect(d.locator('.mcpGrant[data-tool="mcp_analysis_my_limits"] .mcpGrant__note')).toHaveText('every key has it');
   await expect(d.locator('.mcpGrantGroup.is-empty')).toHaveCount(7);
   // The details span the table's width and need no scroll of the page's own to be read.
   const wide = await d.evaluate((el) => ({ cell: el.querySelector('td').getBoundingClientRect().width, table: el.closest('table').getBoundingClientRect().width }));
@@ -1160,14 +1360,15 @@ test('the details of a key with every tool name the tools it holds, the ones tha
   // ops-all: tools ["*"] and data "*": all of them. A key with "*" and a narrower data holds the tools that do not need all the data.
   await row(page, 'ops-all').locator('[data-action="open"]').click();
   let d = details(page);
-  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('23 of 23');
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('25 of 25');
   await expect(d.locator('.mcpGrantGroup.is-empty')).toHaveCount(0);
   await expect(d.locator('.mcpAbout')).toContainText('The config file');
   await expect(d.locator('.mcpAbout')).toContainText('200');
   await expect(d.locator('.mcpAbout')).toContainText('10 s');
   await row(page, 'star-narrow').locator('[data-action="open"]').click();
   d = details(page);
-  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('21 of 23');
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('23 of 25');
+  await expect(d.locator('[data-group="mcp_analysis"] .mcpGrantGroup__count')).toHaveText('2 of 2');
   await expect(d.locator('[data-group="sql"] .mcpGrantGroup__count')).toHaveText('0 of 2');
   await expect(d.locator('[data-group="explorer"] .mcpGrantGroup__count')).toHaveText('2 of 2');
   await expect(d.locator('[data-group="observability-traces"] .mcpGrantGroup__count')).toHaveText('5 of 5');
@@ -1175,10 +1376,84 @@ test('the details of a key with every tool name the tools it holds, the ones tha
   await expect(d.locator('[data-group="observability-metrics"] .mcpGrantGroup__count')).toHaveText('3 of 3');
 });
 
+test('a key that names mcp_analysis_all_usage holds it: its Tools cell counts it, "*" does not give it, and its details list it', async ({ page }) => {
+  const server = setUsage(newServer(), { allKeys: true });  // the server offers 26 tools now: the one of all the keys is one of them
+  server.keys.push(key({ id: 'ui_aa0000000001', name: 'auditor', tools: ['list_hosts', 'mcp_analysis_all_usage'], databases: ['*'] }));
+  server.keys.push(key({ id: 'ui_aa0000000002', name: 'star-and-all', tools: ['*', 'mcp_analysis_all_usage'], databases: ['*'] }));
+  await open(page, server);
+  const cell = (name) => row(page, name).locator('td').nth(3);
+  // The key that names it: its tool, the two that every key has, and the one that it named; the title lists them in the order of the catalog.
+  await expect(cell('auditor')).toHaveText('4/26');
+  await expect(cell('auditor').locator('.mcpMono')).toHaveAttribute('title', 'list_hosts, mcp_analysis_my_limits, mcp_analysis_my_usage, mcp_analysis_all_usage');
+  // A key that does not name it does not hold it.
+  await expect(cell('ci-bot')).toHaveText('4/26');
+  await expect(cell('ci-bot').locator('.mcpMono')).toHaveAttribute('title', 'list_databases, query_table, mcp_analysis_my_limits, mcp_analysis_my_usage');
+  // "*" does not give it: the cell says "All", and its title says what "*" leaves out. Named next to "*", it is given: nothing is left out.
+  await expect(cell('ops-all')).toHaveText('All');
+  await expect(cell('ops-all').locator('.mcpMuted')).toHaveAttribute('title', 'All tools but mcp_analysis_all_usage: a key has it only when its list names it');
+  await expect(cell('star-and-all')).toHaveText('All');
+  await expect(cell('star-and-all').locator('.mcpMuted')).toHaveAttribute('title', 'All tools');
+  // The details: the family card lists the three tools of the key that names it (what the tool does, and "every key has it" for the two others).
+  await row(page, 'auditor').locator('[data-action="open"]').click();
+  let d = details(page);
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('4 of 26');
+  await expect(d.locator('[data-group="mcp_analysis"] .mcpGrantGroup__count')).toHaveText('3 of 3');
+  await expect(d.locator('[data-group="mcp_analysis"] .mcpGrant__name')).toHaveText(['mcp_analysis_my_limits', 'mcp_analysis_my_usage', 'mcp_analysis_all_usage']);
+  await expect(d.locator('.mcpGrant[data-tool="mcp_analysis_all_usage"] .mcpGrant__note')).toHaveText('What all the keys of all the instances did.');
+  await expect(d.locator('.mcpGrant[data-tool="mcp_analysis_my_usage"] .mcpGrant__note')).toHaveText('every key has it');
+  // "*" holds the other two, not this one.
+  await row(page, 'ops-all').locator('[data-action="open"]').click();
+  d = details(page);
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('25 of 26');
+  await expect(d.locator('[data-group="mcp_analysis"] .mcpGrantGroup__count')).toHaveText('2 of 3');
+  await expect(d.locator('[data-group="mcp_analysis"] .mcpGrant__name')).toHaveText(['mcp_analysis_my_limits', 'mcp_analysis_my_usage']);
+  await expect(d.locator('.mcpGrant[data-tool="mcp_analysis_all_usage"]')).toHaveCount(0);
+  await row(page, 'star-and-all').locator('[data-action="open"]').click();
+  d = details(page);
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('26 of 26');
+  await expect(d.locator('[data-group="mcp_analysis"] .mcpGrantGroup__count')).toHaveText('3 of 3');
+});
+
+test('a key with no tool of its own holds the ones that every key has: its Tools cell never says None', async ({ page }) => {
+  const server = newServer();
+  server.keys.push(key({ id: 'ui_bb0000000001', name: 'bare-key', tools: [], databases: ['otel'] }));
+  await open(page, server);
+  const cell = row(page, 'bare-key').locator('td').nth(3);
+  await expect(cell).toHaveText('2/25');
+  await expect(cell.locator('.mcpMono')).toHaveAttribute('title', 'mcp_analysis_my_limits, mcp_analysis_my_usage');
+  await row(page, 'bare-key').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpDetails__title .pagePart__count')).toHaveText('2 of 25');
+  await expect(details(page).locator('.mcpGrantGroup:not(.is-empty)')).toHaveCount(1);
+  await expect(details(page).locator('[data-group="mcp_analysis"] .mcpGrant__name')).toHaveText(['mcp_analysis_my_limits', 'mcp_analysis_my_usage']);
+});
+
+test('a key that names a tool that the server does not offer now does not hold it: the cell and the details leave it out', async ({ page }) => {
+  // mcp.usage.all_keys is off: the tool of all the keys is not on offer (25 tools), so the key that names it holds the same as any other.
+  const server = newServer();
+  server.keys.push(key({ id: 'ui_aa0000000001', name: 'auditor', tools: ['list_hosts', 'mcp_analysis_all_usage'], databases: ['*'] }));
+  await open(page, server);
+  const cell = row(page, 'auditor').locator('td').nth(3);
+  await expect(cell).toHaveText('3/25');
+  await expect(cell.locator('.mcpMono')).toHaveAttribute('title', 'list_hosts, mcp_analysis_my_limits, mcp_analysis_my_usage');
+  await row(page, 'auditor').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpDetails__title .pagePart__count')).toHaveText('3 of 25');
+  await expect(details(page).locator('[data-group="mcp_analysis"] .mcpGrantGroup__count')).toHaveText('2 of 2');
+  await expect(details(page).locator('.mcpGrant[data-tool="mcp_analysis_all_usage"]')).toHaveCount(0);
+  // The usage is off: not even the tool that reads the usage of the key is on offer, and "*" has nothing to leave out of the 24 that are.
+  const off = setUsage(newServer(), { enabled: false });
+  off.keys.push(key({ id: 'ui_aa0000000002', name: 'usage-reader', tools: ['list_hosts', 'mcp_analysis_my_usage', 'mcp_analysis_all_usage'], databases: ['*'] }));
+  await open(page, off);
+  await expect(row(page, 'usage-reader').locator('td').nth(3)).toHaveText('2/24');
+  await expect(row(page, 'usage-reader').locator('td').nth(3).locator('.mcpMono')).toHaveAttribute('title', 'list_hosts, mcp_analysis_my_limits');
+  await row(page, 'usage-reader').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpDetails__title .pagePart__count')).toHaveText('2 of 24');
+  await expect(details(page).locator('[data-group="mcp_analysis"] .mcpGrant__name')).toHaveText(['mcp_analysis_my_limits']);
+});
+
 test('a page that cannot change keys still shows the details of a key', async ({ page }) => {
   await open(page, newServer({ meta: { manage_from_ui: false, can_manage: false } }));
   await row(page, 'ci-bot').locator('[data-action="open"]').click();
-  await expect(details(page).locator('.mcpGrantGroup')).toHaveCount(8);
+  await expect(details(page).locator('.mcpGrantGroup')).toHaveCount(9);
   await expect(page.locator('#mcpKeysBody [data-action="remove"]')).toHaveCount(0);
 });
 
@@ -1286,7 +1561,7 @@ test('the details of a key: two columns of about the same height, in the order o
     // Same height: the two columns differ by less than a fifth.
     expect(Math.abs(cols[0].h - cols[1].h)).toBeLessThan(Math.max(cols[0].h, cols[1].h) * 0.2);
     // Together they hold every family once, each column in the order of the families, the first family first.
-    const ORDER = ['data', 'explorer', 'system', ...SIGNALS, 'query', 'sql'];
+    const ORDER = ['data', 'explorer', 'system', ...SIGNALS, 'query', 'sql', 'mcp_analysis'];
     expect([...cols[0].groups, ...cols[1].groups].sort((x, y) => ORDER.indexOf(x) - ORDER.indexOf(y))).toEqual(ORDER);
     for (const col of cols) expect(col.groups).toEqual([...col.groups].sort((x, y) => ORDER.indexOf(x) - ORDER.indexOf(y)));
     expect(cols[0].groups[0]).toBe('data');
@@ -1379,7 +1654,7 @@ test('the data of a key that cannot be listed says so and the rest of the detail
   await row(page, 'ci-bot').locator('[data-action="open"]').click();
   await expect(details(page).locator('.mcpReach')).toContainText('The data of this key cannot be listed');
   await expect(details(page).locator('.mcpReach')).toContainText('The grants could not be read.');
-  await expect(details(page).locator('.mcpGrantGroup')).toHaveCount(8);
+  await expect(details(page).locator('.mcpGrantGroup')).toHaveCount(9);
 });
 
 test.describe('tablet', () => {
@@ -1457,6 +1732,43 @@ test.describe('phone', () => {
     await expect(page.locator('.mcpOff')).toBeVisible();
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
     await screenshot(page, 'off-phone');
+  });
+
+  test('390 px: the warning about an instance, the note of the usage of a key and its open list stay inside the page', async ({ page }) => {
+    const server = newServer();
+    server.instances[1] = { instance: 'chdash-1', status: 'skipped', reason: 'invalid', written_at: null };
+    await open(page, server);
+    // Under the keys: the note and the warning, as wide as the page at most.
+    const warning = page.locator('.mcpUsedNote + .mcpUsedWarn .mcpInstances__warn');
+    await expect(warning).toBeVisible();
+    const box = await warning.boundingBox();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390.5);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    // The usage of a key: the head wraps (no dot before "Summed over 2 instances" where it starts a line), the warning is above the tiles.
+    await row(page, 'ci-bot').locator('[data-action="open"]').click();
+    const usage = details(page).locator('.mcpUsage');
+    await expect(usage.locator('.statTile')).toHaveCount(6);
+    await expect(usage.locator('.mcpInstances__sep')).toBeHidden();
+    await expect(usage.locator('.mcpUsage__warnings .mcpInstances__warn')).toBeVisible();
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    const note = usage.locator('.mcpInstances__button');
+    const noteBox = await note.boundingBox();
+    expect(noteBox.x).toBeGreaterThanOrEqual(0);
+    expect(noteBox.x + noteBox.width).toBeLessThanOrEqual(390.5);
+    // The list is a popover as wide as the page allows, with a column of its own for each instance (the name, then when it wrote).
+    await note.click();
+    const popover = page.locator('.mcpInstancesPopover');
+    await expect(popover).toBeVisible();
+    const list = await popover.boundingBox();
+    expect(list.x).toBeGreaterThanOrEqual(0);
+    expect(list.x + list.width).toBeLessThanOrEqual(390.5);
+    expect(await popover.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+    const row0 = await popover.locator('.mcpInstancesList__row').first().evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
+    expect(row0).toBe(1);
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
   });
 });
 
@@ -1563,8 +1875,9 @@ test('the column Used: the last use and the tool calls of the last 7 days, read 
   await expect(used(page, 'ops-all')).toHaveText('2 min ago · 1.2K');
   await expect(used(page, 'legacy')).toHaveText('3 h ago · 25');
   await expect(used(page, 'second-ui-key')).toHaveText('10 d ago · 0');
-  // Counted for the whole life of the keys (a usage file): a key without a use was never used.
+  // The counting began before the keys were made (usage.since is Oct 1): a key without a use was never used, and its title says since when.
   await expect(used(page, 'reporting')).toHaveText('Never');
+  await expect(used(page, 'reporting')).toHaveAttribute('title', /^Never used\. Counted since Oct 1 08:00\.\n0 tool calls in 0 requests in the last 7 days\.$/);
   // Muted without a call in the window; the warning colour for errors (3 of 12) or refusals of the rate limit.
   await expect(used(page, 'reporting')).toHaveClass(/mcpMuted/);
   await expect(used(page, 'second-ui-key')).toHaveClass(/mcpMuted/);
@@ -1574,7 +1887,9 @@ test('the column Used: the last use and the tool calls of the last 7 days, read 
   await expect(used(page, 'ci-bot')).toHaveAttribute('title', /^Last used .*\n12 tool calls in 20 requests in the last 7 days\.\n3 errors\.$/);
   await expect(used(page, 'legacy')).toHaveAttribute('title', /2 refused by the rate limit\./);
   await expect(page.locator('#mcpKeysBody th.mcpCell--used')).toHaveAttribute('title', 'When the key was last used, and its tool calls in the last 7 days');
-  await expect(page.locator('.mcpUsedNote')).toHaveText('Used: when each key was last used, and its tool calls in the last 7 days.');
+  // The note says what the column counts and, as the fake has two instances that share the usage directory, over how many it is summed.
+  // The window starts after the counting began, so there is no "Counted since".
+  await expect(page.locator('.mcpUsedNote')).toHaveText('Used: when each key was last used, and its tool calls in the last 7 days. Summed over 2 instances.');
   // A key that is open stays open when the counts come, and Refresh reads them again.
   await row(page, 'ops-all').locator('[data-action="open"]').click();
   await page.locator('#mcpRefresh').click();
@@ -1583,22 +1898,169 @@ test('the column Used: the last use and the tool calls of the last 7 days, read 
   await expect(used(page, 'ops-all')).toHaveText('2 min ago · 1.2K');
 });
 
-test('the column Used says when it cannot read the usage, and counted in memory it says since when', async ({ page }) => {
+test('the column Used says when it cannot read the usage, and since when it counts when the counting began after the window starts', async ({ page }) => {
   const failing = newServer();
   failing.errors['GET /usage'] = { status: 503, body: { error_code: 'server_busy', message: 'Too many heavy requests.', retryable: true } };
   await open(page, failing);
   await expect(used(page, 'ci-bot')).toHaveText('—');
   await expect(used(page, 'ci-bot')).toHaveAttribute('title', /Too many heavy requests/);
   await expect(page.locator('.mcpUsedNote')).toBeHidden();
+  // Nothing is left of an answer that was not read: no warning about the instances, no line of other keys.
+  await expect(page.locator('.mcpUsedWarn')).toBeHidden();
+  await expect(page.locator('.mcpDeleted')).toBeHidden();
 
-  const memory = newServer();
-  memory.meta.usage = { ...memory.meta.usage, persisted: false, since: '2026-10-14T08:00:00Z' };
-  await open(page, memory);
-  await expect(page.locator('.mcpUsedNote')).toContainText('Counted in memory since');
-  await expect(page.locator('.mcpUsedNote')).toContainText('a restart of ClickHouse Dash clears it.');
-  // The key is older than the counting: not "Never" (it may have been used before the start), a dash that says why.
-  await expect(used(page, 'reporting')).toHaveText('—');
-  await expect(used(page, 'reporting')).toHaveAttribute('title', /^Not used since .*the usage is kept in memory\./);
+  // The usage is counted in files that survive a restart, so it says since when it counts (usage.since) and nothing about a restart. The window
+  // of 7 days starts before the counting here: the note says so ("Counted since"), and a key that is older than the counting may have been used
+  // before it began: a dash, not "Never". A key made after the counting began was never used.
+  const late = newServer();
+  late.meta.usage = { ...late.meta.usage, since: '2026-10-14T08:00:00Z' };
+  late.keys.push(key({ id: 'ui_young0000000', name: 'young-key', created_at: '2026-10-14T09:00:00Z' }));
+  late.keys.push(key({ id: 'quiet-config', name: 'quiet-config', source: 'config', secret_hint: '', created_at: null }));
+  await open(page, late);
+  await expect(page.locator('.mcpUsedNote')).toHaveText('Used: when each key was last used, and its tool calls in the last 7 days. Counted since Oct 14 08:00. Summed over 2 instances.');
+  await expect(page.locator('.mcpUsedNote')).not.toContainText(/memory|restart/);
+  await expect(used(page, 'reporting')).toHaveText('\u2014');
+  await expect(used(page, 'reporting')).toHaveAttribute('title', /^Not used since Oct 14 08:00, when the counting began\. The key is older: it may have been used before\.\n0 tool calls in 0 requests in the last 7 days\.$/);
+  await expect(used(page, 'young-key')).toHaveText('Never');
+  await expect(used(page, 'young-key')).toHaveAttribute('title', /^Never used\. Counted since Oct 14 08:00\.\n0 tool calls in 0 requests in the last 7 days\.$/);
+  // A key of the config file has no date of creation (null): only its use tells, so it was never used rather than "perhaps before the counting".
+  await expect(used(page, 'quiet-config')).toHaveText('Never');
+  // A key that was used shows its use whenever the counting began.
+  await expect(used(page, 'ci-bot')).toHaveText('1 d ago \u00b7 12');
+  // The usage of a key says it too, and the dates of its window start where the counting did.
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const usage = details(page).locator('.mcpUsage');
+  await expect(usage.locator('.statTile')).toHaveCount(6);
+  await expect(usage.locator('.mcpNote--fine').first()).toHaveText('Counted since Oct 14 08:00.');
+  await expect(usage.locator('.mcpUsage__range')).toHaveText('Oct 14 08:00 \u2192 10:00');
+  await expect(usage).not.toContainText(/memory|restart/);
+});
+
+// ---- the usage is off (mcp.usage.enabled is false): nothing is counted, so nothing of it is on the page ----------------------------------------
+
+test('usage off: no column Used, no note, no line of other keys, and no request for the usage; the data of the keys still counts', async ({ page }) => {
+  const server = setUsage(newServer(), { enabled: false });
+  await open(page, server);
+  // The table has every column but Used, and nothing that the usage writes: no cell, no note under the table, no warning about the instances,
+  // no line of the keys that keep usage (the fake has a deleted key that would be listed).
+  await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
+  await expect(rows(page)).toHaveCount(5);
+  await expect(page.locator('th.mcpCell--used, td.mcpCell--used, .mcpUsedCell, .mcpUsedNote, .mcpUsedWarn, .mcpDeleted')).toHaveCount(0);
+  // The data of the keys is counted by /access, which does not depend on the usage.
+  await expect(row(page, 'ci-bot').locator('.mcpDataCell')).toHaveText('2 dbs \u00b7 4 tables');
+  await expect(row(page, 'ops-all').locator('.mcpDataCell')).toHaveText('2 dbs \u00b7 4 tables');
+  expect(callsTo(server, '/access')).toHaveLength(1);
+  // The tools that this server offers while the usage is off: the two tools of the usage are not among them (24 are, of the 26 of the fake), so
+  // the key that lists 2 tools holds 3 (the one that every key has) and the title does not name the tools that are not offered.
+  await expect(row(page, 'ci-bot').locator('td').nth(3)).toHaveText('3/24');
+  await expect(row(page, 'ci-bot').locator('td').nth(3).locator('.mcpMono')).toHaveAttribute('title', 'list_databases, query_table, mcp_analysis_my_limits');
+  await expect(row(page, 'ops-all').locator('td').nth(3).locator('.mcpMuted')).toHaveAttribute('title', 'All tools');
+  // A refresh asks the keys and the meta again, and still not the usage.
+  await page.locator('#mcpRefresh').click();
+  await expect.poll(() => callsTo(server, '/access').length).toBe(2);
+  await expect(rows(page)).toHaveCount(5);
+  expect(server.calls.filter((call) => call.path.includes('usage'))).toEqual([]);
+  // A phone draws the card of a key without the field Used as well.
+  await page.setViewportSize({ width: 390, height: 800 });
+  const fields = await page.evaluate(() => [...document.querySelectorAll('#mcpKeysBody tbody tr[data-key-id]:first-child td')].filter((td) => td.offsetParent !== null).map((td) => td.dataset.label));
+  expect(fields).toEqual(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
+});
+
+test('usage off: the details of a key have no usage and no link to the Usage tab, and the ClickHouse cost has the buttons of its own window', async ({ page }) => {
+  const server = setUsage(newServer(), { enabled: false });
+  await open(page, server);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const d = details(page);
+  // The rest of the details are there: the grants, the data, and the 3 tools that this key holds out of the 24 on offer.
+  await expect(d.locator('.mcpReach .mcpReachHost')).toBeVisible();
+  await expect(d.locator('.mcpDetails__title .pagePart__count')).toHaveText('3 of 24');
+  await expect(d.locator('[data-group="mcp_analysis"] .mcpGrantGroup__count')).toHaveText('1 of 1');
+  await expect(d.locator('.mcpUsage, .mcpInstances')).toHaveCount(0);
+  await expect(d.getByRole('link', { name: 'Open in Usage' })).toHaveCount(0);
+  await expect(d.getByRole('button')).toHaveText(['Check again', 'ClickHouse cost']);
+  // The cost is the one section after the data. Its buttons of window are its own: not there to press while it is closed, nothing is read yet.
+  const cost = d.locator('.mcpCost');
+  const toggle = cost.getByRole('button', { name: 'ClickHouse cost' });
+  const windows = cost.locator('.mcpCost__windows');
+  await expect(cost).toHaveCount(1);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(windows).toHaveCount(1);
+  await expect(windows).toBeHidden();
+  expect(server.calls.filter((call) => call.path.endsWith('/cost'))).toHaveLength(0);
+  // Opened, it reads the cost in the largest window (7 d: the usage that would hold the choice is not there) and shows its buttons.
+  await toggle.click();
+  await expect(windows).toBeVisible();
+  await expect(cost.getByRole('group', { name: 'Window of the cost' })).toBeVisible();
+  await expect(windows.getByRole('button')).toHaveText(['1 h', '6 h', '24 h', '7 d']);
+  await expect(windows.getByRole('button', { name: '7 d' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(cost.locator('.statTile')).toHaveCount(6);
+  await expect(cost.locator('.statTile').first()).toContainText('12');
+  await expect(cost).toContainText('otel.otel_logs');
+  expect(callsTo(server, '/keys/ui_0a1b2c3d4e5f/cost')).toEqual(['?window=7d']);
+  // A button reads the cost in its window; Check again reads system.query_log anew in the same one.
+  await windows.getByRole('button', { name: '24 h' }).click();
+  await expect(windows.getByRole('button', { name: '24 h' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(windows.getByRole('button', { name: '7 d' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(cost.locator('.mcpCost__range')).toHaveText('Oct 13 10:01 \u2192 Oct 14 10:01');
+  await cost.getByRole('button', { name: 'Check again' }).click();
+  await expect.poll(() => callsTo(server, '/keys/ui_0a1b2c3d4e5f/cost')).toEqual(['?window=7d', '?window=24h', '?window=24h&refresh=1']);
+  // Closed, the cost takes its buttons with it; the window that was picked is kept for the next key.
+  await toggle.click();
+  await expect(windows).toBeHidden();
+  await row(page, 'reporting').locator('[data-action="open"]').click();
+  const other = details(page).locator('.mcpCost');
+  await other.getByRole('button', { name: 'ClickHouse cost' }).click();
+  await expect(other.locator('.mcpCost__windows').getByRole('button', { name: '24 h' })).toHaveAttribute('aria-pressed', 'true');
+  // The runner of this key's host may not read query_log: the reason and the GRANT, as with the usage on.
+  await expect(other.locator('.mcpCost__reason')).toHaveText('The runner account of the host may not read system.query_log.');
+  await expect(other.locator('.mcpCode__pre')).toHaveText('GRANT SELECT ON system.query_log TO chdash_runner');
+  // No request for the usage of a key, nor for the usage of all the keys.
+  expect(server.calls.filter((call) => call.path.includes('usage'))).toEqual([]);
+});
+
+test('the cost that asks for a smaller window says where to pick it: in Usage while the usage is on, in its own buttons while it is off', async ({ page }) => {
+  // The runner could not read so many rows: the server suggests 24 hours (the shape of an answer that is not "ok" is the one of the key that
+  // the runner may not read, with another reason).
+  const tooLarge = (srv, id, window) => ({
+    ...costOf(srv, 'ui_111111111111', window), id, reason: 'window_too_large', suggested_window: '24h', error: 'Too many rows in system.query_log.', statement: '',
+  });
+  const on = newServer();
+  on.cost = tooLarge;
+  await open(page, on);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await details(page).locator('.mcpCost').getByRole('button', { name: 'ClickHouse cost' }).click();
+  await expect(details(page).locator('.mcpCost__reason')).toHaveText('system.query_log has too many rows in this window for one read.');
+  await expect(details(page).locator('.mcpCost__body')).toContainText('Pick the window of 24 hours in Usage: the cost follows it.');
+
+  const off = setUsage(newServer(), { enabled: false });
+  off.cost = tooLarge;
+  await open(page, off);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await details(page).locator('.mcpCost').getByRole('button', { name: 'ClickHouse cost' }).click();
+  await expect(details(page).locator('.mcpCost__reason')).toHaveText('system.query_log has too many rows in this window for one read.');
+  await expect(details(page).locator('.mcpCost__body')).toContainText('Pick the window of 24 hours.');
+  await expect(details(page).locator('.mcpCost__body')).not.toContainText('in Usage');
+});
+
+test('usage turned off after the meta was read (404 not_enabled): the keys are drawn again as with the usage off, and the page asks the usage once', async ({ page }) => {
+  const server = newServer();
+  server.errors['GET /usage'] = { status: 404, body: { error_code: 'not_enabled', message: 'The usage of the keys is off (mcp.usage.enabled is false).', retryable: false } };
+  await open(page, server);
+  // The meta said on, so the table was drawn with its column; the answer of the usage draws it again without. It is a state, not an error.
+  await expect(page.locator('#mcpKeysBody thead th')).toHaveText(['Name', 'Secret', 'Host', 'Tools', 'Data', 'Limits', 'Actions']);
+  await expect(rows(page)).toHaveCount(5);
+  await expect(page.locator('th.mcpCell--used, td.mcpCell--used, .mcpUsedCell, .mcpUsedNote, .mcpUsedWarn, .mcpDeleted')).toHaveCount(0);
+  await expect(page.locator('#mcpAlert')).toBeHidden();
+  await expect(page.locator('#mcpKeysBody .uiState--error')).toHaveCount(0);
+  await expect(row(page, 'ci-bot').locator('.mcpDataCell')).toHaveText('2 dbs \u00b7 4 tables');
+  // One read, and no other: the table that was drawn again does not ask for the usage.
+  expect(callsTo(server, '/usage')).toEqual(['?window=7d']);
+  // The details of a key are the ones of a usage that is off: the ClickHouse cost alone, with the buttons of its window.
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpReach .mcpReachHost')).toBeVisible();
+  await expect(details(page).locator('.mcpUsage, .mcpInstances')).toHaveCount(0);
+  await expect(details(page).locator('.mcpCost .mcpCost__windows')).toHaveCount(1);
+  expect(server.calls.filter((call) => call.path.includes('usage') && call.path !== '/usage')).toEqual([]);
 });
 
 test('the usage of a key in its details: a window, the tiles, the trend, the tools, the results and the clients', async ({ page }) => {
@@ -1646,6 +2108,208 @@ test('the usage of a key in its details: a window, the tiles, the trend, the too
   await expect(usage.locator('.mcpUsage__peak')).toHaveText('Peak 12 calls, 2026-10-14');
   await usage.getByRole('button', { name: '1 h' }).click();
   await expect(usage.locator('.mcpUsage__peak')).toHaveText('Peak 12 calls, Oct 14 10:00');
+});
+
+// ---- the instances that share the usage directory: the usage is their sum, and a file that is left out is a warning --------------------------
+
+// The warnings about the instances (app_mcp_instances.js, uiState.banner level warn): under the note of the table, and above the figures of the
+// usage of a key (the details that are open).
+const tableWarnings = (page) => page.locator('.mcpUsedNote + .mcpUsedWarn .mcpInstances__warn');
+const keyWarnings = (page) => details(page).locator('.mcpUsage .mcpUsage__warnings .mcpInstances__warn');
+const NOTE = 'Used: when each key was last used, and its tool calls in the last 7 days.';
+// A file of an instance as the usage routes list it (this instance first).
+const instanceFile = (instance, status = 'ok', reason = '', writtenAt = '2026-10-14T09:59:00Z') => ({ instance, status, reason, written_at: status === 'skipped' ? null : writtenAt });
+
+test('the usage of a key says that it is summed over the instances: the note opens the list (this one first, when each wrote), and Escape closes it and gives the focus back', async ({ page }) => {
+  await open(page);
+  // All is well: the files are read, so there is no warning, under the table or above the figures.
+  await expect(page.locator('.mcpUsedNote')).toHaveText(`${NOTE} Summed over 2 instances.`);
+  await expect(page.locator('.mcpUsedWarn')).toBeHidden();
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const usage = details(page).locator('.mcpUsage');
+  await expect(usage.locator('.statTile')).toHaveCount(6);
+  await expect(usage.locator('.mcpUsage__warnings')).toHaveCount(0);
+  // The head of the usage says it after the dates of the window: a button that says what it opens.
+  const note = usage.locator('.mcpInstances__button');
+  await expect(usage.locator('.mcpInstances')).toBeVisible();
+  await expect(note).toHaveText('Summed over 2 instances');
+  await expect(note).toHaveAttribute('aria-haspopup', 'dialog');
+  await expect(note).toHaveAttribute('aria-expanded', 'false');
+  await expect(note).toHaveAttribute('title', 'The usage is summed over 2 instances. Open the list.');
+  await expect(page.locator('.mcpInstancesPopover')).toHaveCount(0);
+  await note.click();
+  const popover = page.locator('.mcpInstancesPopover');
+  await expect(popover).toBeVisible();
+  await expect(popover).toHaveAttribute('role', 'dialog');
+  await expect(popover).toHaveAttribute('aria-label', 'Instances of the usage');
+  await expect(note).toHaveAttribute('aria-expanded', 'true');
+  await expect(popover).toBeFocused();
+  await expect(popover.locator('.mcpInstancesList__lead')).toHaveText('The usage is summed over 2 instances: each one saves the file of its own in the usage directory and reads the files of the others.');
+  // This instance first (the meta names it), then the other. Each says when its file was written, as of the time of the answer (10:00).
+  const items = popover.locator('.mcpInstancesList__row');
+  await expect(items.locator('code')).toHaveText(['chdash-0', 'chdash-1']);
+  await expect(items.nth(0)).toContainText('this instance');
+  await expect(items.nth(1)).not.toContainText('this instance');
+  await expect(items.nth(0).locator('.mcpInstancesList__meta')).toHaveText('wrote 30 s ago');
+  await expect(items.nth(1).locator('.mcpInstancesList__meta')).toHaveText('wrote 1 min ago');
+  // Both files are read: no badge, no reason.
+  await expect(popover.locator('.badge')).toHaveCount(0);
+  // Escape closes it and the focus goes back to the note; the details stay open.
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expect(note).toBeFocused();
+  await expect(note).toHaveAttribute('aria-expanded', 'false');
+  await expect(details(page)).toHaveCount(1);
+  // The note opens the list and closes it again.
+  await note.click();
+  await expect(popover).toBeVisible();
+  await note.click();
+  await expect(popover).toHaveCount(0);
+  // From the keyboard: Enter on the note opens the list and takes the focus in, Escape closes it and the focus is on the note again.
+  await note.focus();
+  await page.keyboard.press('Enter');
+  await expect(popover).toBeVisible();
+  await expect(popover).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(popover).toHaveCount(0);
+  await expect(note).toBeFocused();
+  // The list does not outlive the details that hold its note: closing them takes it away.
+  await note.click();
+  await expect(popover).toBeVisible();
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page)).toHaveCount(0);
+  await expect(popover).toHaveCount(0);
+});
+
+test('the list of instances has this one first and the others by name, a number in a name sorting by its value', async ({ page }) => {
+  const server = newServer();
+  // As the server could list them: the names as text put chdash-10 before chdash-2, and this instance (chdash-0) is not first.
+  server.instances = [instanceFile('chdash-2'), instanceFile('chdash-10'), instanceFile('chdash-0'), instanceFile('chdash-1')];
+  await open(page, server);
+  await expect(page.locator('.mcpUsedNote')).toHaveText(`${NOTE} Summed over 4 instances.`);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const note = details(page).locator('.mcpUsage .mcpInstances__button');
+  await expect(note).toHaveText('Summed over 4 instances');
+  await note.click();
+  const items = page.locator('.mcpInstancesPopover .mcpInstancesList__row');
+  await expect(items.locator('code')).toHaveText(['chdash-0', 'chdash-1', 'chdash-2', 'chdash-10']);
+  await expect(page.locator('.mcpInstancesPopover .mcpInstancesList__row', { hasText: 'this instance' })).toHaveCount(1);
+  await expect(items.first()).toContainText('this instance');
+});
+
+test('with one instance nothing is summed: no note under the table or in the usage of a key, and no list to open', async ({ page }) => {
+  const server = oneInstance(newServer());
+  await open(page, server);
+  await expect(page.locator('.mcpUsedNote')).toHaveText(NOTE);
+  await expect(used(page, 'ci-bot')).toHaveText('1 d ago \u00b7 12');
+  await expect(page.locator('.mcpUsedWarn')).toBeHidden();
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const usage = details(page).locator('.mcpUsage');
+  await expect(usage.locator('.statTile')).toHaveCount(6);
+  await expect(usage.locator('.mcpInstances')).toBeHidden();
+  await expect(details(page).getByRole('button', { name: /instances/ })).toHaveCount(0);
+  await expect(usage.locator('.mcpUsage__warnings')).toHaveCount(0);
+  await expect(page.locator('.mcpInstancesPopover')).toHaveCount(0);
+});
+
+test('a skipped file is a warning under the note of the table and above the figures of the usage of a key, and the list says why', async ({ page }) => {
+  const server = newServer();
+  server.instances[1] = { instance: 'chdash-1', status: 'skipped', reason: 'invalid', written_at: null };
+  await open(page, server);
+  const message = 'chdash-1: its file was skipped (invalid), so its counts are not in these figures.';
+  // Under the note of the table, which still says over how many files the figures are summed.
+  await expect(page.locator('.mcpUsedNote')).toHaveText(`${NOTE} Summed over 2 instances.`);
+  await expect(tableWarnings(page)).toHaveCount(1);
+  await expect(tableWarnings(page)).toHaveText(message);
+  await expect(tableWarnings(page)).toHaveClass(/uiBanner--warn/);
+  // A warning waits its turn (a status), it does not interrupt (an alert).
+  await expect(tableWarnings(page)).toHaveAttribute('role', 'status');
+  await expect(page.locator('.mcpUsedWarn')).toBeVisible();
+  // Above the tiles of the usage of a key, in the same words.
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const usage = details(page).locator('.mcpUsage');
+  await expect(usage.locator('.statTile')).toHaveCount(6);
+  await expect(keyWarnings(page)).toHaveCount(1);
+  await expect(keyWarnings(page)).toHaveText(message);
+  const above = await keyWarnings(page).boundingBox();
+  const tiles = await usage.locator('.mcpUsage__tiles').boundingBox();
+  expect(above.y + above.height).toBeLessThanOrEqual(tiles.y);
+  // The list names the file that is left out, with a badge, the reason in a word, and "no write yet": it has no date.
+  await usage.locator('.mcpInstances__button').click();
+  const skipped = page.locator('.mcpInstancesList__row[data-instance="chdash-1"]');
+  await expect(skipped).toHaveAttribute('data-status', 'skipped');
+  await expect(skipped.locator('.badge')).toHaveText('skipped');
+  await expect(skipped.locator('.badge')).toHaveAttribute('title', message);
+  await expect(skipped.locator('.mcpInstancesList__name')).toContainText('invalid');
+  await expect(skipped.locator('.mcpInstancesList__meta')).toHaveText('no write yet');
+  await expect(page.locator('.mcpInstancesList__row[data-instance="chdash-0"] .badge')).toHaveCount(0);
+});
+
+test('several skipped files are one warning that names the first three, and the list has each of them', async ({ page }) => {
+  const server = newServer();
+  // A rolling upgrade of a cluster can skip dozens of files: one sentence, not one box for each.
+  server.instances = [instanceFile('chdash-0'), instanceFile('chdash-1', 'skipped', 'invalid'), instanceFile('chdash-2', 'skipped', 'too_large'), instanceFile('chdash-3', 'skipped', 'invalid'),
+    instanceFile('chdash-4', 'skipped', 'the file is larger than 8 MiB')];
+  await open(page, server);
+  const message = '4 instance files were skipped, so their counts are not in these figures: chdash-1 (invalid), chdash-2 (too large), chdash-3 (invalid) and 1 more.';
+  await expect(page.locator('.mcpUsedNote')).toHaveText(`${NOTE} Summed over 5 instances.`);
+  await expect(tableWarnings(page)).toHaveCount(1);
+  await expect(tableWarnings(page)).toHaveText(message);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpUsage .statTile')).toHaveCount(6);
+  await expect(keyWarnings(page)).toHaveCount(1);
+  await expect(keyWarnings(page)).toHaveText(message);
+  // The list has every file: the four that were left out have a badge, and the reason as it was sent (an underscore reads as a space).
+  await details(page).locator('.mcpUsage .mcpInstances__button').click();
+  const items = page.locator('.mcpInstancesPopover .mcpInstancesList__row');
+  await expect(items).toHaveCount(5);
+  await expect(items.locator('code')).toHaveText(['chdash-0', 'chdash-1', 'chdash-2', 'chdash-3', 'chdash-4']);
+  await expect(page.locator('.mcpInstancesPopover .badge')).toHaveText(['skipped', 'skipped', 'skipped', 'skipped']);
+  await expect(items.nth(2).locator('.mcpInstancesList__name')).toContainText('too large');
+  await expect(items.nth(4).locator('.mcpInstancesList__name')).toContainText('the file is larger than 8 MiB');
+  await expect(items.nth(4).locator('.badge')).toHaveAttribute('title', 'chdash-4: its file was skipped (the file is larger than 8 MiB), so its counts are not in these figures.');
+});
+
+test('a name that two ChDash write under is a warning of its own, with its reason behind Why, even when this is the only instance listed', async ({ page }) => {
+  const server = oneInstance(newServer());
+  const reason = 'another ChDash process writes the file of this instance: give each instance its own mcp.usage.instance';
+  server.instances[0] = { instance: 'chdash-0', status: 'conflict', reason, written_at: '2026-10-14T09:59:30Z' };
+  await open(page, server);
+  const message = 'Another ChDash writes as chdash-0: this instance does not save its counts. Give each instance its own name (mcp.usage.instance).';
+  // One instance, so nothing is summed; a conflict is about this one, so its warning shows all the same.
+  await expect(page.locator('.mcpUsedNote')).toHaveText(NOTE);
+  await expect(tableWarnings(page)).toHaveCount(1);
+  await expect(tableWarnings(page).locator('.uiBanner__text')).toHaveText(message);
+  const why = tableWarnings(page).locator('.uiBanner__details');
+  await expect(why.locator('summary')).toHaveText('Why');
+  await expect(why.locator('.uiBanner__more')).toBeHidden();
+  await why.locator('summary').click();
+  await expect(why.locator('.uiBanner__more')).toBeVisible();
+  await expect(why.locator('.uiBanner__more')).toHaveText(reason);
+  // Above the figures of the usage of a key as well, and still no note.
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const usage = details(page).locator('.mcpUsage');
+  await expect(usage.locator('.statTile')).toHaveCount(6);
+  await expect(keyWarnings(page)).toHaveCount(1);
+  await expect(keyWarnings(page).locator('.uiBanner__text')).toHaveText(message);
+  await expect(usage.locator('.mcpInstances')).toBeHidden();
+});
+
+test('a conflict and a skipped file are two warnings, the conflict first, and the list marks each file', async ({ page }) => {
+  const server = newServer();
+  const reason = 'another ChDash process writes the file of this instance: give each instance its own mcp.usage.instance';
+  server.instances = [{ instance: 'chdash-0', status: 'conflict', reason, written_at: '2026-10-14T09:59:30Z' }, instanceFile('chdash-1', 'skipped', 'invalid')];
+  await open(page, server);
+  const conflict = 'Another ChDash writes as chdash-0: this instance does not save its counts. Give each instance its own name (mcp.usage.instance).';
+  const skipped = 'chdash-1: its file was skipped (invalid), so its counts are not in these figures.';
+  await expect(tableWarnings(page)).toHaveCount(2);
+  await expect(tableWarnings(page).locator('.uiBanner__text')).toHaveText([conflict, skipped]);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  await expect(details(page).locator('.mcpUsage .statTile')).toHaveCount(6);
+  await expect(keyWarnings(page).locator('.uiBanner__text')).toHaveText([conflict, skipped]);
+  await details(page).locator('.mcpUsage .mcpInstances__button').click();
+  await expect(page.locator('.mcpInstancesList__row[data-instance="chdash-0"] .badge')).toHaveText('conflict');
+  await expect(page.locator('.mcpInstancesList__row[data-instance="chdash-1"] .badge')).toHaveText('skipped');
 });
 
 test('the ClickHouse cost of a key is read only when it is opened, and says why the runner cannot read query_log', async ({ page }) => {
@@ -1750,14 +2414,137 @@ test('a deleted key keeps its usage: a line under the keys opens on it, and its 
   const line = block.locator('tbody tr[data-deleted-id="ui_dead00000001"]');
   await expect(line.locator('.mcpKeyName')).toHaveText('old-bot');
   await expect(line.locator('td.mcpCell--used')).toHaveText('2 d ago · 40');
+  // Only deleted keys are listed: the column says when they were deleted, and no key is marked as another instance's.
+  await expect(block.locator('table')).toHaveAttribute('aria-label', 'Deleted keys');
+  await expect(block.locator('thead th')).toHaveText(['Name', 'Host', 'Deleted', 'Used']);
+  await expect(line).toHaveAttribute('data-state', 'deleted');
+  await expect(line.locator('td.mcpCell--deleted')).toHaveText('Oct 12 08:00');
+  await expect(block.locator('.badge')).toHaveCount(0);
   await line.locator('[data-action="open"]').click();
   const detail = block.locator('.mcpDetailRow');
   await expect(detail.locator('.mcpUsage .statTile')).toHaveCount(6);
   await expect(detail.getByRole('link', { name: 'Open in Usage' })).toHaveAttribute('href', '/mcp-integration/usage?key=ui_dead00000001&window=7d');
+  await expect(detail.locator('.mcpAbout dt')).toHaveText(['Host', 'Deleted']);
   await expect(detail.locator('.mcpAbout')).toContainText('Deleted');
   await expect(detail.locator('.mcpDetails__perms')).toHaveCount(0);
   expect(callsTo(server, '/keys/ui_dead00000001/usage')).toEqual(['?window=7d']);
   // The keys of the table are the live ones: the filter and the count do not see it.
   await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('5');
   await expect(page.locator('#mcpKeysBody tr[data-key-id="ui_dead00000001"]')).toHaveCount(0);
+});
+
+test('no deleted key and no key of another instance: there is no line under the keys', async ({ page }) => {
+  const server = newServer();
+  server.deleted = [];
+  await open(page, server);
+  await expect(rows(page)).toHaveCount(5);
+  await expect(used(page, 'ci-bot')).toHaveText('1 d ago \u00b7 12');
+  await expect(page.locator('.mcpDeleted')).toBeHidden();
+  await expect(page.locator('.mcpDeleted .mcpDeletedToggle')).toHaveCount(0);
+});
+
+test('a key that only another instance knows: a line "Keys of other instances" opens on it, with its badge, its use, and what it did and cost', async ({ page }) => {
+  const server = newServer();
+  server.deleted = [];  // the line is about the keys of other instances alone
+  server.elsewhere = ELSEWHERE();
+  await open(page, server);
+  const block = page.locator('.mcpDeleted');
+  const toggle = block.locator('.mcpDeletedToggle');
+  await expect(block).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toContainText('Keys of other instances');
+  await expect(toggle).not.toContainText('Deleted');
+  await expect(toggle.locator('.mcpDeleted__count')).toHaveText('1');
+  // Nothing was deleted: the line says why the key is listed instead of how long its usage stays.
+  await expect(block).toContainText('Only another instance knows them: this instance has no key of their name.');
+  await expect(block).not.toContainText('Their usage stays');
+  await expect(page.locator('#mcpKeysBody table')).toHaveCount(1);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(block.locator('table')).toHaveAttribute('aria-label', 'Keys of other instances');
+  // The column does not say "Deleted" for a key that was not: it says "State", and the state is the badge.
+  await expect(block.locator('thead th')).toHaveText(['Name', 'Host', 'State', 'Used']);
+  const line = block.locator('tbody tr[data-deleted-id="ui_ee0000000001"]');
+  await expect(block.locator('tbody tr')).toHaveCount(1);
+  await expect(line).toHaveAttribute('data-state', 'elsewhere');
+  await expect(line.locator('.mcpKeyName')).toHaveText('etl-bot');
+  await expect(line.locator('td.mcpCell--hosts')).toHaveText('prod');
+  await expect(line.locator('td.mcpCell--deleted .badge')).toHaveText('other instance');
+  await expect(line.locator('td.mcpCell--deleted .badge')).toHaveAttribute('title', /^Only another instance knows this key: its usage comes from the file of that instance$/);
+  await expect(line.locator('[data-action="open"]')).toHaveAttribute('aria-label', 'Usage of etl-bot, a key of another instance');
+  // Its use reads like the use of the other keys: when it was last used, and its tool calls in the last 7 days.
+  await expect(line.locator('td.mcpCell--used')).toHaveText('1 h ago \u00b7 12');
+  await expect(line.locator('td.mcpCell--used span')).toHaveAttribute('title', /^Last used .*\n12 tool calls in 15 requests in the last 7 days\.$/);
+  // Its details are those of a key that is not in the list: where it comes from, then its usage and its cost; no permissions, no Delete.
+  await line.locator('[data-action="open"]').click();
+  await expect(line.locator('[data-action="open"]')).toHaveAttribute('aria-expanded', 'true');
+  const detail = block.locator('.mcpDetailRow');
+  await expect(detail).toHaveCount(1);
+  await expect(detail.locator('.mcpAbout dt')).toHaveText(['Host', 'Known to']);
+  await expect(detail.locator('.mcpAbout dd')).toHaveText(['prod', 'Another instance only']);
+  await expect(detail.locator('.mcpAbout dd').nth(1)).toHaveAttribute('title', /no key of this name/);
+  await expect(detail.locator('.mcpDetails__perms')).toHaveCount(0);
+  await expect(detail.locator('[data-action="remove"]')).toHaveCount(0);
+  const usage = detail.locator('.mcpUsage');
+  await expect(usage.locator('.statTile')).toHaveCount(6);
+  await expect(usage.locator('.statTile').first()).toContainText('12');
+  await expect(usage.getByRole('link', { name: 'Open in Usage' })).toHaveAttribute('href', '/mcp-integration/usage?key=ui_ee0000000001&window=7d');
+  expect(callsTo(server, '/keys/ui_ee0000000001/usage')).toEqual(['?window=7d']);
+  // The cost is read when it opens, as for the other keys.
+  const cost = detail.locator('.mcpCost');
+  expect(callsTo(server, '/keys/ui_ee0000000001/cost')).toEqual([]);
+  await cost.getByRole('button', { name: 'ClickHouse cost' }).click();
+  await expect(cost.locator('.statTile')).toHaveCount(6);
+  expect(callsTo(server, '/keys/ui_ee0000000001/cost')).toEqual(['?window=7d']);
+  // It is not a key of the table: the count and the rows are the keys that exist here.
+  await expect(page.locator('#mcpKeys .pagePart__count')).toHaveText('5');
+  await expect(page.locator('#mcpKeysBody tr[data-key-id="ui_ee0000000001"]')).toHaveCount(0);
+  // The same key again closes its details.
+  await line.locator('[data-action="open"]').click();
+  await expect(detail).toHaveCount(0);
+});
+
+test('deleted keys and keys of other instances share one line under the keys: it says both, the column is State, and each key says which it is', async ({ page }) => {
+  const server = newServer();
+  server.elsewhere = ELSEWHERE();  // the fake already has a deleted key (old-bot)
+  await open(page, server);
+  const block = page.locator('.mcpDeleted');
+  const toggle = block.locator('.mcpDeletedToggle');
+  await expect(toggle).toContainText('Deleted keys and keys of other instances');
+  await expect(toggle.locator('.mcpDeleted__count')).toHaveText('2');
+  await expect(block).toContainText('Their usage stays 90 days. A key that only another instance knows is listed too.');
+  await toggle.click();
+  await expect(block.locator('table')).toHaveAttribute('aria-label', 'Deleted keys and keys of other instances');
+  await expect(block.locator('thead th')).toHaveText(['Name', 'Host', 'State', 'Used']);
+  await expect(block.locator('tbody tr .mcpKeyName')).toHaveText(['old-bot', 'etl-bot']);
+  // A deleted key says that it is, and when; a key of another instance has the badge, where the time would be.
+  const gone = block.locator('tbody tr[data-deleted-id="ui_dead00000001"]');
+  const apart = block.locator('tbody tr[data-deleted-id="ui_ee0000000001"]');
+  await expect(gone).toHaveAttribute('data-state', 'deleted');
+  await expect(gone.locator('td.mcpCell--deleted')).toHaveText('Deleted Oct 12 08:00');
+  await expect(gone.locator('.badge')).toHaveCount(0);
+  await expect(gone.locator('[data-action="open"]')).toHaveAttribute('aria-label', 'Usage of the deleted key old-bot');
+  await expect(apart).toHaveAttribute('data-state', 'elsewhere');
+  await expect(apart.locator('td.mcpCell--deleted')).toHaveText('other instance');
+  await expect(apart.locator('.badge')).toHaveCount(1);
+  await expect(gone.locator('td.mcpCell--used')).toHaveText('2 d ago \u00b7 40');
+  await expect(apart.locator('td.mcpCell--used')).toHaveText('1 h ago \u00b7 12');
+  // One key at a time under the line: the details of the deleted key say when, those of the other say where it comes from.
+  await gone.locator('[data-action="open"]').click();
+  await expect(block.locator('.mcpDetailRow')).toHaveCount(1);
+  await expect(block.locator('.mcpDetailRow .mcpAbout dt')).toHaveText(['Host', 'Deleted']);
+  await expect(block.locator('.mcpDetailRow .mcpUsage .statTile')).toHaveCount(6);
+  await apart.locator('[data-action="open"]').click();
+  await expect(block.locator('.mcpDetailRow')).toHaveCount(1);
+  await expect(gone.locator('[data-action="open"]')).toHaveAttribute('aria-expanded', 'false');
+  await expect(block.locator('.mcpDetailRow .mcpAbout dt')).toHaveText(['Host', 'Known to']);
+  await expect(block.locator('.mcpDetailRow .mcpUsage .statTile')).toHaveCount(6);
+  expect(callsTo(server, '/keys/ui_dead00000001/usage')).toEqual(['?window=7d']);
+  expect(callsTo(server, '/keys/ui_ee0000000001/usage')).toEqual(['?window=7d']);
+  // The line stays open when the list is drawn again (Refresh), on the same key.
+  await page.locator('#mcpRefresh').click();
+  await expect.poll(() => callsTo(server, '/usage').length).toBe(2);
+  await expect(block.locator('.mcpDetailRow')).toHaveCount(1);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(block.locator('tbody tr.is-open .mcpKeyName')).toHaveText('etl-bot');
 });

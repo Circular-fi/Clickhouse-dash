@@ -48,6 +48,8 @@ def test_every_frontend_file_maps_to_specs_that_exist(file):
     ("src/static/mcpusage.html", "mcp-usage"),
     ("src/static/app_mcp_view.js", "mcp-usage"),
     ("src/static/app_mcp_view.js", "mcp-page"),
+    ("src/static/app_mcp_instances.js", "mcp-usage"),
+    ("src/static/app_mcp_instances.js", "mcp-page"),
     ("src/static/css/20-features/mcp.css", "mcp-usage"),
     ("src/static/app_page_trace.js", "trace-page"),
     ("src/static/trace.html", "trace-page"),

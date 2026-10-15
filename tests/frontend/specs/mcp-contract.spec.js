@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { compareShapes, shapeOf } from '../helpers/shape.js';
-import { newServer, install } from '../helpers/mcp-fake.js';
+import { newServer, install, setUsage } from '../helpers/mcp-fake.js';
 import { requireInstance } from '../helpers/instances.js';
 
 // The fake MCP server of mcp-page.spec.js (helpers/mcp-fake.js) and the real one answer the same routes. This spec plays
@@ -9,9 +9,18 @@ import { requireInstance } from '../helpers/instances.js';
 // contract that no longer exists. It then drives the real page against the real server: the keys of the config file, a key
 // made in the page (its secret shown once, never given back) and deleted.
 // The instance: MCP_CONTRACT_BASE_URL, a server with tests/config/mcp.hcl and a writable /data (the `chdash_mcp` service of
-// tests/docker-compose.yml).
+// tests/docker-compose.yml). It has the usage on (one instance, `all_keys` on). The usage OFF is the instance of tests/config/mcp.profile.hcl
+// (MCP_PROFILE_BASE_URL, the `chdash_mcp_profile` service): MCP on and no `mcp.usage` block. Several instances that share a directory and the keys
+// that only another one knows (`elsewhere`) cannot be made from a page (the directory is the server's): their shapes are the ones of the one-instance
+// answers (a list of instances, a flag on every key), and test_mcp.py plays the files of several instances against a real server.
 
 const BASE = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
+// The instance with the usage off (tests/config/mcp.profile.hcl), and the name that the instance of the contract counts under (mcp.usage.instance
+// of tests/config/mcp.hcl: a fixed name, since the host name of a container changes).
+const PROFILE = (process.env.MCP_PROFILE_BASE_URL || '').replace(/\/$/, '');
+const INSTANCE = 'chdash-mcp-test';
+// The file of an instance is written once a minute when something changed: an instance that has just started has `written_at: null` (no write yet).
+const wroteOrNot = (value) => value === null || /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(value);
 
 test.beforeEach(() => { requireInstance(test, 'MCP_CONTRACT_BASE_URL', BASE); });
 
@@ -32,10 +41,11 @@ const call = (page, method, path, body) => page.evaluate(async ({ method, path, 
   return { status: response.status, body: await response.json().catch(() => null) };
 }, { method, path, body });
 
-// The page talks to the real server, or to the fake: its routes are the fake's while it is installed.
-async function realPage(page) {
+// The page talks to the real server, or to the fake: its routes are the fake's while it is installed. `base`: another real instance (the one
+// that has the usage off).
+async function realPage(page, base = BASE) {
   await page.unrouteAll({ behavior: 'ignoreErrors' });
-  await page.goto(`${BASE}/query`);
+  await page.goto(`${base}/query`);
 }
 
 async function fakePage(page, fake) {
@@ -60,6 +70,75 @@ const compare = ({ real, fake }, label) => {
 
 test('GET /api/mcp/meta: the real answer and the fake have the same shape', async ({ page }) => {
   compare(await bothAnswers(page, (p) => call(p, 'GET', '/api/mcp/meta')), 'meta');
+});
+
+// The catalog of the tools: `always`, `explicit_only` and `available` on every tool, the family of the analysis of the keys (the limits and the usage
+// of a key, and the usage of all of them), and the fake's catalog, which is a part of the real one: the same family and the same flags for each tool.
+test('GET /api/mcp/meta: the catalog says which tools every key has, which ones "*" leaves out and which ones are offered now', async ({ page }) => {
+  await realPage(page);
+  const real = await call(page, 'GET', '/api/mcp/meta');
+  expect(real.status).toBe(200);
+  const tool = (name) => real.body.tools.find((item) => item.name === name);
+  expect(real.body.tool_groups.map((group) => group.id)).toContain('mcp_analysis');
+  for (const item of real.body.tools) {
+    for (const flag of ['always', 'explicit_only', 'available', 'needs_all_data']) expect(typeof item[flag], `${item.name}.${flag}`).toBe('boolean');
+  }
+  // Every key has the limits and (while the usage is on) the usage of its own, whatever its list says; the usage of all the keys is in the list of a
+  // key only by its name, never by "*", and only when mcp.usage.all_keys is on (it is, here).
+  expect(tool('mcp_analysis_my_limits')).toMatchObject({ group: 'mcp_analysis', always: true, explicit_only: false, available: true });
+  expect(tool('mcp_analysis_my_usage')).toMatchObject({ group: 'mcp_analysis', always: true, explicit_only: false, available: true });
+  expect(tool('mcp_analysis_all_usage')).toMatchObject({ group: 'mcp_analysis', always: false, explicit_only: true, available: true });
+  expect(real.body.tools.filter((item) => item.always).map((item) => item.name).sort()).toEqual(['mcp_analysis_my_limits', 'mcp_analysis_my_usage']);
+  expect(real.body.tools.filter((item) => item.explicit_only).map((item) => item.name)).toEqual(['mcp_analysis_all_usage']);
+  expect(real.body.tools.filter((item) => !item.available)).toEqual([]);
+  // The usage block: on, in the files of a directory, as the instance of the configuration, and the setting of all the keys.
+  expect(real.body.usage).toMatchObject({ enabled: true, storage: 'files', instance: INSTANCE, all_keys: true });
+  expect(real.body.usage.windows).toEqual(expect.arrayContaining(['1h', '24h', '7d']));
+  expect(real.body.usage).not.toHaveProperty('persisted');
+  // The fake's catalog is a part of the real one.
+  const fake = newServer();
+  for (const item of fake.meta.tools) {
+    const found = tool(item.name);
+    expect(found, `${item.name} is a tool of the server`).toBeTruthy();
+    expect({ group: found.group, always: found.always, explicit_only: found.explicit_only }, item.name).toEqual({ group: item.group, always: item.always, explicit_only: item.explicit_only });
+  }
+  expect(fake.meta.tool_groups.map((group) => group.id)).toEqual(real.body.tool_groups.map((group) => group.id));
+});
+
+// The usage off: no `mcp.usage` block. The meta says so, the analysis of the usage is not offered (the limits of a key are), the three routes of the
+// usage answer 404 `not_enabled`, and the cost of a key, which does not come from the usage, still answers. The fake in the same state answers alike.
+test('the usage is off: the meta and the three usage routes say so in the shapes of the fake, and the cost of a key still answers', async ({ page }) => {
+  requireInstance(test, 'MCP_PROFILE_BASE_URL', PROFILE);
+  await realPage(page, PROFILE);
+  const config = (await call(page, 'GET', '/api/mcp/keys')).body.keys.find((key) => key.source === 'config');
+  const real = {
+    meta: await call(page, 'GET', '/api/mcp/meta'),
+    summary: await call(page, 'GET', '/api/mcp/usage?window=7d'),
+    overview: await call(page, 'GET', '/api/mcp/usage/overview?window=7d'),
+    usage: await call(page, 'GET', `/api/mcp/keys/${config.id}/usage?window=24h`),
+    cost: await call(page, 'GET', `/api/mcp/keys/${config.id}/cost?window=24h`),
+  };
+  expect(real.meta.body.usage).toEqual({ enabled: false, cost_windows: ['1h', '6h', '24h', '7d'] });
+  const offered = (name) => real.meta.body.tools.find((item) => item.name === name).available;
+  expect([offered('mcp_analysis_my_limits'), offered('mcp_analysis_my_usage'), offered('mcp_analysis_all_usage')]).toEqual([true, false, false]);
+  for (const name of ['summary', 'overview', 'usage']) {
+    expect(real[name].status, name).toBe(404);
+    expect(real[name].body, name).toMatchObject({ error_code: 'not_enabled', retryable: false });
+  }
+  expect(real.cost.status).toBe(200);
+  expect(real.cost.body.id).toBe(config.id);
+  const fake = newServer();
+  setUsage(fake, { enabled: false });
+  await fakePage(page, fake);
+  const fakeConfig = fake.keys.find((key) => key.source === 'config');
+  const fakeMeta = await call(page, 'GET', '/api/mcp/meta');
+  compare({ real: { status: 200, body: real.meta.body.usage }, fake: { status: 200, body: fakeMeta.body.usage } }, 'the usage block of the meta, usage off');
+  const fakeOffered = (name) => fakeMeta.body.tools.find((item) => item.name === name).available;
+  expect([fakeOffered('mcp_analysis_my_limits'), fakeOffered('mcp_analysis_my_usage'), fakeOffered('mcp_analysis_all_usage')]).toEqual([true, false, false]);
+  compare({ real: real.summary, fake: await call(page, 'GET', '/api/mcp/usage?window=7d') }, 'usage of the keys, usage off');
+  compare({ real: real.overview, fake: await call(page, 'GET', '/api/mcp/usage/overview?window=7d') }, 'usage overview, usage off');
+  compare({ real: real.usage, fake: await call(page, 'GET', `/api/mcp/keys/${fakeConfig.id}/usage?window=24h`) }, 'usage of a key, usage off');
+  expect((await call(page, 'GET', `/api/mcp/keys/${fakeConfig.id}/cost?window=24h`)).status, 'the cost of a key, usage off').toBe(200);
 });
 
 test('GET /api/mcp/keys and /api/mcp/access: the same shape', async ({ page }) => {
@@ -96,6 +175,18 @@ test('the usage of the keys, the usage of a key and its cost: the same shape, th
     unknown: await call(page, 'GET', '/api/mcp/keys/nope/usage'),
     window: await call(page, 'GET', '/api/mcp/usage?window=48h'),
   };
+  // Every answer of the usage says which instances it sums (this one first, each with how its file was read) and has no `persisted`; a key has
+  // `elsewhere` (true when only another instance knows it: not here, there is one instance).
+  for (const name of ['summary', 'usage', 'usageByMinute']) {
+    const [only, ...others] = real[name].body.instances;
+    expect(others, name).toEqual([]);
+    expect(only, name).toMatchObject({ instance: INSTANCE, status: 'ok', reason: '' });
+    expect(wroteOrNot(only.written_at), `${name}: written_at`).toBe(true);
+    expect(real[name].body, name).not.toHaveProperty('persisted');
+  }
+  expect(real.summary.body.keys.map((item) => item.elsewhere)).not.toContain(true);
+  expect(real.summary.body.keys.every((item) => typeof item.elsewhere === 'boolean')).toBe(true);
+  expect(real.usage.body.elsewhere).toBe(false);
   const fake = newServer();
   await fakePage(page, fake);
   const fakeConfig = fake.keys.find((key) => key.source === 'config');
@@ -115,8 +206,9 @@ test('the usage of the keys, the usage of a key and its cost: the same shape, th
 // The usage of every key (GET /api/mcp/usage/overview). A list that is empty accepts any shape, so the usage is made first on the real
 // instance, with the key of the config file that reads everything (tests/config/mcp.hcl): an initialize that names a client, tools/list, a
 // tool call, a method that nobody knows and a notification. Then the page's own calls are compared: the answer with nothing asked, a
-// filtered one, one grouped by key and one by client, the finest window, and the refusals (the old `split`, a group that does not exist, a
-// value that is not valid, a client that is not valid, a parameter that is not one, more than 20 values).
+// filtered one, one grouped by key, by client and by instance, one cut to an instance, the finest window, and the refusals (the old `split`, a
+// group that does not exist, a value that is not valid, a client or an instance that is not valid, a parameter that is not one, more than 20
+// values).
 const ALL_DATA_KEY = 'a11da7a0-0000-4000-8000-000000000001';
 
 async function makeUsage(request) {
@@ -143,14 +235,19 @@ test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one
     byClient: '/api/mcp/usage/overview?window=1h&group=client&client=chdash-contract',
     byResult: '/api/mcp/usage/overview?window=6h&group=result&result=ok',
     byType: '/api/mcp/usage/overview?window=24h&group=type&type=call&type=request',
+    byInstance: '/api/mcp/usage/overview?window=24h&group=instance',
+    ofInstance: `/api/mcp/usage/overview?window=24h&group=key&instance=${INSTANCE}`,
+    ofOtherInstance: '/api/mcp/usage/overview?window=24h&instance=nobody-writes-this',
     badWindow: '/api/mcp/usage/overview?window=48h',
     badGroup: '/api/mcp/usage/overview?group=nope',
     oldSplit: '/api/mcp/usage/overview?split=method',
     badValue: '/api/mcp/usage/overview?key=BAD!',
     badClient: '/api/mcp/usage/overview?client=%20padded',
+    badInstance: '/api/mcp/usage/overview?instance=bad%20name',
     unknown: '/api/mcp/usage/overview?bogus=1',
     tooMany: `/api/mcp/usage/overview?${Array.from({ length: 21 }, (_, i) => `method=m${i}`).join('&')}`,
     tooManyClients: `/api/mcp/usage/overview?${Array.from({ length: 21 }, (_, i) => `client=c${i}`).join('&')}`,
+    tooManyInstances: `/api/mcp/usage/overview?${Array.from({ length: 21 }, (_, i) => `instance=i${i}`).join('&')}`,
   };
   await realPage(page);
   const real = {};
@@ -171,7 +268,27 @@ test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one
   expect(real.byClient.body.series.step).toBe(60);
   expect(real.byKey.body.series.step).toBe(900);
   expect(real.byClient.body.series.t).toHaveLength(60);
-  expect(real.filtered.body.filters).toEqual({ key: ['all-data'], method: ['tools/list'], client: [], result: [], type: [] });
+  expect(real.filtered.body.filters).toEqual({ key: ['all-data'], method: ['tools/list'], client: [], instance: [], result: [], type: [] });
+  // The instance is a dimension: the answer lists the instances (this one first: its name, how its file was read, its figures and its keys in the
+  // view, the facet of the filter by instance), a group by instance has one group for each, a filter keeps the instances that it names (a name that
+  // nobody writes under is in the facet with zeros and its own status), and the lists that the server cuts say how many rows they left out.
+  const instanceRow = real.plain.body.instances[0];
+  expect(real.plain.body.instances.map((item) => item.instance)).toEqual([INSTANCE]);
+  expect(instanceRow).toMatchObject({ status: 'ok', reason: '' });
+  expect(wroteOrNot(instanceRow.written_at)).toBe(true);
+  expect(Object.keys(instanceRow).sort()).toEqual(['bytes', 'calls', 'duration_ms_avg', 'duration_ms_max', 'errors', 'instance', 'keys', 'rate_limited', 'reason', 'rejected', 'requests', 'rows', 'status', 'written_at']);
+  expect(instanceRow.requests).toBe(real.plain.body.totals.requests);
+  expect(real.plain.body.omitted).toEqual({ keys: 0, methods: 0, results: 0, clients: 0, instances: 0 });
+  expect(real.byInstance.body.group).toBe('instance');
+  expect(real.byInstance.body.series.groups.map((item) => item.id)).toEqual([INSTANCE]);
+  expect(real.ofInstance.body.filters.instance).toEqual([INSTANCE]);
+  expect(real.ofInstance.body.totals.requests).toBe(real.plain.body.totals.requests);
+  expect(real.ofOtherInstance.status).toBe(200);
+  expect(real.ofOtherInstance.body.totals.requests).toBe(0);
+  expect(real.ofOtherInstance.body.instances.map((item) => item.instance)).toEqual([INSTANCE, 'nobody-writes-this']);
+  expect(real.ofOtherInstance.body.instances[1]).toMatchObject({ status: 'unknown', written_at: null, requests: 0 });
+  expect(real.plain.body).not.toHaveProperty('persisted');
+  expect(real.plain.body.keys.every((item) => typeof item.elsewhere === 'boolean')).toBe(true);
   // The refusals: a group or a value that is not one is 400 invalid; `split` (what `group` was called) and a parameter that is not one are
   // unknown; a kind of filter takes 20 values.
   expect(real.badGroup.status).toBe(400);
@@ -179,9 +296,11 @@ test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one
   expect(real.oldSplit.status).toBe(400);
   expect(real.oldSplit.body).toMatchObject({ error_code: 'validation', field: 'split', reason: 'unknown' });
   expect(real.badClient.body).toMatchObject({ error_code: 'validation', field: 'client', reason: 'invalid' });
+  expect(real.badInstance.body).toMatchObject({ error_code: 'validation', field: 'instance', reason: 'invalid' });
   expect(real.unknown.body).toMatchObject({ error_code: 'validation', field: 'bogus', reason: 'unknown' });
   expect(real.tooMany.body).toMatchObject({ error_code: 'validation', field: 'method', reason: 'too_many' });
   expect(real.tooManyClients.body).toMatchObject({ error_code: 'validation', field: 'client', reason: 'too_many' });
+  expect(real.tooManyInstances.body).toMatchObject({ error_code: 'validation', field: 'instance', reason: 'too_many' });
   await fakePage(page, newServer());
   for (const [name, path] of Object.entries(asked)) compare({ real: real[name], fake: await call(page, 'GET', path) }, `usage overview, ${name}`);
 });

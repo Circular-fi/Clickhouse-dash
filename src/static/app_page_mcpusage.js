@@ -1,8 +1,8 @@
 // The MCP Usage page (mcpusage.html, /mcp-integration/usage, docs/mcp-integration-page.md, "The Usage tab"): what every key did, the second page
 // of the MCP section (the first is app_page_mcp.js: the keys). Like it, the page is not tied to a host. This entry reads /api/mcp/meta
-// (ns.api, app_api.js), shows the "Turn MCP on" state when MCP is off (the row of the two pages stays), and otherwise hands the panel to the
-// view (app_mcp_overview.js: the filter bar, the chips, the four charts and the tables). #mcpState holds the loading, the error and the "MCP is off"
-// states, the same block as the keys page.
+// (ns.api, app_api.js), shows the "Turn MCP on" state when MCP is off and the "Usage is off" state when the usage is (the row of the two pages
+// stays, and nothing of the usage is read), and otherwise hands the panel to the view (app_mcp_overview.js: the filter bar, the chips, the four
+// charts and the tables). #mcpState holds the loading, the error, the "MCP is off" and the "Usage is off" states, the same block as the keys page.
 
 import "./app_common.js";
 import { api } from "./app_api.js";
@@ -35,8 +35,13 @@ async function load() {
     mcpView.renderDisabled(state);
     return;
   }
+  if (!meta.usage.enabled) {
+    mcpView.renderUsageOff(state);
+    return;
+  }
   state.replaceChildren();
-  mcpOverview.show(dom.byId("mcpOverview"), { meta });
+  // A server that says "not_enabled" to a read (the usage was turned off after the meta) ends in the same state.
+  mcpOverview.show(dom.byId("mcpOverview"), { meta, onOff: () => { mcpOverview.hide(); mcpView.renderUsageOff(state); } });
 }
 
 async function start() {
@@ -78,6 +83,7 @@ import * as h_api from "./app_api.js";
 import * as h_route_notice from "./app_route_notice.js";
 import * as h_boot from "./app_boot.js";
 import * as h_header from "./app_header.js";
+import * as h_mcp_instances from "./app_mcp_instances.js";
 import * as h_ui_filterbar from "./app_ui_filterbar.js";
 import * as h_mcp_bar from "./app_mcp_bar.js";
 import * as h_chart_core from "./app_chart_core.js";
@@ -115,6 +121,7 @@ h_loader.loader.expose([
   h_route_notice,
   h_boot,
   h_header,
+  h_mcp_instances,
   h_ui_filterbar,
   h_mcp_bar,
   h_chart_core,

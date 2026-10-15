@@ -8,14 +8,20 @@
 //       button for each host that has an mcp_uri): the tools that the MCP user of that host cannot
 //       serve are greyed and say which grant is missing, and a host whose MCP user cannot connect
 //       cannot be chosen. The submit button stays off, and says why in its title, until the key is valid.
+//       Two kinds of tool are not a plain choice (the catalog of the meta says which): a tool that every key has
+//       (`always`: the analysis of the key's own limits and usage) shows checked and locked, "Every key has it",
+//       and is never sent; a tool that "*" does not give (`explicitOnly`: the usage of all the keys) is a check
+//       box of its own, off by default, that no "all" box of the family ticks, and it says so. A tool that the
+//       server does not offer now (`available`: the usage is off, or the setting that the tool needs) is not shown.
 //       submit(input) sends it (ns.api.createMcpKey) and returns the answer, which resolves the promise.
 //       A validation error of the server (err.mcp.field, err.mcp.reason) shows under its field and the
 //       dialog stays open; any other error shows at the foot of the dialog.
 //   ns.mcpForm.keyDetails({ meta, key, deleted })    the details of a key (a node): its facts and its permissions by family
 //       The details of a key: its source, its hosts, its data, its limits and every permission it
-//       holds, by family, with what each one does, the data it reads, then what it did (its usage) and
-//       what its statements cost ClickHouse (app_mcp_usage.js). It is read-only. A deleted key (deleted:
-//       true) shows its host, when it was deleted, its usage and its cost only.
+//       holds, by family, with what each one does, the data it reads, then what it did (its usage, while the
+//       usage is on) and what its statements cost ClickHouse (app_mcp_usage.js). It is read-only. A key that
+//       is not in the list but keeps usage (deleted: true: deleted, or known to another instance only) shows
+//       its host, when it was deleted (or where it comes from), its usage and its cost only.
 //   ns.mcpForm.forgetDetails() / cancelDetails()     the next details read again (Refresh) / the reads in flight stop (they close)
 //   ns.mcpForm.showSecret({ meta, key, secret })   Promise<void>
 //       The panel after a create: the secret and the commands that connect a client. It is the only time
@@ -40,6 +46,9 @@ const EMPTY = format.EMPTY;
 // The tools that a new key holds: the data tools (hosts, databases, tables, rows). The other families are chosen.
 const DEFAULT_GROUPS = new Set(["data"]);
 const NEEDS_EVERYTHING = "Needs the data pattern * alone: ClickHouse Dash cannot limit this tool to some tables.";
+// What a tool that is not a plain choice says in the form.
+const ALWAYS_NOTE = "Every key has it";
+const EXPLICIT_NOTE = "\"*\" does not include it";
 
 // What the server's reason says when it sends no sentence of its own.
 const REASON_TEXT = {
@@ -68,23 +77,27 @@ const mcpUser = (host) => (host.mcp.user ? `The MCP user ${host.mcp.user}` : "Th
 // Who lacks the grants of a tool (the MCP user, or the system user for the OpenTelemetry pages).
 const lacking = (gap) => `The ${gap.role}${gap.user ? ` ${gap.user}` : ""}`;
 
+// The tools that the server offers now: the form and the details draw these (a tool that is not available is not shown).
+const offered = (meta) => meta.tools.filter((tool) => tool.available);
+
 // The groups that have tools, in the order of the server, then any group that the server forgot to list. A family with
 // sections (Observability: Traces, Logs, Metrics) is one group for each section ("Observability - Traces"), so that no card
 // holds the three signals; a tool of such a family without a known section stays in a group of the family's own title.
 // Every group says which tools it owns.
 function groupsOf(meta) {
-  const known = meta.toolGroups.filter((group) => meta.tools.some((tool) => tool.group === group.id));
+  const catalog = offered(meta);
+  const known = meta.toolGroups.filter((group) => catalog.some((tool) => tool.group === group.id));
   const ids = new Set(known.map((group) => group.id));
-  const extra = [...new Set(meta.tools.map((tool) => tool.group))].filter((id) => !ids.has(id)).map((id) => ({ id, title: id, note: "" }));
+  const extra = [...new Set(catalog.map((tool) => tool.group))].filter((id) => !ids.has(id)).map((id) => ({ id, title: id, note: "" }));
   const groups = [];
   for (const group of [...known, ...extra]) {
-    const sections = (group.sections || []).filter((section) => meta.tools.some((tool) => tool.group === group.id && tool.section === section.id));
+    const sections = (group.sections || []).filter((section) => catalog.some((tool) => tool.group === group.id && tool.section === section.id));
     const sectionIds = new Set(sections.map((section) => section.id));
     if (!sections.length) {
       groups.push({ id: group.id, parent: group.id, title: group.title, note: group.note, owns: (tool) => tool.group === group.id });
       continue;
     }
-    if (meta.tools.some((tool) => tool.group === group.id && !sectionIds.has(tool.section))) {
+    if (catalog.some((tool) => tool.group === group.id && !sectionIds.has(tool.section))) {
       groups.push({ id: group.id, parent: group.id, title: group.title, note: group.note, owns: (tool) => tool.group === group.id && !sectionIds.has(tool.section) });
     }
     for (const section of sections) {
@@ -109,11 +122,12 @@ function fieldWrap(name, label, content, { hint = "", group = false, required = 
   return wrap;
 }
 
-function checkbox({ id, label, checked, disabled = false, title = "", value = "", mono = false }) {
+function checkbox({ id, label, checked, disabled = false, title = "", value = "", mono = false, note = "" }) {
   const input = h("input", { type: "checkbox", id, value, checked: !!checked, disabled: !!disabled || null });
   input.checked = !!checked;
   input.disabled = !!disabled;
-  const text = h("span", { class: "uiCheck__text" }, h("span", { class: mono ? "uiCheck__label mcpMono" : "uiCheck__label" }, label));
+  const text = h("span", { class: "uiCheck__text" }, h("span", { class: mono ? "uiCheck__label mcpMono" : "uiCheck__label" }, label),
+    note ? h("span", { class: "uiCheck__note" }, note) : null);
   const wrap = h("label", { class: `uiCheck${disabled ? " is-disabled" : ""}`, for: id, title: title || null }, input, text);
   return { wrap, input };
 }
@@ -232,12 +246,14 @@ function buildForm(meta) {
   for (const item of limitInputs) item.input.addEventListener("input", () => capInput(item));
 
   // Permissions: one card for each family. The check box of a card is all its tools; the arrow opens
-  // the tools, one check box each.
+  // the tools, one check box each. A tool that every key has (always) is checked and locked, and one that "*" does not give (explicitOnly)
+  // is not ticked by the box of its family: the box chooses the plain tools only, and a family that has none has no box.
   const toolBoxes = [];
   const cards = [];
   const groupsBox = h("div", { class: "mcpGroups" });
   for (const group of groupsOf(meta)) {
-    const tools = meta.tools.filter(group.owns);
+    const tools = offered(meta).filter(group.owns);
+    const plain = tools.filter((tool) => !tool.always && !tool.explicitOnly);
     const body = h("div", { class: "mcpGroup__body", id: `mcpGroupBody-${group.id}`, hidden: true });
     // A family of one tool has nothing to open: its check box is the tool itself, no arrow.
     const single = tools.length === 1;
@@ -245,11 +261,13 @@ function buildForm(meta) {
       const box = checkbox({
         id: `mcpTool-${tool.name}`,
         label: tool.name,
-        checked: DEFAULT_GROUPS.has(group.parent) && !tool.needsAllData,
+        checked: tool.always || (DEFAULT_GROUPS.has(group.parent) && !tool.needsAllData && !tool.explicitOnly),
         title: plainText(tool.description),
         value: tool.name,
         mono: true,
+        note: tool.always ? ALWAYS_NOTE : tool.explicitOnly ? EXPLICIT_NOTE : "",
       });
+      if (tool.always) box.wrap.classList.add("is-always");
       if (!single) box.wrap.appendChild(h("span", { class: "mcpGroup__tip" }, firstSentence(tool.description)));
       box.tool = tool;
       if (!single) body.appendChild(box.wrap);
@@ -264,10 +282,15 @@ function buildForm(meta) {
       const card = h("div", { class: "mcpGroup mcpGroup--single", dataset: { group: group.id } },
         h("div", { class: "mcpGroup__head" }, only.wrap, h("span", { class: "mcpGroup__note", title: group.note }, group.note), reason));
       groupsBox.appendChild(card);
-      cards.push({ group, card, single: true, all: only, members, reason, count: null });
+      cards.push({ group, card, single: true, box: true, all: only, members, reason, count: null });
       continue;
     }
-    const all = checkbox({ id: `mcpGroup-${group.id}`, label: group.title, checked: false, title: group.note });
+    // The box of the family. A family with no plain tool (the analysis of a key's own usage: one tool that every key has, one to name) has a
+    // title and no box: the input is only the holder of the state that sync() writes, and it is never in the page.
+    const box = plain.length > 0;
+    const all = box
+      ? checkbox({ id: `mcpGroup-${group.id}`, label: group.title, checked: false, title: group.note })
+      : { wrap: h("span", { class: "mcpGroup__title", title: group.note }, group.title), input: h("input", { type: "checkbox" }) };
     const count = h("span", { class: "mcpGroup__count" });
     const toggle = h("button", { type: "button", class: "button button--small mcpGroup__toggle", "aria-expanded": "false", "aria-controls": body.id, title: `Choose the tools of ${group.title}`, "aria-label": `Choose the tools of ${group.title}` },
       icon.el("chevron-down", { size: "sm" }));
@@ -275,6 +298,13 @@ function buildForm(meta) {
     reason.hidden = true;
     const card = h("div", { class: "mcpGroup", dataset: { group: group.id } },
       h("div", { class: "mcpGroup__head" }, all.wrap, h("span", { class: "mcpGroup__note", title: group.note }, group.note), reason, count, toggle), body);
+    // A family that holds a tool to name, or only tools that every key has, shows them at once: nothing hides what the key will hold.
+    const startsOpen = !box || tools.some((tool) => tool.explicitOnly);
+    if (startsOpen) {
+      body.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+      card.classList.add("is-open");
+    }
     toggle.addEventListener("click", () => {
       const open = body.hidden;
       body.hidden = !open;
@@ -284,12 +314,15 @@ function buildForm(meta) {
     // On "input", not "change": the form's own "input" listener (the summary of the state) runs after this
     // one, whereas it would run first and undo the click.
     all.input.addEventListener("input", () => {
-      for (const box of members) if (!box.input.disabled) box.input.checked = all.input.checked;
+      for (const member of members) if (!member.input.disabled && !member.tool.explicitOnly) member.input.checked = all.input.checked;
     });
     groupsBox.appendChild(card);
-    cards.push({ group, card, all, members, count, reason });
+    cards.push({ group, card, box, all, members, count, reason });
   }
-  if (cards.length) cards[0].all.input.dataset.field = "tools";
+  // The field "tools" is the first box that is in the page (the error of the field takes the focus there).
+  const first = cards.find((item) => item.box);
+  if (first) first.all.input.dataset.field = "tools";
+  else if (cards.length) cards[0].members[0].input.dataset.field = "tools";
 
   const patternList = () => [...new Set(patterns.value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
   const isEverything = () => { const list = patternList(); return list.length === 1 && list[0] === "*"; };
@@ -303,6 +336,13 @@ function buildForm(meta) {
     syncLimits(host);
     const gaps = gapsOf(host);
     for (const box of toolBoxes) {
+      if (box.tool.always) {
+        // Every key has it: checked and locked, nothing to choose and nothing to send (the form sends the boxes that are on and free).
+        box.input.checked = true;
+        box.input.disabled = true;
+        box.lock = "";
+        continue;
+      }
       const gap = gaps.get(box.tool.name);
       const needsData = box.tool.needsAllData && !everything;
       const locked = !!gap || needsData;
@@ -334,25 +374,32 @@ function buildForm(meta) {
       return "unavailable";
     };
     for (const item of cards) {
+      // What the person chose: the tools that every key has are on, and are not a choice.
+      const chosen = item.members.filter((box) => box.input.checked && !box.tool.always).length;
+      // The tools that the person can lock out of a family: those that every key has are not among them, so a family is "all locked" without them.
+      const choosable = item.members.filter((box) => !box.tool.always);
       if (item.single) {
-        const locked = item.members[0].input.disabled;
-        item.card.classList.toggle("has-tools", item.members[0].input.checked);
+        const only = item.members[0];
+        const locked = only.input.disabled && !only.tool.always;
+        item.card.classList.toggle("has-tools", chosen > 0);
         item.reason.hidden = !locked;
         item.reason.textContent = locked ? lockText(item.members) : "";
-        item.reason.title = item.members[0].wrap.title;
+        item.reason.title = only.wrap.title;
         continue;
       }
-      const free = item.members.filter((box) => !box.input.disabled);
+      // The box of the family is its plain tools: not the ones that every key has, nor the ones that "*" does not give.
+      const free = item.members.filter((box) => !box.input.disabled && !box.tool.explicitOnly);
       const on = free.filter((box) => box.input.checked).length;
       item.all.input.disabled = !free.length;
       item.all.input.checked = free.length > 0 && on === free.length;
       item.all.input.indeterminate = on > 0 && on < free.length;
-      item.all.wrap.classList.toggle("is-disabled", !free.length);
-      item.count.textContent = `${on}/${item.members.length}`;
-      item.card.classList.toggle("has-tools", on > 0);
+      if (item.box) item.all.wrap.classList.toggle("is-disabled", !free.length);
+      item.count.textContent = `${item.members.filter((box) => box.input.checked).length}/${item.members.length}`;
+      item.card.classList.toggle("has-tools", chosen > 0);
       // A family that is all locked says why in its head.
-      item.reason.hidden = !!free.length;
-      item.reason.textContent = free.length ? "" : lockText(item.members);
+      const stuck = choosable.length > 0 && choosable.every((box) => box.input.disabled);
+      item.reason.hidden = !stuck;
+      item.reason.textContent = stuck ? lockText(choosable) : "";
       item.reason.title = item.members[0].wrap.title;
     }
   };
@@ -476,11 +523,10 @@ function openKeyForm({ meta, submit }) {
 // They show under the key in the table (app_mcp_view.js), one key at a time.
 
 // The tools a key holds: the names it lists, or every tool it can hold when it lists "*" (the tools that
-// need all the data only when its data is "*" alone).
+// need all the data only when its data is "*" alone, and not the ones that "*" does not give), and the ones that
+// every key has (mcpView.heldTools: the same rule as the Tools cell of the table).
 function grantedTools(meta, key) {
-  const everything = key.databases.length === 1 && key.databases[0] === "*";
-  const all = key.tools.includes("*");
-  return meta.tools.filter((tool) => (all ? !tool.needsAllData || everything : key.tools.includes(tool.name)));
+  return mcpView.heldTools(meta, key);
 }
 
 // --- The data that a key reaches ---------------------------------------------------------
@@ -568,11 +614,15 @@ function reachBody(access) {
   return wrap;
 }
 
-// A key that was deleted: its host and when, then what it did and what it cost (its usage stays for usage_retention_days).
+// A key that is not in the list but keeps usage: its host and when it was deleted (or where it comes from: only another instance knows
+// it), then what it did and what it cost (its usage stays for the retention of the usage).
 function deletedDetails(meta, key) {
+  const deleted = key.deletedAt != null;
   const about = h("dl", { class: "mcpAbout" },
     h("dt", null, "Host"), h("dd", null, key.hosts.length ? h("code", { class: "mcpChip" }, key.hosts[0]) : h("span", { class: "mcpMuted" }, "None")),
-    h("dt", null, "Deleted"), h("dd", { title: format.timeTitle(key.deletedAt) }, format.time(key.deletedAt, { precision: "min" })));
+    h("dt", null, deleted ? "Deleted" : "Known to"),
+    deleted ? h("dd", { title: format.timeTitle(key.deletedAt) }, format.time(key.deletedAt, { precision: "min" }))
+      : h("dd", { title: "This instance has no key of this name: its usage comes from the file of the other instance." }, "Another instance only"));
   return h("div", { class: "mcpDetails mcpDetails--deleted" }, about, ...mcpUsage.sections(key, { meta }));
 }
 
@@ -615,7 +665,7 @@ function keyDetails({ meta, key, deleted = false }) {
   // it; the tallest families go first, each into the shorter column, then every column is put back in the
   // order of the families.
   const cards = groupsOf(meta).map((group, index) => {
-    const tools = meta.tools.filter(group.owns);
+    const tools = offered(meta).filter(group.owns);
     const mine = tools.filter((tool) => held.has(tool.name));
     const node = h("div", { class: `mcpGrantGroup${mine.length ? "" : " is-empty"}`, dataset: { group: group.id } },
       h("div", { class: "mcpGrantGroup__head" }, h("span", { class: "mcpGrantGroup__title" }, group.title), h("span", { class: "mcpGrantGroup__count" }, `${mine.length} of ${tools.length}`)),
@@ -624,7 +674,7 @@ function keyDetails({ meta, key, deleted = false }) {
         const gap = gaps.get(tool.name);
         const lost = !!gap;
         const note = gap ? `not served: ${gap.user || "the " + gap.role} lacks ${gap.grants[0].replace(/^SELECT ON /, "")}${gap.grants.length > 1 ? " and more" : ""}`
-          : firstSentence(tool.description);
+          : tool.always ? ALWAYS_NOTE.toLowerCase() : firstSentence(tool.description);
         return h("li", { class: `mcpGrant${lost ? " is-lost" : ""}`, dataset: { tool: tool.name }, title: gap ? `${gap.grants.join(", ")} is missing.\n${gap.statement}` : plainText(tool.description) },
           h("span", { class: "mcpGrant__name" }, tool.name),
           h("span", { class: "mcpGrant__note" }, note));
@@ -645,7 +695,7 @@ function keyDetails({ meta, key, deleted = false }) {
   const reach = reachSection(key);
   const lostCount = granted.filter((tool) => gaps.has(tool.name)).length;
   const body = h("div", { class: "mcpDetails" }, about,
-    h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${meta.tools.length}`),
+    h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${offered(meta).length}`),
       lostCount ? h("span", { class: "mcpWarn mcpLostCount", title: "The user that runs these tools on this host lacks a grant. The key keeps them; they answer with an error." }, `${lostCount} not served`) : null), perms),
     // What the key may read, then what it did and what that cost.
     reach, ...mcpUsage.sections(key, { meta }));

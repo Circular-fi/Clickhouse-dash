@@ -1,12 +1,15 @@
 // The usage of a key and the ClickHouse cost of its statements, in the details of the key (docs/mcp-integration-page.md, "The details
 // of a key"). app_mcp_form.js puts the two sections under the data that the key reads; a deleted key shows them alone.
 //
-//   ns.mcpUsage.sections(key, { meta })   [usage, cost]: two sections, the second one closed
+//   ns.mcpUsage.sections(key, { meta })   [usage, cost]: two sections, the second one closed; [cost] while the usage is off
 //       Usage: what the key did in a window (1 h, 6 h, 24 h, 7 d, ... as the retention keeps them): tiles, the calls of each step of the
 //       window (a minute to a day) with the errors, the tools, the results and the clients. The window that the reader picks stays for the
-//       visit of the page. "Open in Usage" leads to the Usage tab (app_mcp_overview.js), filtered by this key, in the same window.
+//       visit of the page. "Open in Usage" leads to the Usage tab (app_mcp_overview.js), filtered by this key, in the same window. When
+//       several instances share the usage directory the head says "Summed over 3 instances" (a list of them opens from it), and a file that
+//       is left out of the sum is a warning above the tiles (app_mcp_instances.js).
 //       ClickHouse cost: what the statements of the key cost, read from system.query_log of its host when the section is opened (a
 //       scan of the log: never before it is asked), in the window of the usage when the cost has it (1 h, 6 h, 24 h, 7 d), else in 7 d.
+//       It does not depend on the usage: while the usage is off it is the one section of the details, and it has the window buttons of its own.
 //   ns.mcpUsage.forget()                  the next read asks the server again (the Refresh button of the page)
 //   ns.mcpUsage.cancel()                  stops the reads in flight (the details close)
 // Each answer is kept 60 s for its key and window, as the server keeps the cost.
@@ -14,6 +17,7 @@
 import { api } from "./app_api.js";
 import { h } from "./app_dom.js";
 import { format } from "./app_format.js";
+import { mcpInstances } from "./app_mcp_instances.js";
 import { mcpView } from "./app_mcp_view.js";
 import { chartUi } from "./app_ui_chart.js";
 import { icon } from "./app_ui_icon.js";
@@ -34,6 +38,8 @@ const costCache = new Map();
 const openCosts = new Set();
 // The window that the reader picked: the same for every key of the visit, so two keys are compared on the same window.
 let chosenWindow = "";
+// The notes of the instances that are on screen (each opens a list): the details that close take them away.
+const instanceNotes = new Set();
 
 const WINDOW_LABEL = { "1h": "1 h", "6h": "6 h", "24h": "24 h", "7d": "7 d", "30d": "30 d", "90d": "90 d", "365d": "365 d" };
 const WINDOW_TEXT = {
@@ -80,8 +86,11 @@ function compactTable(label, columns, rows, className = "") {
 function usageBody(usage) {
   const out = [];
   const t = usage.totals;
-  if (!usage.persisted) out.push(note(`Counted in memory since ${minute(usage.since)}, when ClickHouse Dash started: a restart clears it.`, true));
-  else if (usage.since != null && usage.from != null && usage.since > usage.from) out.push(note(`Counted since ${minute(usage.since)}.`, true));
+  // A file that is left out of the sum says so before the figures (they are not the whole).
+  const warnings = h("div", { class: "mcpUsage__warnings", hidden: true });
+  mcpInstances.warn(warnings, usage.instances);
+  if (!warnings.hidden) out.push(warnings);
+  if (usage.since != null && usage.from != null && usage.since > usage.from) out.push(note(`Counted since ${minute(usage.since)}.`, true));
   if (!t.requests) {
     out.push(h("p", { class: "mcpNote mcpUsage__empty" }, usage.lastUsedAt != null
       ? `No request in ${WINDOW_TEXT[usage.window] || "this window"}. Last used ${minute(usage.lastUsedAt)}.`
@@ -146,6 +155,9 @@ function usageSection(key, meta, onWindow) {
   const windows = meta?.usage?.windows?.length ? meta.usage.windows : ["24h"];
   if (!windows.includes(chosenWindow)) chosenWindow = windows.includes(meta?.usage?.defaultWindow) ? meta.usage.defaultWindow : windows[0];
   const range = h("span", { class: "mcpMuted mcpUsage__range" });
+  // "Summed over 3 instances": the usage of this key is the sum of the files of the instances that share the usage directory.
+  const instances = mcpInstances.create({ prefix: "Summed over " });
+  instanceNotes.add(instances);
   const picker = h("div", { class: "mcpUsage__windows" });
   segmented.render(picker, windows.map((value) => ({ value, label: WINDOW_LABEL[value] || value })), { attr: "window", value: chosenWindow, size: "compact", label: "Window" });
   // The Usage tab, filtered by this key, in the window that is picked here.
@@ -154,11 +166,12 @@ function usageSection(key, meta, onWindow) {
   link();
   const body = h("div", { class: "mcpUsage__body" });
   const section = h("section", { class: "mcpUsage", dataset: { usage: key.id }, "aria-label": `What ${key.name} did` },
-    h("h3", { class: "mcpDetails__title mcpUsage__head" }, "Usage", range, open, picker), body);
+    h("h3", { class: "mcpDetails__title mcpUsage__head" }, "Usage", range, instances.el, open, picker), body);
   const slot = `${USAGE_SLOT}${key.id}`;
   const show = (usage) => {
     const from = usage.since != null && usage.from != null ? Math.max(usage.from, usage.since) : usage.from;
     range.textContent = from != null && usage.to != null ? format.range(from, usage.to) : "";
+    instances.update(usage.instances, { me: meta?.usage?.instance || "", now: usage.to ?? NaN });
     body.replaceChildren(...usageBody(usage));
   };
   const load = async (announce) => {
@@ -207,12 +220,12 @@ const COST_REASON = {
 
 const ROLE_TEXT = { mcp: "MCP user", system: "system user", other: "another user" };
 
-function costBody(cost) {
+function costBody(cost, usageOn) {
   const out = [];
   if (cost.status !== "ok") {
     out.push(h("p", { class: "mcpNote mcpWarn mcpCost__reason" }, COST_REASON[cost.reason] || COST_REASON.failed));
     if (cost.statement) out.push(note("Give it the grant, as for System > Queries:"), mcpView.codeBlock(cost.statement, "the GRANT statement"));
-    if (cost.suggestedWindow === "24h") out.push(note("Pick the window of 24 hours in Usage: the cost follows it."));
+    if (cost.suggestedWindow === "24h") out.push(note(usageOn ? "Pick the window of 24 hours in Usage: the cost follows it." : "Pick the window of 24 hours."));
     if (cost.error) out.push(note(cost.error, true));
     return out;
   }
@@ -256,14 +269,17 @@ function costBody(cost) {
 
 function costSection(key, meta) {
   const windows = meta?.usage?.costWindows || [];
+  const usageOn = meta?.usage?.enabled === true;
   const bodyId = `mcpCost-${key.id}`;
   const toggle = h("button", { type: "button", class: "mcpCostToggle", "aria-expanded": "false", "aria-controls": bodyId },
     icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("span", null, "ClickHouse cost"));
   const refresh = h("button", { type: "button", class: "button button--small mcpCost__refresh", title: "Read system.query_log again", hidden: true }, "Check again");
   const range = h("span", { class: "mcpMuted mcpCost__range" }, "read from system.query_log when opened");
+  // The window of the cost follows the usage, which has the buttons. Without the usage the cost has its own, shown while it is open.
+  const picker = usageOn ? null : h("div", { class: "mcpCost__windows", hidden: true });
   const body = h("div", { class: "mcpCost__body", id: bodyId, hidden: true });
   const section = h("section", { class: "mcpCost", dataset: { cost: key.id }, "aria-label": `What the statements of ${key.name} cost ClickHouse` },
-    h("h3", { class: "mcpDetails__title mcpCost__head" }, toggle, range, refresh), body);
+    h("h3", { class: "mcpDetails__title mcpCost__head" }, toggle, range, picker, refresh), body);
   if (!windows.length) {
     toggle.disabled = true;
     range.textContent = "off: system.top_queries is off in the config";
@@ -275,7 +291,7 @@ function costSection(key, meta) {
   const isOpen = () => toggle.getAttribute("aria-expanded") === "true";
   const show = (cost) => {
     range.textContent = cost.from != null && cost.to != null ? format.range(cost.from, cost.to) : "";
-    body.replaceChildren(...costBody(cost));
+    body.replaceChildren(...costBody(cost, usageOn));
   };
   const load = async (again) => {
     const window = windowOf();
@@ -309,6 +325,7 @@ function costSection(key, meta) {
   const setOpen = (open) => {
     toggle.setAttribute("aria-expanded", open ? "true" : "false");
     body.hidden = !open;
+    if (picker) picker.hidden = !open;
     if (open) {
       openCosts.add(key.id);
       void load(false);
@@ -319,13 +336,22 @@ function costSection(key, meta) {
   };
   toggle.addEventListener("click", () => setOpen(!isOpen()));
   refresh.addEventListener("click", () => load(true));
+  if (picker) {
+    segmented.render(picker, windows.map((value) => ({ value, label: WINDOW_LABEL[value] || value })), { attr: "window", value: windowOf(), size: "compact", label: "Window of the cost" });
+    segmented.bind(picker, { attr: "window", onChange: (value) => {
+      chosenWindow = value;
+      void load(false);
+    } });
+  }
   if (openCosts.has(key.id)) setOpen(true);
   return { section, reload: () => { if (isOpen()) void load(false); } };
 }
 
-// The two sections of a key: its usage, and the cost of its statements, which follows the window of the usage.
+// The two sections of a key: its usage, and the cost of its statements, which follows the window of the usage. The usage is not counted while it is
+// off: the cost is then the only section.
 function sections(key, { meta }) {
   const cost = costSection(key, meta);
+  if (meta?.usage?.enabled !== true) return [cost.section];
   return [usageSection(key, meta, cost.reload), cost.section];
 }
 
@@ -337,6 +363,8 @@ function forget() {
 function cancel() {
   util.latest.cancelPrefix(USAGE_SLOT);
   util.latest.cancelPrefix(COST_SLOT);
+  for (const instances of instanceNotes) instances.destroy();
+  instanceNotes.clear();
 }
 
 export const mcpUsage = Object.freeze({ sections, forget, cancel });
