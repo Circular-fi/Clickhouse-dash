@@ -14,11 +14,15 @@
 // The server (app_api.js, getMcpUsageOverview) cuts the usage. The tiles and the charts have every filter. The table of a dimension, and the
 // list of its picker, have every filter but their own, so a filtered table still lists what else could be picked, and a value that is picked
 // is always there (at 0 when it has nothing). The legend of a chart is the filter of the dimension that the charts are grouped by; a group
-// that a chart folds into "N more" cannot be picked there but in its table. The bar and the chips sit under the row of the two pages, out
-// of the panel that scrolls, as the filter bar of System does.
+// that a chart folds into "N more" cannot be picked there but in its table. A dimension that has fewer than two values in the answer, and no
+// filter, is not offered at all (offered()): its list in the bar is off, its rows and its legend entries cannot be picked. The bar and the
+// chips sit under the row of the two pages, out of the panel that scrolls, as the filter bar of System does.
+//
+// Nothing moves when a filter is added or removed, or when the next answer comes: the chips are one line that is always there (a hint when
+// there is no filter), the cards of the charts keep one height (app_mcp_charts.js), and so do the tiles (mcp.css).
 
 import { api } from "./app_api.js";
-import { dom, h } from "./app_dom.js";
+import { dom, h, shell } from "./app_dom.js";
 import { format } from "./app_format.js";
 import { mcpBar } from "./app_mcp_bar.js";
 import { mcpCharts } from "./app_mcp_charts.js";
@@ -49,6 +53,9 @@ const VALID = {
   type: /^(?:call|request|limited|rejected)$/,
 };
 const DIMENSION_LABEL = { key: "Key", method: "Method", client: "Client", result: "Result", type: "Type" };
+// The values that an answer lists for a dimension that can be picked (its facet: every filter but its own). The type has no list, row or
+// legend to pick it from.
+const FACET = { key: (data) => data.keys, method: (data) => data.methods, client: (data) => data.clients, result: (data) => data.results };
 // The four kinds of request (the `type` of the server): what each one is, for the chip and the tooltip.
 const TYPE_LABEL = { call: "Tool calls", request: "Protocol", limited: "Rate limited", rejected: "Rejected" };
 const TYPE_TITLE = {
@@ -102,6 +109,7 @@ let bar = null;
 let charts = null;
 // The chips on screen (their values and names), to draw them again only when they change.
 let chipsDrawn = "";
+let chipsShown = [];
 let mounted = false;
 
 // The address of the tab (ns.router): its parameters are the state of the page, written by the changes and read on load and by Back and Forward.
@@ -197,6 +205,14 @@ function clearDimension(dimension) {
 
 const filterCount = () => DIMENSIONS.reduce((sum, dimension) => sum + model.filters[dimension].length, 0);
 
+// Whether a filter on the dimension is offered: it has two values to choose from in the answer, or a filter is on already (so that it can be
+// taken off). One value, or none, is nothing to choose: its list, its rows and its legend entries stay as they are, but cannot be used.
+// Before the first answer nothing is known, and everything is offered.
+function offered(dimension) {
+  if (!model.data || !FACET[dimension]) return true;
+  return model.filters[dimension].length > 0 || FACET[dimension](model.data).length > 1;
+}
+
 // --- Reading -------------------------------------------------------------------------------
 
 // The usage for the window, the group and the filters. A newer read cancels the one in flight (util.latest); the figures that are on screen
@@ -261,7 +277,7 @@ function hide() {
 function setShown(on) {
   els.root.hidden = !on;
   bar.form.hidden = !on;
-  els.filters.hidden = !on || !filterCount();
+  els.filters.hidden = !on;
 }
 
 // The text that stands for the folded bar on a phone ("<time range> · 2 filters" on the other bars): the window and the group.
@@ -289,19 +305,21 @@ function build(root) {
     },
   });
   els.refresh = bar.refresh;
-  // The chips are a list; "Clear filters" is a button, so it stands beside the list and not in it.
-  els.chips = h("div", { class: "chips mcpOverview__chips", role: "list", "aria-label": "Active filters" });
+  // The chips row is always there, one line high, so that a filter never moves what is under it: a hint while there is none, then the chips
+  // (a list; one line that scrolls sideways when they do not fit) and "Clear filters", a button, which stands beside the list and not in it.
+  els.hint = h("span", { class: "mcpMuted mcpOverview__filtersHint" }, "No filters. Pick a value in a list, a legend or a table.");
+  els.chips = h("div", { class: "chips mcpOverview__chips", role: "list", "aria-label": "Active filters", hidden: true });
   els.clear = h.html(badge.clearHtml("Clear filters", { "data-chip-clear": true })).firstElementChild;
   els.clear.hidden = true;
-  els.filters = h("div", { class: "chips mcpOverview__filters", hidden: true }, els.chips, els.clear);
+  els.filters = h("div", { class: "chips mcpOverview__filters", hidden: true }, els.hint, els.chips, els.clear);
   els.filters.addEventListener("click", onChipClick);
   dom.$(".mcpPage__nav", root.closest(".mcpPage")).after(bar.form, els.filters);
+  shell.edgeCues(els.chips);
 
   els.state = h("div", { class: "mcpOverview__state" });
   els.tiles = h("div", { class: "statTiles statTiles--boxed mcpOverview__tiles", role: "group", "aria-label": "Totals" });
   els.charts = h("div", { class: "mcpOverview__charts" });
-  els.chartsEmpty = h("div", { class: "mcpOverview__empty", hidden: true });
-  charts = mcpCharts.create(els.charts, { pressed: (group, id) => model.filters[group]?.includes(id) === true, onToggle: toggleFilter });
+  charts = mcpCharts.create(els.charts, { pressed: (group, id) => model.filters[group]?.includes(id) === true, onToggle: toggleFilter, offered });
 
   // Two columns on a wide window: the keys over the methods (the wide tables), the results over the clients.
   els.tables = h("div", { class: "mcpOverview__tables" },
@@ -309,7 +327,7 @@ function build(root) {
     h("div", { class: "mcpOverview__col" }, blockOf("results"), blockOf("clients")));
   els.tables.addEventListener("click", onRowClick);
   els.notes = h("div", { class: "mcpOverview__notes" });
-  els.content = h("div", { class: "mcpOverview__content" }, els.tiles, els.charts, els.chartsEmpty, els.tables, els.notes);
+  els.content = h("div", { class: "mcpOverview__content" }, els.tiles, els.charts, els.tables, els.notes);
   els.body = h("div", { class: "mcpOverview__body" }, els.state, els.content);
 
   root.replaceChildren(h("section", { class: "pagePart mcpOverview__part", "aria-labelledby": "mcpOverviewTitle" },
@@ -347,7 +365,8 @@ function showState(on) {
 }
 
 function syncControls() {
-  bar.sync({ group: model.group, window: model.window, filters: model.filters, data: model.data });
+  bar.sync({ group: model.group, window: model.window, filters: model.filters, data: model.data,
+    offered: { key: offered("key"), method: offered("method"), client: offered("client") } });
   const data = model.data;
   const from = data && data.since != null && data.from != null ? Math.max(data.from, data.since) : data?.from;
   els.range.textContent = data && from != null && data.to != null ? format.range(from, data.to) : "";
@@ -362,16 +381,22 @@ function valueLabel(dimension, value) {
   return value;
 }
 
-// One chip for each value, and "Clear filters" from the second (the shared chips, ns.badge). The chips are drawn again only when they
-// change: the keyboard is on one of them while the answer comes.
+const chipId = ({ dimension, value }) => `${dimension}=${value}`;
+
+// One chip for each value, and "Clear filters" from the second (the shared chips, ns.badge), or the hint when there is no filter. The row
+// does not change its size either way. The chips are drawn again only when they change: the keyboard is on one of them while the answer comes.
 function renderChips() {
   const chips = [];
   for (const dimension of DIMENSIONS) for (const value of model.filters[dimension]) chips.push({ dimension, value, text: valueLabel(dimension, value) });
-  els.filters.hidden = els.root.hidden || !chips.length;
+  els.filters.hidden = els.root.hidden;
+  els.hint.hidden = chips.length > 0;
+  els.chips.hidden = !chips.length;
   els.clear.hidden = chips.length < 2;
   const drawn = JSON.stringify(chips);
   if (drawn === chipsDrawn) return;
   chipsDrawn = drawn;
+  const had = new Set(chipsShown.map(chipId));
+  chipsShown = chips;
   h.replace(els.chips, chips.map(({ dimension, value, text }) => h.html(badge.chipHtml({
     key: DIMENSION_LABEL[dimension],
     op: "=",
@@ -380,6 +405,9 @@ function renderChips() {
     title: dimension === "type" ? `${text}: ${TYPE_TITLE[value]}` : `${DIMENSION_LABEL[dimension]} = ${text}`,
     remove: { label: `Remove filter ${DIMENSION_LABEL[dimension]} = ${text}`, attrs: { "data-chip-dimension": dimension, "data-chip-value": value } },
   }))));
+  // The chips are in the order of the dimensions, so a pick may land past the edge of a row that scrolls: the new chip comes into view.
+  const added = chips.findIndex((chip) => !had.has(chipId(chip)));
+  if (added >= 0 && had.size) shell.revealInRow(els.chips, els.chips.children[added]);
 }
 
 // The control that a click leaves: a chip that went, or the button of the empty state that cleared the filters. The keyboard goes on from the
@@ -467,23 +495,18 @@ function renderTiles(data) {
 
 // --- Charts --------------------------------------------------------------------------------
 
-// The four charts, or the one sentence that says why there is nothing to draw (the same for the four: no request has what they count).
+// The four charts. A window with no request keeps the four cards (the page does not shrink): the Requests card says why there is nothing to
+// draw, with a way out when filters are on, and the others say what they count (nothing).
 function renderCharts(data) {
   const none = !data.totals.requests || !data.series.times.length;
-  els.charts.hidden = none;
-  els.chartsEmpty.hidden = !none;
   if (!none) {
     charts.draw(data);
     return;
   }
-  charts.destroy();
   const span = WINDOW_TEXT[data.window] || "this window";
-  if (filterCount()) {
-    uiState.empty(els.chartsEmpty, { title: "No request has all these filters", body: `Nothing in ${span} matches them.`, compact: true,
-      action: { label: "Clear filters", onClick: () => { clearFilters(); focusFilters(); } } });
-  } else {
-    uiState.empty(els.chartsEmpty, { title: `No request in ${span}`, body: "Nothing was counted in this window.", compact: true });
-  }
+  charts.draw(data, filterCount()
+    ? { title: "No request has all these filters", body: `Nothing in ${span} matches them.`, action: { label: "Clear filters", onClick: () => { clearFilters(); focusFilters(); } } }
+    : { title: `No request in ${span}`, body: "Nothing was counted in this window." });
 }
 
 // --- Tables --------------------------------------------------------------------------------
@@ -620,13 +643,14 @@ function blockOf(id) {
   const spec = TABLES[id];
   const block = {
     count: h("span", { class: "pagePart__count" }),
+    // The hint is there only while a row can be picked.
+    hint: h("span", { class: "mcpMuted mcpOverview__hint", hidden: true }, "Click a row to filter"),
     box: h("div", { class: "dataTableWrap mcpOverview__wrap" }),
     more: h("p", { class: "mcpNote mcpNote--fine", hidden: true }),
   };
   block.section = h("section", { class: "mcpOverview__block", "aria-labelledby": `mcpOverviewTitle-${id}` },
     h("div", { class: "pagePart__head mcpOverview__blockHead" },
-      h("h3", { class: "mcpOverview__blockTitle", id: `mcpOverviewTitle-${id}` }, spec.title), block.count,
-      h("span", { class: "mcpMuted mcpOverview__hint" }, "Click a row to filter")),
+      h("h3", { class: "mcpOverview__blockTitle", id: `mcpOverviewTitle-${id}` }, spec.title), block.count, block.hint),
     block.box, block.more,
     spec.note ? h("p", { class: "mcpNote mcpNote--fine" }, spec.note) : null);
   tableMod.scrollCues(block.box);
@@ -658,7 +682,10 @@ function renderTable(id) {
   const data = model.data;
   const rows = data ? spec.rows(data) : [];
   const omitted = data ? spec.omitted(data) : 0;
+  // A row is a filter only while its dimension is offered (two values, or a filter on); else it is a line to read.
+  const pickable = rows.length > 0 && offered(spec.dimension);
   block.count.textContent = rows.length ? count(rows.length) : "";
+  block.hint.hidden = !pickable;
   block.more.hidden = !omitted;
   block.more.textContent = omitted ? `${count(omitted)} more ${spec.noun} not shown.` : "";
   if (!rows.length) {
@@ -677,6 +704,8 @@ function renderTable(id) {
     const value = spec.value(row);
     const on = model.filters[spec.dimension].includes(value);
     const cells = columns.map((column, index) => (index === 0 ? h("th", { scope: "row" }, column.cell(row)) : h("td", { class: column.text ? null : "num" }, column.cell(row))));
+    // A row that is not offered has no class, tabindex or value: no pointer, no hover, no click, and not in the roving focus (rovingRows).
+    if (!pickable) return h("tr", { class: "mcpOverview__row" }, cells);
     return h("tr", { class: ["mcpOverview__row", "is-pickable", on && "is-selected"], tabindex: "-1", "aria-selected": on ? "true" : "false", dataset: { dimension: spec.dimension, value } }, cells);
   });
   h.replace(block.box, h("table", { class: "dataTable dataTable--compact mcpOverview__table", "aria-label": spec.label },

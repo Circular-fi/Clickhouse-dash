@@ -3,11 +3,19 @@
 // dimension (the Group by of the bar: key, method or client) and cut by the same filters, so they have the same x axis (the steps of the
 // window, 1 minute to 1 day), the same groups and, for a group, the same colour: it comes from a hash of its id, so a name has one colour in
 // every chart, window and filter. Each chart has its own legend (the totals of its figure), and a legend is the filter of the group: a click
-// on an entry adds or removes it. The groups that a chart folds into "N more" cannot be picked there (the tables list them). The cursor and
-// the zoom go from one chart to the others. The engine is app_chart_core.js.
+// on an entry adds or removes it. The groups that a chart folds into "N more" cannot be picked there (the tables list them), and neither can
+// any group when the dimension has one value and no filter (there is nothing to filter by). The cursor and the zoom go from one chart to the
+// others. The engine is app_chart_core.js.
 //
-//   mcpCharts.create(box, { pressed(group, id), onToggle(group, id) }) -> charts
-//   charts.draw(data)       the four charts for an answer (the cards are built the first time; the engines are drawn again each time)
+// The four cards keep one height, whatever they hold (a filter never moves what is under them): the plot is CHART_HEIGHT, the legend has the
+// room of three lines (four on a phone) and scrolls inside past them, and a card with nothing to draw says so in a box of the same size
+// (mcp.css, .mcpOverview__card).
+//
+//   mcpCharts.create(box, { pressed(group, id), onToggle(group, id), offered(group) }) -> charts
+//                           offered(group): whether a filter on the group dimension is offered (it has two values, or a filter is on)
+//   charts.draw(data, empty)  the four charts for an answer (the cards are built the first time; the engines are drawn again each time).
+//                           `empty` (null when the window has requests) is { title, body, action }: the sentence of the Requests card
+//                           for a window with no request; the three others say what they count, as for a figure that is 0
 //   charts.redraw()         the legends again, for a filter that is picked while the next answer is read
 //   charts.destroy()        stops the engines and empties the box
 
@@ -149,10 +157,10 @@ function cardOf(spec) {
   const body = h("div", { class: "chartCard__body mcpOverview__chart", dataset: { chart: spec.id } });
   const el = h("section", { class: "chartCard mcpOverview__card", dataset: { card: spec.id }, aria: { labelledby: `mcpChartTitle-${spec.id}` } },
     h("header", { class: "chartCard__head" }, title, meta), body);
-  return { spec, el, title, meta, body, chart: null, watch: null };
+  return { spec, el, title, meta, body, group: "", chart: null, watch: null };
 }
 
-function create(box, { pressed, onToggle }) {
+function create(box, { pressed, onToggle, offered }) {
   const cards = CHARTS.map(cardOf);
   // The entry of a legend that was pressed: the chart that the answer draws takes the keyboard back to it.
   let focus = null;
@@ -170,9 +178,12 @@ function create(box, { pressed, onToggle }) {
     built = false;
   }
 
-  // "N more" holds the groups that a chart folds: it is not a filter, so it cannot be pressed (the tables pick any value).
-  function lockRest(card) {
-    for (const item of $$(`.chartCore__legendItem[data-series="${REST_ID}"]`, card.chart?.root)) {
+  // An entry that is no filter cannot be pressed: "N more" holds the groups that a chart folds (the tables pick any value), and no entry is a
+  // filter when the dimension of the groups has one value and no filter.
+  function lockEntries(card) {
+    const open = offered(card.group);
+    for (const item of $$(".chartCore__legendItem", card.chart?.root)) {
+      if (open && item.dataset.series !== REST_ID) continue;
       item.disabled = true;
       item.removeAttribute("aria-pressed");
     }
@@ -202,19 +213,25 @@ function create(box, { pressed, onToggle }) {
     return out;
   }
 
-  function drawChart(card, data) {
+  function drawChart(card, data, empty) {
     const { spec } = card;
     const { times, step, groups, rest } = data.series;
     const group = data.group;
     const noun = GROUP_NOUN[group] || "group";
+    card.group = group;
     card.chart?.destroy();
     card.chart = null;
     card.watch?.disconnect();
     card.watch = null;
     card.body.replaceChildren();
     card.title.textContent = `${spec.title} by ${noun}`;
-    card.meta.textContent = stepText(step);
-    if (![...groups, rest].some(spec.any)) {
+    card.meta.textContent = step ? stepText(step) : "";
+    // A window with no request: the Requests card has the sentence (and its way out), the others say what they count.
+    if (empty && spec === CHARTS[0]) {
+      uiState.empty(card.body, { ...empty, compact: true });
+      return;
+    }
+    if (empty || ![...groups, rest].some(spec.any)) {
       uiState.empty(card.body, { title: spec.none, compact: true });
       return;
     }
@@ -239,9 +256,13 @@ function create(box, { pressed, onToggle }) {
       legend: "totals",
       legendTotal: spec.total,
       legendPressed: on,
-      legendTitle: (s, isOn) => (s.rest ? `${s.label} ${noun}s that the chart folds together: pick them in the table` : `${isOn ? "Stop filtering by" : "Filter by"} ${noun} ${s.label}`),
+      legendTitle: (s, isOn) => {
+        if (s.rest) return `${s.label} ${noun}s that the chart folds together: pick them in the table`;
+        if (!offered(group)) return `Only one ${noun} in this view`;
+        return `${isOn ? "Stop filtering by" : "Filter by"} ${noun} ${s.label}`;
+      },
       onLegendClick: (s) => {
-        if (s.rest) return;
+        if (s.rest || !offered(group)) return;
         focus = { chart: spec.id, series: s.id };
         onToggle(group, s.raw);
       },
@@ -263,24 +284,24 @@ function create(box, { pressed, onToggle }) {
     });
     card.chart.root.setAttribute("role", "group");
     card.chart.root.setAttribute("aria-label", `${spec.title} by ${noun} over time`);
-    // A legend is drawn again when its groups or its pressed entries change: "N more" is locked each time.
+    // A legend is drawn again when its groups or its pressed entries change: what is no filter is locked each time.
     const legend = $(".chartCore__legend", card.chart.root);
     if (legend && typeof MutationObserver === "function") {
-      card.watch = new MutationObserver(() => lockRest(card));
+      card.watch = new MutationObserver(() => lockEntries(card));
       card.watch.observe(legend, { childList: true });
     }
-    lockRest(card);
+    lockEntries(card);
   }
 
   return {
-    draw(data) {
+    draw(data, empty = null) {
       if (!built) {
         h.replace(box, cards.map((card) => card.el));
         built = true;
       }
       const back = focus;
       focus = null;
-      for (const card of cards) drawChart(card, data);
+      for (const card of cards) drawChart(card, data, empty);
       // The chart is drawn again for the new figures: the keyboard stays on the entry of the legend that it pressed.
       if (back) {
         const card = cards.find((item) => item.spec.id === back.chart);

@@ -1442,20 +1442,44 @@ body[data-page="mcp"] #mcpPanel {
   display: none;
 }
 
-/* The chips under the bar: the list of chips wraps in its own box, "Clear filters" keeps its place at its right. A long row scrolls in itself
-   rather than push the panel down. */
+/* The chips under the bar: one line that is always there (a hint says so while no filter is on), so that adding or removing a filter moves
+   nothing under it. The list does not wrap: when the chips do not fit it scrolls sideways, fading where it hides some (ns.shell.edgeCues),
+   and "Clear filters" stays in view beside it. A chip is 22 px high (32 px on a touch screen, whose bands need the room) between 6 px of
+   padding and the 1 px border. */
 .mcpOverview__filters {
   flex: 0 0 auto;
-  align-items: flex-start;
-  gap: var(--space-6) var(--space-8);
-  max-height: 7.5rem;
-  padding: var(--space-6) var(--gutter);
-  overflow-y: auto;
+  flex-wrap: nowrap;
+  gap: var(--space-8);
+  height: 35px;
+  padding: 0 var(--gutter);
   border-bottom: 1px solid var(--border);
+}
+
+@media (pointer: coarse) {
+  .mcpOverview__filters {
+    height: 45px;
+  }
 }
 
 .mcpOverview__filters[hidden] {
   display: none;
+}
+
+.mcpOverview__filtersHint {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcpOverview__chips {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  align-self: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
 }
 
 .mcpOverview__filters > .chips__clear {
@@ -1503,6 +1527,15 @@ body[data-page="mcp"] #mcpPanel {
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
 }
 
+/* A tile keeps the room of its sub line (a row of its own, filled or not): a figure that has none (no call, no row) does not shorten its
+   row of tiles, so what is under them stays where it is. */
+.mcpOverview__tiles > .statTile {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto calc(var(--fs-xs) * 1.3);
+  align-content: start;
+}
+
 /* The four charts: two columns above 1100 px, one under the other from there down. */
 .mcpOverview__charts {
   display: grid;
@@ -1511,30 +1544,84 @@ body[data-page="mcp"] #mcpPanel {
   min-width: 0;
 }
 
-.mcpOverview__charts[hidden],
-.mcpOverview__empty[hidden] {
-  display: none;
-}
-
 @media (min-width: 1101px) {
   .mcpOverview__charts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-/* The tooltip of a chart may float past its plot, over the next chart or the tables below. */
+/* The four cards keep one height, whatever they draw (app_mcp_charts.js): the head is one line, the plot is 200 px (CHART_HEIGHT), the legend
+   has the room of three lines (four on a phone) and scrolls inside past them, and a card with nothing to draw says so in the same room. A
+   legend row is the 20 px of an entry (32 px on a touch screen, where the bands of two rows meet 8 px apart). The legend keeps a margin
+   inside its box, which would cut the ring of a focused entry (2 px) and, on a touch screen, the band of an entry (5 px). */
+.mcpOverview__card {
+  --mcp-plot: 200px;
+  --mcp-legend-row: 20px;
+  --mcp-legend-gap: 2px;
+  --mcp-legend-pad: var(--space-2);
+  --mcp-legend-lines: 3;
+  --mcp-legend: calc(var(--mcp-legend-lines) * var(--mcp-legend-row) + (var(--mcp-legend-lines) - 1) * var(--mcp-legend-gap) + 2 * var(--mcp-legend-pad));
+}
+
+@media (pointer: coarse) {
+  .mcpOverview__card {
+    --mcp-legend-row: 32px;
+    --mcp-legend-gap: 8px;
+    --mcp-legend-pad: var(--space-6);
+  }
+}
+
+@media (max-width: 600px) {
+  .mcpOverview__card {
+    --mcp-legend-lines: 4;
+  }
+}
+
+.mcpOverview__card .chartCard__head {
+  flex-wrap: nowrap;
+}
+
+.mcpOverview__card .chartCard__title {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The tooltip of a chart may float past its plot, over the next chart or the tables below. The room is the plot, the legend (6 px of padding
+   over its lines) and the padding of the card. */
 .mcpOverview__card .mcpOverview__chart {
   z-index: var(--z-sticky);
-  min-height: 11rem;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(var(--mcp-plot) + var(--space-6) + var(--mcp-legend) + var(--space-8));
 }
 
 .mcpOverview__card .mcpOverview__chart:is(:hover, :focus-within) {
   z-index: var(--z-sticky-top);
 }
 
-.mcpOverview__chart > .uiState,
-.mcpOverview__empty > .uiState {
-  min-height: 8rem;
+.mcpOverview__chart > .uiState {
+  flex: 1 1 auto;
+}
+
+.mcpOverview__chart .chartCore__legendList {
+  align-content: flex-start;
+  height: var(--mcp-legend);
+  padding: var(--mcp-legend-pad);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.mcpOverview__chart .chartCore__legendItem {
+  height: var(--mcp-legend-row);
+}
+
+/* An entry that is no filter ("N more", or a dimension with one value): no pointer, no hover. */
+.mcpOverview__chart .chartCore__legendItem:disabled {
+  cursor: default;
+}
+
+.mcpOverview__chart .chartCore__legendItem:disabled:hover {
+  border-color: transparent;
 }
 
 /* The four tables: two columns on a wide window (the wide tables, keys and methods, take six elevenths; the results and the clients five
@@ -1604,6 +1691,12 @@ body[data-page="mcp"] #mcpPanel {
 
 .mcpOverview__row.is-pickable {
   cursor: pointer;
+}
+
+/* A row that is not offered (its dimension has one value, or none) is a line to read: the table's hover would say that it can be clicked. */
+.mcpOverview__row:not(.is-pickable):hover > td,
+.mcpOverview__row:not(.is-pickable):hover > th {
+  background-color: transparent;
 }
 
 .mcpOverview__name {

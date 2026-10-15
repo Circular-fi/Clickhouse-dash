@@ -10,13 +10,17 @@
 //   bar.windows                    the buttons of the window
 //   bar.refresh                    the Refresh button (type submit: the submit of the form is onRefresh)
 //   bar.setWindows(list, value)    the buttons of the windows that the server keeps, `value` pressed
-//   bar.sync({ group, window, filters, data })   what the model says, quietly: the group, the window, the button of each picker, and its
-//                                  list when it is open. `data` (an answer, or null) gives the values of the lists and their counts: the
-//                                  facet of each dimension has every filter but its own, so a list shows what else can be picked.
+//   bar.sync({ group, window, filters, data, offered })   what the model says, quietly: the group, the window, the button of each picker,
+//                                  and its list when it is open. `data` (an answer, or null) gives the values of the lists and their counts:
+//                                  the facet of each dimension has every filter but its own, so a list shows what else can be picked.
+//                                  `offered` ({ key, method, client }: booleans, all true when it is left out) says which lists can be used:
+//                                  a dimension that has fewer than two values in the answer, and no filter, has nothing to choose from.
 //   bar.mountSummary({ describe })  the phone fold (app_ui_filterbar.js): call it once the chips row is right after the form
 //
 // A picker is a multiple choice like the Service picker of Logs (ns.menu.multi): a check box for each value with its number of requests, an
-// "All ..." action that clears the dimension, and a field that narrows a long list. A dimension takes 20 values at most.
+// "All ..." action that clears the dimension, and a field that narrows a long list. A dimension takes 20 values at most. A picker that has
+// nothing to choose from (one value or none, and no filter on) is off and keeps its place: its button says the value ("Client · claude-code")
+// or "Client · none", and its title why.
 
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -33,11 +37,11 @@ const MAX_VALUES = 20;
 const SEARCH_FROM = 12;
 const WINDOW_LABEL = { "1h": "1 h", "6h": "6 h", "24h": "24 h", "7d": "7 d", "30d": "30 d", "90d": "90 d", "365d": "365 d" };
 
-// The dimensions that have a picker: the word of its button, the noun of its list, the action that clears it.
+// The dimensions that have a picker: the word of its button, the noun of its list (and of one value), the action that clears it.
 const PICKERS = [
-  { dimension: "key", label: "Key", noun: "keys", all: "All keys" },
-  { dimension: "method", label: "Method", noun: "methods", all: "All methods" },
-  { dimension: "client", label: "Client", noun: "clients", all: "All clients" },
+  { dimension: "key", label: "Key", noun: "keys", one: "key", all: "All keys" },
+  { dimension: "method", label: "Method", noun: "methods", one: "method", all: "All methods" },
+  { dimension: "client", label: "Client", noun: "clients", one: "client", all: "All clients" },
 ];
 
 // The values of a list, from the facet of the answer: what the check box says, its count, and what makes the row different.
@@ -76,10 +80,10 @@ function create({ groups, labelOf, onGroup, onWindow, onPick, onClear, onRefresh
     setWindows(list, value) {
       segmented.render(windows, list.map((item) => ({ value: item, label: WINDOW_LABEL[item] || item })), { attr: "window", value, size: "compact", label: "Window" });
     },
-    sync({ group, window, filters, data }) {
+    sync({ group, window, filters, data, offered = {} }) {
       if (groupSelect.value !== group) groupMenu.set(group);
       segmented.set(windows, window, "window");
-      for (const item of pickers) item.sync(filters[item.dimension], data);
+      for (const item of pickers) item.sync(filters[item.dimension], data, offered[item.dimension] !== false);
     },
     mountSummary(options) {
       filterBar.mountSummary(bar.form, options);
@@ -93,6 +97,8 @@ function picker(bar, spec, { labelOf, onPick, onClear }) {
   const { dimension, noun } = spec;
   let chosen = [];
   let data = null;
+  // Whether there is anything to choose from (see the header): a list that is off cannot be opened.
+  let usable = true;
   // The values on screen (to draw the list again only when they change).
   let drawn = "";
 
@@ -109,7 +115,9 @@ function picker(bar, spec, { labelOf, onPick, onClear }) {
   // An item of the bar's lead, as the others, but the phone summary counts the chips under the bar and not these (one filter, one count).
   bar.lead.appendChild(h("div", { class: "obsFilterBar__field traceSearchField mcpBar__field", dataset: { summary: "off" } }, root));
 
-  const handle = menu.multi(button, panel, { root, onOpen: () => { search.value = ""; draw(); } });
+  // A list that was open while it became off (the pick that emptied the filter of a dimension of one value) stays as it is until it closes:
+  // it would shut under the pointer, and the next pick is the one that put the value back.
+  const handle = menu.multi(button, panel, { root, onOpen: () => { search.value = ""; draw(); }, onClose: () => paint() });
 
   // The values of the list: those of the facet by their requests, then the picked ones that the facet does not have (the answer is not
   // there yet, or it is the one of the older filters).
@@ -154,11 +162,26 @@ function picker(bar, spec, { labelOf, onPick, onClear }) {
     }
     note.hidden = !full;
     const names = chosen.map((value) => labelOf(dimension, value));
-    const text = names.length === 0 ? `${spec.label} · All` : names.length === 1 ? `${spec.label} · ${names[0]}` : `${spec.label} · ${names.length} selected`;
+    const off = !usable && !handle.isOpen();
+    let text;
+    let title;
+    if (off) {
+      // Nothing to choose from: the button says what there is.
+      const only = data ? FACETS[dimension](data)[0] : null;
+      text = `${spec.label} · ${only ? only.label : "none"}`;
+      title = only ? `Only one ${spec.one} in this view` : `No ${spec.one} in this view`;
+    } else {
+      text = names.length === 0 ? `${spec.label} · All` : names.length === 1 ? `${spec.label} · ${names[0]}` : `${spec.label} · ${names.length} selected`;
+      title = names.length ? names.join(", ") : spec.all;
+    }
     // The button is written again only when its words change (every answer paints the lists).
     if (button.textContent !== text) button.replaceChildren(h("span", { class: "tracePicker__label" }, text));
-    const title = names.length ? names.join(", ") : spec.all;
     if (button.title !== title) button.title = title;
+    // Off as a picker with nothing to pick is (menu.select): no arrow, dimmed, not in the tab order.
+    button.disabled = off;
+    button.setAttribute("aria-disabled", off ? "true" : "false");
+    root.classList.toggle("is-disabled", off);
+    root.classList.toggle("is-empty", off);
   }
 
   // The field narrows the list to the values that hold its text.
@@ -190,9 +213,10 @@ function picker(bar, spec, { labelOf, onPick, onClear }) {
 
   return {
     dimension,
-    sync(values, answer) {
+    sync(values, answer, offered = true) {
       chosen = values;
       data = answer;
+      usable = offered;
       if (handle.isOpen()) draw();
       else paint();
     },
