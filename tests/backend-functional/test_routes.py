@@ -336,6 +336,8 @@ def test_observability_serves_each_view_as_a_page_of_its_own_and_the_old_pages_a
 
 def test_system_sections_and_explorer_views_are_pages_of_their_own():
     pages = {
+        "/mcp-integration": ('id="mcpTab-keys"', "style.mcp.css"),
+        "/mcp-integration/usage": ('id="mcpTab-usage"', "style.mcpusage.css"),
         "/system": ('id="systemTab-overview"', "style.system.css"),
         "/system/queries": ('id="systemTab-queries"', "style.queries.css"),
         "/system/disks": ('id="systemTab-disks"', "style.disks.css"),

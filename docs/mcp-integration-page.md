@@ -1,16 +1,19 @@
 # MCP integration page
 
-The **MCP integration** page shows the access keys of ChDash's MCP server and how to connect a client. An AI client (Claude Desktop, Claude Code, an IDE, your own agent) reads your ClickHouse data and the pages of ChDash through the MCP endpoint. Each key limits the host, the tools and the data that its client can use. This file describes the page. The server side (the endpoint, the key store, the tools, the `mcp` configuration block) is in `docs/mcp.md`.
+The **MCP integration** page shows the access keys of ChDash's MCP server and how to connect a client. An AI client (Claude Desktop, Claude Code, an IDE, your own agent) reads your ClickHouse data and the pages of ChDash through the MCP endpoint. Each key limits the host, the tools and the data that its client can use. This file describes the two pages of the section: **Keys** (the access keys and how to connect a client) and **Usage** (what all the keys did: see "The Usage tab"). The server side (the endpoint, the key store, the tools, the `mcp` configuration block) is in `docs/mcp.md`.
 
 ## Open the page
 
 The page is at `/mcp-integration`. It is a page of its own (`mcp.html`), like System. It is not tied to a host, so the host picker is hidden.
 
+A row of two links stands under the header, on both pages: **Keys** (`/mcp-integration`) and **Usage** (`/mcp-integration/usage`, `mcpusage.html`). It is the nav row of System: the tab of the current page is underlined and has `aria-current="page"`. The row is in the shell of each page (a script puts the base path of a reverse proxy in its links). It stays when MCP is off: both pages then show "Turn MCP on".
+
 ## Layout
 
-The page has the same frame as System and Observability (the header, then one scrolling panel). It has no bar, no strip and no visible title. The page switcher in the header names the page. The `h1` ("MCP integration") is for screen readers only (`srOnly`). The panel is the only scroller. Its inset is `--gutter` (12 px, 10 px at 820 px and below).
+The page has the same frame as System and Observability (the header, the nav row of the two links, then one scrolling panel). It has no bar, no strip and no visible title. The page switcher in the header names the page. The `h1` ("MCP integration") is for screen readers only (`srOnly`). The panel is the only scroller. Its inset is `--gutter` (12 px, 10 px at 820 px and below).
 
 ```
+Keys  Usage                                  the nav row
 +-------------------------------------------------+------------------------------+
 | Access keys  11    [filter]      (refresh) [+ New key] | Connect a client             |
 | Name  Secret     Host Tools Data Limits Used         | Endpoint [ https://host/mcp ]|
@@ -50,7 +53,7 @@ ChDash has no login. Anyone who can open the page can create a key and show any 
 | `manage_from_ui = false` | A read-only note. **New key** and **Delete** are off. |
 | No keys | An empty state with **New key** (when the page can create keys). The side column stays, so the commands to connect are next to it. |
 
-A server that does not have the `/api/mcp/*` routes answers `404` for `/api/mcp/meta`. The page treats this as MCP off.
+A server that does not have the `/api/mcp/*` routes answers `404` for `/api/mcp/meta`. The page treats this as MCP off. The Usage page has its own states (loading, an error with **Try again**, no request): see "The Usage tab".
 
 ## Connect a client
 
@@ -125,13 +128,13 @@ Under the permissions, **Data it reads** answers the question "which databases a
 
 Under it, **Usage** says what the key did (`docs/mcp.md`, "Usage of a key"), read when the details open (`GET /api/mcp/keys/<id>/usage`):
 
-- a **window**: the buttons `24 h`, `7 d`, `30 d`, `90 d` (and `365 d`), as far as `mcp.usage_retention_days` keeps them, `7 d` first. The window that the reader picks stays for the visit of the page, so two keys are compared on the same window. The heading says the dates of the window;
+- a **window**: the buttons `24 h`, `7 d`, `30 d`, `90 d` (and `365 d`), as far as `mcp.usage_retention_days` keeps them, `7 d` first. The window that the reader picks stays for the visit of the page, so two keys are compared on the same window. The heading says the dates of the window, and **Open in Usage** (a link beside them) leads to the Usage tab, cut by this key, in the same window (`/mcp-integration/usage?key=<id>&window=<window>`);
 - six tiles: the tool calls (and the requests), the errors (and their share: in the warning colour, in the danger colour from 5%), the refused requests (and how many by the rate limit), the time of a call (average and longest), the bytes returned (and the rows of the tools that build their SQL), the last use (and the first);
 - the calls of each hour (24 h) or day, with the errors in the danger colour (the shared sparkline), and the busiest hour or day;
 - three compact tables: the **tools** (calls with a bar of their share, errors, average time, bytes returned; the longest call is in the tooltip of the tool), the **results** (`ok`, the error codes, the refusals, with their share) and the **clients** (the name and the version that the client sent in `initialize`, its User-Agent, its requests, when it was first and last seen);
 - when the usage is in memory, a line says since when it is counted (a restart clears it); a key without a request in the window says so.
 
-Then **ClickHouse cost**, closed: what the statements of the key cost ClickHouse, read from `system.query_log` of its host (`GET /api/mcp/keys/<id>/cost`; `docs/mcp.md`, "The ClickHouse cost of a key"). It is read **only when it is opened** (a scan of the log), in the window of the usage (24 h, else 7 d), and kept a minute; **Check again** reads it anew. Six tiles (statements and failed ones, bytes and rows read, CPU, the peak of memory, the time, the bytes and rows returned), then the cost **by tool**, the **tables read** the most, and the cost **by user** (the MCP user, the system user, or another user in the warning colour). When the runner of the host may not read `query_log`, the block says so and shows the `GRANT` to give (a code block with its copy button); a window too large suggests 24 h. A line says that only the statements named for the key count. When `system.top_queries` is off, the block cannot open and says why.
+Then **ClickHouse cost**, closed: what the statements of the key cost ClickHouse, read from `system.query_log` of its host (`GET /api/mcp/keys/<id>/cost`; `docs/mcp.md`, "The ClickHouse cost of a key"). It is read **only when it is opened** (a scan of the log), in the window of the usage (24 h, else 7 d), and kept a minute; **Check again** reads it anew. Six tiles (statements and failed ones, bytes and rows read, CPU, the peak of memory, the time, the bytes and rows returned), then the cost **by tool**, the **tables read** the most (a long table name ends in an ellipsis, and its title has the whole name), and the cost **by user** (the MCP user, the system user, or another user in the warning colour). When the runner of the host may not read `query_log`, the block says so and shows the `GRANT` to give (a code block with its copy button); a window too large suggests 24 h. A line says that only the statements named for the key count. When `system.top_queries` is off, the block cannot open and says why.
 
 Each answer of the usage is kept a minute for its key and window: opening the details again shows it at once. Closing the details stops the reads in flight. Refresh forgets what was kept.
 
@@ -140,6 +143,41 @@ The details only show. **Delete** is the button of the row. On a phone, the deta
 ## Deleted keys
 
 A deleted key keeps its usage until it is older than `mcp.usage_retention_days`. Under the keys, a line **Deleted keys** with their count, and how long their usage stays (in memory: until ChDash restarts), opens on them: one line each, with its name, its host, when it was deleted and its use (as the column Used). The table is built when the line opens. A deleted key opens its details under its line: its host, when it was deleted, then its **Usage** and its **ClickHouse cost**, as for a key. It has no permissions, no data and no Delete. The line is hidden when no deleted key keeps usage. The filter and the count of the keys do not see the deleted keys.
+
+## The Usage tab
+
+**Usage** (`/mcp-integration/usage`, `mcpusage.html`) is the second page of the section. It shows what **all the keys** did, and cuts it by key, by method, by result and by type. The usage of one key stays in the details of that key, which link here (**Open in Usage**). The page is not tied to a host. The server side is `GET /api/mcp/usage/overview` (`docs/mcp.md`).
+
+```
+Keys  [Usage]                                                                        the nav row
+Usage of all keys   Oct 8 00:00 -> Oct 14 10:00                [24 h|7 d|30 d|90 d] (refresh)
+[Key = ops-all x] [Method = run_query x]  Clear filters                              with filters only
+[Requests] [Tool calls] [Errors] [Refused] [Call time] [Returned] [Active keys]
++--------------------------------------------------------------------------------------+
+| Requests by method  by the UTC day                          [Keys|Methods|Results|Type] |
+|   the bars, stacked by method, over the window                                        |
+|   query_table 754   ping 100   list_hosts 75   ...   2 more 4        the legend       |
++--------------------------------------------------------------------------------------+
+| By key                                         | By result                            |
+| By method                                      | Clients                              |
++------------------------------------------------+--------------------------------------+
+the notes
+```
+
+- **The window.** The buttons come from `/api/mcp/meta` (`usage.windows`): `24 h` (by the hour), then `7 d`, `30 d`, `90 d` and `365 d` as far as `mcp.usage_retention_days` keeps them (by the UTC day). The first load uses `usage.default_window` (`7d`). The heading says the dates of the window. A window that starts before the counting started begins at the first start with the file.
+- **The filters.** A filter is a value of a dimension: a key, a method, a result or a type. The values of one dimension match any of them (OR). The dimensions combine (AND). Four things add or remove a filter: a **row** of a table (a click, or Enter or Space on it), an entry of the **legend**, the **x** of a chip, and **Clear filters** (a button beside the list of chips; it shows from two chips). A chip reads `Key = ci-bot` (the name of the key, not its id) or `Type = Tool calls`. A dimension takes 20 values at most. Every figure of the page follows the filters. The server cuts each table with **every filter but its own**, so a filtered table still lists what else the reader can pick. A value that is picked is always in its table (at 0 when nothing matches). The **Clients** table takes the key filter only.
+- **The tiles.** Seven: **Requests** (the tool calls, the requests of the protocol and the refused ones), **Tool calls**, **Errors** (the tool calls that ended with an error code and the requests of the protocol that failed, with their share of the requests that were read: the line says "2.73% of read requests" and the title has the whole sentence), **Refused** (the 429 and the requests that were refused before their message was read, and how many by the rate limit), **Call time** (the average and the longest time of a tool call), **Returned** (the bytes of the answers and the rows of the tools that build their own SQL: an API tool counts no row) and **Active keys** ("3 of 5 keys · 1 deleted": the keys that exist and have a request in this view, out of the keys that exist). A deleted key keeps its usage, so one that had a request in this view is counted apart, as "· N deleted" (the line has no such part when none did), and is in neither figure: "7 of 7 keys" is seven keys that exist. The server counts a deleted key with the others (`totals.active_keys`), so the page counts from the rows of the keys table of the answer, which have every filter but the key filter (the page applies that one): a row with requests, when the key filter is empty or has its id, is a key that exists or, with `deleted_at`, a deleted key. When the server cut that table (`omitted.keys` above 0) the rows cannot be counted, and the tile shows `totals.active_keys`, the deleted keys included, with the line "keys with requests" (no ratio, no "deleted"). Errors and Refused take the warning colour when they are not 0, and Errors the danger colour from 5% of the requests read. The sub line of a tile is one line, and the longest that come ("12.3% of read requests", "12,345 by the rate limit", "of 12 keys · 3 deleted") fit the narrowest tile, 9 rem wide (seven on a line at 1100 px): the title of a tile says the rest. A count shows its digits up to a million ("1,013"). The server counts whole milliseconds, so a time of 0 reads "<1 ms". The tiles and the chart have every filter, so the bars add up to the tiles.
+- **The chart.** The requests over time, as stacked bars, drawn by the shared chart engine: by the hour for 24 h, by the UTC day for the other windows. The switch **Keys | Methods | Results | Type** says what the bars are stacked by (`split`; the default is Methods). **Type** has four values: **Tool calls**, **Protocol** (`initialize`, `tools/list`, `ping`, the notifications...), **Rate limited** (429) and **Rejected** (refused before their message was read: 400, 413, 415). The chart shows the 8 biggest groups and adds up the others as **N more** (grey). When the split dimension has a filter, the groups are the values that are picked. A group keeps its colour: it comes from a hash of its name, not from its rank, so a name has the same colour in every window and under every filter (two groups of one chart never share a colour: the second takes the next free one). The **legend** is the filter of the split dimension. An entry shows the total of its group and is pressed when its value is a filter. A click adds or removes the filter, and the entries that the filter leaves out dim while the page reads. **N more** is not a filter: pick its values in a table. The tooltip names the bucket (the UTC date of a day, the range of an hour), the groups that have requests, and the total. The axis of a chart by the day is labelled by dates ("Oct 9", one line: the option `xDateOnly` of the engine, a tick for each midnight of the browser, one day apart where the days fit, a week or a month apart where they do not) and never by hours, even on a wide screen that has room for a tick every 6 h; the chart by the hour keeps its hours, with the date under the first one and under each midnight. A drag zooms the chart, as on every chart of the engine, and a zoom that is narrower than a day has no label on its axis (a double click resets it).
+- **The tables.** Two columns from 1280 px (the keys over the methods at the left, three fifths of the width, the results over the clients at the right), one under the other below. Each is a compact data table in its box. A table of many rows (the server sends 200 at most) scrolls in its box, which is 24 rem high at most, and its head stays over the rows. A click on a header sorts it (a second click reverses it, and the sort stays for the visit; it is not in the address). A row of By key, By method and By result is a row of the keyboard: Up, Down, Home and End move, Enter or Space picks the value, and the picked row is marked (`is-selected`, `aria-selected`).
+  - **By key.** The key, with a badge **deleted** for a key that was deleted (its usage stays), Requests, Calls (with a bar of its share of the key that has the most), Errors (and their share), 429, Avg time, Returned and Last used (when the key was last used, in any window).
+  - **By method.** The tools in code. The methods of the protocol are muted, with a badge `protocol`. `unread` (a request that was refused before its message was read) has a badge `refused`, and `unread`, `invalid` and `other` say what they stand for in their tooltip. Requests, Errors, Avg time, Max, Returned and Keys.
+  - **By result.** `ok`, the error codes of the tools, `rpc_error_<code>` and the refusals (`429_rate_limited`...), in the warning colour when they are not `ok`. Count (with a bar of its share of all) and Keys.
+  - **Clients.** The name and the version that the client sent in `initialize`, or its User-Agent when it sent none. Keys, Requests, First seen and Last seen. A client is counted since it was first seen, as far as the retention keeps it: the window and every filter but the key do not apply to it.
+  - When the server cut a table (200 rows, or 50 clients), a line under it says "N more methods not shown". A value that is picked is never cut.
+- **The notes.** Under the tables: since when the counting runs ("Counted since ..." when the window starts before it, "Counted in memory since ..., when ClickHouse Dash started: a restart clears it" without `usage_file`), and that an API tool counts no row.
+- **The address.** The whole state is in the address: `?window=7d&split=key&key=ops-all&key=ci-bot&method=run_query&result=ok&type=call`. `key`, `method`, `result` and `type` repeat once for each value. A default stays out of it (the default window, the split by method). A change of the window, of the split or of a filter pushes an entry: Back and Forward walk through the filters. A link to the page says what it shows (the details of a key link to `/mcp-integration/usage?key=<id>&window=<window>`). The page fixes an address that it cannot use when it loads (a window that the retention does not keep, a split that is not one, a value that the server would refuse, more than 20 values of a kind) with a replace, not a push.
+- **Reading.** One read of `GET /api/mcp/usage/overview` when the page opens, and one for each change. A newer read cancels the one in flight. The figures on screen stay, dimmed, until the answer comes. **Refresh** reads again. There is no timer. A page restored from the back/forward cache reads again.
+- **States.** Loading: a spinner and a sentence. An error: its message and **Try again** (the heading, with the window, stays, so the reader can pick another window). A window with no request: the tiles say 0, and the chart says "No request in the last 7 days"; with filters it says "No request has all these filters", with a **Clear filters** button. MCP off: "Turn MCP on", as on the Keys page.
 
 ## The secret dialog
 
@@ -163,7 +201,8 @@ The confirmation names what the action touches: the hosts of the key. After the 
 - Every control is a button, a link or a form field. The dialogs trap the focus and give it back when they close.
 - Each field has a label. Each group (hosts, permissions) has a legend. An error is a live region, and its field has `aria-invalid`. The arrow of a family is a button with `aria-expanded` and `aria-controls`.
 - Row action buttons have a label that names the key ("Delete ci-bot"). The Delete button wears the danger color at rest, so touch users see it too.
-- The page works at 390 px without a horizontal scroll. Code blocks scroll inside themselves.
+- The Usage tab: a row of a table is a row of the keyboard (Up, Down, Home, End, then Enter or Space). A chip has a remove button with a label ("Remove filter Key = ci-bot"), and the keyboard moves on to the next chip when one goes. A legend entry is a button with `aria-pressed`. Every table has a label, a scope on each header and a header on each row. A change says what it found, once, in the live region of the page ("1,012 requests in the last 7 days with these filters.").
+- The page works at 390 px without a horizontal scroll. Code blocks scroll inside themselves. A table of the Usage tab that is wider than its box scrolls in it.
 - The page uses the design tokens only. It follows the dark and light themes.
 - The document does not scroll. The panel scrolls and the header stays.
 
@@ -171,23 +210,33 @@ The confirmation names what the action touches: the hosts of the key. After the 
 
 | File | Role |
 | --- | --- |
-| `src/static/mcp.html` | The shell: `<body data-page="mcp">`, one `h1` (`srOnly`), the panel (`#mcpState`, `#mcpLayout` with `#mcpKeys` and `#mcpSide`). |
-| `src/static/app_page_mcp.js` | The controller: loads the state, draws the containers again, runs create and delete. |
+| `src/static/mcp.html` | The shell of Keys: `<body data-page="mcp">`, one `h1` (`srOnly`), the row of the two pages (`#mcpTabs`), the panel (`#mcpState`, `#mcpLayout` with `#mcpKeys` and `#mcpSide`). |
+| `src/static/mcpusage.html` | The shell of Usage: the same body and row, the panel (`#mcpState`, `#mcpOverview`). |
+| `src/static/app_page_mcp.js` | The controller of Keys: loads the state, draws the containers again, runs create and delete. |
+| `src/static/app_page_mcpusage.js` | The controller of Usage: loads the meta, shows "Turn MCP on" or hands the panel to the view. |
+| `src/static/app_mcp_overview.js` | The Usage tab: the window, the filters (chips, legend, rows), the tiles, the chart, the four tables, the notes, the address. |
 | `src/static/app_mcp_view.js` | The keys part (heading, table), the side column and the states. |
 | `src/static/app_mcp_form.js` | The make-a-key dialog, the details of a key (a node that the table puts in a row) and the secret dialog. |
 | `src/static/app_mcp_usage.js` | The usage of a key and the ClickHouse cost of its statements, the two sections at the end of its details. |
 | `src/static/app_ui_dialog.js` | `dialog.open`, with `validate` (the submit button is off while it answers a reason). |
-| `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `deleteMcpKey`, `getMcpUsageSummary`, `getMcpKeyUsage`, `getMcpKeyCost`. They hold every `/api/mcp/*` shape. |
+| `src/static/app_api.js` | `getMcpMeta`, `getMcpKeys`, `createMcpKey`, `deleteMcpKey`, `getMcpUsageSummary`, `getMcpKeyUsage`, `getMcpUsageOverview`, `getMcpKeyCost`. They hold every `/api/mcp/*` shape. |
 | `src/static/css/10-components/form.css`, `part.css` | The form kit and the part heading that the page shares with other pages. |
-| `src/static/css/20-features/mcp.css` | The styles of this page only (`style.mcp.css` is generated from it). |
-| `tests/frontend/specs/mcp-page.spec.js` | The Playwright spec, with a mocked API. |
+| `src/static/css/20-features/mcp.css` | The styles of the two MCP pages (`style.mcp.css` and `style.mcpusage.css` are generated from it). The nav row is in `shell.css`, shared with System. |
+| `tests/frontend/specs/mcp-page.spec.js` | The Playwright spec of Keys, with a mocked API. |
+| `tests/frontend/specs/mcp-usage.spec.js` | The Playwright spec of Usage. The mocked API (`tests/frontend/helpers/mcp-fake.js`) computes its answers from a list of cells by the rules of the contract. |
+| `tests/frontend/specs/mcp-contract.spec.js` | Compares the answers of the mocked API with those of a real instance, the overview included. |
 
 ## Decisions
 
 - The page has no visible title and no strip. The page switcher names the page, as on System. The endpoint is in the side column, where a client needs it, and New key is in the heading of the keys, where the keys are.
 - A key is one line, and its name column is narrow. A name has 32 characters at most, so the room goes to the side column, which holds the commands of the clients.
 - The secret shows its start only (`3f2a9c1e-••••…`, decided 2026-10-14): the hint tells the keys apart, the whole mask is in the tooltip, and the column Used fits beside the others without a column that leaves at some widths.
-- The use of a key shows in the table and in its details, and there is no view of the usage of every key (decided 2026-10-14): the column says which keys are used and how much, the details say how. The column is one request for every key, for a fixed window (7 days); the details pick their window. The last use comes from the usage of the key: it survives a restart when `mcp.usage_file` is set. A key that the counting does not cover since its creation is a dash, not "Never".
+- The use of a key shows in the table and in its details (decided 2026-10-14): the column says which keys are used and how much, the details say how. The column is one request for every key, for a fixed window (7 days); the details pick their window. The last use comes from the usage of the key: it survives a restart when `mcp.usage_file` is set. A key that the counting does not cover since its creation is a dash, not "Never".
+- The usage of all the keys is a page of its own, **Usage** (decided 2026-10-15). On 2026-10-14 the owner had set a global view aside; the next day he asked for one, on the model of the usage page of Helius: tiles, bars over time that one dimension stacks, filters that are chips, a window. It answers "how is MCP used?": by which keys, which methods, with which results, over time. It is a second page of the section, with a row of two links as System has its sections, because the keys page is full and a chart with four tables needs the room.
+- Every dimension of the Usage tab filters every other (decided 2026-10-15). The questions are crossings ("which method fails for this key?", "which key is refused?"), so the server keeps the cells (type, method, result) of each key for each hour or day, and every filter combines with the others. A table has every filter but its own, so that it lists what else can be picked. The clients are the exception: they stay counted over the life of the keys, with the key filter only, and no new storage keeps them by window.
+- The "methods" are the tools and the methods of the MCP protocol (decided 2026-10-15): a fixed vocabulary, so that a client cannot fill the memory with names (a method that is not in it counts as `other`, one that cannot be read as `invalid`, a request that was refused before its message was read as `unread`).
+- The chart colours a group by a hash of its name, not by its rank. A rank changes with every window and every filter, and a person who follows "ping" from 7 days to 24 hours would lose it. The groups of one chart never share a colour.
+- A legend entry, a row and a chip are three ways to one filter. The chart is the first thing that the reader sees, so its legend has to filter; the tables are where the values are listed (and where the groups that the chart folds into "N more" are found); the chips say what is on, and remove it.
 - The ClickHouse cost of a key is read only when its block is opened: it scans `system.query_log` of the host. The usage, counted by ChDash, is read when the details open.
 - A deleted key keeps its usage, and its line opens on it under the keys, so a key that leaked and was deleted can still be looked at. It is not a row of the keys table: its secret, tools, data and limits mean nothing, and the filter and the count stay about the keys that exist.
 - A key is made or deleted, never changed. An edit form, a switch and a rotation were three more things to build, explain and test for a key that costs one click to make again. To change a key, delete it and make a new one.

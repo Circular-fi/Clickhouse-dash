@@ -24,7 +24,7 @@ ROOT = Path(os.environ.get("TEST_REPOSITORY_ROOT", Path(__file__).resolve().pare
 pytestmark = pytest.mark.skipif(not BASE, reason="EMBEDDED_BASE_URL is not set (the build with the files embedded)")
 
 SESSION = requests.Session()
-SHELLS = ("/", "/explorer/catalog", "/explorer/functions", "/observability/traces", "/observability/logs", "/observability/metrics", "/system", "/mcp-integration")
+SHELLS = ("/", "/explorer/catalog", "/explorer/functions", "/observability/traces", "/observability/logs", "/observability/metrics", "/system", "/mcp-integration", "/mcp-integration/usage")
 
 
 def get(path: str, encoding: str = "identity", **kwargs) -> requests.Response:

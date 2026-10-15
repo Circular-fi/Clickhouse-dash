@@ -3,22 +3,8 @@
    section's filter bar (the Observability one, .obsFilterBar), then the
    section on screen, full-bleed, in its own scroller. Tables use the data table type scale
    (13px), titles sit above their tables, monospace only for identifiers such
-   as hosts, paths, part names and SQL. The workspace, page and panel frame is in shell.css. */
-
-/* The nav row: the tabs' underline sits on the row's border. */
-.systemPage__nav {
-  position: relative;
-  z-index: var(--z-nav);
-  flex: 0 0 auto;
-  display: flex;
-  align-items: stretch;
-  gap: var(--space-8) var(--space-16);
-  min-width: 0;
-  min-height: var(--nav-row-h);
-  padding: 0 var(--gutter);
-  border-bottom: var(--shell-border);
-  background: var(--panel);
-}
+   as hosts, paths, part names and SQL. The workspace, page and panel frame, and the nav row
+   (.systemPage__nav, shared with the MCP pages), are in shell.css. */
 
 .systemPage__panel[hidden] {
   display: none;
@@ -260,16 +246,6 @@
   gap: var(--space-4);
   color: var(--muted);
   font-size: var(--fs-sm);
-}
-
-/* Phones: the tabs fill the row; the filter bar under it folds into its summary line. */
-@media (max-width: 600px) {
-  .systemPage__tabs {
-    flex: 1 1 100%;
-  }
-  .systemPage__tabs .contentTabs__tab {
-    min-height: 40px;
-  }
 }
 
 /* A panel that could not be read: why, and the GRANT to run. */

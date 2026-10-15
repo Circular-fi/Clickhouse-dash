@@ -7,7 +7,7 @@ import { installObservers } from '../helpers/observability.js';
 
 const PAGES = [
   '/', '/explorer/catalog', '/explorer/functions', '/system', '/system/queries', '/system/disks',
-  '/observability/traces', '/observability/logs', '/observability/metrics', '/mcp-integration',
+  '/observability/traces', '/observability/logs', '/observability/metrics', '/mcp-integration', '/mcp-integration/usage',
 ];
 
 async function watchViolations(page) {

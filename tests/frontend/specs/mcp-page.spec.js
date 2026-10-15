@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { horizontalOverflow } from '../helpers/app.js';
 import { fetchedModules } from '../helpers/modules.js';
-import { GROUPS, KEYS, META, SECRET, SECTIONS, TOOLS, T, install, json, key, maskOf, newServer, reachOf, summaryOf } from '../helpers/mcp-fake.js';
+import { GROUPS, KEYS, META, SECRET, SECTIONS, TOOLS, T, costOf, install, json, key, maskOf, newServer, reachOf, summaryOf } from '../helpers/mcp-fake.js';
 
 // The MCP integration page (mcp.html, /mcp-integration, docs/mcp-integration-page.md): the access keys
 // of the MCP server built into ChDash, and how to connect a client. The server side is a small in-memory
@@ -76,13 +76,17 @@ test('the page is a page of its own: shell, modules, one heading, no host picker
   expect(state.page).toBe('mcp');
   expect(state.sheets).toEqual(['style.mcp.css']);
   for (const name of ['app_page_mcp.js', 'app_mcp_view.js', 'app_mcp_form.js', 'app_api.js']) expect(state.scripts, name).toContain(name);
-  for (const name of ['app_explorer.js', 'app_system_view.js', 'app_traces.js', 'app_logs.js', 'app_sql.js', 'app_ui_filterbar.js']) expect(state.scripts, name).not.toContain(name);
+  for (const name of ['app_explorer.js', 'app_system_view.js', 'app_traces.js', 'app_logs.js', 'app_sql.js', 'app_ui_filterbar.js', 'app_mcp_overview.js', 'app_chart_core.js', 'app_page_mcpusage.js']) expect(state.scripts, name).not.toContain(name);
   expect(new Set(state.scripts).size).toBe(state.scripts.length);
   // Not tied to a host: the picker is not on screen, the switcher and the theme are.
   await expect(page.locator('#hostPicker')).toBeHidden();
   await expect(page.locator('#pageSelect')).toBeVisible();
   await expect(page.locator('#themeSelect')).toBeVisible();
   await expect(page.locator('#mcpKeysBody table')).toBeVisible();
+  // The row of the two MCP pages: Keys (this page, the current one) and Usage (mcp-usage.spec.js).
+  await expect(page.locator('#mcpTabs a.contentTabs__tab')).toHaveText(['Keys', 'Usage']);
+  await expect(page.locator('#mcpTabs [aria-current="page"]')).toHaveText('Keys');
+  await expect(page.locator('#mcpTab-usage')).toHaveAttribute('href', '/mcp-integration/usage');
 });
 
 test('the layout wastes no room: the keys beside a wide side column, New key in the heading, no strip', async ({ page }) => {
@@ -90,7 +94,8 @@ test('the layout wastes no room: the keys beside a wide side column, New key in 
   const m = await page.evaluate(() => {
     const box = (selector) => document.querySelector(selector).getBoundingClientRect();
     const h1 = box('h1');
-    const header = box('body > .appHeader');
+    // The row of the two MCP pages (Keys, Usage) is the nav row under the header: the content starts under it.
+    const nav = box('.mcpPage__nav');
     const table = box('#mcpKeysBody table');
     const side = box('#mcpSide');
     const head = box('.mcpKeys__head');
@@ -101,13 +106,13 @@ test('the layout wastes no room: the keys beside a wide side column, New key in 
       bar,
       h1: [h1.width, h1.height],
       gutter,
-      headTop: head.top - header.bottom,
+      headTop: head.top - nav.bottom,
       refreshRight: box('#mcpNewKey').left - box('#mcpRefresh').right,
       tableRight: table.right,
       sideLeft: side.left,
       sideRight: window.innerWidth - side.right,
       sideWidth: side.width,
-      sideTop: side.top - header.bottom,
+      sideTop: side.top - nav.bottom,
       rowHeights: [...document.querySelectorAll('#mcpKeysBody tbody tr')].map((tr) => tr.getBoundingClientRect().height),
       nameWidth: box('#mcpKeysBody th.mcpCell--name').width,
     };
@@ -115,7 +120,7 @@ test('the layout wastes no room: the keys beside a wide side column, New key in 
   // The heading stays for the screen reader; the switcher says where the reader is.
   expect(m.h1[0]).toBeLessThanOrEqual(1);
   expect(m.h1[1]).toBeLessThanOrEqual(1);
-  // No strip and no state container on screen: the keys start at the top of the panel, with New key at the
+  // No strip and no state container on screen: the keys start at the top of the panel (under the row of links), with New key at the
   // right end of their heading (Refresh before it).
   await expect(page.locator('#mcpHead, .mcpStrip, .mcpBadges')).toHaveCount(0);
   await expect(page.locator('#mcpState')).toBeHidden();
@@ -176,6 +181,8 @@ test('the MCP entry is hidden while features.mcp is off, and its page shows how 
   await expect(page.locator('#mcpLayout')).toBeHidden();
   await expect(page.locator('#mcpNewKey')).toHaveCount(0);
   expect(server.calls.map((call) => `${call.method} ${call.path}`)).toEqual(['GET /meta']);
+  // The row of the two pages stays: Usage shows the same state.
+  await expect(page.locator('#mcpTabs a.contentTabs__tab')).toHaveText(['Keys', 'Usage']);
 });
 
 test('the side column: the endpoint with a copy button, connect tabs, hosts with their health, limits', async ({ page }) => {
@@ -1658,6 +1665,55 @@ test('the ClickHouse cost of a key is read only when it is opened, and says why 
   await expect(other.locator('.mcpCode__pre')).toHaveText('GRANT SELECT ON system.query_log TO chdash_runner');
 });
 
+test('the usage of a key leads to the Usage tab, cut by the key, in the window that is picked', async ({ page }) => {
+  const server = await open(page);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const usage = details(page).locator('.mcpUsage');
+  const link = usage.getByRole('link', { name: 'Open in Usage' });
+  await expect(link).toHaveAttribute('href', '/mcp-integration/usage?key=ui_0a1b2c3d4e5f&window=7d');
+  await expect(link).toHaveAttribute('title', /Usage tab/);
+  // The link follows the window of the usage (the key's id, never its name).
+  await usage.getByRole('button', { name: '24 h' }).click();
+  await expect(link).toHaveAttribute('href', '/mcp-integration/usage?key=ui_0a1b2c3d4e5f&window=24h');
+  // It is a link: the Usage tab opens with the key as a filter, in that window.
+  await link.click();
+  await expect(page).toHaveURL(/\/mcp-integration\/usage\?key=ui_0a1b2c3d4e5f&window=24h$/);
+  await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
+  await expect(page.locator('.mcpOverview__windows [aria-pressed="true"]')).toHaveText('24 h');
+  await expect(page.locator('.mcpOverview__chips .chip')).toHaveText('Key=ci-bot');
+  expect(callsTo(server, '/usage/overview')).toEqual(['?window=24h&split=method&key=ui_0a1b2c3d4e5f']);
+});
+
+test('a long name in the tables read ends in an ellipsis in its column, with the whole name in its title', async ({ page }) => {
+  const long = 'chdash_ui.weather_observations_of_every_station_in_the_world_since_1900';
+  const server = newServer();
+  server.cost = (srv, id, window, refresh) => {
+    const answer = costOf(srv, id, window, refresh);
+    if (answer?.tables?.length) answer.tables[0].name = long;
+    return answer;
+  };
+  await open(page, server);
+  await row(page, 'ci-bot').locator('[data-action="open"]').click();
+  const cost = details(page).locator('.mcpCost');
+  await cost.getByRole('button', { name: 'ClickHouse cost' }).click();
+  const read = cost.locator('.mcpUsage__block', { hasText: 'Tables read' });
+  const name = read.locator('tbody tr').first().locator('code');
+  await expect(name).toHaveText(long);
+  await expect(name).toHaveAttribute('title', long);
+  // The table is as wide as its box (nothing scrolls in the box, nor in the page); the name is cut with an ellipsis.
+  const m = await read.evaluate((el) => {
+    const wrap = el.querySelector('.dataTableWrap');
+    const cell = el.querySelector('tbody tr td');
+    return { wrap: wrap.scrollWidth - wrap.clientWidth, cell: cell.scrollWidth - cell.clientWidth, overflow: getComputedStyle(cell).textOverflow };
+  });
+  expect(m.wrap).toBeLessThanOrEqual(0);
+  expect(m.cell).toBeGreaterThan(0);
+  expect(m.overflow).toBe('ellipsis');
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+  // The count of statements keeps its column.
+  await expect(read.locator('tbody tr').first().locator('.shareBar__text')).toHaveText('8');
+});
+
 test('a deleted key keeps its usage: a line under the keys opens on it, and its details show what it did and cost', async ({ page }) => {
   const server = await open(page);
   const block = page.locator('.mcpDeleted');
@@ -1676,6 +1732,7 @@ test('a deleted key keeps its usage: a line under the keys opens on it, and its 
   await line.locator('[data-action="open"]').click();
   const detail = block.locator('.mcpDetailRow');
   await expect(detail.locator('.mcpUsage .statTile')).toHaveCount(6);
+  await expect(detail.getByRole('link', { name: 'Open in Usage' })).toHaveAttribute('href', '/mcp-integration/usage?key=ui_dead00000001&window=7d');
   await expect(detail.locator('.mcpAbout')).toContainText('Deleted');
   await expect(detail.locator('.mcpDetails__perms')).toHaveCount(0);
   expect(callsTo(server, '/keys/ui_dead00000001/usage')).toEqual(['?window=7d']);

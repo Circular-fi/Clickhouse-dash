@@ -70,6 +70,7 @@ page_specs() {
     metrics) echo metrics-browser observability ;;
     system|queries|disks|shape) echo system ;;
     mcp) echo mcp-page ;;
+    mcpusage) echo mcp-usage ;;
   esac
 }
 
@@ -83,6 +84,9 @@ specs_for() {
     tests/frontend/playwright.config.js|tests/frontend/package.json|tests/Dockerfile.tests) echo ALL ;;
     # The pages without a spec family of their own in the table below, and the WebAssembly kernels with their JavaScript
     # references: the kernel specs compare each one with its reference on the page.
+    src/static/app_mcp_overview.js|src/static/mcpusage.html|src/static/app_page_mcpusage.js) echo mcp-usage ;;
+    # The states of the MCP pages (app_mcp_view.js) and their styles (mcp.css) are shared by the two of them, Keys and Usage.
+    src/static/app_mcp_view.js|src/static/css/20-features/mcp.css) echo mcp-page mcp-usage ;;
     src/static/app_mcp_*.js|src/static/mcp.html|src/static/app_page_mcp.js) echo mcp-page ;;
     src/static/app_page_trace.js|src/static/trace.html|src/static/app_trace_detail.js) echo trace-page trace-waterfall trace-views ;;
     src/static/app_page_shape.js|src/static/shape.html) echo system page-chrome ;;

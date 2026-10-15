@@ -1,11 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { fetchedModules } from '../helpers/modules.js';
+import { install, newServer } from '../helpers/mcp-fake.js';
 
 // Every view of Observability, System and the Explorer is an HTML page of its own: its own shell,
 // its own modules, its own stylesheet, one entry module. Each opens without a script error, names
 // itself (body data-page, the loader's page entry), loads only the modules of its view, and links
-// to its siblings, itself marked as the current page.
+// to its siblings, itself marked as the current page. The two MCP pages (Keys and Usage) are pages of
+// their own too: they need a server with MCP on, so they run against the in-memory server of
+// helpers/mcp-fake.js (`mcp: true`), which answers the shells and /api/mcp/* on any instance.
 
 const PAGES = [
   { path: '/observability/traces', name: 'traces', body: 'observability', row: '#obsTabs', current: '#obsTab-traces', controller: 'app_page_traces.js', own: ['app_obs_page.js', 'app_traces.js'], never: ['app_logs.js', 'app_metrics.js', 'app_system_view.js', 'app_explorer.js'] },
@@ -16,11 +19,14 @@ const PAGES = [
   { path: '/system/disks', name: 'disks', body: 'system', row: '#systemTabs', current: '#systemTab-disks', controller: 'app_page_disks.js', own: ['app_system.js', 'app_system_disks.js'], never: ['app_system_overview.js', 'app_system_queries.js', 'app_system_perf.js', 'app_explorer.js'] },
   { path: '/explorer/catalog', name: 'explorer', body: 'explorer', row: '#explorerViewTabs', current: '#explorerCatalogTab', controller: 'app_page_explorer.js', own: ['app_explorer.js', 'app_explorer_graph.js', 'app_explorer_detail.js'], never: ['app_system_view.js', 'app_traces.js'] },
   { path: '/explorer/functions', name: 'functions', body: 'explorer', row: '#explorerViewTabs', current: '#explorerFunctionsTab', controller: 'app_page_functions.js', own: ['app_explorer_functions_page.js', 'app_explorer_functions.js'], never: ['app_explorer.js', 'app_explorer_tree.js', 'app_explorer_database.js', 'app_explorer_data.js', 'app_explorer_table.js', 'app_explorer_graph.js', 'app_explorer_detail.js', 'app_explorer_storage.js', 'app_explorer_treemap.js', 'app_system_view.js', 'app_traces.js'] },
+  { path: '/mcp-integration', name: 'mcp', body: 'mcp', mcp: true, row: '#mcpTabs', current: '#mcpTab-keys', controller: 'app_page_mcp.js', own: ['app_mcp_view.js', 'app_mcp_form.js', 'app_mcp_usage.js'], never: ['app_mcp_overview.js', 'app_chart_core.js', 'app_page_mcpusage.js', 'app_system_view.js', 'app_traces.js', 'app_explorer.js'] },
+  { path: '/mcp-integration/usage', name: 'mcpusage', body: 'mcp', mcp: true, row: '#mcpTabs', current: '#mcpTab-usage', controller: 'app_page_mcpusage.js', own: ['app_mcp_overview.js', 'app_mcp_view.js', 'app_chart_core.js'], never: ['app_mcp_form.js', 'app_mcp_usage.js', 'app_page_mcp.js', 'app_system_view.js', 'app_traces.js', 'app_explorer.js'] },
 ];
 
 for (const spec of PAGES) {
   test(`${spec.path} is a page of its own: ${spec.name}`, async ({ page }) => {
     const observers = installObservers(page);
+    if (spec.mcp) await install(page, newServer());
     await page.goto(spec.path);
     await page.waitForFunction(() => !!(window.ChDash?.features && window.ChDash?.api && window.ChDash?.header));
     await expect(page.locator('body')).toHaveAttribute('data-page', spec.body);
@@ -53,6 +59,7 @@ for (const spec of PAGES) {
 }
 
 test('the links of a row open the sibling pages', async ({ page }) => {
+  await install(page, newServer());
   for (const [from, link, to] of [
     ['/observability/traces', '#obsTab-logs', '/observability/logs'],
     ['/observability/logs', '#obsTab-metrics', '/observability/metrics'],
@@ -61,6 +68,8 @@ test('the links of a row open the sibling pages', async ({ page }) => {
     ['/system/queries', '#systemTab-overview', '/system'],
     ['/explorer/catalog', '#explorerFunctionsTab', '/explorer/functions'],
     ['/explorer/functions', '#explorerCatalogTab', '/explorer/catalog'],
+    ['/mcp-integration', '#mcpTab-usage', '/mcp-integration/usage'],
+    ['/mcp-integration/usage', '#mcpTab-keys', '/mcp-integration'],
   ]) {
     await page.goto(from);
     await page.locator(link).click();

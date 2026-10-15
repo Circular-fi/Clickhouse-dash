@@ -1,4 +1,4 @@
-"""The generated parts of the page shells (query.html, explorer.html, functions.html, traces.html, logs.html, metrics.html, trace.html, system.html, queries.html, disks.html, shape.html, mcp.html).
+"""The generated parts of the page shells (query.html, explorer.html, functions.html, traces.html, logs.html, metrics.html, trace.html, system.html, queries.html, disks.html, shape.html, mcp.html, mcpusage.html).
 
 Two regions of every shell are written from one source, so the shells cannot drift:
 

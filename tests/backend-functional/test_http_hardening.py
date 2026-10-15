@@ -60,7 +60,7 @@ def test_every_answer_carries_the_security_headers():
 
 
 def test_a_page_runs_only_the_inline_scripts_of_its_shell():
-    for path in ("/", "/query", "/explorer/catalog", "/system", "/mcp-integration"):
+    for path in ("/", "/query", "/explorer/catalog", "/system", "/mcp-integration", "/mcp-integration/usage"):
         response = get(path)
         assert response.status_code == 200, path
         policy = response.headers["Content-Security-Policy"]

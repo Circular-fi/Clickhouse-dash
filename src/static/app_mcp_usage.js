@@ -4,6 +4,7 @@
 //   ns.mcpUsage.sections(key, { meta })   [usage, cost]: two sections, the second one closed
 //       Usage: what the key did in a window (24 h, 7 d, ... as the retention keeps them): tiles, the calls of each hour or day with
 //       the errors, the tools, the results and the clients. The window that the reader picks stays for the visit of the page.
+//       "Open in Usage" leads to the Usage tab (app_mcp_overview.js), filtered by this key, in the same window.
 //       ClickHouse cost: what the statements of the key cost, read from system.query_log of its host when the section is opened (a
 //       scan of the log: never before it is asked), in the window of the usage (24 h, else 7 d).
 //   ns.mcpUsage.forget()                  the next read asks the server again (the Refresh button of the page)
@@ -57,12 +58,12 @@ function share(value, of, text = count(value)) {
   return el;
 }
 
-// A compact table: columns [title, numeric], rows of cells (text or nodes).
-function compactTable(label, columns, rows) {
+// A compact table: columns [title, numeric], rows of cells (text or nodes); `className` is added to the table.
+function compactTable(label, columns, rows, className = "") {
   const head = h("tr", null, columns.map(([title, numeric]) => h("th", { scope: "col", class: numeric ? "num" : null }, title)));
   const body = h("tbody", null, rows.map((cells) => h("tr", null, cells.map((cell, index) => h("td", { class: columns[index][1] ? "num" : null }, cell)))));
   return h("div", { class: "dataTableWrap mcpUsage__tableWrap" },
-    h("table", { class: "dataTable dataTable--compact mcpUsage__table", "aria-label": label }, h("thead", null, head), body));
+    h("table", { class: `dataTable dataTable--compact mcpUsage__table${className ? ` ${className}` : ""}`, "aria-label": label }, h("thead", null, head), body));
 }
 
 // --- Usage -------------------------------------------------------------------------------
@@ -138,9 +139,13 @@ function usageSection(key, meta, onWindow) {
   const range = h("span", { class: "mcpMuted mcpUsage__range" });
   const picker = h("div", { class: "mcpUsage__windows" });
   segmented.render(picker, windows.map((value) => ({ value, label: WINDOW_LABEL[value] || value })), { attr: "window", value: chosenWindow, size: "compact", label: "Window" });
+  // The Usage tab, filtered by this key, in the window that is picked here.
+  const open = h("a", { class: "mcpUsage__open", title: "The usage of this key in the Usage tab, where it can be cut by method, result and type" }, "Open in Usage");
+  const link = () => { open.href = `${api.resolveUrl("mcp-integration/usage")}?${new URLSearchParams({ key: key.id, window: chosenWindow }).toString()}`; };
+  link();
   const body = h("div", { class: "mcpUsage__body" });
   const section = h("section", { class: "mcpUsage", dataset: { usage: key.id }, "aria-label": `What ${key.name} did` },
-    h("h3", { class: "mcpDetails__title mcpUsage__head" }, "Usage", range, picker), body);
+    h("h3", { class: "mcpDetails__title mcpUsage__head" }, "Usage", range, open, picker), body);
   const slot = `${USAGE_SLOT}${key.id}`;
   const show = (usage) => {
     const from = usage.since != null && usage.from != null ? Math.max(usage.from, usage.since) : usage.from;
@@ -170,6 +175,7 @@ function usageSection(key, meta, onWindow) {
   };
   segmented.bind(picker, { attr: "window", onChange: (value) => {
     chosenWindow = value;
+    link();
     void load(true);
     onWindow?.();
   } });
@@ -223,8 +229,9 @@ function costBody(cost) {
     // The tables beside the tools (two narrow columns), the users under them.
     if (cost.tables.length) {
       const most = cost.tables[0].statements;
+      // A long name (analytics.page_views_by_country_and_day) ends in an ellipsis, and its title says all of it.
       tables.appendChild(block("Tables read", compactTable("The tables that the statements read the most", [["Table"], ["Statements", true]],
-        cost.tables.map((item) => [h("code", null, item.name), share(item.statements, most)])),
+        cost.tables.map((item) => [h("code", { title: item.name }, item.name), share(item.statements, most)]), "mcpCost__tablesRead"),
         cost.tablesTruncated ? note("The 10 tables read the most.", true) : null));
     }
     if (cost.identities.length) {

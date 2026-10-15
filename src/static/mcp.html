@@ -182,14 +182,32 @@
   </header>
   <!-- /shell:header -->
 
-  <!-- The MCP integration page (app_page_mcp.js, app_mcp_view.js, app_mcp_form.js): one scrolling
-       panel. The keys, with New key and Refresh in their heading, beside a side column (how to connect
-       a client, with the endpoint, the hosts, the global limits). Not tied to a host: the host picker is
-       hidden (mcp.css). #mcpState holds the loading, error and "MCP is off" states; the scripts draw the
-       other containers below. -->
+  <!-- The MCP integration page (app_page_mcp.js, app_mcp_view.js, app_mcp_form.js): the row of the two
+       MCP pages (Keys, Usage: mcpusage.html), then one scrolling panel. The keys, with New key and
+       Refresh in their heading, beside a side column (how to connect a client, with the endpoint, the
+       hosts, the global limits). Not tied to a host: the host picker is hidden (mcp.css). #mcpState
+       holds the loading, error and "MCP is off" states; the scripts draw the other containers below. -->
   <main id="mcpWorkspace" class="mcpWorkspace" role="main">
     <h1 class="srOnly">MCP integration</h1>
     <section id="mcpPage" class="mcpPage" aria-label="MCP integration">
+      <nav class="mcpPage__nav" aria-label="MCP sections">
+        <div id="mcpTabs" class="contentTabs contentTabs--nav mcpPage__tabs" role="group" aria-label="MCP sections">
+          <a class="contentTabs__tab is-active" aria-current="page" id="mcpTab-keys" data-section="keys" href="/mcp-integration">Keys</a>
+          <a class="contentTabs__tab" id="mcpTab-usage" data-section="usage" href="/mcp-integration/usage">Usage</a>
+        </div>
+      </nav>
+      <script>
+        (function () {
+          try {
+            // The row's links under the page's base path (a reverse-proxy prefix).
+            var tabs = document.querySelectorAll("#mcpTabs [data-section]");
+            for (var i = 0; i < tabs.length; i += 1) {
+              var name = tabs[i].getAttribute("data-section");
+              if (window.__chdashUrl) tabs[i].setAttribute("href", window.__chdashUrl(name === "keys" ? "mcp-integration" : "mcp-integration/usage"));
+            }
+          } catch (_) {}
+        })();
+      </script>
       <div id="mcpPanel" class="mcpPage__panel">
         <div id="mcpState" class="mcpState"></div>
         <div id="mcpLayout" class="mcpLayout" hidden>

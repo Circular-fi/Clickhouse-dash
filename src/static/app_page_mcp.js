@@ -2,6 +2,8 @@
 // of the MCP server that is built into ChDash and the access keys of its clients. It is a page of
 // its own and not tied to a host: the header block and the keys table come from /api/mcp/meta and
 // /api/mcp/keys (ns.api, app_api.js), the key form and the one-time secret from app_mcp_form.js.
+// It is the first of the two MCP pages: the row of links under the header (Keys, Usage) is static
+// in the shell, and Usage is a page of its own (mcpusage.html, app_page_mcpusage.js).
 //
 // This controller starts the page's modules (ns.loader), the header (ns.header.init: page switcher,
 // theme), loads the two answers and runs the actions of a key: create and delete (a key is never
@@ -13,7 +15,7 @@
 import "./app_common.js";
 import { api } from "./app_api.js";
 import { boot } from "./app_boot.js";
-import { dom } from "./app_dom.js";
+import { dom, shell } from "./app_dom.js";
 import { header } from "./app_header.js";
 import { mcpForm } from "./app_mcp_form.js";
 import { mcpView } from "./app_mcp_view.js";
@@ -273,6 +275,7 @@ async function deleteKey(key) {
 async function start() {
   header.setPageSelectorValue("mcp");
   header.init();
+  shell.edgeCues(dom.byId("mcpTabs"));
   // A page restored from the back/forward cache is as old as the visit: it reads again.
   window.addEventListener("pageshow", (event) => { if (event.persisted) void reload(); });
   await load();

@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STATIC = ROOT / "src" / "static"
-SHELL_PAGES = ("query", "explorer", "traces", "logs", "metrics", "trace", "system", "shape", "mcp")
+SHELL_PAGES = ("query", "explorer", "traces", "logs", "metrics", "trace", "system", "shape", "mcp", "mcpusage")
 
 
 def tools_module(name: str):
@@ -181,7 +181,7 @@ def test_icon_only_buttons_in_the_shells_have_a_label_and_a_title():
         # The System shell ships its header only (its sections draw their controls); the
         # trace shell its header and the back arrow of the trace; Logs and Metrics their header
         # and a few controls of their own.
-        assert len(icon_only) >= (3 if page in ("system", "trace", "shape", "mcp", "logs", "metrics") else 6), page
+        assert len(icon_only) >= (3 if page in ("system", "trace", "shape", "mcp", "mcpusage", "logs", "metrics") else 6), page
         for button in icon_only:
             attrs = button["attrs"]
             assert attrs.get("aria-label") and attrs.get("title"), (page, attrs)

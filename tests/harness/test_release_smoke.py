@@ -77,7 +77,7 @@ FAKE_SERVER = textwrap.dedent('''\
                 return self.send(200, module, "application/wasm", headers)
             if path == "/api/mcp/meta":
                 return self.send(200, b'{{"enabled":true,"endpoint_path":"/mcp"}}', "application/json")
-            if path in ("/", "/mcp-integration", "/query", "/observability/traces", "/observability/logs", "/observability/metrics",
+            if path in ("/", "/mcp-integration", "/mcp-integration/usage", "/query", "/observability/traces", "/observability/logs", "/observability/metrics",
                         "/explorer/catalog", "/explorer/functions", "/system", "/system/queries", "/system/disks") \\
                     or path.startswith("/observability/traces/"):
                 return self.send(200, PAGE)

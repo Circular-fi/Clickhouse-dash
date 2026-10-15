@@ -385,7 +385,7 @@ const isAtMost = (name) => {
 // both of which wrap on narrow windows) as --shell-top on the root element,
 // in px: drawers and bottom sheets start under it rather than under a
 // literal offset that a wrapped header outgrows.
-const SHELL_ROWS = ["body > .appHeader", "#obsNav", "#explorerTopBar", ".systemPage__nav"];
+const SHELL_ROWS = ["body > .appHeader", "#obsNav", "#explorerTopBar", ".systemPage__nav", ".mcpPage__nav"];
 let shellTopTracked = false;
 function trackShellTop() {
   if (shellTopTracked) return;

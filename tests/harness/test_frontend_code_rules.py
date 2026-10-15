@@ -58,7 +58,7 @@ def test_a_page_does_not_load_the_modules_of_another_family():
     # Why: one page per view (modules.json): a page ships and runs only the modules of its own family.
     families = {
         "system": {"system", "queries", "disks", "shape"},
-        "mcp": {"mcp"},
+        "mcp": {"mcp", "mcpusage"},
         "logs": {"logs"},
         "metrics": {"metrics"},
         "traces": {"traces", "trace"},

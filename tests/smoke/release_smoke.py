@@ -60,6 +60,7 @@ PROBES = [
     ("/system/queries", 200, {"type": HTML}),
     ("/system/disks", 200, {"type": HTML}),
     ("/mcp-integration", 200, {"type": HTML}),
+    ("/mcp-integration/usage", 200, {"type": HTML}),
     ("/api/mcp/meta", 200, {"type": "application/json", "json": ["enabled", "endpoint_path"]}),
     ("/system/zzz", 302, {"location": "../system?redirected_from=%2Fsystem%2Fzzz"}),
     ("/static/does-not-exist.js", 404, {}),

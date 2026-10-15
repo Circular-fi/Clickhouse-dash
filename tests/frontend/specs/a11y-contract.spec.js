@@ -283,6 +283,53 @@ test('axe (dark): the MCP page has no violation', async ({ page }) => {
   expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
 });
 
+// The Usage tab of the MCP pages has a chart with its legend, filter chips and four tables. Usage is made first on the instance, with the
+// key of the config file that reads everything (an initialize that names a client, tools/list, a tool call, a method that nobody knows and a
+// notification), so that every part has something to show. Both themes: the muted hints and the warning colours are on the tab.
+const MCP_ALL_DATA_KEY = 'a11da7a0-0000-4000-8000-000000000001';
+
+async function makeMcpUsage(request, base) {
+  const post = (data) => request.post(`${base}/mcp`, {
+    headers: { Authorization: `Bearer ${MCP_ALL_DATA_KEY}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, data,
+  });
+  await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'a11y-contract', version: '1.0' } } });
+  await post({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+  await post({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_hosts', arguments: {} } });
+  await post({ jsonrpc: '2.0', id: 4, method: 'nothing/known' });
+  await post({ jsonrpc: '2.0', method: 'notifications/initialized' });
+}
+
+for (const theme of THEMES) {
+  test(`axe (${theme}): the MCP Usage tab has no violation, with its legend, its chips and its tables`, async ({ page, request }) => {
+    const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
+    requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
+    await makeMcpUsage(request, base);
+    await useTheme(page, theme);
+    await page.goto(`${base}/mcp-integration/usage`);
+    await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7, { timeout: 20_000 });
+    await expect(page.locator('.mcpOverview__chart .chartCore__legendItem').first()).toBeVisible();
+    await page.waitForTimeout(1500);
+    const violations = async () => (await new AxeBuilder({ page }).analyze()).violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
+    expect(await violations()).toEqual([]);
+    // A legend entry and a row of a table are filters: the chips, the pressed entry and the marked row have no violation either.
+    await page.locator('.mcpOverview__chart .chartCore__legendItem[aria-pressed="false"]').first().click();
+    await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(1);
+    await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
+    await page.locator('tr[data-dimension="result"]').first().click();
+    await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(2);
+    await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
+    await page.waitForTimeout(600);
+    expect(await violations()).toEqual([]);
+    // The window and the split are switches: pressed states and the empty chart of a window that has nothing.
+    await page.locator('.mcpOverview__split').getByRole('button', { name: 'Results' }).click();
+    await expect(page.locator('.mcpOverview__card .chartCard__title')).toHaveText('Requests by result');
+    await page.locator('.mcpOverview__windows').getByRole('button', { name: '24 h' }).click();
+    await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
+    await page.waitForTimeout(600);
+    expect(await violations()).toEqual([]);
+  });
+}
+
 // --- landmarks, headings, skip link ----------------------------------------------------------------------------
 
 const SHELLS = {

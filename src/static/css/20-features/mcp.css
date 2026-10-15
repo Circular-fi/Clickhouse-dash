@@ -1274,3 +1274,207 @@ body[data-page="mcp"] #mcpPanel {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* "Open in Usage", in the head of the Usage of a key: a link to the Usage tab, filtered by the key. */
+.mcpUsage__open {
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-regular);
+  text-decoration: none;
+}
+
+.mcpUsage__open:hover {
+  text-decoration: underline;
+}
+
+/* The tables read by the statements of a key: a long name (analytics.page_views_by_country_and_day) ends in an ellipsis in its column, and its title
+   says all of it. The table is as wide as its box; the column of the counts keeps its width. */
+.mcpUsage__table.mcpCost__tablesRead {
+  table-layout: fixed;
+}
+
+.mcpCost__tablesRead th.num {
+  width: 8.5rem;
+}
+
+/* The Usage tab (mcpusage.html, app_mcp_overview.js, docs/mcp-integration-page.md, "The Usage tab"): the head with the window, the filter chips,
+   the tiles, the chart that one dimension stacks, the four tables, the notes. The part heading, the chips, the tiles, the chart card and the
+   tables are the shared components: this is what the tab alone has. */
+.mcpOverview__part {
+  gap: var(--space-12);
+}
+
+.mcpOverview__range {
+  font-size: var(--fs-sm);
+}
+
+.mcpOverview__windows {
+  margin-left: auto;
+}
+
+/* The chips, and "Clear filters" after them: the list of chips wraps in its own box, the button keeps its place at its right. */
+.mcpOverview__filters {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6) var(--space-8);
+  min-width: 0;
+}
+
+.mcpOverview__filters[hidden] {
+  display: none;
+}
+
+.mcpOverview__filters > .chips__clear {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-height: 22px;
+}
+
+.mcpOverview__filters > .chips__clear[hidden] {
+  display: none;
+}
+
+/* A value of a dimension as a chip: "Method = run_query". A long value ends in an ellipsis. */
+.chip.mcpOverview__chip {
+  max-width: 28rem;
+}
+
+.mcpOverview__body {
+  min-width: 0;
+}
+
+/* The figures on screen while a newer read runs. */
+.mcpOverview__body.is-loading {
+  opacity: 0.55;
+  transition: opacity var(--dur-quick) var(--ease);
+}
+
+.mcpOverview__content {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+/* Seven tiles share the line from 1100 px, then two or three to a line, as wide as the line lets them be. */
+.mcpOverview__tiles {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+/* The tooltip of the chart may float past the plot, over the tables below. */
+.mcpOverview__card .mcpOverview__chart {
+  z-index: var(--z-sticky);
+  min-height: 13rem;
+}
+
+.mcpOverview__chart > .uiState {
+  min-height: 10rem;
+}
+
+/* The Keys | Methods | Results | Type switch sits at the right end of the head of the chart. */
+.mcpOverview__split {
+  display: inline-flex;
+}
+
+/* The four tables: two columns on a wide window (the wide tables, keys and methods, take three fifths; the results and the clients two
+   fifths, each column as tall as its tables), one under the other below it. */
+.mcpOverview__tables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-16);
+}
+
+.mcpOverview__col {
+  display: grid;
+  align-content: start;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+@media (min-width: 1280px) {
+  .mcpOverview__tables {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+.mcpOverview__block {
+  display: grid;
+  align-content: start;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.mcpOverview__blockHead {
+  min-height: 0;
+}
+
+.mcpOverview__blockTitle {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: 1.3;
+}
+
+.mcpOverview__hint {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+}
+
+.mcpOverview__table {
+  width: 100%;
+}
+
+/* A table can list 200 rows: its box has a height of its own (the rows scroll under the head), so the page stays short and the other tables
+   stay in reach. */
+.mcpOverview__wrap {
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+/* The first column holds the name of a key, of a method or of a client: it takes what the figures leave and ends in an ellipsis. */
+.mcpOverview__table > tbody > tr > th {
+  max-width: 14rem;
+  font-weight: var(--fw-regular);
+}
+
+.mcpOverview__row.is-pickable {
+  cursor: pointer;
+}
+
+.mcpOverview__name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.mcpOverview__method {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcpOverview__agent {
+  display: inline-block;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.mcpOverview__share {
+  display: block;
+  min-width: 6rem;
+}
+
+.mcpOverview__none {
+  padding: var(--space-12);
+}
+
+.mcpOverview__notes {
+  display: grid;
+  gap: var(--space-4);
+}

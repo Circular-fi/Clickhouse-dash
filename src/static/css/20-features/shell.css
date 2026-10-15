@@ -210,6 +210,34 @@ html[data-theme-mode="light"] .themeSelect__current > .themeIcon--light {
   padding: var(--gutter) var(--gutter) calc(var(--gutter) * 2);
 }
 
+/* The nav row of such a page (the System sections, the MCP pages Keys and Usage): the underline of its tabs sits on the row's border. */
+.systemPage__nav,
+.mcpPage__nav {
+  position: relative;
+  z-index: var(--z-nav);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-8) var(--space-16);
+  min-width: 0;
+  min-height: var(--nav-row-h);
+  padding: 0 var(--gutter);
+  border-bottom: var(--shell-border);
+  background: var(--panel);
+}
+
+/* Phones: the tabs fill the row. */
+@media (max-width: 600px) {
+  .systemPage__tabs,
+  .mcpPage__tabs {
+    flex: 1 1 100%;
+  }
+  .systemPage__tabs .contentTabs__tab,
+  .mcpPage__tabs .contentTabs__tab {
+    min-height: 40px;
+  }
+}
+
 /* Explorer text is set in --font-sans; only SQL and identifiers use --font-mono. */
 .explorerWorkspace {
   font-family: var(--font-sans);

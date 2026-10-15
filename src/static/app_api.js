@@ -564,6 +564,8 @@ async function getMetricsAttributes(params, { signal } = {}) {
 //   getMcpAccessSummary({refresh})  for each key, how many databases and tables it reaches (a Map by key id)
 //   getMcpUsageSummary({window})  what each key did in a window: { keys: Map by key id, deleted: [the deleted keys that keep usage] }
 //   getMcpKeyUsage(id, {window})  what one key did: totals, one point for each hour or day, tools, results, clients
+//   getMcpUsageOverview({window, split, filters})  what every key did, cut by key, method, result and type (the Usage tab): totals,
+//                                 a stacked series by `split`, one table for each of the four, the clients
 //   getMcpKeyCost(id, {window, refresh})  what the statements of a key cost ClickHouse (read from system.query_log)
 //   deleteMcpKey(id)              id
 // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
@@ -905,6 +907,107 @@ async function getMcpKeyUsage(id, { window = "", signal } = {}) {
   };
 }
 
+// The four dimensions that the Usage tab splits and filters by, in the order of its filter parameters.
+const MCP_USAGE_DIMENSIONS = ["key", "method", "result", "type"];
+
+// What every key did in a window (GET /api/mcp/usage/overview), cut by `filters` ({ key, method, result, type }: lists of values, any of
+// the values of one dimension and all the dimensions together; each a repeated parameter). The totals and the series have every filter;
+// each table of a dimension has all but its own, so a filter shows its alternatives. `series.groups` are the biggest groups of `split`
+// (`rest` is what the others add up to); `series.t` has one time for each hour or day. The clients take the key filter only.
+async function getMcpUsageOverview({ window = "", split = "", filters = {}, signal } = {}) {
+  const params = new URLSearchParams();
+  if (window) params.set("window", window);
+  if (split) params.set("split", split);
+  for (const dimension of MCP_USAGE_DIMENSIONS) for (const value of mcpList(filters?.[dimension])) params.append(dimension, value);
+  const query = params.toString();
+  const payload = await mcpRequest(`/usage/overview${query ? `?${query}` : ""}`, { signal });
+  const list = (value) => (Array.isArray(value) ? value : []);
+  const totals = payload?.totals && typeof payload.totals === "object" ? payload.totals : {};
+  const series = payload?.series && typeof payload.series === "object" ? payload.series : {};
+  // One value for each time (a time that does not read is left out with its values), whatever the answer holds.
+  const sentTimes = list(series.t).map(mcpTime);
+  const kept = sentTimes.map((t, i) => (t == null ? -1 : i)).filter((i) => i >= 0);
+  const times = kept.map((i) => sentTimes[i]);
+  const values = (raw) => {
+    const sent = list(raw);
+    return kept.map((i) => mcpCount(sent[i]));
+  };
+  const rest = series.rest && typeof series.rest === "object" ? series.rest : {};
+  const omitted = payload?.omitted && typeof payload.omitted === "object" ? payload.omitted : {};
+  const sent = payload?.filters && typeof payload.filters === "object" ? payload.filters : {};
+  return {
+    ...mcpUsageWindow(payload),
+    split: mcpText(payload?.split),
+    filters: Object.fromEntries(MCP_USAGE_DIMENSIONS.map((dimension) => [dimension, mcpList(sent[dimension])])),
+    totals: {
+      requests: mcpCount(totals.requests),
+      calls: mcpCount(totals.calls),
+      errors: mcpCount(totals.errors),
+      rateLimited: mcpCount(totals.rate_limited),
+      rejected: mcpCount(totals.rejected),
+      durationMsAvg: mcpLimit(totals.duration_ms_avg),
+      durationMsMax: mcpLimit(totals.duration_ms_max),
+      rows: mcpCount(totals.rows),
+      bytes: mcpCount(totals.bytes),
+      activeKeys: mcpCount(totals.active_keys),
+      keys: mcpCount(totals.keys),
+    },
+    series: {
+      step: series.step === "hour" ? "hour" : "day",
+      times,
+      groups: list(series.groups).map((group) => ({
+        id: mcpText(group?.id),
+        label: mcpText(group?.label) || mcpText(group?.id),
+        total: mcpCount(group?.total),
+        values: values(group?.values),
+      })).filter((group) => group.id),
+      rest: { groups: mcpCount(rest.groups), total: mcpCount(rest.total), values: values(rest.values) },
+    },
+    keys: list(payload?.keys).map((item) => ({
+      id: mcpText(item?.id),
+      name: mcpText(item?.name) || mcpText(item?.id),
+      host: mcpText(item?.host),
+      source: item?.source === "config" ? "config" : "ui",
+      deletedAt: mcpTime(item?.deleted_at),
+      requests: mcpCount(item?.requests),
+      calls: mcpCount(item?.calls),
+      errors: mcpCount(item?.errors),
+      rateLimited: mcpCount(item?.rate_limited),
+      rejected: mcpCount(item?.rejected),
+      durationMsAvg: mcpLimit(item?.duration_ms_avg),
+      durationMsMax: mcpLimit(item?.duration_ms_max),
+      rows: mcpCount(item?.rows),
+      bytes: mcpCount(item?.bytes),
+      lastUsedAt: mcpTime(item?.last_used_at),
+    })).filter((item) => item.id),
+    // kind: "call" (a tool), "request" (a method of the MCP protocol) or "refused" (`unread`: refused before the message was read).
+    methods: list(payload?.methods).map((item) => ({
+      method: mcpText(item?.method),
+      kind: item?.kind === "request" || item?.kind === "refused" ? item.kind : "call",
+      requests: mcpCount(item?.requests),
+      errors: mcpCount(item?.errors),
+      durationMsAvg: mcpLimit(item?.duration_ms_avg),
+      durationMsMax: mcpLimit(item?.duration_ms_max),
+      rows: mcpCount(item?.rows),
+      bytes: mcpCount(item?.bytes),
+      keys: mcpCount(item?.keys),
+    })).filter((item) => item.method),
+    results: list(payload?.results).map((item) => ({ result: mcpText(item?.result), count: mcpCount(item?.count), keys: mcpCount(item?.keys) })).filter((item) => item.result),
+    types: list(payload?.types).map((item) => ({ type: mcpText(item?.type), requests: mcpCount(item?.requests) })).filter((item) => item.type),
+    clients: list(payload?.clients).map((client) => ({
+      name: mcpText(client?.name),
+      version: mcpText(client?.version),
+      userAgent: mcpText(client?.user_agent),
+      keys: mcpCount(client?.keys),
+      requests: mcpCount(client?.requests),
+      firstSeenAt: mcpTime(client?.first_seen_at),
+      lastSeenAt: mcpTime(client?.last_seen_at),
+    })),
+    // The rows that the server cut (200 for a table, 50 for the clients); a value that a filter selects is never cut.
+    omitted: { keys: mcpCount(omitted.keys), methods: mcpCount(omitted.methods), results: mcpCount(omitted.results), clients: mcpCount(omitted.clients) },
+  };
+}
+
 // The figures of a part of the cost of a key.
 const mcpCostFigures = (raw) => ({
   statements: mcpCount(raw?.statements),
@@ -1120,6 +1223,6 @@ export const api = { resolveUrl, request, getJson, postJson, getHosts, getVersio
   getTraceServices, getTraceServicesDb,
   searchTraceSpans, getTraceSpan,
   getMetricsMeta, getMetricsCatalog, getMetricsSeries, getMetricsExemplars, getMetricsAttributes,
-  getMcpMeta, getMcpKeys, createMcpKey, getMcpKeyAccess, getMcpAccessSummary, getMcpUsageSummary, getMcpKeyUsage, getMcpKeyCost, deleteMcpKey,
+  getMcpMeta, getMcpKeys, createMcpKey, getMcpKeyAccess, getMcpAccessSummary, getMcpUsageSummary, getMcpKeyUsage, getMcpUsageOverview, getMcpKeyCost, deleteMcpKey,
   humanizeErrors,
 };

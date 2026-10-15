@@ -42,7 +42,7 @@ def test_every_page_has_one_shell_one_entry_and_every_module_is_on_a_page():
         assert entry["entry"] == f"app_page_{page}.js", page
         assert set(entry) <= {"entry", "label", "main", "nav", "lazy"}, page
         assert entry["label"] and entry["main"], page
-        assert entry.get("nav", "") in ("", "explorer", "observability", "system"), page
+        assert entry.get("nav", "") in ("", "explorer", "observability", "system", "mcp"), page
     # The Worker script of the WebAssembly kernels is the one script that is on no page (app_wasm.js starts it by name).
     shipped = {path.name for path in STATIC.glob("app_*.js")}
     on_pages = set().union(*(set(graph.page_modules(page, data)) for page in PAGES))

@@ -41,6 +41,12 @@ def test_every_frontend_file_maps_to_specs_that_exist(file):
 @pytest.mark.parametrize("file, expected", [
     ("src/static/app_mcp_form.js", "mcp-page"),
     ("src/static/mcp.html", "mcp-page"),
+    ("src/static/app_mcp_overview.js", "mcp-usage"),
+    ("src/static/app_page_mcpusage.js", "mcp-usage"),
+    ("src/static/mcpusage.html", "mcp-usage"),
+    ("src/static/app_mcp_view.js", "mcp-usage"),
+    ("src/static/app_mcp_view.js", "mcp-page"),
+    ("src/static/css/20-features/mcp.css", "mcp-usage"),
     ("src/static/app_page_trace.js", "trace-page"),
     ("src/static/trace.html", "trace-page"),
     ("src/static/app_page_shape.js", "system"),

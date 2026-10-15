@@ -104,6 +104,59 @@ test('the usage of the keys, the usage of a key and its cost: the same shape, th
   compare({ real: real.window, fake: await call(page, 'GET', '/api/mcp/usage?window=48h') }, 'a window that the retention does not keep');
 });
 
+// The usage of every key (GET /api/mcp/usage/overview). A list that is empty accepts any shape, so the usage is made first on the real
+// instance, with the key of the config file that reads everything (tests/config/mcp.hcl): an initialize that names a client, tools/list,
+// a tool call, a method that nobody knows and a notification. Then the page's own calls are compared: the answer with nothing asked, a
+// filtered one, one split by key, and the refusals (a split that does not exist, a value that is not valid, a parameter that is not one,
+// more than 20 values).
+const ALL_DATA_KEY = 'a11da7a0-0000-4000-8000-000000000001';
+
+async function makeUsage(request) {
+  const post = (data) => request.post(`${BASE}/mcp`, {
+    headers: { Authorization: `Bearer ${ALL_DATA_KEY}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, data,
+  });
+  const answers = [
+    await post({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'chdash-contract', version: '1.0.0' } } }),
+    await post({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    await post({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_hosts', arguments: {} } }),
+    await post({ jsonrpc: '2.0', id: 4, method: 'nothing/known' }),
+    await post({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+  ];
+  // The request of a method that nobody knows is a JSON-RPC error (200), the notification has no answer (202).
+  expect(answers.map((answer) => answer.status())).toEqual([200, 200, 200, 200, 202]);
+}
+
+test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one and a split by key, the same refusals', async ({ page, request }) => {
+  await makeUsage(request);
+  const asked = {
+    plain: '/api/mcp/usage/overview',
+    filtered: '/api/mcp/usage/overview?window=24h&split=result&key=all-data&method=tools/list',
+    byKey: '/api/mcp/usage/overview?window=24h&split=key',
+    byType: '/api/mcp/usage/overview?window=24h&split=type&type=call&type=request',
+    badWindow: '/api/mcp/usage/overview?window=48h',
+    badSplit: '/api/mcp/usage/overview?split=nope',
+    badValue: '/api/mcp/usage/overview?key=BAD!',
+    unknown: '/api/mcp/usage/overview?bogus=1',
+    tooMany: `/api/mcp/usage/overview?${Array.from({ length: 21 }, (_, i) => `method=m${i}`).join('&')}`,
+  };
+  await realPage(page);
+  const real = {};
+  for (const [name, path] of Object.entries(asked)) real[name] = await call(page, 'GET', path);
+  // What the page reads is there: the usage that was just made, by the key, the methods and the client.
+  expect(real.plain.status).toBe(200);
+  expect(real.plain.body.totals.requests).toBeGreaterThanOrEqual(5);
+  expect(real.plain.body.keys.map((item) => item.id)).toContain('all-data');
+  expect(real.plain.body.methods.map((item) => item.method)).toEqual(expect.arrayContaining(['initialize', 'tools/list', 'list_hosts', 'other', 'notifications/initialized']));
+  expect(real.plain.body.clients.map((item) => item.name)).toContain('chdash-contract');
+  expect(real.filtered.body.filters).toEqual({ key: ['all-data'], method: ['tools/list'], result: [], type: [] });
+  expect(real.badSplit.status).toBe(400);
+  expect(real.badSplit.body).toMatchObject({ error_code: 'validation', field: 'split', reason: 'invalid' });
+  expect(real.unknown.body).toMatchObject({ error_code: 'validation', field: 'bogus', reason: 'unknown' });
+  expect(real.tooMany.body).toMatchObject({ error_code: 'validation', field: 'method', reason: 'too_many' });
+  await fakePage(page, newServer());
+  for (const [name, path] of Object.entries(asked)) compare({ real: real[name], fake: await call(page, 'GET', path) }, `usage overview, ${name}`);
+});
+
 test('POST then DELETE /api/mcp/keys: the grant has the shape the page reads, and the secret is given once', async ({ page }) => {
   const make = { name: `${PROBE}-api`, hosts: ['local'], tools: ['list_hosts'], databases: ['*'] };
   await realPage(page);

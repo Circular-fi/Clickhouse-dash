@@ -208,10 +208,186 @@ export function costOf(server, id, window) {
   };
 }
 
+// ---- the usage of every key (GET /api/mcp/usage/overview) ------------------------------------------------------------------------
+// What the keys did, as the server keeps it: cells of one key in one hour, by kind (call, request, limited, rejected), method and result.
+// The answers are computed from them by the rules of the contract (docs/mcp-integration-page.md, "The Usage tab"): every filter cuts the totals
+// and the series; a table has all the filters but its own; a value that a filter picks is in its table whatever its count; the series keeps the
+// 8 biggest groups of the split and sums the others as `rest`; the clients take the key filter only, and no window. The checks are in the order
+// of the real route (the window, a name that is not a parameter, the split, then each dimension: de-duplicated, at most 20, valid), and a key
+// has one last use for every window and every filter (mcp-contract.spec.js compares the shapes with the real answers). A spec changes
+// `server.cells` (a list of what the keys did) or `server.overview` (the whole answer).
+// A cell: [key id, hour, kind, method, result, count, the time of the calls added up (ms), the longest (ms), rows, bytes].
+const cell = (keyId, at, kind, method, result, count, ms = 0, max = 0, rows = 0, bytes = 0) => ({ key: keyId, at: Date.parse(`${at}:00:00Z`), kind, method, result, count, ms, max, rows, bytes });
+export const CELLS = () => [
+  // ops-all, the busy key of the config file: 24 h, 7 d and 30 d
+  cell('ops-all', '2026-10-14T09', 'call', 'query_table', 'ok', 400, 6000, 380, 1200, 400000),
+  cell('ops-all', '2026-10-14T09', 'call', 'query_table', 'table_not_allowed', 2, 8, 5, 0, 600),
+  cell('ops-all', '2026-10-14T09', 'call', 'list_hosts', 'ok', 40, 160, 9, 0, 24000),
+  cell('ops-all', '2026-10-14T09', 'request', 'tools/list', 'ok', 60, 90, 4, 0, 300000),
+  cell('ops-all', '2026-10-14T09', 'request', 'initialize', 'ok', 20, 60, 6, 0, 8000),
+  cell('ops-all', '2026-10-14T09', 'request', 'ping', 'ok', 100, 50, 2, 0, 4000),
+  cell('ops-all', '2026-10-14T08', 'call', 'run_query', 'ok', 30, 3600, 900, 3000, 90000),
+  cell('ops-all', '2026-10-14T08', 'call', 'run_query', 'sql_error', 5, 150, 60, 0, 2500),
+  cell('ops-all', '2026-10-13T15', 'call', 'describe_table', 'ok', 25, 250, 30, 0, 50000),
+  cell('ops-all', '2026-10-13T15', 'request', 'notifications/initialized', 'ok', 20, 10, 1, 0, 0),
+  // 7 d and 30 d
+  cell('ops-all', '2026-10-12T12', 'call', 'query_table', 'ok', 300, 4500, 200, 900, 300000),
+  cell('ops-all', '2026-10-09T12', 'call', 'list_hosts', 'ok', 10, 40, 6, 0, 6000),
+  // 30 d only
+  cell('ops-all', '2026-10-02T12', 'call', 'query_table', 'ok', 100, 1500, 120, 300, 100000),
+  cell('ui_222222222222', '2026-10-04T10', 'call', 'list_tables', 'ok', 6, 30, 9, 0, 7000),
+  // ci-bot, last used yesterday
+  cell('ui_0a1b2c3d4e5f', '2026-10-13T12', 'call', 'query_table', 'ok', 9, 135, 30, 27, 9000),
+  cell('ui_0a1b2c3d4e5f', '2026-10-13T12', 'call', 'query_table', 'table_not_allowed', 3, 6, 3, 0, 900),
+  cell('ui_0a1b2c3d4e5f', '2026-10-13T12', 'request', 'initialize', 'ok', 3, 9, 4, 0, 1200),
+  cell('ui_0a1b2c3d4e5f', '2026-10-13T12', 'request', 'tools/list', 'ok', 5, 10, 3, 0, 20000),
+  // legacy: a refusal of the rate limit, and a method that the vocabulary does not know
+  cell('ui_legacy000000', '2026-10-14T07', 'call', 'list_hosts', 'ok', 25, 100, 8, 0, 15000),
+  cell('ui_legacy000000', '2026-10-14T07', 'limited', 'unread', '429_rate_limited', 2, 0, 0, 0, 200),
+  cell('ui_legacy000000', '2026-10-14T07', 'request', 'other', 'rpc_error_32601', 1, 1, 1, 0, 150),
+  // a deleted key keeps its usage
+  cell('ui_dead00000001', '2026-10-12T07', 'call', 'query_table', 'ok', 40, 600, 50, 120, 40000),
+  cell('ui_dead00000001', '2026-10-12T07', 'rejected', 'unread', '413_payload_too_large', 1, 0, 0, 0, 120),
+];
+// The clients of each key, for as long as the retention keeps them (they take no window).
+export const CLIENTS = () => [
+  { key: 'ops-all', name: 'claude-code', version: '2.1.3', user_agent: 'claude-code/2.1.3 (node)', requests: 900, first: '2026-10-01T09:00:00Z', last: '2026-10-14T09:58:00Z' },
+  { key: 'ops-all', name: 'mcp-inspector', version: '0.14.0', user_agent: 'node', requests: 40, first: '2026-10-05T11:00:00Z', last: '2026-10-09T12:00:00Z' },
+  { key: 'ui_0a1b2c3d4e5f', name: 'claude-code', version: '2.1.3', user_agent: 'claude-code/2.1.3 (node)', requests: 20, first: '2026-10-09T08:00:00Z', last: '2026-10-13T12:00:00Z' },
+  { key: 'ui_legacy000000', name: '', version: '', user_agent: 'python-httpx/0.27.0', requests: 28, first: '2026-10-10T10:00:00Z', last: '2026-10-14T07:00:00Z' },
+];
+
+const DIMENSIONS = ['key', 'method', 'result', 'type'];
+const VALID = { key: /^[a-z0-9][a-z0-9_-]*$/, method: /^[A-Za-z0-9_/]{1,64}$/, result: /^[a-z0-9_]{1,64}$/, type: /^(?:call|request|limited|rejected)$/ };
+const PROTOCOL = [
+  'initialize', 'ping', 'tools/list', 'tools/call', 'response', 'notifications/initialized', 'notifications/cancelled', 'notifications/progress',
+  'notifications/roots/list_changed', 'resources/list', 'resources/read', 'resources/templates/list', 'resources/subscribe', 'resources/unsubscribe',
+  'prompts/list', 'prompts/get', 'completion/complete', 'logging/setLevel', 'other', 'invalid',
+];
+const TYPES = ['call', 'request', 'limited', 'rejected'];
+const invalid = (field, reason, message) => ({ status: 400, body: { error_code: 'validation', message, retryable: false, field, reason } });
+const iso = (ms) => new Date(ms).toISOString().replace('.000Z', 'Z');
+// The server counts whole milliseconds: an average is a whole number, and 0 is a time under a millisecond.
+const average = (total, n) => (n ? Math.round(total / n) : null);
+const sum = (list, pick) => list.reduce((total, item) => total + pick(item), 0);
+const newest = (list) => (list.length ? iso(Math.max(...list)) : null);
+
+// The answer of the server for the query string of the page: { status, body }.
+export function overviewOf(server, params) {
+  // The window (an empty one is the default), then a name that is not a parameter, then the split (an empty one is not valid).
+  const window = params.get('window') || server.meta.usage.default_window;
+  if (!server.meta.usage.windows.includes(window)) return invalid('window', 'invalid', `window must be one of ${server.meta.usage.windows.join(', ')}`);
+  for (const name of new Set(params.keys())) {
+    if (!['window', 'split', ...DIMENSIONS].includes(name)) return invalid(name, 'unknown', `unknown parameter: ${name}`);
+  }
+  const split = params.has('split') ? params.get('split') : 'method';
+  if (!DIMENSIONS.includes(split)) return invalid('split', 'invalid', 'split must be key, method, result or type');
+  // Each dimension: the repeated values once each (the first one stays), at most 20, each one valid.
+  const filters = {};
+  for (const dimension of DIMENSIONS) {
+    const values = [...new Set(params.getAll(dimension))];
+    if (values.length > 20) return invalid(dimension, 'too_many', `${dimension} takes at most 20 values`);
+    if (values.some((value) => !VALID[dimension].test(value))) return invalid(dimension, 'invalid', `${dimension} is not valid`);
+    filters[dimension] = values;
+  }
+
+  const hourly = window === '24h';
+  const step = hourly ? 3600000 : 86400000;
+  const buckets = hourly ? 24 : Number.parseInt(window, 10);
+  const from = Date.parse(WINDOW_FROM[window]);
+  const names = new Map([...server.keys, ...server.deleted].map((owner) => [owner.id, owner.name]));
+  const valueOf = (dimension, c) => (dimension === 'key' ? c.key : dimension === 'type' ? c.kind : c[dimension]);
+  // The cells of the window that every filter but `skip` lets through.
+  const inWindow = server.cells.filter((c) => c.at >= from && c.at < from + buckets * step);
+  const cut = (skip) => inWindow.filter((c) => DIMENSIONS.every((dimension) => dimension === skip || !filters[dimension].length || filters[dimension].includes(valueOf(dimension, c))));
+  const errorOf = (c) => c.result !== 'ok' && (c.kind === 'call' || c.kind === 'request');
+  const figures = (list) => {
+    const calls = list.filter((c) => c.kind === 'call');
+    return {
+      requests: sum(list, (c) => c.count),
+      calls: sum(calls, (c) => c.count),
+      errors: sum(list.filter(errorOf), (c) => c.count),
+      rate_limited: sum(list.filter((c) => c.kind === 'limited'), (c) => c.count),
+      rejected: sum(list.filter((c) => c.kind === 'rejected'), (c) => c.count),
+      duration_ms_avg: average(sum(calls, (c) => c.ms), sum(calls, (c) => c.count)),
+      duration_ms_max: calls.length ? Math.max(...calls.map((c) => c.max)) : null,
+      rows: sum(list, (c) => c.rows),
+      bytes: sum(list, (c) => c.bytes),
+    };
+  };
+  const distinct = (list, dimension) => new Set(list.map((c) => valueOf(dimension, c))).size;
+
+  // The totals and the series: every filter.
+  const all = cut(null);
+  const totals = { ...figures(all), active_keys: distinct(all, 'key'), keys: server.keys.length };
+  const labelOf = (id) => (split === 'key' ? names.get(id) || id : id);
+  const groupIds = filters[split].length ? filters[split] : [...new Set(all.map((c) => valueOf(split, c)))];
+  const valuesOf = (ids) => Array.from({ length: buckets }, (_, i) => sum(all.filter((c) => ids.includes(valueOf(split, c)) && Math.floor((c.at - from) / step) === i), (c) => c.count));
+  const groups = groupIds.map((id) => ({ id, label: labelOf(id), total: sum(all.filter((c) => valueOf(split, c) === id), (c) => c.count), values: valuesOf([id]) }))
+    .sort((a, b) => b.total - a.total || (a.id < b.id ? -1 : 1));
+  const shown = filters[split].length ? groups : groups.slice(0, 8);
+  const folded = filters[split].length ? [] : groups.slice(8);
+  const series = {
+    step: hourly ? 'hour' : 'day',
+    t: Array.from({ length: buckets }, (_, i) => iso(from + i * step)),
+    groups: shown,
+    rest: { groups: folded.length, total: sum(folded, (g) => g.total), values: valuesOf(folded.map((g) => g.id)) },
+  };
+
+  // The tables: every filter but their own, the rows that have requests and the values that a filter picks.
+  const rows = (dimension, byOf, build) => {
+    const list = cut(dimension);
+    const ids = new Set([...list.map(byOf), ...filters[dimension]]);
+    return [...ids].map((id) => build(id, list.filter((c) => byOf(c) === id)));
+  };
+  const keys = rows('key', (c) => c.key, (id, list) => {
+    const owner = server.keys.find((k) => k.id === id);
+    const gone = server.deleted.find((k) => k.id === id);
+    const own = server.cells.filter((c) => c.key === id);
+    return {
+      id, name: names.get(id) || id, host: owner && owner.hosts.length === 1 ? owner.hosts[0] : gone ? gone.host : '', source: (owner || gone || { source: '' }).source,
+      deleted_at: gone ? gone.deleted_at : null, ...figures(list), last_used_at: newest(own.map((c) => c.at)),
+    };
+  }).sort((a, b) => b.requests - a.requests || (a.name < b.name ? -1 : 1));
+  // A method row has times when it has requests (the refused ones too), and none when a filter picked a method that nothing matches.
+  // Its kind comes from its name: a tool is a call, `unread` is refused, the vocabulary of the protocol is a request.
+  const methods = rows('method', (c) => c.method, (id, list) => ({
+    method: id, kind: PROTOCOL.includes(id) ? 'request' : id === 'unread' ? 'refused' : 'call', requests: sum(list, (c) => c.count), errors: sum(list.filter(errorOf), (c) => c.count),
+    duration_ms_avg: average(sum(list, (c) => c.ms), sum(list, (c) => c.count)), duration_ms_max: list.length ? Math.max(...list.map((c) => c.max)) : null,
+    rows: sum(list, (c) => c.rows), bytes: sum(list, (c) => c.bytes), keys: distinct(list, 'key'),
+  })).sort((a, b) => b.requests - a.requests || (a.method < b.method ? -1 : 1));
+  const results = rows('result', (c) => c.result, (id, list) => ({ result: id, count: sum(list, (c) => c.count), keys: distinct(list, 'key') }))
+    .sort((a, b) => b.count - a.count || (a.result < b.result ? -1 : 1));
+  const typeList = cut('type');
+  const types = TYPES.map((type) => ({ type, requests: sum(typeList.filter((c) => c.kind === type), (c) => c.count) }));
+
+  // The clients: the key filter only, grouped by name and version (by User-Agent when the client has no name).
+  const clients = new Map();
+  for (const client of server.clients.filter((c) => !filters.key.length || filters.key.includes(c.key))) {
+    const id = client.name ? `${client.name}\n${client.version}` : `\n${client.user_agent}`;
+    const found = clients.get(id) || { name: client.name, version: client.version, user_agent: client.user_agent, keys: new Set(), requests: 0, first: client.first, last: client.last };
+    found.keys.add(client.key);
+    found.requests += client.requests;
+    found.first = found.first < client.first ? found.first : client.first;
+    found.last = found.last > client.last ? found.last : client.last;
+    clients.set(id, found);
+  }
+  const clientRows = [...clients.values()].sort((a, b) => (a.last < b.last ? 1 : -1))
+    .map((c) => ({ name: c.name, version: c.version, user_agent: c.user_agent, keys: c.keys.size, requests: c.requests, first_seen_at: c.first, last_seen_at: c.last }));
+
+  return {
+    status: 200,
+    body: {
+      ...usageWindow(server, window), split, filters, totals, series, keys, methods, results, types, clients: clientRows,
+      omitted: { keys: 0, methods: 0, results: 0, clients: 0 },
+    },
+  };
+}
+
 // The server: meta and keys in memory; every call recorded. `errors` makes the next call of a route fail.
 export function newServer(over = {}) {
   const server = { keys: KEYS(), calls: [], errors: {}, delay: {}, version: { mcp: { enabled: true } }, access: reachOf, summary: summaryOf,
-    usageOf: USAGE_OF, deleted: DELETED(), usage: usageSummaryOf, keyUsage: keyUsageOf, cost: costOf, ...over };
+    usageOf: USAGE_OF, deleted: DELETED(), usage: usageSummaryOf, keyUsage: keyUsageOf, cost: costOf, cells: CELLS(), clients: CLIENTS(), overview: overviewOf, ...over };
   server.meta = { ...structuredClone(META), ...(over.meta || {}) };
   return server;
 }
@@ -222,6 +398,8 @@ export async function install(page, server) {
   // The shell is served at /mcp-integration only when the instance has MCP on: the request is sent on to
   // the shell's static file, which the document then shows under the page's own address.
   await page.route('**/mcp-integration', (route) => route.continue({ url: new URL('/static/mcp.html', route.request().url()).href }));
+  // The Usage page, with the window, the split and the filters in its address.
+  await page.route(/\/mcp-integration\/usage\/?(\?.*)?$/, (route) => route.continue({ url: new URL('/static/mcpusage.html', route.request().url()).href }));
   await page.route('**/api/version', async (route) => {
     // A test that ends while this request is in flight disposes the response: nothing is left to answer.
     try {
@@ -258,6 +436,10 @@ export async function install(page, server) {
       const created = key({ id: 'ui_aabbccddeeff', name: body.name, hosts: body.hosts, tools: body.tools, databases: body.databases, max_rows: body.max_rows ?? null, timeout_seconds: body.timeout_seconds ?? null, secret_hint: SECRET.slice(0, 8) });
       server.keys.push(created);
       return json(route, 201, { key: created, secret: SECRET });
+    }
+    if (method === 'GET' && path === '/usage/overview') {
+      const answer = server.overview(server, url.searchParams);
+      return json(route, answer.status, answer.body);
     }
     if (method === 'GET' && path === '/usage') {
       const window = url.searchParams.get('window') || server.meta.usage.default_window;

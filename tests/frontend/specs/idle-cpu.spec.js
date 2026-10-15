@@ -79,13 +79,17 @@ for (const path of PAGES) {
   });
 }
 
-test('the MCP page at rest: the same', async ({ page }) => {
-  // The MCP page needs a server with MCP on (the instance of mcp-contract.spec.js).
-  const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
-  requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
-  await page.goto(`${base}/mcp-integration`);
-  expectAtRest(await restingWindow(page, '/mcp-integration'), '/mcp-integration');
-});
+// The MCP pages need a server with MCP on (the instance of mcp-contract.spec.js). The Usage tab has a chart, filters and tables: nothing of
+// it runs on a timer, so it rests as the others do.
+for (const path of ['/mcp-integration', '/mcp-integration/usage']) {
+  test(`the MCP page ${path} at rest: the same`, async ({ page }) => {
+    const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
+    requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
+    await page.goto(`${base}${path}`);
+    if (path.endsWith('/usage')) await expect(page.locator('.mcpOverview__tiles .statTile').first()).toBeVisible({ timeout: 20_000 });
+    expectAtRest(await restingWindow(page, path), path);
+  });
+}
 
 test('a trace page at rest: the same', async ({ page }) => {
   await mockTraceResults(page);
