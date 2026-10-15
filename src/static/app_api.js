@@ -563,9 +563,9 @@ async function getMetricsAttributes(params, { signal } = {}) {
 //   getMcpKeyAccess(id, {refresh})  the data that a key reaches: the tables of the MCP user of each host, cut by the key's patterns
 //   getMcpAccessSummary({refresh})  for each key, how many databases and tables it reaches (a Map by key id)
 //   getMcpUsageSummary({window})  what each key did in a window: { keys: Map by key id, deleted: [the deleted keys that keep usage] }
-//   getMcpKeyUsage(id, {window})  what one key did: totals, one point for each hour or day, tools, results, clients
-//   getMcpUsageOverview({window, split, filters})  what every key did, cut by key, method, result and type (the Usage tab): totals,
-//                                 a stacked series by `split`, one table for each of the four, the clients
+//   getMcpKeyUsage(id, {window})  what one key did: totals, one point for each step of the window (1 min to 1 day), tools, results, clients
+//   getMcpUsageOverview({window, group, filters})  what every key did, cut by key, method, client, result and type (the Usage tab): totals,
+//                                 a series of five figures for each group of `group` (key, method or client), one table for each dimension
 //   getMcpKeyCost(id, {window, refresh})  what the statements of a key cost ClickHouse (read from system.query_log)
 //   deleteMcpKey(id)              id
 // A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
@@ -849,7 +849,11 @@ async function getMcpUsageSummary({ window = "", signal } = {}) {
   return { ...mcpUsageWindow(payload), keys, deleted };
 }
 
-// What one key did in a window (GET /api/mcp/keys/<id>/usage). `series.points` has one point for each hour or day of the window.
+// The step of a series, in seconds (60 for a minute, 86400 for a day): a window is cut in steps of its own (1 h by the minute, 6 h by 5
+// minutes, 24 h by 15 minutes, 7 d by 3 hours, 30 d by 12 hours, 90 d and 365 d by the day). A step that is not a number is a day.
+const mcpStep = (value) => (Number(value) > 0 ? Number(value) : 86400);
+
+// What one key did in a window (GET /api/mcp/keys/<id>/usage). `series.points` has one point for each step of the window.
 async function getMcpKeyUsage(id, { window = "", signal } = {}) {
   const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/usage${window ? `?window=${encodeURIComponent(window)}` : ""}`, { signal });
   const totals = payload?.totals && typeof payload.totals === "object" ? payload.totals : {};
@@ -875,7 +879,7 @@ async function getMcpKeyUsage(id, { window = "", signal } = {}) {
       bytes: mcpCount(totals.bytes),
     },
     series: {
-      step: series.step === "hour" ? "hour" : "day",
+      step: mcpStep(series.step),
       points: (Array.isArray(series.points) ? series.points : []).map((point) => ({
         t: mcpTime(point?.t),
         requests: mcpCount(point?.requests),
@@ -907,17 +911,18 @@ async function getMcpKeyUsage(id, { window = "", signal } = {}) {
   };
 }
 
-// The four dimensions that the Usage tab splits and filters by, in the order of its filter parameters.
-const MCP_USAGE_DIMENSIONS = ["key", "method", "result", "type"];
+// The five dimensions that the Usage tab filters by, in the order of its filter parameters (it groups by key, method or client).
+const MCP_USAGE_DIMENSIONS = ["key", "method", "client", "result", "type"];
 
-// What every key did in a window (GET /api/mcp/usage/overview), cut by `filters` ({ key, method, result, type }: lists of values, any of
-// the values of one dimension and all the dimensions together; each a repeated parameter). The totals and the series have every filter;
-// each table of a dimension has all but its own, so a filter shows its alternatives. `series.groups` are the biggest groups of `split`
-// (`rest` is what the others add up to); `series.t` has one time for each hour or day. The clients take the key filter only.
-async function getMcpUsageOverview({ window = "", split = "", filters = {}, signal } = {}) {
+// What every key did in a window (GET /api/mcp/usage/overview), cut by `filters` ({ key, method, client, result, type }: lists of values,
+// any of the values of one dimension and all the dimensions together; each a repeated parameter). The totals and the series have every
+// filter; each table of a dimension has all but its own, so a filter shows its alternatives. `series.groups` are the biggest groups of
+// `group` (`rest` is what the others add up to), each with five series of one value for each step of the window (`series.t`): the
+// requests, the errors, the tool calls, the time of the tool calls added up (ms) and the bytes returned.
+async function getMcpUsageOverview({ window = "", group = "", filters = {}, signal } = {}) {
   const params = new URLSearchParams();
   if (window) params.set("window", window);
-  if (split) params.set("split", split);
+  if (group) params.set("group", group);
   for (const dimension of MCP_USAGE_DIMENSIONS) for (const value of mcpList(filters?.[dimension])) params.append(dimension, value);
   const query = params.toString();
   const payload = await mcpRequest(`/usage/overview${query ? `?${query}` : ""}`, { signal });
@@ -932,12 +937,20 @@ async function getMcpUsageOverview({ window = "", split = "", filters = {}, sign
     const sent = list(raw);
     return kept.map((i) => mcpCount(sent[i]));
   };
+  // The five series of a group, or of what the chart folds into `rest`.
+  const figures = (item) => ({
+    requests: values(item?.requests),
+    errors: values(item?.errors),
+    calls: values(item?.calls),
+    durationMsSum: values(item?.duration_ms_sum),
+    bytes: values(item?.bytes),
+  });
   const rest = series.rest && typeof series.rest === "object" ? series.rest : {};
   const omitted = payload?.omitted && typeof payload.omitted === "object" ? payload.omitted : {};
   const sent = payload?.filters && typeof payload.filters === "object" ? payload.filters : {};
   return {
     ...mcpUsageWindow(payload),
-    split: mcpText(payload?.split),
+    group: mcpText(payload?.group) || group || "method",
     filters: Object.fromEntries(MCP_USAGE_DIMENSIONS.map((dimension) => [dimension, mcpList(sent[dimension])])),
     totals: {
       requests: mcpCount(totals.requests),
@@ -953,15 +966,15 @@ async function getMcpUsageOverview({ window = "", split = "", filters = {}, sign
       keys: mcpCount(totals.keys),
     },
     series: {
-      step: series.step === "hour" ? "hour" : "day",
+      step: mcpStep(series.step),
       times,
-      groups: list(series.groups).map((group) => ({
-        id: mcpText(group?.id),
-        label: mcpText(group?.label) || mcpText(group?.id),
-        total: mcpCount(group?.total),
-        values: values(group?.values),
-      })).filter((group) => group.id),
-      rest: { groups: mcpCount(rest.groups), total: mcpCount(rest.total), values: values(rest.values) },
+      groups: list(series.groups).map((item) => ({
+        id: mcpText(item?.id),
+        label: mcpText(item?.label) || mcpText(item?.id),
+        total: mcpCount(item?.total),
+        ...figures(item),
+      })).filter((item) => item.id),
+      rest: { groups: mcpCount(rest.groups), total: mcpCount(rest.total), ...figures(rest) },
     },
     keys: list(payload?.keys).map((item) => ({
       id: mcpText(item?.id),
@@ -994,16 +1007,24 @@ async function getMcpUsageOverview({ window = "", split = "", filters = {}, sign
     })).filter((item) => item.method),
     results: list(payload?.results).map((item) => ({ result: mcpText(item?.result), count: mcpCount(item?.count), keys: mcpCount(item?.keys) })).filter((item) => item.result),
     types: list(payload?.types).map((item) => ({ type: mcpText(item?.type), requests: mcpCount(item?.requests) })).filter((item) => item.type),
-    clients: list(payload?.clients).map((client) => ({
-      name: mcpText(client?.name),
-      version: mcpText(client?.version),
-      userAgent: mcpText(client?.user_agent),
-      keys: mcpCount(client?.keys),
-      requests: mcpCount(client?.requests),
-      firstSeenAt: mcpTime(client?.first_seen_at),
-      lastSeenAt: mcpTime(client?.last_seen_at),
-    })),
-    // The rows that the server cut (200 for a table, 50 for the clients); a value that a filter selects is never cut.
+    // A client is named by the clientInfo of its initialize, else by the product of its User-Agent, else "unknown" ("other": the names past
+    // the caps). `versions` (five at most, the latest first) and `lastSeenAt` are those of the clients that the keys have kept for life.
+    clients: list(payload?.clients).map((item) => ({
+      client: mcpText(item?.client),
+      requests: mcpCount(item?.requests),
+      calls: mcpCount(item?.calls),
+      errors: mcpCount(item?.errors),
+      rateLimited: mcpCount(item?.rate_limited),
+      rejected: mcpCount(item?.rejected),
+      durationMsAvg: mcpLimit(item?.duration_ms_avg),
+      durationMsMax: mcpLimit(item?.duration_ms_max),
+      rows: mcpCount(item?.rows),
+      bytes: mcpCount(item?.bytes),
+      keys: mcpCount(item?.keys),
+      versions: mcpList(item?.versions),
+      lastSeenAt: mcpTime(item?.last_seen_at),
+    })).filter((item) => item.client),
+    // The rows that the server cut (200 for a table); a value that a filter selects is never cut.
     omitted: { keys: mcpCount(omitted.keys), methods: mcpCount(omitted.methods), results: mcpCount(omitted.results), clients: mcpCount(omitted.clients) },
   };
 }

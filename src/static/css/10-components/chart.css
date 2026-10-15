@@ -356,9 +356,11 @@
 
 /* The engine's totals legend (legend: "totals"): each series' total. */
 .chartCore__legendItem--total > b {
+  flex: none;
   color: var(--muted);
   font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .sparkline {

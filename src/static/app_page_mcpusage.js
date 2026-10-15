@@ -1,7 +1,7 @@
 // The MCP Usage page (mcpusage.html, /mcp-integration/usage, docs/mcp-integration-page.md, "The Usage tab"): what every key did, the second page
 // of the MCP section (the first is app_page_mcp.js: the keys). Like it, the page is not tied to a host. This entry reads /api/mcp/meta
 // (ns.api, app_api.js), shows the "Turn MCP on" state when MCP is off (the row of the two pages stays), and otherwise hands the panel to the
-// view (app_mcp_overview.js: the window, the filters, the chart and the tables). #mcpState holds the loading, the error and the "MCP is off"
+// view (app_mcp_overview.js: the filter bar, the chips, the four charts and the tables). #mcpState holds the loading, the error and the "MCP is off"
 // states, the same block as the keys page.
 
 import "./app_common.js";
@@ -78,7 +78,10 @@ import * as h_api from "./app_api.js";
 import * as h_route_notice from "./app_route_notice.js";
 import * as h_boot from "./app_boot.js";
 import * as h_header from "./app_header.js";
+import * as h_ui_filterbar from "./app_ui_filterbar.js";
+import * as h_mcp_bar from "./app_mcp_bar.js";
 import * as h_chart_core from "./app_chart_core.js";
+import * as h_mcp_charts from "./app_mcp_charts.js";
 import * as h_mcp_overview from "./app_mcp_overview.js";
 import * as h_mcp_view from "./app_mcp_view.js";
 h_loader.loader.expose([
@@ -112,7 +115,10 @@ h_loader.loader.expose([
   h_route_notice,
   h_boot,
   h_header,
+  h_ui_filterbar,
+  h_mcp_bar,
   h_chart_core,
+  h_mcp_charts,
   h_mcp_overview,
   h_mcp_view,
 ]);

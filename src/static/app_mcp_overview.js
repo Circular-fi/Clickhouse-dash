@@ -1,27 +1,29 @@
 // The Usage tab of the MCP pages (mcpusage.html, /mcp-integration/usage, docs/mcp-integration-page.md, "The Usage tab"): what every key did.
-// A window (24 h to 90 d), the tiles of the whole, a chart of the requests over time that one dimension stacks, and a table for each of the
-// four dimensions (key, method, result, and the clients). A filter is a value of a dimension: a chip, an entry of the chart legend or a row of a
-// table adds or removes it, and every figure of the page follows (the values of one dimension match any of them, the dimensions all of them).
-// The whole state is in the address (?window=&split=&key=&method=&result=&type=, one parameter for each value): a link says what it shows, and
-// Back and Forward walk through the filters. Nothing runs on a timer: the usage is read when the page opens, on a change and with Refresh.
+// A filter bar at the top (app_mcp_bar.js: Group by key, method or client, a picker for each of the three, the window, Refresh), the tiles of
+// the whole, four charts over time that the Group by groups (app_mcp_charts.js: the requests, the errors, the time of a call and the bytes
+// returned), and a table for each of the four dimensions that the tables list (key, method, client, result). A filter is a value of a
+// dimension: a chip, a picker of the bar, an entry of a chart legend or a row of a table adds or removes it, and every figure of the page
+// follows (the values of one dimension match any of them, the dimensions all of them).
+// The whole state is in the address (?window=&group=&key=&method=&client=&result=&type=, one parameter for each value): a link says what it
+// shows, and Back and Forward walk through the filters. Nothing runs on a timer: the usage is read when the page opens, on a change and
+// with Refresh (the pickers of the bar wait for the clicks to pause, once, before they read).
 //
 //   ns.mcpOverview.show(root, { meta })   draws the tab in `root` the first time, then reads the usage (again when it is shown again)
 //   ns.mcpOverview.hide()                 hides the tab and stops its reads
 //
-// The server (app_api.js, getMcpUsageOverview) cuts the usage. The tiles and the chart have every filter. The table of a dimension has every
-// filter but its own, so a filtered table still lists what else could be picked, and a value that is picked is always there (at 0 when it has
-// nothing). The clients have the key filter only, and no window. The chart is the shared engine (app_chart_core.js): the legend is the filter of
-// the dimension that the chart splits by, a group that the chart folds into "N more" cannot be picked there but in its table.
+// The server (app_api.js, getMcpUsageOverview) cuts the usage. The tiles and the charts have every filter. The table of a dimension, and the
+// list of its picker, have every filter but their own, so a filtered table still lists what else could be picked, and a value that is picked
+// is always there (at 0 when it has nothing). The legend of a chart is the filter of the dimension that the charts are grouped by; a group
+// that a chart folds into "N more" cannot be picked there but in its table. The bar and the chips sit under the row of the two pages, out
+// of the panel that scrolls, as the filter bar of System does.
 
 import { api } from "./app_api.js";
-import { chartCore } from "./app_chart_core.js";
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
-import { palette } from "./app_palette.js";
+import { mcpBar } from "./app_mcp_bar.js";
+import { mcpCharts } from "./app_mcp_charts.js";
 import { router } from "./app_router.js";
 import { badge } from "./app_ui_badge.js";
-import { icon } from "./app_ui_icon.js";
-import { segmented } from "./app_ui_segmented.js";
 import { stat } from "./app_ui_stat.js";
 import { table as tableMod } from "./app_ui_table.js";
 import { uiState } from "./app_ui_state.js";
@@ -30,22 +32,24 @@ import { util } from "./app_util.js";
 const EMPTY = format.EMPTY;
 const SLOT = "mcp.overview";
 const PATH = "/mcp-integration/usage";
-const DIMENSIONS = ["key", "method", "result", "type"];
-const DEFAULT_SPLIT = "method";
+// The dimensions that a filter has, in the order of the address; the charts are grouped by one of the first three (what the bar offers).
+const DIMENSIONS = ["key", "method", "client", "result", "type"];
+const GROUPS = [{ value: "key", label: "Key" }, { value: "method", label: "Method" }, { value: "client", label: "Client" }];
+const DEFAULT_GROUP = "method";
 // The server takes 20 values of a kind at most (a 400 `too_many` above).
-const MAX_VALUES = 20;
+const MAX_VALUES = mcpBar.MAX_VALUES;
 // What the server accepts for a value of each dimension (a 400 `invalid` for the others): the id of a key (the name of a key of the
-// configuration, which never starts with "ui_", or "ui_" and 12 hexadecimal digits), the name of a tool or of a method of the protocol, a
-// result code, a type.
+// configuration, which never starts with "ui_", or "ui_" and 12 hexadecimal digits), the name of a tool or of a method of the protocol, the
+// name of a client (printable ASCII, 1 to 64 characters, no space at either end), a result code, a type.
 const VALID = {
   key: /^(?:ui_[0-9a-f]{12}|(?!ui_)[a-z0-9][a-z0-9_-]{0,31})$/,
   method: /^[A-Za-z0-9_/]{1,64}$/,
+  client: /^[\x21-\x7e](?:[\x20-\x7e]{0,62}[\x21-\x7e])?$/,
   result: /^[a-z0-9_]{1,64}$/,
   type: /^(?:call|request|limited|rejected)$/,
 };
-const SPLITS = [{ value: "key", label: "Keys" }, { value: "method", label: "Methods" }, { value: "result", label: "Results" }, { value: "type", label: "Type" }];
-const DIMENSION_LABEL = { key: "Key", method: "Method", result: "Result", type: "Type" };
-// The four kinds of request (the `type` of the server): what each one is, for the chip, the legend and the tooltip.
+const DIMENSION_LABEL = { key: "Key", method: "Method", client: "Client", result: "Result", type: "Type" };
+// The four kinds of request (the `type` of the server): what each one is, for the chip and the tooltip.
 const TYPE_LABEL = { call: "Tool calls", request: "Protocol", limited: "Rate limited", rejected: "Rejected" };
 const TYPE_TITLE = {
   call: "A call of a tool (tools/call)",
@@ -64,14 +68,14 @@ const METHOD_NOTE = {
   "tools/call": "A tool call that failed before the tool ran (an unknown tool, a missing argument)",
   ping: "A client checks that the server answers",
 };
-const WINDOW_LABEL = { "24h": "24 h", "7d": "7 d", "30d": "30 d", "90d": "90 d", "365d": "365 d" };
-const WINDOW_TEXT = { "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days", "90d": "the last 90 days", "365d": "the last 365 days" };
-const STEP_MS = { hour: 3600000, day: 86400000 };
-const CHART_HEIGHT = 220;
-// The id of the series that holds the groups the chart folds together: no group can have it (an id has no "~").
-const REST_ID = "~rest";
-// palette.categorical(i) has these slots (--qchart-1..18).
-const COLOURS = 18;
+// The names that ClickHouse Dash gives a client that has none, or that it cannot keep apart.
+const CLIENT_NOTE = {
+  unknown: "The client sent no name in initialize and no User-Agent",
+  other: "The clients past the caps: a key keeps 16 client names, and ClickHouse Dash 4,096",
+};
+const WINDOW_TEXT = {
+  "1h": "the last hour", "6h": "the last 6 hours", "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days", "90d": "the last 90 days", "365d": "the last 365 days",
+};
 
 const count = (n) => format.count(n);
 // The server counts whole milliseconds: a time of 0 is under a millisecond.
@@ -79,26 +83,23 @@ const ms = (value) => (value == null ? EMPTY : value === 0 ? "<1 ms" : format.du
 // A count of a tile: all its digits up to a million ("1,013", not "1K": a total is read exactly), then compact.
 const figure = (n) => (n < 1e6 ? count(n) : format.compact(n));
 const minute = (t) => format.time(t, { precision: "min" });
-const day = (t) => format.iso(t).slice(0, 10);
 
 const model = {
   meta: null,
   window: "",
-  split: DEFAULT_SPLIT,
-  filters: { key: [], method: [], result: [], type: [] },
+  group: DEFAULT_GROUP,
+  filters: { key: [], method: [], client: [], result: [], type: [] },
   data: null,
   error: null,
   loading: false,
   announced: false,
   // The sort of each table: it stays for the visit of the page and is not in the address.
-  sort: { keys: { key: "requests", dir: "desc" }, methods: { key: "requests", dir: "desc" }, results: { key: "count", dir: "desc" }, clients: { key: "last", dir: "desc" } },
+  sort: { keys: { key: "requests", dir: "desc" }, methods: { key: "requests", dir: "desc" }, clients: { key: "requests", dir: "desc" }, results: { key: "count", dir: "desc" } },
 };
 // The nodes that the view fills (built once by build()).
 const els = { blocks: {} };
-let chart = null;
-let legendWatch = null;
-// The id of the legend entry that was pressed: the chart that the answer draws takes the focus back to it.
-let legendFocus = "";
+let bar = null;
+let charts = null;
 // The chips on screen (their values and names), to draw them again only when they change.
 let chipsDrawn = "";
 let mounted = false;
@@ -111,17 +112,20 @@ const address = router.owner("mcpusage", { view: null, path: PATH, params: () =>
 const windows = () => (model.meta?.usage?.windows?.length ? model.meta.usage.windows : ["24h"]);
 const defaultWindow = () => (windows().includes(model.meta?.usage?.defaultWindow) ? model.meta.usage.defaultWindow : windows()[0]);
 
-// The address into the model. Returns true when a value had to be fixed: a window that the retention does not keep, a split that is not
-// one, a value that is malformed or repeated, or more than 20 values of a kind (the caller replaces the address with the fixed one).
+// The address into the model. Returns true when a value had to be fixed: a window that the retention does not keep, a group that the bar
+// does not offer, the old `split`, a value that is malformed or repeated, or more than 20 values of a kind (the caller replaces the address
+// with the fixed one).
 function readUrl() {
   const params = router.current().params;
   let fixed = false;
   const asked = params.get("window");
   model.window = windows().includes(asked) ? asked : defaultWindow();
   if (params.has("window") && model.window !== asked) fixed = true;
-  const split = params.get("split");
-  model.split = DIMENSIONS.includes(split) ? split : DEFAULT_SPLIT;
-  if (params.has("split") && model.split !== split) fixed = true;
+  const group = params.get("group");
+  model.group = GROUPS.some((item) => item.value === group) ? group : DEFAULT_GROUP;
+  if (params.has("group") && model.group !== group) fixed = true;
+  // The chart used to be split (Keys | Methods | Results | Type): that name is gone, and so is what it asked for.
+  if (params.has("split")) fixed = true;
   for (const dimension of DIMENSIONS) {
     const sent = params.getAll(dimension);
     const values = [...new Set(sent.filter((value) => VALID[dimension].test(value)))].slice(0, MAX_VALUES);
@@ -131,36 +135,46 @@ function readUrl() {
   return fixed;
 }
 
-// The model as parameters: what a default is stays out (the window of the server, the split by method).
+// The model as parameters: what a default is stays out (the window of the server, the group by method).
 function urlParams() {
   const params = new URLSearchParams();
   if (model.window && model.window !== defaultWindow()) params.set("window", model.window);
-  if (model.split !== DEFAULT_SPLIT) params.set("split", model.split);
+  if (model.group !== DEFAULT_GROUP) params.set("group", model.group);
   for (const dimension of DIMENSIONS) for (const value of model.filters[dimension]) params.append(dimension, value);
   return params;
 }
 
-// A change of the window, of the split or of a filter: an entry of the history, then the new figures.
+// A change of the window, of the group or of a filter: an entry of the history, then the new figures. Picks that cancel out (a box ticked
+// and cleared before the clicks paused) leave the address as it was: there is nothing to read.
 function changed() {
-  address.push();
-  void load();
+  scheduleChange.cancel();
+  if (address.push()) void load();
 }
+
+// The picks of a list in the bar wait for the clicks to pause: a few of them are one entry of the history and one read (as in Logs).
+const scheduleChange = util.debounce(changed);
 
 // Back and Forward (and a link to the tab from itself): the address is the state.
 function onLocation() {
   if (!mounted || els.root.hidden) return;
+  scheduleChange.cancel();
   if (readUrl()) address.replace();
   void load();
 }
 
-function toggleFilter(dimension, value) {
+// A value that is on or off, with the limit of the server: false when the 21st is refused.
+function toggle(dimension, value) {
   const list = model.filters[dimension];
   if (!list.includes(value) && list.length >= MAX_VALUES) {
     uiState.announce(`A filter takes ${MAX_VALUES} values at most.`);
-    return;
+    return false;
   }
   model.filters[dimension] = list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
-  changed();
+  return true;
+}
+
+function toggleFilter(dimension, value) {
+  if (toggle(dimension, value)) changed();
 }
 
 function clearFilters() {
@@ -168,11 +182,24 @@ function clearFilters() {
   changed();
 }
 
+// A pick in a list of the bar: the model, the button and the chips follow at once, the read when the clicks pause.
+function pick(dimension, value) {
+  if (toggle(dimension, value)) scheduleChange();
+  syncControls();
+}
+
+function clearDimension(dimension) {
+  if (!model.filters[dimension].length) return;
+  model.filters[dimension] = [];
+  syncControls();
+  scheduleChange();
+}
+
 const filterCount = () => DIMENSIONS.reduce((sum, dimension) => sum + model.filters[dimension].length, 0);
 
 // --- Reading -------------------------------------------------------------------------------
 
-// The usage for the window, the split and the filters. A newer read cancels the one in flight (util.latest); the figures that are on screen
+// The usage for the window, the group and the filters. A newer read cancels the one in flight (util.latest); the figures that are on screen
 // stay (dimmed) until the answer comes. No timer: only a change of the page, or Refresh, reads.
 async function load() {
   const req = util.latest(SLOT);
@@ -180,7 +207,7 @@ async function load() {
   model.error = null;
   render();
   try {
-    const data = await api.getMcpUsageOverview({ window: model.window, split: model.split, filters: model.filters, signal: req.signal });
+    const data = await api.getMcpUsageOverview({ window: model.window, group: model.group, filters: model.filters, signal: req.signal });
     if (!req.isCurrent()) return;
     model.data = data;
   } catch (error) {
@@ -208,56 +235,73 @@ function show(root, { meta }) {
     build(root);
     if (readUrl()) address.replace();
     router.on(PATH, onLocation);
+    bar.mountSummary({ describe });
   } else if (!windows().includes(model.window)) {
     model.window = defaultWindow();
     address.replace();
   }
-  els.root.hidden = false;
-  segmented.render(els.windows, windows().map((value) => ({ value, label: WINDOW_LABEL[value] || value })), { attr: "window", value: model.window, size: "compact", label: "Window" });
+  setShown(true);
+  bar.setWindows(windows(), model.window);
   void load();
 }
 
 function hide() {
   util.latest.cancel(SLOT);
   if (!mounted) return;
-  destroyChart();
+  scheduleChange.cancel();
+  charts.destroy();
   // Shown again, the tab reads again and says so: it does not show what it read before.
   model.data = null;
   model.error = null;
   model.loading = false;
-  els.root.hidden = true;
+  setShown(false);
 }
 
-// The head (title, dates, window, Refresh), the filter chips, then the body: the tiles, the chart, the four tables and the notes.
+// The bar and the chips are not in the root of the tab: they show and hide with it.
+function setShown(on) {
+  els.root.hidden = !on;
+  bar.form.hidden = !on;
+  els.filters.hidden = !on || !filterCount();
+}
+
+// The text that stands for the folded bar on a phone ("<time range> · 2 filters" on the other bars): the window and the group.
+function describe() {
+  const span = (WINDOW_TEXT[model.window] || model.window).replace(/^the /, "");
+  return `${span.charAt(0).toUpperCase()}${span.slice(1)} · by ${model.group}`;
+}
+
+// The bar and the chips (under the row of the two pages), then the head of the tab (title, dates) and its body: the tiles, the charts, the
+// four tables and the notes.
 function build(root) {
   els.root = root;
   els.range = h("span", { class: "mcpMuted mcpOverview__range" });
-  els.windows = h("div", { class: "mcpOverview__windows" });
-  els.refresh = h("button", { type: "button", class: "refreshButton", id: "mcpRefresh", title: "Refresh", "aria-label": "Refresh" },
-    icon.el("refresh", { size: "sm", className: "refreshGlyph" }));
-  els.refresh.addEventListener("click", async () => {
-    await load();
-    // The button is off while the read runs, and that takes the focus from it: the keyboard comes back to it.
-    if (document.activeElement === document.body) els.refresh.focus();
+  bar = mcpBar.create({
+    groups: GROUPS,
+    labelOf: valueLabel,
+    onGroup: (value) => { model.group = value; changed(); },
+    onWindow: (value) => { model.window = value; changed(); },
+    onPick: pick,
+    onClear: clearDimension,
+    onRefresh: async () => {
+      await load();
+      // The button is off while the read runs, and that takes the focus from it: the keyboard comes back to it.
+      if (document.activeElement === document.body) bar.refresh.focus();
+    },
   });
-  segmented.bind(els.windows, { attr: "window", onChange: (value) => { model.window = value; changed(); } });
+  els.refresh = bar.refresh;
   // The chips are a list; "Clear filters" is a button, so it stands beside the list and not in it.
   els.chips = h("div", { class: "chips mcpOverview__chips", role: "list", "aria-label": "Active filters" });
   els.clear = h.html(badge.clearHtml("Clear filters", { "data-chip-clear": true })).firstElementChild;
   els.clear.hidden = true;
-  els.filters = h("div", { class: "mcpOverview__filters", hidden: true }, els.chips, els.clear);
+  els.filters = h("div", { class: "chips mcpOverview__filters", hidden: true }, els.chips, els.clear);
   els.filters.addEventListener("click", onChipClick);
+  dom.$(".mcpPage__nav", root.closest(".mcpPage")).after(bar.form, els.filters);
 
   els.state = h("div", { class: "mcpOverview__state" });
   els.tiles = h("div", { class: "statTiles statTiles--boxed mcpOverview__tiles", role: "group", "aria-label": "Totals" });
-  els.chartTitle = h("strong", { class: "chartCard__title" });
-  els.chartMeta = h("span", { class: "chartCard__meta" });
-  els.splits = h("div", { class: "mcpOverview__split" });
-  segmented.render(els.splits, SPLITS, { attr: "split", value: model.split, size: "compact", label: "Split the chart by" });
-  segmented.bind(els.splits, { attr: "split", onChange: (value) => { model.split = value; changed(); } });
-  els.chartBox = h("div", { class: "chartCard__body mcpOverview__chart" });
-  const card = h("section", { class: "chartCard mcpOverview__card", "aria-label": "Requests over time" },
-    h("header", { class: "chartCard__head" }, els.chartTitle, els.chartMeta, h("div", { class: "chartCard__actions" }, els.splits)), els.chartBox);
+  els.charts = h("div", { class: "mcpOverview__charts" });
+  els.chartsEmpty = h("div", { class: "mcpOverview__empty", hidden: true });
+  charts = mcpCharts.create(els.charts, { pressed: (group, id) => model.filters[group]?.includes(id) === true, onToggle: toggleFilter });
 
   // Two columns on a wide window: the keys over the methods (the wide tables), the results over the clients.
   els.tables = h("div", { class: "mcpOverview__tables" },
@@ -265,13 +309,12 @@ function build(root) {
     h("div", { class: "mcpOverview__col" }, blockOf("results"), blockOf("clients")));
   els.tables.addEventListener("click", onRowClick);
   els.notes = h("div", { class: "mcpOverview__notes" });
-  els.content = h("div", { class: "mcpOverview__content" }, els.tiles, card, els.tables, els.notes);
+  els.content = h("div", { class: "mcpOverview__content" }, els.tiles, els.charts, els.chartsEmpty, els.tables, els.notes);
   els.body = h("div", { class: "mcpOverview__body" }, els.state, els.content);
 
   root.replaceChildren(h("section", { class: "pagePart mcpOverview__part", "aria-labelledby": "mcpOverviewTitle" },
-    h("div", { class: "pagePart__head mcpOverview__head" },
-      h("h2", { class: "pagePart__title", id: "mcpOverviewTitle" }, "Usage of all keys"), els.range, els.windows, els.refresh),
-    els.filters, els.body));
+    h("div", { class: "pagePart__head mcpOverview__head" }, h("h2", { class: "pagePart__title", id: "mcpOverviewTitle" }, "Usage of all keys"), els.range),
+    els.body));
 }
 
 // What is on screen: the controls always; then the loading or the error, or the figures. A read in flight dims the figures that are there.
@@ -288,24 +331,23 @@ function render() {
   } else if (!model.loading) {
     showState(false);
     renderTiles(model.data);
-    renderChart(model.data);
+    renderCharts(model.data);
     for (const id of Object.keys(TABLES)) renderTable(id);
     renderNotes(model.data);
   } else {
-    // A read is running: the figures stay, and the legend already shows what the click picked (the entries that it leaves out dim).
-    chart?.redraw();
+    // A read is running: the figures stay, and the legends already show what the click picked (the entries that it leaves out dim).
+    charts.redraw();
   }
 }
 
 function showState(on) {
   els.state.hidden = !on;
   els.content.hidden = on;
-  if (on) destroyChart();
+  if (on) charts.destroy();
 }
 
 function syncControls() {
-  segmented.set(els.windows, model.window, "window");
-  segmented.set(els.splits, model.split, "split");
+  bar.sync({ group: model.group, window: model.window, filters: model.filters, data: model.data });
   const data = model.data;
   const from = data && data.since != null && data.from != null ? Math.max(data.from, data.since) : data?.from;
   els.range.textContent = data && from != null && data.to != null ? format.range(from, data.to) : "";
@@ -325,7 +367,7 @@ function valueLabel(dimension, value) {
 function renderChips() {
   const chips = [];
   for (const dimension of DIMENSIONS) for (const value of model.filters[dimension]) chips.push({ dimension, value, text: valueLabel(dimension, value) });
-  els.filters.hidden = !chips.length;
+  els.filters.hidden = els.root.hidden || !chips.length;
   els.clear.hidden = chips.length < 2;
   const drawn = JSON.stringify(chips);
   if (drawn === chipsDrawn) return;
@@ -344,7 +386,7 @@ function renderChips() {
 // chip that took its place (the last one at the end), else from the window.
 function focusFilters(index = 0) {
   const buttons = dom.$$(".chip__remove", els.chips);
-  (buttons[Math.min(index, buttons.length - 1)] || dom.$('[aria-pressed="true"]', els.windows))?.focus();
+  (buttons[Math.min(index, buttons.length - 1)] || dom.$('[aria-pressed="true"]', bar.windows))?.focus();
 }
 
 function onChipClick(event) {
@@ -393,7 +435,7 @@ function activeKeys(data) {
   }
   return {
     value: count(live),
-    sub: `of ${format.countLabel(totals.keys, "key")}${deleted ? ` \u00b7 ${count(deleted)} deleted` : ""}`,
+    sub: `of ${format.countLabel(totals.keys, "key")}${deleted ? ` · ${count(deleted)} deleted` : ""}`,
     title: "The keys that exist and have a request that every filter of the page keeps, out of the keys that exist. A deleted key keeps its usage: one that had such a request is counted apart (\"1 deleted\"), not in the two figures.",
   };
 }
@@ -423,133 +465,25 @@ function renderTiles(data) {
     stat.tile({ label: "Active keys", ...activeKeys(data) }));
 }
 
-// --- Chart ---------------------------------------------------------------------------------
+// --- Charts --------------------------------------------------------------------------------
 
-// The slot of a group: the one that the hash of its id gives (FNV-1a, as palette.service does for a name it has not met), so a group has the
-// same colour on every visit, in every window and under every filter, whatever its rank. The groups of one chart never share a slot: a group
-// whose slot is taken takes the next free one (the order is the hash and the id, never the size).
-function slotsOf(ids) {
-  const hashOf = (text) => {
-    let hash = 0x811c9dc5;
-    for (let i = 0; i < text.length; i += 1) {
-      hash ^= text.charCodeAt(i);
-      hash = Math.imul(hash, 0x01000193) >>> 0;
-    }
-    return hash % COLOURS;
-  };
-  const taken = new Set();
-  const slots = new Map();
-  for (const id of [...ids].sort((a, b) => hashOf(a) - hashOf(b) || (a < b ? -1 : a > b ? 1 : 0))) {
-    let slot = hashOf(id);
-    while (taken.has(slot) && taken.size < COLOURS) slot = (slot + 1) % COLOURS;
-    taken.add(slot);
-    slots.set(id, slot);
-  }
-  return slots;
-}
-
-// A group is a series; a zero is no value (the tooltip lists the groups that have something). The folded groups are the last series, "N more".
-function seriesOf(data) {
-  const { groups, rest } = data.series;
-  const slots = slotsOf(groups.map((group) => group.id));
-  const bars = (values) => Float64Array.from(values, (value) => (value > 0 ? value : NaN));
-  const out = groups.map((group) => ({
-    id: `${data.split}:${group.id}`,
-    raw: group.id,
-    label: data.split === "type" ? TYPE_LABEL[group.id] || group.label : group.label,
-    color: palette.categorical(slots.get(group.id)),
-    values: bars(group.values),
-    nulls: null,
-    group: 0,
-  }));
-  if (rest.groups > 0) {
-    out.push({ id: REST_ID, raw: REST_ID, rest: true, label: `${count(rest.groups)} more`, color: palette.categorical(-1), values: bars(rest.values), nulls: null, group: 0 });
-  }
-  return out;
-}
-
-function destroyChart() {
-  legendWatch?.disconnect();
-  legendWatch = null;
-  chart?.destroy();
-  chart = null;
-}
-
-// "N more" holds the groups that the chart folds: it is not a filter, so it cannot be pressed (the tables pick any value).
-function lockRest() {
-  for (const item of dom.$$(`.chartCore__legendItem[data-series="${REST_ID}"]`, chart?.root)) {
-    item.disabled = true;
-    item.removeAttribute("aria-pressed");
-  }
-}
-
-function renderChart(data) {
-  destroyChart();
-  els.chartBox.replaceChildren();
-  const focusId = legendFocus;
-  legendFocus = "";
-  const noun = (DIMENSION_LABEL[data.split] || "Group").toLowerCase();
-  const { times, step } = data.series;
-  els.chartTitle.textContent = `Requests by ${noun}`;
-  els.chartMeta.textContent = step === "hour" ? "by the hour" : "by the UTC day";
-  if (!data.totals.requests || !times.length) {
-    const span = WINDOW_TEXT[data.window] || "this window";
-    if (filterCount()) {
-      uiState.empty(els.chartBox, { title: "No request has all these filters", body: `Nothing in ${span} matches them.`, compact: true,
-        action: { label: "Clear filters", onClick: () => { clearFilters(); focusFilters(); } } });
-    } else {
-      uiState.empty(els.chartBox, { title: `No request in ${span}`, body: "Nothing was counted in this window.", compact: true });
-    }
+// The four charts, or the one sentence that says why there is nothing to draw (the same for the four: no request has what they count).
+function renderCharts(data) {
+  const none = !data.totals.requests || !data.series.times.length;
+  els.charts.hidden = none;
+  els.chartsEmpty.hidden = !none;
+  if (!none) {
+    charts.draw(data);
     return;
   }
-  const bucket = STEP_MS[step];
-  const series = seriesOf(data);
-  const split = data.split;
-  const pressed = (s) => !s.rest && model.filters[split].includes(s.raw);
-  chart = chartCore.create(els.chartBox, {
-    xKind: "time",
-    type: "bar",
-    stack: true,
-    height: CHART_HEIGHT,
-    xs: Float64Array.from(times, (t) => t + bucket / 2),
-    xDomain: [times[0], times[times.length - 1] + bucket],
-    bucketMs: bucket,
-    bucketAlign: "center",
-    // The days are UTC days: the tooltip and the badge of the axis name the date, not the local hours that it starts at.
-    xReadout: (i) => (step === "day" ? `${day(times[i])} (UTC)` : format.range(times[i], times[i] + bucket)),
-    // A bar of a day is labelled by its date ("Oct 9", one line), not by the hours that a wide screen has room for between the days (every
-    // 6 h at 1920 px); the bars of an hour keep their hours, with the date under the first.
-    xDateOnly: step === "day",
-    series,
-    xFractionDigits: 0,
-    // The engine's totals legend is the filter of the dimension that the chart splits by.
-    legend: "totals",
-    legendTotal: (s, sum) => format.compact(sum),
-    legendPressed: pressed,
-    legendTitle: (s, on) => (s.rest ? `${s.label} ${noun}s that the chart folds together: pick them in the table` : `${on ? "Stop filtering by" : "Filter by"} ${noun} ${s.label}${TYPE_TITLE[s.raw] ? `\n${TYPE_TITLE[s.raw]}` : ""}`),
-    onLegendClick: (s) => {
-      if (s.rest) return;
-      legendFocus = s.id;
-      toggleFilter(split, s.raw);
-    },
-    barWidthRatio: times.length > 14 ? 0.86 : 0.6,
-    cursorPoints: false,
-    tooltipSort: "desc",
-    tooltipNulls: false,
-    formatValue: (value) => count(value),
-    formatY: (value) => count(Math.max(0, value)),
-  });
-  chart.root.setAttribute("role", "group");
-  chart.root.setAttribute("aria-label", `Requests by ${noun} over time`);
-  // The chart is drawn again for the new figures: the keyboard stays on the entry of the legend that it pressed.
-  if (focusId) dom.$(`.chartCore__legendItem[data-series="${CSS.escape(focusId)}"]`, chart.root)?.focus({ preventScroll: true });
-  // A legend is drawn again when its groups or its pressed entries change: "N more" is locked each time.
-  const legend = dom.$(".chartCore__legend", chart.root);
-  if (legend && typeof MutationObserver === "function") {
-    legendWatch = new MutationObserver(lockRest);
-    legendWatch.observe(legend, { childList: true });
+  charts.destroy();
+  const span = WINDOW_TEXT[data.window] || "this window";
+  if (filterCount()) {
+    uiState.empty(els.chartsEmpty, { title: "No request has all these filters", body: `Nothing in ${span} matches them.`, compact: true,
+      action: { label: "Clear filters", onClick: () => { clearFilters(); focusFilters(); } } });
+  } else {
+    uiState.empty(els.chartsEmpty, { title: `No request in ${span}`, body: "Nothing was counted in this window.", compact: true });
   }
-  lockRest();
 }
 
 // --- Tables --------------------------------------------------------------------------------
@@ -584,9 +518,14 @@ function methodCell(row) {
     row.kind === "call" ? null : badge.el(row.kind === "refused" ? "refused" : "protocol", { tone: "neutral", size: "sm" }));
 }
 
+// A client is its name, then the versions that it sent, muted (the latest first). The two names that ClickHouse Dash gives, `unknown` and
+// `other`, are muted, and their title says what they stand for.
 function clientCell(row) {
-  if (!row.name) return h("code", { class: "mcpOverview__agent", title: row.userAgent || "No User-Agent" }, row.userAgent || EMPTY);
-  return h("span", { class: "mcpOverview__name", title: row.userAgent }, h("strong", null, row.name), row.version ? h("span", { class: "mcpMuted" }, ` ${row.version}`) : null);
+  const note = CLIENT_NOTE[row.client] || "";
+  const lines = [row.client, row.versions.length ? `Versions: ${row.versions.join(", ")}` : "", note].filter(Boolean);
+  return h("span", { class: "mcpOverview__name", title: lines.join("\n") },
+    note ? h("span", { class: "mcpMuted mcpOverview__client" }, row.client) : h("strong", { class: "mcpOverview__client" }, row.client),
+    row.versions.length ? h("span", { class: "mcpMuted mcpOverview__versions" }, ` ${row.versions.join(", ")}`) : null);
 }
 
 const when = (t, now) => (t == null ? EMPTY : h("span", { title: format.timeTitle(t) }, format.ago(t, { now, short: true })));
@@ -655,20 +594,23 @@ const TABLES = {
     },
   },
   clients: {
-    title: "Clients",
-    label: "Clients of the keys",
-    dimension: "",
+    title: "By client",
+    label: "Usage by client",
+    dimension: "client",
     noun: "clients",
-    none: "No client was seen.",
+    none: "No client sent a request in this view.",
+    // How a client is named (the server counts it by that name): the clientInfo of its initialize, else the product of its User-Agent.
+    note: "A client is named as it says in initialize (clientInfo), else by the product of its User-Agent (the text before the first / or space), else unknown. Other holds the names past the caps: 16 for a key, 4,096 in all. Its versions are those that it sent, the latest first.",
     rows: (data) => data.clients,
     omitted: (data) => data.omitted.clients,
-    value: () => "",
+    value: (row) => row.client,
     columns: (data) => [
-      { key: "name", label: "Client", text: true, title: "Sort by name", sort: (row) => (row.name || row.userAgent).toLowerCase(), cell: clientCell },
-      { key: "keys", label: "Keys", title: "Keys that the client used", sort: (row) => row.keys, cell: (row) => count(row.keys) },
+      { key: "client", label: "Client", text: true, title: "Sort by name", sort: (row) => row.client.toLowerCase(), cell: clientCell },
       { key: "requests", label: "Requests", title: "Requests of the client", sort: (row) => row.requests, cell: (row) => count(row.requests) },
-      { key: "first", label: "First seen", title: "When the client was first seen", sort: (row) => row.firstSeenAt, cell: (row) => (row.firstSeenAt == null ? EMPTY : h("span", { title: format.timeTitle(row.firstSeenAt) }, minute(row.firstSeenAt))) },
-      { key: "last", label: "Last seen", title: "When the client was last seen", sort: (row) => row.lastSeenAt, cell: (row) => when(row.lastSeenAt, data.to) },
+      { key: "errors", label: "Errors", title: "Errors, and their share of the requests that were read", sort: (row) => row.errors, cell: (row) => errorsCell(row.errors, row.requests - refusals(row)) },
+      { key: "avg", label: "Avg time", title: "The average time of a tool call", sort: (row) => row.durationMsAvg, cell: (row) => h("span", { title: row.durationMsMax == null ? "" : `The longest call took ${ms(row.durationMsMax)}` }, ms(row.durationMsAvg)) },
+      { key: "keys", label: "Keys", title: "Keys that the client used", sort: (row) => row.keys, cell: (row) => count(row.keys) },
+      { key: "last", label: "Last seen", title: "When the keys last saw the client, in any window", sort: (row) => row.lastSeenAt, cell: (row) => when(row.lastSeenAt, data.to) },
     ],
   },
 };
@@ -684,14 +626,11 @@ function blockOf(id) {
   block.section = h("section", { class: "mcpOverview__block", "aria-labelledby": `mcpOverviewTitle-${id}` },
     h("div", { class: "pagePart__head mcpOverview__blockHead" },
       h("h3", { class: "mcpOverview__blockTitle", id: `mcpOverviewTitle-${id}` }, spec.title), block.count,
-      spec.dimension ? h("span", { class: "mcpMuted mcpOverview__hint" }, "Click a row to filter") : null),
+      h("span", { class: "mcpMuted mcpOverview__hint" }, "Click a row to filter")),
     block.box, block.more,
-    spec.dimension ? null : h("p", { class: "mcpNote mcpNote--fine" },
-      "A client is counted since it was first seen, as far as the retention keeps it: the window, and every filter but the key, do not apply to it."));
+    spec.note ? h("p", { class: "mcpNote mcpNote--fine" }, spec.note) : null);
   tableMod.scrollCues(block.box);
-  if (spec.dimension) {
-    tableMod.rovingRows(block.box, { onOpen: (row) => toggleFilter(row.dataset.dimension, row.dataset.value), key: (row) => row.dataset.value });
-  }
+  tableMod.rovingRows(block.box, { onOpen: (row) => toggleFilter(row.dataset.dimension, row.dataset.value), key: (row) => row.dataset.value });
   els.blocks[id] = block;
   return block.section;
 }
@@ -736,9 +675,8 @@ function renderTable(id) {
   });
   const body = sorted(rows, by, sort.dir).map((row) => {
     const value = spec.value(row);
-    const on = !!spec.dimension && model.filters[spec.dimension].includes(value);
+    const on = model.filters[spec.dimension].includes(value);
     const cells = columns.map((column, index) => (index === 0 ? h("th", { scope: "row" }, column.cell(row)) : h("td", { class: column.text ? null : "num" }, column.cell(row))));
-    if (!spec.dimension) return h("tr", { class: "mcpOverview__row" }, cells);
     return h("tr", { class: ["mcpOverview__row", "is-pickable", on && "is-selected"], tabindex: "-1", "aria-selected": on ? "true" : "false", dataset: { dimension: spec.dimension, value } }, cells);
   });
   h.replace(block.box, h("table", { class: "dataTable dataTable--compact mcpOverview__table", "aria-label": spec.label },

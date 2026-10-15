@@ -76,7 +76,7 @@ test('the page is a page of its own: shell, modules, one heading, no host picker
   expect(state.page).toBe('mcp');
   expect(state.sheets).toEqual(['style.mcp.css']);
   for (const name of ['app_page_mcp.js', 'app_mcp_view.js', 'app_mcp_form.js', 'app_api.js']) expect(state.scripts, name).toContain(name);
-  for (const name of ['app_explorer.js', 'app_system_view.js', 'app_traces.js', 'app_logs.js', 'app_sql.js', 'app_ui_filterbar.js', 'app_mcp_overview.js', 'app_chart_core.js', 'app_page_mcpusage.js']) expect(state.scripts, name).not.toContain(name);
+  for (const name of ['app_explorer.js', 'app_system_view.js', 'app_traces.js', 'app_logs.js', 'app_sql.js', 'app_ui_filterbar.js', 'app_mcp_overview.js', 'app_mcp_bar.js', 'app_mcp_charts.js', 'app_chart_core.js', 'app_page_mcpusage.js']) expect(state.scripts, name).not.toContain(name);
   expect(new Set(state.scripts).size).toBe(state.scripts.length);
   // Not tied to a host: the picker is not on screen, the switcher and the theme are.
   await expect(page.locator('#hostPicker')).toBeHidden();
@@ -915,7 +915,7 @@ test('a key is made or deleted: nothing on the page changes it, and no request d
   await expect(details(page)).toHaveCount(1);
   for (const label of ['Edit', 'Disable', 'Enable', 'Rotate', 'Rotate secret']) await expect(details(page).getByRole('button', { name: label })).toHaveCount(0);
   // The details only show: a button looks at the grants again, the windows of the usage, and the cost that opens.
-  await expect(details(page).getByRole('button')).toHaveText(['Check again', '24 h', '7 d', '30 d', '90 d', 'ClickHouse cost']);
+  await expect(details(page).getByRole('button')).toHaveText(['Check again', '1 h', '6 h', '24 h', '7 d', '30 d', '90 d', 'ClickHouse cost']);
   expect(server.calls.filter((call) => ['PATCH', 'PUT'].includes(call.method) || call.path.endsWith('/rotate'))).toHaveLength(0);
 });
 
@@ -1612,15 +1612,16 @@ test('the usage of a key in its details: a window, the tiles, the trend, the too
   expect(callsTo(server, '/keys/ui_0a1b2c3d4e5f/usage')).toEqual(['?window=7d']);
   await expect(usage.getByRole('button', { name: '7 d' })).toHaveAttribute('aria-pressed', 'true');
   await expect(usage.locator('svg.sparkline')).toHaveCount(1);
-  await expect(usage.locator('svg.sparkline')).toHaveAttribute('aria-label', /Tool calls by day in the last 7 days/);
+  // The sparkline has a point for each step of the window: 3 hours for 7 d.
+  await expect(usage.locator('svg.sparkline')).toHaveAttribute('aria-label', /^Tool calls by 3 hours in the last 7 days, the errors in red; the most: 12 \(Oct 14 09:00\)$/);
   await expect(usage.locator('.mcpUsage__table').first()).toContainText('query_table');
   await expect(usage).toContainText('table_not_allowed');
   await expect(usage).toContainText('claude-code');
   await expect(usage).toContainText('claude-code/2.1.3 (node)');
-  // Another window reads again, by the hour; the choice holds for another key.
+  // Another window reads again, by 15 minutes; the choice holds for another key.
   await usage.getByRole('button', { name: '24 h' }).click();
   await expect.poll(() => callsTo(server, '/keys/ui_0a1b2c3d4e5f/usage')).toEqual(['?window=7d', '?window=24h']);
-  await expect(usage.locator('svg.sparkline')).toHaveAttribute('aria-label', /Tool calls by hour in the last 24 hours/);
+  await expect(usage.locator('svg.sparkline')).toHaveAttribute('aria-label', /^Tool calls by 15 minutes in the last 24 hours, the errors in red; the most: 12 \(Oct 14 10:00\)$/);
   await row(page, 'ops-all').locator('[data-action="open"]').click();
   await expect.poll(() => callsTo(server, '/keys/ops-all/usage')).toEqual(['?window=24h']);
   // Opened again within a minute: what was read shows, with no request.
@@ -1635,6 +1636,16 @@ test('the usage of a key in its details: a window, the tiles, the trend, the too
   await page.setViewportSize({ width: 390, height: 800 });
   await expect(details(page).locator('.mcpUsage .statTile')).toHaveCount(6);
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+  // Each window has the step of the server in its sparkline: the minute, 5 minutes, 15 minutes, 3 hours, 12 hours and the day.
+  for (const [name, text] of [['1 h', 'minute in the last hour'], ['6 h', '5 minutes in the last 6 hours'], ['24 h', '15 minutes in the last 24 hours'], ['7 d', '3 hours in the last 7 days'], ['30 d', '12 hours in the last 30 days'], ['90 d', 'day in the last 90 days']]) {
+    await usage.getByRole('button', { name }).click();
+    await expect(usage.getByRole('button', { name })).toHaveAttribute('aria-pressed', 'true');
+    await expect(usage.locator('svg.sparkline')).toHaveAttribute('aria-label', new RegExp(`^Tool calls by ${text}, the errors in red; the most: 12 \\(`));
+  }
+  // The peak of a day is a date; the peak of a step of less than a day is a time of the day.
+  await expect(usage.locator('.mcpUsage__peak')).toHaveText('Peak 12 calls, 2026-10-14');
+  await usage.getByRole('button', { name: '1 h' }).click();
+  await expect(usage.locator('.mcpUsage__peak')).toHaveText('Peak 12 calls, Oct 14 10:00');
 });
 
 test('the ClickHouse cost of a key is read only when it is opened, and says why the runner cannot read query_log', async ({ page }) => {
@@ -1657,6 +1668,15 @@ test('the ClickHouse cost of a key is read only when it is opened, and says why 
   await expect.poll(() => callsTo(server, '/keys/ui_0a1b2c3d4e5f/cost')).toEqual(['?window=7d', '?window=7d&refresh=1']);
   await details(page).locator('.mcpUsage').getByRole('button', { name: '24 h' }).click();
   await expect.poll(() => callsTo(server, '/keys/ui_0a1b2c3d4e5f/cost')).toEqual(['?window=7d', '?window=7d&refresh=1', '?window=24h']);
+  // The windows of the cost are 1 h, 6 h, 24 h and 7 d: the cost has the window of the usage when it can, else the largest (7 d, as it was
+  // read a minute ago: no new read for 30 d and 90 d).
+  const usageBox = details(page).locator('.mcpUsage');
+  for (const [name, range] of [['1 h', 'Oct 14 09:01 → 10:01'], ['6 h', 'Oct 14 04:01 → 10:01'], ['30 d', 'Oct 7 10:01 → Oct 14 10:01'], ['90 d', 'Oct 7 10:01 → Oct 14 10:01']]) {
+    await usageBox.getByRole('button', { name }).click();
+    await expect(usageBox.getByRole('button', { name })).toHaveAttribute('aria-pressed', 'true');
+    await expect(details(page).locator('.mcpCost__range'), name).toHaveText(range);
+  }
+  expect(callsTo(server, '/keys/ui_0a1b2c3d4e5f/cost')).toEqual(['?window=7d', '?window=7d&refresh=1', '?window=24h', '?window=1h', '?window=6h']);
   // A key whose runner may not read query_log: the reason and the GRANT to give.
   await row(page, 'reporting').locator('[data-action="open"]').click();
   const other = details(page).locator('.mcpCost');
@@ -1679,9 +1699,10 @@ test('the usage of a key leads to the Usage tab, cut by the key, in the window t
   await link.click();
   await expect(page).toHaveURL(/\/mcp-integration\/usage\?key=ui_0a1b2c3d4e5f&window=24h$/);
   await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
-  await expect(page.locator('.mcpOverview__windows [aria-pressed="true"]')).toHaveText('24 h');
+  await expect(page.locator('.mcpBar__windows [aria-pressed="true"]')).toHaveText('24 h');
   await expect(page.locator('.mcpOverview__chips .chip')).toHaveText('Key=ci-bot');
-  expect(callsTo(server, '/usage/overview')).toEqual(['?window=24h&split=method&key=ui_0a1b2c3d4e5f']);
+  await expect(page.locator('#mcpPickerButton-key')).toHaveText('Key · ci-bot');
+  expect(callsTo(server, '/usage/overview')).toEqual(['?window=24h&group=method&key=ui_0a1b2c3d4e5f']);
 });
 
 test('a long name in the tables read ends in an ellipsis in its column, with the whole name in its title', async ({ page }) => {

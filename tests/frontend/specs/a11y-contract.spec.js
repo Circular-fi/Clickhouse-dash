@@ -283,9 +283,10 @@ test('axe (dark): the MCP page has no violation', async ({ page }) => {
   expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
 });
 
-// The Usage tab of the MCP pages has a chart with its legend, filter chips and four tables. Usage is made first on the instance, with the
-// key of the config file that reads everything (an initialize that names a client, tools/list, a tool call, a method that nobody knows and a
-// notification), so that every part has something to show. Both themes: the muted hints and the warning colours are on the tab.
+// The Usage tab of the MCP pages has a filter bar (Group by and three lists of check boxes, the window, Refresh), four charts with their
+// legends, filter chips and four tables. Usage is made first on the instance, with the key of the config file that reads everything (an
+// initialize that names a client, tools/list, a tool call, a method that nobody knows and a notification), so that every part has something
+// to show. Both themes: the muted hints and the warning colours are on the tab.
 const MCP_ALL_DATA_KEY = 'a11da7a0-0000-4000-8000-000000000001';
 
 async function makeMcpUsage(request, base) {
@@ -300,7 +301,7 @@ async function makeMcpUsage(request, base) {
 }
 
 for (const theme of THEMES) {
-  test(`axe (${theme}): the MCP Usage tab has no violation, with its legend, its chips and its tables`, async ({ page, request }) => {
+  test(`axe (${theme}): the MCP Usage tab has no violation, with its bar, its lists, its legends, its chips and its tables`, async ({ page, request }) => {
     const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
     requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
     await makeMcpUsage(request, base);
@@ -320,10 +321,35 @@ for (const theme of THEMES) {
     await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
     await page.waitForTimeout(600);
     expect(await violations()).toEqual([]);
-    // The window and the split are switches: pressed states and the empty chart of a window that has nothing.
-    await page.locator('.mcpOverview__split').getByRole('button', { name: 'Results' }).click();
-    await expect(page.locator('.mcpOverview__card .chartCard__title')).toHaveText('Requests by result');
-    await page.locator('.mcpOverview__windows').getByRole('button', { name: '24 h' }).click();
+    // The lists of the bar are dialogs of check boxes, open: they have no violation, and a pick leaves none either (the chips and the box).
+    for (const dimension of ['key', 'method', 'client']) {
+      await page.locator(`#mcpPickerButton-${dimension}`).click();
+      await expect(page.locator(`#mcpPickerMenu-${dimension}`)).toBeVisible();
+      await page.waitForTimeout(400);
+      expect(await violations(), `the ${dimension} list`).toEqual([]);
+      await page.keyboard.press('Escape');
+      await expect(page.locator(`#mcpPickerMenu-${dimension}`)).toBeHidden();
+    }
+    // A pick in a list is one more chip (the lists keep every filter but their own: the client that the others leave may be none).
+    const chipsBefore = await page.locator('.mcpOverview__chips .chip').count();
+    await page.locator('#mcpPickerButton-client').click();
+    const boxes = page.locator('#mcpPickerMenu-client input[type="checkbox"]');
+    if (await boxes.count()) {
+      await boxes.first().check();
+      await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(chipsBefore + 1);
+    }
+    await page.keyboard.press('Escape');
+    // The page reads when the clicks of a list pause.
+    await page.waitForTimeout(600);
+    await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
+    // Group by, the window and the four charts: pressed states, a list of one choice, and the empty chart of a window that has nothing.
+    await page.locator('#mcpGroupButton').click();
+    await expect(page.locator('.mcpBar__groupPicker .tracePicker__option[data-value="client"]')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await violations(), 'Group by').toEqual([]);
+    await page.locator('.mcpBar__groupPicker .tracePicker__option[data-value="client"]').click();
+    await expect(page.locator('#mcpGroupButton')).toHaveText('Group by · Client');
+    await page.locator('.mcpBar__windows').getByRole('button', { name: '24 h' }).click();
     await expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
     await page.waitForTimeout(600);
     expect(await violations()).toEqual([]);

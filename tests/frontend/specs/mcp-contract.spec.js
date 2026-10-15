@@ -90,7 +90,9 @@ test('the usage of the keys, the usage of a key and its cost: the same shape, th
   const real = {
     summary: await call(page, 'GET', '/api/mcp/usage?window=7d'),
     usage: await call(page, 'GET', `/api/mcp/keys/${realConfig.id}/usage?window=24h`),
+    usageByMinute: await call(page, 'GET', `/api/mcp/keys/${realConfig.id}/usage?window=1h`),
     cost: await call(page, 'GET', `/api/mcp/keys/${realConfig.id}/cost?window=24h`),
+    costOfAnHour: await call(page, 'GET', `/api/mcp/keys/${realConfig.id}/cost?window=1h`),
     unknown: await call(page, 'GET', '/api/mcp/keys/nope/usage'),
     window: await call(page, 'GET', '/api/mcp/usage?window=48h'),
   };
@@ -99,16 +101,22 @@ test('the usage of the keys, the usage of a key and its cost: the same shape, th
   const fakeConfig = fake.keys.find((key) => key.source === 'config');
   compare({ real: real.summary, fake: await call(page, 'GET', '/api/mcp/usage?window=7d') }, 'usage of the keys');
   compare({ real: real.usage, fake: await call(page, 'GET', `/api/mcp/keys/${fakeConfig.id}/usage?window=24h`) }, 'usage of a key');
+  // The step of the series is a number of seconds (900 for 24 h, 60 for 1 h), whatever the window; the windows of the cost are 1 h to 7 d.
+  compare({ real: real.usageByMinute, fake: await call(page, 'GET', `/api/mcp/keys/${fakeConfig.id}/usage?window=1h`) }, 'usage of a key in the last hour');
+  expect(real.usage.body.series.step, 'the real step of 24 h').toBe(900);
+  expect(real.usageByMinute.body.series.step, 'the real step of 1 h').toBe(60);
+  expect(real.usageByMinute.body.series.points, 'the real points of 1 h').toHaveLength(60);
   compare({ real: real.cost, fake: await call(page, 'GET', `/api/mcp/keys/${fakeConfig.id}/cost?window=24h`) }, 'cost of a key');
+  compare({ real: real.costOfAnHour, fake: await call(page, 'GET', `/api/mcp/keys/${fakeConfig.id}/cost?window=1h`) }, 'cost of a key in the last hour');
   compare({ real: real.unknown, fake: await call(page, 'GET', '/api/mcp/keys/nope/usage') }, 'usage of an unknown key');
   compare({ real: real.window, fake: await call(page, 'GET', '/api/mcp/usage?window=48h') }, 'a window that the retention does not keep');
 });
 
 // The usage of every key (GET /api/mcp/usage/overview). A list that is empty accepts any shape, so the usage is made first on the real
-// instance, with the key of the config file that reads everything (tests/config/mcp.hcl): an initialize that names a client, tools/list,
-// a tool call, a method that nobody knows and a notification. Then the page's own calls are compared: the answer with nothing asked, a
-// filtered one, one split by key, and the refusals (a split that does not exist, a value that is not valid, a parameter that is not one,
-// more than 20 values).
+// instance, with the key of the config file that reads everything (tests/config/mcp.hcl): an initialize that names a client, tools/list, a
+// tool call, a method that nobody knows and a notification. Then the page's own calls are compared: the answer with nothing asked, a
+// filtered one, one grouped by key and one by client, the finest window, and the refusals (the old `split`, a group that does not exist, a
+// value that is not valid, a client that is not valid, a parameter that is not one, more than 20 values).
 const ALL_DATA_KEY = 'a11da7a0-0000-4000-8000-000000000001';
 
 async function makeUsage(request) {
@@ -126,18 +134,23 @@ async function makeUsage(request) {
   expect(answers.map((answer) => answer.status())).toEqual([200, 200, 200, 200, 202]);
 }
 
-test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one and a split by key, the same refusals', async ({ page, request }) => {
+test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one, a group by key and by client, the same refusals', async ({ page, request }) => {
   await makeUsage(request);
   const asked = {
     plain: '/api/mcp/usage/overview',
-    filtered: '/api/mcp/usage/overview?window=24h&split=result&key=all-data&method=tools/list',
-    byKey: '/api/mcp/usage/overview?window=24h&split=key',
-    byType: '/api/mcp/usage/overview?window=24h&split=type&type=call&type=request',
+    filtered: '/api/mcp/usage/overview?window=24h&group=client&key=all-data&method=tools/list',
+    byKey: '/api/mcp/usage/overview?window=24h&group=key',
+    byClient: '/api/mcp/usage/overview?window=1h&group=client&client=chdash-contract',
+    byResult: '/api/mcp/usage/overview?window=6h&group=result&result=ok',
+    byType: '/api/mcp/usage/overview?window=24h&group=type&type=call&type=request',
     badWindow: '/api/mcp/usage/overview?window=48h',
-    badSplit: '/api/mcp/usage/overview?split=nope',
+    badGroup: '/api/mcp/usage/overview?group=nope',
+    oldSplit: '/api/mcp/usage/overview?split=method',
     badValue: '/api/mcp/usage/overview?key=BAD!',
+    badClient: '/api/mcp/usage/overview?client=%20padded',
     unknown: '/api/mcp/usage/overview?bogus=1',
     tooMany: `/api/mcp/usage/overview?${Array.from({ length: 21 }, (_, i) => `method=m${i}`).join('&')}`,
+    tooManyClients: `/api/mcp/usage/overview?${Array.from({ length: 21 }, (_, i) => `client=c${i}`).join('&')}`,
   };
   await realPage(page);
   const real = {};
@@ -147,12 +160,28 @@ test('GET /api/mcp/usage/overview: the same shape for the answer, a filtered one
   expect(real.plain.body.totals.requests).toBeGreaterThanOrEqual(5);
   expect(real.plain.body.keys.map((item) => item.id)).toContain('all-data');
   expect(real.plain.body.methods.map((item) => item.method)).toEqual(expect.arrayContaining(['initialize', 'tools/list', 'list_hosts', 'other', 'notifications/initialized']));
-  expect(real.plain.body.clients.map((item) => item.name)).toContain('chdash-contract');
-  expect(real.filtered.body.filters).toEqual({ key: ['all-data'], method: ['tools/list'], result: [], type: [] });
-  expect(real.badSplit.status).toBe(400);
-  expect(real.badSplit.body).toMatchObject({ error_code: 'validation', field: 'split', reason: 'invalid' });
+  // A client is a dimension of the window, named by its clientInfo: the rows are { client, ... }, and `group` is the name of what the series groups.
+  expect(real.plain.body.clients.map((item) => item.client)).toContain('chdash-contract');
+  expect(real.plain.body.group).toBe('method');
+  expect(real.byClient.body.group).toBe('client');
+  expect(real.byClient.body.series.groups.map((item) => item.id)).toEqual(['chdash-contract']);
+  expect(real.byClient.body.clients.map((item) => item.client)).toContain('chdash-contract');
+  // The series has five figures for each group, and a step in seconds (a minute for 1 h, 15 minutes for 24 h).
+  expect(Object.keys(real.byClient.body.series.groups[0]).sort()).toEqual(['bytes', 'calls', 'duration_ms_sum', 'errors', 'id', 'label', 'requests', 'total']);
+  expect(real.byClient.body.series.step).toBe(60);
+  expect(real.byKey.body.series.step).toBe(900);
+  expect(real.byClient.body.series.t).toHaveLength(60);
+  expect(real.filtered.body.filters).toEqual({ key: ['all-data'], method: ['tools/list'], client: [], result: [], type: [] });
+  // The refusals: a group or a value that is not one is 400 invalid; `split` (what `group` was called) and a parameter that is not one are
+  // unknown; a kind of filter takes 20 values.
+  expect(real.badGroup.status).toBe(400);
+  expect(real.badGroup.body).toMatchObject({ error_code: 'validation', field: 'group', reason: 'invalid' });
+  expect(real.oldSplit.status).toBe(400);
+  expect(real.oldSplit.body).toMatchObject({ error_code: 'validation', field: 'split', reason: 'unknown' });
+  expect(real.badClient.body).toMatchObject({ error_code: 'validation', field: 'client', reason: 'invalid' });
   expect(real.unknown.body).toMatchObject({ error_code: 'validation', field: 'bogus', reason: 'unknown' });
   expect(real.tooMany.body).toMatchObject({ error_code: 'validation', field: 'method', reason: 'too_many' });
+  expect(real.tooManyClients.body).toMatchObject({ error_code: 'validation', field: 'client', reason: 'too_many' });
   await fakePage(page, newServer());
   for (const [name, path] of Object.entries(asked)) compare({ real: real[name], fake: await call(page, 'GET', path) }, `usage overview, ${name}`);
 });

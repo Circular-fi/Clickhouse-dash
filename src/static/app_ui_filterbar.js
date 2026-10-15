@@ -33,12 +33,14 @@
 //                                    (type submit: onSubmit runs it)
 //     A chip's set(on) changes it quietly; onChange(on) runs on
 //     a click.
-//   filterBar.mountSummary(form)
+//   filterBar.mountSummary(form, { describe })
 //     the phone fold (at --bp-sm, 600 px, and below): one summary line, a
 //     .foldSummary "<time range> · N filters", stands for the folded
 //     bar and unfolds it; the action folds it again; the chips row right
 //     after the bar folds with it. Wider windows show the bar, the
-//     summary hidden (the rules sit in max-width: 600px blocks).
+//     summary hidden (the rules sit in max-width: 600px blocks). A bar
+//     with no time range (the MCP Usage bar: a window and a group)
+//     gives describe(), the text that stands for it on the folded line.
 
 import { dom, h, shell } from "./app_dom.js";
 import { icon as iconMod } from "./app_ui_icon.js";
@@ -153,7 +155,7 @@ function rangeText(form) {
   return String(text || "").replace(/^Time range · /, "").trim();
 }
 
-function mountSummary(form) {
+function mountSummary(form, { describe = null } = {}) {
   if (!form || $(":scope > .obsFilterSummary", form)) return;
   const range = h("span", { class: "foldSummary__text" });
   const count = h("span", { class: "foldSummary__meta" });
@@ -163,7 +165,7 @@ function mountSummary(form) {
   // a click does (a range twice, once in the line and once in the picker, was one too many).
   const refresh = () => {
     const open = !form.classList.contains("is-folded");
-    const text = open ? "Hide the filters" : rangeText(form);
+    const text = open ? "Hide the filters" : describe ? describe() : rangeText(form);
     const n = open ? 0 : filterCount(form);
     if (range.textContent !== text) range.textContent = text;
     const label = n ? ` · ${n} filter${n === 1 ? "" : "s"}` : "";

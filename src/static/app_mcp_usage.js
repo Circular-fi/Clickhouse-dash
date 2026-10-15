@@ -2,11 +2,11 @@
 // of a key"). app_mcp_form.js puts the two sections under the data that the key reads; a deleted key shows them alone.
 //
 //   ns.mcpUsage.sections(key, { meta })   [usage, cost]: two sections, the second one closed
-//       Usage: what the key did in a window (24 h, 7 d, ... as the retention keeps them): tiles, the calls of each hour or day with
-//       the errors, the tools, the results and the clients. The window that the reader picks stays for the visit of the page.
-//       "Open in Usage" leads to the Usage tab (app_mcp_overview.js), filtered by this key, in the same window.
+//       Usage: what the key did in a window (1 h, 6 h, 24 h, 7 d, ... as the retention keeps them): tiles, the calls of each step of the
+//       window (a minute to a day) with the errors, the tools, the results and the clients. The window that the reader picks stays for the
+//       visit of the page. "Open in Usage" leads to the Usage tab (app_mcp_overview.js), filtered by this key, in the same window.
 //       ClickHouse cost: what the statements of the key cost, read from system.query_log of its host when the section is opened (a
-//       scan of the log: never before it is asked), in the window of the usage (24 h, else 7 d).
+//       scan of the log: never before it is asked), in the window of the usage when the cost has it (1 h, 6 h, 24 h, 7 d), else in 7 d.
 //   ns.mcpUsage.forget()                  the next read asks the server again (the Refresh button of the page)
 //   ns.mcpUsage.cancel()                  stops the reads in flight (the details close)
 // Each answer is kept 60 s for its key and window, as the server keeps the cost.
@@ -35,13 +35,22 @@ const openCosts = new Set();
 // The window that the reader picked: the same for every key of the visit, so two keys are compared on the same window.
 let chosenWindow = "";
 
-const WINDOW_LABEL = { "24h": "24 h", "7d": "7 d", "30d": "30 d", "90d": "90 d", "365d": "365 d" };
-const WINDOW_TEXT = { "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days", "90d": "the last 90 days", "365d": "the last 365 days" };
+const WINDOW_LABEL = { "1h": "1 h", "6h": "6 h", "24h": "24 h", "7d": "7 d", "30d": "30 d", "90d": "90 d", "365d": "365 d" };
+const WINDOW_TEXT = {
+  "1h": "the last hour", "6h": "the last 6 hours", "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days", "90d": "the last 90 days", "365d": "the last 365 days",
+};
 const count = (n) => format.count(n);
 const plural = (n, one, many) => `${count(n)} ${n === 1 ? one : many}`;
 const ms = (value) => (value == null ? EMPTY : format.duration.fromMs(value));
 const minute = (t) => format.time(t, { precision: "min" });
 const day = (t) => format.iso(t).slice(0, 10);
+
+// The step of a series (seconds) as a word: "minute", "5 minutes", "15 minutes", "3 hours", "12 hours", "day".
+function stepWord(seconds) {
+  if (seconds >= 86400) return "day";
+  const [n, unit] = seconds >= 3600 ? [seconds / 3600, "hour"] : [seconds / 60, "minute"];
+  return n === 1 ? unit : `${n} ${unit}s`;
+}
 
 function cached(cache, key) {
   const hit = cache.get(key);
@@ -95,15 +104,15 @@ function usageBody(usage) {
     stat.tile({ label: "Last use", value: usage.lastUsedAt == null ? EMPTY : format.ago(usage.lastUsedAt, { now, short: true }),
       sub: usage.firstUsedAt == null ? "" : `first ${minute(usage.firstUsedAt)}`, title: usage.lastUsedAt == null ? "" : format.timeTitle(usage.lastUsedAt) })));
 
-  // The calls of each hour or day, and the errors as the second line.
+  // The calls of each step of the window (1 minute to 1 day), and the errors as the second line.
   const points = usage.series.points;
-  const hourly = usage.series.step === "hour";
+  const daily = usage.series.step >= 86400;
   const peak = points.reduce((best, point) => (point.calls > best.calls ? point : best), { calls: 0, t: null });
-  const when = (t) => (hourly ? minute(t) : day(t));
+  const when = (t) => (daily ? day(t) : minute(t));
   const trend = h("div", { class: "mcpUsage__trend" });
   chartUi.sparkline.draw(trend, points.map((point) => point.calls), {
     alt: points.map((point) => point.errors), area: true, min: 0, className: "mcpUsage__spark",
-    label: `Tool calls by ${hourly ? "hour" : "day"} in ${WINDOW_TEXT[usage.window] || "the window"}, the errors in red${peak.calls ? `; the most: ${count(peak.calls)} (${when(peak.t)})` : ""}`,
+    label: `Tool calls by ${stepWord(usage.series.step)} in ${WINDOW_TEXT[usage.window] || "the window"}, the errors in red${peak.calls ? `; the most: ${count(peak.calls)} (${when(peak.t)})` : ""}`,
   });
   out.push(h("div", { class: "mcpUsage__trendRow" }, trend,
     h("span", { class: "mcpMuted mcpUsage__peak" }, peak.calls ? `Peak ${plural(peak.calls, "call", "calls")}, ${when(peak.t)}` : "No tool call")));
@@ -140,7 +149,7 @@ function usageSection(key, meta, onWindow) {
   const picker = h("div", { class: "mcpUsage__windows" });
   segmented.render(picker, windows.map((value) => ({ value, label: WINDOW_LABEL[value] || value })), { attr: "window", value: chosenWindow, size: "compact", label: "Window" });
   // The Usage tab, filtered by this key, in the window that is picked here.
-  const open = h("a", { class: "mcpUsage__open", title: "The usage of this key in the Usage tab, where it can be cut by method, result and type" }, "Open in Usage");
+  const open = h("a", { class: "mcpUsage__open", title: "The usage of this key in the Usage tab, where it can be cut by method, client, result and type" }, "Open in Usage");
   const link = () => { open.href = `${api.resolveUrl("mcp-integration/usage")}?${new URLSearchParams({ key: key.id, window: chosenWindow }).toString()}`; };
   link();
   const body = h("div", { class: "mcpUsage__body" });

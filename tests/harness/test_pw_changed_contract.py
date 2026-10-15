@@ -42,6 +42,8 @@ def test_every_frontend_file_maps_to_specs_that_exist(file):
     ("src/static/app_mcp_form.js", "mcp-page"),
     ("src/static/mcp.html", "mcp-page"),
     ("src/static/app_mcp_overview.js", "mcp-usage"),
+    ("src/static/app_mcp_bar.js", "mcp-usage"),
+    ("src/static/app_mcp_charts.js", "mcp-usage"),
     ("src/static/app_page_mcpusage.js", "mcp-usage"),
     ("src/static/mcpusage.html", "mcp-usage"),
     ("src/static/app_mcp_view.js", "mcp-usage"),
@@ -59,6 +61,8 @@ def test_every_frontend_file_maps_to_specs_that_exist(file):
     ("src/wasm/sqlscan.c", "wasm-sql"),
     ("src/static/wasm/treemap.wasm", "wasm-treemap"),
     ("src/static/app_ui_filterbar.js", "obs-filterbar"),
+    ("src/static/app_ui_filterbar.js", "mcp-usage"),
+    ("src/static/app_ui_menu.js", "mcp-usage"),
     ("src/static/app_trace_nav.js", "trace-page"),
 ])
 def test_the_files_that_fell_to_the_general_set_have_their_own_specs(file, expected):

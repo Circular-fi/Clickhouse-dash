@@ -1297,27 +1297,161 @@ body[data-page="mcp"] #mcpPanel {
   width: 8.5rem;
 }
 
-/* The Usage tab (mcpusage.html, app_mcp_overview.js, docs/mcp-integration-page.md, "The Usage tab"): the head with the window, the filter chips,
-   the tiles, the chart that one dimension stacks, the four tables, the notes. The part heading, the chips, the tiles, the chart card and the
-   tables are the shared components: this is what the tab alone has. */
-.mcpOverview__part {
-  gap: var(--space-12);
+/* The Usage tab (mcpusage.html, app_mcp_overview.js, docs/mcp-integration-page.md, "The Usage tab"): the filter bar and its chips, under the row
+   of the two pages and out of the panel that scrolls; then, in the panel, the head with the dates, the tiles, the four charts, the four tables and
+   the notes. The bar (observability.css), the part heading, the chips, the tiles, the chart cards and the tables are the shared components: this is
+   what the tab alone has. */
+
+/* The bar is hidden with the tab. The window and Refresh keep the right end: the window takes the free room to its left. */
+.mcpFilterBar[hidden] {
+  display: none;
 }
 
-.mcpOverview__range {
-  font-size: var(--fs-sm);
-}
-
-.mcpOverview__windows {
+.mcpBar__windows {
   margin-left: auto;
 }
 
-/* The chips, and "Clear filters" after them: the list of chips wraps in its own box, the button keeps its place at its right. */
-.mcpOverview__filters {
+.mcpFilterBar .obsFilterBar__actions {
+  margin-left: 0;
+}
+
+/* A list of the bar (app_mcp_bar.js): the Service picker of Logs with a field that narrows a long list. Its head (the field and "All ...")
+   stays over the values while they scroll. */
+.mcpFilterBar .mcpPicker__menu {
+  width: 290px;
+  min-width: 290px;
+  max-width: calc(100vw - 16px);
+  right: auto;
+  max-height: 22rem;
+  padding: 0 0 var(--space-4);
+  overflow-y: auto;
+}
+
+.mcpPicker__head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-raised);
   display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-8);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.mcpPicker__search {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 25px;
+  padding: 0 var(--space-6);
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-md);
+  background: var(--input-bg);
+  color: var(--text);
+  font: var(--fw-regular) var(--fs-xs)/1 var(--font-sans);
+}
+
+.mcpPicker__search::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.mcpPicker__search[hidden] {
+  display: none;
+}
+
+.mcpPicker__all {
+  flex: none;
+  height: 22px;
+  margin-left: auto;
+  padding: 0 var(--space-8);
+  border: 1px solid var(--button-border);
+  border-radius: var(--r-md);
+  background: var(--button-bg);
+  color: var(--text);
+  font: var(--fw-semibold) var(--fs-xs)/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mcpPicker__all:hover {
+  border-color: var(--button-border-hover);
+}
+
+.mcpPicker__option {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-6);
+  min-height: 27px;
+  padding: 0 var(--space-10);
+  color: var(--text);
+  font: var(--fw-semibold) var(--fs-xs)/1.2 var(--font-sans);
+  cursor: pointer;
+}
+
+.mcpPicker__option[hidden] {
+  display: none;
+}
+
+.mcpPicker__option:hover {
+  background: var(--row-hover);
+}
+
+.mcpPicker__option > input {
+  margin: 0;
+  accent-color: var(--accent-fill);
+}
+
+.mcpPicker__option > input:disabled,
+.mcpPicker__option:has(> input:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.mcpPicker__option.is-muted .mcpPicker__name {
+  color: var(--muted);
+  font-weight: var(--fw-regular);
+}
+
+.mcpPicker__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcpPicker__count {
+  min-width: 1.5rem;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.mcpPicker__none,
+.mcpPicker__note {
+  margin: 0;
+  padding: var(--space-6) var(--space-10);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.mcpPicker__none[hidden],
+.mcpPicker__note[hidden] {
+  display: none;
+}
+
+/* The chips under the bar: the list of chips wraps in its own box, "Clear filters" keeps its place at its right. A long row scrolls in itself
+   rather than push the panel down. */
+.mcpOverview__filters {
+  flex: 0 0 auto;
   align-items: flex-start;
   gap: var(--space-6) var(--space-8);
-  min-width: 0;
+  max-height: 7.5rem;
+  padding: var(--space-6) var(--gutter);
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
 }
 
 .mcpOverview__filters[hidden] {
@@ -1338,6 +1472,14 @@ body[data-page="mcp"] #mcpPanel {
 /* A value of a dimension as a chip: "Method = run_query". A long value ends in an ellipsis. */
 .chip.mcpOverview__chip {
   max-width: 28rem;
+}
+
+.mcpOverview__part {
+  gap: var(--space-12);
+}
+
+.mcpOverview__range {
+  font-size: var(--fs-sm);
 }
 
 .mcpOverview__body {
@@ -1361,23 +1503,42 @@ body[data-page="mcp"] #mcpPanel {
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
 }
 
-/* The tooltip of the chart may float past the plot, over the tables below. */
+/* The four charts: two columns above 1100 px, one under the other from there down. */
+.mcpOverview__charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.mcpOverview__charts[hidden],
+.mcpOverview__empty[hidden] {
+  display: none;
+}
+
+@media (min-width: 1101px) {
+  .mcpOverview__charts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* The tooltip of a chart may float past its plot, over the next chart or the tables below. */
 .mcpOverview__card .mcpOverview__chart {
   z-index: var(--z-sticky);
-  min-height: 13rem;
+  min-height: 11rem;
 }
 
-.mcpOverview__chart > .uiState {
-  min-height: 10rem;
+.mcpOverview__card .mcpOverview__chart:is(:hover, :focus-within) {
+  z-index: var(--z-sticky-top);
 }
 
-/* The Keys | Methods | Results | Type switch sits at the right end of the head of the chart. */
-.mcpOverview__split {
-  display: inline-flex;
+.mcpOverview__chart > .uiState,
+.mcpOverview__empty > .uiState {
+  min-height: 8rem;
 }
 
-/* The four tables: two columns on a wide window (the wide tables, keys and methods, take three fifths; the results and the clients two
-   fifths, each column as tall as its tables), one under the other below it. */
+/* The four tables: two columns on a wide window (the wide tables, keys and methods, take six elevenths; the results and the clients five
+   elevenths, which the eight columns of the keys and the six of the clients need from 1280 px), one under the other below it. */
 .mcpOverview__tables {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1394,7 +1555,7 @@ body[data-page="mcp"] #mcpPanel {
 
 @media (min-width: 1280px) {
   .mcpOverview__tables {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
   }
 }
 
@@ -1422,7 +1583,9 @@ body[data-page="mcp"] #mcpPanel {
   font-size: var(--fs-xs);
 }
 
+/* Up to eight columns in a box of 560 to 760 px: 6 px at the sides of a cell, not 8, keep them in it from 1280 px. */
 .mcpOverview__table {
+  --dt-pad-x: var(--space-6);
   width: 100%;
 }
 
@@ -1456,12 +1619,21 @@ body[data-page="mcp"] #mcpPanel {
   text-overflow: ellipsis;
 }
 
-.mcpOverview__agent {
-  display: inline-block;
-  max-width: 14rem;
+/* A client: its name, then its versions, muted. The versions end in an ellipsis before the name does. */
+.mcpOverview__client {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.mcpOverview__versions {
+  flex: 0 10 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

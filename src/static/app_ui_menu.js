@@ -482,9 +482,11 @@ function select(selectEl, options = {}) {
 // ---- multi -----------------------------------------------------------------
 // A multi-select list: checkboxes (or aria-checked options) that stay
 // open on each pick; the caller renders the list (onOpen) and the button
-// label ("Service - 2 selected").
+// label ("Service - 2 selected"). A listbox is marked multiselectable; a
+// popup that holds check boxes and other controls is a dialog (the MCP
+// Usage pickers), which has no such state.
 function multi(button, menu, options = {}) {
-  menu?.setAttribute("aria-multiselectable", "true");
+  if (menu?.getAttribute("role") === "listbox") menu.setAttribute("aria-multiselectable", "true");
   return bind(button, menu, { items: 'input[type="checkbox"], button, [role="option"]', closeOnSelect: false, ...options });
 }
 

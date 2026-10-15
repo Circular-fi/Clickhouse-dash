@@ -380,7 +380,9 @@ function usedCell(key) {
   return h("span", { class: "mcpUsedCell mcpMuted", dataset: { keyId: key.id, createdAt: key.createdAt || "" }, title: "Reading the use of the key\u2026" }, "\u2026");
 }
 
-const WINDOW_TEXT = { "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days", "90d": "the last 90 days", "365d": "the last 365 days" };
+const WINDOW_TEXT = {
+  "1h": "the last hour", "6h": "the last 6 hours", "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days", "90d": "the last 90 days", "365d": "the last 365 days",
+};
 const windowText = (name) => WINDOW_TEXT[name] || "the window";
 const minuteTime = (ms) => format.time(ms, { precision: "min" });
 

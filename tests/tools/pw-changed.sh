@@ -84,7 +84,7 @@ specs_for() {
     tests/frontend/playwright.config.js|tests/frontend/package.json|tests/Dockerfile.tests) echo ALL ;;
     # The pages without a spec family of their own in the table below, and the WebAssembly kernels with their JavaScript
     # references: the kernel specs compare each one with its reference on the page.
-    src/static/app_mcp_overview.js|src/static/mcpusage.html|src/static/app_page_mcpusage.js) echo mcp-usage ;;
+    src/static/app_mcp_overview.js|src/static/app_mcp_bar.js|src/static/app_mcp_charts.js|src/static/mcpusage.html|src/static/app_page_mcpusage.js) echo mcp-usage ;;
     # The states of the MCP pages (app_mcp_view.js) and their styles (mcp.css) are shared by the two of them, Keys and Usage.
     src/static/app_mcp_view.js|src/static/css/20-features/mcp.css) echo mcp-page mcp-usage ;;
     src/static/app_mcp_*.js|src/static/mcp.html|src/static/app_page_mcp.js) echo mcp-page ;;
@@ -102,7 +102,7 @@ specs_for() {
       echo wasm-layout explorer-graph ;;
     src/static/app_wasm_worker.js) echo wasm-worker wasm-highlight ;;
     src/static/app_wasm.js|src/static/app_wasm_*.js|src/wasm/*|src/static/wasm/*|tools/build_wasm.py) echo wasm-autoload wasm-worker wasm-highlight wasm-sql wasm-rowsort wasm-chartprep wasm-color wasm-treemap wasm-layout ;;
-    src/static/app_ui_filterbar.js) echo obs-filterbar system observability ui-components ;;
+    src/static/app_ui_filterbar.js) echo obs-filterbar system observability ui-components mcp-usage ;;
     src/static/app_trace_heatmap.js) echo trace-heatmap ;;
     src/api_traces.cpp|src/trace_*.cpp|src/trace_*.hpp) echo trace-heatmap trace-insights trace-search-filters trace-services trace-spans trace-views functional ;;
     src/static/app_trace_insights.js) echo trace-insights ;;
@@ -130,7 +130,7 @@ specs_for() {
     src/static/app_query_library.js|src/*query_library*) echo query-library ;;
     src/static/app_graph_kit.js) echo explorer-graph trace-views trace-service-map ;;
     src/static/app_ui_tabs.js|src/static/app_ui_segmented.js|src/static/app_ui_menu.js)
-      echo ui-components ui-consistency ui-foundations ui-layers ;;
+      echo ui-components ui-consistency ui-foundations ui-layers mcp-usage ;;
     src/static/app_ui_layers.js) echo ui-layers ui-popover ui-panels ui-foundations ui-consistency ;;
     src/static/app_ui_popover.js) echo ui-popover ui-layers ui-foundations ;;
     src/static/app_ui_panel.js) echo ui-panels ui-layers ui-foundations explorer-nav logs metrics-browser trace-spans ;;
