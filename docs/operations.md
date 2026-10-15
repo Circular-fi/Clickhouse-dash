@@ -118,7 +118,7 @@ The events:
 | `query.cancel_failed` | A cancel could not reach ClickHouse. |
 | `query.kill_failed` | A `KILL QUERY` of a cancel did not work (a missing grant or a lost connection): the cancel stays best effort. |
 | `mcp.tool_failed` | A tool of MCP failed with an exception: the tool, the key and the cut text of the error. |
-| `mcp.usage_save_failed` | The usage file of the MCP keys (`mcp.usage_file`) could not be written: the file and the error. The counts stay in memory and the next save (a minute later) tries again. |
+| `mcp.usage_save_failed` | The usage file of the MCP keys (`mcp.usage_file`) could not be written: the file and the error. The counts stay in memory and the next save (a minute later) tries again. ChDash writes the whole file every minute when a count changed (every 5 minutes above 8 MiB): a cell takes about 50 to 70 bytes (the length of its names), and the million cells that it keeps at most are 50 to 70 MB, under the 128 MiB that a start reads. |
 | `traces.index_fallback`, `traces.estimate_failed`, `traces.filters_are_broad_failed`, `traces.release_markers_failed`, `traces.attribute_maps_failed` | A Traces route left its fast path: the index search, the estimate of the size of a window, the test of broad filters, the release markers, or the read of the attribute columns. The answer is still given, slower or with less detail (the search says `fallback_reason`). |
 | `query_library` | A load, a migration or a write error of the query library file. |
 

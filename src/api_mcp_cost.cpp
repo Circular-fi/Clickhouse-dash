@@ -211,7 +211,7 @@ void Server::handle_mcp_key_cost(const httplib::Request& req, httplib::Response&
   if (!known) return fail(res, 404, "not_found", "no such key");
   const std::string asked = req.has_param("window") ? req.get_param_value("window") : std::string();
   const auto window = mcp_cost_window(asked.empty() ? "24h" : asked, cfg_.system.query_log_max_lookback_hours, now);
-  if (!window) return fail(res, 400, "validation", "window must be 24h or 7d", "window", "invalid");
+  if (!window) return fail(res, 400, "validation", "window must be 1h, 6h, 24h or 7d", "window", "invalid");
 
   const HostSpec* host = host_id.empty() ? nullptr : find_host(cfg_.hosts, host_id);
   rapidjson::StringBuffer sb;

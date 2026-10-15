@@ -29,7 +29,7 @@ inline std::string mcp_query_id(std::string_view key_id, std::string_view tool) 
   return mcp_query_id_prefix(key_id) + std::string(tool.empty() ? std::string_view("-") : tool) + "/" + random_uuid_v4();
 }
 
-// A window of the cost: the last 24 hours or the last 7 days, to the end of the current minute, cut to the longest window of System >
+// A window of the cost: the last hour, 6 hours, 24 hours or 7 days, to the end of the current minute, cut to the longest window of System >
 // Queries (system.query_log_max_lookback_hours; `clamped` then).
 struct McpCostWindow {
   std::string name;

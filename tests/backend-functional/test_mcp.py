@@ -21,6 +21,7 @@ chdash_source with the feature disabled, only runs the disabled checks):
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import os
@@ -279,10 +280,10 @@ def test_meta_and_version():
     # The usage of the keys: kept in mcp.usage_file, and the windows of its answers.
     usage = meta["usage"]
     assert usage["persisted"] is True and usage["retention_days"] == 90
-    assert usage["windows"] == ["24h", "7d", "30d", "90d"] and usage["default_window"] == "7d"
+    assert usage["windows"] == ["1h", "6h", "24h", "7d", "30d", "90d"] and usage["default_window"] == "7d"
     assert usage["since"].endswith("Z")
     # The windows of the ClickHouse cost of a key (System > Queries is on: it reads query_log the same way).
-    assert usage["cost_windows"] == ["24h", "7d"]
+    assert usage["cost_windows"] == ["1h", "6h", "24h", "7d"]
     assert tools["query_table"]["group"] == "data" and tools["list_hosts"]["group"] == "data"
     assert {tools[n]["group"] for n in ("query_library", "format_sql", "query_execution")} == {"query"}
     # The API tools: one for each read function of the API, in the families of the pages; they need all the data.
@@ -476,6 +477,11 @@ def test_a_tool_the_key_lacks_is_refused():
     fail_tool(MCP_URL, WEATHER, "run_query", {"sql": "SELECT 1"}, "tool_not_allowed")
     fail_tool(MCP_URL, OTEL, "explain_query", {"sql": "SELECT 1"}, "tool_not_allowed")
     fail_tool(MCP_URL, HOSTS_ONLY, "list_databases", {}, "tool_not_allowed")
+
+
+def parse_time(text: str) -> float:
+    """Unix seconds of a time of the answers (ISO 8601 UTC, as 2026-10-15T10:00:00Z)."""
+    return datetime.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()
 
 
 def usage_of(key_id: str, window: str = "24h", base: str | None = None) -> dict:
@@ -1007,9 +1013,10 @@ def test_usage_of_a_key():
         assert {t["tool"]: (t["calls"], t["errors"]) for t in usage["tools"]} == {"list_hosts": (1, 0), "query_table": (1, 1)}
         assert {s["status"]: s["count"] for s in usage["statuses"]} == {
             "ok": 1, "table_not_allowed": 1, "rpc_error_32601": 1, "415_unsupported_media_type": 1}
-        # One point for each hour; the requests are in the last one (or the one before it, at the turn of an hour).
+        # One point for each 15 minutes (the step is a number of seconds); the requests are in the last one (or the one before it, at the
+        # turn of a step).
         points = usage["series"]["points"]
-        assert usage["series"]["step"] == "hour" and len(points) == 24
+        assert usage["series"]["step"] == 900 and len(points) == 96
         assert sum(p["calls"] for p in points[-2:]) == 2 and sum(p["requests"] for p in points) == 6
         # The client named itself in initialize; the requests after it with its User-Agent are its own.
         named = [c for c in usage["clients"] if c["name"] == "pytest-client"]
@@ -1030,7 +1037,12 @@ def test_usage_of_a_key():
         api_error(m("GET", f"/api/mcp/keys/{key['id']}/usage?window=365d"), 400, "validation", field="window", reason="invalid")
         api_error(m("GET", "/api/mcp/usage?window=48h"), 400, "validation", field="window", reason="invalid")
         api_error(m("GET", "/api/mcp/keys/ui_000000000000/usage"), 404, "not_found")
-        assert usage_of(key["id"], "7d")["series"]["step"] == "day"
+        # Each window has the step of its tier, in seconds, and the points of its window; the requests are in all of them.
+        for window, step, count in (("1h", 60, 60), ("6h", 300, 72), ("24h", 900, 96), ("7d", 10800, 56), ("30d", 43200, 60), ("90d", 86400, 90)):
+            each = usage_of(key["id"], window)
+            assert each["series"]["step"] == step and isinstance(each["series"]["step"], int), window
+            assert len(each["series"]["points"]) == count and each["totals"]["requests"] == 6, window
+            assert sum(p["requests"] for p in each["series"]["points"]) == 6, window
         # A deleted key keeps its usage: it is listed after the keys, with when it was deleted.
         drop_key(key["id"])
         gone = usage_of(key["id"])
@@ -1043,13 +1055,19 @@ def test_usage_of_a_key():
         drop_key(key["id"])
 
 
-OVERVIEW_FIELDS = {"window", "from", "to", "since", "persisted", "retention_days", "split", "filters", "totals", "series", "keys", "methods",
+OVERVIEW_FIELDS = {"window", "from", "to", "since", "persisted", "retention_days", "group", "filters", "totals", "series", "keys", "methods",
                    "results", "types", "clients", "omitted"}
+OVERVIEW_FILTERS = ("key", "method", "client", "result", "type")
+SERIES_METRICS = ("requests", "errors", "calls", "duration_ms_sum", "bytes")
 OVERVIEW_TOTALS = {"requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg", "duration_ms_max", "rows", "bytes", "active_keys", "keys"}
 OVERVIEW_KEY = {"id", "name", "host", "source", "deleted_at", "requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg",
                 "duration_ms_max", "rows", "bytes", "last_used_at"}
 OVERVIEW_METHOD = {"method", "kind", "requests", "errors", "duration_ms_avg", "duration_ms_max", "rows", "bytes", "keys"}
-OVERVIEW_CLIENT = {"name", "version", "user_agent", "keys", "requests", "first_seen_at", "last_seen_at"}
+OVERVIEW_CLIENT = {"client", "requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg", "duration_ms_max", "rows", "bytes",
+                   "keys", "versions", "last_seen_at"}
+# A client that was chosen and has no request: zeros, no time, no version and no sight (a name that no key ever had).
+OVERVIEW_CLIENT_ZERO = {"client": "nobody-has-this-name", "requests": 0, "calls": 0, "errors": 0, "rate_limited": 0, "rejected": 0, "duration_ms_avg": None,
+                        "duration_ms_max": None, "rows": 0, "bytes": 0, "keys": 0, "versions": [], "last_seen_at": None}
 
 
 def overview(*params, base: str | None = None) -> dict:
@@ -1061,10 +1079,25 @@ def overview_rows(rows: list, by: str, field: str) -> dict:
     return {row[by]: row[field] for row in rows}
 
 
-def points_of(doc: dict) -> list:
-    """The requests at each point of a series: the groups and `rest` added up."""
+def points_of(doc: dict, metric: str = "requests") -> list:
+    """A metric at each point of a series: the groups and `rest` added up."""
     series = doc["series"]
-    return [sum(g["values"][i] for g in series["groups"]) + series["rest"]["values"][i] for i in range(len(series["t"]))]
+    return [sum(g[metric][i] for g in series["groups"]) + series["rest"][metric][i] for i in range(len(series["t"]))]
+
+
+def check_series_adds_up(doc: dict) -> None:
+    """What every answer holds: at each point the groups and `rest` add up, for each of the five metrics, to the tiles."""
+    series, totals = doc["series"], doc["totals"]
+    assert isinstance(series["step"], int) and len(series["t"]) in (60, 72, 96, 56, 90, 365)
+    for group in [*series["groups"], series["rest"]]:
+        assert all(len(group[metric]) == len(series["t"]) for metric in SERIES_METRICS)
+        assert sum(group["requests"]) == group["total"]
+    sums = {metric: sum(points_of(doc, metric)) for metric in SERIES_METRICS}
+    assert (sums["requests"], sums["errors"], sums["calls"], sums["bytes"]) == (totals["requests"], totals["errors"], totals["calls"], totals["bytes"])
+    if sums["calls"]:
+        assert totals["duration_ms_avg"] == (sums["duration_ms_sum"] + sums["calls"] // 2) // sums["calls"]
+    else:
+        assert totals["duration_ms_avg"] is None and sums["duration_ms_sum"] == 0
 
 
 @needs_mcp
@@ -1109,24 +1142,33 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         both = [("key", a["id"]), ("key", b["id"])]
         doc = overview(("window", "24h"), *both)
         assert set(doc) == OVERVIEW_FIELDS
-        assert doc["window"] == "24h" and doc["persisted"] is True and doc["retention_days"] == 90 and doc["split"] == "method"
+        assert doc["window"] == "24h" and doc["persisted"] is True and doc["retention_days"] == 90 and doc["group"] == "method"
         assert doc["from"].endswith("Z") and doc["to"].endswith("Z") and doc["since"].endswith("Z")
-        assert doc["filters"] == {"key": [a["id"], b["id"]], "method": [], "result": [], "type": []}
+        assert doc["filters"] == {"key": [a["id"], b["id"]], "method": [], "client": [], "result": [], "type": []}
         totals = doc["totals"]
         assert set(totals) == OVERVIEW_TOTALS
         assert (totals["requests"], totals["calls"], totals["errors"], totals["rate_limited"], totals["rejected"]) == (17, 8, 6, 0, 1), totals
         assert totals["active_keys"] == 2 and totals["keys"] == len(api_ok(m("GET", "/api/mcp/keys"))["keys"])
         assert totals["duration_ms_max"] >= totals["duration_ms_avg"] >= 0 and totals["bytes"] > 0
-        # The series: 24 points; at most 8 groups, the others summed in `rest`; the bars add up to the tile, at each point.
+        # The series: 96 points of 15 minutes (the step is a number of seconds); at most 8 groups, the others summed in `rest`; each group
+        # has the five metrics, and the bars add up to the tile, at each point.
         series = doc["series"]
-        assert set(series) == {"step", "t", "groups", "rest"} and series["step"] == "hour" and len(series["t"]) == 24
-        assert all(set(group) == {"id", "label", "total", "values"} for group in series["groups"]) and set(series["rest"]) == {"groups", "total", "values"}
+        assert set(series) == {"step", "t", "groups", "rest"} and series["step"] == 900 and len(series["t"]) == 96
+        assert all(set(group) == {"id", "label", "total", *SERIES_METRICS} for group in series["groups"])
+        assert set(series["rest"]) == {"groups", "total", *SERIES_METRICS}
         assert [(g["id"], g["total"]) for g in series["groups"]] == [
             ("run_query", 4), ("list_hosts", 3), ("initialize", 2), ("invalid", 1), ("notifications/initialized", 1), ("other", 1), ("ping", 1),
             ("query_table", 1)]
         assert series["rest"]["groups"] == 3 and series["rest"]["total"] == 3  # resources/list, tools/list, unread
-        assert all(len(g["values"]) == 24 for g in series["groups"]) and len(series["rest"]["values"]) == 24
+        assert all(len(g[metric]) == 96 for g in series["groups"] for metric in SERIES_METRICS)
+        assert all(len(series["rest"][metric]) == 96 for metric in SERIES_METRICS)
         assert sum(points_of(doc)) == 17
+        check_series_adds_up(doc)
+        # The metrics follow the tiles: the calls, the time of the calls and the bytes of a group (run_query: 4 calls, 3 of them errors).
+        run_group = next(g for g in series["groups"] if g["id"] == "run_query")
+        assert (sum(run_group["calls"]), sum(run_group["errors"])) == (4, 3) and sum(run_group["bytes"]) > 0
+        init_group = next(g for g in series["groups"] if g["id"] == "initialize")
+        assert (sum(init_group["calls"]), sum(init_group["duration_ms_sum"])) == (0, 0) and sum(init_group["bytes"]) > 0  # no tool call, no time
         # The keys: the most requests first, with what each one did. The facet of the keys ignores the filter of the keys, so the
         # other keys of the instance that were used in 24 hours are in it too.
         assert all(set(row) == OVERVIEW_KEY for row in doc["keys"])
@@ -1156,27 +1198,37 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         assert doc["results"][0] == {"result": "ok", "count": 10, "keys": 2}
         assert doc["types"] == [{"type": "call", "requests": 8}, {"type": "request", "requests": 8}, {"type": "limited", "requests": 0},
                                 {"type": "rejected", "requests": 1}]
-        # The clients of the keys: by name and version; the filter of the keys applies, the window does not.
+        # The clients, from the cells of the window: the name that the client gave in initialize (clientInfo), the requests that follow it
+        # with its User-Agent are its own. The facet follows the filters but its own, the key here.
         assert all(set(row) == OVERVIEW_CLIENT for row in doc["clients"])
-        assert [(c["name"], c["version"], c["user_agent"], c["keys"], c["requests"]) for c in doc["clients"]] == [
-            ("other-client", "1.0", "overview-agent/2", 1, 4), ("overview-client", "9.9", "overview-agent/1", 1, 13)]
+        assert [(c["client"], c["keys"], c["requests"], c["calls"], c["errors"], c["versions"]) for c in doc["clients"]] == [
+            ("overview-client", 1, 13, 6, 5, ["9.9"]), ("other-client", 1, 4, 2, 1, ["1.0"])]
+        assert all(c["last_seen_at"].endswith("Z") for c in doc["clients"])
         assert doc["omitted"] == {"keys": 0, "methods": 0, "results": 0, "clients": 0}
 
-        # Every split: the groups and `rest` add up to the requests. The label of a key is its name.
-        for split in ("key", "method", "result", "type"):
-            by = overview(("window", "24h"), ("split", split), *both)
-            assert by["split"] == split and by["totals"]["requests"] == 17
-            assert sum(g["total"] for g in by["series"]["groups"]) + by["series"]["rest"]["total"] == 17, split
-        by_key = overview(("window", "24h"), ("split", "key"), *both)["series"]
+        # Every group: the groups and `rest` add up to the requests, for the five metrics. The label of a key is its name.
+        for group in ("key", "method", "client", "result", "type"):
+            by = overview(("window", "24h"), ("group", group), *both)
+            assert by["group"] == group and by["totals"]["requests"] == 17
+            assert sum(g["total"] for g in by["series"]["groups"]) + by["series"]["rest"]["total"] == 17, group
+            check_series_adds_up(by)
+        by_key = overview(("window", "24h"), ("group", "key"), *both)["series"]
         assert [(g["id"], g["label"], g["total"]) for g in by_key["groups"]] == [(a["id"], "overview-a", 13), (b["id"], "overview-b", 4)]
-        by_result = overview(("window", "24h"), ("split", "result"), *both)["series"]
+        by_result = overview(("window", "24h"), ("group", "result"), *both)["series"]
         assert len(by_result["groups"]) == 8 and by_result["rest"]["groups"] == 0 and by_result["groups"][0]["id"] == "ok"
-        by_type = overview(("window", "24h"), ("split", "type"), *both)["series"]
+        by_type = overview(("window", "24h"), ("group", "type"), *both)["series"]
         assert [(g["id"], g["label"], g["total"]) for g in by_type["groups"]] == [("call", "call", 8), ("request", "request", 8), ("rejected", "rejected", 1)]
-        # The bars add up to the requests at each point, whatever the split.
-        assert points_of(overview(("window", "24h"), ("split", "key"), *both)) == points_of(doc)
-        assert points_of(overview(("window", "24h"), ("split", "type"), *both)) == points_of(doc)
-        assert points_of(overview(("window", "24h"), ("split", "result"), *both)) == points_of(doc)
+        by_client = overview(("window", "24h"), ("group", "client"), *both)["series"]
+        assert [(g["id"], g["label"], g["total"]) for g in by_client["groups"]] == [("overview-client", "overview-client", 13), ("other-client", "other-client", 4)]
+        # The bars add up to the requests at each point, whatever the group.
+        for group in ("key", "type", "result", "client"):
+            assert points_of(overview(("window", "24h"), ("group", group), *both)) == points_of(doc)
+        # A filter on the client: the totals follow it, the facet of the clients does not.
+        mine = overview(("window", "24h"), ("client", "other-client"), *both)
+        assert mine["totals"]["requests"] == 4 and mine["filters"]["client"] == ["other-client"]
+        assert [c["client"] for c in mine["clients"]] == ["overview-client", "other-client"]
+        # The keys that were chosen are in the facet of the keys at 0: only key B has a request of this client.
+        assert {row["id"]: row["requests"] for row in mine["keys"] if row["id"] in (a["id"], b["id"])} == {a["id"]: 0, b["id"]: 4}
 
         # A filter on the method: run_query lists the codes that it ended with. The facet of the methods ignores its own filter.
         run = overview(("window", "24h"), ("method", "run_query"), *both)
@@ -1204,25 +1256,125 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         rows = overview_rows(zero["keys"], "id", "requests")  # the keys that pinged in 24 hours (the other tests use the instance too)
         assert rows[a["id"]] == 0 and rows[b["id"]] == 1
         assert next(row for row in zero["methods"] if row["method"] == "ping")["requests"] == 0
-        assert [g["id"] for g in zero["series"]["groups"]] == ["ping"] and sum(zero["series"]["groups"][0]["values"]) == 0
+        assert [g["id"] for g in zero["series"]["groups"]] == ["ping"] and sum(zero["series"]["groups"][0]["requests"]) == 0
         ghost = overview(("window", "24h"), ("key", "ui_000000000000"), ("method", "no_such_tool"), ("result", "no_such_result"))
         assert ghost["totals"]["requests"] == 0 and ghost["keys"][0]["id"] == "ui_000000000000" and ghost["keys"][0]["name"] == "ui_000000000000"
         assert [(row["method"], row["kind"], row["requests"]) for row in ghost["methods"]] == [("no_such_tool", "call", 0)]
         assert ghost["results"] == [{"result": "no_such_result", "count": 0, "keys": 0}]
 
-        # The window: 7 days is by the day.
+        # The window: 7 days is by 3 hours, and every window has its step in seconds.
         week = overview(("window", "7d"), *both)
-        assert week["window"] == "7d" and week["series"]["step"] == "day" and len(week["series"]["t"]) == 7 and week["totals"]["requests"] == 17
+        assert week["window"] == "7d" and week["series"]["step"] == 10800 and len(week["series"]["t"]) == 56 and week["totals"]["requests"] == 17
+        for window, step, count in (("1h", 60, 60), ("6h", 300, 72), ("30d", 43200, 60), ("90d", 86400, 90)):
+            each = overview(("window", window), *both)
+            assert each["window"] == window and each["series"]["step"] == step and len(each["series"]["t"]) == count, window
+            assert each["totals"]["requests"] == 17, window
+            check_series_adds_up(each)
         # A key that is deleted keeps its usage: it stays in the keys with when it was deleted, and answers to its filter.
         drop_key(a["id"])
         gone = overview(("window", "24h"), ("key", a["id"]))
         assert gone["totals"]["requests"] == 13 and gone["totals"]["active_keys"] == 1 and gone["totals"]["keys"] == totals["keys"] - 1
         row = next(row for row in gone["keys"] if row["id"] == a["id"])
         assert row["deleted_at"] and row["name"] == "overview-a" and row["requests"] == 13
-        assert [c["name"] for c in gone["clients"]] == ["overview-client"]
+        assert [c["client"] for c in gone["clients"]] == ["overview-client"]
         # Never a secret, never SQL.
         text = json.dumps(doc) + json.dumps(run) + json.dumps(gone)
         assert secret_a not in text and secret_b not in text and "SELECT" not in text and "DROP TABLE" not in text
+    finally:
+        drop_key(a["id"])
+        drop_key(b["id"])
+
+
+@needs_mcp
+def test_the_usage_overview_groups_and_filters_by_client():
+    # The client of a request is the name that it gave in initialize (clientInfo), else the product of its User-Agent (the text before the
+    # first "/" or space). Two clients that name themselves (with two User-Agents), and three that do not.
+    a, secret_a = make_key(new_key_body("client-a", tools=["list_hosts"]))
+    b, secret_b = make_key(new_key_body("client-b", tools=["list_hosts"]))
+    one, two = {"User-Agent": "client-ua-one/1.2.3"}, {"User-Agent": "client-ua-two/4.5"}
+    long_name = "n" * 100
+
+    def initialize(secret, agent, name, version):
+        info = {"protocolVersion": "2025-06-18", "clientInfo": {"name": name, "version": version}}
+        assert rpc(MCP_URL, secret, "initialize", info, headers=agent).status_code == 200
+
+    try:
+        initialize(secret_a, one, "client-one", "1.2")
+        for _ in range(3):  # no clientInfo: the User-Agent of the request finds its client
+            assert rpc(MCP_URL, secret_a, "tools/call", {"name": "list_hosts", "arguments": {}}, headers=one).status_code == 200
+        initialize(secret_a, two, "client-two", "4.5")
+        for _ in range(2):
+            assert rpc(MCP_URL, secret_a, "ping", headers=two).status_code == 200
+        time.sleep(1.1)  # the times are in seconds: the upgrade is seen after the first version
+        initialize(secret_a, one, "client-one", "1.3")  # an upgrade is the same client: the version is no part of its name
+        # Key B: no clientInfo but one (with a name of several words, and one that is cut to 64 bytes); the others are by User-Agent.
+        for _ in range(2):
+            assert rpc(MCP_URL, secret_b, "tools/list", headers={"User-Agent": "python-httpx/0.27.0"}).status_code == 200
+        assert rpc(MCP_URL, secret_b, "ping", headers={"User-Agent": "curl/8.14.1"}).status_code == 200
+        initialize(secret_b, {"User-Agent": "vscode/1"}, "Visual Studio Code", "1.99")
+        initialize(secret_b, {"User-Agent": "long/1"}, long_name, "1")
+        # Key A: 5 + 3 requests; key B: 2 + 1 + 1 + 1.
+        both = [("key", a["id"]), ("key", b["id"])]
+        window = ("window", "24h")
+
+        # A group by client: the id and the label are the name, the largest first.
+        doc = overview(window, ("group", "client"), *both)
+        assert doc["group"] == "client" and doc["totals"]["requests"] == 13, doc["totals"]
+        groups = [(g["id"], g["label"], g["total"]) for g in doc["series"]["groups"]]
+        assert groups == [("client-one", "client-one", 5), ("client-two", "client-two", 3), ("python-httpx", "python-httpx", 2),
+                          ("Visual Studio Code", "Visual Studio Code", 1), ("curl", "curl", 1), ("n" * 64, "n" * 64, 1)], groups
+        assert doc["series"]["rest"]["groups"] == 0
+        check_series_adds_up(doc)
+
+        # The facet of the clients: the counters of a key, the keys that used the client, its versions (the last seen first) and its last sight.
+        assert all(set(row) == OVERVIEW_CLIENT for row in doc["clients"])
+        rows = {row["client"]: row for row in doc["clients"]}
+        assert [row["client"] for row in doc["clients"]] == [g[0] for g in groups]
+        assert (rows["client-one"]["requests"], rows["client-one"]["calls"], rows["client-one"]["keys"]) == (5, 3, 1)
+        assert rows["client-one"]["versions"] == ["1.3", "1.2"] and rows["client-two"]["versions"] == ["4.5"]
+        assert rows["python-httpx"]["versions"] == [] and rows["curl"]["versions"] == [] and rows["Visual Studio Code"]["versions"] == ["1.99"]
+        assert all(row["last_seen_at"].endswith("Z") for row in doc["clients"])
+        assert parse_time(rows["client-one"]["last_seen_at"]) > parse_time(rows["client-two"]["last_seen_at"])
+        assert rows["client-one"]["duration_ms_avg"] is not None and rows["curl"]["duration_ms_avg"] is None  # the time of the tool calls
+        assert sum(row["requests"] for row in doc["clients"]) == 13 and doc["omitted"]["clients"] == 0
+
+        # A filter on a client: the totals, the series and the other facets follow it; the facet of the clients does not.
+        mine = overview(window, ("client", "client-two"), *both)
+        assert mine["totals"]["requests"] == 3 and mine["filters"]["client"] == ["client-two"]
+        assert [row["client"] for row in mine["clients"]] == [g[0] for g in groups]
+        assert {row["id"]: row["requests"] for row in mine["keys"] if row["id"] in (a["id"], b["id"])} == {a["id"]: 3, b["id"]: 0}
+        assert {row["method"] for row in mine["methods"]} == {"initialize", "ping"}
+        check_series_adds_up(mine)
+        # Two clients are OR, and the other filters are AND; a name with spaces in it, and the one that was cut to 64 bytes, are clients.
+        either = overview(window, ("client", "python-httpx"), ("client", "curl"), *both)
+        assert either["totals"]["requests"] == 3 and either["filters"]["client"] == ["python-httpx", "curl"]
+        assert overview(window, ("client", "python-httpx"), ("client", "curl"), ("method", "ping"), *both)["totals"]["requests"] == 1
+        assert overview(window, ("client", "Visual Studio Code"), *both)["totals"]["requests"] == 1
+        assert overview(window, ("client", "n" * 64), *both)["totals"]["requests"] == 1
+        assert overview(window, ("client", "n" * 63), *both)["totals"]["requests"] == 0  # the name is cut to 64 bytes, not to 63
+        # A client that was chosen is in the groups, in the order of the request, and in its facet at 0 when nothing of it matches: a client
+        # that no request has is listed as a line of zeros.
+        chosen = overview(window, ("group", "client"), ("client", "curl"), ("client", "nobody-has-this-name"), ("client", "client-two"), *both)
+        assert [(g["id"], g["total"]) for g in chosen["series"]["groups"]] == [("curl", 1), ("nobody-has-this-name", 0), ("client-two", 3)]
+        assert chosen["series"]["rest"]["groups"] == 0 and chosen["totals"]["requests"] == 4
+        check_series_adds_up(chosen)
+        zero = overview(window, ("method", "list_hosts"), ("client", "curl"), ("client", "nobody-has-this-name"), *both)
+        assert zero["totals"]["requests"] == 0
+        zero_rows = {row["client"]: row for row in zero["clients"]}
+        assert set(zero_rows) == {"client-one", "curl", "nobody-has-this-name"}  # the clients of list_hosts, and the two that were chosen
+        assert zero_rows["curl"]["requests"] == 0 and zero_rows["curl"]["duration_ms_avg"] is None and zero_rows["curl"]["keys"] == 0
+        assert zero_rows["nobody-has-this-name"] == {**OVERVIEW_CLIENT_ZERO}
+        # The facet of the clients follows the other filters: the method here.
+        pings = overview(window, ("method", "ping"), *both)
+        assert [(row["client"], row["requests"]) for row in pings["clients"]] == [("client-two", 2), ("curl", 1)]
+
+        # The records of the clients of a key (their life, by name, version and User-Agent) are what they were.
+        records = usage_of(a["id"])["clients"]
+        assert {(c["name"], c["version"], c["user_agent"]) for c in records} == {
+            ("client-one", "1.2", "client-ua-one/1.2.3"), ("client-one", "1.3", "client-ua-one/1.2.3"), ("client-two", "4.5", "client-ua-two/4.5")}
+        # Never a secret, never SQL, never an address.
+        text = json.dumps(doc) + json.dumps(mine) + json.dumps(chosen)
+        assert secret_a not in text and secret_b not in text and "SELECT" not in text
     finally:
         drop_key(a["id"])
         drop_key(b["id"])
@@ -1236,31 +1388,50 @@ def test_the_usage_overview_refuses_what_it_does_not_read():
 
     invalid([("window", "48h")], "window", "invalid")
     invalid([("window", "365d")], "window", "invalid")  # the retention of this instance is 90 days
-    invalid([("split", "keys")], "split", "invalid")
-    invalid([("split", "")], "split", "invalid")
+    invalid([("window", "12h")], "window", "invalid")
+    # `split` is gone: it is a name that the route does not read, as a typo is.
+    invalid([("split", "method")], "split", "unknown")
+    invalid([("split", "key"), ("group", "key")], "split", "unknown")
+    invalid([("group", "keys")], "group", "invalid")
+    invalid([("group", "")], "group", "invalid")
+    invalid([("group", "nope")], "group", "invalid")
+    invalid([("group", "Client")], "group", "invalid")
     invalid([("nope", "1")], "nope", "unknown")
     invalid([("limit", "5")], "limit", "unknown")
+    invalid([("clients", "x")], "clients", "unknown")  # the filter is `client`
     invalid([("key", "Bad Key")], "key", "invalid")
     invalid([("key", "ui_zzzzzzzzzzzz")], "key", "invalid")
     invalid([("key", "")], "key", "invalid")
     invalid([("method", "has space")], "method", "invalid")
     invalid([("method", "x" * 65)], "method", "invalid")
+    invalid([("client", "")], "client", "invalid")
+    invalid([("client", " leading")], "client", "invalid")
+    invalid([("client", "trailing ")], "client", "invalid")
+    invalid([("client", "x" * 65)], "client", "invalid")
+    invalid([("client", "caf\u00e9")], "client", "invalid")
+    invalid([("client", "line\nbreak")], "client", "invalid")
     invalid([("result", "Not-A-Result")], "result", "invalid")
     invalid([("result", "a/b")], "result", "invalid")
     invalid([("type", "tool")], "type", "invalid")
     invalid([("type", "call"), ("type", "refused")], "type", "invalid")
-    for field, value in (("key", "key-{}"), ("method", "method_{}"), ("result", "result_{}")):
+    for field, value in (("key", "key-{}"), ("method", "method_{}"), ("client", "client {}"), ("result", "result_{}")):
         invalid([(field, value.format(i)) for i in range(21)], field, "too_many")
         # Twenty are fine, and a value that is repeated counts once.
         assert overview(*[(field, value.format(i)) for i in range(20)])["totals"]["requests"] == 0
         assert overview(*[(field, value.format(0))] * 30)["filters"][field] == [value.format(0)]
-    # Every value of every dimension is checked, in the order: the window, the unknown names, the split, the filters.
+    # A name with spaces inside is a valid client, and one of 64 bytes.
+    assert overview(("client", "Visual Studio Code"), ("client", "c" * 64))["filters"]["client"] == ["Visual Studio Code", "c" * 64]
+    # Every value of every dimension is checked, in the order: the window, the unknown names, the group, the filters.
     invalid([("window", "48h"), ("nope", "1")], "window", "invalid")
-    invalid([("nope", "1"), ("split", "x")], "nope", "unknown")
-    # Without a parameter: the default window of the meta, the split by method.
+    invalid([("nope", "1"), ("group", "x")], "nope", "unknown")
+    invalid([("group", "x"), ("key", "Bad Key")], "group", "invalid")
+    invalid([("key", "Bad Key"), ("client", " x")], "key", "invalid")
+    invalid([("client", " x"), ("result", "A")], "client", "invalid")
+    # Without a parameter: the default window of the meta, the group by method.
     plain = overview()
     meta = api_ok(m("GET", "/api/mcp/meta"))["usage"]
-    assert plain["window"] == meta["default_window"] and plain["split"] == "method" and plain["filters"] == {"key": [], "method": [], "result": [], "type": []}
+    assert plain["window"] == meta["default_window"] and plain["group"] == "method" and "split" not in plain
+    assert plain["filters"] == {"key": [], "method": [], "client": [], "result": [], "type": []}
     # The route of the page is a read of the page only, like the others.
     for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Origin": "https://evil.example.com"}):
         api_error(m("GET", "/api/mcp/usage/overview", headers=headers), 403, "cross_site_request")
@@ -1430,29 +1601,38 @@ def test_usage_file_holds_counts_never_secrets():
         assert document["version"] == 1 and document["since"].endswith("Z")
         entry = next(e for e in document["keys"] if e["id"] == key["id"])
         assert entry["name"] == "usage-file" and entry["host"] == "local" and entry["source"] == "ui" and entry["deleted_at"] is None
-        # A bucket is its start and its cells: [type, method, result, count, duration sum, duration max, rows, bytes].
-        hour = entry["hours"][-1]
-        assert len(hour) == 2 and hour[0] % 3600 == 0
-        cells = {tuple(cell[:3]): cell[3:] for cell in hour[1]}
-        assert len(cells[("call", "list_hosts", "ok")]) == 5 and cells[("call", "list_hosts", "ok")][0] >= 1
-        day = entry["days"][-1]
-        assert len(day) == 2 and day[0] % 86400 == 0 and [cell[:3] for cell in day[1]] == [list(key) for key in cells]
+        # An entry has the six tiers (m1, m5, m15, h3, h12, d1: the steps of 1 minute, 5 minutes, 15 minutes, 3 hours, 12 hours, 1 day), and
+        # a bucket is its start and its cells: [type, client, method, result, count, duration sum, duration max, rows, bytes].
+        steps = {"m1": 60, "m5": 300, "m15": 900, "h3": 10800, "h12": 43200, "d1": 86400}
+        assert "hours" not in entry and "days" not in entry and all(isinstance(entry[tier], list) for tier in steps)
+        for tier, step in steps.items():
+            bucket = entry[tier][-1]  # the retention of this instance is 90 days: every tier is kept
+            assert len(bucket) == 2 and bucket[0] % step == 0, tier
+            assert all(len(cell) == 9 for cell in bucket[1]), tier
+        cells = {tuple(cell[:4]): cell[4:] for cell in entry["m1"][-1][1]}
+        assert len(cells[("call", "chdash-backend-functional", "list_hosts", "ok")]) == 5 and cells[("call", "chdash-backend-functional", "list_hosts", "ok")][0] >= 1
+        # The key made one call: it is in each tier, as the same cell.
+        assert all([cell[:4] for cell in entry[tier][-1][1]] == [list(cell_key) for cell_key in cells] for tier in steps)
         # Nothing that a client chose is in the file, for any key: a method of a request is one of the protocol (or "other", "invalid",
-        # for a message that could not be read) and every name is of the shape that the file keeps.
+        # for a message that could not be read), a result is of the shape that the file keeps, and a client is printable ASCII (1 to 64 bytes,
+        # no space at either end): its name, or the product of its User-Agent.
         known = {"initialize", "ping", "tools/list", "tools/call", "response", "notifications/initialized", "notifications/cancelled",
                  "notifications/progress", "notifications/roots/list_changed", "resources/list", "resources/read", "resources/templates/list",
                  "resources/subscribe", "resources/unsubscribe", "prompts/list", "prompts/get", "completion/complete", "logging/setLevel",
                  "other", "invalid"}
         for each in document["keys"]:
-            for bucket in each["hours"] + each["days"]:
-                assert len(bucket) == 2
-                for kind, method, result, *counts in bucket[1]:
-                    assert kind in ("call", "request", "limited", "rejected") and len(counts) == 5 and counts[0] >= 1
-                    assert re.fullmatch(r"[A-Za-z0-9_/]{1,64}", method) and re.fullmatch(r"[a-z0-9_]{1,64}", result), (method, result)
-                    if kind == "request":
-                        assert method in known, method
-                    if kind in ("limited", "rejected"):
-                        assert method == "unread" and result != "ok", (kind, method, result)
+            assert len({client for tier in steps for bucket in each[tier] for kind, client, *_ in bucket[1] if client not in ("other", "unknown")}) <= 16
+            for tier, step in steps.items():
+                for bucket in each[tier]:
+                    assert len(bucket) == 2 and bucket[0] % step == 0
+                    for kind, client, method, result, *counts in bucket[1]:
+                        assert kind in ("call", "request", "limited", "rejected") and len(counts) == 5 and counts[0] >= 1
+                        assert re.fullmatch(r"[A-Za-z0-9_/]{1,64}", method) and re.fullmatch(r"[a-z0-9_]{1,64}", result), (method, result)
+                        assert re.fullmatch(r"[\x20-\x7e]{1,64}", client) and client == client.strip(" "), client
+                        if kind == "request":
+                            assert method in known, method
+                        if kind in ("limited", "rejected"):
+                            assert method == "unread" and result != "ok", (kind, method, result)
     finally:
         drop_key(key["id"])
 
@@ -1775,16 +1955,22 @@ def test_startup_error_8_usage_file():
     # The key file is no usage file; a usage file of another shape is refused and never rewritten; its directory must exist.
     same = 'mcp {\n enabled = true\n storage_file = "@DIR@/keys.json"\n usage_file = "@DIR@/keys.json"\n' + KEY % "" + "}\n" + HOSTS
     assert_config_error(start_binary(same), "mcp.usage_file", "key file")
-    content = '{"version": 2, "since": "2026-10-01T00:00:00Z", "keys": []}'
-    with tempfile.TemporaryDirectory() as tmp:
-        os.chmod(tmp, 0o755)
-        (Path(tmp) / "usage.json").write_text(content)
-        os.chmod(Path(tmp) / "usage.json", 0o644)
-        (Path(tmp) / "chdash.hcl").write_text(('mcp {\n enabled = true\n usage_file = "@DIR@/usage.json"\n' + KEY % "" + "}\n" + HOSTS).replace("@DIR@", config_dir(tmp)))
-        os.chmod(Path(tmp) / "chdash.hcl", 0o644)
-        result = subprocess.run(STARTUP_CMD.format(dir=shlex.quote(tmp), name="chdash.hcl"), shell=True, capture_output=True, text=True, timeout=60)
-        assert_config_error(result, "mcp.usage_file", "version must be 1", "the file is not changed")
-        assert (Path(tmp) / "usage.json").read_text() == content
+    entry = ('{"id": "k", "name": "k", "source": "config", "host": "local", "first_used_at": null, "last_used_at": null, "deleted_at": null, "clients": [], %s}')
+    old_layout = '{"version": 1, "since": "2026-10-01T00:00:00Z", "keys": [' + entry % '"hours": [], "days": []' + ']}'  # no tiers
+    old_cell = '{"version": 1, "since": "2026-10-01T00:00:00Z", "keys": [' + entry % (
+        '"m1": [], "m5": [], "m15": [], "h3": [], "h12": [], "d1": [[86400, [["call", "list_hosts", "ok", 1, 0, 0, 0, 0]]]]') + ']}'  # no client
+    bad_step = '{"version": 1, "since": "2026-10-01T00:00:00Z", "keys": [' + entry % '"m1": [], "m5": [[360, []]], "m15": [], "h3": [], "h12": [], "d1": []' + ']}'
+    for content, fragment in (('{"version": 2, "since": "2026-10-01T00:00:00Z", "keys": []}', "version must be 1"),
+                              (old_layout, "m1 is missing"), (old_cell, "cell"), (bad_step, "m5")):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chmod(tmp, 0o755)
+            (Path(tmp) / "usage.json").write_text(content)
+            os.chmod(Path(tmp) / "usage.json", 0o644)
+            (Path(tmp) / "chdash.hcl").write_text(('mcp {\n enabled = true\n usage_file = "@DIR@/usage.json"\n' + KEY % "" + "}\n" + HOSTS).replace("@DIR@", config_dir(tmp)))
+            os.chmod(Path(tmp) / "chdash.hcl", 0o644)
+            result = subprocess.run(STARTUP_CMD.format(dir=shlex.quote(tmp), name="chdash.hcl"), shell=True, capture_output=True, text=True, timeout=60)
+            assert_config_error(result, "mcp.usage_file", fragment, "the file is not changed")
+            assert (Path(tmp) / "usage.json").read_text() == content
     assert_config_error(start_binary('mcp {\n enabled = true\n usage_file = "/no/such/dir/usage.json"\n' + KEY % "" + "}\n" + HOSTS), "usage_file", "does not exist")
 
 
@@ -2053,7 +2239,14 @@ def test_the_statements_of_a_key_are_named_and_their_cost_is_read():
         assert again["read_at"] == cost["read_at"] and again["totals"] == totals
         week = api_ok(m("GET", f"/api/mcp/keys/{key['id']}/cost?window=7d"))
         assert week["status"] == "ok" and week["totals"]["statements"] >= totals["statements"]
+        # The short windows: the last hour and the last 6 hours hold the statements of the calls that were just made.
+        for window, seconds in (("1h", 3600), ("6h", 6 * 3600)):
+            short = api_ok(m("GET", f"/api/mcp/keys/{key['id']}/cost?window={window}&refresh=1"))
+            assert short["status"] == "ok" and short["window"] == window and short["clamped"] is False, short
+            assert short["totals"]["statements"] >= 3 and short["totals"]["statements"] <= week["totals"]["statements"], short["totals"]
+            assert 0 < (parse_time(short["to"]) - parse_time(short["from"])) <= seconds + 60
         api_error(m("GET", f"/api/mcp/keys/{key['id']}/cost?window=30d"), 400, "validation", field="window", reason="invalid")
+        api_error(m("GET", f"/api/mcp/keys/{key['id']}/cost?window=12h"), 400, "validation", field="window", reason="invalid")
         api_error(m("GET", "/api/mcp/keys/ui_000000000000/cost"), 404, "not_found")
         assert secret not in json.dumps(cost) and "SELECT" not in json.dumps(cost)
         # A deleted key: its cost is read on the host that its usage kept.

@@ -1424,9 +1424,25 @@ void the_cost_windows_end_with_the_minute_and_keep_to_the_lookback() {
   const auto cut = mcp_cost_window("7d", 24, now);
   CHECK(cut->clamped);
   CHECK_EQ(cut->from_s, cut->to_s - 86400);
+  // The two short windows: the last hour and the last 6 hours.
+  const auto hour = mcp_cost_window("1h", 168, now);
+  CHECK(hour.has_value());
+  CHECK_EQ(hour->name, std::string("1h"));
+  CHECK_EQ(hour->to_s, int64_t{1'800'000'060});
+  CHECK_EQ(hour->from_s, hour->to_s - 3600);
+  CHECK(!hour->clamped);
+  const auto six = mcp_cost_window("6h", 168, now);
+  CHECK(six.has_value());
+  CHECK_EQ(six->from_s, six->to_s - 6 * 3600);
+  CHECK(!six->clamped);
+  const auto short_lookback = mcp_cost_window("6h", 1, now);  // a lookback of one hour cuts the 6 hours, and keeps the hour
+  CHECK(short_lookback->clamped);
+  CHECK_EQ(short_lookback->from_s, short_lookback->to_s - 3600);
+  CHECK(!mcp_cost_window("1h", 1, now)->clamped);
   CHECK(!mcp_cost_window("30d", 168, now).has_value());
+  CHECK(!mcp_cost_window("12h", 168, now).has_value());
   CHECK(!mcp_cost_window("", 168, now).has_value());
-  CHECK(mcp_cost_windows() == std::vector<std::string>({"24h", "7d"}));
+  CHECK(mcp_cost_windows() == std::vector<std::string>({"1h", "6h", "24h", "7d"}));
 }
 
 void the_cost_of_a_key_is_one_bounded_scan_of_its_prefix() {

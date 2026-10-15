@@ -107,17 +107,17 @@ bool allow_from_page(const httplib::Request& req, httplib::Response& res) {
   return false;
 }
 
-// The parameters of GET /api/mcp/usage/overview besides the window: `split`, and the filters `key`, `method`, `result` and `type`,
-// each of them repeatable, checked by mcp_usage_overview_check. A name that the route does not read is refused (400 validation,
-// reason unknown), so a typo is an error and not a filter that does nothing. Nullopt when they are valid.
+// The parameters of GET /api/mcp/usage/overview besides the window: `group`, and the filters `key`, `method`, `client`, `result` and
+// `type`, each of them repeatable, checked by mcp_usage_overview_check. A name that the route does not read is refused (400 validation,
+// reason unknown), so a typo is an error and not a filter that does nothing (the old `split` is one). Nullopt when they are valid.
 std::optional<McpValidationError> read_usage_overview_query(const httplib::Request& req, McpUsageOverviewQuery* query) {
   for (const auto& item : req.params) {
-    if (item.first != "window" && item.first != "split" && item.first != "key" && item.first != "method" && item.first != "result" &&
-        item.first != "type") {
+    if (item.first != "window" && item.first != "group" && item.first != "key" && item.first != "method" && item.first != "client" &&
+        item.first != "result" && item.first != "type") {
       return McpValidationError{item.first, "unknown", "unknown parameter: " + item.first};
     }
   }
-  if (req.has_param("split")) query->split = req.get_param_value("split");
+  if (req.has_param("group")) query->group = req.get_param_value("group");
   const auto values = [&](const char* name) {
     std::vector<std::string> out;
     const auto range = req.params.equal_range(name);
@@ -126,6 +126,7 @@ std::optional<McpValidationError> read_usage_overview_query(const httplib::Reque
   };
   query->keys = values("key");
   query->methods = values("method");
+  query->clients = values("client");
   query->results = values("result");
   query->types = values("type");
   return mcp_usage_overview_check(query);
@@ -1013,8 +1014,8 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     return;
   }
   // What the keys did (mcp_usage.hpp): every key in one answer (the Used column of the page), one key (its details), and every
-  // key cut by method, result and type (the Usage tab), in a window of the usage. A read of the page, as the access above; it
-  // never holds SQL, data or a secret.
+  // key cut by key, method, client, result and type (the Usage tab), in a window of the usage. A read of the page, as the access
+  // above; it never holds SQL, data or a secret.
   if (route == McpApiRoute::Usage || route == McpApiRoute::KeyUsage || route == McpApiRoute::UsageOverview) {
     const int64_t retention = cfg_.mcp.usage_retention_days;
     const std::string asked = req.has_param("window") ? req.get_param_value("window") : std::string();

@@ -29,21 +29,22 @@ using Usage = McpUsage;
 
 constexpr int64_t kHour = 3600;
 constexpr int64_t kDay = 86400;
-constexpr int64_t kHours = 24;
 constexpr size_t kMaxFileBytes = 128u * 1024 * 1024;
 constexpr size_t kMaxNames = 4096;  // the id of a name has 12 bits
 constexpr size_t kCellsPerBucket = 512;
 constexpr int64_t kTombstoneSeconds = 2 * kHour;
 constexpr size_t kNameBytes = 64;
-constexpr size_t kClientNameBytes = 128;
+constexpr size_t kClientNameBytes = 128;   // the name of a client record, which is kept for the life of the client
+constexpr size_t kCellClientBytes = 64;    // the name of a client in the cells: the record's name, cut
 constexpr size_t kClientVersionBytes = 64;
 constexpr size_t kUserAgentBytes = 256;
 constexpr size_t kHostBytes = 256;
+constexpr size_t kKeyClients = 16;  // the client names that a key uses in its cells over its retention
 constexpr int64_t kSaveEvery = 60;
 constexpr int64_t kSaveEveryLarge = 300;
 constexpr size_t kLargeFile = 8u * 1024 * 1024;
 constexpr size_t kBucketFields = 2;  // start, the cells
-constexpr size_t kCellFields = 8;    // type, method, result, count, duration sum, duration max, rows, bytes
+constexpr size_t kCellFields = 9;    // type, client, method, result, count, duration sum, duration max, rows, bytes
 
 // The methods of the protocol that a request is counted under (docs/mcp.md, "Usage of a key"). Any other method is "other":
 // a notification accepts any name, and a text that a client chose would fill the names for the whole retention.
@@ -60,13 +61,51 @@ constexpr uint16_t kNameFirstMethod = 2;
 constexpr uint16_t kNameInvalid = static_cast<uint16_t>(kNameFirstMethod + kProtocolMethodCount);  // the message could not be read
 constexpr uint16_t kNameUnread = static_cast<uint16_t>(kNameInvalid + 1);  // refused before the message was read
 
+// The fixed names of the clients are 0 other (what a key counts under past its names, or when the table is full) and 1 unknown (a
+// request that gives no name and no User-Agent). No cap counts them.
+constexpr uint16_t kClientOther = 0;
+constexpr uint16_t kClientFixed = 2;  // the ids below it are the fixed names
+
 // The types of a cell, in the order of McpUsageKind.
 constexpr const char* kKindNames[] = {"call", "request", "limited", "rejected"};
 constexpr size_t kKinds = sizeof(kKindNames) / sizeof(kKindNames[0]);
 
+// The tiers of an entry, in the order of the members of its file entry. A tier keeps `points` buckets of `step` seconds, aligned on UTC
+// (d1 keeps one for each day of the retention), and only when the retention reaches `min_days`: nothing is kept past the retention.
+enum Tier : size_t { kTierM1, kTierM5, kTierM15, kTierH3, kTierH12, kTierD1 };
+static_assert(kTierD1 + 1 == kMcpUsageTiers, "one spec for each tier");
+struct TierSpec {
+  const char* member;
+  int64_t step;
+  size_t points;
+  int64_t min_days;
+};
+constexpr TierSpec kTierSpecs[kMcpUsageTiers] = {{"m1", 60, 60, 0},        {"m5", 300, 72, 0},         {"m15", 900, 96, 0},
+                                                  {"h3", 3 * kHour, 56, 7}, {"h12", 12 * kHour, 60, 30}, {"d1", kDay, 0, 0}};
+
+// The windows of the answers: the tier that each one reads, its points, and the retention that offers it.
+struct WindowSpec {
+  const char* name;
+  size_t tier;
+  size_t points;
+  int64_t min_days;
+};
+constexpr WindowSpec kWindowSpecs[] = {{"1h", kTierM1, 60, 0},   {"6h", kTierM5, 72, 0},   {"24h", kTierM15, 96, 0}, {"7d", kTierH3, 56, 7},
+                                       {"30d", kTierH12, 60, 30}, {"90d", kTierD1, 90, 90}, {"365d", kTierD1, 365, 365}};
+
 int64_t floor_to(int64_t t, int64_t step) {
   const int64_t r = t % step;
   return t - (r < 0 ? r + step : r);
+}
+
+// Whether a retention keeps a tier.
+bool tier_kept(size_t tier, int64_t retention_days) { return retention_days >= kTierSpecs[tier].min_days; }
+
+// The start of the oldest bucket that a tier keeps when `at` is in its last one.
+int64_t tier_first(size_t tier, int64_t at, int64_t retention_days) {
+  const TierSpec& spec = kTierSpecs[tier];
+  const int64_t points = tier == kTierD1 ? retention_days : static_cast<int64_t>(spec.points);
+  return floor_to(at, spec.step) - (points - 1) * spec.step;
 }
 
 bool name_char(char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'; }
@@ -92,6 +131,12 @@ bool valid_method(std::string_view name) {
          std::all_of(name.begin(), name.end(), [](char c) { return name_char(c) || (c >= 'A' && c <= 'Z') || c == '/'; });
 }
 
+// A client name as the cells keep it: printable ASCII, 1 to 64 bytes, no space at either end.
+bool valid_client(std::string_view name) {
+  return !name.empty() && name.size() <= kCellClientBytes && name.front() != ' ' && name.back() != ' ' &&
+         std::all_of(name.begin(), name.end(), [](char c) { return c >= 0x20 && c <= 0x7e; });
+}
+
 // The id of a method of the protocol (the text must be exactly one of them), "other" for any other text.
 uint16_t protocol_method(std::string_view method) {
   for (size_t i = 0; i < kProtocolMethodCount; ++i) {
@@ -107,31 +152,32 @@ int kind_index(std::string_view name) {
   return -1;
 }
 
-uint32_t cell_key(McpUsageKind kind, uint16_t method, uint16_t result) {
-  return static_cast<uint32_t>(kind) << 24 | static_cast<uint32_t>(method) << 12 | result;
+uint64_t cell_key(McpUsageKind kind, uint16_t client, uint16_t method, uint16_t result) {
+  return static_cast<uint64_t>(kind) << 36 | static_cast<uint64_t>(client) << 24 | static_cast<uint64_t>(method) << 12 | result;
 }
-McpUsageKind kind_of(uint32_t key) { return static_cast<McpUsageKind>(key >> 24); }
-uint16_t method_of(uint32_t key) { return static_cast<uint16_t>((key >> 12) & 0xfff); }
-uint16_t result_of(uint32_t key) { return static_cast<uint16_t>(key & 0xfff); }
+McpUsageKind kind_of(uint64_t key) { return static_cast<McpUsageKind>(key >> 36); }
+uint16_t client_of(uint64_t key) { return static_cast<uint16_t>((key >> 24) & 0xfff); }
+uint16_t method_of(uint64_t key) { return static_cast<uint16_t>((key >> 12) & 0xfff); }
+uint16_t result_of(uint64_t key) { return static_cast<uint16_t>(key & 0xfff); }
 
-// The cell of an event: its type, its method and its result. The names that this adds (a tool, a result) come from the
-// catalog and from the code of ChDash: a method of the protocol is looked up, never added.
-uint32_t cell_key_of(Usage::Names& names, const McpUsageEvent& event) {
+// The cell of an event, for the id of its client: its type, its method and its result. The names that this adds (a tool, a result) come
+// from the catalog and from the code of ChDash: a method of the protocol is looked up, never added.
+uint64_t cell_key_of(Usage::Names& names, const McpUsageEvent& event, uint16_t client) {
   uint16_t method = kNameUnread;
   if (event.kind == McpUsageKind::ToolCall) method = names.intern(clean_name(event.tool));
   else if (event.kind == McpUsageKind::Request) method = event.method.empty() ? kNameInvalid : protocol_method(event.method);
   const uint16_t result = event.status == "ok" ? kNameOk : names.intern(clean_name(event.status));
-  return cell_key(event.kind, method, result);
+  return cell_key(event.kind, client, method, result);
 }
 
-// Where the requests of a cell go when no cell can be made for them: the cell of their type with the method "other" and
-// the result "ok" or "other". No cap stops it (at most 6 for a bucket), so a total stays exact.
-uint32_t overflow_key(uint32_t key) {
-  return cell_key(kind_of(key), kNameOther, result_of(key) == kNameOk ? kNameOk : kNameOther);
+// Where the requests of a cell go when no cell can be made for them: the cell of their type with the client "other", the method "other"
+// and the result "ok" or "other". No cap stops it (at most 6 for a bucket), so a total stays exact.
+uint64_t overflow_key(uint64_t key) {
+  return cell_key(kind_of(key), kClientOther, kNameOther, result_of(key) == kNameOk ? kNameOk : kNameOther);
 }
 
 // A tool call or a protocol request that did not end ok. A refusal (429, 400, 413, 415) is counted apart.
-bool is_error(uint32_t key) {
+bool is_error(uint64_t key) {
   const McpUsageKind kind = kind_of(key);
   return (kind == McpUsageKind::ToolCall || kind == McpUsageKind::Request) && result_of(key) != kNameOk;
 }
@@ -228,9 +274,9 @@ bool bucket_full(const Usage::Bucket& bucket) {
 
 // The cell of `key` (the cells are sorted by key). A new cell past the caps (of the bucket, of all the buckets) is the overflow
 // cell of its type, which no cap stops.
-Usage::Cell& cell_of(Usage::Bucket& bucket, uint32_t key, size_t* used, size_t max_cells) {
-  const auto find = [&bucket](uint32_t wanted) {
-    return std::lower_bound(bucket.cells.begin(), bucket.cells.end(), wanted, [](const Usage::Cell& cell, uint32_t k) { return cell.key < k; });
+Usage::Cell& cell_of(Usage::Bucket& bucket, uint64_t key, size_t* used, size_t max_cells) {
+  const auto find = [&bucket](uint64_t wanted) {
+    return std::lower_bound(bucket.cells.begin(), bucket.cells.end(), wanted, [](const Usage::Cell& cell, uint64_t k) { return cell.key < k; });
   };
   auto at = find(key);
   if (at != bucket.cells.end() && at->key == key) return *at;
@@ -246,7 +292,7 @@ Usage::Cell& cell_of(Usage::Bucket& bucket, uint32_t key, size_t* used, size_t m
   return *at;
 }
 
-void add_event(Usage::Bucket& bucket, const McpUsageEvent& event, uint32_t key, size_t* cells, size_t max_cells) {
+void add_event(Usage::Bucket& bucket, const McpUsageEvent& event, uint64_t key, size_t* cells, size_t max_cells) {
   Usage::Cell& cell = cell_of(bucket, key, cells, max_cells);
   const auto ms = static_cast<uint64_t>(std::max<int64_t>(0, event.duration_ms));
   ++cell.count;
@@ -257,8 +303,9 @@ void add_event(Usage::Bucket& bucket, const McpUsageEvent& event, uint32_t key, 
 }
 
 // The client of a request: an initialize with clientInfo is the client of that name, version and User-Agent (or the client
-// with that User-Agent that had no name yet); any other request is the client last seen with its User-Agent.
-void note_client(Usage::Entry& entry, const McpUsageEvent& event, size_t max_clients) {
+// with that User-Agent that had no name yet); any other request is the client last seen with its User-Agent. Returns the record that
+// the request counted for, a copy: the least recently seen record may go as the new one comes (the cap of the records).
+Usage::Client note_client(Usage::Entry& entry, const McpUsageEvent& event, size_t max_clients) {
   const std::string agent = mcp_usage_clean(event.user_agent, kUserAgentBytes);
   const std::string name = mcp_usage_clean(event.client_name, kClientNameBytes);
   const std::string version = mcp_usage_clean(event.client_version, kClientVersionBytes);
@@ -289,10 +336,59 @@ void note_client(Usage::Entry& entry, const McpUsageEvent& event, size_t max_cli
   ++found->requests;
   found->last_seen = std::max(found->last_seen, event.at);
   found->first_seen = std::min(found->first_seen, event.at);
+  const Usage::Client chosen = *found;
   if (entry.clients.size() > max_clients) {
     const auto oldest = std::min_element(entry.clients.begin(), entry.clients.end(),
                                          [](const Usage::Client& a, const Usage::Client& b) { return a.last_seen < b.last_seen; });
     entry.clients.erase(oldest);
+  }
+  return chosen;
+}
+
+// The name that a request counts under in the cells: the name of its client (clientInfo), else the product of its User-Agent (the text
+// before the first "/" or space: python-httpx/0.27.0 is python-httpx), else "unknown". The version is no part of it, so an upgrade does not
+// cut a series.
+std::string client_name_of(const Usage::Client& client) {
+  std::string name = mcp_usage_clean(client.name, kCellClientBytes);
+  if (!name.empty()) return name;
+  name = mcp_usage_clean(client.user_agent.substr(0, client.user_agent.find_first_of("/ ")), kCellClientBytes);
+  return name.empty() ? std::string("unknown") : name;
+}
+
+// The id of a client name for a key. The name is its own id when the key has it, or can add it (a key uses at most 16 names over its
+// retention, whatever a client sends) and the table has it, or can add it (4096 names); else the requests count as "other", and the
+// totals stay exact. The names other and unknown are fixed: they count in no cap.
+uint16_t client_id_of(Usage::Entry& entry, Usage::ClientNames& table, const std::string& name) {
+  const auto known = table.ids.find(name);
+  if (known != table.ids.end() && known->second < kClientFixed) return known->second;
+  const auto& ids = entry.client_ids;
+  if (known != table.ids.end() && std::find(ids.begin(), ids.end(), known->second) != ids.end()) return known->second;
+  if (ids.size() >= kKeyClients) return kClientOther;
+  const uint16_t id = known != table.ids.end() ? known->second : table.intern(name);
+  if (id == kClientOther) return id;  // the table is full
+  entry.client_ids.push_back(id);
+  return id;
+}
+
+// The ids of the clients that the cells of an entry use, in all its tiers (not the fixed names), made again.
+void rebuild_client_ids(Usage::Entry& entry) {
+  std::vector<uint16_t> ids;
+  for (const auto& tier : entry.tiers) {
+    for (const auto& bucket : tier) {
+      for (const auto& cell : bucket.cells) {
+        if (client_of(cell.key) >= kClientFixed) ids.push_back(client_of(cell.key));
+      }
+    }
+  }
+  std::sort(ids.begin(), ids.end());
+  ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+  entry.client_ids = std::move(ids);
+}
+
+// What a deleted entry gives back: the cells of all its tiers.
+void release_cells(const Usage::Entry& entry, size_t* cells) {
+  for (const auto& tier : entry.tiers) {
+    for (const auto& bucket : tier) take_cells(cells, cells_of(bucket));
   }
 }
 
@@ -329,21 +425,26 @@ uint64_t count_of(const rapidjson::Value& value, const std::string& where) {
 
 std::string_view view_of(const rapidjson::Value& value) { return std::string_view(value.GetString(), value.GetStringLength()); }
 
-// The cells of a bucket: [[type, method, result, count, duration sum, duration max, rows, bytes], ...]. A cell that is a
-// duplicate adds to the first one, a cell without request is ignored, and the cells past the cap of a bucket go to the
-// overflow cell of their type: no request is lost.
-void cells_into(Usage::Bucket* bucket, const rapidjson::Value& cells, const std::string& at, Usage::State* state) {
+// The cells of a bucket: [[type, client, method, result, count, duration sum, duration max, rows, bytes], ...]. A cell that is a
+// duplicate adds to the first one, a cell without request is ignored, and the cells past the cap of a bucket go to the overflow cell of
+// their type: no request is lost. The client of a cell that its key has no room for (16 names) or that the table has no room for (4096)
+// is "other": the cells that this makes equal are one cell.
+void cells_into(Usage::Bucket* bucket, const rapidjson::Value& cells, const std::string& at, Usage::State* state, Usage::Entry* entry) {
   for (const auto& item : cells.GetArray()) {
-    if (!item.IsArray() || item.Size() != kCellFields) file_error(at + " has a cell that is not a type, a method, a result and 5 counts");
-    if (!item[0].IsString() || !item[1].IsString() || !item[2].IsString()) file_error(at + " has a cell whose type, method and result are not text");
+    if (!item.IsArray() || item.Size() != kCellFields) file_error(at + " has a cell that is not a type, a client, a method, a result and 5 counts");
+    for (rapidjson::SizeType i = 0; i < 4; ++i) {
+      if (!item[i].IsString()) file_error(at + " has a cell whose type, client, method and result are not text");
+    }
     const int kind = kind_index(view_of(item[0]));
     if (kind < 0) file_error(at + " has a cell of a type that is not known");
-    if (!valid_method(view_of(item[1]))) file_error(at + " has a method that is not valid");
-    if (!valid_name(view_of(item[2]))) file_error(at + " has a result that is not valid");
+    if (!valid_client(view_of(item[1]))) file_error(at + " has a client that is not valid");
+    if (!valid_method(view_of(item[2]))) file_error(at + " has a method that is not valid");
+    if (!valid_name(view_of(item[3]))) file_error(at + " has a result that is not valid");
     uint64_t counts[5];
-    for (rapidjson::SizeType i = 0; i < 5; ++i) counts[i] = count_of(item[i + 3], at);
+    for (rapidjson::SizeType i = 0; i < 5; ++i) counts[i] = count_of(item[i + 4], at);
     if (counts[0] == 0) continue;
-    const uint32_t key = cell_key(static_cast<McpUsageKind>(kind), state->names.intern(view_of(item[1])), state->names.intern(view_of(item[2])));
+    const uint16_t client = client_id_of(*entry, state->clients, std::string(view_of(item[1])));
+    const uint64_t key = cell_key(static_cast<McpUsageKind>(kind), client, state->names.intern(view_of(item[2])), state->names.intern(view_of(item[3])));
     Usage::Cell& cell = cell_of(*bucket, key, &state->cells, SIZE_MAX);
     cell.count += counts[0];
     cell.duration_ms_sum += counts[1];
@@ -353,19 +454,23 @@ void cells_into(Usage::Bucket* bucket, const rapidjson::Value& cells, const std:
   }
 }
 
-std::vector<Usage::Bucket> buckets_of(const rapidjson::Value& value, const std::string& where, int64_t step, Usage::State* state) {
+// The buckets of a tier: [[start, cells], ...] by start. The start is a multiple of the step of the tier.
+std::vector<Usage::Bucket> buckets_of(const rapidjson::Value& value, const std::string& where, size_t tier, Usage::State* state, Usage::Entry* entry) {
   if (!value.IsArray()) file_error(where + " must be an array");
+  const TierSpec& spec = kTierSpecs[tier];
   std::vector<Usage::Bucket> out;
   size_t index = 0;
   for (const auto& item : value.GetArray()) {
     const std::string at = where + "[" + std::to_string(index++) + "]";
     if (!item.IsArray() || item.Size() != kBucketFields) file_error(at + " must be an array of 2 fields: the start and the cells");
     Usage::Bucket bucket;
-    if (!item[0].IsInt64() || item[0].GetInt64() <= 0 || item[0].GetInt64() % step != 0) file_error(at + " must start on a whole " + (step == kHour ? "hour" : "day"));
+    if (!item[0].IsInt64() || item[0].GetInt64() <= 0 || item[0].GetInt64() % spec.step != 0) {
+      file_error(at + " must start at a multiple of " + std::to_string(spec.step) + " seconds, the step of the tier " + spec.member);
+    }
     bucket.start = item[0].GetInt64();
     if (!out.empty() && out.back().start >= bucket.start) file_error(at + " is not after the bucket before it");
     if (!item[1].IsArray()) file_error(at + " must end with the cells (an array)");
-    cells_into(&bucket, item[1], at, state);
+    cells_into(&bucket, item[1], at, state, entry);
     out.push_back(std::move(bucket));
   }
   return out;
@@ -421,8 +526,11 @@ void parse_usage(std::string_view text, Usage::State* state, size_t max_clients)
       std::sort(entry.clients.begin(), entry.clients.end(), [](const Usage::Client& a, const Usage::Client& b) { return a.last_seen > b.last_seen; });
       entry.clients.resize(max_clients);
     }
-    entry.hours = buckets_of(member(item, "hours", where), where + ".hours", kHour, state);
-    entry.days = buckets_of(member(item, "days", where), where + ".days", kDay, state);
+    for (size_t tier = 0; tier < kMcpUsageTiers; ++tier) {
+      const std::string name = kTierSpecs[tier].member;
+      entry.tiers[tier] = buckets_of(member(item, kTierSpecs[tier].member, where), where + "." + name, tier, state, &entry);
+    }
+    rebuild_client_ids(entry);
     const std::string id = entry.key.id;
     if (!state->entries.emplace(id, std::move(entry)).second) file_error("two entries have the id " + id);
   }
@@ -461,13 +569,14 @@ void put_time(McpJsonWriter& w, const char* name, int64_t seconds) {
   else w.Null();
 }
 
-void put_bucket(McpJsonWriter& w, const Usage::Bucket& bucket, const Usage::Names& names) {
+void put_bucket(McpJsonWriter& w, const Usage::Bucket& bucket, const Usage::Names& names, const Usage::ClientNames& clients) {
   w.StartArray();
   w.Int64(bucket.start);
   w.StartArray();
   for (const auto& cell : bucket.cells) {
     w.StartArray();
     w.String(kKindNames[static_cast<size_t>(kind_of(cell.key))]);
+    put(w, clients.by_id[client_of(cell.key)]);
     put(w, names.by_id[method_of(cell.key)]);
     put(w, names.by_id[result_of(cell.key)]);
     for (const uint64_t value : {cell.count, cell.duration_ms_sum, cell.duration_ms_max, cell.rows, cell.bytes}) w.Uint64(value);
@@ -477,9 +586,7 @@ void put_bucket(McpJsonWriter& w, const Usage::Bucket& bucket, const Usage::Name
   w.EndArray();
 }
 
-const std::vector<Usage::Bucket>& window_buckets(const Usage::Entry& entry, const McpUsageWindow& window) {
-  return window.step == kHour ? entry.hours : entry.days;
-}
+const std::vector<Usage::Bucket>& window_buckets(const Usage::Entry& entry, const McpUsageWindow& window) { return entry.tiers[window.tier]; }
 
 bool in_window(const Usage::Bucket& bucket, const McpUsageWindow& window) {
   return bucket.start >= window.from && bucket.start < window.from + static_cast<int64_t>(window.points) * window.step;
@@ -556,17 +663,24 @@ void put_counters(McpJsonWriter& w, const Usage::Counters& total) {
 // ---- the overview ----------------------------------------------------------------------------------
 
 constexpr size_t kFacetRows = 200;
-constexpr size_t kClientRows = 50;
 constexpr size_t kSeriesGroups = 8;
+constexpr size_t kClientVersions = 5;
 
-enum class Split { Key, Method, Result, Type };
+// What the series is grouped by.
+enum class Group { Key, Method, Client, Result, Type };
 
-Split split_of(const std::string& name) {
-  if (name == "key") return Split::Key;
-  if (name == "result") return Split::Result;
-  if (name == "type") return Split::Type;
-  return Split::Method;
+Group group_of(const std::string& name) {
+  if (name == "key") return Group::Key;
+  if (name == "client") return Group::Client;
+  if (name == "result") return Group::Result;
+  if (name == "type") return Group::Type;
+  return Group::Method;
 }
+
+// The metrics of a point of the series, in the order of their members: the requests, the errors, the calls, the time of the calls and
+// the bytes (add_to_counters says what each one counts).
+constexpr const char* kSeriesMetrics[] = {"requests", "errors", "calls", "duration_ms_sum", "bytes"};
+constexpr size_t kMetrics = sizeof(kSeriesMetrics) / sizeof(kSeriesMetrics[0]);
 
 // The kind of a row of the methods: a tool, a method of the protocol, or what was refused before its message was read.
 enum RowKind : uint8_t { kRowCall, kRowRequest, kRowRefused };
@@ -597,6 +711,8 @@ struct Filter {
   std::unordered_set<std::string> keys;
   bool methods_on = false;
   std::bitset<kMaxNames> methods;
+  bool clients_on = false;
+  std::bitset<kMaxNames> clients;
   bool results_on = false;
   std::bitset<kMaxNames> results;
   bool types_on = false;
@@ -604,6 +720,7 @@ struct Filter {
 
   bool key(const std::string& id) const { return !keys_on || keys.count(id) != 0; }
   bool method(uint16_t id) const { return !methods_on || methods.test(id); }
+  bool client(uint16_t id) const { return !clients_on || clients.test(id); }
   bool result(uint16_t id) const { return !results_on || results.test(id); }
   bool type(McpUsageKind kind) const { return !types_on || types[static_cast<size_t>(kind)]; }
 };
@@ -619,70 +736,78 @@ struct KeyRow {
   bool selected = false;
 };
 
-struct ClientRow {
-  std::string name;
-  std::string version;
-  std::string user_agent;
+// The cells of one client in the facet of the clients: the totals of a key, and the keys that have a request of the client.
+struct ClientFigures {
+  Usage::Counters counters;
   uint64_t keys = 0;
-  uint64_t requests = 0;
-  int64_t first_seen = 0;
-  int64_t last_seen = 0;
-  size_t last_entry = SIZE_MAX;
+  size_t last_entry = SIZE_MAX;  // the entry that was counted last: the entries are walked one after the other
 };
 
-// Everything that the entries add to an answer. An entry is walked once: the totals and the series with all the filters, each
-// facet with all the filters but its own, the clients with the filter of the keys. The rows are indexed by id: a cell costs a few
-// additions, whatever the number of rows.
+void add_client_figures(ClientFigures& into, const Usage::Cell& cell, size_t entry) {
+  add_to_counters(into.counters, cell);
+  if (into.last_entry != entry) {
+    ++into.keys;
+    into.last_entry = entry;
+  }
+}
+
+// What the records of the clients of the keys that the filter keeps say of a client name: when it was last seen, and its versions.
+struct ClientSeen {
+  int64_t last_seen = 0;
+  std::vector<std::pair<int64_t, std::string>> versions;  // when a record was last seen, and its version
+};
+
+// Everything that the entries add to an answer. An entry is walked once: the totals and the series with all the filters, each facet
+// with all the filters but its own, the records of the clients with the filter of the keys. The rows are indexed by id: a cell costs a
+// few additions, whatever the number of rows.
 struct Tally {
-  Tally(const Filter& f, const McpUsageWindow& w, Split s, size_t entries)
+  Tally(const Filter& f, const McpUsageWindow& w, Group g, size_t entries)
       : filter(f),
         window(w),
-        split(s),
+        group(g),
         methods(kRowKinds * kMaxNames),
         results(kMaxNames),
-        series(s == Split::Key ? entries : s == Split::Type ? kKinds : kMaxNames) {}
+        clients(kMaxNames),
+        series(g == Group::Key ? entries : g == Group::Type ? kKinds : kMaxNames) {}
   const Filter& filter;
   const McpUsageWindow& window;
-  Split split;
+  Group group;
   Usage::Counters totals;
   size_t active_keys = 0;  // the keys that have a request that every filter keeps
   std::unordered_map<std::string, KeyRow> keys;
   std::vector<Figures> methods;  // by kind of row and method: kind * kMaxNames + method
   std::vector<Figures> results;  // by result
   std::array<uint64_t, kKinds> types{};
-  // The requests at each point of the window, by group: the entry (its index) for a split by key, else the method, the
-  // result or the type. A group without a request has no points.
+  std::vector<ClientFigures> clients;  // by client
+  // The metrics at each point of the window, by group: the entry (its index) for a group by key, else the method, the client, the
+  // result or the type. A group without a request has none; else it has kMetrics * points counts, a metric after the other.
   std::vector<std::vector<uint64_t>> series;
-  std::map<std::string, ClientRow> clients;
+  std::unordered_map<std::string, ClientSeen> seen;  // by client name
 };
 
-// The clients that the filter of the keys keeps, grouped as a person names them: by name and version, or by User-Agent for a
-// client that gave no name. The group shows the client that was seen last.
-void tally_clients(Tally& t, size_t index, const Usage::Entry& entry) {
-  for (const auto& client : entry.clients) {
-    const std::string group = client.name.empty() ? "u\x1f" + client.user_agent : "n\x1f" + client.name + "\x1f" + client.version;
-    ClientRow& row = t.clients[group];
-    const bool fresh = row.last_entry == SIZE_MAX;
-    if (fresh || client.last_seen > row.last_seen) {
-      row.name = client.name;
-      row.version = client.version;
-      row.user_agent = client.user_agent;
-    }
-    row.first_seen = fresh ? client.first_seen : std::min(row.first_seen, client.first_seen);
-    row.last_seen = fresh ? client.last_seen : std::max(row.last_seen, client.last_seen);
-    row.requests += client.requests;
-    if (row.last_entry != index) {
-      ++row.keys;
-      row.last_entry = index;
-    }
+// The records of the clients of an entry that the filter of the keys keeps, by the name that their requests count under.
+void tally_records(Tally& t, const Usage::Entry& entry) {
+  for (const auto& record : entry.clients) {
+    ClientSeen& seen = t.seen[client_name_of(record)];
+    seen.last_seen = std::max(seen.last_seen, record.last_seen);
+    if (!record.version.empty()) seen.versions.emplace_back(record.last_seen, record.version);
   }
+}
+
+// A cell adds to a group at one point of the series: the metrics are the counts of add_to_counters, so the groups add up to the totals.
+void add_to_series(std::vector<uint64_t>& values, size_t points, size_t point, const Usage::Cell& cell) {
+  if (values.empty()) values.assign(kMetrics * points, 0);
+  Usage::Counters one;
+  add_to_counters(one, cell);
+  const uint64_t counts[kMetrics] = {one.requests, one.errors, one.calls, one.duration_ms_sum, one.bytes};
+  for (size_t metric = 0; metric < kMetrics; ++metric) values[metric * points + point] += counts[metric];
 }
 
 // Adds an entry (the `index`-th of the sorted ids) to the tally. `live` is the key when it exists.
 void tally_entry(Tally& t, size_t index, const std::string& id, const Usage::Entry& entry, const McpUsageKeyRef* live) {
   const Filter& f = t.filter;
   const bool key_kept = f.key(id);
-  if (key_kept) tally_clients(t, index, entry);
+  if (key_kept) tally_records(t, entry);
   Usage::Counters mine;  // the facet of the keys: every filter but the one of the keys
   bool any = false;
   for (const auto& bucket : window_buckets(entry, t.window)) {
@@ -690,29 +815,31 @@ void tally_entry(Tally& t, size_t index, const std::string& id, const Usage::Ent
     const auto point = static_cast<size_t>((bucket.start - t.window.from) / t.window.step);
     for (const auto& cell : bucket.cells) {
       const McpUsageKind kind = kind_of(cell.key);
+      const uint16_t client = client_of(cell.key);
       const uint16_t method = method_of(cell.key);
       const uint16_t result = result_of(cell.key);
+      const bool by_client = f.client(client);
       const bool by_method = f.method(method);
       const bool by_result = f.result(result);
       const bool by_type = f.type(kind);
-      if (by_method && by_result && by_type) add_to_counters(mine, cell);
+      if (by_client && by_method && by_result && by_type) add_to_counters(mine, cell);
       if (!key_kept) continue;
-      if (by_result && by_type) add_figures(t.methods[row_kind_of(kind) * kMaxNames + method], cell, index);
-      if (by_method && by_type) add_figures(t.results[result], cell, index);
-      if (by_method && by_result) t.types[static_cast<size_t>(kind)] += cell.count;
-      if (!(by_method && by_result && by_type)) continue;
+      if (by_client && by_result && by_type) add_figures(t.methods[row_kind_of(kind) * kMaxNames + method], cell, index);
+      if (by_client && by_method && by_type) add_figures(t.results[result], cell, index);
+      if (by_client && by_method && by_result) t.types[static_cast<size_t>(kind)] += cell.count;
+      if (by_method && by_result && by_type) add_client_figures(t.clients[client], cell, index);
+      if (!(by_client && by_method && by_result && by_type)) continue;
       any = true;
       add_to_counters(t.totals, cell);
-      uint32_t group = 0;
-      switch (t.split) {
-        case Split::Key: group = static_cast<uint32_t>(index); break;
-        case Split::Method: group = method; break;
-        case Split::Result: group = result; break;
-        case Split::Type: group = static_cast<uint32_t>(kind); break;
+      size_t group = 0;
+      switch (t.group) {
+        case Group::Key: group = index; break;
+        case Group::Method: group = method; break;
+        case Group::Client: group = client; break;
+        case Group::Result: group = result; break;
+        case Group::Type: group = static_cast<size_t>(kind); break;
       }
-      std::vector<uint64_t>& values = t.series[group];
-      if (values.empty()) values.assign(t.window.points, 0);
-      values[point] += cell.count;
+      add_to_series(t.series[group], t.window.points, point, cell);
     }
   }
   if (any) ++t.active_keys;
@@ -757,21 +884,31 @@ struct ResultRow {
   bool selected = false;
 };
 
+struct ClientRow {
+  std::string client;
+  ClientFigures figures;
+  bool selected = false;
+};
+
 struct SeriesGroup {
   std::string id;
   std::string label;
-  uint64_t total = 0;
-  std::vector<uint64_t> values;
+  uint64_t total = 0;             // its requests
+  std::vector<uint64_t> metrics;  // as the series of the tally
 };
 
 bool listed(const std::vector<std::string>& values, const std::string& value) {
   return std::find(values.begin(), values.end(), value) != values.end();
 }
 
-void put_values(McpJsonWriter& w, const std::vector<uint64_t>& values) {
-  w.StartArray();
-  for (const uint64_t value : values) w.Uint64(value);
-  w.EndArray();
+// The metrics of a group, one array for each, as the members of an object.
+void put_metrics(McpJsonWriter& w, const std::vector<uint64_t>& metrics, size_t points) {
+  for (size_t metric = 0; metric < kMetrics; ++metric) {
+    w.Key(kSeriesMetrics[metric]);
+    w.StartArray();
+    for (size_t point = 0; point < points; ++point) w.Uint64(metrics[metric * points + point]);
+    w.EndArray();
+  }
 }
 
 void put_strings(McpJsonWriter& w, const std::vector<std::string>& values) {
@@ -780,59 +917,62 @@ void put_strings(McpJsonWriter& w, const std::vector<std::string>& values) {
   w.EndArray();
 }
 
-// The groups of the series, from the requests that were counted at each point. A split by a dimension that is filtered shows
-// the values that were chosen, in their order (a value without a request is a line of zeros); else the 8 largest groups
+// The groups of the series, from the metrics that were counted at each point. A series grouped by a dimension that is filtered shows
+// the values that were chosen, in their order (a value without a request is a line of zeros); else the 8 largest groups by requests
 // (the same total: the smaller id first), and the others summed in `rest`.
 void put_series(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& query, const std::vector<std::string>& names,
-                const std::vector<std::string>& ids, const std::unordered_map<std::string, std::string>& key_names) {
+                const std::vector<std::string>& client_names, const std::vector<std::string>& ids,
+                const std::unordered_map<std::string, std::string>& key_names) {
   const size_t points = t.window.points;
-  const auto id_of = [&](uint32_t group) -> std::string {
-    switch (t.split) {
-      case Split::Key: return ids[group];
-      case Split::Method:
-      case Split::Result: return names[group];
-      case Split::Type: break;
+  const auto id_of = [&](size_t group) -> std::string {
+    switch (t.group) {
+      case Group::Key: return ids[group];
+      case Group::Method:
+      case Group::Result: return names[group];
+      case Group::Client: return client_names[group];
+      case Group::Type: break;
     }
     return kKindNames[group];
   };
   const auto label_of = [&](const std::string& id) -> std::string {
-    if (t.split != Split::Key) return id;
+    if (t.group != Group::Key) return id;
     const auto it = key_names.find(id);
     return it == key_names.end() ? id : it->second;
   };
   const std::vector<std::string>* chosen = nullptr;
-  switch (t.split) {
-    case Split::Key: chosen = &query.keys; break;
-    case Split::Method: chosen = &query.methods; break;
-    case Split::Result: chosen = &query.results; break;
-    case Split::Type: chosen = &query.types; break;
+  switch (t.group) {
+    case Group::Key: chosen = &query.keys; break;
+    case Group::Method: chosen = &query.methods; break;
+    case Group::Client: chosen = &query.clients; break;
+    case Group::Result: chosen = &query.results; break;
+    case Group::Type: chosen = &query.types; break;
   }
   // The groups that have requests, by id.
   struct Counted {
     std::string id;
     uint64_t total = 0;
-    const std::vector<uint64_t>* values = nullptr;
+    const std::vector<uint64_t>* metrics = nullptr;
   };
   std::vector<Counted> counted;
   for (size_t group = 0; group < t.series.size(); ++group) {
-    const std::vector<uint64_t>& values = t.series[group];
-    if (values.empty()) continue;
+    const std::vector<uint64_t>& metrics = t.series[group];
+    if (metrics.empty()) continue;
     Counted item;
-    item.id = id_of(static_cast<uint32_t>(group));
-    for (const uint64_t value : values) item.total += value;
-    item.values = &values;
+    item.id = id_of(group);
+    for (size_t point = 0; point < points; ++point) item.total += metrics[point];  // the requests come first
+    item.metrics = &metrics;
     counted.push_back(std::move(item));
   }
   std::vector<SeriesGroup> groups;
   SeriesGroup rest;
-  rest.values.assign(points, 0);
+  rest.metrics.assign(kMetrics * points, 0);
   size_t folded = 0;
   const auto show = [&](const std::string& id, const Counted* item) {
     SeriesGroup group;
     group.id = id;
     group.label = label_of(id);
     group.total = item ? item->total : 0;
-    group.values = item ? *item->values : std::vector<uint64_t>(points, 0);
+    group.metrics = item ? *item->metrics : std::vector<uint64_t>(kMetrics * points, 0);
     groups.push_back(std::move(group));
   };
   if (!chosen->empty()) {
@@ -849,12 +989,12 @@ void put_series(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& q
       }
       ++folded;
       rest.total += counted[i].total;
-      for (size_t p = 0; p < points; ++p) rest.values[p] += (*counted[i].values)[p];
+      for (size_t m = 0; m < kMetrics * points; ++m) rest.metrics[m] += (*counted[i].metrics)[m];
     }
   }
   w.Key("series");
   w.StartObject();
-  w.Key("step"); w.String(t.window.step == kHour ? "hour" : "day");
+  w.Key("step"); w.Int64(t.window.step);
   w.Key("t");
   w.StartArray();
   for (size_t i = 0; i < points; ++i) put(w, mcp_iso_utc(t.window.from + static_cast<int64_t>(i) * t.window.step));
@@ -866,7 +1006,7 @@ void put_series(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& q
     w.Key("id"); put(w, group.id);
     w.Key("label"); put(w, group.label);
     w.Key("total"); w.Uint64(group.total);
-    w.Key("values"); put_values(w, group.values);
+    put_metrics(w, group.metrics, points);
     w.EndObject();
   }
   w.EndArray();
@@ -874,14 +1014,25 @@ void put_series(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& q
   w.StartObject();
   w.Key("groups"); w.Uint64(folded);
   w.Key("total"); w.Uint64(rest.total);
-  w.Key("values"); put_values(w, rest.values);
+  put_metrics(w, rest.metrics, points);
   w.EndObject();
   w.EndObject();
 }
 
+// Up to 5 distinct versions that the records of a client saw, the one seen last first.
+std::vector<std::string> versions_of(std::vector<std::pair<int64_t, std::string>> versions) {
+  std::sort(versions.begin(), versions.end(), [](const auto& a, const auto& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
+  std::vector<std::string> out;
+  for (const auto& item : versions) {
+    if (out.size() >= kClientVersions) break;
+    if (!listed(out, item.second)) out.push_back(item.second);
+  }
+  return out;
+}
+
 // The facets and the clients, after the totals and the series.
 void put_facets(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& query, const std::vector<std::string>& names,
-                const std::vector<McpUsageKeyRef>& live) {
+                const std::vector<std::string>& client_names, const std::vector<McpUsageKeyRef>& live) {
   // The keys: those that have a request (every filter but their own), and the ones that were chosen.
   std::vector<KeyRow> keys;
   for (const auto& item : t.keys) keys.push_back(item.second);
@@ -952,14 +1103,29 @@ void put_facets(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& q
   });
   const size_t results_omitted = cap_rows(&results, kFacetRows);
 
-  std::vector<const ClientRow*> clients;
-  for (const auto& item : t.clients) clients.push_back(&item.second);
-  std::sort(clients.begin(), clients.end(), [](const ClientRow* a, const ClientRow* b) {
-    if (a->last_seen != b->last_seen) return a->last_seen > b->last_seen;
-    return std::tie(a->name, a->version, a->user_agent) < std::tie(b->name, b->version, b->user_agent);
+  // The clients: those that have a request in the window (every filter but their own), and the ones that were chosen.
+  std::vector<ClientRow> clients;
+  for (size_t id = 0; id < t.clients.size(); ++id) {
+    if (t.clients[id].counters.requests == 0) continue;
+    ClientRow row;
+    row.client = client_names[id];
+    row.figures = t.clients[id];
+    row.selected = listed(query.clients, row.client);
+    clients.push_back(std::move(row));
+  }
+  for (const auto& client : query.clients) {
+    const bool counted = std::any_of(clients.begin(), clients.end(), [&](const ClientRow& row) { return row.client == client; });
+    if (counted) continue;
+    ClientRow row;
+    row.client = client;
+    row.selected = true;
+    clients.push_back(std::move(row));
+  }
+  std::sort(clients.begin(), clients.end(), [](const ClientRow& a, const ClientRow& b) {
+    if (a.figures.counters.requests != b.figures.counters.requests) return a.figures.counters.requests > b.figures.counters.requests;
+    return a.client < b.client;
   });
-  const size_t clients_omitted = clients.size() > kClientRows ? clients.size() - kClientRows : 0;
-  if (clients_omitted != 0) clients.resize(kClientRows);
+  const size_t clients_omitted = cap_rows(&clients, kFacetRows);
 
   w.Key("keys");
   w.StartArray();
@@ -1009,15 +1175,16 @@ void put_facets(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& q
   w.EndArray();
   w.Key("clients");
   w.StartArray();
-  for (const ClientRow* client : clients) {
+  for (const auto& row : clients) {
+    const auto seen = t.seen.find(row.client);
     w.StartObject();
-    w.Key("name"); put(w, client->name);
-    w.Key("version"); put(w, client->version);
-    w.Key("user_agent"); put(w, client->user_agent);
-    w.Key("keys"); w.Uint64(client->keys);
-    w.Key("requests"); w.Uint64(client->requests);
-    put_time(w, "first_seen_at", client->first_seen);
-    put_time(w, "last_seen_at", client->last_seen);
+    w.Key("client"); put(w, row.client);
+    put_counters(w, row.figures.counters);
+    w.Key("keys"); w.Uint64(row.figures.keys);
+    w.Key("versions");
+    if (seen == t.seen.end()) put_strings(w, {});
+    else put_strings(w, versions_of(seen->second.versions));
+    put_time(w, "last_seen_at", seen == t.seen.end() ? 0 : seen->second.last_seen);
     w.EndObject();
   }
   w.EndArray();
@@ -1056,6 +1223,23 @@ uint16_t McpUsage::Names::intern(std::string_view name) {
   return id;
 }
 
+McpUsage::ClientNames::ClientNames() {
+  for (const char* name : {"other", "unknown"}) {
+    ids.emplace(name, static_cast<uint16_t>(by_id.size()));
+    by_id.emplace_back(name);
+  }
+}
+
+uint16_t McpUsage::ClientNames::intern(std::string_view name) {
+  const std::string text(name);
+  if (const auto it = ids.find(text); it != ids.end()) return it->second;
+  if (by_id.size() >= kMaxNames) return kClientOther;
+  const auto id = static_cast<uint16_t>(by_id.size());
+  by_id.push_back(text);
+  ids.emplace(text, id);
+  return id;
+}
+
 McpUsageKeyRef mcp_usage_key_ref(const McpKey& key) {
   return McpUsageKeyRef{key.id, key.name, key.hosts.size() == 1 ? key.hosts.front() : std::string(), key.source};
 }
@@ -1067,9 +1251,9 @@ bool mcp_valid_key_id(std::string_view id) {
 }
 
 std::vector<std::string> mcp_usage_windows(int64_t retention_days) {
-  std::vector<std::string> out{"24h"};
-  for (const int64_t days : {7, 30, 90, 365}) {
-    if (days <= retention_days) out.push_back(std::to_string(days) + "d");
+  std::vector<std::string> out;
+  for (const auto& spec : kWindowSpecs) {
+    if (retention_days >= spec.min_days) out.push_back(spec.name);
   }
   return out;
 }
@@ -1077,21 +1261,17 @@ std::vector<std::string> mcp_usage_windows(int64_t retention_days) {
 std::string mcp_usage_default_window(int64_t retention_days) { return retention_days >= 7 ? "7d" : "24h"; }
 
 std::optional<McpUsageWindow> mcp_usage_window(std::string_view name, int64_t retention_days, int64_t now) {
-  const auto names = mcp_usage_windows(retention_days);
-  if (std::find(names.begin(), names.end(), name) == names.end()) return std::nullopt;
-  McpUsageWindow window;
-  window.name = std::string(name);
-  if (name == "24h") {
-    window.step = kHour;
-    window.points = static_cast<size_t>(kHours);
-    window.from = floor_to(now, kHour) - (kHours - 1) * kHour;
-  } else {
-    const int64_t days = std::stoll(std::string(name.substr(0, name.size() - 1)));
-    window.step = kDay;
-    window.points = static_cast<size_t>(days);
-    window.from = floor_to(now, kDay) - (days - 1) * kDay;
+  for (const auto& spec : kWindowSpecs) {
+    if (name != spec.name || retention_days < spec.min_days) continue;
+    McpUsageWindow window;
+    window.name = std::string(name);
+    window.tier = spec.tier;
+    window.step = kTierSpecs[spec.tier].step;
+    window.points = spec.points;
+    window.from = floor_to(now, window.step) - (static_cast<int64_t>(spec.points) - 1) * window.step;
+    return window;
   }
-  return window;
+  return std::nullopt;
 }
 
 std::string mcp_usage_clean(std::string_view text, size_t max_bytes) {
@@ -1118,8 +1298,8 @@ std::optional<McpValidationError> mcp_usage_overview_check(McpUsageOverviewQuery
   const auto bad = [](const char* field, const char* reason, std::string message) {
     return McpValidationError{field, reason, std::move(message)};
   };
-  if (query->split != "key" && query->split != "method" && query->split != "result" && query->split != "type") {
-    return bad("split", "invalid", "split must be key, method, result or type");
+  if (query->group != "key" && query->group != "method" && query->group != "client" && query->group != "result" && query->group != "type") {
+    return bad("group", "invalid", "group must be key, method, client, result or type");
   }
   const auto check = [&](const char* field, std::vector<std::string>* values, bool (*valid)(const std::string&),
                          const char* rule) -> std::optional<McpValidationError> {
@@ -1138,6 +1318,7 @@ std::optional<McpValidationError> mcp_usage_overview_check(McpUsageOverviewQuery
   };
   if (const auto error = check("key", &query->keys, [](const std::string& v) { return mcp_valid_key_id(v); }, "the id of a key")) return error;
   if (const auto error = check("method", &query->methods, [](const std::string& v) { return valid_method(v); }, "a tool or a method of the protocol (A-Z a-z 0-9 _ /, at most 64)")) return error;
+  if (const auto error = check("client", &query->clients, [](const std::string& v) { return valid_client(v); }, "a client name (printable ASCII, 1 to 64 bytes)")) return error;
   if (const auto error = check("result", &query->results, [](const std::string& v) { return valid_name(v); }, "a result (a-z 0-9 _, at most 64)")) return error;
   if (const auto error = check("type", &query->types, [](const std::string& v) { return kind_index(v) >= 0; }, "call, request, limited or rejected")) return error;
   return std::nullopt;
@@ -1199,15 +1380,16 @@ void McpUsage::record(const McpUsageEvent& event) {
   if (entry.first_used == 0 || event.at < entry.first_used) entry.first_used = event.at;
   entry.last_used = std::max(entry.last_used, event.at);
 
-  const uint32_t key = cell_key_of(state_.names, event);
-  const int64_t hour = floor_to(event.at, kHour);
-  const int64_t day = floor_to(event.at, kDay);
-  add_event(bucket_at(entry.hours, hour), event, key, &state_.cells, options_.max_cells);
-  add_event(bucket_at(entry.days, day), event, key, &state_.cells, options_.max_cells);
-  // The memory stays bounded between two saves.
-  drop_before(entry.hours, floor_to(entry.hours.back().start, kHour) - (kHours - 1) * kHour, &state_.cells);
-  drop_before(entry.days, entry.days.back().start - (options_.retention_days - 1) * kDay, &state_.cells);
-  note_client(entry, event, options_.max_clients);
+  // The client first: the cell is the one of its name.
+  const Client client = note_client(entry, event, options_.max_clients);
+  const uint64_t key = cell_key_of(state_.names, event, client_id_of(entry, state_.clients, client_name_of(client)));
+  for (size_t tier = 0; tier < kMcpUsageTiers; ++tier) {
+    if (!tier_kept(tier, options_.retention_days)) continue;
+    std::vector<Bucket>& buckets = entry.tiers[tier];
+    add_event(bucket_at(buckets, floor_to(event.at, kTierSpecs[tier].step)), event, key, &state_.cells, options_.max_cells);
+    // The memory stays bounded between two saves.
+    drop_before(buckets, tier_first(tier, buckets.back().start, options_.retention_days), &state_.cells);
+  }
   dirty_ = true;
 }
 
@@ -1231,8 +1413,7 @@ void McpUsage::cap_deleted_locked() {
       if (it->second.deleted_at == 0) continue;
       if (oldest == state_.entries.end() || it->second.deleted_at < oldest->second.deleted_at) oldest = it;
     }
-    for (const auto& bucket : oldest->second.hours) take_cells(&state_.cells, cells_of(bucket));
-    for (const auto& bucket : oldest->second.days) take_cells(&state_.cells, cells_of(bucket));
+    release_cells(oldest->second, &state_.cells);
     state_.entries.erase(oldest);
     --deleted;
     dirty_ = true;
@@ -1240,20 +1421,33 @@ void McpUsage::cap_deleted_locked() {
 }
 
 void McpUsage::prune_locked(int64_t now) {
-  const int64_t first_hour = floor_to(now, kHour) - (kHours - 1) * kHour;
   const int64_t first_day = floor_to(now, kDay) - (options_.retention_days - 1) * kDay;
   for (auto it = state_.entries.begin(); it != state_.entries.end();) {
     Entry& entry = it->second;
-    if (drop_before(entry.hours, first_hour, &state_.cells)) dirty_ = true;
-    if (drop_before(entry.days, first_day, &state_.cells)) dirty_ = true;
+    bool day_gone = false;
+    for (size_t tier = 0; tier < kMcpUsageTiers; ++tier) {
+      std::vector<Bucket>& buckets = entry.tiers[tier];
+      if (!tier_kept(tier, options_.retention_days)) {
+        // Nothing is kept past the retention: a tier that it no longer reaches (it was lowered) is emptied.
+        if (buckets.empty()) continue;
+        for (const auto& bucket : buckets) take_cells(&state_.cells, cells_of(bucket));
+        buckets.clear();
+        dirty_ = true;
+      } else if (drop_before(buckets, tier_first(tier, now, options_.retention_days), &state_.cells)) {
+        dirty_ = true;
+        day_gone = day_gone || tier == kTierD1;
+      }
+    }
+    // A client name that no cell uses any more makes room for another one.
+    if (day_gone) rebuild_client_ids(entry);
     const size_t clients = entry.clients.size();
     entry.clients.erase(std::remove_if(entry.clients.begin(), entry.clients.end(), [&](const Client& c) { return c.last_seen < first_day; }),
                         entry.clients.end());
     if (entry.clients.size() != clients) dirty_ = true;
     // A deleted key whose usage is older than the retention is gone; a deleted key that was never used, after 2 hours.
     const bool used = entry.last_used != 0;
-    if (entry.deleted_at != 0 && entry.days.empty() && (used || now - entry.deleted_at >= kTombstoneSeconds)) {
-      for (const auto& bucket : entry.hours) take_cells(&state_.cells, cells_of(bucket));
+    if (entry.deleted_at != 0 && entry.tiers[kTierD1].empty() && (used || now - entry.deleted_at >= kTombstoneSeconds)) {
+      release_cells(entry, &state_.cells);
       it = state_.entries.erase(it);
       dirty_ = true;
       continue;
@@ -1296,7 +1490,7 @@ void McpUsage::write_list(McpJsonWriter& w, const std::vector<McpUsageKeyRef>& l
   {
     std::lock_guard<std::mutex> lock(mu_);
     for (const auto& [id, entry] : state_.entries) {
-      if (entry.deleted_at != 0 && !entry.days.empty() && !listed_ids.count(id)) deleted.emplace_back(entry.deleted_at, id);
+      if (entry.deleted_at != 0 && !entry.tiers[kTierD1].empty() && !listed_ids.count(id)) deleted.emplace_back(entry.deleted_at, id);
     }
   }
   std::sort(deleted.begin(), deleted.end(), [](const auto& a, const auto& b) { return a.first != b.first ? a.first > b.first : a.second < b.second; });
@@ -1329,7 +1523,7 @@ bool McpUsage::write_detail(McpJsonWriter& w, const std::string& id, const McpUs
   // One point for each step of the window, from its start: a step without a bucket has no request.
   w.Key("series");
   w.StartObject();
-  w.Key("step"); w.String(window.step == kHour ? "hour" : "day");
+  w.Key("step"); w.Int64(window.step);
   w.Key("points");
   w.StartArray();
   static const std::vector<Bucket> kNone;
@@ -1422,6 +1616,7 @@ void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& que
   filter.keys_on = !query.keys.empty();
   filter.keys.insert(query.keys.begin(), query.keys.end());
   filter.methods_on = !query.methods.empty();
+  filter.clients_on = !query.clients.empty();
   filter.results_on = !query.results.empty();
   filter.types_on = !query.types.empty();
   for (const auto& type : query.types) {
@@ -1433,6 +1628,9 @@ void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& que
     for (const auto& method : query.methods) {
       if (const auto it = state_.names.ids.find(method); it != state_.names.ids.end()) filter.methods.set(it->second);
     }
+    for (const auto& client : query.clients) {
+      if (const auto it = state_.clients.ids.find(client); it != state_.clients.ids.end()) filter.clients.set(it->second);
+    }
     for (const auto& result : query.results) {
       if (const auto it = state_.names.ids.find(result); it != state_.names.ids.end()) filter.results.set(it->second);
     }
@@ -1443,7 +1641,7 @@ void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& que
 
   // 2. One entry at a time under the lock again, found again by its id (it may be gone): a call that is counted meanwhile waits
   // for one entry, never for all of them. Nothing that points into an entry or into the names outlives its lock.
-  Tally tally(filter, window, split_of(query.split), ids.size());
+  Tally tally(filter, window, group_of(query.group), ids.size());
   std::unordered_map<std::string, const McpUsageKeyRef*> live_by_id;
   for (const auto& key : live) live_by_id.emplace(key.id, &key);
   for (size_t i = 0; i < ids.size(); ++i) {
@@ -1454,11 +1652,13 @@ void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& que
     tally_entry(tally, i, ids[i], it->second, named == live_by_id.end() ? nullptr : named->second);
   }
 
-  // 3. Under a last lock: the names, which grow (and move) while calls are counted.
+  // 3. Under a last lock: the names of the methods, the results and the clients, which grow (and move) while calls are counted.
   std::vector<std::string> names;
+  std::vector<std::string> client_names;
   {
     std::lock_guard<std::mutex> lock(mu_);
     names = state_.names.by_id;
+    client_names = state_.clients.by_id;
   }
 
   std::unordered_map<std::string, std::string> key_names;
@@ -1467,11 +1667,12 @@ void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& que
 
   w.StartObject();
   put_head(w, window, now, since_, persisted(), options_.retention_days);
-  w.Key("split"); put(w, query.split);
+  w.Key("group"); put(w, query.group);
   w.Key("filters");
   w.StartObject();
   w.Key("key"); put_strings(w, query.keys);
   w.Key("method"); put_strings(w, query.methods);
+  w.Key("client"); put_strings(w, query.clients);
   w.Key("result"); put_strings(w, query.results);
   w.Key("type"); put_strings(w, query.types);
   w.EndObject();
@@ -1481,8 +1682,8 @@ void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& que
   w.Key("active_keys"); w.Uint64(tally.active_keys);
   w.Key("keys"); w.Uint64(live.size());
   w.EndObject();
-  put_series(w, tally, query, names, ids, key_names);
-  put_facets(w, tally, query, names, live);
+  put_series(w, tally, query, names, client_names, ids, key_names);
+  put_facets(w, tally, query, names, client_names, live);
   w.EndObject();
 }
 
@@ -1508,14 +1709,12 @@ void McpUsage::write_entry_locked(McpJsonWriter& w, const Entry& entry) const {
     w.EndObject();
   }
   w.EndArray();
-  w.Key("hours");
-  w.StartArray();
-  for (const auto& bucket : entry.hours) put_bucket(w, bucket, state_.names);
-  w.EndArray();
-  w.Key("days");
-  w.StartArray();
-  for (const auto& bucket : entry.days) put_bucket(w, bucket, state_.names);
-  w.EndArray();
+  for (size_t tier = 0; tier < kMcpUsageTiers; ++tier) {
+    w.Key(kTierSpecs[tier].member);
+    w.StartArray();
+    for (const auto& bucket : entry.tiers[tier]) put_bucket(w, bucket, state_.names, state_.clients);
+    w.EndArray();
+  }
   w.EndObject();
 }
 

@@ -16,14 +16,18 @@ constexpr int kCostSeconds = 15;
 // The (user, tool) pairs that one read groups: far more than a key has (a user or two, 61 tools at most).
 constexpr uint64_t kCostGroups = 10000;
 
-int64_t window_seconds(std::string_view name) { return name == "7d" ? 7 * 86400 : 86400; }
+int64_t window_seconds(std::string_view name) {
+  if (name == "1h") return 3600;
+  if (name == "6h") return 6 * 3600;
+  return name == "7d" ? 7 * 86400 : 86400;
+}
 
 }  // namespace
 
-std::vector<std::string> mcp_cost_windows() { return {"24h", "7d"}; }
+std::vector<std::string> mcp_cost_windows() { return {"1h", "6h", "24h", "7d"}; }
 
 std::optional<McpCostWindow> mcp_cost_window(std::string_view name, int64_t max_lookback_hours, int64_t now_s) {
-  if (name != "24h" && name != "7d") return std::nullopt;
+  if (name != "1h" && name != "6h" && name != "24h" && name != "7d") return std::nullopt;
   McpCostWindow window;
   window.name = std::string(name);
   // To the end of the current minute: a second request in the same minute reads the same window (the cache keeps it 60 s).
