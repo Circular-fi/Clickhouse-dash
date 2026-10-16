@@ -4,8 +4,33 @@ This file is generated from `src/config_keys.def`. Do not edit it: run `python3 
 
 Each key is in the block of the configuration file that its section names (`observability.traces` is
 `observability { traces { ... } }`). A value outside its range stops the start with an error that names the key.
-`chdash --config <file> --print-config` writes the value of every key as it applies.
-The prose of the keys, and the blocks of hosts and MCP keys, are in [configuration.md](configuration.md).
+`chdash --config <file> --print-config` writes the value of every key as it applies, and where the value comes from.
+The blocks `clickhouse.host`, `mcp.mcp_key`, `mcp.key` and `query_library` can appear more than once. Each block is one host, one key or one library.
+An `mcp_key` block has the name of its key as its label: `mcp_key "ci-bot" { ... }`. No other block takes a label.
+The block `mcp.key` is the older form of `mcp.mcp_key`: ChDash reads it for one release and writes a warning.
+The block `access` is required: a file without it stops the start ([access.md](access.md)).
+The prose of the keys is in [configuration.md](configuration.md).
+
+## Secrets
+
+A secret is never written in the file: a password in a URI, or a `token` or `secret` in a key, stops the start. A secret has two forms,
+and each form is a key of its own in the tables below:
+
+- `<name>_env` gives the name of an environment variable. The value of the secret is the value of the variable.
+- `<name>_file` gives the path of a file. The value of the secret is the content of the file, without its last line end.
+
+Give exactly one of the two forms. A variable that is not set or is empty, and a file that cannot be read or is empty,
+stop the start. ChDash reads each secret one time, at start. ChDash reads no environment variable that the file does not name.
+The keys that accept `_env` and `_file` are the ones whose type is `environment variable name` or `file path` in the sections
+`clickhouse.host`, `mcp.mcp_key`, `mcp.key` and `access.pdp`. `--print-config` shows the source of a secret (`env:VAR` or `file:/path`), never its value.
+
+## Values from the environment or from a file
+
+An attribute that is not a secret can also take its value from a different place, when the file tells it. Such an attribute
+`<name>` has three forms: `<name>` (the value is in the file), `<name>_env` (an environment variable) and `<name>_file` (a file,
+without its last line end). Give only one of the three forms. The same rules as for a secret apply to `_env` and `_file`.
+These attributes have the three forms: `otlp_endpoint` of the section `telemetry`, `public_keys` of the section `access.identity`
+and `url` of the section `access.pdp`. `--print-config` shows the value of each one and its source.
 
 ## `server`
 
@@ -17,7 +42,7 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 | `max_worker_threads` | integer | `256` | 1 to 4096 threads | The most threads that the pool grows to when streams hold threads. It is at least worker_threads. |
 | `max_queued_requests` | integer | `1024` | 16 to 100000 requests | Requests that wait for a thread. A request past the limit is refused with 503. |
 | `max_body_bytes` | integer | `0` | 0 or 65536 to 2147483648 bytes | The largest request body. A larger body is refused with 413 before it is read. 0 = derived from query.max_sql_bytes and the query library. |
-| `max_host_streams` | integer | `64` | 0 to 4096 streams | Open status streams of the pages (one for each visible page). At most half of max_worker_threads. Past the limit a page polls. |
+| `max_host_streams` | integer | `64` | 0 to 4096 streams | Open status streams of the pages (one for each visible page). It is at most half of max_worker_threads: a higher value stops the start. Past the limit a page polls. |
 | `write_timeout_ms` | integer | `120000` | 1000 to 3600000 ms | How long one write of a response waits for a client that does not read (a paused download). Past it the response ends. |
 | `shutdown_timeout_ms` | integer | `10000` | 1000 to 600000 ms | How long a stop (SIGTERM, SIGINT) waits for the running requests. Past it the process ends with status 1. |
 | `metrics` | boolean | `true` |  | Serve GET /metrics (the Prometheus text format). |
@@ -209,6 +234,49 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 | `database` | text | `otel` |  | The database of the metric tables. |
 | `table_prefix` | text | `otel_metrics` |  | The prefix of the metric tables: <prefix>_gauge, <prefix>_sum, <prefix>_histogram and the others. |
 
+## `clickhouse.host`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `name` | text |  | 1 or more bytes, no control character | The id of the host. It is required and each host has a different one. The pages and the API name the host with it. |
+| `label` | text |  |  | The name that the pages show. Default: the value of name. |
+| `runner_uri` | text |  | clickhouse://user@host[:port][?parameters] | The URI of the account that runs the queries of the people (the runner). It is required. It never holds a password: use runner_password_env, runner_password_file, password_env or password_file. The parameters are compression, secure, verify, ca, ca_dir and sni. |
+| `system_uri` | text |  | clickhouse://user@host[:port][?parameters] | The URI of the system account. The backend uses it for its own reads. It is required. It never holds a password: use system_password_env, system_password_file, password_env or password_file. |
+| `mcp_uri` | text |  | clickhouse://user@host[:port][?parameters] | The URI of the account of the MCP tools. A host without it is not visible to MCP. It never holds a password: use mcp_password_env or mcp_password_file. |
+| `password_env` | environment variable name |  | letters, digits and _ | The variable that holds the password of runner_uri and of system_uri. It is a secret. Give only one of password_env and password_file, and none of the runner_password_* and system_password_* keys. |
+| `password_file` | file path |  |  | The file that holds the password of runner_uri and of system_uri, without its last line end. It is a secret. Give only one of password_env and password_file, and none of the runner_password_* and system_password_* keys. |
+| `runner_password_env` | environment variable name |  | letters, digits and _ | The variable that holds the password of runner_uri only. It is a secret. Give only one of runner_password_env and runner_password_file. |
+| `runner_password_file` | file path |  |  | The file that holds the password of runner_uri only, without its last line end. It is a secret. Give only one of runner_password_env and runner_password_file. |
+| `system_password_env` | environment variable name |  | letters, digits and _ | The variable that holds the password of system_uri only. It is a secret. Give only one of system_password_env and system_password_file. |
+| `system_password_file` | file path |  |  | The file that holds the password of system_uri only, without its last line end. It is a secret. Give only one of system_password_env and system_password_file. |
+| `mcp_password_env` | environment variable name |  | letters, digits and _ | The variable that holds the password of mcp_uri. It is a secret. It needs mcp_uri. Give only one of mcp_password_env and mcp_password_file. No other password key applies to mcp_uri. |
+| `mcp_password_file` | file path |  |  | The file that holds the password of mcp_uri, without its last line end. It is a secret. It needs mcp_uri. Give only one of mcp_password_env and mcp_password_file. No other password key applies to mcp_uri. |
+
+## `clickhouse.host.observability.traces`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `enabled` | boolean |  |  | Show the Traces page for this host. Default: the value of observability.traces.enabled. |
+| `database` | text |  |  | The database of the traces table of this host. Default: the value of observability.traces.database. |
+| `table` | text |  |  | The traces table of this host. Default: the value of observability.traces.table. |
+| `trace_index_table` | text |  |  | The table of this host that gives the time range of a trace. Default: the value of observability.traces.trace_index_table. |
+
+## `clickhouse.host.observability.logs`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `enabled` | boolean |  |  | Show the Logs page for this host. Default: the value of observability.logs.enabled. |
+| `database` | text |  |  | The database of the logs table of this host. Default: the value of observability.logs.database. |
+| `table` | text |  |  | The logs table of this host. Default: the value of observability.logs.table. |
+
+## `clickhouse.host.observability.metrics`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `enabled` | boolean |  |  | Show the Metrics page for this host. Default: the value of observability.metrics.enabled. |
+| `database` | text |  |  | The database of the metric tables of this host. Default: the value of observability.metrics.database. |
+| `table_prefix` | text |  |  | The prefix of the metric tables of this host. Default: the value of observability.metrics.table_prefix. |
+
 ## `mcp`
 
 | Key | Type | Default | Range | Use |
@@ -217,7 +285,7 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 | `allowed_origins` | list of texts | `[]` | https://host[:port], at most 256 bytes each | The origins of the pages that may call from a browser. A call with no Origin is always accepted. |
 | `enabled` | boolean | `false` |  | Serve the MCP endpoint, POST /mcp. |
 | `storage_file` | text |  |  | The JSON file of the keys that are made on the MCP page. |
-| `manage_from_ui` | boolean | `true` |  | Allow the MCP page to make and delete keys. When false, a change is refused with 403 manage_disabled. |
+| `manage_from_ui` | boolean | `true` |  | Deprecated: use keys.mode. false is the static mode, true the hybrid mode. It stops the start when keys.mode is also in the file. |
 | `max_rows` | integer | `1000` | 1 to 1000000 rows | Rows that a call returns, at most. A key can lower it. |
 | `max_result_bytes` | integer | `1048576` | 1024 to 268435456 bytes | Bytes that a call returns, at most. |
 | `query_timeout_seconds` | integer | `30` | 1 to 3600 seconds | The time of one call. A key can lower it. |
@@ -236,3 +304,93 @@ The prose of the keys, and the blocks of hosts and MCP keys, are in [configurati
 | `instance` | text |  |  | The name of this ChDash in the usage files: 1 to 64 characters of A-Z a-z 0-9 . _ -. Two instances that run at the same time must not share it. Empty: the host name of the machine (the start fails when it is not a valid name: set this key). |
 | `retention_days` | integer | `90` | 1 to 365 days | How long the usage of a key is kept (also after the key is deleted). It is kept by the minute, 5 minutes and 15 minutes up to the day, then by 3 hours (from 7 days), by 12 hours (from 30 days) and by the day. |
 | `all_keys` | boolean | `false` |  | Let a key read the usage of all the keys of all the instances (the tool mcp_analysis_all_usage, which the tools of the key must also name). Never the ClickHouse cost of another key. |
+
+## `mcp.keys`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `mode` | one of static\|dynamic\|hybrid | `hybrid` |  | Which keys apply. static: the mcp_key blocks only (the page makes no key and the key file is not read). dynamic: the keys of the page only (an mcp_key block stops the start). hybrid: the two. |
+
+## `mcp.mcp_key`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `token_env` | environment variable name |  | letters, digits and _ | The variable that holds the token of the key: mcp_ and 43 base64url characters. It is a secret. Give exactly one of token_env and token_file. The token is never written in the file. |
+| `token_file` | file path |  |  | The file that holds the token of the key, without its last line end: mcp_ and 43 base64url characters. It is a secret. Give exactly one of token_env and token_file. The token is never written in the file. |
+| `subject` | text |  | 1 to 64 characters of A-Z a-z 0-9 . _ @ + - | The name of the user for whom the key operates. The call log shows it. |
+| `tools` | list of texts | `[]` | names of tools, or * | The tools that the key can call. * is every read tool but the restricted tools. An empty list means no tool. |
+| `expires` | text |  | an RFC 3339 time | The time when the key stops. After it, a request with the key gets 401. Empty: the key does not expire. |
+
+## `mcp.mcp_key.scope`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `hosts` | list of texts |  | one name of a host that has mcp_uri | The host that the key reads. A key reads one host. Default: the host with mcp_uri, when the configuration has one only. |
+| `databases` | list of texts | `[]` | patterns of databases and tables, or * | The data that the key reads. An empty list means no data. |
+
+## `mcp.mcp_key.limits`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `max_rows` | integer |  | 1 to mcp.max_rows | The rows that a call of the key returns, at most. Default: the value of mcp.max_rows. |
+| `timeout_seconds` | integer |  | 1 to mcp.query_timeout_seconds | The time of one call of the key. Default: the value of mcp.query_timeout_seconds. |
+| `rate_limit_per_minute` | integer |  | 1 to mcp.rate_limit_per_minute | The requests that the key can send in one minute. Default: the value of mcp.rate_limit_per_minute. |
+
+## `mcp.key`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `name` | text |  | a-z, 0-9, - and _ (at most 32 bytes), no ui_ at the start | The name of the key. It is required and each key has a different one. |
+| `secret_env` | environment variable name |  | letters, digits and _ | The variable that holds the token of the key: an mcp_ token, or the UUID version 4 of an older key. It is a secret. Give exactly one of secret_env and secret_file. The secret is never written in the file. |
+| `secret_file` | file path |  |  | The file that holds the token of the key, without its last line end: an mcp_ token, or the UUID version 4 of an older key. It is a secret. Give exactly one of secret_env and secret_file. The secret is never written in the file. |
+| `hosts` | list of texts |  | one name of a host that has mcp_uri | The host that the key reads. It is required. A key reads one host: make one key for each host. |
+| `tools` | list of texts | `[]` | names of tools, or * | The tools that the key can call. An empty list means no tool. |
+| `databases` | list of texts | `[]` | patterns of databases and tables, or * | The data that the key reads. An empty list means no data. |
+| `max_rows` | integer |  | 1 to mcp.max_rows | The rows that a call of the key returns, at most. Default: the value of mcp.max_rows. |
+| `timeout_seconds` | integer |  | 1 to mcp.query_timeout_seconds | The time of one call of the key. Default: the value of mcp.query_timeout_seconds. |
+
+## `telemetry`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `enabled` | boolean | `false` |  | Send the SERVER span of each MCP request, a child span for each ClickHouse statement of the call, the call log, and the CLIENT span of each call to the PDP of the access block to an OTLP/HTTP receiver (JSON encoding). It needs otlp_endpoint. |
+| `otlp_endpoint` | text |  | http://host[:port][/path] | The base URL of the OTLP/HTTP receiver. The spans go to <base>/v1/traces and the call log to <base>/v1/logs. Only http: ChDash has no TLS client. It is required when enabled is true. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file. |
+| `otlp_endpoint_env` | environment variable name |  | letters, digits and _ | The variable that holds the value of otlp_endpoint. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file. |
+| `otlp_endpoint_file` | file path |  |  | The file that holds the value of otlp_endpoint, without its last line end. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file. |
+| `service_name` | text | `chdash` |  | The service.name of the resource of the spans and the log records: 1 to 255 bytes, no control character. |
+| `export_interval` | duration | `5s` | 100ms to 1h | The longest time that a span or a log record waits in the queue before it is sent. A full batch is sent at once. |
+| `export_timeout` | duration | `10s` | 100ms to 5m | The time of one export request. A batch that fails with a connection error, 429, 502, 503 or 504 is sent again two times at most, then dropped and counted. |
+| `connect_timeout` | duration | `2s` | 100ms to 1m | The time to open the connection to the receiver. It is at most export_timeout. |
+| `max_queue_size` | integer | `2048` | 1 to 1000000 items | The spans that wait for the export, at most, and the log records too. A new item past the limit is dropped and counted in chdash_telemetry_dropped_total. |
+| `max_export_batch_size` | integer | `512` | 1 to 100000 items | The items of one export request, at most. It is at most max_queue_size. |
+| `call_log` | boolean | `true` |  | Send the call log (mcp.call) as OTLP log records too. The JSON line of the log is always written. |
+
+## `access`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `mode` | one of authzen\|open |  |  | Required: a file without the access block stops the start. authzen: each request of the pages and of the API needs a valid identity token, and the PDP decides each action. open: no check; the start writes a warning. Use open only for a server alone on a closed network. open takes no identity block and no pdp block. |
+
+## `access.identity`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `header` | text | `X-Identity-Token` | an HTTP header name, not Cookie or Authorization | The request header that carries the identity token. The token is never read from a cookie or from a query parameter. |
+| `issuer` | text |  | 1 to 1024 bytes, no control character | Required with authzen: the value that the iss claim of a token must have. |
+| `audience` | text |  | 1 to 256 bytes, no control character | Required with authzen: the name of this server. The aud claim of a token must contain it. It is also the id of the service resource that ChDash sends to the PDP, and the server of GET /.well-known/access-actions. |
+| `public_keys` | text |  | PEM, 1 to 16 SubjectPublicKeyInfo blocks | The public keys of the issuer: Ed25519 (EdDSA) or P-256 with an uncompressed point (ES256). A token signed by one of them is accepted. Give exactly one of public_keys, public_keys_env and public_keys_file. |
+| `public_keys_env` | environment variable name |  | letters, digits and _ | The variable that holds the value of public_keys. Give exactly one of public_keys, public_keys_env and public_keys_file. |
+| `public_keys_file` | file path |  |  | The file that holds the value of public_keys, without its last line end. Give exactly one of public_keys, public_keys_env and public_keys_file. |
+| `max_age` | duration | `5m` | 1s to 24h | The longest life of a token: exp - iat is at most this value. A token with a longer life gets 401. |
+
+## `access.pdp`
+
+| Key | Type | Default | Range | Use |
+|---|---|---|---|---|
+| `url` | text |  | http://host[:port][/path] | Required with authzen: the base URL of the AuthZEN PDP. ChDash sends POST <url>/access/v1/evaluation and <url>/access/v1/evaluations. Only http: ChDash has no TLS client, so the network between ChDash and the PDP must be private to them. Give exactly one of url, url_env and url_file. |
+| `url_env` | environment variable name |  | letters, digits and _ | The variable that holds the value of url. Give exactly one of url, url_env and url_file. |
+| `url_file` | file path |  |  | The file that holds the value of url, without its last line end. Give exactly one of url, url_env and url_file. |
+| `token_env` | environment variable name |  | letters, digits and _ | The variable that holds the token of this server at the PDP (Authorization: Bearer). It is a secret. Give exactly one of token_env and token_file. |
+| `token_file` | file path |  |  | The file that holds the token of this server at the PDP, without its last line end. It is a secret. Give exactly one of token_env and token_file. |
+| `timeout` | duration | `500ms` | 10ms to 1m | The time of one request to the PDP. Without an answer in this time, the decision is false (fail closed). |
+| `cache_ttl` | duration | `30s` | 0s to 1h | How long ChDash keeps an answer of the PDP for one subject, action and resource. 0s: no cache. A failure is never kept. |

@@ -1,32 +1,38 @@
 # System
 
-The **System** page shows the health of the selected server. It uses the system tables of the server. It shows what the server does now, its history, its top queries and its disks. The page is about the server. It is not about a database or a table. For this reason, it is a page of its own beside Query, Explorer and Observability (the page switcher of the header). It is not an Explorer view. Every read is a fixed, bounded, read-only SELECT on system tables. Only allowlisted values of a request can reach the SQL.
+The **System** page shows the health of the selected server. It uses the system tables of the server. It shows what the server does now, its history, its top queries and its disks. The page is about the server, not about a database or a table. For this reason, it is a page of its own. It is beside Query, Explorer and Observability in the page switcher of the header.
+
+It is not an Explorer view. Every read is a fixed, bounded, read-only SELECT on system tables. Only allowlisted values of a request can reach the SQL.
 
 ## Routes and page
 
-The sections are three pages of their own: `system.html`, `queries.html` and `disks.html`. One controller starts them (`app_system.js`). A row of links in one nav row under the header goes from page to page. The links look like the underlined tabs, and the current page is marked. Under the nav row, each section has the filter bar of Observability (`filterBar`, docs/ui-foundations.md, "Filter bar"). The filter bar has these parts:
+The sections are three pages of their own: `system.html`, `queries.html` and `disks.html`. The controller `app_system.js` starts them. One row of links under the header moves from page to page. The links are shown as underlined tabs, and the current page is marked. Under the nav row, each section has the filter bar of Observability (`filterBar`, docs/ui-foundations.md, "Filter bar"). The filter bar has these parts:
 
-- The time range is first on the left (the same picker).
-- The filters of the section follow. They are the same "Label · Value" pickers.
-- A refresh icon button is at the right end, in the slot of the Search button of Observability.
+- The time range is the first part, on the left. It is the same picker.
+- The filters of the section come next. They are the same "Label · Value" pickers.
+- A refresh icon button is at the right end. It takes the place of the Search button of Observability.
 
-A change of a filter or of the range applies at once. The button reloads the section. The height, the padding, the gaps and the wrap rules are the same as on Traces, Logs and Metrics. At 600 px and below, the filter bar folds into one summary line ("Last 1 hour · 2 filters"). The summary line unfolds it, and the refresh button folds it again.
+A change of a filter or of the range applies at once. The refresh button reloads the section. The height, the padding, the gaps and the wrap rules are the same as on Traces, Logs and Metrics. At 600 px and below, the filter bar becomes one summary line ("Last 1 hour · 2 filters"). The summary line opens the full filter bar. The refresh button closes it again.
 
 | Section | Address | What it shows |
 | --- | --- | --- |
-| Overview | `/system[?from=&to=]` | server tiles, the databases, the cluster (topology, Keeper, replication), the performance history (`from` / `to`: its time range), the background activity, one page top to bottom |
+| Overview | `/system[?from=&to=]` | server tiles, the databases, the cluster (topology, Keeper, replication), the performance history (`from` / `to`: its time range), the background activity, on one page from top to bottom |
 | Queries | `/system/queries[?from=&to=&sort=&kind=&errors=&user=&database=&table=&hide=0]` | the top query shapes of a window |
-| (a query shape) | `/system/queries/<hash>[?from=&to=&runs=&<the list's parameters>]` | one shape's timeline and runs, a page of its own (below), not a section: no section tabs |
+| (a query shape) | `/system/queries/<hash>[?from=&to=&runs=&<the list's parameters>]` | the timeline and runs of one shape, on a page of its own (below), not a section: no section tabs |
 | Disks | `/system/disks[?from=&to=]` | each disk's fill, its growth and time until full, the bytes of each database on it, the storage policies |
 
-The browser follows the link of a section. Back / Forward walk the history of the browser, from page to page. Inside a page, they walk from one query string to the next. Each section keeps its own parameters. The page of another section does not receive them. The server answers an unknown section (`/system/whatever`) with a `302` to Overview. It keeps the query string and adds `redirected_from=<the path asked for>`. The page takes this mark off the address and shows a notice: "/system/whatever is not a page of this server. The System overview is shown instead." The configuration can turn off a section (Queries with `system.top_queries = false`). That section has no link, and its address is a `302` to Overview in the same way. Each page loads only the module and the stylesheet of its own section (`style.system.css`, `style.queries.css`, `style.disks.css`).
+The browser follows the link of a section. Back / Forward move through the history of the browser, from page to page. Inside a page, they move from one query string to the next. Each section keeps its own parameters. The page of another section does not receive them.
 
-The former addresses of Explorer answer with a redirect to the System page (`server.cpp` `redirect_to_system`). The redirect has these properties:
+The server answers an unknown section (`/system/whatever`) with a `302` to Overview. It keeps the query string and adds `redirected_from=<the path asked for>`. The page removes this mark from the address. It shows a notice: "/system/whatever is not a page of this server. The System overview is shown instead."
+
+The configuration can disable a section (Queries with `system.top_queries = false`). That section has no link. Its address gives a `302` to Overview in the same way. Each page loads only the module and the stylesheet of its own section (`style.system.css`, `style.queries.css`, `style.disks.css`).
+
+The former addresses of Explorer send a redirect to the System page (`server.cpp` `redirect_to_system`). The redirect has these properties:
 
 - It is a `302`.
 - It has `Cache-Control: no-store`.
-- It has a `Location` that is relative to the request. In this way, a prefix of a reverse proxy is kept.
-- It keeps the query string as it came.
+- Its `Location` is relative to the request. In this way, a prefix of a reverse proxy is kept.
+- It keeps the query string as received.
 
 | Former address | Redirects to |
 | --- | --- |
@@ -35,13 +41,15 @@ The former addresses of Explorer answer with a redirect to the System page (`ser
 | `/explorer/_monitoring/performance` | `/system#performance` |
 | `/explorer/_monitoring/activity`, `/explorer/_operations` (v2.14.0's Server operations) | `/system#activity` |
 
-`#performance` and `#activity` scroll the Overview to that part when the page opens on it. The page keeps the part at the top while the parts above it fill in, until the reader scrolls. With `system.enabled = false`, there is no redirect. These addresses open the Explorer Catalog.
+When the page opens on `#performance` or `#activity`, it scrolls the Overview to that part. The page keeps that part at the top while the parts above it load. The page stops this when the reader scrolls. With `system.enabled = false`, there is no redirect. These addresses open the Explorer Catalog.
 
-The shell is `src/static/system.html` (header partial `src/shell/header.html`, generated regions from `tools/page_shells.py`, which reads `pages.system` of `src/static/modules.json`). Its sheet is `style.system.css` (`tools/build_page_css.py`, source `src/static/css/20-features/system.css`). The bootstrap `app_system.js` handles the routes, Back / Forward, the host change and *Open in Query*. The entry of the page (`pages.system` in `src/static/modules.json`) imports it, and it starts the section of the page. The highlighter is the lazy group `highlight`:
+The shell is `src/static/system.html`. The header partial is `src/shell/header.html`. The tool `tools/page_shells.py` generates the regions of the shell. It reads `pages.system` of `src/static/modules.json`. The style sheet is `style.system.css`. The tool `tools/build_page_css.py` builds it from `src/static/css/20-features/system.css`.
+
+The bootstrap `app_system.js` handles the routes, Back / Forward, the host change and *Open in Query*. The entry of the page (`pages.system` in `src/static/modules.json`) imports it. The entry also starts the section of the page. The highlighter is the lazy group `highlight`:
 
 | Module | Holds |
 | --- | --- |
-| `app_system_view.js` | `systemView.mountSection`: the section's filter bar (`filterBar`, `app_ui_filterbar.js`) and its panel in the page |
+| `app_system_view.js` | `systemView.mountSection`: the filter bar of the section (`filterBar`, `app_ui_filterbar.js`) and its panel on the page |
 | `app_system_kit.js` | the pieces that the sections share: section bar, issue block, cards, parts, tables, the tone of an error share, *Open in Query* |
 | `app_system_charts.js` | `systemCharts`: the time range of a section (address, zoom, check), the grid of chart cards, the axes of bytes |
 | `app_system_overview.js` | Overview: tiles, Databases, Cluster, and the parts below |
@@ -50,96 +58,112 @@ The shell is `src/static/system.html` (header partial `src/shell/header.html`, g
 | `app_system_queries.js` | Queries |
 | `app_system_disks.js` | Disks |
 
-Each section module exports one object, `{ id, label, available, create }` (`systemOverview`, `systemQueries`, `systemDisks`). The entry of the page gives it to `startSystemPage` (`app_system.js`). A section that the server does not offer (`available`) is replaced by the Overview. `create(ctx)` returns `{ show(query), refresh(force), query() }`. The panel of each section (`.systemPage__panel`) is its own scroller. A section with a time range and charts builds them from `systemCharts`: `range()` keeps the range, its address parameters and the zoom of a drag over a chart, and `grid()` builds the cards and creates the charts with the same options. This code is in one place, so a fix applies to every section.
+Each section module exports one object, `{ id, label, available, create }` (`systemOverview`, `systemQueries`, `systemDisks`). The entry of the page passes it to `startSystemPage` (`app_system.js`). If the server does not offer a section (`available`), the Overview replaces it. `create(ctx)` returns `{ show(query), refresh(force), query() }`. The panel of each section (`.systemPage__panel`) is its own scroller.
 
-Every figure is **the own figure of this server**. The system tables are local to each node. For this reason, `query_log` holds the queries that the node received or ran, and the metrics are the metrics of that node. Each replica that is configured as a ChDash host gets its own page (the host picker of the header names it). It needs no extra grant. The `clusterAllReplicas` views across a cluster are opt-in (`system.cluster_fanout`). They need `GRANT REMOTE ON *.*` for the system account. The topology always comes from the local `system.clusters`.
+A section with a time range and charts builds them from `systemCharts`. `range()` keeps the range, its address parameters and the zoom of a drag over a chart. `grid()` builds the cards and creates the charts with the same options. This code is in one place. A fix therefore applies to every section.
 
-Configuration: the `system { }` block (see [configuration.md](configuration.md#evolution-blocks)). The `explorer.operations { enabled, keeper }` of v2.14.0 still works. `system.enabled = false` removes these items: the entry of the page switcher, the page, every `/api/system/...` route (the `/api/explorer/ops/...` aliases included) and the redirects. `/api/version` reports `features.system` (`enabled`, `activity`, `keeper`, `top_queries`, `cluster_fanout`, `default_lookback_minutes`, `max_lookback_days`, `query_log_max_lookback_hours`, `disk_growth_days`).
+Every figure is **the own figure of this server**. The system tables are local to each node. For this reason, `query_log` holds the queries that the node received or ran. The metrics are the metrics of that node.
+
+Each replica that is configured as a ChDash host gets its own page. The host picker of the header names it. It needs no extra grant. The `clusterAllReplicas` views across a cluster are opt-in (`system.cluster_fanout`). They need `GRANT REMOTE ON *.*` for the system account. The topology always comes from the local `system.clusters`.
+
+Configuration: see the `system { }` block in [configuration.md](configuration.md#evolution-blocks). The `explorer.operations { enabled, keeper }` setting of v2.14.0 still works. With `system.enabled = false`, these items are removed: the entry of the page switcher, the page, every `/api/system/...` route (the `/api/explorer/ops/...` aliases included) and the redirects. `/api/version` reports `features.system` (`enabled`, `activity`, `keeper`, `top_queries`, `cluster_fanout`, `default_lookback_minutes`, `max_lookback_days`, `query_log_max_lookback_hours`, `disk_growth_days`).
 
 ## Reads, budgets and degradation
 
-Every endpoint runs fixed queries. The request provides no SQL, no column, no filter and no limit. A parameter outside the allowlist of the endpoint is a 400 `unknown_parameter`. Every SELECT of the system tables ends with this clause: `SETTINGS readonly = 2, max_execution_time = N, timeout_overflow_mode = 'throw', max_rows_to_read = R, read_overflow_mode = 'throw', max_result_rows = L, result_overflow_mode = 'throw', log_comment = 'chdash-system'`. The other reads of the page (the Activity, Keeper and the SHOW boundary of the runner) get `log_comment = 'chdash-system'`, the deadline of the request and `generated_queries.max_memory_usage` from their scope (`docs/configuration.md`, "The bounds of the queries").
+Every endpoint runs fixed queries. The request gives no SQL, no column, no filter and no limit. A parameter outside the allowlist of the endpoint is a 400 `unknown_parameter`. Every SELECT of the system tables ends with this clause: `SETTINGS readonly = 2, max_execution_time = N, timeout_overflow_mode = 'throw', max_rows_to_read = R, read_overflow_mode = 'throw', max_result_rows = L, result_overflow_mode = 'throw', log_comment = 'chdash-system'`.
+
+The other reads of the page receive `log_comment = 'chdash-system'`. These are the Activity reads, the Keeper reads and the SHOW boundary reads of the runner. They also receive the deadline of the request and `generated_queries.max_memory_usage` from their scope (`docs/configuration.md`, "The bounds of the queries").
 
 - A cap stops the read with an error. The answer is never silently partial.
-- The own load of ChDash stays visible (and can be excluded) in `system.query_log`.
-- The settings are set for each query. For this reason, neither account can have a `readonly = 1` profile.
+- The own load of ChDash is visible in `system.query_log`. You can exclude it there.
+- The settings are set for each query. For this reason, no account can have a `readonly = 1` profile.
 
-The runner bounds the objects. A read of `system.replicas`, `system.parts` and the activity tables is restricted to `database IN (<databases the runner reads>)` inside ClickHouse. The page then keeps each row only when the runner reads that object. The page does not list or count a database or table that is hidden from the runner. The boundary is the runner ACL that the Explorer uses too (`CHECK GRANT` and zero-row probes as the runner, kept for `explorer.acl_cache_ttl_ms`, refer to [Caches and privileges](configuration.md#caches-and-privileges)). A database whose answer the discovery bound did not reach is not used. When the ACL cannot be read (a lost connection), the route answers 503: it never counts as "nothing visible".
+The runner bounds the objects. A read of `system.replicas`, `system.parts` and the activity tables is restricted to `database IN (<databases the runner reads>)` inside ClickHouse. The page then keeps a row only when the runner reads that object. The page does not list or count a database or table that is hidden from the runner.
 
-The page detects once for each host what a server exposes, and keeps the result for 10 minutes. It detects these items:
+The boundary is the runner ACL. The Explorer uses this ACL too. The ACL uses `CHECK GRANT` and zero-row probes as the runner. The cache keeps the result for `explorer.acl_cache_ttl_ms`. See [Caches and privileges](configuration.md#caches-and-privileges).
+
+The page does not use a database whose answer the discovery bound did not reach. When the ACL cannot be read (a lost connection), the route gives 503. This response never means "nothing visible".
+
+The page detects what a server exposes. It detects this once for each host, and it keeps the result for 10 minutes. It detects these items:
 
 - The optional system logs (`query_log`, `metric_log`, `asynchronous_metric_log`, `part_log`, `zookeeper_connection`, reported in `logs`).
-- The columns that older versions do not have. The page leaves them out and shows them as `—`.
+- The columns that older versions do not have. The page omits them and shows them as `—`.
 
-A panel that cannot be read degrades on its own. It is listed in `unavailable_panels` (`panel`, `table`, `reason`, `message`, `hint`). It is never a page error. The reasons are:
+A panel that cannot be read degrades on its own. The panel is listed in `unavailable_panels` (`panel`, `table`, `reason`, `message`, `hint`). It is never a page error. These are the reasons:
 
 - `disabled`: the table does not exist (ClickHouse codes 60, 81).
-- `not_granted`: ClickHouse code 497. `hint` is the statement to run, `GRANT SELECT ON system.<table> TO <user>`. The user is the account that did the read: the system account for each panel, and the runner account for Queries (which read `system.query_log` as the runner). When the account is not known, the statement names it `<system user>` or `<runner user>`. The page shows it with a copy button.
-- `unsupported`: a column that this version does not have (16, 47).
+- `not_granted`: ClickHouse code 497. `hint` is the statement to run: `GRANT SELECT ON system.<table> TO <user>`. The user is the account that did the read. For each panel, this is the system account. For Queries, it is the runner account, because Queries reads `system.query_log` as the runner. When the account is not known, the statement names it `<system user>` or `<runner user>`, and the page shows it with a copy button.
+- `unsupported`: this version does not have a column (16, 47).
 - `window_too_large`: the time budget or the read cap (159, 158, and the limits of memory and of rows or bytes, 241 and 396).
 - `readonly_account`: 164. A `readonly = 1` profile cannot set the limits.
 - `failed`.
 
 ## Overview
 
-**Overview** (`app_system_overview.js`) shows the selected server on one scrolling page, top to bottom. The parts are the server tiles, **Databases**, **Cluster**, **Performance** and **Activity**. Each part degrades on its own. If an answer or a panel fails, only that part says why. The page shows no figure twice.
+**Overview** (`app_system_overview.js`) shows the selected server on one page. The reader scrolls from top to bottom. The parts are the server tiles, **Databases**, **Cluster**, **Performance** and **Activity**. Each part degrades on its own. If an answer or a panel fails, only that part states the reason. The page shows no figure twice.
 
 - **Server tiles**: they show these items:
   - Uptime.
   - CPU (`OSUserTimeNormalized` + `OSSystemTimeNormalized`, the share of all cores).
   - Resident memory of the total (`CGroupMemoryTotal` when the container has a limit, else `OSMemoryTotal`).
   - Load average.
-  - Running queries, merges and mutations.
+  - Queries, merges and mutations in progress.
   - Client connections.
   - MergeTree parts with their size, and the most parts in one partition (warning from 300, error from 1,000: `parts_to_delay_insert`).
   - Delayed inserts.
 
   A tile for a metric that the server does not have shows `—`.
-- **Databases**: the size band of the databases that the runner can see, by bytes on disk. It is the band of the Explorer (`explorerTreemap.band`). It is always the treemap (`#systemDatabaseMap`, `strip: "never"`), for any distribution. The data come from the `usage` rows of `/api/system/disks`, summed by database, for every disk.
+- **Databases**: the size band of the databases that the runner can see, by bytes on disk. It is the band of the Explorer (`explorerTreemap.band`). It is always the treemap (`#systemDatabaseMap`, `strip: "never"`), for any distribution. The source is the `usage` rows of `/api/system/disks`. The page sums them by database, for every disk.
   - The heading counts the databases (`N databases · size on disk`).
-  - A database under 1% of the total is grouped into Others. The footnote says what the bytes are.
-  - A click on a database opens its Explorer card (`/explorer/catalog/<db>`). The map is static when the Explorer is off.
+  - A database under 1% of the total is grouped into Others. The footnote states what the bytes are.
+  - Click a database to open its Explorer card (`/explorer/catalog/<db>`). When the Explorer is off, the map is static.
   - The part shows "No data on disk" when no visible database has active parts.
-  - If the `usage` panel is not readable, it says why in its place.
-- **Cluster**: three cards in two balanced columns. Topology and the Replication summary under it are in one column. Keeper (the tallest) is beside them.
-  - **Topology**: for each cluster of `system.clusters`, one row for each shard and replica (host, address, `errors_count`, `slowdowns_count`, `estimated_recovery_time`). The card marks this server. A cluster of one local replica (the built-in `default`) is this server alone. When every cluster is like this, the card says "Single server, no multi-replica cluster". The card has at most 1,000 rows.
-  - **Keeper**: one card for the session and for an embedded Keeper. It shows these items:
+  - If the `usage` panel cannot be read, the part states the reason in its place.
+- **Cluster**: three cards in two balanced columns. Topology, and the Replication summary under it, are in one column. Keeper (the tallest card) is beside them.
+  - **Topology**: for each cluster of `system.clusters`, the card has one row for each shard and replica (host, address, `errors_count`, `slowdowns_count`, `estimated_recovery_time`). The card marks this server. A cluster of one local replica (the built-in `default`) is this server alone. When every cluster is like this, the card states "Single server, no multi-replica cluster". The card has at most 1,000 rows.
+  - **Keeper**: one card for the session and for an embedded Keeper. The card shows these items:
     - A badge (Connected / Session expired).
-    - Each connection of `system.zookeeper_connection` (host and port, connected since in the tooltip) with its session uptime and timeout.
-    - The latency. It is the average over the last refresh interval once two snapshots exist. Before that, it is the average wait for each transaction since start.
-    - The requests in flight, and the transaction rate (transactions since start before a second snapshot).
+    - Each connection of `system.zookeeper_connection`, with its session uptime and timeout. The tooltip shows the host, the port and the time of connection.
+    - The latency. Once two snapshots exist, it is the average over the last refresh interval. Before that, it is the average wait for each transaction since start.
+    - The requests in flight, and the transaction rate. Before a second snapshot, the rate is the transactions since start.
     - Watches.
     - Exceptions since start.
     - For a Keeper that is embedded in this server: its role, znodes, Keeper latency (average and max) and followers in sync (`Keeper*` asynchronous metrics).
 
-    The card says "No Keeper configured" when there is no connection, no session and no embedded Keeper. The card is hidden with `system.keeper = false`.
+    The card states "No Keeper configured" when there is no connection, no session and no embedded Keeper. With `system.keeper = false`, the card is hidden.
   - **Replication**: the replicated tables that the runner can see. It shows their status, the read-only and expired sessions, the largest delay and the queue. It uses the alert thresholds of Altinity (`future_parts > 20`, `parts_to_check > 10`, `queue_size > 20`, `inserts_in_queue > 10`, delay over 5 minutes). It is hidden when there are no replicated tables. These tables are the Replicas of the Activity, further down.
 - **Performance** and **Activity**: below.
 
-There is **no live refresh** (no Auto-refresh toggle, no timer). The Overview reads its parts on load and on show, on a range change, on a host change and with the refresh button. The refresh button reloads every part. It replaces a read that is still running (the old one is aborted). A host change aborts every read of the old host at once. A page restored from the back/forward cache reads again. On show, the charts read again when their relative range was read 30 s ago or more. The databases read again when their last read is older than 60 s. If a browser stored the former Auto-refresh choice (`chdash.system.autoRefresh`), the dashboard removes it.
+There is **no live refresh**. There is no Auto-refresh toggle and no timer. The Overview reads its parts on load, on show, on a range change, on a host change and with the refresh button. The refresh button reloads every part. It replaces a read that is still in progress. The old read is aborted.
 
-`GET /api/system/overview?host_id=<id>[&refresh=1]` runs fixed queries through the system context. The queries read these items:
+A host change aborts every read of the old host at once. A page restored from the back/forward cache reads again. On show, the charts read again when their relative range was read 30 s ago or more. The databases read again when their last read is older than 60 s. If a browser stored the former Auto-refresh choice (`chdash.system.autoRefresh`), the dashboard removes it.
+
+`GET /api/system/overview?host_id=<id>[&refresh=1]` runs fixed queries through the system context. These queries read these items:
 
 - `version()`, `timezone()`, `hostName()` and `uptime()`.
 - The allowlisted names of `system.asynchronous_metrics` and `system.metrics`.
 - `system.clusters` (`LIMIT 1001`).
 - The in-memory columns of `system.replicas`, restricted to the databases of the runner (`LIMIT 10001`). The route counts a row only when the runner reads that table.
 
-`log_max_index`, `log_pointer`, `total_replicas` and `active_replicas` cost one Keeper request for each table. The route does not read them. The backend caches the snapshot for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). For this reason, any number of open pages costs one read for each interval. After the TTL, and for 10 s more, the backend sends the previous snapshot at once (`"stale": true`) while one read runs in the background. `refresh=1` reads again, the runner ACL included. The Keeper card adds `/api/system/keeper` (*Activity* below).
+`log_max_index`, `log_pointer`, `total_replicas` and `active_replicas` cost one Keeper request for each table. The route does not read them. The backend caches the snapshot for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). For this reason, any number of open pages costs one read for each interval.
+
+After the TTL, and for 10 s more, the backend sends the previous snapshot at once (`"stale": true`). One read runs in the background meanwhile. `refresh=1` reads again. It includes the runner ACL. The Keeper card adds `/api/system/keeper` (*Activity* below).
 
 ### Performance
 
-**Performance** (`app_system_perf.js`) charts the history of the server over a time range. The range picker is the time range picker of Observability (`timeRange`, the same quick ranges, calendar and browser-local 24 h times). It is first in the filter bar of the Overview, where Queries and Disks have their own (the refresh button is at the other end). The default range is 1 hour (`system.default_lookback_minutes`). The maximum is `system.max_lookback_days` (30). The range is in the address of the Overview as `from` / `to` (`now-6h`, `2026-10-03 14:00:00`). It is absent for the default.
+**Performance** (`app_system_perf.js`) charts the history of the server over a time range. The range picker is the time range picker of Observability (`timeRange`). It has the same quick ranges, calendar and browser-local 24 h times. It is the first part of the filter bar of the Overview. Queries and Disks have their own pickers on their pages. The refresh button is at the other end of the bar.
 
-The part has ten charts on the shared chart engine (`chartCore`, canvas). Each chart is in a chart card. There are two cards in a row (one under 900 px). These rules apply to the charts:
+The default range is 1 hour (`system.default_lookback_minutes`). The maximum is `system.max_lookback_days` (30). The range is in the address of the Overview as `from` / `to` (`now-6h`, `2026-10-03 14:00:00`). The address has no range for the default.
+
+The part has ten charts on the shared chart engine (`chartCore`, canvas). Each chart is in a chart card. Two cards are in each row, or one card under 900 px. These rules apply to the charts:
 
 - The charts share a crosshair.
-- A drag over any chart sets the range of all of them. The page pushes the range to the address, and Back returns to the previous range.
-- Each chart has one unit, also on its axis (CPU in cores, Merges & mutations in tasks running). A figure in another unit is in the summary of the card and in the tooltip at the cursor.
-- A chart at 0 over the whole range (no replication delay) shows its title and one line. The line is "Max delay 0 s over the whole range". The chart is at the end of the grid.
+- A drag over any chart sets the range of all of them. The page writes the range to the address. Back returns to the previous range.
+- Each chart has one unit, also on its axis (CPU in cores, Merges & mutations as a task count). A figure in another unit is in the summary of the card and in the tooltip at the cursor.
+- A chart with 0 over the whole range (no replication delay) shows its title and one line. The line reads "Max delay 0 s over the whole range". The chart is at the end of the grid.
 - A chart that is alone on its row takes the row.
 - A hidden series keeps its legend swatch in full color. Its name is struck through. The swatch of a dashed series is dashed (Tracked peak, the pool sizes).
-- Disks that share one filesystem are one line of the *Disk used* chart, named after all of them, as they are one card.
+- Disks that share one filesystem form one line in the *Disk used* chart. The line has the names of all of them, because they form one card.
 
 | Chart | Series | Source | Without it |
 | --- | --- | --- | --- |
@@ -147,37 +171,39 @@ The part has ten charts on the shared chart engine (`chartCore`, canvas). Each c
 | Query latency | p50, p95, p99 of the initial queries (one hue) | `query_log` | the average (`metric_log`), labeled "average", also past `query_log_max_lookback_hours` |
 | CPU | ClickHouse's CPU and I/O wait (`metric_log`), the machine's user and system time (`OSUserTime`, `OSSystemTime`), in cores; the core count; the 1-minute load at the cursor | both | either alone |
 | Memory | tracked (average and peak), merges and mutations (`metric_log`), resident (`asynchronous_metric_log`); OS memory available at the cursor | both | either alone |
-| Merges & mutations | running merges and mutations; rows merged per second in the summary | `metric_log` | "Needs system.metric_log" |
+| Merges & mutations | merges and mutations in progress; rows merged per second in the summary | `metric_log` | "Needs system.metric_log" |
 | Inserts | rows inserted per second, a marker on each bucket with delayed or rejected inserts; bytes per second in the summary | `metric_log` | same |
 | Parts | MergeTree parts and the most in one partition (`asynchronous_metric_log`), active and outdated (`metric_log`) | both | either alone |
 | Background pools | tasks of the merges and mutations, fetches, moves, schedule and common pools; pool sizes (hidden at first) | `metric_log` | "Needs system.metric_log" |
 | Reads | rows selected per second; bytes per second in the summary | `metric_log` | same |
 | Replication | the largest replica delay; the queue in the summary | `asynchronous_metric_log` | hidden on a server without replicated tables |
 
-Assume that `metric_log` and `asynchronous_metric_log` are not available. Then the part says "History needs system.metric_log or system.asynchronous_metric_log (server configuration): the current values are the tiles at the top". It shows only the `query_log` charts. It does not repeat the tiles. The part lists a log that it cannot read above the charts, with its reason. When a grant is missing, it also shows the GRANT to run.
+If `metric_log` and `asynchronous_metric_log` are not available, the part states: "History needs system.metric_log or system.asynchronous_metric_log (server configuration): the current values are the tiles at the top". It shows only the `query_log` charts. It does not repeat the tiles. Above the charts, the part lists each log that it cannot read, with its reason. When a grant is missing, the part also shows the GRANT to run.
 
-`GET /api/system/series?host_id=<id>[&from_ms=&to_ms=][&refresh=1]` takes whole milliseconds and nothing else. The default window applies when they are absent. A `to_ms` in the future ends now. These rules apply to the parameters:
+`GET /api/system/series?host_id=<id>[&from_ms=&to_ms=][&refresh=1]` takes only whole milliseconds as values. The default window applies when they are absent. A `to_ms` in the future ends at the current time. These rules apply to the parameters:
 
-- `panel` can be only `performance` (the default) or `disk_growth` (*Disks*). Anything else is a 400 `invalid_panel`.
-- `scope` can be only `server` (`invalid_scope` otherwise). `cluster` is a 400 `cluster_fanout_disabled` unless `system.cluster_fanout` is set. Then it is a 501 `cluster_scope_unsupported`: it is not implemented yet.
+- `panel` accepts only `performance` (the default) or `disk_growth` (*Disks*). Any other value is a 400 `invalid_panel`.
+- `scope` accepts only `server`. Any other value is rejected with `invalid_scope`. `cluster` is a 400 `cluster_fanout_disabled` unless `system.cluster_fanout` is set. When it is set, `cluster` is a 501 `cluster_scope_unsupported`. This is not implemented yet.
 - Any other parameter is a 400 `unknown_parameter`. In this way, no request text reaches the SQL.
 - `from_ms >= to_ms` is a 400 `invalid_range`.
 - A window over `max_lookback_days` is a 400 `range_too_large`.
 
-The server picks the step. The steps are 10 s, 30 s, 1 min, 5 min, 15 min, 30 min, 1 h, 3 h, 6 h, 1 d and 2 d. The server uses the smallest step that gives at most 300 buckets (1 h: 30 s, 24 h: 5 min, 7 d: 1 h, 30 d: 3 h, 365 d: 2 d, so the window of the longest lookback has 183 buckets). It aligns the window to the step. For this reason, every request of one aligned window shares a cache entry of 15 s (one read in flight for each window). The server runs three SELECTs through the system context. Each SELECT uses one pass:
+The steps are 10 s, 30 s, 1 min, 5 min, 15 min, 30 min, 1 h, 3 h and 6 h. The longer steps are 1 d and 2 d. The server picks the smallest step that gives at most 300 buckets. For example, 1 h uses 30 s, and 24 h uses 5 min. The 7 d window uses 1 h, the 30 d window uses 3 h and the 365 d window uses 2 d. So the window of the longest lookback has 183 buckets, and the server aligns the window to the step.
 
-- `system.metric_log`: the allowlisted columns that this server has (detected with the other capabilities).
-  - `ProfileEvent_*` are deltas for each sample. A rate is their sum over the seconds that the bucket covers (for the bucket still in progress: up to its last sample).
+Every request of one aligned window therefore shares a cache entry of 15 s. Only one read is in progress for each window. The server runs three SELECTs through the system context. Each SELECT uses one pass:
+
+- `system.metric_log`: the allowlisted columns that this server has. The page detects them with the other capabilities.
+  - `ProfileEvent_*` are deltas for each sample. A rate is the sum of them over the seconds that the bucket covers. For the bucket that is still in progress, the sum runs up to its last sample.
   - `CurrentMetric_*` are gauges (average, or maximum for a peak).
-  - `avg_query_ms` is the time of the queries over their number. ClickHouse adds the time of a query when it ends, and counts it (`ProfileEvent_Query`) when it starts. The server therefore counts the queries that ended in the bucket: the started ones, less the growth of `CurrentMetric_Query` since the end of the bucket before. The first bucket of a window counts the started ones.
-  - The server reads a `metric_log` in the transposed layout (no `ProfileEvent_*` column) as no `metric_log` (`unsupported`).
-- `system.asynchronous_metric_log`: `metric IN (<allowlist>)` first (the key of the table). The value is the average for each bucket (maximum for the load, the parts for each partition and the replica delay).
-- `system.query_log`: the key, `type`, `is_initial_query` and `query_duration_ms` only (`quantilesTDigest`). The server skips it (`out_of_range`, not an error) when the window is wider than `query_log_max_lookback_hours`.
+  - `avg_query_ms` is the time of the queries divided by their number. ClickHouse adds the time of a query when the query ends. It counts the query (`ProfileEvent_Query`) when the query starts. The server therefore counts the queries that ended in the bucket. These are the started queries, less the growth of `CurrentMetric_Query` since the end of the previous bucket. The first bucket of a window counts the started queries.
+  - The server treats a `metric_log` in the transposed layout (no `ProfileEvent_*` column) as no `metric_log` (`unsupported`).
+- `system.asynchronous_metric_log`: `metric IN (<allowlist>)` comes first. It is the key of the table. The value is the average of each bucket. The maximum is used for the load, the parts of each partition and the replica delay.
+- `system.query_log`: only the key, `type`, `is_initial_query` and `query_duration_ms` (`quantilesTDigest`). The server skips the table (`out_of_range`, not an error) when the window is wider than `query_log_max_lookback_hours`.
 
-Each SELECT has the System `SETTINGS` (10 s, 50 M rows read, or `query_log_max_rows` for `query_log`, and a result cap of the bucket count). The answer has these fields:
+Each SELECT has the System `SETTINGS`. The limits are 10 s, 50 M rows read (or `query_log_max_rows` for `query_log`) and a result cap of the bucket count. The answer has these fields:
 
 - `timestamps` (bucket starts, ms).
-- `series` (name to one value or `null` for each bucket). A value has six significant digits. From one million up, it is a whole number with all its digits, so a size in bytes is not rounded.
+- `series` (name to one value or `null` for each bucket). A value has six significant digits. From one million up, the value is a whole number with all its digits. So a size in bytes is not rounded.
 - `sources` (`status`, `message`, `hint`, `rows_read`, `elapsed_ms`, `missing` columns for each log).
 - `unavailable_panels`.
 - `step_seconds`.
@@ -190,15 +216,17 @@ On the local test stack (14 days of logs), a cold read takes about 0.1 s for any
 
 ### Activity
 
-**Activity** (`app_system_activity.js`) shows what the selected server does in the background, in the spirit of clickhouse-monitoring:
+**Activity** (`app_system_activity.js`) shows the background work of the selected server. It follows the approach of clickhouse-monitoring:
 
 - **Replicas**: the health of every replicated table (read-only, expired Keeper session, delay, queue with inserts/merges, last queue update and its exception, `active / total` replicas).
-- **Mutations**: pending mutations only. The failing mutations are first, with the failed part, the error code name and the reason.
+- **Mutations**: only the mutations that are not done. Mutations with a failure are listed first. Each row shows the failed part, the error code name and the reason.
 - **Replication queue**: one row for each table (entries, executing, postponed, max tries, oldest entry, entry types, last exception or postpone reason).
-- **Merges**: running merges and mutation merges (partition, progress, elapsed, source size, parts, memory).
-- **Distributed send queues**: pending files and bytes for each shard directory, errors, blocked state, broken files and the last exception.
+- **Merges**: merges in progress and mutation merges (partition, progress, elapsed time, source size, parts, memory).
+- **Distributed send queues**: files and bytes that wait to be sent, for each shard directory. The list also shows errors, blocked state, broken files and the last exception.
 
-The kinds with a problem come first. Then the kinds with rows follow. The part folds the empty kinds into one quiet line "No pending mutations · No merges running ...". It reports a system table that the server does not expose as not readable, not as empty. A table name opens its Explorer card. The Keeper session is the Keeper card of the Cluster. It is not a list of its own. The part is absent with `system.activity = false`.
+The kinds with a problem come first. The kinds with rows come next. The part folds the empty kinds into one quiet line: "No pending mutations · No merges running ...". A system table that the server does not expose is reported as not readable. It is not reported as empty.
+
+Select a table name to open its Explorer card. The Keeper session is in the Keeper card of the Cluster. It has no list of its own. With `system.activity = false`, the part is absent.
 
 `GET /api/system/activity?host_id=<id>[&refresh=1]` runs five fixed queries through the system context:
 
@@ -208,9 +236,13 @@ The kinds with a problem come first. Then the kinds with rows follow. The part f
 - `system.replicas`.
 - `system.distribution_queue`.
 
-Each query is restricted to `database IN (<databases the runner reads>)` inside ClickHouse. The route then keeps every row only when the runner reads that object (the runner ACL, resolved lazily for the databases that actually appear, after the read). An object that is hidden from the runner never reaches the browser. Its rows never use the bound.
+Each query is restricted to `database IN (<databases the runner reads>)` inside ClickHouse. The route then keeps a row only when the runner reads that object. The runner ACL is resolved lazily, for the databases that appear, after the read. An object that is hidden from the runner never reaches the browser. Its rows never count toward the bound.
 
-Each kind reads at most 201 rows and returns 200 (`row_limit`). The server reads the rows with the system account. After the read, it drops the rows of a table that the runner cannot see. A read that comes back with 201 rows is cut, even when few rows remain after that: the rows past it were not looked at. The answer lists such a kind in `truncated_sections` and an unreadable kind in `unavailable_sections`. The `system.replicas` read selects only in-memory columns. `log_max_index`, `log_pointer`, `total_replicas`, `active_replicas`, `zookeeper_exception` and `replica_is_active` cost one Keeper request for each table. The route does not select them. The replica counts come from the same cache of 60 s for each server as the catalog (see [Explorer](explorer.md#replication-metadata-and-keeper-load)).
+Each kind reads at most 201 rows and returns 200 (`row_limit`). The server reads the rows with the system account. After the read, it drops the rows of a table that the runner cannot see. A read that returns 201 rows is cut. This is true even when few rows remain, because the rows past the cut were not checked.
+
+The answer lists such a kind in `truncated_sections`. It lists an unreadable kind in `unavailable_sections`.
+
+The `system.replicas` read selects only in-memory columns. `log_max_index`, `log_pointer`, `total_replicas`, `active_replicas`, `zookeeper_exception` and `replica_is_active` each cost one Keeper request for each table. The route does not select them. The replica counts use the same cache of 60 s for each server as the catalog (see [Explorer](explorer.md#replication-metadata-and-keeper-load)).
 
 `GET /api/system/keeper?host_id=<id>[&refresh=1]` reads these items:
 
@@ -219,31 +251,35 @@ Each kind reads at most 201 rows and returns 200 (`row_limit`). The server reads
 - `system.events` (`ZooKeeper*` transaction, wait, exception, byte and per-operation counters).
 - `average_wait_ms = ZooKeeperWaitMicroseconds / ZooKeeperTransactions`.
 
-The route names no object. The paths of `system.zookeeper` are not browsable on purpose:
+The route names no object. The paths of `system.zookeeper` are not browsable by design. The reasons are these:
 
 - A read of a path is one Keeper request for each node.
 - A `LIMIT` cannot bound it before ClickHouse issues those requests.
 - The paths themselves (`/clickhouse/tables/<shard>/<table>/...`) name objects that the runner possibly cannot see. These objects are outside the `AllowedObjectSet` boundary.
 
-The backend caches both answers for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). After the TTL, and for 10 s more, it sends the previous answer at once (`"stale": true`) while one read runs in the background. `refresh=1` reads again, the runner ACL included. The routes are present while `system.activity` and `system.keeper` are set, respectively. The `/api/explorer/ops/activity` and `/api/explorer/ops/keeper` of v2.14.0 stay as aliases of the same handlers.
+The backend caches both answers for each host for `min(explorer.cache_ttl_ms, 5 s)` (at least 1 s). After the TTL, and for 10 s more, it sends the previous answer at once (`"stale": true`). One read runs in the background meanwhile. `refresh=1` reads again. It includes the runner ACL.
+
+The routes are present while `system.activity` and `system.keeper` are set, respectively. The `/api/explorer/ops/activity` and `/api/explorer/ops/keeper` routes of v2.14.0 stay as aliases of the same handlers.
 
 ## Queries
 
-**Queries** (`app_system_queries.js`) ranks the query shapes that this server ran over a window. It follows the Query Insights of ClickHouse Cloud. A shape is a `normalized_query_hash` (the text with its literals replaced). The filter bar holds these items, from left to right:
+**Queries** (`app_system_queries.js`) ranks the query shapes that this server ran in a time window. It follows the Query Insights of ClickHouse Cloud. A shape is a `normalized_query_hash`. It is the text with its literals replaced. The filter bar has these items, from left to right:
 
-- The window: the time range picker (1 hour by default, at most `system.query_log_max_lookback_hours`, 168).
+- The window: the time range picker. The default is 1 hour. The maximum is `system.query_log_max_lookback_hours` (168).
 - **Kind** (All, SELECT, INSERT, Other).
-- **Errors**. The values are All, With errors and Without errors. With errors: the shapes with at least one failed run. Without errors: the shapes whose every run finished. A shape is kept or left out whole.
-- **User** (All, then the users of the window, the most active first with their query counts, at most 50).
-- **Database** and **Table**. The values are All, then the databases and the tables that the queries of the window involved and that the runner can see. The tables are written `database.table`, as query_log names them. The most involved are first, with their run counts, at most 50 each. These rules apply:
+- **Errors**. The values are All, With errors and Without errors. With errors: the shapes with at least one failed run. Without errors: the shapes whose runs all finished. A shape is kept or omitted as a whole.
+- **User** (All, then the users of the window, most active first, with their query counts; at most 50).
+- **Database** and **Table**. The values are All, then the databases and the tables that the queries of the window used and that the runner can see. The tables are written `database.table`, as query_log names them. The most used come first, with their run counts. There are at most 50 of each. These rules apply:
   - The tables are narrowed to the chosen database.
   - A table of another database is dropped when the database changes.
-  - A shape is kept whole when one of its runs involved it.
-- **Order by**. It is an order, not a filter. For this reason, the summary on a phone does not count it. From 1,279 px down, the pickers from Database on take the second row of the bar.
+  - A shape is kept as a whole when one of its runs used it.
+- **Order by**. It is an order, not a filter. For this reason, the summary on a phone does not count it. From 1,279 px down, the pickers from Database onward take the second row of the bar.
 - **Hide internal reads**, a toggle chip (pressed by default).
 - The refresh button.
 
-There is no Auto-refresh. The page of a shape hides the filters. A log or a grant that the runner lacks also hides them. The range and the button stay. Under the bar, the page shows the tiles of the window and the top 50. The tiles are queries, shapes, total time, errors and their share, and bytes read. They count all the filtered shapes. The Shapes tile says "the top 50 listed" when there are more.
+There is no Auto-refresh. The page of a shape hides the filters. A log or a grant that the runner lacks also hides them. The range and the button stay.
+
+Under the bar, the page shows the tiles of the window and the top 50. The tiles show queries, shapes, total time, errors with their share, and bytes read. They count all the filtered shapes. The Shapes tile states "the top 50 listed" when there are more.
 
 | Column | |
 | --- | --- |
@@ -253,35 +289,39 @@ There is no Auto-refresh. The page of a shape hides the filters. A log or a gran
 | Read rows, Read, Memory | rows and bytes read, the largest memory use of a run |
 | Users, Tables | up to 5 users and 8 tables |
 
-A duration is the `query_duration_ms` of ClickHouse. It ends when ClickHouse has sent its last block. A client that reads a large result slowly makes it longer, because ClickHouse waits for it. The Elapsed tile of the Query page is a different time: see "What the times measure" in `docs/telemetry.md`.
+A duration is the `query_duration_ms` of ClickHouse. It ends when ClickHouse has sent its last block. A client that reads a large result slowly makes the duration longer, because ClickHouse waits for the client. The Elapsed tile of the Query page measures a different time. See "What the times measure" in `docs/telemetry.md`.
 
-**Order by** picks the measure that the server uses to rank the shapes of the window, largest first. The measures are Calls, Total time (the default), Avg, p95, Max, Errors, Read rows, Read bytes and Memory (the largest memory use of a run). The headers of the same columns sort too. Order by and the headers are one setting. A click on a header moves the picker, and a pick moves the arrow of the header. Either one reads the top 50 again by that measure.
+**Order by** picks the measure that the server uses to rank the shapes of the window, largest first. The measures are Calls, Total time (the default), Avg, p95, Max, Errors, Read rows, Read bytes and Memory (the largest memory use of a run). The column headers sort too. **Order by** and the headers form one setting.
+
+A click on a header moves the picker. A pick in the picker moves the arrow of the header. Either action reads the top 50 again for that measure.
 
 These rules apply to the display:
 
 - Measures are in sans with tabular figures. SQL, hashes and query ids are in mono. Times are 24 h browser-local.
-- Under 1,280 px, Max, Read rows and Tables go.
-- Under 900 px, Kind, Errors, Avg, p95, Read, Memory and Users go. The kind, the users and the errors move under the query.
-- On a phone, the query and its total time remain, and the calls are under the query. The filters wrap onto as many lines as they need (390 and 360 px).
+- Under 1,280 px, the columns Max, Read rows and Tables are hidden.
+- Under 900 px, the columns Kind, Errors, Avg, p95, Read, Memory and Users are hidden. The kind, the users and the errors move under the query.
+- On a phone, the query and its total time remain. The calls appear under the query. The filters take as many lines as they need (390 and 360 px).
 - The address keeps `from` / `to`, `sort`, `kind`, `errors`, `user`, `database`, `table` and `hide=0` when they differ from the defaults. Back and Forward restore them.
 - The filters are the filters of the list. The page of a shape shows every run of the shape in the window.
 
-A row (or Enter on it) opens the **shape** as a page of its own (`/system/queries/<hash>`, `shape.html`, started by `app_page_shape.js`). The page has the page header. It has none of the System section tabs (Overview, Queries, Disks) and not the list. It has only the time range and the refresh button of the filter bar. These rules apply to the navigation:
+Select a row, or press Enter on it, to open the **shape** as a page of its own (`/system/queries/<hash>`, `shape.html`, started by `app_page_shape.js`). The page has the page header. It has none of the System section tabs (Overview, Queries, Disks), and it has no list. It has only the time range and the refresh button of the filter bar. These rules apply to the navigation:
 
-- To open a shape is a page navigation. Its address keeps the parameters of the list (sort, kind, errors, user, database, table, `hide=0`).
-- The back arrow (the one of the trace page) returns to the exact list entry from which the user opened the shape. The browser restores that page as it was left, or reads it again. For a shape that the user opened by its address, the back arrow returns to the list of those parameters.
-- The former address `/system/queries?q=<hash>` answers a `302` to `queries/<hash>`. The `302` is relative to the request, so a prefix of a reverse proxy is kept. It keeps the other parameters as they came.
-- With `system.top_queries = false`, there is no page of a shape, and the route is the route of the System page.
+- A shape opens as a page navigation. Its address keeps the parameters of the list (sort, kind, errors, user, database, table, `hide=0`).
+- The back arrow (the one of the trace page) returns to the exact list entry from which the user opened the shape. The browser restores that page as it was left, or reads it again. For a shape that the user opened by its address, the back arrow returns to the list with those parameters.
+- The former address `/system/queries?q=<hash>` gives a `302` to `queries/<hash>`. The `302` is relative to the request, so a prefix of a reverse proxy is kept. It keeps the other parameters as received.
+- With `system.top_queries = false`, there is no page of a shape. The route is then the route of the System page.
 
 The page has these parts:
 
 - The title is the normalized first line. The hash is in the tooltip of the title and in its copy button.
 - The tiles: calls, errors, total and average time, p95 and max, bytes and rows read, the largest memory use, CPU time as a duration.
-- The normalized SQL, **formatted** by the formatter of the Query page. The server formats it: `GET /api/system/queries/<hash>` answers it as `normalized_formatted`, next to `normalized`, and the page makes no call to `/api/format` for it (see "The formatted text of a shape" below). The page shows the text as `query_log` has it when `normalized_formatted` is `null` (the formatter could not parse the text, or the text is too large, or the host did not answer). The copy button of the block copies the text that is shown. A long query **scrolls inside its block**: the block is as tall as 14 lines, with a scroll bar and the line numbers, and there is no "Show all n lines" button. The **Formatted | Raw** switch of the head (a segmented control, Formatted by default) lets **Raw** show the normalized text as `query_log` has it, with its `?` placeholders and without the formatter; the formatted text is the default.
-- Three charts on the shared engine: runs finished and failed per bucket, p50 and p95 duration, and CPU time with the rows read and the memory at the cursor. The crosshair is shared, and a drag narrows the window. A sparse series marks its points, with room above the largest.
-- Its 20 **Slowest**, **Latest** or **Most memory** runs (`runs=`): time, duration, status (the exception code and message), rows and bytes read, result rows, memory, CPU, user and query id.
+- The normalized SQL, **formatted** by the formatter of the Query page. The server formats it, and `GET /api/system/queries/<hash>` returns the text as `normalized_formatted`, next to `normalized`. The page makes no call to `/api/format` for it (see "The formatted text of a shape" below). When `normalized_formatted` is `null`, the page shows the text as `query_log` has it. This happens when the formatter cannot parse the text, when the text is too large, or when the host does not answer. The copy button of the block copies the text that is shown.
+  - A long query **scrolls inside its block**. The block is as tall as 14 lines. It has a scroll bar and line numbers. There is no "Show all n lines" button.
+  - The **Formatted | Raw** switch of the head is a segmented control. Formatted is the default. **Raw** shows the normalized text as `query_log` has it, with its `?` placeholders and without the formatter.
+- Three charts use the shared engine: runs finished and failed per bucket, p50 and p95 duration, and CPU time. The CPU chart also shows the rows read and the memory at the cursor. The crosshair is shared. A drag narrows the window. A sparse series marks its points. There is room above the largest value.
+- It lists 20 **Slowest**, **Latest** or **Most memory** runs (`runs=`). Each run shows its time, duration, status (the exception code and message), rows and bytes read, result rows, memory, CPU, user and query id.
 
-Two actions put SQL in the editor of the Query page. Both actions work in this way:
+Two actions put SQL in the editor of the Query page. Both actions work as follows:
 
 - They write the text into the session draft of the Query page (`sessionStorage` `chdash.editor.draft.v2`, this browser tab only).
 - They navigate this tab to `/query`. The Query page opens with an empty editor and loads the draft into it.
@@ -289,10 +329,10 @@ Two actions put SQL in the editor of the Query page. Both actions work in this w
 - Nothing runs. The query runs only when the user presses **Run** there. It runs with the runner account, like any query that the user types.
 
 - **Open example in Query** puts the full text of the **latest run** of the shape in the window in the editor. It is the real statement with its literals, not the normalized `?` form.
-  - The text is `system.query_log.query` of the most recent finished or failed initial run by `event_time_microseconds`. The filters are the same as on the page of the shape: Hide internal reads, and never the own reads of the System page.
-  - The page first sends the text to `/api/format` (the formatter of the Query page). When the formatter cannot parse it (an `INSERT` with inline data, for example), the text goes in as logged.
+  - The text is `system.query_log.query` of the most recent finished or failed initial run, by `event_time_microseconds`. The filters are the same as on the page of the shape: Hide internal reads. The own reads of the System page are never used.
+  - The page first sends the text to `/api/format`, the formatter of the Query page. When the formatter cannot parse the text, for example an `INSERT` with inline data, the text goes in as logged.
   - The button is disabled when the shape has no example. It is also disabled when the text is longer than 256K characters (the text was cut).
-- **Open history in Query** puts a ready-made `SELECT` over `system.query_log` in the editor. It lists the runs of this shape, so that the user can filter or extend it. The text is as written (not formatted):
+- **Open history in Query** puts a ready-made `SELECT` over `system.query_log` in the editor. The query lists the runs of this shape. The user can filter or extend it. The text is not formatted:
 
   ```sql
   -- The runs of query shape <hash> (System > Queries).
@@ -311,83 +351,94 @@ Two actions put SQL in the editor of the Query page. Both actions work in this w
   LIMIT 100
   ```
 
-  The window follows the picker. A relative range that ends now (`now-15m`, `now-1h`, `now-7d`, `now-2w`) is written as `now() - INTERVAL n UNIT`. When the user runs it later, it reads the last n units at that time. Any other range (absolute, or zoomed by a drag on a chart) is written as the instants `toDateTime(<start>)` .. `event_time < toDateTime(<end>)`. The comment has the range in the time zone of the user. Unlike the page of the shape, it lists up to 100 runs, newest first. It does not leave out the queries of the system account (Hide internal reads) or the own reads of the System page.
+  The window follows the picker. A relative range that ends now (`now-15m`, `now-1h`, `now-7d`, `now-2w`) is written as `now() - INTERVAL n UNIT`. When the user runs it later, it reads the last n units at that time.
 
-`GET /api/system/queries?host_id=<id>[&from_ms=&to_ms=][&sort=][&kind=][&errors=all|with|without][&user=][&database=][&table=][&hide_chdash=1|0][&refresh=1]` and `GET /api/system/queries/<hash>?host_id=<id>[&from_ms=&to_ms=][&order=duration|latest|memory][&hide_chdash=][&refresh=1]` (routes present while `system.top_queries`) read `system.query_log` with the **runner** account. The ClickHouse grants decide. The runner can already read the same rows in the Query page. These rules apply to the parameters:
+  Any other range (absolute, or zoomed by a drag on a chart) is written as the instants `toDateTime(<start>)` .. `event_time < toDateTime(<end>)`. The comment has the range in the time zone of the user. Unlike the page of the shape, it lists up to 100 runs, newest first. It does not omit the queries of the system account (Hide internal reads) or the own reads of the System page.
+
+`GET /api/system/queries?host_id=<id>[&from_ms=&to_ms=][&sort=][&kind=][&errors=all|with|without][&user=][&database=][&table=][&hide_chdash=1|0][&refresh=1]` and `GET /api/system/queries/<hash>?host_id=<id>[&from_ms=&to_ms=][&order=duration|latest|memory][&hide_chdash=][&refresh=1]` (routes present while `system.top_queries`) read `system.query_log` with the **runner** account. The ClickHouse grants decide. The runner can already read the same rows on the Query page. These rules apply to the parameters:
 
 - `sort` is one of `total_time | calls | avg | p95 | max | errors | read_rows | read_bytes | max_memory`. Each value is a fixed `ORDER BY … DESC`.
 - `kind` is one of `all | Select | Insert | other`.
 - `errors` is one of `all | with | without` (each a fixed `HAVING` on the failed runs of the shape).
-- `user` is one user name (1 to 256 bytes, no control character). It is absent or empty for every user.
+- `user` is one user name (1 to 256 bytes, no control character). An absent or empty value means every user.
 - `database` is one database name.
 - `table` is one `database.table` (1 to 512 bytes, no control character). A table has a dot and something on both sides. Either name can hold dots.
 - The hash is the decimal digits of a UInt64.
-- Anything else is a 400 (`invalid_sort`, `invalid_kind`, `invalid_errors`, `invalid_user`, `invalid_database`, `invalid_table`, `invalid_order`, `invalid_hash`, `invalid_hide_chdash`, `unknown_parameter`).
+- Any other value is a 400 (`invalid_sort`, `invalid_kind`, `invalid_errors`, `invalid_user`, `invalid_database`, `invalid_table`, `invalid_order`, `invalid_hash`, `invalid_hide_chdash`, `unknown_parameter`).
 
 The SQL stays fixed:
 
 - The backend never writes the user into the SQL. It binds the user as a ClickHouse query parameter (`AND user = {chdash_user:String}`). The value is sent apart from the text. For this reason, quotes and backslashes are plain characters.
-- The database and the table work in the same way, in the `HAVING` of the shapes (`countIf(has(databases, {chdash_database:String})) > 0`, `countIf(has(tables, {chdash_table:String})) > 0`). A shape is kept whole when one of its runs involved them.
+- The database and the table are handled in the same way, in the `HAVING` of the shapes (`countIf(has(databases, {chdash_database:String})) > 0`, `countIf(has(tables, {chdash_table:String})) > 0`). A shape is kept as a whole when one of its runs used them.
 
 The answer has these fields:
 
 - It echoes `errors`, `user`, `database` and `table`.
 - `users`: `{name, calls}` of the users of the window under the same filters, most active first (`limits.user_limit`, 50).
-- `databases` / `tables`: the same, from the `databases` / `tables` arrays of query_log (how many runs involved each). The backend keeps the first 200 of the read when the runner can see them (the runner ACL of the System pages, the AclService). The answer has 50 at most for each (`limits.object_limit`).
+- `databases` / `tables`: the same, from the `databases` / `tables` arrays of query_log (how many runs involved each). When the runner can see them, the backend keeps the first 200 of the read (the runner ACL of the System pages, the AclService). The answer has at most 50 for each (`limits.object_limit`).
 
-A window wider than `query_log_max_lookback_hours` is a 400 `range_too_large`. Every row that the backend counts is a finished or failed initial query (`type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query`). It is never one of the own reads of the System page (`log_comment != 'chdash-system'`). `hide_chdash` (the default) also leaves out the user of the system account, and every other read that ChDash writes itself (`log_comment` starting with `chdash:`: the Explorer, the formatter, the health checks, the reads of the other pages, on the runner side too). The runs of the Query page (`chdash-run`), the exports (`chdash-export`) and the MCP tools (`chdash-mcp key=...`) are the work of users: they stay listed.
+A window wider than `query_log_max_lookback_hours` is a 400 `range_too_large`. Every row that the backend counts is a finished or failed initial query (`type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query`). It is never one of the own reads of the System page (`log_comment != 'chdash-system'`).
 
-There are two phases, because the text costs several times more than the numbers:
+`hide_chdash` (the default) also omits the user of the system account. It omits every other read that ChDash writes itself. These reads have a `log_comment` that starts with `chdash:`. They are the Explorer, the formatter, the health checks and the reads of the other pages, on the runner side too. The runs of the Query page (`chdash-run`), the exports (`chdash-export`) and the MCP tools (`chdash-mcp key=...`) are the work of users. They stay listed.
 
-1. The backend reads the narrow columns, grouped by `normalized_query_hash`. It filters them by the errors `HAVING`, orders them by the sort, and uses `LIMIT 50`. The same read gives more items. These are the totals of the window over every shape, its users with their query counts, and its databases and tables with their run counts. They are window functions after the `GROUP BY`: `sumMap(sumMap([user], [1])) OVER ()`, no second read. The read uses `max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'` (past a million shapes, a new shape is not counted, and `totals.shapes_capped` is true). The tables of a shape are `groupUniqArrayArray(8)(tables)`: the memory of the aggregation stays bounded.
-2. The backend reads the text of those 50 only: `PREWHERE normalized_query_hash IN (…)`, the `query` of the latest run (4,096 characters), its `normalizeQuery` and its query id.
+There are two phases. The text costs several times more than the numbers.
+
+1. The backend reads the narrow columns, grouped by `normalized_query_hash`. It filters them by the errors `HAVING`, orders them by the sort, and uses `LIMIT 50`. The same read gives the window totals over every shape: the users with their query counts, and the databases and tables with their run counts. These are window functions after the `GROUP BY`, so no second read is needed: `sumMap(sumMap([user], [1])) OVER ()`. The read uses `max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any'`, so past a million shapes a new shape is not counted and `totals.shapes_capped` is true. The tables of a shape are `groupUniqArrayArray(8)(tables)`, so the memory of the aggregation stays bounded.
+2. The backend reads the text of these 50 shapes only: `PREWHERE normalized_query_hash IN (…)`, the `query` of the latest run (4,096 characters), its `normalizeQuery` and its query id.
 
 ### The formatted text of a shape
 
-The answer of `GET /api/system/queries/<hash>` has two texts of the shape: `normalized` (the `normalizeQuery` text of the latest run, with its `?` and `?..`) and `normalized_formatted` (the same text laid out, `null` when it cannot be). The `?` and `?..` of normalizeQuery are not SQL, so the backend (`src/system_query_format.cpp`) does what the page did before:
+The answer of `GET /api/system/queries/<hash>` has two texts of the shape. `normalized` is the `normalizeQuery` text of the latest run, with its `?` and `?..`. `normalized_formatted` is the same text laid out. It is `null` when the text cannot be laid out. The `?` and `?..` of normalizeQuery are not SQL. For this reason, the backend (`src/system_query_format.cpp`) does what the page did before:
 
-1. It writes a number in place of each placeholder: `90900`, `90901`, and so on (the k-th placeholder is `90900 + k`). Quoted text (`'...'`, `"..."`, backticks), `-- ...` and `/* ... */` comments are left alone. The text is not masked, and the answer is `null`, when it has more than 9,000 placeholders or when a number of the form `9dddd` is already in it (even in a string or a comment: it could not be told from a stand-in).
-2. It formats the masked text with the formatter of the Query page (`FormatBatch`, so its meaning check, its `max_query_size` and its limits apply). The statement runs on the **runner** account of the host, inside the scope of the request (the label `chdash-system`, the deadline, the stop of a caller that went away). A text that the formatter returns "as written" with a `format_meaning_changed` warning is not formatted: the answer is `null`.
-3. It puts the placeholders back. Every placeholder must come back exactly once, or the answer is `null`. A placeholder is shorter than its stand-in, so a line that gave width back gives it to the padding before the first `AS` of that line (the aligned `AS` column is kept).
+1. It writes a number in place of each placeholder: `90900`, `90901`, and so on. The k-th placeholder is `90900 + k`. Quoted text (`'...'`, `"..."`, backticks), `-- ...` and `/* ... */` comments are left alone.
+   In these cases, the answer is `null`, and the text is not masked. The first case is a text with more than 9,000 placeholders. The second case is a text that already has a number of the form `9dddd`, even in a string or a comment. Such a number cannot be told from a stand-in.
+2. The backend formats the masked text with the formatter of the Query page (`FormatBatch`). The meaning check, the `max_query_size` and the other limits of the formatter apply. The statement runs on the **runner** account of the host. It runs inside the scope of the request: the label `chdash-system`, the deadline, and the stop of a caller that went away. When the formatter returns the text "as written" with a `format_meaning_changed` warning, the text is not formatted. The answer is `null`.
+3. The backend puts the placeholders back. Each placeholder must be restored exactly once. Otherwise the answer is `null`. A placeholder is shorter than its stand-in. For this reason, a line that frees width gives that width to the padding before its first `AS`. The aligned `AS` column is kept.
 
-A text of more than 64 KiB is not formatted, and neither is one whose formatted text would be more than 256 KiB: the field is `null`, so the answer stays bounded (the MCP tool `system_query` returns the same answer, inside its `max_result_bytes`).
+A text of more than 64 KiB is not formatted. A text is also not formatted when its formatted text is more than 256 KiB. In both cases, the field is `null`, and the answer stays bounded. The MCP tool `system_query` returns the same answer, inside its `max_result_bytes`.
 
-The formatted text is kept by the host (its identity: an MCP key has a host of its own) and the text, for 10 minutes, 512 texts and 16 MiB. The key has no window, so a second request of the shape (another window, another order, another viewer) does not ask ClickHouse again. A text that cannot be formatted is kept too (`null`), but a failure that is not the text's (the host is down, the time ran out, ClickHouse refused, the connection broke) is not: the next request asks again after 2 s. A failure of the formatter never fails the route.
+The host keeps the formatted text. The identity is the host, and an MCP key has a host of its own. The host keeps each text for 10 minutes, up to 512 texts and 16 MiB. The key has no window. For this reason, a second request of the shape does not ask ClickHouse again. This holds for another window, another order or another viewer.
 
-The answer for a shape is three reads `PREWHERE normalized_query_hash = <hash>`:
+A text that cannot be formatted is kept too (`null`). A failure that is not caused by the text is not kept. Examples are a host that is down, a timeout, a ClickHouse refusal and a broken connection. The next request asks again after 2 s. A failure of the formatter never fails the route.
 
-- The timeline (the Performance steps, at most 300 buckets). The CPU time comes from `ProfileEvents` and is read only here. The read also gives the figures of the window.
+The answer for a shape comes from three reads. Each read uses `PREWHERE normalized_query_hash = <hash>`:
+
+- The timeline (the Performance steps, at most 300 buckets). The CPU time comes from `ProfileEvents`, and only this read gets it. The read also gives the figures of the window.
 - The 20 runs.
 - The text of the latest run (256K characters).
 
-Each SELECT has the System `SETTINGS` with `query_log_max_rows` (50 M) as its read cap, and 15 s (phase 1) or 10 s. The backend caches the answers for 60 s. The cache key has these parts: the minute-aligned window, sort, kind, errors, Hide internal reads, user, database and table. There is one read in flight for each key. A second request of the same key waits for that read: it does not fail. `refresh=1` asks for a read that starts after the request. A read in progress is waited for first, and every request that asked meanwhile shares the next read. Thus a loop of `refresh=1` never runs two reads of one key at a time. The answers carry `phases` (or `reads`: `status`, `rows_read`, `bytes_read`, `elapsed_ms`).
+Each SELECT has the System `SETTINGS` with `query_log_max_rows` (50 M) as its read cap. Its time limit is 15 s for phase 1, or 10 s. The backend caches the answers for 60 s. The cache key has these parts: the minute-aligned window, sort, kind, errors, Hide internal reads, user, database and table.
 
-The degraded states are `status`, and `unavailable_panels` in the shape above:
+There is one read in progress for each key. A second request of the same key waits for that read. It does not fail. `refresh=1` asks for a read that starts after the request. The read in progress finishes first. Every request that asked in the meantime shares the next read.
+
+Thus, a loop of `refresh=1` never runs two reads of one key at a time. The answers carry `phases` (or `reads`: `status`, `rows_read`, `bytes_read`, `elapsed_ms`).
+
+The degraded states appear in `status` and in `unavailable_panels`, as shown above:
 
 - `disabled`: "system.query_log is disabled on this server", with the `<query_log>` server setting and `log_queries = 1`.
 - `not_granted`: the GRANT of the runner, `GRANT SELECT ON system.query_log TO <runner user>`, with a copy button.
-- `window_too_large`: a read past the cap or the time budget. The answer suggests a span from the rows that the last hour logged (`suggested_span_ms`). **Narrow to the last …** applies it.
+- `window_too_large`: a read goes past the cap or the time budget. The answer suggests a span from the rows that the last hour logged (`suggested_span_ms`). The **Narrow to the last …** action applies the suggested span.
 - `readonly_account`.
 - `unsupported`.
 
-A window past the lookback offers **Show the last …** (the lookback: 7 days by default). If phase 2 fails, the shapes stay, named by their hash.
+A window past the lookback offers **Show the last …** (the lookback is 7 days by default). If phase 2 fails, the shapes stay. Each shape is named by its hash.
 
 The measurement used the local test stack (`query_log` of 7.7 M rows over 7 days):
 
-- Phase 1 reads the window once (36 k rows for 1 h, 1.1 M for 24 h, 7.7 M for 7 d: 2.5 MB, 71 MB, 508 MB). It takes about 0.01, 0.04 and 0.13 s.
+- Phase 1 reads the window once. The read covers 36 k rows for 1 h, 1.1 M for 24 h and 7.7 M for 7 d. The bytes read are 2.5 MB, 71 MB and 508 MB. It takes about 0.01, 0.04 and 0.13 s.
 - Phase 2 reads the hash column of the window and the text of the matching granules (15 MB, 383 MB, 2.6 GB). It takes 0.01, 0.04 and 0.2 s.
 - The three reads of a shape take 0.03, 0.09 and 0.35 s.
 
 ## Disks
 
-**Disks** (`app_system_disks.js`) answers these questions: which disk, how full, how fast it grows and which databases fill it. It does not do again the database storage of the Explorer (no treemap, no partitions). A database opens its Explorer page, scrolled to its storage (`/explorer/<db>?tab=storage`, which the Explorer writes back as `/explorer/<db>`).
+**Disks** (`app_system_disks.js`) answers these questions: which disk, how full, how fast it grows and which databases fill it. This section does not repeat the database storage of the Explorer. It has no treemap and no partitions. A database opens its Explorer page at its storage section (`/explorer/<db>?tab=storage`). The Explorer then replaces this address with `/explorer/<db>`.
 
-- **Tiles**: the disks and storage policies, the fullest disk, and the bytes of the active parts of the databases that the runner can see (ClickHouse data).
-- **A card for each filesystem**: the disks that report the same capacity and free space (to the MiB: the default disk and the disks under its path) share one card, on its own row.
-  - The card shows these items once: the fill of the filesystem, the free space, the unreserved space and the forecast (the soonest full). The unreserved space is the free space less what any of the disks reserved. Then the card shows the ClickHouse data, the path and the policies of each disk.
+- **Tiles**: the disks and storage policies, the fullest disk, and the ClickHouse data (active parts) of the databases that the runner can see.
+- **A card for each filesystem**: the disks that report the same capacity and free space share one card. The comparison is to the MiB. It includes the default disk and the disks under its path. The card has its own row.
+  - The card shows these items once: the fill of the filesystem, the free space, the unreserved space and the forecast (the soonest full). The unreserved space is the free space less what any of the disks reserved. After that, the card shows the ClickHouse data, the path and the policies of each disk.
   - The cards share the row (`auto-fit`, at least 340 px each).
   - A card shows its fill as a bar on its own track beside the percentage. The tone is **neutral under 80 %, warning from 80 % to 90 %, danger from 90 %**. The border of the card takes the tone too.
-  - A card also shows these items:
+  - The card also shows these items:
     - Used of total.
     - Free (`free_space`, what ClickHouse can still write, `keep_free_space` excluded).
     - Unreserved (`unreserved_space`: free space that merges, mutations and fetches in progress do not reserve).
@@ -397,30 +448,30 @@ The measurement used the local test stack (`query_log` of 7.7 M rows over 7 days
     - The path and the cache path (mono, wrapped, never cut).
     - The policies and volumes that it belongs to.
     - Badges for its type, object storage, remote, encrypted, read-only and broken.
-  - A disk without a capacity (object storage, `total_space = 0`) says "Capacity not reported". It shows the bytes of its active parts instead.
-- **Growth** (charts on the shared engine, shared crosshair, a drag narrows the window):
-  - **Disk used** for each disk. Disks on one filesystem report the same bytes and draw one line, named after all of them. The axis follows the data, so that a slow growth of a large disk is readable.
+  - A disk without a capacity (object storage, `total_space = 0`) states "Capacity not reported". Instead, it shows the bytes of its active parts.
+- **Growth** (charts on the shared engine. The crosshair is shared, and a drag narrows the window):
+  - **Disk used** for each disk. Disks on one filesystem report the same bytes and draw one line, named after all of them. The axis follows the data. For this reason, a slow growth of a large disk is readable.
   - **MergeTree data** (`TotalBytesOfMergeTreeTables`).
-  - **Written and moved**: the bytes of the new parts that the databases visible to the runner wrote. It also shows the bytes of the parts that TTL or the storage policy moved (`part_log`; hidden without it).
-- **Bytes by database**: for each disk, the share strip of its top 8 databases and Others (the strip of the size band, one color rule: a segment opens that database) over a table of the same rows. The table has these columns: the database (a link to its storage in the Explorer), its size, its share of the disk and its parts. The share is a bar on its own track.
+  - **Written and moved**: the bytes of the new parts that the databases visible to the runner wrote. It also shows the bytes of the parts that TTL or the storage policy moved (`part_log`). Without `part_log`, this chart is hidden.
+- **Bytes by database**: for each disk, the share strip of its top 8 databases and Others. The strip is the strip of the size band, with one color rule: a segment opens that database. The strip sits over a table of the same rows. The table has these columns: the database (a link to its storage in the Explorer), its size, its share of the disk and its parts. The share is a bar on its own track.
 - **Storage policies**: the policy, its volumes in priority order, their disks, type, `max_data_part_size`, `move_factor` and `prefer_not_to_merge`. A server with only the `default` policy and one volume gets one line.
 
-The window is the time range picker at the start of the filter bar. The refresh button is at its other end. The default window is the last `system.disk_growth_days` (7). The maximum is `max_lookback_days`. The address has `from` / `to` when the window differs. There is no Auto-refresh.
+The window is set by the time range picker at the start of the filter bar. The refresh button is at the other end of the bar. The default window is the last `system.disk_growth_days` (7). The maximum is `max_lookback_days`. The address has `from` / `to` when the window differs from the default. There is no Auto-refresh.
 
-**Until full** is the free space over the least-squares slope of the used bytes of the disk across the buckets of the window. The page never extrapolates from too little history, or from a flat or falling trend:
+**Until full** is the free space divided by the least-squares slope of the used bytes of the disk across the buckets of the window. The page never extrapolates from too little history. It also never extrapolates from a flat or falling trend:
 
-- Too little history is fewer than 6 buckets, or less than 6 hours between the first and the last. The page shows "Not enough history", with what the window holds.
+- Too little history means fewer than 6 buckets, or less than 6 hours between the first and the last bucket. The page shows "Not enough history", with what the window holds.
 - A flat or falling trend is a trend that adds less than 1/10,000 of the capacity, or 1 MiB, over the window. The page shows "Not growing".
 
-A forecast reads as a warning under 30 days and as danger under 7.
+A forecast is shown as a warning under 30 days, and as danger under 7 days.
 
-`GET /api/system/disks?host_id=<id>[&refresh=1]` (any other parameter is a 400 `unknown_parameter`) runs through the system context. The backend caches it for 60 s for each host. The Databases of the Overview read the same answer. The route reads these items:
+`GET /api/system/disks?host_id=<id>[&refresh=1]` (any other parameter is a 400 `unknown_parameter`) runs through the system context. The backend caches it for 60 s for each host. The Databases part of the Overview reads the same answer. The route reads these items:
 
-- `system.disks` (`ORDER BY name LIMIT 201`): name, path, `free_space`, `total_space`. It also reads the columns that this server has of this list: `unreserved_space`, `keep_free_space`, `type`, `object_storage_type`, `cache_path`, `is_read_only`, `is_broken`, `is_encrypted`, `is_remote`. The route detects them with the other capabilities. Absent columns are `null`.
-- `system.storage_policies` (`ORDER BY policy_name, volume_priority LIMIT 501`), the optional columns detected in the same way.
+- `system.disks` (`ORDER BY name LIMIT 201`): name, path, `free_space`, `total_space`. The route also reads the columns of this list that this server has: `unreserved_space`, `keep_free_space`, `type`, `object_storage_type`, `cache_path`, `is_read_only`, `is_broken`, `is_encrypted`, `is_remote`. The route detects these columns with the other capabilities. An absent column is `null`.
+- `system.storage_policies` (`ORDER BY policy_name, volume_priority LIMIT 501`). The route detects its optional columns in the same way.
 - `system.parts`: `WHERE active AND database IN (<databases the runner reads>) GROUP BY disk_name, database`.
   - The read returns bytes, rows, parts and compact parts, largest first, `LIMIT 1001`.
-  - It adds the totals of each disk over every visible database as window functions. In this way, a cut list still knows its Others.
+  - It adds the totals of each disk over every visible database, as window functions. In this way, a cut list still includes its Others.
   - The route checks each row again against the databases of the runner. The route does not list or count a database that the runner cannot see.
 
 The answer has these fields:
@@ -432,13 +483,13 @@ The answer has these fields:
 - `limits`.
 - `unavailable_panels` (`disks`, `policies`, `usage`: a missing grant says which GRANT to run).
 
-The growth is `GET /api/system/series?host_id=<id>&panel=disk_growth[&from_ms=&to_ms=][&refresh=1]`. The window is validated and stepped as for Performance (7 days: 1 h buckets). The backend caches it for 5 minutes for each aligned window. The route reads these items:
+The growth data comes from `GET /api/system/series?host_id=<id>&panel=disk_growth[&from_ms=&to_ms=][&refresh=1]`. The window is validated and stepped as for Performance (7 days: 1 h buckets). The backend caches it for 5 minutes for each aligned window. The route reads these items:
 
 1. `system.disks` (names, free space and capacity).
-2. `system.asynchronous_metric_log` once: the largest `DiskUsed_<disk>` sample of each bucket, with the disk names quoted from `system.disks`, and `TotalBytesOfMergeTreeTables`.
-3. `system.part_log`: `sumIf(size_in_bytes, event_type = 'NewPart')`, the same for `MovePart`, and the move count for each bucket. It uses `database IN (<runner-visible databases>)`, summed over them (no database is named). The names of the databases (here, in the Activity section and in the disk usage) are query parameters, one String for each name. A database with a quote mark or a backslash in its name is a plain value.
+2. `system.asynchronous_metric_log`, once: the largest `DiskUsed_<disk>` sample of each bucket, with the disk names quoted from `system.disks`, and `TotalBytesOfMergeTreeTables`.
+3. `system.part_log`: `sumIf(size_in_bytes, event_type = 'NewPart')`, the same for `MovePart`, and the move count for each bucket. The read uses `database IN (<runner-visible databases>)`, summed over them, and no database is named. The names of the databases are query parameters, here and in the Activity section and in the disk usage. Each name is one String parameter. A database with a quote mark or a backslash in its name is a plain value.
 
-**ClickHouse 26.8** adds a `key` column. It logs the metric of each disk as `metric = 'DiskUsed'` with the disk in `key`. This does not apply when `asynchronous_metrics_key_values_mode` is `legacy_names` or `both`. When the column exists, the predicate is `(metric = 'TotalBytesOfMergeTreeTables' OR metric IN ('DiskUsed_<d>', …) OR (metric = 'DiskUsed' AND key IN ('<d>', …)))`. The disk is `if(metric = 'DiskUsed', key, substring(metric, 10))`. For this reason, either form, or both, read the same (`disk_metric_form`: `names` or `key`).
+**ClickHouse 26.8** adds a `key` column. It logs the metric of each disk as `metric = 'DiskUsed'`, with the disk in `key`. This does not apply when `asynchronous_metrics_key_values_mode` is `legacy_names` or `both`. When the column exists, the predicate is `(metric = 'TotalBytesOfMergeTreeTables' OR metric IN ('DiskUsed_<d>', …) OR (metric = 'DiskUsed' AND key IN ('<d>', …)))`. The disk is `if(metric = 'DiskUsed', key, substring(metric, 10))`. For this reason, either form, or both, gives the same read (`disk_metric_form`: `names` or `key`).
 
 The answer has these fields:
 
@@ -448,4 +499,4 @@ The answer has these fields:
 - `sources`.
 - `unavailable_panels`.
 
-Without `asynchronous_metric_log`, the charts give way to "Growth needs system.asynchronous_metric_log", and the cards say what they need. A source that cannot be read shows its reason and GRANT. Every SELECT has the System `SETTINGS` (5 s or 10 s, 100 k, 10 M or 50 M rows read, a result cap). On the local test stack, `/disks` answers in about 15 ms. A week of growth answers in about 45 ms (1.7 M `asynchronous_metric_log` rows and 1.1 M `part_log` rows read).
+Without `asynchronous_metric_log`, the charts are replaced by "Growth needs system.asynchronous_metric_log". The cards state what they need. A source that cannot be read shows its reason and its GRANT. Each SELECT has the System `SETTINGS` (5 s or 10 s, 100 k, 10 M or 50 M rows read, a result cap). On the local test stack, `/disks` answers in about 15 ms. A week of growth answers in about 45 ms (1.7 M `asynchronous_metric_log` rows and 1.1 M `part_log` rows read).

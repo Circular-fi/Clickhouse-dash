@@ -1,12 +1,12 @@
 # OpenTelemetry logs
 
-ChDash can read the OpenTelemetry logs that the OpenTelemetry Collector contrib ClickHouse exporter stores (`otel_logs`). Logs follow the host that the user selects in the UI, like traces. ChDash reads them through the `system_uri` of that host.
+ChDash can read the OpenTelemetry logs that the OpenTelemetry Collector contrib ClickHouse exporter stores in `otel_logs`. The logs follow the host that the user selects in the UI, the same as traces. ChDash reads the logs through the `system_uri` of that host.
 
 This document describes these items:
 
 - The configuration.
 - The endpoint for schema detection.
-- The Logs explorer (the Logs view of `/observability` and its `/api/logs/*` routes).
+- The Logs explorer: the Logs view of `/observability` and its `/api/logs/*` routes.
 
 ## Configuration
 
@@ -23,25 +23,25 @@ observability {
 }
 ```
 
-(The top-level `logs {}` block of older configurations still works. A host can override `enabled`, `database` and `table` in `clickhouse.host { observability { logs { } } }`: docs/configuration.md, "Where the tables of a host are".)
+The top-level `logs {}` block of older configurations still works. A host can override `enabled`, `database` and `table` in `clickhouse.host { observability { logs { } } }`. See docs/configuration.md, "Where the tables of a host are".
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `false` | Turns the logs source on. |
+| `enabled` | `false` | Enables the logs source. |
 | `database`, `table` | `otel`, `otel_logs` | Exporter logs table. |
 | `max_lookback_minutes` | `10080` | Widest time range that a logs query can cover (1 minute to 365 days). |
 | `search_limit` | `200` | Maximum log records for each search (1 to 10000). |
-| `body_search` | `token` | `token`: `hasToken()` on `Body`, which a `tokenbf_v1`/`text` skip index serves. `substring`: case-insensitive scan (an `ngrambf_v1` index serves it if one exists). `off`: no `Body` search. |
+| `body_search` | `token` | `token`: `hasToken()` on `Body`. A `tokenbf_v1` or `text` skip index serves this mode. `substring`: case-insensitive scan. An `ngrambf_v1` index serves this mode if one exists. `off`: no `Body` search. |
 
-The access control for `ServiceName` is `observability.service_allowlist` (`traces.service_allowlist` in older configurations). The same patterns apply to logs. There is no separate allowlist for logs. Unknown keys in the block are startup errors.
+`observability.service_allowlist` sets the access control for `ServiceName`. In older configurations, `traces.service_allowlist` does this. The same patterns apply to logs. There is no separate allowlist for logs. An unknown key in the block causes a startup error.
 
-`/api/version` exposes `features.logs.enabled` and `features.logs.body_search`.
+`/api/version` shows `features.logs.enabled` and `features.logs.body_search`.
 
 ## Schema detection: `GET /api/logs/meta`
 
-Parameters: `host_id` (optional when one host is configured) and `refresh=1` to bypass the cache.
+Parameters: `host_id` (optional when one host is configured) and `refresh=1`. Use `refresh=1` to skip the cache.
 
-The route is always registered. It reads only system tables (`system.tables`, `system.columns`, `system.data_skipping_indices`, `system.parts`). It never scans log rows. For this reason, it stays cheap on very large tables. The route caches successful detections for 60 seconds for each source. The response carries `cache: {hit, age_ms, ttl_ms}`.
+The route is always registered. It reads only system tables (`system.tables`, `system.columns`, `system.data_skipping_indices`, `system.parts`). It never scans log rows. For this reason, it stays cheap on very large tables. The route caches successful detections for 60 seconds for each source. The response contains `cache: {hit, age_ms, ttl_ms}`.
 
 When `logs.enabled = false`, the route answers `200` with this body:
 
@@ -49,9 +49,9 @@ When `logs.enabled = false`, the route answers `200` with this body:
 {"enabled": false, "signal": "logs", "error_code": "logs_disabled", "message": "..."}
 ```
 
-An unknown `host_id` answers `404 unknown_host`. A failure of the connection or of a system table answers `503 logs_source_unavailable` / `logs_schema_failed`. A missing table is not an error. The response has `table_exists: false`, `schema_ok: false`, `error_code: "logs_table_missing"` and a message.
+An unknown `host_id` answers `404 unknown_host`. A failure of the connection or of a system table answers `503 logs_source_unavailable` / `logs_schema_failed`. A missing table is not an error. The response contains `table_exists: false`, `schema_ok: false`, `error_code: "logs_table_missing"` and a message.
 
-Response for an existing table (abridged):
+Response for a table that exists (abridged):
 
 ```json
 {
@@ -89,27 +89,28 @@ Response for an existing table (abridged):
 
 Notes for query builders:
 
-- **Time column.** The exporter layout that the test stack uses (v0.120) has a `TimestampTime DateTime` column. It partitions by `toDate(TimestampTime)` and sorts by `(ServiceName, TimestampTime, Timestamp)`. Put coarse range filters on `TimestampTime` (`time_column`). Put exact ordering on `Timestamp`. Newer exporter releases drop `TimestampTime` and sort by `(toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp)`. `time_column` is then `Timestamp`.
+- **Time column.** The exporter layout that the test stack uses (v0.120) has a `TimestampTime DateTime` column. The table partitions by `toDate(TimestampTime)`. It sorts by `(ServiceName, TimestampTime, Timestamp)`. Use coarse range filters on `TimestampTime` (`time_column`). Use exact ordering on `Timestamp`.
+  - Newer exporter releases drop `TimestampTime`. These releases sort by `(toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp)`. In that case, `time_column` is `Timestamp`.
 - **Attributes.** `kind` is one of these values:
-  - `map`: filter with `LogAttributes['k']` and the `mapKeys`/`mapValues` bloom filters.
+  - `map`: a filter that uses `LogAttributes['k']` and the `mapKeys`/`mapValues` bloom filters.
   - `json`: JSON subcolumns.
   - `string`, `other` or `missing`.
-- **Body index.** `lowercase: true` means that the index is on `lower(Body)` (`idx_lower_body` of the newer exporter). To use the index, search `lower(Body)` with a lower-cased token. `index_backed: false` means that the configured search mode works but scans. `tokenbf_v1` and `hasToken()` split on every non-alphanumeric byte (`_` and `.` included). `hasToken()` rejects a needle that contains a separator. Split the user input into tokens first (`analytics.events_buffer` is `analytics`, `events`, `buffer`).
+- **Body index.** `lowercase: true` means that the index is on `lower(Body)` (`idx_lower_body` of the newer exporter). To use the index, search `lower(Body)` with a lower-cased token. `index_backed: false` means that the configured search mode works, but it scans. `tokenbf_v1` and `hasToken()` split on every non-alphanumeric byte (`_` and `.` included). `hasToken()` rejects a needle that contains a separator. Split the user input into tokens first, for example `analytics.events_buffer` gives `analytics`, `events` and `buffer`.
 - **Trace correlation.** `trace_id_index` is the `TraceId` skip index (`bloom_filter(0.001)`, or `text(tokenizer = 'array')` on newer layouts). A lookup of "logs of this trace" must always add a time range around the trace.
-- **Time bounds** come from the minimum and maximum of the partition key of the parts. They are exact to the second for `toDate(<time>)` partitions. Otherwise, they have day precision. They are table-wide. The service allowlist does not narrow them.
+- **Time bounds.** The minimum and maximum of the partition key of the parts give the time bounds. They are exact to the second for `toDate(<time>)` partitions. Otherwise, they have day precision. They apply to the whole table. The service allowlist does not narrow them.
 
 ## Logs of a trace: `GET /api/traces/logs`
 
-The trace detail page lists the logs of the open trace (see below). The route is registered with the other trace routes (when `traces.enabled = true`).
+The trace detail page lists the logs of the open trace. See below. The route is registered with the other trace routes, when `traces.enabled = true`.
 
 Parameters:
 
 | Parameter | Meaning |
 | --- | --- |
 | `trace_id` | Required. |
-| `start_ns`, `end_ns` | Required: the trace bounds in epoch nanoseconds. A request without them is rejected (`400 missing_time_range`). The backend never runs a `TraceId` lookup over the whole table. |
-| `service` | Repeated: the services of the trace. They restrict `ServiceName`, the first column of the primary key. Without them, the lookup relies only on the time range and on the `TraceId` skip index. |
-| `span_id` | Optional: the logs of one span. |
+| `start_ns`, `end_ns` | Required. The trace bounds in epoch nanoseconds. A request without them is rejected (`400 missing_time_range`). The backend never runs a `TraceId` lookup over the whole table. |
+| `service` | Repeated. The services of the trace. They restrict `ServiceName`, the first column of the primary key. Without them, the lookup uses only the time range and the `TraceId` skip index. |
+| `span_id` | Optional. The logs of one span. |
 | `limit` | Optional, 1..`logs.trace_logs_limit` (default: that limit). |
 | `host_id` | Optional when one host is configured. |
 
@@ -130,11 +131,11 @@ SETTINGS max_execution_time = 10, merge_tree_min_rows_for_concurrent_read = 8192
          merge_tree_min_bytes_for_concurrent_read = 1
 ```
 
-- The margins are `logs.trace_margin_before_seconds` (default 5) and `logs.trace_margin_after_seconds` (default 30). They catch the records that the exporter wrote just before the first span, or after the end of the last span. Exporters often flush logs later than their span. The window is clamped to `logs.max_lookback_minutes` from its start (`window.clamped: true`).
-- Without a `TimestampTime` column (newer exporter layouts), the range is on `Timestamp`. `Map` and `JSON` attribute columns are both serialized with `toJSONString`. The backend reads the column types from `system.columns` and caches them for 60 seconds for each source.
+- The margins are `logs.trace_margin_before_seconds` (default 5) and `logs.trace_margin_after_seconds` (default 30). They catch the records that the exporter wrote just before the first span, or after the end of the last span. Exporters often flush logs later than their span. The backend limits the window to `logs.max_lookback_minutes` from its start (`window.clamped: true`).
+- Without a `TimestampTime` column (newer exporter layouts), the range uses `Timestamp`. `toJSONString` serializes both the `Map` and the `JSON` attribute columns. The backend reads the column types from `system.columns`. It caches them for 60 seconds for each source.
 - The `ServiceName` allowlist is the allowlist of the traces (`src/otel_allowlist.hpp`, shared by the trace routes and the log routes).
 - The backend reads one more row than the limit. `truncated: true` means that the trace has more logs than the response returns.
-- The small time window leaves only a few granules after the indexes. The settings for concurrent read let ClickHouse read them with several threads. Without them, ClickHouse uses one thread. This gives about 25 ms instead of 45 ms on the test fixture.
+- The small time window leaves only a few granules after the indexes. The settings for concurrent read let ClickHouse read them with several threads. Without them, ClickHouse uses one thread. The settings give about 25 ms, instead of 45 ms on the test fixture.
 
 The test stack has 17 million log rows and 2 billion spans. On this stack, a trace of the last fixture hour with about 80 logs answers in 20-35 ms (server `elapsed_ms`, round trip included).
 
@@ -168,44 +169,44 @@ Response (abridged):
 
 ### In the trace detail page
 
-The logs load after the trace has rendered. They never delay the trace. They do not load at all when `/api/version` reports `features.logs.enabled = false`.
+The logs load after the trace renders. They never delay the trace. They do not load at all when `/api/version` reports `features.logs.enabled = false`.
 
 - **Header**: a `Logs` item with the count (`n+` when truncated) and the number of error logs. A click shows or hides the logs panel. The dashboard remembers the state.
 - **Logs panel**: every log of the trace in time order. Each log has the severity, the offset from the trace start (absolute time on hover), the service, the span and the body. The panel also has severity chips, a service picker and a text filter over the loaded logs. A click on a row opens its span (`?span=`). The Logs group of the inspector is open, and the log is marked. The arrow expands the full body, the log attributes and the resource attributes.
 - **Waterfall**: each span row that has logs shows a log count badge. The color of the badge is the color of the most severe log. The timeline of the row shows a marker for each log. The badge or a marker lists the logs of the span under its row. The list uses the waterfall columns, with a diamond at the time of each log.
 - **Span inspector**: a `Logs (n)` group with the logs of the span.
 
-A log belongs to the span of its `SpanId`. `(TraceId, SpanId)` is not always unique (the same span is stored twice at different times). In this case, a log belongs to the span whose interval holds it. Otherwise, it belongs to the nearest span. Logs without a span of the trace are listed in the panel only.
+A log belongs to the span of its `SpanId`. `(TraceId, SpanId)` is not always unique (the same span is stored twice at different times). In this case, a log belongs to the span whose interval holds it. Otherwise, it belongs to the nearest span. Logs without a span of the trace appear in the panel only.
 
 ## Logs explorer: the Logs view (`/observability/logs`)
 
-When `logs.enabled = true`, the Observability page (`/observability`, see `docs/traces.md`) has a **Logs** tab. Otherwise, the tab is hidden. The dashboard caches the availability in `chdash.pageNav.v1` for the first paint, like the page switcher. The time range and the service are shared with the Traces and Metrics views. The view follows the model of the search page of HyperDX:
+When `logs.enabled = true`, the Observability page (`/observability`, see `docs/traces.md`) has a **Logs** tab. Otherwise, the tab is hidden. The dashboard caches the availability in `chdash.pageNav.v1` for the first paint, the same as the page switcher. The time range and the service are shared with the Traces and Metrics views. The view follows the model of the search page of HyperDX:
 
-- **Search bar**: it has these controls:
+- **Search bar**: the bar has these controls:
   - The time range picker of Traces (quick ranges, absolute range, calendar).
   - Services (multi-select, with record counts for the range).
   - Minimum level.
   - Body text.
   - Filters `key=value` and `key!=value`.
 
-  `TraceId=<id>` in the filter box filters one trace. Every setting is in the URL (`from`, `to`, `service`, `level`, `sev`, `q`, `attr`, `trace_id`, `tab`, `cols`, `denoise`). For this reason, the user can share a search, reload it and navigate it with Back / Forward.
+  `TraceId=<id>` in the filter box filters for one trace. Every setting is in the URL (`from`, `to`, `service`, `level`, `sev`, `q`, `attr`, `trace_id`, `tab`, `cols`, `denoise`). For this reason, the user can share a search, reload it and navigate it with Back / Forward.
 - **Fields**: the left sidebar. It is the component of the Traces **Attributes** panel (`app_facet_panel.js`). It has these parts:
-  - The field keys of the matching records, under the name of their scope (Record, Log attributes, Resource attributes, Scope attributes). Each key has its sampled count ("from a 3M sample" when the count is on a sample).
+  - The field keys of the records that match, under the name of their scope (Record, Log attributes, Resource attributes, Scope attributes). Each key has its sampled count ("from a 3M sample" when the count is on a sample).
   - A key search.
   - The top values of an expanded key.
   - Pins.
-  - A folded rail of 32 px. It is folded by default under 1100 px. On phones, the panel stacks above the histogram.
+  - A folded rail of 32 px. The panel folds by default under 1100 px. On phones, the panel stacks above the histogram.
 
   A checked value adds a `key=value` filter (`LogAttributes.<key>=...`, the column, or the service picker for `ServiceName`). The exclude button adds `key!=value`. Several checked values of one key match any of them. The panel shows the active filters (from the chips, the Filter box or the URL). The dashboard keeps the pins and the fold state in `localStorage`.
 - **Volume histogram**: records over time, stacked by severity class (error, warn, info, debug). The total is the sum of the buckets. The buckets align on the local midnight of the browser. Drag over the chart to zoom the time range. The legend toggles the severity classes.
-- **Results**: a virtualized table, newest first (time, level, service, body). The user can add host, TraceId, SpanId, scope and any attribute from **Columns**. Scrolling loads older pages through keyset cursors. The status line beside the tabs describes the tab that is shown (the listed records on Results, the mined sample on Patterns). The service colors are the colors of the Traces view (same session assignment).
-- **Record panel**: click a row (or use the arrow keys) to see every field and attribute.
-  - Below 1600 px, the Fields panel folds to its rail while the record panel is open. The table drops its columns of lowest priority before Body would shrink under 320 px. The order is: attributes, scope, span, trace, host, then service.
+- **Results**: a virtualized table, newest first (time, level, service, body). The user can add host, TraceId, SpanId, scope and any attribute from **Columns**. When the user scrolls, the table loads older pages through keyset cursors. The status line beside the tabs describes the tab that is shown (the listed records on Results, the mined sample on Patterns). The service colors match the colors of the Traces view. Both views use the same session assignment.
+- **Record panel**: click a row, or use the arrow keys, to see every field and attribute.
+  - Below 1600 px, the Fields panel folds to its rail while the record panel is open. The table drops its columns of lowest priority before the Body column shrinks under 320 px. The order is: attributes, scope, span, trace, host, then service.
   - Each value has the actions *filter*, *exclude*, *search only this* and *copy*.
   - **Open trace** opens `/observability/traces/<TraceId>?span=<SpanId>` (the own page of the trace).
-  - **Surrounding context** lists the records around the record. The user can select anything, same service, same host (`ResourceAttributes['host.name']`) or same trace, within ±1 min to ±1 h.
+  - **Surrounding context** lists the records around the record. The user can select anything, the same service, the same host (`ResourceAttributes['host.name']`) or the same trace, within ±1 min to ±1 h.
 - **Patterns**: templates that the dashboard mines from a sample of the search. Each pattern shows its count, its share beside its own bar, its trend and a sample record. The status line reads "21 patterns in a sample of 9,472 of 6,544,139 logs · counts extrapolated ×691 from the sample". **Denoise** hides the patterns above 10 % of the sample. A click on a pattern searches its constant words.
-- **No live tail**: the dashboard reads the records on load, on a change of a filter or of the range, and with **Search**. Nothing polls on a timer.
+- **No live tail**: the dashboard reads the records when it loads, when a filter or the range changes, and when the user clicks **Search**. Nothing polls on a timer.
 
 Token search (`body_search = "token"`) matches whole tokens, case-sensitively (the exporter index is on `Body`, not on `lower(Body)`). `miss` matches `cache miss`, but `mis` does not. All separate terms must match. `"quoted text"` must appear verbatim. `-term` excludes.
 
@@ -223,9 +224,11 @@ All routes take `host_id` (optional with one host). The backend registers them o
 | `attr` (repeated) | `key=value` or `key!=value`. A bare key matches `LogAttributes` or `ResourceAttributes`. `LogAttributes.<key>`, `ResourceAttributes.<key>`, `ScopeAttributes.<key>` pick one map. `ServiceName`, `SeverityText`, `TraceId`, `SpanId`, `ScopeName`, `ScopeVersion` compare the column. Several `key=value` of one key match any of the values. Every `key!=value` excludes its value. |
 | `trace_id`, `span_id` | Hexadecimal ids. |
 
-Every query filters the columns of the primary key first (`ServiceName`, and `TimestampTime` on the older exporter layout, plus the exact `Timestamp` bound). It runs with `max_execution_time = 30` and `max_rows_to_read = 1000000000` (`read_overflow_mode = 'throw'`). A query over that guard answers `422 logs_scan_limit`. A timeout answers `504 logs_timeout`. These codes come from the code that ClickHouse sends, like every error of ChDash ([operations.md](operations.md#errors)). The queries of the schema of the table have the bounds of the pages (`generated_queries`).
+Every query filters the columns of the primary key first (`ServiceName`, and `TimestampTime` on the older exporter layout, plus the exact `Timestamp` bound). The query runs with `max_execution_time = 30` and `max_rows_to_read = 1000000000` (`read_overflow_mode = 'throw'`). A query that exceeds that guard answers `422 logs_scan_limit`. A timeout answers `504 logs_timeout`. These codes come from the code that ClickHouse sends, the same as every error of ChDash ([operations.md](operations.md#errors)). The schema queries of the table have the bounds of the pages (`generated_queries`).
 
-The values that a user writes (a service, an attribute value or key, a trace id, a span id, a search term) are never part of the SQL text. They go to ClickHouse as query parameters (`{p1:String}`, `{p2:String}`, ...), apart from the text. A quote mark, a backslash or a new line in a value is a plain character. The text of a statement does not change with the value, and the skip indexes work as they do for a literal. The cache of the facets has the values in its key. A column name (the key of an `attr` filter on a column) cannot be a parameter: it is a quoted identifier, and only the known columns are accepted.
+The values that a user writes are never part of the SQL text. These values are a service, an attribute value or key, a trace id, a span id and a search term. ChDash sends them to ClickHouse as query parameters (`{p1:String}`, `{p2:String}`, ...), apart from the text. A quote mark, a backslash or a new line in a value is a plain character. The text of a statement does not change with the value.
+
+The skip indexes work as they do for a literal. The cache of the facets has the values in its key. A column name (the key of an `attr` filter on a column) cannot be a parameter. ChDash quotes it as an identifier, and accepts only the known columns.
 
 **Body search.** The mode decides how the backend builds the search:
 
@@ -235,12 +238,14 @@ The values that a user writes (a service, an attribute value or key, a trace id,
 
 ### `GET /api/logs/search`
 
-Newest-first records. `limit` (default and maximum `logs.search_limit`), `cursor` (next page). The route ignores `after` of the former live tail (a page).
+Records, newest first. `limit` (default and maximum `logs.search_limit`), `cursor` (next page). The route ignores `after` of the former live tail (a page).
 
 - **Order and cursor.** `ORDER BY Timestamp DESC, cityHash64(ServiceName, TraceId, SpanId, SeverityNumber, Body) DESC`. The `id` of each row is `<Timestamp ns>-<tiebreak>`. `next_cursor` continues strictly after the last row: `Timestamp < ts OR (Timestamp = ts AND tiebreak < h)`. There is no `OFFSET`. A page costs the same at any depth. The route never skips or repeats records that share a timestamp.
-- **Progressive windows** (HyperDX `searchWindows`): the backend reads the newest 15 minutes first. Then it reads windows of 1 h, 6 h and 24 h further back. It stops when the page is full or when it reaches the range start. `windows` lists them with their row counts and durations. After 12 s, the search stops widening. It answers with a `next_cursor` that resumes below the last scanned window (`budget_exhausted: true`). The first window may use the 30 seconds of a query. The next windows get `max_execution_time` = what remains of the 12 s (at least 1 s), so a search never runs past its budget by more than a second. A window that runs out of time ends the search with the rows that the earlier windows gave (`budget_exhausted: true`); it is an error only when there is no row yet.
+- **Progressive windows** (HyperDX `searchWindows`): the backend reads the newest 15 minutes first. Then it reads windows of 1 h, 6 h and 24 h further back. It stops when the page is full or when it reaches the range start. `windows` lists them with their row counts and durations. After 12 s, the search reads no more windows.
+  - It answers with a `next_cursor` that resumes below the last scanned window (`budget_exhausted: true`). The first window can use the 30 seconds of a query. Each next window gets `max_execution_time` = the time that remains of the 12 s (at least 1 s).
+  - So, a search never runs past its budget by more than a second. A window that runs out of time ends the search with the rows that the earlier windows gave (`budget_exhausted: true`). It is an error only when there is no row yet.
 
-Response: `rows`, `row_count`, `next_cursor`, `exhausted`, `truncated`, `windows`, `text_search: {active, mode, index_backed}` and `timing_ms`. Each row has these fields: `id`, `ts_ns`, `ts_ms`, `service`, `severity_text`, `severity_number`, `trace_id`, `span_id`, `trace_flags`, `scope_name`, `scope_version`, `log_attributes`, `resource_attributes`, `scope_attributes` and `body`. `body` has the first 16384 characters. Beyond that, `body_truncated` / `body_length` apply.
+Response: `rows`, `row_count`, `next_cursor`, `exhausted`, `truncated`, `windows`, `text_search: {active, mode, index_backed}` and `timing_ms`. Each row has these fields: `id`, `ts_ns`, `ts_ms`, `service`, `severity_text`, `severity_number`, `trace_id`, `span_id`, `trace_flags`, `scope_name`, `scope_version`, `log_attributes`, `resource_attributes`, `scope_attributes` and `body`. `body` has the first 16384 characters. Beyond that limit, `body_truncated` / `body_length` apply.
 
 ```sql
 SELECT ... FROM otel.otel_logs
@@ -255,7 +260,7 @@ SETTINGS max_execution_time = 30, timeout_overflow_mode = 'throw',
 
 ### `GET /api/logs/histogram`
 
-Record counts for each bucket and severity class, for the same filters. `buckets` (target count, 10-300, default 80) picks a bucket of 1 s .. 7 d. `bucket_origin_ms` anchors the grid (the browser sends its local midnight, as the Traces analytics do). Response: `bucket_ms`, `bucket_origin_ms` (origin modulo the bucket), `buckets: [[start_ms, error, warn, info, debug], ...]` and `totals` (`total` is the sum of the buckets). Grids that are aligned to the second bucket `TimestampTime` instead of `Timestamp`.
+Record counts for each bucket and severity class, for the same filters. `buckets` (target count, 10-300, default 80) picks a bucket of 1 s .. 7 d. `bucket_origin_ms` anchors the grid (the browser sends its local midnight, as the Traces analytics do). Response: `bucket_ms`, `bucket_origin_ms` (origin modulo the bucket), `buckets: [[start_ms, error, warn, info, debug], ...]` and `totals` (`total` is the sum of the buckets). Grids that align to the second use the bucket `TimestampTime` instead of `Timestamp`.
 
 ### `GET /api/logs/context`
 
@@ -270,9 +275,13 @@ Response: `rows` newest first with the anchor among them (`anchor_found`), `befo
 
 ### `GET /api/logs/patterns`
 
-Drain templates (the algorithm of `common-utils/drain` of HyperDX: depth 4, similarity 0.4, 100 children for each node). The backend mines them on the server from a bounded sample. The route counts the matching records. Then it reads at most `sample` (default 10000) of them. It reads all of them when they fit. Otherwise, it uses a deterministic block sample (`cityHash64(_part, intDiv(_part_offset, 64)) % 1000000 < rate`). This sample reads `Body` only for the granules that hold a picked block. On the test fixture, this is about a fifth of the bytes of `ORDER BY rand()`. The backend first masks the bodies. Quoted strings, UUIDs and hex ids, and numbers that are not glued to a word become `<*>`. The masking and the Drain port are pure code (`src/logs_drain.cpp`), and so is the text search (`src/logs_text.cpp`: tokens, terms and the SQL of a term). Both have native unit tests (`tests/native/logs_test.cpp`). The routes in `src/api_logs.cpp` own the reads and the budget.
+Drain templates (the algorithm of `common-utils/drain` of HyperDX: depth 4, similarity 0.4, 100 children for each node). The backend mines them on the server from a bounded sample. The route counts the records that match. Then it reads at most `sample` (default 10000) of them. It reads all of them when they fit.
 
-The mining is CPU on a thread of the server, so it is bounded: a leaf of the template tree keeps 50 clusters at most (a message past that joins the nearest one), and the mining stops after 2 s (`mining_partial: true`, `scale` then uses the rows that were mined).
+Otherwise, it uses a deterministic block sample (`cityHash64(_part, intDiv(_part_offset, 64)) % 1000000 < rate`). This sample reads `Body` only for the granules that hold a picked block. On the test fixture, this is about a fifth of the bytes of `ORDER BY rand()`. The backend first masks the bodies. Quoted strings, UUIDs and hex ids, and numbers that are not glued to a word become `<*>`.
+
+The masking and the Drain port are pure code (`src/logs_drain.cpp`). The text search is pure code too (`src/logs_text.cpp`: tokens, terms and the SQL of a term). Both have native unit tests (`tests/native/logs_test.cpp`). The routes in `src/api_logs.cpp` own the reads and the budget.
+
+The mining uses CPU on a thread of the server. For this reason, it has bounds. A leaf of the template tree keeps 50 clusters at most. A message past that limit joins the nearest cluster. The mining stops after 2 s. In this case, `mining_partial: true`, and `scale` uses only the rows that were mined.
 
 Response: `total`, `sample_size`, `sampled`, `sample_method` (`all` or `block_hash`), `scale` (`total / sample_size`), `mining_partial`, `pattern_count` and `patterns` sorted by count. Each pattern has these fields:
 
@@ -314,7 +323,7 @@ SETTINGS max_execution_time = 5, timeout_overflow_mode = 'break',
          max_rows_to_read = 50000000, read_overflow_mode = 'break'
 ```
 
-`/api/logs/facet_values?scope=log|resource|scope|column&key=...&limit=...` (limit 1-500, default 10) counts the values of one field (`values: [[value, count], ...]`, `records_with_key`, `distinct_values`, `has_more`). The route leaves out the own filters of the field. These are the `service` filter for `ServiceName`, and the `attr` filters on the column, on `<Map>.<key>` or on the bare key. In this way, the other values of the field stay listed. A column facet must name one of the four columns (`400 invalid_logs_facet`). A JSON attribute column answers `400 logs_facet_unsupported`.
+`/api/logs/facet_values?scope=log|resource|scope|column&key=...&limit=...` (limit 1-500, default 10) counts the values of one field (`values: [[value, count], ...]`, `records_with_key`, `distinct_values`, `has_more`). The route omits the own filters of the field. These are the `service` filter for `ServiceName`, and the `attr` filters on the column, on `<Map>.<key>` or on the bare key. In this way, the other values of the field stay listed. A column facet must name one of the four columns (`400 invalid_logs_facet`). A JSON attribute column answers `400 logs_facet_unsupported`.
 
 ### `GET /api/logs/services`
 
@@ -322,9 +331,9 @@ Service names with record counts in the range, for the service picker. The route
 
 ## Test fixture
 
-The test stack creates `otel.otel_logs` with the exporter DDL (`tests/clickhouse-init/05-otel-logs-metrics.sql`). The `otel_fixture` service fills it when `OTEL_FIXTURE_LOGS=1` (on in `tests/docker-compose.yml`). The fixture derives the records from the stored spans with one `INSERT ... SELECT` for each hour of the window. For this reason, `TraceId`, `SpanId` and the timestamps correlate:
+The test stack creates `otel.otel_logs` with the exporter DDL (`tests/clickhouse-init/05-otel-logs-metrics.sql`). The `otel_fixture` service fills it when `OTEL_FIXTURE_LOGS=1` (enabled in `tests/docker-compose.yml`). The fixture derives the records from the stored spans with one `INSERT ... SELECT` for each hour of the window. For this reason, `TraceId`, `SpanId` and the timestamps correlate:
 
-- Window: the last `OTEL_FIXTURE_SIGNALS_WINDOW_MINUTES` (1440) minutes of the trace fixture, ending at the newest span.
+- Window: the last `OTEL_FIXTURE_SIGNALS_WINDOW_MINUTES` (1440) minutes of the trace fixture. The window ends at the newest span.
 - Traces with logs: every trace of the last `OTEL_FIXTURE_LOGS_DENSE_MINUTES` (60) minutes has logs. 1 trace in `OTEL_FIXTURE_LOGS_TRACE_SAMPLE` (16) of the rest has logs. In those traces, the root span and 1 span in `OTEL_FIXTURE_LOGS_SPAN_SAMPLE` (4) emit 1-3 records each.
 - Every error span of the window gets an `ERROR` record at the end of the span. The `Body` of the record is the span `StatusMessage` (`exception.type` = `SyntheticFixtureError`).
 - The severities are about DEBUG 20 % / INFO 65 % / WARN 10 % / ERROR 5 %. About 5 % of the records have no trace context (`log.origin = background`). About 5 % are written 1-3 s after their span ended (`log.origin = after_span`).
@@ -332,4 +341,4 @@ The test stack creates `otel.otel_logs` with the exporter DDL (`tests/clickhouse
 - `LogAttributes`: `code.function`, `code.lineno`, `log.origin`, `http.route` / `http.request.method` / `http.response.status_code` for HTTP spans, and `exception.type` / `exception.message` / `exception.stacktrace` on ERROR records.
 - `ResourceAttributes`: `service.name`, `service.version` (stable for each service), `host.name` (`<service>-0..2`), `deployment.environment.name`.
 
-On the local volume with 2 billion spans, this is about 17 million records, inserted in about 25 s. The load is idempotent. The fixture keeps a complete earlier load (marked in the table comment). It rebuilds an interrupted load. `OTEL_FIXTURE_SIGNALS_FORCE=1` rebuilds logs and metrics without a change to the traces.
+On the local volume with 2 billion spans, this is about 17 million records. The fixture inserts them in about 25 s. The load is idempotent. The fixture keeps a complete earlier load (marked in the table comment). It rebuilds an interrupted load. `OTEL_FIXTURE_SIGNALS_FORCE=1` rebuilds logs and metrics, but it does not change the traces.

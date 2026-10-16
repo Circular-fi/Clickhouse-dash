@@ -1,6 +1,8 @@
 # Native TCP telemetry
 
-ClickHouse Dash runs queries through ClickHouse native TCP. It sends the results and telemetry to the browser with Server-Sent Events.
+This page describes the live counters of a query that the browser shows. For the OTLP export of the spans and of the call log of MCP, refer to [server-telemetry.md](server-telemetry.md).
+
+ClickHouse Dash runs queries through ClickHouse native TCP. It sends the results and the telemetry to the browser with Server-Sent Events.
 
 ## Metrics
 
@@ -15,7 +17,7 @@ The dashboard keeps the original compact set of metrics:
 
 The dashboard no longer has the thread metric. Native profile packets contain thread identifiers. They do not give a deterministic count of the active threads of the whole query while it runs. The dashboard does not infer a count.
 
-Rows and bytes come from native `Progress` packets. CPU and memory come only from the query-group `ProfileEvents` row (`thread_id = 0`). If a CPU or memory value is not available, the dashboard sends JSON `null`. It does not guess a value.
+Native `Progress` packets give the rows and the bytes. Only the query-group `ProfileEvents` row (`thread_id = 0`) gives the CPU and the memory. If a CPU or memory value is not available, the dashboard sends JSON `null`. It does not guess a value.
 
 The progress percentage is the read progress. ClickHouse does not give a deterministic denominator for the later work of the pipeline. This work includes aggregation, sorting, final projection and result serialization. For this reason, the dashboard does not invent an overall percentage for the query.
 
@@ -43,7 +45,7 @@ The server sends a `tick` every 250 ms while the query runs. The Query page ends
 
 The host of a run is fixed when the run starts. Every statement of a batch, the history entry and the diagnostics use that host. The host picker is disabled while the run continues.
 
-The counts of `result_rows`, `tick`, `keepalive` and `message` can be different between releases. This does not change the query semantics. The tests compare these items:
+The number of `result_rows`, `tick`, `keepalive` and `message` events can differ between releases. This does not change the query semantics. The tests compare these items:
 
 - Rows.
 - Row order.
@@ -55,7 +57,7 @@ The counts of `result_rows`, `tick`, `keepalive` and `message` can be different 
 
 ## What the times measure
 
-A run has several times. They measure different things, so they are not equal. The table shows each time, where it appears, and the clock that measures it.
+A run has several times. Each time measures a different thing, so the times are not equal. The table shows each time, where it appears, and the clock that measures it.
 
 | Time | Where it appears | What it measures |
 |---|---|---|
@@ -66,19 +68,19 @@ A run has several times. They measure different things, so they are not equal. T
 
 System is not the time that ClickHouse needs to compute the result. ClickHouse sends the blocks of a result to ChDash through the native protocol. It waits when ChDash has not read the previous blocks. For a large result, System contains this wait. A client that decodes slowly makes System longer. It is not a defect of ClickHouse.
 
-The `done` event has the part `timing_ms`. It shows where the Elapsed time went:
+The `done` event has the part `timing_ms`. It shows where the Elapsed time goes:
 
 | Field | Meaning |
 |---|---|
-| `receive` | The time inside the native client: ClickHouse that produces and sends the blocks, and the decoding of their columns. |
+| `receive` | The time inside the native client. It covers the production and the sending of the blocks by ClickHouse, and the decoding of their columns. |
 | `encode` | The time that ChDash needs to write the rows as JSON events. |
-| `backpressure` | The time that ChDash waited because the browser had not read the events. |
+| `backpressure` | The time that ChDash waits because the browser has not read the events. |
 
 `receive` and `encode` run at the same time for a result of more than one block. A thread encodes a block while the client decodes the next block. For this reason, their sum can be longer than Elapsed. The rest of Elapsed is the connection, `USE` and `DESCRIBE`. The Elapsed tile shows these parts in its tooltip.
 
 ### Example: `select * from chdash_ui.weather_buffer`
 
-The table has 120,064 rows with `Tuple`, `Array` and `Map` columns. ClickHouse reads 42 MiB, and ChDash sends 37 MB of JSON. The times are medians on one host, with ClickHouse on the same host. The load of the host was 4 to 7. The browser is Chrome. The server figures come from nine runs, and the browser figures come from eight runs.
+The table has 120,064 rows with `Tuple`, `Array` and `Map` columns. ClickHouse reads 42 MiB, and ChDash sends 37 MB of JSON. The times are medians on one host, with ClickHouse on the same host. The load of the host was 4 to 7. The browser is Chrome. Nine runs give the server figures, and eight runs give the browser figures.
 
 | Step | Before 2.17 | Now |
 |---|---|---|
@@ -89,7 +91,9 @@ The table has 120,064 rows with `Tuple`, `Array` and `Map` columns. ClickHouse r
 | System, `query_duration_ms` | 0.30 s | 0.09 s |
 | From the click until the browser has every row | 1.5 s | 1.0 s |
 
-Before 2.17, System was six times the time that ClickHouse needs alone. ClickHouse waited for ChDash to read, decode and encode. The `Map` columns made most of the encoding time: ChDash copied the keys and the values of each cell. The browser was the other half. The `EventSource` of Chrome needs about as long as the bytes need to arrive. The Query page now reads the stream with `fetch`. The rest of the browser time has three parts. The parsing of the events takes 200 ms. The layout and the paint of the table take about 300 ms. The code that fills the table rows takes the remainder.
+Before 2.17, System was six times the time that ClickHouse needs alone. ClickHouse waited for ChDash to read, decode and encode. The `Map` columns caused most of the encoding time: ChDash copied the keys and the values of each cell. The browser was the other half.
+
+The `EventSource` of Chrome needs about as long as the bytes need to arrive. The Query page now reads the stream with `fetch`. The rest of the browser time has three parts. The parsing of the events takes 200 ms. The layout and the paint of the table take about 300 ms. The code that fills the table rows takes the remainder.
 
 ## Tick layout
 
@@ -161,11 +165,13 @@ Two cases need the compatibility projection of `query.describe_mode` (the `trans
 
 ### On the Query page
 
-The Query page shows, copies and downloads these values as they arrive. It never turns a string into a number, it never parses a `String` value, and it never unescapes a value again.
+The Query page shows, copies and downloads these values as they arrive. It never changes a string into a number. It never parses a `String` value. It never unescapes a value again.
 
 - The table shows the text of each value: `10577349846663553072`, `nan`, `C:\new`, `007`. A `Map` reads as an object in its stored order, `{"10":1,"2":2}`. A structure reads as compact JSON.
 - Copy cell copies that text. A structure is indented JSON. A NULL copies as nothing.
 - Copy JSON, Download JSON, Copy row, Copy column and the row details use one serializer. Each row is an object (column: value). When two columns have the same name, each row is an array. A 64-bit integer, a Decimal and NaN stay strings. A `Map` and a named `Tuple` are objects.
 - Copy CSV, Download CSV and `results.csv` of the Debug archive use one serializer. A field has quotes only when it needs them. A NULL is a bare `\N`, as in the CSV of ClickHouse. A text that is exactly `\N` has quotes. A structure is its compact JSON.
-- Copy CSV gives the same text as Download CSV. Copy JSON gives the same values as Download JSON, without wrapping that says nothing: one row is its object (not a list of one), one column is the list of its values (not objects of one key), and one row of one column is the value itself. Download JSON always writes the list of objects, so a program reads one shape for every result.
+- Copy CSV gives the same text as Download CSV. Copy JSON gives the same values as Download JSON, but it omits wrapping that adds no information.
+- One row is its object, not a list of one. One column is the list of its values, not objects of one key. One row of one column is the value itself.
+- Download JSON always writes the list of objects. A program therefore reads one shape for every result.
 - A numeric sort compares the digits of a `UInt64` or of a long `Decimal` exactly. `inf` and `-inf` sort as numbers, `nan` sorts with the NULLs.

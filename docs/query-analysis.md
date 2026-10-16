@@ -2,7 +2,7 @@
 
 ## Execution modes
 
-The primary **Run** action uses `mode=normal`. It keeps the existing native ProfileEvents telemetry that the live dashboard needs. It does not enable processor profiling. It does not call the analysis endpoint.
+The primary **Run** action uses `mode=normal`. It keeps the current native ProfileEvents telemetry that the live dashboard needs. It does not enable processor profiling. It does not call the analysis endpoint.
 
 **Run with profiling** uses `mode=profiling`. It needs no application authentication. It sets these values on the individual `clickhouse::Query` object:
 
@@ -51,7 +51,9 @@ Debug requests (`include_original_trace=true`) retain those original arrays for 
 | `summary_window_schema` | Repeated `[start_offset_us, finish_offset_us, active_time_us, event_count]` quadruples within each series. |
 | `summary_row_count` | Number of summary windows, checked against the decoded series. |
 
-Add the origin to each summary time offset. These values keep the precision of one microsecond and all recorded windows. The 4K temporal LOD of the trace does **not** apply to processor summaries. Processor IDs, parent IDs and plan IDs stay exact decimal strings in the dictionary. Counters and offsets use JSON integers up to `2^53 - 1`. Above that value, they use decimal strings up to UInt64 max. Large integer arithmetic must therefore use an exact integer type before the conversion for visualization.
+Add the origin to each summary time offset. These values keep the precision of one microsecond and all recorded windows. The 4K temporal LOD of the trace does **not** apply to processor summaries. Processor IDs, parent IDs and plan IDs stay exact decimal strings in the dictionary.
+
+Counters and offsets use JSON integers up to `2^53 - 1`. Above that value, they use decimal strings up to UInt64 max. Use an exact integer type for large integer arithmetic. Convert the result for visualization only after that.
 
 The browser checks these items:
 
@@ -62,11 +64,11 @@ The browser checks these items:
 - The order of the windows.
 - The collection caps.
 
-A malformed compact block is an explicit analysis error. This is also true when a debug payload contains legacy arrays. Older object payloads stay readable when no compact block is present. The iteration of the summary can restart. It does not retain another expanded array of 65,536 rows.
+A malformed compact block is an explicit analysis error. This is also true when a debug payload contains legacy arrays. Older object payloads stay readable when no compact block is present. The browser can restart the summary iteration. It does not retain another expanded array of 65,536 rows.
 
 ## Analysis lookup
 
-Analyze is on demand. It does a bounded lookup of the logs that ClickHouse already produced. It never runs the business query again. These are the logs:
+Analyze is on demand. It performs a bounded lookup of the logs that ClickHouse already produced. It never runs the business query again. These are the logs:
 
 - `system.query_log`
 - `system.processors_profile_log`, when recorded
@@ -74,23 +76,25 @@ Analyze is on demand. It does a bounded lookup of the logs that ClickHouse alrea
 
 System logs are asynchronous. For this reason, `analysis.log_lookup_timeout_ms` controls a short retry window. `SYSTEM FLUSH LOGS` is a server-wide operation that writes new system-log parts. ChDash avoids it as much as possible:
 
-- `analysis.flush_logs=false` is the default. The dashboard never flushes. When ClickHouse did not yet publish the rows, the response sets `logs_pending` (query_log) or `profiling_logs_pending` (processor rows and OpenTelemetry spans of a profiling run). The browser then polls Analyze again with a bounded backoff (~20 s). It does this until the own flush interval of ClickHouse publishes the rows.
+- `analysis.flush_logs=false` is the default. The dashboard never flushes. If ClickHouse did not yet publish the rows, the response sets `logs_pending` (query_log) or `profiling_logs_pending` (processor rows and OpenTelemetry spans of a profiling run). The browser then polls Analyze again with a bounded backoff (~20 s). It repeats this until the ClickHouse flush interval publishes the rows.
 - With `analysis.flush_logs=true`, the dashboard still reads the logs first. It issues a flush only when the needed rows are missing. It issues at most one flush for each lookup and for each log group. Concurrent lookups share the flush. A flush that started after a caller needed the rows covers that caller.
 - If that flush fails, the endpoint returns an explicit `analysis_collection_failed` error. It does not render an analysis that looks partial.
-- Exports validate the privilege with `CHECK GRANT SYSTEM FLUSH LOGS`. They do not flush up front.
+- Exports validate the privilege with `CHECK GRANT SYSTEM FLUSH LOGS`. They do not flush at the start.
 - The dashboard handles a failure to connect to the system context in the same way. It handles a failure to query the core `system.query_log` in the same way.
 
 The technical account is not an authorization source. The backend serializes names from system logs only after this step. It rebuilds or reuses the same runner-scoped `AllowedObjectSet` that Explorer uses. The backend omits hidden databases, tables, views and view targets.
 
 ## Analysis UI
 
-The Profiling dialog opens **Pipeline** first. It mounts **Tracing** only when the user selects it. The header and the time ruler stay visible while the rows scroll. The ruler shares the horizontal scrolling with the data.
+The Profiling dialog opens **Pipeline** first. It mounts **Tracing** only when the user selects it. The header and the time ruler stay visible while the rows scroll. The ruler scrolls horizontally with the data.
 
-Above 150 stages, the Pipeline mounts only the visible rows plus six rows of overscan on each side. Sorting and scrolling retain every row of the model. The dashboard does not sample the stages. The drawing of the timeline is limited to the mounted rows. The dashboard reuses the processor decoding, the trace decoding and the Pipeline model when the user switches tabs.
+Above 150 stages, the Pipeline mounts only the visible rows plus six rows of overscan on each side. Sort and scroll actions keep every row of the model. The dashboard does not sample the stages. The viewer draws the timeline only for the mounted rows. The dashboard reuses the decoded processor data, the decoded trace data and the Pipeline model when the user switches tabs.
 
-Closing the dialog releases the payload, the caches, the DOM and the resize observers. A response from an older opening cannot replace a newer query. It cannot refill a closed dialog.
+When the user closes the dialog, the dashboard releases the payload, the caches, the DOM and the resize observers. A response for an earlier dialog session cannot replace a newer query. It cannot refill a closed dialog.
 
-Pipeline groups processors by hostname, native query ID and plan step. It separates by type the processors without a plan step (`plan_step=0`). The order from source to sink follows `parent_ids`, scoped to the same host and query. In the analysis API, the IDs of processors, parents, plan steps and plan groups are decimal strings. In this way, the UInt64 identities survive the parsing of JavaScript. Legacy safe integer IDs still work. The dashboard reports large numeric IDs that are already rounded. These IDs cannot form graph links.
+Pipeline groups processors by hostname, native query ID and plan step. It groups the processors without a plan step (`plan_step=0`) by type. The order from source to sink follows `parent_ids`, scoped to the same host and query. In the analysis API, the IDs of processors, parents, plan steps and plan groups are decimal strings.
+
+Thus, the UInt64 identities survive the JavaScript parser. Legacy safe integer IDs still work. The dashboard reports large numeric IDs that are already rounded. These IDs cannot form graph links.
 
 ### Costs and flow
 
@@ -101,16 +105,16 @@ Pipeline groups processors by hostname, native query ID and plan step. It separa
   - If the collection of processors is truncated, the shares describe only the retained processors.
   - The stage order is a segmented control (**Pipeline order** | **Most work**). It can rank the rows by work. It does not change their original pipeline numbers or timestamps.
 - **Input wait / Output wait** show the maximum wait that the dashboard observed on one processor.
-- **Input / Output** sum the counters on the processors at the entry and at the exit of a stage. This includes parallel lanes. It does not count sequential internal processors twice. The boundary is an approximation in these cases: mixed internal and external ports, missing links, or a truncated processor list. The dashboard shows the approximation explicitly with `≈`. Counters for each port are not available.
+- **Input / Output** sum the counters on the processors at the entry and at the exit of a stage. This includes parallel lanes. It does not count sequential internal processors twice. The boundary is an approximation in these cases: mixed internal and external ports, links that are absent, or a truncated processor list. The dashboard shows the approximation explicitly with `≈`. The dashboard has no counters for each port.
 - Stages that only wait stay visible. The dashboard does not show all unassigned processors as one fictitious output stage. It shows a table hint only for a source-like stage, and only when the query overview identifies one table.
 
 The counter definitions follow the [ClickHouse processor log documentation](https://clickhouse.com/docs/reference/system-tables/processors_profile_log).
 
 ### Measured times and estimated associations
 
-The backend scans the complete OpenTelemetry trace that has a time bound. This scan does not depend on the cap of 10,000 detailed spans. The backend groups each exact processor operation into adaptive temporal buckets before it returns the summary. The browser assembles again the rows from the same processor instance. In this way, it retains the gaps between summary windows that do not overlap. The real gaps between periods of activity within a window are unknown.
+The backend scans the complete OpenTelemetry trace that has a time bound. This scan does not depend on the cap of 10,000 detailed spans. The backend groups each exact processor operation into adaptive temporal buckets before it returns the summary. The browser assembles the rows again from the same processor instance. In this way, it retains the gaps between summary windows that do not overlap. The real gaps between periods of activity within a window are unknown.
 
-The target is about 32K summary rows with a hard cap of 65,536 rows. Small and normal pipelines receive hundreds of temporal buckets for each processor. Very large pipelines give up some temporal resolution to keep the size of the payload bounded.
+The target is about 32K summary rows with a hard cap of 65,536 rows. Small and normal pipelines receive hundreds of temporal buckets for each processor. Very large pipelines lose some temporal resolution to keep the payload size bounded.
 
 Each slice still carries these items:
 
@@ -119,22 +123,26 @@ Each slice still carries these items:
 - The event count.
 - The `query_id`, where the span exposes it.
 
-The query IDs from root spans identify the attempt for the other operations in that trace. Missing traces from an earlier attempt cannot move a later trace to the wrong query. The dashboard can attribute legacy payloads without this mapping only when one query is present.
+The query IDs from root spans identify the attempt for the other operations in that trace. Traces that are absent from an earlier attempt cannot move a later trace to the wrong query. The dashboard can attribute legacy payloads without this association only when one query is present.
 
 A processor family that is unique to a stage can use its measured activity slices. The dashboard does not estimate which stage it belongs to. When the same type occurs in several stages, the viewer compares the active-time counters with indexed cost buckets. These rules apply:
 
 - A match must be within 25% with a minimum scale of 100µs.
-- Competing stages within 0.05 normalized score are ambiguous.
+- Stages with a normalized score within 0.05 of each other are ambiguous.
 - These thresholds are UI heuristics. They are not a guarantee of the identity in ClickHouse.
 - The viewer marks accepted cost matches with `≈`, an explicit approximate marker.
 - Candidates with equal cost or with incompatible cost stay unassigned.
 - The viewer never attaches overflow instances arbitrarily to the busiest stage.
 
-A stage marked `Timing unavailable` still has processor counters. But the dashboard cannot assign a processor span to it with confidence. There are two typical cases. The first case is a structural processor with zero work, for example a `Limit` that only waits. The second case is a duplicate processor family. In this case, the OpenTelemetry operation name does not expose the identity of the plan step. The association by counters stays ambiguous.
+A stage marked `Timing unavailable` still has processor counters. But the dashboard cannot assign a processor span to it with confidence. There are two typical cases. The first case is a structural processor with zero work, for example a `Limit` that only waits.
+
+The second case is a duplicate processor family. In this case, the OpenTelemetry operation name does not expose the identity of the plan step. The association by counters stays ambiguous.
 
 The default chart is a **work-density histogram over time**. It has a common height and a common color scale across the stages. Each summary window contributes its summed work divided by its duration from first to last. This is the average processor work. It is not CPU utilization, and it can exceed one for concurrent processors. The viewer does not treat the total number of processors in a stage as a capacity of simultaneous lanes.
 
-For the rendering, the viewer spreads the work uniformly only inside its own summary window. It projects the work into at most 192 display cells for each row. This is an estimate at the reported summary resolution. It is not a reconstruction of individual processor calls or waits. The viewer retains the gaps between windows, subject to the pixel resolution. The contributions of overlaps are additive. Height and shade distinguish brief work that recurs from heavier processing across the same query duration. The viewer batches SVG paths into eight color levels. It does not create a DOM element for each call.
+The viewer spreads the work uniformly, and only inside its own summary window. It projects the work into at most 192 display cells for each row. This is an estimate at the reported summary resolution. It is not a reconstruction of individual processor calls or waits.
+
+The viewer retains the gaps between windows, subject to the pixel resolution. The contributions of overlaps are additive. Height and shade distinguish brief work that recurs from heavier work across the same query duration. The viewer batches SVG paths into eight color levels. It does not create a DOM element for each call.
 
 These items belong to the controls and the labels of the pipeline:
 
@@ -153,21 +161,23 @@ Under 600 px, a row has two lines: the operation over its bar. Both have the wid
 
 Zoom does not create more detailed measurements. The work counters and their shares stay totals for the whole query while the view is zoomed. The time labels increase their precision when the user views short ranges near the end of the query. The waits stay separate numeric maxima, because their temporal positions are not available.
 
-Legacy payloads without `processor_trace_bucket_us` have only first and last envelopes. These are dashed, unfilled ranges. They never contribute to the activity histogram. A new run with profiling records the newer summary windows. Missing timing and partial collection are explicit. A blank area in an incomplete trace does not prove that the processor was idle.
+Legacy payloads without `processor_trace_bucket_us` have only first and last envelopes. These are dashed, unfilled ranges. They never contribute to the activity histogram. A new run with profiling records the newer summary windows. The dashboard shows absent timing and partial collection explicitly. A blank area in an incomplete trace does not prove that the processor was idle.
 
-Detailed Tracing keeps its separate 4K temporal LOD. ClickHouse frequently adds a trailing numeric instance suffix to the names of sibling operations (for example `ExpressionTransform_0`, `_1`, `_2`). The UI does these steps:
+Detailed Tracing keeps its separate 4K temporal LOD. ClickHouse frequently adds a numeric instance suffix to the end of the names of sibling operations (for example `ExpressionTransform_0`, `_1`, `_2`). The UI does these steps:
 
-- It removes the repeated trailing `_N` suffixes.
+- It removes the repeated `_N` suffixes at the end of each name.
 - It merges the siblings recursively, only when they share the same logical parent.
 - It retains their disjoint activity intervals and their descendants.
 - It keeps different parents separate.
 - It keeps a minimum visible width of two pixels for tiny events. This includes events at the right edge.
 
-The cap of 10,000 detailed spans can be reached. Then the breadth-first retention keeps the structural parents. But the deepest processor leaves would otherwise be a chronological prefix only. In that case, Tracing replaces the processor leaf groups with the same time-bucketed summary of the full trace that Pipeline uses. It keeps the structural spans and the non-processor spans exact. A family that is missing from the summary can still use detailed spans if it belongs to one stage. The full summary determines the time ruler, even when the raw detailed leaves cover only the start of a query.
+The cap of 10,000 detailed spans can be reached. Then the breadth-first retention keeps the structural parents. Without a replacement, the deepest processor leaves form only a chronological prefix. In that case, Tracing replaces the processor leaf groups with the same time-bucketed summary of the full trace that Pipeline uses.
+
+It keeps the structural spans and the non-processor spans exact. A family that the summary does not contain can still use detailed spans if it belongs to one stage. The full summary determines the time ruler, even when the raw detailed leaves cover only the start of a query.
 
 The API exposes the independent flags `processors_truncated` (10,000 rows) and `processor_trace_summary_truncated` (65,536 rows). It uses one extra sentinel row. `processor_trace_bucket_us` reports the width of the adaptive summary bucket that the run used. The availability and the errors of the summary are separate from the errors of the detailed trace. Pipeline shows the diagnostics of incomplete data and of the lookup together with the retained processor costs. It does not silently render a timeline that looks complete.
 
-The model uses indexed identities, a cursor-based topological queue and sorted cost buckets with disjoint-set skipping. The grouping is O(P + E). The matching is O((P + S) log(P + S)), plus the sorting of intervals. P is the number of processor rows, E is the number of graph edges and S is the number of summary rows. The model does not scan all processors again for every span.
+The model uses indexed identities, a cursor-based topological queue and sorted cost buckets with disjoint-set skipping. The grouping is O(P + E). The matching is O((P + S) log(P + S)), plus the sort of intervals. P is the number of processor rows, E is the number of graph edges and S is the number of summary rows. The model does not scan all processors again for every span.
 
 Run the deterministic model regressions without browser dependencies:
 
@@ -186,7 +196,7 @@ To test the real round trip of the codec from C++ to JavaScript, do these steps:
 
 This checks every field, Unicode and NUL strings, large counters, identities and gaps. It includes the limits of 10,000 processors and 65,536 windows.
 
-A normal Run cannot be analyzed. The user must run the original statement with **Run with profiling**. The dashboard marks a preview-limited execution as partial. Currently there is no Raw tab. Views and Distributed data stay available in the analysis response. They are not additional tabs in this dialog.
+You cannot analyze a normal Run. The user must run the original statement with **Run with profiling**. The dashboard marks a preview-limited execution as partial. Currently there is no Raw tab. Views and Distributed data stay available in the analysis response. They are not additional tabs in this dialog.
 
 ## Distributed scope
 
@@ -205,7 +215,7 @@ POST api/query/deep-analysis
 202 {"job_id": "...", "host_id": "local", "query_id": "...", "status": "running", "poll_after_ms": 1000}
 ```
 
-The same checks as before apply first, and they answer at once: `403 deep_analysis_disabled`, `404 analysis_not_found`, `409 query_not_finished`, `409 analysis_not_enabled` (the run was not in profiling mode), `409 deep_analysis_sql_unavailable` and `409 deep_analysis_unsafe_query` (only a `SELECT` or a `WITH` statement is replayed). A second `POST` for a query whose job still runs gives the same job: ChDash does not run the same `EXPLAIN ANALYZE` twice at the same time.
+The same checks apply first. They answer at once. The errors are: `403 deep_analysis_disabled`, `404 analysis_not_found`, `409 query_not_finished`, `409 analysis_not_enabled` (the run was not in profiling mode), `409 deep_analysis_sql_unavailable` and `409 deep_analysis_unsafe_query`. ChDash replays only a `SELECT` or a `WITH` statement. A second `POST` for a query whose job still runs gives the same job. ChDash does not run the same `EXPLAIN ANALYZE` twice at the same time.
 
 ```http
 GET api/query/deep-analysis?host_id=local&job_id=...
@@ -213,7 +223,7 @@ GET api/query/deep-analysis?host_id=local&job_id=...
 200 {"job_id": "...", "host_id": "local", "query_id": "...", "status": "running", "elapsed_ms": 4200}
 ```
 
-`status` is `running`, `finished`, `failed` or `canceled`. A finished job has the analysis in `result` (`summary`, `plan_nodes`, `plan_lines`, `deep_query_id`). A failed job has `error_code`, `message`, `retryable` and `http_status` (the status that a synchronous answer would have had). The poll itself answers `200` in all these states. An unknown job, a job of another host, and a job whose result is no longer kept answer `404 deep_analysis_job_not_found`.
+`status` is `running`, `finished`, `failed` or `canceled`. A finished job has the analysis in `result` (`summary`, `plan_nodes`, `plan_lines`, `deep_query_id`). A failed job has `error_code`, `message`, `retryable` and `http_status` (the status that a synchronous answer gives). The poll itself answers `200` in all these states. An unknown job, a job of another host, and a job whose result is no longer kept answer `404 deep_analysis_job_not_found`.
 
 ```http
 POST api/query/deep-analysis/cancel
@@ -222,12 +232,12 @@ POST api/query/deep-analysis/cancel
 200 {"job_id": "...", "status": "running", "cancel_requested": true}
 ```
 
-The cancel stops the job and sends `KILL QUERY` for its statements through the system account, as the cancel of a run does. The state turns `canceled` once the thread of the job has seen it, so poll once more. Cancel on a job that ended answers `200` and does nothing.
+The cancel stops the job and sends `KILL QUERY` for its statements through the system account, as the cancel of a run does. The state changes to `canceled` after the thread of the job sees the cancel. Poll once more. A cancel of a job that ended answers `200` and does nothing.
 
 The bounds of a job:
 
 - It holds one place of the `analysis` admission class for its host (`admission.analysis_per_host`, default 1) from its start to its end. When no place is free within `admission.wait_ms`, `POST` answers `503 server_busy`. Query Analysis requests share this class.
-- ClickHouse stops its statements after `analysis.deep_max_execution_time_s` (default 300 seconds; 0 leaves the limit to the profile of the runner). The bounds of a run (`query.max_execution_time_s`, `query.max_memory_usage`, `query.max_rows_to_read`) apply too, and the smaller limit wins.
+- ClickHouse stops its statements after `analysis.deep_max_execution_time_s` (default 300 seconds; 0 leaves the limit to the profile of the runner). The bounds of a run (`query.max_execution_time_s`, `query.max_memory_usage`, `query.max_rows_to_read`) also apply, and the smaller limit wins.
 - ChDash keeps at most 16 jobs and 64 MiB of results. A job that ended stays 10 minutes. When the store is full, the oldest job that ended goes first. A job that runs never goes.
 - A stop of the server cancels the jobs and kills their statements, as it does for the runs and the exports (`server.shutdown_timeout_ms`).
-- The statements of a job are labelled `chdash-deep-analysis` in `system.query_log`.
+- ChDash labels the statements of a job `chdash-deep-analysis` in `system.query_log`.

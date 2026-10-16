@@ -1,14 +1,14 @@
 # SQL Formatting Guide
 
-This document defines the canonical SQL formatting style used in this repository.
-Its purpose is to keep all queries visually consistent, easy to scan, and easy to review.
+This document defines the canonical SQL layout style used in this repository.
+Its purpose is to keep all queries visually consistent. Make queries easy to scan and easy to review.
 
 ## Goals
 
-- Keep formatting predictable across all files.
+- Keep the layout predictable across all files.
 - Make query structure readable at a glance.
-- Use compact formatting for simple constructs.
-- Use vertical formatting for multi-part or dense constructs.
+- Use a compact layout for simple constructs.
+- Use a vertical layout for multi-part or dense constructs.
 - Prefer consistency over personal preference.
 
 ## General Rules
@@ -23,7 +23,7 @@ Its purpose is to keep all queries visually consistent, easy to scan, and easy t
 
 ## Top-Level Clause Layout
 
-Top-level clauses should start on their own line and remain left-aligned.
+Each top-level clause must start on its own line and stay left-aligned.
 
 Typical layout:
 
@@ -37,7 +37,7 @@ ORDER BY metric_value DESC
 LIMIT 20
 ```
 
-Common top-level clauses include:
+Common top-level clauses are:
 
 - `WITH`
 - `SELECT`
@@ -55,7 +55,7 @@ Common top-level clauses include:
 
 ## Indentation
 
-Indent one level inside any multiline block:
+Indent one level inside each multiline block:
 
 - `SELECT` lists
 - `WITH` lists
@@ -83,8 +83,8 @@ Use one item per line for multiline `SELECT` and `WITH` blocks.
 
 ### Alias alignment
 
-Inside homogeneous projection blocks, align `AS` vertically.
-This applies to:
+In a homogeneous projection block, align `AS` vertically.
+Align `AS` in these blocks:
 
 - multiline `SELECT`
 - multiline `WITH`
@@ -104,20 +104,20 @@ SELECT
 FROM anon.metrics_store
 ```
 
-Alignment uses monospace display width, not bytes or code points:
-East Asian Wide/Fullwidth characters (CJK, Hangul, fullwidth forms) and emoji
-count two columns, while combining marks, zero-width joiners and variation
-selectors count none, so literals and identifiers containing them stay aligned.
+Alignment uses the monospace display width. It does not use bytes or code points.
+East Asian Wide and Fullwidth characters (CJK, Hangul, fullwidth forms) and emoji count as two columns.
+Combining marks, zero-width joiners and variation selectors count as zero columns.
+Literals and identifiers with these characters stay aligned.
 
 ### Literal spelling
 
-String literals keep the exact spelling of the input (`'it''s'` stays `'it''s'`),
-and heredoc literals keep their heredoc form, tag and body byte-for-byte
-(`$$raw 'text'$$`, `$tag$...$tag$`); they are never rewritten as quoted strings.
+String literals keep the exact spelling of the input. For example, `'it''s'` stays `'it''s'`.
+Heredoc literals keep their heredoc form, tag and body byte for byte. Examples are `$$raw 'text'$$` and `$tag$...$tag$`.
+The formatter never rewrites a heredoc literal as a quoted string.
 
 ### Where alias alignment does not apply
 
-Keep `AS` compact outside projection lists, for example:
+Keep `AS` compact outside projection lists. Examples are:
 
 - table aliases
 - subquery aliases
@@ -147,12 +147,12 @@ SELECT
     metric_value
 ```
 
-Do not place commas at the beginning of lines.
+Do not place commas at the start of lines.
 
 ## Compact vs Multiline Formatting
 
-Use compact formatting when the clause is short and easy to read on one line.
-Use multiline formatting when the clause contains multiple elements or becomes visually dense.
+Use a compact layout when the clause is short and easy to read on one line.
+Use a multiline layout when the clause contains several elements or becomes visually dense.
 
 ### Prefer compact when simple
 
@@ -161,7 +161,7 @@ GROUP BY entity_key
 ORDER BY metric_value DESC
 ```
 
-### Prefer multiline when there are multiple items
+### Prefer multiline when there are several items
 
 ```sql
 GROUP BY
@@ -175,7 +175,7 @@ ORDER BY
 ## WHERE Conditions
 
 Keep simple predicates compact.
-Switch to vertical formatting for multiple conditions or nested logic.
+Switch to a vertical layout for several conditions or nested logic.
 
 ### Simple
 
@@ -195,7 +195,7 @@ WHERE
 ### Nested logic
 
 Use parentheses only when they clarify grouping.
-Do not wrap every atomic predicate in unnecessary parentheses.
+Do not put parentheses around every atomic predicate.
 
 ```sql
 WHERE
@@ -218,7 +218,8 @@ LEFT JOIN anon.reference_table USING (entity_key)
 
 ### ON joins
 
-When the join condition is composed, place `ON` on the next indented line and format conditions vertically.
+When the join condition has several parts, place `ON` on the next indented line.
+Put the conditions in a vertical layout.
 
 ```sql
 INNER JOIN anon.right_reference AS right_src
@@ -228,7 +229,8 @@ INNER JOIN anon.right_reference AS right_src
 
 ### JOIN subqueries
 
-Format subqueries as blocks and keep the alias compact after the closing parenthesis.
+Format subqueries as blocks.
+Keep the alias compact after the closing parenthesis.
 
 ```sql
 INNER JOIN (
@@ -244,8 +246,8 @@ INNER JOIN (
 ## Subqueries
 
 Format subqueries as visual blocks.
-The opening parenthesis should stay attached to the operator or clause that introduces it.
-The body should be indented by 4 spaces.
+Keep the opening parenthesis on the line of the operator or clause that introduces it.
+Indent the body by 4 spaces.
 
 ### FROM subquery
 
@@ -260,9 +262,9 @@ FROM (
 
 ### IN subquery
 
-A single condition stays on the `WHERE` line; its block is indented two levels
-and its `)` one level, where the condition would sit in the multi-condition
-layout.
+A single condition stays on the `WHERE` line.
+Indent its block two levels and its `)` one level.
+This is the place that the condition takes in the multi-condition layout.
 
 ```sql
 WHERE entity_key IN (
@@ -283,37 +285,33 @@ WHERE exists(
 
 ## Functions and Multiline Expressions
 
-Function calls, array literals and `IN` value lists are laid out by one rule:
-**a call stays on one line when that whole line fits; otherwise it explodes, one
-argument per line.** The fixtures `230`–`287` show every case below.
+Function calls, array literals and `IN` value lists follow one rule.
+**A call stays on one line when that whole line fits. Otherwise, it explodes, with one argument per line.**
+The fixtures `230`–`287` show every case below.
 
 ### Width
 
-- The line width is 80 columns (the `line_width` request field, 40–200),
-  measured in display columns (see "Alias alignment").
-- "The line" is the complete output line: indentation, the text before the call
-  on the same line (`AND `, `x -> `, `ON a = `) and everything after it
-  (` AS alias`, the trailing comma, the `)` of an enclosing call, `> 0`).
-  A call that fits by itself but not with its alias explodes.
-- A single token longer than the width (a long string literal, a long type
-  string) cannot be split: it stays whole on its own argument line. Comments
-  are never moved to make room.
+- The line width is 80 columns. The `line_width` request field sets it, from 40–200.
+  The formatter measures the width in display columns (see "Alias alignment").
+- "The line" is the complete output line. It includes the indentation and the text before the call
+  on the same line (`AND `, `x -> `, `ON a = `). It also includes everything after the call
+  (` AS alias`, the trailing comma, the `)` of the outer call, `> 0`).
+  A call that fits by itself, but not with its alias, explodes.
+- A single token longer than the width cannot be split. Examples are a long string literal and a long type string.
+  Such a token stays whole on its own argument line. The formatter never moves comments to make room.
 
 ### Inline or exploded
 
-The decision is taken outermost first. When the outermost call fits, it and
-everything inside it stay on one line. When it does not fit it explodes:
+The formatter decides the outermost call first. When the outermost call fits, it and
+everything inside it stay on one line. When it does not fit, it explodes:
 
 - `name(` ends the line;
-- each argument goes on its own line, one level (4 spaces) deeper, followed by a
-  comma except the last one;
-- `)` goes on its own line at the indentation of the line that opened the call,
-  followed by the rest of that line: `) AS alias,`, `),`, `) >= 2`. An
-  arithmetic operator after the call also continues on the `)` line when it
-  fits (`) / nullIf(sum(duration_ms), 0),`), as after a parenthesized block.
+- each argument goes on its own line, one level (4 spaces) deeper. Add a comma after each argument, except the last one;
+- `)` goes on its own line, at the indentation of the line that opened the call. The rest of that line follows the `)`:
+  `) AS alias,`, `),`, `) >= 2`. When it fits, an arithmetic operator after the call also stays on the `)` line
+  (`) / nullIf(sum(duration_ms), 0),`). This is the same as after a parenthesized block.
 
-Each argument is then laid out again at its new position by the same rule, so
-an inner call that fits there stays inline:
+The rule applies again to each argument at its new position. An inner call that fits there stays inline:
 
 ```sql
 SELECT
@@ -325,9 +323,8 @@ SELECT
     toStartOfInterval(timestamp, toIntervalMinute(5)) AS `bucket`
 ```
 
-A sole argument is never hugged: it goes on its own line like any other, so
-closing parentheses never pile up (`))`) and every `)` sits under the line that
-opened it.
+Never hug a sole argument. Put it on its own line, like any other argument.
+This keeps closing parentheses apart (no `))`). Each `)` sits under the line that opened it.
 
 ```sql
 SELECT
@@ -342,13 +339,12 @@ SELECT
     ) AS `session_bucket_key`
 ```
 
-Not `sipHash64(concat(` with a shared closer.
+Do not write `sipHash64(concat(` with a shared closer.
 
-An item that is only operands joined by binary operators (comparison,
-arithmetic, `||`) and whose first operand is a call or bracket breaks before
-its lowest-precedence operators first, each continuation one level deeper like
-an arithmetic chain in a list; the operands are then decided by the rules
-above. A bare first operand keeps the call exploded after it
+This rule applies to an item that has only operands joined by binary operators (comparison,
+arithmetic, `||`). Its first operand is a call or bracket. Such an item breaks before
+its lowest-precedence operators first. Each continuation line is one level deeper, as in an arithmetic chain in a list.
+The rules above then decide the operands. A bare first operand keeps the call exploded after it
 (`timestamp >= toStartOfInterval(` …).
 
 ```sql
@@ -361,20 +357,18 @@ SELECT
 
 ### Decision tables and pairs
 
-- `multiIf` with two or more conditions, and `CASE` with two or more `WHEN`
-  branches, are always vertical, whatever their width: one `condition, result`
-  pair per line, the default last. `CASE x WHEN ...` (printed as
-  `caseWithExpression`) keeps its operand on the first line. With a single
-  condition they follow the width rule (`multiIf(retries > 3, 'flaky', NULL)`).
-  A call that contains such a table is never joined onto one line.
-- An exploded `map(...)` puts one `key, value` pair per line.
-- A `CASE` that keeps its keywords (a statement with comments, which does not
-  go through formatQuery) follows the same rule: `CASE [operand]` stays on the
-  line, one `WHEN ... THEN ...` branch per line one level deeper, `ELSE` last,
-  and `END` back at the line's indentation followed by the rest of the line
-  (`END AS kind,`, `END = 1`). Operator keywords on that path are printed in
-  upper case like formatQuery does (`NOT`, `NULL`, `AS`, `IS`, `IN`, `LIKE`,
-  `BETWEEN`, CASE words, `ASC` / `DESC`, `NULLS FIRST`).
+- A `multiIf` with two or more conditions is always vertical, whatever its width.
+  The same applies to a `CASE` with two or more `WHEN` branches.
+  Put one `condition, result` pair on each line, and put the default last. `CASE x WHEN ...` (printed as
+  `caseWithExpression`) keeps its operand on the first line. With a single condition, they follow the width rule
+  (`multiIf(retries > 3, 'flaky', NULL)`). Never join a call that contains such a table onto one line.
+- An exploded `map(...)` puts one `key, value` pair on each line.
+- A `CASE` that keeps its keywords follows the same rule. This applies to a statement with comments,
+  which does not go through formatQuery. `CASE [operand]` stays on the line.
+  Put one `WHEN ... THEN ...` branch on each line, one level deeper. Put `ELSE` last.
+  Put `END` at the indentation of the line, followed by the rest of the line (`END AS kind,`, `END = 1`).
+  On that path, the formatter writes operator keywords in upper case, as formatQuery does.
+  These keywords are `NOT`, `NULL`, `AS`, `IS`, `IN`, `LIKE`, `BETWEEN`, CASE words, `ASC` / `DESC` and `NULLS FIRST`.
 
 ```sql
 SELECT
@@ -388,12 +382,12 @@ SELECT
 
 ### Lambdas
 
-A lambda `x -> body` is one argument. Its body stays on the lambda's line when
-it fits. A body that is a call explodes from `x -> f(`, its `)` under the
-lambda's line. A boolean body wraps before `AND` / `OR`, the continuation
-lines one level deeper than the lambda. A tuple body keeps its parentheses:
-`(k, v) -> (k, v * 2)` returns a tuple, and without them `v * 2` would become
-the next argument of the call.
+A lambda `x -> body` is one argument. Its body stays on the lambda's line when it fits.
+A body that is a call explodes from `x -> f(`, and its `)` goes under the lambda's line.
+A boolean body wraps before `AND` / `OR`. The continuation lines are one level deeper than the lambda.
+
+A tuple body keeps its parentheses. For example, `(k, v) -> (k, v * 2)` returns a tuple.
+Without the parentheses, `v * 2` becomes the next argument of the call.
 
 ```sql
 SELECT
@@ -408,12 +402,11 @@ SELECT
 
 ### Conditions and arithmetic as arguments
 
-A condition argument (`if(c, ...)`, `sumIf(x, c)`, `countIf(c)`) is formatted
-like a `WHERE` condition, without the parentheses formatQuery puts around each
-comparison. Inside an exploded list, the continuation lines of a wrapped
-condition or arithmetic argument hang one level deeper, so they cannot be
-mistaken for the next argument. A sole argument keeps its operators aligned
-under its first operand (see "Arithmetic Expressions").
+Format a condition argument (`if(c, ...)`, `sumIf(x, c)`, `countIf(c)`) like a `WHERE` condition.
+Do not add the parentheses that formatQuery puts around each comparison.
+In an exploded list, the continuation lines of a wrapped condition or arithmetic argument hang one level deeper.
+This keeps a reader from mistaking them for the next argument.
+A sole argument keeps its operators aligned under its first operand (see "Arithmetic Expressions").
 
 ```sql
 SELECT
@@ -428,9 +421,9 @@ SELECT
 
 ### Literals as arguments
 
-Array literals, tuples inside them and `IN (...)` value lists follow the same
-rule: inline when the line fits, otherwise one element per line. An element
-that fits (a tuple in an array of tuples) stays on one line.
+Array literals, tuples inside them and `IN (...)` value lists follow the same rule.
+Keep them inline when the line fits. Otherwise, put one element on each line.
+An element that fits stays on one line, for example a tuple in an array of tuples.
 
 ```sql
 SELECT
@@ -440,37 +433,33 @@ SELECT
     ] AS `dependency_slos`
 ```
 
-A literal followed by `::Type` is kept exactly as written:
-`[110, 120]::Array(DateTime)` casts the literal's source text, so its spacing
-is part of the query.
+Keep a literal that is followed by `::Type` exactly as written.
+For example, `[110, 120]::Array(DateTime)` casts the literal's source text. The spaces in the literal are part of the query.
 
 ### Where the call sits
 
-- A single projection that fits stays on the `SELECT` line; one that needs
-  several lines goes into the indented block, like a list.
+- A single projection that fits stays on the `SELECT` line. A projection that needs several lines
+  goes into the indented block, like a list item.
 - A single `WHERE` / `PREWHERE` / `HAVING` condition stays on the keyword line.
-  When it explodes, its arguments are indented two levels and its `)` one
-  level, the place the condition takes in the multi-condition layout. `IN` and
+  When it explodes, indent its arguments two levels. Indent its `)` one level.
+  This is the place that the condition takes in the multi-condition layout. `IN` and
   `exists` subqueries and long `IN` value lists use the same layout.
-- In a condition list (`AND` / `OR` lines, `JOIN ... ON` lines), a call explodes
-  under its own line.
-- A table function in `FROM` or `JOIN`, and a single `ARRAY JOIN` expression,
-  explode like a `FROM` subquery: `FROM s3(` then the arguments, then
-  `) AS alias`.
+- In a condition list (`AND` / `OR` lines, `JOIN ... ON` lines), a call explodes under its own line.
+- A table function in `FROM` or `JOIN` explodes like a `FROM` subquery. A single `ARRAY JOIN` expression does the same.
+  The layout is `FROM s3(`, then the arguments, then `) AS alias`.
 - `GROUP BY` and `ORDER BY` items follow the same rule as projections.
-- A window function keeps its `OVER (...)` layout (see the window fixtures);
-  a call containing a multi-line `OVER` specification is never joined. A
-  window that extends a named one keeps that name as its first line
+- A window function keeps its `OVER (...)` layout (see the window fixtures).
+  Never join a call that contains a multi-line `OVER` specification.
+  A window that extends a named window keeps that name as its first line
   (`OVER (\n    base_window\n    ROWS BETWEEN ...\n)`). A `WINDOW name AS (...)`
-  definition that does not fit its line lays its specification out the same
-  way, one clause per line.
-- A scalar subquery beside a comparison or arithmetic operator is a block whose
-  `(` stays on the operator's line: `WHERE m > (` then the query, `)` one level
-  in, like an `IN` subquery; `a / (` … `) AS ratio` in a projection.
-- A boolean projection (`a AND b AS flag`) too long for its line wraps before
-  `AND` / `OR`, the continuation lines one level deeper.
-- `ORDER BY x WITH FILL FROM a TO b STEP s` too long for its line breaks
-  before `FROM`, `TO`, `STEP` and `STALENESS`, one level deeper.
+  definition that does not fit its line uses the same layout for its specification, with one clause on each line.
+- A scalar subquery beside a comparison or arithmetic operator is a block. Its `(` stays on the line of the operator.
+  For example: `WHERE m > (`, then the query, then `)` one level in, as in an `IN` subquery.
+  In a projection: `a / (` … `) AS ratio`.
+- A boolean projection (`a AND b AS flag`) that is too long for its line wraps before `AND` / `OR`.
+  The continuation lines are one level deeper.
+- An `ORDER BY x WITH FILL FROM a TO b STEP s` clause that is too long for its line breaks
+  before `FROM`, `TO`, `STEP` and `STALENESS`. Each break is one level deeper.
 
 ```sql
 SELECT count()
@@ -486,30 +475,27 @@ WHERE positionCaseInsensitive(
 
 ### Comments inside argument lists
 
-A comment pins the layout it sits in: a call containing a comment is never
-joined onto one line, and a `--` comment stays after its argument's comma.
+A comment fixes the layout where it sits. Never join a call that contains a comment onto one line.
+A `--` comment stays after the comma of its argument.
 
-### Alignment after joining
+### Alignment after calls are joined
 
-Joining calls can turn a multi-line item into a one-line item. Projection
-aliases are then aligned as for any run of one-line items (see "Alias
-alignment"); a run whose aligned form would exceed the width is not aligned,
-and a closing line (`) AS x`, `] AS x`) is never padded.
+When calls are joined, a multi-line item can become a one-line item. The formatter then aligns the projection aliases
+as for any run of one-line items (see "Alias alignment"). A run whose aligned form exceeds the width is not aligned.
+A closing line (`) AS x`, `] AS x`) is never padded.
 
 ### Scope
 
 The width rule applies to queries (`SELECT`, `WITH`, `INSERT ... SELECT`, view
-bodies). DDL keeps its own layout: column types such as
-`Array(Tuple(...))`, `INDEX ... TYPE ...`, `CODEC(...)`, `GRANT SELECT(...)`
-and keywords followed by a parenthesis (`GROUPING SETS (`) are not treated as
-calls.
+bodies). DDL keeps its own layout. The formatter does not treat these items as calls:
+column types such as `Array(Tuple(...))`, `INDEX ... TYPE ...`, `CODEC(...)`, `GRANT SELECT(...)`,
+and keywords followed by a parenthesis (`GROUPING SETS (`).
 
 ### Parametric aggregates
 
-A parametric aggregate `name(parameters)(arguments)` follows the same rules as
-any other call. The argument list wraps exactly when a plain call of the same
-length would, with `name(parameters)(` kept on the opening line. The parameter
-list goes vertical only when that head alone does not fit.
+A parametric aggregate `name(parameters)(arguments)` follows the same rules as any other call.
+The argument list wraps exactly when a plain call of the same length wraps.
+Keep `name(parameters)(` on the opening line. Put the parameter list in a vertical layout only when that head alone does not fit.
 
 ```sql
 SELECT
@@ -531,13 +517,13 @@ SELECT
 ## Arithmetic Expressions
 
 Keep arithmetic inline while it fits. A longer expression wraps at the
-operators of its lowest precedence level: one operand per line, with the
+operators of its lowest precedence level. Put one operand on each line, with the
 operator at the start of the line. The layout then shows how the parser groups
-the expression. Continuation lines hang one level (4 spaces) under the first
-operand. The exception is the sole argument of a call, whose lines stay
-aligned. An operand that is itself a long parenthesized expression opens a
-block. After a block closes, the operator stays on the `)` line, the way
-`) AS alias` does.
+the expression. Continuation lines hang one level (4 spaces) under the first operand.
+
+The exception is the sole argument of a call. Its lines stay aligned. An operand that is itself a long
+parenthesized expression opens a block. After a block closes, the operator stays on the `)` line.
+This is the same as `) AS alias`.
 
 ```sql
 SELECT
@@ -562,11 +548,12 @@ WHERE
 
 ### Redundant parentheses
 
-`formatQuery` parenthesizes every nested operator, for example
-`((a * w1) + (b * w2)) / ((w1 + w2) + w3)`. Parentheses are not part of
-the parsed AST, so the formatter removes a group when operator precedence
+`formatQuery` adds parentheses to every nested operator. For example:
+`((a * w1) + (b * w2)) / ((w1 + w2) + w3)`.
+
+Parentheses are not part of the parsed AST. The formatter therefore removes a group when operator precedence
 already produces the same tree. The input above becomes
-`(a * w1 + b * w2) / (w1 + w2 + w3)`. A group is kept when it matters:
+`(a * w1 + b * w2) / (w1 + w2 + w3)`. Keep a group when it matters:
 
 - the right operand of an operator at the same level: `a - (b - c)`, `a / (b * c)`, `a + (b + c)`
 - a lower-precedence operand: `(a + b) * c`
@@ -577,15 +564,13 @@ already produces the same tree. The input above becomes
 
 ### Unary minus
 
-A unary sign is written against its operand: `-x`, `-(a + b)`, `a * -b`,
-`x > -y`. The two signs of `- -x` keep their separating space, because `--`
-would start a comment.
+Write a unary sign against its operand: `-x`, `-(a + b)`, `a * -b`,
+`x > -y`. The two signs of `- -x` keep the space between them. Without that space, `--` starts a comment.
 
 ## Lambda Expressions
 
-Keep lambda bodies compact; they wrap by the width rule (see "Lambdas" above).
-Do not add unnecessary parentheses around simple lambda expressions, and keep
-the parentheses of a tuple body.
+Keep lambda bodies compact. They wrap by the width rule (see "Lambdas" above).
+Do not add unnecessary parentheses around simple lambda expressions. Keep the parentheses of a tuple body.
 
 Preferred:
 
@@ -631,8 +616,8 @@ WHERE
 
 ## ORDER BY and GROUP BY
 
-Use inline formatting for single-item clauses.
-Use multiline formatting for multiple items.
+Use an inline layout for single-item clauses.
+Use a multiline layout for several items.
 
 ```sql
 GROUP BY entity_key
@@ -650,7 +635,7 @@ ORDER BY
 
 ## DDL Formatting
 
-Use vertical formatting for DDL blocks and keep nested definitions indented consistently.
+Use a vertical layout for DDL blocks. Indent nested definitions consistently.
 
 ### CREATE TABLE
 
@@ -666,18 +651,18 @@ ENGINE = MergeTree
 ORDER BY (entity_group, entity_key, event_date)
 ```
 
-A column list is laid out like this (fixtures `092`, `308`, `597`-`607`):
+A column list follows this layout. The fixtures `092`, `308` and `597`-`607` show it.
 
-- Column names are back-quoted and the types start in one column. The column is as wide as the longest name,
-  except that a name wider than 32 columns (with its quotes) does not stretch it: that column keeps one space before
-  its type and the others stay aligned. When every name is wider than 32, the longest sets the column.
-- A `Tuple` type goes on the column's line when the whole column fits the line width beside the aligned name:
-  `` `point` Tuple(x Float64, y Float64), `` and `` `segments` Array(Tuple(a UInt32, b UInt32)), `` are one line each.
-  A type that does not fit puts one element on each line, 4 spaces under the column, and its closing parenthesis on a line
-  of its own at the column's indent. Inside such a block, a `Tuple` that fits its own line is on one line
-  (`first Tuple(alpha UInt64, beta String),`).
-- A comment after the comma of a column, or after the closing line of its type, stays at the end of that column's line.
-  A comment inside a type keeps the type on several lines.
+- Back-quote the column names. The types start in one column. The column is as wide as the longest name.
+  A name wider than 32 columns (with its quotes) does not stretch the column. In that case, the column keeps one space
+  before its type, and the other columns stay aligned. When every name is wider than 32, the longest name sets the column.
+- A `Tuple` type stays on the column's line when the whole column fits the line width beside the aligned name.
+  For example, `` `point` Tuple(x Float64, y Float64), `` and `` `segments` Array(Tuple(a UInt32, b UInt32)), `` take one line each.
+  A type that does not fit puts one element on each line, 4 spaces under the column. Its closing parenthesis goes on a line
+  of its own, at the column's indent.
+  Inside such a block, a `Tuple` that fits its own line stays on one line (`first Tuple(alpha UInt64, beta String),`).
+- A comment after the comma of a column stays at the end of that column's line. The same applies to a comment
+  after the closing line of its type. A comment inside a type keeps the type on several lines.
 
 ### ALTER TABLE
 
@@ -701,30 +686,25 @@ ALTER TABLE anon.metrics_store
 )
 ```
 
-A one-command `ALTER TABLE ... UPDATE` puts `IN PARTITION p` on its own line
-after the assignments, before `WHERE`. A multi-command ALTER writes its
-commands one for each line at the left edge, separated by commas. A statement
-with comments has the same layout (fixtures `514`, `515`, `559`, `589`-`591`):
-the comment stays on the line of the command that it follows, and the comma goes
-before it.
+A one-command `ALTER TABLE ... UPDATE` puts `IN PARTITION p` on its own line, after the assignments and before `WHERE`.
+A multi-command ALTER writes one command on each line, at the left edge. Separate the commands with commas.
+A statement with comments has the same layout (fixtures `514`, `515`, `559`, `589`-`591`).
+The comment stays on the line of the command that it follows. The comma goes before the comment.
 
 ### Set operators
 
-`INTERSECT` and `EXCEPT` (with or without `DISTINCT` / `ALL`) stand on their own
-line between their operands, like `UNION ALL`; an operand formatQuery
-parenthesizes to show precedence is a block.
+`INTERSECT` and `EXCEPT` (with or without `DISTINCT` / `ALL`) stand on their own line between their operands. This is the same as `UNION ALL`.
+An operand that formatQuery puts in parentheses to show precedence is a block.
 
 ### CREATE FUNCTION
 
-The lambda of `CREATE FUNCTION name AS (x, y) -> body` follows the lambda rules
-(no parentheses around a plain body). When its first line does not fit after
-`AS`, the lambda moves to the next line, one level deeper.
+The lambda of `CREATE FUNCTION name AS (x, y) -> body` follows the lambda rules.
+Do not put parentheses around a plain body. When its first line does not fit after `AS`, move the lambda to the next line, one level deeper.
 
 ### Index definitions
 
-`INDEX name expr TYPE type GRANULARITY n` rows of one table are aligned in
-columns while every aligned row fits the line width. When any row would
-overflow, the rows are stacked instead, one clause per continuation line:
+Rows of `INDEX name expr TYPE type GRANULARITY n` in one table are aligned in columns. This happens while every aligned row fits the line width.
+When any row is too wide, stack the rows instead, with one clause on each continuation line:
 
 ```sql
     INDEX idx_attributes_keys mapKeys(attributes)
@@ -732,14 +712,13 @@ overflow, the rows are stacked instead, one clause per continuation line:
         GRANULARITY 100000000
 ```
 
-The single `ADD INDEX [IF NOT EXISTS] ...` command of an `ALTER TABLE` stacks the
-same way when it does not fit.
+The single `ADD INDEX [IF NOT EXISTS] ...` command of an `ALTER TABLE` stacks in the same way when it does not fit.
 
 ### TTL lists
 
-Keep a single short TTL rule on the `TTL` line. Put one rule per line when there
-are several, or when the rule does not fit; a conditional rule that does not fit
-splits its `WHERE` like a filter (the same applies to `ALTER TABLE ... MODIFY TTL`).
+Keep a single short TTL rule on the `TTL` line. Put one rule on each line when there are several rules.
+Put one rule on each line also when the rule does not fit. A conditional rule that does not fit splits its `WHERE` like a filter.
+The same applies to `ALTER TABLE ... MODIFY TTL`.
 
 ```sql
 TTL
@@ -755,9 +734,8 @@ TTL
         AND metric_value = 0
 ```
 
-A `GROUP BY ... SET ...` rule is one rule although its keys and assignments are
-comma lists; when it does not fit, `GROUP BY` and `SET` start their own lines,
-one assignment per line.
+A `GROUP BY ... SET ...` rule is one rule. Its keys and assignments are comma lists.
+When it does not fit, `GROUP BY` and `SET` start their own lines. Put one assignment on each line.
 
 ```sql
 TTL
@@ -770,12 +748,10 @@ TTL
 
 ### Access-control and refreshable view DDL
 
-`CREATE ROW POLICY`, `CREATE SETTINGS PROFILE` and view heads (`REFRESH`,
-`DEPENDS ON`, `TO`, `DEFINER = user`, `SQL SECURITY`) stay
-on one line while they fit the line width. A longer statement puts every clause on
-its own line at column 0: `USING` is formatted like `WHERE`, `SETTINGS` lists one
-setting per line with aligned `=`, and a view head ends with `AS` on its own line
-before the query.
+`CREATE ROW POLICY`, `CREATE SETTINGS PROFILE` and view heads stay on one line while they fit the line width.
+View heads contain `REFRESH`, `DEPENDS ON`, `TO`, `DEFINER = user` and `SQL SECURITY`.
+A longer statement puts every clause on its own line at column 0. Format `USING` like `WHERE`.
+`SETTINGS` lists one item on each line, with aligned `=`. A view head ends with `AS` on its own line, before the query.
 
 ```sql
 CREATE ROW POLICY tenant_isolation ON anon.metrics_store
@@ -805,19 +781,19 @@ SELECT
     ...
 ```
 
-`ALTER SETTINGS PROFILE` keeps its single line: its `ADD`/`MODIFY`/`DROP SETTINGS`
-grammar is not a plain `name = value` list.
+`ALTER SETTINGS PROFILE` stays on one line. Its `ADD`/`MODIFY`/`DROP SETTINGS` grammar is not a plain `name = value` list.
 
 ## INSERT Statements
 
 Keep short `VALUES` inserts compact.
-Use multiline formatting for structured `SELECT`-based inserts.
+Use a multiline layout for structured `SELECT`-based inserts.
 
-`VALUES` payloads are data: every value keeps its exact spelling. The
-statement stays on one line when it fits; otherwise `INSERT INTO target`, the
-column list (one line, or one column per line), an optional `SETTINGS` line,
-`VALUES`, then one row per line, and one value per line for a row that does
-not fit:
+`VALUES` payloads are data. Every value keeps its exact spelling.
+The statement stays on one line when it fits. Otherwise, the layout is: `INSERT INTO target`, then the column list
+(one line, or one column on each line), then an optional `SETTINGS` line, then `VALUES`.
+Each row goes on its own line.
+
+A row that does not fit puts one value on each line:
 
 ```sql
 INSERT INTO ops.deploy_events
@@ -838,16 +814,16 @@ FROM anon.source_table
 
 ## Whitespace Hygiene
 
-Always ensure:
+Always make sure of these points:
 
-- no trailing spaces
-- no accidental double-spacing for alignment outside intended aligned blocks
-- no mixed indentation width
-- no blank lines that break the visual structure of a query
+- Do not leave trailing spaces.
+- Do not add double spaces for alignment outside the intended aligned blocks.
+- Do not mix indentation widths.
+- Do not add blank lines that break the visual structure of a query.
 
 ## Practical Summary
 
-Use this mental model when formatting:
+Use this mental model to format queries:
 
 1. Start every major clause on its own line.
 2. Indent multiline content by 4 spaces.
@@ -855,26 +831,24 @@ Use this mental model when formatting:
 4. Keep simple clauses compact.
 5. Expand complex clauses vertically.
 6. Use parentheses only when they improve structure.
-7. Keep formatting stable across similar query shapes.
+7. Keep the layout stable across similar query shapes.
 
 ## Comments
 
-Comments are preserved: block comments before a statement or subquery are
-re-indented and reflowed, and a `--` comment stays at the end of the line of the
-item or predicate it follows.
+The formatter preserves comments. Block comments before a statement or subquery are re-indented and reflowed.
+A `--` comment stays at the end of the line of the item or predicate that it follows.
 
 ### A comment runs to the end of its line
 
-A `--` (or `#`) comment always ends at its newline, exactly as ClickHouse reads
-it, even in a query pasted as a **single line**, where the comment swallows the
-clauses after it. The formatter never turns comment text into code, whatever
-the comment contains (`AND`, `OR`, `WHERE`, `FROM`, an identifier and a comma):
+A `--` (or `#`) comment always ends at its newline. ClickHouse reads it in the same way.
+This is true even in a query that is pasted as a **single line**. In that case, the comment swallows the clauses after it.
+The formatter never converts comment text to code. This is true whatever the comment contains (`AND`, `OR`, `WHERE`, `FROM`, an identifier and a comma):
 
 ```sql
 DELETE FROM db.t WHERE id = 5 -- old version: or 1 = 1
 ```
 
-becomes
+The result is:
 
 ```sql
 DELETE FROM db.t
@@ -882,28 +856,27 @@ WHERE
     id = 5 -- old version: or 1 = 1
 ```
 
-and never `... WHERE id = 5 OR 1 = 1`, which would delete every row.
-A one-line buffer whose comment swallows the rest of the query keeps that rest
-in the comment (fixture `059_comments_header_and_select`); fixtures `499`–`588`
-pin comments that hold clause keywords, commas and quotes, on one line and on
-several.
+The formatter never produces `... WHERE id = 5 OR 1 = 1`. That text deletes every row.
+A one-line buffer can have a comment that swallows the rest of the query. The formatter keeps that rest in the comment
+(fixture `059_comments_header_and_select`). Fixtures `499`–`588` fix comments that hold clause keywords, commas and quotes.
+They cover one line and several lines.
 
-### A layout that would change the statement
+### A layout that changes the statement
 
 The local layout works on the text. For each text with comments, the service
-checks that ClickHouse reads the formatted text as it reads the written one
-(`EXPLAIN AST`, see [`docs/formatter.md`](../../../docs/formatter.md)). When it does not, the answer is the text as
-it was written, with a `warning`. Fixture `596` pins this: `WITH t AS (SELECT 1)
-INSERT INTO t2 ...` with a comment comes back unchanged.
+checks that ClickHouse reads the formatted text in the same way as the written text
+(`EXPLAIN AST`, see [`docs/formatter.md`](../../../docs/formatter.md)). If it does not, the answer is the text as
+it was written, with a `warning`. Fixture `596` fixes this behavior: `WITH t AS (SELECT 1)
+INSERT INTO t2 ...` with a comment returns unchanged.
 
 ## Canonical Principle
 
-When in doubt, choose the formatting that makes two queries with the same structure look the same.
-Consistency across the repository matters more than local stylistic preference.
+When in doubt, choose the layout that makes two queries with the same structure look the same.
+Consistency across the repository matters more than local style preference.
 
 ## Test Data Layout
 
-Formatter fixtures are split explicitly between bad input and canonical output:
+Formatter fixtures are split into bad input and canonical output:
 
 - `input/` contains intentionally badly formatted SQL sent to `/api/format`.
 - `output/` contains the expected final formatted SQL returned by the API.
@@ -913,24 +886,26 @@ Each fixture must exist in both folders with the same file name. For example:
 - `input/001_select_from.sql`
 - `output/001_select_from.sql`
 
-The test fails during collection when an `input/` fixture has no matching `output/` fixture, or when an `output/` fixture has no matching `input/` fixture.
+The test fails during collection in two cases. In the first case, an `input/` fixture has no corresponding `output/` fixture.
+In the second case, an `output/` fixture has no corresponding `input/` fixture.
 
 All `.sql` files are normalized without a trailing newline.
 
-Fixtures `316`–`498` cover ClickHouse syntax construct by construct, in this
-order: windows, grouping, LIMIT / ORDER / SAMPLE forms and joins (`316`–`349`);
-lambdas, aggregate combinators, access and casts, operators and CTEs
-(`350`–`384`); set operators, output clauses, literals, quoting, comments and
-deep nesting (`385`–`409`); DDL (`410`–`446`); INSERT, maintenance, EXPLAIN /
-SHOW / SET / KILL and access control (`447`–`476`); and a mixed batch
-(`477`–`498`).
+Fixtures `316`–`498` cover ClickHouse syntax, construct by construct. They run in this order:
 
-Every expected output is also formatted again (`test_expected_format_fixtures_are_idempotent_in_batch`)
-and must come back unchanged. That request sends `"cache": false`: the API caches each output as
-the answer for itself, which would otherwise make the check pass without running the formatter.
+- windows, grouping, LIMIT / ORDER / SAMPLE forms and joins (`316`–`349`);
+- lambdas, aggregate combinators, access and casts, operators and CTEs (`350`–`384`);
+- set operators, output clauses, literals, quoted strings, comments and deep nesting (`385`–`409`);
+- DDL (`410`–`446`);
+- INSERT, maintenance, EXPLAIN / SHOW / SET / KILL and access control (`447`–`476`);
+- a mixed batch (`477`–`498`).
 
-Every fixture is also checked for semantic safety (`test_format_fixture_preserves_ast`):
-`EXPLAIN AST <input>` must equal `EXPLAIN AST <output>` on the reference ClickHouse server,
-so formatting can never change what a query means. No fixture is exempt
-(`AST_EQUIVALENCE_EXEMPT` is empty): a comment is never turned into code (see "A
-comment runs to the end of its line").
+Every expected output is also formatted again (`test_expected_format_fixtures_are_idempotent_in_batch`).
+
+The output must return unchanged. That request sends `"cache": false`. The API caches each output as the answer for itself.
+Without that request field, the check passes, but the formatter does not run.
+
+Every fixture is also checked for semantic safety (`test_format_fixture_preserves_ast`).
+`EXPLAIN AST <input>` must equal `EXPLAIN AST <output>` on the reference ClickHouse server.
+The formatter can never change what a query means. No fixture is exempt (`AST_EQUIVALENCE_EXEMPT` is empty).
+A comment is never converted to code (see "A comment runs to the end of its line").

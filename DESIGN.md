@@ -136,11 +136,15 @@ components:
 
 # Design system: ClickHouse Dash home page
 
-Scope: the public home page in `docs/` only. The application's own interface is a separate system (see `docs/ui-foundations.md`). This page borrows the colour world of Circular.fi's product surfaces (deep navy ground, one aqua accent) because Circular is the publisher; Circular itself is only named, discreetly.
+Scope: the public home page in `docs/` only. The application's own interface is a separate system (see `docs/ui-foundations.md`). This page uses the colour world of the Circular.fi product surfaces: a deep navy ground and one aqua accent. Circular is the publisher, so Circular is named only in a discreet way.
 
 ## Overview
 
-One fixed field of 3D columns (WebGL2, no library) sits behind the whole page. ClickHouse is columnar and the Dash mark is four columns, so the page is made of columns, and the columns change shape with the section on screen, each shape being something a ClickHouse server does with big data: a stream of inserts (hero), the sparse primary index with sorted runs merging (features), a latency heatmap that drifts and spikes (OpenTelemetry), a scan sweeping across the table (install). It follows the scroll and the clock, never the pointer. The content is calm: real recordings and screenshots, one diagram, three code blocks. One theme (dark), one accent (aqua), motion only on transform, clip-path and opacity.
+One fixed field of 3D columns sits behind the whole page. The field uses WebGL2 and no library. ClickHouse is columnar, and the Dash mark is four columns. So the page is made of columns. The columns change shape with the section on screen.
+
+Each shape shows one task of a ClickHouse server with big data. The hero shows a stream of inserts. The features section shows the sparse primary index, with sorted runs that merge. The OpenTelemetry section shows a latency heatmap that drifts and spikes. The install section shows a scan that sweeps across the table.
+
+The field follows the scroll and the clock, never the pointer. The content is calm. It has real recordings and screenshots, one diagram and three code blocks. The theme is dark. The only accent is aqua. Motion uses only transform, clip-path and opacity.
 
 ## Colors
 
@@ -150,15 +154,19 @@ One fixed field of 3D columns (WebGL2, no library) sits behind the whole page. C
 
 ## Typography
 
-Bricolage Grotesque for display and headings (weight 600, tight tracking), Onest for body, the system monospace for commands, config and table names (no font to download). Bricolage and Onest are self-hosted variable woff2, subset to Latin (SIL OFL, licenses in `docs/assets/fonts`). Display never exceeds 6 rem; body measure stays under 65 characters.
+The display and heading font is Bricolage Grotesque (weight 600, tight tracking). The body font is Onest. The page uses the system monospace font for commands, config and table names. The monospace font needs no download.
+
+Bricolage and Onest are self-hosted variable woff2 files, subset to Latin. Their licenses are SIL OFL, and the license texts are in `docs/assets/fonts`. Display never exceeds 6 rem. The body measure stays under 65 characters.
 
 ## Layout
 
-Asymmetric and left-weighted: the hero copy sits bottom-left over the dark side of the column field. The tour is a centred 16:9 frame; the story is a sticky text column beside a sticky screenshot stack; the flow and the install panel use unequal grids (the install step with the download spans the full width, the config and run steps split 7 and 5). One 64 px navigation line. Below 960 px everything collapses to one column and the screenshot stays pinned under the navigation.
+The layout is asymmetric and left-weighted. The hero copy sits bottom-left, over the dark side of the column field. The tour is a centred 16:9 frame, and the story is a sticky text column beside a sticky screenshot stack. The flow and the install panel use unequal grids. In the install panel, the download step spans the full width. The config and run steps split 7 and 5.
+
+The navigation is one line, 64 px high. Below 960 px, all content collapses to one column. The screenshot stays pinned under the navigation.
 
 ## Elevation & Depth
 
-Neutral black shadows with an offset and a short blur (about 24 px); frames are outlined with a 1 px ring shadow. The only coloured light on the page is the column field itself. No glow shadows, no gradient text.
+Shadows are neutral black. Each shadow has an offset and a short blur of about 24 px. Frames have a 1 px outline. A ring shadow draws it. The only coloured light on the page is the column field itself. The page uses no glow shadows and no gradient text.
 
 ## Shapes
 
@@ -166,22 +174,36 @@ One scale: 20 px frames and cards, 14 px code blocks, full pills for every butto
 
 ## Components
 
-- **Hero and player:** the video is the first thing on the page: one compact row (a one-line headline with the sentence under it on the left, the Download and Run buttons with a line of facts on the right), then the 16:9 player sized to the rest of the viewport height, with the column field around it and the video credit under it. The video autoplays muted and loops while on screen, and enters with a short 3D lift. Sound, Pause and Full screen are buttons inside the player, in a bar that shows on hover, on focus, when paused and for a few seconds after a tap; clicking the video pauses it. There are no chapter buttons. Below 780 px of height the sentence and the facts line are dropped and the headline and buttons shrink, so the video stays in the first screen.
-- **Column field:** instanced cubes, the heights of four shapes (inserts stream, sparse primary index with merging runs, latency heatmap, scan sweep) computed in the vertex shader and mixed by a stage taken from the scroll. The camera, the brightness and a navy veil change with the stage so text stays readable. Pauses in hidden tabs; draws still frames on scroll under `prefers-reduced-motion`; hidden (with a gradient fallback) without WebGL2. It never follows the pointer.
-- **Features:** a bento of the six pages, each card a link to its documentation page (hover lifts it and moves the arrow), with a real screenshot.
-- **Flow:** three rows, collector to table to page, with packets running along the pipes while the section is visible.
-- **Install:** the platform tab rewrites the archive name in the commands; Copy buttons confirm for 1.6 s. Code is coloured by a 3 kB highlighter (shell, HCL, SQL, JSON, HTTP, YAML): commands in the page accent, keys and flags in the accent text blue of ClickHouse Dash (#93b4ff), strings amber, URLs green, numbers and keywords violet, comments grey.
-- **Documentation (`documentation.html`):** the Markdown files of `docs/` fetched and rendered in the browser with marked; a filterable menu, an on-this-page list, previous and next cards, copy buttons on code, wide tables that scroll inside their box. Links between files, anchors, images and links to repository files are rewritten. The list of pages lives in `docs/assets/docs.js` and a repository check keeps it equal to `docs/*.md`.
-- **Circular:** a discreet reference, never a logo: "by circular.fi" in small muted type right after the name in the navigation, and one quiet footer line. Every mention is a link to https://circular.fi; GitHub always carries its mark.
+- **Hero and player:** the video is the first thing on the page, in a compact top row. The row has a one-line headline, with the sentence under it, on the left. On the right, it has the Download and Run buttons and a line of facts. Below the row, the 16:9 player fills the rest of the viewport height. The column field surrounds the player, and the video credit is under it. The video autoplays muted, loops while on screen, and enters with a short 3D lift.
+
+  Sound, Pause and Full screen are buttons inside the player. The bar appears on hover, on focus, when paused, and for a few seconds after a tap. A click on the video pauses it. There are no chapter buttons. Below 780 px of height, the sentence and the facts line are removed. The headline and the buttons shrink, so the video stays in the first screen.
+- **Column field:** instanced cubes. The vertex shader computes the heights of four shapes: inserts stream, sparse primary index with sorted runs that merge, latency heatmap and scan sweep.
+
+  A stage taken from the scroll mixes the shapes. The camera, the brightness and a navy veil change with the stage, so text stays readable. The field pauses in hidden tabs. Under `prefers-reduced-motion`, it draws still frames on scroll. Without WebGL2, the page hides the field and shows a gradient fallback. It never follows the pointer.
+- **Features:** a bento of the six pages. Each card is a link to its documentation page. Hover lifts the card and moves the arrow. Each card has a real screenshot.
+- **Flow:** three rows: collector to table to page. Packets run along the pipes while the section is visible.
+- **Install:** the platform tab changes the archive name in the commands. Copy buttons confirm for 1.6 s. A 3 kB highlighter colours the code. It supports shell, HCL, SQL, JSON, HTTP and YAML.
+
+  Commands use the page accent. Keys and flags use the ClickHouse Dash blue (#93b4ff). Strings are amber. URLs are green. Numbers and keywords are violet. Comments are grey.
+- **Documentation (`documentation.html`):** the page fetches the Markdown files of `docs/`. It renders them in the browser with marked. The page has these parts: a filterable menu, an on-this-page list, previous and next cards, copy buttons on code, and wide tables. Wide tables scroll inside their box.
+
+  The page rewrites links between files, anchors, images and links to repository files. The list of pages lives in `docs/assets/docs.js`. A repository check keeps that list equal to `docs/*.md`.
+- **Circular:** a discreet reference, never a logo. The text "by circular.fi" is small and muted. It appears right after the name in the navigation, and in one quiet footer line. Every mention is a link to https://circular.fi. GitHub always carries its mark.
 - **Hover:** only what can be clicked reacts to the pointer.
 
 ## Performance
 
-The page is built to cost little, and `tests/harness/test_docs_site.py` guards the numbers: the video is a full HD, 24 fps, 6.7 MB copy (a 2.5 MB 720p copy for Save-Data and phones) that starts when the page is idle and plays once; images are AVIF with WebP fallback at two widths (under 70 kB each); two subset fonts (63 kB); a 3 kB icon sprite; no web font for code; no blur behind the navigation (it would repaint over the animated canvas); sections below the fold use `content-visibility: auto`. The column field computes its heights on the CPU for the two shapes in use, draws one instanced call at 24 frames per second (10 when left alone), at most 1.25 device pixels per pixel, without multisampling, on the low-power GPU, measures its own frame time and lowers its resolution or stops animating when the machine cannot keep up, and stops in hidden tabs. Reduced motion and Save-Data get still frames and no autoplay.
+The page is built to cost little. `tests/harness/test_docs_site.py` guards the numbers. The video is a full HD copy of 6.7 MB at 24 fps. A 2.5 MB 720p copy serves Save-Data and phones. The video starts when the page is idle, and it plays once.
+
+Images are AVIF with a WebP fallback, at two widths, and each image is under 70 kB. There are two subset fonts (63 kB). The icon sprite is 3 kB, and no web font is used for code. The page uses no blur behind the navigation. A blur repaints the animated canvas under it. Sections below the fold use `content-visibility: auto`.
+
+The column field computes its heights on the CPU for the two shapes in use. It draws one instanced call at 24 frames per second (10 when left alone) on the low-power GPU. Its resolution is at most 1.25 device pixels per pixel, without multisampling. It measures its own frame time. When the machine cannot keep up, it lowers its resolution or stops the animation. It also stops in hidden tabs.
+
+Reduced motion and Save-Data get still frames and no autoplay.
 
 ## Do's and Don'ts
 
-- Do keep one accent and one corner scale; do show the real product (video, screenshots), never a drawn mock-up.
-- Do keep every string plain and factual; the only numbers are real (6.6 MB archive, 4 platforms, 74 seconds).
-- Don't add eyebrows, section numbers, em-dashes, glow shadows, gradient text or a second marquee.
-- Don't animate layout properties; don't leave an infinite animation running off screen.
+- Keep one accent and one corner scale. Show the real product (video, screenshots), never a drawn mock-up.
+- Keep every string plain and factual. The only numbers are real (6.6 MB archive, 4 platforms, 74 seconds).
+- Do not add eyebrows, section numbers, em-dashes, glow shadows, gradient text or a second marquee.
+- Do not animate layout properties. Do not keep an infinite animation active when it is off screen.
