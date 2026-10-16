@@ -1,20 +1,20 @@
-// Read-only SQL, one component for every page (css/10-components/sql.css),
-// highlighted by the editor's highlighter (ns.highlight,
-// ns.highlight.toHtml). A page that has not loaded it (Observability) gets
-// the plain text at once and the colours when the highlighter has loaded.
+// Read-only SQL. One component serves every page (css/10-components/sql.css).
+// The highlighter of the editor (ns.highlight, ns.highlight.toHtml) colours the text.
+// A page that has not loaded the highlighter (Observability) gets the plain text at once.
+// The colours appear when the highlighter has loaded.
 //
 //   sqlBlock({ sql, gutter, copy, maxLines, expand, inline, label })
 //     gutter    line numbers
 //     copy      a copy button (copy.button) at the top right
 //     maxLines  the lines shown before "Show all N lines" (expand: true,
-//               the default when maxLines is set) or a scroll
-//     inline    one line cut with an ellipsis inside a table cell: a click
-//               (Enter / Space) shows it all, wrapped, and back
+//               the default when maxLines is set), or a scroll
+//     inline    one line cut with an ellipsis inside a table cell. A click
+//               (Enter / Space) shows all of it, wrapped. A second click returns to one line.
 //     wrap      long lines wrap instead of scrolling
 //   Returns the element (.sqlBlock).
-//   sqlBlock.html({ sql, inline, label }) is the same block as an HTML
-//   string, for modules that render strings; sqlBlock.bind(root) once on their
-//   container gives its inline blocks the toggle.
+//   sqlBlock.html({ sql, inline, label }) gives the same block as an HTML
+//   string, for modules that render strings. Call sqlBlock.bind(root) once on their
+//   container. It gives the inline blocks the toggle.
 
 import { dom } from "./app_dom.js";
 import { loader } from "./app_loader.js";
@@ -23,9 +23,10 @@ import { util } from "./app_util.js";
 
 const { $$ } = dom;
 
-// The highlighter (app_highlight.js) gives itself to the block when its module loads: with the modules of the Query and
-// Explorer pages, as the lazy group "highlight" (src/static/modules.json, loader.loadGroup) on the others. A page
-// without either (MCP) shows the plain text.
+// The highlighter (app_highlight.js) registers itself with the block when its module loads.
+// On the Query and Explorer pages, the module loads with the page modules. On the other pages,
+// it loads as the lazy group "highlight" (src/static/modules.json, loader.loadGroup).
+// A page without either (MCP) shows the plain text.
 const HIGHLIGHT_GROUP = "highlight";
 let highlight = null;
 function useHighlighter(engine) {
@@ -42,7 +43,7 @@ function loadHighlighter() {
       if (!highlight?.toHtml) throw new Error("no highlighter on this page");
       for (const paint of pending) paint();
       pending.clear();
-      // Blocks written as HTML strings before the highlighter loaded.
+      // Blocks that are written as HTML strings before the highlighter has loaded.
       for (const code of $$(".sqlBlock__code[data-sql-plain]")) {
         code.removeAttribute("data-sql-plain");
         code.innerHTML = highlight.toHtml(code.textContent || "");
@@ -66,9 +67,9 @@ function paintInto(code, sql) {
   }
 }
 
-// Inline (table cell) block: one line, a click shows the statement whole.
-// A DOM block listens itself; string-built ones need sqlBind(root) once on
-// their container (one delegated listener).
+// Inline (table cell) block: one line. A click shows the whole statement.
+// A DOM block adds its own listener. A string-built block needs sqlBind(root) once on
+// its container. This gives one delegated listener.
 function toggleInline(block) {
   const open = block.getAttribute("aria-expanded") !== "true";
   block.setAttribute("aria-expanded", open ? "true" : "false");
@@ -168,7 +169,8 @@ function sqlBlock({ sql = "", gutter = false, copy = false, maxLines = 0, expand
   return block;
 }
 
-// The block shows another text (a formatted statement, then the one as returned): repainted and, from then on, what its copy button copies.
+// The block shows another text, for example a formatted statement or the statement as returned.
+// The block repaints. From then on, the copy button copies this text.
 sqlBlock.setText = (block, sql) => {
   const code = block?.querySelector?.(".sqlBlock__code");
   if (!code) return;
@@ -176,8 +178,9 @@ sqlBlock.setText = (block, sql) => {
   block._sqlText = text;
   paintInto(code, text);
 };
-// The Formatted switch, one for every place that offers a statement formatted or as it was: a pressed button reading "Formatted".
-// Pressed, the statement is shown (and saved) as the formatter lays it out; released, as it was (`rawName`: "as typed", "as
+// The Formatted switch. Each place that offers a statement, formatted or as it was, uses this switch.
+// A pressed button reads "Formatted". When pressed, the statement is shown and saved as the formatter
+// arranges it. When released, it is shown as it was (`rawName`: "as typed", "as
 // ClickHouse returned it"). onChange(pressed) runs after a click.
 sqlBlock.formatSwitch = ({ pressed = true, rawName = "as typed", disabled = false, onChange = null } = {}) => {
   const button = document.createElement("button");

@@ -20,7 +20,7 @@ namespace {
 using sql::quote_ident;
 
 constexpr int kAccessDenied = 497;
-// An answer keeps this many issues at most: they explain a gap, they are not a listing.
+// An answer keeps at most this many issues. The issues explain a gap. They are not a listing.
 constexpr size_t kMaxIssues = 64;
 
 std::string qualified_ident(std::string_view database, std::string_view table) {
@@ -53,7 +53,7 @@ bool block_bool_at(const clickhouse::Block& block, size_t column, size_t row, bo
   return false;
 }
 
-// CHECK GRANT on a connection: nullopt when no row could be read.
+// CHECK GRANT on a connection. Returns nullopt when no row could be read.
 std::optional<bool> select_check_grant(ChExecutor& db, const std::string& expression) {
   bool seen = false;
   bool granted = false;
@@ -106,9 +106,10 @@ public:
 
   std::vector<std::string> show_objects(const std::string& database) override {
     auto names = guarded([&] { return select_names(*client_, "SHOW TABLES FROM " + quote_ident(database)); });
-    // SHOW DICTIONARIES reads system.dictionaries, which a runner limited to a few databases (SHOW and SELECT on
-    // those only) has no grant on: ACCESS_DENIED. Such a runner sees no dictionary listed apart from the ones that
-    // SHOW TABLES already returns. Any other error is a real failure.
+    // SHOW DICTIONARIES reads system.dictionaries.
+    // A runner limited to a few databases (SHOW and SELECT on those only) has no grant on it. ClickHouse returns ACCESS_DENIED.
+    // Such a runner sees no dictionary in the list, except the ones that SHOW TABLES already returns.
+    // Any other error is a real failure.
     try {
       auto dictionaries = guarded([&] { return select_names(*client_, "SHOW DICTIONARIES FROM " + quote_ident(database)); });
       names.insert(names.end(), dictionaries.begin(), dictionaries.end());
@@ -123,12 +124,12 @@ public:
     try {
       return select_check_grant(*client_, expression);
     } catch (const clickhouse::ServerException&) {
-      // A server that does not know this form of CHECK GRANT: the probes decide.
+      // Some servers do not know this form of CHECK GRANT. The probes decide.
       return std::nullopt;
     } catch (const clickhouse::Error&) {
-      // Some ClickHouse/clickhouse-cpp combinations cannot decode the CHECK GRANT answer (an unknown packet type).
-      // The connection is then out of step: it is opened again, and this source stops asking CHECK GRANT. When it
-      // cannot be opened again, the server is gone: that is a transport error.
+      // Some ClickHouse and clickhouse-cpp combinations cannot decode the CHECK GRANT answer. The answer has an unknown packet type.
+      // The connection is then out of step. This source opens it again and stops asking CHECK GRANT.
+      // If the connection cannot be opened again, the server is gone. That is a transport error.
       try {
         client_->ResetConnection();
       } catch (...) {
@@ -160,8 +161,8 @@ public:
   }
 
 private:
-  // ACCESS_DENIED is the only "no"; another server error is about the object; anything else is a transport error,
-  // and the connection is not given back to the pool.
+  // ACCESS_DENIED is the only "no". Another server error is about the object.
+  // Anything else is a transport error. The connection is not given back to the pool.
   template <typename Fn>
   auto guarded(Fn&& fn) -> decltype(fn()) {
     try {
@@ -200,7 +201,7 @@ std::string select_columns_expression(
   return out;
 }
 
-// A LIMIT 0 projection is an exact permission probe: ClickHouse checks every referenced column and reads no data.
+// A LIMIT 0 projection is an exact permission probe. ClickHouse checks every referenced column and reads no data.
 bool zero_row_column_probe(
     AclSource& source,
     const std::string& database,
@@ -269,8 +270,8 @@ AllowedTable inspect_table(AclSource& source, const std::string& database, const
     return result;
   }
 
-  // Keep individual CHECK GRANT statements bounded for very wide schemas.
-  // Fully granted chunks collapse to one check; denied chunks are split until
+  // Keep each CHECK GRANT statement bounded for very wide schemas.
+  // A fully granted chunk becomes one check. A denied chunk is split until
   // the exact readable columns are known.
   constexpr size_t kChunkColumns = 64;
   for (size_t begin = 0; begin < columns.size(); begin += kChunkColumns) {
@@ -284,8 +285,8 @@ AllowedTable inspect_table(AclSource& source, const std::string& database, const
 } // namespace
 
 bool explorer_schema_visible(const std::string& database) {
-  // INFORMATION_SCHEMA is a compatibility surface, not an Explorer object namespace: system.tables is read without
-  // these schemas, so the ACL boundary leaves them out too.
+  // INFORMATION_SCHEMA is a compatibility surface. It is not an Explorer object namespace.
+  // system.tables is read without these schemas. So the ACL boundary leaves them out too.
   return database != "INFORMATION_SCHEMA" && database != "information_schema";
 }
 
@@ -397,8 +398,8 @@ std::optional<AllowedTable> check_table_access(AclSource& source, const std::str
     out.all_columns = true;
     return out;
   }
-  // No SELECT on the whole table: ClickHouse is asked directly whether it reads any column. A zero-row SELECT reads
-  // nothing and is refused (ACCESS_DENIED) without a column grant. The decision is ClickHouse's.
+  // No SELECT on the whole table. ClickHouse is asked directly whether the identity reads any column.
+  // A zero-row SELECT reads nothing. It is refused (ACCESS_DENIED) without a column grant. The decision is ClickHouse's.
   try {
     source.probe("SELECT 1 FROM " + target + " LIMIT 0");
   } catch (const AclDenied&) {
@@ -408,7 +409,7 @@ std::optional<AllowedTable> check_table_access(AclSource& source, const std::str
     out.partial = true;
     return out;
   }
-  // CHECK GRANT could not be read: a zero-row SELECT of every column tells a whole grant from a partial one.
+  // CHECK GRANT could not be read. A zero-row SELECT of every column shows a whole grant or a partial grant.
   std::vector<std::string> columns;
   try {
     columns = source.describe_columns(database, table);
@@ -431,8 +432,8 @@ AclObjects discover_objects(AclSource& source, const std::string& database, AclB
     add_issue(out.issues, database, {}, error);
     return out;
   }
-  // One database-wide CHECK GRANT replaces one check per object when the identity reads the whole database. It is
-  // exact: a partial REVOKE on a table or a column inside the database makes it answer 0.
+  // One database-wide CHECK GRANT replaces one check per object. Use it when the identity reads the whole database.
+  // The check is exact. A partial REVOKE on a table or a column inside the database makes it answer 0.
   const auto whole = source.check_grant("SELECT ON " + quote_ident(database) + ".*");
   if (whole && *whole) {
     out.objects.reserve(names.size());
@@ -483,8 +484,8 @@ AclDatabases discover_databases(AclSource& source, AclBudget& budget) {
       add_issue(out.issues, database, {}, error);
       continue;
     }
-    // The first readable object decides. A database whose answer the budget did not reach is not hidden: it is
-    // reported as unverified (its name is what SHOW DATABASES gives the identity anyway).
+    // The first readable object decides. A database that the budget did not reach is not hidden.
+    // It is reported as unverified. Its name is what SHOW DATABASES gives the identity anyway.
     bool readable = false;
     bool decided = true;
     size_t probed = 0;
@@ -535,7 +536,7 @@ std::optional<AllowedTable> discover_allowed_table(AclSource& source, const std:
 }
 
 std::optional<AllowedTable> discover_allowed_table(clickhouse::Client& runner, const std::string& database, const std::string& table) {
-  // The caller owns the connection: a non-owning pointer, and no pool to give it back to.
+  // The caller owns the connection. The pointer does not own it, and there is no pool to give it back to.
   std::shared_ptr<clickhouse::Client> client(&runner, [](clickhouse::Client*) {});
   ClientAclSource source(std::move(client), nullptr);
   return discover_allowed_table(source, database, table);

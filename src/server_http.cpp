@@ -1,6 +1,9 @@
-// The hooks of every request (docs/operations.md): the request id, the refusals of a stopping server and the guard of
-// the writes before the routing; the access log and the metrics after it; the JSON answer of an exception and of the
-// errors that cpp-httplib answers itself. And the probes and the metrics.
+// This file has the hooks of every request (docs/operations.md).
+// The hooks handle the request id, and they refuse the requests of a stopping server.
+// They also guard the writes before the routing.
+// After the routing, the hooks write the access log and the metrics.
+// The hooks also write the JSON answer of an exception and of the errors that cpp-httplib answers itself.
+// This file also has the probes and the metrics.
 
 #include "server.hpp"
 
@@ -24,7 +27,7 @@ namespace chdash {
 
 namespace {
 
-// The one error answer of ChDash (api_error.hpp), for what the server refuses before any route runs.
+// Write the one error answer of ChDash (api_error.hpp). The server uses it for each refusal before any route runs.
 void refuse(httplib::Response& res, int status, std::string_view code, std::string_view message) { json_error(res, status, code, message); }
 
 bool is_probe(const std::string& path) {
@@ -35,7 +38,7 @@ bool is_write(const std::string& method) {
   return method == "POST" || method == "PUT" || method == "PATCH" || method == "DELETE";
 }
 
-// "Payload Too Large" -> "payload_too_large".
+// Return a name in snake_case for an HTTP status. For example, "Payload Too Large" gives "payload_too_large".
 std::string status_code_name(int status) {
   std::string out;
   for (const char* c = httplib::status_message(status); *c; ++c) {
@@ -55,13 +58,24 @@ std::string_view cut(std::string_view text, size_t limit) { return text.size() >
 
 } // namespace
 
+// Return the subject of the request for the access log (docs/access.md).
+// The value is "-" when there is no subject. For example, the open mode, a probe or a refusal has no subject.
+std::string Server::access_subject_or_dash() {
+  std::string subject = access_subject();
+  return subject.empty() ? std::string("-") : subject;
+}
+
+namespace {
+
+} // namespace
+
 void Server::install_http_hooks() {
   http_.set_default_headers(security_headers());
   http_.set_pre_routing_handler([this](const httplib::Request& req, httplib::Response& res) { return before_routing(req, res); });
   http_.set_post_routing_handler([this](const httplib::Request& req, httplib::Response& res) { after_routing(req, res); });
 
-  // A handler that throws: a JSON 500 and one log line. The text of the exception (it may quote SQL or a host) never
-  // reaches the client.
+  // A handler that throws gets a JSON 500 and one log line.
+  // The text of the exception can quote SQL or a host. The client never gets this text.
   http_.set_exception_handler([](const httplib::Request& req, httplib::Response& res, std::exception_ptr error) {
     std::string what = "unknown exception";
     try {
@@ -82,8 +96,8 @@ void Server::install_http_hooks() {
     refuse(res, 500, "internal_error", "Internal server error.");
   });
 
-  // The errors that cpp-httplib answers without a body (no route, a body too large, a bad request line): the same
-  // JSON shape as every other error.
+  // Handle the errors that cpp-httplib answers without a body.
+  // Examples are no route, a body that is too large and a bad request line. These errors have the same JSON shape as every other error.
   http_.set_error_handler([](const httplib::Request&, httplib::Response& res) {
     if (!res.body.empty() || res.content_provider_) return httplib::Server::HandlerResponse::Unhandled;
     refuse(res, res.status, status_code_name(res.status), httplib::status_message(res.status));
@@ -92,16 +106,21 @@ void Server::install_http_hooks() {
 }
 
 httplib::Server::HandlerResponse Server::before_routing(const httplib::Request& req, httplib::Response& res) {
-  res.set_header("X-Request-Id", request_id_for(req));
+  const std::string request_id = request_id_for(req);
+  res.set_header("X-Request-Id", request_id);
+  reset_access_state();
   http_metrics_->request_started();
-  // The probes and the metrics answer while the server stops: an orchestrator reads them.
+  // The probes and the metrics still answer while the server stops. An orchestrator reads them.
   if (stopping() && !is_probe(req.path)) {
     res.set_header("Connection", "close");
     refuse(res, 503, "server_stopping", "the server is stopping");
     return httplib::Server::HandlerResponse::Handled;
   }
-  // Every write but the MCP endpoint (its Origin list and its Content-Type check are its own, api_mcp.cpp). The body
-  // is not read yet: close the connection rather than read it.
+  // The access of humans (docs/access.md) checks the identity token (401) and the action of the route (403).
+  // This check runs before anything else reads the request. The probes, the list of actions and the MCP endpoint need no token.
+  if (check_access(req, res, request_id)) return httplib::Server::HandlerResponse::Handled;
+  // This check covers every write, except the MCP endpoint.
+  // The MCP endpoint has its own Origin list and Content-Type check (api_mcp.cpp). The body is not read yet. Close the connection instead of reading it.
   if (is_write(req.method) && req.path != "/mcp") {
     if (const auto refusal = check_browser_write(req)) {
       res.set_header("Connection", "close");
@@ -115,10 +134,11 @@ httplib::Server::HandlerResponse Server::before_routing(const httplib::Request& 
 void Server::after_routing(const httplib::Request& req, httplib::Response& res) {
   const std::string request_id = res.get_header_value("X-Request-Id");
   const double seconds = seconds_since(req);
-  // Only a request that went through before_routing counts as in flight (a bad request line never reaches it).
+  // Only a request that went through before_routing counts as in flight.
+  // A bad request line never reaches before_routing.
   http_metrics_->request_answered(req.method, req.matched_route, res.status, seconds, !request_id.empty());
   if (!cfg_.server.access_log) return;
-  // A probe that succeeds is not logged: an orchestrator asks every few seconds.
+  // The server does not log a probe that succeeds. An orchestrator asks every few seconds.
   if (is_probe(req.path) && res.status < 400) return;
 
   const bool stream = static_cast<bool>(res.content_provider_);
@@ -132,9 +152,11 @@ void Server::after_routing(const httplib::Request& req, httplib::Response& res) 
              {"duration_ms", duration_ms},
              {"bytes", stream ? static_cast<uint64_t>(0) : static_cast<uint64_t>(res.body.size())},
              {"stream", stream},
-             {"remote", req.remote_addr}});
+             {"remote", req.remote_addr},
+             {"subject", access_subject_or_dash()}});
   if (!stream) return;
-  // A stream (a query, an export, the host status) logs a second line when it ends: how long it lasted.
+  // A stream (a query, an export or the host status) writes a second line when it ends.
+  // That line gives the duration of the stream.
   const auto started = req.start_time_ == (std::chrono::steady_clock::time_point::min)() ? std::chrono::steady_clock::now() : req.start_time_;
   auto inner = std::move(res.content_provider_resource_releaser_);
   res.content_provider_resource_releaser_ = [inner = std::move(inner), request_id, path = std::string(cut(req.path, 512)),
@@ -146,14 +168,15 @@ void Server::after_routing(const httplib::Request& req, httplib::Response& res) 
   };
 }
 
-// The process answers: no ClickHouse host is asked. A liveness probe that fails only means a stuck process.
+// The process answers this probe. No ClickHouse host is asked.
+// A liveness probe that fails means only that the process is stuck.
 void Server::handle_livez(const httplib::Request&, httplib::Response& res) {
   res.set_header("Cache-Control", "no-store");
   res.status = 200;
   res.set_content("ok", "text/plain");
 }
 
-// Ready for traffic: the server does not stop, and at least one host answered its last ping.
+// The server is ready for traffic when it does not stop and at least one host answered its last ping.
 void Server::handle_readyz(const httplib::Request&, httplib::Response& res) {
   const size_t total = cfg_.hosts.size();
   const size_t healthy = health_ ? health_->healthy_count() : 0;
@@ -187,8 +210,10 @@ void Server::handle_metrics(const httplib::Request&, httplib::Response& res) {
   prom_sample(out, "chdash_stopping", {}, stopping() ? 1 : 0);
 
   http_metrics_->write(out);
+  if (cfg_.mcp.enabled) mcp_metrics_.write(out);
+  if (telemetry_) telemetry_->write_metrics(out);
 
-  // The query sessions by state, and the streams and exports in progress.
+  // The query sessions by state. Also the streams and exports in progress.
   std::unordered_map<std::string, size_t> sessions_by_status;
   for (const char* status : {"created", "running", "finished", "error", "canceled", "result_limit_reached"}) sessions_by_status[status] = 0;
   {
@@ -220,7 +245,7 @@ void Server::handle_metrics(const httplib::Request&, httplib::Response& res) {
   prom_family(out, "chdash_exports_active", "gauge", "Exports that stream (POST /api/export/stream).");
   prom_sample(out, "chdash_exports_active", {}, static_cast<double>(active_exports_.load(std::memory_order_relaxed)));
 
-  // The admission of the heavy work: the places in use, the requests that wait, the ones that were refused.
+  // The admission of the heavy work. This part gives the places in use, the requests that wait and the requests that were refused.
   {
     const auto stats = admission_.stats();
     prom_family(out, "chdash_admission_in_use", "gauge", "Places in use for heavy work, by class and host.");
@@ -236,7 +261,7 @@ void Server::handle_metrics(const httplib::Request&, httplib::Response& res) {
     }
   }
 
-  // The hosts, as the health runner saw them last.
+  // The hosts, as the health runner saw them at its last check.
   if (health_) {
     const HostsSnapshot snapshot = health_->snapshot();
     prom_family(out, "chdash_host_up", "gauge", "1 when the host answered its last ping (runner credentials), else 0.");
@@ -251,7 +276,8 @@ void Server::handle_metrics(const httplib::Request&, httplib::Response& res) {
     }
   }
 
-  // The native ClickHouse connections, by host and identity (the URIs carry passwords: they never leave the process).
+  // The native ClickHouse connections, by host and identity.
+  // The URIs carry passwords. They never leave the process.
   if (client_pool_) {
     const auto stats = client_pool_->stats();
     struct Identity { std::string host, identity; };

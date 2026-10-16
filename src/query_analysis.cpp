@@ -80,9 +80,9 @@ std::pair<uint64_t, uint64_t> clickhouse_query_extent_us(
 std::pair<uint64_t, uint64_t> clickhouse_query_bounds_us(
     const QueryRegistryRecord& record,
     const std::vector<QueryLogAnalysisRow>& rows) {
-  // OpenTelemetry and query_log are written by ClickHouse. Deriving the trace
-  // window from query_log therefore avoids host/container wall-clock skew while
-  // still letting finish_date/finish_time_us prune opentelemetry_span_log.
+  // OpenTelemetry and query_log are written by ClickHouse.
+  // The trace window is derived from query_log. This avoids host and container wall-clock skew.
+  // The finish_date and finish_time_us columns still prune opentelemetry_span_log.
   constexpr uint64_t margin_us = 10ULL * 1000ULL * 1000ULL;
   const auto [earliest, latest] = clickhouse_query_extent_us(rows);
   if (earliest == 0 || latest == 0) return analysis_wall_bounds_us(record);
@@ -97,10 +97,10 @@ uint64_t processor_trace_bucket_us(
     uint64_t trace_lo_us,
     uint64_t trace_hi_us,
     size_t processor_count) {
-  // Preserve gaps without sending every OTel processor call to the browser.
-  // Aim for ~32K summary rows before the independent 65K hard cap. Typical
-  // pipelines therefore get hundreds of temporal buckets per processor, while
-  // very large pipelines automatically trade temporal resolution for bounded
+  // Keep the gaps. Do not send every OTel processor call to the browser.
+  // Aim for ~32K summary rows before the independent 65K hard cap.
+  // Typical pipelines therefore get hundreds of temporal buckets per processor.
+  // Very large pipelines automatically trade temporal resolution for a bounded
   // response size.
   constexpr uint64_t target_rows = 32768;
   constexpr uint64_t min_buckets_per_processor = 4;
@@ -129,10 +129,10 @@ std::string standard_log_prewhere(const QueryRegistryRecord& record) {
 std::string otel_log_prewhere(uint64_t lo_us, uint64_t hi_us) {
   const uint64_t lo_s = lo_us / 1000000ULL;
   const uint64_t hi_s = (hi_us + 999999ULL) / 1000000ULL;
-  // system.opentelemetry_span_log stores finish_time_us as epoch
+  // The system.opentelemetry_span_log table stores finish_time_us as epoch
   // microseconds (UInt64) and is ordered by (finish_date, finish_time_us,
-  // trace_id). Keep both predicates in their native types so the ORDER BY
-  // prefix prunes correctly and the numeric timestamp comparison cannot turn
+  // trace_id). Keep both predicates in their native types. Then the ORDER BY
+  // prefix prunes correctly, and the numeric timestamp comparison cannot turn
   // into an empty DateTime64 range.
   return "finish_date BETWEEN toDate(toDateTime(" + std::to_string(lo_s) + ")) "
       "AND toDate(toDateTime(" + std::to_string(hi_s) + ")) "
@@ -400,8 +400,8 @@ std::vector<OpenTelemetrySpanAnalysisRow> load_otel_spans(
     return out;
   };
 
-  // The overwhelmingly common case is below the configured cap. Keep it to one
-  // span fetch; only use breadth-first retrieval when truncation is necessary.
+  // Most traces are below the configured cap. Keep this case to one span fetch.
+  // Use breadth-first retrieval only when truncation is necessary.
   uint64_t total = 0;
   ch_select(client,
       "SELECT toUInt64(count()) FROM system.opentelemetry_span_log PREWHERE " + time_scope + " WHERE " + trace_scope,
@@ -411,8 +411,8 @@ std::vector<OpenTelemetrySpanAnalysisRow> load_otel_spans(
   if (total <= kMaxTraceSpans) return load_rows("", kMaxTraceSpans);
 
   // When a trace is larger than the cap, chronological LIMIT can retain a deep
-  // branch while dropping shallower siblings/parents. Retrieve breadth-first
-  // instead: every span at depth N-1 is retained before depth N is considered.
+  // branch and drop shallower siblings or parents. Retrieve breadth-first
+  // instead. Every span at depth N-1 is retained before depth N is considered.
   // A parent that is not present in the retained trace is treated as a root.
   const std::string root_predicate =
       "parent_span_id = 0 OR tuple(trace_id, parent_span_id) NOT IN ("
@@ -513,16 +513,16 @@ QueryAnalysisResult collect_query_analysis(
     return result;
   }
 
-  // System logs are read *without* flushing first: when Analyze is opened a
+  // System logs are read without a flush first. When Analyze is opened a
   // few seconds after the run, ClickHouse's periodic flush has usually
   // published the rows already. SYSTEM FLUSH LOGS (server-wide, creates new
-  // parts) is only a last resort when analysis.flush_logs = true and the rows
-  // are still missing, and SystemLogFlushGate shares one flush between
-  // concurrent callers. With flush_logs = false nothing is ever flushed; the
+  // parts) is only a last resort, used when analysis.flush_logs = true and the rows
+  // are still missing. SystemLogFlushGate shares one flush between
+  // concurrent callers. With flush_logs = false, nothing is ever flushed. The
   // browser re-polls while logs_pending / profiling_logs_pending is set.
   const auto requested_at = std::chrono::steady_clock::now();
-  // Rows exist server-side once the query ended; any flush that started
-  // after that (by another lookup, too) makes them visible.
+  // Rows exist on the server once the query ended. Any flush that started
+  // after that, by another lookup too, makes them visible.
   const auto needed_after = record.updated_at.time_since_epoch().count() != 0
       ? std::min(record.updated_at, requested_at) : requested_at;
   bool core_logs_flushed = false;
@@ -570,8 +570,8 @@ QueryAnalysisResult collect_query_analysis(
       result.distributed_children = load_query_log_rows(*client, record, ids, true);
       result.distributed_error.clear();
     } catch (const std::exception& e) {
-      // This lookup is optional for the rest of Analysis, but its failure is
-      // still user-visible; an empty list must never masquerade as success.
+      // This lookup is optional for the rest of Analysis. Its failure is still
+      // user-visible. An empty list must never masquerade as success.
       result.distributed_error = e.what();
     }
   }
@@ -585,7 +585,7 @@ QueryAnalysisResult collect_query_analysis(
     }
   };
   load_processor_rows();
-  // processors_profile_log is flushed independently of query_log, so a
+  // processors_profile_log is flushed independently of query_log. So a
   // profiling run can already have its query_log row but no processor rows.
   if (record.run_mode == QueryRunMode::Profiling && result.processors.empty() &&
       result.processors_profile_available && !result.query_log.empty() &&
@@ -596,10 +596,10 @@ QueryAnalysisResult collect_query_analysis(
 
   if (record.run_mode == QueryRunMode::Profiling) {
     // The OpenTelemetry span log is asynchronous and can lag query_log. Give
-    // it its own bounded lookup window instead of reusing the query_log
-    // deadline, otherwise a slow query_log lookup can consume the entire trace
-    // budget. It used to be flushed every 200 ms unconditionally (even with
-    // flush_logs = false); now it is flushed at most once, only when enabled
+    // it its own bounded lookup window. Do not reuse the query_log
+    // deadline. A slow query_log lookup can otherwise consume the entire trace
+    // budget. Earlier, the span log was flushed every 200 ms, even with flush_logs = false.
+    // Now it is flushed at most once, and only when flush_logs is true
     // and no span is visible yet.
     const auto otel_deadline = std::chrono::steady_clock::now() +
         std::chrono::milliseconds(std::max(0, options.log_lookup_timeout_ms));
@@ -633,9 +633,9 @@ QueryAnalysisResult collect_query_analysis(
         result.opentelemetry_span_log_error = e.what();
         break;
       }
-      // Without a query_log row the query's time bounds are unknown and the
-      // span log is published no sooner; return and let the browser re-poll
-      // instead of spending a second full lookup window here.
+      // Without a query_log row, the time bounds of the query are unknown. The
+      // span log is published no sooner. Return, and let the browser re-poll.
+      // This avoids a second full lookup window here.
       if (result.logs_pending) break;
       if ((!result.trace_spans.empty() && stable_observations >= 1) ||
           std::chrono::steady_clock::now() >= otel_deadline) break;
@@ -664,10 +664,9 @@ QueryAnalysisResult collect_query_analysis(
     result.query_views_error = e.what();
   }
 
-  // Profiling runs always record processor rows and OpenTelemetry spans, but
-  // those logs are published asynchronously (without a flush, up to the
-  // server's flush interval later). Tell the browser to re-poll instead of
-  // forcing a server-wide flush.
+  // Profiling runs always record processor rows and OpenTelemetry spans. These logs are
+  // published asynchronously, without a flush. They can appear up to one server flush interval later.
+  // Tell the browser to re-poll. Do not force a server-wide flush.
   result.profiling_logs_pending = record.run_mode == QueryRunMode::Profiling &&
       !result.query_log.empty() &&
       ((result.processors_profile_available && result.processors.empty()) ||

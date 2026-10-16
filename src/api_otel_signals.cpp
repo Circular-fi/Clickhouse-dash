@@ -1,10 +1,10 @@
-// Schema detection for OpenTelemetry logs and metrics stored by the
-// OpenTelemetry Collector ClickHouse exporter.
+// This file detects the schema of the OpenTelemetry logs and metrics.
+// The OpenTelemetry Collector ClickHouse exporter stores these logs and metrics.
 //
-// Both routes only read system tables (tables, columns, data_skipping_indices,
-// parts): no query ever touches the signal data itself, so detection stays
-// cheap on multi-billion-row tables. Results are cached per source for
-// kSignalMetaCacheTtl, one read per source at a time; ?refresh=1 reads again.
+// Both routes read only system tables (tables, columns, data_skipping_indices, parts).
+// No query touches the signal data itself. So the detection stays cheap on tables with billions of rows.
+// The results are cached for each source, for kSignalMetaCacheTtl. There is one read for each source at a time.
+// ?refresh=1 reads again.
 #include "server.hpp"
 #include "otel_caches.hpp"
 
@@ -52,7 +52,7 @@ const HostSpec* signal_host(const AppConfig& cfg, const httplib::Request& req, s
   return otel::request_host(cfg, req, host_id);
 }
 
-// Only system-table reads run here.
+// Only reads of system tables run here.
 std::shared_ptr<clickhouse::Client> acquire_signal_client(
     const HostSpec& host,
     const std::shared_ptr<ClickHouseClientPool>& pool,
@@ -60,7 +60,7 @@ std::shared_ptr<clickhouse::Client> acquire_signal_client(
   return otel::acquire_client(host, pool, "OTel logs/metrics", std::chrono::seconds(15), error);
 }
 
-// The error answer of a detection: it is sent to the requests that waited for it, never kept.
+// This is the error answer of a detection. It is sent to the requests that waited for it. It is never kept.
 struct MetaRejected {
   int status = 503;
   httplib::Headers headers;
@@ -74,7 +74,7 @@ template <typename Write>
   throw MetaRejected{response.status, response.headers, response.body};
 }
 
-// The cached body is a JSON object; the cache status is appended per response.
+// The cached body is a JSON object. The cache status is added to each response.
 std::string with_cache_status(const std::string& body, bool hit, int64_t age_ms) {
   std::string out = body;
   if (!out.empty() && out.back() == '}') out.pop_back();
@@ -92,7 +92,8 @@ void send_meta(httplib::Response& res, const std::string& body) {
   res.set_content(body, "application/json");
 }
 
-// The answer of a detection (kept or read by this request or by the one it waited for), or its error.
+// This is the answer of a detection, or its error. The answer is kept, or it is read by this request,
+// or by the request that this request waited for.
 void send_meta_result(httplib::Response& res, const TtlCache<std::string, std::string>::Result& result, const char* failure_code) {
   if (result.has_value && result.value) return send_meta(res, with_cache_status(*result.value, !result.fetched, static_cast<int64_t>(result.age_ms)));
   if (result.exception) {
@@ -165,7 +166,7 @@ std::string in_list(const std::vector<std::string>& values) {
   return out + ")";
 }
 
-// Four system-table queries for any number of tables of one database.
+// These are four system-table queries. They serve any number of tables of one database.
 std::map<std::string, TableInfo> load_table_infos(
     clickhouse::Client& client,
     const std::string& database,
@@ -214,9 +215,8 @@ std::map<std::string, TableInfo> load_table_infos(
         }
       });
 
-  // min_time/max_time come from the partition-key minmax index (exact to the
-  // second for toDate(<time column>) partitions); min_date/max_date are the
-  // day-precision fallback. Neither reads column data.
+    // min_time/max_time come from the partition-key minmax index. They are exact to the second for toDate(<time column>) partitions.
+    // min_date/max_date are the day-precision fallback. Neither reads column data.
   ch_select(client,
       "SELECT toString(`table`), toString(count()), toString(sum(rows)), toString(sum(bytes_on_disk)), "
       "toString(toUnixTimestamp(min(min_time))), toString(toUnixTimestamp(max(max_time))), "
@@ -247,8 +247,8 @@ bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
 }
 
-// Map vs JSON attribute storage decides how filters are written
-// (m['k'] / mapKeys vs JSON subcolumns).
+// The attribute storage, Map or JSON, decides how the filters are written.
+// Map uses m['k'] and mapKeys. JSON uses JSON subcolumns.
 std::string attribute_kind(const ColumnInfo* column) {
   if (!column) return "missing";
   if (starts_with(column->type, "Map(")) return "map";
@@ -301,7 +301,7 @@ void write_skip_indexes(JsonWriter& w, const TableInfo& table) {
   w.EndArray();
 }
 
-// Table-wide bounds (not narrowed by the service allowlist).
+// These are table-wide bounds. The service allowlist does not narrow them.
 void write_time_bounds(JsonWriter& w, const PartsInfo& parts) {
   w.Key("time_bounds");
   if (parts.rows <= 0) {
@@ -324,7 +324,7 @@ void write_time_bounds(JsonWriter& w, const PartsInfo& parts) {
   }
   w.StartObject();
   w.Key("min_ms"); w.Int64(min_s * 1000);
-  // max_time is truncated to the second: the newest row is before max + 1 s.
+    // max_time is truncated to the second. The newest row is before max + 1 s.
   w.Key("max_ms"); w.Int64(max_s * 1000 + 999);
   w.Key("source"); w.String(source);
   w.Key("precision"); w.String(precision);
@@ -357,7 +357,7 @@ void write_string_list(JsonWriter& w, const std::vector<std::string>& values) {
 }
 
 void write_allowlist(JsonWriter& w, const TraceSettings& traces) {
-  // Logs and metrics reuse traces.service_allowlist for ServiceName filtering.
+    // Logs and metrics use traces.service_allowlist for the ServiceName filter.
   w.Key("service_allowlist");
   write_string_list(w, traces.service_allowlist);
   const bool unrestricted = std::find(traces.service_allowlist.begin(), traces.service_allowlist.end(), "*") !=
@@ -456,8 +456,8 @@ std::string build_logs_meta(const OtelSettings& otel, const std::string& host_id
     w.Key("message"); write_json_text(w, message);
   }
   write_storage(w, table);
-  // Older exporter layouts sort by (ServiceName, TimestampTime, Timestamp):
-  // coarse range filters belong on TimestampTime there, on Timestamp otherwise.
+    // Older exporter layouts sort by (ServiceName, TimestampTime, Timestamp).
+    // Coarse range filters go on TimestampTime in these layouts. In other layouts, they go on Timestamp.
   w.Key("timestamp_time_column"); w.Bool(has_timestamp_time);
   w.Key("time_column"); w.String(has_timestamp_time ? "TimestampTime" : "Timestamp");
   w.Key("precise_time_column"); w.String("Timestamp");
@@ -591,8 +591,8 @@ std::string build_metrics_meta(const OtelSettings& otel, const std::string& host
     write_attribute(w, table, "resource", "ResourceAttributes");
     write_attribute(w, table, "scope", "ScopeAttributes");
     w.EndObject();
-    // Exporter layout: Exemplars Nested(FilteredAttributes, TimeUnix, Value,
-    // SpanId, TraceId) flattened to Exemplars.* Array columns.
+        // This is the exporter layout. The Exemplars Nested(FilteredAttributes, TimeUnix, Value,
+        // SpanId, TraceId) is flattened to Exemplars.* Array columns.
     w.Key("exemplars");
     w.StartObject();
     std::vector<std::string> exemplar_columns;
@@ -670,7 +670,7 @@ void Server::handle_logs_meta(const httplib::Request& req, httplib::Response& re
         "OTel logs are disabled for this host. Add observability { logs { enabled = true } } to the ChDash configuration.");
   }
 
-  // The answer names the host (source_host_id): hosts that share an identity do not share it.
+    // The answer names the host (source_host_id). Hosts that share an identity do not share it.
   const std::string key = "logs\x1f" + host_id + '\x1f' + host->system_uri + '\x1f' + logs.database + '\x1f' + logs.table;
   const auto result = signal_meta_cache_.get(
       key,
@@ -740,7 +740,7 @@ void Server::handle_metrics_meta(const httplib::Request& req, httplib::Response&
           const std::string message = e.what();
           reject([&](httplib::Response& out) { json_error(out, 503, "metrics_schema_failed", message); });
         }
-        // Every kind table absent from system.tables: a grant that is missing looks the same as a table that is missing.
+                // A kind table that is absent from system.tables counts as missing. A missing grant looks the same as a missing table.
         bool any = false;
         for (const auto& entry : tables) any = any || entry.second.exists;
         if (!any && !names.empty()) {

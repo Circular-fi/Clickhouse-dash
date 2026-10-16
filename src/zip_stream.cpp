@@ -20,9 +20,9 @@ constexpr uint16_t kFlags = 0x0808U; // UTF-8 + trailing data descriptor.
 constexpr uint16_t kStore = 0;
 constexpr uint16_t kZip64ExtraId = 0x0001U;
 
-// Slicing-by-8 CRC-32 tables: processes 8 bytes per step instead of 1, which
-// made the byte-wise table loop (~0.5-1 GB/s) a visible cost on multi-GB
-// STORE exports. Table 0 is the classic byte-wise table.
+// Slicing-by-8 CRC-32 tables process 8 bytes per step, not 1.
+// The byte-wise table loop (~0.5-1 GB/s) was a visible cost on multi-GB STORE exports.
+// Table 0 is the classic byte-wise table.
 using CrcTables = std::array<std::array<uint32_t, 256>, 8>;
 
 const CrcTables& crc_tables() {
@@ -66,7 +66,7 @@ uint32_t zip_crc32_update(uint32_t state, const char* data, size_t size) {
   const auto* p = reinterpret_cast<const unsigned char*>(data);
   uint32_t c = state;
   while (size >= 8) {
-    // Explicit little-endian assembly keeps this portable and alignment-free.
+    // Explicit little-endian assembly keeps the code portable. It needs no alignment.
     const uint32_t lo = c ^ (static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8U) |
                              (static_cast<uint32_t>(p[2]) << 16U) | (static_cast<uint32_t>(p[3]) << 24U));
     c = t[7][lo & 0xffU] ^ t[6][(lo >> 8U) & 0xffU] ^ t[5][(lo >> 16U) & 0xffU] ^ t[4][lo >> 24U] ^
@@ -166,8 +166,8 @@ bool Zip64StreamWriter::begin_entry(const std::string& name) {
   current_crc_ = 0xffffffffU;
   current_size_ = 0;
 
-  // ZIP64 local header. The final CRC and 64-bit sizes follow in a data
-  // descriptor, allowing the entry to be streamed without seeking.
+  // ZIP64 local header. The final CRC and 64-bit sizes follow in a data descriptor.
+  // This layout lets the code stream the entry. No seek is needed.
   if (!write_u32(kLocalHeader) || !write_u16(kVersion45) || !write_u16(kFlags) ||
       !write_u16(kStore) || !write_u16(current_.dos_time) || !write_u16(current_.dos_date) ||
       !write_u32(0) || !write_u32(0xffffffffU) || !write_u32(0xffffffffU) ||

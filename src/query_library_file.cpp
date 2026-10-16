@@ -102,10 +102,10 @@ QueryLibraryState parse_query_library_file(std::string_view text, QueryLibraryMi
   if (state.revision < 0) file_error("revision cannot be negative");
   state.updated_at_ms = file_int(doc, "updated_at_ms", "file", 0);
 
-  // Every entry belongs to one host. Entries without a host_id (every folder
-  // of a version-1 file) are dropped; a folder or query left in a dropped
+  // Every entry belongs to one host. Entries without a host_id, which means every folder
+  // of a version-1 file, are dropped. A folder or query left in a dropped
   // folder moves to the top level of its host. The structure is checked on
-  // the whole file first, so a broken file is a load error either way.
+  // the whole file first. So a broken file is a load error either way.
   std::vector<QueryLibraryFolder> all_folders;
   std::unordered_set<std::string> folder_ids;
   if (const auto* folders = file_array(doc, "folders")) {
@@ -191,7 +191,7 @@ QueryLibraryState parse_query_library_file(std::string_view text, QueryLibraryMi
     }
   }
 
-  // The history of an earlier release's file is not kept (it lives in the browser): counted, not read.
+  // The history of an earlier release is not kept. It lives in the browser. The history is counted, not read.
   if (const auto* history = file_array(doc, "history")) mig.dropped_history = history->Size();
   return state;
 }
@@ -231,7 +231,7 @@ bool atomic_write_file(const std::string& path, std::string_view data, std::stri
   fs::path dir = target.parent_path();
   if (dir.empty()) dir = ".";
 
-  // An unpredictable name (secure_random.hpp): O_EXCL below refuses a file that someone made in advance.
+  // An unpredictable name comes from secure_random.hpp. O_EXCL below refuses a file that someone made in advance.
   const fs::path tmp = dir / ("." + base + ".tmp-" + std::to_string(static_cast<long>(::getpid())) + "-" + random_hex(8));
 
   int flags = O_WRONLY | O_CREAT | O_EXCL;
@@ -270,7 +270,7 @@ bool atomic_write_file(const std::string& path, std::string_view data, std::stri
     return false;
   }
 
-  // Make the rename itself durable. Best effort: the data is already in place.
+  // Make the rename durable. This is a best-effort step, because the data is already in place.
   int dir_flags = O_RDONLY;
 #ifdef O_DIRECTORY
   dir_flags |= O_DIRECTORY;

@@ -1,9 +1,10 @@
 #pragma once
 
-// What the Metrics page does with the rows that ClickHouse sends back: the aggregation state of one (group, bucket) cell for every kind of
-// point, the merge of cells, the quantiles of explicit and exponential histograms, the choice of the aggregations that a metric offers, and
-// the ranking of the groups with the top-K and "other" fold. Everything is a plain function of rows (a row is the text of the columns of
-// a ClickHouse block), so the native tests run it without a server. The formulas are the ones of docs/metrics.md ("Metrics browser API").
+// This file does the work of the Metrics page on the rows that ClickHouse sends back.
+// It holds the aggregation state of one (group, bucket) cell for every kind of point. It merges cells, and it computes the quantiles of explicit and exponential histograms.
+// It also chooses the aggregations that a metric offers. It ranks the groups with the top-K and "other" fold.
+// Each function is a plain function of rows. A row is the text of the columns of a ClickHouse block. So, the native tests run it without a server.
+// The formulas are the ones of docs/metrics.md ("Metrics browser API").
 
 #include "metrics_request.hpp"
 #include "metrics_sql.hpp"
@@ -27,7 +28,7 @@ constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 double text_to_double(const std::string& text);
 int64_t text_to_i64(const std::string& text);
 std::vector<double> text_to_doubles(const std::string& text);
-// Splits on a delimiter, keeping empty fields (an absent attribute is "").
+// Splits on a delimiter and keeps the empty fields. An absent attribute gives "".
 std::vector<std::string> split_keep(std::string_view text, char delimiter);
 
 // ---- the state of a cell ----
@@ -40,7 +41,7 @@ struct ExpState {
   double zero = 0;
 };
 
-// One struct covers every kind: the fields a mode does not use stay at their neutral value.
+// One struct covers every kind. The fields that a mode does not use keep their neutral value.
 struct Cell {
   double sum = 0;      // gauge: sum of values; sums: sum of deltas; histograms/summary: Sum delta
   double count = 0;    // gauge: number of points; histograms/summary: Count delta
@@ -62,10 +63,10 @@ struct Group {
 
 void merge_cell(Cell& into, const Cell& from);
 
-// Prometheus histogram_quantile: the bucket holding rank q * total, linear inside it; the first bucket starts at 0 when its upper bound is
-// positive, and a rank in the +Inf bucket answers the largest finite bound.
+// Prometheus histogram_quantile: the bucket that holds rank q * total. The result is linear inside that bucket.
+// The first bucket starts at 0 when its upper bound is positive. A rank in the +Inf bucket gives the largest finite bound.
 double explicit_quantile(double q, const std::vector<double>& bounds, const std::vector<double>& counts);
-// Exponential buckets: index k covers (base^k, base^(k+1)] with base = 2^(2^-scale); negative buckets mirror them; linear inside a bucket.
+// Exponential buckets: index k covers (base^k, base^(k+1)], with base = 2^(2^-scale). Negative buckets mirror them. The result is linear inside a bucket.
 double exponential_quantile(double q, const ExpState& state);
 
 // "p50" -> 0.5, "p99.9" -> 0.999
@@ -74,7 +75,7 @@ bool is_quantile_agg(const std::string& agg);
 // Summary quantile names: 0.5 -> "p50", 0.999 -> "p99.9", 1 -> "p100".
 std::string quantile_agg_name(double q);
 
-// The value of a cell for an aggregation; NaN when it has none. `bucket_seconds` is what a rate divides by.
+// The value of a cell for an aggregation. The value is NaN when the cell has none. A rate divides by `bucket_seconds`.
 double cell_value(const Cell& cell, Mode mode, const std::string& agg, double bucket_seconds);
 
 // ---- what a metric is ----
@@ -97,7 +98,7 @@ inline bool monotonic_mixed(const MetricInfo& info) { return info.monotonic && !
 // "delta", "cumulative", "mixed", or "" when the metric has no temporality.
 std::string temporality_name(const MetricInfo& info);
 
-// The aggregations that a kind of metric offers (the first is the default; a summary offers its own quantiles), and the mode that reads it.
+// The aggregations that a kind of metric offers, and the mode that reads it. The first aggregation is the default. A summary offers its own quantiles.
 struct AggregationPlan {
   std::vector<std::string> aggs;
   std::string default_agg;
@@ -107,7 +108,7 @@ struct AggregationPlan {
   bool all_delta = false;
   bool per_series = false;  // summary quantiles: one line for each series, no grouping
 };
-// False, with the message of the 400 answer, when the requested aggregation is not one of the offered ones.
+// The result is false when the requested aggregation is not offered. The 400 answer gets the message.
 bool plan_aggregation(const std::string& kind, const MetricInfo& info, const std::string& requested, AggregationPlan* plan,
                       std::string* error);
 // The literal of the wanted summary quantile in the SQL.
@@ -118,8 +119,8 @@ std::string summary_quantile_literal(const MetricInfo& info, const std::string& 
 // Adds the row of a series statement of `mode` to its group and cell.
 void add_series_row(const clickhouse::Block& block, size_t row, Mode mode, std::map<std::string, Group>* groups);
 
-// The groups ordered by score (descending, ties by key); the `top_k` first are kept, the others fold into "other" (not for a summary: it
-// has no folding).
+// Orders the groups by score, from high to low. Ties are ordered by key.
+// The first `top_k` groups are kept. The others fold into "other". A summary does not fold.
 struct RankedGroups {
   std::vector<Group*> ordered;
   size_t kept = 0;
@@ -131,7 +132,7 @@ RankedGroups rank_groups(std::map<std::string, Group>* groups, Mode mode, const 
 
 // The bucket starts of the window (at most 5000).
 std::vector<int64_t> bucket_timestamps(const BucketGrid& grid, const TimeWindow& window);
-// The seconds of the bucket that start at `t` that lie in the window: a rate divides by it.
+// The seconds of the bucket that starts at `t` and that lies in the window. A rate divides by this value.
 double covered_seconds(const BucketGrid& grid, const TimeWindow& window, int64_t t, double bucket_seconds);
 
 }  // namespace metrics

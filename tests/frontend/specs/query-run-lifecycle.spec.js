@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { openApp } from '../helpers/app.js';
 
-// A run keeps its host and always ends (docs/telemetry.md, "SSE event contract"). The 2.17 page read
-// the selected host again for each statement of a batch, so a host chosen during the first statement
-// received the rest; and three exits of the stream never settled the run, which stayed "running"
-// until a reload: a stream that ended after an "error" event, a renderer that threw on "done", and a
-// stream that never sent anything.
+// A run keeps its host and always ends (docs/telemetry.md, "SSE event contract").
+// The 2.17 page read the selected host again for each statement of a batch.
+// A host chosen in the first statement received all later statements too.
+// Three exits of the stream did not settle the run.
+// The run stayed "running" until a reload.
+// These exits were: a stream that ended after an "error" event, a renderer that threw on "done", and a stream that never sent anything.
 
 async function enableMultiquery(page) {
   await page.locator('#runSettingsButton').click();
@@ -31,10 +32,11 @@ test('every statement of a batch runs on the host the run started on; the host p
   await page.locator('#queryTextArea').fill('SELECT sleep(1) AS a; SELECT 2 AS b; SELECT 3 AS c;');
   await page.locator('#runButton').click();
   await expect(page.locator('#runButton')).toHaveText('Cancel');
-  // `disabled`, not toBeDisabled(): a picker of one host is aria-disabled anyway.
+  // The test reads `disabled`, not toBeDisabled(). A picker of one host is aria-disabled anyway.
   await expect(page.locator('#hostPickerButton')).toHaveJSProperty('disabled', true);
-  // The selection moves while the first statement runs (the hosts stream switches it when a host
-  // disappears): the batch keeps its host.
+  // The selection moves while the first statement runs.
+  // The hosts stream switches it when a host disappears.
+  // The batch keeps its host.
   await expect.poll(() => hosts.length).toBe(1);
   const before = await page.evaluate(() => {
     const previous = window.ChDash.state.selectedHostId;
@@ -76,7 +78,7 @@ test('a renderer that fails on "done" does not leave the run running', async ({ 
 test('a stream that sends nothing for 60 seconds ends the run as an error', async ({ page }) => {
   await page.clock.install();
   await openApp(page);
-  // The stream request never answers: no event, no end.
+  // The stream request never gets an answer. No event arrives, and the stream never ends.
   await page.route('**/api/query/stream*', () => {});
   await page.locator('#queryTextArea').fill('SELECT 1');
   await page.locator('#runButton').click();
@@ -97,7 +99,7 @@ test('text typed while the formatter answers is kept: the run uses the formatted
   const editor = page.locator('#queryTextArea');
   await editor.fill('select 1 as a');
   await page.locator('#runButton').click();
-  // The formatter is still working: more text is typed at the end.
+  // The formatter is still busy. More text is typed at the end.
   await editor.focus();
   await page.keyboard.press('Control+End');
   await page.keyboard.type(' -- typed meanwhile');
@@ -134,14 +136,14 @@ test('Cancel works while the statement is on its way to the server: the request 
   let released = null;
   await page.route('**/api/query/run', async (route) => {
     reached += 1;
-    // The proxy that never answers: the request stays open until the page aborts it.
+    // The proxy never answers. The request stays open until the page aborts it.
     await new Promise((resolve) => { released = resolve; setTimeout(resolve, 20_000); });
     await route.abort('aborted').catch(() => {});
   });
   await page.locator('#queryTextArea').fill('SELECT 1');
   await page.locator('#runButton').click();
   await expect.poll(() => reached).toBe(1);
-  // Cancel is there although the server has not answered: no token yet, the request is what Cancel aborts.
+  // Cancel is visible although the server has not answered. There is no token yet. The request is what Cancel aborts.
   await expect(page.locator('#runButton')).toHaveText('Cancel');
   await expect(page.locator('#runButton')).toBeEnabled();
   await page.locator('#runButton').click();

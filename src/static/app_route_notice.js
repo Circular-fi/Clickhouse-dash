@@ -1,8 +1,9 @@
-// The notice of an address that has no page. The server answers /observability/nope, /observability/logs (a view that is turned
-// off) and /system/no-such-section with a redirect to the first page that exists, and marks it with ?redirected_from=<the path that
-// was asked for> (server.cpp). A shared link that no longer works then says so, instead of opening another page as if nothing
-// happened (UI-008). boot() (app_boot.js) takes the mark off the address before the page reads its address, and shows the
-// notice once the page started. It is a strip between the header rows and the page: info level, role status, with Dismiss.
+// The notice for an address that has no page. The server answers /observability/nope, /observability/logs (a view that is disabled)
+// and /system/no-such-section with a redirect to the first page that exists. The server adds the mark ?redirected_from=<the path that
+// was asked for> to the redirect (server.cpp). A shared link that no longer works then says so.
+// It does not open another page as if nothing happened (UI-008). boot() (app_boot.js) removes the mark from the address before the page reads its address.
+// Then boot() shows the notice when the page has started. The notice is a strip between the header rows and the page.
+// It has info level and role status, with Dismiss.
 //
 //   routeNotice.take()      -> the path that was asked for, or "" (and the parameter is gone from the address bar)
 //   routeNotice.show(from)  -> shows the notice for it (nothing for "")
@@ -14,7 +15,7 @@ import { uiState } from "./app_ui_state.js";
 const PARAM = "redirected_from";
 const MAX_PATH = 120;
 
-// What opens in its place, by the page that the redirect reached.
+// The page that opens in its place, by the last path segment that the redirect reached.
 const PAGES = { traces: "Traces", logs: "Logs", metrics: "Metrics", system: "The System overview" };
 
 function take() {

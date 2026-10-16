@@ -15,21 +15,19 @@
 
 namespace chdash {
 
-// SYSTEM FLUSH LOGS is a server-wide operation: it forces every buffered
-// system-log entry of the named logs into a new MergeTree part. ChDash only
-// uses it as a last resort (analysis.flush_logs = true AND the rows needed are
-// still missing), and this gate makes concurrent/nearby callers share one
-// flush: a flush that *started* after a caller needed the data already covers
-// that caller, so it is not repeated.
+// SYSTEM FLUSH LOGS is a server-wide operation. It forces every buffered
+// system-log entry of the named logs into a new MergeTree part. ChDash uses it only as a last resort
+// (analysis.flush_logs = true AND the rows needed are still missing). This gate lets concurrent or nearby callers share one
+// flush. A flush that *started* after a caller needed the data already covers
+// that caller, so the flush is not repeated.
 class SystemLogFlushGate {
 public:
-  // Ensure every log in `logs` (comma-separated system log names) was flushed
-  // on the server identified by `scope` by a flush that started at or after
-  // `needed_after` (the moment the wanted rows existed server-side, e.g. the
-  // end of the query). Coverage is tracked per log name, so flushing
+  // Make sure every log in `logs` (comma-separated system log names) is flushed
+  // on the server identified by `scope`. The flush must start at or after
+  // `needed_after`: the moment the wanted rows existed on the server, for example the
+  // end of the query. Coverage is tracked for each log name. So a flush of
   // "query_log, processors_profile_log" also satisfies a later "query_log"
-  // request. Returns false with `error` set if the flush this caller had to
-  // perform failed.
+  // request. Returns false with `error` set when the flush of this caller failed.
   bool ensure_flushed_after(
       clickhouse::Client& client,
       const std::string& scope,
@@ -44,7 +42,7 @@ public:
     for (;;) {
       if (covered(state, names, needed_after)) return true;
       if (!state.in_flight) break;
-      // One flush per server at a time; its completion may cover us.
+      // Only one flush runs for each server at a time. Its completion can cover this caller.
       state.cv.wait(lk, [&state] { return !state.in_flight; });
     }
 

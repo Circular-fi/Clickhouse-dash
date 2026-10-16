@@ -30,16 +30,16 @@ namespace {
 
 using namespace mcp_usage;
 
-// The bounds of a file that is read besides those of McpUsageFileLimits: the keys and the cells that it may hold, and the instances that are read.
+// The bounds of a file that is read, apart from the bounds of McpUsageFileLimits. They set the keys and the cells that a file may hold, and the instances that are read.
 constexpr size_t kMaxFileKeys = 10000;
 constexpr size_t kMaxFileCells = 2000000;
 constexpr size_t kMaxInstances = 256;
-// The window of a zstd frame that is read, at most (16 MiB): a frame that asks for more memory is refused.
+// The window of a zstd frame that is read has a maximum of 16 MiB. A frame that asks for more memory is refused.
 constexpr unsigned kWindowLogMax = 24;
 constexpr int kZstdLevel = 3;
-// A file of this name that someone else wrote less than this long ago is a process that is alive.
+// A file of this name that another process wrote less than this long ago shows a live process.
 constexpr int64_t kConflictSeconds = 120;
-// A temporary file of a save that a crash left, removed at the start when it is this old.
+// A temporary file of a save that a crash left. The start removes it when the file is this old.
 constexpr int64_t kTemporaryAgeSeconds = 3600;
 constexpr const char* kFormat = "chdash-mcp-usage";
 constexpr const char kSuffix[] = ".jsonl.zst";
@@ -61,7 +61,7 @@ std::string size_text(size_t bytes) {
 
 [[noreturn]] void bad(const std::string& what) { throw std::runtime_error(what); }
 
-// The stop of the server, while a file is read.
+// The stop of the server. ChDash checks it while a file is read.
 struct Cancelled {};
 
 class Fd {
@@ -101,10 +101,11 @@ bool write_all(int fd, const char* data, size_t size, std::string* error) {
   return true;
 }
 
-// ---- reading ------------------------------------------------------------------------------------------
+// ---- read ------------------------------------------------------------------------------------------
 
-// The lines of a zstd file, decompressed as they are read, within the bounds: nothing is allocated for a line that is past 64 KiB, a stream
-// that holds more than 512 MiB is stopped, and a file that is read past 128 MiB is too. Each message says what is wrong and holds no content.
+// The lines of a zstd file are decompressed as they are read, within the bounds.
+// Nothing is allocated for a line that is past 64 KiB. A stream that holds more than 512 MiB is stopped. A file that is read past 128 MiB is stopped too.
+// Each message says what is wrong. No message holds any content.
 class LineReader {
 public:
   LineReader(int fd, const McpUsageFileLimits& limits) : fd_(fd), limits_(limits), in_(ZSTD_DStreamInSize()), out_(ZSTD_DStreamOutSize()) {
@@ -267,8 +268,8 @@ FileHeader header_of(const rapidjson::Value& line) {
   return header;
 }
 
-// Reads the file of `instance` into `state`: the header first, then the rows of the keys, their clients and their cells. Throws
-// std::runtime_error (the line and what is wrong with it, never its content), or Cancelled.
+// Reads the file of `instance` into `state`. It reads the header first, then the rows of the keys, their clients and their cells.
+// Throws std::runtime_error with the line and the reason, never the content. Or it throws Cancelled.
 FileHeader read_state(int fd, const std::string& instance, McpUsage::State* state, size_t max_clients, const std::atomic<bool>* cancel,
                       const McpUsageFileLimits& limits) {
   LineReader reader(fd, limits);
@@ -382,7 +383,7 @@ bool read_own_file(const std::string& path, const std::string& instance, McpUsag
   return true;
 }
 
-// The instance that a file name stands for, when it is a name of a usage file (<instance>.jsonl.zst).
+// The instance that a file name represents, when the name is a name of a usage file (<instance>.jsonl.zst).
 std::optional<std::string> instance_of_file(const std::string& name) {
   const size_t suffix = sizeof(kSuffix) - 1;
   if (name.size() <= suffix || name.compare(name.size() - suffix, suffix, kSuffix) != 0) return std::nullopt;
@@ -420,10 +421,11 @@ std::optional<std::vector<std::string>> list_directory(int dir_fd, std::string* 
   return names;
 }
 
-// ---- writing ------------------------------------------------------------------------------------------
+// ---- write ------------------------------------------------------------------------------------------
 
-// The rows of one save, as lines of JSON compressed with zstd into a temporary file of the directory. commit() ends the stream, makes the
-// file durable and renames it over the file of the instance: the file is the old one or the new one, never a part of either.
+// The rows of one save are written as lines of JSON. The lines are compressed with zstd into a temporary file of the directory.
+// commit() ends the stream. It makes the file durable, and renames it over the file of the instance.
+// So, the file is either the old one or the new one. It is never a part of either.
 class FileWriter final : public McpUsageWriter {
 public:
   FileWriter(int fd, std::string temporary, std::string target, std::string dir, std::string instance, std::string boot,
@@ -519,7 +521,7 @@ public:
       return false;
     }
     done_ = true;
-    // Make the rename itself durable. Best effort: the data is already in place.
+    // Make the rename itself durable. This is a best effort: the data is already in place.
     int flags = O_RDONLY | O_CLOEXEC;
 #ifdef O_DIRECTORY
     flags |= O_DIRECTORY;
@@ -552,7 +554,7 @@ private:
   void fail(const std::string& what) {
     if (failed_.empty()) failed_ = what;
   }
-  // The compression of `data`, written to the file as it comes out; ZSTD_e_end ends the frame.
+  // The compression of `data`. The output is written to the file as it comes out. ZSTD_e_end ends the frame.
   void compress(std::string_view data, ZSTD_EndDirective mode) {
     ZSTD_inBuffer input{data.data(), data.size(), 0};
     bool finished = false;
@@ -605,8 +607,8 @@ private:
 McpUsageFileStore::McpUsageFileStore(std::string dir, std::string instance, McpUsageFileLimits limits)
     : dir_(std::move(dir)), instance_(std::move(instance)), limits_(limits), boot_(random_uuid_v4()) {
   while (dir_.size() > 1 && dir_.back() == '/') dir_.pop_back();
-  // Anyone who can write in the directory can plant a file that another instance reads, or remove a file: the sticky bit keeps each one to
-  // its own files.
+  // Anyone who can write in the directory can plant a file that another instance reads. That person can also remove a file.
+  // The sticky bit keeps each user to its own files.
   struct stat info{};
   if (::stat(dir_.c_str(), &info) == 0 && S_ISDIR(info.st_mode) && (info.st_mode & S_IWOTH) && !(info.st_mode & S_ISVTX)) {
     log_event(LogLevel::Warn, "mcp.usage_dir_writable_by_all", {{"dir", dir_}});
@@ -617,7 +619,7 @@ std::string McpUsageFileStore::file_name(const std::string& instance) { return i
 
 std::string McpUsageFileStore::path_of(const std::string& instance) const { return dir_ + "/" + file_name(instance); }
 
-// The temporary files of a save that a crash left (.<instance>.<16 hexadecimal digits>.tmp): only this instance's, only when they are old.
+// The temporary files of a save that a crash left (.<instance>.<16 hexadecimal digits>.tmp). ChDash removes only the files of this instance. It removes only the files that are old.
 void McpUsageFileStore::remove_old_temporaries() {
   const Fd dir(::open(dir_.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY));
   if (!dir) return;
@@ -653,8 +655,8 @@ bool McpUsageFileStore::load(McpUsage::State* state, size_t max_clients) {
 
 std::unique_ptr<McpUsageWriter> McpUsageFileStore::begin(const McpUsageHeader& header, McpUsageSaveStatus* status, std::string* error) {
   *status = McpUsageSaveStatus::Failed;
-  // Another process that writes this name: its file has a boot that is not ours, and it was written less than 2 minutes ago. A file that is as
-  // this process last saw it (a start that follows a stop) is nobody's: the process that wrote it is gone.
+  // Another process writes this name when its file has a boot that is not ours, and it was written less than 2 minutes ago.
+  // A file that is as this process last saw it (a start that follows a stop) belongs to nobody. The process that wrote it is gone.
   {
     const auto current = read_header(path_of(instance_), limits_);
     std::lock_guard<std::mutex> lock(mu_);
@@ -717,8 +719,8 @@ bool McpUsageFileStore::refresh(std::vector<McpUsage::Other>* others, size_t max
   }
   std::sort(instances.begin(), instances.end());
   instances.erase(std::unique(instances.begin(), instances.end()), instances.end());
-  // A directory that holds more files than the bound is not read past it: the first instances by name are, and the first one that is not is
-  // logged once.
+  // A directory that holds more files than the bound is not read past it. The first instances by name are read.
+  // The first instance that is not read is logged once.
   std::string crowded;
   if (instances.size() > kMaxInstances) {
     crowded = instances[kMaxInstances];
@@ -777,8 +779,8 @@ bool McpUsageFileStore::refresh(std::vector<McpUsage::Other>* others, size_t max
         }
       }
     }
-    // A reason is logged when the file changed (the answer is kept while it does not), and a reason that comes from the system (the file
-    // cannot be opened: it is asked again every time) when it is not the one that was logged.
+    // A reason is logged when the file changed. The answer is kept while the file does not change.
+    // A reason from the system is logged too, when it is not the one that was logged. The file cannot be opened, so it is asked again every time.
     if (seen.other.status != "ok" && (seen.known || seen.other.reason != logged)) {
       log_event(LogLevel::Error, "mcp.usage_file_skipped", {{"instance", instance}, {"file", name}, {"reason", seen.other.reason}});
     }
@@ -798,8 +800,8 @@ void McpUsageFileStore::prune(int64_t now, int64_t retention_days) {
   std::lock_guard<std::mutex> lock(files_mu_);
   for (auto it = files_.begin(); it != files_.end();) {
     const Seen& seen = it->second;
-    // Only a file that was read as a usage file: another one is never removed. Its header and its file are both older than the retention and a
-    // day (a live instance writes every minute when something changes, and a file that was written again is read again first).
+    // Only a file that was read as a usage file is removed. Another file is never removed.
+    // The header and the file are both older than the retention and a day. A live instance writes every minute when something changes. A file that was written again is read again first.
     const bool old = seen.other.status == "ok" && seen.known && now - seen.other.written_at > limit && now - seen.mtime_ns / 1000000000 > limit;
     if (!old) {
       ++it;
@@ -829,7 +831,7 @@ void mcp_check_usage_dir(const std::string& dir, const std::string& instance) {
     bad("the directory cannot be read: " + errno_text());
   }
   if (!S_ISDIR(info.st_mode)) bad("it is not a directory");
-  // The file of this instance first (it is never replaced when it is not valid, whatever the rights on the directory), then the rights.
+  // First, check the file of this instance. It is never replaced when it is not valid, whatever the rights on the directory. Then, check the rights.
   McpUsage::State state;
   FileHeader header;
   const std::string name = McpUsageFileStore::file_name(instance);

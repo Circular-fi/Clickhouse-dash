@@ -5,8 +5,8 @@ function setText(el, value) {
   el.textContent = value;
 }
 
-// A meta line ("5 rows, 4 columns \u00b7 6 ms \u00b7 read 1.9 MB"): one
-// .metaPart (white-space: nowrap) per " \u00b7 " part, so a narrow window
+// A meta line ("5 rows, 4 columns \u00b7 6 ms \u00b7 read 1.9 MB") has one
+// .metaPart (white-space: nowrap) for each " \u00b7 " part. A narrow window
 // wraps the line between parts, never between a value and its unit. At
 // most `max` parts (three: two separators a line) show; the others go to
 // the element's tooltip (title), joined the same way.
@@ -37,11 +37,11 @@ function setMetaLine(el, value, { max = META_MAX } = {}) {
   el.replaceChildren(...(text ? nodes : []));
 }
 
-// Keep the compact magnitude (K/M/B/T or Ki/Mi/Gi/Ti) at the exact same
-// typographic size as the numeric value. Only the real unit/rate suffix is
-// split out, e.g. 148.9M/s => [148.9M][/s] and ns.format's "1.7 KB/s" =>
-// [1.7][ KB/s]: the space before a unit is kept (a no-break space, which
-// the flex layout does not collapse), so the text reads as ns.format wrote it.
+// Keep the compact magnitude (K/M/B/T or Ki/Mi/Gi/Ti) at the same
+// typographic size as the numeric value. Split out only the real unit or rate suffix.
+// For example: 148.9M/s => [148.9M][/s], and ns.format's "1.7 KB/s" => [1.7][ KB/s].
+// The space before a unit is kept. It is a no-break space, which
+// the flex layout does not collapse. The text then reads as ns.format wrote it.
 function setMetricText(el, rawValue) {
   if (!el) return;
 
@@ -93,12 +93,12 @@ function escapeHtml(text) {
     .replace(/'/g, "&#039;");
 }
 
-// Copying is app_ui_copy.js (ns.copy.text): one helper and one feedback.
+// The app_ui_copy.js module (ns.copy.text) does the copy action. It has one helper and one feedback.
 
-// formatInt and formatBytes keep their "-" for a missing value and hand
-// the rest to ns.format (app_format.js, loaded first), which owns the
-// number and byte formats. formatSeconds ("1.234s") is not ns.format's
-// duration and stays as it is.
+// formatInt and formatBytes keep their "-" for a missing value. They pass
+// the rest to ns.format (app_format.js, loaded first). ns.format owns the
+// number and byte formats. formatSeconds ("1.234s") is not a ns.format
+// duration. It stays as it is.
 
 function formatInt(value) {
   const n = typeof value === "number" ? value : Number(value);
@@ -193,8 +193,8 @@ function replaceTextAreaValue(textAreaEl, nextValue) {
       } catch {
         null;
       }
-      // The focus can be refused (the editor sits under a modal dialog, so the page is inert): insertText then
-      // goes to whatever else is focused (the library's search box) and reports success, leaving the editor as it was.
+      // The focus can be refused. The editor sits under a modal dialog, so the page is inert. insertText then
+      // goes to whatever else is focused (the library's search box). It reports success and leaves the editor as it was.
       if (document.activeElement === textAreaEl) {
         textAreaEl.setSelectionRange(0, before.length);
         const ok = document.execCommand && document.execCommand("insertText", false, v);
@@ -310,7 +310,7 @@ function rafOnce(fn) {
 
 // Keyboard access to a scrolling element (WCAG 2.1.1, axe scrollable-region-focusable): while its content
 // overflows it is a focusable region (tabindex 0, role region, `label` as its name); when it fits it is
-// none of these. A resize or, with `mutations`, a change of its content re-reads it, once a frame.
+// none of these. A resize, or a change of its content when `mutations` is set, re-reads it once a frame.
 function scrollFocus(el, { label = "", mutations = false } = {}) {
   if (!el || el.hasAttribute("data-scroll-focus-watched")) return;
   el.setAttribute("data-scroll-focus-watched", "");
@@ -337,14 +337,14 @@ function scrollFocus(el, { label = "", mutations = false } = {}) {
   frame();
 }
 
-// The latest request for `key` (e.g. "logs.search"): a new one aborts the
-// previous one still in flight (its fetch stops, so does the server work it
-// started) and makes it stale.
+// The latest request for `key` (e.g. "logs.search"). A new request aborts the
+// previous request that is still in flight. Its fetch stops, and so does the server work that it
+// started. The previous request becomes stale.
 //   const req = util.latest("logs.search");
 //   const data = await api.getLogs("search", params, { signal: req.signal });
 //   if (!req.isCurrent()) return;      // superseded: ignore the answer
 // An aborted request rejects with an AbortError (util.isAbort): check
-// isCurrent() before showing an error.
+// Check isCurrent() before an error is shown.
 const latestByKey = new Map();
 function latest(key) {
   latestByKey.get(key)?.controller.abort();
@@ -373,11 +373,11 @@ latest.cancelPrefix = (prefix) => {
   }
 };
 
-// The one way to turn an error into a message for the reader: the server's
-// own sentence, without the "error_code: " prefix of app_api.js's Error text
-// (the code stays on error.code); our sentence for a network failure or an
-// answer that is not JSON; `fallback` when the error says nothing. The
-// Query result alone shows a server error verbatim, code included.
+// This is the one way to turn an error into a message for the reader. It uses the server's
+// own sentence, without the "error_code: " prefix of the Error text of app_api.js.
+// The code stays on error.code. For a network failure, or for an answer that is not JSON,
+// it uses the sentence of this module. It uses `fallback` when the error says nothing.
+// Only the Query result shows a server error verbatim, code included.
 const ERROR_TEXT = {
   network_error: "The server could not be reached. Check the connection and retry.",
   invalid_api_response: "The server sent an unexpected response. Retry, or reload the page.",
@@ -392,15 +392,15 @@ function errorText(error, fallback = "The request failed.") {
   return text || fallback;
 }
 
-// A ClickHouse error as the Query result shows it: the sentence without our
-// code prefix ("query_failed: ", "format_failed: "), "Code: 62.",
-// "DB::Exception: ", the "(version ...)" tail and the formatter's
+// This is a ClickHouse error, as the Query result shows it. The sentence has no
+// code prefix ("query_failed: ", "format_failed: "), no "Code: 62.",
+// no "DB::Exception: ", no "(version ...)" tail and no formatter
 // "In scope SELECT formatQuery(...) AS query" wrapper. A syntax error reads
 // "Syntax error, line 1 col 8 near FROM" (`where` is the server's
-// { line, col, near } when it sent one), and the parser's long
-// "Expected one of: ..." list comes apart as `expected`, for a toggle.
-// What the server adds after "while executing 'FUNCTION throwIf(...)'" (the expression it was evaluating) comes apart as
-// `trace`, for the same toggle: the sentence before it is what to read.
+// { line, col, near } when it sent one). The long "Expected one of: ..." list
+// of the parser goes to `expected`, for a toggle.
+// The text that the server adds after "while executing 'FUNCTION throwIf(...)'" (the expression it evaluates) goes to
+// `trace`, for the same toggle. The sentence before it is the one to read.
 //   -> { summary, expected, trace, name }   (name: "SYNTAX_ERROR", or "")
 function queryErrorParts(message, where = null) {
   let text = String(message ?? "").trim();

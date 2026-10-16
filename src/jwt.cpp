@@ -58,7 +58,7 @@ static bool b64url_decode(const std::string& in, std::vector<uint8_t>& out) {
   out.clear();
   if (in.empty()) return true;
 
-  // base64url has no padding. We'll decode in 4-char groups.
+  // base64url has no padding. Decode the input in groups of 4 characters.
   size_t i = 0;
   while (i < in.size()) {
     const size_t remain = in.size() - i;
@@ -102,8 +102,7 @@ static bool constant_time_eq(const uint8_t* a, const uint8_t* b, size_t n) {
 }
 
 // --- SHA-256 (minimal implementation) ---
-// Public domain / educational implementation.
-// Inspired by FIPS 180-4 reference.
+// This implementation is in the public domain and is for education. It is inspired by the FIPS 180-4 reference.
 
 static inline uint32_t rotr(uint32_t x, uint32_t n) { return (x >> n) | (x << (32 - n)); }
 static inline uint32_t ch(uint32_t x, uint32_t y, uint32_t z) { return (x & y) ^ (~x & z); }
@@ -134,9 +133,9 @@ static std::array<uint8_t, 32> sha256(const uint8_t* data, size_t len) {
   uint32_t h6 = 0x1f83d9ab;
   uint32_t h7 = 0x5be0cd19;
 
-  // Pre-processing: padding
+  // Pre-processing: add the padding.
   const uint64_t bit_len = static_cast<uint64_t>(len) * 8ull;
-  // new_len = len + 1 + pad + 8, multiple of 64
+  // The new length is len + 1 + pad + 8. It is a multiple of 64.
   size_t new_len = len + 1 + 8;
   size_t rem = new_len % 64;
   if (rem != 0) new_len += (64 - rem);
@@ -144,15 +143,15 @@ static std::array<uint8_t, 32> sha256(const uint8_t* data, size_t len) {
   std::vector<uint8_t> msg(new_len, 0);
   if (len > 0) std::memcpy(msg.data(), data, len);
   msg[len] = 0x80;
-  // length in bits at end (big endian)
+  // Put the length in bits at the end, in big endian order.
   for (int i = 0; i < 8; ++i) {
     msg[new_len - 1 - i] = uint8_t((bit_len >> (8 * i)) & 0xFF);
   }
 
-  // Process in 512-bit chunks
+  // Process the message in 512-bit chunks.
   uint32_t w[64];
   for (size_t off = 0; off < new_len; off += 64) {
-    // prepare message schedule
+    // Prepare the message schedule.
     for (int t = 0; t < 16; ++t) {
       size_t j = off + t * 4;
       w[t] = (uint32_t(msg[j]) << 24) | (uint32_t(msg[j + 1]) << 16) | (uint32_t(msg[j + 2]) << 8) | uint32_t(msg[j + 3]);

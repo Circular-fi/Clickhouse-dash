@@ -1,24 +1,25 @@
-// The cycle "a section with a time range and charts" that the three System sections used to copy (ARCH-F-195): the
-// range of the section with its address and its zoom, the grid of chart cards, the axes of bytes. A section gives what
-// is its own (the defaults of its range, the series of each chart, the load) and gets the rest the same way on every page.
+// The cycle "a section with a time range and charts" (ARCH-F-195). The three System sections used to copy this cycle.
+// It covers the range of the section, with its address and its zoom. It covers the grid of chart cards and the axes of bytes.
+// A section gives what is its own: the defaults of its range, the series of each chart, and the load.
+// Every page gets the rest in the same way.
 //
 //   const range = systemCharts.range({ ctx, root, idPrefix, defaultRange, maxMinutes, where, minZoomMs, onChange, onZoom });
-//     range.value             the range { from, to } on screen (assign to change it without a load)
-//     range.picker            the time range picker (timeRange.create) in `root`, the range's place in the filter bar
-//     range.query()           the address parameters of the section ("" for the defaults): the range's own from / to, or
-//                             what the section's `query` option says when it has more parameters than the range
-//     range.read(params)      takes the range of the address (or the default); true when it changed
-//     range.apply(raw, opts)  a range picked by the user: it is kept, written to the address (ctx.setQuery) and onChange runs
-//     range.zoom(window, fromUser)  a drag over a chart: that window in whole seconds, at least minZoomMs wide, as apply()
-//     range.check()           timeRange.checkRange of the range against the widest one the server reads
+//     range.value             the range { from, to } on screen. Assign it to change the range without a load.
+//     range.picker            the time range picker (timeRange.create) in `root`. It is the place of the range in the filter bar.
+//     range.query()           the address parameters of the section. It returns "" for the defaults. It returns the range's own from / to,
+//                             or what the `query` option of the section says. The option applies when the section has more parameters than the range.
+//     range.read(params)      takes the range of the address, or the default. It returns true when the range changed.
+//     range.apply(raw, opts)  keeps a range that the user picked. It writes the range to the address (ctx.setQuery) and runs onChange.
+//     range.zoom(window, fromUser)  a drag over a chart. The window is in whole seconds, at least minZoomMs wide. It works as apply().
+//     range.check()           runs timeRange.checkRange on the range. It compares the range with the widest range that the server reads.
 //
 //   const grid = systemCharts.grid({ root, specs, idPrefix, syncKey, height, onZoom: range.zoom, empty, badge });
 //     grid.entries            Map id -> { spec, card, plot, empty, badge, meta, chart }
 //     grid.draw(entry, { xs, step, series, type, stack, yUnit, yAxis, formatValue, footer, ... })  creates or updates the chart
-//     grid.setZoom(startMs, endMs)  every chart shows that window at once; grid.destroy()
+//     grid.setZoom(startMs, endMs)  every chart shows that window at once. grid.destroy() removes the charts.
 //
-// bytesAxis(fromZero) is the y axis of a chart of bytes (round ticks in the 1024 unit); column(values, length) is a
-// series as a Float64Array with NaN where there is no sample.
+// bytesAxis(fromZero) is the y axis of a chart of bytes. Its ticks are round numbers in the 1024 unit.
+// column(values, length) makes a series as a Float64Array. The array has NaN where there is no sample.
 
 import { chartCore } from "./app_chart_core.js";
 import { h, dom } from "./app_dom.js";
@@ -44,14 +45,15 @@ function range({ ctx, root, idPrefix, defaultRange, maxMinutes, where, minZoomMs
     },
   });
 
-  // The address parameters of the section: the range's own, or all of the section's when it has more (`query` option).
+  // The address parameters of the section. They are the range's own parameters. When the section has more parameters,
+  // they are all of the section's parameters (`query` option).
   function query() {
     if (fullQuery) return fullQuery();
     if (timeRange.sameRange(state.value, defaultRange())) return "";
     return timeRange.url.write(new URLSearchParams(), state.value).toString();
   }
 
-  // The range of an address: its from / to, or the default. True when it is not the range on screen.
+  // The range of an address is its from / to, or the default. It returns true when the range is not the range on screen.
   function read(params) {
     const next = timeRange.url.read(params) || defaultRange();
     const changed = !timeRange.sameRange(next, state.value);
@@ -71,7 +73,7 @@ function range({ ctx, root, idPrefix, defaultRange, maxMinutes, where, minZoomMs
     onChange();
   }
 
-  // A drag over a chart: that window, whole seconds, widened around its centre when it is narrower than minZoomMs.
+  // A drag over a chart. The window is in whole seconds. When it is narrower than minZoomMs, the window is widened around its centre.
   function zoom(windowMs, fromUser) {
     if (!fromUser || !windowMs) return;
     let startMs = Math.floor(windowMs[0] / 1000) * 1000;
@@ -99,9 +101,9 @@ function range({ ctx, root, idPrefix, defaultRange, maxMinutes, where, minZoomMs
 
 // --- The grid of chart cards -------------------------------------------------------------
 
-// specs: [{ id, title, help }]. idPrefix: the card of a spec is #<idPrefix>-<id>. cardClass(spec): the class of a card.
-// empty: a block next to the plot that says why a chart has no data; badge: a slot in the head of the card; hidden: the
-// cards start hidden (the section shows each one that has data).
+// specs: [{ id, title, help }]. idPrefix: the card of a spec has the id #<idPrefix>-<id>. cardClass(spec): the class of a card.
+// empty: a block next to the plot. It says why a chart has no data. badge: a slot in the head of the card. hidden: the cards start hidden.
+// The section shows each card that has data.
 function grid({ root, specs, idPrefix, cardClass = () => "systemChart", syncKey, height, onZoom, empty = false, badge = false, hidden = true }) {
   const entries = new Map();
   for (const spec of specs) {
@@ -123,8 +125,8 @@ function grid({ root, specs, idPrefix, cardClass = () => "systemChart", syncKey,
     entries.set(spec.id, { spec, card, plot, empty: emptyEl, badge: badgeEl, meta: $(".chartCard__meta", card), chart: null });
   }
 
-  // series: [{ id, label, color, values, nulls }]; yUnit(maxAbs) the unit of the axis; formatValue(v) the value as text;
-  // footer(i) a line under the tooltip's values; hiddenSeries: ids of the series that start hidden.
+  // series: [{ id, label, color, values, nulls }]. yUnit(maxAbs) gives the unit of the axis. formatValue(v) gives the value as text.
+  // footer(i) gives a line under the values of the tooltip. hiddenSeries: ids of the series that start hidden.
   function draw(entry, { xs, step = 0, series, type = "line", stack = false, yInclude = [0], yHeadroom = 0, yUnit, yAxis = null, formatValue, footer = null, markers = [], hiddenSeries = null }) {
     const options = {
       xs,
@@ -132,7 +134,7 @@ function grid({ root, specs, idPrefix, cardClass = () => "systemChart", syncKey,
       series,
       type,
       stack: !!stack,
-      // Always a legend, so that the cards of a row keep one height.
+      // The legend is always shown. This keeps the cards of a row at one height.
       legend: "always",
       markers,
       yInclude,
@@ -183,8 +185,8 @@ function byteUnit(max) {
   return { factor: 1, suffix: " B" };
 }
 
-// Round ticks in the 1024 unit. fromZero: the axis starts at 0; else it follows the data, so a slow growth of a large
-// disk still reads.
+// The ticks are round numbers in the 1024 unit. When fromZero is true, the axis starts at 0.
+// Otherwise the axis follows the data. So a slow growth of a large disk is still readable.
 function bytesAxis(fromZero) {
   return (dataMin, dataMax, plotH) => {
     let lo;
@@ -209,7 +211,7 @@ function bytesAxis(fromZero) {
   };
 }
 
-// A series as a Float64Array of `length` values: NaN where there is no sample.
+// A series as a Float64Array of `length` values. The array has NaN where there is no sample.
 function column(values, length = values?.length || 0) {
   const out = new Float64Array(length);
   for (let i = 0; i < length; i++) {

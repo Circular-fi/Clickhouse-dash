@@ -1,5 +1,7 @@
-// The Functions page: the list of the functions of the host grouped by category, the overview (categories, popular functions) and the
-// card of one function. Loads GET /api/explorer/functions once for each host.
+// The Functions page.
+// It shows the list of the functions of the host, grouped by category.
+// It also shows the overview (categories, popular functions) and the card of one function.
+// It loads GET /api/explorer/functions once for each host.
 
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
@@ -49,8 +51,8 @@ function selectFunction(item, category) {
   revealSelectedFunction();
 }
 
-// Empty state: what the catalog contains (categories with counts, popular
-// functions) instead of a bare "Select a function".
+// Empty state: show what the catalog contains (categories with counts, popular functions).
+// Do not show a bare "Select a function".
 function renderFunctionOverview() {
   const empty = dom.explorerFunctionEmpty;
   if (!empty) return;
@@ -93,8 +95,8 @@ function renderFunctionOverview() {
     block.appendChild(list);
     sections.push(block);
   }
-  // Every category with its count, largest first: a button opens that
-  // category in the list (on a phone, the list's drawer).
+  // The code shows every category with its count, largest first.
+  // A button opens that category in the list. On a phone, it opens the list's drawer.
   const block = h("section", { class: "explorerFunctionOverview__section" });
   block.appendChild(h("h3", { class: "explorerFunctionOverview__heading" }, "Categories"));
   const grid = h("div", { class: "explorerFunctionOverview__categories" });
@@ -218,8 +220,8 @@ function renderFunctionList() {
         const button = h("button", { class: "explorerTreeObject explorerFunctionObject" });
         button.type = "button";
         button.classList.toggle("is-selected", key === model.selectedFunctionKey);
-        // One line per function: the group already names the category,
-        // so only a kind badge that adds information is kept.
+        // One line per function. The group already names the category.
+        // The code keeps only a kind badge that adds information.
         button.appendChild(h("span", { class: "explorerTreeObject__name explorerFunctionObject__name" }, item.name || "\u2014"));
         const badge = functionKindBadge(item, category);
         if (badge) button.appendChild(badgeMod.el(badge, { shape: "pill", className: "explorerFunctionObject__badge" }));
@@ -234,11 +236,13 @@ function renderFunctionList() {
   renderFunctionDetail();
 }
 
-// The functions load in flight: { hostId, force, promise }. The same host reuses it, unless the call is a forced
-// Refresh over a plain load; another host replaces it (the answer of the old host is dropped).
+// The functions load in flight: { hostId, force, promise }.
+// The same host reuses it. A forced Refresh over a plain load does not reuse it.
+// Another host replaces it. The answer of the old host is dropped.
 let functionsLoad = null;
 
-// A change of host drops the load in flight (the answer of the old host is dropped by its slot of util.latest).
+// A change of host drops the load in flight.
+// The util.latest slot drops the answer of the old host.
 function forgetFunctionsLoad() {
   functionsLoad = null;
 }
@@ -276,7 +280,8 @@ async function refreshFunctions(force) {
         else missing = route.functionName;
       }
       renderFunctionList();
-      // An address that names no function (a dropped UDF, a typo) keeps the catalog: the overview shows, with the reason.
+      // An address that names no function (a dropped UDF, a typo) keeps the catalog.
+      // The overview shows, with the reason.
       if (missing) setError(new Error(`${missing} is not a function of this host.`));
       if (route?.functionName && !missing) revealSelectedFunction("center");
     } catch (e) {
@@ -296,7 +301,7 @@ async function refreshFunctions(force) {
   return load.promise;
 }
 
-// The Functions list's root: the Functions overview (categories, popular).
+// The root of the Functions list: the Functions overview (categories, popular).
 function functionRootRow(count) {
   const current = !model.selectedFunctionKey;
   return rootRow({ id: "explorerFunctionRoot", icon: "function", label: "All functions", count, title: "All functions: the categories and the popular functions", current, open: () => openFunctionsOverview() });

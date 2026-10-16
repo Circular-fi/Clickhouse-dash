@@ -131,7 +131,6 @@ def test_mcp_code_is_not_reachable_from_other_routes_and_never_uses_the_runner()
     assert "mcp_uri" in api and "runner_uri" not in api
     uses = [line for line in api.split("\n") if "system_uri" in line]
     assert len(uses) == 1 and "as_system" in uses[0], uses
-    assert "mcp_password_file" not in read("src/config.cpp")
     # The cost of a key is a read of the page, not of MCP: it reads query_log with the runner account, as System > Queries does,
     # and never as the MCP identity.
     cost = code_of(read("src/api_mcp_cost.cpp"))
@@ -158,7 +157,7 @@ def test_no_handler_reads_the_defaults_of_the_otel_block():
     for path in sorted(SRC.glob("*.cpp")):
         text = code_of(path.read_text(encoding="utf-8", errors="replace"))
         assert not re.search(r"\bcfg_?\.(traces|logs|metrics)\b(?!_on)", text), path.name
-        if path.name == "config.cpp":
+        if path.name in ("config.cpp", "config_schema.cpp"):  # the loader, and the printer of what the configuration holds
             continue
         uses = re.findall(r"otel_defaults[^\n]*", text)
         assert len(uses) <= {"server.cpp": 1, "api_mcp.cpp": 1}.get(path.name, 0), (path.name, uses)
@@ -212,7 +211,11 @@ def test_cache_ages_are_measured_on_a_monotonic_clock():
 
 def test_the_configuration_is_read_from_the_file_only():
     # Why: HCL is the one source of configuration (docs/configuration.md); an environment variable read in code would be an undocumented key.
-    assert "getenv(" not in read("src/config.cpp")
+    # The one read of the environment is in config_secret.cpp, for a variable that the file names with an attribute that ends in _env.
+    for path in sorted(SRC.glob("*.[ch]pp")):
+        if path.name == "config_secret.cpp":
+            continue
+        assert "getenv(" not in code_of(path.read_text(encoding="utf-8", errors="replace")), path.name
     assert "load_config_from_environment" not in read("src/config.hpp")
 
 

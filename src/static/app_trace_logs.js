@@ -1,11 +1,12 @@
-// OpenTelemetry logs of the open trace, after HyperDX's TraceLogsPanel and
-// the correlated logs of its DBTraceWaterfallChart: a "Logs" header item
-// toggling a logs panel (severity / service / text filters), log count
-// badges and log markers on span rows, the logs of a span listed under its
-// row, and a Logs group in the span inspector. Clicking a log opens its
-// span (?span=). Logs load after the trace has rendered, from
-// GET /api/traces/logs. app_trace_detail.js calls init() once, load()
-// after each trace load, and the *Html hooks while rendering.
+// This file shows the OpenTelemetry logs of the open trace.
+// It follows HyperDX's TraceLogsPanel and the correlated logs of its DBTraceWaterfallChart.
+// The header has a "Logs" item. The item toggles a logs panel with severity, service and text filters.
+// The waterfall shows log count badges and log markers on span rows. The logs of a span are listed under its row.
+// The span inspector has a Logs group. A click on a log opens its span (?span=).
+//
+// The logs load after the trace has rendered. They load from GET /api/traces/logs.
+// The file app_trace_detail.js calls init() once. It calls load() after each trace load.
+// It also uses the *Html hooks when the trace renders.
 
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
@@ -66,18 +67,18 @@ function storePanelOpen(open) {
 }
 
 function logsFeatureEnabled() {
-  // Before /api/version answers, try: the endpoint itself says disabled.
+  // Before /api/version answers, the code tries the endpoint. The endpoint itself says disabled when the feature is off.
   return features.get("logs.enabled", true);
 }
 
-// Logs of the trace on screen (none while another trace loads).
+// These are the logs of the trace on screen. There are no logs while another trace loads.
 function current() {
   const trace = model.activeTrace;
   return trace && view.trace === trace ? view : null;
 }
 
-// The palette's level of the OTel SeverityNumber, else the SeverityText;
-// "unset" when the log has neither.
+// The palette level comes from the OTel SeverityNumber. If that is missing, it comes from the SeverityText.
+// The level is "unset" when the log has neither.
 function severityOf(record) {
   const n = Number(record.severity_number || 0);
   const text = String(record.severity_text || "").trim();
@@ -87,9 +88,9 @@ function severityOf(record) {
 
 const severityRank = (sev) => SEVERITIES.indexOf(sev);
 
-// A log belongs to a span of its SpanId; when several spans share it
-// (duplicate span rows), to the one whose interval holds the log, else
-// the nearest one.
+// A log belongs to the span with its SpanId.
+// When several spans share the SpanId (duplicate span rows), the log belongs to the span whose interval holds the log.
+// If no interval holds the log, it belongs to the nearest span.
 function attach(records, spans) {
   const spansById = new Map();
   for (const span of spans) {
@@ -138,7 +139,7 @@ function traceWindow(cache) {
   const start = Number(cache.extent?.start);
   const end = Number(cache.extent?.end);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-  // Exact enough: the server widens the window to whole seconds + margins.
+  // This is exact enough. The server widens the window to whole seconds and margins.
   return { startNs: String(Math.floor(start)), endNs: String(Math.ceil(Math.max(start, end))) };
 }
 
@@ -163,8 +164,8 @@ async function load(trace) {
   view.status = "loading";
   updateHeaderItem();
   renderPanel();
-  // The trace's services narrow the primary key; a list too long for a URL
-  // is left out (the time range and the TraceId index still bound it).
+  // The services of the trace narrow the primary key. A list that is too long for a URL is left out.
+  // The time range and the TraceId index still limit the query.
   let services = [...new Set(cache.spans.map((span) => String(span.service_name || "")).filter(Boolean))];
   const servicesChars = services.reduce((sum, name) => sum + encodeURIComponent(name).length + 9, 0);
   if (services.length > 1000 || servicesChars > MAX_SERVICES_QUERY_CHARS) services = [];
@@ -189,7 +190,7 @@ async function load(trace) {
   afterLoad();
 }
 
-// Badges, markers and inspector groups come with the waterfall rows.
+// The waterfall rows include the badges, the markers and the inspector groups.
 function afterLoad() {
   updateHeaderItem();
   renderPanel();
@@ -282,19 +283,20 @@ function detailsHtml(record, mode) {
   return `<div class="traceLog__details">${bodyDetailHtml(record)}<div class="traceLog__meta">${meta}${openSpan}</div><div class="traceLog__attrs"><b>Attributes</b>${renderAttributeTable(logAttrs, "No attributes")}</div>${resource}</div>`;
 }
 
-// The shared severity badge (ns.badge.severityHtml), as on the Logs page.
+// This is the shared severity badge (ns.badge.severityHtml). It is the same badge as on the Logs page.
 function sevHtml(record) {
   return badge.severityHtml(record.sev, SEVERITY_LABELS[record.sev], { className: "traceLog__sev", title: record.severity_text || SEVERITY_LABELS[record.sev] });
 }
 
-// mode: panel (every column; the row opens the span), inspector (one span:
-// no service / span columns; the row expands).
+// The mode is panel or inspector.
+// In panel mode, the list shows every column, and the row opens the span.
+// In inspector mode, the list shows one span. It has no service or span columns, and the row expands.
 function logItemHtml(record, mode) {
   const open = view.expanded.has(record.index);
   const span = record.span;
   const opensSpan = mode === "panel" && !!span;
-  // The row is not a control (its toggle button holds the keyboard): a click on it still opens the span or the
-  // details. In the panel the span's name is the button that opens the span.
+  // The row is not a control. Its toggle button holds the keyboard. A click on the row still opens the span or the details.
+  // In the panel, the span name is the button that opens the span.
   const rowAttrs = opensSpan
     ? `data-log-open-span="${esc(span.span_id)}" title="Open the span of this log"`
     : "data-log-expand";
@@ -330,7 +332,7 @@ function headerItemInner(v) {
     title = `${countLabel(n)}${errors ? `, ${fmt.count(errors)} error${errors === 1 ? "" : "s"}` : ""}${v.payload?.truncated ? " (first logs only)" : ""}. ${v.panelOpen ? "Hide" : "Show"} the logs panel.`;
     if (errors) extra = `<span class="traceLogsToggle__errors" data-trace-logs-errors>${fmt.count(errors)} ERR</span>`;
   }
-  // A header stat tile like the others (ns.stat.html), its value the toggle.
+  // This is a header stat tile, like the others (ns.stat.html). Its value is the toggle.
   return stat.html({
     label: "Logs", className: "statTile--sm tracePageOverviewItem tracePageOverviewItem--logs", attrs: { "data-trace-header-item": "Logs" },
     valueHtml: `<button type="button" class="traceLogsToggle${cls}${v.panelOpen ? " is-open" : ""}" data-trace-logs-toggle aria-expanded="${v.panelOpen ? "true" : "false"}" aria-controls="traceLogsPanel" title="${esc(title)}" aria-label="${esc(`Logs: ${title}`)}">${LOG_ICON}<span data-trace-logs-count>${value}</span>${extra}</button>`,
@@ -368,7 +370,7 @@ function filteredRecords(v) {
     && (!needle || searchText(record).includes(needle)));
 }
 
-// The panel's state (ns.uiState): loading, error, unavailable, empty or filtered.
+// This is the panel state (ns.uiState). The states are loading, error, unavailable, empty, or filtered.
 function panelStateHtml(kind, options) {
   const ui = uiState;
   const attrs = { "data-trace-logs-state": kind };
@@ -383,8 +385,8 @@ function windowText(v) {
   return `from ${fmt.duration.fromSeconds(w.margin_before_s)} before the trace to ${fmt.duration.fromSeconds(w.margin_after_s)} after it`;
 }
 
-// The Logs view of the Observability page on this trace and its log window
-// (a link: the trace is a page of its own, so the browser opens that page).
+// The Logs view of the Observability page shows this trace and its log window.
+// This is a link. The trace is a page of its own, so the browser opens that page.
 function logsViewUrl(v) {
   const w = v.payload?.window;
   const traceId = String(model.activeTrace?.trace_id || "");
@@ -468,7 +470,7 @@ function renderPanel() {
   if (select) enhanceTraceSelect(select);
 }
 
-// Filters only redraw the list (the text box keeps its focus).
+// Filters only redraw the list. The text box keeps its focus.
 function renderPanelList() {
   const panel = byId("traceLogsPanel");
   const v = current();
@@ -512,7 +514,7 @@ function spanBadgeHtml(span) {
   });
 }
 
-// One marker per 0.2 % of the view, in the colour of its worst log.
+// The code draws one marker for each 0.2 % of the view. A marker has the colour of its worst log.
 function spanMarkersHtml(span, win) {
   const records = spanLogs(span);
   if (!records.length) return "";
@@ -537,7 +539,7 @@ function inlineShown(node) {
   return view.inline.has(String(node.span.span_id || "")) && spanLogs(node.span).length > 0;
 }
 
-// Faint tree guides through the listed logs, like the inspector row.
+// Faint tree guides run through the listed logs, as in the inspector row.
 function guidesHtml(depth) {
   return `<span class="traceSpanRow__guides" aria-hidden="true">${Array.from({ length: depth + 1 }, (_, i) => `<i style="left:${13 + i * 18}px"></i>`).join("")}</span>`;
 }
@@ -555,7 +557,7 @@ function inlineLineHtml(record, win, indentPx, guides) {
     </div>`;
 }
 
-// The span's logs as child rows of the span (HyperDX's green log rows).
+// The logs of a span are child rows of that span. They follow HyperDX's green log rows.
 function inlineRowHtml(node, win) {
   if (!inlineShown(node)) return "";
   const span = node.span;
@@ -569,7 +571,7 @@ function inlineRowHtml(node, win) {
   return `<div class="traceSpanLogsRow" data-span-logs-for="${esc(span.span_id)}" style="--trace-service-color:${palette.service(span.service_name)}" role="list" aria-label="${esc(`Logs of ${span.span_name || "span"}`)}">${shown.map((record) => inlineLineHtml(record, win, indentPx, guidesHtml(depth))).join("")}${more}</div>`;
 }
 
-// Virtual list estimate until the row has been measured.
+// This is the virtual list estimate. It is used until the row is measured.
 function inlineHeight(node) {
   if (!inlineShown(node)) return 0;
   const records = spanLogs(node.span);
@@ -627,7 +629,7 @@ function toggleDetails(item, record, mode) {
   }
 }
 
-// Focus the log's span in the timeline, its inspector's Logs group open.
+// Focus the span of the log in the timeline. Open the Logs group of its inspector.
 function openSpan(spanId, record) {
   const id = String(spanId || "");
   if (!id) return;
@@ -642,7 +644,7 @@ function openSpan(spanId, record) {
   }
 }
 
-// Clicks inside log items, wherever they are (panel, inline, inspector).
+// This handles the clicks inside log items. It works in the panel, inline, and in the inspector.
 function handleLogClick(event, mode) {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return false;
@@ -656,7 +658,7 @@ function handleLogClick(event, mode) {
       openSpan(open.getAttribute("data-log-open-span"), recordOf(item));
       return true;
     }
-    // Attribute tables: copy buttons and JSON trees are the inspector's.
+    // The inspector handles the attribute tables: the copy buttons and the JSON trees.
     if (mode === "panel") spanDetailClick(event);
     else event.stopPropagation();
     return true;
@@ -712,8 +714,8 @@ function onKeydown(event) {
   row.click();
 }
 
-// The panel's × and Escape in it close it and give focus back to the
-// header's Logs button that opened it.
+// The panel × button and the Escape key close the panel.
+// Focus returns to the Logs button in the header that opened the panel.
 function closePanelToToggle() {
   togglePanel(false);
   $("#traceDetailHeader [data-trace-logs-toggle]")?.focus({ preventScroll: true });
@@ -721,7 +723,7 @@ function closePanelToToggle() {
 
 function onPanelKeydown(event) {
   if (event.key !== "Escape" || event.defaultPrevented || !view.panelOpen) return;
-  // A filter with text: Escape clears it first (the search field's own key).
+  // If a filter has text, Escape clears that text first. The search field handles this key itself.
   if (event.target instanceof HTMLInputElement && event.target.type === "search" && event.target.value) return;
   event.preventDefault();
   closePanelToToggle();
@@ -751,7 +753,7 @@ function onPanelClick(event) {
 
 function init() {
   const waterfall = byId("traceWaterfall");
-  // Capture phase: before the row's own click (which toggles the inspector).
+  // This is the capture phase. It runs before the click of the row, which toggles the inspector.
   waterfall?.addEventListener("click", onWaterfallClick, true);
   waterfall?.addEventListener("keydown", onKeydown, true);
   byId("traceLogsPanel")?.addEventListener("keydown", onPanelKeydown);

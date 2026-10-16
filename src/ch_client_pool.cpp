@@ -70,7 +70,7 @@ std::shared_ptr<clickhouse::Client> ClickHouseClientPool::acquire(
   bool bounded_receive_timeout = recv_timeout.count() > 0;
   {
     std::unique_lock<std::mutex> lock(mu_);
-    // The lease is counted from here: a connection that fails to open gives it back below.
+    // The lease is counted from this point. A connection that fails to open returns the lease below.
     if (max_leased_per_uri_ > 0) {
       const bool free = lease_cv_.wait_for(lock, lease_wait_, [&] {
         return stopping_ || leased_[uri] < max_leased_per_uri_;
@@ -103,10 +103,9 @@ std::shared_ptr<clickhouse::Client> ClickHouseClientPool::acquire(
         const bool validation_due = validate_after_idle_.count() > 0 &&
                                     idle_for >= validate_after_idle_;
         if (validation_due && !entry.bounded_receive_timeout) {
-          // Query clients intentionally use an unbounded receive timeout so a
-          // legitimate long query cannot be aborted locally. Never Ping such a
-          // socket for validation: a half-open peer could block forever. Open a
-          // fresh connection instead after the validation threshold.
+          // Query clients intentionally use an unbounded receive timeout. A legitimate long query cannot be aborted locally.
+          // Never ping such a socket for validation. A half-open peer can block forever.
+          // After the validation threshold, open a fresh connection instead.
           expired.push_back(std::move(entry.client));
           continue;
         }
@@ -119,17 +118,17 @@ std::shared_ptr<clickhouse::Client> ClickHouseClientPool::acquire(
     }
   }
 
-  // Destroy expired sockets outside the pool mutex. Closing the client sends a
-  // normal FIN to ClickHouse instead of leaving the server blocked until its
-  // receive timeout expires.
+  // Destroy expired sockets outside the pool mutex.
+  // When the client closes, it sends a normal FIN to ClickHouse.
+  // The server does not stay blocked until its receive timeout expires.
   expired.clear();
 
   if (client && validate) {
     try {
       client->Ping();
     } catch (...) {
-      // The peer or a proxy closed the idle socket. Drop it and create a fresh
-      // connection; do not return a half-open client to callers.
+      // The peer or a proxy closed the idle socket.
+      // Drop it and create a fresh connection. Do not return a half-open client to callers.
       client.reset();
     }
   }
@@ -185,7 +184,7 @@ void ClickHouseClientPool::release(
   if (!client) return;
 
   ChClientPtr owned(client);
-  // A connection that a statement left in an unknown state is closed, never lent again.
+  // The pool closes a connection that a statement left in an unknown state. It never lends that connection again.
   const bool dirty = ch_connection_dirty(*client);
 
   try {

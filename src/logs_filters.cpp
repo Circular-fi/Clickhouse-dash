@@ -150,10 +150,10 @@ bool build_filters(const OtelSettings& otel, const LogsSchema& schema, const Fil
     where += " AND SpanId = " + params.text(input.span_id);
   }
 
-  // attr=key=value / attr=key!=value. A bare key matches LogAttributes or ResourceAttributes; LogAttributes.<key> / ResourceAttributes.<key>
-  // pick one map; ServiceName, SeverityText, TraceId, SpanId, ScopeName and ScopeVersion compare the column. Several key=value filters of
-  // one key match any of their values (the Fields panel's checked values, as the Traces attribute facets); key!=value filters each
-  // exclude their value.
+  // attr=key=value and attr=key!=value are the forms. A bare key matches LogAttributes or ResourceAttributes. LogAttributes.<key> and ResourceAttributes.<key>
+  // pick one map. ServiceName, SeverityText, TraceId, SpanId, ScopeName and ScopeVersion compare the column. Several key=value filters of
+  // one key match any of their values (the checked values of the Fields panel, as in the Traces attribute facets). Each key!=value filter
+  // excludes its value.
   if (input.attrs.size() > kMaxAttrFilters) {
     *error = invalid_filter("Too many attribute filters.");
     return false;

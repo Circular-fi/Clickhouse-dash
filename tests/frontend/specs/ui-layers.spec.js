@@ -4,14 +4,14 @@ import { installLeakTracker, leakStats, leakDiff, leakSummary } from '../helpers
 import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
 
 // ns.layers (app_ui_layers.js): one stack of open layers (menus, popovers,
-// panels, sheets, dialogs). Escape closes the top one only, one capture
-// listener closes on a press outside, the focus goes back to the opener.
+// panels, sheets, dialogs). Escape closes the top layer only. One capture
+// listener closes a layer on a press outside. The focus goes back to the opener.
 // ns.lifecycle.scope(): what a view binds (listeners, observers, timers,
-// channels) lives with its page. Each Observability view is a page of its own
-// (the row of tabs is made of links), so a leak can only build up inside one
-// page: the cycles below run in one page, many times, and the tracker
-// (helpers/leaks.js, tested by leak-tracker.spec.js) must read the same after
-// the last cycle as after the second.
+// channels) belongs to its page. Each Observability view is a page of its own
+// (the row of tabs is made of links). A leak can only build up inside one page.
+// The cycles below run in one page, many times. The tracker (helpers/leaks.js,
+// tested by leak-tracker.spec.js) must read the same after the last cycle as
+// after the second.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => {
@@ -34,11 +34,11 @@ const WORKSPACE = { traces: '#tracesWorkspace', logs: '#logsWorkspace', metrics:
 const CYCLES = 12;
 const SWITCHES = 30;
 
-// Every request the page sent has completed, and two frames have rendered
-// what they brought (a view adds its listeners as it renders).
+// Every request that the page sent has completed. Two frames have rendered
+// what the requests brought. A view adds its listeners as it renders.
 function trackRequests(page) {
   const pending = new Set();
-  // The hosts status stream (an EventSource) stays open for the page's life.
+  // The hosts status stream (an EventSource) stays open for the life of the page.
   page.on('request', (request) => { if (request.resourceType() !== 'eventsource') pending.add(request); });
   for (const event of ['requestfinished', 'requestfailed']) page.on(event, (request) => pending.delete(request));
   return async () => {
@@ -47,7 +47,7 @@ function trackRequests(page) {
   };
 }
 
-// A view is idle once its search has answered and nothing in it is busy any more.
+// A view is idle when its search has answered. Nothing in the view is busy any more.
 async function viewIdle(page, view, answered) {
   if (answered) await answered;
   await expect(page.locator(`${BAR[view]} .obsFilterBar__submit`)).not.toHaveClass(/is-loading/);
@@ -66,18 +66,18 @@ async function openView(page, view) {
   await viewIdle(page, view, run);
 }
 
-// The answer of the view's search, if one comes: a range or a search that the view answers from its own cache sends
-// nothing, so the wait is short and its end is no failure; the view being idle is what the cycle needs.
+// Wait for the answer of the view's search, if one comes. A range or a search that the view answers from its own cache sends
+// nothing. The wait is short, and its end is not a failure. The cycle needs the view to be idle.
 const answer = (page, view) => page.waitForResponse((response) => IS_RUN[view](response.url()), { timeout: 4_000 }).catch(() => null);
 
-// Runs the view's search again and waits until it is idle.
+// Run the view's search again. Wait until the view is idle.
 async function search(page, view) {
   const run = answer(page, view);
   await page.locator(`${BAR[view]} .obsFilterBar__submit`).click();
   await viewIdle(page, view, run);
 }
 
-// Opens the range panel, types the range, applies it and waits until the view is idle.
+// Open the range panel, type the range, and apply it. Wait until the view is idle.
 async function setRange(page, view, [from, to]) {
   await page.locator(`${WORKSPACE[view]} .tracePicker--range > .tracePicker__button`).click();
   await page.locator(`#${view}RangeStart`).fill(from);
@@ -87,7 +87,7 @@ async function setRange(page, view, [from, to]) {
   await viewIdle(page, view, run);
 }
 
-// Everything the cycle builds exists after two rounds; CYCLES more must add nothing.
+// Everything the cycle builds exists after two rounds. CYCLES more cycles must add nothing.
 async function expectNoLeak(page, testInfo, cycle) {
   // 14 rounds of a few requests each, on the 22 k spans of the rich fixture hour.
   test.setTimeout(240_000);
@@ -127,7 +127,7 @@ test.describe('what a view binds is released: cycles inside one page', () => {
       await expect(panel).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(panel).toBeHidden();
-      // Closing went Back (log= was the panel's own entry).
+      // Close goes Back, because log= was the panel's own entry.
       await expect.poll(() => new URL(page.url()).searchParams.get('log')).toBe(null);
       await page.locator('#logsColumnsButton').click();
       await expect(page.locator('#logsColumnsMenu')).toBeVisible();
@@ -173,7 +173,7 @@ test.describe('what a view binds is released: cycles inside one page', () => {
       () => page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click(),
       () => page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Columns' }).click(),
     ];
-    // Two rounds of the four steps first: every mode has loaded and rendered its content.
+    // Run two rounds of the four steps first. Every mode must load and render its content.
     for (let round = 0; round < 2; round += 1) for (const step of steps) { await step(); await settle(); }
     const before = await leakStats(page, true);
     for (let i = 0; i < SWITCHES; i += 1) { await steps[i % steps.length](); await settle(); }
@@ -186,7 +186,7 @@ test.describe('what a view binds is released: cycles inside one page', () => {
   });
 });
 
-// A scratch stack on a real page: layers, each with an opener button.
+// A scratch stack on a real page. It has layers, and each layer has an opener button.
 async function scratchLayers(page, specs) {
   await page.evaluate((list) => {
     window.__dismissed = [];
@@ -229,8 +229,8 @@ test.describe('ns.layers', () => {
     await page.keyboard.press('Escape');
     expect(await dismissed(page)).toEqual(['menu:escape']);
     await expect(page.locator('#menuOpener')).toBeFocused();
-    // The focus left the popover (it is on the menu's opener): closing the
-    // popover does not take it back.
+    // The focus left the popover. It is on the menu's opener.
+    // Close the popover. It does not take the focus back.
     await page.keyboard.press('Escape');
     expect(await dismissed(page)).toEqual(['menu:escape', 'popover:escape']);
     await expect(page.locator('#menuOpener')).toBeFocused();
@@ -242,10 +242,10 @@ test.describe('ns.layers', () => {
 
   test('a press outside dismisses the floating layers down to the one it lands in; docked panels stay', async ({ page }) => {
     await scratchLayers(page, [{ name: 'panel', x: 10, docked: true }, { name: 'popover', x: 200 }, { name: 'menu', x: 400 }]);
-    // Inside the popover: only the menu above it goes.
+    // Inside the popover, only the menu above it closes.
     await page.mouse.click(300, 130);
     expect(await dismissed(page)).toEqual(['menu:outside']);
-    // On the page: the popover goes, the docked panel stays.
+    // On the page, the popover closes. The docked panel stays open.
     await page.mouse.click(900, 600);
     expect(await dismissed(page)).toEqual(['menu:outside', 'popover:outside']);
     await expect(page.locator('#panelLayer')).toBeVisible();
@@ -354,7 +354,7 @@ test('ns.dialog is a modal layer: Escape closes it and the focus goes back to it
     const top = window.ChDash.layers.top();
     return { size: window.ChDash.layers.size(), top: top?.el?.id };
   })).toEqual({ size: 1, top: 'queryLibraryMenu' });
-  // A press outside a modal dialog (on its backdrop) is the dialog's own.
+  // A press outside a modal dialog, on its backdrop, belongs to the dialog.
   await page.keyboard.press('Escape');
   await expect(page.locator('#queryLibraryMenu')).toBeHidden();
   await expect(button).toBeFocused();

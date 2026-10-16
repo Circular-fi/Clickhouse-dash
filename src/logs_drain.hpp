@@ -1,7 +1,7 @@
 #pragma once
 
-// The patterns of the logs routes as pure units (api_logs.cpp, docs/logs.md): the masking of the variable parts of a message and a
-// Drain port (He et al. 2017) that groups the masked messages into templates. No I/O, no clock: the route owns the budget.
+// The patterns of the logs routes are pure units (api_logs.cpp, docs/logs.md). They do the masking of the variable parts of a message, and a
+// Drain port (He et al. 2017) that groups the masked messages into templates. The code does no I/O and reads no clock. The route owns the budget.
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -14,7 +14,7 @@ namespace chdash::logs {
 
 extern const std::string kParam;
 
-// Replaces the variable parts of a message with <*>.
+// Replace the variable parts of a message with <*>.
 std::string mask_body(std::string_view body);
 // The tokens of a masked message (at most 64).
 std::vector<std::string> whitespace_tokens(const std::string& text);
@@ -38,11 +38,11 @@ class Drain {
   static constexpr int kDepth = 4;
   static constexpr double kSimilarity = 0.4;
   static constexpr size_t kMaxChildren = 100;
-  // The clusters of one leaf (the messages of one length that start alike): past this a message joins the nearest cluster
-  // whatever its similarity, so the search for the best one stays short (50 comparisons at most for each message).
+  // The clusters of one leaf hold the messages of one length that start alike. Past this limit, a message joins the nearest cluster
+  // whatever its similarity. The search for the best cluster stays short: 50 comparisons at most for each message.
   static constexpr size_t kMaxClustersPerLeaf = 50;
 
-  // Adds the tokens of one masked message and returns the id of its cluster.
+  // This function adds the tokens of one masked message and returns the id of its cluster.
   size_t add(const std::vector<std::string>& tokens);
   std::vector<Cluster>& clusters() { return clusters_; }
 

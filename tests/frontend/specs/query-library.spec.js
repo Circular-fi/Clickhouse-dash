@@ -5,27 +5,36 @@ import { historyRecords } from '../helpers/history.js';
 import { captureCopies, copiedText } from '../helpers/clipboard.js';
 import { requireInstance } from '../helpers/instances.js';
 
-// Query library: the toolbar book button (between Format and the run settings
-// cog) opens it in the shared modal dialog of the profiling (app_ui_dialog.js:
-// same shell, size, backdrop and tab style), with two tabs in its head (no
-// title), Saved (folders and saved queries) and History. Its Move and Remove
-// prompts stack over it; Save and Edit do not: they are a form in the right
-// pane (Saved), in place of the preview. Saved is a tree, as in the Explorer: the storages are its
-// top folders and every folder opens in place. A "New folder" button in the
-// head names the folder in its row, a "..." menu on each row (also the right
-// click) changes it, "Save" is the floppy button of the editor (it opens the form of the pane), and the preview pane on the right shows the highlighted row:
-// its tools are icon buttons at the right end of the head's one line (title,
-// then "Updated ..." or a run's time and status), its foot holds "Load"
-// (Ctrl/Cmd+Enter) only.
-// Saved holds two root folders: "Shared server storage" (the server library,
-// only when features.query_library is enabled) and "Local browser storage"
-// (localStorage chdash.queryLibrary.v2), both browsable; the pickers offer
-// both; a move between them copies, then removes. Saved queries, folders and
-// History are per host: the dialog shows the selected host's and follows a
-// host switch. The server is a small in-memory server behind page.route,
-// writable or read-only, plus one live check when QUERY_LIBRARY_LIVE_URL
-// names a real instance. History is the browser's record of what ran:
-// nothing in it can be removed.
+// Query library: the toolbar book button opens it. The button is between Format and the run
+// settings cog. It opens the shared modal dialog of the profiling (app_ui_dialog.js: same shell,
+// size, backdrop and tab style). The head of the dialog has two tabs and no title: Saved (folders
+// and saved queries) and History.
+//
+// The Move and Remove prompts stack over the dialog. Save and Edit do not stack. They are a form in
+// the right pane (Saved), in place of the preview. Saved is a tree, as in the Explorer. The
+// storages are its top folders. Every folder opens in place.
+//
+// The head has a "New folder" button. It names the folder in its row. Each row has a "..." menu. A
+// right click opens the same menu. The menu changes the folder.
+//
+// "Save" is the floppy button of the editor. It opens the form of the pane. The preview pane on the
+// right shows the highlighted row.
+//
+// The tools are icon buttons at the right end of the one line in the head. The line holds the
+// title, then "Updated ..." or the time and status of a run. The foot holds "Load" (Ctrl/Cmd+Enter)
+// only.
+//
+// Saved holds two root folders. The first root is "Shared server storage". It is the server
+// library, and it shows only when features.query_library is enabled. The second root is "Local
+// browser storage" (localStorage chdash.queryLibrary.v2). Both roots are browsable. The pickers
+// offer both roots. A move between the roots copies, then removes.
+//
+// Saved queries, folders and History are per host. The dialog shows the selected host's data. The
+// dialog follows a host switch.
+//
+// The server is a small in-memory server behind page.route. It is writable or read-only. One live
+// check is also possible. It runs when QUERY_LIBRARY_LIVE_URL names a real instance. History is the
+// browser's record of what ran. Nothing in it can be removed.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -41,14 +50,15 @@ const LOCAL_ROOT = 'Local browser storage';
 const SERVER_ROOT = 'Shared server storage';
 const tree = (page) => page.locator('#queryLibraryViewSaved [role=tree]');
 const node = (page, name) => tree(page).locator('li[role=treeitem]').filter({ has: page.locator(':scope > .qlRow .qlRow__name', { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }) });
-// A prompt stacked over the library (Move, Remove): Save and Edit are not one, they are the form of the right pane.
+// This prompt is over the library (Move, Remove). Save and Edit are not prompts: they are the form
+// of the right pane.
 const dialog = (page) => page.locator('dialog.qlDialog[open]');
 const openDialogs = (page) => page.locator('dialog[open]');
 const libraryState = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('chdash.queryLibrary.v2') || 'null'));
-// The runs of this browser: records of IndexedDB (app_history.js), the newest first.
+// The runs of this browser are records in IndexedDB (app_history.js). The newest run is first.
 const historyState = historyRecords;
 
-// Seeds localStorage before the first page script, once per test.
+// Seed localStorage before the first page script. Do this once for each test.
 async function seed(page, values) {
   await page.addInitScript((entries) => {
     if (sessionStorage.getItem('ql.seeded')) return;
@@ -60,7 +70,7 @@ async function seed(page, values) {
   }, values);
 }
 
-// The compose instance has one host, "local".
+// The compose instance has one host: "local".
 const HOST = 'local';
 const now = Date.UTC(2026, 9, 1, 12, 0, 0);
 const LIBRARY = {
@@ -80,15 +90,16 @@ const LIBRARY = {
 
 const panel = (page) => page.locator('#queryLibraryMenu');
 const preview = (page) => page.locator('#queryLibraryPreview');
-// The Save / Edit form: the pane's content in place of the preview.
+// The Save / Edit form is the content of the pane. It replaces the preview.
 const saveForm = (page) => preview(page).locator('form.qlPaneForm');
 const formTitle = (page) => saveForm(page).locator('.qlPreview__title');
 const formButton = (page, name) => saveForm(page).getByRole('button', { name, exact: true });
-// The folder picker (createFolderPicker): a dropdown in the Save and Edit form, an open tree in Move to. Its element says
-// the chosen place by data-value ("local:f_reports", "server:" for the top of a storage) and data-path ("/Reports").
+// The folder picker (createFolderPicker) is a dropdown in the Save and Edit form. It is an open
+// tree in Move to. Its element shows the chosen place. It uses data-value ("local:f_reports",
+// "server:" for the top of a storage). It uses data-path ("/Reports").
 const pickerOf = (scope) => scope.locator('.qlPicker');
 const folderField = (page) => pickerOf(saveForm(page));
-// The pane's foot (Load) and its tools (icon buttons of the head).
+// The foot of the pane holds Load. The tools of the pane are icon buttons in the head.
 const previewAction = (page, action) => preview(page).locator(`.qlPreview__foot [data-action="${action}"]`);
 const previewTool = (page, action) => preview(page).locator(`.qlPreview__tools [data-action="${action}"]`);
 const footLabels = (page) => preview(page).locator('.qlPreview__foot .button');
@@ -99,21 +110,21 @@ const facts = (page) => preview(page).locator('.qlPreview__facts').evaluate((dl)
   return out;
 }).catch(() => ({}));
 
-// Selects a tree item without toggling it (the focus selects).
+// Select a tree item. Do not toggle it. Focus also selects the item.
 async function selectItem(page, name) {
   await node(page, name).focus();
   await expect(node(page, name)).toHaveAttribute('aria-selected', 'true');
   await expect(preview(page).locator('.qlPreview__title')).toHaveText(name);
 }
 
-// Selects a saved query (a click) and loads it with the preview's button.
+// Select a saved query with a click. Load it with the button of the preview.
 async function loadSaved(page, name) {
   await node(page, name).locator(':scope > .qlRow').click();
   await expect(preview(page).locator('.qlPreview__title')).toHaveText(name);
   await previewAction(page, 'load').click();
 }
 
-// Opens the panel (from a closed state) on a tab.
+// Open the panel on a tab. Do this from a closed state.
 async function showPanel(page, tab = 'saved') {
   if (await panel(page).isHidden()) await page.locator('#queryLibraryButton').click();
   await expect(panel(page)).toBeVisible();
@@ -127,7 +138,7 @@ async function openLibrary(page) {
   await showPanel(page);
 }
 
-// The library is modal: the editor behind it is inert until it closes.
+// The library is modal. The editor behind it is inert until the library closes.
 async function closePanel(page) {
   // A save form open in the pane takes the first Escape.
   if ((await panel(page).isVisible()) && (await saveForm(page).isVisible())) await page.keyboard.press('Escape');
@@ -135,7 +146,7 @@ async function closePanel(page) {
   await expect(panel(page)).toBeHidden();
 }
 
-// Waits for the open animation (the dialog box is scaled meanwhile).
+// Wait for the open animation. The dialog box is scaled during this time.
 async function settled(locator) {
   await locator.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   return locator.boundingBox();
@@ -161,7 +172,7 @@ async function openPicker(scope) {
   if ((await trigger.count()) && (await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
 }
 
-// Every folder of the tree shown: the dropdown open, each closed folder opened.
+// Open every folder of the tree that is shown. Open the dropdown, and open each closed folder.
 async function expandPicker(scope) {
   await openPicker(scope);
   for (let i = 0; i < 12; i += 1) {
@@ -171,7 +182,8 @@ async function expandPicker(scope) {
   }
 }
 
-// Chooses a place: a value ("local:f_reports", "server:") or a path ("/Reports", "/Operations/Merges", "/" for a top).
+// Choose a place by value ("local:f_reports", "server:") or by path ("/Reports",
+// "/Operations/Merges", "/" for a top).
 async function pickPlace(scope, target) {
   await expandPicker(scope);
   const tree = pickerOf(scope).locator('.qlPicker__tree');
@@ -179,8 +191,9 @@ async function pickPlace(scope, target) {
   await row.locator('.qlPicker__row').click();
 }
 
-// The paths of the tree, top of each storage first ("/", then its folders), and the same by storage: { "<storage>": ["/", "/Ops"] }
-// (a read-only storage is named "<storage> (read-only)").
+// The paths of the tree list the top of each storage first ("/"), then its folders. The same paths
+// are grouped by storage: { "<storage>": ["/", "/Ops"] }. A read-only storage is named "<storage>
+// (read-only)".
 async function pickerOptions(scope) {
   await expandPicker(scope);
   return pickerOf(scope).locator('.qlPicker__tree [role="treeitem"]').evaluateAll((rows) => rows.map((row) => row.dataset.path));
@@ -202,9 +215,9 @@ async function pickerGroups(scope) {
   });
 }
 
-// A second host, "other", next to the compose instance's "local": /api/hosts
-// lists it, and the requests naming it are answered for "local" (the same
-// ClickHouse), so the page has two hosts to switch between.
+// A second host, "other", sits next to the compose instance's "local". /api/hosts lists it. The
+// requests that name it get answers for "local" (the same ClickHouse). So the page has two hosts to
+// switch between.
 async function addSecondHost(page) {
   const withOther = (body) => {
     const hosts = Array.isArray(body.hosts) ? body.hosts : [];
@@ -215,8 +228,8 @@ async function addSecondHost(page) {
     const response = await route.fetch();
     await route.fulfill({ response, json: withOther(await response.json()) });
   });
-  // The picker follows the hosts stream: one event with both hosts, then the
-  // stream ends (the page polls api/hosts and reconnects).
+  // The picker follows the hosts stream. The stream sends one event with both hosts. Then the
+  // stream ends. The page polls api/hosts and reconnects.
   await page.route('**/api/hosts/stream', async (route) => {
     const response = await page.request.get(route.request().url().replace(/\/stream(\?.*)?$/, ''));
     const body = withOther(await response.json());
@@ -229,8 +242,8 @@ async function addSecondHost(page) {
   });
 }
 
-// Picks a host in the header (the library dialog must be closed: the page
-// under a modal dialog is inert).
+// Pick a host in the header. The library dialog must be closed first. The page under a modal dialog
+// is inert.
 async function pickHost(page, id) {
   await page.locator('#hostPickerButton').click();
   await expect(page.locator('#hostPickerMenu')).toBeVisible();
@@ -238,17 +251,18 @@ async function pickHost(page, id) {
   await expect(page.locator('#hostPickerText')).toHaveText(id);
 }
 
-// The text the last copy put on the clipboard (http origins have no async
-// clipboard to read: copy.text selects a textarea and runs the copy command).
+// This is the text that the last copy put on the clipboard. http origins have no async clipboard to
+// read. copy.text selects a textarea and runs the copy command.
 
-// A History run carries no menu and no button: every action is in the preview, and none removes it.
+// A History run has no menu and no button. Every action is in the preview. No action removes the
+// run.
 async function expectNoItemMenu(page, item) {
   await expect(item.locator('button')).toHaveCount(0);
   await item.click({ button: 'right' });
   await expect(page.locator('#queryLibraryMenu [role=menu]')).toHaveCount(0);
 }
 
-// A row's "..." menu: its items, and the menu itself.
+// This describes the "..." menu of a row: its items, and the menu itself.
 const rowMenu = (page) => page.locator('.qlMenu[role=menu]');
 const menuLabels = (page) => rowMenu(page).locator('[role=menuitem] .runMenu__optText').allTextContents();
 async function openRowMenu(page, name) {
@@ -288,37 +302,39 @@ test('browser mode: one root, Local browser storage; the entries without a host 
     ],
   });
   await openLibrary(page);
-  // One root: the server library is not enabled.
+  // There is one root. The server library is not enabled.
   await expect(tree(page).locator(':scope > li[role=treeitem]')).toHaveCount(1);
   await expect(node(page, LOCAL_ROOT)).toHaveAttribute('aria-level', '1');
   await expect(node(page, LOCAL_ROOT)).toHaveAttribute('aria-expanded', 'true');
   await expect(node(page, SERVER_ROOT)).toHaveCount(0);
   expect(await page.evaluate(() => window.ChDash.queryLibrary.roots)).toEqual(['local']);
-  // Only the current host's entries; a query of a removed folder is at the top level of its root.
+  // Only the entries of the current host appear. A query of a removed folder is at the top level of
+  // its root.
   await expect(node(page, 'Local folder')).toBeVisible();
   await expect(node(page, 'Was in a hostless folder')).toHaveAttribute('aria-level', '2');
   for (const gone of ['Hostless folder', 'Hostless query', 'Other folder', 'Other query', 'Legacy flat']) await expect(node(page, gone)).toHaveCount(0);
   await expect(footCount(page)).toHaveText(`2 queries \u00b7 ${HOST}`);
-  // No import offer any more (and its stored state is removed).
+  // The import offer is gone. Its stored state is removed.
   await expect(page.locator('#queryLibraryViewSaved .qlNotice--import')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('chdash.queryLibrary.importOffer.v1'))).toBeNull();
 
-  // The stored library lost its host-less entries (the other host's stay).
+  // The stored library lost its entries without a host. The entries of the other host stay.
   const stored = await libraryState(page);
   expect(stored.version).toBe(2);
   expect(stored.folders.map((f) => f.id).sort()).toEqual(['f_local', 'f_other']);
   expect(stored.queries.map((q) => q.id).sort()).toEqual(['q_in_hostless', 'q_local', 'q_other']);
   expect(stored.queries.find((q) => q.id === 'q_in_hostless').folder_id).toBeNull();
   expect('migrated_from' in stored).toBe(false);
-  // The legacy flat list is neither imported nor touched.
+  // The legacy flat list is not imported. The list is not changed either.
   expect(JSON.parse(await page.evaluate(() => localStorage.getItem('chdash.savedQueries.v1')))).toEqual(legacy);
-  // History: the host-less run is gone from the key, the other host's is kept but not shown.
+  // History: the run without a host is removed from the key. The run of the other host stays, but
+  // is not shown.
   expect((await historyState(page)).map((h) => h.host_id).sort()).toEqual([HOST, 'other']);
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveCount(1);
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toContainText('local run');
 
-  // A run is recorded with its host; loading a query fills the editor.
+  // A run is recorded with its host. A loaded query fills the editor.
   await page.locator('#queryLibraryTabSaved').click();
   await loadSaved(page, 'Was in a hostless folder');
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 3');
@@ -332,7 +348,7 @@ test('confirm prompts: remove a query or a folder; Cancel, Escape and the backdr
   await openLibrary(page);
   const confirm = dialog(page);
 
-  // Remove a query: the shared confirm, over the library, focus on Cancel.
+  // Remove a query. The shared confirm appears over the library. The focus is on Cancel.
   await node(page, 'The answer').focus();
   await page.keyboard.press('Delete');
   await expect(confirm).toBeVisible();
@@ -341,28 +357,28 @@ test('confirm prompts: remove a query or a folder; Cancel, Escape and the backdr
   await expect(confirm.locator('.uiDialog__message')).toContainText('Remove \u201cThe answer\u201d? This cannot be undone.');
   await expect(confirm.getByRole('button', { name: 'Cancel' })).toBeFocused();
   await expect(confirm.getByRole('button', { name: 'Remove' })).toHaveClass(/button--danger/);
-  // Enter on the focused Cancel keeps the query.
+  // When Cancel has the focus, Enter keeps the query.
   await page.keyboard.press('Enter');
   await expect(confirm).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
   await expect(node(page, 'The answer')).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('li[role=treeitem]')?.dataset.id || '')).toBe('q_answer');
-  // The backdrop of the confirm closes the confirm only.
+  // A click on the backdrop of the confirm closes only the confirm.
   await page.keyboard.press('Delete');
   await expect(confirm).toBeVisible();
   await page.mouse.click(8, 8);
   await expect(confirm).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
-  // Confirmed (from the preview's Remove), it goes.
+  // Confirm the removal from the preview's Remove button. The query is then removed.
   await previewTool(page, 'delete').click();
   await confirm.getByRole('button', { name: 'Remove' }).click();
   await expect(node(page, 'The answer')).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
   expect((await libraryState(page)).queries.map((q) => q.id).sort()).toEqual(['q_merges', 'q_parts']);
-  // Its toast is shown in the top dialog (the page under it is inert).
+  // The toast appears in the top dialog. The page under it is inert.
   await expect(page.locator('#queryLibraryMenu > .qlToast')).toContainText('Query removed.');
 
-  // Remove a non-empty folder: Escape keeps it.
+  // Remove a non-empty folder. Press Escape to keep it.
   await selectItem(page, 'Operations');
   await previewTool(page, 'delete').click();
   await expect(confirm.locator('.uiDialog__title')).toHaveText('Remove folder');
@@ -371,13 +387,13 @@ test('confirm prompts: remove a query or a folder; Cancel, Escape and the backdr
   await expect(confirm).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
   await expect(node(page, 'Operations')).toBeVisible();
-  // An empty folder asks too (Delete key).
+  // An empty folder also asks first. This happens with the Delete key.
   await node(page, 'Reports').focus();
   await page.keyboard.press('Delete');
   await expect(confirm.locator('.uiDialog__message')).toHaveText('Remove the empty folder \u201cReports\u201d?');
   await confirm.getByRole('button', { name: 'Cancel' }).click();
   await expect(node(page, 'Reports')).toBeVisible();
-  // A root is never removed: Delete on it does nothing.
+  // A root is never removed. The Delete key does nothing on a root.
   await node(page, LOCAL_ROOT).focus();
   await page.keyboard.press('Delete');
   await expect(confirm).toHaveCount(0);
@@ -391,11 +407,12 @@ test('confirm prompts: remove a query or a folder; Cancel, Escape and the backdr
 test('folders: named in place, nested, renamed in place, moved and removed; the picker writes folders as "/" paths under their root; a folder has a name and a place, nothing else', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] } });
   await openLibrary(page);
-  // Nothing saved is the usual tree: the root, saying it is empty (no screen of its own).
+  // With nothing saved, the tree shows its usual form: the root, which says it is empty. The root
+  // has no screen of its own.
   await expect(node(page, LOCAL_ROOT)).toBeVisible();
   await expect(node(page, LOCAL_ROOT).locator('.qlTree__empty')).toHaveText('Empty');
   await expect(tree(page)).not.toContainText('No saved queries');
-  // One focus ring: the search field draws it, the input inside does not.
+  // There is one focus ring. The search field draws it. The input inside does not draw it.
   const field = page.locator('#queryLibraryViewSaved .qlSearch');
   await field.locator('.qlSearch__input').focus();
   await page.keyboard.press('Shift+Tab');
@@ -405,7 +422,8 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   expect(rings.field).not.toBe('none');
   expect(rings.input).toBe('rgba(0, 0, 0, 0)');
 
-  // New folder: a row to type the name in, first in the root, focused. Escape drops it.
+  // New folder adds a row for the name. The row is first in the root and has the focus. Escape
+  // removes the row.
   const newFolder = page.locator('#queryLibraryViewSaved [data-action="new-folder"]');
   await newFolder.click();
   await expect(newFolderInput(page)).toBeFocused();
@@ -414,7 +432,7 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   await expect(newFolderInput(page)).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
   expect((await libraryState(page))?.folders || []).toEqual([]);
-  // Enter makes it, and highlights it.
+  // Enter creates the folder and highlights it.
   await newFolder.click();
   await newFolderInput(page).fill('Monitoring');
   await page.keyboard.press('Enter');
@@ -424,7 +442,8 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   await expect(page.locator('.qlToast')).toContainText('Folder created.');
   expect((await libraryState(page)).folders.map((f) => Object.keys(f).sort())).toEqual([['created_at_ms', 'host_id', 'id', 'name', 'parent_id', 'updated_at_ms']]);
 
-  // A duplicate name is refused in the row, case-insensitively, and the row stays to be corrected.
+  // The row refuses a duplicate name. The check ignores case. The row stays, so the user can
+  // correct the name.
   await selectItem(page, LOCAL_ROOT);
   await newFolder.click();
   await newFolderInput(page).fill('monitoring');
@@ -435,20 +454,22 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   await page.keyboard.press('Escape');
   await expect(newFolderInput(page)).toHaveCount(0);
 
-  // A folder's preview: its path (root and folders), contents and tools (no foot, no Load).
+  // The preview of a folder shows its path (root and folders), its contents and its tools. It has
+  // no foot and no Load.
   await selectItem(page, 'Monitoring');
   expect(await facts(page)).toEqual({ Path: `${LOCAL_ROOT} /Monitoring`, Contents: 'Empty' });
   expect(await toolNames(page)).toEqual(['Rename', 'Move to\u2026', 'New subfolder', 'Remove']);
   await expect(preview(page).locator('.qlPreview__foot')).toHaveCount(0);
   await expect(preview(page).locator('.qlPreview__description')).toHaveCount(0);
-  // Its row's menu.
+  // This is the menu of the row.
   await openRowMenu(page, 'Monitoring');
   expect(await menuLabels(page)).toEqual(['Open', 'Rename', 'Move to\u2026', 'Export as JSON', 'Remove']);
   await page.keyboard.press('Escape');
   await expect(rowMenu(page)).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
 
-  // New subfolder, from the preview: the folder opens and the new one is named in it.
+  // A new subfolder comes from the preview. The folder opens. The new subfolder is named inline in
+  // the open folder.
   await previewTool(page, 'new-subfolder').click();
   await expect(node(page, 'Monitoring')).toHaveAttribute('aria-expanded', 'true');
   await expect(newFolderInput(page)).toBeFocused();
@@ -456,7 +477,7 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   await page.keyboard.press('Enter');
   await expect(node(page, 'Disks')).toHaveAttribute('aria-level', '3');
 
-  // Saving with the subfolder selected puts the query in it.
+  // When the subfolder is selected, the save adds the query to it.
   await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT name, free_space FROM system.disks');
   await showPanel(page);
@@ -468,12 +489,13 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   await saveForm(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(node(page, 'Free space')).toHaveAttribute('aria-level', '4');
   await expect(node(page, 'Free space')).toHaveAttribute('aria-selected', 'true');
-  // No Folder line in a query's preview (the tree shows where it is).
+  // A query's preview has no Folder line. The tree shows where the query is.
   expect(Object.keys(await facts(page))).not.toContain('Folder');
   const disks = (await libraryState(page)).folders.find((f) => f.name === 'Disks');
   expect((await libraryState(page)).queries.find((q) => q.name === 'Free space').folder_id).toBe(disks.id);
 
-  // Rename in place: F2 on the folder's row, or Rename in the preview; Escape keeps the name.
+  // Rename a folder in place. Press F2 on the folder's row, or use Rename in the preview. Escape
+  // keeps the old name.
   await node(page, 'Monitoring').focus();
   await node(page, 'Monitoring').press('F2');
   await expect(newFolderInput(page)).toBeFocused();
@@ -491,7 +513,7 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   await newFolderInput(page).press('Enter');
   await expect(node(page, 'Volumes')).toBeVisible();
 
-  // Move to... from the preview: to the top level ("/").
+  // Move to... in the preview moves the folder to the top level ("/").
   await selectItem(page, 'Volumes');
   await previewTool(page, 'move').click();
   expect(await pickerOptions(dialog(page))).toEqual(['/', '/Health']);
@@ -500,7 +522,7 @@ test('folders: named in place, nested, renamed in place, moved and removed; the 
   await expect(page.locator('.qlToast')).toContainText('Moved to /.');
   await expect(node(page, 'Volumes')).toHaveAttribute('aria-level', '2');
 
-  // Removing a non-empty folder asks first and removes everything inside.
+  // A non-empty folder asks first when it is removed. The removal deletes everything inside the folder.
   await selectItem(page, 'Volumes');
   await previewTool(page, 'delete').click();
   await expect(dialog(page)).toContainText('1 query');
@@ -527,7 +549,8 @@ test('History keeps a run formatted: a run typed unformatted, and an older entry
     ],
   });
   await openApp(page);
-  // A run typed unformatted (Auto-format is off): the entry holds what was typed, then the formatter's text.
+  // A run that is typed without formatting (Auto-format is off) keeps the typed text in the entry. The
+  // formatter's text follows.
   await runSuccessfulQuery(page, 'select number   from system.numbers limit 3');
   await expect.poll(async () => {
     const entry = (await historyState(page)).find((h) => h.sql_raw.startsWith('select number'));
@@ -535,7 +558,8 @@ test('History keeps a run formatted: a run typed unformatted, and an older entry
   }).toEqual({ formatted: true, text: 'SELECT number\nFROM system.numbers\nLIMIT 3' });
   const typed = (await historyState(page)).find((h) => h.sql_raw.startsWith('select number'));
   expect(typed.sql_raw).toBe('select number   from system.numbers limit 3');
-  // The older entry that had no formatted text gets it when it is looked at (selected); the one that had it keeps it.
+  // An older entry without formatted text gets it when the user selects it. An entry that already
+  // has formatted text keeps it.
   await showPanel(page, 'history');
   const items = page.locator('#queryLibraryViewHistory .qhItem');
   await items.filter({ hasText: 'select 1 as a' }).click();
@@ -544,11 +568,12 @@ test('History keeps a run formatted: a run typed unformatted, and an older entry
   expect(stored.find((h) => h.sql_raw.startsWith('select 1 as a')).sql_formatted).toMatch(/^SELECT\s+1 AS `?a`?,\s+2 AS `?b`?\s+FROM system\.one$/);
   expect(stored.find((h) => h.sql_raw.startsWith('select 1 as a')).sql_raw).toBe('select 1 as a,2 as b from system.one');
   expect(stored.find((h) => h.sql_raw.startsWith('select 0')).sql_formatted).toBe('SELECT 0\nFROM system.one');
-  // The preview then shows the formatted text; the list did not change (one line each).
+  // The preview then shows the formatted text. The list does not change. Each entry stays on one
+  // line.
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText(/^SELECT\s+1 AS `?a`?,\s+2 AS `?b`?\s+FROM system\.one$/);
   await items.filter({ hasText: 'numbers' }).click();
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT number\nFROM system.numbers\nLIMIT 3');
-  // A failing script is kept as typed and not asked for again while the page lives.
+  // A script that fails is kept as typed. The page does not request it again while the page is open.
   const calls = [];
   page.on('request', (request) => { if (request.url().includes('/api/format')) calls.push(request.postData()); });
   await closePanel(page);
@@ -562,8 +587,8 @@ test('History keeps a run formatted: a run typed unformatted, and an older entry
   await items.filter({ hasText: 'numbers' }).click();
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT number\nFROM system.numbers\nLIMIT 3');
   await items.filter({ hasText: '(((' }).click();
-  // The preview shows the script again (the selection ran); two frames and a round trip later, the request that a
-  // second look would send is in the list.
+  // The preview shows the script again. The selection ran. Two frames and one round trip later, the
+  // list holds the request that a second look sends.
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toContainText('(((');
   await nextFrames(page);
   await roundTrip(page);
@@ -579,19 +604,19 @@ test('Save: the query is saved formatted, the Formatted switch released keeps it
   await showPanel(page);
   await clickSave(page);
   const d = saveForm(page);
-  // The Formatted switch is the one of the results: pressed by default.
+  // The Formatted switch is the switch of the results. It is pressed by default.
   const formatted = d.locator('.qlForm__sql .sqlMode');
   await expect(formatted).toHaveText('Formatted');
-  // It sits in the SQL block, left of the copy button, as in a result's statement.
+  // It sits in the SQL block, left of the copy button. A result's statement has the same layout.
   const switchBox = await formatted.boundingBox();
   const copyBox = await d.locator('.qlForm__sql .sqlBlock__copy').boundingBox();
   expect(switchBox.x + switchBox.width).toBeLessThanOrEqual(copyBox.x);
   expect(Math.abs(switchBox.y - copyBox.y)).toBeLessThan(12);
   await expect(formatted).toHaveAttribute('aria-pressed', 'true');
   await expect(d.locator('.qlForm__sql .uiField__label')).toContainText('from the editor');
-  // The preview is the formatter's text: upper-case keywords, one clause per line.
+  // The preview shows the formatter's text. Keywords are in upper case. Each clause is on one line.
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText("SELECT count()\nFROM system.tables\nWHERE database = 'system'");
-  // Released: the text as typed.
+  // When the switch is released, the preview shows the text as typed.
   await formatted.click();
   await expect(formatted).toHaveAttribute('aria-pressed', 'false');
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText("select count() from system.tables where database = 'system'");
@@ -600,8 +625,8 @@ test('Save: the query is saved formatted, the Formatted switch released keeps it
   await fillForm(page, { name: 'Formatted one' });
   await d.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
-  // Again, with the Formatted switch released.
-  // The editor now holds the saved query: the dialog offers Update and Save as new.
+  // Repeat the test with the Formatted switch released. The editor now holds the saved query. The
+  // dialog offers Update and Save as new.
   await clickSave(page);
   await expect(saveForm(page).locator('.qlForm__sql .sqlMode')).toHaveAttribute('aria-pressed', 'true');
   await saveForm(page).locator('.qlForm__sql .sqlMode').click();
@@ -623,11 +648,12 @@ test('folder picker: the choice reads as a path, the tree opens on it and is bro
   const picker = folderField(page);
   const trigger = picker.locator('.qlPicker__button');
   const panelOf = picker.locator('.qlPicker__panel');
-  // Closed: the top of the browser storage, as a path.
+  // When the picker is closed, it shows the top of the browser storage as a path.
   await expect(trigger).toContainText(LOCAL_ROOT);
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   await expect(panelOf).toBeHidden();
-  // Open: the storages and their folders as a tree; a folder opens with its twisty, and choosing closes the picker.
+  // When the picker is open, it shows the storages and their folders as a tree. A folder opens with
+  // its twisty. A choice of a place closes the picker.
   await trigger.click();
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   await expect(picker.locator('[role="treeitem"][data-key="local:f_merges"]')).toHaveCount(0);
@@ -638,10 +664,11 @@ test('folder picker: the choice reads as a path, the tree opens on it and is bro
   await expect(trigger.locator('.qlPicker__crumb:not(.qlPicker__crumb--last)')).toHaveText([LOCAL_ROOT, 'Operations']);
   await expect(trigger.locator('.qlPicker__crumb--last')).toHaveText('Merges');
   await expect(picker).toHaveAttribute('data-path', '/Operations/Merges');
-  // The choice is the folder the query is saved in, and the tree behind shows it there.
+  // The choice is the folder where the query is saved. The tree behind the picker shows that
+  // folder.
   await expect(page.locator('.qlRow--ghost')).toBeVisible();
-  // Keys: Down opens on the chosen place, Left goes to its parent, Down moves, Enter chooses; Escape closes the picker
-  // and keeps the form (and the dialog).
+  // Keys: Down opens the picker on the chosen place. Left goes to the parent of the place. Down
+  // moves the selection. Enter chooses. Escape closes the picker and keeps the form and the dialog.
   await trigger.press('ArrowDown');
   await expect(picker.locator('[role="treeitem"][data-key="local:f_merges"][data-section="tree"]')).toBeFocused();
   await page.keyboard.press('ArrowLeft');
@@ -658,7 +685,7 @@ test('folder picker: the choice reads as a path, the tree opens on it and is bro
   await picker.locator('[role="treeitem"][data-key="local:f_reports"][data-section="tree"]').focus();
   await page.keyboard.press('Enter');
   await expect(picker).toHaveAttribute('data-path', '/Reports');
-  // The places chosen last come first, with their path.
+  // The places chosen last are first in the list. Each place shows its path.
   await trigger.click();
   const recent = picker.locator('[role="treeitem"][data-section="recent"]');
   await expect(recent).toHaveCount(2);
@@ -666,7 +693,7 @@ test('folder picker: the choice reads as a path, the tree opens on it and is bro
   await expect(recent.nth(1).locator('.qlPicker__path')).toHaveText(`${LOCAL_ROOT} / Operations`);
   await recent.nth(1).locator('.qlPicker__row').click();
   await expect(picker).toHaveAttribute('data-path', '/Operations/Merges');
-  // The form saves where the picker says.
+  // The form saves the query where the picker says.
   await fillForm(page, { name: 'Picked' });
   await formButton(page, 'Save').click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
@@ -701,31 +728,33 @@ test('folder picker: with many folders a filter finds one by name and shows wher
 test('every folder and storage says how many queries it holds, and its pane lists what is inside; a click on an entry opens it', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
-  // The tree: the queries under each folder (subfolders included) and under the storage, before anything is opened.
+  // The tree shows the queries under each folder, subfolders included. It also shows the queries
+  // under the storage. This happens before any folder is opened.
   const meta = (name) => node(page, name).locator(':scope > .qlRow .qlRow__meta');
   await expect(node(page, LOCAL_ROOT).locator(':scope > .qlRow .qlRow__count')).toHaveText('3 queries');
   await expect(meta('Operations')).toHaveText('2 queries');
   await expect(meta('Reports')).toHaveText('Empty');
   await expandFolder(page, 'Operations');
   await expect(meta('Merges')).toHaveText('1 query');
-  // A folder's pane: its subfolders, then its queries, each with what it holds.
+  // The pane of a folder lists its subfolders first. Then it lists its queries. Each item shows
+  // what it holds.
   await selectItem(page, 'Operations');
   const entries = preview(page).locator('.qlContents__item');
   await expect(preview(page).locator('.qlContents__label')).toHaveText('In this folder');
   await expect(entries.locator('.qlContents__name')).toHaveText(['Merges', 'Active parts']);
   await expect(entries.nth(0).locator('.qlContents__meta')).toHaveText('1 query');
   await expect(entries.nth(1).locator('.qlContents__desc')).toHaveText('Active data parts per table');
-  // A click on an entry opens it in the tree and shows its own pane.
+  // A click on an entry opens it in the tree. The entry then shows its own pane.
   await entries.nth(0).click();
   await expect(node(page, 'Merges')).toHaveAttribute('aria-selected', 'true');
   await expect(preview(page).locator('.qlPreview__title')).toHaveText('Merges');
   await expect(preview(page).locator('.qlContents__item .qlContents__name')).toHaveText(['Running merges']);
   await preview(page).locator('.qlContents__item').first().click();
   await expect(preview(page).locator('.qlPreview__title')).toHaveText('Running merges');
-  // An empty folder says so, and how to fill it.
+  // An empty folder says that it is empty. It also says how to fill it.
   await selectItem(page, 'Reports');
   await expect(preview(page).locator('.qlContents__empty')).toContainText('This folder is empty');
-  // A storage: its top level, folders first.
+  // A storage shows its top level. Folders come first.
   await selectItem(page, LOCAL_ROOT);
   await expect(preview(page).locator('.qlContents__label')).toHaveText('In this library');
   await expect(preview(page).locator('.qlContents__item .qlContents__name')).toHaveText(['Operations', 'Reports', 'The answer']);
@@ -741,7 +770,8 @@ test('Save: a query that the formatter leaves as it is has no Formatted switch (
   await clickSave(page);
   const d = saveForm(page);
   await expect(d.locator('.qlForm__sql .sqlBlock__code')).toHaveText('SELECT 1');
-  // The formatter answered with the same text: the toggle goes, and the label does not claim a formatting.
+  // The formatter answered with the same text. The toggle is removed. The label does not claim that
+  // the text is formatted.
   await expect(d.locator('.qlForm__sql .sqlMode')).toBeHidden();
   await expect(d.locator('.qlForm__sql .uiField__label')).toHaveText('SQL (from the editor)');
   await fillForm(page, { name: 'Already formatted' });
@@ -772,7 +802,8 @@ test('Save from History: the formatted text by default, the text as typed with t
   await fillForm(page, { name: 'From history raw' });
   await d.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(async () => (await libraryState(page)).queries.map((q) => q.sql)).toEqual(['select 1 as one from system.one']);
-  // A script the formatter rejects: the switch is released and locked, its title says why, the text is saved as typed.
+  // The formatter rejects a script. The switch is released and locked. Its title says why. The text
+  // is saved as typed.
   await showPanel(page, 'history');
   await items.filter({ hasText: '(((' }).click();
   await previewTool(page, 'save').click();
@@ -789,8 +820,9 @@ test('Save from History: the formatted text by default, the text as typed with t
 // --- Save and Edit are the form of the right pane (no window over the dialog) ---
 
 const selectedRow = (page) => page.locator('#queryLibraryViewSaved li[role=treeitem][aria-selected="true"]');
-// The editor's floppy button, between the copy button and the options cog. The editor is inert while the dialog is open,
-// so a click that the test makes then is the event itself (the same handler as the real click).
+// This is the floppy button of the editor. It sits between the copy button and the options cog. The
+// editor is inert while the dialog is open. So a click that the test makes is the event itself. The
+// handler is the same as for a real click.
 const saveButton = (page) => page.locator('#editorSaveButton');
 const clickSave = (page) => saveButton(page).dispatchEvent('click');
 const focusIsInTree = (page) => page.evaluate(() => !!document.activeElement?.closest('#queryLibraryViewSaved .qlTree'));
@@ -800,7 +832,7 @@ test('Save opens no window: Saved shows the form in the right pane with Name foc
   await openApp(page);
   const editor = page.locator('#queryTextArea');
   await editor.fill('SELECT 1 AS one');
-  // Ctrl+S with the library closed opens it on Saved, with the form in its pane.
+  // Ctrl+S with the library closed opens it on Saved. The form is in its pane.
   await editor.press('Control+s');
   await expect(panel(page)).toBeVisible();
   await expect(page.locator('#queryLibraryTabSaved')).toHaveAttribute('aria-selected', 'true');
@@ -808,12 +840,13 @@ test('Save opens no window: Saved shows the form in the right pane with Name foc
   await expect(openDialogs(page)).toHaveCount(1);
   await expect(page.getByRole('form', { name: 'Save to library' })).toBeVisible();
   await expect(saveForm(page).locator('[name="name"]')).toBeFocused();
-  // Labelled fields, the SQL that will be saved with its label, and the buttons in the pane's foot.
+  // The form has labelled fields. It also has the SQL that is saved with its label. The buttons are
+  // in the foot of the pane.
   for (const label of ['Name', 'Description', 'Folder']) await expect(saveForm(page).getByLabel(label, { exact: true })).toBeVisible();
   await expect(saveForm(page).locator('.qlForm__sql .uiField__label')).toContainText('SQL (from the editor');
   await expect(saveForm(page).locator('.qlPreview__foot .button')).toHaveText(['Cancel', 'Save']);
   await expect(formButton(page, 'Save')).toHaveClass(/button--primary/);
-  // The tree stays on the left and usable; the form is the pane, right of it.
+  // The tree stays on the left and stays usable. The form is the pane, to the right of the tree.
   await expect(tree(page)).toBeVisible();
   const places = await page.evaluate(() => ({
     tree: document.querySelector('#queryLibraryViewSaved').getBoundingClientRect().right,
@@ -824,7 +857,8 @@ test('Save opens no window: Saved shows the form in the right pane with Name foc
   expect(places.form).toBeGreaterThanOrEqual(places.tree - 1);
   expect(places.last.right).toBeLessThanOrEqual(places.pane.right + 0.5);
   expect(places.last.bottom).toBeLessThanOrEqual(places.pane.bottom + 0.5);
-  // Escape: the form goes, the preview of the selection is back, the dialog stays, the selected row has the focus.
+  // Press Escape. The form closes. The preview of the selection comes back. The dialog stays open.
+  // The selected row has the focus.
   await page.keyboard.press('Escape');
   await expect(saveForm(page)).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
@@ -833,7 +867,7 @@ test('Save opens no window: Saved shows the form in the right pane with Name foc
   await page.keyboard.press('Escape');
   await expect(panel(page)).toBeHidden();
 
-  // From the editor's button: Cancel puts the focus back in the list.
+  // This test starts from the editor's button. Cancel puts the focus back in the list.
   await showPanel(page);
   await clickSave(page);
   await expect(saveForm(page)).toBeVisible();
@@ -841,7 +875,8 @@ test('Save opens no window: Saved shows the form in the right pane with Name foc
   await formButton(page, 'Cancel').click();
   await expect(saveForm(page)).toHaveCount(0);
   expect(await focusIsInTree(page)).toBe(true);
-  // Enter in Name saves: the toast, the query selected in the tree, its preview in the pane, still one dialog.
+  // Enter in the Name field saves the query. The toast appears. The query is selected in the tree,
+  // and its preview is in the pane. The dialog stays the only dialog.
   await clickSave(page);
   await saveForm(page).locator('[name="name"]').fill('One');
   await saveForm(page).locator('[name="name"]').press('Enter');
@@ -852,7 +887,7 @@ test('Save opens no window: Saved shows the form in the right pane with Name foc
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 1 AS `one`');
   await expect(openDialogs(page)).toHaveCount(1);
   expect((await libraryState(page)).queries.find((q) => q.name === 'One')).toMatchObject({ folder_id: null, host_id: HOST });
-  // Ctrl+S again while the form is open only focuses it (what was typed stays).
+  // Ctrl+S again, while the form is open, only focuses the form. The typed text stays.
   await page.keyboard.press('Control+s');
   await expect(saveForm(page)).toBeVisible();
   await saveForm(page).locator('[name="description"]').fill('typed');
@@ -877,14 +912,16 @@ test('the editor has a floppy Save button between Copy and the options cog; the 
   await openApp(page);
   const editor = page.locator('#queryTextArea');
   await editor.fill('SELECT 1 AS `one`');
-  // From the right: the options cog, Save, Copy (so Copy is the leftmost of the three).
+  // From the right, the order is: the options cog, Save, then Copy. So Copy is the leftmost of the
+  // three buttons.
   const [copy, save, cog] = await Promise.all(['#editorCopyButton', '#editorSaveButton', '.editorAutocompleteControl__button'].map(async (selector) => (await page.locator(selector).boundingBox()).x));
   expect(copy).toBeLessThan(save);
   expect(save).toBeLessThan(cog);
   await expect(saveButton(page)).toHaveAttribute('aria-label', 'Save query');
   await expect(saveButton(page).locator('use')).toHaveAttribute('href', /#i-device-floppy$/);
   await expect(saveButton(page)).toHaveAttribute('title', /^Save query \((Ctrl|\u2318)\+S\)$/);
-  // A real click opens the library on Saved with the form, Name focused; the foot has no Save of its own.
+  // A real click opens the library on Saved, with the form. The Name field has the focus. The foot
+  // has no Save button of its own.
   await saveButton(page).click();
   await expect(panel(page)).toBeVisible();
   await expect(saveForm(page)).toBeVisible();
@@ -893,7 +930,7 @@ test('the editor has a floppy Save button between Copy and the options cog; the 
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expect(panel(page)).toBeHidden();
-  // An empty editor has nothing to save, as it has nothing to copy.
+  // An empty editor has nothing to save. It also has nothing to copy.
   await editor.fill('');
   await expect(saveButton(page)).toBeDisabled();
   await editor.fill('SELECT 2');
@@ -914,7 +951,7 @@ test('Save from History: the library goes to Saved with the form, the draft stay
   await expect(openDialogs(page)).toHaveCount(1);
   await expect(saveForm(page).locator('.qlForm__sql .uiField__label')).toContainText('SQL (from History');
   await expect(saveForm(page).locator('[name="name"]')).toBeFocused();
-  // The draft stays while the other tab is shown.
+  // The draft stays when the other tab is shown.
   await saveForm(page).locator('[name="name"]').fill('Seven');
   await page.locator('#queryLibraryTabHistory').click();
   await expect(saveForm(page)).toHaveCount(0);
@@ -941,7 +978,7 @@ test('update and Save as new: the editor holds a saved query, the form offers bo
   await expect(formButton(page, 'Update')).toHaveClass(/button--primary/);
   await expect(saveForm(page).locator('[name="name"]')).toHaveValue('The answer');
   await expect(folderField(page)).toHaveAttribute('data-path', '/');
-  // Reports is picked in the tree: Update puts the query there.
+  // Pick Reports in the tree. Update then puts the query there.
   await node(page, 'Reports').locator(':scope > .qlRow').click();
   await expect(folderField(page)).toHaveAttribute('data-path', '/Reports');
   await formButton(page, 'Update').click();
@@ -953,7 +990,7 @@ test('update and Save as new: the editor holds a saved query, the form offers bo
   let stored = await libraryState(page);
   expect(stored.queries.filter((q) => q.name === 'The answer')).toHaveLength(1);
   expect(stored.queries.find((q) => q.id === 'q_answer').folder_id).toBe('f_reports');
-  // Save as new: a second query, the first stays.
+  // Save as new creates a second query. The first query stays.
   await clickSave(page);
   await expect(formTitle(page)).toHaveText('Save “The answer”');
   await expect(folderField(page)).toHaveAttribute('data-path', '/Reports');
@@ -977,14 +1014,15 @@ test('the folder follows the tree while the form is open, and what was typed sur
   await clickSave(page);
   await fillForm(page, { name: 'Draft', description: 'Typed text' });
   const name = saveForm(page).locator('[name="name"]');
-  // A click on a folder, a root, the arrows and a query set the Folder.
+  // A click on a folder, a root, an arrow, or a query sets the Folder.
   await node(page, 'Reports').locator(':scope > .qlRow').click();
   await expect(folderField(page)).toHaveAttribute('data-value', 'local:f_reports');
   await node(page, LOCAL_ROOT).focus();
   await expect(folderField(page)).toHaveAttribute('data-value', 'local:');
   await node(page, 'Merges').focus();
   await expect(folderField(page)).toHaveAttribute('data-value', 'local:f_merges');
-  // The folder the form names is open (the dashed row sits in it): the arrow goes into it, to its query.
+  // The folder that the form names is open. The dashed row is in this folder. The arrow moves into
+  // the folder, to its query.
   await page.keyboard.press('ArrowDown');
   await expect(selectedRow(page)).toHaveAttribute('data-id', 'q_merges');
   await expect(folderField(page)).toHaveAttribute('data-value', 'local:f_merges');
@@ -995,7 +1033,7 @@ test('the folder follows the tree while the form is open, and what was typed sur
   await expect(folderField(page)).toHaveAttribute('data-value', 'local:');
   await expect(name).toHaveValue('Draft');
   await expect(saveForm(page).locator('[name="description"]')).toHaveValue('Typed text');
-  // A search draws the tree again; the form is as it was, and the tree works.
+  // A search draws the tree again. The form does not change. The tree still works.
   const search = page.locator('#queryLibraryViewSaved .qlSearch__input');
   await search.fill('merges');
   await expect(tree(page).locator('li[role=treeitem]')).toHaveCount(1);
@@ -1004,10 +1042,10 @@ test('the folder follows the tree while the form is open, and what was typed sur
   await expect(folderField(page)).toHaveAttribute('data-value', 'local:f_merges');
   await search.fill('');
   await expect(node(page, 'Reports')).toBeVisible();
-  // A folder closes and opens in the tree without a trace in the form.
+  // A folder closes and opens in the tree. The form shows no trace of this action.
   await node(page, 'Operations').locator(':scope > .qlRow .qlRow__twisty').click();
   await expect(name).toHaveValue('Draft');
-  // A new folder made while the form is open is in the list and chosen.
+  // A new folder created while the form is open is in the list. The new folder is also chosen.
   await node(page, 'Reports').focus();
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
   await newFolderInput(page).fill('Fresh');
@@ -1032,14 +1070,15 @@ test('Escape in the save form: from the tree, over a row menu, over a filled sea
   await showPanel(page);
   await clickSave(page);
   await expect(saveForm(page)).toBeVisible();
-  // A row's menu takes its Escape.
+  // The menu of a row takes the Escape press.
   await node(page, 'The answer').focus();
   await page.keyboard.press('Shift+F10');
   await expect(rowMenu(page)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(rowMenu(page)).toHaveCount(0);
   await expect(saveForm(page)).toBeVisible();
-  // So does a filled search (it is cleared), and a folder name being typed.
+  // A filled search also takes the Escape press. The search is cleared. A folder name that the user
+  // types also takes the Escape press.
   const search = page.locator('#queryLibraryViewSaved .qlSearch__input');
   await search.fill('answer');
   await search.press('Escape');
@@ -1051,7 +1090,8 @@ test('Escape in the save form: from the tree, over a row menu, over a filled sea
   await page.keyboard.press('Escape');
   await expect(newFolderInput(page)).toHaveCount(0);
   await expect(saveForm(page)).toBeVisible();
-  // From the tree, from the search and from the form itself: the form goes, the dialog stays.
+  // From the tree, from the search, or from the form itself, Escape removes the form. The dialog
+  // stays open.
   await node(page, 'The answer').focus();
   await page.keyboard.press('Escape');
   await expect(saveForm(page)).toHaveCount(0);
@@ -1065,10 +1105,10 @@ test('Escape in the save form: from the tree, over a row menu, over a filled sea
   await saveForm(page).locator('[name="description"]').press('Escape');
   await expect(saveForm(page)).toHaveCount(0);
   await expect(panel(page)).toBeVisible();
-  // A second Escape closes the dialog as usual.
+  // A second Escape closes the dialog.
   await page.keyboard.press('Escape');
   await expect(panel(page)).toBeHidden();
-  // Nothing was saved by all of that.
+  // Nothing was saved in this test.
   expect((await libraryState(page)).queries).toHaveLength(3);
 });
 
@@ -1090,18 +1130,18 @@ test('Save: a missing or used name shows its message under the field (role alert
   await expect(saveForm(page)).toBeVisible();
   await expect(page.locator('.qlToast--error')).toHaveCount(0);
   expect((await libraryState(page)).queries).toHaveLength(3);
-  // Typing clears it.
+  // Text input clears it.
   await name.fill('x');
   await expect(error).toBeHidden();
   await expect(name).not.toHaveAttribute('aria-invalid', 'true');
-  // A name that the folder already holds.
+  // This test uses a name that the folder already holds.
   await name.fill('the answer');
   await name.press('Enter');
   await expect(error).toContainText('already exists in this folder');
   await expect(name).toBeFocused();
   await expect(saveForm(page)).toBeVisible();
   expect((await libraryState(page)).queries).toHaveLength(3);
-  // The other folder takes it.
+  // The other folder accepts the name.
   await node(page, 'Reports').locator(':scope > .qlRow').click();
   await name.fill('the answer');
   await name.press('Enter');
@@ -1121,7 +1161,7 @@ test('Edit is the same form in the pane: name, description and folder, the SQL o
   await expect(saveForm(page).locator('.qlForm__sql .uiField__label')).toHaveText('SQL');
   await expect(saveForm(page).locator('.qlForm__sql .sqlBlock__code')).toHaveText('SELECT 42 AS answer');
   await expect(saveForm(page).locator('.qlPreview__foot .button')).toHaveText(['Cancel', 'Save']);
-  // Cancel: the preview, the row has the focus.
+  // Cancel shows the preview again. The row has the focus.
   await formButton(page, 'Cancel').click();
   await expect(saveForm(page)).toHaveCount(0);
   await expect(node(page, 'The answer')).toBeFocused();
@@ -1134,7 +1174,8 @@ test('Edit is the same form in the pane: name, description and folder, the SQL o
   await expect(preview(page).locator('.qlPreview__title')).toHaveText('Renamed');
   await expect(node(page, 'Renamed')).toHaveAttribute('aria-level', '3');
   expect((await libraryState(page)).queries.find((q) => q.id === 'q_answer')).toMatchObject({ name: 'Renamed', description: 'Moved by the tree', folder_id: 'f_reports', sql: 'SELECT 42 AS answer' });
-  // The query is removed meanwhile (here: by Remove in another tab's storage event): the form ends.
+  // The query is removed in the meantime. In this test, another tab removes it with a storage
+  // event. The form then ends.
   await previewTool(page, 'edit').click();
   await expect(saveForm(page)).toBeVisible();
   await page.evaluate(() => {
@@ -1153,12 +1194,13 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await openLibrary(page);
   const editor = page.locator('#queryTextArea');
 
-  // Save the editor with the panel's + button.
+  // Save the editor with the + button of the panel.
   await closePanel(page);
   await editor.fill('SELECT count() FROM system.tables');
   await showPanel(page);
   await clickSave(page);
-  // No window over the dialog: the form is the right pane, the fields above the SQL they save.
+  // No window opens over the dialog. The form is the right pane. The fields are above the SQL that
+  // they save.
   await expect(openDialogs(page)).toHaveCount(1);
   await expect(saveForm(page).locator('.qlPaneForm__fields')).toBeVisible();
   await expect(saveForm(page).locator('[name="tags"]')).toHaveCount(0);
@@ -1168,20 +1210,20 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await expect(node(page, 'Table count')).toBeVisible();
   let stored = await libraryState(page);
   const saved = stored.queries.find((q) => q.name === 'Table count');
-  // Saved as the formatter writes it (the Formatted switch is pressed).
+  // The query is saved as the formatter writes it. The Formatted switch is pressed.
   expect(saved).toMatchObject({ folder_id: 'f_reports', host_id: HOST, description: 'How many tables', sql: 'SELECT count()\nFROM system.tables' });
 
-  // A click selects a query: the preview shows it, the editor is unchanged
-  // and the dialog stays open. "Load" (bottom right) loads it,
-  // closes the dialog and focuses the editor; the opened query is marked.
+  // A click selects a query. The preview shows the query. The editor does not change, and the
+  // dialog stays open. The Load button (bottom right) loads the query. Load closes the dialog and
+  // focuses the editor. The opened query is marked.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await expect(node(page, 'The answer')).toHaveAttribute('aria-selected', 'true');
   await expect(preview(page).locator('.qlPreview__title')).toHaveText('The answer');
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 42 AS answer');
   await expect(panel(page)).toBeVisible();
   await expect(editor).toHaveValue('SELECT count() FROM system.tables');
-  // The tools are the head's icon buttons; the foot is "Load"
-  // alone, at the bottom right: no Copy SQL, Append to editor or Run.
+  // The tools are the icon buttons of the head. The foot has only "Load", at the bottom right. The
+  // foot has no Copy SQL, no Append to editor, and no Run.
   expect(await toolNames(page)).toEqual(['Edit', 'Move to\u2026', 'Remove']);
   await expect(previewTool(page, 'delete')).toHaveClass(/qlPreview__tool--danger/);
   await expect(footLabels(page)).toHaveText(['Load']);
@@ -1197,7 +1239,7 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   });
   expect(geometry.right).toBeLessThanOrEqual(20);
   expect(geometry.bottom).toBeLessThanOrEqual(20);
-  // The row's menu: the same changes, and Load.
+  // The menu of the row has the same changes, and Load.
   await openRowMenu(page, 'The answer');
   expect(await menuLabels(page)).toEqual(['Load', 'Edit\u2026', 'Move to\u2026', 'Remove']);
   await page.keyboard.press('Escape');
@@ -1211,18 +1253,19 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   await page.keyboard.press('Escape');
   await expect(panel(page)).toBeHidden();
 
-  // Ctrl+S on an opened query updates it in place (the panel can stay closed).
+  // Ctrl+S on an opened query updates it in place. The panel can stay closed.
   await editor.fill('SELECT 42 AS answer, 43 AS next');
   await editor.press('Control+s');
   await expect(formTitle(page)).toHaveText('Save \u201cThe answer\u201d');
   await saveForm(page).getByRole('button', { name: 'Update' }).click();
   await expect(page.locator('.qlToast')).toContainText('Query updated');
   stored = await libraryState(page);
-  // The update is formatted too (the Formatted switch is pressed).
+  // The update is also formatted. The Formatted switch is pressed.
   expect(stored.queries.find((q) => q.id === 'q_answer').sql).toBe('SELECT\n\t42 AS `answer`,\n\t43 AS `next`');
   expect(stored.queries.filter((q) => q.name === 'The answer')).toHaveLength(1);
 
-  // Edit (the preview): name, description and folder; the SQL is only shown (Ctrl+S above updates it from the editor).
+  // Edit in the preview changes the name, the description and the folder. The SQL is only shown.
+  // Ctrl+S, described above, updates the SQL from the editor.
   await closePanel(page);
   await editor.fill('SELECT 6 * 7 AS answer');
   await showPanel(page);
@@ -1237,7 +1280,7 @@ test('save, open, edit (name, description, SQL) and update the opened query with
   stored = await libraryState(page);
   expect(stored.queries.find((q) => q.id === 'q_answer')).toMatchObject({ name: 'Answer', description: 'Douglas Adams', sql: 'SELECT\n\t42 AS `answer`,\n\t43 AS `next`', host_id: HOST });
 
-  // Copy: the SQL block's own copy button.
+  // Copy uses the copy button of the SQL block.
   await captureCopies(page);
   const copy = preview(page).locator('.qlSql .sqlBlock__copy');
   await expect(copy).toHaveAttribute('aria-label', /^Copy /);
@@ -1257,17 +1300,17 @@ test('move: drag and drop into a folder, Move to\u2026 from the preview, no move
   await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '3');
   expect((await libraryState(page)).queries.find((q) => q.id === 'q_answer').folder_id).toBe('f_reports');
 
-  // Drag it back to the top level (onto its root).
+  // Drag the query back to the top level, onto its root.
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, LOCAL_ROOT).locator(':scope > .qlRow'));
   await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
-  // And again, then onto the tree background (the one root's top level).
+  // Drag the query again, then onto the tree background. This is the top level of the one root.
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, 'Reports').locator(':scope > .qlRow'));
   await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '3');
   const box = await tree(page).boundingBox();
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(tree(page), { targetPosition: { x: box.width / 2, y: box.height - 20 } });
   await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
 
-  // Move to... a query: every folder as a path.
+  // Move to... for a query lists every folder as a path.
   await selectItem(page, 'The answer');
   await previewTool(page, 'move').click();
   expect(await pickerOptions(dialog(page))).toEqual(['/', '/Operations', '/Operations/Merges', '/Reports']);
@@ -1276,7 +1319,7 @@ test('move: drag and drop into a folder, Move to\u2026 from the preview, no move
   await expect(page.locator('.qlToast')).toContainText('Moved to /Operations/Merges');
   expect((await libraryState(page)).queries.find((q) => q.id === 'q_answer').folder_id).toBe('f_merges');
 
-  // Move to... a folder: its own subfolders are not offered.
+  // Move to... for a folder does not offer its own subfolders.
   await selectItem(page, 'Operations');
   await previewTool(page, 'move').click();
   expect(await pickerOptions(dialog(page))).toEqual(['/', '/Reports']);
@@ -1286,7 +1329,7 @@ test('move: drag and drop into a folder, Move to\u2026 from the preview, no move
   const stored = await libraryState(page);
   expect(stored.folders.find((f) => f.id === 'f_ops').parent_id).toBe('f_reports');
   expect(stored.folders.find((f) => f.id === 'f_merges').parent_id).toBe('f_ops');
-  // A root does not move: it is not draggable and has no Move tool.
+  // A root does not move. It is not draggable, and it has no Move tool.
   await selectItem(page, LOCAL_ROOT);
   await expect(node(page, LOCAL_ROOT)).not.toHaveAttribute('draggable', 'true');
   expect(await toolNames(page)).toEqual(['New folder']);
@@ -1296,7 +1339,7 @@ test('rows: the "..." menu and the right click act on one row: Load, Move to...,
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openLibrary(page);
   await expandFolder(page, 'Operations');
-  // The "..." button of a row opens its menu; the right click opens the same one under the pointer.
+  // The "..." button of a row opens its menu. A right click opens the same menu under the pointer.
   await openRowMenu(page, 'Active parts');
   expect(await menuLabels(page)).toEqual(['Load', 'Edit\u2026', 'Move to\u2026', 'Remove']);
   await page.keyboard.press('Escape');
@@ -1305,7 +1348,8 @@ test('rows: the "..." menu and the right click act on one row: Load, Move to...,
   expect(await menuLabels(page)).toEqual(['Close', 'Rename', 'Move to\u2026', 'Export as JSON', 'Remove']);
   await page.keyboard.press('Escape');
   await expect(rowMenu(page)).toHaveCount(0);
-  // A folder is exported with everything in it: the JSON that POST /api/query-library/import takes.
+  // A folder export includes everything in the folder. The export is the JSON that POST
+  // /api/query-library/import takes.
   await node(page, 'Operations').locator(':scope > .qlRow').click({ button: 'right' });
   const [download] = await Promise.all([page.waitForEvent('download'), rowMenu(page).getByRole('menuitem', { name: 'Export as JSON' }).click()]);
   expect(download.suggestedFilename()).toBe('Operations.json');
@@ -1318,15 +1362,15 @@ test('rows: the "..." menu and the right click act on one row: Load, Move to...,
   ]);
   expect(Object.keys(exported.queries[0]).sort()).toEqual(['created_at_ms', 'description', 'folder_id', 'name', 'sql', 'updated_at_ms']);
   await expect(page.locator('.qlToast')).toContainText('Exported 2 queries to Operations.json.');
-  // No tick box and no bar: a row is changed one at a time.
+  // There is no tick box and no bar. Change one row at a time.
   await expect(page.locator('#queryLibraryViewSaved .qlRow__check, #queryLibraryViewSaved .qlRow__box, #queryLibraryViewSaved .ql__bar')).toHaveCount(0);
-  // The menu acts: Load fills the editor and closes the dialog.
+  // The menu acts. Load fills the editor and closes the dialog.
   await openRowMenu(page, 'Active parts');
   await rowMenu(page).getByRole('menuitem', { name: /^Load/ }).click();
   await expect(page.locator('#queryTextArea')).toHaveValue(/FROM system\.parts/);
   await expect(panel(page)).toBeHidden();
   await showPanel(page);
-  // Move to... opens the picker for this row; Remove asks first.
+  // Move to... opens the picker for this row. Remove asks first.
   await expandFolder(page, 'Operations');
   await openRowMenu(page, 'The answer');
   await rowMenu(page).getByRole('menuitem', { name: /^Move to/ }).click();
@@ -1340,7 +1384,8 @@ test('rows: the "..." menu and the right click act on one row: Load, Move to...,
   await dialog(page).getByRole('button', { name: 'Remove' }).click();
   await expect(node(page, 'The answer')).toHaveCount(0);
 
-  // A search result: its menu has Show in folder, which leaves the search and opens its folders.
+  // A search result has a menu with Show in folder. This item leaves the search and opens the
+  // folders of the result.
   await page.locator('#queryLibraryViewSaved .qlSearch__input').fill('merges');
   await expect(tree(page).locator('li.qlNode')).toHaveCount(1);
   await openRowMenu(page, 'Running merges');
@@ -1376,12 +1421,12 @@ test('search covers names, descriptions and SQL; the preview shows the descripti
   await expect(search).toHaveValue('');
   await expect(node(page, 'Operations')).toBeVisible();
 
-  // Nothing selected yet: the pane says how to fill it.
+  // Nothing is selected yet. The pane says how to fill it.
   const pane = preview(page);
   await expect(pane.locator('.qlPreview__empty')).toHaveText('Select a query to preview it here.');
-  // A click selects: name, then "Updated ..." on its line (ns.format time,
-  // its ISO value in the tooltip), the description and the SQL
-  // with keyword highlighting; no Folder line.
+  // A click selects the query. The pane shows the name, then "Updated ..." on its line. The time
+  // uses ns.format. Its ISO value is in the tooltip. Then the pane shows the description and the
+  // SQL, with the keywords highlighted. There is no Folder line.
   await expandFolder(page, 'Operations');
   await node(page, 'Active parts').locator(':scope > .qlRow').click();
   await expect(pane.locator('.qlPreview__title')).toHaveText('Active parts');
@@ -1393,19 +1438,19 @@ test('search covers names, descriptions and SQL; the preview shows the descripti
   await expect(pane.locator('.qlSql')).toContainText('FROM system.parts');
   await expect(pane.locator('.qlSql .sqlBlock__code span').first()).toBeVisible();
   await expect(pane.locator('.qlTag, .qlPreview__tags')).toHaveCount(0);
-  // The Back button is the phone step's only.
+  // The Back button is only in the phone step.
   await expect(pane.locator('.qlPreview__back')).toBeHidden();
-  // The preview is a pane of the dialog, right of the list.
+  // The preview is a pane of the dialog. It is to the right of the list.
   const geometry = await page.evaluate(() => {
     const el = document.getElementById('queryLibraryPreview');
     const list = document.getElementById('queryLibraryViewSaved').getBoundingClientRect();
     return { inDialog: !!el.closest('dialog#queryLibraryMenu'), beside: el.getBoundingClientRect().left >= list.right - 1 };
   });
   expect(geometry).toEqual({ inDialog: true, beside: true });
-  // Hovering another query changes nothing; selecting it does.
+  // Hover over another query changes nothing. Select the query to change the preview.
   const answer = node(page, 'The answer').locator(':scope > .qlRow');
   await answer.hover();
-  // The row shows its hover (its handlers have run), then two frames.
+  // The row shows its hover state. Its handlers have run. Wait two frames after that.
   await expect.poll(() => answer.evaluate((el) => el.matches(':hover'))).toBe(true);
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(pane.locator('.qlPreview__title')).toHaveText('Active parts');
@@ -1413,9 +1458,9 @@ test('search covers names, descriptions and SQL; the preview shows the descripti
   await expect(pane.locator('.qlPreview__title')).toHaveText('The answer');
   await expect(pane.locator('.qlPreview__description')).toHaveCount(0);
   await expect(pane.locator('.qlPreview__facts')).toHaveCount(0);
-  // A click on the row of an open folder that is not the selected one selects it and leaves it open; a click on the
-  // folder that is already selected (the blue frame) and open closes it, as the chevron does; a click on a closed
-  // folder opens it.
+  // A click on the row of an open folder that is not selected selects the folder and leaves it
+  // open. A click on a folder that is already selected (the blue frame) and open closes it. The
+  // chevron does the same. A click on a closed folder opens it.
   const operationsRow = node(page, 'Operations').locator(':scope > .qlRow .qlRow__name');
   await expect(node(page, 'Operations')).toHaveAttribute('aria-expanded', 'true');
   await expect(node(page, 'Operations')).toHaveAttribute('aria-selected', 'false');
@@ -1428,14 +1473,14 @@ test('search covers names, descriptions and SQL; the preview shows the descripti
   await expect(node(page, 'Operations')).toHaveAttribute('aria-expanded', 'true');
   await node(page, 'Operations').locator(':scope > .qlRow .qlRow__twisty').click();
   await expect(node(page, 'Operations')).toHaveAttribute('aria-expanded', 'false');
-  // A selected folder shows its path and contents, with its tools: a folder has no description.
+  // A selected folder shows its path and its contents, with its tools. A folder has no description.
   await expect(pane.locator('.qlPreview__title')).toHaveText('Operations');
   await expect(pane.locator('.qlPreview__meta')).toHaveText(/^Updated /);
   await expect(pane.locator('.qlPreview__description')).toHaveCount(0);
   expect(await facts(page)).toEqual({ Path: `${LOCAL_ROOT} /Operations`, Contents: '2 queries \u00b7 1 subfolder' });
   await expect(pane.locator('.qlPreview__foot')).toHaveCount(0);
   expect(await toolNames(page)).toHaveLength(4);
-  // A renamed query stays selected and previewed under its new name.
+  // A renamed query stays selected. Its preview shows the new name.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await node(page, 'The answer').press('F2');
   await fillForm(page, { name: 'Answer' });
@@ -1480,39 +1525,42 @@ test('the preview head: title, then its meta, then the tools as icon buttons at 
     expect(shape.order).toEqual(['qlPreview__title', 'qlPreview__meta', 'qlPreview__tools']);
     expect(shape).toMatchObject({ oneLine: true, metaRightOfTitle: true, toolsAtRightEnd: true, toolsRightOfMeta: true });
     for (const button of shape.buttons) {
-      // Icon only: no text, a label and the same tooltip, the sprite's drawing.
+      // Icon only: there is no text. The button has a label and the same tooltip. The icon comes
+      // from the sprite.
       expect(button.text).toBe('');
       expect(button.label).toBeTruthy();
       expect(button.title).toBe(button.label);
       expect(button.icon).toBe(icons[button.action]);
     }
   };
-  // A saved query.
+  // This is a saved query.
   await expandFolder(page, 'Operations');
   await node(page, 'Active parts').locator(':scope > .qlRow').click();
   let shape = await head(page);
   check(shape);
   expect(shape.buttons.map((b) => b.action)).toEqual(['edit', 'move', 'delete']);
-  // A folder.
+  // This is a folder.
   await selectItem(page, 'Operations');
   shape = await head(page);
   check(shape);
   expect(shape.buttons.map((b) => b.action)).toEqual(['rename', 'move', 'new-subfolder', 'delete']);
-  // The lists' heads: the same search row, the same place (Saved now, History below).
+  // The heads of the lists have the same search row, in the same place. Saved is shown now. History
+  // is below.
   const listHead = (tab) => page.evaluate((name) => {
     const head = document.querySelector(`#queryLibraryView${name} .ql__head`);
     const box = head.querySelector('.qlSearch').getBoundingClientRect();
     return { classes: [...head.children].map((el) => el.className.split(' ')[0]), search: [Math.round(box.x), Math.round(box.y), Math.round(box.height)] };
   }, tab);
   const savedHead = await listHead('Saved');
-  // A History run: the same head, its meta the run's time and status.
+  // A History run has the same head. Its meta line shows the run's time and status.
   await showPanel(page, 'history');
   await page.locator('#queryLibraryViewHistory .qhItem').first().click();
   shape = await head(page);
   check(shape);
   expect(shape.buttons.map((b) => b.action)).toEqual(['save']);
-  // The run is formatted when it is looked at (the answer of /api/format replaces the shown text): a quick run still
-  // reads the typed text, a slow one already reads the formatter's, which quotes the alias.
+  // The run is formatted when it is looked at. The answer of /api/format replaces the shown text. A
+  // quick run still reads the typed text. A slow run already reads the formatter's text, which
+  // quotes the alias.
   await expect(preview(page).locator('.qlPreview__title')).toHaveText(/^SELECT 1 AS `?one`?$/);
   await expect(preview(page).locator('.qlPreview__meta')).toHaveText(/^Oct 1(, 2026)? \d\d:\d\d:\d\d \u00b7 Succeeded$/);
   await expect(preview(page).locator('.qlPreview__meta .qhItem__status--ok')).toHaveCount(1);
@@ -1526,14 +1574,14 @@ test('the SQL preview shows the line-number gutter when the editor shows line nu
   const multiline = { ...LIBRARY.queries[2], id: 'q_lines', name: 'Three lines', sql: 'SELECT 1\nUNION ALL\nSELECT 2' };
   await seed(page, { 'chdash.queryLibrary.v2': { ...LIBRARY, queries: [...LIBRARY.queries, multiline] } });
   await openLibrary(page);
-  // On by default (the editor's setting, chdash.editor.line_numbers.enabled).
+  // Line numbers are on by default. The setting is chdash.editor.line_numbers.enabled.
   await node(page, 'Three lines').locator(':scope > .qlRow').click();
   const block = preview(page).locator('.qlSql');
   await expect(block).toHaveClass(/sqlBlock--gutter/);
   await expect(block.locator('.sqlBlock__gutter')).toHaveText('1\n2\n3');
-  // Each number on its line: the lines scroll rather than wrap.
+  // Each number stays on its line. The lines scroll, and they do not wrap.
   await expect(block).not.toHaveClass(/sqlBlock--wrap/);
-  // Off in the editor's settings: no gutter (the lines wrap).
+  // When the editor settings disable them, there is no gutter. The lines wrap.
   await closePanel(page);
   await page.locator('.editorAutocompleteControl__button').click();
   const item = page.locator('.editorAutocompleteControl__menu [data-line-numbers-toggle]');
@@ -1547,7 +1595,7 @@ test('the SQL preview shows the line-number gutter when the editor shows line nu
   await expect(block.locator('.sqlBlock__gutter')).toHaveCount(0);
   await expect(block).not.toHaveClass(/sqlBlock--gutter/);
   await expect(block).toHaveClass(/sqlBlock--wrap/);
-  // Remembered: still off after a reload.
+  // The setting is remembered. It stays off after a reload.
   await page.reload();
   await showPanel(page);
   await node(page, 'Three lines').locator(':scope > .qlRow').click();
@@ -1562,8 +1610,8 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, the row 
     return el?.closest?.('li[role=treeitem]')?.querySelector('.qlRow__name')?.textContent || el?.id || el?.className || '';
   });
 
-  // The button opens the panel from the keyboard; the focus moves into it
-  // (the search) and Escape gives it back to the button.
+  // The button opens the panel from the keyboard. The focus moves into the panel, to the search
+  // field. Escape returns the focus to the button.
   const button = page.locator('#queryLibraryButton');
   await button.focus();
   await page.keyboard.press('Enter');
@@ -1577,8 +1625,8 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, the row 
   await page.keyboard.press('Enter');
   await expect(page.locator('#queryLibraryViewSaved .qlSearch__input')).toBeFocused();
 
-  // Arrow keys move the selection along the visible items, the root first;
-  // the preview follows.
+  // Arrow keys move the selection along the visible items. The root comes first. The preview
+  // follows the selection.
   await page.keyboard.press('ArrowDown');
   expect(await focused()).toBe(LOCAL_ROOT);
   await expect(preview(page).locator('.qlPreview__title')).toHaveText(LOCAL_ROOT);
@@ -1615,15 +1663,16 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, the row 
   await page.keyboard.press('t');
   expect(await focused()).toBe('The answer');
 
-  // F2 edits; Enter submits.
+  // Press F2 to edit. Press Enter to submit.
   await page.keyboard.press('F2');
   await expect(formTitle(page)).toHaveText('Edit query');
   await fillForm(page, { name: 'Answer 42' });
   await page.keyboard.press('Enter');
   await expect(node(page, 'Answer 42')).toBeVisible();
 
-  // The row's menu from the keyboard: Shift+F10 or the context-menu key; its first item has the focus,
-  // the arrows move in it, Escape closes it and gives the focus back to the row.
+  // Open the menu of the row with the keyboard. Use Shift+F10 or the context-menu key. The first
+  // item has the focus. The arrow keys move in the menu. Escape closes the menu and returns the
+  // focus to the row.
   await node(page, 'Answer 42').focus();
   await page.keyboard.press('Shift+F10');
   await expect(rowMenu(page)).toBeVisible();
@@ -1639,7 +1688,7 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, the row 
   await page.keyboard.press('Escape');
   await expect(rowMenu(page)).toHaveCount(0);
 
-  // Space opens or closes a folder, and does nothing on a query.
+  // Space opens or closes a folder. Space does nothing on a query.
   await node(page, 'Reports').focus();
   await page.keyboard.press('Space');
   await expect(node(page, 'Reports')).toHaveAttribute('aria-expanded', 'true');
@@ -1649,8 +1698,8 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, the row 
   await page.keyboard.press('Space');
   await expect(panel(page)).toBeVisible();
 
-  // Enter moves to the preview, on "Load"; Shift+Tab reaches its
-  // other controls and Tab comes back; Enter there loads the query and closes the panel.
+  // Enter moves the focus to the preview, on "Load". Shift+Tab reaches the other controls of the
+  // preview. Tab comes back to Load. Enter there loads the query and closes the panel.
   await page.keyboard.press('Enter');
   await expect(previewAction(page, 'load')).toBeFocused();
   await expect(preview(page).locator('.qlPreview__title')).toHaveText('Answer 42');
@@ -1663,8 +1712,8 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, the row 
   await expect(page.locator('#queryTextArea')).toBeFocused();
   await expect(panel(page)).toBeHidden();
 
-  // Ctrl/Cmd+Enter loads at once, from the list or from the preview (and
-  // runs nothing).
+  // Ctrl/Cmd+Enter loads the query at once. This works from the list or from the preview. It runs
+  // nothing.
   const runs = async () => (await historyRecords(page)).length;
   const before = await runs();
   await page.locator('#queryTextArea').fill('SELECT 0');
@@ -1688,14 +1737,14 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, the row 
   await page.keyboard.press('Control+Enter');
   await expect(panel(page)).toBeVisible();
 
-  // F2 on a folder renames it in its row.
+  // F2 on a folder renames the folder in its row.
   await page.keyboard.press('F2');
   await expect(newFolderInput(page)).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(newFolderInput(page)).toHaveCount(0);
   await expect(dialog(page)).toHaveCount(0);
 
-  // Delete asks, Enter confirms.
+  // Delete asks for a confirm. Enter confirms.
   await node(page, 'Answer 42').focus();
   await page.keyboard.press('Delete');
   await expect(dialog(page)).toContainText('Remove \u201cAnswer 42\u201d');
@@ -1703,7 +1752,7 @@ test('keyboard: tabs, tree navigation and selection, expand / collapse, the row 
   await page.keyboard.press('Enter');
   await expect(node(page, 'Answer 42')).toHaveCount(0);
 
-  // Tabs: arrows switch between Saved and History.
+  // The arrow keys switch between the Saved and History tabs.
   await page.locator('#queryLibraryTabSaved').focus();
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('#queryLibraryTabHistory')).toBeFocused();
@@ -1731,7 +1780,7 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await expect(page.locator('#queryLibraryViewHistory .qhDay').first()).toHaveText('Today');
   await expect(page.locator('#queryLibraryViewHistory .qhDay')).toHaveCount(3);
   await expect(page.locator('#queryLibraryViewHistory .ql__foot')).toHaveText(`4 entries \u00b7 ${HOST} \u00b7 Stored in this browser`);
-  // No Clear history anywhere: the foot is the count line alone.
+  // There is no Clear history button anywhere. The foot shows only the count line.
   await expect(page.locator('#queryLibraryMenu .qh__clear, #queryLibraryMenu .qh__footBar')).toHaveCount(0);
   await expect(page.locator('#queryLibraryMenu').getByRole('button', { name: /clear/i })).toHaveCount(0);
   await expect(page.locator('#queryLibraryViewHistory .ql__foot button')).toHaveCount(0);
@@ -1743,16 +1792,17 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await expect(ok).toHaveClass(/qhItem--ok/);
   await expect(ok.locator('.qhItem__sql')).toContainText('numbers(7)');
   await expect(ok.locator('.qhItem__rows')).toHaveText('7 rows');
-  // ns.format: "8 ms", "1.23 s"; the time of day is browser-local 24 h.
+  // ns.format shows values such as "8 ms" and "1.23 s". The time of day uses the browser's local
+  // time in 24 h format.
   await expect(ok.locator('.qhItem__elapsed')).toHaveText(/^\d+(\.\d+)? (\u00b5s|ms|s)$/);
   await expect(ok.locator('.qhItem__time')).toHaveText(/^\d\d:\d\d:\d\d$/);
   await expect(ok.locator('.qhItem__time')).toHaveAttribute('title', /^\d{4}-\d\d-\d\dT/);
-  // The rows carry no buttons and no menu: every action is in the preview.
+  // The rows have no buttons and no menu. Every action is in the preview.
   await expectNoItemMenu(page, ok);
 
-  // A click selects a run: the head shows its SQL, then its time and
-  // status; its elapsed time, rows and SQL below, with its tools (Save to
-  // library, Remove) and "Load" alone in the foot.
+  // A click selects a run. The head shows its SQL, then its time and status. Below the head, the
+  // preview shows the elapsed time, the rows and the SQL. The preview has its tools: Save to
+  // library and Remove. The foot has only "Load".
   const pane = preview(page);
   await failed.click();
   await ok.click();
@@ -1766,7 +1816,7 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   expect(shown.Rows).toBe('7');
   await expect(pane.locator('.qlSql')).toContainText('numbers(7)');
   expect(await toolNames(page)).toEqual(['Save to library\u2026']);
-  // History is the browser's record of what ran: no run can be removed, by tool or by key.
+  // History is the browser's record of what ran. No run can be removed, by a tool or by a key.
   await expect(previewTool(page, 'remove')).toHaveCount(0);
   const runs = await page.locator('.qhItem').count();
   await ok.focus();
@@ -1776,16 +1826,16 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   expect((await historyRecords(page)).length).toBeGreaterThanOrEqual(runs);
   await expect(footLabels(page)).toHaveText(['Load']);
   await expect(panel(page)).toBeVisible();
-  // The failed run's preview shows the server error.
+  // The preview of a failed run shows the server error.
   await failed.click();
   await expect(pane.locator('.qlPreview__meta')).toContainText('Failed');
   await expect(pane.locator('.qlPreview__error')).toContainText(/__missing_history_table/);
-  // Arrows move the selection, the preview follows.
+  // The arrow keys move the selection. The preview follows.
   await page.keyboard.press('ArrowDown');
   await expect(ok).toBeFocused();
   await expect(pane.locator('.qlPreview__meta')).toContainText('Succeeded');
 
-  // Copy: the SQL block's own button.
+  // Copy uses the button of the SQL block.
   await captureCopies(page);
   await pane.locator('.qlSql .sqlBlock__copy').click();
   await expect.poll(() => copiedText(page)).toContain('numbers(7)');
@@ -1797,18 +1847,19 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await search.fill('');
   await expect(items).toHaveCount(4);
 
-  // Load: the SQL, no run, the panel closes.
+  // Load loads the SQL only, not the run. The panel closes.
   await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT 0');
   await showPanel(page, 'history');
-  // Load formats a run that was not formatted (an entry of the seed): the editor gets the formatter's text.
+  // Load formats a run that was not formatted. This is an entry of the seed. The editor gets the
+  // formatter's text.
   await items.filter({ hasText: 'older' }).click();
   await previewAction(page, 'load').click();
   await expect(panel(page)).toBeHidden();
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT \'older\' AS `tag`');
   await expect(page.locator('#queryTextArea')).toBeFocused();
 
-  // Save to library from the History preview.
+  // Save to library uses the History preview.
   await showPanel(page, 'history');
   await items.filter({ hasText: 'older' }).click();
   await previewTool(page, 'save').click();
@@ -1816,14 +1867,15 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   expect(await pickerGroups(saveForm(page))).toEqual({ [LOCAL_ROOT]: ['/'] });
   await fillForm(page, { name: 'Older one' });
   await saveForm(page).getByRole('button', { name: 'Save', exact: true }).click();
-  // The dialog's submit is asynchronous (validation, then the adapter's write).
+  // The submit of the dialog is asynchronous. First it validates the input. Then the adapter writes
+  // the query.
   await expect.poll(async () => (await libraryState(page)).queries.map((q) => [q.sql, q.host_id])).toEqual([['SELECT \'older\' AS `tag`', HOST]]);
 
-  // The save ends on Saved, with the new query selected; History is one click away.
+  // The save ends on Saved, and the new query is selected. History is one click away.
   await expect(page.locator('#queryLibraryTabSaved')).toHaveAttribute('aria-selected', 'true');
   await showPanel(page, 'history');
 
-  // No removal: neither the preview nor the Delete key takes a run out of History.
+  // No run is removed. Neither the preview nor the Delete key removes a run from History.
   await items.filter({ hasText: 'oldest' }).click();
   await expect(previewTool(page, 'remove')).toHaveCount(0);
   await items.filter({ hasText: 'older' }).focus();
@@ -1831,7 +1883,7 @@ test('history groups runs by day with status, elapsed time and rows; the preview
   await expect(items.filter({ hasText: 'older' })).toHaveCount(1);
   await expect(items.filter({ hasText: 'oldest' })).toHaveCount(1);
   expect((await historyState(page)).some((h) => h.sql_raw.includes('oldest'))).toBe(true);
-  // Keyboard: Enter moves to the preview's Load.
+  // With the keyboard, Enter moves the focus to the Load button of the preview.
   await items.first().focus();
   await page.keyboard.press('Enter');
   await expect(previewAction(page, 'load')).toBeFocused();
@@ -1863,14 +1915,14 @@ test('per host: the library and the History follow a host switch, live; saves an
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/ran on local/]);
 
-  // Switch the host in the header: the library shows the other host's.
+  // Switch the host in the header. The library then shows the entries of the other host.
   await closePanel(page);
   await pickHost(page, 'other');
   await showPanel(page);
   await expect(node(page, 'Other ops')).toBeVisible();
   await expect(node(page, 'Operations')).toHaveCount(0);
   await expect(footCount(page)).toContainText('2 queries \u00b7 other');
-  // The selection was the other host's: nothing is previewed.
+  // The selection belonged to the other host. Nothing is previewed.
   await expect(preview(page).locator('.qlPreview__empty')).toBeVisible();
   await selectItem(page, 'The answer');
   await expect(preview(page).locator('.qlSql')).toContainText('SELECT 43');
@@ -1878,7 +1930,7 @@ test('per host: the library and the History follow a host switch, live; saves an
   await expect(page.locator('#queryLibraryViewHistory .qhItem')).toHaveText([/ran on other/]);
   await expect(page.locator('#queryLibraryViewHistory .ql__foot')).toContainText('other');
 
-  // A save goes to the selected host; its folders are the only ones offered.
+  // A save goes to the selected host. Only the folders of that host are offered.
   await page.locator('#queryLibraryTabSaved').click();
   await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT \'saved on other\'');
@@ -1891,7 +1943,7 @@ test('per host: the library and the History follow a host switch, live; saves an
   expect(stored.queries.find((q) => q.name === 'Saved on other')).toMatchObject({ host_id: 'other', folder_id: 'f_other' });
   expect(stored.queries.filter((q) => q.host_id === HOST)).toHaveLength(3);
 
-  // Live: a host switch while the dialog is open re-renders it.
+  // A host switch renders the open dialog again.
   await showPanel(page);
   await expect(node(page, 'Other ops')).toBeVisible();
   await page.evaluate((id) => window.ChDash.header.setSelectedHostId(id), HOST);
@@ -1907,10 +1959,10 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   await seed(page, { 'chdash.queryLibrary.v2': LIBRARY });
   await openApp(page);
   const button = page.locator('#queryLibraryButton');
-  // An icon button like Format, between Format and the run settings cog.
+  // This is an icon button like Format. It sits between Format and the run settings cog.
   await expect(button).toHaveAttribute('aria-label', 'Query library');
   await expect(button).toHaveAttribute('aria-haspopup', 'dialog');
-  // The open-book icon (the sprite's book, like the Format icon).
+  // The open-book icon is the sprite's book, like the Format icon.
   await expect(button.locator('.queryLibraryButton__icon')).toBeVisible();
   await expect(button.locator('.queryLibraryButton__icon use')).toHaveAttribute('href', /#i-book$/);
   const toolbar = await page.evaluate(() => {
@@ -1920,10 +1972,11 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
     return { order: f.right <= b.left && b.right <= c.left, sameLine: Math.abs((b.top + b.bottom) / 2 - (f.top + f.bottom) / 2) <= 2, sameStyle: JSON.stringify(style('formatButton')) === JSON.stringify(style('queryLibraryButton')) };
   });
   expect(toolbar).toEqual({ order: true, sameLine: true, sameStyle: true });
-  // Nothing of the dialog exists before it first opens.
+  // No part of the dialog exists before it first opens.
   await expect(panel(page)).toHaveCount(0);
 
-  // The shell of the library and of the profiling dialog, side by side.
+  // This test compares the shell of the library and the shell of the profiling dialog, side by
+  // side.
   const shellOf = (selector) => page.evaluate((sel) => {
     const dialog = document.querySelector(sel);
     const r = dialog.getBoundingClientRect();
@@ -1953,9 +2006,9 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   const library = await shellOf('#queryLibraryMenu');
   expect(library.tag).toBe('DIALOG');
   expect(library.modal).toBe(true);
-  // Saved | History stand in the head where a title would be: no title or
-  // subtitle, the dialog is named by aria-label, the close button stays in
-  // the head, and no tab bar sits under it.
+  // Saved and History are in the head, in the place of a title. The head has no title and no
+  // subtitle. The dialog is named by aria-label. The close button stays in the head. No tab bar is
+  // under the head.
   const head = await page.evaluate(() => {
     const d = document.getElementById('queryLibraryMenu');
     const h = d.querySelector(':scope > .uiDialog__frame > .uiDialog__head');
@@ -1972,17 +2025,17 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   });
   expect(head).toEqual({ label: 'Query library', labelledby: null, titles: 0, tabs: ['Saved', 'History'], tabsBelow: 0, close: true, named: false });
   await expect(page.getByRole('dialog', { name: 'Query library' })).toBeVisible();
-  // The selected tab's underline stands on the head's bottom border.
+  // The underline of the selected tab is on the bottom border of the head.
   const underline = await page.evaluate(() => {
     const h = document.querySelector('#queryLibraryMenu .uiDialog__head').getBoundingClientRect();
     const t = document.getElementById('queryLibraryTabSaved').getBoundingClientRect();
     return Math.round(h.bottom - t.bottom);
   });
   expect(Math.abs(underline)).toBeLessThanOrEqual(1);
-  // Focus moved in (the search), the page behind is inert.
+  // The focus moves into the dialog, to the search field. The page behind the dialog is inert.
   await expect(page.locator('#queryLibraryViewSaved .qlSearch__input')).toBeFocused();
   expect(await page.evaluate(() => document.elementFromPoint(5, 5) === document.getElementById('queryLibraryMenu'))).toBe(true);
-  // Tab cycles inside the dialog (and its browser chrome), never to the page.
+  // Tab cycles inside the dialog and its browser chrome. Tab never moves to the page.
   for (let i = 0; i < 25; i += 1) {
     await page.keyboard.press('Tab');
     expect(await page.evaluate(() => {
@@ -1990,20 +2043,20 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
       return el === document.body || !!el?.closest('#queryLibraryMenu');
     })).toBe(true);
   }
-  // Escape closes it; the focus is back on the book button.
+  // Escape closes the dialog. The focus returns to the book button.
   await page.keyboard.press('Escape');
   await expect(panel(page)).toBeHidden();
   await expect(button).toHaveAttribute('aria-expanded', 'false');
   await expect(button).toBeFocused();
 
-  // A click on the backdrop closes it; so does the close button.
+  // A click on the backdrop closes the dialog. The close button also closes the dialog.
   await button.click();
   await expect(panel(page)).toBeVisible();
   await page.mouse.click(10, page.viewportSize().height - 10);
   await expect(panel(page)).toBeHidden();
   await expect(button).toBeFocused();
   await button.click();
-  // A click inside (and a press that ends outside) keeps it open.
+  // A click inside the dialog keeps it open. A press that ends outside also keeps it open.
   await footCount(page).click();
   const foot = await footCount(page).boundingBox();
   await page.mouse.move(foot.x + 5, foot.y + 5);
@@ -2015,13 +2068,13 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   await expect(panel(page)).toBeHidden();
   await expect(button).toBeFocused();
 
-  // The profiling dialog: the same element, classes, geometry, head, close
-  // button, backdrop and tab style.
+  // The profiling dialog uses the same element, classes, geometry, head, close button, backdrop and
+  // tab style.
   await runSuccessfulQuery(page, 'SELECT count() FROM numbers(1000)', { profiling: true });
   await expect(page.locator('#analysisModal')).toBeVisible({ timeout: 15_000 });
   await settled(page.locator('#analysisModal'));
   const profiling = await shellOf('#analysisModal');
-  // The profiling dialog keeps its title, its tabs under the head.
+  // The profiling dialog keeps its title. Its tabs are under the head.
   await expect(page.locator('#analysisModal .uiDialog__head .uiDialog__title')).toHaveText('Query analysis');
   await expect(page.locator('#analysisModal > .uiDialog__frame > .uiDialog__tabs')).toHaveCount(1);
   await page.keyboard.press('Escape');
@@ -2032,8 +2085,8 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   expect(Math.abs(profilingHead - libraryHead)).toBeLessThanOrEqual(2);
   expect(library.classes).toEqual(['uiDialog', 'uiDialog--lg']);
 
-  // A prompt opened from the library stacks over it: Escape closes the
-  // prompt only, and the focus goes back into the library.
+  // A prompt opened from the library is over the library. Escape closes only the prompt. The focus
+  // returns to the library.
   await button.click();
   await expect(tree(page)).toBeVisible();
   await node(page, 'The answer').locator(':scope > .qlRow').click();
@@ -2046,8 +2099,8 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   await expect(panel(page)).toBeVisible();
   expect(await page.evaluate(() => !!document.activeElement?.closest('#queryLibraryMenu'))).toBe(true);
 
-  // Closed and reopened at once (the browser's "close" event comes a task
-  // later): it stays the top dialog, so its menus and toasts go in it.
+  // The dialog is closed and reopened at once. The browser sends its "close" event one task later.
+  // The dialog stays the top dialog. So its menus and toasts appear in it.
   await page.evaluate(async () => {
     window.ChDash.queryUi.closeQueryLibrary();
     window.ChDash.queryUi.openQueryLibrary();
@@ -2056,7 +2109,8 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   await expect(panel(page)).toBeVisible();
   await expect(button).toHaveAttribute('aria-expanded', 'true');
   expect(await page.evaluate(() => window.ChDash.dialog.host().id)).toBe('queryLibraryMenu');
-  // Edit... is the form of the pane, not a prompt: the library stays the one dialog, and Escape drops the form only.
+  // Edit... is the form of the pane, not a prompt. The library stays the only dialog. Escape
+  // removes the form only.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await previewTool(page, 'edit').click();
   await expect(saveForm(page)).toBeVisible();
@@ -2076,7 +2130,8 @@ test('the library opens in the profiling dialog: same shell, size and tabs, the 
   await expect(page.locator('#queryLibraryViewHistory')).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // The editor / results split is remembered across sessions (localStorage).
+  // The split between the editor and the results is remembered across sessions. It uses
+  // localStorage.
   const handle = page.locator('.editorResizeHandle');
   const grip = await handle.boundingBox();
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
@@ -2105,11 +2160,13 @@ test('a long query in a preview (Saved or History) scrolls inside its block, bot
   await openLibrary(page);
   const block = preview(page).locator('.qlSql .sqlBlock__body');
   const scrolls = async () => {
-    // The block of the pane is drawn (a click on a History row shows its preview a frame later, and a busy host a few more).
+    // The block of the pane is drawn. A click on a History row shows the preview one frame later. A
+    // busy host takes a few more frames.
     await expect(block).toBeVisible();
     await expect.poll(() => block.evaluate((el) => el.scrollHeight)).toBeGreaterThan(0);
     const before = await block.evaluate((el) => ({ client: [el.clientWidth, el.clientHeight], scroll: [el.scrollWidth, el.scrollHeight] }));
-    // The block fits in the pane (it does not push the pane's content out) and has more to show.
+    // The block fits in the pane. It does not push the content of the pane out. It has more content
+    // to show.
     expect(before.scroll[1]).toBeGreaterThan(before.client[1] * 2);
     expect(before.scroll[0]).toBeGreaterThan(before.client[0]); // the line numbers keep each line on one row
     const box = await preview(page).locator('.qlSql').boundingBox();
@@ -2123,18 +2180,18 @@ test('a long query in a preview (Saved or History) scrolls inside its block, bot
   };
   await selectItem(page, 'Long one');
   await scrolls();
-  // The copy button sits left of the body's scrollbar, not over it.
+  // The copy button sits left of the scrollbar of the body. It does not sit over the scrollbar.
   const clear = await preview(page).locator('.qlSql').evaluate((el) => {
     const body = el.querySelector('.sqlBlock__body').getBoundingClientRect();
     const bar = el.querySelector('.sqlBlock__body').offsetWidth - el.querySelector('.sqlBlock__body').clientWidth;
     return { bar, gap: body.right - bar - el.querySelector('.sqlBlock__copy').getBoundingClientRect().right };
   });
   expect(clear.gap).toBeGreaterThanOrEqual(0);
-  // A short query is as tall as its line: the block is not stretched to the pane.
+  // A short query is as tall as its line. The block is not stretched to the pane.
   await selectItem(page, 'Short one');
   expect(await block.evaluate((el) => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1);
   expect((await preview(page).locator('.qlSql').boundingBox()).height).toBeLessThan(80);
-  // The History's preview is the same block.
+  // The preview of History is the same block.
   await page.locator('#queryLibraryTabHistory').click();
   await page.locator('#queryLibraryViewHistory .qhItem').first().click();
   await scrolls();
@@ -2142,12 +2199,15 @@ test('a long query in a preview (Saved or History) scrolls inside its block, bot
 
 // --- Server storage (mocked API) ----------------------------------------------
 
-// An in-memory /api/query-library: per-host reads (host_id required),
-// writes stamped with their host, revision, If-Match conflicts, read-only,
-// the import's copy mode (a folder moved in from the browser's root). It has
-// no history route: the History is the browser's.
-// What GET /api/query-library answers (src/query_library_read.cpp): the children of a folder, folders first then queries by name, as many
-// levels deep as fit in `limit` items, the minimal data of each; a first level larger than a page comes in windows (`cursor`).
+// This is an in-memory /api/query-library. Reads are per host, and they need host_id. Writes are
+// stamped with their host and a revision. The server reports If-Match conflicts. It supports
+// read-only mode and the copy mode of the import. In copy mode, a folder moves in from the
+// browser's root. The server has no history route. The History belongs to the browser.
+//
+// GET /api/query-library answers with the children of a folder (src/query_library_read.cpp).
+// Folders come first, then queries by name. The answer has as many levels as fit within `limit`
+// items. Each item has the minimal data. A first level that is larger than a page is sent in
+// windows (`cursor`).
 function pageOf(server, host, parentId, cursor, limit) {
   const byName = (a, b) => (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : a.id < b.id ? -1 : 1);
   const folders = server.folders.filter((f) => f.host_id === host);
@@ -2199,9 +2259,11 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
     queries: structuredClone(library.queries),
     requests: [],
     conflicts,
-    // Another client's change at the moment of a conflict: onConflict(server) edits the library.
+    // Another client makes a change at the moment of a conflict. The onConflict(server) function
+    // edits the library.
     onConflict: null,
-    // The next GETs of the library fail (a dropped connection after a change went through).
+    // The next GET requests for the library fail. This simulates a dropped connection after a
+    // change went through.
     failNextGet: 0,
   };
   let seq = 0;
@@ -2236,7 +2298,8 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
         ...pageOf(server, host, parent, Number(url.searchParams.get('cursor')) || 0, Math.min(100, Number(url.searchParams.get('limit')) || 100)),
       });
     }
-    // One query, whole; a search; the export of a folder or of the host: the reads that the page makes when it needs more than a page.
+    // One whole query is read. A search is one read. An export of a folder, or of the host, is also
+    // one read. The page makes these reads when it needs more than one page.
     const wantedQuery = method === 'GET' ? /^\/queries\/([^/?]+)$/.exec(path) : null;
     if (wantedQuery) {
       const found = server.queries.find((q) => q.id === decodeURIComponent(wantedQuery[1]) && q.host_id === host);
@@ -2262,7 +2325,7 @@ async function mockServerLibrary(page, { writable = true, conflicts = 0, library
         queries: server.queries.filter((q) => q.host_id === host && (!root || (q.folder_id && keep.has(q.folder_id)))),
       });
     }
-    // The server has no history: a page asking for one is a bug.
+    // The server has no history. A page that asks for history has a bug.
     if (path.startsWith('/history')) return json(route, 404, { error: 'not_found', error_code: 'not_found', message: 'no such route' });
     if (!writable) return json(route, 403, { error: 'read_only', error_code: 'read_only', message: 'the query library is read-only' });
     if (headers['if-match'] && Number(headers['if-match']) !== server.revision) {
@@ -2359,24 +2422,25 @@ test('server storage enabled: two roots, Shared server storage then Local browse
   await expect(roots.nth(0).locator(':scope > .qlRow .qlIcon use')).toHaveAttribute('href', /#i-database$/);
   await expect(roots.nth(1).locator(':scope > .qlRow .qlIcon use')).toHaveAttribute('href', /#i-device-desktop$/);
   expect(await page.evaluate(() => window.ChDash.queryLibrary.roots)).toEqual(['server', 'local']);
-  // Both open: the server's folders and queries, and the browser's.
+  // Both roots are open. The tree shows the server's folders and queries, and the browser's folders
+  // and queries.
   await expect(node(page, 'Operations')).toHaveAttribute('aria-level', '2');
   await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
   await expect(node(page, 'Mine')).toHaveAttribute('aria-level', '2');
   await expect(node(page, 'The answer')).toHaveAttribute('data-store', 'server');
   await expect(node(page, 'Mine')).toHaveAttribute('data-store', 'local');
-  // Each root counts its queries; the foot counts both.
+  // Each root counts its queries. The foot counts both roots.
   await expect(roots.nth(0).locator(':scope > .qlRow .qlRow__count')).toHaveText('3 queries');
   await expect(roots.nth(1).locator(':scope > .qlRow .qlRow__count')).toHaveText('1 query');
   await expect(footCount(page)).toHaveText(`4 queries · ${HOST}`);
-  // A root's preview: what it is, its contents, New folder as its one tool.
+  // The preview of a root shows what the root is, and its contents. New folder is the only tool.
   await selectItem(page, SERVER_ROOT);
   await expect(preview(page).locator('.qlPreview__description')).toContainText('Shared by everyone');
   await expect(preview(page).locator('.qlPreview__meta')).toHaveText('3 queries · 3 subfolders');
   expect(await toolNames(page)).toEqual(['New folder']);
   await selectItem(page, LOCAL_ROOT);
   await expect(preview(page).locator('.qlPreview__description')).toContainText('Only this browser');
-  // A root closes and opens; its state is remembered.
+  // A root closes and opens. Its state is remembered.
   await node(page, SERVER_ROOT).locator(':scope > .qlRow .qlRow__twisty').click();
   await expect(node(page, SERVER_ROOT)).toHaveAttribute('aria-expanded', 'false');
   await expect(node(page, 'Operations')).toHaveCount(0);
@@ -2385,7 +2449,7 @@ test('server storage enabled: two roots, Shared server storage then Local browse
   await expect(node(page, SERVER_ROOT)).toHaveAttribute('aria-expanded', 'false');
   await node(page, SERVER_ROOT).locator(':scope > .qlRow .qlRow__twisty').click();
   await expect(node(page, 'Operations')).toBeVisible();
-  // The save picker: both roots, each with its folders; the server's first.
+  // The save picker shows both roots, each with its folders. The server's root comes first.
   await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT 2 AS two');
   await page.locator('#queryTextArea').press('Control+s');
@@ -2393,13 +2457,13 @@ test('server storage enabled: two roots, Shared server storage then Local browse
     [SERVER_ROOT]: ['/', '/Operations', '/Operations/Merges', '/Reports'],
     [LOCAL_ROOT]: ['/'],
   });
-  // Into the browser's root.
+  // This test saves into the browser's root.
   await fillForm(page, { name: 'Two' });
   await pickPlace(saveForm(page), 'local:');
   await saveForm(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
   expect((await libraryState(page)).queries.map((q) => q.name).sort()).toEqual(['Mine', 'Two']);
-  // A search covers both roots, each result names its root.
+  // A search covers both roots. Each result names its root.
   await showPanel(page);
   await page.locator('#queryLibraryViewSaved .qlSearch__input').fill('SELECT');
   await expect(tree(page).locator('.qlRow__path')).toContainText([`${SERVER_ROOT} /Operations`]);
@@ -2424,7 +2488,7 @@ test('a move between the roots copies into the target, then removes from the sou
   });
   await openLibrary(page);
 
-  // A query, browser -> server, from Move to...: the picker shows both roots.
+  // A query moves from the browser to the server, with Move to... . The picker shows both roots.
   await selectItem(page, 'Mine');
   await previewTool(page, 'move').click();
   expect(await pickerGroups(dialog(page))).toEqual({ [SERVER_ROOT]: ['/', '/Operations', '/Operations/Merges', '/Reports'], [LOCAL_ROOT]: ['/', '/Local folder', '/Local folder/Sub'] });
@@ -2439,7 +2503,7 @@ test('a move between the roots copies into the target, then removes from the sou
   await expect(node(page, 'Mine')).toHaveAttribute('aria-level', '3');
   await expect(node(page, 'Mine')).toHaveAttribute('aria-selected', 'true');
 
-  // A query, server -> browser, by drag and drop onto the browser's root.
+  // A query moves from the server to the browser. This is a drag and drop onto the browser's root.
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, LOCAL_ROOT).locator(':scope > .qlRow'));
   await expect(page.locator('.qlToast')).toContainText(`Moved to ${LOCAL_ROOT} /.`);
   expect(server.queries.find((q) => q.id === 'q_answer')).toBeUndefined();
@@ -2447,8 +2511,8 @@ test('a move between the roots copies into the target, then removes from the sou
   expect((await libraryState(page)).queries.find((q) => q.name === 'The answer')).toMatchObject({ folder_id: null, sql: 'SELECT 42 AS answer', host_id: HOST });
   await expect(node(page, 'The answer')).toHaveAttribute('data-store', 'local');
 
-  // A folder with everything in it, browser -> server: one copy request
-  // (POST /import, copy mode) under the target folder, then the browser's goes.
+  // A folder with everything in it moves from the browser to the server. The page sends one copy
+  // request (POST /import, copy mode) under the target folder. Then the browser's copy is removed.
   await selectItem(page, 'Local folder');
   await previewTool(page, 'move').click();
   await pickPlace(dialog(page), '/Reports');
@@ -2467,7 +2531,8 @@ test('a move between the roots copies into the target, then removes from the sou
   expect((await libraryState(page)).folders).toEqual([]);
   await expect(node(page, 'Local folder')).toHaveAttribute('data-store', 'server');
 
-  // A folder, server -> browser (Operations, with Merges and two queries).
+  // A folder moves from the server to the browser. The folder is Operations, with Merges and two
+  // queries.
   await selectItem(page, 'Operations');
   await previewTool(page, 'move').click();
   await pickPlace(dialog(page), 'local:');
@@ -2482,7 +2547,7 @@ test('a move between the roots copies into the target, then removes from the sou
   expect(local.queries.filter((q) => q.name === 'Active parts' || q.name === 'Running merges' || q.name === 'Mine')).toHaveLength(3);
   expect(server.folders.map((f) => f.name).sort()).toEqual(['Local folder', 'Reports', 'Sub']);
 
-  // A clash in the target is refused in the dialog; nothing is copied or removed.
+  // The dialog refuses a name clash in the target. Nothing is copied or removed.
   await selectItem(page, SERVER_ROOT);
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
   await newFolderInput(page).fill('Operations');
@@ -2502,7 +2567,8 @@ test('a move between the roots copies into the target, then removes from the sou
 
 test('server storage: a conflict does not replay an edit of an item that someone else changed meanwhile (ARCH-F-085)', async ({ page }) => {
   const server = await mockServerLibrary(page, { writable: true, conflicts: 1 });
-  // At the moment of the conflict another client renames the very query that this page is about to rename.
+  // At the moment of the conflict, another client renames the same query. This page is about to
+  // rename that query too.
   server.onConflict = (state) => {
     const query = state.queries.find((q) => q.id === 'q_answer');
     query.name = 'Their name';
@@ -2516,7 +2582,8 @@ test('server storage: a conflict does not replay an edit of an item that someone
   await saveForm(page).getByRole('button', { name: /save/i }).click();
   await expect(saveForm(page).locator('.qlPaneForm__error')).toContainText('changed by someone else');
   await page.keyboard.press('Escape');
-  // One PATCH, no replay: the other client's name is still the server's.
+  // The page sends one PATCH. It does not replay the request. The name of the other client stays on
+  // the server.
   expect(server.requests.filter((r) => r.method === 'PATCH')).toHaveLength(1);
   expect(server.queries.find((q) => q.id === 'q_answer').name).toBe('Their name');
 });
@@ -2530,7 +2597,8 @@ test('server storage: a change that went through is not announced as failed when
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
   await newFolderInput(page).fill('Reloaded later');
   await page.keyboard.press('Enter');
-  // The folder exists on the server and shows once the library is read again; nothing says the change failed.
+  // The folder exists on the server. It shows after the library is read again. Nothing tells the
+  // user that the change failed.
   await expect(node(page, 'Reloaded later')).toBeVisible({ timeout: 10_000 });
   await expect(page.locator('.qlToast--error')).toHaveCount(0);
   await expect(page.locator('#queryLibraryViewSaved .qlRow__error')).toHaveCount(0);
@@ -2555,8 +2623,8 @@ test('server storage: changes go through the API with If-Match; a conflict reloa
   // Every read names the host.
   expect(server.requests.filter((r) => r.method === 'GET').every((r) => new URL(`http://x${r.path}`).searchParams.get('host_id') === HOST)).toBe(true);
 
-  // Create (into the server's root, the default): the first attempt
-  // conflicts, the library is reloaded, the retry wins.
+  // Create a query in the server's root, which is the default. The first attempt conflicts. The
+  // library is reloaded. The retry is accepted.
   await selectItem(page, SERVER_ROOT);
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
   await newFolderInput(page).fill('Shared');
@@ -2569,7 +2637,7 @@ test('server storage: changes go through the API with If-Match; a conflict reloa
   expect(writes.every((r) => r.contentType === 'application/json')).toBe(true);
   expect(writes[1].body).toEqual({ host_id: HOST, parent_id: null, name: 'Shared' });
 
-  // A server validation error (duplicate name) is shown in the row.
+  // The row shows a server validation error for a duplicate name.
   await selectItem(page, SERVER_ROOT);
   await page.locator('#queryLibraryViewSaved [data-action="new-folder"]').click();
   await newFolderInput(page).fill('shared');
@@ -2578,19 +2646,19 @@ test('server storage: changes go through the API with If-Match; a conflict reloa
   await page.keyboard.press('Escape');
   await expect(newFolderInput(page)).toHaveCount(0);
 
-  // Two conflicts in a row: the user is told and the library is reloaded.
+  // Two conflicts in a row. The user sees a message, and the library is reloaded.
   server.conflicts = 2;
   await selectItem(page, 'The answer');
   await previewTool(page, 'move').click();
   await pickPlace(dialog(page), '/Shared');
   await dialog(page).getByRole('button', { name: 'Move' }).click();
-  // The dialog says so (the library was reloaded); Escape gives up.
+  // The dialog says that the library was reloaded. Escape stops the action.
   await expect(dialog(page).locator('.uiDialog__error')).toContainText('changed by someone else');
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toHaveCount(0);
   await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '2');
 
-  // Moving and recursive remove through the API.
+  // The move and the recursive remove use the API.
   await expect(panel(page)).toBeVisible();
   await node(page, 'The answer').locator(':scope > .qlRow').dragTo(node(page, 'Shared').locator(':scope > .qlRow'));
   await expect(node(page, 'The answer')).toHaveAttribute('aria-level', '3');
@@ -2600,7 +2668,7 @@ test('server storage: changes go through the API with If-Match; a conflict reloa
   await dialog(page).getByRole('button', { name: 'Remove all' }).click();
   await expect(node(page, 'Operations')).toHaveCount(0);
   expect(server.requests.some((r) => r.method === 'DELETE' && r.path === '/folders/f_ops?recursive=1')).toBe(true);
-  // A saved query is stamped with the host.
+  // A saved query is stamped with its host.
   await closePanel(page);
   await page.locator('#queryTextArea').fill('SELECT 7 AS seven');
   await page.locator('#queryTextArea').press('Control+s');
@@ -2647,8 +2715,8 @@ test('server storage: a host switch reloads both roots and the browser History f
   expect(reads.at(-1)).toBe('other');
   expect(reads).toContain(HOST);
 
-  // A move the server refuses (the folder moved to another host behind this
-  // page's back: 400 host_mismatch) is told, and nothing moves.
+  // The server refuses a move when the folder moved to another host. This happens behind the page's
+  // back: 400 host_mismatch. The page tells the user, and nothing moves.
   await page.locator('#queryLibraryTabSaved').click();
   await page.evaluate((id) => window.ChDash.header.setSelectedHostId(id), HOST);
   await expect(node(page, 'Operations')).toBeVisible();
@@ -2680,7 +2748,7 @@ test('server storage: the History stays in the browser, whatever the server root
   await page.keyboard.press('Delete');
   await expect(items).toHaveCount(2);
   expect((await historyState(page)).some((h) => h.sql_raw.includes('earlier'))).toBe(true);
-  // Not one request about the History reached the server.
+  // No request about the History reached the server.
   expect(server.requests.filter((r) => r.path.startsWith('/history'))).toEqual([]);
 });
 
@@ -2692,17 +2760,17 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   await expect(serverRoot.locator(':scope > .qlRow .qlBadge--readonly')).toHaveText('Read-only');
   await expect(serverRoot.locator(':scope > .qlRow .qlBadge--readonly use')).toHaveAttribute('href', /#i-lock$/);
   await expect(node(page, LOCAL_ROOT).locator('.qlBadge--readonly')).toHaveCount(0);
-  // The list's New folder and Save act on the browser's root.
+  // New folder and Save in the list act on the browser's root.
   await expect(page.locator('#queryLibraryViewSaved .ql__actions')).toBeVisible();
-  // Nothing of the server's root drags; the browser's does.
+  // Nothing in the server's root can be dragged. Items in the browser's root can be dragged.
   await expect(tree(page).locator('li[data-store="server"][draggable="true"]')).toHaveCount(0);
   await expect(node(page, 'Mine')).toHaveAttribute('draggable', 'true');
-  // The server's menu only lists what a read-only item can do.
+  // The menu of the server only lists the actions that a read-only item allows.
   await openRowMenu(page, 'The answer');
   expect(await menuLabels(page)).toEqual(['Load']);
   await page.keyboard.press('Escape');
 
-  // The server's items and root: no tools; a query keeps Load.
+  // The items and the root of the server have no tools. A query keeps Load.
   await node(page, 'The answer').locator(':scope > .qlRow').click();
   await expect(preview(page).locator('.qlPreview__tools')).toHaveCount(0);
   await expect(footLabels(page)).toHaveText(['Load']);
@@ -2711,7 +2779,8 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   await selectItem(page, SERVER_ROOT);
   await expect(preview(page).locator('.qlPreview__tools')).toHaveCount(0);
   await expect(preview(page).locator('.qlPreview__meta')).toContainText('Read-only');
-  // The browser's query keeps its tools; its Move picker offers the server root disabled.
+  // The query of the browser keeps its tools. Its Move picker shows the server root, but the root
+  // is disabled.
   await selectItem(page, 'Mine');
   expect(await toolNames(page)).toEqual(['Edit', 'Move to…', 'Remove']);
   await previewTool(page, 'move').click();
@@ -2723,7 +2792,7 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   await previewAction(page, 'load').click();
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
 
-  // Editing shortcuts on a server item are inert; no drop into the server root.
+  // The edit shortcuts do nothing on a server item. No item can be dropped into the server root.
   await showPanel(page);
   await node(page, 'The answer').focus();
   await page.keyboard.press('Delete');
@@ -2733,7 +2802,7 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   await expect(saveForm(page)).toHaveCount(0);
   await node(page, 'Mine').locator(':scope > .qlRow').dragTo(node(page, 'Reports').locator(':scope > .qlRow'));
   await expect(node(page, 'Mine')).toHaveAttribute('data-store', 'local');
-  // Ctrl+S saves into the browser's root (the server's group is disabled).
+  // Ctrl+S saves into the browser's root. The server group is disabled.
   await page.keyboard.press('Escape');
   await page.locator('#queryTextArea').press('Control+s');
   await expect(folderField(page)).toHaveAttribute('data-value', 'local:');
@@ -2743,10 +2812,12 @@ test('a read-only server root: shown with its badge and no edit tools; the brows
   await saveForm(page).getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('.qlToast')).toContainText('Query saved');
   expect((await libraryState(page)).queries.map((q) => q.name).sort()).toEqual(['Mine', 'Mine too']);
-  // The library stays open on the saved query; the editor behind it is inert until it closes.
+  // The library stays open on the saved query. The editor behind it is inert until the library
+  // closes.
   await closePanel(page);
 
-  // History: Save to library (into the browser's root) and Remove (the History is the browser's, whatever the server root).
+  // History has Save to library, which saves into the browser's root. History also has Remove. The
+  // History is the browser's, whatever the server root is.
   await runSuccessfulQuery(page, 'SELECT 5 AS five');
   await showPanel(page, 'history');
   await expect(page.locator('#queryLibraryViewHistory .qhItem').first()).toBeVisible();
@@ -2768,7 +2839,8 @@ test('Save with a read-only server root: its group is off, its rows in the tree 
   await openPicker(saveForm(page));
   await expect(folderField(page).locator('[role="treeitem"][data-key="server:"] .qlPicker__lock')).toBeVisible();
   await expect(folderField(page).locator('[role="treeitem"][data-key="server:"]')).toHaveAttribute('aria-disabled', 'true');
-  // The server's root, folders and queries are in the tree, but a click on them does not make them the Folder.
+  // The server's root, its folders and its queries are in the tree. A click on them does not make
+  // them the Folder.
   await expandFolder(page, SERVER_ROOT);
   await expect(folderField(page)).toHaveAttribute('data-value', 'local:');
   await node(page, 'The answer').locator(':scope > .qlRow').click();
@@ -2792,7 +2864,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     const button = page.locator('#queryLibraryButton');
     await expect(button).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    // Toolbar controls stay clickable (none hides under the metrics).
+    // Toolbar controls stay clickable. None of them hides under the metrics.
     await runSuccessfulQuery(page, 'SELECT number, toString(number) AS label FROM numbers(5)');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await button.click();
@@ -2800,17 +2872,17 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await expect(tree(page)).toBeVisible();
     const box = await settled(panel(page));
     expect([Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height)]).toEqual([0, 0, 390, 844]);
-    // The first step is the list alone: no preview pane beside it.
+    // The first step shows the list only. There is no preview pane beside it.
     await expect(preview(page)).toBeHidden();
     expect(Math.round((await page.locator('#queryLibraryViewSaved').boundingBox()).width)).toBe(390);
-    // Saving is the editor's button: the list has no Save in its foot, New folder is in the head.
+    // Use the editor button to save. The list has no Save in its foot. New folder is in the
+    // head.
     await expect(page.locator('#queryLibraryViewSaved [data-action="save"]')).toHaveCount(0);
     await expect(page.locator('#queryLibraryViewSaved [data-action="new-folder"]')).toBeVisible();
     await expect(page.locator('#queryLibraryViewSaved .qlRow__meta').first()).toBeHidden();
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-library-${scheme}.png` });
-    // A tap shows the query's preview in place of the list, with a Back
-    // button and every action; the focus is on Load. Nothing is
-    // loaded yet.
+    // A tap shows the preview of the query in place of the list. The preview has a Back button and
+    // every action. The focus is on Load. Nothing is loaded yet.
     await node(page, 'The answer').locator(':scope > .qlRow').click();
     await expect(preview(page)).toBeVisible();
     await expect(page.locator('#queryLibraryViewSaved')).toBeHidden();
@@ -2821,8 +2893,8 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await expect(footLabels(page)).toHaveText(['Load']);
     expect(Math.round((await preview(page).boundingBox()).width)).toBe(390);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    // Every button of the pane is inside it; the title keeps its line with
-    // Back and the tools, the meta goes under it.
+    // Every button of the pane is inside the pane. The title stays on its line, with Back and the
+    // tools. The meta goes under the title.
     await settled(panel(page));
     const fit = await page.evaluate(() => {
       const pane = document.getElementById('queryLibraryPreview').getBoundingClientRect();
@@ -2837,7 +2909,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     });
     expect(fit).toEqual({ inside: true, titleWhole: true, metaUnder: true });
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-library-preview-${scheme}.png` });
-    // A prompt is a bottom sheet over it.
+    // A prompt is a bottom sheet over the dialog.
     await previewTool(page, 'move').click();
     const sheet = await settled(dialog(page));
     expect([Math.round(sheet.x), Math.round(sheet.width), Math.round(sheet.y + sheet.height)]).toEqual([0, 390, 844]);
@@ -2845,7 +2917,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await page.keyboard.press('Escape');
     await expect(dialog(page)).toHaveCount(0);
     await expect(preview(page)).toBeVisible();
-    // Back (and Escape) return to the list, on the item; the dialog stays.
+    // Back and Escape return to the list, on the same item. The dialog stays open.
     await preview(page).locator('.qlPreview__back').click();
     await expect(preview(page)).toBeHidden();
     await expect(node(page, 'The answer')).toBeFocused();
@@ -2855,8 +2927,8 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await expect(preview(page)).toBeHidden();
     await expect(panel(page)).toBeVisible();
     await expect(node(page, 'The answer')).toBeFocused();
-    // A folder: the twisty opens or closes it, its name opens its preview
-    // (its tools). (The expanded folders are remembered across the loop.)
+    // A folder has a twisty. The twisty opens or closes the folder. Its name opens the preview of
+    // the folder, with its tools. The expanded folders are remembered across the loop.
     const expanded = await node(page, 'Operations').getAttribute('aria-expanded');
     await node(page, 'Operations').locator(':scope > .qlRow .qlRow__twisty').click();
     await expect(node(page, 'Operations')).toHaveAttribute('aria-expanded', expanded === 'true' ? 'false' : 'true');
@@ -2874,7 +2946,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await previewAction(page, 'load').click();
     await expect(panel(page)).toBeHidden();
     await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 42 AS answer');
-    // History: the same two steps; the dialog reopens on the list.
+    // History uses the same two steps. The dialog reopens on the list.
     await button.click();
     await expect(panel(page)).toBeVisible();
     await page.locator('#queryLibraryTabHistory').click();
@@ -2892,7 +2964,7 @@ test('phone: the library and profiling dialogs are full-screen, the list and the
     await expect(panel(page)).toBeHidden();
     const background = await panel(page).evaluate((el) => getComputedStyle(el).backgroundColor);
     expect(background).toMatch(scheme === 'dark' ? /rgba?\((1[0-9]|[0-9]|2[0-9]), / : /rgba?\(255, 255, 255/);
-    // Profiling: the same full-screen dialog.
+    // The profiling dialog is the same full-screen dialog.
     await runSuccessfulQuery(page, 'SELECT count() FROM numbers(10)', { profiling: true });
     await expect(page.locator('#analysisModal')).toBeVisible({ timeout: 15_000 });
     const analysis = await settled(page.locator('#analysisModal'));
@@ -2915,7 +2987,7 @@ test.describe('touch', () => {
   const sizes = await preview(page).locator('.qlPreview__tools button, .qlPreview__back').evaluateAll((els) => els.map((el) => [Math.round(el.getBoundingClientRect().width), Math.round(el.getBoundingClientRect().height)]));
   expect(sizes.length).toBe(4);
   for (const [w, h] of sizes) expect([w, h]).toEqual([40, 40]);
-  // The list's menu button is there without a hover, --hit square.
+  // The menu button of the list is there without a hover. Its size is --hit square.
   await preview(page).locator('.qlPreview__back').click();
   const menu = node(page, 'The answer').locator(':scope > .qlRow > .qlRow__menu');
   expect(await menu.evaluate((el) => [Math.round(el.getBoundingClientRect().width), Math.round(el.getBoundingClientRect().height), getComputedStyle(el).opacity])).toEqual([40, 40, '1']);
@@ -2932,7 +3004,8 @@ test('phone: the save form is the pane step (Back keeps it, a tapped folder is t
     await page.locator('#queryLibraryButton').click();
     await expect(tree(page)).toBeVisible();
     await clickSave(page);
-    // The pane replaces the list, the form fits it, Name has the focus, and it is the only dialog.
+    // The pane replaces the list. The form fits the pane. The Name field has the focus. It is the
+    // only dialog.
     await expect(saveForm(page)).toBeVisible();
     await expect(page.locator('#queryLibraryViewSaved')).toBeHidden();
     await expect(openDialogs(page)).toHaveCount(1);
@@ -2953,16 +3026,17 @@ test('phone: the save form is the pane step (Back keeps it, a tapped folder is t
     });
     expect(fit).toEqual({ page: 390, formWhole: true, inside: true, paneWidth: 390 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    // The buttons are reachable by touch size.
+    // The buttons have a size that is easy to touch.
     for (const label of ['Cancel', 'Save']) expect((await formButton(page, label).boundingBox()).height).toBeGreaterThanOrEqual(36);
     await page.screenshot({ path: `${shotsDir}/${testInfo.project.name}-phone-save-form-${scheme}.png` });
-    // Back: the list, the form kept; the editor's Save brings it back as it was.
+    // Back shows the list, and the form stays. The Save button of the editor shows the form again,
+    // as it was.
     await saveForm(page).locator('.qlPreview__back').click();
     await expect(preview(page)).toBeHidden();
     await clickSave(page);
     await expect(saveForm(page).locator('[name="name"]')).toHaveValue(`Phone ${scheme}`);
     await expect(saveForm(page).locator('[name="description"]')).toHaveValue('Typed on a phone');
-    // A folder tapped in the list is the Folder, and the form is back.
+    // A folder tapped in the list becomes the Folder. The form is shown again.
     await saveForm(page).locator('.qlPreview__back').click();
     await node(page, 'Reports').locator(':scope > .qlRow .qlRow__name').click();
     await expect(saveForm(page)).toBeVisible();
@@ -2970,14 +3044,14 @@ test('phone: the save form is the pane step (Back keeps it, a tapped folder is t
     await expect(saveForm(page).locator('[name="name"]')).toHaveValue(`Phone ${scheme}`);
     await formButton(page, 'Save').click();
     await expect(page.locator('.qlToast')).toContainText('Query saved.');
-    // The preview of the new query is the next step, its Load has the focus.
+    // The preview of the new query is the next step. Its Load button has the focus.
     await expect(saveForm(page)).toHaveCount(0);
     await expect(preview(page)).toBeVisible();
     await expect(preview(page).locator('.qlPreview__title')).toHaveText(`Phone ${scheme}`);
     await expect(previewAction(page, 'load')).toBeFocused();
     await preview(page).locator('.qlPreview__back').click();
     await expect(node(page, `Phone ${scheme}`)).toHaveAttribute('aria-level', '3');
-    // Escape and Cancel drop the form and show the list, the focus in it.
+    // Escape and Cancel remove the form and show the list. The focus is in the list.
     await clickSave(page);
     await expect(saveForm(page)).toBeVisible();
     await page.keyboard.press('Escape');
@@ -2992,7 +3066,7 @@ test('phone: the save form is the pane step (Back keeps it, a tapped folder is t
     await page.keyboard.press('Escape');
     await expect(panel(page)).toBeHidden();
   }
-  // A tablet (the two columns): the form is the right pane and fits it.
+  // A tablet shows two columns. The form is the right pane, and it fits the pane.
   await page.setViewportSize({ width: 820, height: 1000 });
   await page.locator('#queryLibraryButton').click();
   await expect(tree(page)).toBeVisible();
@@ -3077,7 +3151,7 @@ test('several server libraries: one named root each (the first is the default), 
     const writable = name === 'default';
     const wanted = /\/queries\/([^/?]+)$/.exec(url.pathname);
     if (wanted) {
-      // One query, whole: the page reads it when it is opened.
+      // The page reads one whole query when the query is opened.
       const found = (content[name] || []).find((q) => q.id === decodeURIComponent(wanted[1]));
       return route.fulfill({ status: found ? 200 : 404, contentType: 'application/json', body: JSON.stringify(found ? { ...found, revision: 1, ancestors: [], path: '/' } : { error: 'not_found', error_code: 'not_found', message: 'no such query' }) });
     }
@@ -3101,16 +3175,17 @@ test('several server libraries: one named root each (the first is the default), 
   await expect(roots.nth(1)).toHaveAttribute('data-store', 'server~runbooks');
   await expect(roots.nth(2)).toHaveAttribute('data-store', 'local');
   expect(await page.evaluate(() => window.ChDash.queryLibrary.roots)).toEqual(['server', 'server~runbooks', 'local']);
-  // Both server roots have the database icon; only the read-only one says so.
+  // Both server roots have the database icon. Only the read-only root says that it is read-only.
   await expect(roots.nth(0).locator(':scope > .qlRow .qlIcon--server use')).toHaveAttribute('href', /#i-database$/);
   await expect(roots.nth(1).locator(':scope > .qlRow .qlIcon--server use')).toHaveAttribute('href', /#i-database$/);
   await expect(roots.nth(0).locator(':scope > .qlRow .qlBadge--readonly')).toHaveCount(0);
   await expect(roots.nth(1).locator(':scope > .qlRow .qlBadge--readonly')).toHaveCount(1);
-  // Each library was read by its own name.
+  // Each library is read by its own name.
   expect(requests.some((r) => r.includes('library=runbooks'))).toBe(true);
   expect(requests.some((r) => r.includes('library=default'))).toBe(true);
 
-  // The read-only library: its preview has no New folder, its query has no Edit, Move or Remove; the writable one has.
+  // The read-only library has no New folder in its preview. Its query has no Edit, Move, or Remove.
+  // The writable library has these actions.
   await selectItem(page, 'runbooks');
   expect(await toolNames(page)).toEqual([]);
   await expect(preview(page).locator('.qlPreview__meta')).toContainText('Read-only');
@@ -3119,7 +3194,7 @@ test('several server libraries: one named root each (the first is the default), 
   await selectItem(page, 'default');
   expect(await toolNames(page)).toEqual(['New folder']);
 
-  // A query of a read-only library loads into the editor like any other.
+  // A query of a read-only library loads into the editor, like any other query.
   await loadSaved(page, 'Runbook one');
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 2 AS runbook');
 });
@@ -3135,7 +3210,8 @@ test('a level that is larger than a page comes in windows of 100: the next one i
   const server = await mockServerLibrary(page, { writable: true, library: { folders: [], queries } });
   await seed(page, { 'chdash.queryLibrary.v2': emptyLocal });
   await openLibrary(page);
-  // The storage says how many it holds (250), and shows the first 100: its page carries no SQL and no description.
+  // The storage shows how many queries it holds (250). It shows the first 100. Its page has no SQL
+  // and no description.
   await expect(node(page, SERVER_ROOT).locator(':scope > .qlRow .qlRow__count')).toHaveText('250 queries');
   await expect(serverRows(page)).toHaveCount(100);
   const more = tree(page).locator('[data-more]').first();
@@ -3147,7 +3223,8 @@ test('a level that is larger than a page comes in windows of 100: the next one i
   await expect(serverRows(page)).toHaveCount(250);
   await expect(tree(page).locator('[data-more]')).toHaveCount(0);
   expect(server.requests.filter((r) => r.path.includes('cursor=')).map((r) => /cursor=(\d+)/.exec(r.path)[1])).toEqual(['100', '200']);
-  // The pane of the storage lists the first level too (200 at most, and says how many are left).
+  // The pane of the storage also lists the first level. It lists 200 items at most. It says how
+  // many items are left.
   await selectItem(page, SERVER_ROOT);
   await expect(preview(page).locator('.qlContents__item')).toHaveCount(200);
   await expect(preview(page).locator('p.qlContents__more')).toContainText('50 more');
@@ -3160,7 +3237,7 @@ test('the SQL and the description of a query are read when it is opened, once; a
   await openLibrary(page);
   await expect(serverRows(page)).toHaveCount(30);
   expect(server.requests.filter((r) => r.method === 'GET')).toHaveLength(1);
-  // Nothing was read of the queries but their names.
+  // Only the names of the queries were read.
   expect(server.requests.some((r) => r.path.startsWith('/queries/'))).toBe(false);
   await node(page, 'Query 005').locator(':scope > .qlRow').click();
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 5 AS n');
@@ -3169,9 +3246,10 @@ test('the SQL and the description of a query are read when it is opened, once; a
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 6 AS n');
   await node(page, 'Query 005').locator(':scope > .qlRow').click();
   await expect(preview(page).locator('.qlSql .sqlBlock__code')).toHaveText('SELECT 5 AS n');
-  // One read for each query that was opened, whatever the number of times it is shown.
+  // The page reads each opened query once. This is true whatever the number of times the query is
+  // shown.
   expect(server.requests.filter((r) => r.path.startsWith('/queries/')).map((r) => r.path.split('?')[0]).sort()).toEqual(['/queries/q_5', '/queries/q_6']);
-  // Load puts it in the editor.
+  // Load fills the editor with the query.
   await previewAction(page, 'load').click();
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 5 AS n');
 });
@@ -3182,17 +3260,18 @@ test('a large library comes by levels: the folders first, the children of a fold
   const server = await mockServerLibrary(page, { writable: true, library: { folders, queries } });
   await seed(page, { 'chdash.queryLibrary.v2': emptyLocal });
   await openLibrary(page);
-  // 11 folders and 99 queries do not fit in a page (110 items): the page is the folders, each with its count of queries.
+  // 11 folders and 99 queries do not fit in one page (110 items). The page shows the folders, and
+  // each folder shows its count of queries.
   await expect(node(page, SERVER_ROOT).locator(':scope > .qlRow .qlRow__count')).toHaveText('99 queries');
   await expect(tree(page).locator('li[data-kind="folder"][data-store="server"]')).toHaveCount(11);
   await expect(serverRows(page)).toHaveCount(0);
   await expect(node(page, 'Team 03').locator(':scope > .qlRow .qlRow__meta')).toHaveText('9 queries');
   expect(server.requests.some((r) => r.path.includes('parent_id='))).toBe(false);
-  // Opening a folder reads its children, and only those.
+  // When a folder opens, the page reads its children. The page reads only those children.
   await node(page, 'Team 03').locator(':scope > .qlRow .qlRow__twisty').click();
   await expect(serverRows(page)).toHaveCount(9);
   expect(server.requests.filter((r) => r.path.includes('parent_id=')).map((r) => /parent_id=([^&]+)/.exec(r.path)[1])).toEqual(['f_3']);
-  // Closed and opened again, it is not read again.
+  // A folder that is closed and opened again is not read again.
   await node(page, 'Team 03').locator(':scope > .qlRow .qlRow__twisty').click();
   await node(page, 'Team 03').locator(':scope > .qlRow .qlRow__twisty').click();
   await expect(serverRows(page)).toHaveCount(9);
@@ -3215,7 +3294,7 @@ test('the search of a library of the server is made by the server: its answers c
 
 const LIVE = process.env.QUERY_LIBRARY_LIVE_URL || '';
 
-// The live instance has two libraries (default and reference): the first shows its name.
+// The live instance has two libraries: default and reference. The first library shows its name.
 const LIVE_SERVER_ROOT = 'default';
 test('live server library: both roots; create, save, move within and across the roots, reload and remove against a real instance', async ({ page }) => {
   requireInstance(test, 'QUERY_LIBRARY_LIVE_URL', LIVE);
@@ -3248,7 +3327,7 @@ test('live server library: both roots; create, save, move within and across the 
   await node(page, `${stamp} query`).locator(':scope > .qlRow').dragTo(node(page, `${stamp} folder`).locator(':scope > .qlRow'));
   await expect(node(page, `${stamp} query`)).toHaveAttribute('aria-level', '3');
 
-  // Reloaded from the server file, for this host.
+  // The library is reloaded from the server file, for this host.
   await page.reload();
   await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
   await showPanel(page);
@@ -3257,7 +3336,7 @@ test('live server library: both roots; create, save, move within and across the 
   let library = await page.evaluate(async (id) => (await fetch(`api/query-library/export?host_id=${encodeURIComponent(id)}`)).json(), host);
   expect(library.queries.find((q) => q.name === `${stamp} query`).host_id).toBe(host);
 
-  // The run lands in this browser's History, for the host.
+  // The run appears in the History of this browser, for the host.
   await loadSaved(page, `${stamp} query`);
   await page.locator('#runButton').click();
   await waitForTerminal(page);
@@ -3265,8 +3344,8 @@ test('live server library: both roots; create, save, move within and across the 
   await expect(page.locator('#queryLibraryViewHistory .qhItem').filter({ hasText: stamp }).first()).toBeVisible();
   await page.locator('#queryLibraryTabSaved').click();
 
-  // The folder to this browser (copied, then removed from the server), and back
-  // (one copy-mode import on the real server).
+  // The folder moves to this browser. It is copied, then removed from the server. The folder then
+  // moves back. This uses one copy-mode import on the real server.
   await selectItem(page, `${stamp} folder`);
   await previewTool(page, 'move').click();
   await pickPlace(dialog(page), 'local:');
@@ -3289,31 +3368,33 @@ test('live server library: both roots; create, save, move within and across the 
   await expect(node(page, `${stamp} folder`)).toHaveCount(0);
 });
 
-// Audit round 2: an empty tab is one empty state centred across the dialog
-// (no "select an item" pane beside it).
+// Audit round 2. An empty tab shows one empty state. The empty state is centred across the dialog.
+// No "select an item" pane is beside it.
 test('an empty History is one centred empty state across the dialog; an empty library is the plain tree of its roots', async ({ page }) => {
   await seed(page, { 'chdash.queryLibrary.v2': { version: 2, revision: 1, folders: [], queries: [] }, 'chdash.queryHistory.v1': [] });
   await openLibrary(page);
   const body = page.locator('.queryLibraryDialog__body');
-  // Saved with nothing saved is the classic tree: the root (and the server's when the library is
-  // enabled), each saying it is empty, with the preview pane beside it; no "No saved queries" screen.
+  // With nothing saved, Saved shows the classic tree. The tree has the root, and the server root
+  // when the library is enabled. Each root says that it is empty. The preview pane is beside the
+  // tree. There is no "No saved queries" screen.
   await expect(body).not.toHaveClass(/is-empty/);
   await expect(preview(page)).toBeVisible();
   await expect(node(page, LOCAL_ROOT).locator('.qlTree__empty')).toHaveText('Empty');
   await expect(page.locator('#queryLibraryViewSaved .qlTree__empty--root')).toHaveCount(0);
   await expect(panel(page)).not.toContainText('No saved queries');
   await expect(panel(page)).not.toContainText('in the editor');
-  // History with no run is one empty state centred across the dialog, without the preview pane.
+  // History with no run shows one empty state. The empty state is centred across the dialog. It has
+  // no preview pane.
   await showPanel(page, 'history');
   const empty = page.locator('#queryLibraryViewHistory .qlTree__empty--root');
   await expect(empty).toContainText(`No history for ${HOST} yet`);
   await expect(body).toHaveClass(/is-empty/);
   await expect(preview(page)).toBeHidden();
   const [bodyBox, emptyBox, listBox] = await Promise.all([body.boundingBox(), empty.boundingBox(), page.locator('#queryLibraryViewHistory .qhList').boundingBox()]);
-  // Centred across the dialog's width and in the list's height.
+  // The empty state is centred across the width of the dialog and in the height of the list.
   expect(Math.abs((emptyBox.x + emptyBox.width / 2) - (bodyBox.x + bodyBox.width / 2))).toBeLessThanOrEqual(24);
   expect(Math.abs((emptyBox.y + emptyBox.height / 2) - (listBox.y + listBox.height / 2))).toBeLessThanOrEqual(24);
-  // A first entry brings the list and its preview pane back.
+  // A first entry shows the list and its preview pane again.
   await closePanel(page);
   await runSuccessfulQuery(page, 'SELECT 1 AS one');
   await showPanel(page, 'history');
@@ -3332,7 +3413,7 @@ test('History: no "Clear history"; its foot is the count line, as the Saved foot
   await expect(view.locator('.qh__clear, .qh__footBar')).toHaveCount(0);
   await expect(view.getByRole('button', { name: /clear history/i })).toHaveCount(0);
   await expect(view.locator('.ql > .ql__foot')).toHaveText(`1 entry · ${HOST} · Stored in this browser`);
-  // The same place as Saved's foot, at the bottom of its column.
+  // It is in the same place as the foot of Saved, at the bottom of its column.
   const [foot, list] = await Promise.all([view.locator('.ql__foot').boundingBox(), view.locator('.qhList').boundingBox()]);
   expect(foot.y).toBeGreaterThanOrEqual(list.y + list.height - 1);
   expect(await page.evaluate(() => [...document.querySelectorAll('#queryLibraryViewHistory .ql > *')].map((el) => el.className.split(' ')[0]))).toEqual(['ql__head', 'qhList', 'ql__foot']);

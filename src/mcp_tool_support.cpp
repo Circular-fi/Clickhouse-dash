@@ -66,7 +66,8 @@ void resolve_host(Ctx& ctx, const rapidjson::Value& args) {
   const auto asked = opt_string(args, "host", 256);
   if (asked && !asked->empty()) {
     if (std::find(names.begin(), names.end(), *asked) == names.end()) {
-      fail("host_not_allowed", "this key cannot use the host " + *asked + "; call list_hosts");
+      // A host out of the scope of the key looks like a host that does not exist (contract 3.7).
+      fail("not_found", "the host " + *asked + " does not exist or is not visible; call list_hosts");
     }
     ctx.host = *asked;
     return;
@@ -155,6 +156,9 @@ void write_columns(Writer& w, const McpDbResult& res) {
 }
 
 void write_rows(Writer& w, const McpDbResult& res) {
+  // The rows are data of the users of the database: in untrusted.rows; the columns and the counts stay out (contract 5.2, rule 8).
+  w.Key("untrusted");
+  w.StartObject();
   w.Key("rows");
   w.StartArray();
   for (const auto& row : res.rows) {
@@ -163,6 +167,7 @@ void write_rows(Writer& w, const McpDbResult& res) {
     w.EndArray();
   }
   w.EndArray();
+  w.EndObject();
   w.Key("row_count"); w.Uint64(res.rows.size());
 }
 
@@ -177,7 +182,8 @@ std::string glob_conditions(const char* column, const std::vector<std::string>& 
 
 void check_table_scope(const Ctx& ctx, const std::string& database, const std::string& table) {
   if (!mcp_scope_table_allowed(ctx.key.databases, database, table)) {
-    fail("table_not_allowed", "this key cannot read " + database + "." + table);
+    // A table out of the scope of the key looks like a table that does not exist (contract 3.7).
+    fail("not_found", "the table " + database + "." + table + " does not exist or is not visible");
   }
 }
 

@@ -1,22 +1,22 @@
-// The sort of the rows of a result: a numeric column (the text of a Decimal or of a big integer is compared as a number, NaN
-// goes last), a text column, and the WebAssembly kernel that sorts the numeric keys of a long result.
+// The sort of the rows of a result. A numeric column is sorted as numbers. The text of a Decimal or of a big integer is compared as a number, and NaN goes last.
+// A text column is sorted as text. The WebAssembly kernel sorts the numeric keys of a long result.
 
 import { loader } from "./app_loader.js";
 import { NUMERIC_RE } from "./app_results_values.js";
 import { wasm } from "./app_wasm.js";
 
-// The text of a Float value the API sends as a string (docs/telemetry.md, "Result values"): the
-// infinities sort as numbers, NaN with the NULLs, last.
+// The text of a Float value is sent by the API as a string (docs/telemetry.md, "Result values"). The infinities sort as numbers.
+// NaN sorts with the NULLs, last.
 const FLOAT_WORDS = new Map([["inf", Infinity], ["+inf", Infinity], ["-inf", -Infinity], ["nan", NaN], ["-nan", NaN], ["+nan", NaN]]);
 const DECIMAL_TEXT = /^([+-]?)0*(\d*?)(?:\.(\d*?)0*)?$/;
 
-// Digits a double cannot hold: a Decimal(38, 9) text is compared as text (compareDecimalText).
+// A double cannot hold these digits. A Decimal(38, 9) text is compared as text (compareDecimalText).
 function longDecimalText(text) {
   if (text.indexOf(".") < 0 || !NUMERIC_RE.test(text) || /[eE]/.test(text)) return false;
   return text.replace(/[^0-9]/g, "").replace(/^0+/, "").length > 15;
 }
 
-// Two decimal texts (digits, one dot, a sign) compared exactly.
+// Two decimal texts (digits, one dot, a sign) are compared exactly.
 function compareDecimalText(a, b) {
   const ma = DECIMAL_TEXT.exec(a);
   const mb = DECIMAL_TEXT.exec(b);
@@ -125,12 +125,14 @@ function compareTextForSort(a, b) {
 }
 
 // ----------------------------------------------------------- numeric sort keys
-// A numeric column is sorted by compareNumericForSort, which normalises both values on every comparison (a regular
-// expression, a BigInt): O(n log n) of them. When every value is a null, a number, a numeric string or an integer
-// string of at most 2^53 (the usual case), the comparison is the one of plain doubles, nulls last, so the values are
-// read once into a Float64Array and the rows are ordered by those keys: orderByKeysJs, or the kernel of
-// src/wasm/rowsort.c (orderByKeysWasm) for long results. Any other value (text in a numeric column, a huge integer)
-// keeps the comparator path, so the order is the same on every input.
+// A numeric column is sorted by compareNumericForSort. This function normalises both values on every comparison (a regular expression and a BigInt).
+// The sort makes O(n log n) of these comparisons.
+//
+// When every value is null, a number, a numeric string, or an integer string of at most 2^53, the comparison uses plain doubles.
+// This is the usual case. Nulls go last. The values are read once into a Float64Array.
+//
+// The rows are then ordered by these keys: orderByKeysJs, or the kernel of src/wasm/rowsort.c (orderByKeysWasm) for long results.
+// Any other value (text in a numeric column, a huge integer) uses the comparator path. The order is therefore the same for every input.
 const SORT_WASM_MIN_ROWS = 5000;
 const SAFE_INTEGER_TEXT = /^[+-]?\d+$/;
 let sortKernelAsked = false;
@@ -144,7 +146,7 @@ function requestSortKernel() {
     .catch(() => {});
 }
 
-// { vals: Float64Array, nulls: Uint8Array } or null when a value needs the comparator.
+// { vals: Float64Array, nulls: Uint8Array }, or null when a value needs the comparator.
 function numericSortKeys(rows, key) {
   const n = rows.length;
   const vals = new Float64Array(n);
@@ -179,8 +181,8 @@ function numericSortKeys(rows, key) {
   return { vals, nulls };
 }
 
-// The order (row positions) that rows.sort(compare) gives, from the keys: values ascending (nulls last), equal keys
-// by __chdashRowIndex; descending is the reverse comparison, ties included.
+// The order (row positions) that rows.sort(compare) gives, from the keys. Values ascend, with nulls last. Equal keys
+// are ordered by __chdashRowIndex. Descending is the reverse comparison. The ties are included.
 function orderByKeysJs(rows, keys, desc) {
   const { vals, nulls } = keys;
   const n = rows.length;
@@ -211,7 +213,7 @@ function orderByKeysWasm(rows, keys, desc) {
   }
 }
 
-// rows sorted by one numeric column: the same array order as rows.slice().sort(comparator).
+// Sorts rows by one numeric column. The array order is the same as rows.slice().sort(comparator).
 function sortNumericRows(allRows, key, dir) {
   const rows = allRows.slice();
   const desc = dir === "desc";
@@ -226,7 +228,7 @@ function sortNumericRows(allRows, key, dir) {
   return sortNumericRowsByComparator(rows, key, desc);
 }
 
-// The reference: every comparison normalises both values.
+// The reference. Every comparison normalises both values.
 function sortNumericRowsByComparator(rows, key, desc) {
   rows.sort((a, b) => {
     const av = key === -1 ? a.__chdashRowIndex : a[key];
@@ -238,11 +240,12 @@ function sortNumericRowsByComparator(rows, key, desc) {
   return rows;
 }
 
-// A text column is ordered by compareTextForSort: the lower-cased text, then the text, then the row number. The
-// strings are made once (lower-cased by JavaScript, which knows Unicode) and ordered by orderTextJs: the same order
-// as the comparator path (sortTextRowsByComparator) in a third of the time. A WebAssembly merge sort of the same
-// strings was measured and is not faster (the copy of the strings and the cache misses of the compare cost as much),
-// so text columns stay in JavaScript (docs/wasm.md).
+// A text column is ordered by compareTextForSort. The order uses the lower-cased text, then the text, then the row number.
+// The strings are made once. JavaScript lower-cases them, and it knows Unicode. The module orders them by orderTextJs.
+// This gives the same order as the comparator path (sortTextRowsByComparator), in a third of the time.
+//
+// A WebAssembly merge sort of the same strings was measured. It is not faster, because the copy of the strings and the cache misses cost as much as the comparison.
+// So text columns stay in JavaScript (docs/wasm.md).
 function orderTextJs(lower, text, rank, desc) {
   const n = lower.length;
   const order = new Uint32Array(n);
@@ -259,7 +262,7 @@ function orderTextJs(lower, text, rank, desc) {
   return order;
 }
 
-// rows ordered by the text of one column; textOf(row) is what the comparator would have compared.
+// Sorts rows by the text of one column. textOf(row) gives the text that the comparator would compare.
 function sortTextRows(allRows, key, dir, textOf) {
   const rows = allRows.slice();
   const desc = dir === "desc";
@@ -280,7 +283,7 @@ function sortTextRows(allRows, key, dir, textOf) {
   return out;
 }
 
-// The reference: every comparison lower-cases both texts.
+// The reference. Every comparison lower-cases both texts.
 function sortTextRowsByComparator(rows, key, desc, textOf) {
   rows.sort((a, b) => {
     let cmp = compareTextForSort(String(textOf(a, key) ?? ""), String(textOf(b, key) ?? ""));
@@ -290,7 +293,7 @@ function sortTextRowsByComparator(rows, key, desc, textOf) {
   return rows;
 }
 
-// The tests switch the kernel off to compare both paths (tests/frontend/specs/wasm-rowsort.spec.js).
+// The tests disable the kernel to compare both paths (tests/frontend/specs/wasm-rowsort.spec.js).
 function setSortWasm(on) {
   sortWasmEnabled = !!on;
 }

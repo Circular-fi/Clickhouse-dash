@@ -1,22 +1,22 @@
-// The views of the MCP integration page (docs/mcp-integration-page.md): the keys table with its states
-// and, beside it, the side column (how to connect a client, with the endpoint, the hosts, the global
-// limits). The heading of the keys holds the page's two actions: Refresh and New key. app_page_mcp.js
-// decides what to show and answers the actions; app_mcp_form.js has the dialogs. Every node is built
-// with ns.h: no API value reaches markup.
+// The views of the MCP integration page (docs/mcp-integration-page.md). The views are the keys table with its states.
+// Beside the table is the side column. It shows how to connect a client, with the endpoint, the hosts and the global limits.
+// The heading of the keys holds the two actions of the page: Refresh and New key.
+// app_page_mcp.js decides what to show, and it answers the actions. app_mcp_form.js has the dialogs.
+// Every node is built with ns.h. No API value reaches markup.
 //
-//   ns.mcpView.renderSide(el, meta)                  the side column: connect a client, hosts, global limits
-//   ns.mcpView.renderDisabled(el)                    the HCL extract that turns MCP on
-//   ns.mcpView.renderUsageOff(el)                    "Usage is off": what the usage would show, and the HCL extract that turns it on
+//   ns.mcpView.renderSide(el, meta)                  the side column. It shows how to connect a client, the hosts and the global limits.
+//   ns.mcpView.renderDisabled(el)                    the HCL extract that enables MCP
+//   ns.mcpView.renderUsageOff(el)                    "Usage is off": it shows what the usage provides when it is on, and the HCL extract that enables it.
 //   ns.mcpView.renderKeys(el, view, actions)         the keys part: head (New key), note, table or state
 //   ns.mcpView.fillAccess(el, access, failure)       the counts of databases and tables in the Data cells (a Map of getMcpAccessSummary, or null)
 //   ns.mcpView.fillUsage(el, usage, failure)         the last use and the tool calls in the Used cells, its note and the warnings about the
 //                                                    instances (getMcpUsageSummary, or null). The column is there only while the usage is on.
-//   ns.mcpView.renderDeleted(el, usage, view, actions)  the keys that are not in the list but keep usage, under the keys (a line that opens
-//                                                    on them): the deleted keys, and the keys that only another instance knows
+//   ns.mcpView.renderDeleted(el, usage, view, actions)  the keys that are not in the list but keep usage, under the keys.
+//                                                    A line opens on them: the deleted keys, and the keys that only another instance knows.
 //   ns.mcpView.heldTools(meta, key)                  the tools of the catalog that a key holds (the Tools cell, the details of a key)
 //   ns.mcpView.secretCell(key)                       the secret of a key as the page shows it: its hint and dots
 //   ns.mcpView.endpointUrl(meta)                     the full URL of the endpoint (the page's origin)
-//   ns.mcpView.commands(url, name, secret, header)   { cli, desktop, inspector, json } to connect a client; header is mcp.auth_header
+//   ns.mcpView.commands(url, name, secret, header)   { cli, desktop, inspector, json } are the commands to connect a client. The header argument is mcp.auth_header.
 //   ns.mcpView.codeBlock(text, label, lang)          a code block with its copy button and its colours (json, shell, values, hcl)
 //   ns.mcpView.clientTabs(url, name, secret, id, header)  the client snippets as tabs (the side column and the secret panel)
 //   ns.mcpView.manageReason(meta)                    why the keys cannot change ("" when they can)
@@ -36,23 +36,26 @@ import { util } from "./app_util.js";
 const { $, $$ } = dom;
 const EMPTY = format.EMPTY;
 
-// The block that turns MCP on: the one place that names the keys of the config file for the reader.
+// This block enables MCP. It is the one place that names the keys of the config file for the reader.
 const HCL_EXAMPLE = [
   "mcp {",
-  "  enabled        = true",
-  "  storage_file   = \"/var/lib/chdash/mcp-keys.json\"",
-  "  manage_from_ui = true",
+  "  enabled      = true",
+  "  storage_file = \"/var/lib/chdash/mcp-keys.json\"",
+  "  keys {",
+  "    mode = \"hybrid\"",
+  "  }",
   "}",
   "",
   "clickhouse {",
   "  host {",
-  "    name    = \"prod\"",
-  "    mcp_uri = \"clickhouse://chdash_mcp:<password>@clickhouse:9000\"",
+  "    name              = \"prod\"",
+  "    mcp_uri           = \"clickhouse://chdash_mcp@clickhouse:9000\"",
+  "    mcp_password_file = \"/run/secrets/chdash_mcp_password\"",
   "  }",
   "}",
 ].join("\n");
 
-// The block that turns the usage on: the directory is the one thing it needs. Several ChDash may write in it.
+// This block enables the usage. The directory is the only thing that it needs. Several ChDash instances may write in it.
 const HCL_USAGE_EXAMPLE = [
   "mcp {",
   "  usage {",
@@ -63,7 +66,7 @@ const HCL_USAGE_EXAMPLE = [
 ].join("\n");
 
 const SOURCE_TITLE = {
-  config: "Defined in the config file (a key block of mcp). It is read-only here.",
+  config: "Defined in the config file (an mcp_key block of mcp). It is read-only here.",
   ui: "Created on this page. It is stored in the storage file.",
 };
 
@@ -76,14 +79,14 @@ function endpointUrl(meta) {
   return new URL(path, window.location.origin).href;
 }
 
-// The header that carries the key (mcp.auth_header: Authorization by default) and the value that it takes:
-// Authorization takes "Bearer <key>", another header the key alone.
+// The header that carries the key is mcp.auth_header. The default is Authorization.
+// Authorization takes "Bearer <key>". Another header takes the key alone.
 const authHeader = (meta) => String(meta?.authHeader || "Authorization");
 const authValue = (header, secret) => (header.toLowerCase() === "authorization" ? `Bearer ${secret}` : secret);
 
-// The commands that connect a client, from the real URL of the endpoint.
+// These commands connect a client. They use the real URL of the endpoint.
 //   cli       Claude Code (a command)
-//   desktop   Claude Desktop (claude_desktop_config.json: the mcp-remote bridge adds the header)
+//   desktop   Claude Desktop (claude_desktop_config.json). The mcp-remote bridge adds the header.
 //   inspector MCP Inspector (the values to enter)
 //   json      a client that reads a JSON file of servers (.mcp.json)
 function commands(url, name, secret, header = "Authorization") {
@@ -97,9 +100,9 @@ function commands(url, name, secret, header = "Authorization") {
 }
 
 // --- Colours for the code blocks ---------------------------------------------------------
-// A block is cut into tokens with the classes of the SQL highlighter (.tok-*, css/10-components/sql.css),
-// so the page has the colours of the Query editor and of both themes. The nodes are text nodes and spans:
-// no value reaches markup. Each rule is sticky: it matches at the position being read.
+// The program cuts a block into tokens. The tokens use the classes of the SQL highlighter (.tok-*, css/10-components/sql.css).
+// The page then has the colours of the Query editor and of both themes.
+// The nodes are text nodes and spans. No value reaches markup. Each rule is sticky. It matches only at the current position.
 const rule = (cls, re) => [cls, new RegExp(re, "y")];
 const GRAMMARS = {
   json: [
@@ -162,8 +165,8 @@ function codeBlock(text, label, lang = "") {
   return h("div", { class: "mcpCode" }, h("pre", { class: "mcpCode__pre" }, h("code", null, ...colored(text, lang))), copy);
 }
 
-// The client snippets as tabs (one block at a time keeps the dialog and the help short). It
-// serves the help of the page and the one-time secret panel.
+// The client snippets appear as tabs. One block at a time keeps the dialog and the help short.
+// The tabs serve the help of the page and the one-time secret panel.
 const CLIENTS = [
   { value: "code", label: "Claude Code", note: "Run this command in a terminal:", key: "cli", lang: "shell", copy: "the command" },
   { value: "desktop", label: "Desktop", note: "Add this to claude_desktop_config.json. It needs Node.js: the mcp-remote bridge adds the header.", key: "desktop", lang: "json", copy: "the Claude Desktop settings" },
@@ -188,7 +191,7 @@ function clientTabs(url, name, secret, idBase, header = "Authorization") {
 
 function manageReason(meta) {
   if (!meta || !meta.enabled) return "MCP is off.";
-  if (!meta.manageFromUi) return "Keys are read-only: manage_from_ui is false in the config.";
+  if (!meta.manageFromUi) return "Keys are read-only: keys.mode is static in the config.";
   if (!meta.storageConfigured) return "Keys cannot be created here: mcp.storage_file is not set in the config.";
   return meta.canManage ? "" : "Keys cannot be changed from this page.";
 }
@@ -205,7 +208,7 @@ function limitText(value, unit, zero) {
 
 // --- The side column ---------------------------------------------------------------------
 
-// A block of the side column: a small heading (title, count), then its body.
+// A block of the side column has a small heading (title, count). Its body follows the heading.
 function sideBlock(id, title, countText, ...body) {
   const titleId = `${id}Title`;
   const section = h("section", { class: "mcpBlock", id });
@@ -222,7 +225,7 @@ function healthBadge(healthy) {
   return badgeMod.el("unknown", { tone: "neutral" });
 }
 
-// The endpoint: a read-only field with its Copy button, the first thing a client needs.
+// The endpoint is a read-only field with its Copy button. A client needs this first.
 function endpointField(url) {
   return h("div", { class: "uiField mcpEndpoint" },
     h("label", { class: "uiField__label", for: "mcpEndpointUrl" }, "Endpoint"),
@@ -275,7 +278,7 @@ function renderSide(container, meta) {
   container.hidden = false;
 }
 
-// MCP off ({ enabled: false }): what to add to the config. The page is still a page of its own.
+// MCP is off ({ enabled: false }). This block says what to add to the config. The page is still a page of its own.
 function renderDisabled(container) {
   const wrap = h("section", { class: "pagePart mcpOff", id: "mcpOff", "aria-labelledby": "mcpOffTitle" },
     h("div", { class: "pagePart__head" }, h("h2", { class: "pagePart__title", id: "mcpOffTitle" }, "Turn MCP on"), badge("MCP is off", "neutral")),
@@ -286,8 +289,8 @@ function renderDisabled(container) {
   container.replaceChildren(wrap);
 }
 
-// The usage is off (`usage.enabled` is false in the meta): what the Usage tab would show, and what to add to the config. Calm: nothing is wrong,
-// and the rest of the page works (the keys, and the ClickHouse cost of a key, which does not depend on the usage).
+// The usage is off (`usage.enabled` is false in the meta). This block says what the Usage tab shows when it is on, and what to add to the config.
+// Nothing is wrong. The rest of the page works, with the keys and the ClickHouse cost of a key. The cost does not depend on the usage.
 function renderUsageOff(container) {
   const state = uiState.block("empty", {
     title: "Usage is off",
@@ -302,7 +305,7 @@ function renderUsageOff(container) {
 
 // --- Keys ------------------------------------------------------------------------------
 
-// The one action on a key: Delete (a key is made or deleted, never changed).
+// The one action on a key is Delete. A key is made or deleted, but never changed.
 function deleteButton(key, onClick) {
   const button = h("button", {
     type: "button",
@@ -315,8 +318,8 @@ function deleteButton(key, onClick) {
   return button;
 }
 
-// The host of a key: a key reads one host, so its name. A key of an older file can name several (or "*"): it
-// reads "n hosts" in the warning colour, and its details say what to do.
+// The host of a key is shown by name. A key reads one host.
+// A key of an older file can name several hosts, or "*". Such a key shows "n hosts" in the warning colour. Its details say what to do.
 function hostCell(key, meta) {
   if (!key.hosts.length) return h("span", { class: "mcpMuted" }, "None");
   if (key.hosts.length > 1 || key.hosts.includes("*")) {
@@ -328,20 +331,21 @@ function hostCell(key, meta) {
   return h("span", { class: `mcpHostCell${known && !down ? "" : " mcpWarn"}`, title: !known ? `${name}: no mcp_uri any more, the key reads nothing` : down ? `${name}: the MCP user cannot connect` : name }, name);
 }
 
-// The tools that the server offers now: a tool that is not available (the usage is off, or the setting that it needs) is not shown and not held.
+// The tools that the server offers now. A tool is not available when the usage is off, or when its setting is missing. Such a tool is not shown and not held.
 const offeredTools = (meta) => meta.tools.filter((tool) => tool.available);
 
-// The tools that a key holds: those that every key has (the analysis of its own limits and usage), the names that its list holds, and, when it
-// lists "*", every tool but those that "*" does not give (the tools that a key must name) and, unless its data is "*" alone, those that need
-// all the data.
+// The tools that a key holds are these: the tools that every key has (the analysis of its own limits and usage), and the names in its list.
+// When the list is "*", the key holds every tool. The exceptions are the tools that "*" does not give (the tools that a key must name).
+// Unless its data is "*" alone, the key also holds the tools that need all the data.
 function heldTools(meta, key) {
   const everything = key.databases.length === 1 && key.databases[0] === "*";
   const all = key.tools.includes("*");
   return offeredTools(meta).filter((tool) => tool.always || key.tools.includes(tool.name) || (all && !tool.explicitOnly && (!tool.needsAllData || everything)));
 }
 
-// "All" and "None" are words, a part is "n/total" (code): the tools of the key out of the ones that exist.
-// The title lists them. Data has no total (patterns), so it is a count. `all`: the key lists "*" (its title says what "*" leaves out: `left`).
+// "All" and "None" are words. A part is shown as "n/total" (code): the tools of the key out of the tools that exist.
+// The title lists them. Data has no total, because it uses patterns, so it is shown as a count.
+// `all`: the key lists "*". Its title says what "*" omits (`left`).
 function listCell(values, total = 0, noun = "", { all = false, left = [] } = {}) {
   if (!values.length) return h("span", { class: "mcpMuted" }, "None");
   if (all) {
@@ -353,23 +357,24 @@ function listCell(values, total = 0, noun = "", { all = false, left = [] } = {})
   return h("span", { class: "mcpMono", title: values.join(", ") }, text);
 }
 
-// The tools of a key: what it holds (heldTools, the tools that every key has among them) out of what the server offers now.
+// The tools of a key are the tools it holds (heldTools, including the tools that every key has). They are shown out of the tools that the server offers now.
 function toolsCell(key, meta) {
   const held = heldTools(meta, key).map((tool) => tool.name);
   const left = offeredTools(meta).filter((tool) => tool.explicitOnly && !held.includes(tool.name)).map((tool) => tool.name);
   return listCell(held, offeredTools(meta).length, "tools", { all: key.tools.includes("*"), left });
 }
 
-// The data of a key: how many databases and tables it reaches. The count comes after the table is drawn (the page asks for
-// it once, for all the keys: fillAccess), so the cell starts as an ellipsis. The patterns of the key are in its title.
+// The data of a key is the number of databases and tables that it reaches.
+// The count appears after the table is drawn. The page asks for it once, for all the keys (fillAccess). Until then, the cell shows an ellipsis.
+// The patterns of the key are in its title.
 const plural = (n, one, many) => `${format.count(n)} ${n === 1 ? one : many}`;
 function dataCell(key) {
   return h("span", { class: "mcpMono mcpDataCell mcpMuted", dataset: { keyId: key.id, patterns: key.databases.join(", ") }, title: patternsTitle(key, "Counting the databases and tables\u2026") }, "\u2026");
 }
 const patternsTitle = (key, first) => `${first}\nData patterns: ${key.databases.length ? key.databases.join(", ") : "none"}`;
 
-// Puts the counts in the cells of the table (without drawing it again, so the details that are open stay open).
-// `access` is the Map of ns.api.getMcpAccessSummary(), or null when it could not be read (the cells then say so).
+// Puts the counts in the cells of the table. The table is not drawn again, so the details that are open stay open.
+// `access` is the Map of ns.api.getMcpAccessSummary(), or null when it cannot be read. The cells then say so.
 function fillAccess(container, access, failure = "") {
   for (const node of $$(".mcpDataCell", container)) {
     const patterns = node.dataset.patterns || "";
@@ -394,7 +399,7 @@ function fillAccess(container, access, failure = "") {
   }
 }
 
-// A value the key sets itself reads at full strength; the global limit that it inherits reads muted.
+// A value that the key sets itself is shown at full strength. A global limit that the key inherits is shown muted.
 function limitsCell(key, meta) {
   const l = meta.limits || {};
   const part = (own, global, unit) => (own != null
@@ -404,19 +409,21 @@ function limitsCell(key, meta) {
     part(key.maxRows, l.maxRows, ""), h("span", { class: "mcpMuted" }, " \u00b7 "), part(key.timeoutSeconds, l.queryTimeoutSeconds, " s"));
 }
 
-// The secret of a key as the page shows it: its first characters (the hint, to tell the keys apart), then dots with the
-// hyphens in clear. That is all the page has: ChDash keeps the hash of a secret, and shows the secret once, when it makes
-// the key (app_mcp_form.js, showSecret). The server sends the mask (`secret_mask`); without it the shape of a UUID stands in.
+// The page shows the token of a key with its first characters (the hint, to tell the keys apart), then dots. The page has no more than that.
+// ChDash keeps only the hash of a token. It shows the token once, when it makes the key (app_mcp_form.js, showSecret).
+// The server sends the mask (`secret_mask`). If the server sends no mask, the page uses the hint and 35 dots for an mcp_ token.
+// For an older key, the page uses the shape of a UUID.
 const DOTS = (n) => "\u2022".repeat(n);
 const MASK = [8, 4, 4, 4, 12].map(DOTS).join("-");
 const maskOf = (key) => {
   if (key.secretMask) return key.secretMask;
   const hint = key.secretHint || "";
+  if (/^mcp_[A-Za-z0-9_-]{8}$/.test(hint)) return `${hint}${DOTS(35)}`;
   return /^[0-9a-f]{8}$/i.test(hint) ? `${hint}${MASK.slice(8)}` : MASK;
 };
 
-// The cell is short: the hint, the next group of the UUID and an ellipsis (the whole mask is in its title), so the column Used fits beside
-// the others.
+// The cell is short. It shows the first 13 characters of the mask and an ellipsis. The whole mask is in its title.
+// The column Used then fits beside the others.
 function secretCell(key) {
   const mask = maskOf(key);
   const why = `The secret of ${key.name} is not kept: ClickHouse Dash showed it once, when it made the key. A lost secret cannot be found again: delete the key and make a new one.`;
@@ -425,8 +432,8 @@ function secretCell(key) {
 
 // --- Usage ------------------------------------------------------------------------------
 
-// When a key was last used and its tool calls in a window (the column Used, a deleted key): asked once for all the keys after the
-// table is drawn (fillUsage), so the cell starts as an ellipsis.
+// This block gives when a key was last used, and its tool calls in a window (the column Used, a deleted key).
+// The page asks for this once, for all the keys, after the table is drawn (fillUsage). Until then, the cell shows an ellipsis.
 function usedCell(key) {
   return h("span", { class: "mcpUsedCell mcpMuted", dataset: { keyId: key.id, createdAt: key.createdAt || "" }, title: "Reading the use of the key\u2026" }, "\u2026");
 }
@@ -437,14 +444,14 @@ const WINDOW_TEXT = {
 const windowText = (name) => WINDOW_TEXT[name] || "the window";
 const minuteTime = (ms) => format.time(ms, { precision: "min" });
 
-// Is the counting as old as the key? Then a key without a use was never used. The counting began when the usage was turned on (`since`): a key
-// that is older than that may have been used before. A key of the config file has no date of creation: only its use tells.
+// Is the counting as old as the key? If so, a key without a use was never used. The counting began when the usage was enabled (`since`).
+// A key that is older than `since` may have been used before. A key of the config file has no date of creation. Only its use gives that information.
 function countedWholeLife(usage, createdAt) {
   const created = createdAt ? Date.parse(createdAt) : NaN;
   return !Number.isFinite(created) || usage.since == null || usage.since <= created;
 }
 
-// The text, the colour and the title of the use of a key: "2 h ago · 1.2K" (its last use, its tool calls in the window).
+// The text, the color and the title of the use of a key. An example is "2 h ago · 1.2K": its last use, and its tool calls in the window.
 function usedView(line, usage, createdAt = "") {
   const now = usage.to ?? Date.now();
   const lines = [];
@@ -469,8 +476,8 @@ function usedView(line, usage, createdAt = "") {
   return { text, title: lines.join("\n"), muted: !line.calls, warn };
 }
 
-// Puts the use of each key in its cell (without drawing the table again, so the details that are open stay open), and says under the
-// table what the column counts. `usage` is the answer of ns.api.getMcpUsageSummary(), or null when it could not be read.
+// Puts the use of each key in its cell. The table is not drawn again, so the details that are open stay open.
+// The function also says under the table what the column counts. `usage` is the answer of ns.api.getMcpUsageSummary(), or null when it cannot be read.
 function fillUsage(container, usage, failure = "") {
   for (const node of $$(".mcpUsedCell", container)) {
     const line = usage && usage.keys.get(node.dataset.keyId);
@@ -491,20 +498,21 @@ function fillUsage(container, usage, failure = "") {
   if (head && usage) head.title = `When the key was last used, and its tool calls in ${windowText(usage.window)}`;
   const note = $(".mcpUsedNote", container);
   if (note) {
-    // What the column counts; since when, when the window starts before the counting; and over how many instances it is summed.
+    // What the column counts: the start date, when the window starts before the counting, and the number of instances that are summed.
     const counted = usage && usage.since != null && usage.from != null && usage.since > usage.from ? ` Counted since ${minuteTime(usage.since)}.` : "";
     const summed = usage && usage.instances.length > 1 ? ` Summed over ${format.count(usage.instances.length)} instances.` : "";
     note.textContent = !usage ? "" : `Used: when each key was last used, and its tool calls in ${windowText(usage.window)}.${counted}${summed}`;
     note.hidden = !usage;
   }
-  // A file that is left out of the sum, or a name that two ChDash write under: said under the note.
+  // A file that the sum omits, or a name that two ChDash instances write under, is stated under the note.
   const warn = $(".mcpUsedWarn", container);
   if (warn) mcpInstances.warn(warn, usage ? usage.instances : []);
 }
 
-// The keys that are not in the list of keys but keep usage: the deleted ones (until the retention ends), and those that only another instance
-// knows (`elsewhere`: a key made on the page of another ChDash that shares the usage directory). A line under the keys opens on them, each with
-// what it did. view.deletedOpen says whether the list is open and view.openDeletedId which key shows its details (the page keeps both).
+// The keys that are not in the list of keys, but keep usage, are these: the deleted keys (until the retention ends), and the keys that only another instance knows.
+// The keys known only to another instance are marked `elsewhere`. Such a key was made on the page of another ChDash that shares the usage directory.
+// A line under the keys opens on them. Each key in the line shows what it did.
+// view.deletedOpen says whether the list is open. view.openDeletedId says which key shows its details. The page keeps both.
 function renderDeleted(container, usage, view, actions) {
   const block = $(".mcpDeleted", container);
   if (!block) return;
@@ -527,7 +535,7 @@ function renderDeleted(container, usage, view, actions) {
     h("span", { class: "mcpMuted" }, !apart ? stays : !gone ? "Only another instance knows them: this instance has no key of their name." : `${stays} A key that only another instance knows is listed too.`));
   const list = h("div", { class: "mcpDeleted__list", id: listId });
   list.hidden = !view.deletedOpen;
-  // The table is built when the list opens: until then the page has one table, the one of the keys.
+  // The table is built when the list opens. Until then, the page has one table: the table of the keys.
   const fill = () => { if (!list.childElementCount) list.appendChild(deletedTable(others, usage, view, actions, title)); };
   toggle.addEventListener("click", () => {
     view.deletedOpen = !view.deletedOpen;
@@ -539,8 +547,9 @@ function renderDeleted(container, usage, view, actions) {
   block.replaceChildren(head, list);
 }
 
-// The keys that keep usage, one line each: the name (it opens what the key did), its host, when it was deleted (or the badge "other
-// instance": the column then says "State"), and its use. `title` is the title of the line that opens the table: it is the name of the table.
+// The keys that keep usage have one line each. The line shows the name (it opens what the key did), its host, and its use.
+// The line also shows when the key was deleted, or the badge "other instance". With the badge, the column says "State".
+// `title` is the title of the line that opens the table. It is the name of the table.
 function deletedTable(others, usage, view, actions, title) {
   const mixed = others.some((line) => line.deletedAt == null);
   const kinds = [["Name", "name"], ["Host", "hosts"], [mixed ? "State" : "Deleted", "deleted"], ["Used", "used"]];
@@ -578,7 +587,7 @@ function deletedTable(others, usage, view, actions, title) {
     const opener = h("button", { type: "button", class: "mcpKeyOpen", dataset: { action: "open" }, title: `${line.name}\n${what}`, "aria-label": deleted ? `Usage of the deleted key ${line.name}` : `Usage of ${line.name}, a key of another instance`, "aria-expanded": "false", "aria-controls": `mcpDeletedDetail-${line.id}` },
       icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("strong", { class: "mcpKeyName" }, line.name));
     const used = usedView(line, usage);
-    // A deleted key says when (and "Deleted" when the column holds both kinds); a key of another instance has a badge.
+    // A deleted key shows when it was deleted. The text is "Deleted" when the column holds both kinds. A key of another instance has a badge.
     const state = deleted
       ? h("span", { title: format.timeTitle(line.deletedAt) }, mixed ? `Deleted ${minuteTime(line.deletedAt)}` : minuteTime(line.deletedAt))
       : badgeMod.el("other instance", { tone: "neutral", size: "sm", title: "Only another instance knows this key: its usage comes from the file of that instance" });
@@ -602,14 +611,14 @@ function deletedTable(others, usage, view, actions, title) {
   return h("div", { class: "dataTableWrap mcpTableWrap" }, table);
 }
 
-// [label, kind, tier]: a column that matters less leaves the table when the window is narrower than its tier's breakpoint ("mid": 820 px;
-// table.css, "Priority columns", UI-130). A key opens its details under its row, and a phone draws the card with every field.
+// [label, kind, tier]: a column that matters less leaves the table when the window is narrower than the breakpoint of its tier ("mid": 820 px;
+// table.css, "Priority columns", UI-130). A key opens its details under its row. A phone draws the card with every field.
 const COLUMNS = [["Name", "name"], ["Secret", "secret"], ["Host", "hosts"], ["Tools", "tools", "mid"], ["Data", "data", "mid"], ["Limits", "limits", "mid"], ["Used", "used", "mid"], ["Actions", "actions"]];
 const COLUMN_TITLES = { Used: "When the key was last used, and its tool calls in the last 7 days" };
-// The usage is counted only when it is on: the column Used is not there while it is off (the key details have no usage either).
+// The usage is counted only when it is on. The column Used is not shown while the usage is off. The key details have no usage either.
 const columnsOf = (meta) => (meta?.usage?.enabled ? COLUMNS : COLUMNS.filter(([, kind]) => kind !== "used"));
 
-// The classes of a column's header and cells: its kind, and its tier when it has one.
+// The classes of the header and the cells of a column are its kind and, when it has one, its tier.
 const columnClass = (kind) => {
   const tier = COLUMNS.find((column) => column[1] === kind)?.[2];
   return `mcpCell--${kind}${tier ? ` is-${tier}` : ""}`;
@@ -617,8 +626,8 @@ const columnClass = (kind) => {
 
 function keyRow(key, meta, actions, reason) {
   const readOnly = key.source === "config";
-  // A key that cannot be deleted (it comes from the config file, or the page is read-only) has no Delete icon: a lock stands
-  // where it would be, and says why.
+  // A key that cannot be deleted has no Delete icon. Such a key comes from the config file, or the page is read-only.
+  // A lock stands in the place of the icon, and it states why.
   const locked = readOnly || reason;
   const cell = (label, cls, ...children) => {
     const td = h("td", { class: cls }, ...children);
@@ -626,7 +635,7 @@ function keyRow(key, meta, actions, reason) {
     td.dataset.label = label;
     return td;
   };
-  // The name opens the details of the key (a click on the row does the same).
+  // The name opens the details of the key. A click on the row does the same.
   const open = h("button", { type: "button", class: "mcpKeyOpen", dataset: { action: "open" }, title: `${key.name}\n${SOURCE_TITLE[key.source]}\nShow its permissions`, "aria-label": `Details of key ${key.name}`, "aria-expanded": "false", "aria-controls": `mcpDetail-${key.id}` },
     icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("strong", { class: "mcpKeyName" }, key.name));
   open.addEventListener("click", () => actions.onOpen(key, open));
@@ -645,8 +654,8 @@ function keyRow(key, meta, actions, reason) {
     actionsCell);
 }
 
-// The page gives the details of a key (actions.keyDetails: app_mcp_form.js) and is told when they close
-// (actions.onDetailsClose: the "Data it reads" read of the key that closes stops with it).
+// The page gives the details of a key (actions.keyDetails: app_mcp_form.js). The page is told when the details close.
+// (actions.onDetailsClose): the "Data it reads" read of the key stops when the details close.
 function closeDetails(tbody, actions) {
   actions.onDetailsClose?.();
   for (const row of $$(".mcpDetailRow", tbody)) row.remove();
@@ -668,9 +677,9 @@ function showDetails(tbody, key, meta, actions) {
   $('[data-action="open"]', row)?.setAttribute("aria-expanded", "true");
 }
 
-// view.openKeyId is the key that shows its details ("" for none); the page owns it and is told of a change
-// (actions.onOpenChange), so the next drawing of the list keeps it open. view.meta and view.keys are read when a row opens:
-// the page passes its live state (getters), so a row that outlives a redraw never shows the meta of an older one.
+// view.openKeyId is the key that shows its details ("" for none). The page owns it, and it is told of a change (actions.onOpenChange).
+// The next drawing of the list keeps that key open.
+// view.meta and view.keys are read when a row opens. The page passes its live state (getters). So a row that survives a redraw never shows the meta of an older one.
 function keysTable(keys, meta, actions, view) {
   const reason = manageReason(meta);
   const head = h("tr", null, ...columnsOf(meta).map(([name, kind]) => {
@@ -680,18 +689,18 @@ function keysTable(keys, meta, actions, view) {
     return th;
   }));
   head.setAttribute("role", "row");
-  // The details of a key open under its row, one key at a time: opening another closes this one. The
-  // open key stays open when the list is drawn again.
+  // The details of a key open under its row. Only one key can be open at a time: opening another key closes this one.
+  // The open key stays open when the list is drawn again.
   const toggle = (key, opener) => {
     const wasOpen = view.openKeyId === key.id;
     closeDetails(tbody, actions);
     view.openKeyId = wasOpen ? "" : key.id;
     actions.onOpenChange?.(view.openKeyId);
-    // The controller's meta of now, not the one of the render that built this row (ARCH-F-193).
+    // The meta of the controller now, not the meta of the render that built this row (ARCH-F-193).
     if (!wasOpen) showDetails(tbody, key, view.meta, actions);
     (opener || $(`tr[data-key-id="${CSS.escape(key.id)}"] [data-action="open"]`, tbody))?.focus();
   };
-  // Roles are written out: a phone draws each row as a card and the browser would drop the table.
+  // The roles are written out. A phone draws each row as a card. Otherwise the browser drops the table.
   const tbody = h("tbody", { role: "rowgroup" }, ...keys.map((key) => keyRow(key, meta, { ...actions, onOpen: toggle }, reason)));
   // A click on the row, outside its buttons and not while text is selected, opens the key.
   tbody.addEventListener("click", (event) => {
@@ -717,7 +726,7 @@ function keysTable(keys, meta, actions, view) {
   return wrap;
 }
 
-// A long list gets a filter (name, source). The text stays between redraws (view.filterText, owned by the page).
+// A long list has a filter (name, source). The text stays between redraws (view.filterText, owned by the page).
 const FILTER_FROM = 10;
 
 function applyFilter(container, filterText) {
@@ -762,7 +771,7 @@ function renderKeys(container, view, actions) {
     view.status === "ready" ? h("span", { class: "pagePart__count" }, String(keys.length)) : null,
     filter,
     h("div", { class: "mcpKeys__actions" }, refresh, create));
-  // The note under the head says why the keys cannot change (New key points to it).
+  // The note under the head says why the keys cannot change. New key points to the note.
   const note = h("div", { class: "mcpKeys__note" });
   note.id = "mcpKeysNote";
   if (reason) uiState.banner(note, { message: reason, level: "info", inset: true });
@@ -784,13 +793,13 @@ function renderKeys(container, view, actions) {
   } else {
     body.appendChild(keysTable(keys, meta, actions, view));
     body.appendChild(h("p", { class: "mcpNote mcpKeys__none", hidden: true }, "No key matches this filter."));
-    // What the column Used counts, and the warnings about the instances (fillUsage writes them): nothing of it while the usage is off.
+    // What the column Used counts, and the warnings about the instances (fillUsage writes them). Nothing of this is shown while the usage is off.
     if (meta.usage.enabled) {
       body.appendChild(h("p", { class: "mcpNote mcpNote--fine mcpUsedNote", hidden: true }));
       body.appendChild(h("div", { class: "mcpUsedWarn", hidden: true }));
     }
   }
-  // The keys that keep usage without being in the list (renderDeleted fills it once the usage is read).
+  // The keys that keep usage but are not in the list (renderDeleted fills it once the usage is read).
   if (view.status === "ready" && meta.usage.enabled) body.appendChild(h("div", { class: "mcpDeleted", hidden: true }));
   container.replaceChildren(head, note, alert, body);
   if (filter) {

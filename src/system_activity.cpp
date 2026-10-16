@@ -85,8 +85,8 @@ bool try_select(ChExecutor& db, const std::string& sql, Fn&& fn, std::string* er
   }
 }
 
-// The runner's boundary (its ACL, kept by the AclService), resolved lazily per
-// database: only databases that actually appear in an activity row are read.
+// The runner's boundary (its ACL, kept by the AclService). It is resolved lazily for each
+// database. Only databases that appear in an activity row are read.
 class RunnerVisibility {
 public:
   explicit RunnerVisibility(AclView& acl) : acl_(acl) {}
@@ -98,7 +98,7 @@ private:
   AclView& acl_;
 };
 
-// Reads at most row_limit + 1 rows so truncation is detected without a
+// Reads at most row_limit + 1 rows. This detects truncation without a
 // count() query. Returns false when the system table is unavailable.
 template <typename Row, typename Parse>
 bool load_section(
@@ -113,7 +113,7 @@ bool load_section(
     const ChParams& params = {}) {
   bool truncated = false;
   std::string section_error;
-  // The rows are filtered after the read: the visibility may ask ClickHouse (as the runner), which never happens
+  // The rows are filtered after the read. The visibility check can ask ClickHouse as the runner. This never happens
   // inside the callback of another read.
   std::vector<Row> rows;
   const bool ok = try_select(system, sql, [&](const clickhouse::Block& block) {
@@ -131,8 +131,9 @@ bool load_section(
     if (activity.unavailable_detail.empty()) activity.unavailable_detail = section_error;
     return false;
   }
-  // The read stopped at row_limit + 1 rows, and the rows of a table that the runner cannot see are dropped after it. A read that came back full
-  // is cut whatever is left of it once they are dropped: the rows past it were never looked at, and some of them may be visible.
+  // The read stops at row_limit + 1 rows. The rows of a table that the runner cannot see are dropped after the read.
+  // A read that comes back full is cut, even when rows remain after the drop.
+  // The rows past the cut were never checked, and some of them can be visible.
   truncated = rows.size() > row_limit;
   for (auto& item : rows) {
     if (!visibility.visible(item.database, item.table)) continue;
@@ -158,10 +159,10 @@ bool load_system_activity(
   RunnerVisibility visibility(runner_acl);
   if (visibility.databases().empty()) return true;
 
-  // Rows of databases the runner cannot SHOW are excluded inside ClickHouse,
-  // so they never consume the bounded LIMIT; table-level visibility is then
-  // checked per row before anything is kept.
-  // The names go as query parameters, one String for each: a name with a quote mark or a backslash is a plain value.
+  // Rows of databases that the runner cannot SHOW are excluded inside ClickHouse.
+  // So they never use the bounded LIMIT. The table-level visibility is checked for each row
+  // before any row is kept.
+  // The names go as query parameters, one String for each name. A name with a quote mark or a backslash is a plain value.
   SqlParams names;
   const std::string in_databases = "database IN (" + names.texts(visibility.databases()) + ")";
   const ChParams& database_params = names.list();
@@ -187,8 +188,8 @@ bool load_system_activity(
       item.memory_usage = u64(text(block, 12, row));
     }, database_params);
 
-  // Pending mutations only: finished ones are history, and a failing
-  // mutation stays pending with its latest failure reason.
+  // Pending mutations only. Finished mutations are history.
+  // A failing mutation stays pending, with its latest failure reason.
   load_section(system, visibility, "mutations",
     "SELECT toString(database), toString(`table`), toString(mutation_id), toString(command), toString(create_time), "
     "toString(parts_to_do), toString(is_done), toString(is_killed), toString(latest_failed_part), "
@@ -209,7 +210,7 @@ bool load_system_activity(
       item.latest_fail_error_code_name = text(block, 11, row);
     }, database_params);
 
-  // One row per table: the queue itself can hold thousands of entries.
+  // One row for each table. The queue itself can hold thousands of entries.
   load_section(system, visibility, "replication_queue",
     "SELECT toString(database), toString(`table`), toString(count()), toString(countIf(is_currently_executing)), "
     "toString(countIf(num_postponed > 0)), toString(max(num_tries)), toString(min(create_time)), "
@@ -240,9 +241,9 @@ bool load_system_activity(
       item.last_exception_time = text(block, 10, row);
     }, database_params);
 
-  // In-memory replica state only. log_max_index, log_pointer,
-  // total/active_replicas, zookeeper_exception and replica_is_active cost a
-  // Keeper request per table and are not selected here; the replica counts
+  // In-memory replica state only. The columns log_max_index, log_pointer,
+  // total/active_replicas, zookeeper_exception and replica_is_active each cost a
+  // Keeper request for each table. They are not selected here. The replica counts
   // come from the shared 60 s cache below.
   const bool replicas_loaded = load_section(system, visibility, "replicas",
     "SELECT toString(database), toString(`table`), toString(replica_name), toString(is_leader), toString(is_readonly), "
@@ -338,7 +339,7 @@ bool load_system_keeper_status(
   if (!try_select(system, connection_columns + ", toString(session_timeout_ms) FROM system.zookeeper_connection ORDER BY name LIMIT 16",
                   consume_connections(true), &section_error)) {
     out.connections.clear();
-    // session_timeout_ms is recent; older servers still expose the rest.
+    // session_timeout_ms is recent. Older servers still expose the rest.
     if (!try_select(system, connection_columns + " FROM system.zookeeper_connection ORDER BY name LIMIT 16",
                     consume_connections(false), &section_error)) {
       out.connections.clear();

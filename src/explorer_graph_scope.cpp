@@ -8,12 +8,12 @@
 
 namespace chdash {
 
-// The adjacency of the graph: for each node (by its place in graph.nodes), what it links to.
+// The adjacency of the graph. Each node has its place in graph.nodes. The adjacency gives the nodes that each node links to.
 struct ExplorerGraphIndex {
   std::unordered_map<std::string, uint32_t> by_id;
-  // The edges between two logical nodes, in the order of the edges: downstream[from] has to, upstream[to] has from.
+  // The edges between two logical nodes, in the order of the edges. downstream[from] contains `to`. upstream[to] contains `from`.
   std::vector<std::vector<uint32_t>> downstream, upstream;
-  // The "buffer" edges between two logical nodes: forward[from] has to; backward[to] has from when `from` is a Buffer.
+  // The "buffer" edges between two logical nodes. forward[from] contains `to`. backward[to] contains `from` when `from` is a Buffer.
   std::vector<std::vector<uint32_t>> buffer_forward, buffer_backward;
   // The edges from a node to a physical node, in the order of the edges.
   std::vector<std::vector<uint32_t>> physical_children;
@@ -38,8 +38,8 @@ GraphScopeRequest read_graph_scope(const httplib::Request& req) {
   scope.physical = req.has_param("mode") && req.get_param_value("mode") == "physical";
   scope.include_system = req.has_param("include_system") && req.get_param_value("include_system") == "1";
   scope.include_non_storing = !req.has_param("include_non_storing") || req.get_param_value("include_non_storing") != "0";
-  // Repeated expand=up:table:db.t / expand=down:table:db.u parameters. Ids are only compared with ids of the authorized graph, so an unknown or hidden
-  // id is a no-op.
+  // Repeated expand=up:table:db.t and expand=down:table:db.u parameters. The ids are compared only with the ids of the authorized graph.
+  // An unknown or hidden id is a no-op.
   const size_t expand_count = std::min(req.get_param_value_count("expand"), kMaxGraphExpansions);
   for (size_t i = 0; i < expand_count; ++i) {
     const std::string item = req.get_param_value("expand", i);
@@ -86,7 +86,7 @@ std::shared_ptr<const ExplorerGraphIndex> index_graph(const ExplorerGraph& graph
     if (b.layer == "physical") index->physical_children[from].push_back(to);
     if (a.layer == "logical" && b.layer == "physical") is_placed[from] = 1;
   }
-  // A Buffer that routes to a node that owns a placement owns one for the rest of the route (a chain of Buffers is followed).
+  // A Buffer that routes to a node with a placement also gets a placement. The same rule applies along the rest of the route. A chain of Buffers is followed.
   std::deque<uint32_t> queue;
   for (uint32_t i = 0; i < n; ++i) if (is_placed[i]) queue.push_back(i);
   while (!queue.empty()) {
@@ -104,7 +104,7 @@ std::shared_ptr<const ExplorerGraphIndex> index_graph(const ExplorerGraph& graph
 
 namespace {
 
-// The nodes of a scope, by their place in the graph, and whether it is a focused lineage.
+// The nodes of a scope, given by their place in the graph. A flag says whether the scope is a focused lineage.
 struct ScopedNodes {
   std::vector<char> included;
   bool focused_lineage = false;
@@ -149,8 +149,8 @@ class Scoper {
     return out;
   }
 
-  // One semantic hop from `start` in one direction. When non-storing objects are hidden, View/MV/Buffer nodes cost zero hops (same rule as depth) and
-  // are walked through; they are reported separately as intermediates.
+  // One semantic hop from `start` in one direction. When non-storing objects are hidden, View, MV and Buffer nodes cost zero hops (same rule as depth).
+  // The walk passes through them. They are reported separately as intermediates.
   Walk walk(uint32_t start, bool up) const {
     Walk out;
     const auto& links = up ? index_.upstream : index_.downstream;
@@ -176,8 +176,8 @@ class Scoper {
  private:
   bool allowed(uint32_t node) const { return scope_.include_system || !is_system_database(graph_.nodes[node].database); }
 
-  // Depth is a user-visible semantic hop count. When non-storing objects are hidden, View/MV/Buffer intermediates cost zero hops so: table -> view
-  // -> mv -> table is depth 1, not depth 3. We still ship those hidden intermediates inside the scoped payload so the browser can contract them into
+  // Depth is a semantic hop count that the user sees. When non-storing objects are hidden, View, MV and Buffer intermediates cost zero hops. For example, table -> view
+  // -> mv -> table is depth 1, not depth 3. The scoped payload still ships these hidden intermediates, so the browser can contract them into
   // the correct typed edge.
   void lineage(uint32_t root, ScopedNodes& out) const {
     std::unordered_map<uint32_t, int> distance;
@@ -204,8 +204,8 @@ class Scoper {
     }
     for (const auto& [node, _] : distance) out.included[node] = 1;
 
-    // Per-node expansions add one semantic hop in one direction from an anchor that is itself shown. Applied to a fixed point so a chain of expansions
-    // (expand A, then the node it revealed) is order-free; an anchor that is no longer shown expands nothing.
+    // A per-node expansion adds one semantic hop in one direction from an anchor that is itself shown. The expansions apply to a fixed point,
+    // so a chain of expansions (expand A, then the node it revealed) has no order dependence. An anchor that is no longer shown expands nothing.
     if (scope_.expansions.empty()) return;
     std::vector<std::pair<bool, uint32_t>> anchors;
     for (const auto& [up, id] : scope_.expansions) {
@@ -217,7 +217,7 @@ class Scoper {
       grew = false;
       for (const auto& [up, anchor] : anchors) {
         if (!out.included[anchor]) continue;
-        // Hidden intermediates on the way are shipped for contraction.
+        // The hidden intermediates on the way ship for contraction.
         const Walk found = walk(anchor, up);
         for (const uint32_t id : found.neighbors) if (!out.included[id]) { out.included[id] = 1; grew = true; }
         for (const uint32_t id : found.intermediates) if (!out.included[id]) { out.included[id] = 1; grew = true; }
@@ -225,7 +225,7 @@ class Scoper {
     }
   }
 
-  // Storage mode needs only the focused table, Buffer routes that feed or drain it, and their physical descendants. Do not ship the unrelated
+  // Storage mode needs only the focused table, the Buffer routes that feed or drain it, and their physical descendants. Do not ship the unrelated
   // database-wide physical topology to the browser.
   void physical(uint32_t root, ScopedNodes& out) const {
     std::vector<uint32_t> queue{root};
@@ -254,8 +254,8 @@ class Scoper {
     }
   }
 
-  // The topology of a cluster belongs to no database (the Distributed tables of several databases share it): the Storage mode of a database shows the
-  // shared nodes below its own tables, and no other.
+  // The topology of a cluster belongs to no database. The Distributed tables of several databases share it. The Storage mode of a database shows the
+  // shared nodes below its own tables, and no other nodes.
   void shared_below(ScopedNodes& out) const {
     std::vector<uint32_t> queue;
     for (uint32_t i = 0; i < graph_.nodes.size(); ++i) {
@@ -312,7 +312,7 @@ ExplorerGraph scope_graph(const ExplorerGraph& graph, const GraphScopeRequest& s
     place.push_back(i);
   }
   if (scoped.focused_lineage) {
-    // Lets the browser draw a per-node "+N" only where something is left to expand, without shipping the next ring.
+    // The browser draws a per-node "+N" only where a node can still expand. This keeps the next ring out of the payload.
     for (size_t k = 0; k < out.nodes.size(); ++k) {
       ExplorerGraphNode& node = out.nodes[k];
       if (node.layer != "logical") continue;

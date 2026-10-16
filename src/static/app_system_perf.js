@@ -1,32 +1,25 @@
-// The Performance part of the System Overview (docs/system.md
-// "Performance"): the selected server's history, read from its system logs
-// through /api/system/series (one pass each over metric_log,
-// asynchronous_metric_log and narrow query_log columns; the server picks
-// the step, at most 300 buckets).
+// The Performance part of the System Overview (docs/system.md "Performance") shows the history of the selected server.
+// It reads the history from the system logs through /api/system/series. It makes one pass each over metric_log,
+// asynchronous_metric_log and narrow query_log columns. The server picks the step, at most 300 buckets.
 //
-// Ten charts on the shared engine (ns.chartCore) in chartUi.cardHtml
-// cards, two a row (one on a phone). They share a crosshair (syncKey) and
-// a drag over any of them sets the time range of all of them, as on
-// Metrics. The range is the Observability picker (ns.timeRange) on the
-// section's tab row, written to the address as from / to
-// (ns.timeRange.url) through the Overview's ctx.setQuery. Each chart has
-// one unit; a figure in another unit (bytes next to rows, the replication
-// queue next to its delay) is in the card's summary and in the tooltip at
-// the cursor.
+// The part has ten charts. They use the shared engine (ns.chartCore) in chartUi.cardHtml cards, two a row (one on a phone).
+// The charts share a crosshair (syncKey). A drag over any chart sets the time range of all charts, as on Metrics.
+// The range is the Observability picker (ns.timeRange) on the section's tab row.
+// It is written to the address as from / to (ns.timeRange.url) through the Overview's ctx.setQuery.
+// Each chart has one unit. A figure in another unit is in the card's summary and in the tooltip at the cursor.
+// Examples are bytes next to rows, or the replication queue next to its delay.
 //
-// A source the server lacks (a disabled log, metric_log in the transposed
-// layout, a missing grant) degrades only the charts that need it: they
-// fall back to another source when one says the same thing (queries/s and
-// the average latency), otherwise they say what is missing. Without
-// metric_log and asynchronous_metric_log the part says so: the current
-// values are the Overview's tiles above it.
+// The server can lack a source: a disabled log, metric_log in the transposed layout, or a missing grant.
+// Only the charts that need that source degrade. A chart uses another source when that source says the
+// same thing (queries/s and the average latency). Otherwise the chart says what is missing.
+// Without metric_log and asynchronous_metric_log, the part says so. The current values are in the Overview's tiles above it.
 //
 // systemPerf.create({ setQuery, rangeRoot }) -> { el,
 //   show(addressQuery), load(force), reset(), query() }
-// No timer: the charts read on show (again when a relative range was read
-// STALE_AFTER_MS ago or more), on a range change and the refresh button.
-// rangeRoot: the time range slot of the Overview's filter bar (its
-// picker root, the "systemPerf" ids), on which the range mounts.
+// The module does not use a timer. The charts read on show. They read again when a relative range was read
+// STALE_AFTER_MS ago or more. They also read on a range change and on the refresh button.
+// rangeRoot: the time range slot of the Overview's filter bar (its picker root, the "systemPerf" ids).
+// The range mounts on it.
 
 import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
@@ -46,8 +39,7 @@ const SYNC_KEY = "systemPerf";
 const PLOT_HEIGHT = 172;
 // A relative range read this long ago reads again when the Overview shows.
 const STALE_AFTER_MS = 30000;
-// A drag narrower than this widens around its centre (one 10 s bucket
-// a point would draw nothing readable).
+// A drag narrower than this widens around its centre. One 10 s bucket draws a point that is not readable.
 const MIN_ZOOM_MS = 60000;
 
 const settings = () => kit.features() || {};
@@ -60,13 +52,13 @@ const UNITS = {
   qps: { value: (v) => format.rate(v), axis: (max) => compactAxis(max, "/s") },
   rows: { value: (v) => format.rate(v, "rows"), axis: (max) => compactAxis(max, "/s") },
   count: { value: (v) => format.number(v), axis: (max) => compactAxis(max, "") },
-  // Tasks running (an average per bucket: "0.05 running").
+  // Tasks running. The value is an average per bucket, for example "0.05 running".
   running: { value: (v) => `${format.number(v)} running`, axis: (max) => compactAxis(max, " running") },
   cores: { value: (v) => `${format.number(v)} cores`, axis: () => ({ factor: 1, suffix: " cores" }) },
   bytes: {
     value: (v) => format.bytes(v),
     axis: (max) => systemCharts.byteUnit(max),
-    // Round ticks in the 1024 unit ("1 GB, 2 GB"), not 1.862645 GB.
+    // The ticks use round values in the 1024 unit ("1 GB, 2 GB"), not 1.862645 GB.
     yAxis: systemCharts.bytesAxis(true),
   },
   ms: {
@@ -84,13 +76,13 @@ function compactAxis(max, suffix) {
   return { factor: unit.factor, suffix: `${unit.suffix}${suffix}` };
 }
 
-// Okabe-Ito first (--qchart-1..8), a series per slot in chart order.
+// The Okabe-Ito palette comes first (--qchart-1..8). Each series takes one slot, in chart order.
 const slot = (n) => `var(--qchart-${n})`;
 const DASHED = [4, 3];
 
 // --- Data --------------------------------------------------------------------
 
-// The answer as columns: Float64Array per series (NaN: no sample).
+// The answer is a set of columns. Each series is a Float64Array (NaN means no sample).
 function columns(data) {
   const xs = Float64Array.from(data.timestamps || [], Number);
   const cols = new Map();
@@ -115,11 +107,11 @@ function stats(values) {
 const sourceOk = (data, name) => data?.sources?.[name]?.status === "ok";
 
 // --- Charts --------------------------------------------------------------------
-//
-// build(d) -> null (the chart does not apply: hidden), { need } (the
-// sources it needs are missing: says so) or { series, unit, type, stack,
-// meta, badge, footer(i), markers, source }. d: { data, cols, col(name),
-// ok(source), stepLabel }.
+// build(d) returns one of these values:
+//   null                    the chart does not apply, so it stays hidden;
+//   { need }                a source that the chart needs is missing, so the chart says so;
+//   { series, unit, type, stack, meta, badge, footer(i), markers, source }.
+// d: { data, cols, col(name), ok(source), stepLabel }.
 
 function line(d, key, label, color, extra = {}) {
   const values = d.col(key);
@@ -204,7 +196,7 @@ const CHARTS = [
             line(d, "p99_ms", "p99", "var(--pct-p99)"),
           ]),
           meta: `p95 max ${format.duration.fromMs(stats(d.col("p95_ms")).max)}`,
-          // Sparse percentiles are dots: room above the largest.
+          // Sparse percentiles are drawn as dots. Leave room above the largest value.
           yHeadroom: 0.15,
           source: "query_log",
         };
@@ -415,8 +407,7 @@ function create(ctx) {
     loadedAt: 0,
   };
 
-  // The range picker leads the Overview's filter bar (as on Queries and
-  // Disks).
+  // The range picker comes first in the Overview's filter bar, as on Queries and Disks.
   const part = kit.part("performance", "Performance");
   const notes = h("div", { class: "systemPerf__notes", id: "systemPerfNotes" });
   const grid = h("div", { class: "systemPerf__grid", id: "systemPerfGrid" });
@@ -435,7 +426,7 @@ function create(ctx) {
     onZoom: (startMs, endMs) => charts.setZoom(startMs, endMs),
   });
 
-  // The cards, built once in chart order; each holds its chart once drawn.
+  // The cards are built once, in chart order. Each card holds its chart after the chart is drawn.
   const charts = systemCharts.grid({
     root: grid,
     specs: CHARTS,
@@ -455,7 +446,7 @@ function create(ctx) {
     const resolved = range.check();
     const invalid = resolved.error;
     if (invalid) {
-      // A read in flight was asked for another range: it stops, so its answer never replaces this message.
+      // A read in flight asked for another range. It stops, and its answer never replaces this message.
       util.latest.cancel("system.series");
       uiState.busy(body, false);
       state.error = new Error(invalid);
@@ -537,8 +528,8 @@ function create(ctx) {
     balanceGrid();
   }
 
-  // Two charts a row: the flat cards (one line each) go last, on rows of
-  // their own; a chart left alone on its row takes the whole row.
+  // Two charts a row. The flat cards (one line each) go last, on rows of their own.
+  // A chart that is alone on its row takes the whole row.
   function balanceGrid() {
     const shown = [...charts.entries.values()].filter((entry) => !entry.card.hidden);
     const full = shown.filter((entry) => !entry.card.classList.contains("is-flat"));
@@ -546,8 +537,8 @@ function create(ctx) {
     if (full.length % 2 === 1) full[full.length - 1].card.classList.add("is-alone");
   }
 
-  // A chart whose every series is 0 (or has no sample) over the range: a
-  // line that says so instead of an empty plot.
+  // If every series of a chart is 0 (or has no sample) over the range, the chart shows a line.
+  // The line says so instead of an empty plot.
   function flatSeries(series) {
     let seen = false;
     for (const s of series) {
@@ -642,8 +633,8 @@ function create(ctx) {
   render();
   return {
     el: part.el,
-    // addressQuery: the address's from / to when the address opened the
-    // Overview (undefined: keep the range).
+    // addressQuery: the from / to of the address, when the address opened the Overview.
+    // If it is undefined, keep the range.
     show(addressQuery) {
       if (addressQuery !== undefined && range.read(new URLSearchParams(String(addressQuery || "")))) state.loadedAt = 0;
       if (state.host && state.host !== kit.hostId()) reset();

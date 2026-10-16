@@ -1,8 +1,11 @@
 #pragma once
 
-// What the Traces page discovers about its source before and beside a search: the schema of the tables (meta), the (service, operation)
-// pairs that fill the pickers (prefill), and the attribute keys and the values of one key (facets). The reads are bounded: a read
-// cap, a time budget, and a cache that the server owns; an answer is marked estimated when a bound stopped the scan.
+// This header declares what the Traces page discovers about its source. The page makes these discoveries before a search and next
+// to a search. The discovery has three parts: the schema of the tables (meta), the (service, operation) pairs that fill the
+// pickers (prefill), and the attribute keys and the values of one key (facets).
+//
+// Each read has bounds. A read cap and a time budget limit each read. The server owns the cache. An answer is marked estimated
+// when a bound stops the scan.
 
 #include "ch_executor.hpp"
 #include "facet_limits.hpp"
@@ -28,20 +31,21 @@ struct MetaOutcome {
   bool span_attribute_map = false, resource_attribute_map = false;
 };
 
-// Reads the columns of the table and whether the trace index table exists. Throws what ClickHouse throws. The attribute maps are read
-// by read_attribute_maps (trace_attributes.hpp), which does not throw.
+// This function reads the columns of the table. It also checks whether the trace index table exists. It throws what ClickHouse
+// throws. The attribute maps are read by read_attribute_maps (trace_attributes.hpp), which does not throw.
 void read_schema(ChExecutor& db, const TraceSettings& traces, MetaOutcome* out);
 
 // ---- prefill ----
 
-// Service / operation prefill. The browser re-requests it on every time-range change and page load; each miss scans every span of the
-// window (seconds on wide windows), so identical minute-aligned ranges share one result for a short TTL.
+// This comment describes the service and operation prefill. The browser requests the prefill again on each time-range change and
+// each page load. Each cache miss scans every span of the window, which takes seconds on wide windows. Therefore identical
+// minute-aligned ranges share one result for a short TTL.
 struct Prefill {
   std::vector<std::pair<std::string, std::string>> pairs;
   bool truncated = false;
-  // A read bound stopped the scans: the pairs are then a subset.
+  // A read bound stopped the scans. The pairs are then a subset.
   bool estimated = false;
-  // The scans: passes run and rows read.
+  // The number of scan passes and the number of rows read.
   int passes = 0;
   uint64_t read_rows = 0;
   int64_t start_ms = 0;
@@ -57,23 +61,29 @@ constexpr size_t kPrefillExcludeBytes = 128 * 1024;
 constexpr size_t kPrefillHardLimit = 20000;
 constexpr int64_t kPrefillAlignMs = 60 * 1000;
 
-// The statement of one pass, and the pairs that it leaves out: the sorting key starts with (ServiceName, SpanName), so a scan that
-// excludes the pairs already known (NOT IN on the key prefix) skips, through the primary index, every granule holding only them.
+// This comment describes the statement of one pass and the pairs that it leaves out. The sorting key starts with (ServiceName,
+// SpanName). A scan that excludes the known pairs (NOT IN on the key prefix) uses the primary index to skip every granule that
+// holds only those pairs.
 std::string prefill_excluded_sql(const std::set<std::pair<std::string, std::string>>& known);
 std::string prefill_pass_sql(const std::string& table, int64_t from_ms, int64_t end_ms, const std::string& visibility,
                              const std::string& tag_filters, const std::string& excluded, uint64_t cap);
 
-// Discovery only needs existence. The passes: (1) the seed, the newest kPrefillSeedMs of the window, whose pairs are usually most of the
-// window's; (2) passes over the whole window, NOT IN the known pairs, each capped at kPrefillPassRows rows read, until one completes.
-// Every pass is a complete scan of what it did not exclude unless its cap stopped it, so the list is exact when the last pass ran to
-// its end; else (passes, the read budget or the time budget spent) it is a subset, answered as estimated. Throws what ClickHouse throws.
+// Discovery needs only the existence of a pair. The discovery runs in passes. Pass 1 is the seed. It reads the newest
+// kPrefillSeedMs of the window. Its pairs are usually most of the pairs of the window.
+//
+// Pass 2 and the later passes read the whole window. They use NOT IN on the known pairs. Each pass stops at kPrefillPassRows rows
+// read. The passes continue until one pass completes.
+//
+// A pass that its cap does not stop scans all rows that it did not exclude. The list is then exact when the last pass runs to its
+// end. Otherwise, the passes, the read budget or the time budget is spent. The list is then a subset, and the answer is marked
+// estimated. This function throws what ClickHouse throws.
 Prefill read_prefill(ChExecutor& db, const std::string& table, const std::string& visibility, const std::string& tag_filters,
                      int64_t aligned_start_ms, int64_t aligned_end_ms, uint64_t read_budget);
 
 // ---- facets ----
 
-// Attribute facets of the Traces search page: the most frequent keys of a sample, and the top values of one key. A value keeps
-// kFacetMaxKeys + 1 keys at most.
+// This section declares the attribute facets of the Traces search page. The facets give the most frequent keys of a sample, and
+// the top values of one key. A value keeps at most kFacetMaxKeys + 1 keys.
 struct FacetKeys {
   struct Key { std::string scope, key; uint64_t count = 0; };
   std::vector<Key> keys;
@@ -93,16 +103,17 @@ struct FacetValues {
 using FacetKeysCache = TtlCache<std::string, FacetKeys>;
 using FacetValuesCache = TtlCache<std::string, FacetValues>;
 
-// The most frequent attribute keys (span + resource) of the spans that match the filters, by the number of sampled spans carrying
-// them. One capped pass reads only the key subcolumns of the maps.
+// This function returns the SQL for the most frequent attribute keys (span + resource). It counts the spans that match the
+// filters and that carry each key. The count uses the number of sampled spans. One capped pass reads only the key subcolumns of
+// the maps.
 std::string facet_keys_sql(const std::string& table, int64_t aligned_start_ms, int64_t aligned_end_ms, const std::string& visibility,
                            const std::string& span_filters, bool span, bool resource, uint64_t read_cap);
-// The top values of one attribute key with their sampled span counts.
+// This function returns the SQL for the top values of one attribute key. The result has the sampled span count of each value.
 std::string facet_values_sql(const std::string& table, int64_t aligned_start_ms, int64_t aligned_end_ms, const std::string& visibility,
                              const std::string& span_filters, const std::string& key_scope, const std::string& key, int limit,
                              uint64_t read_cap);
 
-// Throw what ClickHouse throws.
+// These functions throw what ClickHouse throws.
 FacetKeys read_facet_keys(ChExecutor& db, const std::string& sql, uint64_t read_cap);
 FacetValues read_facet_values(ChExecutor& db, const std::string& sql, uint64_t read_cap);
 

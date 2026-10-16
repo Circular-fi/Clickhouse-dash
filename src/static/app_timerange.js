@@ -1,9 +1,7 @@
-// Time range picker of the Observability filter bars (Traces, Logs,
-// Metrics), modelled on Grafana's
-// TimeRangePicker: a raw range keeps what the user typed ("now-6h", "now",
-// "2026-09-19 14:00:00") and is resolved to milliseconds for each request,
-// so relative ranges follow the clock. All dates are browser-local time,
-// like the timestamps the page displays.
+// This is the time range picker of the Observability filter bars (Traces, Logs, Metrics).
+// It follows Grafana's TimeRangePicker. A raw range keeps the text that the user typed, such as "now-6h", "now", or "2026-09-19 14:00:00".
+// The picker converts the raw range to milliseconds for each request. Relative ranges therefore follow the clock.
+// All dates use the browser local time, as the timestamps that the page shows do.
 
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -19,11 +17,11 @@ const { $, $$ } = dom;
 
 const UNITS = "yMwdhms";
 const UNIT_WORDS = { s: "second", m: "minute", h: "hour", d: "day", w: "week", M: "month", y: "year" };
-// The recently used ranges (ns.storage, read when used).
+// The recently used ranges are stored in ns.storage. The code reads them when they are used.
 const recentPref = () => storage.pref(storage.KEYS.traceTimeRanges, []);
 const RECENT_LIMIT = 2;
 const pad = (value, width = 2) => String(value).padStart(width, "0");
-// util.escapeHtml is the one escaper; null prints as "".
+// util.escapeHtml is the only escaper. null prints as "".
 const esc = (value) => util.escapeHtml(value == null ? "" : value);
 
 // --- Date math (Grafana @grafana/data datemath.ts semantics) -------------
@@ -67,7 +65,7 @@ function endOfUnit(source, unit) {
 
 const ABSOLUTE_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?)?$/;
 
-// "2026-09-19", "2026-09-19 14:00" or "2026-09-19 14:00:00(.123)", local time.
+// These date forms use local time: "2026-09-19", "2026-09-19 14:00", or "2026-09-19 14:00:00(.123)".
 function parseAbsolute(text) {
   const match = ABSOLUTE_RE.exec(String(text || "").trim());
   if (!match) return null;
@@ -84,8 +82,8 @@ function parseAbsolute(text) {
   return { date, dateOnly: !hasTime, hours, minutes, seconds };
 }
 
-// Applies "-6h", "/d", "+1w-2d/h"... left to right. Rounding goes to the
-// start of the unit, or to its end when roundUp (a range's To side).
+// This applies steps such as "-6h", "/d", or "+1w-2d/h" from left to right.
+// Rounding goes to the start of the unit. Rounding goes to the end of the unit when roundUp is set, which applies to the To side of a range.
 function applyDateMath(source, math, roundUp) {
   let date = source;
   let index = 0;
@@ -105,7 +103,7 @@ function applyDateMath(source, math, roundUp) {
   return date;
 }
 
-// Milliseconds for one side of a range, NaN when the text is not valid.
+// This returns the milliseconds for one side of a range. It returns NaN when the text is not valid.
 function parseTime(text, roundUp, nowMs = Date.now()) {
   const raw = String(text == null ? "" : text).trim();
   if (!raw) return NaN;
@@ -136,11 +134,11 @@ function isRelative(raw) {
   return /now/i.test(String(raw?.from || "")) || /now/i.test(String(raw?.to || ""));
 }
 
-// The window that a range stands for, checked against the widest one the server reads: { startMs, endMs, error }.
-// error is "" or the sentence the views show ("Select a valid time range." for a range that is not one,
-// "Max range is 7 days (<where>)." for a wider one). maxMinutes 0 or null: no bound. where names the setting that
-// bounds it ("server setting traces.max_lookback_minutes"). Every view with a time range (Traces, Logs, Metrics, the
-// System sections) says this the same way.
+// This is the window of a range. The window is checked against the widest window that the server reads: { startMs, endMs, error }.
+// The error value is "" or the sentence that the views show.
+// The sentence is "Select a valid time range." for a range that is not valid. It is "Max range is 7 days (<where>)." for a wider range.
+// When maxMinutes is 0 or null, there is no bound. The where value names the setting that bounds the range ("server setting traces.max_lookback_minutes").
+// Every view with a time range (Traces, Logs, Metrics, the System sections) states this in the same way.
 function checkRange(raw, maxMinutes = 0, where = "", nowMs = Date.now()) {
   const { startMs, endMs } = resolveRange(raw, nowMs);
   let error = "";
@@ -149,32 +147,31 @@ function checkRange(raw, maxMinutes = 0, where = "", nowMs = Date.now()) {
   return { startMs, endMs, error };
 }
 
-// checkRange(), as an exception for a request that cannot be sent: { startMs, endMs }.
+// This shape is the exception of checkRange() for a request that cannot be sent: { startMs, endMs }.
 function resolveBounded(raw, maxMinutes = 0, where = "", nowMs = Date.now()) {
   const checked = checkRange(raw, maxMinutes, where, nowMs);
   if (checked.error) throw new Error(checked.error);
   return checked;
 }
 
-// Start of the local day of `ms`: the origin of the buckets that the server draws for a window (bucket_origin_ms).
+// This is the start of the local day of `ms`. It is the origin of the buckets that the server draws for a window (bucket_origin_ms).
 function localMidnight(ms) {
   const date = new Date(Number(ms));
   date.setHours(0, 0, 0, 0);
   return date.getTime();
 }
 
-// The range as the minutes that it touches: "<start minute>|<end minute>". A relative range resolves anew for each search, so two
-// searches in the same minute have the same key and the answer of the first is reused (facets, Services, Logs fields). The end is
-// rounded up, so a range that ends later in a minute never shares a key with one that ends in the next.
+// This is the range as the minutes that it touches: "<start minute>|<end minute>".
+// A relative range resolves again for each search. Two searches in the same minute have the same key, so the answer of the first search is reused (facets, Services, Logs fields).
+// The end is rounded up. A range that ends later in a minute never shares a key with a range that ends in the next minute.
 function minuteKey(startMs, endMs) {
   return `${Math.floor(Number(startMs) / 60000)}|${Math.ceil(Number(endMs) / 60000)}`;
 }
 
 // --- Quick ranges (Grafana DateTimePickers/options.ts) --------------------
 
-// Kept short enough that the list never scrolls next to the calendar, with
-// the recently used ranges below it; any other span can be typed in the
-// search ("45m", "30d") or the From / To fields.
+// The list is short enough that it never scrolls next to the calendar. The recently used ranges are below it.
+// The user can type any other span in the search ("45m", "30d") or in the From / To fields.
 const QUICK_RANGES = [
   ["now-5m", "now", "Last 5 minutes"],
   ["now-15m", "now", "Last 15 minutes"],
@@ -188,7 +185,7 @@ const QUICK_RANGES = [
 
 const sameRange = (a, b) => String(a?.from || "") === String(b?.from || "") && String(a?.to || "") === String(b?.to || "");
 
-// "now-60m" style span for a number of minutes, in the unit quick ranges use.
+// This is a span in the "now-60m" style, in minutes. Minutes is the unit that quick ranges use.
 function minutesToSpan(minutes) {
   const value = Math.max(1, Math.round(Number(minutes) || 60));
   if (value % 1440 === 0 && value >= 2880) return `${value / 1440}d`;
@@ -203,7 +200,7 @@ function formatMinutes(minutes) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
 
-// Typing "45m", "now-45m" or "last 45m" in the quick search offers that range.
+// If the user types "45m", "now-45m", or "last 45m" in the quick search, the search offers that range.
 function durationOption(text) {
   const match = /^(?:last\s*|now-)?(\d{1,5})\s*([smhdwMy])$/.exec(String(text || "").trim());
   if (!match) return null;
@@ -223,7 +220,7 @@ function dayKey(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-// Normalized text of one side: absolute values are rewritten zero-padded.
+// This is the normalized text of one side. Absolute values are rewritten with zero padding.
 function normalizeTime(text) {
   const raw = String(text || "").trim();
   const absolute = parseAbsolute(raw);
@@ -231,14 +228,13 @@ function normalizeTime(text) {
   return absolute.dateOnly ? dayKey(absolute.date) : formatDateTime(absolute.date.getTime());
 }
 
-// The label of an applied range, the same on every view (and in the
-// recently used list): a known range by name ("Last 1 hour"), "Last N
-// units" for now-N to now, otherwise both sides as 24 h local time,
-// "Sep 12 14:00 \u2192 15:00" with the date repeated only when the day
-// changes, and seconds only when the range is under 10 minutes
-// (ns.format.range). Relative sides ("now-2d") are shown as typed; the
-// absolute side of a mixed range reads as ns.format.time. ISO text is for
-// the inputs, the tooltips and the copies only.
+// This is the label of an applied range. The label is the same on every view and in the recently used list.
+// A known range has its name, such as "Last 1 hour". A range from now-N to now has the label "Last N units".
+// Otherwise, both sides show as 24 h local time, such as "Sep 12 14:00 \u2192 15:00".
+//
+// The date repeats only when the day changes. Seconds show only when the range is under 10 minutes (ns.format.range).
+// Relative sides, such as "now-2d", show as typed. The absolute side of a mixed range uses ns.format.time.
+// ISO text is for the inputs, the tooltips, and the copies only.
 const SECONDS_BELOW_MS = 10 * 60000;
 
 function describeRange(raw, nowMs = Date.now()) {
@@ -295,13 +291,13 @@ const ICONS = {
   nextYear: iconMod("chevrons-right"),
 };
 
-// Mounts the picker on the panel markup (see create()). options:
+// Mount the picker on the panel markup (see create()). The options are:
 //   getValue()            -> applied raw range { from, to }
 //   getMaxMinutes()       -> widest range the server accepts
 //   onApply(raw, source)  -> the user applied a range ("form", "quick", "recent", "shift", "zoom")
-//   open() / close()      -> optional: open / close the dropdown; by default
+//   open() / close()      -> optional: open or close the dropdown. By default,
 //                            the panel is an ns.menu menu (app_ui_menu.js:
-//                            motion, outside click, Escape, focus return)
+//                            motion, outside click, Escape, and focus return)
 //   settingName           -> server setting named by the max range error
 function mountPicker(el, options) {
   const { button, menu, select, fromInput, toInput, fromError, toError, rangeError, calendar, hint, applyButton, quickSearch, lists, timeZone, shiftBack, shiftForward, zoomOut } = el;
@@ -310,13 +306,13 @@ function mountPicker(el, options) {
   const fields = { from: fromInput.closest(".timeRangeField"), to: toInput.closest(".timeRangeField") };
   const isOpen = () => button.getAttribute("aria-expanded") === "true";
   const idPrefix = String(options.idPrefix || "timeRange");
-  // The panel keeps its own click, keys, focus (the From field) and
-  // layout (a sheet on phones): ns.menu does not place it.
+  // The panel keeps its own click, keys, focus (the From field), and layout (a sheet on phones).
+  // ns.menu does not place the panel.
   const dropdown = options.open ? null : menuMod?.bind(button, menu, { root: button.closest(".themeSelect"), trigger: false, keys: false, focus: "none", placement: false }) || null;
   const openDropdown = () => (options.open ? options.open() : dropdown?.open());
   const closeDropdown = () => (options.close ? options.close() : dropdown?.close({ focus: false }));
 
-  // Calendar skeleton: header (built once), weekday names, 6 x 7 day grid.
+  // The calendar skeleton has a header (built once), the weekday names, and a 6 x 7 day grid.
   calendar.innerHTML = `
       <div class="timeCalendar__header">
         <button type="button" class="timeCalendar__nav" data-cal-nav="-12" aria-label="Previous year" title="Previous year">${ICONS.prevYear}</button>
@@ -356,8 +352,7 @@ function mountPicker(el, options) {
     grid.innerHTML = rows.join("");
   }
 
-  // Updates the day classes in place, so hovering and clicking never
-  // replace the element under the pointer.
+  // This updates the day classes in place. Hover and click actions never replace the element under the pointer.
   function paintGrid() {
     const { startMs, endMs } = selection();
     const startDay = Number.isFinite(startMs) ? midnight(startMs).getTime() : NaN;
@@ -401,7 +396,7 @@ function mountPicker(el, options) {
     fields.to?.classList.toggle("is-active", mode === "end");
     if (hint) {
       const text = mode === "end" ? `Pick the end date · max ${formatMinutes(options.getMaxMinutes())}` : "Pick the start date";
-      // The step of the range that changes (the start is picked, the end comes next) is said through the page's one live region.
+      // The live region of the page announces the step of the range. The start is picked first, and the end comes next.
       if (hint.textContent && hint.textContent !== text) uiState.announce(text);
       hint.textContent = text;
     }
@@ -435,7 +430,7 @@ function mountPicker(el, options) {
     cal.focus = day;
     clearErrors();
     if (cal.mode !== "end" || !Number.isFinite(startMs) || t < midnight(startMs).getTime()) {
-      // Start picked: the calendar moves on to the end date by itself.
+      // After the start is picked, the calendar goes to the end date by itself.
       fromInput.value = `${dayKey(day)} 00:00:00`;
       const { endMs } = selection();
       if (!(endMs > t) || endMs - t > maxMs()) toInput.value = "";
@@ -526,8 +521,8 @@ function mountPicker(el, options) {
     syncForm();
   }
 
-  // Grafana timePicker.ts getShiftedTimeRange: half the span, and a forward
-  // shift crossing now ends at now.
+  // This follows Grafana timePicker.ts getShiftedTimeRange. The shift is half the span.
+  // A forward shift that crosses now ends at now.
   function shift(direction) {
     const range = currentWindow();
     if (!range) return;
@@ -539,8 +534,8 @@ function mountPicker(el, options) {
     applyAbsolute(startMs, endMs, "shift");
   }
 
-  // getZoomedTimeRange: twice the span around the same center, capped by the
-  // server's max range and not reaching past now.
+  // getZoomedTimeRange makes the range twice the span, around the same center.
+  // The server max range caps the result, and the result does not reach past now.
   function zoom() {
     const range = currentWindow();
     if (!range) return;
@@ -560,7 +555,7 @@ function mountPicker(el, options) {
     if (shiftForward) shiftForward.disabled = !range;
   }
 
-  // Form, calendar and lists follow the applied range.
+  // The form, the calendar, and the lists follow the applied range.
   function syncForm() {
     const raw = options.getValue();
     fromInput.value = raw.from;
@@ -610,10 +605,9 @@ function mountPicker(el, options) {
     else openPanel();
   });
 
-  // Escape: the host's picker is an ns.layers layer (it closes the panel and
-  // gives the focus back to the button).
+  // Escape: the picker of the host is an ns.layers layer. It closes the panel, and it returns the focus to the button.
 
-  // Tabbing out of the panel closes it (it is a dropdown, not a modal).
+  // When the focus leaves the panel with Tab, the panel closes. It is a dropdown, not a modal.
   menu.addEventListener("focusout", (event) => {
     const next = event.relatedTarget;
     if (isOpen() && next && !menu.contains(next) && next !== button) closePanel();
@@ -644,7 +638,7 @@ function mountPicker(el, options) {
       addMonths(target, step);
       cal.focus = midnight(target.getTime());
       showMonth(cal.focus);
-      // The month that the buttons reached is said through the page's one live region.
+      // The live region of the page announces the month that the buttons reach.
       uiState.announce(title.textContent);
       return;
     }
@@ -680,7 +674,7 @@ function mountPicker(el, options) {
 
   applyButton.addEventListener("click", applyForm);
 
-  // A short local list: it follows every key (ArrowDown goes straight into it).
+  // This is a short local list. It responds to every key. ArrowDown moves the focus into it.
   search.bind(quickSearch, () => renderLists(), { debounceMs: 0 });
   quickSearch.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -716,10 +710,9 @@ function mountPicker(el, options) {
   return { refresh, open: openPanel, close: closePanel, isOpen };
 }
 
-// The range panel of one view: absolute From / To with a calendar on the
-// left, quick and recently used ranges on the right, the time zone and the
-// shift / zoom buttons in the footer. Every id starts with the view's
-// prefix ("tracesRangeStart", "logsQuickRanges"...).
+// This is the range panel of one view. It has the absolute From and To fields, with a calendar on the left.
+// The quick and recently used ranges are on the right. The time zone and the shift and zoom buttons are in the footer.
+// Every id starts with the prefix of the view ("tracesRangeStart", "logsQuickRanges"...).
 function panelHtml(p) {
   const field = (side, label, placeholder) => `
             <label class="timeRangeField${side === "Start" ? " is-active" : ""}">
@@ -753,10 +746,9 @@ function panelHtml(p) {
       </div>`;
 }
 
-// Builds the range panel in a view's filter bar picker (the shipped
-// .tracePicker--range root: its hidden select and its button) and mounts
-// the picker on it. options are mountPicker's, plus idPrefix (the view).
-// Returns the picker and its elements (el).
+// Build the range panel in the filter bar picker of a view. The root is the shipped .tracePicker--range element, with its hidden select and its button.
+// Then mount the picker on this root. The options are the options of mountPicker, plus idPrefix (the view).
+// It returns the picker and its elements (el).
 function create(root, options) {
   const p = String(options.idPrefix || "timeRange");
   const select = $(":scope > select", root);
@@ -788,8 +780,8 @@ function create(root, options) {
   return { ...mountPicker(el, { ...options, idPrefix: p }), el };
 }
 
-// The time range in an address: the from / to parameters of Traces, Logs
-// and Metrics (raw sides: "now-1h", "2026-09-12 16:00:00"), named here only.
+// The time range in an address uses the from and to parameters of Traces, Logs, and Metrics (raw sides: "now-1h", "2026-09-12 16:00:00").
+// The names are defined here only.
 //   url.read(params)        -> { from, to }, or null unless both are set;
 //                              params defaults to the current address
 //                              (ns.router.current().params)
@@ -815,7 +807,7 @@ const url = Object.freeze({
   has: (params) => params.has("from") || params.has("to"),
 });
 
-// ns.format.range names a relative range with the picker's names.
+// ns.format.range uses the names of the picker for a relative range.
 format.setRangeNamer(describeRange);
 
 export const timeRange = {

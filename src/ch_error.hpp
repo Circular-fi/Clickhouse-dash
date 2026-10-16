@@ -1,9 +1,11 @@
 #pragma once
 
-// What a failure of a ClickHouse statement means, decided by the code that ClickHouse sends and by the kind of the exception,
-// never by a word in its message. Every place that turns a failure into an answer (the HTTP routes, MCP, the System page, the
-// fallbacks of the trace search) classifies it here, so the same failure gets the same status, the same code and the same
-// advice (retry or not) wherever it happens.
+// The meaning of a failed ClickHouse statement is derived from the error code that ClickHouse sends.
+// The kind of the exception also decides the meaning.
+// The meaning is never derived from a word in the message.
+// Every place that turns a failure into an answer uses this classification.
+// Examples are the HTTP routes, MCP, the System page and the fallbacks of the trace search.
+// The same failure gets the same status, the same code and the same advice (retry or not) everywhere.
 
 #include <exception>
 #include <string>
@@ -29,10 +31,10 @@ struct ChError {
   int code = 0;  // the code of ClickHouse; 0 when the failure did not come from the server
 };
 
-// The meaning of an exception that a statement threw.
+// Describes the meaning of an exception that a statement threw.
 ChError classify_clickhouse_error(const std::exception& error);
 
-// "TIMEOUT_EXCEEDED" and the like, for the codes that ChDash tells apart; "" for the others.
+// Holds "TIMEOUT_EXCEEDED" and similar names for the codes that ChDash tells apart. Holds "" for the other codes.
 std::string_view clickhouse_error_name(int code);
 
 } // namespace chdash

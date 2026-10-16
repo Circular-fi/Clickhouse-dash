@@ -124,7 +124,7 @@ SeriesStatements::SeriesStatements(const SeriesRequest& request, const std::stri
   service_param_ = params_.text(request.service);
   metric_param_ = params_.text(request.metric);
   window_prewhere_ = metric_predicate(service_param_, metric_param_, request.window.start_ms, request.window.end_ms);
-  // Per-series differences need each series' previous point: the scan starts earlier, only points inside the window contribute.
+  // Per-series differences need the previous point of each series. So, the scan starts earlier. Only points inside the window contribute.
   const int64_t scan_start_ms = std::max<int64_t>(0, request.window.start_ms - std::max(request.grid.size_ms, kLagLookbackMinMs));
   lag_prewhere_ = metric_predicate(service_param_, metric_param_, scan_start_ms, request.window.end_ms);
   series_id_ = with_scope ? "cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion)" : "cityHash64(Attributes, ResourceAttributes)";
@@ -148,8 +148,8 @@ Statement SeriesStatements::info() const {
 
 namespace {
 
-// The expression of the group of a point: the values of the attributes of the grouping, joined. The groups that are not kept are one group,
-// "other", folded here: the rows of ClickHouse are then the kept groups and one more.
+// The expression of the group of a point. It has the values of the attributes of the group setting, joined.
+// The groups that are not kept become one group, "other". This file folds them here. The rows of ClickHouse are then the kept groups and one more.
 std::string group_expression(const SeriesRequest& request, Mode mode, const std::vector<std::string>* keep, SqlParams& params) {
   if (request.group_by.empty() || mode == Mode::SummaryQuantile) return "''";
   std::string expr = "arrayStringConcat([";
@@ -191,8 +191,8 @@ SeriesStatements::Body SeriesStatements::body(Mode mode, bool all_delta, const s
                 table + " PREWHERE " + window_prewhere + " WHERE " + where + " GROUP BY g, b";
     out.order = " ORDER BY g, b";
   } else if (mode == Mode::Delta || mode == Mode::SummaryDelta) {
-    // Delta points count as they are. A cumulative point contributes its difference to the previous point of the same series, or its
-    // whole value after a reset (new StartTimeUnix or a decrease); the first point of a series has no predecessor and no difference.
+    // Delta points count as they are. A cumulative point contributes its difference to the previous point of the same series.
+    // After a reset (new StartTimeUnix or a decrease), it contributes its whole value. The first point of a series has no predecessor and no difference.
     const bool summary = mode == Mode::SummaryDelta;
     const std::string temporality = summary ? "2" : "AggregationTemporality";
     const std::string v1 = summary ? "Sum" : "Value";
@@ -262,7 +262,7 @@ SeriesStatements::Body SeriesStatements::body(Mode mode, bool all_delta, const s
     }
     out.order = " ORDER BY g, b";
   } else {
-    // Summary quantiles: one line for each series, the last value in each bucket. Only the series that are kept, when the series are ranked.
+    // Summary quantiles: one line for each series, with the last value in each bucket. Only the series that are kept are used, when the series are ranked.
     out.cells = "SELECT toString(sid) AS g, any(attrs), toString(b), toString(argMax(qv, TimeUnix)) AS c1 FROM (SELECT " + series_id +
                 " AS sid, toJSONString(Attributes) AS attrs, " + bucket + " AS b, TimeUnix, indexOf(`ValueAtQuantiles.Quantile`, " +
                 quantile + ") AS qi, `ValueAtQuantiles.Value`[qi] AS qv FROM " + table + " PREWHERE " + window_prewhere +
@@ -284,8 +284,9 @@ Statement SeriesStatements::series(Mode mode, bool all_delta, const std::string&
 
 namespace {
 
-// The value of a cell for an aggregation, as SQL over the columns of the wrapper (s: the sum, n: the count, mn, mx, ls: the sum of the last values
-// and sr: the number of the series that have one): the formulas of cell_value (metrics_aggregate.cpp). `seconds` is what a rate divides by.
+// The value of a cell for an aggregation, as SQL over the columns of the wrapper.
+// The columns are: s (the sum), n (the count), mn, mx, ls (the sum of the last values), and sr (the number of the series that have one).
+// The formulas are the ones of cell_value (metrics_aggregate.cpp). `seconds` is the value that a rate divides by.
 std::string value_sql(Mode mode, const std::string& agg, const std::string& seconds) {
   switch (mode) {
     case Mode::Gauge:
@@ -310,15 +311,15 @@ std::string value_sql(Mode mode, const std::string& agg, const std::string& seco
   return "nan";
 }
 
-// A text that ClickHouse wrote as a number; NaN when it is not one (what text_to_double does).
+// A text that ClickHouse wrote as a number. The result is NaN when the text is not a number. This is what text_to_double does.
 std::string number_sql(const std::string& column) { return "toFloat64OrDefault(" + column + ", nan)"; }
 
 }  // namespace
 
-// The groups that the answer keeps are the `top_k` ones with the largest sum, over the buckets, of the absolute value of the aggregation (the
-// count of the observations for the quantiles of a histogram): the score of rank_groups (metrics_aggregate.cpp). The statement of the buckets is
-// wrapped, so ClickHouse ranks the groups and sends the keys of the best ones, how many groups there are and their scores (the score of each of the
-// best ones, and the sum of the scores of all the groups), not every cell of every group.
+// The answer keeps the `top_k` groups with the largest score. The score is the sum, over the buckets, of the absolute value of the aggregation.
+// For the quantiles of a histogram, the score is the count of the observations. The score is the one of rank_groups (metrics_aggregate.cpp).
+// The statement of the buckets is wrapped. So, ClickHouse ranks the groups and sends three things: the keys of the best groups, the number of groups, and their scores.
+// The scores are the score of each of the best groups, and the sum of the scores of all the groups. ClickHouse does not send every cell of every group.
 Statement SeriesStatements::ranking(Mode mode, bool all_delta, const std::string& quantile, const std::string& agg, double bucket_seconds,
                                     size_t top_k) const {
   Body statement = body(mode, all_delta, quantile, nullptr);

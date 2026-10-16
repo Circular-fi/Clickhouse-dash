@@ -13,9 +13,9 @@
 namespace chdash {
 
 struct SqlMaskResult {
-  // Same byte length as the input. String/identifier/comment contents are
-  // replaced with spaces while newlines are preserved. ASCII code outside
-  // those regions is lower-cased to make cheap token scans deterministic.
+  // The result has the same byte length as the input.
+  // The function replaces the contents of strings, identifiers and comments with spaces. It keeps every newline.
+  // It makes the ASCII code outside these regions lower case. Each token scan then gives a fixed result.
   std::string code_lower;
   bool has_comments = false;
 };
@@ -54,9 +54,9 @@ inline SqlMaskResult mask_sql_surface(std::string_view sql) {
   return result;
 }
 
-// Return the first SQL keyword outside comments and quoted regions. The result
-// is ASCII-lowercase and empty for a comment/whitespace-only buffer. This keeps
-// statement classification correct for editor queries beginning with comments.
+// The function gives the first SQL keyword outside comments and quoted regions.
+// The result is in ASCII lower case. It is empty for a buffer that has only comments or only blanks.
+// This keeps the statement classification correct for editor queries that begin with comments.
 inline std::string sql_first_keyword_lower(std::string_view sql) {
   for (const sql::Token& token : sql::lex(sql)) {
     if (token.kind != sql::TokenKind::Word || !sql_is_ident_start(sql[token.begin])) continue;
@@ -78,10 +78,9 @@ inline std::vector<std::pair<size_t, size_t>> sql_single_quoted_literal_ranges(
   return ranges;
 }
 
-// Decode a single-quoted SQL literal (including its quotes) to the value the
-// ClickHouse parser produces. Two spellings are interchangeable only when they
-// decode to the same bytes, e.g. 'it''s' and 'it\'s'. Unknown escapes keep
-// their backslash, matching ClickHouse's parseComplexEscapeSequence.
+// The function decodes a single-quoted SQL literal, with its quotes, to the value that the ClickHouse parser produces.
+// Two spellings are interchangeable only when they decode to the same bytes. For example, 'it''s' and 'it\'s'.
+// An unknown escape keeps its backslash. This matches ClickHouse's parseComplexEscapeSequence.
 inline std::string decode_sql_single_quoted_literal(std::string_view literal) {
   std::string out;
   if (literal.size() < 2) return std::string(literal);
@@ -131,12 +130,11 @@ inline std::string decode_sql_single_quoted_literal(std::string_view literal) {
   return out;
 }
 
-// formatQuery re-escapes string literals; restore the user's exact spelling.
-// Literals are matched by *decoded value*, in order, never by position alone:
-// formatQuery also adds literals (CAST(x AS T) -> CAST(x, 'T'), x::T) and
-// removes others (INTERVAL '2 hours' -> toIntervalHour(2)), so a positional
-// swap would silently change query semantics. A formatted literal without an
-// equal-valued source literal ahead of the cursor keeps its formatted spelling.
+// formatQuery re-escapes string literals. Restore the exact spelling that the user wrote.
+// Match the literals by their *decoded value*, in order. Never match by position alone.
+// formatQuery also adds literals (CAST(x AS T) -> CAST(x, 'T'), x::T) and removes others (INTERVAL '2 hours' -> toIntervalHour(2)).
+// A positional swap would change the query semantics without a warning.
+// A formatted literal that has no equal-valued source literal ahead of the cursor keeps its formatted spelling.
 inline std::string restore_sql_single_quoted_literals(
     std::string formatted,
     std::string_view original
@@ -153,8 +151,9 @@ inline std::string restore_sql_single_quoted_literals(
     source_values.push_back(decode_sql_single_quoted_literal(original.substr(begin, end - begin)));
   }
 
-  // The places of each value in the source, in order: the next literal of a value after the cursor is found by a search in its list, not by a
-  // walk over the rest of the source (a literal that formatQuery added has no equal and walked to the end each time).
+  // The function keeps the places of each value in the source, in order.
+  // It finds the next literal of a value after the cursor by a search in its list. It does not walk the rest of the source.
+  // A walk would reach the end each time for a literal that formatQuery added, because that literal has no equal.
   std::unordered_map<std::string, std::vector<size_t>> places;
   for (size_t i = 0; i < source_values.size(); ++i) places[source_values[i]].push_back(i);
 
@@ -185,13 +184,10 @@ inline std::string restore_sql_single_quoted_literals(
 }
 
 
-// Monospace display columns of one code point, as editors and terminals render
-// it: East Asian Wide/Fullwidth characters and emoji take two columns, while
-// combining marks, zero-width joiners/spaces, variation selectors and emoji
-// skin-tone modifiers take none. Alignment that counts bytes or code points
-// shifts the `AS` column as soon as a literal or identifier contains CJK or
-// emoji. The tables cover the common blocks rather than all of Unicode's
-// EastAsianWidth.txt; unlisted code points count as one column.
+// The function gives the monospace display columns of one code point, as editors and terminals render it.
+// East Asian Wide/Fullwidth characters and emoji take two columns. Combining marks, zero-width joiners/spaces, variation selectors and emoji skin-tone modifiers take none.
+// Alignment that counts bytes or code points moves the AS column when a literal or identifier contains CJK or emoji.
+// The tables cover the common blocks. They do not cover all of Unicode's EastAsianWidth.txt. A code point that is not listed counts as one column.
 inline size_t sql_codepoint_display_width(char32_t cp) {
   struct Range { char32_t first; char32_t last; };
   static constexpr Range kZeroWidth[] = {
@@ -234,10 +230,10 @@ inline size_t sql_codepoint_display_width(char32_t cp) {
   return in(kWide) ? 2 : 1;
 }
 
-// Display width of UTF-8 text (see sql_codepoint_display_width). Invalid bytes
-// count one column each. An emoji joined by U+200D (ZWJ sequence such as a
-// family emoji) renders as one glyph, so joined components add no width; U+FE0F
-// requests emoji presentation, which widens a preceding narrow symbol (❤️).
+// The function gives the display width of UTF-8 text. It uses sql_codepoint_display_width.
+// Each invalid byte counts as one column.
+// An emoji that is joined by U+200D, such as a family emoji, renders as one glyph. Its joined parts add no width.
+// U+FE0F asks for emoji presentation. It widens a preceding narrow symbol (❤️).
 inline size_t sql_display_width(std::string_view s) {
   size_t width = 0;
   size_t previous = 0;
@@ -277,11 +273,9 @@ inline size_t sql_display_width(std::string_view s) {
   return width;
 }
 
-// ClickHouse heredoc literals: `$$body$$` or `$tag$body$tag$`. formatQuery
-// prints them as ordinary quoted strings, and the local post-processor's
-// scanners only know quotes, backticks and comments, so a heredoc body with a
-// quote, `--`, `/*` or an operator would be misread as SQL there. Heredocs are
-// therefore masked before formatting and restored byte-for-byte afterwards.
+// ClickHouse heredoc literals have the form `$$body$$` or `$tag$body$tag$`. formatQuery prints them as ordinary quoted strings.
+// The local post-processor scanners know only quotes, backticks and comments. A heredoc body with a quote, `--`, `/*` or an operator would be misread as SQL there.
+// The code therefore masks the heredocs before formatting. It restores them byte-for-byte afterwards.
 inline std::vector<std::pair<size_t, size_t>> sql_heredoc_ranges(std::string_view sql) {
   std::vector<std::pair<size_t, size_t>> ranges;
   for (const sql::Token& token : sql::lex(sql)) {
@@ -292,15 +286,14 @@ inline std::vector<std::pair<size_t, size_t>> sql_heredoc_ranges(std::string_vie
 
 struct SqlHeredocMask {
   std::string sql;
-  // Placeholder literal -> exact heredoc spelling.
+  // The map gives the exact heredoc spelling for each placeholder literal.
   std::vector<std::pair<std::string, std::string>> heredocs;
 };
 
-// Replace each heredoc by a single-quoted placeholder literal with the same
-// display width, so alignment and wrapping decisions made on the masked text
-// stay right once the heredoc is put back. The placeholder body starts with a
-// private-use code point (U+E000 + index, one column) that user SQL never
-// contains, padded with `_`; heredocs are at least four columns wide (`$$$$`).
+// The function replaces each heredoc by a single-quoted placeholder literal with the same display width.
+// Alignment and wrapping decisions on the masked text stay correct after the heredoc is put back.
+// The placeholder body starts with a private-use code point (U+E000 + index, one column) that user SQL never contains. It is padded with `_`.
+// A heredoc is at least four columns wide (`$$$$`).
 inline SqlHeredocMask mask_sql_heredocs(std::string_view sql) {
   SqlHeredocMask mask;
   const auto ranges = sql_heredoc_ranges(sql);
@@ -313,8 +306,7 @@ inline SqlHeredocMask mask_sql_heredocs(std::string_view sql) {
     const std::string_view spelling = sql.substr(begin, end - begin);
     const size_t index = mask.heredocs.size();
     const size_t width = sql_display_width(spelling);
-    // A multiline heredoc keeps its exact bytes too; only the alignment of
-    // text after it can be off, as for any multiline literal.
+    // A multiline heredoc also keeps its exact bytes. Only the alignment of the text after it can be off, as for any multiline literal.
     if (index >= 0x1000 || width < 4) continue;
     const char32_t marker = 0xE000 + static_cast<char32_t>(index);
     std::string placeholder = "'";
@@ -332,12 +324,10 @@ inline SqlHeredocMask mask_sql_heredocs(std::string_view sql) {
   return mask;
 }
 
-// Multi-line single-quoted literals are masked like heredocs. The line-based
-// post-processor re-indents and re-spaces every line it sees, so the body of a
-// literal spanning several lines (HTTP headers, HTML, JSON documents...) was
-// rewritten as if it were SQL (`Content-Type` -> `Content - Type`, indentation
-// injected into the string), changing the value. The placeholder is one line
-// as wide as the literal's widest line; the exact bytes are restored at the end.
+// The code masks multi-line single-quoted literals in the same way as heredocs.
+// The line-based post-processor re-indents and re-spaces every line that it reads. It rewrote the body of a literal that spans several lines (HTTP headers, HTML, JSON documents...) as if it were SQL.
+// For example, `Content-Type` -> `Content - Type` changed the value, and the indentation was injected into the string.
+// The placeholder is one line, as wide as the widest line of the literal. The function restores the exact bytes at the end.
 inline void mask_sql_multiline_literals(SqlHeredocMask& mask) {
   const std::string source = mask.sql;
   if (source.find('\n') == std::string::npos) return;
@@ -409,15 +399,14 @@ inline bool sql_identifier_value_equal(std::string_view lhs, std::string_view rh
   return true;
 }
 
-// Tokenize identifiers while ignoring strings and comments. Quoted identifiers
-// are decoded only for alignment; their exact source spelling is kept in the
-// original SQL and can later be restored after ClickHouse formatQuery has
-// normalized double quotes to backticks.
+// The function tokenizes identifiers. It ignores strings and comments.
+// It decodes a quoted identifier only for alignment. The exact source spelling stays in the original SQL.
+// The function can restore that spelling later. This is needed after ClickHouse formatQuery changes double quotes to backticks.
 inline std::vector<SqlIdentifierToken> sql_identifier_tokens(std::string_view sql) {
   std::vector<SqlIdentifierToken> tokens;
   for (const sql::Token& token : sql::lex(sql)) {
     if (token.kind == sql::TokenKind::QuotedIdent && token.closed) {
-      // The name between the quote marks: a doubled quote mark and an escaped byte are one byte.
+      // Read the name between the quote marks. A doubled quote mark and an escaped byte are one byte.
       const char quote = sql[token.begin];
       std::string decoded;
       for (size_t i = token.begin + 1; i + 1 < token.end;) {
@@ -439,14 +428,12 @@ inline std::vector<SqlIdentifierToken> sql_identifier_tokens(std::string_view sq
   return tokens;
 }
 
-// formatQuery back-quotes keyword-named callables (`FROM VALUES(…)` becomes
-// FROM `VALUES`(…)). When the user wrote that name unquoted as a call, the
-// input already parsed to the same AST, so give the call its original
-// spelling back. Only `` `name`( `` call sites are touched; quoted aliases and
-// column identifiers keep their quotes.
+// formatQuery adds backquotes to the callables whose names are keywords. For example, `FROM VALUES(…)` becomes FROM `VALUES`(…).
+// When the user wrote that name unquoted as a call, the input already parsed to the same AST. Give the call its original spelling back.
+// Only the call sites of the form `` `name`( `` are changed. Quoted aliases and column identifiers keep their quotes.
 inline std::string unquote_call_identifiers_written_unquoted(std::string formatted, std::string_view source) {
   if (formatted.find('`') == std::string::npos) return formatted;
-  // Unquoted names the user wrote as calls (`name(`), lower-cased.
+  // The map holds the unquoted names that the user wrote as calls (`name(`), in lower case.
   std::vector<std::string> unquoted_calls;
   for (const auto& token : sql_identifier_tokens(source)) {
     if (token.quoted) continue;
@@ -513,12 +500,10 @@ inline std::string restore_sql_quoted_identifiers(
     }
   };
 
-  // The local formatter may change only the outer quote character without
-  // rewriting doubled quote escapes inside the identifier. In that case the
-  // decoded values differ even though the identifier occupies the same token
-  // slot. Prefer positional alignment when the complete token structure is
-  // unchanged; all unquoted tokens must still match and quoted source tokens
-  // must still be quoted in the formatted output.
+  // The local formatter can change only the outer quote character. It does not rewrite the doubled quote escapes inside the identifier.
+  // In that case the decoded values differ, although the identifier has the same token slot.
+  // Prefer positional alignment when the complete token structure is unchanged.
+  // All unquoted tokens must still match. Quoted source tokens must still be quoted in the formatted output.
   bool structurally_aligned = source_tokens.size() == formatted_tokens.size();
   if (structurally_aligned) {
     for (size_t i = 0; i < source_tokens.size(); ++i) {
@@ -537,12 +522,11 @@ inline std::string restore_sql_quoted_identifiers(
       add_replacement(source_tokens[i], formatted_tokens[i]);
     }
   } else {
-    // Align the complete identifier stream rather than only quoted tokens. This
-    // prevents a quoted alias from being matched to an earlier unquoted alias
-    // which formatQuery happened to wrap in backticks. The places of each name
-    // (lower case) in the formatted text are searched, not walked: a name that
-    // is not there is passed over, and the names after it are still restored
-    // (formatQuery drops some: `x::T` has a name less than `CAST(x, 'T')`).
+    // Align the complete identifier stream, not only the quoted tokens.
+    // This stops a quoted alias from matching an earlier unquoted alias. formatQuery had wrapped that unquoted alias in backticks.
+    // The function searches the places of each name (in lower case) in the formatted text. It does not walk them.
+    // A name that is not there is skipped. The names after it are still restored.
+    // formatQuery drops some names: `x::T` has one name less than `CAST(x, 'T')`.
     std::unordered_map<std::string, std::vector<size_t>> places;
     for (size_t i = 0; i < formatted_tokens.size(); ++i) {
       std::string lower;
@@ -584,10 +568,9 @@ inline bool sql_identifier_ends_with(std::string_view ident, std::string_view su
          ident.substr(ident.size() - suffix.size()) == suffix;
 }
 
-// Detect result types which clickhouse-cpp v2.6 cannot reliably decode through
-// the native protocol. This is deliberately lexical and conservative: a false
-// positive costs one cached DESCRIBE, while a false negative can corrupt a
-// streamed result before the driver reports its decode error.
+// The function detects result types that clickhouse-cpp v2.6 cannot decode reliably through the native protocol.
+// The detection is lexical and conservative by design. A false positive costs one cached DESCRIBE.
+// A false negative can corrupt a streamed result before the driver reports its decode error.
 inline bool sql_likely_requires_compat_describe(std::string_view sql) {
   const auto masked = mask_sql_surface(sql);
   const std::string_view code(masked.code_lower);
@@ -614,16 +597,13 @@ inline bool sql_likely_requires_compat_describe(std::string_view sql) {
 
     if (ident == "object" && is_call) return true;
 
-    // Aggregate combinators ending in State return AggregateFunction(...), for
-    // example argMaxState, uniqState and quantilesMergeState. Merge/finalizer
-    // functions can expose the AggregateFunction argument's scalar type (for
-    // example sumMerge(AggregateFunction(sum, Int256)) -> Int256), which is not
-    // visible lexically in the SELECT itself. Pre-describe those calls too.
+    // Aggregate combinators whose names end in State return AggregateFunction(...). Examples are argMaxState, uniqState and quantilesMergeState.
+    // Merge and finalizer functions can expose the scalar type of the AggregateFunction argument. For example, sumMerge(AggregateFunction(sum, Int256)) -> Int256.
+    // The SELECT text does not show this type lexically. Describe those calls in advance too.
     if (is_call && (sql_identifier_ends_with(ident, "state") ||
                     sql_identifier_ends_with(ident, "merge"))) return true;
 
-    // Explicit conversion helpers expose 256-bit values even when their type
-    // name does not otherwise occur in the query text.
+    // Explicit conversion helpers expose 256-bit values. The type name can be absent from the query text.
     if (is_call && (ident == "touint256" || ident == "toint256" || ident == "todecimal256")) {
       return true;
     }

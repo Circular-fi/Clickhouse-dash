@@ -33,9 +33,8 @@ namespace chdash {
 namespace {
 
 std::optional<std::pair<std::string, std::string>> split_qualified_name(std::string value) {
-  // system.query_log/system.query_views_log normally use database.table. Keep
-  // this parser deliberately conservative: an unparseable system-account name
-  // is omitted rather than leaked.
+  // system.query_log and system.query_views_log normally use database.table. Keep this parser deliberately conservative.
+  // An unparseable system-account name is omitted, and it is not leaked.
   if (value.empty()) return std::nullopt;
   if (value.front() == '`' && value.back() == '`') value = value.substr(1, value.size() - 2);
   const size_t dot = value.find('.');
@@ -68,8 +67,8 @@ void filter_query_log_row(QueryLogAnalysisRow& row, const AllowedObjectSet& allo
         return !allowed_qualified_name(allowed, table);
       }),
       row.tables.end());
-  // Projection names are not globally qualified. Only return them when the
-  // query still has at least one readable table after ACL filtering.
+  // Projection names are not globally qualified. Return them only when the query
+  // still has at least one readable table after ACL filtering.
   if (row.tables.empty()) row.projections.clear();
 }
 
@@ -323,8 +322,8 @@ TraceJsonBuild build_trace_json(
       continue;
     }
 
-    // Strict leaf-only aggregation: same trace + parent + operation, and only
-    // spans that are not parents of any other span are eligible.
+    // Strict leaf-only aggregation. The key is the same trace, parent and operation.
+    // Only spans that are not parents of any other span are eligible.
     const std::string group_key = leaf_group_key(row.trace_id, row.parent_span_id, operation_name);
     auto [it, inserted] = leaf_groups.emplace(group_key, pending.size());
     if (inserted) {
@@ -341,12 +340,11 @@ TraceJsonBuild build_trace_json(
     pending[it->second].segments.emplace_back(row.start_time_us, row.finish_time_us);
   }
 
-  // A breadth-first detailed trace cap preserves structure, but for very busy
-  // processor leaves it necessarily retains only a chronological prefix at the
-  // final retained depth. When that cap is hit, replace processor leaf groups
-  // with the independent full-trace temporal summary used by Pipeline. This
-  // keeps Tracing representative across the complete query without sending all
-  // raw processor calls. Structural/non-processor spans remain exact.
+  // A breadth-first detailed trace cap keeps the structure of the trace.
+  // For very busy processor leaves, the cap keeps only a chronological prefix at the final retained depth.
+  // When that cap is hit, the code replaces processor leaf groups with the independent full-trace temporal summary used by Pipeline.
+  // This keeps Tracing representative across the complete query. It does not send all raw processor calls.
+  // Structural and non-processor spans remain exact.
   if (use_processor_summary_overlay && !processor_families.empty() && !processor_summary.empty()) {
     std::unordered_set<size_t> replaced_groups;
     replaced_groups.reserve(processor_families.size() * 2);
@@ -387,7 +385,7 @@ TraceJsonBuild build_trace_json(
     if (out.processor_summary_overlay) out.processor_summary_bucket_us = processor_summary_bucket_us;
   }
 
-  // Exact overlap merge first. The 4K temporal LOD below then merges segments
+  // The exact overlap merge runs first. The 4K temporal LOD below then merges segments
   // that are indistinguishable at a 3840-pixel timeline resolution.
   for (auto& node : pending) {
     if (!node.leaf_group || node.segments.size() < 2) continue;
@@ -618,7 +616,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
 
   auto record = query_registry_->find(query_id, host_id);
   if (!record) {
-    // Missing and foreign-owned query ids deliberately return the same result.
+    // Missing query ids and foreign query ids return the same result. This is deliberate.
     return json_error(res, 404, "analysis_not_found", "Query is not available for analysis.");
   }
   if (record->terminal_status.empty()) {
@@ -630,7 +628,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
         "Analysis is available only for queries executed in profiling mode.");
   }
 
-  // The objects the runner reads (the ACL of its identity, shared with the Explorer and the System pages).
+  // The objects that the runner reads. This is the ACL of its identity, shared with the Explorer and the System pages.
   std::shared_ptr<const AclTableSet> allowed;
   try {
     allowed = acl_.table_set(runner_access(*host));
@@ -678,8 +676,8 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
   else processor_profiling_status = "unknown_no_rows";
   writer.Key("processor_profiling_requested"); writer.Bool(processor_setting_enabled);
   writer.Key("processor_profiling_status"); write_json_text(writer, processor_profiling_status);
-  // Applicability is derived from the filtered execution itself. The frontend
-  // must never infer cluster/view usage from database names or configuration.
+  // The code derives applicability from the filtered execution itself.
+  // The frontend must never infer cluster or view usage from database names or configuration.
   writer.Key("views_applicable"); writer.Bool(!analysis.views.empty());
   writer.Key("distributed_applicable"); writer.Bool(!analysis.distributed_children.empty());
   writer.Key("distributed_scope"); writer.String("local_replica");
@@ -758,7 +756,7 @@ void Server::handle_query_analysis(const httplib::Request& req, httplib::Respons
 }
 
 
-// The JSON object of a finished analysis (the `result` of the job that the poll answers).
+// The JSON object of a finished analysis. It is the `result` of the job that the poll answers.
 static std::string deep_analysis_result_json(const std::string& query_id, const std::string& host_id, const DeepAnalysisResult& deep) {
   rapidjson::StringBuffer buffer(nullptr, 8192);
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
@@ -802,7 +800,7 @@ static std::string deep_analysis_result_json(const std::string& query_id, const 
   return std::string(buffer.GetString(), buffer.GetSize());
 }
 
-// KILL QUERY for the statements of a job, through the system account like every cancel (docs/configuration.md, "Authorization model").
+// KILL QUERY stops the statements of a job. It uses the system account, like every cancel (docs/configuration.md, "Authorization model").
 static void kill_deep_statements(const HostSpec& host, const std::vector<std::string>& statements) {
   if (statements.empty()) return;
   std::string where = "query_id IN (";
@@ -822,9 +820,10 @@ static void write_deep_job_head(rapidjson::Writer<rapidjson::StringBuffer>& writ
   writer.Key("status"); writer.String(status);
 }
 
-// POST /api/query/deep-analysis starts the job and answers 202 at once; the analysis runs in a thread of the server that holds one
-// place of the analysis admission for each host (operations.md, "Admission") until it ends. The client polls
-// GET /api/query/deep-analysis and can cancel with POST /api/query/deep-analysis/cancel.
+// POST /api/query/deep-analysis starts the job and answers 202 at once.
+// The analysis runs in a thread of the server. That thread holds one place of the analysis admission for each host (operations.md, "Admission").
+// The thread holds the place until the analysis ends. The client polls
+// GET /api/query/deep-analysis. It can cancel with POST /api/query/deep-analysis/cancel.
 void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Response& res) {
   rapidjson::Document doc;
   if (!parse_json_body(req, doc)) {
@@ -879,10 +878,10 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
     res.set_header("Cache-Control", "no-store");
     res.set_content(buffer.GetString(), buffer.GetSize(), "application/json");
   };
-  // The analysis of this query already runs: the same job, no second EXPLAIN ANALYZE.
+  // The analysis of this query already runs. This is the same job. No second EXPLAIN ANALYZE starts.
   if (!started.created) return answer(started.job_id);
 
-  // A place for the job: it is held until the job ends. Without one (a burst of analyses), 503 server_busy.
+  // A place for the job is held until the job ends. Without a place (during a burst of analyses), the answer is 503 server_busy.
   auto ticket = admit(WorkClass::Analysis, req, res);
   if (!ticket) {
     deep_jobs_.discard(started.job_id);
@@ -895,10 +894,10 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
   }
 
   ChQueryLimits limits = user_sql_limits(req, "chdash-deep-analysis");
-  // The request is over when the job runs: the job stops by its own cancel, or when the server stops.
+  // The request ends, but the job keeps running. The job stops by its own cancel, or when the server stops.
   const std::shared_ptr<DeepJobControl> control = started.control;
   limits.canceled = [this, control] { return stopping() || control->cancel_requested(); };
-  // The bound of the job (analysis.deep_max_execution_time_s); the query { } bounds of a run apply too, the smaller one wins.
+  // The bound of the job is analysis.deep_max_execution_time_s. The query { } bounds of a run apply too. The smaller bound wins.
   if (cfg_.analysis.deep_max_execution_time_s > 0) {
     limits.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(cfg_.analysis.deep_max_execution_time_s);
   }
@@ -908,7 +907,7 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
     std::thread([this, group, ticket = std::move(*ticket), record = std::move(*record), host = *host, job_id, control,
                  limits = std::move(limits)]() mutable {
       {
-        // A stop of the server, or a cancel, kills the statements: EXPLAIN ANALYZE can send nothing for as long as the run did.
+        // A stop of the server, or a cancel, kills the statements. EXPLAIN ANALYZE can send nothing for as long as the run did.
         struct StopHook {
           Server& server;
           uint64_t id;
@@ -932,7 +931,7 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
                           error.http_status > 0 ? error.http_status : 500);
         }
       }
-      // The place goes back before the thread leaves the group: the server waits for the group, then destroys the admission.
+      // The place is given back before the thread leaves the group. The server waits for the group, then destroys the admission.
       ticket = Admission::Ticket();
       group->leave();
     }).detach();
@@ -944,7 +943,7 @@ void Server::handle_query_deep_analysis(const httplib::Request& req, httplib::Re
   answer(job_id);
 }
 
-// GET /api/query/deep-analysis?host_id=&job_id=: the state of the job, and the analysis once it finished.
+// GET /api/query/deep-analysis?host_id=&job_id=: the state of the job, and the analysis once it has finished.
 void Server::handle_query_deep_analysis_status(const httplib::Request& req, httplib::Response& res) {
   res.set_header("Cache-Control", "no-store");
   if (!req.has_param("host_id")) return json_error(res, 400, "missing_host_id", "Missing host_id.");
@@ -965,7 +964,7 @@ void Server::handle_query_deep_analysis_status(const httplib::Request& req, http
     writer.Key("result");
     writer.RawValue(job.result_json->data(), job.result_json->size(), rapidjson::kObjectType);
   } else if (job.state == DeepJobState::Failed) {
-    // The poll itself succeeded: the failure is the state of the job, with the code and the message of the envelope (operations.md,
+    // The poll itself succeeded. The failure is the state of the job. It has the code and the message of the envelope (operations.md,
     // "Errors"). `http_status` is the status that a synchronous answer would have had.
     writer.Key("error_code"); write_json_text(writer, job.error_code);
     writer.Key("message"); write_json_text(writer, job.error_message);
@@ -977,8 +976,8 @@ void Server::handle_query_deep_analysis_status(const httplib::Request& req, http
   res.set_content(buffer.GetString(), buffer.GetSize(), "application/json");
 }
 
-// POST /api/query/deep-analysis/cancel {host_id, job_id}: the job stops and its statements are killed. The state turns "canceled" when
-// the thread of the job has seen it: the client polls once more.
+// POST /api/query/deep-analysis/cancel {host_id, job_id}: the job stops and its statements are killed.
+// The state turns "canceled" when the thread of the job has seen the cancel. The client polls once more.
 void Server::handle_query_deep_analysis_cancel(const httplib::Request& req, httplib::Response& res) {
   res.set_header("Cache-Control", "no-store");
   rapidjson::Document doc;

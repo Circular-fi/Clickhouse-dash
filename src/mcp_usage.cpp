@@ -121,7 +121,8 @@ void put_strings(McpJsonWriter& w, const std::vector<std::string>& values) {
   w.EndArray();
 }
 
-// The rows of an entry, as a file or a table holds them: the key, its clients, then its cells by tier and by start (the names of the ids).
+// The rows of an entry, as a file or a table holds them.
+// The row has the key, its clients, and then its cells by tier and by start. These are the names of the ids.
 void write_rows(McpUsageWriter& writer, const Usage::State& state, const Usage::Entry& entry) {
   McpUsageKeyRow key;
   key.key = entry.key.id;
@@ -169,9 +170,13 @@ void write_rows(McpUsageWriter& writer, const Usage::State& state, const Usage::
 
 constexpr uint32_t kNone = UINT32_MAX;
 
-// The names of the methods and the results (or of the clients) that an answer sees, from all the instances, by their text: the id of a name
-// is made for the answer, and the names of all the instances are as many as they are (an instance has at most 4096 of its own). A name has
-// its flags: whether the first filter of its dimension (the methods, the clients) and the second (the results) chose it.
+// The names of the methods and the results (or of the clients) that an answer sees.
+// The answer reads them from all the instances, by their text.
+// The id of a name is made for the answer. The names of all the instances are as many as they are.
+// An instance has at most 4096 names of its own.
+//
+// A name has its flags. They show whether the first filter of its dimension (the methods, the clients) chose it.
+// They also show whether the second filter (the results) chose it.
 class Table {
 public:
   explicit Table(const std::vector<std::string>& first = {}, const std::vector<std::string>& second = {})
@@ -199,8 +204,8 @@ private:
   std::vector<uint8_t> chosen_;
 };
 
-// One instance that an answer reads, with the translation of the ids of its names and its clients into those of the answer (made as the
-// cells come: an id that no cell uses is never looked at).
+// One instance that an answer reads. The translation of the ids of its names and its clients goes into the ids of the answer.
+// The translation is made as the cells come. An id that no cell uses is never checked.
 struct Source {
   std::string instance;
   bool selected = true;                 // the filter of the instances keeps it
@@ -220,9 +225,12 @@ struct Source {
   }
 };
 
-// The instances that an answer reads: this one first (its state is live: one entry at a time under its lock, so that a call that is counted
-// meanwhile waits for one entry, never for all of them), then the others that were read (immutable: no lock). An entry is found again by its
-// id each time it is read: it may be gone.
+// The instances that an answer reads. This instance comes first.
+// Its state is live. The code takes one entry at a time under its lock.
+// So a call that is counted meanwhile waits for one entry, never for all of them.
+//
+// The other instances follow. They were read before, and they are immutable, so they need no lock.
+// An entry is found again by its id each time it is read. The entry may be gone.
 class View {
 public:
   View(std::mutex* mutex, const Usage::State* own, const std::string& instance, std::shared_ptr<const std::vector<Usage::Other>> others,
@@ -283,8 +291,9 @@ private:
   std::shared_ptr<const std::vector<Usage::Other>> others_;
 };
 
-// What the instances know of a key, put together: the name that the newest use recorded, the first and the last use, the last deletion that an
-// instance recorded, and the usage of a window.
+// What the instances know of a key, put together.
+// This is the name that the newest use recorded, the first and the last use, and the last deletion that an instance recorded.
+// It also holds the usage of a window.
 struct KeyFacts {
   McpUsageKeyRef ref;
   int64_t first_used = 0;
@@ -359,13 +368,15 @@ Group group_of(const std::string& name) {
   return Group::Method;
 }
 
-// The metrics of a point of the series, in the order of their members: the requests, the errors, the calls, the time of the calls, the
-// bytes and the refusals (the 429 and what was refused before it was read; add_to_counters says what each one counts).
+// The metrics of a point of the series, in the order of their members.
+// The members are the requests, the errors, the calls, the time of the calls, the bytes and the refusals.
+// The refusals are the 429 and what was refused before it was read.
+// add_to_counters says what each one counts.
 constexpr const char* kSeriesMetrics[] = {"requests", "errors", "calls", "duration_ms_sum", "bytes", "refused"};
 constexpr size_t kMetrics = sizeof(kSeriesMetrics) / sizeof(kSeriesMetrics[0]);
 
-// The metrics that can rank the groups of the series (the parameter `order`). The time of the calls is a sum that the calls average, so it is
-// not one of them.
+// The metrics that can rank the groups of the series (the parameter `order`). The time of the calls is a sum that the calls average.
+// So it is not one of them.
 constexpr const char* kSeriesOrders[] = {"requests", "errors", "refused", "calls", "bytes"};
 constexpr size_t kOrders = sizeof(kSeriesOrders) / sizeof(kSeriesOrders[0]);
 
@@ -376,7 +387,7 @@ bool valid_order(const std::string& order) {
   return false;
 }
 
-// The metric of the series that an order ranks by (the requests for a name that is not an order: the check refuses it before).
+// The metric of the series that an order ranks by. For a name that is not an order, the metric is the requests. The check refuses such a name before.
 size_t order_metric(const std::string& order) {
   if (!valid_order(order)) return 0;
   for (size_t metric = 0; metric < kMetrics; ++metric) {
@@ -439,8 +450,9 @@ T& at_grow(std::vector<T>& values, size_t index) {
   return values[index];
 }
 
-// What the filters keep, in the terms of the cells. A value that no cell has (a key that is not there, a name that was never counted) is
-// chosen by no name of the tables: the filter then keeps nothing. The filter of the instances is in the sources.
+// What the filters keep, in the terms of the cells. A value that no cell has is chosen by no name of the tables.
+// Examples are a key that is not there, or a name that was never counted. The filter then keeps nothing.
+// The filter of the instances is in the sources.
 struct Filter {
   bool keys_on = false;
   std::unordered_set<std::string> keys;
@@ -469,7 +481,8 @@ struct KeyRow {
   bool selected = false;
 };
 
-// The cells of one client in the facet of the clients: the totals of a key, and the keys that have a request of the client.
+// The cells of one client in the facet of the clients. They hold the totals of a key.
+// They also hold the keys that have a request of the client.
 struct ClientFigures {
   Usage::Counters counters;
   uint64_t keys = 0;
@@ -491,15 +504,18 @@ struct InstanceFigures {
   size_t last_entry = SIZE_MAX;
 };
 
-// What the records of the clients of the keys that the filter keeps say of a client name: when it was last seen, and its versions.
+// The records of the clients of the keys that the filter keeps tell two things about a client name.
+// These things are when the name was last seen, and its versions.
 struct ClientSeen {
   int64_t last_seen = 0;
   std::vector<std::pair<int64_t, std::string>> versions;  // when a record was last seen, and its version
 };
 
-// Everything that the entries add to an answer. A key is walked once, in all the instances: the totals and the series with all the filters,
-// each facet with all the filters but its own, the records of the clients with the filter of the keys. The rows are indexed by the ids of
-// the answer, which grow with the names: a cell costs a few additions, whatever the number of rows.
+// Everything that the entries add to an answer. A key is walked once, in all the instances.
+// The totals and the series use all the filters. Each facet uses all the filters but its own.
+//
+// The records of the clients use the filter of the keys. The rows are indexed by the ids of the answer, which grow with the names.
+// A cell costs a few additions, whatever the number of rows.
 struct Tally {
   Tally(const Filter& f, const McpUsageWindow& w, Group g, size_t key_count, size_t instance_count, Table& method_names, Table& client_names, bool with_series)
       : filter(f),
@@ -527,8 +543,9 @@ struct Tally {
   std::array<uint64_t, kKinds> types{};
   std::vector<ClientFigures> by_client;                  // by client
   std::vector<InstanceFigures> by_instance;              // by source
-  // The metrics at each point of the window, by group: the key (its index) for a group by key, the instance (its source), else the method, the
-  // client, the result or the type. A group without a request has none; else it has kMetrics * points counts, a metric after the other.
+  // The metrics at each point of the window, by group. The group is the key (its index) for a group by key, or the instance (its source).
+  // Otherwise, the group is the method, the client, the result or the type. A group without a request has none.
+  // Else, the group has kMetrics * points counts, one metric after the other.
   std::vector<std::vector<uint64_t>> series;
   bool series_wanted = true;
   std::unordered_map<std::string, ClientSeen> seen;  // by client name
@@ -543,8 +560,8 @@ void tally_records(Tally& t, const Usage::Entry& entry) {
   }
 }
 
-// A cell adds to a group at one point of the series: the metrics are the counts of add_to_counters, so the groups add up to the totals (the
-// refusals are the 429 and the rejected requests of the totals).
+// A cell adds to a group at one point of the series. The metrics are the counts of add_to_counters. So the groups add up to the totals.
+// The refusals are the 429 and the rejected requests of the totals.
 void add_to_series(std::vector<uint64_t>& values, size_t points, size_t point, const Usage::Cell& cell) {
   if (values.empty()) values.assign(kMetrics * points, 0);
   Usage::Counters one;
@@ -629,7 +646,7 @@ void tally_key(Tally& t, View& view, size_t index, const std::string& id, const 
   row.selected = selected;
 }
 
-// The facet rows to show: the first ones, and the selected ones after them. Returns how many were left out.
+// The facet rows to show: the first ones, and the selected ones after them. Returns how many were omitted.
 template <typename Row>
 size_t cap_rows(std::vector<Row>* rows, size_t most) {
   const size_t before = rows->size();
@@ -668,8 +685,8 @@ struct InstanceRow {
   bool selected = false;
 };
 
-// What a ranking of the series shows: its groups, and the others summed in `rest`. The metrics of a group are the counts of the tally (a pointer,
-// never a copy), so a series that is ranked several times holds them once.
+// What a ranking of the series shows: its groups, and the others summed in `rest`. The metrics of a group are the counts of the tally.
+// They are a pointer, never a copy. So a series that is ranked several times holds them once.
 struct Ranking {
   struct Shown {
     std::string id;
@@ -714,11 +731,17 @@ void put_ranking(McpJsonWriter& w, const Ranking& ranking, size_t points) {
   w.EndObject();
 }
 
-// The series: its points, then its groups as `order` ranks them, and once more for each of `orders` (`rankings`, which is only there when some
-// were asked). A series grouped by a dimension that is filtered shows the values that were chosen, in their order (a value without a request is a
-// line of zeros), whatever the metric; else the 8 largest groups by the metric over the window (the same total: the smaller id first), and the others
-// summed in `rest`: a group that has none of that metric is one of them, even when there are fewer than 8 (the results that are not errors, when the
-// errors rank). The groups are counted once, from the tally, and each ranking sorts the same counts. `id_of` names a group, `label_of` a group by its id.
+// The series: its points, then its groups as `order` ranks them.
+// Then once more for each of `orders`, in `rankings`. The rankings are only there when some were asked.
+// A series grouped by a dimension that is filtered shows the values that were chosen, in their order.
+// A value without a request is a line of zeros, whatever the metric. `id_of` names a group, and `label_of` names a group by its id.
+//
+// Otherwise, the series shows the 8 largest groups by the metric over the window.
+// The smaller id comes first when the totals are equal.
+//
+// The others are summed in `rest`. A group that has none of that metric is one of them, even when there are fewer than 8.
+// The results that are not errors are one such group, when the errors rank.
+// The groups are counted once, from the tally. Each ranking sorts the same counts.
 void put_series(McpJsonWriter& w, const Tally& t, const std::string& order, const std::vector<std::string>& orders,
                 const std::vector<std::string>& chosen, const std::function<std::string(size_t)>& id_of,
                 const std::function<std::string(const std::string&)>& label_of) {
@@ -811,8 +834,8 @@ std::vector<std::string> versions_of(std::vector<std::pair<int64_t, std::string>
   return out;
 }
 
-// The facets and the clients, after the totals and the series. `known` is every instance with how it went; `source_of` is the source that
-// reads it (the instances that were skipped have none).
+// The facets and the clients follow the totals and the series. `known` is every instance with how it went.
+// `source_of` is the source that reads each instance. The instances that were skipped have none.
 void put_facets(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& query, const std::vector<McpUsageKeyRef>& live,
                 const std::vector<McpUsageInstance>& known, const std::unordered_map<std::string, size_t>& source_of, size_t limit) {
   // The keys: those that have a request (every filter but their own), and the ones that were chosen.
@@ -911,8 +934,8 @@ void put_facets(McpJsonWriter& w, const Tally& t, const McpUsageOverviewQuery& q
   });
   const size_t clients_omitted = cap_rows(&clients, limit);
 
-  // The instances: every one that is known (this one first, then the others by name), at 0 when it has no request, and the ones that were
-  // chosen and are not known. It applies every filter but its own.
+  // The instances: every one that is known. This one comes first, then the others by name. An instance with no request has 0.
+  // The instances that were chosen and are not known are also listed. The list applies every filter but its own.
   std::vector<InstanceRow> instances;
   for (const auto& info : known) {
     InstanceRow row;
@@ -1098,7 +1121,7 @@ std::optional<McpValidationError> mcp_usage_overview_check(McpUsageOverviewQuery
     }
     return std::nullopt;
   };
-  // The orders of the rankings: at most the 5 that there are, each one once (a sixth value cannot be one of them: the number is checked first).
+    // The orders of the rankings: at most the 5 that there are, each one once. A sixth value cannot be one of them, because the number is checked first.
   if (const auto error = check("orders", &query->orders, valid_order, "requests, errors, refused, calls or bytes", kOrders)) return error;
   if (const auto error = check("key", &query->keys, [](const std::string& v) { return mcp_valid_key_id(v); }, "the id of a key")) return error;
   if (const auto error = check("method", &query->methods, [](const std::string& v) { return valid_method(v); }, "a tool or a method of the protocol (A-Z a-z 0-9 _ /, at most 64)")) return error;
@@ -1167,8 +1190,8 @@ void McpUsage::record(const McpUsageEvent& event) {
   std::lock_guard<std::mutex> lock(mu_);
   Entry& entry = state_.entries[std::string(event.key_id)];
   if (entry.deleted_at == 0) {
-    // The key as it is now (a key of the configuration can change its host from a start to the next). A call that ends
-    // after the deletion of its key counts for the deleted key, as it was.
+    // The key as it is now. A key of the configuration can change its host from one start to the next.
+    // A call that ends after the deletion of its key counts for the deleted key, as it was.
     if (entry.key.id != event.key_id) entry.key.id = std::string(event.key_id);
     if (entry.key.name != event.key_name) entry.key.name = std::string(event.key_name);
     if (entry.key.host != event.key_host) entry.key.host = std::string(event.key_host);
@@ -1225,7 +1248,7 @@ void McpUsage::prune_locked(int64_t now) {
     for (size_t tier = 0; tier < kMcpUsageTiers; ++tier) {
       std::vector<Bucket>& buckets = entry.tiers[tier];
       if (!tier_kept(tier, options_.retention_days)) {
-        // Nothing is kept past the retention: a tier that it no longer reaches (it was lowered) is emptied.
+        // Nothing is kept past the retention. A tier that the retention no longer reaches is emptied. This happens when the retention was lowered.
         if (buckets.empty()) continue;
         for (const auto& bucket : buckets) take_cells(&state_.cells, cells_of(bucket));
         buckets.clear();
@@ -1241,7 +1264,7 @@ void McpUsage::prune_locked(int64_t now) {
     entry.clients.erase(std::remove_if(entry.clients.begin(), entry.clients.end(), [&](const Client& c) { return c.last_seen < first_day; }),
                         entry.clients.end());
     if (entry.clients.size() != clients) dirty_ = true;
-    // A deleted key whose usage is older than the retention is gone; a deleted key that was never used, after 2 hours.
+    // A deleted key is gone when its usage is older than the retention. A deleted key that was never used is gone after 2 hours.
     const bool used = entry.last_used != 0;
     if (entry.deleted_at != 0 && entry.tiers[kTierD1].empty() && (used || now - entry.deleted_at >= kTombstoneSeconds)) {
       release_cells(entry, &state_.cells);
@@ -1323,8 +1346,8 @@ void McpUsage::write_list(McpJsonWriter& w, const std::vector<McpUsageKeyRef>& l
     const KeyFacts facts = facts_of(view, key.id, &window, false);
     put_summary(w, key, facts, 0, false);
   }
-  // The keys that are not live here and that still have usage: the deleted ones (the last deletion first), then the ones that only another
-  // instance knows (the last use first).
+  // The keys that are not live here, and that still have usage, follow. The deleted keys come first, in the order of the last deletion.
+  // The keys that only another instance knows follow, in the order of the last use.
   std::vector<std::pair<KeyFacts, std::string>> gone;
   for (const auto& id : view.key_ids()) {
     if (listed_ids.count(id)) continue;
@@ -1355,8 +1378,8 @@ bool McpUsage::write_detail(McpJsonWriter& w, const std::string& id, const McpUs
   const McpUsageKeyRef& key = live ? *live : any.ref;
   const int64_t deleted_at = live ? 0 : any.deleted_at;
 
-  // One pass over the instances that are summed: the points of the series, the tools (the tool calls, by tool), the results (every cell but
-  // the successful protocol requests) of the window, and the records of the clients.
+  // One pass visits the instances that are summed. The pass collects the points of the series, and the tools (the tool calls, by tool).
+  // It also collects the results (every cell but the successful protocol requests) of the window, and the records of the clients.
   Table names;
   std::vector<Usage::Counters> points(window.points);
   std::unordered_map<uint32_t, Figures> tools;
@@ -1377,7 +1400,7 @@ bool McpUsage::write_detail(McpJsonWriter& w, const std::string& id, const McpUs
         }
       }
       for (const auto& record : entry->clients) {
-        // The records of a client (its name, its version and its User-Agent) that the instances kept add up.
+        // The records of a client add up. A record has the name, the version and the User-Agent of the client, as the instances kept them.
         const auto found = clients.emplace(std::make_tuple(record.name, record.version, record.user_agent), record);
         if (found.second) continue;
         Client& merged = found.first->second;
@@ -1485,7 +1508,7 @@ bool McpUsage::write_detail(McpJsonWriter& w, const std::string& id, const McpUs
     w.EndObject();
   }
   w.EndArray();
-  // For a caller that asked for fewer rows: how many were left out of each list.
+  // For a caller that asked for fewer rows: how many were omitted from each list.
   if (query.limit != 0) {
     w.Key("omitted");
     w.StartObject();
@@ -1550,8 +1573,8 @@ void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& que
   w.StartObject();
   put_counters(w, tally.totals);
   w.Key("active_keys"); w.Uint64(tally.active_keys);
-  // The keys that exist: those of this instance, and those that only another instance knows (a deleted key is not one of them). The count is the
-  // same whichever instance answers.
+  // The keys that exist are those of this instance, and those that only another instance knows. A deleted key is not one of them.
+  // The count is the same whichever instance answers.
   w.Key("keys"); w.Uint64(live.size() + tally.elsewhere);
   w.EndObject();
   if (query.series) {
@@ -1619,8 +1642,9 @@ bool McpUsage::save(int64_t now) {
     if (status != McpUsageSaveStatus::Conflict) log_event(LogLevel::Error, "mcp.usage_save_failed", {{"file", store_->location()}, {"error", error}});
     return false;
   }
-  // One entry at a time under the lock (the rows are made in memory): a call that counts meanwhile waits for one entry, never for the whole
-  // state, and never for the disk: what the rows came to is written once the lock is released.
+  // The code takes one entry at a time under the lock. The rows are made in memory.
+  // So a call that counts meanwhile waits for one entry, never for the whole state, and never for the disk.
+  // The rows are written once the lock is released.
   for (const auto& id : ids) {
     {
       std::lock_guard<std::mutex> lock(mu_);

@@ -9,7 +9,7 @@
 // - Keep output compact and stream-friendly (NDJSON / per-row JSON).
 //
 // The value contract (docs/telemetry.md, "Result values"): a value comes out exactly as ClickHouse
-// stores it, in a form that JavaScript's JSON.parse does not change.
+// stores it. The form is one that JavaScript's JSON.parse does not change.
 // - (U)Int8/16/32 and finite Float32/Float64 are JSON numbers. A float is written with the fewest
 //   digits that read back as the same float (Float32 0.1 is 0.1, not 0.10000000149011612).
 // - (U)Int64/128/256 and every Decimal are JSON strings of their digits ("18446744073709551615",
@@ -86,7 +86,7 @@ inline void writer_string(rapidjson::Writer<rapidjson::StringBuffer>& w, std::st
   write_json_text(w, s);
 }
 
-// Text that the encoder made itself (digits, a date): ASCII, no check needed.
+// The encoder makes this text itself (digits, a date). It is ASCII, so no check is needed.
 inline void writer_ascii(rapidjson::Writer<rapidjson::StringBuffer>& w, std::string_view s) {
   w.String(s.data(), static_cast<rapidjson::SizeType>(s.size()));
 }
@@ -98,9 +98,9 @@ inline void writer_integer_text(rapidjson::Writer<rapidjson::StringBuffer>& w, I
   writer_ascii(w, std::string_view(buf, static_cast<size_t>(res.ptr - buf)));
 }
 
-// A finite float is a JSON number with the fewest digits that read back as the same float (to_chars of
-// the float type, so Float32 0.1 is "0.1"). JSON has no NaN or infinity: they are the strings ClickHouse
-// prints, never null (null is a SQL NULL).
+// A finite float is a JSON number. It has the fewest digits that read back as the same float (to_chars of
+// the float type, so Float32 0.1 is "0.1"). JSON has no NaN or infinity. These values are the strings that ClickHouse
+// prints. They are never null, because null is a SQL NULL.
 template <typename Float>
 inline void writer_float(rapidjson::Writer<rapidjson::StringBuffer>& w, Float value) {
   if (std::isnan(value)) {
@@ -162,9 +162,9 @@ inline std::string decimal_to_string(clickhouse::Int128 raw, size_t scale) {
   return digits;
 }
 
-// clickhouse-cpp keeps a UUID as two UInt64 (the first holds the first 16 hex digits of the text), each in
-// the byte order of the host: each half is printed from its most significant digit. Printing the bytes in
-// memory order gave 00000000-0000-0000-0100-000000000000 for toUUID('00000000-0000-0000-0000-000000000001').
+// clickhouse-cpp keeps a UUID as two UInt64 values. The first value holds the first 16 hex digits of the text. Each value uses
+// the byte order of the host. Each half is printed from its most significant digit. Do not print the bytes in memory order.
+// That method gave 00000000-0000-0000-0100-000000000000 for toUUID('00000000-0000-0000-0000-000000000001').
 inline std::string uuid_to_string(std::string_view bytes16) {
   uint64_t half[2] = {0, 0};
   std::memcpy(half, bytes16.data(), std::min<size_t>(sizeof(half), bytes16.size()));
@@ -180,8 +180,8 @@ inline std::string uuid_to_string(std::string_view bytes16) {
   return std::string(out, out + 36);
 }
 
-// clickhouse-cpp keeps an IPv4 as a UInt32 in host byte order (1.2.3.4 is 0x01020304); inet_ntop reads
-// network order.
+// clickhouse-cpp keeps an IPv4 as a UInt32 in host byte order (1.2.3.4 is 0x01020304).
+// inet_ntop reads network order.
 inline std::string ipv4_to_string(uint32_t v) {
   struct in_addr a;
   a.s_addr = htonl(v);
@@ -199,11 +199,11 @@ inline std::string ipv6_to_string(std::string_view bytes16) {
   return r ? std::string(r) : std::string();
 }
 
-// Calendar formatting is done arithmetically (Howard Hinnant's
+// The calendar formatting uses arithmetic (Howard Hinnant's
 // civil_from_days, proleptic Gregorian, UTC). glibc gmtime_r takes the
-// process-wide tz lock on every call, which serialized every DateTime cell of
-// every concurrent query/export; strftime adds locale work on top. These
-// helpers are lock-free, allocation-free and correct for pre-1970 values.
+// process-wide tz lock on every call. This lock serialized every DateTime cell of
+// every concurrent query and export. strftime adds locale work on top. These
+// helpers are lock-free, allocation-free and correct for values before 1970.
 inline void civil_from_days(int64_t z, int64_t& y, unsigned& m, unsigned& d) {
   z += 719468;
   const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
@@ -225,8 +225,8 @@ inline char* put_digits(char* p, unsigned v, int width) {
   return p + width;
 }
 
-// Writes YYYY-MM-DD (years outside 0..9999 keep a sign/extra digits).
-// `out` must hold at least 24 bytes. Returns the end pointer.
+// Writes YYYY-MM-DD. Years outside 0..9999 keep a sign and extra digits.
+// `out` must hold at least 24 bytes. The function returns the end pointer.
 inline char* format_civil_date(char* out, int64_t days) {
   int64_t y = 0;
   unsigned m = 1, d = 1;
@@ -266,8 +266,8 @@ inline size_t format_datetime_iso(char* out, uint32_t seconds) {
   return static_cast<size_t>(p - out);
 }
 
-// DateTime64 uses floor division so that negative (pre-epoch) values with a
-// fractional part are formatted correctly: -0.5 s is 1969-12-31T23:59:59.5Z.
+// DateTime64 uses floor division. This formats negative values before the epoch correctly, when they have
+// a fractional part. For example, -0.5 s is 1969-12-31T23:59:59.5Z.
 // `out` must hold at least 64 bytes.
 inline size_t format_datetime64_iso(char* out, int64_t scaled, size_t precision) {
   if (precision > 18) precision = 18;
@@ -307,13 +307,11 @@ inline std::string date_days_to_iso(int64_t days) {
   return std::string(buf, format_civil_date(buf, days));
 }
 
-// clickhouse-cpp stores Decimal32/64 in their native 4/8-byte integer widths
-// and ColumnDecimal::GetItem() reports the *logical* Decimal type code while
-// carrying the bytes of its physical Int32/Int64/Int128 storage column.
-// Reading every decimal as Int128 therefore triggers ItemView's strict size
-// check ("Requested size: 16 stored size: 8" on Decimal(18,6)). Select the
-// physical width from the precision, matching clickhouse-cpp's ColumnDecimal
-// (<=9 -> Int32, <=18 -> Int64, else Int128), then widen.
+// clickhouse-cpp stores Decimal32 and Decimal64 in their native 4-byte and 8-byte integer widths.
+// ColumnDecimal::GetItem() reports the *logical* Decimal type code. It carries the bytes of its physical Int32, Int64 or Int128 storage column.
+// So a read of every decimal as Int128 triggers the strict size check of ItemView.
+// The check fails with "Requested size: 16 stored size: 8" on Decimal(18,6). Select the physical width from the precision, as clickhouse-cpp's ColumnDecimal does:
+// (<=9 -> Int32, <=18 -> Int64, else Int128). Then widen the value.
 inline clickhouse::Int128 decimal_raw_value(const clickhouse::ItemView& it, size_t precision) {
   using clickhouse::Type;
   if (it.type == Type::Decimal32 || (it.type == Type::Decimal && precision <= 9)) {
@@ -417,32 +415,32 @@ inline void write_item(rapidjson::Writer<rapidjson::StringBuffer>& w, const clic
     case Type::Decimal128: {
       const auto* d = ty.As<clickhouse::DecimalType>();
       const size_t scale = d ? d->GetScale() : 0;
-      // clickhouse-cpp stores Decimal32/64 in their native 4/8-byte integer
-      // widths. Reading every decimal as Int128 triggers ItemView's strict size
-      // check (for example "Requested size: 16 stored size: 8" on
-      // Decimal(18,6)). Widen only after reading the runtime-width value.
+      // clickhouse-cpp stores Decimal32 and Decimal64 in their native 4-byte and 8-byte integer
+      // widths. A read of every decimal as Int128 triggers the strict size check of ItemView.
+      // The check fails, for example, with "Requested size: 16 stored size: 8" on
+      // Decimal(18,6). Widen the value only after it is read at its runtime width.
       const size_t precision = d ? d->GetPrecision() : 38;
-      // ColumnDecimal::GetItem() intentionally reports the *logical* Decimal
-      // type code; a Decimal(18,6) arrives as Type::Decimal with 8 stored
-      // bytes. decimal_raw_value() selects the physical width.
+      // ColumnDecimal::GetItem() reports the *logical* Decimal type code by design.
+      // A Decimal(18,6) arrives as Type::Decimal with 8 stored bytes.
+      // decimal_raw_value() selects the physical width.
       const clickhouse::Int128 raw = decimal_raw_value(it, precision);
       writer_ascii(w, decimal_to_string(raw, scale));
       return;
     }
 
     default:
-      // Unknown / rare type: encode as string of raw bytes.
+      // Unknown or rare type: encode it as a string of raw bytes.
       writer_string(w, it.AsBinaryData());
       return;
   }
 }
 
-// ColumnMap keeps its Array(Tuple(K, V)) storage private and only offers
-// GetAsColumn(row), which Slice()s the row out: three new columns and a copy of
-// every key and value string for every single Map cell. A member pointer taken
-// in an explicit instantiation (the one place the language exempts from access
-// checks) reaches the storage so that a Map cell is read in place, like an
-// Array cell. A change of the member in a newer clickhouse-cpp stops the build.
+// ColumnMap keeps its Array(Tuple(K, V)) storage private. It offers only
+// GetAsColumn(row). That call uses Slice() to extract the row. It creates three new columns and copies
+// every key and value string for each Map cell. A member pointer taken
+// in an explicit instantiation reaches the storage. The language exempts this place from access
+// checks. The pointer lets a Map cell be read in place, as an Array cell is read.
+// A change of this member in a newer clickhouse-cpp stops the build.
 template <typename Tag, typename Tag::Type Member>
 struct PrivateMemberAccess {
   friend typename Tag::Type private_member(Tag) { return Member; }
@@ -459,11 +457,11 @@ inline const clickhouse::ColumnArray* map_storage(const clickhouse::ColumnMap& m
   return (map.*private_member(ColumnMapDataTag{})).get();
 }
 
-// A cell encoder is built once for a column of a block, then writes any row of
-// that column. Building resolves the nested structure (Nullable, LowCardinality,
-// Array, Tuple, Map) to plain pointers, so a row costs no dynamic_cast, no
-// shared_ptr copy and no allocation: the generic path paid all three for every
-// cell of every nested column. It must not outlive the column it was built from.
+// A cell encoder is built once for a column of a block. It then writes any row of
+// that column. The build step resolves the nested structure (Nullable, LowCardinality,
+// Array, Tuple, Map) to plain pointers. So a row costs no dynamic_cast, no
+// shared_ptr copy and no allocation. The generic path paid all three for every
+// cell of every nested column. The encoder must not outlive the column it was built from.
 class CellEncoder {
  public:
   explicit CellEncoder(const clickhouse::ColumnRef& column) { build(column.get()); }
@@ -580,7 +578,7 @@ class CellEncoder {
         break;
     }
     // A Nullable that is not a ColumnNullable reads as its scalar item. An
-    // Array, Tuple or Map whose column class is not the expected one reads as
+    // Array, Tuple or Map whose column class is not the expected one also reads as
     // null, as it always did.
     const auto code = type_->GetCode();
     kind_ = (code == Type::Array || code == Type::Tuple || code == Type::Map) ? Kind::Null : Kind::Item;
@@ -626,7 +624,7 @@ inline void write_column_value(rapidjson::Writer<rapidjson::StringBuffer>& w,
 
 } // namespace detail
 
-// Encode a single cell value (one column at one row) as JSON.
+// Encode one cell value (one column at one row) as JSON.
 inline void write_cell_json(rapidjson::Writer<rapidjson::StringBuffer>& w, const clickhouse::ColumnRef& col, size_t row) {
   detail::write_column_value(w, col, row);
 }
@@ -636,8 +634,7 @@ inline void write_cell_json_declared(rapidjson::Writer<rapidjson::StringBuffer>&
                                      size_t row,
                                      const std::string& declared_type) {
   // ClickHouse exposes Bool through the native UInt8 wire representation in
-  // several system tables. Preserve the declared SQL type in JSON instead of
-  // leaking the transport representation as 0/1.
+  // several system tables. Keep the declared SQL type in JSON. Do not show the transport representation as 0/1.
   if (detail::starts_with_ci(declared_type, "bool")) {
     const auto code = col->Type()->GetCode();
     if (code == clickhouse::Type::UInt8) {
@@ -658,8 +655,8 @@ inline void write_cell_json_declared(rapidjson::Writer<rapidjson::StringBuffer>&
       }
     }
   }
-  // A JSON value that arrives as text stays that text, a JSON string: parsing it here and writing it
-  // again would round its numbers above 2^53 and drop the trailing zeros of its decimals. The page
+  // A JSON value that arrives as text stays that text, a JSON string. Do not parse it here and write it
+  // again. That would round its numbers above 2^53 and drop the trailing zeros of its decimals. The page
   // reads the text of a JSON column without loss (app_results.js).
   if (detail::starts_with_ci(declared_type, "json") || detail::starts_with_ci(declared_type, "object('json')")) {
     if (detail::column_is_stringish(col)) {

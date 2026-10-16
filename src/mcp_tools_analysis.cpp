@@ -10,10 +10,14 @@ namespace mcp_tools {
 
 // ---- the analysis of the keys ----------------------------------------------------------------------------------
 //
-// Three tools by which a key reads its own limits (mcp_analysis_my_limits), its own usage with the ClickHouse cost of its statements when it
-// asks (mcp_analysis_my_usage), and the usage of every key of every instance (mcp_analysis_all_usage, which a key must name and the
-// configuration must allow). They run no SQL of the MCP user and take no host: the rate limit, the usage and the cost come from the server
-// through McpAnalysis (mcp_tools.hpp). Every answer is bounded by its row limits, and by max_result_bytes like any result.
+// The analysis has three tools. A key reads its own limits with mcp_analysis_my_limits.
+// A key reads its own usage with mcp_analysis_my_usage. This tool adds the ClickHouse cost of the statements, when the key asks for it.
+// A key reads the usage of every key of every instance with mcp_analysis_all_usage.
+// The key must name this tool, and the configuration must enable it.
+//
+// The tools run no SQL of the MCP user. They take no host.
+// The server gives the rate limit, the usage and the cost through McpAnalysis (mcp_tools.hpp).
+// Every answer is bounded by its row limits, and by max_result_bytes like any result.
 
 namespace {
 
@@ -21,13 +25,14 @@ constexpr const char* kMyLimits = "mcp_analysis_my_limits";
 constexpr const char* kMyUsage = "mcp_analysis_my_usage";
 constexpr const char* kAllUsage = "mcp_analysis_all_usage";
 constexpr const char* kDefaultWindow = "24h";
-// The rows of each list of the usage of one key (its tools, its results, its clients), and the rows of each list of all the keys.
+// The row limits of the lists of the usage of one key (its tools, its results, its clients), and of all the keys.
 constexpr size_t kMyUsageRows = 20;
 constexpr int64_t kDefaultRows = 20;
 constexpr int64_t kMaxRows = 200;
 
-// The server's side of the analysis, when the configuration offers the tool. The protocol checks this too and never runs a tool that is off,
-// but the tool does not trust its caller: the usage of all the keys must not depend on one check.
+// The server side of the analysis checks the configuration of the tool.
+// The protocol checks this too. It never runs a tool that is off.
+// The tool does not trust its caller, though. The usage of all the keys must not depend on one check.
 McpAnalysis& offered(Ctx& ctx, const char* tool) {
   if (!ctx.analysis) fail("not_enabled", "this server does not offer the analysis of the keys");
   const McpToolInfo* info = mcp_find_tool(tool);
@@ -46,8 +51,9 @@ auto relay(F&& call) -> decltype(call()) {
   }
 }
 
-// A list of at most 20 strings (an absent or null argument is an empty list). The rules of each value are the ones of the usage
-// (mcp_usage_overview_check), which the caller applies once the list is whole.
+// A list has at most 20 strings. An absent or null argument is an empty list.
+// The rules of each value are the rules of the usage (mcp_usage_overview_check).
+// The caller applies these rules once the list is whole.
 std::vector<std::string> opt_names(const rapidjson::Value& args, const char* name) {
   std::vector<std::string> out;
   const auto it = args.FindMember(name);
@@ -63,7 +69,7 @@ std::vector<std::string> opt_names(const rapidjson::Value& args, const char* nam
   return out;
 }
 
-// The names of instances follow the rule of the filter `instance` of the page: a name once, at most 20, each one valid.
+// The names of instances follow the rule of the filter `instance` of the page. A name appears once. The list has at most 20 names, and each name is valid.
 void check_instances(std::vector<std::string>* instances) {
   McpUsageOverviewQuery probe;
   probe.instances = std::move(*instances);
@@ -71,7 +77,7 @@ void check_instances(std::vector<std::string>* instances) {
   *instances = std::move(probe.instances);
 }
 
-// The window of the call: one that the retention of the usage keeps (24h when none is given).
+// The window of the call. It is a window that the retention of the usage keeps. The default is 24h, when none is given.
 std::string window_of(McpAnalysis& server, const rapidjson::Value& args) {
   std::string window = opt_string(args, "window", 16).value_or(std::string());
   if (window.empty()) window = kDefaultWindow;
@@ -84,8 +90,8 @@ std::string window_of(McpAnalysis& server, const rapidjson::Value& args) {
   return window;
 }
 
-// An answer is bounded by its row limits, and the cap of a result still holds (mcp.max_result_bytes, which an administrator lowers to keep the
-// memory of the calls that run at once low).
+// An answer is bounded by its row limits. The cap of a result still applies (mcp.max_result_bytes).
+// An administrator lowers this cap to keep the memory of the calls that run at once low.
 std::string bounded(const Ctx& ctx, std::string json) {
   if (static_cast<int64_t>(json.size()) > ctx.config.max_result_bytes) {
     fail("result_too_large", "the answer is larger than " + std::to_string(ctx.config.max_result_bytes) +
@@ -94,15 +100,16 @@ std::string bounded(const Ctx& ctx, std::string json) {
   return json;
 }
 
-// The cap that a key meets for one limit: its own value when it lowers the cap of its host (the smaller of the configuration and the profile
-// of the MCP user), else the cap of the host and who sets it. A host cap that the server did not say is the configuration's.
+// The cap that a key meets for one limit is its own value, when that value lowers the cap of its host.
+// Otherwise, the cap of the host applies. The cap of the host is the smaller of the configuration and the profile of the MCP user.
+// The source names who sets the cap. A host cap that the server did not say is the configuration's.
 McpAnalysisCap cap_of(const McpAnalysisCap& host, int64_t configured, const std::optional<int64_t>& key) {
   const McpAnalysisCap base = host.value > 0 ? host : McpAnalysisCap{configured, "mcp"};
   if (key && *key <= base.value) return McpAnalysisCap{*key, "key"};
   return base;
 }
 
-// {"value": n, "source": "..."}; `value` is null for a limit that is not set (0 is "none" in the configuration, and 0 rows is not what it says).
+// Format: {"value": n, "source": "..."}. `value` is null for a limit that is not set. In the configuration, 0 means none, and 0 rows is not what it says.
 void put_cap(Writer& w, const char* name, int64_t value, const std::string& source, bool zero_is_none = false) {
   w.Key(name);
   w.StartObject();
@@ -113,8 +120,12 @@ void put_cap(Writer& w, const char* name, int64_t value, const std::string& sour
   w.EndObject();
 }
 
-// The usage object with the cost object as one more member: the writers of the usage close their objects themselves, so the two are joined as
-// documents. Both are made by ChDash, so a parse failure is a bug and not an input.
+// The usage of a key names the clients as they name themselves (clientInfo, User-Agent). ChDash did not write this text.
+// The tool gives the whole answer of the page in `untrusted` (contract 5.2), as the API tools do.
+std::string in_untrusted(const std::string& answer) { return "{\"untrusted\":" + answer + "}"; }
+
+// The cost object is one more member of the usage object. The writers of the usage close their objects themselves.
+// So the two are joined as documents. ChDash makes both objects. A parse failure is therefore a bug, and not an input.
 std::string with_cost(const std::string& usage, const std::string& cost) {
   rapidjson::Document doc;
   rapidjson::Document cost_doc;
@@ -152,11 +163,11 @@ std::string tool_analysis_my_limits(Ctx& ctx, const rapidjson::Value& args) {
   w.Key("name"); put(w, key.name);
   w.Key("host"); put(w, key.hosts.empty() ? std::string() : key.hosts.front());
   w.EndObject();
-  // The instance has a name only while the usage is on (it is the name of its usage file).
+  // The instance has a name only while the usage is on. The name is the name of its usage file.
   w.Key("instance");
   if (limits.instance.empty()) w.Null();
   else put(w, limits.instance);
-  // The bucket of this ChDash: another instance has its own (a key that goes through two of them has two). `null` is no limit.
+  // The bucket of this ChDash. Another instance has its own bucket. A key that uses two instances has two buckets. `null` means no limit.
   const McpRateStatus& rate = limits.rate;
   w.Key("rate_limit");
   w.StartObject();
@@ -170,8 +181,8 @@ std::string tool_analysis_my_limits(Ctx& ctx, const rapidjson::Value& args) {
   w.Key("next_call_in_seconds"); w.Int64(rate.next_call_in_seconds);
   w.Key("full_in_seconds"); w.Int64(rate.full_in_seconds);
   w.EndObject();
-  // The rows and the seconds of a call: the key lowers the cap of its host. The other caps are the configuration's (the profile of the MCP user can
-  // cut them further: ChDash reads only its rows and its time).
+  // The key can lower the cap of its host for the rows and the seconds of a call. The other caps are the configuration's.
+  // The profile of the MCP user can cut them further. ChDash reads only its rows and its time.
   const McpAnalysisCap rows = cap_of(limits.max_rows, config.max_rows, key.max_rows);
   put_cap(w, "max_rows", rows.value, rows.source);
   const McpAnalysisCap seconds = cap_of(limits.timeout_seconds, config.query_timeout_seconds, key.timeout_seconds);
@@ -199,19 +210,19 @@ std::string tool_analysis_my_usage(Ctx& ctx, const rapidjson::Value& args) {
 
   std::string json = relay([&] { return server.my_usage(ctx.key, window, query, ctx.now); });
   if (include_cost) {
-    // The cost reads system.query_log of the host of the key: the audit line of the call names it. Only the cost of this key, never another's.
+    // The cost reads system.query_log of the host of the key. The audit line of the call names this host. The cost is only the cost of this key, never another key's.
     if (!ctx.key.hosts.empty()) ctx.host = ctx.key.hosts.front();
     json = with_cost(json, relay([&] { return server.my_cost(ctx.key, window, ctx.now); }));
   }
-  return bounded(ctx, std::move(json));
+  return bounded(ctx, in_untrusted(json));
 }
 
 // ---- mcp_analysis_all_usage ----------------------------------------------------------------------------------------
 
 std::string tool_analysis_all_usage(Ctx& ctx, const rapidjson::Value& args) {
   McpAnalysis& server = offered(ctx, kAllUsage);
-  // The second lock: the answer shows the names, hosts, clients and activity of the other keys, so the key must name the tool. `*` does not,
-  // and the protocol already refuses a key that does not hold it; a caller that skips the protocol is refused here.
+  // The second lock: the answer shows the names, hosts, clients and activity of the other keys. So the key must name the tool.
+  // `*` does not name it. The protocol already refuses a key that does not hold the tool. A caller that skips the protocol is refused here.
   const auto& listed = ctx.key.tools;
   if (std::find(listed.begin(), listed.end(), kAllUsage) == listed.end()) {
     fail("tool_not_allowed", std::string("this key cannot use the tool ") + kAllUsage + ": its tools must name it (\"*\" does not include it)");
@@ -224,7 +235,7 @@ std::string tool_analysis_all_usage(Ctx& ctx, const rapidjson::Value& args) {
   if (query.group != "key" && query.group != "method" && query.group != "client" && query.group != "instance") {
     fail("invalid_argument", "group must be key, method, client or instance");
   }
-  // The same orders as the page: mcp_usage_overview_check (below) refuses another one and says which are valid.
+  // The orders are the same as the orders of the page. mcp_usage_overview_check (below) refuses another order and says which orders are valid.
   query.order = opt_string(args, "order", 64).value_or(std::string());
   if (query.order.empty()) query.order = "requests";
   query.keys = opt_names(args, "key");
@@ -235,7 +246,7 @@ std::string tool_analysis_all_usage(Ctx& ctx, const rapidjson::Value& args) {
   query.limit = static_cast<size_t>(opt_int(args, "limit", 1, kMaxRows, kDefaultRows));
   if (const auto error = mcp_usage_overview_check(&query)) fail("invalid_argument", error->message);
 
-  return bounded(ctx, relay([&] { return server.all_usage(window, query, ctx.now); }));
+  return bounded(ctx, in_untrusted(relay([&] { return server.all_usage(window, query, ctx.now); })));
 }
 
 }  // namespace mcp_tools

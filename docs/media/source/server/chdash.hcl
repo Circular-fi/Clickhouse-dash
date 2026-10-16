@@ -86,9 +86,11 @@ query_library {
 }
 
 mcp {
-  enabled        = true
-  storage_file   = "/data/mcp_keys.json"
-  manage_from_ui = true
+  enabled      = true
+  storage_file = "/data/mcp_keys.json"
+  keys {
+    mode = "hybrid"
+  }
 }
 
 observability {
@@ -138,8 +140,17 @@ clickhouse {
   host {
     name       = "prod-eu-1"
     label      = "Production EU"
-    runner_uri = "clickhouse://dash_runner:video_runner_pw@clickhouse:9000"
-    system_uri = "clickhouse://dash_system:video_system_pw@clickhouse:9000"
-    mcp_uri    = "clickhouse://dash_mcp:video_mcp_pw@clickhouse:9000"
+    runner_uri = "clickhouse://dash_runner@clickhouse:9000"
+    system_uri = "clickhouse://dash_system@clickhouse:9000"
+    mcp_uri    = "clickhouse://dash_mcp@clickhouse:9000"
+    # The passwords are scratch passwords of the test stack. The docker run command of the README sets these variables.
+    runner_password_env = "CHDASH_VIDEO_RUNNER_PASSWORD"
+    system_password_env = "CHDASH_VIDEO_SYSTEM_PASSWORD"
+    mcp_password_env    = "CHDASH_VIDEO_MCP_PASSWORD"
   }
+}
+
+# The access of humans (docs/access.md): no gateway in front of this server, so no check.
+access {
+  mode = "open"
 }

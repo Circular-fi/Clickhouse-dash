@@ -1,5 +1,6 @@
-// What the Explorer graph says about a node and an edge, as text: the kind and the engine of a card, its size line, the TTL rules in short, the
-// labels of an edge. Pure: no DOM, no canvas (tests/frontend/model/explorer-graph-model.test.cjs). Counts and sizes come from ns.format.
+// This module gives the text of the Explorer graph for a node and an edge.
+// The text has the kind and the engine of a card, the size line, the TTL rules in short form, and the labels of an edge.
+// This module is pure. It has no DOM and no canvas. See tests/frontend/model/explorer-graph-model.test.cjs. Counts and sizes come from ns.format.
 
 import { ttlRules } from "./app_explorer_graph_model.js";
 import { format } from "./app_format.js";
@@ -33,9 +34,8 @@ function kindCode(kind) {
 function humanEngine(engine) {
   const value = String(engine || "");
   const compact = value.toLowerCase().replace(/[^a-z0-9]/g, "");
-  // ClickHouse's own engine names, as system.tables spells them: an engine
-  // given in another spelling (lower case, spaced) is written back that way,
-  // any other name is shown as sent.
+  // These are the ClickHouse engine names, as system.tables spells them.
+  // An engine that has another spelling (lower case or with spaces) is returned in that spelling. Any other name is shown as sent.
   const labels = {
     mergetree: "MergeTree",
     replacingmergetree: "ReplacingMergeTree",
@@ -156,8 +156,8 @@ function edgeLongLabel(edge) {
   return (EDGE_KIND_LABELS[edge.kind] || [null, String(edge.kind || "").replaceAll("_", " ")])[1];
 }
 
-// Card texts per payload node: formatting every card on every frame
-// dominated pan / zoom frames on large catalogs.
+// Card texts for each payload node. Each card is formatted on each frame. On large catalogs, this used most of the time in pan and zoom frames.
+// The cache avoids this cost.
 const nodeTextCache = new WeakMap();
 function nodeTexts(node) {
   let texts = nodeTextCache.get(node);

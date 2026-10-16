@@ -1,9 +1,9 @@
-// The size drawings of the Explorer (All databases, a database page, a
+// The size maps of the Explorer (All databases, a database page, a
 // table's partitions and columns) and of the System page (the Overview's
-// databases, the Disks rows): band() picks the treemap or the share strip
-// and draws one legend and one footnote. The grouping rules and the
+// databases, the Disks rows). The band() function picks the treemap or the share strip
+// and draws one legend and one footnote. The rules for groups and the
 // squarified layout of the treemap are a port of the
-// S3-Browser folder treemap so both products read the same way:
+// S3-Browser folder treemap, so that both products read the same way:
 //
 // - one absolute threshold (ceil(1%) of the displayed root) is applied at
 //   every level; smaller siblings are merged into one "Others" node;
@@ -14,10 +14,9 @@
 //   the minimum height needed for its label.
 //
 // ChDash node kinds: "server" (root), "database" (folder), "table",
-// "partition" and "column" (leaves) and "other" (grouped siblings). Grouping runs in the browser because the
-// visible scope (system databases on/off, databases vs databases + tables)
-// is a view option, and the same rules must also apply to the per-database
-// catalog that is already loaded for the sidebar.
+// "partition" and "column" (leaves) and "other" (grouped siblings). The browser makes
+// the groups because the visible scope (system databases on/off, databases vs databases + tables) is a view option.
+// The same rules must also apply to the per-database catalog that is already loaded for the sidebar.
 
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -40,8 +39,8 @@ const treemapMinimumRegularPixels = 30;
 const treemapFolderHeaderPixels = 26;
 const treemapBranchInsetPixels = 2;
 
-// util.escapeHtml is the one escaper (null prints as ""); counts and shares
-// come from ns.format, colours from ns.palette (docs/ui-foundations.md).
+// util.escapeHtml is the only escaper. It gives "" for null. Counts and shares
+// come from ns.format. Colours come from ns.palette (docs/ui-foundations.md).
 const esc = (value) => util.escapeHtml(value ?? "");
 const SEP = " \u00b7 ";
 
@@ -57,8 +56,8 @@ function isFolderKind(kind) {
 function treemapThreshold(totalBytes) {
   const total = Math.max(0, Math.floor(Number(totalBytes || 0)));
   if (!(total > 0)) return 0;
-  // Ceiling division keeps objects that are exactly one percent visible and
-  // matches the integer threshold used by the S3-Browser backend.
+  // Ceiling division keeps objects that are exactly one percent visible.
+  // It matches the integer threshold that the S3-Browser backend uses.
   return Math.floor((total + 99) / 100);
 }
 
@@ -82,8 +81,8 @@ function materializeTreemap(node, threshold) {
     listedCount += Math.max(0, Number(child.count || 0));
   }
   // Parent aggregates are exact. Anything they contain beyond the listed
-  // children (for example tables bounded out by the backend) belongs to
-  // Others rather than silently disappearing from the area.
+  // children (for example, tables that the backend does not list) belongs to
+  // Others. This keeps them in the area.
   let otherBytes = Math.max(0, nodeBytes(result) - listedBytes);
   let otherCount = Math.max(0, Number(result.count || 0) - listedCount);
   let otherMembers = otherCount;
@@ -113,8 +112,8 @@ function materializeTreemap(node, threshold) {
   }
   visible.sort(compareNodes);
 
-  // Contract every folder chain that does not introduce a real branch so a
-  // lone database never renders as a redundant wrapper around its tables.
+  // Contract every folder chain that does not add a real branch. A lone database then never
+  // renders as a redundant wrapper around its tables.
   while (visible.length === 1) {
     const only = visible[0];
     if (isFolderKind(only.kind) && Array.isArray(only.children) && only.children.length > 0) {
@@ -122,13 +121,13 @@ function materializeTreemap(node, threshold) {
       continue;
     }
     if (only.kind !== "other") {
-      // Preserve the only meaningful object and its click target instead of
-      // replacing it with an otherwise uninformative root rectangle.
+      // Keep the only meaningful object and its click target. Do not replace it
+      // with an uninformative root rectangle.
       const identity = { ...only };
       delete identity.children;
       return { ...identity, bytes: result.bytes, count: result.count };
     }
-    // A sole Others node adds no information: the parent already carries
+    // A sole Others node adds no information. The parent already carries
     // the exact byte and object totals.
     visible.length = 0;
   }
@@ -252,10 +251,10 @@ function layoutTreemapNodesJs(nodes, x, y, width, height) {
   const share = otherBytes / Math.max(Number.EPSILON, totalBytes);
   const rectangles = [];
 
-  // Others stays proportional to its exact byte share. It only receives the
-  // smallest horizontal strip required to keep its label readable. The
-  // minimum is always clamped below the room reserved for regular nodes, so
-  // a tiny aggregate can never consume most of its parent rectangle.
+  // Others stays proportional to its exact byte share. It only gets the
+  // smallest horizontal strip that keeps its label readable.
+  // The minimum is always limited below the room reserved for regular nodes, so
+  // a tiny aggregate can never take most of its parent rectangle.
   const naturalHeight = height * share;
   const maximumHeight = Math.max(0, height - Math.min(treemapMinimumRegularPixels, height));
   if (!(maximumHeight > 0)) return squarifyTreemapNodes(visible, x, y, width, height);
@@ -269,8 +268,9 @@ function layoutTreemapNodesJs(nodes, x, y, width, height) {
 
 // ----------------------------------------------------------- WebAssembly layout
 // src/wasm/treemap.c places the nodes of a group like layoutTreemapNodesJs, with the same numbers
-// (tests/frontend/specs/wasm-treemap.spec.js). The page keeps the sorting (it needs the locale) and the
-// JavaScript path: it answers a small group, and every group while the kernel is not loaded or when it fails.
+// (tests/frontend/specs/wasm-treemap.spec.js). The page keeps the sort step, because it needs the locale.
+// The page also keeps the JavaScript path. That path answers a small group, and every group while
+// the kernel is not loaded or when it fails.
 const WASM_MIN_NODES = 48;
 let wasmAsked = false;
 
@@ -281,7 +281,7 @@ function requestWasm() {
   group.then(() => (wasm && wasm.ops.treemap ? wasm.load("treemap") : null)).catch(() => {});
 }
 
-// The rectangles [{ node, x, y, width, height }] or null (no kernel yet, or it failed).
+// This function gives the rectangles [{ node, x, y, width, height }], or null when there is no kernel yet or it failed.
 function layoutTreemapNodesWasm(nodes, x, y, width, height) {
   const kernel = wasm && wasm.get("treemap");
   if (!kernel || !wasm.ops.treemap) {
@@ -328,9 +328,9 @@ function layoutTreemapNodes(nodes, x, y, width, height) {
   return layoutTreemapNodesJs(nodes, x, y, width, height);
 }
 
-// One colour rule for every size drawing (docs/ui-foundations.md, "Size
-// maps"): databases, tables and partitions are one accent tint (CSS,
-// .explorerTreemap__node), Others is hatched and named in the legend; only
+// One colour rule applies to every size map (docs/ui-foundations.md, "Size
+// maps"). Databases, tables and partitions are one accent tint (CSS,
+// .explorerTreemap__node). Others is hatched and named in the legend. Only
 // the Columns tab's map colours its cells, by the type family the legend
 // names. A name never picks a colour.
 const COLUMN_FAMILIES = [
@@ -341,8 +341,8 @@ const COLUMN_FAMILIES = [
 ];
 const OTHER_COLUMN_FAMILY = { key: "other-type", label: "Other types", slot: -1 };
 
-// The family of each type of a tree, worked out once per draw: familyMemo maps a type text to its index in COLUMN_FAMILIES (the
-// length of the list: other types). 500 types or more go through the colour kernel in one batch (src/wasm/color.c).
+// The family of each type in a tree is found once per draw. familyMemo maps a type text to its index in COLUMN_FAMILIES.
+// For other types, the index is the length of the list. 500 types or more go through the colour kernel in one batch (src/wasm/color.c).
 const familyMemo = new Map();
 
 function prefetchColumnFamilies(types) {
@@ -374,7 +374,7 @@ function columnFamilyJs(type) {
   return { ...family, color: palette.categorical(family.slot) };
 }
 
-// The hue of a cell: a column's type family, else none (the accent tint).
+// The hue of a cell is the type family of a column. Otherwise, there is no hue (the accent tint).
 function cellColor(node) {
   return node?.kind === "column" ? columnFamily(node.type).color : "";
 }
@@ -388,8 +388,8 @@ function nodeMetaLabel(node) {
   if (node.kind === "other") {
     return format.countLabel(node.members, node.memberKind || "table");
   }
-  // A database counted in something other than tables (the System
-  // Overview's databases: their active parts) names it itself.
+  // A database counted in something other than tables uses its own label.
+  // For example, the databases of the System Overview count their active parts.
   if (node.countLabel) return String(node.countLabel);
   return format.countLabel(node.count, "table", "tables");
 }
@@ -416,8 +416,8 @@ function collectTreemapRectangles(node, x, y, width, height, depth, output, cont
   const declaredKind = String(node.kind || "");
   const isFolder = isFolderKind(declaredKind);
   // A tall, narrow database (for example `system` next to a huge
-  // database) still opens as a branch: its tables are drawn under its
-  // header band instead of being hidden in a terminal tile.
+  // database) still opens as a branch. Its tables are drawn under its
+  // header band. They are not hidden in a terminal tile.
   const isBranch = isFolder
     && children.length > 0
     && depth < treemapMaximumDepth
@@ -434,9 +434,9 @@ function collectTreemapRectangles(node, x, y, width, height, depth, output, cont
     : (kind === "partition" ? `${node.path || ""} partition ${node.name || ""}` : kind === "column" ? `${node.path || ""} column ${node.name || ""}` : (node.path || node.name || ""));
   const title = `${titlePath}\n${sizeLabel} · ${metaLabel}`;
 
-  // Every expanded database owns a header. If the rectangle cannot reserve
-  // a readable header and child area, it is rendered as a terminal tile
-  // instead of drawing an unnamed container around its tables.
+  // Every expanded database has a header. If the rectangle cannot reserve
+  // a readable header and a child area, it is rendered as a terminal tile.
+  // Do not draw an unnamed container around its tables.
   const header = isBranch ? Math.min(treemapFolderHeaderPixels, Math.max(0, drawHeight - 30)) : 0;
   const labelName = node.name || (kind === "database" ? "Database" : "Unnamed");
   const label = `<span class="explorerTreemap__label"><span class="explorerTreemap__name">${esc(labelName)}</span><span class="explorerTreemap__details"><span class="explorerTreemap__size">${esc(sizeLabel)}</span><span class="explorerTreemap__meta">${esc(metaLabel)}</span></span></span>`;
@@ -473,8 +473,8 @@ function fitTreemapLabels(map) {
     node.classList.remove("is-sliver");
     if (meta) meta.hidden = false;
 
-    // Others always keeps its name, exact size, and member count. The
-    // layout reserves enough space; compact mode only reduces typography.
+    // Others always keeps its name, exact size and member count. The
+    // layout reserves enough space. Compact mode reduces only the typography.
     if (isOther) {
       if (rect.width >= treemapOtherInlineMinimumWidthPixels && labelHeight < 38) {
         label.classList.add("is-other-inline");
@@ -485,7 +485,7 @@ function fitTreemapLabels(map) {
     }
 
     // A database rectangle is never rendered without its name. Small
-    // databases use compact typography rather than hiding the label.
+    // databases use compact typography. They do not hide the label.
     if (isFolder) {
       if (rect.width < 40 && labelHeight >= 48) {
         label.classList.add("is-vertical");
@@ -498,9 +498,9 @@ function fitTreemapLabels(map) {
       return;
     }
 
-    // A cell under 64 x 28 px has no label of its own: the name of a tile of 11 px text in a box of 40 px was a word cut in
-    // two. A tall narrow one keeps its name rotated; any other gets a visible edge mark (so a 1% table never reads as
-    // part of its neighbour), and its name is in its tooltip and in the table under the map.
+    // A cell under 64 x 28 px has no label of its own. An 11 px name in a 40 px box cut a word in two.
+    // A tall narrow cell keeps its name rotated. Any other cell gets a visible edge mark, so that a 1% table
+    // never reads as part of its neighbour. Its name is in its tooltip and in the table under the map.
     if (rect.width < 64 || labelHeight < 28) {
       if (rect.width >= 12 && labelHeight >= 48) {
         label.classList.add("is-vertical");
@@ -573,9 +573,9 @@ function familyLegend(nodes) {
   return [...families.values()].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
 }
 
-// Mount a treemap in `host`. The host owns the map surface and the tooltip;
-// the returned controller lets callers swap the tree without leaking
-// observers when the Explorer detail pane is re-rendered.
+// Mount a treemap in `host`. The host owns the map surface and the tooltip.
+// The returned controller lets callers swap the tree. Observers are not retained
+// when the Explorer detail pane is re-rendered.
 function mount(host, options = {}) {
   if (!host) return null;
   const context = {
@@ -592,8 +592,8 @@ function mount(host, options = {}) {
   map.setAttribute("aria-label", options.ariaLabel || "Storage size treemap");
   map.setAttribute("aria-busy", "true");
   host.replaceChildren(map);
-  // A pointer tooltip (ns.popover.follow, role=tooltip: hovering is not
-  // announced), kept in the host so it goes away with the treemap.
+  // A pointer tooltip (ns.popover.follow, role=tooltip: a hover is not announced). It is kept in
+  // the host, so that it is removed with the treemap.
   const tip = popover.follow({ className: "explorerTreemap__tooltip", side: "bottom", align: "start", offset: 12, host });
   const tooltip = tip.el;
   tooltip.setAttribute("data-treemap-tooltip", "");
@@ -667,7 +667,7 @@ function mount(host, options = {}) {
     });
   };
 
-  // The listeners of the map go with destroy().
+  // The listeners of the map are removed by destroy().
   const lifetime = new AbortController();
   const { signal } = lifetime;
   map.addEventListener("pointermove", (event) => {
@@ -727,30 +727,30 @@ function mount(host, options = {}) {
   return controller;
 }
 
-// ---- The size band: the one size drawing of the Explorer and System pages -------
+// ---- The size band: the one size map of the Explorer and System pages -------
 //
 // band(container, { tree, name, id, stripId, footnoteId, ariaLabel, className,
 //   footnote(built, mode), minItems = 1, fallback = "strip", legend = true,
 //   strip = "auto", onOpen(target) })
-// The databases of All databases and of the System Overview, the tables of
-// a database page, the databases of a disk (Disks), a table's partitions
-// and columns. One height (--sizemap-h) and one colour rule. It draws:
-//  - the treemap, when its cells spread, or always (strip: "never": the
-//    databases of All databases and of the System Overview, a treemap
-//    whatever the distribution, Others on its chip and in the legend);
-//  - the share strip (one bar split by cell, Others hatched), when one
-//    top-level cell holds more than DOMINANT_SHARE of the bytes, when fewer
+// The band draws the databases of All databases and of the System Overview, the tables of
+// a database page, the databases of a disk (Disks), and the partitions and columns of a table.
+// It has one height (--sizemap-h) and one colour rule. It draws:
+//  - the treemap, when its cells spread, or always when strip is "never". Use "never" for
+//    the databases of All databases and of the System Overview. The treemap is then drawn
+//    whatever the distribution. Others is on its chip and in the legend;
+//  - the share strip (one bar split by cell, Others hatched). It is drawn when one
+//    top-level cell holds more than DOMINANT_SHARE of the bytes. It is also drawn when fewer
 //    than minItems cells of >= 1% would show (fallback "strip"; "none"
-//    draws nothing and band() returns null), or always (strip: "always",
-//    the rows of Disks).
-// The legend names the column families and Others (the strip's legend
-// lists its cells); `legend: false` leaves it to a table under the band.
+//    draws nothing and band() returns null). It is always drawn when strip is "always",
+//    as for the rows of Disks.
+// The legend names the column families and Others. The strip's legend
+// lists its cells. Use `legend: false` when a table under the band gives the legend.
 // onOpen({ kind, database, table, name }) for a database or table cell.
 // Returns { element, mode(), setTree(tree, { name, footnote }), destroy() }.
 const DOMINANT_SHARE = 0.85;
 
-// Rectangles of a materialized tree that stand for real objects (leaves of
-// >= 1% of the root: everything smaller is in Others).
+// This function counts the rectangles of a materialized tree that stand for real objects.
+// These are leaves of at least 1% of the root. Everything smaller is in Others.
 function significantLeafCount(tree) {
   let count = 0;
   const visit = (item) => {
@@ -763,7 +763,7 @@ function significantLeafCount(tree) {
   return count;
 }
 
-// The share of the largest top-level cell (not Others) of a materialized tree.
+// This function gives the share of the largest top-level cell (not Others) of a materialized tree.
 function dominantShare(tree) {
   const total = nodeBytes(tree);
   const regular = treemapRootNodes(tree).filter((node) => node.kind !== "other");

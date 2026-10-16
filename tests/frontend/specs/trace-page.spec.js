@@ -2,10 +2,10 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { SYNTHETIC_TRACES, mockTraceResults } from '../helpers/traces.js';
 
-// One trace is a page of its own (trace.html at /observability/traces/<id>),
-// not a pane of the Observability page: the page header, but none of the
-// Traces / Logs / Metrics tabs and none of the search; opening a trace from
-// the results and leaving it are page navigations.
+// One trace is a page of its own (trace.html at /observability/traces/<id>).
+// It is not a pane of the Observability page. It keeps the page header.
+// It has none of the Traces, Logs or Metrics tabs, and none of the search.
+// Opening a trace from the results, and leaving it, are page navigations.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -63,7 +63,7 @@ test('opening a trace navigates to its page and the back arrow returns to the sa
   expect(context.get('from')).toBe('now-3h');
   await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
 
-  // Back: the search page again, with the search of the trace's address.
+  // Back goes to the search page again, with the search of the trace address.
   const before = searches.length;
   await Promise.all([page.waitForURL(/\/observability\/traces\?/), page.locator('#traceBackButton').click()]);
   await expect(page.locator('body')).toHaveAttribute('data-page', 'observability');
@@ -78,8 +78,8 @@ test('a trace opened by its address returns to the search it carries, and Back /
   const searches = await mockTraceResults(page);
   await page.goto(`/observability/traces/${FIRST.trace_id}?from=now-2h&to=now&status=Error`);
   await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
-  // A span picked in the spans table is a history entry (the view tab itself replaces),
-  // written next to the carried context.
+  // A span picked in the spans table is a history entry.
+  // The view tab itself replaces the entry. The entry is written next to the carried context.
   await page.evaluate(() => { window.__sameDocument = true; });
   await page.locator('#traceViewTab-spans').click();
   await expect.poll(() => new URL(page.url()).searchParams.get('tab')).toBe('spans');
@@ -95,7 +95,7 @@ test('a trace opened by its address returns to the search it carries, and Back /
   await page.goForward();
   await expect.poll(() => new URL(page.url()).searchParams.get('span')).toBeTruthy();
   expect(await page.evaluate(() => window.__sameDocument)).toBe(true);
-  // No search entry before it (a direct address): the back arrow opens the search.
+  // There is no search entry before it (a direct address). The back arrow opens the search.
   await Promise.all([page.waitForURL(/\/observability\/traces\?/), page.locator('#traceBackButton').click()]);
   const back = new URL(page.url()).searchParams;
   expect(back.get('status')).toBe('Error');
@@ -128,7 +128,7 @@ test('the page switcher of a trace page leads to the other pages, and the trace 
   await mockTraceResults(page);
   await page.goto(`/observability/traces/${FIRST.trace_id}?from=now-1h&to=now`);
   await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
-  // The trace is a page of Observability: its link is the current one. The others are links to their pages.
+  // The trace is a page of Observability. Its link is the current one. The others are links to their pages.
   await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
   await Promise.all([page.waitForURL(/\/query$/), page.locator('#navQueryLink').click()]);
   await expect(page.locator('body')).toHaveAttribute('data-page', 'query');
@@ -138,12 +138,12 @@ test('a trace whose address has no time range returns to the range its tab last 
   await mockTraceResults(page);
   await page.addInitScript(() => sessionStorage.setItem('chdash.observability.context.v1', JSON.stringify({ range: { from: 'now-6h', to: 'now' } })));
   const range = () => Object.fromEntries([...new URL(page.url()).searchParams].filter(([name]) => name === 'from' || name === 'to'));
-  // The address says 2 h: that is the search it returns to.
+  // The address says 2 h. That is the search it returns to.
   await page.goto(`/observability/traces/${FIRST.trace_id}?from=now-2h&to=now`);
   await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
   await Promise.all([page.waitForURL(/\/observability\/traces\?/), page.locator('#traceBackButton').click()]);
   expect(range()).toEqual({ from: 'now-2h', to: 'now' });
-  // No range in the address (a link from Logs or Metrics, a trace opened by its id): the tab's.
+  // No range in the address (a link from Logs or Metrics, or a trace opened by its id). The tab range applies.
   await page.goto(`/observability/traces/${FIRST.trace_id}`);
   await expect(spanRow(page)).toBeVisible({ timeout: 30_000 });
   await Promise.all([page.waitForURL(/\/observability\/traces\?/), page.locator('#traceBackButton').click()]);
@@ -156,9 +156,9 @@ test('a trace whose address has no time range returns to the range its tab last 
   expect(range()).toEqual({});
 });
 
-// A solid badge (.badge--solid: the tone as a fill, the glyph in --panel) keeps a readable ink wherever it sits. The
-// rules that colour the header's spans in --muted outranked it: the error count of a service chip showed grey on light
-// red (about 2:1) in the dark theme.
+// A solid badge (.badge--solid) uses the tone as a fill, and the glyph in --panel.
+// It keeps a readable ink wherever it sits. Rules that colour the header spans in --muted outranked it.
+// So the error count of a service chip showed grey on light red (about 2:1) in the dark theme.
 const luminance = ([r, g, b]) => {
   const lin = (c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
@@ -176,7 +176,7 @@ for (const theme of ['dark', 'light']) {
       const style = getComputedStyle(el);
       return { cls: el.className, text: el.textContent.trim(), color: style.color, bg: style.backgroundColor };
     }));
-    // The service chips carry the error count of the trace: there is at least one solid badge to judge.
+    // The service chips carry the error count of the trace. There is at least one solid badge to judge.
     expect(solid.length).toBeGreaterThan(0);
     for (const badge of solid) {
       const ratio = contrast(rgb(badge.color), rgb(badge.bg));

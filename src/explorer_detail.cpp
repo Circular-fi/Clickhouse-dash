@@ -42,8 +42,8 @@ bool TableDetailReader::read_definition() {
   };
   bool table_loaded = load_ddl(system_, &section_error_);
   if (!table_loaded || out_.create_table_query.empty()) {
-    // Per-object metadata is safe to recover through runner_uri after the ACL boundary has already accepted this exact object. This also
-    // handles newly created runner-readable tables that are not yet visible to the technical metadata connection.
+    // The metadata of each object can be read through runner_uri after the ACL boundary accepted this exact object. This also
+    // covers newly created tables that the technical metadata connection cannot see yet.
     out_.create_table_query.clear();
     std::string runner_error;
     table_loaded = load_ddl(runner_, &runner_error);
@@ -104,10 +104,10 @@ bool TableDetailReader::read_columns() {
     if (!columns_loaded) return fail("Column metadata query failed: " + runner_error);
   }
 
-  // Since ClickHouse 24.2, parameterized View objects intentionally have no rows in system.columns. Try DESCRIBE as a compatibility fallback
-  // for any object whose catalog columns are absent; ordinary tables/views are then recovered without weakening the ACL boundary.
-  // Parameterized views can also reject bare DESCRIBE because their local parameters were not supplied. In that case Explorer still has
-  // useful object metadata (DDL, lineage, engine), so a View with no resolvable static schema must remain browsable instead of turning an
+  // Since ClickHouse 24.2, parameterized View objects have no rows in system.columns on purpose. Use DESCRIBE as a fallback
+  // for any object whose catalog columns are absent. Ordinary tables and views are then read. The ACL boundary stays intact.
+  // A parameterized view can also reject a bare DESCRIBE, because its parameters were not supplied. The Explorer still has
+  // useful object metadata (DDL, lineage, engine). A View without a static schema must stay browsable. It must not turn an
   // upstream ClickHouse metadata limitation into a 503.
   if (out_.columns.empty()) {
     const SqlStatement fallback_describe_sql = describe_sql(database_, table_, false);
@@ -146,9 +146,9 @@ bool TableDetailReader::read_columns() {
   }
   if (schema_unresolved_view) out_.unavailable_sections.push_back("columns");
 
-  // system.columns.compression_codec is intentionally empty when a column has no explicit CODEC(). For MergeTree we can still expose what
-  // ClickHouse actually used for those columns by reading the default codec recorded on active parts. This is more useful than the
-  // ambiguous UI label "server default" and also correctly represents tables whose old/new parts use different defaults after a settings or
+  // system.columns.compression_codec is empty on purpose when a column has no explicit CODEC(). For MergeTree, the Explorer can still show
+  // the codec that ClickHouse used for these columns. It reads the default codec recorded on the active parts. This is more useful than the
+  // unclear UI label "server default". It also shows the right codec for tables whose old and new parts use different defaults after a settings or
   // compression-policy change.
   if (summary_.engine.find("MergeTree") != std::string::npos) {
     std::string codec_error;
@@ -164,9 +164,9 @@ bool TableDetailReader::read_columns() {
   }
 
   if (!out_.columns.empty()) {
-    // DESCRIBE TABLE is deliberately metadata-only and version-stable for column TTLs. Include subcolumns so the Browse storage breakdown can
-    // expose named Tuple fields (for example `<sensor_packet.station.code>`) instead of hiding all tuple storage behind the parent column.
-    // The runner ACL is still applied at the top-level column boundary: a subcolumn is visible only when its longest matching top-level
+    // DESCRIBE TABLE only reads metadata and stays stable across versions for column TTLs. Include subcolumns, so the Browse storage breakdown can
+    // show named Tuple fields (for example `<sensor_packet.station.code>`) and not hide all tuple storage behind the parent column.
+    // The runner ACL still applies at the top-level column boundary. A subcolumn is visible only when its longest matching top-level
     // parent is readable.
     std::unordered_map<std::string, ExplorerColumnInfo*> columns_by_name;
     columns_by_name.reserve(out_.columns.size());
@@ -207,9 +207,8 @@ bool TableDetailReader::read_columns() {
             ExplorerColumnInfo subcolumn;
             subcolumn.name = name;
             subcolumn.type = block_string_at(block, 1, row);
-            // Intermediate Tuple subcolumns are structural containers and do not own a physical stream in MergeTree parts. Showing them
-            // would produce a misleading size row with no bytes; keep the leaf tuple fields that system.parts_columns can actually
-            // account for.
+            // Intermediate Tuple subcolumns are structural containers. They do not own a physical stream in MergeTree parts. Their display
+            // produces a misleading size row with no bytes. Keep only the leaf tuple fields that system.parts_columns can account for.
             if (subcolumn.type.rfind("Tuple(", 0) == 0 || subcolumn.type.rfind("NamedTuple(", 0) == 0) continue;
             subcolumn.default_kind = block_string_at(block, 2, row);
             subcolumn.default_expression = block_string_at(block, 3, row);
@@ -249,10 +248,10 @@ bool TableDetailReader::read_columns() {
 }
 
 bool TableDetailReader::read_column_storage() {
-  // Compact parts physically interleave all columns in one data file. ClickHouse intentionally reports column_data_* = 0 for those parts,
-  // including in system.parts_columns. Exact per-column Compact compressed bytes therefore do not exist as metadata. Keep exact
-  // *table/part-type* totals from system.parts and use system.parts_columns only for the independently stored Wide portion. This avoids
-  // both a user-data scan and fabricated allocations.
+  // Compact parts store all columns in one data file. ClickHouse reports column_data_* = 0 for these parts,
+  // including in system.parts_columns. Exact per-column Compact compressed bytes therefore do not exist as metadata. Keep the exact
+  // table and part-type totals from system.parts. Use system.parts_columns only for the independently stored Wide portion. This avoids
+  // both a user-data scan and invented allocations.
   uint64_t compact_on_disk = 0;
   uint64_t wide_on_disk = 0;
   uint64_t compact_compressed = 0;
@@ -289,8 +288,8 @@ bool TableDetailReader::read_column_storage() {
   }
 
   if (compact_parts_ > 0 || wide_parts_ > 0) {
-    // system.columns aggregates the same counters but does not distinguish part format. Rebuild per-column size metrics from
-    // system.parts_columns so mixed tables clearly mean "Wide bytes" instead of silently excluding Compact.
+    // system.columns aggregates the same counters, but it does not distinguish the part format. Rebuild the per-column size metrics from
+    // system.parts_columns. Then mixed tables clearly mean "Wide bytes" and do not silently exclude Compact.
     for (auto& column : out_.columns) {
       column.compressed_bytes.reset();
       column.uncompressed_bytes.reset();
@@ -329,8 +328,8 @@ bool TableDetailReader::read_column_storage() {
         out_.unavailable_sections.push_back("wide_column_sizes");
       }
 
-      // Modern MergeTree parts expose exact nested-stream counters in the `subcolumns.*` arrays. Aggregate them by the DESCRIBE-visible dot
-      // path so named Tuple fields can be compared without reading user data.
+      // Modern MergeTree parts give exact nested-stream counters in the `subcolumns.*` arrays. Aggregate them by the DESCRIBE-visible dot
+      // path, so that named Tuple fields can be compared without a read of user data.
       if (!subcolumn_by_name.empty()) {
         section_error_.clear();
         const bool wide_subcolumn_sizes_loaded = try_select(system_, wide_subcolumn_sizes_sql(database_, table_),
@@ -350,8 +349,8 @@ bool TableDetailReader::read_column_storage() {
       }
     }
 
-    // Relative weight is always against the exact Wide data total. Top-level Tuple rows and their subcolumn rows intentionally overlap
-    // semantically, so summing visible rows would double-count nested storage.
+    // The relative weight always uses the exact Wide data total. Top-level Tuple rows and their subcolumn rows overlap on purpose.
+    // The sum of the visible rows counts nested storage twice.
     if (wide_compressed_ > 0) {
       for (auto& column : out_.columns) {
         if (column.compressed_bytes) {
@@ -385,10 +384,9 @@ bool TableDetailReader::read_storage() {
     if (!degrade("storage", section_error_)) return fail("Storage metadata query failed: " + section_error_);
   }
 
-  // TinyLog/Log/StripeLog are persistent disk engines but do not create MergeTree parts, so system.parts is correctly empty. Resolve their
-  // system.tables.data_paths against system.disks and expose the physical placement without inventing parts. When a table spans more than
-  // one disk ClickHouse does not give us a per-path byte split here; leave per-disk bytes unknown instead of duplicating the table total
-  // across every disk.
+  // TinyLog, Log and StripeLog are persistent disk engines. They create no MergeTree parts, so system.parts is empty. Resolve their
+  // system.tables.data_paths against system.disks. Show the physical placement. Do not invent parts. When a table spans more than
+  // one disk, ClickHouse gives no per-path byte split here. Leave the per-disk bytes unknown. Do not copy the table total to every disk.
   if (out_.storage.empty() && is_log_family(summary_.engine) && !summary_.data_paths.empty()) {
     struct DiskMeta {
       std::string name;
@@ -443,8 +441,8 @@ bool TableDetailReader::read_storage() {
     }
   }
   if (storage_loaded_ && !out_.storage.empty()) {
-    // system.disks is queried once and only disk names already associated with this allowed table are exposed to the caller. This prevents
-    // unrelated infrastructure metadata from leaking through a table detail request.
+    // system.disks is queried once. Only the disk names that are already linked to this allowed table are shown to the caller. This prevents
+    // unrelated infrastructure metadata from being exposed through a table detail request.
     std::unordered_map<std::string, ExplorerStorageDisk*> storage_by_name;
     for (auto& disk : out_.storage) storage_by_name.emplace(disk.disk, &disk);
     const bool disks_loaded = try_select(system_, disks_sql(),
@@ -534,8 +532,8 @@ bool TableDetailReader::read_indexes_and_projections() {
     if (!degrade("projection", section_error_)) return fail("Projection metadata query failed: " + section_error_);
   }
 
-  // `system.projections` describes the definition; the materialized storage lives in `system.projection_parts`. Enrich each projection with
-  // its exact local compressed data size so Browse can compare it to columns and indexes.
+  // system.projections describes the definition. The materialized storage is in system.projection_parts. Enrich each projection with
+  // its exact local compressed data size, so that Browse can compare it to columns and indexes.
   section_error_.clear();
   const bool projection_sizes_loaded = try_select(system_, projection_sizes_sql(database_, table_),
     [&](const clickhouse::Block& block) {

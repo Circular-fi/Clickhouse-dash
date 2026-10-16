@@ -1,11 +1,14 @@
 #pragma once
 
-// The port of a service to ClickHouse: the statements that it sends and the connection under them.
+// The port of a service to ClickHouse. It defines the statements that the service sends, and the connection under them.
 //
-// A service (the Traces service, trace_service.hpp) builds its SQL with pure functions (trace_sql.hpp) and sends it through a
-// ChExecutor. The executor of the server is ClientExecutor: one connection of the pool, and every statement of ch_query.hpp
-// (the bounds of the scope of the request, the stop of a caller that went away). The native tests use another one, with
-// answers that a test writes, so a search strategy is tested without a ClickHouse server.
+// A service (the Traces service, trace_service.hpp) builds its SQL with pure functions (trace_sql.hpp).
+// It sends the SQL through a ChExecutor.
+// The executor of the server is ClientExecutor. It uses one connection of the pool.
+// Every statement of ch_query.hpp applies the bounds of the scope of the request. It also stops when a caller goes away.
+//
+// The native tests use another executor.
+// It returns answers that a test writes. A search strategy is tested without a ClickHouse server.
 
 #include "ch_client_pool.hpp"
 #include "ch_query.hpp"
@@ -21,7 +24,7 @@
 
 namespace chdash {
 
-// "host:port" of the server that a connection is on.
+// "host:port" of the server that a connection reaches.
 inline std::string client_endpoint(clickhouse::Client& client) {
   const auto& endpoint = client.GetCurrentEndpoint();
   return endpoint ? endpoint->host + ":" + std::to_string(endpoint->port) : std::string{};
@@ -33,30 +36,30 @@ class ChExecutor {
 
   virtual ~ChExecutor() = default;
 
-  // A SELECT; `params` are the query parameters of its {name:Type} placeholders (ch_query.hpp). Throws what ClickHouse or
-  // `on_block` throws.
+  // A SELECT statement. `params` are the query parameters of its {name:Type} placeholders (ch_query.hpp).
+  // It throws what ClickHouse or `on_block` throws.
   virtual void select(const std::string& sql, const ChParams& params, const OnBlock& on_block) = 0;
   void select(const std::string& sql, const OnBlock& on_block) { select(sql, ChParams{}, on_block); }
 
-  // A SELECT whose work is bounded by its SETTINGS, and what it read (facet_limits.hpp).
+  // A SELECT statement. Its work is bounded by its SETTINGS. It returns what it read (facet_limits.hpp).
   virtual BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block, const ChParams& params) = 0;
   BoundedRead bounded_select(const std::string& sql, const OnBlock& on_block) { return bounded_select(sql, on_block, ChParams{}); }
 
-  // The server that the statements go to ("host:port"), for what a service keeps for each server; empty when it is not known.
+  // The server that receives the statements ("host:port"). A service keeps this value for each server. The value is empty when it is not known.
   virtual std::string endpoint() const { return {}; }
 
-  // After a failed statement: the connection is not lent again.
+  // After a failed statement, the connection is never lent again.
   virtual void invalidate() = 0;
-  // After a failed statement: a new connection. False, with the reason in *error, when none can be had.
+  // After a failed statement, the method opens a new connection. It returns false and gives the reason in *error when no connection is available.
   virtual bool renew(std::string* error) = 0;
 };
 
-// The executor of the server: one connection, taken from the pool by `connect`.
+// The executor of the server. It uses one connection that `connect` takes from the pool.
 class ClientExecutor final : public ChExecutor {
  public:
   using Connect = std::function<std::shared_ptr<clickhouse::Client>(std::string* error)>;
 
-  // The connection, or null with the reason in *error.
+  // Returns the connection. It returns null and gives the reason in *error on failure.
   static std::unique_ptr<ClientExecutor> open(std::shared_ptr<ClickHouseClientPool> pool, Connect connect, std::string* error) {
     auto client = connect(error);
     if (!client) return nullptr;
@@ -95,8 +98,8 @@ class ClientExecutor final : public ChExecutor {
   std::shared_ptr<clickhouse::Client> client_;
 };
 
-// An executor over a connection that someone else owns (a route that has its client and calls a function that takes the port).
-// It cannot take another connection: renew() fails.
+// An executor over a connection that another owner holds. For example, a route has its own client and calls a function that takes the port.
+// It cannot take another connection. renew() fails.
 class BorrowedExecutor final : public ChExecutor {
  public:
   explicit BorrowedExecutor(clickhouse::Client& client) : client_(client) {}

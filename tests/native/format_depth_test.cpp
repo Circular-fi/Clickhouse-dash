@@ -1,14 +1,14 @@
-// Unit tests of the bounds that keep one small request from stopping the process: the bounded
-// JSON parse (src/json_parse.hpp) and the depth guard of the SQL formatter
-// (src/format_postprocess.cpp), plus the rule that the formatter never turns comment text into code.
+// Unit tests of the bounds. The bounds keep one small request from crashing the process.
+// The bounds are the bounded JSON parse (src/json_parse.hpp), the depth guard of the SQL formatter
+// (src/format_postprocess.cpp), and the rule that the formatter never changes comment text to code.
 //
-// Every case runs on a thread with a 128 KiB stack, the default thread stack of musl (the release
-// binaries and the test image): what passes here cannot overflow a worker thread there.
+// Every case runs on a thread with a 128 KiB stack. This is the default thread stack of musl (the release
+// binaries and the test image). What passes here cannot overflow a worker thread there.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF
 //          -DCHDASH_BUILD_FORMAT_TESTS=ON
 //        cmake --build build --target chdash_format_depth_test
-// Run:   ./build/chdash_format_depth_test   (exit code 0 = every check passed)
+// Run:   ./build/chdash_format_depth_test   (exit code 0 means that every check passed)
 
 #include "format_postprocess.hpp"
 #include "json_parse.hpp"
@@ -51,14 +51,14 @@ int g_checks = 0;
 #define CHDASH_TEST_ASAN 0
 #endif
 
-// AddressSanitizer pads every frame and slows every call: under it the same depth gets a larger
-// stack and more time (the sanitized run looks for memory errors; the plain build proves the stack).
+// AddressSanitizer adds padding to every frame and slows every call. With it, the same depth gets a larger stack and more time.
+// The sanitized run looks for memory errors. The plain build proves the stack.
 constexpr size_t kSmallStack = CHDASH_TEST_ASAN ? 8 * 1024 * 1024 : 128 * 1024;
-// The formatter gives up after 2 s (kFormatTimeBudget): a little more for the check itself.
+// The formatter stops after 2 s (kFormatTimeBudget). The check itself gets a little more time.
 constexpr double kMaxSeconds = CHDASH_TEST_ASAN ? 10.0 : 3.0;
 constexpr size_t kWidth = 100;
 
-// Runs `fn` on a thread with a stack of `stack_bytes` and waits for it.
+// Runs `fn` on a thread with a stack of `stack_bytes`. It waits for the thread to finish.
 void on_small_stack(const std::function<void()>& fn, size_t stack_bytes = kSmallStack) {
   pthread_attr_t attr;
   pthread_attr_init(&attr);
@@ -94,7 +94,7 @@ std::string repeat(const std::string& s, size_t n) {
 
 void test_json_depth() {
   on_small_stack([] {
-    // Thousands of levels: refused, without recursion, as an invalid text.
+    // Thousands of levels are refused without recursion, as an invalid text.
     for (const size_t depth : {300, 2000, 100000}) {
       const std::string arrays = repeat("[", depth) + repeat("]", depth);
       rapidjson::Document doc;
@@ -106,12 +106,12 @@ void test_json_depth() {
       CHECK(!chdash::parse_json_bounded(doc2, objects));
       CHECK(doc2.HasParseError());
 
-      // Unclosed: refused as well.
+      // An unclosed text is also refused.
       rapidjson::Document doc3;
       CHECK(!chdash::parse_json_bounded(doc3, repeat("[", depth)));
     }
 
-    // At the limit: parsed, and written back (Accept recurses once per level).
+    // At the limit, the text is parsed and written again. Accept recurses once for each level.
     {
       const size_t depth = chdash::kJsonMaxDepth;
       const std::string text = repeat("[", depth) + repeat("]", depth);
@@ -123,7 +123,7 @@ void test_json_depth() {
       CHECK(std::string(sb.GetString()) == text);
     }
 
-    // Brackets inside strings do not count, escaped quotes included.
+    // Brackets in strings do not count. This includes escaped quotes.
     {
       const std::string text = "{\"sql\":\"" + repeat("((([[[{{{", 1000) + "\\\"" + repeat("[", 500) + "\"}";
       rapidjson::Document doc;
@@ -131,7 +131,7 @@ void test_json_depth() {
       CHECK(doc.IsObject() && doc["sql"].IsString());
     }
 
-    // An ordinary body, and the flags of the caller still apply (invalid UTF-8 refused).
+    // An ordinary body is parsed. The flags of the caller still apply. Invalid UTF-8 is refused.
     {
       rapidjson::Document doc;
       CHECK(chdash::parse_json_bounded(doc, std::string("{\"host_id\":\"local\",\"sql\":\"SELECT 1\"}")));
@@ -196,7 +196,7 @@ void test_formatter_depth() {
         std::cerr << c.name << " depth " << n << ": empty output" << std::endl;
       }
       ++g_checks;
-      // The guard also bounds the time: a deep statement is given back, not laid out for seconds.
+      // The guard also limits the time. A deep statement is returned as written. It is not laid out for seconds.
       if (seconds > kMaxSeconds) {
         ++g_failures;
         std::cerr << c.name << " depth " << n << ": took " << seconds << " s" << std::endl;
@@ -205,8 +205,8 @@ void test_formatter_depth() {
   }
 }
 
-// Some layout passes are quadratic in the nesting without recursing (a CASE in a CASE): the time
-// budget gives the statement back as written instead of holding the thread for minutes.
+// Some layout passes are quadratic in the nesting. They do not recurse (a CASE in a CASE).
+// The time budget returns the statement as written. It does not keep the thread for minutes.
 void test_formatter_time_budget() {
   const std::string sql = "SELECT " + repeat("CASE WHEN a = 1 THEN ", 8000) + "1" + repeat(" ELSE 0 END", 8000) + " AS v FROM t";
   std::string out;
@@ -218,7 +218,7 @@ void test_formatter_time_budget() {
   });
   CHECK(seconds < kMaxSeconds);
   CHECK(out == sql);
-  // A later statement on the same thread has its own budget again.
+  // A later statement on the same thread has its own budget.
   std::string small;
   on_small_stack([&] { small = chdash::postprocess_format_query("select a, b from t where c = 1", kWidth); });
   CHECK(small.find("SELECT") != std::string::npos && small.find("FROM t") != std::string::npos);
@@ -226,8 +226,8 @@ void test_formatter_time_budget() {
 
 // ---- comments stay comments --------------------------------------------------------------------
 
-// True when some line of `out` ends with the comment `--<body>` (spaces after `--` and around the
-// body ignored): the comment was kept whole, none of its text became code.
+// The result is true when a line of `out` ends with the comment `--<body>`. Spaces after `--` and around the body are ignored.
+// The comment is kept whole. None of its text changed to code.
 bool comment_kept_whole(const std::string& out, const std::string& body) {
   size_t start = 0;
   while (start <= out.size()) {
@@ -263,7 +263,7 @@ void test_comments_stay_comments() {
       {"SELECT a FROM t -- UNION ALL SELECT b FROM u", "UNION ALL SELECT b FROM u"},
       {"SELECT a FROM t WHERE x = 1 -- SETTINGS max_threads = 1", "SETTINGS max_threads = 1"},
       {"/* head */ SELECT a FROM t WHERE x = 1 -- FORMAT JSON", "FORMAT JSON"},
-      // Leading commas: the comma of the next line must not end up inside the comment.
+      // Leading commas: the comma of the next line must not be inside the comment.
       {"select a -- from the left table\n, b\nfrom t", "from the left table"},
       {"select a -- c\n, b -- d\n, c\nfrom t", "c"},
       {"select f(x -- first\n, y) from t", "first"},
@@ -276,7 +276,7 @@ void test_comments_stay_comments() {
     std::string out;
     on_small_stack([&] { out = chdash::postprocess_format_query(c.sql, kWidth); });
     ++g_checks;
-    // The comment is whole, and no comma was pulled into any comment.
+    // The comment is whole. No comma was added to any comment.
     if (!comment_kept_whole(out, c.comment) || out.find(c.comment + ",") != std::string::npos) {
       ++g_failures;
       std::cerr << "comment split into code\n  in:  " << c.sql << "\n  out: " << out << std::endl;

@@ -1,7 +1,7 @@
-// The controller of the Explorer's Catalog: the mode on screen (Browse, Graph), the selection (a database or a table) and its address, the
-// catalog of the host, and the start of the page. The tree, the database page, the table card, the graph, the shell and the pure parts are the
-// modules app_explorer_*.js under it; what they need from it is in `actions` (app_explorer_store.js). The Functions page has its own
-// controller (app_explorer_functions_page.js).
+// This file is the controller of the Explorer's Catalog. It controls the mode on screen (Browse or Graph).
+// It also controls the selection (a database or a table), its address, the catalog of the host and the start of the page.
+// The tree, the database page, the table card, the graph, the shell and the pure parts are the modules app_explorer_*.js under this file.
+// These modules get what they need from `actions` (app_explorer_store.js). The Functions page has its own controller (app_explorer_functions_page.js).
 
 import { api } from "./app_api.js";
 import { dom, shell } from "./app_dom.js";
@@ -29,10 +29,9 @@ function scopeUp() {
   else if (scope.database) openCatalogRoot();
 }
 
-// ns.explorer.setView(): a top view, or a Catalog mode by name ("browse",
-// "graph": the former Graph view). "storage" (the former Storage view)
-// opens Browse on the storage of the selection (the table card's Storage
-// tab, the database page scrolled to its storage).
+// ns.explorer.setView() takes a top view or a Catalog mode by name ("browse" or "graph"). "graph" is the former Graph view.
+// "storage" is the former Storage view. It opens Browse on the storage of the selection.
+// That means the Storage tab of the table card, or the database page scrolled to its storage.
 function setView(view, { history = "push" } = {}) {
   if (view === "storage") {
     model.tab = "Storage";
@@ -44,8 +43,7 @@ function setView(view, { history = "push" } = {}) {
   syncExplorerUrl(history);
 }
 
-// Nothing selected: the Catalog root (the databases overview in Browse,
-// all databases in Graph).
+// If nothing is selected, the Catalog root is shown. In Browse, this is the databases overview. In Graph, this is all databases.
 function openCatalogRoot({ history = "push" } = {}) {
   clearSelection();
   syncVisibilityOptionLocks({ propagate: true });
@@ -54,8 +52,8 @@ function openCatalogRoot({ history = "push" } = {}) {
   syncExplorerUrl(history);
 }
 
-// The Catalog on screen: its panes, the mode, the tree. show: false only switches the panes; the caller applies the selection
-// (applyRouteFromLocation, openCard).
+// The Catalog on screen: its panes, the mode and the tree. With show: false, only the panes switch.
+// The caller must apply the selection (applyRouteFromLocation, openCard).
 function showTables({ show = true } = {}) {
   model.section = "tables";
   syncViewTabs();
@@ -67,7 +65,7 @@ function showTables({ show = true } = {}) {
 function applyExplorerFeatures() {
   const gf = explorerFeatures().graph || {};
   const available = modeAvailability();
-  // A mode the server disables falls back to the first available one.
+  // If the server disables a mode, the first available mode is used.
   if (!available[model.mode]) setMode(model.mode);
 
   const modes = [];
@@ -82,8 +80,8 @@ function applyExplorerFeatures() {
   syncViewTabs();
 }
 
-// Switches the Catalog mode; the selection stays. show: false only
-// switches the panes (see showTables).
+// Switches the Catalog mode. The selection stays the same.
+// With show: false, only the panes switch (see showTables).
 function setMode(mode, { show = true } = {}) {
   const available = modeAvailability();
   const requested = mode === "list" ? "browse" : String(mode || "");
@@ -101,7 +99,7 @@ function setMode(mode, { show = true } = {}) {
   syncViewTabs();
   if (!model.active || !tables) return;
   if (next !== "graph") parts.graph?.deactivate();
-  // The tree greys storage-less objects in the graph's Storage topology only.
+  // The tree shows storage-less objects in grey. This happens in the Storage topology of the graph only.
   if (previous !== next) {
     syncVisibilityOptionLocks({ propagate: next === "graph" });
     renderTableList();
@@ -109,8 +107,7 @@ function setMode(mode, { show = true } = {}) {
   if (show) showMode();
 }
 
-// Shows the selection in the current mode: the card (Browse) or the graph
-// focused on it (Graph).
+// Shows the selection in the current mode. In Browse, it shows the card. In Graph, it shows the graph focused on the selection.
 function showMode() {
   if (!model.active || model.section !== "tables") return;
   const scope = selectionScope();
@@ -126,8 +123,8 @@ function showMode() {
     parts.graph?.activate(false);
     return;
   }
-  // Graph never fetches the card: Browse loads it when shown. The caller
-  // owns the history entry (a mode switch pushes the Browse URL).
+  // Graph never fetches the card. Browse loads the card when it is shown.
+  // The caller owns the history entry. A mode switch adds the Browse URL to the history.
   if (model.selectedKey) {
     if (!model.detailLoading && !model.detail) void selectTable(scope.database, scope.table, false, { history: "none" });
   } else if (model.selectedDatabase) {
@@ -139,8 +136,7 @@ function showMode() {
   }
 }
 
-// "Open card" (Graph side panel): the object's card in Browse, as its
-// deep link opens it.
+// "Open card" (Graph side panel) shows the object's card in Browse. It opens the card the way its deep link does.
 function openCard(database, table) {
   if (!database || !table) return;
   model.tab = DEFAULT_TAB;
@@ -151,9 +147,8 @@ function openCard(database, table) {
 function setWorkspace(name, { history = "push" } = {}) {
   if (name === "explorer" && explorerFeatures().enabled === false) name = "query";
   const explorer = name === "explorer";
-  // Query and Explorer are separate HTML documents. Crossing that boundary
-  // must load the other document rather than leaving the current DOM mounted
-  // and emulating a page transition with pushState.
+  // Query and Explorer are separate HTML documents. A move across that boundary must load the other document.
+  // Do not keep the current DOM mounted. Do not emulate a page transition with pushState.
   if (explorer && !dom.explorerWorkspace) {
     if (history !== "none") window.location.assign(appRoute(`/explorer/${CATALOG_ROUTE_SEGMENT}`));
     return;
@@ -178,8 +173,8 @@ function setWorkspace(name, { history = "push" } = {}) {
   }
 }
 
-// The catalog load in flight: { hostId, force, promise }. The same host reuses it, unless the call is a forced Refresh
-// over a plain load; a load for another host replaces it and the old answer is dropped (ARCH-F-097).
+// The catalog load in flight has the form { hostId, force, promise }. The same host reuses this load.
+// The exception is a forced Refresh over a plain load. A load for another host replaces it. The old answer is dropped (ARCH-F-097).
 let catalogLoad = null;
 
 async function refreshCatalog(force) {
@@ -200,7 +195,7 @@ async function refreshCatalog(force) {
       const payload = await api.getExplorerCatalog(hostId, "", !!force, { signal: req.signal });
       if (!current()) return;
 
-      // A plain refresh keeps the branches that are loaded, minus the databases that the server no longer lists.
+      // A plain refresh keeps the loaded branches. It removes the databases that the server no longer lists.
       const listed = new Set(payload?.databases || []);
       const previousTables = force ? [] : (model.catalog?.tables || []).filter((item) => listed.has(String(item.database || "")));
       model.catalog = { ...payload, tables: previousTables };
@@ -213,7 +208,7 @@ async function refreshCatalog(force) {
 
       const route = model.routeIntent;
       if (route?.workspace === "explorer" && route.section === "tables") {
-        // The intent stays the Graph scope until it is selected.
+        // The intent stays the Graph scope until the scope is selected.
         if (route.database) {
           model.expandedDatabases.add(route.database);
           await loadDatabaseTables(route.database, !!force);
@@ -262,13 +257,12 @@ async function refreshCatalog(force) {
 }
 
 async function applyRouteFromLocation() {
-  // Back / Forward in quick succession start several of these; the newest wins, the others stop at their next await.
+  // Back and Forward in quick succession start several of these. The newest one wins. The others stop at their next await.
   const gen = ++model.routeSerial;
   const route = parseExplorerRoute();
   if (route.workspace === "explorer" && route.section === "tables") {
-    // Aliases (?view=, ?mode=storage, /_system, former tab slugs) and
-    // partial addresses take the canonical form of the scope and mode they
-    // open.
+    // Aliases (?view=, ?mode=storage, /_system, former tab slugs) and partial addresses use the canonical form.
+    // The canonical form gives the scope and the mode that they open.
     const canonical = appRoute(catalogPath({
       database: route.database,
       table: route.table,
@@ -292,15 +286,14 @@ async function applyRouteFromLocation() {
   model.mode = route.mode;
   model.tab = route.tab || DEFAULT_TAB;
   model.databaseFocus = route.databaseFocus || "";
-  // Panes only: the route's selection is shown below, once resolved.
+  // Panes only. The selection of the route appears below, when the route is resolved.
   showTables({ show: false });
   if (route.database) {
     model.expandedDatabases.add(route.database);
   }
   if (route.database && route.table && model.catalog) {
-    // A route only needs the addressed database branch. Never refresh/enumerate
-    // every database just because the selected table is not in the lightweight
-    // top-level catalog yet.
+    // A route needs only the addressed database branch. Never refresh or list every database.
+    // Do not refresh every database only because the selected table is not in the lightweight top-level catalog yet.
     await loadDatabaseTables(route.database, false);
     if (gen !== model.routeSerial) return;
     if (!catalogContainsTable(model.catalog, route.database, route.table)) {
@@ -337,19 +330,19 @@ async function applyRouteFromLocation() {
     if (model.catalog) model.routeIntent = null;
     syncVisibilityOptionLocks({ propagate: true });
     renderTableList();
-    // A phone opens on the root page itself (All databases); the tree
-    // drawer waits for its toggle and never covers the page on arrival.
+    // A phone opens on the root page (All databases). The tree drawer waits for its toggle.
+    // The drawer never covers the page when the page opens.
     showMode();
   } else {
-    // The catalog is still loading and refreshCatalog() applies the route;
+    // The catalog is not loaded yet. refreshCatalog() applies the route when the load ends.
     // Graph already shows its scope (selectionScope()).
     showMode();
   }
 }
 
 function resetForHost() {
-  // Everything of the old host stops now: its reads abort, and the loads that were waiting on them are forgotten, so
-  // the new host starts its own (ARCH-F-097, ARCH-F-140).
+  // All work for the old host stops now. Its reads abort. The loads that wait for them are forgotten.
+  // The new host starts its own loads (ARCH-F-097, ARCH-F-140).
   util.latest.cancelPrefix("explorer.");
   catalogLoad = null;
   model.loadingCatalog = false;
@@ -370,8 +363,7 @@ function resetForHost() {
   model.detail = null;
   model.detailLoading = false;
   model.preview = null;
-  // A deep link still being applied keeps its card tab: on a first visit
-  // the host is chosen while the route waits for the catalog.
+  // A deep link that the code still applies keeps its card tab. On a first visit, the host is chosen while the route waits for the catalog.
   const intent = model.routeIntent?.workspace === "explorer" && model.routeIntent.section === "tables" ? model.routeIntent : null;
   model.tab = intent?.tab || DEFAULT_TAB;
   model.databaseFocus = intent?.databaseFocus || "";
@@ -385,25 +377,24 @@ function resetForHost() {
 }
 
 function openTableFromGraph(database, table) {
-  // Canvas clicks must never restart the catalog loader: doing so can replay
-  // a stale route intent and snap focus back to the table that originally
-  // opened Explorer.
+  // Canvas clicks must never restart the catalog loader.
+  // A restart can replay an old route intent. Focus then returns to the table that originally opened Explorer.
   selectTable(database, table, false, { graphOrigin: true });
 }
 
-// Graph side panel "Open card": the table card in Browse.
+// Graph side panel "Open card": shows the table card in Browse.
 function openTableCardFromGraph(database, table) {
   openCard(database, table);
 }
 
 function init() {
   parts.graph?.init({ openTable: openTableFromGraph, openCard: openTableCardFromGraph, onStateChange: () => { syncVisibilityOptionLocks(); renderTableList(); syncExplorerUrl("replace"); } });
-  // The detail pane scrolls: a keyboard user reaches it (a region while it overflows).
+  // The detail pane scrolls. A keyboard user can reach it. It is a region while it overflows.
   for (const pane of $$(".explorerDetailPane")) util.scrollFocus(pane, { label: pane.id ? "Object details" : "Function details", mutations: true });
-  // Back / Forward within the Explorer (ns.router: the one popstate listener).
+  // Back and Forward work inside the Explorer. ns.router has the one popstate listener.
   router.on("/explorer", () => { void applyRouteFromLocation(); });
-  // The Catalog | Functions row is links to two pages; the Catalog's Browse | Graph row is tabs
-  // with the shared tab behaviour (app_ui_tabs.js).
+  // The Catalog | Functions row contains links to two pages.
+  // The Browse | Graph row of the Catalog contains tabs. These tabs use the shared tab behaviour (app_ui_tabs.js).
   shell?.edgeCues?.(shellEl("explorerNavTabs"));
   tabs?.bind(shellEl("explorerModeTabs"), {
     attr: "mode",
@@ -423,14 +414,12 @@ function init() {
     window.matchMedia(shell.mediaQuery("md")).addEventListener("change", (event) => { if (!event.matches) setTreeDrawerOpen(false); });
   } catch {}
   dom.explorerRefreshButton?.addEventListener("click", () => refreshCatalog(true));
-  // ns.search: the tree filter is cheap and follows every key. Graph focus
-  // re-runs the layout, the fit and a scoped graph fetch, so it follows the
-  // query once typing pauses (the one search delay) instead of once per
-  // intermediate prefix.
+  // ns.search: the tree filter is cheap, so it follows every key.
+  // Graph focus runs the layout again, then the fit and a scoped graph fetch. So it follows the query only after a pause in typing (the one search delay). It does not follow each intermediate prefix.
   const graphSearch = util.debounce(() => parts.graph?.searchFocus());
   searches.tree = search.bind(dom.explorerSearchInput, () => { renderTableList(); graphSearch(); }, { debounceMs: 0 });
   window.addEventListener("chdash:host-changed", resetForHost);
-  // Escape on the tree drawer is ns.layers (ns.sidePanel).
+  // Escape on the tree drawer is handled by ns.layers (ns.sidePanel).
   features.on(applyExplorerFeatures);
   loadVisibilityOptions();
   model.includeNonStoring = model.filters.views !== false || model.filters.mv !== false;
@@ -441,10 +430,10 @@ function init() {
   void applyRouteFromLocation();
 }
 
-// The functions that the modules under this controller call (app_explorer_store.js, `actions`).
+// These functions are the ones that the modules under this controller call (app_explorer_store.js, `actions`).
 Object.assign(actions, { openCatalogRoot, refreshCatalog, applyRouteFromLocation, setMode });
 
-// explorer.use({ graph, storage, detail, results }): the parts of the Catalog page (see `parts`).
+// explorer.use({ graph, storage, detail, results }) takes the parts of the Catalog page (see `parts`).
 function use({ graph: graphView = null, storage: storageViews = null, detail = null, results = null } = {}) {
   parts.graph = graphView;
   parts.storage = storageViews;

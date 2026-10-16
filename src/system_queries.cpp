@@ -16,8 +16,8 @@ namespace chdash {
 using namespace monitor_internal;
 
 // ---------------------------------------------------------------------------
-// Queries: top query shapes and one shape's drill-down, read from
-// system.query_log with the runner account.
+// Queries: the top query shapes and the drill-down of one shape.
+// The code reads system.query_log with the runner account.
 
 namespace {
 
@@ -28,18 +28,18 @@ constexpr int kQueriesDrillSeconds = 10;
 // The window-too-large estimate reads the key columns of the last hour only.
 constexpr int kQueriesEstimateSeconds = 5;
 constexpr uint64_t kQueriesEstimateRowsCap = 10'000'000;
-// Phase 1 keeps at most this many distinct shapes (memory bound); past it a
-// new shape is not counted, and the answer says so (totals.shapes_capped).
+// Phase 1 keeps at most this many distinct shapes. This is the memory bound.
+// A new shape after this limit is not counted. The answer then sets totals.shapes_capped.
 constexpr uint64_t kQueriesMaxShapes = 1000000;
 const char* const kQueriesGroupBySettings =
     ", max_rows_to_group_by = 1000000, group_by_overflow_mode = 'any', max_bytes_before_external_group_by = 0";
 
-// Finished or failed initial queries: every query also logs a QueryStart
-// row, and a distributed query's sub-queries are not counted twice.
+// The count uses only the finished or failed initial queries.
+// Each query also logs a QueryStart row. Sub-queries of a distributed query are not counted twice.
 const char* const kQueryLogRows =
     " AND type IN ('QueryFinish', 'ExceptionWhileProcessing', 'ExceptionBeforeStart') AND is_initial_query";
 
-// The ORDER BY of each allowlisted sort (always descending).
+// The ORDER BY of each allowlisted sort. Every sort runs from the highest value to the lowest.
 const std::vector<std::pair<std::string, std::string>>& queries_sort_expressions() {
   static const std::vector<std::pair<std::string, std::string>> sorts{
     {"total_time", "sum(query_duration_ms)"},
@@ -62,8 +62,8 @@ const std::string& expression_of(const std::vector<std::pair<std::string, std::s
   return table.front().second;
 }
 
-// The HAVING of each allowlisted error filter: a shape is kept or dropped as
-// a whole (its calls and error share stay whole).
+// The HAVING clause of each allowlisted error filter.
+// A shape is kept or dropped as a whole. Its calls and error share stay whole.
 const std::vector<std::pair<std::string, std::string>>& queries_error_expressions() {
   static const std::vector<std::pair<std::string, std::string>> filters{
     {"all", ""},
@@ -73,14 +73,14 @@ const std::vector<std::pair<std::string, std::string>>& queries_error_expression
   return filters;
 }
 
-// The user, database and table filters' query parameters: bound by
-// ClickHouse, never spliced.
+// The query parameters of the user, database and table filters.
+// ClickHouse binds them. The code never splices them into the SQL text.
 const char* const kQueriesUserParam = "chdash_user";
 const char* const kQueriesDatabaseParam = "chdash_database";
 const char* const kQueriesTableParam = "chdash_table";
 
-// The HAVING of the list: the error filter and the database / table a
-// shape involves (one of its runs did: the shape is kept whole).
+// The HAVING clause of the list. It holds the error filter and the database / table that a shape involves.
+// One run that involves the database or table keeps the whole shape.
 std::string queries_having_sql(const MonitorQueriesRequest& r, bool with_errors) {
   std::vector<std::string> conditions;
   if (with_errors) {
@@ -94,9 +94,10 @@ std::string queries_having_sql(const MonitorQueriesRequest& r, bool with_errors)
   return sql;
 }
 
-// A window list of query_log's array column `column` (databases, tables):
-// the names and how many runs involved each, the most involved first,
-// kMonitorQueryObjectCandidates at most, one "name\tcount" per line.
+// The window list of the array column `column` of query_log (databases, tables) holds the names.
+// Each name has the number of runs that involved it.
+// The most involved names come first, with kMonitorQueryObjectCandidates lines at most.
+// Each line has the form "name\tcount".
 std::string queries_object_list_sql(const std::string& column, const std::string& alias) {
   return query_log_object_list_sql(column, alias, kMonitorQueryObjectCandidates);
 }
@@ -112,13 +113,13 @@ const std::vector<std::pair<std::string, std::string>>& query_run_order_expressi
 
 std::string queries_time_predicate(const MonitorQueriesRequest& r) { return query_log_time_predicate(r.from_s, r.to_s); }
 
-// The rows a shape counts: the window's finished or failed initial queries,
-// never the System page's own reads; with hide_chdash not the system
-// account's either, nor the other reads that ChDash writes itself (their
-// log_comment starts with 'chdash:', ch_query.hpp); the kind when the list is
-// filtered by one.
-// with_list_filters: the list's own filters too (the kind and the user; a
-// shape's page shows every run of the shape).
+// The rows that a shape counts are the finished or failed initial queries of the window.
+// The System page's own reads are never counted.
+// With hide_chdash, the queries of the system account are not counted either.
+// ChDash also writes other reads. Their log_comment starts with 'chdash:' (ch_query.hpp). These reads are not counted.
+// The kind counts too when the list is filtered by one kind.
+//
+// with_list_filters: the list's own filters too (the kind and the user).
 std::string queries_filter_sql(const MonitorQueriesRequest& r, bool with_list_filters) {
   std::string sql = queries_time_predicate(r) + kQueryLogRows + " AND log_comment != 'chdash-system'";
   if (r.hide_chdash) {
@@ -149,7 +150,7 @@ int64_t i64(const std::string& value) {
   }
 }
 
-// Runs one Queries SELECT, its rows read, bytes and time kept in `read`.
+// It stores the rows read, the bytes and the time of one Queries SELECT in `read`.
 void read_query_log(ChExecutor& runner, const std::string& sql, MonitorQueryRead& read,
                     const std::function<void(const clickhouse::Block&)>& on_block,
                     const std::vector<std::pair<std::string, std::string>>& params = {}) {
@@ -166,8 +167,8 @@ void read_query_log(ChExecutor& runner, const std::string& sql, MonitorQueryRead
   }
 }
 
-// Why a Queries SELECT failed, in the answer's terms; for a read past the
-// cap, the span that would fit (estimated from the last hour's rows).
+// This gives the reason why a Queries SELECT failed, in the terms of the answer.
+// For a read past the cap, it gives the span that fits. The estimate uses the rows of the last hour.
 template <typename Answer>
 void queries_failed(ChExecutor& runner, const MonitorQueriesRequest& r, const clickhouse::ServerException& error,
                     Answer& out, MonitorQueryRead& read) {
@@ -301,19 +302,19 @@ std::string monitor_queries_top_sql(const MonitorQueriesRequest& r) {
          "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), groupUniqArray(5)(user)), '\\n'), "
          "arrayStringConcat(arrayMap(x -> replaceAll(toString(x), '\\n', ' '), groupUniqArrayArray(8)(tables)), '\\n'), "
          "toString(toUnixTimestamp(min(event_time))), toString(toUnixTimestamp(max(event_time))), "
-         // The window's totals over every shape: window functions run after
-         // the GROUP BY and before the LIMIT.
+         // The totals of the window cover every shape.
+         // Window functions run after the GROUP BY and before the LIMIT.
          "toString(sum(count()) OVER ()), toString(sum(countIf(type != 'QueryFinish')) OVER ()), "
          "toString(sum(sum(query_duration_ms)) OVER ()), toString(sum(sum(read_bytes)) OVER ()), toString(count() OVER ()), "
-         // The window's users and their query counts (the user filter's
-         // choices), the most active first: one more window function over
-         // the same rows, no second read.
+         // The users of the window and their query counts are the choices of the user filter.
+         // The most active user comes first. This uses one more window function over the same rows.
+         // It needs no second read.
          "sumMap(sumMap([toString(user)], [toUInt64(1)])) OVER () AS window_users, "
          "arrayStringConcat(arrayMap(x -> concat(replaceAll(replaceAll(x.1, '\\t', ' '), '\\n', ' '), '\\t', toString(x.2)), "
          "arraySlice(arrayReverseSort(x -> x.2, arrayZip(window_users.1, window_users.2)), 1, " + std::to_string(kMonitorQueryUsers) +
          ")), '\\n'), "
-         // The databases and tables the window's rows involved (their
-         // filters' choices), the same way.
+         // The databases and tables that the rows of the window involve are the choices of their filters.
+         // They use the same method.
          + queries_object_list_sql("databases", "window_databases") + ", " + queries_object_list_sql("tables", "window_tables") +
          " FROM system.query_log WHERE " + queries_filter_sql(r, true) +
          " GROUP BY normalized_query_hash" + queries_having_sql(r, true) +
@@ -329,8 +330,8 @@ std::string monitor_queries_text_sql(const MonitorQueriesRequest& r, const std::
     list += std::to_string(hash);
   }
   const std::string chars = std::to_string(kMonitorQueryTextChars);
-  // The key column first (PREWHERE): the text is read only for the granules
-  // of the listed shapes.
+  // Read the key column first with PREWHERE.
+  // Read the text only for the granules of the listed shapes.
   return "SELECT toString(normalized_query_hash), substringUTF8(argMax(query, event_time), 1, " + chars + ") AS example, "
          "normalizeQuery(example), toString(lengthUTF8(argMax(query, event_time)) > " + chars + "), "
          "toString(argMax(query_id, event_time)) FROM system.query_log PREWHERE normalized_query_hash IN (" + list + ") WHERE " +
@@ -346,8 +347,8 @@ std::string monitor_query_timeline_sql(const MonitorQueriesRequest& r) {
          "quantilesTDigest(0.5, 0.95)(query_duration_ms) AS latency_ms, toString(latency_ms[1]), toString(latency_ms[2]), "
          "toString(sum(read_rows)), toString(max(memory_usage)), "
          "toString(sum(ProfileEvents['OSCPUVirtualTimeMicroseconds']) / 1e6), "
-         // The whole window (window functions over the buckets; the p95
-         // merges the buckets' digests).
+         // This covers the whole window. Window functions run over the buckets.
+         // The p95 merges the digests of the buckets.
          "toString(sum(count()) OVER ()), toString(sum(countIf(type != 'QueryFinish')) OVER ()), "
          "toString(sum(sum(query_duration_ms)) OVER ()), "
          "toString(quantileTDigestMerge(0.95)(quantileTDigestState(query_duration_ms)) OVER ()), "
@@ -390,7 +391,7 @@ bool load_system_monitor_queries(ChExecutor& runner, AclView& runner_acl, const 
     return true;
   }
 
-  // Phase 1: the narrow numbers of every shape, the top ones kept.
+  // Phase 1 reads the narrow numbers of every shape. It keeps the top shapes.
   try {
     read_query_log(runner, monitor_queries_top_sql(request), out.aggregate, [&](const clickhouse::Block& block) {
       for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -440,9 +441,9 @@ bool load_system_monitor_queries(ChExecutor& runner, AclView& runner_acl, const 
     if (error) *error = e.what();
     return false;
   }
-  // The database and table choices: those the runner can see (the System
-  // pages' SHOW boundary), kMonitorQueryObjects at most each. A table is
-  // "database.table", either name may hold dots: any split may match.
+  // The database and table choices are those that the runner can see. The System pages' SHOW boundary limits them.
+  // The list holds kMonitorQueryObjects entries at most for each.
+  // A table has the form "database.table". Either name may hold dots, so any split may match.
   if (!out.databases.empty() || !out.tables.empty()) {
     try {
       VisibleTables visible(runner_acl);
@@ -473,7 +474,8 @@ bool load_system_monitor_queries(ChExecutor& runner, AclView& runner_acl, const 
   }
   if (out.queries.empty()) return true;
 
-  // Phase 2: the text of those shapes only (the last run's, cut).
+  // Phase 2 reads the text of those shapes only.
+  // The text is taken from the last run and cut.
   std::vector<uint64_t> hashes;
   std::unordered_map<uint64_t, size_t> index;
   for (size_t i = 0; i < out.queries.size(); ++i) {

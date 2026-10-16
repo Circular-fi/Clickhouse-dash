@@ -1,13 +1,12 @@
-// The Activity part of the System Overview (docs/system.md "Activity"):
-// what the selected server is doing in the background. Replicas, pending
-// mutations (with their failure reason), replication queues (one row per
-// table), merges and Distributed send queues, from /api/system/activity:
-// fixed, bounded, read-only system-table reads restricted to the objects
-// the runner can see. The Keeper session is the Overview's Keeper card.
+// The Activity part of the System Overview (docs/system.md "Activity").
+// It shows what the selected server does in the background: replicas, pending mutations (with their failure reason),
+// replication queues (one row for each table), merges and Distributed send queues. The data comes from /api/system/activity.
+// The reads are fixed, bounded and read-only system-table reads. They are limited to the objects that the runner can see.
+// The Keeper session is on the Keeper card of the Overview.
 //
-// ns.systemActivity.create({ openTable }) -> { el, load(force), reset(),
-//   loading() }: the Overview mounts el, loads it with its tiles (on show and
-// with the refresh button, never on a timer) and resets it on a host change.
+// ns.systemActivity.create({ openTable }) returns { el, load(force), reset(), loading() }.
+// The Overview mounts el and loads it with its tiles. The load runs when the page shows, and with the refresh button.
+// It never runs on a timer. On a host change, the Overview resets it.
 
 import { api } from "./app_api.js";
 import { h } from "./app_dom.js";
@@ -23,8 +22,8 @@ import { util } from "./app_util.js";
 const SEP = kit.SEP;
 const DASH = format.EMPTY;
 
-// A DateTime text of the server's system tables: browser-local text, the
-// server value (and ISO) in the tooltip; an unset (epoch 0) time is EMPTY.
+// A DateTime text of the server's system tables. The text is the browser-local time.
+// The server value and the ISO value are in the tooltip. An unset time (epoch 0) is EMPTY.
 function timeCell(value) {
   const time = header.serverTime(value);
   return textCell(time.text, "", time.title);
@@ -64,8 +63,9 @@ function progressCell(progress) {
   return td;
 }
 
-// A column that matters less names its tier (`priority`: "low", "mid" or "xs"): its header and its cells leave the table when the window is
-// narrower than the tier's breakpoint (table.css, "Priority columns"; UI-130). What stays fits; the box scrolls sideways for the rest.
+// A column that matters less names its tier (`priority`: "low", "mid" or "xs"). When the window is narrower than the breakpoint
+// of the tier, the header and the cells of the column leave the table. The breakpoint is in table.css, in the section
+// "Priority columns" (UI-130). The columns that stay fit. The box scrolls sideways for the other columns.
 function activityTable(id, headers, rows) {
   const head = h("tr", null, headers.map((header) => h("th", { scope: "col", class: [header.num && "num", header.priority && `is-${header.priority}`], title: header.title || null }, header.label)));
   headers.forEach((header, index) => {
@@ -85,7 +85,7 @@ function replicaLevel(item) {
 
 function create({ openTable = null } = {}) {
   const state = { activity: null, error: null, loading: false };
-  // Not a live region: a refresh would read the tables out again every time.
+  // This is not a live region. Each refresh would read the tables again.
   const body = h("div", { class: "systemActivity", id: "systemActivity" });
 
   function objectCell(item) {
@@ -235,13 +235,11 @@ function create({ openTable = null } = {}) {
       { key: "merges", label: "merges running", items: activity.merges || [], render: renderMerges, warn: () => false },
       { key: "distribution_queue", label: "Distributed send queue", items: activity.distribution_queue || [], render: renderDistribution, warn: (items) => items.some((item) => Number(item.error_count || 0) > 0 || item.is_blocked) },
     ];
-    // Problems first, then sections with data; empty sections collapse into
-    // one summary line instead of empty tables.
+    // The sections with problems come first, then the sections with data. Empty sections become one summary line, not empty tables.
     const withData = sections.filter((item) => item.items.length && !unavailable.has(item.key));
     withData.sort((a, b) => Number(b.warn(b.items)) - Number(a.warn(a.items)));
     for (const item of withData) children.push(item.render(item.items));
-    // One sentence ("No pending mutations, merges running or ..."): a list,
-    // not a line of separators.
+    // The summary is one sentence, for example "No pending mutations, merges running or ...". It is a list, not a line of separators.
     const quiet = sections.filter((item) => !item.items.length && !unavailable.has(item.key)).map((item) => item.label);
     const empty = quiet.length ? [`No ${quiet.length > 1 ? `${quiet.slice(0, -1).join(", ")} or ${quiet[quiet.length - 1]}` : quiet[0]}`] : [];
     const missing = sections.filter((item) => unavailable.has(item.key)).map((item) => item.key.replace(/_/g, " "));
@@ -256,8 +254,8 @@ function create({ openTable = null } = {}) {
   async function load(force = false) {
     const host = kit.hostId();
     if (!host || (state.loading && !force)) return;
-    // The newest read of the activity: a forced Refresh or another host aborts the one in flight, which then leaves
-    // the busy state to the newer one.
+    // This is the newest read of the activity. A forced refresh or another host aborts the read in progress.
+    // The newer read then clears the busy state.
     const req = util.latest("system.activity");
     state.loading = true;
     uiState.busy(body, true);

@@ -1,5 +1,5 @@
-// The adapter of src/wasm/rowsort.c (src/static/wasm/rowsort.wasm): the row order of a numeric result column
-// (app_results.js, orderByKeysJs).
+// The adapter of src/wasm/rowsort.c (src/static/wasm/rowsort.wasm). It gives the row order of a numeric result column.
+// It serves orderByKeysJs in app_results.js.
 //
 //   ops.rowsort.numeric(kernel, { vals, nulls, rank, desc }) -> Uint32Array: the row positions in sorted order
 //     vals Float64Array, nulls Uint8Array (1: missing, last when ascending), rank Float64Array (tie break), desc boolean

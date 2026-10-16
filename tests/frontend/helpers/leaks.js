@@ -1,19 +1,29 @@
-// Live counters for leak tests. installLeakTracker() wraps, before any page script runs, everything a view binds and
-// has to release:
+// Live counters for leak tests.
+// installLeakTracker() wraps everything that a view binds and has to release. It does this before any page script runs:
 //
-// - event listeners (EventTarget.prototype.addEventListener / removeEventListener): one entry per live (target, type,
-//   capture, listener). A removeEventListener, an aborted { signal } or a fired { once } drops it; a duplicate add is
-//   a no-op (as in the DOM). Counted: "global" (the target is window or document: they outlive every view),
-//   "connected" (an element still in the document; the listeners of a detached node die with it) and "media" (a
-//   MediaQueryList, which the document keeps alive while it has a listener);
-// - ResizeObserver, IntersectionObserver and MutationObserver: one entry per live (observer, target), dropped by
-//   unobserve() and disconnect(); counted by observer type when the target is connected;
+// - event listeners (EventTarget.prototype.addEventListener / removeEventListener): one entry for each live (target, type,
+//   capture, listener). A removeEventListener call, an aborted { signal } or a fired { once } drops the entry.
+//   A duplicate add is a no-op, as in the DOM.
+//
+//   The counts are "global", "connected" and "media".
+//   "global" means the target is window or document: they outlive every view.
+//   "connected" means an element still in the document: the listeners of a detached node die with it.
+//   "media" means a MediaQueryList, which the document keeps alive while it has a listener);
+//
+// - ResizeObserver, IntersectionObserver and MutationObserver: one entry for each live (observer, target).
+//   unobserve() and disconnect() drop the entry.
+//   The count is by observer type when the target is connected;
+//
 // - setInterval timers not cleared yet;
+//
 // - Worker, EventSource and BroadcastChannel objects not terminated or closed yet.
 //
-// leakStats(page, true) reads them, leakDiff(before, after) names what grew between two readings. A test runs a
-// cycle once (everything built), reads, runs the cycle N times, reads again and expects leakDiff(...) to be {}.
-// installLeakTracker is idempotent. The window of a Worker is not visible to it: only the page is tracked.
+// leakStats(page, true) reads them. leakDiff(before, after) names what grew between two readings.
+// A test runs a cycle once (everything built) and reads the counts.
+// It then runs the cycle N times, reads again, and expects leakDiff(...) to be {}.
+//
+// installLeakTracker is idempotent.
+// The window of a Worker is not visible to it. Only the page is tracked.
 
 export async function installLeakTracker(page) {
   await page.addInitScript(() => {
@@ -63,14 +73,14 @@ export async function installLeakTracker(page) {
       if (entry) entry.drop();
     };
 
-    // Observers: observer -> Map(WeakRef(target) key by target) of live observations.
+        // Observers: observer -> Map(WeakRef(target), keyed by target) of live observations.
     const observations = new Map();
     for (const name of ['ResizeObserver', 'IntersectionObserver', 'MutationObserver']) {
       const Ctor = window[name];
       if (!Ctor) continue;
       const { observe, unobserve, disconnect } = Ctor.prototype;
       Ctor.prototype.observe = function (target, ...rest) {
-        // A MutationObserver may observe the same node with new options: one observation per target.
+                // A MutationObserver can observe the same node with new options. Each target has one observation.
         let targets = observations.get(this);
         if (!targets) { targets = { type: name, refs: new Map() }; observations.set(this, targets); }
         if (!targets.refs.has(target)) targets.refs.set(target, new WeakRef(target));
@@ -151,10 +161,11 @@ export function leakStats(page, detail = false) {
   return page.evaluate((d) => window.__leakStats(d), detail);
 }
 
-// What grew between two detailed readings: "<group>:<name>" -> the increase of the count. Only an increase is a leak: a worker
-// that ended or a listener that went away between the two readings is the page releasing what it held (the Worker of the
-// kernels ends when it has been idle for a while). Listeners are named by node and event (node:), by event on window or
-// document (global:) and on a media query (types).
+// What grew between two detailed readings: "<group>:<name>" -> the increase of the count.
+// Only an increase is a leak.
+// A worker that ended, or a listener that went away between the two readings, shows that the page released what it held.
+// The Worker of the kernels ends when it has been idle for a while.
+// Listeners are named by node and event (node:), by event on window or document (global:), and on a media query (types).
 export function leakDiff(before, after) {
   const out = {};
   const groups = { node: 'nodes', global: 'types', observer: 'observers', interval: 'intervals', channel: 'channels' };

@@ -1,22 +1,24 @@
 // Tabs of the Traces search view: "Search" (the result list) and the tabs
-// other modules register with ns.traceTabs.register(). They sit in the
-// Observability tab row (#tracesTabs in #obsNav, after the view tabs, in
-// the same underline row: .contentTabs--nav, app_ui_tabs.js). Every tab shares
-// the search bar (time range, filters and chips); the selected tab lives in
-// the URL as ?tab=<id> next to the search parameters (app_trace_search.js
-// calls writeParams / applyParams), and the Search button runs the selected
-// tab's search.
+// that other modules register with ns.traceTabs.register().
+// The tabs sit in the Observability tab row (#tracesTabs in #obsNav).
+// They come after the view tabs, in the same underline row (.contentTabs--nav, app_ui_tabs.js).
+//
+// Every tab uses the search bar (time range, filters and chips).
+// The selected tab is in the URL as ?tab=<id>, next to the search parameters.
+// app_trace_search.js calls writeParams / applyParams.
+// The Search button runs the search of the selected tab.
 //
 //   register({ id, label, order, panelId, init(), onSearch(filters, options), onShow(), onHide(),
 //              available(meta), params, writeParams(params), applyParams(params, { initial }) })
 //
-// onSearch replaces the result list search while the tab is selected;
-// onShow runs when the tab becomes visible from a click or Back / Forward.
-// available(meta) false hides the tab (/api/traces/meta decides, e.g. the
-// Services view needs traces.analytics). params lists the tab's own URL
-// parameters that only change what it shows (not a new search: they are
-// left out of the search key); writeParams / applyParams write and read the
-// tab's URL state while it is selected.
+// onSearch replaces the result list search while the tab is selected.
+// onShow runs when the tab becomes visible from a click, or from Back / Forward.
+//
+// available(meta) false hides the tab. /api/traces/meta decides this.
+// For example, the Services view needs traces.analytics.
+// params lists the URL parameters of the tab. These parameters only change the view.
+// They are not a new search, so they are left out of the search key.
+// writeParams / applyParams write and read the URL state of the tab while the tab is selected.
 
 import { dom, shell } from "./app_dom.js";
 import { actions, address } from "./app_trace_store.js";
@@ -54,14 +56,14 @@ function render() {
   const shown = tabs.filter(available);
   bar.hidden = shown.length < 2;
   tabsMod?.render(bar, shown.map((tab) => ({ value: tab.id, label: tab.label, id: `tracesTab-${tab.id}`, controls: tab.panelId || "" })), { attr: "traceTab", selected: current });
-  // A narrow window scrolls the tab row sideways: keep the selected tab in
-  // view, clear of the row's faded edges (ns.shell.revealInRow).
+  // On a narrow window, the tab row scrolls sideways.
+  // Keep the selected tab in view, clear of the faded edges of the row (ns.shell.revealInRow).
   const row = bar.parentElement;
   const active = $(".is-active", bar);
   if (active && row) shell?.revealInRow?.(row, active);
 }
 
-// Shows `id` without side effects (no URL write, no search).
+// Show `id` with no side effects. It writes no URL and runs no search.
 function show(id) {
   const next = valid(id);
   const previous = current;
@@ -82,17 +84,18 @@ function activate(id) {
   else find(id)?.onShow?.();
 }
 
-// A tab click: its own history entry, then the tab refreshes if needed.
-// activate: false only switches the panels (a caller that searches next).
+// A tab click adds its own history entry. Then the tab refreshes if needed.
+// activate: false only switches the panels. Use it when the caller runs a search next.
 function select(id, { url = "push", activate: run = true } = {}) {
   if (!show(id)) return;
   address.write(url);
   if (run) activate(current);
 }
 
-// From the URL (page load, Back / Forward). The page-load search runs the
-// selected tab's search itself, and so does Back / Forward to the Search
-// tab (app_traces.js restoreSearch); another tab refreshes if it is stale.
+// This handles the URL at page load and at Back / Forward.
+// The page-load search runs the search of the selected tab.
+// Back / Forward to the Search tab also runs that search (app_traces.js restoreSearch).
+// Another tab refreshes only when its data is stale.
 function applyParams(params, { initial = false } = {}) {
   const changed = show(params.get("tab") || SEARCH_TAB);
   find(current)?.applyParams?.(params, { initial });
@@ -104,8 +107,8 @@ function writeParams(params) {
   find(current)?.writeParams?.(params);
 }
 
-// /api/traces/meta answered: hide the tabs it does not enable (a selected
-// one falls back to Search).
+// When /api/traces/meta answers, hide the tabs that it does not enable.
+// If the selected tab is hidden, the Search tab is selected.
 function onMeta(value) {
   meta = value || null;
   if (current !== SEARCH_TAB && !available(find(current))) {
@@ -115,7 +118,7 @@ function onMeta(value) {
   render();
 }
 
-// Every tab's view-only URL parameters (left out of the search key).
+// The view-only URL parameters of every tab. They are left out of the search key.
 function viewParams() {
   return tabs.flatMap((tab) => tab.params || []);
 }
@@ -124,14 +127,14 @@ function hasParams(params) {
   return params.has("tab") || viewParams().some((name) => params.has(name));
 }
 
-// The selected tab's search, or null for the result list.
+// The search of the selected tab. The value is null for the result list.
 function activeSearch() {
   return current === SEARCH_TAB ? null : find(current)?.onSearch || null;
 }
 
 function init() {
   started = true;
-  // Click, arrows, Home / End: the shared tab behaviour (app_ui_tabs.js).
+  // Click, arrow keys, Home and End use the shared tab behavior (app_ui_tabs.js).
   tabsMod?.bind(byId("tracesTabs"), { attr: "traceTab", onSelect: (id) => select(id) });
   for (const tab of tabs) tab.init?.();
   render();

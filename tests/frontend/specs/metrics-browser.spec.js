@@ -3,9 +3,9 @@ import { installObservers } from '../helpers/observability.js';
 import { captureState } from '../helpers/review.js';
 import { stamp } from '../helpers/time.js';
 
-// Metrics browser (/metrics) on the OTel fixture metrics (otel.otel_metrics_*,
-// derived from the stored spans: see docs/metrics.md). The window comes from
-// /api/metrics/meta time bounds, never from hard-coded dates.
+// The Metrics browser (/metrics) uses the OTel fixture metrics (otel.otel_metrics_*).
+// The fixture metrics derive from the stored spans. See docs/metrics.md.
+// The time window comes from the time bounds of /api/metrics/meta. The tests never use hard-coded dates.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -14,7 +14,7 @@ test.afterEach(async ({ page }, testInfo) => {
   if (!obs) return;
   await obs.flush(testInfo, testInfo.title);
   expect(obs.pageErrors).toEqual([]);
-  // Navigating away (exemplar click) may abort in-flight chart requests.
+  // Leave the page, for example by an exemplar click. This can abort chart requests that are in flight.
   expect(obs.failedRequests.filter((r) => !/ERR_ABORTED|NS_BINDING_ABORTED/.test(String(r.error || '')))).toEqual([]);
 });
 
@@ -31,7 +31,7 @@ async function metricBounds(request) {
   return bounds;
 }
 
-// Last `hours` hours of data, minute-aligned.
+// The last `hours` hours of data, aligned to the minute.
 async function windowParams(request, hours = 6, which = 'max') {
   const b = await metricBounds(request);
   const end = Math.floor(b[which] / 60000) * 60000;
@@ -47,8 +47,8 @@ function metricsUrl(params) {
   return `/observability/metrics?${search.toString()}`;
 }
 
-// Panels draw on the shared canvas engine: its data attributes say what it
-// drew (data-series-drawn, data-points-drawn, data-markers, data-plot).
+// Panels draw on the shared canvas engine. Its data attributes show what it drew.
+// The attributes are data-series-drawn, data-points-drawn, data-markers and data-plot.
 const chartOf = (panel) => panel.locator('.metricsChart .chartCore');
 
 async function waitForChart(page, panel = page.locator('.metricsPanel').first()) {
@@ -67,13 +67,12 @@ async function plotBox(panel) {
 
 const seriesDrawn = async (panel) => Number(await chartOf(panel).getAttribute('data-series-drawn'));
 
-// The catalog grouped by service (its "By service" switch, remembered).
+// The catalog groups metrics by service. Its "By service" switch is remembered.
 const byService = (page) => page.addInitScript(() => { try { localStorage.setItem('chdash.metricsCatalogBy.v1', 'service'); } catch (_) {} });
 
-// By metric (the default): each metric once with its kind and human unit and
-// the number of services sending it; open, its services; the switch to By
-// service is remembered. Units read as words ("seconds", "calls", "ratio"),
-// the UCUM unit in the tooltip.
+// By metric is the default view. Each metric appears once, with its kind, a human unit and the number of services that send it.
+// When a metric is open, its services are shown. The switch to By service is remembered.
+// Units read as words, such as "seconds", "calls" or "ratio". The UCUM unit is in the tooltip.
 test('metrics: the catalog groups by metric with human units, or by service', async ({ page, request }) => {
   const range = await windowParams(request, 24);
   await page.goto(metricsUrl(range));
@@ -89,11 +88,11 @@ test('metrics: the catalog groups by metric with human units, or by service', as
   expect(Number(await head.locator('.metricsCatalog__count').textContent())).toBeGreaterThan(1);
   await expect(catalog.locator('.metricsCatalog__group[data-metric-group="traces.span.metrics.calls"] .metricsBadge--unit')).toHaveText('calls');
   await expect(catalog.locator('.metricsCatalog__group[data-metric-group="process.cpu.utilization"] .metricsBadge--unit')).toHaveText('ratio');
-  // Each metric once.
+  // Each metric is listed once.
   const names = await catalog.locator('[data-metric-group]').evaluateAll((els) => els.map((el) => el.dataset.metricGroup));
   expect(new Set(names).size).toBe(names.length);
   await expect(page.locator('#metricsCatalogSummary')).toHaveText(new RegExp(`^${names.length + await catalog.locator(':scope > .metricsCatalog__metric').count()} metrics · \\d+ services`));
-  // Open: its services, one picks it.
+  // When open, the metric shows its services. A user picks one service.
   await expect(group).toHaveClass(/is-collapsed/);
   await head.click();
   await expect(head).toHaveAttribute('aria-expanded', 'true');
@@ -102,7 +101,7 @@ test('metrics: the catalog groups by metric with human units, or by service', as
   await api.click();
   await expect(page.locator('.metricsPanel').first().locator('.metricsPanel__name')).toHaveText('http.server.request.duration');
   await expect(page.locator('.metricsPanel').first().locator('.metricsBadge--unit')).toHaveText('seconds');
-  // By service, remembered across a reload.
+  // By service. The choice is remembered after a reload.
   await by.locator('[data-catalog-by="service"]').click();
   await expect(catalog.locator('[data-service-toggle="api_service"]')).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('chdash.metricsCatalogBy.v1'))).toBe('service');
@@ -129,7 +128,7 @@ test('metrics: catalog lists services and metrics with type and unit badges, and
   await page.locator('#metricsSearch').fill('queue.dep');
   const items = catalog.locator('.metricsCatalog__metric');
   await expect(items.first()).toBeVisible();
-  // The search applies after the one typing delay (ns.search, 200 ms).
+  // The search applies after a delay of 200 ms (ns.search). The delay follows the last keystroke.
   await expect.poll(() => items.evaluateAll((els) => [...new Set(els.map((el) => el.dataset.metric))])).toEqual(['queue.depth']);
   await expect(catalog.locator('mark').first()).toHaveText('queue.dep');
   await page.locator('#metricsSearch').fill('api_serv');
@@ -137,13 +136,13 @@ test('metrics: catalog lists services and metrics with type and unit badges, and
   await page.locator('#metricsSearch').fill('no-such-metric-xyz');
   await expect(catalog).toContainText('No metric matches');
   await page.locator('#metricsSearch').fill('');
-  // The filter bar's Service picker (the same slots as Traces and Logs)
-  // narrows the catalog to one service.
+  // The Service picker of the filter bar has the same slots as Traces and Logs.
+  // It narrows the catalog to one service.
   await page.locator('#metricsToolbar .metricsSearchField--service .tracePicker__button').click();
   await page.locator('#metricsToolbar .metricsSearchField--service .tracePicker__menu').getByRole('option', { name: 'api_service', exact: true }).click();
   await expect(page.locator('#metricsToolbar .metricsSearchField--service .tracePicker__button')).toHaveText('Service · api_service');
   await expect.poll(() => catalog.locator('[data-service-toggle]').evaluateAll((els) => els.map((el) => el.dataset.serviceToggle))).toEqual(['api_service']);
-  // The catalog's disclosure is the sprite's chevron, never a filled triangle.
+  // The catalog uses the chevron of the sprite to show its disclosure. It never uses a filled triangle.
   const chevron = catalog.locator('.metricsCatalog__chevron').first();
   await expect(chevron).toHaveJSProperty('tagName', 'svg');
   await expect(chevron.locator('use')).toHaveAttribute('href', /#i-chevron-right$/);
@@ -158,7 +157,7 @@ test('metrics: a percentile is a line with no wash under it; a gauge keeps its w
   await expect(chartOf(panel)).toHaveAttribute('data-series-washed', '0');
   await page.goto(metricsUrl({ ...range, service: 'api_service', metric: 'queue.depth', kind: 'gauge', agg: 'avg' }));
   await waitForChart(page, panel);
-  // (The wash is for a lone series: one line drawn, one wash.)
+  // The wash is for a lone series. One line is drawn, and it has one wash.
   const drawn = await seriesDrawn(panel);
   await expect(chartOf(panel)).toHaveAttribute('data-series-washed', drawn === 1 ? '1' : '0');
 });
@@ -209,7 +208,7 @@ test('metrics: aggregation switch, group-by and = / != filters reload the chart 
   await expect(page).toHaveURL(/agg=increase/);
   await expect(panel.locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Aggregation \u00b7 Increase');
 
-  // Group by status.code: one legend entry per status.
+  // Group by status.code. The legend has one entry per status.
   await panel.locator('.metricsPicker--group .tracePicker__button').click();
   const grouped = page.waitForResponse((r) => r.url().includes('/api/metrics/series') && r.url().includes('group_by=status.code'));
   await panel.locator('.metricsPicker--group input[data-group-key="status.code"]').check();
@@ -221,7 +220,7 @@ test('metrics: aggregation switch, group-by and = / != filters reload the chart 
   await expect(legend.filter({ hasText: 'STATUS_CODE_ERROR' })).toHaveCount(1);
   expect(await legend.count()).toBeGreaterThanOrEqual(2);
 
-  // Legend click hides a line; Alt+click shows only that one (again: all).
+  // A click on the legend hides a line. Alt+click shows only that line. Alt+click again shows all lines.
   const before = await seriesDrawn(panel);
   await legend.filter({ hasText: 'STATUS_CODE_ERROR' }).click();
   await expect(legend.filter({ hasText: 'STATUS_CODE_ERROR' })).toHaveAttribute('aria-pressed', 'false');
@@ -234,7 +233,7 @@ test('metrics: aggregation switch, group-by and = / != filters reload the chart 
   await legend.filter({ hasText: 'STATUS_CODE_ERROR' }).click({ modifiers: ['Alt'] });
   await expect.poll(() => seriesDrawn(panel)).toBe(before);
 
-  // Filter status.code != STATUS_CODE_ERROR with value autocomplete.
+  // Filter status.code != STATUS_CODE_ERROR. The filter has value autocomplete.
   await panel.locator('.metricsFilters__add').click();
   const form = panel.locator('.metricsFilterForm');
   await expect(form).toBeVisible();
@@ -253,7 +252,7 @@ test('metrics: aggregation switch, group-by and = / != filters reload the chart 
   await waitForChart(page, panel);
   await expect(legend.filter({ hasText: 'STATUS_CODE_ERROR' })).toHaveCount(0);
 
-  // Equality filter on span.kind keeps only that kind.
+  // An equality filter on span.kind keeps only that kind.
   await panel.locator('.metricsChip .chip__remove').click();
   await expect(panel.locator('.metricsChip')).toHaveCount(0);
   await expect(page).not.toHaveURL(/filter_not=/);
@@ -280,24 +279,24 @@ test('metrics: the URL restores range, panels, aggregation, group-by, filters an
   await expect(panels.nth(1).locator('.metricsPicker--agg .tracePicker__button')).toHaveText('Aggregation \u00b7 Max');
   await expect(panels.nth(1).locator('.metricsPicker--group .tracePicker__button')).toHaveText('Group by \u00b7 host.name');
   await expect(panels.nth(1).locator('.chartCore__legendItem')).toHaveCount(3);
-  // The shared range label (ns.format.range): "Sep 19 22:23 \u2192 ...", never ISO.
+  // The shared range label (ns.format.range) shows "Sep 19 22:23 \u2192 ...". It never uses ISO format.
   const fromDay = await page.evaluate((from) => window.ChDash.format.range(new Date(from.replace(' ', 'T')).getTime(), new Date(from.replace(' ', 'T')).getTime() + 3600000).split(' ').slice(0, 2).join(' '), range.from);
   await expect(page.locator('#metricsTimeRangePanel').locator('..').locator('.tracePicker__button')).toContainText(fromDay);
-  // The filter bar (range first) spans the catalog and the panels.
+  // The filter bar, with the range first, spans the catalog and the panels.
   const [bar, sidebar] = await Promise.all([page.locator('#metricsToolbar').boundingBox(), page.locator('#metricsSidebar').boundingBox()]);
   expect(bar.x).toBe(sidebar.x);
   expect(sidebar.y).toBeGreaterThanOrEqual(bar.y + bar.height - 0.5);
 
-  // The page rewrites nothing it restored.
+  // The page does not rewrite anything that it restored.
   const restored = new URL(page.url());
   expect(restored.searchParams.get('agg')).toBe('p99');
   expect(restored.searchParams.getAll('panel')).toHaveLength(1);
   expect(new URLSearchParams(restored.searchParams.get('panel')).get('group_by')).toBe('host.name');
 
-  // Add then remove a panel.
+  // Add a panel, then remove it.
   await page.locator('#metricsAddPanelButton').click();
   await expect(panels).toHaveCount(3);
-  // An empty panel: its controls disabled, and the way to fill it.
+  // An empty panel has disabled controls. It also has a way to fill it.
   await expect(panels.nth(2)).toContainText('No metric in this panel');
   const pick = panels.nth(2).getByRole('button', { name: 'Pick a metric' });
   await expect(pick).toBeVisible();
@@ -309,7 +308,7 @@ test('metrics: the URL restores range, panels, aggregation, group-by, filters an
   await panels.nth(2).locator('.metricsPanel__remove').click();
   await expect(panels).toHaveCount(2);
 
-  // Reload: same state.
+  // After a reload, the state is the same.
   await page.reload();
   await expect(panels).toHaveCount(2);
   await waitForChart(page, panels.nth(1));
@@ -333,11 +332,11 @@ test('metrics: an exemplar dot opens its trace with the span selected', async ({
   await exemplar.click();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}$`));
   await expect(page.locator('#traceDetail')).toBeVisible({ timeout: 30_000 });
-  // The metrics' time range goes with the tab (sessionStorage), not in the address.
+  // The time range of the metrics goes with the tab (sessionStorage). It is not in the address.
   const stored = await page.evaluate(() => JSON.parse(sessionStorage.getItem('chdash.observability.context.v1')));
   expect(stored.range.from).toMatch(/\S/);
   expect(stored.range.to).toMatch(/\S/);
-  // The deep-linked span is opened inline in the timeline, with its id.
+  // The span from the deep link opens inline in the timeline, with its id.
   await expect(page.locator('#traceWaterfall')).toContainText(spanId, { timeout: 30_000 });
 });
 
@@ -370,7 +369,7 @@ test('metrics: panels share the crosshair, and a drag sets the time range of eve
   await expect(chartOf(panels.nth(1))).toHaveAttribute('data-sync-x', /\d+/);
   await expect(chartOf(panels.nth(1)).locator('.chartCore__xline')).toBeVisible();
 
-  // Drag a third of the plot: both panels reload on that range.
+  // Drag across a third of the plot. Both panels reload on that range.
   const reload = page.waitForResponse((r) => r.url().includes('/api/metrics/series'));
   await page.mouse.move(box.x + box.width * 0.3, box.y + box.height / 2);
   await page.mouse.down();
@@ -404,7 +403,7 @@ test('metrics: values and axes follow the OpenTelemetry unit', async ({ page, re
     };
   });
   expect(formatted).toEqual({
-    // ns.format: whole units past a minute, bytes with one decimal from KB.
+    // ns.format uses whole units past a minute. It uses bytes with one decimal from KB.
     seconds: '250 ms', micro: '52 µs', minutes: '2 min 5 s', millis: '1.5 s',
     bytes: '1.5 KB', mebibytes: '5.0 MB', byteRate: '2.0 KB/s',
     calls: '12 call/s', requests: '25K request', ratio: '0.5', percent: '42%',
@@ -433,7 +432,7 @@ test('metrics: a failed catalog or chart says so in a sentence, without the erro
   failSeries = false;
   await catalog.getByRole('button', { name: 'Retry' }).click();
   await expect(page.locator('#metricsCatalog :is(.metricsCatalog__metric, [data-metric-toggle])').first()).toBeVisible({ timeout: 30_000 });
-  // (A catalog answer may reload the panel by itself.)
+  // A catalog answer can reload the panel by itself.
   if (await state.isVisible()) await state.getByRole('button', { name: 'Retry' }).click();
   await waitForChart(page);
 });
@@ -443,7 +442,7 @@ test('metrics: an empty range offers the latest data', async ({ page, request })
   await page.goto(metricsUrl({ from: '2001-01-01 00:00:00', to: '2001-01-01 01:00:00' }));
   const jump = page.locator('#metricsCatalog [data-jump-to-data]');
   await expect(jump).toBeVisible({ timeout: 30_000 });
-  // A secondary action (the search stays the primary one), with the time.
+  // This is a secondary action, with the time. The search stays the primary action.
   await expect(jump).toHaveText('Jump to last data');
   await expect(jump).not.toHaveClass(/button--primary/);
   await expect(page.locator('#metricsCatalog')).toContainText(/The latest point is at /);

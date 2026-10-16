@@ -135,8 +135,8 @@ static std::string build_tick_json(const SessionSnapshot& snapshot, StreamState&
   write_nullable_int64(writer, snapshot.current_mem_bytes);
   write_nullable_int64(writer, snapshot.peak_mem_bytes);
 
-  // Positions 12 and 13 used to contain inferred current/peak thread counts.
-  // Keep null placeholders for wire compatibility while removing the metric.
+    // Positions 12 and 13 used to contain inferred current and peak thread counts.
+    // Keep null placeholders for wire compatibility. The metric is removed.
   writer.Null();
   writer.Null();
 
@@ -159,8 +159,8 @@ static std::string build_tick_json(const SessionSnapshot& snapshot, StreamState&
     }
     writer.EndArray();
   }
-  // Append write telemetry after the legacy-compatible positions and sample
-  // payload so older frontends can ignore it safely.
+    // Append the write telemetry after the legacy-compatible positions and the sample payload.
+    // Older frontends can ignore it safely.
   writer.Uint64(snapshot.written_rows_total);
   writer.Uint64(snapshot.written_bytes_total);
   writer.Int64(written_rows_per_second);
@@ -190,11 +190,11 @@ static std::string build_done_json(const SessionSnapshot& snapshot, bool truncat
   writer.Key("written_bytes"); writer.Uint64(snapshot.written_bytes_total);
   writer.Key("result_rows_emitted"); writer.Uint64(snapshot.result_rows_emitted);
   writer.Key("result_bytes_emitted"); writer.Uint64(snapshot.result_bytes_emitted);
-  // Backward-compatible alias consumed by older frontends.
+    // This is a backward-compatible alias. Older frontends use it.
   writer.Key("result_rows_returned"); writer.Uint64(snapshot.result_rows_emitted);
   writer.Key("result_truncated"); writer.Bool(truncated);
-  // Where elapsed_seconds went (docs/telemetry.md): the native client (ClickHouse
-  // and the column decoding), the JSON encoding, the wait for a slow browser.
+    // This shows the parts of elapsed_seconds (docs/telemetry.md).
+    // The parts are the native client (ClickHouse and the column decoding), the JSON encoding, and the wait for a slow browser.
   writer.Key("timing_ms");
   writer.StartObject();
   writer.Key("receive"); writer.Int64(snapshot.receive_ms);
@@ -242,8 +242,8 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
   }
   session->start();
 
-  // set_chunked_content_provider owns Content-Type. Setting it separately
-  // creates duplicate values in cpp-httplib.
+    // set_chunked_content_provider sets Content-Type. Do not set it separately.
+    // Otherwise, cpp-httplib creates duplicate values.
   res.set_header("Cache-Control", "no-cache, no-transform");
   res.set_header("Connection", "keep-alive");
   res.set_header("X-Accel-Buffering", "no");
@@ -271,7 +271,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
             return false;
           }
 
-          // Establish a baseline without emitting an all-zero initial tick.
+                    // Establish a baseline. Do not emit an all-zero initial tick.
           const auto baseline = state->session->snapshot();
           state->prev_read_rows = baseline.read_rows_total;
           state->prev_read_bytes = baseline.read_bytes_total;
@@ -306,7 +306,7 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
           if (!state->terminal_event_sent) {
             state->terminal_event_sent = true;
             std::string terminal;
-            // A stop of the server cancelled the query (Server::stop): the page says why, not only "canceled".
+                        // A stop of the server cancelled the query (Server::stop). The page says why, and not only "canceled".
             if (self->stopping() && snapshot.status == SessionStatus::Canceled) {
               terminal += sse_json_event("error", build_error_payload_json(
                   "server_stopping", "The server is stopping: the query was cancelled. Run it again once the server is back.",
@@ -348,10 +348,10 @@ void Server::handle_query_stream(const httplib::Request& req, httplib::Response&
       [session, state, query_id, self, cancel_session](bool success) {
         self->active_query_streams_.fetch_sub(1, std::memory_order_relaxed);
         session->detach_stream();
-        // The chunk callback returns false after sink.done() (it has nothing more to write), which
-        // cpp-httplib reports as a failed response. A stream that sent its terminal event is
-        // finished: a KILL QUERY would only ask ClickHouse to stop a query that has ended
-        // (a statement and a connection for every run).
+                // The chunk callback returns false after sink.done(). It has nothing more to write.
+                // cpp-httplib reports this as a failed response. A stream that sent its terminal event is finished.
+                // A KILL QUERY would only ask ClickHouse to stop a query that has ended.
+                // It would cost one statement and one connection for every run.
         if (!success && !state->terminal_event_sent) cancel_session(session);
         std::lock_guard<std::mutex> lock(self->mu_);
         self->sessions_.erase(query_id);

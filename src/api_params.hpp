@@ -1,9 +1,9 @@
 #pragma once
 
-// The query parameters of a route: the names that it reads, and numbers that are read whole.
+// This file gives the query parameters of a route. It reads each number as a whole text value.
 //
-// A route that takes a short, fixed list of parameters refuses any other name, so a typo is an error and not a silent
-// default. A number is the whole text of the value: "123abc", " 12" and "1e400" are not numbers.
+// A route that takes a short, fixed list of parameters refuses any other name. A typo is then an error, not a silent default.
+// A number is the whole text of the value: "123abc", " 12" and "1e400" are not numbers.
 
 #include "api_error.hpp"
 
@@ -20,7 +20,7 @@
 
 namespace chdash {
 
-// The 400 `unknown_parameter` error when the request holds a parameter that is not in `allowed`.
+// This gives the 400 `unknown_parameter` error. The request holds a parameter that is not in `allowed`.
 inline std::optional<ApiError> unknown_param_error(const httplib::Request& req, std::initializer_list<const char*> allowed) {
   for (const auto& item : req.params) {
     bool known = false;
@@ -35,7 +35,7 @@ inline std::optional<ApiError> unknown_param_error(const httplib::Request& req, 
   return std::nullopt;
 }
 
-// True after it wrote the 400 `unknown_parameter` answer: the request holds a parameter that is not in `allowed`.
+// This is true after it writes the 400 `unknown_parameter` answer. The request holds a parameter that is not in `allowed`.
 inline bool refuse_unknown_params(const httplib::Request& req, httplib::Response& res, std::initializer_list<const char*> allowed) {
   const auto error = unknown_param_error(req, allowed);
   if (!error) return false;
@@ -43,7 +43,7 @@ inline bool refuse_unknown_params(const httplib::Request& req, httplib::Response
   return true;
 }
 
-// A decimal integer with an optional sign, nothing else, that fits in 64 bits.
+// This is a decimal integer with an optional sign. It has no other characters, and it fits in 64 bits.
 inline std::optional<int64_t> parse_whole_i64(std::string_view text) {
   if (text.empty() || text.size() > 20) return std::nullopt;
   size_t i = text[0] == '-' || text[0] == '+' ? 1 : 0;
@@ -59,7 +59,7 @@ inline std::optional<int64_t> parse_whole_i64(std::string_view text) {
   return static_cast<int64_t>(value);
 }
 
-// A finite number with a decimal point or an exponent allowed, nothing else.
+// This is a finite number. It can have a decimal point or an exponent, and it has no other characters.
 inline std::optional<double> parse_whole_double(std::string_view text) {
   if (text.empty() || text.size() > 64) return std::nullopt;
   const unsigned char first = static_cast<unsigned char>(text[0]);

@@ -1,5 +1,5 @@
-// The adapter of src/wasm/sqlscan.c (src/static/wasm/sqlscan.wasm): the text scans of the editor diagnostics of
-// app_autocomplete.js. It runs in the page, on a kernel that ns.wasm.load("sqlscan") gives it.
+// The adapter of src/wasm/sqlscan.c (src/static/wasm/sqlscan.wasm). It does the text scans of the editor diagnostics
+// of app_autocomplete.js. It runs in the page. It uses a kernel from ns.wasm.load("sqlscan").
 //
 //   ops.sqlscan.names(kernel, { kw, func, tfunc, dtype })   upload the name sets (arrays of lower-case ASCII strings)
 //   ops.sqlscan.run(kernel, { text, flags })                flags: 1 relations, 2 selects, 4 function calls
@@ -8,13 +8,13 @@
 //   ops.sqlscan.split(kernel, { text })                     Int32Array of [start, end) pieces between the ";" of a script
 //   ops.sqlscan.statementStart(kernel, { text })            where the last statement of text starts (currentStatementBefore)
 //
-// The editor asks for the statement several times for one text (every key stroke): the last text stays in the instance.
+// The editor asks for the statement several times for one text, once for each key stroke. The last text stays in the instance.
 import { wasm } from "./app_wasm.js";
 
 const SETS = ["kw", "func", "tfunc", "dtype"];
 const ROWS = ["sel", "item", "lam", "ref", "aj", "rel", "fn"];
 
-// Each name is [length, code units...]; a name with a character beyond ASCII cannot equal the ASCII names the kernel looks up.
+// Each name is [length, code units...]. A name with a character beyond ASCII cannot equal an ASCII name that the kernel looks up.
 const pack = (names) => {
   const list = [];
   let units = 0;
@@ -40,8 +40,8 @@ const pack = (names) => {
   return { data, count: list.length };
 };
 
-// The last text copied into the instance: { text, ptr, length, mark }. A copy lives above everything else the
-// instance keeps, so names() drops it first (the name tables must stay below the arena's top).
+// The last text copied into the instance: { text, ptr, length, mark }. The copy lies above all other data
+// that the instance keeps. So names() drops it first. The name tables must stay below the top of the arena.
 let cached = null;
 const dropCached = (kernel) => {
   if (cached && cached.kernel === kernel) kernel.release(cached.mark);

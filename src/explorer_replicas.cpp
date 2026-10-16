@@ -1,10 +1,11 @@
 // The replica counts of the Explorer, and the caches that its readers share.
 //
-// system.replicas answers queue_size / absolute_delay / is_readonly / is_session_expired from memory, but total_replicas / active_replicas
-// cost a Keeper (ZooKeeper) request per replicated table. The graph catalog is rebuilt every few seconds while the graph is open, so the
-// replica counts (the "nR" badge and the degraded check) are cached per server for kReplicaCountTtl and re-read only for new tables or once the
-// entry expired, restricted to the databases being shown. Local-replica health (read-only, expired session, queue, delay) stays live on every
-// build.
+// system.replicas answers queue_size / absolute_delay / is_readonly / is_session_expired from memory.
+// total_replicas and active_replicas cost one Keeper (ZooKeeper) request per replicated table.
+// The graph catalog is rebuilt every few seconds while the graph is open.
+// The replica counts (the "nR" badge and the degraded check) are cached per server for kReplicaCountTtl.
+// They are read again only for new tables, or when the entry expired. The read is restricted to the databases that are shown.
+// Local-replica health (read-only, expired session, queue, delay) stays live on every build.
 #include "explorer_catalog.hpp"
 
 #include "explorer_sql.hpp"

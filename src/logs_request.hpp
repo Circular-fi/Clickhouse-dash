@@ -2,12 +2,12 @@
 
 // What the routes of the Logs page (/api/logs/search, histogram, context, patterns, services, facets, facet_values) read from a request:
 // the filters that they share (the time range, the services, the severity, the trace and span, the attribute filters, the text search)
-// and what each route adds. Parsing only, and only what does not need the table: nothing here reads ClickHouse or the schema of the
-// table, so a value that a route has to check against the table (a trace id on a table with no TraceId column, a range that must fit
-// logs.max_lookback_minutes) stays text or a number here and is checked by logs_filters.hpp once the schema is known. The numbers
+// and what each route adds. This code only parses. It parses only what does not need the table. Nothing here reads ClickHouse or the schema of the
+// table. A value that a route checks against the table stays text or a number here. For example, a trace id on a table with no TraceId column, or a range that must fit
+// logs.max_lookback_minutes, stays unchecked here. The check runs in logs_filters.hpp once the schema is known. The numbers
 // that a route clamps are clamped by the code that knows the bounds.
 //
-// A parser returns false with the 400 answer in *error only for what no host or table can change (the scope and the key of a facet).
+// A parser returns false, with the 400 answer in *error, only for a value that no host or table can change. Examples are the scope and the key of a facet.
 
 #include "error_envelope.hpp"
 

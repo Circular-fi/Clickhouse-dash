@@ -48,7 +48,14 @@ metrics {
 clickhouse {
   host {
     name       = "local"
-    runner_uri = "clickhouse://chdash_runner:runner_test@host.docker.internal:9000"
-    system_uri = "clickhouse://chdash_system:system_test@host.docker.internal:9000"
+    runner_uri = "clickhouse://chdash_runner@host.docker.internal:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@host.docker.internal:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
   }
+}
+
+# The access of humans (docs/access.md): no gateway in front of this server, so no check.
+access {
+  mode = "open"
 }

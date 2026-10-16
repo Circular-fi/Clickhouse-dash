@@ -2,13 +2,15 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { readZip } from '../helpers/zip.js';
 
-// The streamed export (docs/massive-export.md) from a browser. The pages of ChDash do not use it, but a browser is the
-// client that matters for its guards: it sends the Origin of the page, it cannot send a JSON body from a form, and it
-// puts every address in a history and a log. The backend tests (backend-functional/test_export_protocol.py) cover the
-// answers with a script; these tests run the handshake and the download with the page's own fetch, read the archive,
-// and look at what a page of another site can and cannot do.
+// This file tests the streamed export (docs/massive-export.md) from a browser.
+// The pages of ChDash do not use it. The browser is the client that matters for its guards.
+// The browser sends the Origin of the page. It cannot send a JSON body from a form.
+// It puts every address in a history and a log.
+// The backend tests (backend-functional/test_export_protocol.py) cover the answers with a script.
+// These tests run the handshake and the download with the page's own fetch. They read the archive.
+// They also check what a page of another site can and cannot do.
 
-// The server runs a bounded number of streams at once (export.max_concurrent): one test at a time.
+// The server runs a bounded number of streams at once (export.max_concurrent). Run one test at a time.
 test.describe.configure({ mode: 'default' });
 
 const observers = new WeakMap();
@@ -23,7 +25,7 @@ test.afterEach(async ({ page }, testInfo) => {
 const FIRST = 'SELECT number AS n, toString(number) AS s FROM numbers(3)';
 const SECOND = "SELECT 'a,b' AS answer, 42 AS n";
 
-// The handshake, then the download of its token, with the fetch of the page. Answers what the test inspects.
+// The handshake and the download of its token use the fetch of the page. The result shows what the test inspects.
 async function exportFrom(page, { format, queries, reuse = false }) {
   return page.evaluate(async ({ format, queries, reuse }) => {
     const json = { 'Content-Type': 'application/json' };
@@ -68,10 +70,10 @@ test('a multi-query CSV export: the handshake gives a token, the download is an 
   const text = Object.fromEntries(entries.map((entry) => [entry.name, entry.text()]));
   expect(text['query-001/query.sql']).toBe(FIRST);
   expect(text['query-001/results.csv']).toBe('n,s\n0,0\n1,1\n2,2\n');
-  // A comma in a value is quoted, the header comes first.
+  // A comma in a value is quoted. The header comes first.
   expect(text['query-002/results.csv']).toBe('answer,n\n"a,b",42\n');
   expect(text['query-002/query.sql']).toBe(SECOND);
-  // The execution of each statement is the one ClickHouse logged: its status and the rows it returned.
+  // The execution of each statement is the one that ClickHouse logged: its status and the rows it returned.
   for (const [name, rows] of [['query-001/execution.csv', '3'], ['query-002/execution.csv', '1']]) {
     const [header, row] = text[name].trim().split('\n');
     const columns = header.split(',');
@@ -81,7 +83,7 @@ test('a multi-query CSV export: the handshake gives a token, the download is an 
     expect(values[columns.indexOf('result_rows')]).toBe(rows);
   }
 
-  // The capability never travels in an address: not in the handshake, not in the download.
+  // The capability never travels in an address, in the handshake or in the download.
   const exportCalls = addresses.filter((url) => url.includes('/api/export/'));
   expect(exportCalls.map((url) => new URL(url).pathname)).toEqual(['/api/export/run', '/api/export/stream']);
   for (const url of exportCalls) expect(new URL(url).search).toBe('');
@@ -114,7 +116,7 @@ test('a GET starts nothing, with or without the token in the address: 405 with A
   });
   expect(out.plain).toEqual([405, 'POST']);
   expect(out.withToken).toEqual([405, 'POST']);
-  // The GET did not use up the token: the POST still downloads.
+  // The GET does not use up the token. The POST still downloads.
   expect(out.used).toBe(200);
 });
 
@@ -128,7 +130,7 @@ test('a statement the policy refuses stops the handshake before any download: KI
 });
 
 test('a page of another site cannot start an export: its form post is refused, and so is its fetch', async ({ page, baseURL }) => {
-  // "Another site": an address the test serves, in the same browser, so the requests carry its Origin.
+  // "Another site": an address that the test serves in the same browser. The requests carry its Origin.
   const other = 'http://other-site.test';
   await page.route(`${other}/**`, (route) => route.fulfill({ contentType: 'text/html', body: `<!doctype html><title>other</title>
     <form id="f" method="post" enctype="text/plain" action="${baseURL}/api/export/run">
@@ -138,7 +140,7 @@ test('a page of another site cannot start an export: its form post is refused, a
   const refused = page.waitForResponse((response) => response.url().endsWith('/api/export/run') && response.request().method() === 'POST');
   await page.evaluate(() => document.getElementById('f').submit());
   const form = await refused;
-  // A form cannot send application/json: 415. If it could, the Origin is not ours: 403.
+  // A form cannot send application/json, so the answer is 415. If it could, the Origin is not ours, so the answer is 403.
   expect([403, 415]).toContain(form.status());
   expect((await form.json()).error_code).toMatch(/^(unsupported_media_type|cross_site_request)$/);
 
@@ -148,8 +150,8 @@ test('a page of another site cannot start an export: its form post is refused, a
       const response = await fetch(`${url}/api/export/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host_id: 'local', format: 'csv', queries: ['SELECT 1'] }) });
       return { status: response.status };
     } catch (error) {
-      // The browser may refuse the answer to a request of another origin (CORS): the request was still made, and
-      // the server decided on its Origin. What matters is that no grant came back.
+      // The browser may refuse the answer to a request from another origin (CORS). The request was still made,
+      // and the server decided on its Origin. What matters is that no grant came back.
       return { status: 0 };
     }
   }, baseURL);

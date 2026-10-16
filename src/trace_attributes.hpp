@@ -1,9 +1,11 @@
 #pragma once
 
-// Which attribute columns of the traces table are Maps. Tagged searches, the attribute columns of the span search, the facets and
-// the deltas read the maps, so they must know. It is a schema fact that changes on DDL, not per request: it is kept per source
-// (system URI + table) instead of reading system.columns on every request. /api/traces/meta always reads it fresh and refreshes
-// the cache.
+// This file finds the attribute columns of the traces table that are Maps. The tagged searches, the attribute columns of the span
+// search, the facets and the deltas read these maps. Therefore they must know which columns are Maps.
+//
+// The map columns are a schema fact. The schema changes only on DDL, not on each request. The server therefore keeps the answer
+// for each source (system URI + table). It does not read system.columns on every request. The route /api/traces/meta always reads
+// the columns again and refreshes the cache.
 
 #include "ch_executor.hpp"
 #include "health_runner.hpp"
@@ -22,21 +24,24 @@ struct AttributeMaps {
 };
 using AttributeMapCache = TtlCache<std::string, AttributeMaps>;
 
-// One read per source at a time (single-flight). Only successful lookups are kept: a failure is retried by the next request (no
-// back-off). The key comes from the configuration only.
+// Only one read runs for each source at a time (single-flight). The cache keeps only successful lookups. A failed lookup is
+// retried by the next request, without a back-off. The key comes from the configuration only.
 AttributeMapCache::Options attribute_map_cache_options();
 
-// The columns of the table, read from ClickHouse. False with the reason in *error when the read failed.
+// This function reads the columns of the table from ClickHouse. It returns false when the read fails, and it puts the reason in
+// *error.
 bool read_attribute_maps(ChExecutor& db, const TraceSettings& cfg, bool* span_map, bool* resource_map, std::string* error = nullptr);
 
-// /api/traces/meta read the columns itself: its answer replaces the kept one.
+// The route /api/traces/meta reads the columns itself. Its answer replaces the kept answer.
 void store_attribute_maps(AttributeMapCache& cache, const HostSpec& host, const TraceSettings& cfg, bool span_map, bool resource_map);
 
-// The kept answer, or a read. False when the columns could not be read.
+// This function returns the kept answer. If no answer is kept, it reads the columns. It returns false when the columns cannot be
+// read.
 bool cached_attribute_maps(ChExecutor& db, AttributeMapCache& cache, const HostSpec& host, const TraceSettings& cfg, bool* span_map,
                            bool* resource_map);
 
-// The maps that filters, facets and columns may read: stored as Maps, and enabled by traces.features.
+// This function returns the maps that filters, facets and columns may read. A map is usable when it is stored as a Map and
+// traces.features enables it.
 AttributeColumns attribute_columns(ChExecutor& db, AttributeMapCache& cache, const HostSpec& host, const TraceSettings& cfg);
 
 }  // namespace trace

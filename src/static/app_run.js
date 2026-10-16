@@ -16,11 +16,12 @@ import { util } from "./app_util.js";
 const { $$ } = dom;
 
 let activeEventSource = null;
-// A run is prepared before the server knows it: Auto-format asks the formatter, then the statement is sent. Cancel works in
-// that phase (ARCH-F-039): it aborts the request that is on its way, and the run ends as canceled. null when none is.
+// A run is prepared before the server knows it. Auto-format asks the formatter first, then the statement is sent.
+// Cancel works in that phase (ARCH-F-039). It aborts the request that is on its way. The run then ends as canceled.
+// The value is null when no run is prepared.
 let prepareAbort = null;
 let lockProgressIndeterminate = false;
-// A lookup of the System figure that ends after a new run began must not write the tile of that run.
+// A lookup of the System figure that ends after a new run starts must not write the tile of that run.
 let elapsedLookupSeq = 0;
 
 const series = {
@@ -52,8 +53,8 @@ function pushPointMonotone(arr, t, v) {
     return;
   }
   arr.push({ t, v });
-  // Trim in chunks instead of moving the entire backing array for every
-  // point once the graph reaches its retention limit.
+  // Trim in chunks. This avoids a move of the entire backing array for every point
+  // once the graph reaches its retention limit.
   if (arr.length > MAX_STORE_POINTS + STORE_TRIM_SLACK) {
     arr.splice(0, arr.length - MAX_STORE_POINTS);
   }
@@ -86,16 +87,16 @@ function decimate(points, maxPoints) {
   return out;
 }
 
-// An empty sparkline (a hidden tab keeps no drawing).
+// Remove the drawing of a sparkline. A hidden tab keeps no drawing.
 function releaseCanvasBuffer(el) {
   if (!el || !el.__sparkline) return;
   el.__sparkline = "";
   el.replaceChildren();
 }
 
-// The shared sparkline (chartUi.sparkline, --sparkline-color): the series
-// decimated, from opts.min, its top the max (or a quantile of it), never
-// under opts.minMax.
+// The shared sparkline (chartUi.sparkline, --sparkline-color). It draws the decimated series.
+// The bottom of the sparkline is opts.min. The top is the max, or a quantile of the series.
+// The top is never under opts.minMax.
 function drawSparkline(el, points, opts = {}) {
   if (!el || !Array.isArray(points) || points.length === 0 || document.hidden) {
     releaseCanvasBuffer(el);
@@ -168,18 +169,18 @@ function resetCharts() {
   scheduleChartsRender();
 }
 
-// The metric rail in ns.format (docs/ui-foundations.md): durations
-// "1 ms" / "8 min 30 s", sizes "15.2 KB", rates "1.2K/s" and "1.7 KB/s",
-// totals "120,064", percentages "12.3%", and EMPTY for a missing value.
+// The metric rail in ns.format (docs/ui-foundations.md) formats the values.
+// Durations look like "1 ms" or "8 min 30 s". Sizes look like "15.2 KB". Rates look like "1.2K/s" and "1.7 KB/s".
+// Totals look like "120,064". Percentages look like "12.3%". EMPTY marks a missing value.
 const EMPTY = format.EMPTY;
 const rowsRate = (value) => `${format.compact(value)}/s`;
 // ClickHouse reports CPU and progress in hundredths of a percent.
 const percentFromCenti = (value) => format.percent(Number(value) / 10000);
 
-// The rail's tiles show what the run amounts to: rows and bytes read (or
-// written) and the CPU and memory peaks, the large value; the sub-line is
-// labelled: "Now" with the current rate or level while the query runs,
-// "Avg" with the run's average once it ended (setRailPhase, finishRail).
+// The rail's tiles show the totals of the run: the rows and bytes read (or written), and the CPU and memory peaks.
+// The large value is the figure. The sub-line has a label.
+// The label is "Now" while the query runs. It shows the current rate or level.
+// The label is "Avg" when the run ended. It shows the average of the run (setRailPhase, finishRail).
 function setRailPhase(phase) {
   const label = phase === "done" ? "Avg" : "Now";
   for (const el of $$(".metricColumn [data-rail-sub]")) {
@@ -198,14 +199,14 @@ const mean = (points) => {
   return count ? sum / count : null;
 };
 
-// One part of the done event's timing_ms (docs/telemetry.md), null when absent.
+// One part of the timing_ms value of the done event (docs/telemetry.md). The function returns null when the part is absent.
 function timingMs(done, part) {
   const value = done && done.timing_ms ? done.timing_ms[part] : null;
   return value != null && Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
-// A run's totals for the rail, from its done event and the stream's
-// aggregate (agg) and samples (series). Multiquery adds them up (addRailTotals).
+// The totals of a run for the rail. They come from its done event, and from the stream's aggregate (agg) and samples (series).
+// Multiquery adds the totals up (addRailTotals).
 function railTotals(done, agg) {
   const pick = (value, fallback) => (value != null && Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : (fallback ?? null));
   const cpuAvg = mean(series.cpu);
@@ -252,11 +253,11 @@ function addRailTotals(sum, next) {
   };
 }
 
-// The ended run on the rail: totals and peaks as values, averages on the
-// sub-lines (rates over the elapsed time, CPU and memory over the samples).
-// What the Elapsed figure measures, as the tooltip of the tile (docs/telemetry.md):
-// ChDash time from the start of the stream to its last event, split into its
-// parts, and the time the browser needed until it had every row (from the click).
+// The ended run on the rail. The totals and the peaks are values.
+// The averages are on the sub-lines. The rates use the elapsed time. The CPU and memory averages use the samples.
+// The tooltip of the Elapsed tile (docs/telemetry.md) says what the figure measures.
+// It shows the ChDash time from the start of the stream to its last event. It also splits this time into its parts.
+// It also shows the time that the browser needed to get every row, counted from the click.
 function elapsedTitle(totals, clientMs) {
   const ms = (value) => format.duration.fromMs(value);
   const lines = ["Elapsed: the time ClickHouse Dash needed from the start of the stream to the last row it sent."];
@@ -296,8 +297,8 @@ function finishRail(totals, clientMs = null) {
   setRailPhase("done");
 }
 
-// Before the first run (and after Clear) the rail's tiles are there with dashes until a run gives their figures.
-// A run that failed keeps only the tiles that have a figure (hideEmptyTiles).
+// Before the first run, and after Clear, the rail's tiles show dashes. A run gives the figures for the tiles.
+// A failed run keeps only the tiles that have a figure (hideEmptyTiles).
 const RAIL_VALUES = ["progressPercentText", "readRowsTotalText", "readBytesTotalText", "cpuMaxText", "memoryMaxText"];
 
 function hideEmptyTiles(failed) {
@@ -340,15 +341,15 @@ function resetMetrics() {
   resetCharts();
 }
 
-// A run that finished: the progress tile full.
+// A finished run fills the progress tile.
 function setProgressDone() {
   util.setText(dom.progressPercentText, format.percent(1));
   setProgressFraction(1);
   setProgressIndeterminate(false);
 }
 
-// The Progress tile of a run that ended full stops being tinted: a tile that stays lit reads as a selection or an
-// alert. Its figure is then a result (green, with a check; query.css).
+// The Progress tile of a run that ended full loses its tint. A tile that stays lit reads as a selection or an alert.
+// Its figure is then a result (green, with a check; query.css).
 let progressFraction = 0;
 function syncProgressComplete() {
   if (!dom.progressCard) return;
@@ -356,7 +357,7 @@ function syncProgressComplete() {
   dom.progressCard.classList.toggle("is-complete", ended && progressFraction >= 1);
 }
 
-// The Progress tile's fill (query.css reads --p) and what the run state makes of it.
+// The fill of the Progress tile (query.css reads --p). The run state then decides its effect.
 function setProgressFraction(fraction) {
   progressFraction = fraction;
   dom.progressCard?.style.setProperty("--p", String(fraction));
@@ -412,9 +413,9 @@ function applyTickMetrics(arr, agg) {
   const cpuMaxCenti = arr[9] == null ? null : Number(arr[9]);
   const memInst = arr[10] == null ? null : Number(arr[10]);
   const memMax = arr[11] == null ? null : Number(arr[11]);
-  // Positions 12 and 13 are reserved compatibility placeholders. The source
-  // dashboard always sends null because ClickHouse does not expose a stable
-  // live active-thread count in native query telemetry.
+  // Positions 12 and 13 are reserved as compatibility placeholders.
+  // The source dashboard always sends null for them.
+  // ClickHouse does not expose a stable live active-thread count in native query telemetry.
   const samples = Array.isArray(arr[14]) ? arr[14] : null;
   const writtenRowsTotal = arr[15] == null ? null : Number(arr[15]);
   const writtenBytesTotal = arr[16] == null ? null : Number(arr[16]);
@@ -484,8 +485,8 @@ function applyTickMetrics(arr, agg) {
 
         // Current source layout (five values):
         // [elapsedMs, readRowsTotal, readBytesTotal, cpuCenti, memBytes, writtenRowsTotal, writtenBytesTotal].
-        // Older releases may append legacy fields after memory; values are
-        // treated as write telemetry only when both appended counters exist.
+        // Older releases can append legacy fields after memory.
+        // The values count as write telemetry only when both appended counters exist.
         const hasReadRows = s.length >= 5;
         const rr = hasReadRows ? Number(s[1]) : null;
         const rb = hasReadRows ? Number(s[2]) : Number(s[1]);
@@ -588,9 +589,9 @@ function setQueryIdText(queryId) {
   util.setText(dom.queryIdentifierText, queryId || EMPTY);
 }
 
-// Prevent out-of-order SSE/UI updates from regressing the status text.
-// Example: if a "done/canceled" arrives before the click-handler sets
-// "canceling", we must NOT allow the later "canceling" to overwrite it.
+// Prevent out-of-order SSE/UI updates from lowering the status text.
+// Example: a "done" or "canceled" event arrives before the click handler sets "canceling".
+// The later "canceling" must NOT overwrite it.
 const STATUS_RANK = {
   "-": 0,
   connected: 10,
@@ -613,8 +614,8 @@ function normalizeStatusText(value) {
   return v;
 }
 
-// "running (2/3)", the label of a batch, ranks as "running": without a rank of its own it fell to 0 and the
-// update was dropped, so the progress of a batch never showed.
+// The label "running (2/3)" of a batch ranks as "running".
+// Without a rank of its own, the label gets rank 0. Then the update is dropped, and the progress of a batch never shows.
 const statusRank = (text) => STATUS_RANK[text] ?? (String(text).startsWith("running") ? STATUS_RANK.running : STATUS_RANK["-"]);
 
 function setQueryStatusText(value, opts) {
@@ -626,11 +627,11 @@ function setQueryStatusText(value, opts) {
   // The stream's own "running" does not wipe the progress label of a batch.
   if (!force && next === "running" && cur.startsWith("running (")) return;
 
-  // Allow upgrades, block regressions (unless forced).
+  // Let upgrades pass. Block regressions, unless the call is forced.
   if (!force && nextRank < curRank) return;
 
   state.queryStatusText = next;
-  // The status reads as a word of the interface: an initial capital (the model keeps the lower-case state name).
+  // The status shows as a word of the interface, with an initial capital. The model keeps the lower-case state name.
   util.setText(dom.queryStatusText, next ? next[0].toUpperCase() + next.slice(1) : "-");
   setPanelRunState(runStateFor(next));
 }
@@ -644,10 +645,10 @@ function runStateFor(status) {
   return "idle";
 }
 
-// History: each run is recorded when it starts (ns.history.add, app_history.js);
-// its outcome is added once it ended: one small write of its own record each,
-// and a visible warning when the browser refuses it. The History is the
-// browser's: it is never sent to the server.
+// History: each run is recorded when it starts (ns.history.add, app_history.js).
+// The outcome is added when the run ends. Each outcome is one small write to its own record.
+// A visible warning shows when the browser refuses a write.
+// The History belongs to the browser. The server never receives it.
 function historyStatusFor(status) {
   const s = runStateFor(status);
   if (s === "ok") return "ok";
@@ -682,12 +683,11 @@ function closeActiveStream() {
   }
 }
 
-// The server ends the response right after "done" (api_query_stream.cpp):
-// closing the EventSource on "done" can beat the response's last chunk and
-// abort a finished request (net::ERR_ABORTED). A stream that said "done" is
-// closed once the server has ended it (the error event of an ended stream,
-// fired before the browser would reconnect), or after STREAM_END_GRACE_MS
-// if the server never ends it.
+// The server ends the response right after "done" (api_query_stream.cpp).
+// If the client closes the EventSource on "done", the close can beat the last chunk of the response.
+// The close then aborts a finished request (net::ERR_ABORTED).
+// A stream that said "done" closes when the server ends it. The error event of an ended stream shows that moment, before the browser would reconnect.
+// If the server never ends the stream, the client closes it after STREAM_END_GRACE_MS.
 const STREAM_END_GRACE_MS = 2000;
 function retireStream(es) {
   if (activeEventSource === es) activeEventSource = null;
@@ -720,9 +720,8 @@ function selectedHostSupportsFullProfiling() {
   return tables.processors_profile_log === true && tables.opentelemetry_span_log === true;
 }
 
-// updateActionButtons runs on every editor input; splitting a large script
-// (character-by-character scanner) on each keystroke is wasted work when the
-// text has not changed since the previous call (state/host/button updates).
+// updateActionButtons runs on every editor input. Splitting a large script needs a character-by-character scan.
+// Skip the split when the text did not change since the previous call (state, host and button updates).
 let cachedEditorStatementsText = null;
 let cachedEditorStatements = [];
 function editorStatementsForButtons() {
@@ -738,11 +737,11 @@ function updateActionButtons() {
   const busy = state.isRunning || state.isFormatting;
   const offline = state.apiOnline === false;
 
-  // During execution the primary action becomes Cancel in-place. Keeping the
-  // control in the same location avoids a moving target and removes the old
-  // duplicate Cancel button beside the split Run control.
+  // While a run is active, the primary action changes to Cancel in the same place.
+  // The control stays in one location, so it is not a moving target.
+  // The old duplicate Cancel button beside the split Run control no longer exists.
   if (dom.runButton) {
-    // Called on every hosts snapshot too (each second): the same text is not written again.
+    // The function runs on every hosts snapshot too, each second. It does not write the same text again.
     const runLabel = state.isRunning ? "Cancel" : "Run";
     if (dom.runButton.textContent !== runLabel) dom.runButton.textContent = runLabel;
     dom.runButton.classList.toggle("runSplit__main--cancel", state.isRunning);
@@ -793,8 +792,8 @@ function getSelectedHostId() {
   return state.selectedHostId;
 }
 
-// The results' Copy JSON split (copy.split): JSON on the main button,
-// CSV and Download JSON (app_download.js) in its menu.
+// The Copy JSON split of the results (copy.split). The main button copies JSON.
+// The menu holds CSV and Download JSON (app_download.js).
 function liveJsonText() {
   return state.lastRunMode === "batch" && download && typeof download.buildGlobalJson === "function"
     ? download.buildGlobalJson()
@@ -819,8 +818,9 @@ async function formatEditorSql(hostId = getSelectedHostId(), { signal } = {}) {
   const statements = sql.splitSqlStatements(trimmed);
   if (!statements.length) throw new Error("Nothing to format.");
 
-  // The server answers a status for each statement: the ones that formatted replace their text, the one that did not stays as
-  // typed (its failure is reported once the others are in the editor).
+  // The server sends a status for each statement.
+  // A statement that formatted replaces its text. A statement that did not format stays as typed.
+  // Its failure is reported when the other statements are in the editor.
   const items = await api.formatSqlsEach(hostId, statements, { signal });
   if (!Array.isArray(items) || items.length !== statements.length) {
     const err = new Error("format_failed: Invalid format response.");
@@ -831,8 +831,8 @@ async function formatEditorSql(hostId = getSelectedHostId(), { signal } = {}) {
   const formatted = items.map((item, i) => (item.status === "formatted" ? item.formatted : statements[i]));
 
   const normalized = formatted.map(sql.normalizeStatementText).filter(Boolean);
-  // The editor changed while the server formatted: what was typed since is not replaced. The formatted statements
-  // still go to the run, and nothing else of the format (no new text, no history record) is applied.
+  // The editor changed while the server formatted. Text typed since then is not replaced.
+  // The formatted statements still go to the run. Nothing else of the format is applied: no new text and no history record.
   if (ta && ta.value !== raw) return normalized;
   const joined = sql.joinSqlStatements(normalized);
 
@@ -915,9 +915,9 @@ async function formatEditorSql(hostId = getSelectedHostId(), { signal } = {}) {
         }
         const maxTop = Math.max(0, ta.scrollHeight - ta.clientHeight);
         ta.scrollTop = Math.min(Math.max(0, view.scrollTop), maxTop);
-        // Formatted lines start at their indentation: show them from the
-        // left edge, not where the long unformatted line was scrolled to
-        // (a phone showed the ends of the lines).
+        // Formatted lines start at their indentation. Show them from the left edge.
+        // Do not keep the scroll position of the long unformatted line.
+        // A phone showed the ends of the lines.
         ta.scrollLeft = 0;
       };
 
@@ -931,8 +931,10 @@ async function formatEditorSql(hostId = getSelectedHostId(), { signal } = {}) {
   queryUi.clearEditorError();
 
   if (failedItem) {
-    // Some statements are formatted and one is not: the text is not "formatted" as a whole, a next Format asks again, and the
-    // failure is the one of the first statement that did not format. A run goes on with `statements` (the text as it now stands).
+    // Some statements are formatted, and one is not. The text is not "formatted" as a whole.
+    // A next Format asks the formatter again.
+    // The failure is the one of the first statement that did not format.
+    // A run goes on with `statements`, the text as it now stands.
     state.lastFormatOk = false;
     state.lastFormatHostId = null;
     state.lastFormatEditorValue = null;
@@ -942,7 +944,7 @@ async function formatEditorSql(hostId = getSelectedHostId(), { signal } = {}) {
     throw err;
   }
 
-  // Format writes no History entry: a run does (handleRun), with the formatted text when the editor held it.
+  // Format writes no History entry. A run does (handleRun), with the formatted text when the editor held it.
   state.lastFormatOk = true;
   state.lastFormatHostId = hostId;
   state.lastFormatEditorValue = ta ? String(ta.value || "") : joinedTabified;
@@ -1228,20 +1230,21 @@ function showFormatFailure(err) {
   if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
 }
 
-// Run formats first when "Format on run" is on. A formatter failure never
-// blocks the run: the text runs as typed and the server's own error (or
-// result) shows. Only a format that answered replaces the statements.
+// Run formats the text first, when "Format on run" is on.
+// A formatter failure never blocks the run. The text runs as typed.
+// The server's own error, or the result, then shows.
+// Only a format that answered replaces the statements.
 // The Format button alone still reports its failure (showFormatFailure).
 async function formattedOrTyped(statements, hostId, signal) {
   try {
     return await formatEditorSql(hostId, { signal });
   } catch (error) {
-    // Cancel pressed while the formatter works: the run stops, it does not go on with the typed text.
+    // Cancel was pressed while the formatter works. The run stops. It does not go on with the typed text.
     if (signal?.aborted) throw error;
     state.lastFormatOk = false;
     state.lastFormatHostId = null;
     state.lastFormatEditorValue = null;
-    // Some statements formatted and one did not: the run takes the text as the editor now holds it.
+    // Some statements formatted, and one did not. The run takes the text as the editor holds it now.
     return Array.isArray(error?.statements) ? error.statements : statements;
   }
 }
@@ -1275,8 +1278,8 @@ function createStatementAgg() {
 }
 
 function makeStreamSink(sink) {
-// Sink can redirect table meta/rows rendering to a per-query panel during multiquery.
-// If not provided, fall back to the global results renderer.
+// The sink can redirect the table meta and rows to a per-query panel during multiquery.
+// If the sink is not given, the global results renderer is used.
 const s = sink && typeof sink === "object" ? sink : null;
 
 const api = {
@@ -1293,7 +1296,7 @@ const api = {
     if (s && typeof s.clearLiveResults === "function") return s.clearLiveResults();
     if (results && typeof results.clearLiveResults === "function") return results.clearLiveResults();
   },
-  // Errors/status (still global unless sink overrides)
+  // Errors and status. They stay global unless the sink overrides them.
   setError: (msg, where = null) => {
     if (s && typeof s.setError === "function") return s.setError(msg, where);
     if (results && typeof results.setError === "function") return results.setError(msg, where);
@@ -1316,9 +1319,10 @@ const api = {
 return api;
 }
 
-// The server sends a tick every 250 ms while a query runs (api_query_stream.cpp). A stream that sends
-// nothing for STREAM_STALL_MS (a proxy that holds the response, a half-open connection) ends the run as
-// an error instead of leaving it "running".
+// The server sends a tick every 250 ms while a query runs (api_query_stream.cpp).
+// A stream that sends nothing for STREAM_STALL_MS ends the run as an error.
+// Possible causes are a proxy that holds the response, or a half-open connection.
+// Without this check, the run would stay "running".
 const STREAM_STALL_MS = 60000;
 const STREAM_STALL_CHECK_MS = 5000;
 
@@ -1335,8 +1339,8 @@ function streamQuery(streamUrl, agg, sink, ctx) {
     const es = api.openEventStream(streamUrl);
     activeEventSource = es;
 
-    // Every way out of the stream resolves the run once: "done", a stream that ends without it
-    // (after an "error" event too), a stall, or a renderer that throws.
+    // Each way out of the stream resolves the run once.
+    // The ways are: "done", a stream that ends without it (also after an "error" event), a stall, or a renderer that throws.
     const settle = (value) => {
       if (settled) return;
       settled = true;
@@ -1424,7 +1428,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       const data = parseSseJson(ev) || {};
       doneReceived = true;
       clearInterval(stallTimer);
-      // "done" is the last event: the stream closes once the server ends it.
+      // "done" is the last event. The stream closes when the server ends it.
       retireStream(es);
       const st = data && data.status ? String(data.status) : "done";
 
@@ -1432,7 +1436,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       state.cancelRequested = false;
       streamSink.setStatus(st);
 
-      // Keep the global run status in sync when a query terminates with an error/cancel.
+      // Keep the global run status in sync when a query ends with an error or a cancel.
       // (The bottom-right dashboard indicator is global, not per-query.)
       const lowerGlobal = String(st).toLowerCase();
       if (lowerGlobal === "canceled" || lowerGlobal === "cancelled") {
@@ -1442,8 +1446,8 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       }
 
       const lower = st.toLowerCase();
-      // In multiquery, cancellation must be shown in the active query panel, not the global banner.
-      // In single-query, streamSink maps to the global renderer anyway.
+      // In multiquery, the active query panel must show a cancel, not the global banner.
+      // In single-query, the streamSink uses the global renderer anyway.
       if (lower === "canceled" || lower === "cancelled") {
         const hasLocalErr = typeof streamSink.getErrorText === "function" && String(streamSink.getErrorText() || "").trim().length > 0;
         if (!hasLocalErr) streamSink.setError("Query canceled.");
@@ -1454,18 +1458,18 @@ function streamQuery(streamUrl, agg, sink, ctx) {
       }
 
       applyDoneMetrics(data, agg);
-      // Row decoding/render bookkeeping is intentionally cooperative for large
-      // streams. Do not publish the terminal result until the background row
-      // queue has drained, otherwise row counts/copy/export can observe a
-      // partially ingested response. A renderer that fails still ends the run.
+      // Row decoding and render bookkeeping work cooperatively for large streams, by design.
+      // Do not publish the terminal result until the background row queue has drained.
+      // Otherwise, the row counts, copy and export can read a partly received response.
+      // A renderer that fails still ends the run.
       finalizeThen(() => {
         if (agg) agg.terminal = true;
         settle({ ...data, status: st });
       });
     });
 
-    // A stream that ends without "done" still ends its result: the rows
-    // received get their bars and their chart (finalizeAfterDone).
+    // A stream that ends without "done" still ends its result.
+    // The rows that arrived get their bars and their chart (finalizeAfterDone).
     const endWithoutDone = (status) => {
       if (settled) return;
       clearInterval(stallTimer);
@@ -1482,7 +1486,7 @@ function streamQuery(streamUrl, agg, sink, ctx) {
         return;
       }
       if (performance.now() - lastEventAt < STREAM_STALL_MS) return;
-      // Two checks in a row: a main thread that was busy gets one more turn to read what arrived.
+      // Two checks in a row. A busy main thread gets one more turn to read what arrived.
       staleChecks += 1;
       if (staleChecks < 2) return;
       streamSink.setError(`No data from the server for ${Math.round(STREAM_STALL_MS / 1000)} s: the connection was dropped.`);
@@ -1495,18 +1499,18 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
     es.onerror = (ev) => {
       if (doneReceived) return;
-      // An "error" event of the server (it has data) is handled by its listener above; the run
-      // waits for "done".
+      // The listener above handles an "error" event of the server, because the event has data.
+      // The run waits for "done".
       if (ev && typeof ev.data === "string" && ev.data) return;
-      // The server reported the error and the stream ended before "done": the error is on screen
-      // already, the run ends with it.
+      // The server reported the error, and the stream ended before "done". The error is on screen already.
+      // The run ends with the error.
       if (sseErrorEventReceived) {
         endWithoutDone("error");
         return;
       }
 
-      // If the user requested cancellation, the server may close the SSE stream without a final "done".
-      // Treat this as a canceled query to avoid getting stuck in "canceling".
+      // If the user asked for a cancel, the server can close the SSE stream without a final "done".
+      // Treat this as a canceled query. Then the run does not stay in "canceling".
       if (state.cancelRequested) {
         state.cancelRequested = false;
         streamSink.setStatus("canceled");
@@ -1518,13 +1522,14 @@ function streamQuery(streamUrl, agg, sink, ctx) {
 
       const errVisible = dom.errorBanner && !dom.errorBanner.hidden && String(dom.errorBanner.textContent || "").trim().length > 0;
       if (errVisible) {
-        // Even if we don't want to overwrite the banner, we must still resolve to unblock the runner.
+        // The run must resolve, even when the banner must not change. Otherwise, the runner stays blocked.
         endWithoutDone("error");
         return;
       }
 
-      // The server cancels a query whose stream is cut (api_query_stream.cpp): say so, an INSERT may not have run.
-      // An answer that was not a stream says why: the result stream expired (404) or was read already (409).
+      // The server cancels a query whose stream is cut (api_query_stream.cpp). Say so, because an INSERT may not have run.
+      // An answer that is not a stream gives the reason.
+      // The result stream expired (404), or it was read already (409).
       const gone = ev && (ev.status === 404 || ev.status === 409);
       streamSink.setError(gone
         ? "The result stream of this query is no longer available (it expired, or another page read it). Run the query again."
@@ -1553,9 +1558,9 @@ function statusIsStopping(status) {
   return s === "error" || s === "canceled" || s === "cancelled";
 }
 
-// Result header and multiquery panel summary, in ns.format: "236 rows,
-// 5 columns · 4 ms · read 236 rows, 15.2 KB" (a meta line: its parts after
-// the third go to its tooltip).
+// The result header and the multiquery panel summary, in ns.format.
+// An example is "236 rows, 5 columns · 4 ms · read 236 rows, 15.2 KB".
+// In a meta line, the parts after the third part go to the tooltip.
 function buildCompactMeta({ status, elapsedSeconds, outRows, outCols, readRows, readBytes, cpuMaxCenti, memMax, truncated }) {
   const parts = [];
   if (status) parts.push(statusLabel(status));
@@ -1574,8 +1579,8 @@ function buildCompactMeta({ status, elapsedSeconds, outRows, outCols, readRows, 
   return parts.join(" \u00b7 ");
 }
 
-// The single-query result header: rows and columns received, elapsed time and
-// what the server read. Hidden until a run produced a terminal state.
+// The single-query result header. It shows the rows and columns received, the elapsed time, and what the server read.
+// The header stays hidden until a run reaches a terminal state.
 function setResultSummary(text) {
   const el = dom.resultSummaryText;
   if (!el) return;
@@ -1584,8 +1589,8 @@ function setResultSummary(text) {
   if (dom.resultColumnsText) dom.resultColumnsText.classList.toggle("is-summarized", !!text);
 }
 
-// Running state on the editor panel: the toolbar, editor border and status
-// chip follow it (css/20-features/query.css).
+// The run state of the editor panel.
+// The toolbar, the editor border and the status chip follow this state (css/20-features/query.css).
 function setPanelRunState(stateName) {
   const panel = dom.queryTextArea ? dom.queryTextArea.closest(".panel--query") : null;
   if (!panel) return;
@@ -1594,13 +1599,13 @@ function setPanelRunState(stateName) {
   syncProgressComplete();
 }
 
-// `hostId` is the host of the whole run (handleRunMode): a host chosen while
-// a batch runs never receives the rest of that batch.
+// `hostId` is the host of the whole run (handleRunMode).
+// A host chosen during a batch never receives the rest of that batch.
 async function runOneStatement(statement, sink, ctx = null, runMode = "normal", hostId = getSelectedHostId()) {
   resetMetrics();
   setProgressIndeterminate(true);
 
-  // Cancel is available while the statement is on its way (ARCH-F-039).
+  // Cancel works while the statement is on its way (ARCH-F-039).
   const preparing = new AbortController();
   prepareAbort = preparing;
   updateActionButtons();
@@ -1617,8 +1622,8 @@ async function runOneStatement(statement, sink, ctx = null, runMode = "normal", 
   updateActionButtons();
 
   setQueryIdText(queryId);
-  // New run should always reset the status indicator, even if a previous run ended in a terminal state. A statement
-  // of a batch keeps the progress label ("running (2/3)") that handleRunMode wrote for it.
+  // A new run resets the status indicator, even when a previous run ended in a terminal state.
+  // A statement of a batch keeps the progress label ("running (2/3)") that handleRunMode wrote for it.
   if (!String(state.queryStatusText || "").startsWith("running (")) setQueryStatusText("running", { force: true });
   results.setStatus("running");
   state.cancelRequested = false;
@@ -1627,7 +1632,7 @@ async function runOneStatement(statement, sink, ctx = null, runMode = "normal", 
   const done = await streamQuery(streamUrl, agg, sink, ctx);
 
   let finalStatus = done && done.status ? String(done.status) : "done";
-  // normalize spelling
+  // Normalize the spelling.
   const fsLower = String(finalStatus).toLowerCase();
   if (fsLower === "cancelled") finalStatus = "canceled";
   setQueryStatusText(statusLabel(finalStatus));
@@ -1724,9 +1729,9 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
 
   results.clearResultsStack();
   results.clearLiveResults();
-  // Starting a new run behaves exactly like Clear: stale result rows/panels
-  // disappear while the new query is loading and are shown again only when
-  // the new run produces rows, a terminal result, or an error.
+  // A new run acts exactly like Clear.
+  // Stale result rows and panels disappear while the new query loads.
+  // They appear again only when the new run produces rows, a terminal result, or an error.
   results.setResultsVisible(false);
   resetMetrics();
   setQueryIdText(null);
@@ -1760,10 +1765,10 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
     const editorTextForErrors = dom.queryTextArea ? String(dom.queryTextArea.value || "") : "";
 
     historyRun = { tsMs: Date.now(), startedAt: runStartedAt, sql: trimmed, hostId, rows: 0, elapsedMs: NaN, error: "" };
-    // The address bar links to what ran (?sql= / ?saved=).
+    // The address bar links to the statement that ran (?sql= / ?saved=).
     if (!downloadKind) queryUi.syncQueryUrl(dom.queryTextArea ? dom.queryTextArea.value : trimmed);
     const editorValue = dom.queryTextArea ? dom.queryTextArea.value : trimmed;
-    // The editor holds the formatter's text when Format (or Auto-format) just wrote it.
+    // The editor holds the formatter's text when Format or Auto-format wrote it just now.
     const editorFormatted = !!state.lastFormatOk && String(state.lastFormatHostId || "") === String(hostId || "") && String(state.lastFormatEditorValue || "") === editorValue;
     void history.add({
       ts_ms: historyRun.tsMs,
@@ -1772,7 +1777,7 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
       sql_formatted: editorValue,
       formatted: editorFormatted,
     });
-    // A query that was not formatted is formatted when the History shows it (app_query_library.js), not at each run.
+    // The History formats a query that was not formatted (app_query_library.js). It does this when the History shows the query, not at each run.
 
     if (statements.length === 1) {
       const out = await runOneStatement(statements[0], null, { editorText: editorTextForErrors, statementIndex: 0 }, runMode, hostId);
@@ -1810,8 +1815,8 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
           snapshot: results && typeof results.getSnapshot === "function" ? results.getSnapshot() : null,
         });
       }
-      // The System figure arrives when the query log has the run (a flush can
-      // take seconds on a busy server): the run is over without it.
+      // The System figure arrives when the query log has the run. A flush can take seconds on a busy server.
+      // The run is over without the figure.
       if (out && out.queryId && state.runOptExecutionStats) void refreshClickHouseElapsed(hostId, out.queryId);
       finishRail(railTotals(out?.done, out?.agg), performance.now() - runStartedPerf);
       const terminalStatus = String(out?.done?.status || "done").toLowerCase();
@@ -1825,8 +1830,8 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
         await performRequestedDownload(downloadKind);
         results.setResultsVisible(false);
       } else if (statusIsStopping(terminalStatus)) {
-        // Keep the error banner, but never resurrect the result table after
-        // setError() hid it. A terminal query failure is not a result set.
+        // Keep the error banner. Never show the result table again after setError() hid it.
+        // A terminal query failure is not a result set.
         if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
         results.setResultsVisible(true);
       } else if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = false;
@@ -1838,29 +1843,29 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
     }
 
     const total = statements.length;
-    // A batch that ran every statement ends like one query: "finished" at
-    // 100 %; "error" or "canceled" when a statement stopped it.
+    // A batch that ran every statement ends like one query.
+    // It ends as "finished" at 100 %. It ends as "error" or "canceled" when a statement stopped it.
     let batchFinalStatus = "finished";
-    // The rail ends on the batch: every statement's rows and bytes read,
-    // the highest peaks, the averages over all of them.
+    // The rail ends on the batch. It shows the rows and bytes read by every statement.
+    // It also shows the highest peaks, and the averages over all statements.
     let batchTotals = null;
 
     for (let i = 0; i < total; i++) {
       if (state.batchStopRequested) break;
 
-      // Create/activate the per-query panel and stream directly into it.
+      // Create or activate the per-query panel. Stream the rows directly into it.
       const perQuerySink = results && typeof results.beginMultiqueryPanel === "function"
         ? results.beginMultiqueryPanel({ index: i, total, autoToggle: true })
         : null;
 
-      // Clear only the target we are about to stream into (global in single-query, panel in multiquery)
+      // Clear only the target of the stream. In single-query, the target is global. In multiquery, it is the panel.
       if (perQuerySink && typeof perQuerySink.clearLiveResults === "function") perQuerySink.clearLiveResults();
       else results.clearLiveResults();
 
       resetMetrics();
       setQueryIdText(null);
-      // A statement starts: the label of the batch replaces what the one before ended with ("finished"), which a
-      // plain update (a lower rank) would not.
+      // A statement starts. The batch label replaces the label of the previous statement, such as "finished".
+      // A plain update cannot do this, because its rank is lower than the rank of "finished".
       setQueryStatusText(`running (${i + 1}/${total})`, { force: true });
 
       const stmt = statements[i];
@@ -1876,7 +1881,7 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
           if (out.analysisAvailable) perQuerySink.setAnalyzeAction(() => analysis.open({ hostId, queryId: out.queryId, runMode }));
         }
       } catch (err) {
-        // Per-statement failure: show inside the active panel when in multiquery.
+        // A statement failed. In multiquery, show the error inside the active panel.
         const msg = err instanceof Error ? err.message : String(err);
         if (perQuerySink && typeof perQuerySink.setError === "function") perQuerySink.setError(msg);
         else results.setError(msg);
@@ -1888,7 +1893,7 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
       let st = done && done.status ? String(done.status) : "done";
       const stLower = String(st).toLowerCase();
       if (stLower === "cancelled") st = "canceled";
-      // Track final batch status for the global indicator
+      // Track the final batch status for the global indicator
       if (stLower === "error") batchFinalStatus = "error";
       else if (stLower === "canceled" || stLower === "cancelled") batchFinalStatus = "canceled";
       else if (batchFinalStatus !== "error" && batchFinalStatus !== "canceled") batchFinalStatus = "finished";
@@ -1918,15 +1923,15 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
         truncated: !!(done && done.result_truncated),
       });
 
-      // IMPORTANT: do not clear local errors at finalize time; keep them visible in the panel.
+      // IMPORTANT: do not clear local errors when the run is finalized. Keep them visible in the panel.
       const hasError = !!(perQuerySink && typeof perQuerySink.getErrorText === "function"
         ? perQuerySink.getErrorText()
         : results.getErrorText());
-      // A batch of three statements or fewer shows every result; a longer
-      // one opens the first, and any statement that failed.
+      // A batch of three statements or fewer shows every result.
+      // A longer batch opens the first result, and any statement that failed.
       const expandedByDefault = statusIsStopping(st) || hasError || total <= 3 || i === 0;
 
-      // Finalize the block that streamed this statement (the same live table as the single result).
+      // Finalize the block that streamed this statement. It uses the same live table as the single result.
       if (perQuerySink) results.endMultiqueryPanel(perQuerySink, { expandedByDefault, metaText });
 
       if (download && typeof download.recordQuery === "function") {
@@ -1976,7 +1981,7 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
     downloadRunFailed = !!downloadKind;
     state.suppressResultsVisibility = false;
     if (util.isAbort(err)) {
-      // Cancel pressed while the run was prepared (formatted, sent): nothing ran on the server.
+      // Cancel was pressed while the run was prepared (formatted or sent). Nothing ran on the server.
       setQueryStatusText(statusLabel("canceled"));
       results.setStatus("canceled");
       resetMetrics();
@@ -1987,7 +1992,7 @@ async function handleRunMode(runMode = "normal", { downloadAfter = "" } = {}) {
     } else {
       const msg = err instanceof Error ? err.message : String(err);
       if (historyRun && !historyRun.error) historyRun.error = msg;
-      // No per-query sink available here; show globally.
+      // No per-query sink is available here. Show the error globally.
       results.setError(msg);
       results.setStatus("error");
       setQueryStatusText("error");
@@ -2016,9 +2021,9 @@ async function handleRunWithProfiling() {
 
 async function handleDownloadRun(kind) {
   queryUi.closeRunMenu({ immediate: true });
-  // A debug download is a diagnostic run, not a normal export: execute every
-  // statement with profiling enabled so the archive can include the complete
-  // post-run analysis. CSV/JSON exports keep their normal execution mode.
+  // A debug download is a diagnostic run, not a normal export.
+  // It runs every statement with profiling enabled. The archive can then include the complete post-run analysis.
+  // CSV and JSON exports keep their normal execution mode.
   const mode = String(kind || "") === "debug" ? "profiling" : "normal";
   return handleRunMode(mode, { downloadAfter: kind });
 }
@@ -2031,8 +2036,8 @@ async function handleFormat() {
     return;
   }
 
-  // Formatting does not touch the last run: its error, status and query id stay together. Only an
-  // error that a failed Format put there is Format's to take back, with the status it set.
+  // Formatting does not change the last run. Its error, status and query id stay together.
+  // Only an error that a failed Format put there is Format's to take back. Format also takes back the status that it set.
   const clearEditorError = () => { queryUi.clearEditorError(); };
   const ownErrorUp = state.formatFailureShown === true;
   if (ownErrorUp) {
@@ -2056,7 +2061,7 @@ async function handleFormat() {
       results.setStatus("idle");
       setQueryStatusText("idle", { force: true });
     }
-    // The error marks of a run are positions in the text it ran: a text that changed has moved them.
+    // The error marks of a run are positions in the text that it ran. A changed text moves these positions.
     if (dom.queryTextArea && dom.queryTextArea.value !== before) clearEditorError();
   } catch (err) {
     showFormatFailure(err);
@@ -2092,7 +2097,7 @@ async function handleCancelOrClear() {
 
   const token = state.cancelToken;
   if (!token && prepareAbort) {
-    // Not on the server yet: the request that is on its way is aborted, and handleRunMode ends the run as canceled.
+    // The server does not have the query yet. The request on its way is aborted, and handleRunMode ends the run as canceled.
     prepareAbort.abort();
     return;
   }
@@ -2102,12 +2107,12 @@ async function handleCancelOrClear() {
     return;
   }
 
-  // The flag first: a stream that ends while the request is on its way is a cancel, not "Connection lost".
+  // Set the flag first. A stream that ends while the request is on its way is a cancel, not "Connection lost".
   const queryId = state.activeQueryId;
   state.cancelRequested = true;
   try {
     await api.cancelQuery(token);
-    // The run ended (done, error) or another one started while the request was on its way: nothing to mark.
+    // The run ended (done or error), or another run started while the request was on its way. Nothing to mark.
     if (!state.isRunning || state.activeQueryId !== queryId) return;
     setQueryStatusText("canceling");
     results.setStatus("canceling");
@@ -2139,7 +2144,8 @@ function init() {
   updateActionButtons();
   initCharts();
 
-  // The Run buttons follow the host (its selection and its health) and the answer of the API (app_header.js, app_api.js).
+  // The Run buttons follow the host, its selection and its health.
+  // They also follow the answer of the API (app_header.js, app_api.js).
   header.onHostSelected(() => updateActionButtons());
   window.addEventListener("chdash:api-online", () => updateActionButtons());
   window.addEventListener("chdash:hosts", () => updateActionButtons());

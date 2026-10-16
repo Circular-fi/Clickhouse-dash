@@ -144,7 +144,7 @@ int64_t grid_floor(int64_t t, int64_t size, int64_t origin) {
 }
 
 std::string bucket_sql(const LogsSchema& schema, int64_t size, int64_t origin) {
-  // Second-aligned grids bucket TimestampTime (4 bytes) instead of Timestamp.
+  // Grids that align to the second bucket TimestampTime (4 bytes), not Timestamp.
   const std::string ms = schema.timestamp_time && size % 1000 == 0 && origin % 1000 == 0 ? "(toInt64(toUnixTimestamp(TimestampTime)) * 1000)"
                                                                                            : "toUnixTimestamp64Milli(Timestamp)";
   return std::to_string(origin) + " + intDiv(" + ms + " - " + std::to_string(origin) + ", " + std::to_string(size) + ") * " + std::to_string(size);
@@ -298,7 +298,8 @@ SqlStatement facet_keys_statement(const LogsSchema& schema, const std::string& t
                   "SELECT count() AS sampled, " + join_sql(aggregates) + " FROM ("
                   "SELECT " + join_sql(inner) + " FROM " + table + facet_where(schema, query, window) +
                   " LIMIT " + std::to_string(kFacetSampleRows) + ")) LEFT ARRAY JOIN arrayConcat(" + join_sql(tuples) + ") AS t" +
-                  // The served keys only (and one more, which says truncated), in the order of the sort below.
+                  // The statement keeps only the served keys, and one more key that says truncated.
+                  // The keys are in the order of the sort below.
                   " ORDER BY t.3 DESC, multiIf(t.1 = 'column', 0, t.1 = 'log', 1, t.1 = 'resource', 2, 3), t.2 LIMIT " +
                   std::to_string(kFacetMaxKeys + 1) + facet_settings_sql(kFacetReadRowsCap, false);
   return statement;

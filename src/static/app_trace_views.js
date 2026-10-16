@@ -1,7 +1,8 @@
-// Trace page views after Jaeger's TracePage view switcher: Trace Timeline
-// (the waterfall, app_trace_waterfall.js), Trace Graph, Trace Statistics, Trace
-// Spans Table and Trace Flamegraph; plus the ?span= / ?tab= location and
-// the span-bar event marker popover. app_trace_detail.js calls init() once.
+// This file holds the trace page views. The views follow the view switcher of the Jaeger TracePage.
+// The views are: Trace Timeline (the waterfall, app_trace_waterfall.js), Trace Graph, Trace Statistics, Trace Spans Table and Trace Flamegraph.
+//
+// The file also handles the ?span= and ?tab= location and the event marker popover of a span bar.
+// app_trace_detail.js calls init() one time.
 
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -28,7 +29,7 @@ const viewPref = () => storage.pref(storage.KEYS.traceView, "", { allowed: VIEWS
 const SPANS_TABLE_LIMIT = 2000;
 const GRAPH_NODE_LIMIT = 1500;
 const FLAME_MIN_RATIO = 0.0005;
-// The service colour's share of a flamegraph frame's fill (the rest is the surface).
+// The service colour gives this share of the flamegraph frame fill. The surface gives the rest.
 const FLAME_FILL_PCT = 40;
 
 let lastCache = null;
@@ -39,8 +40,7 @@ const view = {
   flame: { zoomKey: "" },
   graph: { mode: "service" },
 };
-// Per loaded trace (the app's trace cache object): self times, parsed
-// attributes, flame and graph trees.
+// Each loaded trace has an object in the app trace cache. The object holds the self times, the parsed attributes, and the flame and graph trees.
 const derivedByCache = new WeakMap();
 
 const { byId, $, $$ } = dom;
@@ -64,10 +64,10 @@ function storeView(value) {
   viewPref().set(value);
 }
 
-// History entries of an open trace count the steps back to the search entry
-// it was opened from (state.searchBack): the trace page opened from the
-// results is 1 step away (openedFromSearch), a span or view picked in it
-// (a pushed entry) one more, a linked trace opened from it one more again.
+// The history entries of an open trace count the steps back to the search entry (state.searchBack).
+// A trace page opened from the results is one step away (openedFromSearch).
+// A span or view selected in the trace is a pushed entry. It adds one more step.
+// A linked trace opened from the trace adds one more step again.
 // A direct link or a new tab has no such entry (no searchBack).
 function detailEntryState(state) {
   const steps = Number(router.state().searchBack) || 0;
@@ -77,11 +77,11 @@ function detailEntryState(state) {
   return next;
 }
 
-// The trace's own parameters (?tab=, ?span=) on its URL, through the
-// Traces owner of ns.router (nothing while another view shows).
+// The trace parameters ?tab= and ?span= are in the URL of the trace. The Traces owner of ns.router handles them.
+// It does not act while another view is shown.
 function updateParams(mutate, { push = false } = {}) {
   const href = router.href();
-  // A pushed entry keeps the count of steps back to the search (app_trace_nav.js).
+  // A pushed entry keeps the count of steps back to the search. See app_trace_nav.js.
   if (push) address.push(mutate, { href, state: detailEntryState(router.state()) });
   else address.replace(mutate, { href });
 }
@@ -92,8 +92,7 @@ function spanStart(span) { return Number(span.start_ns || 0); }
 function spanDuration(span) { return Math.max(0, Number(span.duration_ns || 0)); }
 function isError(span) { return String(span.status_code || "").toLowerCase() === "error"; }
 
-// Self time: the span's duration minus the union of its children's
-// intervals, each clipped to the span.
+// Self time is the duration of the span minus the union of its child intervals. Clip each child interval to the span first.
 function selfTimeOf(node) {
   const start = spanStart(node.span);
   const duration = spanDuration(node.span);
@@ -163,8 +162,7 @@ function tagKeys() {
 
 // ---------------------------------------------------------------- pickers
 
-// A picker of a view's tools, its label inside the button ("Group by \u00b7
-// Service", ns.menu.select reads data-field-label).
+// A picker is a tool of a view. Its label is in the button, for example "Group by · Service". ns.menu.select reads data-field-label.
 function pickerHtml(id, label, options, value) {
   const opts = options.map(([v, text]) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(text)}</option>`).join("");
   return `<div class="traceViewBar__field"><select id="${esc(id)}" class="traceViewBar__select" data-field-label="${esc(label)}" aria-label="${esc(label)}">${opts}</select></div>`;
@@ -181,7 +179,7 @@ function setSelectOptions(select, options, value) {
   select.dispatchEvent(new Event("tracepicker-refresh"));
 }
 
-// Each view's controls are built once, then shown for that view only.
+// Build the controls of each view one time. Then show them for that view only.
 function toolsFor(name, build) {
   const host = byId("traceViewTools");
   if (!host) return null;
@@ -205,8 +203,7 @@ function showTools() {
 
 // ---------------------------------------------------------------- views
 
-// The view tabs (#traceViewTabs, app_ui_tabs.js); below 820 px the
-// #traceViewSelect dropdown stands in for them (CSS).
+// The view tabs are in #traceViewTabs (app_ui_tabs.js). Below 820 px, the #traceViewSelect dropdown replaces them (CSS).
 let viewTabs = null;
 
 function setView(name, { url = "replace", persist = true } = {}) {
@@ -243,8 +240,7 @@ function showTimeline() {
   if (view.current !== "timeline") setView("timeline", { url: null });
 }
 
-// The trace's tab: ?tab= (the former ?view= is an alias, rewritten by
-// applyLocation).
+// The tab of the trace comes from ?tab=. The former ?view= is an alias. applyLocation rewrites it.
 function tabParam(params) {
   const tab = params.get("tab");
   if (VIEWS.includes(tab)) return tab;
@@ -260,12 +256,12 @@ function viewFromLocation() {
   return readStoredView() || "timeline";
 }
 
-// After a trace load and on popstate within the trace: the view and the
-// deep-linked span of the URL.
+// After a trace loads, and after a popstate event in the trace, read the view and the deep-linked span from the URL.
 function applyLocation() {
   const params = router.current().params;
-  // ?view=<tab> (the former name) and a tab= that is not a trace tab (the
-  // search page's, carried by former trace URLs) take the canonical form.
+  // A ?view=<tab> parameter uses the former name.
+  // A tab= value that is not a trace tab belongs to the search page. Former trace URLs carry it.
+  // Both forms change to the canonical form.
   if (params.has("view") || (params.has("tab") && !VIEWS.includes(params.get("tab")))) {
     const tab = tabParam(params);
     address.replace({ view: null, tab: tab === "timeline" ? null : tab }, { href: router.href() });
@@ -283,7 +279,7 @@ function render() {
   const alt = byId("traceAltView");
   const cache = activeTraceCache();
   if (cache !== lastCache) {
-    // Another trace: its flamegraph starts unzoomed, no popover survives.
+    // For another trace, the flamegraph starts unzoomed. No popover stays open.
     lastCache = cache;
     view.flame.zoomKey = "";
     closeEventPopover();
@@ -301,7 +297,7 @@ function render() {
   else if (view.current === "graph") renderGraph(alt);
 }
 
-// Opening a span in the waterfall points the URL at it (?span=).
+// The waterfall sets ?span= in the URL when the user opens a span.
 function onSpanToggled(spanId, opening) {
   if (model.focusedSpanId && model.focusedSpanId !== spanId) {
     model.focusedSpanId = "";
@@ -339,7 +335,7 @@ const STAT_COLUMNS = [
   ["selfMax", "Self max", "Maximum self time"],
   ["percent", "Self %", "Self total as a share of Total"],
 ];
-// Sentence case, as every label of the app ("Group by \u00b7 Service name").
+// Use sentence case for labels, as in every label of the app ("Group by · Service name").
 const GROUP_LABELS = { service: "Service name", operation: "Operation name", "service-operation": "Service & operation" };
 
 function groupValue(node, by) {
@@ -400,8 +396,8 @@ function groupNodes(nodes, by) {
   return groups;
 }
 
-// Rows: one per group, each followed by its sub-group rows when a
-// sub-group is picked (Jaeger's detail rows).
+// Each group has one row. When a sub-group is selected, its rows follow the group row.
+// These are the detail rows of Jaeger.
 function statisticsRows() {
   const { groupBy, subGroup, sortKey, sortAsc } = view.stats;
   const self = selfTimes();
@@ -431,8 +427,9 @@ function formatStat(key, value) {
   return fmt.duration(value);
 }
 
-// Jaeger's heat colouring: 8 % to 60 % of the heat colour by the row's share
-// of the column maximum (a percentage column against 100).
+// This is the heat rule of Jaeger. The heat share is 8 % to 60 %.
+// The value depends on the share of the row in the column maximum.
+// A percentage column is compared against 100.
 function heatBackground(rows, key) {
   if (!key) return () => "";
   const max = key === "percent" ? 100 : rows.reduce((m, row) => Math.max(m, row.stats[key] || 0), 0);
@@ -463,7 +460,7 @@ function renderStatistics(alt) {
   const rows = statisticsRows();
   const all = rows.flatMap((row) => [row, ...row.details]);
   const heat = heatBackground(all, view.stats.colorBy);
-  // Sortable headers (ns.table): the state in aria-sort, one glyph.
+  // Sortable headers use ns.table. The state is in aria-sort, with one glyph.
   const sort = { key: view.stats.sortKey, dir: view.stats.sortAsc ? "asc" : "desc" };
   const headHtml = `<tr>${table.sortHeadHtml({ key: "name", label: GROUP_LABELS[view.stats.groupBy] || `Tag: ${view.stats.groupBy.slice(4)}`, sort, attrs: { "data-stats-sort": "name" } })}${STAT_COLUMNS.map(([key, label, title]) => table.sortHeadHtml({ key, label, title, sort, num: true, attrs: { "data-stats-sort": key } })).join("")}</tr>`;
   const rowHtml = (row) => {
@@ -541,9 +538,9 @@ function renderSpansTable(alt) {
 
 // ---------------------------------------------------------------- flamegraph
 
-// Jaeger's flamegraph data: one node per span, children with the same
-// "service: operation" merged, a parent at least as wide as its children,
-// under a virtual "total" root.
+// This is the flamegraph data of Jaeger. It has one node for each span.
+// Children with the same "service: operation" are merged.
+// A parent is at least as wide as its children. All nodes are under a virtual "total" root.
 function flameTree() {
   const entry = derived();
   if (entry.flame) return entry.flame;
@@ -616,15 +613,16 @@ function renderFlamegraph(alt) {
   const reset = $("#traceFlameReset", tools);
   if (reset) reset.disabled = zoom === root;
   const barsHtml = [];
-  // Ancestors of the zoomed frame stay on top at full width (zoom out).
+  // The ancestors of the zoomed frame stay on top, at full width (zoom out).
   const ancestors = [];
   for (let node = zoom.parent; node; node = node.parent) ancestors.unshift(node);
   const total = Math.max(1, root.value);
-  // A frame is its service colour mixed 40 % with the surface under a 2 px
-  // full-colour edge; its label is white or ink, whichever contrasts more
-  // with that fill (palette.readableText), worked out once per service.
+  // A frame is the service colour mixed 40 % with the surface.
+  // The frame has a 2 px edge in the full service colour.
+  // Its label is white or ink. Use the one with more contrast to the fill (palette.readableText).
+  // Calculate the label colour one time for each service.
   const labels = new Map();
-  // The labels of every service colour of the subtree in one batch (the batch runs on WebAssembly from 64 colours).
+  // Get the labels of every service colour in the subtree in one batch. The batch runs on WebAssembly from 64 colours.
   const colors = new Set();
   const walk = [...ancestors, zoom];
   for (let at = 0; at < walk.length; at += 1) {
@@ -664,9 +662,9 @@ function renderFlamegraph(alt) {
 
 // ---------------------------------------------------------------- graph
 
-// Jaeger's trace DAG: one node per (parent node, service, operation) path;
-// count / errors, total time (% of the trace), average and self time, and
-// the spans of the path (the panel jumps to them in the timeline).
+// This is the trace DAG of Jaeger. It has one node for each (parent node, service, operation) path.
+// Each node has the count and the errors, the total time (% of the trace), the average and self time, and the spans of the path.
+// The panel jumps to these spans in the timeline.
 function graphTree() {
   const entry = derived();
   if (entry.graph) return entry.graph;
@@ -708,45 +706,46 @@ function graphTree() {
   return entry.graph;
 }
 
-// Time shares of the graph nodes are in percent (0-100).
+// The time shares of the graph nodes are in percent (0-100).
 const sharePct = (value) => fmt.percent(Number(value || 0) / 100);
 
-// Drawn with the shared canvas graph kit (app_graph_kit.js), like the
-// Explorer graph and the Service map: one card per call path (the service
-// as title, the operation under it, "count / errors · avg" and "time % ·
-// self %"; a left strip in the service's waterfall colour; a red dot and
-// border on errors), orthogonal edges from a call path to its callees whose
-// dash pattern is the call kind and whose always visible label is the
-// callee's span count, hover outlines a card, a click recentres on it and
-// opens its side panel (a button jumps to its spans in the timeline). The
-// Time / Self time colour modes fill the cards with a heat mixed in JS
-// between --graph-node-bg and --graph-heat. The canvas is the only view, on
-// phones too (touch pans and pinches; the panel is a bottom sheet): the
-// kit's keyboard access (arrows, Enter, the live region) is the accessible
-// path.
+// The graph is drawn with the shared canvas graph kit (app_graph_kit.js). It works like the Explorer graph and the Service map.
 //
-// Layout: the tree slot layout turned left to right. Graph nodes form a
-// tree (one node per path), so the leaves take consecutive rows in call
-// order and a parent sits on the row of its first callee: no edge can cross
-// another, the first call of every path is a straight line and the rest
-// drop down the gap to their rows. The slot is the kit's lineage row, and
-// the kit's orthogonal router draws the edges on that row grid, one fan at
-// a time (routeGraphEdges). (The kit's
-// layered layout would sort callees by crossings and centre parents between
-// them: every edge then bends, and the call order is lost.)
+// Each call path has one card. The card shows the service as title, and the operation under it.
+// The card also shows "count / errors · avg" and "time % · self %".
+// A left strip has the waterfall colour of the service. A red dot and a red border mark the errors.
+//
+// Orthogonal edges go from a call path to its callees. The dash pattern shows the call kind.
+// The label always shows the span count of the callee.
+// Hover outlines a card. A click moves the view to the card and opens its side panel.
+// A button in the panel jumps to the spans of the call path in the timeline.
+//
+// The Time and Self time colour modes fill the cards with a heat.
+// The heat is mixed in JS between --graph-node-bg and --graph-heat.
+// The canvas is the only view, also on phones.
+// On phones, the user pans and pinches the canvas with touch, and the panel is a bottom sheet.
+// The keyboard access of the kit (arrows, Enter, the live region) is the accessible path.
+//
+// Layout: the tree slot layout turns left to right.
+// The graph nodes form a tree, with one node for each path.
+// The leaves take consecutive rows in call order. A parent sits on the row of its first callee.
+// No edge can cross another edge. The first call of each path is a straight line. The other calls go down the gap to their rows.
+// The slot is the lineage row of the kit. The orthogonal router of the kit draws the edges on that row grid, one fan at a time (routeGraphEdges).
+// The layered layout of the kit sorts the callees by crossings, and it centres the parents between them. Every edge then bends, and the call order is lost.
 const GRAPH_CARD_W = 264;
 const GRAPH_CARD_H = 82;
 const GRAPH_X_GAP = 104;
 const GRAPH_Y_GAP = 26;
 const GRAPH_FIT_MAX = 1.35;
-// The smallest card font is 12 px: the readable scale keeps it at 11 px.
+// The smallest card font is 12 px. The readable scale keeps it at 11 px.
 const GRAPH_READABLE_SCALE = 11 / 12;
 const GRAPH_MIN_FONT = 12;
-// A compact card has two lines (kit.compactBox): the service, then the operation and the time.
+// A compact card has two lines (kit.compactBox).
+// The first line is the service. The second line is the operation and the time.
 const GRAPH_COMPACT_LINES = 2;
-// Heat: up to 45 % of --graph-heat over the card (text keeps 4.5:1).
+// The heat is up to 45 % of --graph-heat over the card. The text keeps a contrast of 4.5:1.
 const GRAPH_HEAT_MAX = 0.45;
-// Time mode: a call path taking 20 % of the trace or more is fully hot.
+// In Time mode, a call path that takes 20 % of the trace or more is fully hot.
 const GRAPH_TIME_HEAT_FULL = 20;
 const GRAPH_PANEL_SPANS = 8;
 const GRAPH_MODES = [["service", "Service"], ["time", "Time"], ["selftime", "Self time"]];
@@ -755,7 +754,7 @@ const GRAPH_KIND_LABELS = { sync: "call", async: "message", db: "database" };
 const graphUi = {
   pane: null,
   ctl: null,
-  // The graphTree() the layout was built for.
+  // The graphTree() that the layout was built for.
   graph: null,
   layout: null,
   view: { scale: 1, offsetX: 0, offsetY: 0 },
@@ -787,18 +786,19 @@ function graphCountText(node) { return `${fmt.count(node.count)} / ${fmt.count(n
 function graphTimeText(node) { return `${fmt.duration(node.time)} (${sharePct(node.percent)}) · self ${fmt.duration(node.selfTime)} (${sharePct(node.percentSelf)})`; }
 function graphLabelText(node) { return `×${fmt.compact(node.count)}`; }
 function graphPathText(node) { return `${node.service} ${node.operation}`; }
-// A compact card's title: the call paths of one service differ by their
-// operation, so it is never the service alone.
+// The title of a compact card. Call paths of one service differ by their operation.
+// The title is never the service alone.
 function graphCompactTitle(node) { return node.operation ? `${node.service} \u00b7 ${node.operation}` : node.service; }
 
-// The heat of a node in the current colour mode, 0..1 (null in Service mode).
+// The heat of a node in the current colour mode, from 0 to 1. The value is null in Service mode.
 function graphHeat(node) {
   if (view.graph.mode === "time") return Math.min(1, Math.max(0, node.percent / GRAPH_TIME_HEAT_FULL));
   if (view.graph.mode === "selftime") return Math.min(1, Math.max(0, node.percentSelf / 100));
   return null;
 }
 
-// The fills of every heat weight of a graph in one batch (one weight, one string: graphUi.fills), before the first draw.
+// Make the fills of every heat weight of a graph in one batch. Each weight gives one value (graphUi.fills).
+// Make them before the first draw.
 function prepareGraphFills(graph) {
   const kit = graphKit();
   if (!graph || !graph.nodes || graphUi.fills.size > 0) return;
@@ -871,7 +871,7 @@ function computeGraphLayout(graph, measure) {
     width: 1.25 + 1.75 * Math.sqrt(edge.node.count / maxCount),
   }));
 
-  // Every edge label, busiest call paths first (they get the best spots).
+  // Place every edge label. The busiest call paths come first, because they get the best spots.
   const textWidth = measure || ((text) => text.length * 7);
   const requests = edgeItems.filter((item) => item.points.length >= 2)
     .sort((a, b) => b.node.count - a.node.count || a.node.row - b.node.row)
@@ -906,14 +906,16 @@ function computeGraphLayout(graph, measure) {
   };
 }
 
-// The routes of a call path to its callees stay inside its own rows of the
-// gap between two columns (no card sits in a gap, and the rows of two call
-// paths of one column never interleave), so each fan is routed on its own:
-// the kit router compares every pair of routes it places, which a single
-// run over 1,500 edges made take seconds. The router gives every route of a
-// fan its own vertical lane; a gap has room for GRAPH_ROUTED_FAN of them, a
-// wider fan shares one trunk (H-V-H, like the kit's fallback past its grid
-// budget) instead of piling lanes on top of each other.
+// The routes of a call path to its callees stay in its own rows of the gap between two columns. No card sits in a gap.
+// The rows of two call paths in one column never interleave.
+//
+// Each fan is routed on its own. The kit router compares every pair of routes that it places.
+// A single run over 1,500 edges took seconds.
+//
+// The router gives every route of a fan its own vertical lane.
+// A gap has room for GRAPH_ROUTED_FAN lanes.
+// A wider fan shares one trunk (H-V-H). This is like the fallback of the kit past its grid budget.
+// The trunk stops lanes from stacking on top of each other.
 const GRAPH_ROUTED_FAN = 8;
 function routeGraphEdges(items, edges) {
   const kit = graphKit();
@@ -946,9 +948,10 @@ function routeGraphEdges(items, edges) {
 
 const GRAPH_FIT_ICON = icon("fit");
 
-// The pane is built once and kept across views (the kit controller is
-// bound to its canvas); the other views replace it in #traceAltView and
-// the Graph view puts it back.
+// Build the pane one time, and keep it across views.
+// The kit controller is bound to its canvas.
+// The other views replace the pane in #traceAltView.
+// The Graph view returns the pane to its place.
 function graphPane() {
   if (graphUi.pane) return graphUi.pane;
   const kit = graphKit();
@@ -1071,7 +1074,7 @@ function graphOverviewScale() {
   return Math.max(0.02, Math.min(GRAPH_FIT_MAX, Math.min(area.width / bounds.width, area.height / bounds.height) * 0.92));
 }
 
-// The world box around a call path, its caller and its callees.
+// The world box is around a call path, its caller, and its callees.
 function graphNeighbourhood(item) {
   const layout = graphUi.layout;
   if (!item || !layout) return null;
@@ -1086,11 +1089,11 @@ function graphNeighbourhood(item) {
   return { x: minX - 24, y: minY - 24, width: maxX - minX + 48, height: maxY - minY + 48 };
 }
 
-// Fit (kit.fitView): the whole graph when it is readable as a whole; a
-// graph slightly too large opens at the readable scale on the selected
-// call path, else on the root, the minimap giving the rest; a much larger
-// one shows whole with compact cards. A phone opens on that call path and
-// its neighbours, then pans.
+// Fit (kit.fitView) shows the whole graph when it is readable as a whole.
+// A graph that is slightly too large opens at the readable scale, on the selected call path or else on the root.
+// The minimap shows the rest.
+// A much larger graph shows whole, with compact cards.
+// A phone opens on that call path and its neighbours, then pans.
 function fitGraph() {
   const kit = graphKit();
   const canvas = graphCanvas();
@@ -1162,11 +1165,12 @@ function drawGraphCard(context, item, compact) {
     rows: [],
   };
   if (compact) {
-    // The title row alone: "service \u00b7 operation" and the call path's time.
+    // The title row alone shows "service · operation" and the time of the call path.
     const box = kit.compactBox(item, graphUi.view.scale, GRAPH_COMPACT_LINES);
     if (box.titleSize) {
-      // Two lines: the service, then the operation (the call paths of a service differ by it) with the path's time at
-      // the right of that line, so a name keeps the card's width.
+      // The card has two lines. The first line is the service.
+      // The second line is the operation, and the time of the path is at its right.
+      // Call paths of a service differ by the operation. A name then keeps the card width.
       card.rows.push({ text: node.service, size: box.titleSize, weight: 600, y: box.baseline });
       if (node.operation) card.rows.push({ text: node.operation, size: box.titleSize, weight: 400, y: box.baseline + box.lineHeight, fit: "full", avoidBadge: true });
       card.badge = fmt.duration(node.time);
@@ -1181,8 +1185,8 @@ function drawGraphCard(context, item, compact) {
     card.rows.push(
       { text: node.service, size: 13, weight: 600, y: 21 },
       { text: node.operation, size: 12, weight: 400, y: 39, color: kit.color("text") },
-      // On a heat fill the error red would not keep its contrast: the dot
-      // and the border carry the errors there.
+      // On a heat fill, the error red does not keep its contrast.
+      // The dot and the border show the errors there.
       { text: graphCountText(node), y: 57, color: node.errors && !heat ? kit.color("error") : kit.color("muted") },
       { text: graphTimeText(node), y: 74 },
     );
@@ -1200,8 +1204,9 @@ function drawGraph(context, frame) {
   }
   const v = graphUi.view;
   const compact = kit.isCompact(GRAPH_CARD_H, v.scale, GRAPH_MIN_FONT);
-  // The world rectangle on screen (plus a margin): cards, edges and labels
-  // outside it are skipped (a 1,500-node graph redraws on every pan frame).
+  // The world rectangle on the screen has a margin.
+  // Cards, edges and labels outside it are skipped.
+  // A graph of 1,500 nodes redraws on every pan frame.
   const margin = 40 / v.scale;
   const left = -v.offsetX / v.scale - margin;
   const top = -v.offsetY / v.scale - margin;
@@ -1251,8 +1256,8 @@ function drawGraph(context, frame) {
     const visible = kit.anyClipped(layout.items.values(), v, frame.width, frame.height);
     minimap.hidden = !visible;
     if (!minimap.hidden) {
-      // The minimap's cards and edges are built once per layout, selection
-      // and theme, not on every pan frame.
+      // Build the minimap cards and edges one time for each layout, selection, and theme.
+      // Do not build them on every pan frame.
       const key = `${graphUi.selected || ""}\u0000${kit.color("error")}\u0000${kit.color("edgeMuted")}`;
       if (!layout.minimap || layout.minimap.key !== key) {
         layout.minimap = {
@@ -1286,7 +1291,7 @@ function graphHitTest(clientX, clientY) {
   if (!layout || !box) return null;
   const v = graphUi.view;
   const point = { x: (clientX - box.left - v.offsetX) / v.scale, y: (clientY - box.top - v.offsetY) / v.scale };
-  // A compact card is hit on the box it draws.
+  // A compact card is hit on the box that it draws.
   const compact = kit.isCompact(GRAPH_CARD_H, v.scale, GRAPH_MIN_FONT);
   for (const item of layout.items.values()) {
     if (kit.pointInRect(point, compact ? kit.compactBox(item, v.scale, GRAPH_COMPACT_LINES) : item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
@@ -1312,21 +1317,21 @@ function describeGraphNode(id) {
 
 // ---------------------------------------------------------- graph panel
 
-// A click on a call path (or on the edge into it) recentres on it and
-// opens its panel; on the background, closes the panel.
+// A click on a call path, or on the edge into it, moves the view to that path and opens its panel.
+// A click on the background closes the panel.
 function selectGraphNode(id, { center = true } = {}) {
   const item = graphUi.layout?.items.get(id);
   if (!item) return;
   graphUi.selected = id;
   renderGraphPanel();
-  // Centred in the visible canvas once the panel has settled, and again
-  // when it closes (kit follow()).
+  // Center the call path in the visible canvas when the panel settles.
+  // Center it again when the panel closes (kit follow()).
   if (center) graphUi.ctl?.follow(id);
   graphUi.ctl?.scheduleDraw();
 }
 
-// The floating detail panel shell (kit.panelShell: Escape through
-// ns.layers, focus back to the canvas).
+// This is the shell of the detail panel that floats (kit.panelShell).
+// Escape works through ns.layers. The focus returns to the canvas.
 let graphPanelShell = null;
 function graphPanelCtl() {
   const panel = graphPanel();
@@ -1439,7 +1444,7 @@ function renderGraph(alt) {
     select.dispatchEvent(new Event("tracepicker-refresh"));
   }
   if (graphUi.graph !== graph) {
-    // Another trace: a new layout, no selection, fitted.
+    // For another trace, make a new layout. Clear the selection and fit the view.
     graphUi.graph = graph;
     prepareGraphFills(graph);
     graphUi.layout = computeGraphLayout(graph, graphMeasure());
@@ -1454,7 +1459,7 @@ function renderGraph(alt) {
   else graphUi.ctl.scheduleDraw();
 }
 
-// Turns of a route (its collinear fan anchors are not bends).
+// These are the turns of a route. The collinear fan anchors are not bends.
 function graphBends(points) {
   let bends = 0;
   for (let i = 1; i + 1 < points.length; i += 1) {
@@ -1464,8 +1469,9 @@ function graphBends(points) {
   return bends;
 }
 
-// Read-only geometry of the last drawn frame in client (CSS pixel)
-// coordinates: lets browser tests hover and click real call paths.
+// This is the read-only geometry of the last drawn frame.
+// The values use client coordinates in CSS pixels.
+// Browser tests use them to hover over and click real call paths.
 function inspectGraph() {
   const box = graphCanvas()?.getBoundingClientRect();
   const v = graphUi.view;
@@ -1502,8 +1508,8 @@ function inspectGraph() {
         id: node.id, label: graphPathText(node), service: node.service, operation: node.operation, depth: node.depth, row: node.row,
         parent: node.parent?.id || null, count: node.count, errors: node.errors, status: node.errors ? "error" : null,
         countText: graphCountText(node), timeText: graphTimeText(node), heat: graphHeat(node),
-        // What the card shows: compact, its title row ("service \u00b7
-        // operation") and its time; else every row.
+        // The card shows the title row ("service · operation") and the time when compact.
+        // Otherwise, every row is shown.
         shown: compact ? [graphCompactTitle(node), fmt.duration(node.time)] : [node.service, node.operation, graphCountText(node), graphTimeText(node)],
         fill: graphFill(node), strip: palette.resolve(palette.service(node.service)), ...toClient(compact ? graphKit().compactBox(item, v.scale, GRAPH_COMPACT_LINES) : item),
       };
@@ -1524,9 +1530,9 @@ export const traceGraph = { inspect: inspectGraph, state: () => graphUi };
 
 // ---------------------------------------------------------------- event markers
 
-// Events of a span grouped by bar position, rounded to 0.2 % of the view
-// (Jaeger's SpanBar): { key, ratio, events }. The waterfall may call it to
-// draw one marker per group.
+// The events of a span are grouped by bar position, rounded to 0.2 % of the view (Jaeger's SpanBar).
+// The result is { key, ratio, events }.
+// The waterfall can call this function to draw one marker for each group.
 function eventGroups(span, viewStartNs, viewTotalNs) {
   const groups = new Map();
   for (const event of spanEventList(span)) {
@@ -1548,9 +1554,9 @@ function waterfallWindow() {
   return { start: cache.extent.start + total * lo, total: Math.max(1, total * (hi - lo)) };
 }
 
-// The open event popover (ns.popover.open: an ns.layers layer, so Escape,
-// a press outside, a scroll or a resize close it and the focus goes back
-// to the marker, or its row).
+// This is the open event popover (ns.popover.open). It is a layer of ns.layers.
+// Escape, a press outside the popover, a scroll, or a resize closes it.
+// The focus then moves to the marker, or to its row.
 let popover = null;
 
 function closeEventPopover() {
@@ -1626,8 +1632,8 @@ function initAltViewEvents() {
       render();
     }
   });
-  // Spans table rows: Up / Down move, Enter / Space show the span in the
-  // timeline (ns.table.rovingRows).
+  // In the spans table rows, Up and Down move the focus.
+  // Enter or Space shows the span in the timeline (ns.table.rovingRows).
   if (alt) table.rovingRows(alt, { rows: "tr[data-table-span]", onOpen: (row) => focusSpanInTimeline(String(row.getAttribute("data-table-span") || ""), { push: true }) });
   alt?.addEventListener("mousemove", (event) => {
     const frame = event.target instanceof Element ? event.target.closest("[data-flame-key]") : null;
@@ -1638,8 +1644,9 @@ function initAltViewEvents() {
   tools?.addEventListener("change", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLSelectElement)) return;
-    // A filter typed just before: applied first, or this render would put
-    // the old text back in the field (ns.search waits for the typing delay).
+    // Apply a filter that the user typed just before.
+    // Otherwise, this render restores the old text in the field.
+    // ns.search waits for the delay after the user types.
     spansFilter?.flush();
     if (target.id === "traceStatsGroupBy") view.stats.groupBy = target.value;
     else if (target.id === "traceStatsSubGroup") view.stats.subGroup = target.value;
@@ -1658,7 +1665,7 @@ function initAltViewEvents() {
   });
 }
 
-// The flamegraph's pointer tooltip (ns.popover.follow).
+// This is the pointer tooltip of the flamegraph (ns.popover.follow).
 let flameTip = null;
 function showFlameTip(frame, x, y) {
   flameTip = flameTip || popoverMod.follow({ className: "traceFlame__tip", side: "bottom", align: "start", offset: 16 });
@@ -1675,14 +1682,14 @@ function init() {
   }
   viewTabs = tabs?.bind(byId("traceViewTabs"), { onSelect: (name) => { if (name !== view.current) setView(name, { url: "replace" }); } }) || null;
   initAltViewEvents();
-  // The flamegraph labels are picked against the theme's surface: a theme
-  // change picks them again.
+  // The flamegraph labels use the theme surface for their colour.
+  // A theme change chooses the labels again.
   const relabel = () => { if (view.current === "flamegraph") render(); };
   if (typeof MutationObserver === "function") new MutationObserver(relabel).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener?.("change", relabel);
   const waterfall = byId("traceWaterfall");
-  // Event markers on the span bars open their group's popover instead of
-  // toggling the span row.
+  // An event marker on a span bar opens the popover of its group.
+  // It does not open or close the span row.
   waterfall?.addEventListener("click", (event) => {
     const marker = event.target instanceof Element ? event.target.closest(".traceSpanEventMarker") : null;
     if (!marker || !waterfall.contains(marker)) return;

@@ -181,6 +181,10 @@ services:
         source: ${CH_HOSTS_SOURCE_CONFIG:-./config/CH_HOSTS.local.hcl}
         target: /config/CH_HOSTS.hcl
         read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
     ports:
       - "${SOURCE_PORT:-18080}:8080"
     healthcheck:
@@ -216,9 +220,142 @@ services:
         source: ./config/mcp.hcl
         target: /config/chdash.hcl
         read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
       - mcp_data:/data
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/version | grep -q '\"name\":\"clickhouse-dash\"'"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
+  # The fake OTLP receiver (tests/otel-fixture/otlp_receiver.py, in the image of the fixture) and a server that exports to it: the SERVER
+  # span of each MCP request, the child spans of its ClickHouse statements and the call log (docs/server-telemetry.md).
+  # backend-functional/test_mcp_telemetry.py reads what the receiver took (TELEMETRY_BASE_URL, OTLP_RECEIVER_URL).
+  otlp_receiver:
+    profiles: ["test"]
+    image: chdash-tests-otel-fixture:local
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: ./tests/otel-fixture/Dockerfile
+    container_name: chdash-tests-otlp-receiver
+    restart: unless-stopped
+    stop_grace_period: 2s
+    entrypoint: ["python3", "/fixture/otlp_receiver.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4318/healthz | grep -q ok"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 1s
+
+  chdash_mcp_telemetry:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-mcp-telemetry
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+      chdash_source:
+        condition: service_healthy
+      otlp_receiver:
+        condition: service_healthy
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/mcp.telemetry.hcl
+        target: /config/chdash.hcl
+        read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/version | grep -q '\"name\":\"clickhouse-dash\"'"]
+      interval: 2s
+      timeout: 2s
+      retries: 120
+      start_period: 2s
+
+  # The access of humans (docs/access.md): a fake AuthZEN PDP (tests/otel-fixture/fake_pdp.py), a fake OTLP receiver of its own for the
+  # CLIENT spans of the calls to the PDP, and a server in the authzen mode that asks them (tests/config/access.authzen.hcl).
+  # backend-functional/test_access.py signs the identity tokens with the test keys (ACCESS_BASE_URL, ACCESS_PDP_URL, ACCESS_OTLP_URL).
+  access_pdp:
+    profiles: ["test"]
+    image: chdash-tests-otel-fixture:local
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: ./tests/otel-fixture/Dockerfile
+    container_name: chdash-tests-access-pdp
+    restart: unless-stopped
+    stop_grace_period: 2s
+    entrypoint: ["python3", "/fixture/fake_pdp.py"]
+    environment:
+      FAKE_PDP_TOKEN: pdp-test-token
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8181/healthz | grep -q ok"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 1s
+
+  access_otlp_receiver:
+    profiles: ["test"]
+    image: chdash-tests-otel-fixture:local
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: ./tests/otel-fixture/Dockerfile
+    container_name: chdash-tests-access-otlp-receiver
+    restart: unless-stopped
+    stop_grace_period: 2s
+    entrypoint: ["python3", "/fixture/otlp_receiver.py"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4318/healthz | grep -q ok"]
+      interval: 2s
+      timeout: 2s
+      retries: 60
+      start_period: 1s
+
+  chdash_access:
+    profiles: ["test"]
+    image: chdash-tests-source:local
+    container_name: chdash-tests-access
+    restart: unless-stopped
+    stop_grace_period: 2s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+        restart: false
+      chdash_source:
+        condition: service_healthy
+      access_pdp:
+        condition: service_healthy
+      access_otlp_receiver:
+        condition: service_healthy
+    environment:
+      CHDASH_CONFIG_FILE: /config/chdash.hcl
+    volumes:
+      - type: bind
+        source: ./config/access.authzen.hcl
+        target: /config/chdash.hcl
+        read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
+    # /api/version needs an identity token here: the probe of the process answers without one.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/livez | grep -q ok"]
       interval: 2s
       timeout: 2s
       retries: 120
@@ -242,6 +379,10 @@ services:
       - type: bind
         source: ./config/query-library.writable.hcl
         target: /config/chdash.hcl
+        read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
         read_only: true
       - qlib_data:/data
     healthcheck:
@@ -273,6 +414,10 @@ services:
         source: ./config/otel-hosts.hcl
         target: /config/chdash.hcl
         read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
     healthcheck: &instance_health
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/api/version | grep -q '\"name\":\"clickhouse-dash\"'"]
       interval: 2s
@@ -294,6 +439,10 @@ services:
         source: ./config/traces-allowlist.hcl
         target: /config/chdash.hcl
         read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
     healthcheck: *instance_health
 
   chdash_privileges:
@@ -309,6 +458,10 @@ services:
       - type: bind
         source: ./config/privileges.hcl
         target: /config/chdash.hcl
+        read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
         read_only: true
       - privileges_data:/data
     healthcheck: *instance_health
@@ -328,6 +481,10 @@ services:
         source: ./config/mcp.profile.hcl
         target: /config/chdash.hcl
         read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
       - mcp_profile_data:/data
     healthcheck: *instance_health
 
@@ -345,6 +502,10 @@ services:
         source: ./config/system-disabled.hcl
         target: /config/chdash.hcl
         read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
     healthcheck: *instance_health
 
   chdash_system_limits:
@@ -360,6 +521,10 @@ services:
       - type: bind
         source: ./config/system-limits.hcl
         target: /config/chdash.hcl
+        read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
         read_only: true
     healthcheck: *instance_health
 
@@ -395,6 +560,10 @@ services:
         source: ${CH_HOSTS_SOURCE_CONFIG:-./config/CH_HOSTS.local.hcl}
         target: /config/CH_HOSTS.hcl
         read_only: true
+      - type: bind
+        source: ./config/secrets
+        target: /run/secrets/chdash-test
+        read_only: true
     ports:
       - "${EMBEDDED_PORT:-18081}:8080"
     healthcheck:
@@ -428,6 +597,16 @@ services:
         condition: service_healthy
       chdash_mcp:
         condition: service_healthy
+      chdash_mcp_telemetry:
+        condition: service_healthy
+      otlp_receiver:
+        condition: service_healthy
+      chdash_access:
+        condition: service_healthy
+      access_pdp:
+        condition: service_healthy
+      access_otlp_receiver:
+        condition: service_healthy
       chdash_qlib:
         condition: service_healthy
       chdash_otel_hosts:
@@ -458,6 +637,11 @@ services:
       TRACES_ALLOWLIST_BASE_URL: http://chdash_traces_allowlist:8080
       PRIVILEGES_BASE_URL: http://chdash_privileges:8080
       MCP_PROFILE_BASE_URL: http://chdash_mcp_profile:8080
+      TELEMETRY_BASE_URL: http://chdash_mcp_telemetry:8080
+      OTLP_RECEIVER_URL: http://otlp_receiver:4318
+      ACCESS_BASE_URL: http://chdash_access:8080
+      ACCESS_PDP_URL: http://access_pdp:8181
+      ACCESS_OTLP_URL: http://access_otlp_receiver:4318
       SYSTEM_DISABLED_BASE_URL: http://chdash_system_disabled:8080
       SYSTEM_LIMITS_BASE_URL: http://chdash_system_limits:8080
       CHDASH_REQUIRE_FIXTURES: "1"

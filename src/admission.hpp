@@ -1,12 +1,13 @@
 #pragma once
 
-// Admission of the heavy work (docs/operations.md, "Admission"). A request that reads a lot (an Explorer table, the graph,
-// a trace search, a System query, an analysis) takes a place before it opens its connection: for each ClickHouse host
-// and class of work at most `max` run at once, the others wait up to `wait` and then are refused with a 503 that says
-// to retry. Without it a burst (eight tools of MCP, five tabs that refresh, three Deep Analyze) opens as many connections
-// to a host as it has requests, and holds as many threads of the server.
+// Admission of the heavy work (docs/operations.md, "Admission"). A heavy request reads a lot of data.
+// Examples are an Explorer table, the graph, a trace search, a System query and an analysis.
+// A heavy request takes a place before it opens its connection. For each ClickHouse host and class of work, at most `max` run at once.
+// The others wait up to `wait`. Then they are refused with a 503 that says to retry.
+// Without admission, a burst opens as many connections to a host as it has requests. Example: eight MCP tools, five tabs that refresh and three Deep Analyze calls.
+// It also holds as many threads of the server.
 //
-// A place is a Ticket: it is given back when the request ends. The wait stops when the caller goes away or the server stops.
+// A place is a Ticket. The request gives the Ticket back when the request ends. The wait stops when the caller disconnects or the server stops.
 
 #include <algorithm>
 #include <chrono>
@@ -60,8 +61,8 @@ public:
     uint64_t refused = 0;
   };
 
-  // A place for `key` (a class of work and a host, "heavy\x1flocal"), when fewer than `max` run (0 = no limit: always a
-  // ticket that counts only). Waits at most `wait`; returns nothing when the time passes or `stop()` says to stop.
+  // A place for `key` (a class of work and a host, "heavy\x1flocal"), when fewer than `max` run. The value 0 means no limit.
+  // With no limit, the call gives a Ticket that counts only. The call waits at most `wait`. It returns nothing when the time passes or `stop()` asks to stop.
   // `stop` is asked about every 50 ms.
   std::optional<Ticket> acquire(const std::string& key, size_t max, std::chrono::milliseconds wait,
                                 const std::function<bool()>& stop = {}) {
@@ -82,7 +83,7 @@ public:
         break;
       }
       if (std::chrono::steady_clock::now() >= deadline || (stop && stop())) break;
-      // Wake at least every 50 ms to ask `stop`; a ticket given back wakes it at once.
+      // Wake at least every 50 ms to ask `stop`. A returned ticket wakes it at once.
       const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
       cv_.wait_for(lock, std::max(std::chrono::milliseconds(1), std::min(std::chrono::milliseconds(50), left)));
     }

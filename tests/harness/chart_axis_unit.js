@@ -1,8 +1,8 @@
-// Unit checks of the chart engine's time axis labels (app_chart_core.js:
-// timeTicks and layoutXLabels), run by test_frontend_unit_scripts.py
-// under several TZ values (browser-local time is the display zone):
+// Unit checks of the chart engine's time axis labels (app_chart_core.js: timeTicks and layoutXLabels).
+// The test_frontend_unit_scripts.py harness runs these checks under several TZ values.
+// Browser-local time is the display zone. Run one case by hand with this command:
 //   TZ=Europe/Paris node --experimental-vm-modules chart_axis_unit.js <repo root>
-// Prints { zone, checks, failures }.
+// It prints { zone, checks, failures }.
 "use strict";
 
 const path = require("path");
@@ -10,7 +10,7 @@ const esm = require("./esm_vm");
 
 const root = process.argv[2] || path.resolve(__dirname, "..", "..");
 
-// The chart engine (app_chart_core.js) with the page's DOM, state and components stubbed: the axis maths are pure.
+// The chart engine (app_chart_core.js) runs with the page's DOM, state and components stubbed. The axis maths are pure.
 let core;
 (async () => {
 const run = await esm.load({ root, stubs: {
@@ -27,7 +27,7 @@ function ok(label, condition, detail) {
   if (!condition) failures.push({ label, detail });
 }
 
-// About the widths of the 11 px axis font and its 600 weight.
+// These values depend on the widths of the 11 px axis font and its 600 weight.
 const measure = (text) => text.length * 6.2;
 const measureBold = (text) => text.length * 6.9;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -36,7 +36,7 @@ const yearOf = (ms) => String(new Date(ms).getFullYear());
 const HOUR = 3600000, DAY = 24 * HOUR;
 const LEFT = 52, RIGHT = 14;
 
-// The labels of an axis over [start, end] on a plot plotW px wide.
+// The labels of an axis over [start, end], on a plot that is plotW px wide.
 function axis(start, end, plotW) {
   const width = LEFT + plotW + RIGHT;
   const ticks = core.timeTicks(start, end, plotW, measure);
@@ -71,8 +71,8 @@ function checkAxis(name, start, end, plotW) {
     return;
   }
   ok(`${where}: a context dates the axis`, contexts.length >= 1, labels.map((t) => t.label));
-  // Year on the first context and where the year changes, nowhere else; the
-  // date of the label's own tick (clock times) or its year (days, months).
+  // The year is shown on the first context and where the year changes, and nowhere else. The
+  // date of the label's own tick is shown for clock times. The year is shown for days and months.
   let shownYear = "";
   for (const t of contexts) {
     const year = yearOf(t.v);
@@ -80,8 +80,8 @@ function checkAxis(name, start, end, plotW) {
     ok(`${where}: context text`, t.context === expected, [t.label, t.context, expected]);
     shownYear = year;
   }
-  // A label never reads under another date: from the first context on, the
-  // last context at or left of each label names its own day (or year).
+  // A label never reads under another date. From the first context on, the
+  // last context at or left of each label names its own day or year.
   let last = null;
   for (const t of labels) {
     if (t.context) last = t;
@@ -92,7 +92,7 @@ function checkAxis(name, start, end, plotW) {
 }
 
 // Spans of the range pickers, on a 1440 px page (1330 px plot), a 390 px
-// one (300 px), and between, from many starts: through days, a year end and
+// page (300 px), and spans between them. The spans start at many times. They cross days, a year end and
 // the DST changes of the zones under test.
 const SPANS = [["1h", HOUR], ["24h", DAY], ["7d", 7 * DAY], ["30d", 30 * DAY]];
 const WIDTHS = [1330, 640, 300];
@@ -114,8 +114,8 @@ for (const plotW of WIDTHS) {
 }
 
 // The reported case: 24 h from 22:30 on a 1440 px page. "Oct 2 2026" under
-// 23:00 and "Oct 3 2026" under 00:00 ran into each other; now the first
-// label's date gives way to the change, which carries the year.
+// 23:00 and "Oct 3 2026" under 00:00 ran into each other. Now the date of the first
+// label gives way to the change, which carries the year.
 {
   const start = new Date(2026, 9, 2, 22, 30).getTime();
   const { labels } = axis(start, start + DAY, 1330);
@@ -143,9 +143,9 @@ for (const plotW of WIDTHS) {
   const shown = labels.filter((t) => t.context).map((t) => [t.label, t.context]);
   ok("months: the year under the first month and under Jan", JSON.stringify(shown) === JSON.stringify([["Feb", "2026"], ["Jan", "2027"]]), shown);
 }
-// A context that would touch the previous (not the first) one skips its
-// label and waits for the next one rather than overlap: made-up ticks 40 px
-// apart, a day change on each of the first three.
+// A context that would touch the previous context, but not the first one, skips its
+// label. It waits for the next one rather than overlap. These are made-up ticks 40 px
+// apart, with a day change on each of the first three.
 {
   const ticks = [
     { v: 0, label: "22:00", date: "Oct 1", year: "2026" },

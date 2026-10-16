@@ -1,8 +1,8 @@
-// The catalog of the graph: every object that the runner reads, with its engine, keys, sizes, ingress and replica health, read as the
-// system account (what the runner may see is the AllowedObjectSet) and, where the system account fails, as the runner. The sidebar, the
-// table card, the storage map, the functions and the preview have their own readers (explorer_index.cpp, explorer_table.cpp,
-// explorer_storage.cpp, explorer_functions.cpp, explorer_preview.cpp); the rules that they share are in explorer_rules.hpp, and every
-// statement is in explorer_sql.hpp.
+// The catalog of the graph. It holds every object that the runner reads, with its engine, keys, sizes, ingress and replica health.
+// The system account reads these objects. What the runner may see is set by the AllowedObjectSet. Where the system account fails, the runner reads them.
+// The sidebar, the table card, the storage map, the functions and the preview have their own readers (explorer_index.cpp, explorer_table.cpp,
+// explorer_storage.cpp, explorer_functions.cpp, explorer_preview.cpp). explorer_rules.hpp holds the rules that they share.
+// Every statement is in explorer_sql.hpp.
 #include "explorer_catalog.hpp"
 
 #include "explorer_rules.hpp"
@@ -63,9 +63,9 @@ bool load_base_summaries(
       summary.partition_key = block_string_at(block, 6, row);
       summary.sampling_key = block_string_at(block, 7, row);
       if (has_storage_policy) summary.storage_policy = block_string_at(block, 8, row);
-      // system.tables is the authoritative lightweight source for engines that do not create MergeTree parts (Memory, TinyLog/Log/StripeLog,
-      // Buffer, dictionaries, etc.). MergeTree values are later replaced by the richer system.parts aggregation, so this is a safe baseline
-      // rather than a competing metric source.
+      // system.tables is the authoritative lightweight source for engines that create no MergeTree parts (Memory, TinyLog/Log/StripeLog,
+      // Buffer, dictionaries, etc.). MergeTree values are replaced later by the richer system.parts aggregation. This makes the baseline
+      // safe. It is not a competing metric source.
       summary.rows = parse_u64(block_string_at(block, 9, row));
       const auto total_bytes = parse_u64(block_string_at(block, 10, row));
       const auto total_uncompressed_bytes = parse_u64(block_string_at(block, 11, row));
@@ -74,9 +74,9 @@ bool load_base_summaries(
       (consuming_runner_fill ? runner_ddl_versions : ddl_versions)
           .push_back(DdlObjectVersion{database, table, summary.metadata_modification_time,
                                       block_string_at(block, 14, row) == "1"});
-      // system.tables.total_bytes is a resident-memory estimate for in-memory engines. Keep Buffer/Memory/Dictionary bytes in resident_bytes
-      // so Browse never presents RAM as database/ClickHouse on-disk footprint. Dictionary bytes are replaced by
-      // system.dictionaries.bytes_allocated when loaded.
+      // system.tables.total_bytes is a resident memory estimate for in-memory engines. Buffer, Memory and Dictionary bytes stay in resident_bytes,
+      // so that Browse never shows RAM as the on-disk footprint of a database or of ClickHouse. The bytes of a Dictionary are replaced by
+      // system.dictionaries.bytes_allocated when the dictionary is loaded.
       if (is_resident_memory_engine(summary.engine)) {
         summary.resident_bytes = total_bytes;
         summary.logical_bytes.reset();
@@ -97,7 +97,7 @@ bool load_base_summaries(
   bool ok = try_select(system, base_tables_ordered_sql(),
     [&](const clickhouse::Block& block) { consume_tables(block, true); }, &metadata_error);
 
-  // The technical account is an enrichment source, not the ACL authority. A transient/native-protocol issue on its bulk system.tables
+  // The technical account is an enrichment source. It is not the ACL authority. A transient or native-protocol issue on its bulk system.tables
   // stream must not make every runner-readable object disappear. Retry the same backend-built metadata query through the runner, whose
   // AllowedObjectSet already defines the exact visibility boundary.
   bool metadata_from_runner = false;
@@ -118,9 +118,9 @@ bool load_base_summaries(
     }
   }
 
-  // system.tables visibility can lag or differ for a narrowly privileged technical account, especially for objects created after the
-  // process/test stack started. Fill only the missing runner-authorized objects with a targeted runner query. If an object disappeared
-  // between ACL discovery and this lookup, simply omit that stale entry; never turn it into a global 503.
+  // The system.tables visibility can lag, or can differ for a narrowly privileged technical account. This happens especially for objects created after the
+  // process or test stack started. Fill only the missing runner-authorized objects with a targeted runner query. If an object disappears
+  // between the ACL discovery and this lookup, omit that stale entry. Never turn it into a global 503.
   for (const auto& entry : allowed.tables()) {
     const auto key = table_key(entry.database, entry.table);
     if (by_key.count(key)) continue;
@@ -132,7 +132,7 @@ bool load_base_summaries(
     consuming_runner_fill = false;
   }
 
-  // engine_full for every summary (the runner-filled entries above included).
+  // engine_full for every summary. This includes the entries that the runner filled above.
   try {
     auto& ddl_client = metadata_from_runner ? runner : system;
     auto texts = caches.ddl_texts.get(ddl_client, metadata_from_runner ? identities.runner : identities.system, ddl_versions);
@@ -178,8 +178,8 @@ bool load_non_part_row_counts(
         if (target.engine.find("Dictionary") == std::string::npos) continue;
         target.rows = parse_u64(block_string_at(block, 2, row));
         target.resident_bytes = parse_u64(block_string_at(block, 3, row));
-        // Dictionary storage is an in-memory allocation. Its backing source is a separate object and must not make the dictionary itself
-        // contribute to database/ClickHouse disk totals.
+        // Dictionary storage is an in-memory allocation. Its backing source is a separate object. The source must not make the dictionary
+        // count toward database or ClickHouse disk totals.
         target.logical_bytes.reset();
         target.physical_bytes.reset();
         target.compressed_bytes.reset();
@@ -190,8 +190,8 @@ bool load_non_part_row_counts(
     *error = "Dictionary row metadata unavailable: " + dictionary_error;
   }
 
-  // TinyLog/Log/StripeLog may legitimately report total_rows=0 in system.tables on supported ClickHouse versions. Query the readable
-  // object through runner_uri only in that ambiguous case. This is exact and never crosses the established runner ACL boundary.
+  // TinyLog, Log and StripeLog may report total_rows=0 in system.tables on supported ClickHouse versions. Query the readable
+  // object through runner_uri only in that unclear case. This is exact and never crosses the established runner ACL boundary.
   for (auto& [key, target] : map) {
     if (!target) continue;
     if (!is_log_family(target->engine) || (target->rows && *target->rows > 0)) continue;
@@ -206,8 +206,8 @@ bool load_non_part_row_counts(
   return true;
 }
 
-// Also collects secondary-index bytes (the same GROUP BY over system.parts), so load_structure_bytes does not scan every active part a second
-// time.
+// It also collects the secondary index bytes with the same GROUP BY over system.parts. Thus load_structure_bytes does not scan
+// every active part a second time.
 bool load_parts_summary(
     ChExecutor& system,
     const AllowedObjectSet& allowed,
@@ -239,8 +239,8 @@ bool load_parts_summary(
         target.secondary_indices_bytes = parse_u64(block_string_at(block, 10, row));
         if (index_seen) index_seen->insert(it->first);
 
-        // A local non-replicated table's local footprint is its physical footprint. Replicated/Distributed physical totals require a
-        // cluster-wide mapping and are deliberately left unknown here.
+        // The local footprint of a local non-replicated table is its physical footprint. Replicated and Distributed physical totals need a
+        // cluster-wide mapping. They stay unknown here on purpose.
         if (target.engine.find("Replicated") == std::string::npos && target.engine != "Distributed") {
           target.physical_bytes = target.logical_bytes;
         }
@@ -271,8 +271,8 @@ void load_structure_bytes(
       }
     }, &section_error);
   if (indexes_loaded) {
-    // A successful system.parts query makes the absence of active parts a known zero for on-disk index bytes. Keep unknown exclusively for
-    // failed metadata reads instead of rendering a misleading 0% on errors.
+    // A successful system.parts query makes the absence of active parts a known zero for on-disk index bytes. Keep unknown only for
+    // failed metadata reads. Do not show a misleading 0% on errors.
     for (auto& [key, table] : map) {
       if (table && table->engine.find("MergeTree") != std::string::npos && !index_seen.count(key)) {
         table->secondary_indices_bytes = 0;
@@ -298,8 +298,8 @@ void load_structure_bytes(
       }
     }, &section_error);
   if (projections_loaded) {
-    // projection_parts has no row for tables with zero materialized projection bytes (including empty MergeTrees). A successful query
-    // makes that absence a known zero independently of the skipping-index query above.
+    // projection_parts has no row for tables with zero materialized projection bytes, including empty MergeTree tables. A successful query
+    // makes that absence a known zero. This is independent of the skipping-index query above.
     for (auto& [key, table] : map) {
       if (table && table->engine.find("MergeTree") != std::string::npos && !projection_seen.count(key)) {
         table->projection_bytes = 0;
@@ -407,7 +407,7 @@ bool load_replication(
     replica.total_replicas = it->second.total;
     replica.active_replicas = it->second.active;
   }
-  // Counts are an enrichment: a failed lookup leaves them unknown (0) rather than failing the whole catalog.
+  // Counts are an enrichment. A failed lookup leaves them unknown (0). The whole catalog does not fail.
   if (!counts_error.empty() && error && error->empty()) *error = "Replica count lookup failed: " + counts_error;
   return true;
 }
@@ -476,8 +476,8 @@ bool load_explorer_catalog(
   // MergeTree counts with a later physical snapshot.
   normalize_buffer_runtime_rows(out.tables);
 
-  // Populate engines that do not own MergeTree parts before database totals and graph nodes are derived from the catalog. Failures are
-  // intentionally best-effort: metadata remains usable with an unknown row count.
+  // Populate the engines that do not own MergeTree parts before database totals and graph nodes are derived from the catalog. Failures are
+  // best effort on purpose. The metadata stays usable with an unknown row count.
   load_non_part_row_counts(system, runner, allowed, map, &section_error);
   section_error.clear();
   std::unordered_set<std::string> parts_index_seen;

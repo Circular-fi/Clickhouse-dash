@@ -3,10 +3,10 @@ import { installObservers } from '../helpers/observability.js';
 import { mockTraceResults, SYNTHETIC_TRACES } from '../helpers/traces.js';
 
 // ns.router (app_router.js): the one owner of the address bar and the
-// history (docs/ui-foundations.md, "Routes"). Deep links open what they name,
-// former names are aliases rewritten with replace, opens push and moves
-// replace, Back / Forward walk views and panels, a hidden view never writes
-// the URL, and every page has one popstate listener.
+// history (docs/ui-foundations.md, "Routes"). Deep links open what they name.
+// Former names are aliases. They are rewritten with replace. Opens push an entry,
+// and moves replace it. Back and Forward walk the views and the panels. A hidden
+// view never writes the URL. Every page has one popstate listener.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -22,8 +22,8 @@ const historyLength = (page) => page.evaluate(() => window.history.length);
 const entryState = (page) => page.evaluate(() => window.history.state);
 const TRACE_ID = SYNTHETIC_TRACES[0].trace_id;
 
-// The popstate listeners on window, counted by the browser (CDP), not by
-// the app's own bookkeeping.
+// The popstate listeners on window are counted by the browser (CDP).
+// The count does not use the app's own bookkeeping.
 async function popstateListeners(page) {
   const cdp = await page.context().newCDPSession(page);
   try {
@@ -63,7 +63,7 @@ test.describe('router', () => {
     await mockTraceResults(page);
     await page.goto('/observability/traces');
     await expect(page.locator('#tracesSearchView')).toBeVisible();
-    // Each view is a page: following the row loads another document, each with its one listener.
+    // Each view is a page. A row link loads another document. Each document has one listener.
     for (const view of ['logs', 'metrics', 'traces', 'logs']) {
       await obsTab(page, view).click();
       await expect(page).toHaveURL(new RegExp(`/observability/${view}`));
@@ -80,8 +80,8 @@ test.describe('router', () => {
     await expect(cardTab(page)).toHaveText('Lineage', { timeout: 15_000 });
     await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/weather_observations\?tab=lineage$/);
 
-    // The card tab as a path segment (and a former slug): the ?tab= form, on
-    // the same entry.
+    // The card tab is a path segment, and a former slug also works. The ?tab= form
+    // stays on the same entry.
     for (const [from, to, tab] of [
       ['/explorer/catalog/chdash_ui/weather_observations/ddl', /\/weather_observations\?tab=ddl$/, 'DDL'],
       ['/explorer/catalog/chdash_ui/weather_observations/data', /\/weather_observations\?tab=preview$/, 'Preview'],
@@ -159,8 +159,8 @@ test.describe('router', () => {
     await page.goto(`/observability/traces/${TRACE_ID}?tab=flamegraph`);
     await expect(traceTab(page, 'Flamegraph')).toHaveAttribute('aria-selected', 'true', { timeout: 30_000 });
     await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}\\?tab=flamegraph$`));
-    // The former ?view= (and a search tab= carried by an old trace URL): the
-    // trace tab, on the same entry.
+    // The former ?view= parameter and a search tab= from an old trace URL open
+    // the trace tab on the same entry.
     await page.goto(`/observability/traces/${TRACE_ID}?view=statistics&tab=map`);
     const length = await historyLength(page);
     await expect(traceTab(page, 'Statistics')).toHaveAttribute('aria-selected', 'true', { timeout: 30_000 });
@@ -216,7 +216,7 @@ test.describe('router', () => {
     await page.goForward();
     await expect(panel).toBeVisible();
     await expect.poll(() => param(page, 'log')).toBe(second);
-    // Closing the panel on its own entry goes Back (no entry left behind).
+    // Close the panel on its own entry. This goes Back, and no entry is left behind.
     await panel.locator('.uiDetail__close').click();
     await expect(panel).toBeHidden();
     await expect.poll(() => param(page, 'log')).toBe(null);
@@ -234,7 +234,7 @@ test.describe('router', () => {
     await page.waitForFunction(() => window.ChDash?.router?.owner('metrics').active() === true);
     const url = page.url();
     const length = await historyLength(page);
-    // The Logs module is not even loaded here; its owner, if asked for, is not the page's.
+    // The Logs module is not loaded here. If its owner is asked for, the owner is not this page.
     const written = await page.evaluate(() => {
       const ns = window.ChDash;
       const logs = ns.router.owner('logs');
@@ -284,7 +284,7 @@ test.describe('router', () => {
     expect(result.samePush).toBe(false);
     expect(result.open).toEqual(['?d=4&item=one', 2, true]);
     expect(result.move).toEqual(['?d=4&item=two', 2, true]);
-    // Something else changed on the entry: close() replaces instead of going Back.
+    // Something else changed the entry. close() replaces the entry and does not go Back.
     expect(result.changed).toBe(false);
     const closed = await page.evaluate(() => {
       const start = window.history.length;

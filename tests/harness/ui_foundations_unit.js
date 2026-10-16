@@ -1,7 +1,7 @@
-// Unit checks of format (app_format.js) and palette (app_palette.js),
-// run by test_frontend_unit_scripts.py under several TZ values:
+// This file has unit checks of format (app_format.js) and palette (app_palette.js),
+// run by the script test_frontend_unit_scripts.py under several TZ values:
 //   TZ=Europe/Paris node --experimental-vm-modules ui_foundations_unit.js <repo root>
-// Prints a JSON list of failures (empty when every check passes).
+// The script prints a JSON list of failures. The list is empty when every check passes.
 "use strict";
 
 const path = require("path");
@@ -18,8 +18,8 @@ function memoryStorage(seed = {}) {
   return { ...esm.memoryStorage(data), dump: () => Object.fromEntries(data) };
 }
 
-// A fresh window with the modules loaded (app_state.js keeps the service colours in the session storage, app_util.js
-// is what the page's formatters delegate to): fresh instances each call, so another storage is another page.
+// This function creates a fresh window with the modules loaded. app_state.js keeps the service colours in the session storage.
+// The formatters of the page pass their work to app_util.js. Each call creates fresh instances, so another storage is another page.
 async function load({ storage = memoryStorage() } = {}) {
   const run = await esm.load({ root, window: { sessionStorage: storage, localStorage: esm.memoryStorage() } });
   const out = {};
@@ -101,7 +101,7 @@ const KB = 1024;
 const byteCases = [
   [0, "0 B"], [205, "205 B"], [1740, "1.7 KB"], [10.3 * KB * KB, "10.3 MB"], [1023.96 * KB, "1.0 MB"],
   [-2048, "-2.0 KB"], [5 * KB ** 4, "5.0 TB"], [null, DASH], ["x", DASH],
-  // Never four integer digits: 1000 B is 1.0 KB (the Query rail's "Avg 1000 B/s" beside "1K/s").
+  // Never show four integer digits. 1000 B is 1.0 KB (the Query rail shows "Avg 1000 B/s" beside "1K/s").
   [999, "999 B"], [999.6, "1.0 KB"], [1000, "1.0 KB"], [1023, "1.0 KB"], [1000 * KB, "1.0 MB"], [999.94 * KB, "999.9 KB"],
 ];
 for (const [input, expected] of byteCases) eq(`bytes(${input})`, format.bytes(input), expected);
@@ -109,8 +109,8 @@ eq("bytesRate", format.bytesRate(1740), "1.7 KB/s");
 eq("bytesRate 1000", format.bytesRate(1000), "1.0 KB/s");
 eq("bytesRate null", format.bytesRate(null), DASH);
 
-// util keeps its own "-" for a missing value and otherwise prints the one
-// byte rule (four integer digits at most: 1000 B is 1.0 KB).
+// The util module keeps its own "-" for a value that is not set. Otherwise, it prints the one
+// byte rule. The byte rule allows four integer digits at most: 1000 B is 1.0 KB.
 function oldFormatBytes(value) {
   const units = ["KB", "MB", "GB", "TB", "PB", "EB"];
   const n = typeof value === "number" ? value : Number(value);
@@ -152,7 +152,7 @@ eq("rate null", format.rate(null, "rows"), DASH);
 // ------------------------------------------------------------------- time
 const NOW = Date.UTC(2026, 9, 2, 12, 0, 0);
 const T = Date.UTC(2026, 8, 12, 14, 29, 57, 123);
-// Expected wall clock of T, and of the DST / year edge instants, per zone.
+// This gives the expected wall clock of T, and of the DST and year edge instants, for each zone.
 const ZONES = {
   UTC: { t: "Sep 12 14:29:57", offset: "UTC+00:00", newYear: "Jan 1 00:30:00", lastYear: "Jan 5, 2025 03:04:05" },
   "Europe/Paris": { t: "Sep 12 16:29:57", offset: "UTC+02:00", newYear: "Jan 1 01:30:00", lastYear: "Jan 5, 2025 04:04:05" },
@@ -169,13 +169,13 @@ else {
   eq("time ns from ms fraction", format.time(T + 0.25, { now: NOW, precision: "ns" }), `${expect.t}.123250000`);
   eq("time never", format.time(T, { now: NOW, date: "never" }), expect.t.slice(-8));
   eq("time always", format.time(T, { now: NOW, date: "always" }), expect.t.replace(/^(\w+ \d+) /, "$1, 2026 "));
-  // The year shows when the local date is in another year than now.
+  // The year appears when the local date is in another year than now.
   eq("time new-year edge", format.time(Date.UTC(2026, 0, 1, 0, 30), { now: Date.UTC(2026, 5, 1) }), expect.newYear);
   eq("time last year", format.time(Date.UTC(2025, 0, 5, 3, 4, 5), { now: NOW }), expect.lastYear);
   eq("time 24 h", /AM|PM/.test(format.time(Date.UTC(2026, 8, 12, 23, 0), { now: NOW })), false);
   eq("time null", format.time(null), DASH);
   eq("time NaN", format.time(NaN), DASH);
-  // Past the Date range: no "undefined NaN" text.
+  // The output never shows "undefined NaN" text past the Date range.
   eq("time out of range", format.time(1e20), DASH);
   eq("timeTitle out of range", format.timeTitle(1e20), DASH);
   eq("range out of range", format.range(0, 1e20), DASH);
@@ -187,7 +187,7 @@ else {
   const title = format.timeTitle(T, { serverTz: "America/New_York" }).split("\n");
   eq("timeTitle lines", title.length, 4);
   eq("timeTitle iso", title[0], "2026-09-12T14:29:57.123Z");
-  // ICU may name the zone by its canonical alias (Asia/Kolkata is Asia/Calcutta).
+  // ICU can name the zone by its canonical alias. Asia/Kolkata is Asia/Calcutta.
   eq("timeTitle local", title[1], `${always}.123 local (${Intl.DateTimeFormat().resolvedOptions().timeZone}, ${expect.offset})`);
   eq("timeTitle utc", title[2], "Sep 12, 2026 14:29:57.123 UTC");
   eq("timeTitle server", title[3], "Sep 12, 2026 10:29:57.123 server (America/New_York, UTC-04:00)");
@@ -196,8 +196,8 @@ else {
   eq("timeTitle no server", format.timeTitle(T).split("\n").length, 3);
   eq("timeTitle precision s", format.timeTitle(T, { precision: "s" }).split("\n")[2], "Sep 12, 2026 14:29:57 UTC");
 
-  // Daylight saving time: the server-zone line follows each zone's own rules,
-  // whatever the browser zone is.
+  // Daylight saving time: the server-zone line follows the rules of each zone.
+  // This applies whatever the browser zone is.
   const paris = (ms) => format.timeTitle(ms, { serverTz: "Europe/Paris", precision: "s" }).split("\n")[3];
   eq("DST spring, before", paris(Date.UTC(2026, 2, 29, 0, 59, 59)), "Mar 29, 2026 01:59:59 server (Europe/Paris, UTC+01:00)");
   eq("DST spring, after", paris(Date.UTC(2026, 2, 29, 1, 0, 0)), "Mar 29, 2026 03:00:00 server (Europe/Paris, UTC+02:00)");
@@ -208,8 +208,8 @@ else {
 
   // ------------------------------------------------------------------ range
   const local = (ms) => format.time(ms, { now: NOW, date: "never" });
-  // The date as format.time writes it ("Sep 12"; its year when it is not the
-  // current year), in the browser zone.
+  // This is the date as format.time writes it ("Sep 12"). The browser zone sets this date.
+  // The year appears only when it is not the current year.
   const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const md = (year, month, day) => `${MONTH_NAMES[month]} ${day}${year === new Date().getFullYear() ? "" : `, ${year}`}`;
   const dayOf = (ms) => {
@@ -232,7 +232,7 @@ else {
   }
   if (zone === "UTC") {
     eq("range late evening UTC", format.range(late, early), `${md(2026, 8, 12)} 21:00 ${ARROW} ${md(2026, 8, 13)} 01:00`);
-    // A chart's range: its precision; the dates alone for Date columns.
+    // The range of a chart uses its own precision. Date columns show only the dates.
     eq("range precision ms", format.range(T, T + 340, { precision: "ms" }), `${md(2026, 8, 12)} 14:29:57.123 ${ARROW} 14:29:57.463`);
     eq("range precision us", format.range(T + 0.5, T + 1, { precision: "us" }), `${md(2026, 8, 12)} 14:29:57.123500 ${ARROW} 14:29:57.124000`);
     eq("range precision day", format.range(a, a + 2 * 86400000, { precision: "day" }), `${md(2026, 8, 12)} ${ARROW} ${md(2026, 8, 14)}`);
@@ -256,7 +256,7 @@ else {
   eq("ago days", format.ago(NOW - 3 * 86400000, { now: NOW }), "3 days ago");
   eq("ago future", format.ago(NOW + 5000, { now: NOW }), "0 seconds ago");
   eq("ago null", format.ago(null), DASH);
-  // short: the units of duration, for a narrow cell (the Used column of the MCP page).
+  // The short option uses the units of duration. Use it for a narrow cell, such as the Used column of the MCP page.
   eq("ago short seconds", format.ago(NOW - 45000, { now: NOW, short: true }), "45 s ago");
   eq("ago short minutes", format.ago(NOW - 12 * 60000, { now: NOW, short: true }), "12 min ago");
   eq("ago short hours", format.ago(NOW - 2 * 3600000 - 59 * 60000, { now: NOW, short: true }), "2 h ago");
@@ -298,7 +298,7 @@ eq("categorical 7", palette.categorical(7), "var(--qchart-8)");
 eq("categorical 17", palette.categorical(17), "var(--qchart-18)");
 eq("categorical wraps", palette.categorical(18), "var(--qchart-1)");
 eq("categorical slots", palette.CATEGORICAL_SLOTS, 18);
-// One error-rate scale: below 1 % neutral, 1-5 % warning, 5 % and more danger.
+// This is one error-rate scale. Below 1 % it is neutral. From 1 % to 5 % it is a warning. At 5 % and more it is danger.
 eq("errorLevel 0", palette.errorLevel(0), "neutral");
 eq("errorLevel 0.5 %", palette.errorLevel(0.005), "neutral");
 eq("errorLevel 1 %", palette.errorLevel(0.01), "warn");
@@ -335,7 +335,7 @@ const kinds = [
 ];
 for (const [input, kind] of kinds) eq(`kind(${input})`, palette.kind(input), `var(--kind-${kind})`);
 
-// Service colours: Traces' first-seen assignment, shared through its sessionStorage key.
+// The assignment follows the order in which Traces first sees each service. The sessionStorage key shares the colours.
 const KEY = "chdash.traces.serviceColors";
 const store = memoryStorage();
 const first = (await load({ storage: store })).palette;

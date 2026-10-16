@@ -36,16 +36,16 @@ McpObservabilityConfig mcp_observability_config(const OtelSettings& otel) {
 }
 
 std::vector<std::string> mcp_user_reads() {
-  // What the MCP user itself reads that the pages do not read with the system user: the documentation of the functions.
-  // The OpenTelemetry tables are read with the system user, for the simple tools as for the pages' tools.
+  // The MCP user reads these items itself. The pages do not read them with the system user. They are the documentation of the functions.
+  // The system user reads the OpenTelemetry tables, for the simple tools and for the pages' tools.
   std::vector<std::string> out;
   add_table(&out, "system.documentation");
   return out;
 }
 
 std::vector<std::string> mcp_system_reads(const OtelSettings& otel, unsigned reads) {
-  // What the system user reads for the OpenTelemetry pages: their tables, and the size and the skipping indices of
-  // the tables of Logs and Metrics.
+  // The system user reads these items for the OpenTelemetry pages.
+  // It reads their tables, and the size and the skipping indices of the tables of Logs and Metrics.
   std::vector<std::string> out = mcp_data_tables(mcp_observability_config(otel), reads);
   if (((reads & kMcpReadsLogs) && otel.logs.enabled) || ((reads & kMcpReadsMetrics) && otel.metrics.enabled)) {
     add_table(&out, "system.parts");
@@ -70,8 +70,8 @@ std::vector<McpToolGap> mcp_tool_gaps(const OtelSettings& otel, const HostAccess
       gap.user = access.mcp_user;
       if (has(access.mcp_missing, "SELECT ON system.documentation")) gap.grants.push_back("SELECT ON system.documentation");
     } else {
-      // Traces, Logs and Metrics (the pages' tools and the simple tools): the OpenTelemetry tables of this host are read
-      // with the system user, as for the pages.
+      // Traces, Logs and Metrics (the pages' tools and the simple tools): the system user reads the OpenTelemetry tables of this host.
+      // The pages do the same.
       if (!system_known) continue;
       gap.role = "system user";
       gap.user = access.system_user;

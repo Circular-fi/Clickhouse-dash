@@ -26,7 +26,7 @@ std::string scope_of(SqlParams& params, const char* table_column, const std::str
   return "database = " + db + " AND `" + table_column + "` = " + tbl;
 }
 
-// The columns of the rates of an ingress read: the rows and the bytes of the last minute, five minutes and hour, and their totals.
+// The columns of the ingress rates. They hold the rows and the bytes of the last minute, of the last five minutes and of the last hour. They also hold the totals.
 const char* const kQueryIngressColumns =
     "toString(sumIf(written_rows, event_time >= now() - INTERVAL 1 MINUTE) / 60.0), "
     "toString(sumIf(written_rows, event_time >= now() - INTERVAL 5 MINUTE) / 300.0), "
@@ -36,7 +36,8 @@ const char* const kQueryIngressColumns =
     "toString(sum(written_bytes) / 3600.0), ";
 
 const char* const kBaseTables =
-    // engine_full (column 3) is filled afterwards from DdlTextCache: formatting it for every object dominates this scan on large catalogs.
+    // engine_full (column 3) is filled later from DdlTextCache.
+    // The formatting for every object dominates this scan on large catalogs.
     "SELECT toString(database), toString(name), toString(engine), '', toString(sorting_key), toString(primary_key), toString(partition_key), toString(sampling_key), toString(storage_policy), "
     "toString(total_rows), toString(total_bytes), toString(total_bytes_uncompressed), arrayStringConcat(data_paths, char(31)), toString(metadata_modification_time), "
     "toString(toUInt8(metadata_modification_time >= now() - 2)) "
@@ -126,7 +127,7 @@ SqlStatement replicas_sql() {
 
 SqlStatement replica_counts_sql(const std::vector<std::string>& databases, const std::vector<std::string>& tables) {
   SqlStatement out;
-  // database/table predicates are applied before the per-table status (and its Keeper requests) is collected.
+  // Apply the database and table predicates before the per-table status is collected. The status includes its Keeper requests.
   const std::string database_list = out.params.texts(databases);
   const std::string table_list = out.params.texts(tables);
   out.sql = "SELECT toString(database), toString(`table`), toString(total_replicas), toString(active_replicas) "
@@ -189,7 +190,7 @@ SqlStatement database_disk_bytes_sql(const std::string& database) {
 
 SqlStatement database_replicas_sql(const std::string& database) {
   SqlStatement out;
-  // Only the columns system.replicas serves from memory: total/active_replicas would cost one Keeper read per table.
+  // Select only the columns that system.replicas serves from memory. total/active_replicas cost one Keeper read per table.
   out.sql = "SELECT toString(`table`), toString(is_readonly), toString(is_session_expired), "
             "toString(queue_size), toString(absolute_delay) FROM system.replicas WHERE database = " + out.params.text(database);
   return out;
@@ -316,7 +317,7 @@ const char* const kReplicaBaseColumns =
 
 SqlStatement table_replica_detail_sql(const std::string& database, const std::string& table) {
   SqlStatement out;
-  // The replica set (replica_is_active) costs the same Keeper reads as total/active_replicas, which the opened table already pays for.
+  // The replica set (replica_is_active) costs the same Keeper reads as total/active_replicas. The opened table already pays for these reads.
   const std::string where = " FROM system.replicas WHERE " + scope_of(out.params, "table", database, table) + " LIMIT 1";
   out.sql = "SELECT " + std::string(kReplicaBaseColumns) + ", toString(is_leader), toString(inserts_in_queue), "
             "toString(merges_in_queue), toString(log_max_index - least(log_pointer, log_max_index)), toString(last_queue_update), "
@@ -343,7 +344,8 @@ SqlStatement table_ddl_sql(const std::string& database, const std::string& table
 SqlStatement columns_sql(const std::string& database, const std::string& table) {
   SqlStatement out;
   const std::string scope = scope_of(out.params, "table", database, table);
-  // system.columns does not expose ttl_expression on every supported ClickHouse release (notably 26.7): the column TTLs come from DESCRIBE TABLE.
+  // system.columns does not expose ttl_expression on every supported ClickHouse release, for example 26.7.
+  // The column TTLs come from DESCRIBE TABLE.
   out.sql = "SELECT toString(name), toString(type), toString(default_kind), toString(default_expression), toString(compression_codec), "
             "toString(data_compressed_bytes), toString(data_uncompressed_bytes), toString(comment), "
             "toString(is_in_partition_key), toString(is_in_sorting_key), toString(is_in_primary_key), toString(is_in_sampling_key) "
@@ -517,8 +519,8 @@ SqlStatement downstream_dependencies_sql(const std::string& database, const std:
 }
 
 SqlStatement reverse_lineage_sql() {
-  // system.tables applies database/name/engine predicates before it materializes the expensive columns (engine_full, as_select): the
-  // engine-filtered scan and the dependency lookup are two cheap statements.
+  // system.tables applies database, name and engine predicates before it materializes the expensive columns (engine_full, as_select).
+  // So the engine-filtered scan and the dependency lookup are two cheap statements.
   return statement(
       "SELECT toString(database), toString(name), toString(engine), "
       "if(engine = 'Buffer', toString(engine_full), ''), toString(as_select) "
@@ -574,8 +576,9 @@ SqlStatement preview_sql(const std::string& database, const std::string& table, 
   std::string text = "SELECT ";
   for (size_t i = 0; i < columns.size(); ++i) {
     if (i) text += ", ";
-    // clickhouse-cpp cannot deserialize native AggregateFunction state columns. Finalize only the rows selected by the bounded preview and
-    // stringify the result. This keeps the preview cheap (LIMIT <= 500) and keeps the declared type in the metadata that the page gets.
+    // clickhouse-cpp cannot deserialize native AggregateFunction state columns.
+    // Finalize only the rows that the bounded preview selects. Then stringify the result.
+    // This keeps the preview cheap (LIMIT <= 500). It also keeps the declared type in the metadata that the page gets.
     if (i < types.size() && types[i].rfind("AggregateFunction(", 0) == 0) {
       text += "toString(finalizeAggregation(" + quote_ident(columns[i]) + ")) AS " + quote_ident(columns[i]);
     } else {
@@ -602,8 +605,8 @@ SqlStatement graph_storage_policies_sql() {
 }
 
 SqlStatement graph_tables_sql() {
-  // Identity/version columns only: the formatted texts come from DdlTextCache, which re-reads them just for objects whose
-  // metadata_modification_time changed since the previous graph build.
+  // Select identity and version columns only.
+  // The formatted texts come from DdlTextCache. It re-reads them only for objects whose metadata_modification_time changed since the previous graph build.
   return statement(
       std::string("SELECT toString(database), toString(name), toString(engine), arrayStringConcat(data_paths, char(31)), ") +
       DdlTextCache::kVersionColumns + " FROM system.tables");

@@ -1,7 +1,7 @@
-// The page of one Observability view (traces.html, logs.html, metrics.html): each view is a page
-// of its own, at /observability/<view>, started by this one controller with the modules the
+// This is the page of one Observability view (traces.html, logs.html, metrics.html). Each view is a page
+// of its own, at /observability/<view>. This controller starts the view with the modules that the
 // page lists (src/static/modules.json). The row under the header links the three pages
-// (#obsNav); one trace (/observability/traces/<traceId>) is a fourth page (trace.html,
+// (#obsNav). One trace (/observability/traces/<traceId>) is a fourth page (trace.html,
 // app_page_trace.js).
 //
 //   /observability/traces[?search]            trace search (tab=services, tab=map: its sub-tabs)
@@ -9,17 +9,17 @@
 //   /observability/metrics[?from=&to=&service=&metric=&panel=...]
 //   /observability                            the server sends it to the first enabled view
 //
-// Shared context: the time range and the selected service follow the user from page to page. A
-// page publishes them when it is left (getContext) and the next one adopts what changed since it
-// last showed them (applyContext); both live in this tab's sessionStorage
-// (ns.storage.observabilityContext), with each view's last query string, so coming back to a
-// view from the row restores its filters. Every other filter stays with its view.
+// The time range and the selected service are shared context. They follow the person from page to page. A
+// page saves them when it is left (getContext). The next page takes the values that changed since it
+// last showed them (applyContext). Both live in the sessionStorage of this tab
+// (ns.storage.observabilityContext), with the last query string of each view. When the person returns to a
+// view from the row, its filters are restored. Every other filter stays with its view.
 //
-// The view's module (traces, logs, metrics) provides
-//   init()                    first show: reads the URL, binds, loads
-//   onLocation()              the URL changed under it (Back / Forward)
-//   getContext()              -> { range: { from, to }, service } (service null: several / none to share)
-//   applyContext(params, ctx) writes ctx.range / ctx.service (each may be null) into its URL params
+// The module of each view (traces, logs, metrics) provides:
+//   init()                    first show: reads the URL, binds the events, and loads the data
+//   onLocation()              the URL changed (Back / Forward)
+//   getContext()              -> { range: { from, to }, service } (service null: several services, or none, to share)
+//   applyContext(params, ctx) writes ctx.range and ctx.service into its URL params. Each may be null.
 
 import { api } from "./app_api.js";
 import { dom as domMod, h, shell } from "./app_dom.js";
@@ -32,7 +32,7 @@ import { icon } from "./app_ui_icon.js";
 import { lifecycle } from "./app_ui_layers.js";
 
 const VIEWS = ["traces", "logs", "metrics"];
-// The view this page shows and its module: startObservabilityPage() names them.
+// startObservabilityPage() names the view that this page shows, and its module.
 let view = "";
 let current = null;
 const store = () => ({
@@ -44,8 +44,8 @@ const sameRange = (a, b) => !!a && !!b && String(a.from) === String(b.from) && S
 
 // ------------------------------------------------------ shared context
 
-// The range and service this page leaves for the next one, and its query string for its own
-// next visit. Written whenever the page is left, whatever the way (pagehide).
+// This page saves the range and the service that it leaves for the next page. It also saves its own query string for its next visit.
+// The values are written whenever the page is left, in any way (pagehide).
 function publish() {
   const stored = store().get();
   const next = { ...stored, seen: { ...stored.seen }, urls: { ...stored.urls } };
@@ -54,7 +54,7 @@ function publish() {
     next.range = { from: String(context.range.from), to: String(context.range.to) };
     next.rangeRev += 1;
   }
-  // null and "" are the same service ("All"): Traces on All must not count as a change of what Logs restored.
+  // null and "" are the same service ("All"). Traces on All does not count as a change to what Logs restored.
   if (context && context.service != null && String(context.service) !== String(stored.service ?? "")) {
     next.service = String(context.service);
     next.serviceRev += 1;
@@ -64,9 +64,8 @@ function publish() {
   store().set(next);
 }
 
-// Reached from another Observability page (the row, a link): the way a view used to be switched
-// in place. A typed address, a bookmark or another product page's switcher open the page as it
-// is named.
+// A person can reach this page from another Observability page (the row, a link). The view then switches in place.
+// A typed address, a bookmark, or the switcher of another product page opens the page as the address names it.
 function fromObservability() {
   try {
     const from = new URL(document.referrer);
@@ -76,14 +75,13 @@ function fromObservability() {
   }
 }
 
-// The address this page opens on: its last query string when it was reached from the row (no
-// query of its own), with the shared range and service it has not shown yet. A link names what
-// it shows: it only gets the shared range, when it has none.
+// The page opens on this address. It uses the last query string when the person reached the page from the row, and the page has no query of its own.
+// It adds the shared range and service that it has not shown yet. A link names what it shows. Such a link gets the shared range only when it has none.
 function adopt() {
   const stored = store().get();
   const url = new URL(window.location.href);
   const mark = () => store().set({ ...stored, seen: { ...stored.seen, [view]: { rangeRev: stored.rangeRev, serviceRev: stored.serviceRev } } });
-  // The entry always gets the router's state (its view), whether the address changes or not.
+  // The history entry always gets the router state (its view). This happens whether the address changes or not.
   const open = () => router.write("replace", null, { href: `${url.pathname}${url.search}${url.hash}`, view });
   if (!fromObservability()) {
     mark();
@@ -134,8 +132,8 @@ function renderRow() {
   if (active) shell?.revealInRow?.(byId("obsNav"), active);
 }
 
-// /api/version turned this view off: the first enabled one (app_ui.js leaves the product when
-// none is left).
+// /api/version turned this view off. The page shows the first enabled view.
+// If no view is left, app_ui.js leaves the product.
 function onFeatures() {
   const enabled = enabledViews();
   renderRow();
@@ -144,14 +142,11 @@ function onFeatures() {
 
 // ------------------------------------------------------------- phones
 
-// At --bp-sm (600 px) and below the view leads with its content (docs/ui-foundations.md, "Touch
+// At --bp-sm (600 px) and below, the view shows its content first (docs/ui-foundations.md, "Touch
 // and phones"):
-//  - its filter bar folds into one summary line ("<time range> . N filters") that unfolds it; a
-//    search folds it again (ns.filterBar.mountSummary, app_ui_filterbar.js);
-//  - its overview charts ([data-phone-fold]: the Traces analytics, the Logs histogram) start
-//    folded to their head, a chevron unfolds each.
-// The folds only bite at that width (their rules sit in max-width: 600px blocks): a wider window
-// shows everything, the summary and chevrons hidden.
+//  - Its filter bar folds into one summary line ("<time range> . N filters"). A tap on the line unfolds the bar. A search folds the bar again (ns.filterBar.mountSummary, app_ui_filterbar.js).
+//  - Its overview charts ([data-phone-fold]: the Traces analytics, the Logs histogram) start folded to their head. A chevron unfolds each chart.
+// The folds apply only at that width, because their rules sit in max-width: 600px blocks. A wider window shows everything. It hides the summary and the chevrons.
 function mountChartFold(card) {
   const head = domMod.$(":scope > .chartCard__head", card);
   if (!head) return;
@@ -181,8 +176,8 @@ function bindShell() {
   header.setPageSelectorValue("observability");
   shell?.edgeCues?.(domMod.byId("obsNav"));
   window.addEventListener("pagehide", publish);
-  // A page restored from the back/forward cache never ran start(): it takes what the other pages changed meanwhile
-  // (the shared range and service) before it publishes its own context again at the next pagehide.
+  // A page restored from the back/forward cache never ran start(). It takes the shared range and service that the other pages changed meanwhile.
+  // Then it publishes its own context again at the next pagehide.
   window.addEventListener("pageshow", (event) => {
     if (!event.persisted) return;
     adopt();
@@ -200,13 +195,13 @@ export async function startObservabilityPage(name, viewInstance) {
   header.init();
   adopt();
   renderRow();
-  // The page shows one view for as long as it lives: its scope (listeners bound with lifecycle.bind) is the page's.
+  // The page shows one view for as long as the page lives. The scope of the view (listeners bound with lifecycle.bind) belongs to the page.
   lifecycle?.enter(view);
   viewModule()?.init?.();
   compactView();
-  // Back / Forward within the page: another query string of the same view.
+  // Back / Forward move within the page. The query string changes, but the view stays the same.
   router.on("/observability", () => viewModule()?.onLocation?.());
-  // /api/version answered during the first load and turned this view off.
+  // /api/version answered during the first load. It turned this view off.
   if (featuresKnown() && enabledViews().length && !enabledViews().includes(view)) onFeatures();
 }
 

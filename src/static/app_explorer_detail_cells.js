@@ -1,5 +1,6 @@
-// The DOM pieces that the tabs of the table card share: the SQL expression of the card, the cells of a table (gauge, number, text, time), the
-// table itself (the shared result table with column specs), a collapsible section and its list, the object icon and the lineage chip.
+// This file has the DOM parts that the tabs of the table card share.
+// The parts are: the SQL expression of the card, the cells of a table (gauge, number, text and time), the table itself, a collapsible section and its list, the object icon and the lineage chip.
+// The table itself is the shared result table, with column specs.
 
 import { dom, h } from "./app_dom.js";
 import { DASH, DEPENDENCY_KINDS, objectType, optionalNumber, shortName } from "./app_explorer_detail_model.js";
@@ -14,11 +15,10 @@ import { table } from "./app_ui_table.js";
 
 const { $$ } = dom;
 
-// An SQL expression of the card, coloured by the Query editor's
-// highlighter (renderHighlightedCode, app_explorer_doc.js: ns.highlight, the
-// same .tok-* classes and theme colours).
-// Function names need the host's function list (ns.meta): the
-// expressions repaint when it arrives (chdash:meta-changed).
+// An SQL expression of the card gets its colours from the highlighter of the Query editor.
+// The code uses renderHighlightedCode (app_explorer_doc.js: ns.highlight). It uses the same .tok-* classes and theme colours.
+// Function names need the function list of the host (ns.meta).
+// The expressions repaint when the list arrives (chdash:meta-changed).
 function paintExpr(code) {
   renderHighlightedCode(code, code.dataset.sql || "");
 }
@@ -30,20 +30,20 @@ function exprEl(text, className = "") {
   return code;
 }
 
-// Repaints the expressions of the card when the function list arrives; called once, by the card's init.
+// Repaints the expressions of the card when the function list arrives. The card's init calls this function one time.
 function watchExpressions() {
   window.addEventListener("chdash:meta-changed", () => {
     for (const code of $$(".explorerExpr[data-sql]", dom.explorerDetailContent) || []) paintExpr(code);
   });
 }
 
-// Treemaps of the card (partitions, column sizes): destroyed with the body.
+// The code destroys the treemaps of the card (partitions, column sizes) with the body.
 const cardMaps = [];
 function destroyCardMaps() {
   while (cardMaps.length) cardMaps.pop()?.destroy?.();
 }
 
-// The one empty / unavailable style of the card: a muted line, no box.
+// This is the one style for an empty or unavailable value on the card. It is a muted line, with no box.
 function emptyNote(text) {
   return h("div", { class: "explorerEmptyNote" }, text);
 }
@@ -52,16 +52,16 @@ function unavailableMessage(label) {
   return emptyNote(`${label} is unavailable on this server or is not enabled.`);
 }
 
-// A DateTime text of the server's system tables: browser-local text, the
-// server value (and ISO) in the tooltip (decision 48).
+// A DateTime text of the server's system tables shows browser-local text.
+// The server value and the ISO value appear in the tooltip (decision 48).
 function timeCell(td, value) {
   const time = header.serverTime(value);
   td.textContent = time.text;
   if (time.title) td.title = time.title;
 }
 
-// In-cell bar normalised to the column maximum (ns.table.cellBar); the
-// callers pass measures only (sizes, bytes, progress).
+// This is an in-cell bar normalised to the column maximum (ns.table.cellBar).
+// The callers pass measures only: sizes, bytes and progress.
 function gaugeCell(td, value, max, text) {
   td.classList.add("num");
   table.cellBar(td, table.barPercent(optionalNumber(value), max));
@@ -73,7 +73,7 @@ function numericCell(td, text) {
   td.textContent = text;
 }
 
-// Text cell that ellipsises in CSS and keeps the full value as tooltip.
+// A text cell that CSS shortens with an ellipsis. The full value stays in the tooltip.
 function textCell(td, value, className = "") {
   const text = value == null || value === "" ? DASH : String(value);
   td.textContent = text;
@@ -81,10 +81,10 @@ function textCell(td, value, className = "") {
   if (text.length > 12) td.title = text;
 }
 
-// The shared Query result table with column specs instead of positional
-// renderers: { label, type, value(item), render(td, item, value), head }.
-// Row numbers always start at 1 per table.
-// A spec's `priority` ("low", "mid" or "xs") names the width below which its column leaves the table (table.css, "Priority columns").
+// The shared Query result table uses column specs, not positional renderers.
+// A column spec has this form: { label, type, value(item), render(td, item, value), head }.
+// Row numbers start at 1 for each table.
+// A spec's `priority` ("low", "mid" or "xs") names the width. Below that width, the column leaves the table (table.css, "Priority columns").
 function staticTable({ className, specs, items, rowIndexValue = null, decorateRow = null, rowDetails = false }) {
   const rows = items.map((item) => {
     const row = specs.map((spec) => spec.value(item));
@@ -121,7 +121,7 @@ function staticTable({ className, specs, items, rowIndexValue = null, decorateRo
   return table;
 }
 
-// Collapsible section with a count; returns its body.
+// This is a collapsible section with a count. It returns its body.
 function section(container, { id, title, count = null, open = true, note = "" }) {
   const details = h("details", { class: "explorerSection" });
   details.dataset.section = id;
@@ -136,8 +136,7 @@ function section(container, { id, title, count = null, open = true, note = "" })
   return body;
 }
 
-// Renders sections with data first, then one muted line naming the empty
-// ones ("No active merges \u00b7 No mutations").
+// Renders the sections with data first. Then it renders one muted line that names the empty sections ("No active merges · No mutations").
 function renderSections(container, sections) {
   const shown = sections.filter((item) => item && item.hasData);
   const idle = sections.filter((item) => item && !item.hasData && item.emptyText);
@@ -154,7 +153,7 @@ function renderSections(container, sections) {
   if (!shown.length && !idle.length) container.appendChild(emptyNote("Nothing to show for this object."));
 }
 
-// The sprite drawing of each object family (the Explorer tree's, app_explorer.js).
+// This is the sprite drawing for each object family. The drawing is the one of the Explorer tree (app_explorer.js).
 const OBJECT_ICONS = {
   table: "table", view: "eye", mv: "eye-table", dictionary: "vocabulary",
   buffer: "stack", distributed: "table-share", unknown: "table",

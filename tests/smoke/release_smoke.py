@@ -40,6 +40,15 @@ STARTUP_SECONDS = 30
 # server.shutdown_timeout_ms is 10 s by default: a stop that takes longer is a failure.
 STOP_SECONDS = 15
 HTML = "text/html"
+# The secrets of release-smoke.hcl are variables of the environment (the attributes that end in _env name them); the binary reads
+# no other variable.
+SMOKE_KEY = "mcp_5a0c0000SmokeKey000000000000000000000000012"
+SMOKE_ENV = {
+    "CHDASH_SMOKE_KEY": SMOKE_KEY,
+    "CHDASH_SMOKE_RUNNER_PASSWORD": "runner_test",
+    "CHDASH_SMOKE_SYSTEM_PASSWORD": "system_test",
+    "CHDASH_SMOKE_MCP_PASSWORD": "mcp_test",
+}
 
 # (path, status or tuple of statuses, extra checks). "location" is the exact Location header of a redirect; "type" a
 # Content-Type prefix; "has" a text that the body must hold; "json" the keys the JSON body must hold.
@@ -124,7 +133,8 @@ class Process:
     def __init__(self, binary: Path, config: Path, work: Path):
         self.log = work / "server.log"
         self._log = self.log.open("wb")
-        self.proc = subprocess.Popen([str(binary), "--config", str(config)], stdout=self._log, stderr=subprocess.STDOUT)
+        self.proc = subprocess.Popen([str(binary), "--config", str(config)], stdout=self._log, stderr=subprocess.STDOUT,
+                                     env={**os.environ, **SMOKE_ENV})
 
     def alive(self) -> bool:
         return self.proc.poll() is None
@@ -173,7 +183,8 @@ class Scratch:
         self.tag = f"chdash-release-smoke:{os.getpid()}"
         self.name = f"chdash-release-smoke-{os.getpid()}"
         run(["docker", "build", "-q", "-t", self.tag, str(context)])
-        run(["docker", "run", "-d", "--name", self.name, "--read-only", "--tmpfs", "/data",
+        env = [part for name, value in SMOKE_ENV.items() for part in ("-e", f"{name}={value}")]
+        run(["docker", "run", "-d", "--name", self.name, "--read-only", "--tmpfs", "/data", *env,
              "-p", f"127.0.0.1:{port}:8080", self.tag])
 
     def alive(self) -> bool:
@@ -336,11 +347,13 @@ def check_wasm(port: int) -> str:
 
 def check_mcp(port: int) -> str:
     """The MCP endpoint is on, wants a key, and answers a key; the cross-site guard stays on."""
-    code, _, _ = post(port, "/mcp", b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+    code, _, body = post(port, "/mcp", b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
     if code != 401:
         raise Failure(f"/mcp without a key: status {code}, expected 401")
+    if json.loads(body).get("error", {}).get("code") != -32001:
+        raise Failure(f"/mcp without a key: the body is not the JSON-RPC error -32001: {body[:120]!r}")
     code, _, body = post(port, "/mcp", b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
-                         {"Authorization": "Bearer 5a0c0000-0000-4000-8000-000000000012"})
+                         {"Authorization": f"Bearer {SMOKE_KEY}"})
     if code != 200 or b"list_hosts" not in body:
         raise Failure(f"/mcp tools/list with a key: status {code}: {body[:120]!r}")
     return "tools/list"

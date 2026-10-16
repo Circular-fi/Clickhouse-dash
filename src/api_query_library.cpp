@@ -1,8 +1,8 @@
 // REST handlers of the server-side query library (docs/query-library.md).
 //
-// Routes exist only when a query_library block is enabled (404 otherwise); ?library= names one of them. This file
-// never executes SQL: saved SQL is stored and returned verbatim.
-// Request paths only select an entity id; the filesystem path is the
+// Routes exist only when a query_library block is enabled. Otherwise, the answer is 404. The ?library= parameter names one of the libraries.
+// This file never executes SQL. It stores the saved SQL and returns it verbatim.
+// A request path selects only an entity id. The filesystem path is the
 // configured file of the library (query_library.file).
 
 #include "server.hpp"
@@ -43,7 +43,7 @@ const std::string* optional_param(const httplib::Request& req, const char* name,
   return &storage;
 }
 
-// A non-negative integer parameter, or the default (an absent, empty or unreadable one).
+// This reads a non-negative integer parameter. The default applies when the parameter is absent, empty, or unreadable.
 size_t number_param(const httplib::Request& req, const char* name, size_t fallback) {
   if (!req.has_param(name)) return fallback;
   const std::string text = req.get_param_value(name);
@@ -69,7 +69,8 @@ void Server::handle_query_library(const httplib::Request& req, httplib::Response
     library_error(res, 404, "not_found", "the query library is disabled");
     return;
   }
-  // Several libraries: ?library=<name> picks one (on every route, the writes too); without it the first, the default.
+    // ?library=<name> picks one of several libraries. It works on every route, and on the writes too.
+    // Without it, the first library applies. This is the default.
   QueryLibraryStore* chosen = query_libraries_.front().get();
   if (req.has_param("library")) {
     const std::string wanted = req.get_param_value("library");
@@ -86,8 +87,8 @@ void Server::handle_query_library(const httplib::Request& req, httplib::Response
   const bool has_body = route == QueryLibraryRoute::FolderCreate || route == QueryLibraryRoute::FolderUpdate ||
                         route == QueryLibraryRoute::QueryCreate || route == QueryLibraryRoute::QueryUpdate ||
                         route == QueryLibraryRoute::Import;
-  // Every write (POST, PATCH, DELETE) passed the guard of the writes before the routing (http_guard.hpp,
-  // Server::before_routing): not from a page of another site, and a body of application/json only.
+    // The guard of the writes runs before the routing (http_guard.hpp, Server::before_routing). It applies to every write (POST, PATCH, DELETE).
+    // The guard refuses a write from a page of another site. It accepts only a body of application/json.
   if (has_body && req.body.size() > store.options().max_file_bytes + 64 * 1024) {
     library_error(res, 413, "too_large", "the request body exceeds query_library.max_file_bytes");
     return;
@@ -96,8 +97,8 @@ void Server::handle_query_library(const httplib::Request& req, httplib::Response
   std::string if_match_storage;
   const std::string* if_match = optional_header(req, "If-Match", if_match_storage);
   const std::string id = req.matches.size() > 1 ? std::string(req.matches[1]) : std::string();
-  // The library and its folders are per host: the read names it (?host_id=),
-  // the writes in their body.
+    // The library and its folders belong to each host. A read names the host with ?host_id=.
+    // A write names the host in its body.
   std::string host_storage;
   const std::string* host_id = optional_param(req, "host_id", host_storage);
 

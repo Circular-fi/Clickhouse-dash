@@ -53,7 +53,7 @@ std::string duration_having(double min_duration_ms, double max_duration_ms) {
 }
 
 int choose_bucket_seconds(int64_t range_ms) {
-  // Aim for roughly 60 visible buckets. A one-hour range therefore has one bar per minute.
+    // Aim for about 60 visible buckets. Therefore, a one-hour range has one bar per minute.
   const int64_t desired = std::max<int64_t>(60, range_ms / 1000 / 60);
   const int candidates[] = {60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 259200, 604800, 1209600, 2592000};
   for (int value : candidates) if (value >= desired) return value;
@@ -61,7 +61,7 @@ int choose_bucket_seconds(int64_t range_ms) {
 }
 
 int choose_quantile_bucket_seconds(int64_t range_ms) {
-  // Keep latency quantiles denser than the count chart while retaining a one-minute floor.
+    // Keep the latency quantiles denser than the count chart. Keep the one-minute floor.
   const int64_t desired = std::max<int64_t>(60, range_ms / 1000 / 120);
   const int candidates[] = {60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 259200, 604800};
   for (int value : candidates) if (value >= desired) return value;
@@ -95,7 +95,7 @@ std::string trace_durations_cte(const TraceScope& scope, bool broad) {
         " WHERE " + scope.visibility + scope.span_filters + " LIMIT 1 BY TraceId)"
       : std::string{};
   const std::string candidate_where = narrow ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
-  // Broad service / operation filters aggregate once with HAVING countIf instead of building an IN set of most traces.
+    // Broad service and operation filters aggregate once, with HAVING countIf. This avoids an IN set of most traces.
   const std::string having = broad ? broad_having(scope.span_filters, scope.having) : scope.having;
   const std::string trace_scope = " FROM " + scope.table + " PREWHERE " + scope.window() + " WHERE " + scope.visibility +
       candidate_where + " GROUP BY TraceId" + having;
@@ -112,8 +112,8 @@ AnalyticsGrid analytics_grid(int64_t start_ms, int64_t end_ms, int64_t bucket_or
   }
   grid.bucket_ms = static_cast<int64_t>(bucket_seconds) * 1000;
   grid.quantile_bucket_ms = static_cast<int64_t>(quantile_bucket_seconds) * 1000;
-  // Buckets lie on a grid anchored at bucket_origin_ms. Only the origin modulo the bucket size matters, and the quantile bucket
-  // divides the count bucket, so both grids nest.
+    // Buckets lie on a grid anchored at bucket_origin_ms. Only the origin modulo the bucket size matters.
+    // The quantile bucket divides the count bucket. So both grids nest.
   grid.count_origin_ms = grid_origin_ms(bucket_origin_ms, grid.bucket_ms);
   grid.quantile_origin_ms = grid_origin_ms(bucket_origin_ms, grid.quantile_bucket_ms);
   grid.range_start_ms = align_buckets ? grid_floor_ms(start_ms, grid.bucket_ms, grid.count_origin_ms) : start_ms;
@@ -195,7 +195,7 @@ std::string deltas_attribute_sql(const TraceScope& scope, const DeltaWindows& wi
                       "('column', 'StatusCode', toString(StatusCode))]";
   if (span_map) pairs += ", arrayMap((k, v) -> ('span', toString(k), toString(v)), SpanAttributes.keys, SpanAttributes.values)";
   if (resource_map) pairs += ", arrayMap((k, v) -> ('resource', toString(k), toString(v)), ResourceAttributes.keys, ResourceAttributes.values)";
-  // Share of the side's sampled traces, so that values are ranked alike whatever the two sample sizes.
+    // This is the share of the side's sampled traces. So the values are ranked alike, whatever the two sample sizes.
   const std::string share = "x.2 / " + std::to_string(n_in) + " + x.3 / " + std::to_string(std::max<size_t>(1, n_out));
   return "SELECT scope, key, toString(uniq_in), toString(uniq_out), toString(occ_in), toString(occ_out), "
          "tv.1, toString(tv.2), toString(tv.3) FROM ("
@@ -214,8 +214,9 @@ std::string deltas_attribute_sql(const TraceScope& scope, const DeltaWindows& wi
 
 namespace {
 
-// The time predicate of a service map read: the whole window, or `count` equally long slices (together `coverage` of the window),
-// each centred in its share of the window. *actual is the coverage really read.
+// The time predicate of a service map read is the whole window, or `count` equally long slices.
+// Together, the slices make up `coverage` of the window. Each slice is centred in its share of the window.
+// *actual is set to the coverage that is really read.
 std::string service_map_time_predicate(int64_t start_ms, int64_t end_ms, double coverage, int* slices, double* actual) {
   const int64_t window_ms = end_ms - start_ms;
   *slices = 0;
@@ -259,7 +260,7 @@ std::string service_map_estimate_sql(const std::string& table, int64_t start_ms,
 
 std::string service_map_sql(const TraceScope& scope, const ServiceMapSampling& sampling) {
   const std::string sample_sql = sampling.trace_factor > 1 ? " AND cityHash64(TraceId) % " + std::to_string(sampling.trace_factor) + " = 0" : std::string{};
-  // Trace selection by the search filters, on the same (sampled) spans.
+    // The search filters select the traces, on the same sampled spans.
   const std::string duration_terms = scope.having.empty() ? std::string{} : having_terms(scope.having);
   const std::string scan = " FROM " + scope.table + " PREWHERE " + sampling.time_predicate + sample_sql + " WHERE " + scope.visibility;
   std::string candidate;
@@ -450,7 +451,7 @@ ServicesWindow services_window(int64_t start_ms, int64_t end_ms, int64_t bucket_
     if (hi <= lo) continue;
     const int64_t length = std::min(slice_ms, hi - lo);
     const int64_t bucket_index = bucket / bucket_ms;
-    // Golden-ratio offsets: spread over the bucket, stable for a given grid.
+        // Golden-ratio offsets. They spread the slices over the bucket and stay stable for a given grid.
     const double phase = std::fmod(static_cast<double>(bucket_index) * 0.6180339887498949, 1.0);
     const int64_t at = lo + static_cast<int64_t>(std::floor(std::fabs(phase) * static_cast<double>(hi - lo - length)));
     if (!terms.empty()) terms += " OR ";
@@ -534,7 +535,7 @@ std::string index_window_predicate(int64_t start_ms, int64_t end_ms) {
 }
 
 std::string index_slice_sql(const std::string& index_table, const std::string& window, int64_t lo_ns, int64_t hi_ns, size_t row_cap) {
-  // toDateTime64(…, 9) accepts both DateTime and DateTime64 index schemas.
+    // toDateTime64(…, 9) accepts both DateTime and DateTime64 index schemas.
   return "SELECT toString(TraceId), toString(toUnixTimestamp64Nano(toDateTime64(max(Start), 9))) FROM " + index_table +
          " PREWHERE " + window + " AND Start >= " + ns_time(lo_ns) + " AND Start <= " + ns_time(hi_ns) +
          " GROUP BY TraceId LIMIT " + std::to_string(row_cap + 1);
@@ -576,7 +577,7 @@ std::string rank_sql(const RankSlice& slice) {
         " WHERE " + scope.visibility + scope.span_filters + " LIMIT 1 BY TraceId) "
       : std::string{};
   const std::string candidate_where = slice.narrow_filters ? " AND TraceId IN (SELECT TraceId FROM candidate_ids)" : std::string{};
-  // Same expression as the duration HAVING, so it is aggregated only once.
+    // This is the same expression as the duration HAVING. So it is aggregated only once.
   const std::string span_end = scope.having.empty()
       ? std::string("'0'")
       : std::string("toString(max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)))");
@@ -599,14 +600,17 @@ std::vector<std::pair<std::string, std::string>> trace_ids_params(const std::vec
 }
 
 std::string summary_sql(const TraceScope& scope, int64_t first_span_ns, int64_t span_end_ns, size_t limit) {
-  // Per-service span/error counts are aggregated server-side with sumMap, so the per-trace state and the payload are
-  // O(services), not O(spans). Spans without a ServiceName are not reported as a service. minMap keeps each service's
-  // earliest span start in the same O(services) state; both maps sort the same key set, so their arrays zip aligned.
+    // Per-service span and error counts are aggregated on the server with sumMap.
+    // So the per-trace state and the payload are O(services), not O(spans).
+    // Spans without a ServiceName are not reported as a service.
+    // minMap keeps each service's earliest span start in the same O(services) state.
+    // Both maps sort the same key set. So their arrays zip aligned.
   const std::string service_stats_map =
       "sumMap([toString(ServiceName)], [toUInt64(1)], [toUInt64(StatusCode = 'Error')])";
   const std::string service_first_span_map = "minMap([toString(ServiceName)], [toUnixTimestamp64Nano(Timestamp)])";
-  // Parent span ids that no span of the trace carries (Jaeger's "incomplete trace" hint): distinct span and parent ids minus
-  // distinct span ids, over the same window spans as the other columns.
+    // Parent span ids that no span of the trace carries (Jaeger's "incomplete trace" hint).
+    // The count is the distinct span and parent ids, minus the distinct span ids.
+    // It uses the same window spans as the other columns.
   const std::string missing_parents_expr =
       "toString(uniqExactArray(arrayFilter(id -> notEmpty(id), [toString(SpanId), toString(ParentSpanId)])) - "
       "uniqExactIf(toString(SpanId), notEmpty(SpanId)))";
@@ -621,10 +625,11 @@ std::string summary_sql(const TraceScope& scope, int64_t first_span_ns, int64_t 
       service_stats_map + ", 2), tupleElement(" + service_stats_map + ", 3), tupleElement(" + service_first_span_map +
       ", 2)))), char(31)), " + missing_parents_expr + " ";
 
-  // The summary aggregates every window span of <= limit selected traces, so it only needs the time range those spans occupy
-  // instead of probing every part of the window. Span-ranked traces carry exact bounds (earliest window span, and the latest
-  // span end when the duration HAVING computed it); index-selected traces use their index bounds (every span Timestamp is
-  // covered by the [Start, End] row of its insert batch) with the same 1 s margin as trace detail.
+    // The summary aggregates every window span of <= limit selected traces.
+    // So it needs only the time range that those spans occupy, not every part of the window.
+    // Span-ranked traces carry exact bounds (earliest window span, and the latest span end when the duration HAVING computed it).
+    // Index-selected traces use their index bounds. Every span Timestamp is covered by the [Start, End] row of its insert batch.
+    // These bounds use the same 1 s margin as trace detail.
   std::string with;
   std::string bounds;
   if (first_span_ns > 0) {

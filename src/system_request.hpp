@@ -1,9 +1,13 @@
 #pragma once
 
-// What the routes of the System page read from a request (docs/system.md): the host, a window in milliseconds (clamped and checked here
-// against the settings), and the allowlisted enums of the Queries. Parsing only: nothing here reads ClickHouse, and a request names no SQL, no
-// column and no limit. A route refuses a parameter that it does not know, so a typo is an error. A parser returns false with the 400 answer
-// in *error; the host is looked up after the parsing, so a bad parameter is refused before an unknown host is.
+// This unit gives the values that the routes of the System page read from a request (docs/system.md).
+// A request gives the host, a window in milliseconds, and the allowlisted enums of the Queries. The window is clamped and checked here against the settings.
+//
+// This code only parses. Nothing here reads ClickHouse. A request names no SQL, no column and no limit.
+// A route refuses a parameter that it does not know. A typo is therefore an error.
+//
+// A parser returns false with the 400 answer in *error. The host is looked up after the parsing.
+// A bad parameter is refused before an unknown host is.
 
 #include "error_envelope.hpp"
 #include "system_queries.hpp"
@@ -33,7 +37,7 @@ struct SeriesRequest {
   bool refresh = false;
 };
 
-// The list of the top query shapes. `query` holds what the user chose (the account users are set by the service).
+// The list of the top query shapes. `query` holds the choices of the user. The service sets the account users.
 struct QueriesRequest {
   std::string host_id;
   uint64_t from_ms = 0, to_ms = 0;

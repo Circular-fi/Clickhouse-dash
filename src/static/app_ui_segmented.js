@@ -1,12 +1,13 @@
-// Segmented controls: a short row of mutually exclusive choices that
-// switch a view in place (Traces | Spans, List | Table, Percentiles |
-// Heatmap, Table | Chart, the chart types, Lineage | Storage, the context
-// window presets...). One look (.segmented / .segmented__option, the
-// pressed option on --selected-bg), two sizes (default 28 px, compact
-// 24 px: .segmented--compact) and one ARIA pattern: role=group (named by
-// aria-label) of toggle buttons carrying aria-pressed. Each option keeps
-// its value in a data attribute the caller names (data-<attr>, "value" by
-// default), so its selectors and URLs keep their meaning.
+// Segmented controls: a short row of mutually exclusive choices. Each choice switches
+// a view in place. Examples: Traces | Spans, List | Table, Percentiles | Heatmap,
+// Table | Chart, the chart types, Lineage | Storage, and the context window presets.
+//
+// All segmented controls have one look: .segmented and .segmented__option. The pressed
+// option uses --selected-bg. There are two sizes: 28 px (the default) and 24 px
+// (.segmented--compact). All controls use one ARIA pattern. The group has role=group and
+// an aria-label. Each option is a toggle button with aria-pressed. Each option keeps its
+// value in a data attribute. The caller names the attribute (data-<attr>, "value" by
+// default). Selectors and URLs keep their meaning.
 //
 //   html(options, { attr, value, size, label, className })  markup string
 //   render(group, options, { attr, value, size, label })    builds the row
@@ -14,9 +15,9 @@
 //   set(group, value, attr)                                  marks the pressed option
 //
 // options: [{ value, label, title, disabled, hidden, html, iconOnly }]
-// (html: a trusted inner markup, e.g. an icon before the label; iconOnly:
-// the html is an icon alone, and label names the option as its
-// aria-label, title its tooltip).
+// html: trusted inner markup, for example an icon before the label.
+// iconOnly: the html is an icon only. The label is then the aria-label of the option.
+// The title is the tooltip of the option.
 
 import { dom } from "./app_dom.js";
 import { util } from "./app_util.js";
@@ -24,7 +25,7 @@ import { util } from "./app_util.js";
 const { $$ } = dom;
 
 const dataKey = (attr) => `data-${attr.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
-// util.escapeHtml (app_util.js loads after this module, before any markup is built).
+// util.escapeHtml: app_util.js loads after this module, but before any markup is built.
 const esc = (value) => util.escapeHtml(String(value ?? ""));
 
 function groupClass(size, className) {
@@ -55,7 +56,7 @@ function html(options, { attr = "value", value = "", size = "", label = "", clas
   return `<div class="${esc(groupClass(size, className))}" role="group"${label ? ` aria-label="${esc(label)}"` : ""}>${items}</div>`;
 }
 
-// Fills `group` (its own classes kept) with the options.
+// Fill `group` with the options. The own classes of `group` stay.
 function render(group, options, { attr = "value", value = "", size = "", label = "" } = {}) {
   if (!group) return;
   group.classList.add("segmented");
@@ -67,9 +68,8 @@ function render(group, options, { attr = "value", value = "", size = "", label =
   group.replaceChildren(...box.firstElementChild.childNodes);
 }
 
-// The click on an option that is not pressed yet calls onChange; the
-// caller decides (and calls set) or set happens here when it returns
-// anything but false.
+// A click on an option that is not pressed calls onChange. If onChange returns anything
+// but false, set runs here. The caller can also call set itself.
 function bind(group, { attr = "value", onChange = null } = {}) {
   if (!group) return { set: () => {}, value: () => "" };
   group.setAttribute("role", "group");

@@ -1,5 +1,7 @@
-// What the page copies. The app copies through the clipboard API in a secure context and through the selection of a
-// hidden textarea outside one: captureCopies() records the second and, with { clipboard: true }, reads the first too.
+// The page copies text in two ways.
+// In a secure context, the app copies through the clipboard API.
+// Outside a secure context, it copies through the selection of a hidden textarea.
+// captureCopies() records the second copy (the textarea). With { clipboard: true }, it also reads the first copy (the clipboard API).
 //
 //   const copied = await captureCopies(page);            // before the click that copies
 //   await expect.poll(copied).toBe('text');                // the last text copied

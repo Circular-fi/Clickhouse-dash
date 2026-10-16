@@ -1,5 +1,5 @@
-// The preview of the Explorer: the first rows of a table that the runner may read, as typed JSON cells (the encoder of the query results). The
-// columns are the ones that the runner may read, and a state of an aggregate function is finalized by the statement.
+// The preview of the Explorer. It shows the first rows of a table that the runner may read, as typed JSON cells.
+// The encoder of the query results writes these cells. The columns are the ones that the runner may read. The statement finalizes the state of an aggregate function.
 #include "explorer_catalog.hpp"
 
 #include "explorer_sql.hpp"
@@ -18,7 +18,7 @@ using namespace explorer;
 
 namespace {
 
-// The columns of the table that the runner may read, in the order of DESCRIBE.
+// Lists the columns of the table that the runner may read, in the order of DESCRIBE.
 std::vector<std::string> allowed_columns_for_table(
     const AllowedObjectSet& allowed,
     const std::string& database,
@@ -70,9 +70,9 @@ bool load_explorer_preview(
     return false;
   }
 
-  // Preserve the native ClickHouse types and pass every cell through the same JSON encoder used by Query results. This is critical for
-  // LowCardinality, Nullable, Bool, Array, Tuple, Map and other nested types. Explorer must not have a second string-only serialization
-  // path.
+  // Keep the native ClickHouse types. Pass every cell through the same JSON encoder that Query results use.
+  // This is critical for LowCardinality, Nullable, Bool, Array, Tuple, Map and other nested types.
+  // Explorer must not have a second, string-only serialization path.
   std::vector<std::string> types;
   types.reserve(columns.size());
   for (size_t i = 0; i < columns.size(); ++i) {
@@ -98,8 +98,8 @@ bool load_explorer_preview(
           rapidjson::Writer<rapidjson::StringBuffer> cell_writer(cell_buffer);
           const std::string& declared_type = out.columns[i].type;
           if (declared_type.rfind("AggregateFunction(", 0) == 0) {
-            // The SELECT projection above finalized/stringified the state, so decode the returned String column by its runtime type while
-            // the public preview metadata keeps the original AggregateFunction type.
+            // The SELECT projection above finalized and stringified the state. Decode the returned String column by its runtime type.
+            // The public preview metadata keeps the original AggregateFunction type.
             write_cell_json(cell_writer, block[i], row);
           } else if (!declared_type.empty()) {
             write_cell_json_declared(cell_writer, block[i], row, declared_type);

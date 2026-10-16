@@ -1,9 +1,7 @@
-// Synthetic /api/traces/trace answers for the trace detail page. The OTel
-// fixture traces are flat (every span a child of the root), so the tree,
-// error, critical path and scale checks run on these mocked traces instead.
-//
-// Each answer is built as JSON text with exact start_ns digits (past 2^53),
-// like the real endpoint.
+// Synthetic /api/traces/trace answers for the trace detail page. The traces of the OTel fixture are flat.
+// Every span in the fixture is a child of the root span.
+// The tree, error, critical path and scale checks therefore run on these mocked traces instead.
+// Each answer is JSON text with exact start_ns digits past 2^53. The real endpoint builds its answers the same way.
 
 export const MOCK_TRACE_START_NS = 1789867372000000000n;
 
@@ -44,7 +42,7 @@ export function traceBody(trace) {
 
 const hex = (value, size) => value.toString(16).padStart(size, '0');
 
-// A 5-level checkout trace:
+// A checkout trace with five levels:
 //
 // frontend GET /checkout                              0 .. 100 ms (http 200)
 // ├─ frontend render                                  2 .. 12
@@ -79,14 +77,14 @@ export function nestedTrace(traceId = 'a1b2c3d4e5f60718293a4b5c6d7e8f90') {
   return { trace_id: traceId, spans };
 }
 
-// A large trace: `count` spans, up to `depth` levels, deterministic.
+// A large trace with `count` spans and up to `depth` levels. The trace is deterministic.
 export function largeTrace(count = 2000, traceId = 'f00dfeedf00dfeedf00dfeedf00dfeed', depth = 6) {
   const services = ['gateway', 'orders', 'billing', 'stock', 'search', 'users', 'mailer', 'ledger'];
   const spans = [{ span_id: hex(1, 16), name: 'GET /bulk', service: 'gateway', kind: 'Server', start_ms: 0, duration_ms: 4000, level: 0 }];
   let seed = 7;
   const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   for (let i = 2; i <= count; i += 1) {
-    // Pick a parent among recent spans that still has room below it.
+    // Pick a parent among the recent spans that still have room below them.
     let parent = spans[Math.floor(rand() * spans.length)];
     if (parent.level >= depth - 1) parent = spans[0];
     const start = parent.start_ms + rand() * parent.duration_ms * 0.8;
@@ -106,7 +104,7 @@ export function largeTrace(count = 2000, traceId = 'f00dfeedf00dfeedf00dfeedf00d
   return { trace_id: traceId, spans };
 }
 
-// Serves a search answer listing `traces` (one row each) for /api/traces/search.
+// Serves a search answer that lists `traces`, one row each, for /api/traces/search.
 export async function routeSearch(page, traces) {
   const services = [...new Set(traces.flatMap((trace) => trace.spans.map((span) => span.service)))].sort();
   const rows = traces.map((trace) => {

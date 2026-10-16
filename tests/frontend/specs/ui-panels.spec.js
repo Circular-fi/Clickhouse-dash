@@ -3,13 +3,14 @@ import { installObservers } from '../helpers/observability.js';
 import { mockTraceFacets, mockTraceResults, mockTraceServices } from '../helpers/traces.js';
 import { settle, cameraIdle } from '../helpers/graph-kit.js';
 
-// ns.detailPanel (app_ui_panel.js): one right panel for one entity, docked
-// beside the content (Logs record, Spans, Services) or floating over a canvas
-// (the graph-kit panel of the Explorer graph, the service map and the trace
-// graph). One head (eyebrow, title, subtitle, actions, the .closeCross close
-// button), --detail-w wide, Escape through ns.layers, a bottom sheet at
-// --bp-md and below. A panel showing one entity writes one URL parameter:
-// pushed when it opens, replaced when it moves, and Back closes it.
+// ns.detailPanel (app_ui_panel.js): one right panel for one entity. The panel
+// docks beside the content (Logs record, Spans, Services). It floats over a
+// canvas (the graph-kit panel of the Explorer graph, the service map and the
+// trace graph). One head holds the eyebrow, the title, the subtitle, the actions
+// and the .closeCross close button. The width is --detail-w. Escape works through
+// ns.layers. At --bp-md and below, the panel is a bottom sheet. A panel that shows
+// one entity writes one URL parameter. The parameter is pushed when the panel
+// opens and replaced when the entity moves. Back closes the panel.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -23,7 +24,7 @@ test.afterEach(async ({ page }, testInfo) => {
 const param = (page, name) => new URL(page.url()).searchParams.get(name);
 const historyLength = (page) => page.evaluate(() => window.history.length);
 
-// The shell every detail panel shares.
+// The shell that every detail panel shares.
 async function expectShell(panel, { layout }) {
   await expect(panel).toHaveClass(new RegExp(`uiDetail--${layout}`));
   await expect(panel).toHaveAttribute('role', 'dialog');
@@ -63,7 +64,7 @@ test.describe('detail panels', () => {
     const width = (await panel.boundingBox()).width;
     const vw = page.viewportSize().width;
     expect(Math.round(width)).toBe(Math.round(Math.max(320, Math.min(600, vw * 0.45))));
-    // Another record: the same entry, replaced.
+    // Another record: the same entry is replaced.
     await logRows(page).nth(1).click();
     await expect.poll(() => param(page, 'log')).toBe(second);
     expect(await historyLength(page)).toBe(before + 1);
@@ -83,7 +84,7 @@ test.describe('detail panels', () => {
     await page.goto(`/observability/logs?from=${encodeURIComponent(win.from)}&to=${encodeURIComponent(win.to)}&log=${encodeURIComponent(second)}`);
     await expect(panel).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(`#logsTableRows .logsRow[data-row-id="${second}"]`)).toHaveClass(/is-selected/);
-    // Closing a panel a link opened drops log= without leaving the page.
+    // Close a panel that a link opened. This drops log= without leaving the page.
     await panel.locator('.uiDetail__close').click();
     await expect(panel).toBeHidden();
     expect(param(page, 'log')).toBe(null);
@@ -124,7 +125,7 @@ test.describe('detail panels', () => {
     await settle(page);
     const click = async (name) => {
       const found = (await page.evaluate(() => window.ChDash.traceMap.inspect())).nodes.find((node) => node.service === name);
-      // A point of the card on screen (the camera may have moved it partly out).
+      // A point of the card on screen. The camera may have moved it partly out.
       const x = Math.max(found.x + 12, Math.min(found.x + found.width / 2, found.x + found.width - 12));
       await page.mouse.click(Math.max(8, x), found.y + found.height / 2);
     };
@@ -137,7 +138,7 @@ test.describe('detail panels', () => {
     await expect.poll(() => param(page, 'node')).toBe('checkout');
     expect(await historyLength(page)).toBe(before + 1);
     await cameraIdle(page, 'ChDash.traceMap');
-    // Another service (left of the panel): the same entry, replaced.
+    // Another service, left of the panel: the same entry is replaced.
     await click('frontend');
     await expect(panel.locator('.uiDetail__title')).toHaveText('frontend');
     await expect.poll(() => param(page, 'node')).toBe('frontend');
@@ -148,8 +149,8 @@ test.describe('detail panels', () => {
     await page.goForward();
     await expect(panel).toBeVisible();
     await expect(panel.locator('.uiDetail__title')).toHaveText('frontend');
-    // Escape (focus in the panel) closes it through ns.layers; the focus goes
-    // back to the canvas.
+    // Escape closes the panel through ns.layers when the focus is in the panel.
+    // The focus goes back to the canvas.
     await panel.locator('.uiDetail__close').focus();
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
@@ -188,13 +189,13 @@ for (const theme of ['dark', 'light']) {
 
 // ------------------------------------------------------------ side panels
 
-// ns.sidePanel: the left list of a page. Each one: a head (title / toggle,
-// meta, a 30 px search), a body scrolling on its own, --side-w (288 px) wide,
-// a 32 px rail when folded on wide windows, a drawer with a toggle on phones.
-// The Explorer's two panels have no bar and no rail (collapse: null): their
-// own test is in explorer-nav.spec.js.
-// An hour of the rich fixture day (tests/README.md, "Rich OTel dataset"),
-// which every stack holds, as the other Observability layout specs.
+// ns.sidePanel: the left list of a page. Each panel has a head (title or toggle,
+// meta, a 30 px search) and a body that scrolls on its own. The width is --side-w (288 px).
+// On wide windows, a folded panel shows a 32 px rail. On phones, a drawer opens with a toggle.
+// The two panels of the Explorer have no bar and no rail (collapse: null).
+// Their own test is in explorer-nav.spec.js.
+// The spec uses one hour of the rich fixture day (tests/README.md, "Rich OTel dataset").
+// Every stack holds this hour, as in the other Observability layout specs.
 const OBS_HOUR = 'from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
 const SIDES = [
   { name: 'Explorer tree', url: '/explorer/catalog', panel: '#explorerListPane', collapse: null, drawer: '#explorerTreeToggle', ready: '#explorerTableList > *' },
@@ -270,8 +271,8 @@ for (const theme of ['dark', 'light']) {
         const panel = page.locator(side.panel);
         const toggle = page.locator(side.drawer);
         await expect(toggle).toBeVisible({ timeout: 20_000 });
-        // The Explorer opens its tree when nothing is selected (once its
-        // list is loaded): start closed.
+        // The Explorer opens its tree when nothing is selected, once its
+        // list is loaded. Start with the panel closed.
         await expect(page.locator(side.ready).first()).toBeAttached({ timeout: 30_000 });
         if ((await toggle.getAttribute('aria-expanded')) === 'true') {
           await page.keyboard.press('Escape');

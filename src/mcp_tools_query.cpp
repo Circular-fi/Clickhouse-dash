@@ -133,7 +133,7 @@ std::string tool_query_table(Ctx& ctx, const rapidjson::Value& args) {
     if (!it->value.IsInt64() || it->value.GetInt64() < 1) fail("invalid_argument", "limit must be a whole number of 1 or more");
     limit = it->value.GetInt64();
   }
-  // Above the cap: ask for one more row, so the answer can say that rows were cut.
+  // Read one more row, above the cap. The answer can then say that rows were cut.
   const bool clamped = limit > ctx.max_rows;
   query.limit = clamped ? ctx.max_rows + 1 : limit;
 
@@ -143,7 +143,7 @@ std::string tool_query_table(Ctx& ctx, const rapidjson::Value& args) {
           describe_table_filter(query.database, query.table, "name") + " AND NOT is_temporary LIMIT 1) AS rows_in_table "
       "FROM system.columns WHERE " + describe_table_filter(query.database, query.table, "table") + " ORDER BY position",
       ctx.schema_limits);
-  if (described.rows.empty()) fail("table_not_found", "the table " + query.database + "." + query.table + " does not exist or is not visible");
+  if (described.rows.empty()) fail("not_found", "the table " + query.database + "." + query.table + " does not exist or is not visible");
   std::vector<McpColumn> real;
   for (const auto& row : described.rows) {
     if (row.size() < 4) continue;
@@ -159,7 +159,7 @@ std::string tool_query_table(Ctx& ctx, const rapidjson::Value& args) {
   const McpBuiltQuery built = mcp_build_table_query(query, real);
   if (!built.ok) fail(built.error, built.argument.empty() ? built.message : built.argument + ": " + built.message);
   McpDbResult res = run(ctx, built.sql, ctx.user_limits);
-  // A Bool column travels as UInt8 on the native wire: give it back as true / false.
+  // A Bool column travels as UInt8 on the native wire. Return it as true / false.
   for (size_t i = 0; i < res.columns.size() && i < built.selected.size(); ++i) {
     for (const auto& column : real) {
       if (column.name != built.selected[i] || mcp_classify_type(column.type).cls != McpTypeClass::Bool) continue;

@@ -2,13 +2,15 @@ import { test, expect } from '@playwright/test';
 import { openApp, runSuccessfulQuery } from '../helpers/app.js';
 import { mockTraceResults, mockTraceServices } from '../helpers/traces.js';
 
-// Shared data display components (app_ui_table.js, app_ui_badge.js,
-// app_ui_copy.js, app_ui_sql.js, app_ui_kv.js, app_ui_stat.js,
-// app_ui_chart.js), in the browser on every page that uses them.
+// These tests cover the shared data display components: app_ui_table.js,
+// app_ui_badge.js, app_ui_copy.js, app_ui_sql.js, app_ui_kv.js, app_ui_stat.js
+// and app_ui_chart.js. The tests run in the browser, on every page that uses
+// them.
 
 const dataRows = '#resultTableBody tr[data-row-key]';
 
-// The table chrome every .dataTable shares, read from one header and one cell.
+// The table chrome that every .dataTable shares. The test reads it from one
+// header and one cell.
 async function tableLook(table) {
   return table.evaluate((el) => {
     const th = el.querySelector('thead th');
@@ -44,7 +46,7 @@ test.describe('data table', () => {
     await expect(header).toHaveAttribute('aria-sort', 'descending');
     expect(Number(await glyph())).toBeGreaterThan(0.5);
     await expect(page.locator(dataRows).first().locator('td').nth(1)).toHaveText('4');
-    // Enter on the header button sorts too (a real button).
+    // Enter on the header button also sorts, because it is a real button.
     await header.locator('.dataTable__sort').focus();
     await page.keyboard.press('Enter');
     await expect(header).toHaveAttribute('aria-sort', 'ascending');
@@ -55,7 +57,7 @@ test.describe('data table', () => {
     await runSuccessfulQuery(page, 'SELECT number AS n, toString(number * 10) AS s FROM numbers(6)');
     const rows = page.locator(dataRows);
     await expect(rows).toHaveCount(6);
-    // One row in the tab order.
+    // Only one row is in the tab order.
     expect(await rows.evaluateAll((trs) => trs.filter((tr) => tr.tabIndex === 0).length)).toBe(1);
     await rows.nth(0).focus();
     await page.keyboard.press('ArrowDown');
@@ -63,7 +65,7 @@ test.describe('data table', () => {
     expect(await rows.nth(1).getAttribute('tabindex')).toBe('0');
     expect(await rows.nth(0).getAttribute('tabindex')).toBe('-1');
 
-    // The context-menu key on the focused row: the row menu, on that row.
+    // The context-menu key on the focused row opens the row menu, for that row.
     await page.keyboard.press('Shift+F10');
     const menu = page.locator('.rowDetailsMenu');
     await expect(menu).toBeVisible();
@@ -73,8 +75,8 @@ test.describe('data table', () => {
     await expect(menu).toHaveCount(0);
     await expect(rows.nth(1)).toBeFocused();
 
-    // Into the cells: Right steps in, Down keeps the column; the menu acts on
-    // the focused cell.
+    // Into the cells: Right steps in, and Down keeps the column. The menu acts
+    // on the focused cell.
     await page.keyboard.press('ArrowRight');
     const cell = rows.nth(1).locator('td').nth(1);
     await expect(cell).toBeFocused();
@@ -123,7 +125,7 @@ async function logsUrl(request, minutes = 30) {
   return `/observability/logs?from=${encodeURIComponent(isoSecond(end - minutes * 60000))}&to=${encodeURIComponent(isoSecond(end + 1000))}`;
 }
 
-// Each look in both themes and at phone width, with nothing overflowing.
+// Each look is checked in both themes and at phone width. Nothing overflows.
 const LOOKS = [
   { theme: 'dark', width: 1440 },
   { theme: 'light', width: 1440 },
@@ -145,12 +147,12 @@ test.describe('badge', () => {
       await page.goto(await logsUrl(request));
       const badge = page.locator('#logsTableRows .badge--sev').first();
       await expect(badge).toBeVisible({ timeout: 30_000 });
-      // The virtual rows re-render while the page settles: retrying matchers
-      // (a detached row has no computed style).
+      // The virtual rows render again while the page settles. So the matchers
+      // retry. A detached row has no computed style.
       await expect(badge).toHaveCSS('height', '18px');
       await expect(badge).toHaveCSS('text-transform', 'none');
-      // Its level's colour: ERROR the danger chip, FATAL solid, WARN amber
-      // text, INFO muted, DEBUG and TRACE dimmed.
+      // The colour of each level: ERROR is the danger chip. FATAL is solid.
+      // WARN is amber text. INFO is muted. DEBUG and TRACE are dimmed.
       await expect.poll(() => badge.evaluate((el) => {
         const token = { error: '--danger', fatal: '--panel', warn: '--sev-color', info: '--muted', debug: '--sev-trace', trace: '--sev-trace', unset: '--sev-trace' }[el.dataset.sev];
         const probe = document.createElement('i');
@@ -160,8 +162,9 @@ test.describe('badge', () => {
         probe.remove();
         return same && el.textContent === el.textContent.toUpperCase();
       })).toBe(true);
-      // The histogram's totals legend filters; the filter is a .chip (a phone
-      // folds the histogram and the bar with its chips: unfold them).
+      // The totals legend of the histogram filters the data. The filter is a
+      // .chip. On a phone, the histogram and the bar fold with their chips.
+      // Unfold them.
       if (view.width < 600) {
         await page.locator('#logsHistogramCard .chartCard__fold').click();
         await page.locator('#logsForm .obsFilterSummary').click();
@@ -180,7 +183,8 @@ test.describe('badge', () => {
     await openApp(page);
     const labels = await page.evaluate(() => ['Ok', 'STATUS_CODE_ERROR', 'Unset', 2, 'ok'].map((code) => window.ChDash.badge.statusLabel(code)));
     expect(labels).toEqual(['OK', 'Error', 'Unset', 'Error', 'OK']);
-    // Unset draws nothing (or the caller's mark), OK discreet muted text, Error a red chip.
+    // Unset draws nothing, or the mark of the caller. OK is discreet muted
+    // text. Error is a red chip.
     const drawn = await page.evaluate(() => {
       const { badge } = window.ChDash;
       const host = document.createElement('div');
@@ -225,7 +229,8 @@ test.describe('badge', () => {
     await page.goto(`/observability/metrics?from=${encodeURIComponent(isoSecond(end - 6 * 3600000))}&to=${encodeURIComponent(isoSecond(end))}`);
     const hist = page.locator('.metricsCatalog .metricsBadge--histogram').first();
     await expect(hist).toBeVisible({ timeout: 30_000 });
-    // Kind and unit: muted text in words (Histogram, not hist), no fill and no border.
+    // Kind and unit are muted text, in words (Histogram, not hist). They have
+    // no fill and no border.
     for (const meta of [hist, page.locator('.metricsCatalog .metricsBadge--unit').first()]) {
       const look = await meta.evaluate((el) => {
         const probe = document.createElement('i');
@@ -254,9 +259,9 @@ test.describe('copy', () => {
     await main.click();
     await expect(main).toHaveText('Copied');
     await expect(main).toHaveText('Copy JSON', { timeout: 3000 });
-    // The menu is an ns.menu split: a click opens it with the list focused,
-    // Down on the toggle with its first item focused; Escape gives the focus
-    // back to the toggle.
+    // The menu is an ns.menu split. A click opens it, with the list focused.
+    // Down on the toggle focuses its first item. Escape returns the focus to
+    // the toggle.
     await page.locator('#copyMenuButton').click();
     await expect(page.locator('#copyMenu')).toBeVisible();
     await expect(page.locator('#copyMenu')).toBeFocused();
@@ -313,7 +318,8 @@ test.describe('SQL block and key/value', () => {
       const style = getComputedStyle(body);
       return { overflowX: style.overflowX, overflowY: style.overflowY, wider: body.scrollWidth > body.clientWidth + 100, clipped: body.clientHeight < body.scrollHeight };
     });
-    // The lines past the fifth are hidden (not scrolled), the first line reaches its end by scrolling.
+    // The lines past the fifth are hidden, not scrolled. The first line reaches
+    // its end after a scroll.
     expect(state).toEqual({ overflowX: 'auto', overflowY: 'hidden', wider: true, clipped: true });
   });
 
@@ -331,7 +337,7 @@ test.describe('SQL block and key/value', () => {
     await statement.click();
     await expect(statement).toHaveAttribute('aria-expanded', 'true');
     expect(await statement.locator('.sqlBlock__code').evaluate((el) => getComputedStyle(el).whiteSpace)).toBe('pre-wrap');
-    // The detail's Requests chart has two series: the engine legend shows.
+    // The Requests chart in the detail has two series. The engine legend shows.
     await expect(page.locator('#traceSvcDetail [data-svc-chart="rate"] .chartCore__legendItem')).toHaveCount(2);
   });
 

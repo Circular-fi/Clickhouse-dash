@@ -1,9 +1,9 @@
-// The live result table (ARCH-F-048): one implementation for the result of a query and for each statement of a batch. It takes
-// the rows as the stream sends them (a cooperative queue that keeps the editor responsive), shows the table once the layout
-// is known (a horizontal table from the second row, one row and one value in their own layouts at the end of the stream),
-// sorts it, draws the bars of the numeric columns, mounts only the rows in view for a long result and keeps the row details
-// (app_results_rowdetails.js). The page around it (the panel of the query result, the block of a statement) gives a few
-// hooks; nothing in this module reads the page.
+// The live result table (ARCH-F-048). One implementation serves the result of a query and each statement of a batch. The table takes
+// the rows as the stream sends them, through a cooperative queue that keeps the editor responsive. It shows the table when the layout is known.
+// A horizontal table is known from the second row. One row and one value have their own layouts, shown at the end of the stream.
+//
+// The table sorts the rows, draws the bars of the numeric columns, and mounts only the rows in view for a long result.
+// It also keeps the row details (app_results_rowdetails.js). The page around it gives a few hooks. This module does not read the page.
 //
 //   const table = createLiveTable({ wrap, host: { visible, metaChanged, rowsChanged, rendered } });
 //     wrap          the element that holds <table><thead><tbody> (a .tableWrap)
@@ -13,7 +13,7 @@
 //     host.rendered()     rows were written to the table
 //   table.renderTableMeta(columns, types)   a new result starts          table.appendRows(rows)   rows of the stream
 //   table.whenIdle()    the rows that were queued are in             table.finalize()         the stream ended: the layout is final
-//   table.clear()       back to nothing                              table.destroy()          the listeners and timers go
+//   table.clear()       reset to nothing                             table.destroy()          remove the listeners and timers
 //   table.rowCount() / columnCount() / columns() / types() / typeAsts() / rows() / setChart(chart) / relayout()
 
 import { dom } from "./app_dom.js";
@@ -27,23 +27,19 @@ const { $, $$ } = dom;
 
 const flushBatchSize = 400;
 
-// DOM virtualization: rendering thousands of rows x dozens of columns creates
-// hundreds of thousands of <td> nodes and makes scrolling/sorting very costly.
-// Keep all rows in memory for copy/export/sort, but only mount rows visible
-// in the main page viewport. The results table itself must not become a
-// separate vertical scroll container.
+// DOM virtualization. Thousands of rows and dozens of columns create hundreds of thousands of <td> nodes. Scroll and sort actions are then very costly.
+// Keep all rows in memory for the copy, export, and sort actions. Mount only the rows in view in the main page viewport.
+// The results table must not become a separate vertical scroll container.
 const virtualRowThreshold = 500;
 const virtualOverscanMinRows = 96;
 const virtualOverscanViewports = 6;
 const virtualDefaultRowHeight = 32;
 
-// Streamed result batches can contain hundreds or thousands of rows. Doing
-// tuple projection, numeric scans and array growth for the whole SSE batch in
-// one task blocks editor input. Drain rows in short background slices so
-// typing/scroll/paint keep getting main-thread time.
-// Each slice processes about SLICE_MS of rows: its size follows the measured
-// cost of a row (64 to 4096 rows), so narrow rows do not pay one task per
-// 128 rows and wide ones still yield often.
+// A streamed result batch can contain hundreds or thousands of rows. When tuple projection, numeric scans, and array growth run for the whole SSE batch in one task, they block the editor input.
+//
+// Drain the rows in short background slices. This keeps the text input, scroll, and paint actions on the main thread.
+// Each slice processes about SLICE_MS of rows. Its size follows the measured cost of a row (64 to 4096 rows).
+// Narrow rows do not pay one task for each 128 rows. Wide rows still yield often.
 const SLICE_MS = 4;
 function createCooperativeRowQueue(processRows) {
   let queue = [];
@@ -64,7 +60,7 @@ function createCooperativeRowQueue(processRows) {
         globalThis.scheduler.postTask(fn, { priority: "background" });
         return;
       } catch {
-        // Fall through to the broadly supported timer queue.
+        // Use the timer queue. It has the broadest browser support.
       }
     }
     setTimeout(fn, 0);
@@ -81,7 +77,7 @@ function createCooperativeRowQueue(processRows) {
         return;
       }
       scheduled = false;
-      // Pending input gets the thread back sooner.
+      // When the user sends input, the thread is released sooner.
       const size = globalThis.navigator?.scheduling?.isInputPending?.() ? 64 : sliceRows;
       const batch = [];
       while (queue.length && batch.length < size) {
@@ -99,8 +95,8 @@ function createCooperativeRowQueue(processRows) {
           sliceRows = Math.max(64, Math.min(4096, sliceRows * 2, Math.max(sliceRows >> 1, target)));
         }
       } catch (error) {
-        // A row that fails to render is reported; the queue goes on, so the run still ends
-        // (whenIdle resolves) instead of staying "running".
+        // The module reports a row that fails to render. The queue continues, so the run still ends
+        // (whenIdle resolves). It does not stay in the "running" state.
         if (typeof reportError === "function") reportError(error);
       } finally {
         if (queue.length) schedule();
@@ -142,12 +138,10 @@ function getVirtualRange(rowsLength, rowH, bodyEl) {
   }
   const viewportH = Math.max(rowH, viewportBottom - viewportTop);
   const visibleRows = Math.max(1, Math.ceil(viewportH / rowH));
-  // Keep several full viewports mounted. A tiny fixed overscan can expose the
-  // spacer background before the next rAF when a trackpad/thumb scroll jumps
-  // multiple screens in one frame.
+  // Keep several full viewports mounted. A small fixed overscan can show the spacer background before the next rAF.
+  // This happens when a trackpad or thumb scroll jumps over several screens in one frame.
   const overscanRows = Math.max(virtualOverscanMinRows, visibleRows * virtualOverscanViewports);
-  // An expanded row (inline details) pushes every later row down by its
-  // measured height: map viewport offsets to row indexes around it.
+  // An expanded row (inline details) pushes every later row down by its measured height. Map the viewport offsets to row indexes around it.
   const detail = rowDetailsVirtualSlot(bodyEl);
   let start = Math.max(0, Math.floor(virtualRowAt(viewportTop - bodyRect.top, rowH, detail)) - overscanRows);
   let end = Math.min(rowsLength, Math.ceil(virtualRowAt(viewportBottom - bodyRect.top, rowH, detail)) + overscanRows);
@@ -184,9 +178,8 @@ function createLiveTable({ wrap, host = {} }) {
   let flushRafId = 0;
 
   let isVerticalResults = false;
-  // Do not commit to a horizontal result layout until the stream proves there
-  // are at least two rows. A one-row result is rendered vertically only after
-  // the terminal event, so the UI never flashes a wide header then flips.
+  // Do not commit to a horizontal result layout until the stream shows at least two rows. A one-row result is rendered vertically only after the terminal event.
+  // So the UI never shows a wide header and then changes it.
   let livePresentationCommitted = false;
 
   let rowIndexCounter = 0;
@@ -227,8 +220,7 @@ function createLiveTable({ wrap, host = {} }) {
     if (tbody) tbody.replaceChildren();
   }
 
-  // The text of a cell in the table (one line): see valueText. "null" for SQL NULL, which
-  // setDisplayCell shows as the NULL token.
+  // The text of a cell in the table, on one line. See valueText. The text is "null" for SQL NULL. The setDisplayCell function shows it as the NULL token.
   function formatCellForDisplay(raw, colIndex) {
     return formatCellForDisplayWithTypes(raw, colIndex, resultTypeAsts);
   }
@@ -237,8 +229,7 @@ function createLiveTable({ wrap, host = {} }) {
     renderValueInto(td, raw, resultTypeAsts[colIndex] || null);
   }
 
-  // A Query result tracks each numeric column's lowest and largest value
-  // (the bars' base and top, setQueryGaugeCell).
+  // A Query result tracks the lowest and the largest value of each numeric column. The base and top of the bars use these values (setQueryGaugeCell).
   function resetLiveGaugeState() {
     gaugeNumericCols = resultTypeAsts.map(isScalarNumericType);
     gaugeMax = new Array(gaugeNumericCols.length).fill(-Infinity);
@@ -323,7 +314,7 @@ function createLiveTable({ wrap, host = {} }) {
     return sortTextRows(allResultRows, key, dir, liveSortText);
   }
 
-  // What the live table shows (and sorts by) for a cell of the column.
+  // The live table shows this value for a cell of the column, and sorts by it.
   function liveSortText(row, key) {
     const av = key === -1 ? row.__chdashRowIndex : row[key];
     return key === -1 ? String(av ?? "") : formatCellForDisplay(av, key);
@@ -390,10 +381,8 @@ function createLiveTable({ wrap, host = {} }) {
     const rows = Array.isArray(virtualViewRows) ? virtualViewRows : [];
     const rowH = Math.max(18, Number(virtualRowHeight) || virtualDefaultRowHeight);
     const target = getVirtualRange(rows.length, rowH, tbody);
-    // A scrollbar-thumb / rapid trackpad jump can move the viewport completely
-    // outside the currently mounted overscan window before the next animation
-    // frame. Render that disjoint jump synchronously so the user never lands on
-    // a spacer-only blank area; ordinary scrolling remains rAF-coalesced.
+    // A scrollbar thumb or a rapid trackpad jump can move the viewport outside the mounted overscan window before the next animation frame.
+    // Render that jump at once, so the user never lands on a blank area with only spacers. Ordinary scroll events stay coalesced in rAF.
     if (virtualLastStart < 0 || target.start >= virtualLastEnd || target.end <= virtualLastStart) {
       renderVirtualRows(false);
       return;
@@ -404,8 +393,8 @@ function createLiveTable({ wrap, host = {} }) {
   function ensureVirtualScrollListener() {
     if (virtualScrollAttached) return;
     virtualScrollAttached = true;
-    // Query scrolls inside #queryWorkspace and Explorer inside its detail pane.
-    // scroll does not bubble, so listen in capture phase for the actual owner.
+    // The Query page scrolls inside #queryWorkspace. The Explorer scrolls inside its detail pane.
+    // A scroll event does not bubble. So the listener uses the capture phase to find the real scroll owner.
     document.addEventListener("scroll", handleVirtualScroll, { passive: true, capture: true });
     window.addEventListener("resize", scheduleVirtualRender, { passive: true });
   }
@@ -449,8 +438,7 @@ function createLiveTable({ wrap, host = {} }) {
     }
   }
 
-  // Returns true when the currently mounted virtual window still matches the
-  // grown row set, after resizing (or creating/removing) the bottom spacer.
+  // Returns true when the mounted virtual window still matches the grown row set. This applies after the bottom spacer is resized, created, or removed.
   function updateVirtualTailSpacer() {
     if (!tbody || virtualLastStart < 0 || isVerticalResults) return false;
     const rows = virtualViewRows;
@@ -488,10 +476,8 @@ function createLiveTable({ wrap, host = {} }) {
     const rows = buildLiveViewRows();
 
     if (rows.length > virtualRowThreshold && wrap) {
-      // Unsorted streaming only appends to allResultRows. When the mounted
-      // window is unchanged, growing the bottom spacer is enough; rebuilding
-      // every mounted row (hundreds x columns) on each SSE batch was the
-      // dominant main-thread cost of large result streams.
+      // An unsorted stream only appends to allResultRows. When the mounted window is unchanged, a larger bottom spacer is enough.
+      // A rebuild of every mounted row (hundreds of rows times columns) on each SSE batch was the main cost of large result streams.
       const appendOnly = allowTailOnly && isVirtualResults && rows === allResultRows && virtualViewRows === allResultRows;
       if (appendOnly && updateVirtualTailSpacer()) return;
       isVirtualResults = true;
@@ -531,8 +517,7 @@ function createLiveTable({ wrap, host = {} }) {
     renderBatch(0);
   }
 
-  // `appendOnly` callers only added rows at the end of an unsorted stream; any
-  // other caller in the same frame forces a real rebuild.
+  // The appendOnly callers only add rows at the end of an unsorted stream. Any other caller in the same frame forces a full rebuild.
   function scheduleLiveTableFullRender({ appendOnly = false } = {}) {
     if (!appendOnly) scheduledFullRenderRebuild = true;
     if (scheduledFullRender) return;
@@ -570,7 +555,7 @@ function createLiveTable({ wrap, host = {} }) {
       const th = document.createElement("th");
       th.textContent = resultColumns[i];
       if (resultTypes[i]) th.title = resultTypes[i];
-      // A number's header is over its figures, on the right with them (the cells are .num).
+      // The header of a number sits over its figures, on the right (the cells are .num).
       if (isScalarNumericType(resultTypeAsts[i] || null)) th.classList.add("num");
       tableMod.sortHeader(th, { key: i, onSort: () => setLiveSort(i) });
       tr.appendChild(th);
@@ -627,8 +612,8 @@ function createLiveTable({ wrap, host = {} }) {
     }
     if (wrap) wrap.classList.remove("tableWrap--virtual");
     if (chart) chart.setMeta(resultColumns, resultTypes);
-    // Deliberately do not reveal headers yet. We need either two rows (horizontal)
-    // or the terminal event (0 rows / one-row vertical) to choose the layout.
+    // Do not show the headers yet on purpose. The layout needs either two rows (horizontal),
+    // or the terminal event (0 rows, or one row in vertical layout).
   }
 
   function scheduleFlush() {
@@ -660,8 +645,7 @@ function createLiveTable({ wrap, host = {} }) {
 
     const frag = document.createDocumentFragment();
     const toRender = Math.min(flushBatchSize, pendingRows.length);
-    // One splice is O(n); repeatedly shifting the head was O(n²) for large
-    // result streams because every row moved the remainder of the array.
+    // One splice is O(n). Repeated head shifts are O(n²) for large result streams, because each row moves the rest of the array.
     const rowsToRender = pendingRows.splice(0, toRender);
 
     for (const row of rowsToRender) {
@@ -705,13 +689,13 @@ function createLiveTable({ wrap, host = {} }) {
     }
 
     if (!livePresentationCommitted) {
-      // Hold the first row in memory until we know whether it is the only row.
+      // Keep the first row in memory until the module knows whether it is the only row.
       host.rowsChanged?.();
       return;
     }
 
-    // Schedule at most one DOM update per SSE batch. Large batches previously
-    // called the scheduler once per row, creating avoidable main-thread work.
+    // Schedule at most one DOM update for each SSE batch. Earlier versions called the scheduler once for each row of a large batch.
+    // This created work on the main thread that was not needed.
     if (needsFullRender) {
       pendingRows.length = 0;
       scheduleLiveTableFullRender({ appendOnly: !isLiveSortActive() });
@@ -852,8 +836,7 @@ function createLiveTable({ wrap, host = {} }) {
           renderVerticalSingleRow(allResultRows[0]);
         }
       } else {
-        // Zero-row results can finally expose their schema; 2+ is a defensive
-        // fallback for a terminal batch that bypassed the live threshold.
+        // A zero-row result can finally show its schema. Two or more rows is a defensive fallback for a terminal batch that skipped the live threshold.
         commitHorizontalPresentation();
       }
     }
@@ -872,11 +855,11 @@ function createLiveTable({ wrap, host = {} }) {
     maybeSwitchToVerticalSingleRow();
     maybeRenderSingleRowValueCell();
     if (chart) chart.done();
-    // A result long enough for the sort kernel asks for it now, so its first sort does not run in JavaScript.
+    // A result long enough for the sort kernel requests the kernel now. So its first sort does not run in JavaScript.
     if (allResultRows.length >= SORT_WASM_MIN_ROWS) requestSortKernel();
   }
 
-  // Back to nothing: the rows, the layout, the sort, the bars and the table.
+  // Reset to nothing: remove the rows, the layout, the sort, the bars, and the table.
   function clear() {
     liveRowIngest.reset();
     resultColumns = [];
@@ -922,7 +905,7 @@ function createLiveTable({ wrap, host = {} }) {
     clearTable();
   }
 
-  // The listeners that a long result put on the document and the window, the timers and the queue.
+  // This removes the listeners that a long result added to the document and the window. It also stops the timers and the queue.
   function destroy() {
     liveRowIngest.reset();
     if (virtualScrollAttached) {
@@ -961,9 +944,9 @@ function createLiveTable({ wrap, host = {} }) {
     types: () => resultTypes,
     typeAsts: () => resultTypeAsts,
     rows: () => allResultRows,
-    // The Table / Chart toggle of the result: the chart reads the rows and the columns of this table.
+    // The Table / Chart toggle of the result. The chart reads the rows and the columns of this table.
     setChart(next) { chart = next; },
-    // The table shows again (the Chart view hid it): the mounted rows are drawn again.
+    // The table is shown again after the Chart view hid it. The mounted rows are drawn again.
     relayout() { if (isVirtualResults && !isVerticalResults) renderVirtualRows(true); },
   };
 }

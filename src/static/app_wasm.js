@@ -11,7 +11,7 @@
 //
 // A kernel is { name, exports, view(), mark(), release(m), scope(fn), alloc(bytes), putU16(text), putBytes(u8),
 // putI32(a), putF64(a) }. Pointers are byte offsets into the instance memory. view() returns fresh typed views
-// of the memory: growing it detaches the old ones, so a caller takes a view after the last call that can grow.
+// of the memory. A call that grows the memory detaches the old views. Take a view after the last call that can grow the memory.
 import { assetUrl } from "./app_assets.js";
 
 const supported = typeof WebAssembly === "object" && typeof WebAssembly.instantiate === "function";
@@ -19,10 +19,10 @@ const stats = { loads: 0, failures: 0, streamingFallbacks: 0 };
 const ops = {};
 const loads = new Map();
 const ready = new Map();
-// Absolute addresses of kernels, set by a Worker (it has no version map): urls[name] replaces the default address.
+// Absolute addresses of kernels. A Worker sets them, because it has no version map. urls[name] replaces the default address.
 const urls = {};
 
-// The host Math functions a kernel may import (src/wasm/rt.h): the numbers stay the ones of the JavaScript reference.
+// The host Math functions that a kernel may import (src/wasm/rt.h). The numbers stay the same as the JavaScript reference.
 const imports = () => ({
   env: { sin: Math.sin, cos: Math.cos, atan2: Math.atan2, pow: Math.pow, exp: Math.exp, log: Math.log, cbrt: Math.cbrt, hypot: Math.hypot },
 });
@@ -56,7 +56,7 @@ function wrap(name, instance) {
     alloc,
     mark: () => exports.wasm_mark() >>> 0,
     release: (mark) => exports.wasm_release(mark),
-    // fn(kernel) runs with an arena of its own: what it allocates is freed when it returns.
+    // fn(kernel) runs with an arena of its own. Everything it allocates is freed when it returns.
     scope(fn) {
       const mark = exports.wasm_mark();
       try {
@@ -88,12 +88,12 @@ function wrap(name, instance) {
       new Float64Array(memory.buffer, ptr, values.length).set(values);
       return ptr;
     },
-    // A copy (not a view) of count items at ptr, safe after the memory grows or the arena is released.
+    // A copy (not a view) of count items at ptr. The copy stays valid after the memory grows or the arena is released.
     readI32: (ptr, count) => new Int32Array(memory.buffer, ptr, count).slice(),
     readU16: (ptr, count) => new Uint16Array(memory.buffer, ptr, count).slice(),
     readF64: (ptr, count) => new Float64Array(memory.buffer, ptr, count).slice(),
     readU8: (ptr, count) => new Uint8Array(memory.buffer, ptr, count).slice(),
-    // A string from count UTF-16 code units at ptr, in chunks (String.fromCharCode.apply has an argument limit).
+    // A string from count UTF-16 code units at ptr. It reads the units in chunks, because String.fromCharCode.apply has an argument limit.
     readString(ptr, count) {
       const u16 = new Uint16Array(memory.buffer, ptr, count);
       if (count <= 8192) return String.fromCharCode.apply(null, u16);
@@ -106,8 +106,8 @@ function wrap(name, instance) {
 }
 
 async function instantiate(url) {
-  // Streaming compiles while the bytes arrive; it needs the application/wasm type. Any failure retries
-  // with the bytes (a proxy that renames the type, an old browser).
+  // Streaming compiles the module while the bytes arrive. It needs the application/wasm type. After any failure, the loader retries with the bytes
+  // (a proxy that renames the type, an old browser).
   if (typeof WebAssembly.instantiateStreaming === "function" && typeof fetch === "function") {
     try {
       const response = await fetch(url);
@@ -153,8 +153,8 @@ const get = (name) => ready.get(name) || null;
 const IDLE_MS = 20000;
 const workers = new Map();
 
-// The kernel runs in a Worker of its own (app_wasm_worker.js), so a long layout never freezes the page.
-// Resolves with the same call() interface; resolves with null when Workers or the kernel are not available.
+// The kernel runs in a Worker of its own (app_wasm_worker.js). A long layout does not freeze the page.
+// It resolves with the same call() interface. It resolves with null when Workers or the kernel are not available.
 function worker(name, opsFile = `app_wasm_${name}.js`) {
   if (workers.has(name)) return workers.get(name).ready;
   const entry = { ready: null, worker: null, pending: new Map(), next: 1, idle: null };

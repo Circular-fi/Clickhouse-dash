@@ -1,9 +1,9 @@
 // MCP endpoint (POST /mcp) and the REST routes of the MCP page (/api/mcp/*).
 // See docs/mcp.md. The endpoint exists only when mcp.enabled = true.
 //
-// Every query of a tool runs through the client pool with the host's mcp_uri
-// identity (never runner_uri or system_uri), with readonly=1 and the caps of
-// the configuration. This file never logs SQL or row data.
+// Each query of a tool runs through the client pool. It uses the identity of the host mcp_uri,
+// never runner_uri or system_uri. It sets readonly=1 and uses the caps of the configuration.
+// This file never logs SQL or row data.
 
 #include "server.hpp"
 
@@ -20,6 +20,8 @@
 #include "mcp_identity.hpp"
 #include "mcp_protocol.hpp"
 #include "mcp_scope.hpp"
+#include "mcp_telemetry.hpp"
+#include "mcp_trace.hpp"
 #include "mcp_usage.hpp"
 #include "mcp_usage_store.hpp"
 #include "json_text.hpp"
@@ -70,7 +72,7 @@ int64_t steady_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// One Cache-Control header, however many layers ask for it.
+// Only one Cache-Control header is sent, even when many layers ask for it.
 void set_no_store(httplib::Response& res) {
   res.headers.erase("Cache-Control");
   res.set_header("Cache-Control", "no-store");
@@ -78,7 +80,7 @@ void set_no_store(httplib::Response& res) {
 
 void put(Writer& w, std::string_view s) { write_json_text(w, s); }
 
-// The one error answer (api_error.hpp) and, for a validation error, "field" and "reason".
+// This is the one error answer (api_error.hpp). For a validation error, it also has "field" and "reason".
 void api_error(httplib::Response& res, int status, const std::string& code, const std::string& message,
                const std::string& field = {}, const std::string& reason = {}) {
   ApiError error;
@@ -99,19 +101,21 @@ void api_ok(httplib::Response& res, int status, const rapidjson::StringBuffer& s
   res.set_content(sb.GetString(), sb.GetSize(), "application/json");
 }
 
-// Cross-site guard of the key routes that are reads: what a key reaches is shown on the ChDash page
-// only (http_guard.hpp). Every write of the page (create, delete) has the same guard for every route, with the check
-// of its body, before the routing (Server::before_routing).
+// The cross-site guard protects the key routes that only read. What a key reaches appears only on the ChDash page.
+// See http_guard.hpp. Each write of the page (create, delete) has the same guard for every route.
+// The guard checks the body before the routing (Server::before_routing).
 bool allow_from_page(const httplib::Request& req, httplib::Response& res) {
   if (!is_cross_site_request(req)) return true;
   api_error(res, 403, "cross_site_request", "MCP key routes are accepted from the ChDash page only");
   return false;
 }
 
-// The parameters of GET /api/mcp/usage/overview besides the window: `group`, `order` (the metric that ranks the groups of the series), `orders`
-// (the metrics of the other rankings of the series, repeatable), and the filters `key`, `method`, `client`, `instance`, `result` and `type`, each
-// of them repeatable, checked by mcp_usage_overview_check. A name that the route does not read is refused (400 validation, reason unknown), so a
-// typo is an error and not a filter that does nothing (the old `split` is one). Nullopt when they are valid.
+// These parameters of GET /api/mcp/usage/overview are in addition to the window:
+// `group`, `order` (the metric that ranks the groups of the series), `orders` (the metrics of the other rankings of the series, repeatable).
+// The filters are `key`, `method`, `client`, `instance`, `result` and `type`. Each filter is repeatable.
+// mcp_usage_overview_check checks them. A name that the route does not read is refused (400 validation, reason unknown).
+// A typo is therefore an error. It is not a filter that does nothing. The old `split` was such a filter.
+// The result is nullopt when they are valid.
 std::optional<McpValidationError> read_usage_overview_query(const httplib::Request& req, McpUsageOverviewQuery* query) {
   for (const auto& item : req.params) {
     if (item.first != "window" && item.first != "group" && item.first != "order" && item.first != "orders" && item.first != "key" &&
@@ -148,8 +152,8 @@ bool origin_listed(const std::string& origin, const std::vector<std::string>& al
   return false;
 }
 
-// The key of the request, or empty. The header is mcp.auth_header: "Authorization" takes "Bearer <key>";
-// any other name takes the key alone, or "Bearer <key>".
+// This is the key of the request, or an empty value. The header is mcp.auth_header.
+// The value "Authorization" takes "Bearer <key>". Any other name takes the key alone, or "Bearer <key>".
 std::string bearer_token(const httplib::Request& req, const std::string& header_name) {
   std::string header = trim_spaces(req.get_header_value(header_name));
   const bool bearer = header.size() >= 8 && lower_ascii(header.substr(0, 7)) == "bearer ";
@@ -160,8 +164,9 @@ std::string bearer_token(const httplib::Request& req, const std::string& header_
 
 // ---- what a key reaches ---------------------------------------------------------------------
 
-// The objects that the MCP ClickHouse user of a host may read (CHECK GRANT and zero-row probes as that user, never
-// SHOW GRANTS): the AclService answer of the MCP identity, shared with the routes that run as it. A failure is not kept.
+// This lists the objects that the MCP ClickHouse user of a host may read. It uses CHECK GRANT and zero-row probes as that user.
+// It never uses SHOW GRANTS. This is the AclService answer of the MCP identity. The routes that run as this identity share it.
+// A failure is not kept.
 struct McpReadable {
   std::shared_ptr<const AllowedObjectSet> objects;
   bool truncated = false;
@@ -184,7 +189,7 @@ McpReadable mcp_readable_objects(AclService& acl, const std::shared_ptr<ClickHou
   return out;
 }
 
-// The answers of several hosts, read at the same time: a cold host does not wait for the others.
+// The answers of several hosts are read at the same time. A cold host does not wait for the others.
 std::map<std::string, McpReadable> mcp_readable_by_host(AclService& acl, const std::shared_ptr<ClickHouseClientPool>& pool,
                                                         const std::vector<const HostSpec*>& hosts, bool refresh) {
   std::map<std::string, std::future<McpReadable>> pending;
@@ -201,8 +206,8 @@ std::map<std::string, McpReadable> mcp_readable_by_host(AclService& acl, const s
 
 // ---- the ClickHouse side -------------------------------------------------------------------
 
-// Bytes of a cell on the native wire, close enough to ClickHouse's own count of the result size:
-// the fixed-width types by their width, the rest by the length of their JSON text.
+// This counts the bytes of a cell on the native wire. The count is close to the ClickHouse count of the result size.
+// Fixed-width types count by their width. Other types count by the length of their JSON text.
 uint64_t native_cell_bytes(const clickhouse::ColumnRef& column, uint64_t json_length) {
   using Code = clickhouse::Type::Code;
   switch (column->Type()->GetCode()) {
@@ -215,7 +220,7 @@ uint64_t native_cell_bytes(const clickhouse::ColumnRef& column, uint64_t json_le
   }
 }
 
-// The code of an error of a tool, from what the failure is (ch_error.hpp): the same classification as the pages.
+// This is the code of a tool error, from the kind of failure (ch_error.hpp). It uses the same classification as the pages.
 std::string error_code_of(const ChError& failure) {
   switch (failure.kind) {
     case ChErrorKind::Timeout: return "timeout";
@@ -230,8 +235,9 @@ std::string error_code_of(const ChError& failure) {
   }
 }
 
-// What a key of a host can ask for at most: the smaller of the configuration of MCP and the profile of the ClickHouse user of the
-// host, and which of them binds ("mcp", "clickhouse", or "both" when they are equal). The page shows it and the key is refused above it.
+// This is the maximum that a key of a host can ask for. It is the smaller value of the MCP configuration and the profile of the ClickHouse user of the host.
+// The value "mcp", "clickhouse" or "both" names the limit that binds. "both" applies when the two values are equal.
+// The page shows this value. The key is refused above it.
 struct McpHostLimit {
   int64_t value = 0;
   const char* source = "mcp";
@@ -256,7 +262,7 @@ McpHostLimits mcp_host_limits(const McpSettings& settings, const HostAccess* acc
     }
   };
   bind(&out.max_rows, static_cast<int64_t>(std::min<uint64_t>(access->mcp_max_result_rows, static_cast<uint64_t>(INT64_MAX))));
-  // A fraction of a second is the second it is rounded up to (a limit of 0.5 s still lets a call ask for 1).
+  // A fraction of a second is rounded up to a full second. For example, a limit of 0.5 s still lets a call ask for 1.
   bind(&out.timeout_seconds, access->mcp_max_execution_time > 0 ? std::max<int64_t>(1, static_cast<int64_t>(access->mcp_max_execution_time)) : 0);
   return out;
 }
@@ -274,21 +280,24 @@ public:
     for (const auto& candidate : hosts_) {
       if (candidate.id == host) spec = &candidate;
     }
-    // A host without mcp_uri is invisible to MCP: there is no fallback to the runner. The OpenTelemetry tools read their
-    // tables with the system user of the host, as the pages do (`as_system`); every other query is the MCP user's.
-    if (!spec || spec->mcp_uri.empty()) throw McpDbError("host_unavailable", "the host " + host + " has no MCP identity");
-    if (!pool_) throw McpDbError("host_unavailable", "no ClickHouse client pool");
+    // A host without mcp_uri is invisible to MCP. There is no fallback to the runner.
+    // The OpenTelemetry tools read their tables with the system user of the host, as the pages do (`as_system`).
+    // Every other query uses the MCP user.
+    if (!spec || spec->mcp_uri.empty()) throw McpDbError("unavailable", "the host " + host + " has no MCP identity");
+    if (!pool_) throw McpDbError("unavailable", "no ClickHouse client pool");
     const std::string& uri = limits.as_system && !spec->system_uri.empty() ? spec->system_uri : spec->mcp_uri;
     const char* who = uri == spec->mcp_uri ? "the MCP user" : "the system user";
 
     std::string connect_error;
     auto client = pool_->acquire(uri, std::chrono::milliseconds(5000),
                                  std::chrono::seconds(timeout_cap_ + 15), std::chrono::milliseconds(10000), &connect_error);
-    if (!client) throw McpDbError("host_unavailable", "cannot connect to ClickHouse host " + host + " as " + who + ": " + connect_error);
+    if (!client) throw McpDbError("unavailable", "cannot connect to ClickHouse host " + host + " as " + who + ": " + connect_error);
 
-    // The settings profile of the user decides what is sent (ch_mcp_settings): readonly = 1 when the profile leaves it at 0
-    // (the SQL then cannot change anything, nor any limit below), none when the profile has it at 1, and a limit only
-    // when it is smaller than the profile's. The profile of the connection is read once.
+    // The settings profile of the user decides what ChDash sends (ch_mcp_settings).
+    // ChDash sends readonly = 1 when the profile sets it to 0. Then the SQL cannot change anything, nor any limit below.
+    // ChDash sends no readonly setting when the profile sets it to 1.
+    // ChDash sends a limit only when the limit is smaller than the value of the profile.
+    // The profile of the connection is read one time.
     ChMcpLimits guard;
     guard.max_rows = limits.max_rows;
     guard.max_bytes = limits.max_bytes;
@@ -296,20 +305,21 @@ public:
     guard.max_memory_bytes = limits.max_memory_bytes;
     guard.max_rows_to_read = limits.max_rows_to_read;
     guard.sql_bytes = static_cast<int64_t>(sql.size());
-    guard.log_comment = "chdash-mcp key=" + limits.key_id;
+    // agent.caller of the call links the cost of the statement to the agent. See docs/mcp.md, "Guard rails of each query".
+    guard.log_comment = "chdash-mcp key=" + limits.key_id + (limits.agent_caller.empty() ? std::string() : " caller=" + mcp_comment_caller(limits.agent_caller));
     ChMcpSettings plan;
     try {
       plan = ch_mcp_settings(guard, ch_connection_profile(*client));
     } catch (const std::system_error& error) {
       pool_->invalidate(client);
-      throw McpDbError("host_unavailable", std::string("the connection to ClickHouse failed: ") + error.what());
+      throw McpDbError("unavailable", std::string("the connection to ClickHouse failed: ") + error.what());
     } catch (const std::exception& error) {
       pool_->invalidate(client);
       throw McpDbError("query_failed", error.what());
     }
 
-    // Named for the key and the tool (mcp_cost.hpp): what the statement costs is found in system.query_log, whatever its profile
-    // lets ChDash send and whatever its SQL says.
+    // The cost is named for the key and the tool (mcp_cost.hpp). The cost of the statement is found in system.query_log.
+    // This is true whatever the profile lets ChDash send, and whatever the SQL says.
     clickhouse::Query query(sql, mcp_query_id(limits.key_id, limits.tool));
     for (const auto& [name, value] : plan.settings) {
       clickhouse::QuerySettingsField field;
@@ -323,7 +333,7 @@ public:
     uint64_t native_bytes = 0;
     rapidjson::StringBuffer cell_buffer;
     rapidjson::Writer<rapidjson::StringBuffer> cell_writer(cell_buffer);
-    // The rows and bytes the call can return: the guard rails, or the profile's when it cuts earlier.
+    // This sets the rows and bytes that the call can return. It uses the guard rails, or the limit of the profile when the profile cuts earlier.
     const uint64_t max_rows = static_cast<uint64_t>(plan.max_rows);
     const uint64_t max_bytes = static_cast<uint64_t>(plan.max_bytes);
 
@@ -369,22 +379,22 @@ public:
     try {
       ch_execute(*client, query);
     } catch (const clickhouse::ServerException& error) {
-      // A cut query ends with "cancelled" on some servers: the rows we kept are the answer.
+      // On some servers, a cut query ends with "cancelled". The rows that ChDash kept are the answer.
       if (!(done && error.GetCode() == 394)) {
         throw McpDbError(error_code_of(classify_clickhouse_error(error)), error.what());
       }
     } catch (const std::system_error& error) {
       pool_->invalidate(client);
       const auto waited = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started).count();
-      throw McpDbError(waited >= limits.timeout_seconds ? "timeout" : "host_unavailable",
+      throw McpDbError(waited >= limits.timeout_seconds ? "timeout" : "unavailable",
                        std::string("the connection to ClickHouse failed: ") + error.what());
     } catch (const std::exception& error) {
       pool_->invalidate(client);
       throw McpDbError("query_failed", error.what());
     }
     result.elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-    // ClickHouse itself may have stopped at max_result_bytes (result_overflow_mode = break), and a cut of the profile leaves
-    // no extra row to show it: a result that fills what the profile allows is reported as cut.
+    // ClickHouse can stop at max_result_bytes (result_overflow_mode = break). A cut of the profile leaves no extra row to show it.
+    // A result that fills the limit of the profile is reported as cut.
     if (native_bytes >= max_bytes) result.truncated = true;
     if (plan.rows_cut_by_profile && result.rows.size() >= max_rows) result.truncated = true;
     return result;
@@ -399,8 +409,8 @@ private:
   HealthFn health_;
 };
 
-// The API tools call the routes of the API in the process (Server::call_mcp_api): the same handlers that answer the browser,
-// run on the thread of the call, with the limits of MCP (admission.hpp keeps the number of calls at once).
+// The API tools call the routes of the API in the process (Server::call_mcp_api). They use the same handlers that answer the browser.
+// The handlers run on the thread of the call, with the limits of MCP. admission.hpp keeps the number of calls at once.
 class InProcessMcpApi : public McpApiClient {
 public:
   explicit InProcessMcpApi(Server& server) : server_(server) {}
@@ -410,20 +420,46 @@ private:
   Server& server_;
 };
 
-// One audit line per call: who, what, where, how long, how it ended. Never SQL, never data.
+// Each action of the MCP page on the keys writes one line. The actions are create, delete, and the reads of what a key reaches and of the usage.
+// The line gives who, what, and how it ended. It never holds a token. The requests of POST /mcp have their own record (mcp.call, McpCallRecord below).
 void audit(const std::string& key, const std::string& what, const std::string& host, const std::string& status,
            int64_t duration_ms, uint64_t rows) {
-  log_event(LogLevel::Info, "mcp.call",
+  log_event(LogLevel::Info, "mcp.page",
             {{"key", key}, {"call", what}, {"host", host.empty() ? std::string("-") : host}, {"status", status},
              {"duration_ms", duration_ms}, {"rows", rows}});
+}
+
+// This is the record of a request of POST /mcp (mcp_telemetry.hpp). It writes the JSON line mcp.call (contract 7.5).
+// When the telemetry block is on, it also writes the SERVER span, the spans of its ClickHouse statements, and the OTLP log record (contract 7.4).
+// The export only puts them in its queue. The request never waits for the export.
+void emit_call(OtlpExporter* telemetry, McpCallRecord& record, const std::string& status, int64_t duration_ms, uint64_t bytes,
+               McpStatementSpans* statements) {
+  record.trace_id = record.trace.trace_id.empty() ? mcp_random_hex(16) : record.trace.trace_id;
+  record.write(status, duration_ms, bytes);
+  if (!telemetry) return;
+  const auto ended = std::chrono::system_clock::now();
+  telemetry->add_spans(mcp_call_spans(record, status, ended, statements ? statements->take() : std::vector<ChStatementRecord>()));
+  if (telemetry->logs_enabled()) telemetry->add_log(mcp_call_log_record(record, status, duration_ms, bytes, ended));
+}
+
+// This is the method as a label of mcp_server_operation_duration_seconds. It is a method of the protocol, or else a fixed word.
+// A client chooses the text of a method. So the text never becomes a label (contract 8.3).
+const char* metric_method(const std::string& method) {
+  static const char* const known[] = {"initialize", "ping", "server/discover", "tools/list", "tools/call", "response", "request"};
+  for (const char* name : known) {
+    if (method == name) return name;
+  }
+  if (method.rfind("notifications/", 0) == 0) return "notification";
+  return "other";
 }
 
 } // namespace
 
 // ---- the analysis of the keys ---------------------------------------------------------------------------------
 
-// What the analysis tools ask of the server (mcp_tools.hpp): the state of the rate limit of a key, its usage and its cost, and the usage of every
-// key. A class of Server, so that it reads what the routes of the page read, and the tools never see Server. It holds no state of its own.
+// This class answers what the analysis tools ask of the server (mcp_tools.hpp). It gives the state of the rate limit of a key,
+// its usage and its cost. It also gives the usage of every key.
+// This class is part of Server. It reads what the routes of the page read. The tools never see Server. The class holds no state of its own.
 class Server::McpAnalysisPort final : public McpAnalysis {
 public:
   explicit McpAnalysisPort(Server& server) : server_(server) {}
@@ -438,9 +474,10 @@ public:
   McpAnalysisLimits limits(const McpKey& key) override {
     McpAnalysisLimits out;
     if (server_.mcp_usage_) out.instance = server_.mcp_usage_->instance();
-    out.rate = server_.mcp_rate_.peek(key.id, steady_ms(), server_.cfg_.mcp.rate_limit_per_minute);
-    // What a key of its host can ask for at most, with who sets it: the same figures as `limits` of the host in the meta. A key of an older file
-    // that names several hosts has the first one's.
+    out.rate = server_.mcp_rate_.peek(key.id, steady_ms(), key.rate_limit_per_minute.value_or(server_.cfg_.mcp.rate_limit_per_minute));
+    // This is the maximum that a key of its host can ask for. It also names who sets the maximum.
+    // The figures are the same as `limits` of the host in the meta.
+    // A key of an older file that names several hosts has the limit of the first host.
     const HostsSnapshot health = server_.health_ ? server_.health_->snapshot() : HostsSnapshot{};
     const HostAccess* access = nullptr;
     for (const auto& item : health.hosts) {
@@ -470,7 +507,7 @@ public:
 
   std::string all_usage(const std::string& window_name, const McpUsageOverviewQuery& query, int64_t now) override {
     McpUsage& usage = need_usage();
-    // The double lock again: the tool names the key, and the configuration must allow it (mcp.usage.all_keys).
+    // This is a second lock. The tool names the key, and the configuration must enable it (mcp.usage.all_keys).
     if (!server_.cfg_.mcp.usage.all_keys) {
       throw McpAnalysisError("not_enabled", "reading the usage of all the keys is off: the administrator must set mcp.usage.all_keys in the ChDash configuration");
     }
@@ -489,7 +526,7 @@ private:
     return *server_.mcp_usage_;
   }
 
-  // The tool checked the window against `usage_windows()`; a name that the retention does not keep is refused here too.
+  // The tool checked the window against `usage_windows()`. A name that the retention does not keep is refused here too.
   McpUsageWindow window_of(const std::string& name, int64_t now) const {
     const int64_t retention = server_.cfg_.mcp.usage.retention_days;
     if (const auto window = mcp_usage_window(name, retention, now)) return *window;
@@ -508,15 +545,16 @@ McpToolAvailability Server::mcp_tool_availability() const { return {mcp_usage_ !
 void Server::init_mcp() {
   McpStoreOptions store;
   store.storage_file = cfg_.mcp.storage_file;
-  store.manage_from_ui = cfg_.mcp.manage_from_ui;
+  store.mode = cfg_.mcp.keys_mode;
   store.config_keys = cfg_.mcp.keys;
   for (const auto& host : cfg_.hosts) {
     if (!host.mcp_uri.empty()) store.context.hosts.push_back(host.id);
   }
   store.context.max_rows_cap = cfg_.mcp.max_rows;
   store.context.timeout_cap = cfg_.mcp.query_timeout_seconds;
-  // A key created from the page needs a host whose MCP user connects, and tools that this user serves. `this`,
-  // never a local: the store outlives the constructor.
+  store.context.rate_limit_cap = cfg_.mcp.rate_limit_per_minute;
+  // A key that the page creates needs a host whose MCP user connects. It also needs tools that this user serves.
+  // Use `this`, never a local. The store outlives the constructor.
   store.context.live_check = [this](const McpKey& key) -> std::optional<McpValidationError> {
     if (key.hosts.empty() || !health_) return std::nullopt;
     const HostHealth* host = nullptr;
@@ -541,9 +579,10 @@ void Server::init_mcp() {
     return std::nullopt;
   };
   mcp_keys_ = std::make_unique<McpKeyStore>(std::move(store));
-  // What each key did, when the usage is on (mcp.usage.enabled): the state of this instance is read from its file (an invalid file stopped
-  // the start in config.cpp), then the keys that are gone since the last run are deleted from now on. The files of the other instances are
-  // read by the background loop. When it is off nothing is counted: there is no usage object.
+  // This records what each key did. It works when the usage is on (mcp.usage.enabled).
+  // The state of this instance is read from its file. An invalid file stops the start in config.cpp.
+  // Then the keys that are gone since the last run are deleted. The background loop reads the files of the other instances.
+  // When the usage is off, nothing is counted. There is no usage object.
   const int64_t started = unix_seconds();
   if (cfg_.mcp.usage.enabled) {
     McpUsageOptions usage;
@@ -555,7 +594,7 @@ void Server::init_mcp() {
     mcp_usage_->sync_live_keys(live, started);
   }
 
-  // `this`, never a local: the callback outlives the constructor.
+  // Use `this`, never a local. The callback outlives the constructor.
   mcp_db_ = std::make_unique<ClickHouseMcpDatabase>(
       client_pool_, cfg_.hosts, cfg_.mcp.query_timeout_seconds, [this](const std::string& host) -> std::optional<bool> {
         if (!health_) return std::nullopt;
@@ -575,8 +614,8 @@ void Server::init_mcp() {
   tools.max_sql_bytes = cfg_.mcp.max_sql_bytes;
   tools.max_memory_bytes = cfg_.mcp.max_memory_bytes;
   tools.max_rows_to_read = cfg_.mcp.max_rows_to_read;
-  // Where the OpenTelemetry data lives: the settings that the Observability pages read, for each host (the tables can
-  // differ from a host to another).
+  // This sets where the OpenTelemetry data lives. These are the settings that the Observability pages read, for each host.
+  // The tables can differ from one host to another.
   tools.observability = mcp_observability_config(cfg_.otel_defaults);
   for (const auto& host : cfg_.hosts) {
     if (!host.mcp_uri.empty()) tools.observability_by_host[host.id] = mcp_observability_config(host.otel);
@@ -589,21 +628,35 @@ void Server::init_mcp() {
 void Server::save_mcp_usage(bool force) {
   if (!mcp_usage_) return;
   const int64_t now = unix_seconds();
-  // The loop writes the state of this instance every minute when it changed, and reads the others' files when they did.
+  // The loop writes the state of this instance every minute when the state changed. It reads the files of the others when they changed.
   if (force) mcp_usage_->save(now);
   else mcp_usage_->tick(now);
 }
 
 // ---- POST /mcp ----------------------------------------------------------------------------------
 
-void Server::handle_mcp_not_allowed(const httplib::Request&, httplib::Response& res) {
+void Server::handle_mcp_not_allowed(const httplib::Request& req, httplib::Response& res) {
   res.set_header("Allow", "POST");
   api_error(res, 405, "method_not_allowed", "the MCP endpoint answers POST only (single JSON responses, no stream)");
+  if (!mcp_keys_) return;
+  // The request reached the endpoint. Its record is in the call log (contract 7.5).
+  McpCallRecord record;
+  record.instance = cfg_.mcp.instance;
+  record.client_address = req.remote_addr;
+  record.client_name = mcp_log_text(req.get_header_value("User-Agent"), 64);
+  record.trace = mcp_trace_context({}, {}, false, trim_spaces(req.get_header_value("traceparent")), req.get_header_value("baggage"));
+  record.span_id = mcp_random_hex(8);
+  emit_call(telemetry_.get(), record, "405", 0, res.body.size(), nullptr);
+  mcp_metrics_.observe("request", "", "405", 0.0);
 }
 
 void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res, const httplib::ContentReader& reader) {
-  // The statements of the call stop when the client goes away; each tool sets its own time limit.
-  RequestScope scope(make_context(req, false));
+  // The statements of the call stop when the client disconnects. Each tool sets its own time limit.
+  // When the telemetry is on, each statement of the call becomes a child span of the request. This includes the statements of an API tool that runs in the process.
+  const auto statements = telemetry_ ? std::make_shared<McpStatementSpans>() : nullptr;
+  RequestContext context = make_context(req, false);
+  if (statements) context.limits.on_statement = [statements](const ChStatementRecord& statement) { statements->add(statement); };
+  RequestScope scope(std::move(context));
   const int64_t started = steady_ms();
   const int64_t now = unix_seconds();
   const auto elapsed = [&] { return steady_ms() - started; };
@@ -612,39 +665,72 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     api_error(res, 404, "mcp_disabled", "MCP is disabled");
     return;
   }
-  // An early answer does not read the body: close the connection rather than drain it.
+
+  // This is the record of the call log. The record is filled while the request runs (contract 7.5).
+  // The trace context of the headers applies to a request that is refused before its message. The message can give its own trace context in _meta (mcp_protocol.cpp).
+  McpCallRecord record;
+  record.instance = cfg_.mcp.instance;
+  record.client_address = req.remote_addr;
+  const std::string user_agent = req.get_header_value("User-Agent");
+  record.client_name = mcp_log_text(user_agent, 64);
+  McpRequestHeaders headers;
+  const auto read_header = [&](const char* name, bool* has, std::string* value) {
+    const size_t count = req.get_header_value_count(name);
+    if (count > 1) headers.repeated = true;
+    if (count == 0) return;
+    *has = true;
+    *value = trim_spaces(req.get_header_value(name));
+  };
+  read_header("MCP-Protocol-Version", &headers.has_protocol_version, &headers.protocol_version);
+  read_header("Mcp-Method", &headers.has_method, &headers.method);
+  read_header("Mcp-Name", &headers.has_name, &headers.name);
+  headers.traceparent = trim_spaces(req.get_header_value("traceparent"));
+  for (size_t i = 0; i < req.get_header_value_count("baggage"); ++i) {
+    if (!headers.baggage.empty()) headers.baggage += ",";
+    headers.baggage += req.get_header_value("baggage", "", i);
+  }
+  record.protocol_version = mcp_log_text(headers.protocol_version, 32);
+  record.trace = mcp_trace_context({}, {}, false, headers.traceparent, headers.baggage);
+  record.span_id = mcp_random_hex(8);
+  // The record and the metric of the request are written after its answer is set. Its size is counted.
+  const auto log_call = [&](const std::string& status) {
+    const int64_t duration = elapsed();
+    emit_call(telemetry_.get(), record, status, duration, res.body.size(), statements.get());
+    mcp_metrics_.observe(metric_method(record.method), record.tool, status, static_cast<double>(duration) / 1000.0);
+  };
+  // An early answer does not read the body. The server closes the connection and does not drain it.
   const auto early = [&](int status, const char* code, const std::string& message) {
     res.set_header("Connection", "close");
     api_error(res, status, code, message);
   };
 
-  // 1. A browser page must be listed. A request without Origin (a CLI, an SDK, an IDE) passes.
+  // 1. A browser page must be in the list of allowed origins. A request without Origin (a CLI, an SDK, an IDE) is accepted.
   const std::string origin = trim_spaces(req.get_header_value("Origin"));
-  if (!origin.empty() && !origin_listed(origin, cfg_.mcp.allowed_origins)) {
-    audit("-", "request", "", "origin_not_allowed", elapsed(), 0);
+  if (req.get_header_value_count("Origin") > 1 || (!origin.empty() && !origin_listed(origin, cfg_.mcp.allowed_origins))) {
     early(403, "origin_not_allowed", "this Origin is not listed in mcp.allowed_origins");
+    log_call("403_origin");
     return;
   }
 
-  // 2. The key.
+  // 2. Check the key. No key, an unknown key and an expired key get the same answer (contract 3.3).
   const std::string token = bearer_token(req, cfg_.mcp.auth_header);
   const bool standard_header = lower_ascii(cfg_.mcp.auth_header) == "authorization";
-  const auto auth = mcp_keys_->authenticate(token);
+  const auto auth = mcp_keys_->authenticate(token, now);
   if (auth.status != McpKeyStore::AuthStatus::Ok) {
-    const char* reason = auth.status == McpKeyStore::AuthStatus::Missing ? "missing" : "unknown";
-    audit("-", "request", "", std::string("401_") + reason, elapsed(), 0);
-    if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash-mcp\"");
-    early(401, "unauthorized", "the key is missing or unknown: send " + cfg_.mcp.auth_header + (standard_header ? ": Bearer <key>" : ": <key>"));
+    if (standard_header) res.set_header("WWW-Authenticate", "Bearer realm=\"chdash\"");
+    res.set_header("Connection", "close");
+    res.status = 401;
+    res.set_content(kMcpUnauthorizedBody, "application/json");
+    log_call("401");
     return;
   }
   const McpKey& key = auth.key;
-  const std::string user_agent = req.get_header_value("User-Agent");
-  // A request that came with a key: its audit line, and its count in the usage of the key (mcp_usage.hpp), once its answer
-  // is set (its size is counted).
-  const auto account = [&](McpUsageKind kind, const std::string& what, const std::string& host, const std::string& status, uint64_t rows,
-                           const McpRpcResult* result) {
-    const int64_t duration = elapsed();
-    audit(key.id, what, host, status, duration, rows);
+  record.key = key.id;
+  record.key_source = key.source;
+  if (!key.subject.empty()) record.subject = key.subject;
+  // For a request that came with a key, the count goes into the usage of the key (mcp_usage.hpp). This happens after the answer is set.
+  // The size of the answer is counted. The usage is not part of the contract (7.7). Its results keep their names (429_rate_limited, rpc_error_32601).
+  const auto account = [&](McpUsageKind kind, const std::string& status, uint64_t rows, const McpRpcResult* result) {
     if (!mcp_usage_) return;
     McpUsageEvent event;
     event.key_id = key.id;
@@ -656,7 +742,7 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     if (result) event.method = result->method;
     if (result && result->tool_called) event.tool = result->tool;
     event.status = status;
-    event.duration_ms = duration;
+    event.duration_ms = elapsed();
     event.rows = rows;
     event.bytes = res.body.size();
     if (result) {
@@ -667,40 +753,37 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
     mcp_usage_->record(event);
   };
 
-  // 3. The rate limit of the key.
+  // 3. Check the rate limit of the key. Use its own limit, or else the global limit.
   int retry_after = 1;
-  if (!mcp_rate_.allow(key.id, steady_ms(), cfg_.mcp.rate_limit_per_minute, &retry_after)) {
+  const int64_t per_minute = key.rate_limit_per_minute.value_or(cfg_.mcp.rate_limit_per_minute);
+  if (!mcp_rate_.allow(key.id, steady_ms(), per_minute, &retry_after)) {
     res.set_header("Retry-After", std::to_string(retry_after));
-    early(429, "rate_limited", "too many calls for this key; retry in " + std::to_string(retry_after) + " seconds");
-    account(McpUsageKind::RateLimited, "request", "", "429_rate_limited", 0, nullptr);
+    res.set_header("Connection", "close");
+    res.status = 429;
+    res.set_content(kMcpRateLimitedBody, "application/json");
+    log_call("429");
+    account(McpUsageKind::RateLimited, "429_rate_limited", 0, nullptr);
     return;
   }
 
-  // 4. The request itself.
+  // 4. Check the request itself.
   std::string type = req.get_header_value("Content-Type");
   if (const auto semi = type.find(';'); semi != std::string::npos) type.resize(semi);
   if (lower_ascii(trim_spaces(type)) != "application/json") {
     early(415, "unsupported_media_type", "the request body must be application/json");
-    account(McpUsageKind::Rejected, "request", "", "415_unsupported_media_type", 0, nullptr);
+    log_call("415");
+    account(McpUsageKind::Rejected, "415_unsupported_media_type", 0, nullptr);
     return;
   }
-  const std::string version_header = trim_spaces(req.get_header_value("MCP-Protocol-Version"));
-  if (!version_header.empty()) {
-    const auto& supported = mcp_protocol_versions();
-    if (std::find(supported.begin(), supported.end(), version_header) == supported.end()) {
-      early(400, "unsupported_protocol_version", "MCP-Protocol-Version " + version_header + " is not supported");
-      account(McpUsageKind::Rejected, "request", "", "400_protocol_version", 0, nullptr);
-      return;
-    }
-  }
-  // One JSON message: the SQL (at most max_sql_bytes) plus its escapes and the envelope.
+  // This is one JSON message. It holds the SQL (at most max_sql_bytes), its escapes, and the envelope.
   const size_t max_body = static_cast<size_t>(cfg_.mcp.max_sql_bytes) * 2 + 16 * 1024;
   const std::string length_header = req.get_header_value("Content-Length");
   const bool length_is_number = !length_header.empty() && length_header.size() < 19 &&
       std::all_of(length_header.begin(), length_header.end(), [](char c) { return c >= '0' && c <= '9'; });
   if (length_is_number && std::stoull(length_header) > max_body) {
     early(413, "payload_too_large", "the request body is larger than " + std::to_string(max_body) + " bytes");
-    account(McpUsageKind::Rejected, "request", "", "413_too_large", 0, nullptr);
+    log_call("413");
+    account(McpUsageKind::Rejected, "413_too_large", 0, nullptr);
     return;
   }
   std::string body;
@@ -715,32 +798,49 @@ void Server::handle_mcp_post(const httplib::Request& req, httplib::Response& res
   });
   if (too_large) {
     early(413, "payload_too_large", "the request body is larger than " + std::to_string(max_body) + " bytes");
-    account(McpUsageKind::Rejected, "request", "", "413_too_large", 0, nullptr);
+    log_call("413");
+    account(McpUsageKind::Rejected, "413_too_large", 0, nullptr);
     return;
   }
   if (!read_ok) {
     early(400, "bad_request", "the request body could not be read");
-    account(McpUsageKind::Rejected, "request", "", "400_unreadable", 0, nullptr);
+    log_call("400");
+    account(McpUsageKind::Rejected, "400_unreadable", 0, nullptr);
     return;
   }
 
-  // 5. The message.
+  // 5. Check the message.
   McpServerInfo info;
   info.version = cfg_.version_semver;
-  McpRpcResult result = mcp_handle_message(body, key, *mcp_tools_, info, now, version_header);
+  McpRpcResult result = mcp_handle_message(body, key, *mcp_tools_, info, now, headers);
   res.status = result.http_status;
   if (result.http_status == 202) {
     res.set_content("", 0, "application/json");
   } else {
-    // The body can be as large as max_result_bytes: it moves into the answer.
+    // The body can be as large as max_result_bytes. The body moves into the answer.
     res.set_content(std::move(result.body), "application/json");
   }
-  std::string what = result.method.empty() ? "request" : result.method;
-  if (result.tool_called) what = "tools/call:" + result.tool;
+  record.method = result.method.empty() ? "request" : result.method;
+  record.tool = result.tool;
+  record.host = result.outcome.host;
+  record.rows = result.outcome.rows;
+  if (!result.protocol_version.empty()) record.protocol_version = result.protocol_version;
+  record.trace = result.trace;
+  record.request_id = result.request_id;
+  if (!result.client_name.empty()) {
+    record.client_name = mcp_log_text(result.client_name, 64);
+    record.client_version = mcp_log_text(result.client_version, 64);
+  }
   std::string status = "ok";
-  if (result.rpc_error != 0) status = "rpc_error_" + std::to_string(-result.rpc_error);
-  else if (result.tool_called && result.outcome.is_error) status = result.outcome.error_code;
-  account(result.tool_called ? McpUsageKind::ToolCall : McpUsageKind::Request, what, result.outcome.host, status, result.outcome.rows, &result);
+  std::string usage_status = "ok";
+  if (result.rpc_error != 0) {
+    status = "rpc_" + std::to_string(result.rpc_error);
+    usage_status = "rpc_error_" + std::to_string(-result.rpc_error);
+  } else if (result.tool_called && result.outcome.is_error) {
+    status = usage_status = result.outcome.error_code;
+  }
+  log_call(status);
+  account(result.tool_called ? McpUsageKind::ToolCall : McpUsageKind::Request, usage_status, result.outcome.rows, &result);
 }
 
 // ---- /api/mcp/* -----------------------------------------------------------------------------------
@@ -760,7 +860,9 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       w.Key("auth_header"); put(w, s.auth_header);
       w.Key("storage_configured"); w.Bool(mcp_keys_->storage_configured());
       w.Key("manage_from_ui"); w.Bool(mcp_keys_->manage_from_ui());
-      w.Key("can_manage"); w.Bool(mcp_keys_->can_manage());
+      w.Key("keys_mode"); w.String(mcp_keys_mode_name(mcp_keys_->mode()));
+      // The page also needs mcp.keys.write for the user (docs/access.md). Without it, New key and Delete are not shown.
+      w.Key("can_manage"); w.Bool(mcp_keys_->can_manage() && access_permits("mcp.keys.write"));
       w.Key("protocol_versions");
       w.StartArray();
       for (const auto& version : mcp_protocol_versions()) put(w, version);
@@ -785,9 +887,11 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
           }
         }
         if (!known) w.Null();
-        // The MCP user of the host: "ok" (it connects), "unavailable" (it does not: no key can read this host) or
-        // "unknown" (not audited yet, or the host is down). The tools that it cannot serve come with the grant
-        // that is missing: the page greys them and the API refuses them (mcp_grants.hpp).
+        // This is the state of the MCP user of the host. The value "ok" means that the user connects.
+        // The value "unavailable" means that the user does not connect. No key can read this host.
+        // The value "unknown" means that the audit is not done yet, or that the host is down.
+        // A tool that the user cannot serve comes with the grant that is missing. The page shows these tools in grey.
+        // The API refuses them (mcp_grants.hpp).
         w.Key("mcp");
         w.StartObject();
         const bool audited = access && access->mcp_audited;
@@ -795,7 +899,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("state"); w.String(!audited ? "unknown" : access->mcp_connected ? "ok" : "unavailable");
         w.Key("error"); put(w, access ? access->mcp_error : std::string());
         w.Key("reads_nothing"); w.Bool(audited && access->mcp_connected && access->mcp_reads_nothing);
-        // The settings profile of the MCP user, and what a key of this host can ask for at most (and what binds it).
+        // This is the settings profile of the MCP user. It also gives the maximum that a key of this host can ask for, and the limit that binds it.
         w.Key("profile");
         w.StartObject();
         const bool profiled = access && access->mcp_audited && access->mcp_profile_known;
@@ -846,7 +950,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("id"); put(w, group.id);
         w.Key("title"); put(w, group.title);
         w.Key("note"); put(w, group.note);
-        // The sub-headings of the card of the family, in the order of the page.
+        // These are the sub-headings of the card of the family. They are in the order of the page.
         w.Key("sections");
         w.StartArray();
         for (const auto& section : mcp_tool_sections()) {
@@ -860,8 +964,11 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.EndObject();
       }
       w.EndArray();
-      // The catalog with how each tool is given: `always` (every key has it, whatever its list says), `explicit_only` ("*" does not give it) and
-      // `available` (the configuration offers it now: the tools of the usage need the usage, the one of all the keys needs mcp.usage.all_keys too).
+      // This is the catalog. It shows how each tool is given.
+      // The value `always` means that every key has the tool, whatever its list says.
+      // The value `explicit_only` means that "*" does not give the tool.
+      // The value `available` means that the configuration offers the tool now. The tools of the usage need the usage.
+      // The tool for all the keys needs mcp.usage.all_keys too.
       const McpToolAvailability availability = mcp_tool_availability();
       w.Key("tools");
       w.StartArray();
@@ -889,7 +996,8 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       w.Key("rate_limit_per_minute"); w.Int64(s.rate_limit_per_minute);
       w.EndObject();
       w.Key("name_pattern"); w.String(kMcpNamePattern);
-      // The usage of the keys (mcp_usage.hpp): off, or kept in files by instance (mcp.usage), and the windows of its answers.
+      // This is the usage of the keys (mcp_usage.hpp). The usage is off, or it is kept in files for each instance (mcp.usage).
+      // This also gives the windows of its answers.
       w.Key("usage");
       w.StartObject();
       w.Key("enabled"); w.Bool(mcp_usage_ != nullptr);
@@ -905,14 +1013,15 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         w.Key("default_window"); put(w, mcp_usage_default_window(usage.retention_days));
         w.Key("since"); put(w, mcp_iso_utc(mcp_usage_->since()));
       }
-      // The windows of the ClickHouse cost of a key (api_mcp_cost.cpp): none when System > Queries is off (it reads query_log the same way).
+      // These are the windows of the ClickHouse cost of a key (api_mcp_cost.cpp). There are none when System > Queries is off.
+      // The cost reads query_log in the same way.
       w.Key("cost_windows");
       w.StartArray();
       if (cfg_.system.top_queries_enabled()) {
         for (const auto& window : mcp_cost_windows()) put(w, window);
       }
       w.EndArray();
-      // Whether a key can read the usage of all the keys (the tool mcp_analysis_all_usage): the usage must be on.
+      // This shows whether a key can read the usage of all the keys (the tool mcp_analysis_all_usage). The usage must be on.
       if (mcp_usage_) {
         w.Key("all_keys"); w.Bool(s.usage.all_keys);
       }
@@ -952,7 +1061,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     w.StartObject();
     w.Key("keys");
     w.StartArray();
-    // When a key was last used is its usage's (all the instances): none when the usage is off.
+    // The time of the last use of a key comes from its usage, for all the instances. There is none when the usage is off.
     const auto last_used = mcp_usage_ ? mcp_usage_->last_used_all() : std::unordered_map<std::string, int64_t>{};
     for (const auto& key : store.list()) {
       const auto used = last_used.find(key.id);
@@ -965,10 +1074,11 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
   }
 
   if (!allow_from_page(req, res)) return;
-  // What the key reaches: the tables that the MCP user of each host may read, cut by the patterns of the key.
+  // This shows what the key reaches. It lists the tables that the MCP user of each host may read. The patterns of the key cut the list.
   if (route == McpApiRoute::AccessSummary) {
-    // One answer for the table of the page: for each key, how many databases and tables it reaches (what the MCP user of its
-    // host may read, cut by the patterns of the key). The grants of a host are read once and kept 60 s, whatever the keys.
+    // This is one answer for the table of the page. For each key, it counts the databases and tables that the key reaches.
+    // The count uses what the MCP user of its host may read, cut by the patterns of the key.
+    // The grants of a host are read one time and kept for 60 s, whatever the keys.
     const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
     std::vector<const HostSpec*> hosts;
     for (const auto& key : store.list()) {
@@ -1069,7 +1179,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         continue;
       }
       w.Key("status"); w.String("ok");
-      // database -> the tables of the user that the key's patterns allow
+      // database -> the tables of the user that the patterns of the key allow
       std::map<std::string, std::vector<const AllowedTable*>> by_database;
       size_t readable_total = 0;
       size_t excluded = 0;
@@ -1082,7 +1192,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         by_database[table.database].push_back(&table);
       }
       w.Key("readable_by_user"); w.Uint64(readable_total);
-      // A bound of the privilege discovery stopped it: the tables that were not checked are not counted.
+      // A limit of the privilege discovery stopped it. The tables that were not checked are not counted.
       w.Key("acl_truncated"); w.Bool(readable.truncated);
       w.Key("excluded_by_key"); w.Uint64(excluded);
       w.Key("databases");
@@ -1103,7 +1213,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
           ++listed;
           w.StartObject();
           w.Key("name"); put(w, tables[i]->table);
-          // "some": the user reads some columns only (the columns are checked when a tool opens the table).
+          // The value "some" means that the user reads only some columns. The columns are checked when a tool opens the table.
           w.Key("columns");
           w.String(tables[i]->all_columns ? "all" : "some");
           w.EndObject();
@@ -1121,9 +1231,14 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     api_ok(res, 200, sb);
     return;
   }
-  // What the keys did (mcp_usage.hpp): every key in one answer (the Used column of the page), one key (its details), and every
-  // key cut by key, method, client, instance, result and type (the Usage tab), in a window of the usage, with every instance summed. A read
-  // of the page, as the access above; it never holds SQL, data, a secret or an address. Off (mcp.usage.enabled): 404 not_enabled.
+  // This shows what the keys did (mcp_usage.hpp). It has three forms.
+  // The first form gives every key in one answer. This is the Used column of the page.
+  // The second form gives one key, with its details.
+  // The third form gives every key, cut by key, method, client, instance, result and type. This is the Usage tab.
+  //
+  // Each form uses a window of the usage, and every instance is summed.
+  // A read of the page works in the same way as the access above. The answer never holds SQL, data, a secret or an address.
+  // When the usage is off (mcp.usage.enabled), the answer is 404 not_enabled.
   if (route == McpApiRoute::Usage || route == McpApiRoute::KeyUsage || route == McpApiRoute::UsageOverview) {
     if (!mcp_usage_) return api_error(res, 404, "not_enabled", "the usage of the keys is off: mcp.usage.enabled");
     const int64_t retention = cfg_.mcp.usage.retention_days;
@@ -1154,17 +1269,18 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
       for (const auto& item : live) {
         if (item.id == wanted) key = &item;
       }
-      // A deleted key answers as long as its usage is kept.
+      // A deleted key still gets an answer while its usage is kept.
       if (!mcp_usage_->write_detail(w, wanted, key, *window, now)) return api_error(res, 404, "not_found", "no such key");
       audit("-", "keys/usage", "", "ok:" + wanted, 0, 0);
     }
     api_ok(res, 200, sb);
     return;
   }
-  // What the statements of a key cost ClickHouse, read from system.query_log of its host (api_mcp_cost.cpp): a read of the page too.
+  // This shows the ClickHouse cost of the statements of a key. ChDash reads the cost from system.query_log of its host (api_mcp_cost.cpp).
+  // A read of the page also uses this cost.
   if (route == McpApiRoute::KeyCost) return handle_mcp_key_cost(req, res, now);
   if (!store.manage_from_ui()) {
-    api_error(res, 403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
+    api_error(res, 403, "manage_disabled", "keys are managed in the configuration (mcp.keys.mode = \"static\")");
     return;
   }
   if (route == McpApiRoute::KeyCreate && req.body.size() > 256 * 1024) {
@@ -1180,7 +1296,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
         api_error(res, 400, "validation", err->message, err->field, err->reason);
         return;
       }
-      // A key can lower the limits of its host and never raise them: the limit of the MCP user's profile counts as the configuration's.
+      // A key can lower the limits of its host. A key can never raise them. The limit of the profile of the MCP user counts as a limit of the configuration.
       const HostsSnapshot health = health_ ? health_->snapshot() : HostsSnapshot{};
       for (const auto& host_name : input.hosts.value_or(std::vector<std::string>{})) {
         const HostAccess* access = nullptr;
@@ -1207,7 +1323,7 @@ void Server::handle_api_mcp(const httplib::Request& req, httplib::Response& res,
     case McpApiRoute::KeyDelete: {
       const auto result = store.remove(id);
       if (!result.key) return write_failure(result);
-      // Its usage stays until it is older than mcp.usage.retention_days.
+      // The usage of a key is kept until it is older than mcp.usage.retention_days.
       if (mcp_usage_) mcp_usage_->mark_deleted(mcp_usage_key_ref(*result.key), now);
       audit("-", "keys/delete", "", "ok:" + id, 0, 0);
       rapidjson::StringBuffer sb;

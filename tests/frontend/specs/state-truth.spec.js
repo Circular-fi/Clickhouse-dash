@@ -5,9 +5,11 @@ import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 import { canvasPixel, plotBox } from '../helpers/charts.js';
 import { stamp } from '../helpers/time.js';
 
-// States and data that tell the truth (design review, Lot 1): a panel with a metric and no service asks for one, a
-// click on a metric names it, the critical path does not strike a span's label, a stop of the data breaks the line,
-// a shortened range is said, and a dashed series is dashed in its legend.
+// States and data that tell the truth (design review, Lot 1).
+//
+// A panel with a metric and no service asks for a service. A click on a metric names it.
+// The critical path does not cross a span's label. A stop in the data breaks the line.
+// The page states a shortened range. A dashed series shows dashes in its legend.
 
 async function metricsWindow(request) {
   const meta = await (await request.get('/api/metrics/meta')).json();
@@ -30,7 +32,7 @@ test('metrics: a panel with a metric and no service asks for the service, one bu
   const choices = state.locator('[data-metrics-service]');
   const count = await choices.count();
   expect(count).toBeGreaterThan(1);
-  // The controls that need a service wait for it; nothing was asked of the server.
+  // The controls that need a service wait for it. The test sends no request to the server.
   await expect(page.locator('.metricsPanel').first().locator('.metricsPicker--agg .tracePicker__button')).toBeDisabled();
   const names = await choices.evaluateAll((els) => els.map((el) => el.dataset.metricsService));
   expect(names).toContain('api_service');
@@ -54,7 +56,7 @@ test('metrics: the name of a metric charts it and keeps its services open; the c
   const head = group.locator('[data-metric-toggle]');
   await expect(head).toBeVisible({ timeout: 30_000 });
   await expect(head).toHaveAttribute('aria-expanded', 'false');
-  // The name: the panel takes the metric and asks for a service; the services of the metric are open.
+  // The name: the panel takes the metric. It asks for a service. The metric's services are listed.
   await head.locator('.metricsCatalog__metricName').click();
   await expect(head).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('.metricsPanel').first().locator('.metricsPanel__name')).toHaveText('http.server.request.duration');
@@ -63,7 +65,7 @@ test('metrics: the name of a metric charts it and keeps its services open; the c
   await head.locator('.metricsCatalog__metricName').click();
   await expect(head).toHaveAttribute('aria-expanded', 'true');
   // The chevron folds.
-  // (The icon takes no pointer events: click at its place, the left edge of the head.)
+  // (The icon takes no pointer events. Click at its place, the left edge of the head.)
   await head.click({ position: { x: 14, y: 12 } });
   await expect(head).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('.metricsPanel').first().locator('.metricsPanel__name')).toHaveText('http.server.request.duration');
@@ -97,7 +99,7 @@ test('trace: the critical path is a strip on the lower edge of the bar, never ac
     return { barTop: bar.top, barBottom: bar.bottom, stripTop: strip.top, stripBottom: strip.bottom, stripHeight: strip.height };
   });
   expect(geometry.stripHeight).toBeLessThanOrEqual(2.5);
-  // Its top is in the bar's lower 2.5 px: under a label that is centred on the bar.
+  // Its top is in the lower 2.5 px of the bar, under a label that sits centred on the bar.
   expect(geometry.stripTop).toBeGreaterThanOrEqual(geometry.barBottom - 2.5);
   expect(geometry.stripTop).toBeGreaterThan((geometry.barTop + geometry.barBottom) / 2);
 });
@@ -112,17 +114,17 @@ test('query chart: rows missing on a regular time axis break the line; "Missing 
   await page.locator('.segmented__option[data-view="chart"]').first().click();
   const chart = page.locator('.queryChart .chartCore').first();
   await expect(chart.locator('canvas.chartCore__canvas')).toBeVisible({ timeout: 20_000 });
-  // One stop of the data (hours 10..12): the engine counts it, and the setting is in Chart details.
+  // One stop in the data (hours 10..12). The engine counts it. The option is in Chart details.
   await expect(chart).toHaveAttribute('data-gaps', '1');
   const missing = page.locator('.queryChart .tracePicker:has(> select[data-cfg="missing"])');
   await expect(missing.locator('.tracePicker__button')).toContainText('Gap');
   const box = await plotBox(chart);
   const [, , , plotHeight] = [0, 0, 0, box.height];
-  // The values are one constant: the line is horizontal, at the middle of the plot. Hours 0..9 and 13..23 are present
-  // (the plot runs from the first to the last hour), 10..12 are missing.
+  // The values are one constant. The line is horizontal, at the middle of the plot.
+  // Hours 0..9 and 13..23 are present. The plot runs from the first to the last hour. Hours 10..12 have no data.
   const at = (hour) => box.x + (box.width * hour) / 23;
   const y = box.y + plotHeight / 2;
-  // The line is drawn 1.5 px thick: look in a 5 px column for its colour (the grid is 9 % of the text colour).
+  // The line is 1.5 px thick. Find its colour in a 5 px column. The grid is 9 % of the text colour.
   const inked = async (hour) => {
     let best = 0;
     for (let dy = -3; dy <= 3; dy += 1) best = Math.max(best, (await canvasPixel(chart, at(hour), y + dy))[3]);
@@ -133,7 +135,7 @@ test('query chart: rows missing on a regular time axis break the line; "Missing 
   await missing.locator('.tracePicker__button').click();
   await missing.locator('.tracePicker__option[data-value="connect"]').click();
   await expect.poll(() => inked(11)).toBeGreaterThan(150);
-  // Zero: the hours without a row read as 0, so there is no stop left and the line dips to the bottom.
+  // Zero: the hours without a row read as 0. So no stop is left, and the line dips to the bottom.
   await missing.locator('.tracePicker__button').click();
   await missing.locator('.tracePicker__option[data-value="zero"]').click();
   await expect(chart).toHaveAttribute('data-gaps', '0');
@@ -172,7 +174,7 @@ test('traces: a range wider than the server allows is shortened with a notice, n
 // --- Charts: a dashed series is dashed in its legend (UI-087) ---------------------------------------------------------
 
 test('charts: the legend swatch of a dashed series is dashed', async ({ page }) => {
-  // The System pages load the chart engine with the page (the Query page loads it with its chart view).
+  // The System pages load the chart engine with the page. The Query page loads it with its chart view.
   await page.goto('/system/disks');
   await page.waitForFunction(() => !!window.ChDash?.chartCore?.create);
   const swatches = await page.evaluate(() => {

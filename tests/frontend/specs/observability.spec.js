@@ -4,11 +4,11 @@ import { fetchedModules } from '../helpers/modules.js';
 import { nestedTrace, largeTrace, routeSearch, routeTrace } from '../helpers/trace-mocks.js';
 import { mockTraceResults, mockTraceServices } from '../helpers/traces.js';
 
-// The Observability pages: Traces, Logs and Metrics, each a page of its own
-// (traces.html, logs.html, metrics.html, app_obs_page.js), linked by the row
-// under the header. Covers the row, the shared time range and service,
-// per-view filters, deep links, Back / Forward, the removed pages, what each
-// page loads and the page switcher of the other shells.
+// The Observability pages are Traces, Logs and Metrics. Each one is a page of its own.
+// The files are traces.html, logs.html, metrics.html and app_obs_page.js. The row under the header links them.
+// The tests cover the row, the shared time range and service, and the per-view filters.
+// They also cover deep links, Back and Forward, the removed pages, and what each page loads.
+// They also cover the page switcher of the other shells.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -36,16 +36,16 @@ async function features(request) {
 async function expectView(page, view) {
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', view);
   await expect(page.locator(workspace[view])).toBeVisible();
-  // The other views are other pages: their markup is not in this document.
+  // The other views are other pages. Their markup is not in this document.
   for (const other of VIEWS.filter((v) => v !== view)) await expect(page.locator(workspace[other])).toHaveCount(0);
   await expect(tab(page, view)).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#obsTabs [aria-current="page"]')).toHaveCount(1);
   await expect(page).toHaveTitle(`ClickHouse Dash · ${view[0].toUpperCase()}${view.slice(1)}`);
 }
 
-// Scripts and stylesheets the document holds.
+// Scripts and stylesheets that the document holds.
 async function loaded(page) {
-  // The modules the page fetched (a module is a request, not a <script> element of its own).
+  // The modules that the page fetched. A module is a request, not a <script> element of its own.
   const scripts = await fetchedModules(page);
   return page.evaluate((scripts) => ({
     scripts,
@@ -57,12 +57,12 @@ async function loaded(page) {
 test('observability: the view tabs are links to pages of their own, each a history entry', async ({ page, request }) => {
   await features(request);
   await page.goto('/observability');
-  // /observability sends the browser to the first enabled view's page.
+  // /observability sends the browser to the page of the first enabled view.
   await expect.poll(() => pathOf(page)).toBe('/observability/traces');
   await expectView(page, 'traces');
   await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('#tracesTabs [data-trace-tab]')).not.toHaveCount(0);
-  // The tabs are plain links, in the Tab order.
+  // The tabs are plain links. They are in the Tab order.
   await expect(page.locator('#obsTabs a[data-obs-tab]')).toHaveCount(3);
   for (const view of VIEWS) await expect(tab(page, view)).toHaveAttribute('href', new RegExp(`/observability/${view}$`));
   await page.evaluate(() => { window.__sameDocument = true; });
@@ -70,13 +70,13 @@ test('observability: the view tabs are links to pages of their own, each a histo
   await tab(page, 'logs').click();
   await expect.poll(() => pathOf(page)).toBe('/observability/logs');
   await expectView(page, 'logs');
-  // Another document: the page was left, not switched in place.
+  // This is another document. The page was left, not switched in place.
   expect(await page.evaluate(() => window.__sameDocument)).toBeUndefined();
   await tab(page, 'metrics').click();
   await expect.poll(() => pathOf(page)).toBe('/observability/metrics');
   await expectView(page, 'metrics');
 
-  // Back / Forward walk the pages.
+  // Back and Forward move through the pages.
   await page.goBack();
   await expect.poll(() => pathOf(page)).toBe('/observability/logs');
   await expectView(page, 'logs');
@@ -86,7 +86,7 @@ test('observability: the view tabs are links to pages of their own, each a histo
   await page.goForward();
   await expectView(page, 'logs');
 
-  // A link tab is reached with Tab and opened with Enter.
+  // Press Tab to reach a link tab. Press Enter to open it.
   await tab(page, 'metrics').focus();
   await page.keyboard.press('Enter');
   await expect.poll(() => pathOf(page)).toBe('/observability/metrics');
@@ -99,12 +99,12 @@ test('observability: the view tabs are a row under the header, the Traces tabs o
   await features(request);
   await page.goto('/observability/traces');
   await expectView(page, 'traces');
-  // The header is the other pages' header: brand, host, page switcher, theme.
+  // The header is the same as the header of the other pages. It has the brand, host, page switcher and theme.
   const header = page.locator('header.appHeader');
   await expect(header.locator('[role="tab"], [role="tablist"]')).toHaveCount(0);
   await expect(header.locator('#hostPicker, #pageSelect, #themeSelect')).toHaveCount(3);
   await expect(page.locator('#navObservabilityLink')).toHaveAttribute('aria-current', 'page');
-  // The row, in the body under the header: the nav row's underline tabs (.contentTabs--nav).
+  // The row is in the body under the header. It has the underline tabs of the nav row (.contentTabs--nav).
   const nav = page.locator('body > nav#obsNav');
   await expect(nav).toBeVisible();
   await expect(page.locator('#obsTabs')).toHaveClass(/\bcontentTabs\b.*\bcontentTabs--nav\b/);
@@ -116,8 +116,8 @@ test('observability: the view tabs are a row under the header, the Traces tabs o
   const navBox = await nav.boundingBox();
   expect(navBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height - 0.5);
   expect(navBox.y).toBeLessThanOrEqual(headerBox.y + headerBox.height + 0.5);
-  // The tab look (app_ui_tabs.js, Components: tabs): the underline row, its
-  // selected tab's underline on the row's bottom border.
+  // The tab look comes from app_ui_tabs.js (Components: tabs). It has the underline row.
+  // The underline of the selected tab is on the bottom border of the row.
   const style = await tab(page, 'traces').evaluate((el) => {
     const s = getComputedStyle(el);
     return { fontSize: s.fontSize, fontWeight: s.fontWeight, underline: `${s.borderBottomWidth} ${s.borderBottomStyle}`, background: s.backgroundColor };
@@ -126,7 +126,7 @@ test('observability: the view tabs are a row under the header, the Traces tabs o
   const tabBox = await tab(page, 'traces').boundingBox();
   expect(Math.abs(tabBox.y + tabBox.height - (navBox.y + navBox.height))).toBeLessThanOrEqual(1);
 
-  // Traces: its sub-tabs after a separator, on the same row (no extra row height).
+  // Traces has its sub-tabs after a separator, on the same row. The row has no extra height.
   const sub = page.locator('#tracesTabs');
   await expect(sub).toBeVisible();
   await expect(sub).toHaveClass(/\bcontentTabs--nav\b/);
@@ -139,14 +139,14 @@ test('observability: the view tabs are a row under the header, the Traces tabs o
   expect(Math.abs(centerY(mainBox) - centerY(subBox))).toBeLessThanOrEqual(1);
   expect(mainBox.x + mainBox.width).toBeLessThanOrEqual(sepBox.x);
   expect(sepBox.x + sepBox.width).toBeLessThanOrEqual(subBox.x);
-  // One row: the tab lists and the row padding, nothing stacked.
+  // One row holds the tab lists and the row padding. Nothing is stacked.
   expect(navBox.height).toBeLessThanOrEqual(mainBox.height + 14);
   // The search bar starts right under the row.
   const formBox = await page.locator('#tracesForm').boundingBox();
   expect(formBox.y).toBeGreaterThanOrEqual(navBox.y + navBox.height - 0.5);
   expect(formBox.y).toBeLessThanOrEqual(navBox.y + navBox.height + 12);
 
-  // Logs and Metrics: no sub-tabs, their toolbar right under the same row.
+  // Logs and Metrics have no sub-tabs. Their toolbar is right under the same row.
   for (const [view, toolbar] of [['logs', '#logsForm'], ['metrics', '#metricsWorkspace']]) {
     await tab(page, view).click();
     await expectView(page, view);
@@ -162,7 +162,7 @@ test('observability: the view tabs are a row under the header, the Traces tabs o
   await expectView(page, 'traces');
   await expect(page.locator('#tracesTabs')).toBeVisible();
 
-  // One trace is a page of its own: the header, but none of the Observability tabs.
+  // One trace is a page of its own. It has the header, but none of the Observability tabs.
   await page.goto('/observability/traces/0123456789abcdef0123456789abcdef');
   await expect(page.locator('body')).toHaveAttribute('data-page', 'trace');
   await expect(page.locator('#traceDetail')).toBeVisible();
@@ -209,7 +209,7 @@ test('observability: the time range and the service follow across views, other f
   await expectView(page, 'traces');
   await expect(rangeButton(page, 'traces')).toHaveText('Time range · Last 2 hours');
 
-  // Traces -> Logs: range and service carried, the trace status filter is not.
+  // From Traces to Logs, the range and the service are kept. The trace status filter is not kept.
   await tab(page, 'logs').click();
   await expectView(page, 'logs');
   await expect.poll(() => param(page, 'from')).toEqual(['now-2h']);
@@ -218,7 +218,7 @@ test('observability: the time range and the service follow across views, other f
   await expect(rangeButton(page, 'logs')).toHaveText('Time range · Last 2 hours');
   await expect(page.locator('#logsServiceButton')).toHaveText('Service · checkout');
 
-  // A Logs-only filter and a new range.
+  // Set a filter that only Logs has, and a new range.
   await page.locator('#logsQuery').fill('payment');
   await page.locator('#logsSearchButton').click();
   await expect.poll(() => param(page, 'q')).toEqual(['payment']);
@@ -226,13 +226,13 @@ test('observability: the time range and the service follow across views, other f
   await page.locator('#logsQuickRanges .timeRangeList__item[data-from="now-6h"]').click();
   await expect.poll(() => param(page, 'from')).toEqual(['now-6h']);
 
-  // Metrics adopts the range.
+  // Metrics takes the range.
   await tab(page, 'metrics').click();
   await expectView(page, 'metrics');
   await expect.poll(() => param(page, 'from')).toEqual(['now-6h']);
   await expect(rangeButton(page, 'metrics')).toHaveText('Time range · Last 6 hours');
 
-  // Back on Traces: the new range, its own status filter kept.
+  // Back on Traces, the new range stays. Its own status filter is kept.
   await tab(page, 'traces').click();
   await expectView(page, 'traces');
   await expect.poll(() => param(page, 'from')).toEqual(['now-6h']);
@@ -241,7 +241,7 @@ test('observability: the time range and the service follow across views, other f
   await expect(rangeButton(page, 'traces')).toHaveText('Time range · Last 6 hours');
   await expect.poll(() => param(page, 'q')).toEqual([]);
 
-  // Back on Logs: its text search survived the round trip.
+  // Back on Logs, the text search is still there after the round trip.
   await tab(page, 'logs').click();
   await expectView(page, 'logs');
   await expect.poll(() => param(page, 'q')).toEqual(['payment']);
@@ -271,7 +271,7 @@ test('observability: a service picked in Logs filters Traces and opens its Metri
   await expect.poll(() => param(page, 'service')).toEqual([service]);
   await tab(page, 'metrics').click();
   await expectView(page, 'metrics');
-  // The service's group is open, every other one folded.
+  // The group of the service is open. Every other group is folded.
   const group = page.locator(`#metricsCatalog [data-service-toggle="${service}"]`);
   await expect(group).toHaveAttribute('aria-expanded', 'true', { timeout: 30_000 });
   await expect(page.locator('#metricsCatalog [data-service-toggle][aria-expanded="true"]')).toHaveCount(1);
@@ -298,7 +298,7 @@ test('observability: deep links open each view and Traces sub-tab', async ({ pag
   await expectView(page, 'metrics');
   await expect(rangeButton(page, 'metrics')).toHaveText('Time range · Last 3 hours');
 
-  // A sub-tab switch inside Traces, then Logs, then Back to that sub-tab.
+  // Switch a sub-tab inside Traces. Then open Logs, and go Back to that sub-tab.
   await page.goto('/observability/traces');
   await page.locator('#tracesTab-map').click();
   await expect.poll(() => param(page, 'tab')).toEqual(['map']);
@@ -311,7 +311,7 @@ test('observability: deep links open each view and Traces sub-tab', async ({ pag
   await expectView(page, 'traces');
   await expect(page.locator('#traceMapView')).toBeHidden();
 
-  // /observability keeps its parameters for the first view; an unknown view falls back.
+  // /observability keeps its parameters for the first view. An unknown view falls back to the first view.
   await page.goto('/observability?from=now-12h&to=now');
   await expect.poll(() => pathOf(page)).toBe('/observability/traces');
   expect(param(page, 'from')).toEqual(['now-12h']);
@@ -335,7 +335,7 @@ test('observability: every "any value" picker reads All, never ALL', async ({ pa
   await expectView(page, 'logs');
   await expect(page.locator('#logsServiceButton')).toHaveText('Service · All');
   await expect(button('logsLevel')).toHaveText('Level · All');
-  // Only that word changed case: the other labels keep theirs.
+  // Only that word changes case. The other labels keep their case.
   await expect(page.locator('#logsLevel option[value="5"]')).toHaveText(/DEBUG/);
   expect(await page.locator('.tracePicker__button').evaluateAll((els) => els.map((el) => el.textContent).filter((text) => /\bALL\b/.test(text)))).toEqual([]);
 });
@@ -344,7 +344,7 @@ test('observability: the former pages are gone', async ({ request }) => {
   for (const path of ['/traces', '/traces/0123456789abcdef0123456789abcdef', '/logs', '/metrics/x', '/static/observability.html']) {
     expect((await request.get(path)).status(), path).toBe(404);
   }
-  // /metrics is the Prometheus text of the server (docs/operations.md), not the former page.
+  // /metrics returns the Prometheus text of the server (docs/operations.md). It is not the former page.
   expect(await (await request.get('/metrics')).text()).not.toContain('metricsWorkspace');
   expect((await request.get('/observability/traces/0123456789abcdef0123456789abcdef')).status()).toBe(200);
 });
@@ -365,9 +365,9 @@ test('observability: each page loads its own modules and its own stylesheet, onc
       expect(state.scripts.map((s) => s.split('?')[0]), `${view}: ${name}`).not.toContain(name);
       expect(requested, `${view}: ${name}`).not.toContain(name);
     }
-    // The page's own sheet alone: the others' rules never reach it.
+    // Only the page's own sheet loads. The rules of the other sheets never reach it.
     expect(state.sheets.map((s) => s.split('?')[0]), view).toEqual([`style.${view}.css`]);
-    // The views share the canvas chart engine and the page controller, loaded once.
+    // The views share the canvas chart engine and the page controller. Each loads once.
     for (const name of ['app_obs_page.js', 'app_chart_core.js']) {
       expect(state.scripts.map((s) => s.split('?')[0]).filter((s) => s === name), `${view}: ${name}`).toHaveLength(1);
     }
@@ -380,14 +380,14 @@ test('observability: each page loads its own modules and its own stylesheet, onc
 
 test('observability: a view the server turns off has no tab and its URLs fall back', async ({ page }) => {
   await page.route('**/api/version', async (route) => {
-    // A request still in flight when the page leaves (the trace page below does) is let go.
+    // A request that is still in flight when the page leaves is released. The trace page below does this.
     try {
       const response = await route.fetch();
       const json = await response.json();
       json.features = { ...json.features, traces: { enabled: false } };
       await route.fulfill({ response, json });
     } catch {
-      // The page is gone.
+      // The page is closed.
     }
   });
   await page.goto('/observability');
@@ -416,11 +416,11 @@ test('observability: with one view the row keeps only what it has to show', asyn
   await page.goto('/observability/traces');
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'traces');
   await expect.poll(() => page.evaluate(() => window.ChDash?.features?.known?.() === true)).toBe(true);
-  // Traces alone: no view tabs, no separator, its own tabs on the row.
+  // Traces only has no view tabs and no separator. It has its own tabs on the row.
   await expect(page.locator('#obsTabs')).toBeHidden();
   await expect(page.locator('#obsNav .obsNav__sep')).toBeHidden();
   await expect(page.locator('#tracesTabs')).toBeVisible();
-  // Logs alone: nothing to show, no row.
+  // Logs only has nothing to show and no row.
   only = 'logs';
   await page.goto('/observability/logs');
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', 'logs');
@@ -478,7 +478,7 @@ test('observability: on a phone the tab row scrolls sideways and keeps one row',
   // View tabs and Traces tabs do not fit 390 px: the row scrolls, the page does not.
   expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
-  // Still one row: both tab lists share a centre line, each keeps its width.
+  // The row is still one row. Both tab lists share a centre line. Each list keeps its width.
   const mainBox = await page.locator('#obsTabs').boundingBox();
   const subBox = await sub.boundingBox();
   expect(Math.abs(centerY(mainBox) - centerY(subBox))).toBeLessThanOrEqual(1);
@@ -487,7 +487,7 @@ test('observability: on a phone the tab row scrolls sideways and keeps one row',
     const clipped = await page.locator('#obsTabs a', { hasText: name }).evaluate((el) => el.scrollWidth > el.clientWidth);
     expect(clipped, name).toBe(false);
   }
-  // The last Traces tab is reachable: a click scrolls it into view and selects it.
+  // A user can reach the last Traces tab. A click scrolls it into view and selects it.
   const lastTab = sub.locator('[data-trace-tab]').last();
   await lastTab.click();
   await expect(lastTab).toHaveAttribute('aria-selected', 'true');
@@ -502,7 +502,7 @@ test('observability: on a phone the tab row scrolls sideways and keeps one row',
     const b = await page.locator(`#tracesTab-${lastId}`).boundingBox();
     return b.x >= -0.5 && b.x + b.width <= 390.5;
   }).toBe(true);
-  // The header is one row on a phone: the logo, then host / page / theme, like the Explorer.
+  // On a phone, the header is one row. It shows the logo, then host, page and theme, like the Explorer.
   const brand = await page.locator('.appBrand').boundingBox();
   const host = await page.locator('#hostPicker').boundingBox();
   expect(host.x).toBeGreaterThanOrEqual(brand.x + brand.width - 1);
@@ -510,13 +510,13 @@ test('observability: on a phone the tab row scrolls sideways and keeps one row',
 });
 
 // --- Shared formats (docs/ui-foundations.md) --------------------------------
-// One 24 h time in the browser's zone with an ISO tooltip, and en-US counts,
-// whatever the browser's locale: Traces showed "Sep 12, 04:29:57 PM",
-// Services "9/12/2026, 1:30:00 PM", the span inspector "Sep 12, 2026,
-// 04:29:57.462 PM", and counts followed the locale ("2 000").
+// Time uses 24 h format in the browser's zone, with an ISO tooltip. Counts use en-US format.
+// This applies whatever the browser's locale is. Without this rule, Traces showed "Sep 12, 04:29:57 PM".
+// Services showed "9/12/2026, 1:30:00 PM". The span inspector showed "Sep 12, 2026, 04:29:57.462 PM".
+// Counts followed the locale, as in "2 000".
 test.describe('observability formats on a French browser in Paris', () => {
   test.use({ locale: 'fr-FR', timezoneId: 'Europe/Paris' });
-  // The year shows only when it is not the current one.
+    // The year shows only when it is not the current year.
   const sep20 = (clock) => `Sep 20${new Date().getFullYear() === 2026 ? '' : ', 2026'} ${clock}`;
   const TIME = /^[A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d{2}:\d{2}:\d{2}$/;
 
@@ -540,7 +540,7 @@ test.describe('observability formats on a French browser in Paris', () => {
     const start = page.locator('#traceDetailStats [data-trace-header-item="Trace start"] .statTile__value');
     await expect(start).toHaveText(sep20('03:22:52.000'));
     expect(await start.locator('time').getAttribute('title')).toContain('2026-09-20T01:22:52.000Z');
-    // The span inspector: the start offset, then the local time to the ms.
+    // The span inspector shows the start offset, then the local time to the ms.
     await page.locator('#traceWaterfall .traceSpanRow[data-span-id="0000000000000002"]').click();
     const inspector = page.locator('[data-inspector-span="0000000000000002"]');
     await expect(inspector.locator('.traceInspectorHead__abs')).toHaveText(sep20('03:22:52.002'));
@@ -583,10 +583,10 @@ test.describe('observability formats on a French browser in Paris', () => {
     const tableRow = page.locator('#logsTableRows .logsRow[data-row-id]').first();
     await expect(tableRow.locator('.logsCell--time')).toHaveText(sep20('03:22:55.742'), { timeout: 30_000 });
     expect(await tableRow.locator('.logsCell--time').getAttribute('title')).toContain('Sep 20, 2026 01:22:55.742983150 UTC');
-    // Severity 21 is fatal: a solid chip in its own colour, not the error one.
+    // Severity 21 is fatal. It is a solid chip in its own colour, not the error colour.
     await expect(tableRow.locator('.badge--sev')).toHaveAttribute('data-sev', 'fatal');
     await expect(tableRow.locator('.badge--sev')).toHaveClass(/badge--solid/);
-    // Polled: the virtual row may re-render (a detached badge has no style).
+    // This is polled. The virtual row can re-render. A detached badge has no style.
     await expect.poll(() => tableRow.locator('.badge--sev').evaluate((badge) => {
       const probe = document.createElement('i');
       probe.style.color = 'var(--sev-fatal)';
@@ -607,8 +607,8 @@ test('observability formats: a Metrics series grouped by service takes the servi
   const bounds = meta.kinds.gauge?.time_bounds || meta.kinds.histogram.time_bounds;
   const end = Math.floor(Number(bounds.max_ms) / 60000) * 60000;
   const stamp = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
-  // Real series, relabelled as two services (the panel used to colour them
-  // with the chart slots, unlike Traces and Logs).
+  // These are real series, relabelled as two services. The panel used to colour them with the chart slots.
+  // Traces and Logs did not do this.
   const names = ['checkout', 'frontend'];
   await page.route('**/api/metrics/series?**', async (route) => {
     const response = await route.fetch();

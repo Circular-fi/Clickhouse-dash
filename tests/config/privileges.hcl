@@ -28,26 +28,29 @@ mcp {
   storage_file = "/data/mcp_keys.json"
 
   # One key for each host: a key reads one host.
-  key {
-    name      = "matrix"
-    secret    = "3a7217c0-0000-4000-8000-00000000000b"
-    hosts     = ["ok"]
-    tools     = ["*"]
-    databases = ["*"]
+  mcp_key "matrix" {
+    token_file = "/run/secrets/chdash-test/mcp-key-matrix"
+    tools      = ["*"]
+    scope {
+      hosts     = ["ok"]
+      databases = ["*"]
+    }
   }
-  key {
-    name      = "matrix-toolnone"
-    secret    = "3a7217c0-0000-4000-8000-00000000000c"
-    hosts     = ["toolnone"]
-    tools     = ["*"]
-    databases = ["*"]
+  mcp_key "matrix-toolnone" {
+    token_file = "/run/secrets/chdash-test/mcp-key-matrix-toolnone"
+    tools      = ["*"]
+    scope {
+      hosts     = ["toolnone"]
+      databases = ["*"]
+    }
   }
-  key {
-    name      = "matrix-toolmin"
-    secret    = "3a7217c0-0000-4000-8000-00000000000d"
-    hosts     = ["toolmin"]
-    tools     = ["*"]
-    databases = ["*"]
+  mcp_key "matrix-toolmin" {
+    token_file = "/run/secrets/chdash-test/mcp-key-matrix-toolmin"
+    tools      = ["*"]
+    scope {
+      hosts     = ["toolmin"]
+      databases = ["*"]
+    }
   }
 }
 
@@ -77,61 +80,92 @@ observability {
 clickhouse {
   host {
     name       = "ok"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
-    mcp_uri    = "clickhouse://chdash_mcp:mcp_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_mcp@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_mcp"
   }
   host {
     name       = "runnermin"
-    runner_uri = "clickhouse://chdash_runner_min:runner_min_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner_min@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner_min"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
   }
   host {
     name       = "systemnone"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_sysnone_user:system_none_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_sysnone_user@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_sysnone_user"
   }
   host {
     name       = "systemmin"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_sysmin_user:system_min_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_sysmin_user@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_sysmin_user"
   }
   host {
     name       = "runnernone"
-    runner_uri = "clickhouse://chdash_runner_none:runner_none_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner_none@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner_none"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
   }
   host {
     name       = "bothnone"
-    runner_uri = "clickhouse://chdash_runner_none:runner_none_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_sysnone_user:system_none_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner_none@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner_none"
+    system_uri = "clickhouse://chdash_sysnone_user@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_sysnone_user"
   }
   host {
     name       = "badauth"
-    runner_uri = "clickhouse://chdash_nobody:nobody@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_nobody@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_nobody"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
   }
   host {
     name       = "badsystem"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_nobody:nobody@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_nobody@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_nobody"
   }
   host {
     name       = "toolnone"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
-    mcp_uri    = "clickhouse://chdash_tool_none:tool_none_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_tool_none@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_tool_none"
   }
   host {
     name       = "toolmin"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
-    mcp_uri    = "clickhouse://chdash_tool_min:tool_min_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_tool_min@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_tool_min"
   }
   host {
     name       = "toolbad"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
-    mcp_uri    = "clickhouse://chdash_nobody:nobody@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_nobody@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_nobody"
   }
+}
+
+# The access of humans (docs/access.md): no gateway in front of this server, so no check.
+access {
+  mode = "open"
 }

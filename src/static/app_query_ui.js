@@ -1,8 +1,9 @@
-// ns.queryUi: the Query page's own controls (app_ui.js held them with the shell's header, now app_header.js): the
-// editor with its highlighter, autocomplete, draft and height, the Run and settings menus, the Run options, the run
-// stats summary of a phone, and the query library dialog with the page's ?sql= / ?saved= address.
+// ns.queryUi: the controls of the Query page. Earlier, app_ui.js held these controls with the shell header. The header is now app_header.js.
+// The controls are the editor with its highlighter, autocomplete, draft and height.
+// The controls also include the Run and settings menus, the Run options, and the run stats summary of a phone.
+// The query library dialog has the ?sql= and ?saved= address of the page.
 //
-//   queryUi.init({ onRun })                 binds the page's controls (after header.init()); Ctrl+Enter calls onRun
+//   queryUi.init({ onRun })                 binds the page controls (call it after header.init()); Ctrl+Enter calls onRun
 //   queryUi.closeRunMenu() / applyRunOptionsUi()   the Run split menu, the checked state of the Run options
 //   queryUi.setEditorError(loc) / clearEditorError()   the error mark of the editor
 //   queryUi.syncQueryUrl(sql)               the address follows the run (a saved query: ?saved=, else ?sql=)
@@ -26,9 +27,8 @@ import { util } from "./app_util.js";
 
 const { byId, $, $$ } = dom;
 
-// The Run and settings menus are ns.menu menus (app_ui_menu.js): open /
-// close motion, keys, focus return and the one outside-click / Escape
-// layer. Bound in init(); these keep the names other modules call.
+// The Run and settings menus are ns.menu menus (app_ui_menu.js). The menus handle the open and close motion, the keys, and the focus return.
+// The menus also use the one outside-click and Escape layer. The init() function binds the menus. These functions keep the names that other modules call.
 const menus = { runSettings: null, run: null };
 
 function closeRunSettings({ immediate = false } = {}) { menus.runSettings?.close({ immediate }); }
@@ -71,12 +71,10 @@ function toggleRunOption(key) {
 }
 
 // --- Query library dialog ----------------------------------------------------
-// The toolbar book button opens the library in the shared modal dialog
-// (app_ui_dialog.js: the shell, size, backdrop and focus handling of the
-// profiling dialog), with two tabs: Saved (folders and saved queries) and
-// History. The dialog is built the first time it opens; app_query_library.js
-// renders both views and is loaded then (or when Ctrl+S is used): a page
-// that never opens it costs no module and no dialog.
+// The toolbar book button opens the library in the shared modal dialog (app_ui_dialog.js). The dialog gives the shell, size, backdrop and focus control of the profiling dialog.
+// The dialog has two tabs: Saved (folders and saved queries) and History. The dialog is built the first time it opens.
+// app_query_library.js renders both views. This module loads at that time, or when Ctrl+S is used.
+// A page that never opens the dialog loads no module and creates no dialog.
 const queryLibraryPrefs = () => storage.pref(storage.KEYS.queryLibraryMenu, {});
 // modules.json pages.query.lazy.library.
 const QUERY_LIBRARY_GROUP = "library";
@@ -94,7 +92,7 @@ function writeQueryLibraryPrefs(patch) {
   queryLibraryPrefs().set({ ...readQueryLibraryPrefs(), ...patch });
 }
 
-// The library (app_query_library.js) is a lazy group of the Query page: null until it first opens.
+// The library (app_query_library.js) is a lazy group of the Query page. It stays null until the library first opens.
 let queryLibrary = null;
 
 function loadQueryLibrary() {
@@ -137,9 +135,9 @@ function setQueryLibraryTab(tab, { focus = false } = {}) {
   });
 }
 
-// The dialog (the Saved / History tabs in its head, where a title would be,
-// in the profiling tab style, and the two views) is built the first time it
-// opens: an idle page carries none of it.
+// The dialog is built the first time it opens. It has the two views and the Saved and History tabs.
+// The tabs replace the title in the head. They use the profiling tab style.
+// An idle page carries none of it.
 function buildQueryLibraryDialog() {
   if (queryLibraryDialog || !dialog || !dom.queryLibraryButton) return queryLibraryDialog;
   const parts = dialog.shell({
@@ -158,7 +156,7 @@ function buildQueryLibraryDialog() {
     },
   });
   parts.close.id = "queryLibraryClose";
-  // The two views; app_query_library.js adds the preview pane beside them.
+  // The two views. app_query_library.js adds the preview pane beside them.
   parts.body.classList.add("queryLibraryDialog__body");
   parts.body.innerHTML = `
       <div id="queryLibraryViewSaved" class="queryLibraryDialog__view" role="tabpanel" aria-labelledby="queryLibraryTabSaved">${uiState.loadingHtml({ label: "Loading the library\u2026", compact: true })}</div>
@@ -176,8 +174,8 @@ function buildQueryLibraryDialog() {
       queryLibrary?.hidden?.();
     },
   });
-  // Saved | History: the shared tab behaviour (app_ui_tabs.js: click,
-  // arrows, Home / End, roving tabindex) in the dialog's tab style.
+  // Saved | History uses the shared tab behaviour of app_ui_tabs.js.
+  // The behaviour has the click, arrow, Home and End keys, and the roving tabindex. The tabs use the dialog tab style.
   queryLibraryTabs = tabs?.bind(parts.tabs, { onSelect: (tab) => setQueryLibraryTab(tab) }) || null;
   return queryLibraryDialog;
 }
@@ -187,8 +185,8 @@ function openQueryLibrary(tab = queryLibraryTab, { focus = true } = {}) {
   if (!libraryDialog) return Promise.resolve(null);
   closeRunMenu({ immediate: true });
   closeRunSettings({ immediate: true });
-  // The focus moves into the dialog at once (the views render when the
-  // module is in) and comes back to the book button when it closes.
+  // The focus moves into the dialog at once. The views render when the module loads.
+  // When the dialog closes, the focus returns to the book button.
   if (!libraryDialog.isOpen()) libraryDialog.open({ returnFocus: dom.queryLibraryButton });
   dom.queryLibrary?.classList.add("is-open");
   dom.queryLibraryButton.setAttribute("aria-expanded", "true");
@@ -202,8 +200,7 @@ function openQueryLibrary(tab = queryLibraryTab, { focus = true } = {}) {
   });
 }
 
-// restoreFocus: false when the caller moves the focus (a query opened in
-// the editor).
+// restoreFocus: false when the caller moves the focus. For example, a query that opens in the editor moves the focus itself.
 function closeQueryLibrary({ restoreFocus = true } = {}) {
   queryLibraryDialog?.close(null, { restoreFocus });
 }
@@ -217,13 +214,12 @@ function saveCurrentQuery() {
   withQueryLibrary((lib) => lib.saveCurrent());
 }
 
-// URL state of the Query page: ?saved=<id> while the editor holds a library
-// query as saved, else ?sql=<text> of the last run (up to 4,000 characters),
-// so the address bar is a link to the query. Read once at startup.
+// URL state of the Query page. The page uses ?saved=<id> while the editor holds a library query that is saved.
+// Otherwise, the page uses ?sql=<text> of the last run, up to 4,000 characters. The address bar is then a link to the query.
+// The page reads this state once at startup.
 const QUERY_URL_MAX_SQL = 4000;
 
-// The Query page's owner of the address (ns.router): it only writes these
-// two parameters, and always replaces.
+// The Query page owns the address through ns.router. The page writes only these two parameters. It always replaces the history entry.
 function syncQueryUrl(sqlText) {
   if (document.body?.dataset.page !== "query") return;
   const text = String(sqlText ?? dom.queryTextArea?.value ?? "").trim();
@@ -232,7 +228,7 @@ function syncQueryUrl(sqlText) {
   router.owner("query", { view: null }).replace({ saved: savedId, sql });
 }
 
-// A link fills an empty editor; a reload keeps the tab's own draft.
+// A link fills an empty editor. A reload keeps the draft of the tab.
 function applyQueryUrl() {
   if (document.body?.dataset.page !== "query" || !dom.queryTextArea) return;
   if (String(dom.queryTextArea.value || "").trim()) return;
@@ -251,7 +247,7 @@ function initQueryLibrary() {
   if (mod !== "Ctrl") {
     for (const kbd of $$(".queryKbd--mod")) kbd.textContent = mod;
   }
-  // The shortcut is told by the Run button's tooltip (no hint beside it).
+  // The Run button tooltip shows the shortcut. No hint is shown beside the button.
   if (dom.runButton) dom.runButton.title = `Run (${mod}+Enter)`;
   if (!dom.queryLibraryButton) return;
   queryLibraryTab = readQueryLibraryPrefs().tab === "history" ? "history" : "saved";
@@ -263,9 +259,9 @@ function initQueryLibrary() {
     if (ev.defaultPrevented || ev.isComposing) return;
     const key = String(ev.key || "").toLowerCase();
     if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && key === "s") {
-      // Never the browser's "Save page". The library opens (or stays) on Saved
-      // with the save form in its pane; over another dialog (a prompt,
-      // profiling) it waits.
+      // Do not let the browser open its "Save page" dialog.
+      // The library opens on Saved, or stays on Saved, with the save form in its pane.
+      // Over another dialog (a prompt or profiling), the library waits.
       ev.preventDefault();
       const top = layers.host();
       if (top && top !== document.body && top !== dom.queryLibraryMenu) return;
@@ -278,8 +274,7 @@ function initQueryLibrary() {
   });
 }
 
-// The editor's copy button: the shared copy.button (icon, tooltip and
-// the one "Copied" feedback).
+// The editor copy button is the shared copy.button. It has the icon, the tooltip, and the one "Copied" feedback.
 function initEditorCopyButton() {
   if (!dom.editorCopyButton || !dom.queryTextArea) return;
 
@@ -296,8 +291,8 @@ function initEditorCopyButton() {
   dom.queryTextArea.addEventListener("input", sync);
 }
 
-// The editor's save button, between the copy button and the options cog: the library opens on Saved with the save form
-// (the same as Ctrl+S). It waits for a query to save, as the copy button does.
+// The editor save button is between the copy button and the options cog. The library opens on Saved with the save form.
+// This is the same action as Ctrl+S. The button waits for a query to save, like the copy button.
 function initEditorSaveButton() {
   if (!dom.editorSaveButton || !dom.queryTextArea) return;
   const mod = util.modifierKeyLabel();
@@ -311,13 +306,13 @@ function initEditorSaveButton() {
   dom.queryTextArea.addEventListener("input", sync);
 }
 
-// Ctrl+Enter runs the query: the page's controller says what runs it (init({ onRun })).
+// Ctrl+Enter runs the query. The controller of the page says what runs it (init({ onRun })).
 let runHandler = null;
 
 function initEditor() {
   if (!dom.queryTextArea) return;
 
-  // The session draft, also written by the Explorer's "Open in Query".
+  // The session draft. The Explorer "Open in Query" action also writes it.
   const draftPref = storage.pref(storage.KEYS.editorDraft, null, { session: true });
   const loadEditorDraft = () => draftPref.get();
   const saveEditorDraft = (text) => draftPref.set(String(text || ""));
@@ -382,8 +377,8 @@ function initEditor() {
     return { start, end };
   };
 
-  // Tab indents inside the editor; Escape then Tab leaves it (keyboard users
-  // are never trapped). Escape that closed the autocomplete does not count.
+  // Tab indents inside the editor. Escape, then Tab, leaves the editor. Keyboard users are never trapped.
+  // An Escape that closes the autocomplete does not count.
   let tabReleased = false;
   dom.queryTextArea.addEventListener("keydown", (e) => {
     const key = e.key;
@@ -544,7 +539,7 @@ function initEditor() {
     ta.selectionEnd = Math.max(blockStart, newEnd);
   });
 
-  // Convert 4 leading spaces into a tab while typing (indentation only).
+  // When the user types, convert 4 leading spaces to a tab. Only the indentation changes.
   dom.queryTextArea.addEventListener("beforeinput", (e) => {
     if (e.inputType !== "insertText" || e.data !== " ") return;
 
@@ -557,10 +552,10 @@ function initEditor() {
     const lineStart = value.lastIndexOf("\n", start - 1) + 1; // 0 if not found
     const prefix = value.slice(lineStart, start);
 
-    // Only within indentation region (tabs/spaces only before cursor)
+    // Work only in the indentation region. Tabs and spaces count only before the cursor.
     if (!/^[\t ]*$/.test(prefix)) return;
 
-    // Count consecutive spaces immediately before cursor in indentation prefix
+    // Count the spaces that come directly before the cursor in the indentation prefix.
     let run = 0;
     for (let i = prefix.length - 1; i >= 0; i--) {
       if (prefix[i] === " ") run++;
@@ -568,7 +563,7 @@ function initEditor() {
       if (run >= 4) break;
     }
 
-    // If this keystroke would complete 4 spaces, replace them with a tab
+    // If this keystroke completes 4 spaces, replace them with a tab.
     if (run === 3) {
       e.preventDefault();
       const deleteFrom = start - 3;
@@ -580,13 +575,13 @@ function initEditor() {
       } catch {
         null;
       }
-      // Fallback if execCommand isn't available
+      // Use this fallback when execCommand is not available.
       ta.setRangeText("\t", deleteFrom, start, "end");
       dispatchInputEvent(ta);
     }
   });
 
-  // Copy: convert tabs to 4 spaces in clipboard to keep alignment when pasting elsewhere.
+  // On copy, convert tabs to 4 spaces in the clipboard. The alignment stays the same when the text is pasted elsewhere.
   dom.queryTextArea.addEventListener("copy", (e) => {
     const ta = dom.queryTextArea;
     const start = ta.selectionStart;
@@ -641,9 +636,9 @@ function initEditor() {
         target.style.height = `${v}px`;
         lastSaved = v;
       }
-      // The page head script uses an !important pre-paint rule to avoid a startup jump.
-      // Once the persisted height has been copied to the real element, release
-      // that rule so the centered drag handle can change the used height.
+      // The page head script uses an !important pre-paint rule. The rule stops a jump at startup.
+      // When the saved height is copied to the real element, remove that rule.
+      // The centered drag handle can then change the used height.
       releasePrepaintHeight();
     };
 
@@ -693,9 +688,9 @@ function initEditor() {
       });
       handle.addEventListener("pointermove", (event) => {
         if (!drag) return;
-        // Match the production resize semantics: only enforce the editor's
-        // minimum usable height. The containing query panel grows/shrinks
-        // naturally instead of forcing the whole workspace to viewport height.
+        // Use the same resize rules as production. Enforce only the minimum usable height of the editor.
+        // The query panel that contains the editor grows and shrinks as needed.
+        // The workspace is not forced to the viewport height.
         const next = Math.round(Math.max(180, drag.height + event.clientY - drag.y));
         target.style.height = `${next}px`;
         event.preventDefault();
@@ -733,15 +728,15 @@ function init({ onRun } = {}) {
 
   menus.runSettings = menu?.bind(dom.runSettingsButton, dom.runSettingsMenu) || null;
 
-  // The root address is the Query page: it takes the page's own address, so a reload and Back agree with it.
+  // The root address is the Query page. It takes the page address, so a reload and a Back action agree with it.
   if (window.location.pathname === router.url("/")) router.replace(null, { path: "/query", view: "query" });
 
-  // The editor's marks and the completion list repaint when the host's keywords, functions or tables arrive.
+  // The marks of the editor and the completion list repaint when the host sends keywords, functions or tables.
   window.addEventListener("chdash:meta-changed", () => {
     if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") state.highlightCtrl.refresh();
     if (autocomplete && typeof autocomplete.refresh === "function") autocomplete.refresh();
   });
-  // The editor follows the host selection: its marks (the host's keywords and functions) and its remembered height.
+  // The editor follows the host selection. Its marks and its saved height follow the host keywords and functions.
   header.onHostSelected(() => {
     if (state.highlightCtrl && typeof state.highlightCtrl.refresh === "function") state.highlightCtrl.refresh();
     if (state.editorSizeCtrl && typeof state.editorSizeCtrl.apply === "function") state.editorSizeCtrl.apply();

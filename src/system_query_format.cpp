@@ -11,7 +11,8 @@ bool is_word(char c) { return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') |
 bool is_digit(char c) { return c >= '0' && c <= '9'; }
 bool is_blank(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
 
-// The end of the quoted text that starts at `start` (a ', a " or a `): a backslash escapes the next character, a doubled quote mark is one.
+// This finds the end of the quoted text that starts at `start`.
+// The quote mark is a ', a " or a `. A backslash escapes the next character. A doubled quote mark counts as one character.
 size_t skip_quoted(std::string_view sql, size_t start) {
   const char quote = sql[start];
   size_t i = start + 1;
@@ -32,8 +33,9 @@ size_t skip_quoted(std::string_view sql, size_t start) {
   return sql.size();
 }
 
-// The number of a stand-in that starts at `at` in `text`: five digits that start with 9, not part of a longer word or number, a decimal or
-// a name (`x90900`, `1.90900`, `$90900`, `90900.5`, `90900a` are not).
+// This gives the number of a stand-in that starts at `at` in `text`. A stand-in has five digits that start with 9.
+// It is not part of a longer word or number. It is not a decimal or a name.
+// These are not stand-ins: `x90900`, `1.90900`, `$90900`, `90900.5`, `90900a`.
 std::optional<int> stand_in_at(std::string_view text, size_t at) {
   if (at + 5 > text.size() || text[at] != '9') return std::nullopt;
   for (size_t k = 1; k < 5; ++k) {
@@ -51,8 +53,8 @@ bool holds_stand_in(std::string_view text) {
   return false;
 }
 
-// The padding of the expressions before their AS (one column, two spaces or more) takes back the width that `removed` placeholders gave up.
-// Only the first AS of the line has such a padding.
+// The padding before the AS of each expression is one column, or two spaces or more.
+// This padding returns the width that the `removed` placeholders gave up. Only the first AS of the line has such a padding.
 std::string repad_alias(std::string line, size_t removed) {
   for (size_t p = 0; p + 1 < line.size(); ++p) {
     if (is_blank(line[p])) continue;
@@ -99,7 +101,8 @@ std::optional<ShapeMask> mask_shape_placeholders(std::string_view text) {
     out.sql.push_back(c);
     ++i;
   }
-  // Whatever the text holds, even in a string or a comment: a number of the range is the sign of a text that was not normalized.
+  // The text can hold any content, even in a string or a comment.
+  // A number of the range is a sign that the text was not normalized.
   if (holds_stand_in(text)) return std::nullopt;
   return out;
 }

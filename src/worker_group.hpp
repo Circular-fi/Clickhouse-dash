@@ -7,13 +7,15 @@
 
 namespace chdash {
 
-// The threads that a component starts and does not join at once (the query worker of each QuerySession, which may
-// end after its session left the server): each one enters the group when it starts and leaves it as its very last
-// step. The server closes the group at shutdown and waits until every thread left it, with a deadline, before
-// it destroys what these threads use (docs/operations.md, "Shutdown").
+// A component can start threads that it does not join at once.
+// For example, the query worker of each QuerySession can end after its session left the server.
+// Each thread enters the group when it starts and leaves it as its very last step.
+// The server closes the group at shutdown.
+// The server waits, with a deadline, until every thread left the group.
+// Then the server destroys what these threads use (docs/operations.md, "Shutdown").
 class WorkerGroup {
 public:
-  // One more thread; false once the group is closed: the caller must not start it.
+    // Add one more thread. The result is false once the group is closed. The caller must not start the thread then.
   bool enter() {
     std::lock_guard<std::mutex> lock(mu_);
     if (closed_) return false;
@@ -27,7 +29,8 @@ public:
     if (active_ == 0) cv_.notify_all();
   }
 
-  // No thread enters any more; waits at most `timeout` for the active ones. True when none is left.
+    // No thread enters the group any more. It waits at most `timeout` for the active threads.
+    // The result is true when no thread is left.
   bool close_and_wait(std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(mu_);
     closed_ = true;

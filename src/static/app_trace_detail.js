@@ -1,7 +1,8 @@
-// The page of one trace (trace.html, /observability/traces/<trace id>): the view that app_page_trace.js starts. It loads the
-// trace, draws its header, its waterfall and its views, and follows Back / Forward and a host change. The search of the Traces
-// page is another view (app_traces.js): they share the model, the address and the helpers of app_trace_store.js, and not
-// their modules (ARCH-F-157).
+// This view shows the page of one trace (trace.html, /observability/traces/<trace id>).
+// The file app_page_trace.js starts this view. The view loads the trace.
+// It draws the header, the waterfall and the views. It follows Back / Forward and a host change.
+// The search of the Traces page is another view (app_traces.js).
+// The two views share the model, the address and the helpers of app_trace_store.js. They do not share their modules (ARCH-F-157).
 
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
@@ -21,8 +22,9 @@ import { util } from "./app_util.js";
 
 const fmt = format;
 
-// A trace's modules that only the trace page has (the views, the logs, the insights) are handed to the waterfall and the
-// inspector, which call them at the points of their rendering that they extend.
+// The trace page gives its modules to the waterfall and the inspector.
+// These modules are the views, the logs and the insights. Only the trace page has them.
+// The waterfall and the inspector call these modules at the points that they extend.
 Object.assign(parts, { traceViews, traceLogs, traceInsights });
 
 async function loadMeta() {
@@ -64,8 +66,8 @@ async function loadTrace(traceId, { push = false } = {}) {
   if (dom.traceWaterfall) uiState.loading(dom.traceWaterfall, { label: "Loading trace\u2026" });
   if (dom.traceInspector) { dom.traceInspector.hidden = true; dom.traceInspector.replaceChildren(); }
   void traceLogs.load(null);
-  // The entry is pushed once the answer is in (the search stays the current
-  // entry while it loads), whether the trace was found or not.
+  // The entry is pushed when the answer is in. The search stays the current
+  // entry during the load. This applies whether the trace was found or not.
   const pushEntry = () => {
     if (push) address.push(null, { href: spanTraceUrl(id, pendingSpanId), state: traceViews.detailEntryState({ traceId: id }) });
   };
@@ -103,7 +105,7 @@ async function loadTrace(traceId, { push = false } = {}) {
   }
 }
 
-// The cycle of the page with its host (app_obs_view.js): the model is emptied, then the trace of the address is read again.
+// The cycle of the page with its host (app_obs_view.js). The model is emptied. Then the trace of the address is read again.
 const hostCycle = obsView.hostCycle({
   feature: "traces",
   loaded: () => !!model.meta,
@@ -118,7 +120,8 @@ const hostCycle = obsView.hostCycle({
 });
 const reloadForHost = () => hostCycle.reload();
 
-// Back / Forward within the trace page: another ?span= / ?view=, or a linked trace opened in place.
+// Back / Forward within the trace page. The address changes to another ?span= or ?view=.
+// It can also change to a linked trace that opens in place.
 function onLocation() {
   const id = traceIdFromPath();
   if (id && id === String(model.activeTrace?.trace_id || "")) traceViews.applyLocation();

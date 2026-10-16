@@ -12,14 +12,13 @@ namespace chdash {
 class ChExecutor;
 
 // ---------------------------------------------------------------------------
-// Performance: bucketed history of the server's system logs
-// (/api/system/series). Three SELECTs, one pass each over
-// system.metric_log, system.asynchronous_metric_log and narrow columns of
-// system.query_log; every name in them comes from the allowlists below, the
-// window and the step are integers the handler validated.
+// Performance: the bucketed history of the system logs of the server (/api/system/series).
+// Three SELECTs make one pass each. They read system.metric_log, system.asynchronous_metric_log, and narrow columns of system.query_log.
+// Every name in them comes from the allowlists below.
+// The window and the step are integers that the handler validated.
 
-// The window, in whole seconds: from is aligned down to the step, to up to
-// it, so every request of the same aligned window shares one cache entry.
+// The window is in whole seconds. From is aligned down to the step. To is aligned up to the step.
+// So every request of the same aligned window shares one cache entry.
 struct MonitorSeriesWindow {
   uint64_t from_s = 0;
   uint64_t to_s = 0;
@@ -29,13 +28,13 @@ struct MonitorSeriesWindow {
   uint64_t now_s = 0;
   // The span asked for, before the alignment widened it by up to two steps.
   uint64_t span_s = 0;
-  // query_log is read only when the window spans at most this many seconds
-  // (system.query_log_max_lookback_hours), with this read cap.
+  // query_log is read only when the window spans at most this many seconds (system.query_log_max_lookback_hours).
+  // The read uses this read cap.
   uint64_t query_log_max_span_s = 0;
   uint64_t query_log_max_rows = 0;
 };
 
-// The steps the server picks from (seconds): at most kMonitorSeriesMaxPoints
+// The steps that the server can use (seconds): at most kMonitorSeriesMaxPoints
 // buckets, never under 10 s (metric_log samples every second).
 const std::vector<uint32_t>& monitor_series_steps();
 constexpr uint64_t kMonitorSeriesMaxPoints = 300;
@@ -43,7 +42,7 @@ uint32_t monitor_series_step_seconds(uint64_t span_seconds);
 
 // A source (one system log) of the series, and how its read went.
 //   status  ok | disabled (no such table) | unsupported (metric_log in the
-//           transposed layout, or columns missing) | out_of_range (query_log
+//           transposed layout, or columns absent) | out_of_range (query_log
 //           and a window wider than its lookback) | not_granted |
 //           window_too_large | readonly_account | failed
 struct MonitorSeriesSource {
@@ -72,8 +71,8 @@ struct SystemMonitorSeries {
 // The series names of each source, for the contract tests and the docs.
 const std::vector<std::string>& monitor_series_async_metrics();
 
-// Reads the three sources. A source that cannot be read is reported in
-// out.sources and the others still answer.
+// Reads the three sources. A source that cannot be read is reported in out.sources.
+// The other sources still answer.
 void load_system_monitor_series(
     ChExecutor& system,
     const MonitorCapabilities& caps,

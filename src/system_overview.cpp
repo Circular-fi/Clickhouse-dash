@@ -145,11 +145,11 @@ bool load_system_monitor_overview(
     }
   }
 
-  // Replication summary: the in-memory columns of system.replicas only
-  // (log_max_index, log_pointer, total_replicas and active_replicas cost one
-  // Keeper request per table). Rows of databases the runner cannot SHOW are
-  // excluded inside ClickHouse; each row then passes the runner's table-level
-  // SHOW boundary before it is counted, so a hidden table changes no figure.
+  // Replication summary: only the in-memory columns of system.replicas are read.
+  // The columns log_max_index, log_pointer, total_replicas and active_replicas cost one
+  // Keeper request for each table. Rows of databases that the runner cannot SHOW are
+  // excluded inside ClickHouse. Then each row passes the runner's table-level
+  // SHOW boundary before it is counted. So a hidden table changes no figure.
   try {
     VisibleTables visibility(runner_acl);
     MonitorReplicationSummary summary;
@@ -159,8 +159,8 @@ bool load_system_monitor_overview(
           "toString(absolute_delay), toString(queue_size), toString(inserts_in_queue), toString(merges_in_queue), "
           "toString(future_parts), toString(parts_to_check) FROM system.replicas WHERE database IN (" + monitor_databases_list(visibility.databases()) + ") LIMIT " + std::to_string(kMonitorReplicaRowLimit + 1) +
           monitor_settings_sql(5, 100000, kMonitorReplicaRowLimit + 1);
-      // Read first, then checked against the runner's boundary (which may ask ClickHouse as the runner: never
-      // inside the callback of another read).
+      // Read first, then check the result against the runner's boundary. The boundary can ask ClickHouse as the runner. Never call it
+      // inside the callback of another read.
       std::vector<std::vector<std::string>> rows;
       system.select(sql, monitor_databases_params(visibility.databases()), [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {

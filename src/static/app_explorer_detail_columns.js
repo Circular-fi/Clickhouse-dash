@@ -1,4 +1,5 @@
-// The Columns tab of the table card: the columns with their types, keys, codecs and sizes, and the size band (a treemap of the column bytes) above.
+// The Columns tab of the table card shows the columns with their types, keys, codecs and sizes.
+// The size band is above the columns. It is a treemap of the column bytes.
 
 import { dom, h } from "./app_dom.js";
 import { cardMaps, emptyNote, exprEl, gaugeCell, numericCell, staticTable, unavailableMessage } from "./app_explorer_detail_cells.js";
@@ -19,11 +20,11 @@ function renderColumnsTab(container, detail) {
     return;
   }
   const topLevel = rows.filter((row) => !row.is_subcolumn);
-  // Distributed / View columns report 0 bytes: no byte columns at all then.
+  // Distributed and View columns report 0 bytes. In that case, the table has no byte columns at all.
   const hasBytes = rows.some((row) => Number(row.compressed) > 0);
   const hasKeys = topLevel.some((row) => row.keys.length);
-  // One shared default codec is stated once (About > Compression); the
-  // column appears only when some column declares its own CODEC().
+  // One shared default codec is stated one time, in About > Compression.
+  // The codec column appears only when some column declares its own CODEC().
   const codecs = new Set(topLevel.map((row) => `${row.codec || ""}\0${row.codec_note || ""}`));
   const hasCodec = topLevel.some((row) => row.explicit_codec) || codecs.size > 1;
   const compressedMax = columnMax(rows.filter((row) => !row.is_subcolumn), (row) => row.compressed);
@@ -61,7 +62,7 @@ function renderColumnsTab(container, detail) {
           td.appendChild(h("span", { class: item.tuple_parent ? "explorerStorageTupleName explorerStorageTupleName--child" : "explorerStorageTupleName" }, item.name));
         }
         td.title = item.comment ? `${item.name}\n${item.comment}` : item.name;
-        // The comment reads under the name and wraps (two lines at most).
+        // The comment appears under the name. It wraps to two lines at most.
         if (item.comment) td.appendChild(h("span", { class: "explorerColumns__comment" }, item.comment));
       },
     },
@@ -91,7 +92,7 @@ function renderColumnsTab(container, detail) {
     value: (item) => item.keys.map(([label]) => label).join(" "),
     render: (td, item) => {
       td.classList.add("explorerColumns__keys");
-      // One key per line, so the sizes keep their room beside About.
+      // Put one key on each line. This keeps room for the sizes beside About.
       const list = h("span", { class: "explorerColumns__keyList" });
       for (const [label, title, kind] of item.keys) {
         const badge = badgeMod.el(label, { tone: "key", className: `explorerBadge explorerBadge--key explorerBadge--${kind}` });
@@ -134,8 +135,7 @@ function renderColumnsTab(container, detail) {
       render: (td, item) => {
         gaugeCell(td, item.uncompressed, uncompressedMax, item.uncompressed == null ? DASH : format.bytes(item.uncompressed));
         td.classList.add("explorerColumns__uncompressed");
-        // The compression ratio: in the tooltip, as a third figure does
-        // not fit the row beside the About panel.
+        // The compression ratio is in the tooltip. A third figure does not fit in the row beside the About panel.
         const ratio = ratioLabel(item.uncompressed, item.compressed);
         if (ratio) td.title = `${ratio} compression (${format.bytes(item.uncompressed)} \u2192 ${format.bytes(item.compressed)})`;
       },
@@ -171,8 +171,7 @@ function renderColumnsTab(container, detail) {
       }
     },
   });
-  // The size band first, then the table (docs/explorer.md, "Size
-  // views").
+  // The size band comes first, then the table (docs/explorer.md, "Size views").
   if (hasBytes) renderColumnSizes(container, detail, rows);
   container.appendChild(table);
 

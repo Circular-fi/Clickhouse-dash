@@ -4,10 +4,13 @@ import { captureState } from '../helpers/review.js';
 import { otelRows } from '../helpers/clickhouse.js';
 import { stamp } from '../helpers/time.js';
 
-// Spans mode of the trace search page (HyperDX's row search): the mode in
-// the URL, the virtualised span table with its column picker, infinite
-// scroll by cursor, the span side panel (click-to-filter, Open in trace and
-// Back) and keyboard navigation, against the live OTel fixture.
+// This file tests the Spans mode of the trace search page. It is the row search
+// of HyperDX.
+//
+// The tests cover the mode in the URL and the span table with its column
+// picker. They also cover the infinite scroll by cursor, the span side panel
+// and the keyboard navigation. The side panel has click-to-filter, Open in
+// trace and Back actions. The tests run against the live OTel fixture.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -19,11 +22,16 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(obs.failedRequests.filter((r) => !/net::ERR_ABORTED/.test(r.error || ''))).toEqual([]);
 });
 
-// Five minutes of the rich fixture day (2026-09-12 10:00-10:05,
-// tests/README.md "Rich OTel dataset") as from / to: ~1.8 k spans of nine
-// services (~550 Server spans, ~130 Ok or Error ones), more than the two
-// pages any test reads, on every stack. Every Server span carries
-// server.port; every span the resource host.name.
+// The tests use five minutes of the rich fixture day as the from and to values.
+// The window is 2026-09-12 10:00-10:05 (see tests/README.md, "Rich OTel
+// dataset").
+//
+// The window holds about 1.8 k spans of nine services. It has about 550 Server
+// spans and about 130 Ok or Error spans. This is more than the two pages that
+// any test reads, on every stack.
+//
+// Every Server span carries server.port. Every span carries the resource
+// host.name.
 const WINDOW = 5 * 60_000;
 const RICH_START = Date.UTC(2026, 8, 12, 10, 0, 0);
 let dense = null;
@@ -44,7 +52,7 @@ function tracesUrl(range, extra = {}) {
   return `/observability/traces?${params.toString()}`;
 }
 
-// /api/traces/spans requests as URLSearchParams.
+// Each /api/traces/spans request is parsed as URLSearchParams.
 function spanRequests(page) {
   const requests = [];
   page.on('request', (request) => {
@@ -86,13 +94,13 @@ test('spans: the Traces | Spans toggle switches the results and lives in the URL
   expect(first.get('limit')).toBe('100');
   expect(first.get('cursor')).toBeNull();
   expect(Number(first.get('end_ms')) - Number(first.get('start_ms'))).toBe(WINDOW);
-  // Every listed span matches the (now span-level) status filter.
+  // The status filter now works at span level. Every listed span matches it.
   const statuses = await rows(page).locator('.traceSpanListRow__cell--status').allTextContents();
   expect(statuses.length).toBeGreaterThan(10);
   expect(new Set(statuses)).toEqual(new Set(['OK']));
 
-  // Kind and span duration filters join the URL and the request (the rich
-  // day's Ok spans are Internal ones).
+  // The kind and span duration filters appear in the URL and in the request.
+  // The rich day's Ok spans are Internal ones.
   await page.locator('#traceSpanTools .tracePicker__button').click();
   await page.locator('#traceSpanTools .tracePicker__option[data-value="Internal"]').click();
   await expect(page).toHaveURL(/[?&]kind=Internal(&|$)/);
@@ -105,7 +113,8 @@ test('spans: the Traces | Spans toggle switches the results and lives in the URL
   await waitRows(page);
   await expect.poll(async () => (await rows(page).locator('.traceSpanListRow__cell--kind').allTextContents()).every((t) => t === 'Internal')).toBe(true);
 
-  // Reload: same mode and filters; Back returns to the trace list.
+  // After a reload, the mode and the filters stay the same. Back returns to the
+  // trace list.
   await page.reload();
   await waitRows(page);
   await expect(page.locator('#traceSpanKind')).toHaveValue('Internal');
@@ -123,15 +132,16 @@ test('spans: virtualised table, attribute column picker (remembered) and infinit
   const range = await denseWindow(request);
   await freshColumns(page);
   const requests = spanRequests(page);
-  // Server spans: every one carries server.port.
+  // Every Server span carries server.port.
   await page.goto(tracesUrl(range, { mode: 'spans', kind: 'Server' }));
   await waitRows(page);
-  // Only the rows in view are in the DOM.
+  // Only the visible rows are in the DOM.
   const rendered = await rows(page).count();
   expect(rendered).toBeGreaterThan(10);
   expect(rendered).toBeLessThan(100);
   await expect(page.locator('#traceSpanTable')).toHaveAttribute('aria-rowcount', '101');
-  // Service colours, relative duration bars, status and kind cells.
+  // The table shows service colours, relative duration bars, and status and
+  // kind cells.
   const firstRow = rows(page).first();
   await expect(firstRow.locator('.serviceSwatch')).toHaveCount(1);
   const color = await firstRow.evaluate((el) => el.style.getPropertyValue('--trace-service-color'));
@@ -140,7 +150,7 @@ test('spans: virtualised table, attribute column picker (remembered) and infinit
   expect(Math.max(...widths)).toBeLessThanOrEqual(100);
   expect(Math.max(...widths)).toBeGreaterThan(0);
 
-  // Column picker: add a span attribute column.
+  // The column picker adds a span attribute column.
   await page.locator('#traceSpanColumnsButton').click();
   await expect(page.locator('#traceSpanColumnsMenu')).toBeVisible();
   await page.locator('#traceSpanColumnInput').fill('span:server.port');
@@ -155,13 +165,13 @@ test('spans: virtualised table, attribute column picker (remembered) and infinit
   await page.keyboard.press('Escape');
   await expect(page.locator('#traceSpanColumnsMenu')).toBeHidden();
 
-  // Remembered across reloads.
+  // The column set is kept after a reload.
   await page.reload();
   await waitRows(page);
   await expect(page.locator('.traceSpanTable__th--attr')).toHaveText('server.port');
   expect(requests[requests.length - 1].get('columns')).toBe('span:server.port');
 
-  // Infinite scroll: the end of the table loads the next page by cursor.
+  // The end of the table loads the next page by cursor.
   const before = requests.length;
   await page.locator('#tracesSearchView').evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await expect.poll(() => requests.length).toBeGreaterThan(before);
@@ -169,7 +179,7 @@ test('spans: virtualised table, attribute column picker (remembered) and infinit
   expect(next.get('cursor')).toMatch(/^1\.\d+\.\d+\.[kb]\./);
   await expect(page.locator('#traceSpanTable')).toHaveAttribute('aria-rowcount', '201', { timeout: 30_000 });
   await expect(page.locator('#tracesResultCount')).toContainText('200+ Spans');
-  // The rows are newest first with no repeated span across the page seam.
+  // The rows are newest first. No span repeats across the page seam.
   const keys = await page.evaluate(() => {
     const view = document.getElementById('tracesSearchView');
     const out = [];
@@ -205,9 +215,12 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   const range = await denseWindow(request);
   await freshColumns(page);
   const requests = spanRequests(page);
-  // A span from the third row on whose host runs other services too, so
-  // that once filtered on that host and its service excluded, spans remain:
-  // the window's newest spans in the table's order, from ClickHouse.
+  // The test uses a span from the third row on. Its host runs other services
+  // too. With a filter on that host and its service excluded, spans still
+  // remain.
+  //
+  // These are the newest spans of the window, in table order, as ClickHouse
+  // returns them.
   const inWindow = `Timestamp >= fromUnixTimestamp64Milli(${RICH_START}) AND Timestamp <= fromUnixTimestamp64Milli(${RICH_START + WINDOW})`;
   const newest = (await otelRows(request, `SELECT ResourceAttributes['host.name'] FROM otel.otel_traces WHERE ${inWindow} ORDER BY Timestamp DESC, SpanId DESC, TraceId DESC LIMIT 30`)).map(([host]) => host);
   const shared = new Set((await otelRows(request, `SELECT ResourceAttributes['host.name'] AS h FROM otel.otel_traces WHERE ${inWindow} GROUP BY h HAVING uniqExact(ServiceName) > 1`)).map(([host]) => host));
@@ -224,7 +237,8 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await expect(row).toHaveAttribute('aria-selected', 'true');
   await expect(panel(page).locator('.traceSpanPanel__title')).toContainText(service);
   await expect(panel(page).locator('#traceSpanPanelTitle')).toHaveText(operation);
-  // Details from /api/traces/span: the span's attributes, with filter actions.
+  // The details come from /api/traces/span. They show the span attributes and
+  // the filter actions.
   const hostRow = panel(page).locator('.kvList__row[data-kv-key="host.name"][data-filter-scope="resource"]');
   await expect(hostRow).toBeVisible({ timeout: 15_000 });
   await expect(panel(page).locator('.kvList__row[data-kv-key="service.name"][data-filter-scope="resource"]')).toBeVisible();
@@ -233,15 +247,18 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   const spanId = (await panel(page).locator('.traceSpanPanel__fact', { hasText: 'Span ID' }).locator('code').textContent()).trim();
   const traceId = (await panel(page).locator('.traceSpanPanel__fact', { hasText: 'Trace ID' }).locator('code').textContent()).trim();
 
-  // Open in trace: the trace detail, focused on the span, carrying the search.
+  // Open in trace shows the trace detail. The view focuses on the span and
+  // keeps the search.
   const searchesBefore = requests.length;
   await panel(page).locator('[data-span-open-trace]').click();
   await expect(page.locator('#traceDetail')).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}&.*mode=spans`));
   await expect(page.locator(`#traceWaterfall [data-inspector-span="${spanId}"]`)).toBeVisible({ timeout: 30_000 });
-  // Back: the search page again (the trace is a page of its own), on the same
-  // spans search from its address; the browser may restore the page as it was
-  // left, else the search runs again and the selection starts over.
+  // Back returns to the search page. The trace is a page of its own.
+  //
+  // The page shows the same spans search as its address. The browser can
+  // restore the page as it was left. If not, the search runs again and the
+  // selection starts over.
   await page.locator('#traceBackButton').click();
   await expect(page.locator('#tracesSearchView')).toBeVisible();
   await expect(page).toHaveURL(/\/observability\/traces\?.*mode=spans/);
@@ -250,7 +267,7 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await rows(page).nth(index).locator('.traceSpanListRow__cell--time').click();
   await expect(panel(page)).toBeVisible();
   await expect(rows(page).nth(index)).toHaveAttribute('aria-selected', 'true');
-  // Browser Back from a trace opened again goes to the search page the same way.
+  // Browser Back from a trace opened again also goes to the search page.
   await panel(page).locator('[data-span-open-trace]').click();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${traceId}\\?span=${spanId}`));
   await expect(page.locator(`#traceWaterfall [data-inspector-span="${spanId}"]`)).toBeVisible({ timeout: 30_000 });
@@ -261,7 +278,8 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await expect(panel(page)).toBeVisible();
   await expect(hostRow).toBeVisible({ timeout: 15_000 });
 
-  // Click-to-filter on an attribute value: a chip and a new span search.
+  // Click-to-filter on an attribute value adds a chip and starts a new span
+  // search.
   await hostRow.locator('.kv__v').click();
   await expect(page.locator('#traceFilterMenu')).toBeVisible();
   await page.locator('#traceFilterMenu [data-filter-action="include"]').click();
@@ -269,7 +287,7 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
   await expect.poll(() => requests[requests.length - 1].getAll('tag')).toEqual([`resource:host.name=${host}`]);
   await expect(panel(page)).toBeHidden();
   await waitRows(page);
-  // Click-to-filter on a row value: exclude its service.
+  // Click-to-filter on a row value excludes its service.
   const excluded = (await rows(page).first().locator('.traceSpanListRow__cell--service').textContent()).trim();
   await rows(page).first().locator('.traceSpanListRow__cell--service [data-filter-field="service"]').click();
   await page.locator('#traceFilterMenu [data-filter-action="exclude"]').click();
@@ -282,8 +300,8 @@ test('spans: side panel, click-to-filter, Open in trace and Back', async ({ page
 test('spans: another Traces tab hides the span mode; the trace-duration chip stays out of span searches', async ({ page, request }) => {
   const range = await denseWindow(request);
   const requests = spanRequests(page);
-  // min/max_duration_ms are the trace-duration chip (heatmap); span_* are
-  // the span table's own duration range.
+  // The min/max_duration_ms parameters set the trace-duration chip (heatmap).
+  // The span_* parameters set the duration range of the span table.
   await page.goto(tracesUrl(range, { mode: 'spans', min_duration_ms: '10', max_duration_ms: '5000', span_min_duration_ms: '2' }));
   await waitRows(page);
   await expect(page.locator('#tracesFilterChips [data-chip-kind="duration"]')).toBeVisible();
@@ -296,7 +314,7 @@ test('spans: another Traces tab hides the span mode; the trace-duration chip sta
 
   const other = page.locator('#tracesTabs [data-trace-tab]:not([data-trace-tab="search"])').first();
   test.skip(!(await other.isVisible()), 'no other Traces tab in this configuration');
-  // The other tabs (Services, Service map) run their own request.
+  // The other tabs, Services and Service map, run their own request.
   const isTabRun = (r) => /\/api\/traces\/(services|service_map)$/.test(new URL(r.url()).pathname);
   const shown = page.waitForRequest(isTabRun, { timeout: 30_000 });
   await other.click();
@@ -306,14 +324,14 @@ test('spans: another Traces tab hides the span mode; the trace-duration chip sta
   await expect(page.locator('#traceSpanTools')).toBeHidden();
   await expect(panel(page)).toBeHidden();
   await expect(page.locator('[data-results-mode="spans"]')).toBeHidden();
-  // The Search button runs the selected tab, never the span search.
+  // The Search button runs the selected tab. It never runs the span search.
   const before = requests.length;
   const searched = page.waitForRequest(isTabRun, { timeout: 30_000 });
   await page.locator('#tracesSearchButton').click();
   await searched;
   expect(requests.length).toBe(before);
 
-  // Back on the Search tab: still Spans mode, with the same filters.
+  // On the Search tab again, the mode is still Spans, with the same filters.
   await page.locator('#tracesTabs [data-trace-tab="search"]').click();
   await expect(page).not.toHaveURL(/[?&]tab=/);
   await expect(page).toHaveURL(/[?&]mode=spans(&|$)/);
@@ -330,13 +348,13 @@ test('spans: the side panel opens under the search bar; on a phone, a bottom she
   await waitRows(page);
   await rows(page).first().locator('.traceSpanListRow__cell--time').click();
   await expect(panel(page)).toBeVisible();
-  // Desktop: right under the sticky search bar (header + #obsNav + bar,
-  // whatever their height).
+  // On desktop, the panel starts below the sticky stack: the header, #obsNav
+  // and the search bar. This holds whatever their height.
   const form = await page.locator('#tracesForm').boundingBox();
   const side = await panel(page).boundingBox();
   expect(Math.abs(side.y - (form.y + form.height))).toBeLessThanOrEqual(1);
-  // Phone: the header is one row; the panel is a bottom sheet under
-  // the page chrome, full width.
+  // On a phone, the header is one row. The panel is a bottom sheet under the
+  // page chrome, at full width.
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(async () => Math.round((await panel(page).boundingBox()).width)).toBe(390);
   const nav = await page.locator('#obsNav').boundingBox();
@@ -347,23 +365,25 @@ test('spans: the side panel opens under the search bar; on a phone, a bottom she
   expect(sheet.x).toBe(0);
   expect(sheet.y).toBeGreaterThanOrEqual(nav.y + nav.height - 1);
   expect(Math.round(sheet.y + sheet.height)).toBe(844);
-  // Nothing covers the head: the title, prev / next and close are hit-tested.
+  // No element covers the head. The title, prev / next and close buttons are
+  // hit-tested.
   for (const selector of ['#traceSpanPanelTitle', '[data-span-panel-nav="next"]', '.traceSpanPanel__close']) {
     const box = await panel(page).locator(selector).boundingBox();
     expect(await page.evaluate(([x, y, sel]) => !!document.elementFromPoint(x, y)?.closest(sel), [box.x + box.width / 2, box.y + box.height / 2, selector]), selector).toBe(true);
   }
-  // Tag values get a column a value fits in (not one character per line).
+  // Tag values get a column that fits the value. A value does not wrap one
+  // character per line.
   const value = panel(page).locator('[data-span-section="tags"] .kvList__row:not(.kvList__row--tree) .kvList__value').first();
   await expect(value).toBeVisible({ timeout: 15_000 });
   expect((await value.boundingBox()).width).toBeGreaterThan(150);
-  // The close button closes it and gives focus back to the table.
+  // The close button closes the panel. Focus returns to the table.
   await panel(page).locator('.traceSpanPanel__close').click();
   await expect(panel(page)).toBeHidden();
   await expect(page.locator('#traceSpanTable')).toBeFocused();
 });
 
-// Every shown column ends inside the table (nothing clipped by the results
-// column); the labels of the shown headers.
+// Every shown column ends inside the table. No column is clipped by the results
+// column. This test also checks the labels of the shown headers.
 async function spanColumns(page) {
   return page.evaluate(() => {
     const table = document.getElementById('traceSpanTable');
@@ -381,9 +401,12 @@ async function spanColumns(page) {
   });
 }
 
-// Below 1600 px a docked detail panel folds the side panel (Attributes) to
-// its rail while it is open, and unfolds it once closed; a rail the viewer
-// chose stays; at 1600 px and more nothing folds.
+// Below 1600 px, a docked detail panel folds the side panel (Attributes) to its
+// rail while the detail panel is open. The side panel unfolds when the detail
+// panel closes.
+//
+// A rail that the viewer chose stays folded. At 1600 px and more, nothing
+// folds.
 test('spans: the docked panel folds Attributes to its rail below 1600 px and unfolds it on close', async ({ page, request }) => {
   const range = await denseWindow(request);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -395,15 +418,16 @@ test('spans: the docked panel folds Attributes to its rail below 1600 px and unf
   await rows(page).nth(1).locator('.traceSpanListRow__cell--time').click();
   await expect(panel(page)).toBeVisible();
   await expect.poll(width).toBe(32);
-  // Not the viewer's fold: nothing is remembered.
+  // This fold is not the viewer's choice. Nothing is remembered.
   expect(['true', '1']).not.toContain(await page.evaluate(() => localStorage.getItem('chdash.traceFacetsCollapsed.v1')));
-  // Moving to another span keeps it folded; closing unfolds it.
+  // When the viewer moves to another span, the fold stays. The panel unfolds
+  // when it closes.
   await rows(page).nth(2).locator('.traceSpanListRow__cell--time').click();
   expect(await width()).toBe(32);
   await panel(page).locator('.traceSpanPanel__close').click();
   await expect(panel(page)).toBeHidden();
   await expect.poll(width).toBe(288);
-  // A rail the viewer chose stays a rail after the panel closes.
+  // A rail that the viewer chose stays a rail after the panel closes.
   await page.locator('#traceFacetsToggle').click();
   await expect.poll(width).toBe(32);
   await rows(page).nth(1).locator('.traceSpanListRow__cell--time').click();
@@ -413,7 +437,7 @@ test('spans: the docked panel folds Attributes to its rail below 1600 px and unf
   expect(await width()).toBe(32);
   await page.locator('#traceFacetsToggle').click();
   await expect.poll(width).toBe(288);
-  // 1920 px: room for both, nothing folds.
+  // At 1920 px, there is room for both, and nothing folds.
   await page.setViewportSize({ width: 1920, height: 1080 });
   await rows(page).nth(1).locator('.traceSpanListRow__cell--time').click();
   await expect(panel(page)).toBeVisible();
@@ -424,7 +448,7 @@ test('spans: beside the docked panel the table fits its column (Kind goes first,
   const range = await denseWindow(request);
   await freshColumns(page);
   await page.setViewportSize({ width: 1200, height: 900 });
-  // Spans with a drawn status (Unset draws nothing in the Status column).
+  // Spans with a drawn status. Unset draws nothing in the Status column.
   await page.goto(tracesUrl(range, { mode: 'spans', status_not: 'Unset' }));
   await waitRows(page);
   const all = ['Time', 'Service', 'Operation', 'Duration', 'Status', 'Kind'];
@@ -435,31 +459,32 @@ test('spans: beside the docked panel the table fits its column (Kind goes first,
   const narrow = await spanColumns(page);
   expect(narrow.labels).toEqual(['Time', 'Service', 'Operation', 'Duration', 'Status']);
   expect(narrow).toMatchObject({ inside: true, fits: true, cells: 5 });
-  // The status (an Error chip or OK text) is whole and hit-testable at the table's right edge.
+  // The status, an Error chip or OK text, is whole. It is hit-testable at the
+  // right edge of the table.
   const status = rows(page).nth(1).locator('.traceSpanListRow__cell--status [data-status]');
   const badge = await status.boundingBox();
   const table = await page.locator('#traceSpanTable').boundingBox();
   expect(badge.x + badge.width).toBeLessThanOrEqual(table.x + table.width);
   expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.traceSpanListRow__cell--status'), [badge.x + badge.width / 2, badge.y + badge.height / 2])).toBe(true);
-  // 1920 px with the panel still open: every column again.
+  // At 1920 px, with the panel still open, every column shows again.
   await page.setViewportSize({ width: 1920, height: 1080 });
   await expect.poll(async () => (await spanColumns(page)).labels).toEqual(all);
   expect(await spanColumns(page)).toMatchObject({ inside: true, fits: true, cells: 6, fit: '' });
-  // Closing the panel at 1200 px gives the full table back.
+  // The full table shows again at 1200 px when the panel closes.
   await page.setViewportSize({ width: 1200, height: 900 });
   await panel(page).locator('.traceSpanPanel__close').click();
   await expect(panel(page)).toBeHidden();
   await expect.poll(async () => (await spanColumns(page)).labels).toEqual(all);
 });
 
-// Traces | Spans heads the results toolbar, left of the results line, at
-// the same place in both modes.
+// The Traces | Spans switch is at the head of the results toolbar. It is left
+// of the results line, at the same place in both modes.
 test('spans: the Traces | Spans switch keeps its place, left of the results line', async ({ page, request }) => {
   const range = await denseWindow(request);
   await page.goto(tracesUrl(range));
   await expect(page.locator('#tracesResults .traceResultItem, #tracesResults .traceTable__row').first()).toBeVisible({ timeout: 30_000 });
-  // The analytics charts above the results may draw after them (and take
-  // their final height then): measure once both have drawn.
+  // The analytics charts above the results can draw after the table. They take
+  // their final height then. The test measures the layout once both have drawn.
   const drawn = () => page.locator('#traceServiceChart .chartCore, #traceDurationChart .chartCore')
     .evaluateAll((charts) => charts.filter((chart) => Number(chart.dataset.pointsDrawn || 0) > 0).length);
   await expect.poll(drawn, { timeout: 30_000 }).toBe(2);
@@ -496,14 +521,14 @@ test('spans: keyboard navigation through rows and the panel', async ({ page, req
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowUp');
   await expect(panel(page).locator('.traceSpanPanel__position')).toHaveText(/^2 \/ 100\+$/);
-  // The panel's own buttons move too, and Escape closes it.
+  // The buttons of the panel move too. Escape closes the panel.
   await panel(page).locator('[data-span-panel-nav="next"]').click();
   await expect(panel(page).locator('.traceSpanPanel__position')).toHaveText(/^3 \/ 100\+$/);
   await page.keyboard.press('ArrowDown');
   await expect(panel(page).locator('.traceSpanPanel__position')).toHaveText(/^4 \/ 100\+$/);
   await page.keyboard.press('Escape');
   await expect(panel(page)).toBeHidden();
-  // End jumps to the last loaded row (loading the next page).
+  // End jumps to the last loaded row. The next page loads in this step.
   await table.focus();
   await page.keyboard.press('End');
   await expect(page.locator('#traceSpanTable .traceSpanListRow.is-selected')).toBeVisible();
@@ -512,15 +537,17 @@ test('spans: keyboard navigation through rows and the panel', async ({ page, req
 
 test('spans: loading, empty, error and "more available" states', async ({ page, request }) => {
   const range = await denseWindow(request);
-  // Empty: a filter that matches nothing.
+  // Empty state: a filter matches no span.
   await page.goto(tracesUrl(range, { mode: 'spans', tag: 'span:fixture.bucket=no-such-bucket' }));
   await expect(page.locator('[data-span-empty]')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-span-empty]')).toContainText('No spans found');
   await expect(page.locator('#tracesResultCount')).toContainText('0 Spans');
 
-  // Budget stops with nothing found yet: the table continues on its own a
-  // few times, then says how far it searched and continues on demand; an
-  // error offers Retry (from the same cursor).
+  // The search budget stops before any match is found. The table continues on
+  // its own a few times. Then it says how far it searched, and it continues on
+  // demand.
+  //
+  // An error offers Retry, which starts from the same cursor.
   let failing = false;
   const cursors = [];
   await page.route('**/api/traces/spans?*', async (route) => {
@@ -538,7 +565,8 @@ test('spans: loading, empty, error and "more available" states', async ({ page, 
   await expect(page.locator('.traceSpanTable__foot[role="status"]')).toContainText('Searching spans');
   await expect(page.locator('[data-span-more-available]')).toContainText('Searched back to', { timeout: 30_000 });
   await expect(page.locator('[data-span-load-more]')).toHaveText('Keep searching');
-  // The first page, then two automatic continuations by cursor.
+  // The test checks the first page. Then it checks two automatic continuations
+  // by cursor.
   const firstPage = cursors.lastIndexOf(null);
   expect(cursors.slice(firstPage + 1)).toHaveLength(2);
   for (const cursor of cursors.slice(firstPage + 1)) expect(cursor).toMatch(/^1\.\d+\.900000000000\.b\./);

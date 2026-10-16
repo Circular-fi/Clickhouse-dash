@@ -1,7 +1,8 @@
 #pragma once
 
-// The parts of the formatter that its units share (format_postprocess.hpp is the entry). The formatter is one pass pipeline over text: the
-// units below hold its passes, and the declarations here are what one unit needs of another. Nothing outside src/format_*.cpp includes this.
+// The parts of the formatter that its units share. Read format_postprocess.hpp first, because it is the entry point.
+// The formatter is a pipeline of passes over text. Each unit below holds some of these passes.
+// The declarations here are the parts that one unit needs from another unit. Only the src/format_*.cpp files include this header.
 //
 //   format_text        characters, whitespace, the work budget, comments, indentation
 //   format_scan        brackets, the top level of a text, keywords, operators, clauses
@@ -12,7 +13,7 @@
 //   format_expression  Formatter: calls, windows, arrays, arithmetic, CASE, IN, EXISTS, conditions
 //   format_ddl         Formatter: CREATE, ALTER, TTL, access control
 //   format_insert      Formatter: INSERT, DELETE, KILL, OPTIMIZE
-//   format_layout      Formatter: the explosion of lines that are too long
+//   format_layout      Formatter: the split of lines that are too long
 
 #include "format_postprocess.hpp"
 #include "sql_lexer.hpp"
@@ -40,11 +41,12 @@ using std::string;
 using std::string_view;
 using std::vector;
 
-// The formatter gives up on a statement it cannot lay out in time (FormatGivesUp, caught by
-// postprocess_format_query, which then returns the statement as written). Every layout pass scans
-// the text with step_scan, so that is where the time is checked: some passes are quadratic in the
-// nesting (a CASE inside a CASE 2000 times takes seconds), and a worker thread must not spend
-// minutes on one request.
+// The formatter stops a statement that it cannot lay out in time. It throws FormatGivesUp. The function
+// postprocess_format_query catches it and returns the statement as written.
+//
+// Every layout pass scans the text with step_scan. So step_scan checks the time limit.
+// Some passes take quadratic time in the nesting. A CASE inside a CASE, repeated 2000 times, takes seconds.
+// A worker thread must not spend minutes on one request.
 struct FormatGivesUp {};
 
 struct FormatBudget {
@@ -53,13 +55,13 @@ struct FormatBudget {
   uint64_t next_check = 0;  // the clock is read each time `work` passes this
 };
 
-// The budget of the statement being formatted on this thread; null outside postprocess_format_query.
+// The budget of the statement that this thread formats. The pointer is null outside postprocess_format_query.
 extern thread_local FormatBudget* t_format_budget;
 
 constexpr auto kFormatTimeBudget = std::chrono::seconds(2);
 
-// Counts `units` characters of scanning against the budget of this thread, reading the clock once
-// every 64 Ki of them.
+// Add `units` characters of scanning to the budget of this thread.
+// The function reads the clock once for every 64 Ki characters.
 inline void spend_format_budget(size_t units = 1) {
   FormatBudget* budget = t_format_budget;
   if (!budget) return;
@@ -69,8 +71,9 @@ inline void spend_format_budget(size_t units = 1) {
   if (std::chrono::steady_clock::now() > budget->deadline) throw FormatGivesUp{};
 }
 
-// The state of a byte by byte pass over a statement (sql_lexer.hpp, sql::Scan): the open quote or comment and the
-// depth of the brackets. Every layout pass reads the text with step_scan.
+// The state of a byte-by-byte pass over a statement (sql_lexer.hpp, sql::Scan).
+// The state holds the open quote or comment, and the depth of the brackets.
+// Every layout pass reads the text with step_scan.
 using ScanState = sql::Scan;
 
 inline bool is_top_level(const ScanState& st) { return st.top_level(); }
@@ -78,20 +81,21 @@ inline bool is_top_level(const ScanState& st) { return st.top_level(); }
 // ---------------------------------------------------------------------------
 // Redundant arithmetic parentheses.
 //
-// formatQuery parenthesizes every nested binary operator:
-// `(a*w1 + b*w2) / (w1 + w2)` comes back as
-// `((a * w1) + (b * w2)) / (w1 + w2)`. Parentheses never appear in the parsed
-// AST, so a group can be dropped whenever operator precedence already implies
-// the same tree. The decision uses only the tokens around the group and the
-// operators directly inside it; anything unfamiliar keeps its parentheses.
+// formatQuery puts parentheses around every nested binary operator:
+// `(a*w1 + b*w2) / (w1 + w2)` is returned as
+// `((a * w1) + (b * w2)) / (w1 + w2)`.
+//
+// Parentheses never appear in the parsed AST. A group can be dropped when operator precedence already gives the same tree.
+// The decision uses only the tokens around the group and the operators directly inside it.
+// Anything unfamiliar keeps its parentheses.
 
 enum class ArithTokenKind { Word, Number, Literal, Op, Open, Close, Comma, Comment, Other };
 
 constexpr int kArithMultiplicative = 12;
 
-// Top-level binary operators of `s` when it is a plain operator chain
-// (`a * w + b / c - f(x)`): byte ranges and precedence of each operator.
-// Returns false for anything else (keywords, lambdas, `||`, `?:`, casts...).
+// One top-level binary operator of a plain operator chain, for example `a * w + b / c - f(x)`.
+// The struct gives the byte range and the precedence of the operator.
+// split_arith_chain returns false for anything else (keywords, lambdas, `||`, `?:`, casts...).
 struct ArithChainOperator {
   size_t begin;
   size_t end;
@@ -101,14 +105,13 @@ struct ArithChainOperator {
 // ---------------------------------------------------------------------------
 // Function-call layout by line width.
 //
-// The expression formatter above decides call layout without knowing the
-// column its text will land on, so it explodes calls by shape (nested calls,
-// lambdas, several arguments). This pass applies the width rule on the final
-// text, where columns are known: a call (or array / IN list) whose one-line
-// form fits on its line is joined back onto one line, outermost first, and a
-// one-line call that overflows the line is exploded one argument per line.
-// Both directions only move whitespace between tokens, so the parsed query is
-// unchanged.
+// The expression formatter decides the call layout before it knows the column where the text lands.
+// So the formatter splits calls by their shape: nested calls, lambdas, and several arguments.
+// This pass applies the width rule to the final text, where the columns are known.
+// A call, an array, or an IN list that fits on its line is joined back onto one line. The outermost one is joined first.
+// The pass splits a one-line call that is too long, with one argument on each line.
+//
+// Both directions move only whitespace between tokens. The parsed query does not change.
 
 enum : unsigned char { kCallCode = 0, kCallLiteral = 1, kCallComment = 2 };
 
@@ -119,19 +122,22 @@ struct CallScan {
   vector<size_t> opener;       // `)` / `]` in code: position of its opener
 };
 
-// What the bracket at `pos` opens, for the width pass: a call's argument
-// list (`name(` or the `(args)` of a parametric `name(params)(`), an array
-// literal, a tuple list after `IN`, or a tuple element of an array literal.
-// `name_begin` receives where the call's name starts.
+// The kind of construct that the bracket at `pos` opens, for the width pass.
+// It can be a call's argument list (`name(` or the `(args)` of a parametric `name(params)(`), an array literal,
+// a tuple list after `IN`, or a tuple element of an array literal.
+// `name_begin` receives the position where the call's name starts.
 enum class CallOpener { None, Call, Array, InList, ArrayTuple };
 
-// The deepest nesting of the formatting calls (a call in an argument, a subquery, a lambda body, a
-// condition in parentheses: each level of the query takes one to three). Past it the statement
-// comes back as it was written. A real query is rarely that deep, and every level costs stack (a
-// worker thread may have only 128 KiB) and time (each level scans its whole text again).
+// kMaxFormatDepth is the deepest nesting of the formatting calls.
+// One level is, for example, a call in an argument, a subquery, a lambda body, or a condition in parentheses.
+// Each level of the query takes one to three levels of depth.
+//
+// Past this depth, the formatter returns the statement as it was written. A real query is rarely that deep.
+// Each level costs stack, and a worker thread may have only 128 KiB of stack.
+// Each level also costs time, because it scans its whole text again.
 constexpr size_t kMaxFormatDepth = 96;
 
-// One level of the formatting calls in progress; gives up (FormatGivesUp) past kMaxFormatDepth.
+// One level of the formatting calls in progress. The guard throws FormatGivesUp when the depth is above kMaxFormatDepth.
 class FormatDepthGuard {
  public:
   explicit FormatDepthGuard(size_t& depth) : depth_(depth) {
@@ -150,7 +156,7 @@ struct Formatter {
   explicit Formatter(size_t threshold_) : threshold(threshold_) {}
 
   size_t threshold;
-  // The nesting of the formatting calls in progress (FormatDepthGuard).
+  // The nesting of the formatting calls in progress. FormatDepthGuard changes this value.
   size_t depth = 0;
 
   string format(string_view s);
@@ -205,7 +211,7 @@ struct Formatter {
   vector<std::pair<string, string>> split_joins(string_view s) const;
 };
 
-// ---- What one unit needs of another ----
+// ---- What one unit needs from another unit ----
 
 // format_text.cpp
 bool iequals_ascii(string_view a, string_view b);
@@ -257,8 +263,9 @@ bool query_returns_table_like_cte(string_view query);
 vector<string> split_lines_keep(string_view s);
 size_t leading_space_count(string_view s);
 string normalize_final_layout(string_view s, size_t width);
-// The width of the column of names in a CREATE TABLE column list: that of the longest name, except that a name wider than
-// kColumnNameAlignCap does not stretch the column (it keeps one space before its type), unless every name is that wide.
+// The width of the column of names in a CREATE TABLE column list is the width of the longest name.
+// A name wider than kColumnNameAlignCap does not stretch the column. Such a name keeps one space before its type.
+// This rule does not apply when every name is that wide.
 constexpr size_t kColumnNameAlignCap = 32;
 size_t column_name_align_width(const vector<size_t>& name_widths);
 // format_arith.cpp

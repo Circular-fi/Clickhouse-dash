@@ -2,11 +2,11 @@ import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 import { MOCK_TRACE_START_NS, nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
-// OTel logs in the trace detail page (HyperDX's TraceLogsPanel feel): the
-// header Logs toggle and panel, log count badges and markers on span rows,
-// a span's logs listed under its row, the inspector Logs group, and a log
-// click opening its span. The first test runs on a real fixture trace from
-// the last hour of the logs window; the others on mocked answers.
+// OTel logs in the trace detail page, in the style of HyperDX's TraceLogsPanel.
+// The tests check the header Logs toggle and panel, log count badges and markers on span rows,
+// the logs of a span under its row, the inspector Logs group, and a log click that opens its span.
+// The first test uses a real fixture trace from the last hour of the logs window.
+// The other tests use mocked answers.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => {
@@ -42,7 +42,7 @@ async function setTheme(page, theme) {
 }
 
 // A fixture trace of the last logs hour with error logs and a span holding
-// several logs, from the APIs the page itself uses.
+// The data comes from the same APIs that the page uses.
 async function findFixtureTrace(request) {
   const version = await (await request.get('/api/version')).json();
   if (!version.features?.logs?.enabled || !version.features?.traces?.enabled) return null;
@@ -97,7 +97,7 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   }
   await expect(spanRow(page, busiest).locator('.traceSpanLogMarker').first()).toBeAttached();
 
-  // The logs under a span: one line per log, details on click, closed again.
+  // The logs under a span: one line per log. Details open on click and close again.
   await spanRow(page, busiest).locator('.traceSpanLogsBadge').click();
   await expect(inlineRows(page, busiest).locator('.traceLog--inline')).toHaveCount(perSpan.get(busiest));
   await expect(spanRow(page, busiest)).not.toHaveAttribute('aria-label', /details open/);
@@ -105,7 +105,7 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   await line.locator('.traceLog__row').click();
   await expect(line.locator('.traceLog__details .traceLog__attrs .traceKv')).toBeVisible();
   await expect(line.locator('.traceLog__details .kvList__row[data-kv-key="log.origin"]')).toBeVisible();
-  // The row keeps the waterfall columns: the log line's timeline starts where the span row's does.
+  // The row keeps the waterfall columns. The log line timeline starts where the span row timeline starts.
   const columns = await page.evaluate((id) => {
     const row = document.querySelector(`#traceWaterfall .traceSpanRow[data-span-id="${id}"] .traceSpanRow__timeline`);
     const logLine = document.querySelector(`#traceWaterfall .traceSpanLogsRow[data-span-logs-for="${id}"] .traceLogLine__timeline`);
@@ -125,7 +125,7 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   await spanRow(page, busiest).locator('.traceSpanRow__name').click();
   await expect(inspector(page, busiest)).toHaveCount(0);
 
-  // The panel: every log, then severity / service / text filters.
+  // The panel: every log, then severity, service and text filters.
   await headerToggle(page).click();
   await expect(panel(page)).toBeVisible();
   await expect(panelRows(page)).toHaveCount(Math.min(300, logs.length));
@@ -166,7 +166,7 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
     await expect(panelRows(page).first()).toBeVisible({ timeout: 30_000 });
   }
 
-  // A log opens its span: ?span=, inspector with the Logs group open, the log marked.
+  // A log opens its span: ?span=, the inspector with the Logs group open, and the log marked.
   const target = logs.find((r) => r.span_id === busiest);
   const index = logs.indexOf(target);
   await panel(page).locator(`.traceLog--panel[data-log-index="${index}"] .traceLog__body`).click();
@@ -177,8 +177,8 @@ test('fixture trace: header count, panel filters, span badges, logs under a span
   await expect(card.locator(`.traceLog.is-target[data-log-index="${index}"]`)).toBeVisible();
   await expect(spanRow(page, busiest)).toHaveClass(/is-deep-linked/);
 
-  // Open in Logs: the Logs view of the Observability page (the trace is a page of
-  // its own, so a new document), on this trace and its log window; Back returns.
+  // Open in Logs: the Logs view of the Observability page, for this trace and its log window.
+  // The trace is a page of its own, so a new document opens. Back returns.
   await page.evaluate(() => { window.__sameDocument = true; });
   await panel(page).locator('[data-trace-logs-open]').click();
   await expect(page).toHaveURL(new RegExp(`/observability/logs\\?from=.+&trace_id=${traceId}`));
@@ -251,7 +251,7 @@ test('mocked: logs load after the trace, with a loading state, the trace bounds 
     return json(route, logsAnswer([logRecord({ span: sid(1), at: 5, body: 'request received' })]));
   });
   await openMocked(page);
-  // The trace is on screen while the logs are still loading.
+  // The trace is on screen while the logs are not yet received.
   await expect(headerToggle(page)).toHaveClass(/is-loading/);
   await headerToggle(page).click();
   await expect(panel(page).locator('[data-trace-logs-state="loading"]')).toBeVisible();
@@ -348,7 +348,7 @@ test('mocked: many logs, truncated: the notice, paging, trace-level logs and the
   await expect(panel(page).locator('[data-trace-logs-state="filtered"]')).toBeVisible();
   await panel(page).locator('[data-trace-logs-clear]').click();
   await expect(panelRows(page)).toHaveCount(300);
-  // Every span row has a badge; markers are grouped per 0.2 % of the view.
+  // Every span row has a badge. Markers are grouped per 0.2 % of the view.
   await expect(page.locator('#traceWaterfall .traceSpanLogsBadge')).toHaveCount(12);
   const markers = await spanRow(page, sid(1)).locator('.traceSpanLogMarker').count();
   expect(markers).toBeGreaterThan(0);
@@ -408,14 +408,14 @@ test('mocked: an empty answer, a missing table and disabled logs', async ({ page
   const version = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith('/api/version'));
   await page.reload();
   await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(TRACE.spans.length, { timeout: 20_000 });
-  // The features are known (the version answer applied): the header and the
-  // panel have had their chance to show the logs.
+  // The features are known because the version answer was applied.
+  // The header and the panel had the chance to show the logs.
   await version;
   await page.evaluate(() => window.ChDash.features.ready);
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect(page.locator('#traceDetailStats [data-trace-header-item="Logs"]')).toHaveCount(0);
   await expect(panel(page)).toBeHidden();
-  // The version answer may land after the trace: a request then is ignored.
+  // The version answer can land after the trace. A request then is ignored.
   expect(requests.length - before).toBeLessThanOrEqual(1);
 });
 
@@ -438,7 +438,7 @@ test('mocked: logs keep the waterfall usable: collapsing a branch removes its lo
   await expect(spanRow(page, sid(8))).toHaveCount(1);
   await spanRow(page, sid(5)).locator('[data-toggle-span]').click();
   await expect(inlineRows(page, sid(7))).toHaveCount(1);
-  // A marker click lists the logs too; the span row itself does not toggle.
+  // A marker click also lists the logs. The span row itself does not toggle.
   await spanRow(page, sid(6)).locator('.traceSpanLogMarker').first().click();
   await expect(inlineRows(page, sid(6))).toHaveCount(1);
   await expect(spanRow(page, sid(6))).not.toHaveAttribute('aria-label', /details open/);

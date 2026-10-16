@@ -17,11 +17,10 @@
 namespace chdash {
 namespace {
 
-// What a statement of the formatter asks of ClickHouse: formatQuery of a text (one row, one String), or EXPLAIN AST of it (one row for each
-// line of the tree).
+// The formatter asks ClickHouse for one of two results. formatQuery of a text returns one row, with one String. EXPLAIN AST of a text returns one row for each line of the tree.
 enum class TextQuery { format_query, explain_ast };
 
-// The tree of a 256 KiB statement is a few megabytes: past this size the answer is not kept (the statement is not judged).
+// The tree of a 256 KiB statement is a few megabytes. Above this size, the answer is not kept, and the statement is not judged.
 constexpr size_t kMaxAstBytes = 64u * 1024 * 1024;
 
 FormatQueryResult run_text_query_once(
@@ -38,9 +37,8 @@ FormatQueryResult run_text_query_once(
   }
 
   try {
-    // Query parameters avoid copying and escaping the complete editor buffer
-    // into a second SQL string. They also keep quotes and backslashes exact.
-    // EXPLAIN AST takes the text as the statement itself: ClickHouse parses it and does not run it.
+    // Query parameters keep the complete editor buffer out of a second SQL string, so no copy and no escape is needed. They also keep quotes and backslashes exact.
+    // EXPLAIN AST takes the text as the statement. ClickHouse parses the text and does not run it.
     clickhouse::Query query(kind == TextQuery::format_query ? std::string("SELECT formatQuery({sql:String}) AS query") : "EXPLAIN AST " + sql,
                             ch_statement_query_id());
     if (kind == TextQuery::format_query) query.SetParam("sql", sql);
@@ -92,7 +90,7 @@ FormatQueryResult run_text_query_once(
     result.connection_reusable = false;
     return result;
   } catch (const clickhouse::ServerException& e) {
-    // By the code that ClickHouse sends (ch_error.hpp), not by a word of its message.
+    // The code that ClickHouse sends (ch_error.hpp) decides the error, not a word of its message.
     switch (classify_clickhouse_error(e).kind) {
       case ChErrorKind::Timeout: result.failure = FormatQueryFailureKind::timeout; break;
       case ChErrorKind::MemoryLimit:
@@ -167,8 +165,7 @@ static FormatQueryResult run_text_query(
   first.reconnect_attempted = true;
 
   try {
-    // ResetConnection replaces the socket and both buffered streams, removing
-    // any bytes left behind by a failed write before the query is retried.
+    // ResetConnection replaces the socket and both buffered streams. It removes the bytes from a failed write. This happens before the query is retried.
     client.ResetConnection();
   } catch (const std::exception& e) {
     first.connection_reusable = false;

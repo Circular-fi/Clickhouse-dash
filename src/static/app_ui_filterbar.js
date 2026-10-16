@@ -1,46 +1,43 @@
-// The filter bar (docs/ui-foundations.md, "Filter bar"): one row under
+// The filter bar (docs/ui-foundations.md, "Filter bar"). It is one row under
 // the tab row(s) of Observability (Traces, Logs, Metrics) and System
-// (Overview, Queries, Disks), the same markup, sizes and phone fold on
+// (Overview, Queries, Disks). It has the same markup, sizes and phone fold on
 // the six views (.obsFilterBar, css/20-features/observability.css).
-// Left to right: the time range first, the view's filters as
-// "Label · Value" pickers (ns.menu.select), free-text fields and
-// toggle chips, then at the right end the secondary actions (Add panel)
-// and the action: Observability's primary
-// "Search" (its queries run on demand), System's refresh icon button (a
-// change applies at once). The lead holds the range and the pickers, the
-// tail the rest; the wrap rules are the stylesheet's.
+// The order runs from left to right. The time range comes first. Then come the
+// view's filters as "Label · Value" pickers (ns.menu.select), free-text fields and
+// toggle chips. The secondary actions (Add panel) and the main action are at the right end.
+// Observability's main action is "Search", and its queries run on demand.
+// System's main action is a refresh icon button. A change in System applies at once.
+// The lead holds the range and the pickers. The tail holds the rest.
+// The stylesheet sets the wrap rules.
 //
 //   filterBar.create({ id, className, dataset, hidden, onSubmit }) -> bar
 //     builds an empty bar (System; Observability ships its markup):
 //     bar.form (a <form>: its submit is the action, bar.onSubmit(event)
 //     runs it), bar.lead, bar.tail, bar.actions, and
-//       bar.range(idPrefix)          the time range slot, first in the
-//                                    lead -> the picker root
-//                                    (ns.timeRange.create mounts on it)
+//       bar.range(idPrefix)          the time range slot, first in the lead. It is
+//                                    the picker root. ns.timeRange.create mounts on it.
 //       bar.field(select, { narrow, summary, tail, className, pickerClass })
-//                                    a picker over `select` (tail: in
-//                                    the tail, before the chips: the
-//                                    lead keeps one row down to 761 px)
-//                                    (data-field-label names it) in the
-//                                    lead -> its ns.menu handle;
-//                                    summary: false leaves it out of the
-//                                    phone summary's filter count (an
-//                                    order, not a filter)
+//                                    a picker over `select`. The data-field-label attribute
+//                                    names it. The picker goes in the lead, and the call returns
+//                                    its ns.menu handle. tail: the picker goes in the tail,
+//                                    before the chips. The lead keeps one row down to 761 px.
+//                                    summary: false leaves the picker out of the phone summary's
+//                                    filter count. Use it for an order, which is not a filter.
 //       bar.chip({ id, label, title, pressed, onChange }) a toggle chip
-//                                    (aria-pressed) before the actions;
-//                                    its default state is not a filter
+//                                    (aria-pressed). It goes before the actions.
+//                                    Its default state is not a filter.
 //       bar.iconAction({ id, label, icon }) the action as an icon button
 //                                    (type submit: onSubmit runs it)
-//     A chip's set(on) changes it quietly; onChange(on) runs on
-//     a click.
+// A chip's set(on) changes the chip. It does not run onChange.
+// onChange(on) runs on a click.
 //   filterBar.mountSummary(form, { describe })
-//     the phone fold (at --bp-sm, 600 px, and below): one summary line, a
-//     .foldSummary "<time range> · N filters", stands for the folded
-//     bar and unfolds it; the action folds it again; the chips row right
-//     after the bar folds with it. Wider windows show the bar, the
-//     summary hidden (the rules sit in max-width: 600px blocks). A bar
-//     with no time range (the MCP Usage bar: a window and a group)
-//     gives describe(), the text that stands for it on the folded line.
+//     the phone fold (at --bp-sm, 600 px, and below). It shows one summary line, a
+//     .foldSummary "<time range> · N filters". The summary stands for the folded
+//     bar and unfolds it. The action folds the bar again. The chips row folds with
+//     the bar, right after it.
+//     Wider windows show the bar and hide the summary. The rules are in max-width: 600px
+//     blocks. A bar with no time range (the MCP Usage bar: a window and a group) gives
+//     describe(). describe() returns the text that stands for the bar on the folded line.
 
 import { dom, h, shell } from "./app_dom.js";
 import { icon as iconMod } from "./app_ui_icon.js";
@@ -52,8 +49,8 @@ function pressedOf(button) {
   return button.getAttribute("aria-pressed") === "true";
 }
 
-// A toggle chip: aria-pressed, onChange on a click. Nothing in a bar
-// refreshes on a timer: there is no live / auto-refresh toggle.
+// A toggle chip has aria-pressed. onChange runs on a click. No element in a bar
+// refreshes on a timer. There is no live / auto-refresh toggle.
 function toggleButton(className, { id = "", label = "", title = "", pressed = false, onChange = null } = {}) {
   const button = h("button", {
     type: "button",
@@ -91,7 +88,7 @@ function create({ id = "", className = "", dataset = {}, hidden = false, onSubmi
     },
     field(select, { narrow = false, summary = true, tail: inTail = false, className: extra = "", pickerClass = "" } = {}) {
       const picker = h("div", { class: ["themeSelect tracePicker", pickerClass] }, select);
-      // .traceSearchField: the pickers' look of the Observability bars.
+      // .traceSearchField gives the pickers the look of the Observability bars.
       const field = h("div", { class: ["obsFilterBar__field", narrow && "obsFilterBar__field--narrow", "traceSearchField", extra], dataset: summary ? {} : { summary: "off" } }, picker);
       if (inTail) tail.insertBefore(field, $(":scope > .obsFilterBar__chip", tail) || actions);
       else lead.appendChild(field);
@@ -125,10 +122,11 @@ function create({ id = "", className = "", dataset = {}, hidden = false, onSubmi
 
 // ------------------------------------------------------------- phones
 
-// The filters a bar applies besides its time range: each picker not on
-// "All" (the lead's, a tail field's; a field with data-summary="off", an
-// order, does not count), each free-text field holding text, each chip
-// out of its default state, each chip of the row under it.
+// The filters that a bar applies, besides its time range, are these. Each picker
+// that is not on "All" counts. This includes the lead picker and the tail pickers.
+// A field with data-summary="off" does not count, because it is an order and not a filter.
+// Each free-text field that holds text counts, and so does each chip that is not in
+// its default state, and each chip of the row under the bar.
 function filterCount(form) {
   let count = 0;
   for (const button of $$(".obsFilterBar__lead .tracePicker:not(.tracePicker--range) .tracePicker__button, .obsFilterBar__tail .obsFilterBar__field .tracePicker__button", form)) {
@@ -147,8 +145,8 @@ function filterCount(form) {
   return count;
 }
 
-// The range as the bar shows it: the option of the picker's hidden select
-// (Observability), else its button without the "Time range" label.
+// The function returns the range as the bar shows it. The range is the option of the
+// picker's hidden select (Observability). Otherwise, it is the picker button without the "Time range" label.
 function rangeText(form) {
   const select = $(".tracePicker--range select", form);
   const text = select ? select.options[0]?.textContent : $(".tracePicker--range > .tracePicker__button", form)?.textContent;
@@ -161,8 +159,9 @@ function mountSummary(form, { describe = null } = {}) {
   const count = h("span", { class: "foldSummary__meta" });
   const summary = h("button", { type: "button", class: "foldSummary obsFilterSummary" }, range, count, iconMod.el("chevron-down", { className: "foldSummary__chevron" }));
   form.prepend(summary);
-  // Folded, the line says what the filters are ("<range> · 2 filters"); open, they are there to read and the line says what
-  // a click does (a range twice, once in the line and once in the picker, was one too many).
+  // When folded, the line says which filters apply ("<range> · 2 filters"). When open,
+  // the filters are there to read. The line then says what a click does.
+  // A range shown twice, once in the line and once in the picker, is one too many.
   const refresh = () => {
     const open = !form.classList.contains("is-folded");
     const text = open ? "Hide the filters" : describe ? describe() : rangeText(form);

@@ -150,8 +150,8 @@ function setContext(ctx) {
   if (dom.analyzeQueryButton) dom.analyzeQueryButton.hidden = !current;
 }
 
-// However the dialog closes (close button, Escape, backdrop click), the
-// pending loads stop and the views and their data are released.
+// The pending loads stop when the dialog closes. This is true for each way to close it: the close button, Escape or a click on the backdrop.
+// The views and their data are also released.
 function closed() {
   loadGeneration += 1;
   util.latest.cancel("analysis.load");
@@ -172,14 +172,12 @@ function notice(text, kind = "info") {
   dom.analysisNotice.hidden = !text;
 }
 
-// The dialog's subtitle: the query id (mono), then the measures (sans).
-// query_log counts whole milliseconds: a faster query reads "<1 ms", never
-// "0 ns".
+// The subtitle of the dialog shows the query id (mono), then the measures (sans).
+// query_log counts whole milliseconds. A faster query reads "<1 ms", never "0 ns".
 function renderSummary(data) {
   if (!dom.analysisSummary) return;
   const overview = data?.overview || null;
-  // The query id on its line, the measures under it (two separators at
-  // most: the times, the rows, the memory).
+    // The query id is on its line. The measures are under it, with two separators at most: the times, the rows and the memory.
   const parts = [];
   const ms = (value) => (Number(value) > 0 ? format.duration.fromMs(value) : "<1 ms");
   const times = [];
@@ -322,8 +320,8 @@ function analysisLogsPending(data) {
   return !!(data && (data.logs_pending || data.profiling_logs_pending));
 }
 
-// The text of the payload on screen: a poll that brings the same answer draws nothing (it would rebuild the viewers and
-// drop the zoom and the sort of the user for nothing).
+// This is the text of the payload on screen. A poll that brings the same answer draws nothing.
+// Such a draw would rebuild the viewers and drop the zoom and the sort of the user for nothing.
 let shownSignature = "";
 function applyAnalysisPayload(response) {
   const signature = JSON.stringify(response);
@@ -338,9 +336,9 @@ function applyAnalysisPayload(response) {
   renderActiveTab();
 }
 
-// The backend no longer forces SYSTEM FLUSH LOGS (server-wide) to make fresh
-// logs visible. ClickHouse publishes them on its own flush interval (7.5 s by
-// default), so re-poll with a bounded backoff while rows are still missing.
+// The backend does not force SYSTEM FLUSH LOGS (server-wide) any more to make fresh logs visible.
+// ClickHouse publishes the logs on its own flush interval, which is 7.5 s by default.
+// Poll again with a bounded backoff while rows are still missing.
 const PENDING_REFRESH_DELAYS_MS = [800, 1500, 2500, 3500, 5000, 7000];
 function schedulePendingRefresh(generation, attempt) {
   if (!analysisLogsPending(payload) || attempt >= PENDING_REFRESH_DELAYS_MS.length) {
@@ -373,8 +371,8 @@ async function open(ctx = current) {
   shownSignature = "";
   activeTab = "pipeline";
   syncTabs();
-  // The focus moves into the dialog (Tab reaches the close button and the
-  // tabs) and goes back to the opener, or to Run, when it closes.
+    // The focus moves into the dialog. Tab reaches the close button and the tabs.
+    // When the dialog closes, the focus returns to the opener, or to Run.
   dialog?.open();
   clear(dom.analysisContent);
   notice("Loading ClickHouse execution logs\u2026");
@@ -399,8 +397,8 @@ async function open(ctx = current) {
 
 function init() {
   dom.analyzeQueryButton?.addEventListener("click", () => open());
-  // Pipeline | Tracing: the shared tab behaviour (app_ui_tabs.js: click,
-  // arrows, Home / End, roving tabindex) in the dialog's tab style.
+    // Pipeline | Tracing uses the shared tab behaviour of app_ui_tabs.js: click, arrows, Home / End and roving tabindex.
+    // The tabs use the tab style of the dialog.
   viewTabs = tabs?.bind(dom.analysisTabs, { onSelect: (tab) => setActiveTab(tab) }) || null;
   dialog = dialogMod?.bind(dom.analysisModal, {
     onClose: closed,

@@ -13,11 +13,9 @@
 
 namespace chdash {
 
-// What an edge or node side panel explains about a logical object. Built from
-// the same authorized system.tables texts as the graph; never serialized in
-// the graph payload itself (GET /api/explorer/graph/definition serves it per
-// object). Referenced objects outside AllowedObjectSet keep only a
-// `*_visible = false` flag, never their name.
+// The side panel of a node or an edge explains a logical object. It uses the same authorized system.tables texts as the graph.
+// The graph payload never serializes these texts. GET /api/explorer/graph/definition serves them for each object.
+// A referenced object outside AllowedObjectSet keeps only a `*_visible = false` flag. It never keeps the name.
 struct ExplorerGraphDefinition {
   std::string select_sql;          // View / MV / refreshable MV AS SELECT
   bool select_sql_truncated = false;
@@ -69,8 +67,8 @@ struct ExplorerGraphNode {
   std::optional<uint64_t> buffer_max_bytes;
   uint64_t buffer_layers = 0;
   std::vector<ExplorerGraphTtlRule> ttl_rules;
-  // Scoped (focused Lineage) payloads only: semantic neighbours of this node
-  // that exist but are outside the shipped neighbourhood, per direction.
+  // Scoped payloads of a focused lineage only: semantic neighbours of this node.
+  // They exist, but lie outside the shipped neighbourhood. The count is given per direction.
   uint64_t hidden_upstream = 0;
   uint64_t hidden_downstream = 0;
 };
@@ -84,8 +82,8 @@ struct ExplorerGraphEdge {
   bool can_animate = false;
 };
 
-// The graph is bounded: the topology of a cluster (a node for each shard and each replica, shared by the Distributed tables that name it) is left out when it would
-// make the graph larger than this, and `truncated` says so.
+// The graph is bounded. The topology of a cluster is omitted when it makes the graph larger than this.
+// The cluster topology has a node for each shard and each replica, shared by the Distributed tables that name it. `truncated` says so.
 constexpr size_t kMaxGraphNodes = 20000;
 constexpr size_t kMaxGraphEdges = 40000;
 
@@ -98,20 +96,20 @@ struct ExplorerGraph {
   bool refreshable_views_available = true;
   std::vector<ExplorerGraphNode> nodes;
   std::vector<ExplorerGraphEdge> edges;
-  // A bound left out some topology (kMaxGraphNodes, kMaxGraphEdges).
+  // A bound removed some topology (kMaxGraphNodes, kMaxGraphEdges).
   bool truncated = false;
   // Made when the graph is loaded; the scope of a request reads it.
   std::shared_ptr<const ExplorerGraphIndex> index;
   // Keyed by logical node id. Kept beside the nodes so scoped graph payloads
   // never copy SELECT texts they do not serialize.
   std::unordered_map<std::string, ExplorerGraphDefinition> definitions;
-  // The sections that a missing grant of the system user left out of the catalog under the graph.
+  // The sections that are not in the catalog under the graph. A missing grant of the system user caused each omission.
   std::vector<std::string> unavailable_sections;
   std::vector<ExplorerUnavailableIssue> unavailable_issues;
 };
 
-// `system_identity`: acl_identity_key of the system URI (DdlTextCache). Reads what the graph needs from the system account (explorer_graph.cpp),
-// then builds it (explorer_graph_build.hpp).
+// `system_identity`: acl_identity_key of the system URI (DdlTextCache). The system account gives the graph inputs.
+// explorer_graph.cpp reads them. Then it builds the graph (explorer_graph_build.hpp).
 bool load_explorer_graph(
     ChExecutor& system,
     ExplorerCaches& caches,

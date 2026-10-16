@@ -3,9 +3,10 @@ import { installObservers } from '../helpers/observability.js';
 import { openApp, runSuccessfulQuery, waitForBatch } from '../helpers/app.js';
 import { captureCopies } from '../helpers/clipboard.js';
 
-// One live table for the result of a query and for each statement of a batch (app_results_table.js, ARCH-F-048): a statement
-// sorts by what its cells show, shows a long result as a virtual window and streams like the single result. These tests
-// ran against two implementations that differed; they now check that the two places behave the same.
+// One live table shows the result of a query. It also shows each statement of a batch (app_results_table.js, ARCH-F-048).
+// A statement sorts by what its cells show. A long result uses a virtual window. The result streams like the single result.
+//
+// These tests ran against two implementations that differed. The tests now check that both places behave the same.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -25,7 +26,7 @@ async function enableMultiquery(page) {
 
 const SORT_SQL = "SELECT arrayJoin(['b', NULL, 'a', 'z']) AS v";
 
-// The text of the first column of the rows that are mounted in a table body.
+// The text of the first column of the rows that the table body mounts.
 const firstColumn = (body) => body.locator('tr:not(.resultTable__spacerRow) td:nth-child(2)').allTextContents();
 
 test('a statement of a batch sorts a text column by what its cells show, as the single result does', async ({ page }) => {
@@ -35,7 +36,7 @@ test('a statement of a batch sorts a text column by what its cells show, as the 
   await single.click();
   const singleOrder = await firstColumn(page.locator('#resultTableBody'));
   expect(singleOrder).toHaveLength(4);
-  // NULL is shown as a token: it sorts with the other texts, not before them as an empty value.
+  // The page shows NULL as a token. It sorts with the other texts, not before them as an empty value.
   expect(singleOrder[0]).toBe('a');
 
   await enableMultiquery(page);
@@ -61,7 +62,7 @@ test('a long statement of a batch mounts a window of its rows, as the single res
   expect(mounted).toBeLessThan(3000);
   expect(await panel.locator('tbody tr.resultTable__spacerRow').count()).toBeGreaterThan(0);
   await expect(panel.locator('.resultsStack__meta')).toContainText('3,000 rows');
-  // The numeric sort reaches the end of the list through the same window.
+  // The numeric sort reaches the end of the list. It uses the same window.
   const header = panel.locator('thead th.is-sortable').nth(1);
   await header.click();
   await expect(header).toHaveAttribute('aria-sort', 'descending');
@@ -75,7 +76,7 @@ test('a statement with one row and one column is a value, with several columns a
   await page.locator('#runButton').click();
   await waitForBatch(page, 3);
   const panels = page.locator('.resultsStack__block');
-  // One value: the value alone, no column title above it (the table keeps the name for assistive technology).
+  // One value: the value appears alone, with no column title above it. The table keeps the name for assistive technology.
   await expect(panels.nth(0).locator('thead th')).toHaveCount(0);
   await expect(panels.nth(0).locator('table')).toHaveAttribute('aria-label', /^one\b/);
   await expect(panels.nth(0).locator('tbody td:not(.dataTable__rowNum)')).toHaveText('1');
@@ -87,7 +88,7 @@ test('a statement with one row and one column is a value, with several columns a
   await expect(panels.nth(2).locator('tbody tr')).toHaveCount(2);
 });
 
-// A statement the server returns on several lines (SHOW CREATE TABLE) is shown as SQL: highlighted, with its lines.
+// The page shows a statement from the server on several lines (SHOW CREATE TABLE) as SQL. It highlights the statement, with its lines.
 test('SHOW CREATE TABLE shows the statement as highlighted multi-line SQL with a copy button', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, 'SHOW CREATE TABLE chdash_ui.weather_daily_summary');
@@ -99,15 +100,15 @@ test('SHOW CREATE TABLE shows the statement as highlighted multi-line SQL with a
   expect(lines[0]).toMatch(/^CREATE TABLE chdash_ui\.weather_daily_summary$/);
   expect(lines.length).toBeGreaterThan(5);
   expect(lines.some((line) => /^ENGINE = /.test(line))).toBe(true);
-  // The highlighter's tokens, not the string colour of a plain value.
+  // The highlighter's tokens, not the colour of a plain text value.
   await expect(block.locator('.tok-kw').first()).toBeVisible();
   await expect(block.locator('.sqlBlock__copy')).toBeVisible();
-  // The lines are laid out one under the other (not collapsed onto one row).
+  // The page arranges the lines one under the other. It does not collapse them onto one row.
   const first = await block.locator('.sqlBlock__code').boundingBox();
   expect(first.height).toBeGreaterThan(100);
 });
 
-// One value is nothing to point at: its cell does not light up under the pointer, a table of rows does.
+// A single value gives no hover target. Its cell does not change colour under the pointer. A table of rows does.
 test('a result of one value has no hover fill; a table of rows has one', async ({ page }) => {
   await openApp(page);
   const fill = (locator) => locator.evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -123,8 +124,8 @@ test('a result of one value has no hover fill; a table of rows has one', async (
   expect(await fill(row)).not.toBe('rgba(0, 0, 0, 0)');
 });
 
-// The statement is laid out by the formatter (a short Tuple on one line, the types in one column); a button goes back to the
-// text as ClickHouse returned it, and Copy copies what is shown.
+// The formatter arranges the statement. A short Tuple is on one line, and the types are in one column.
+// A button returns to the text as ClickHouse returned it. Copy copies what is shown.
 test('SHOW CREATE TABLE shows the formatted statement, with a switch to the text as returned', async ({ page }) => {
   await openApp(page);
   const copied = await captureCopies(page, { clipboard: true, consume: true });
@@ -134,13 +135,13 @@ test('SHOW CREATE TABLE shows the formatted statement, with a switch to the text
   await expect(mode).toHaveAttribute('aria-pressed', 'true');
   const code = block.locator('.sqlBlock__code');
   await expect(code).toContainText(/`tuple_value`\s+Tuple\(code UInt16, name String\),/);
-  // Names that fit are one column of types; the long one keeps one space.
+  // Names that fit form one column of types. The long name keeps one space.
   const lines = (await code.innerText()).split('\n');
   const typeColumn = (name) => lines.find((line) => line.includes(`\`${name}\``)).search(/ [A-Z]/);
   expect(typeColumn('id')).toBe(typeColumn('created_on'));
   await block.locator('.sqlBlock__copy').click();
   await expect.poll(async () => (await copied()).includes('Tuple(code UInt16, name String)')).toBe(true);
-  // As returned: ClickHouse's own layout (a Tuple over lines), and Copy copies that.
+  // As returned: ClickHouse's own layout (a Tuple over lines). Copy copies that layout.
   await mode.click();
   await expect(mode).toHaveAttribute('aria-pressed', 'false');
   await expect(code).toContainText(/Tuple\(\n\s+code UInt16,/);

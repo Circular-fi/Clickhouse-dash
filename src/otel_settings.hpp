@@ -1,9 +1,9 @@
 #pragma once
 
-// The settings of the OpenTelemetry pages (Traces, Logs, Metrics), in the `observability` block of the configuration
-// (docs/configuration.md). The block holds the settings of every host; a host may change where its tables are
-// (`clickhouse.host { observability { traces { table = ... } } }`). The configuration resolves them once: each HostSpec
-// holds the settings that apply to it (health_runner.hpp), and the code reads them from the host that it serves.
+// The settings of the OpenTelemetry pages (Traces, Logs, Metrics) are in the `observability` block of the configuration
+// (docs/configuration.md). The block holds the settings of every host. A host can change where its tables are
+// (`clickhouse.host { observability { traces { table = ... } } }`). The configuration resolves them once.
+// Each HostSpec holds the settings that apply to it (health_runner.hpp). The code reads them from the host that it serves.
 
 #include <cstddef>
 #include <optional>
@@ -34,29 +34,29 @@ struct TraceSettings {
   int max_lookback_minutes = 7 * 24 * 60;
   size_t search_limit = 100;
   size_t max_spans_per_trace = 10000;
-  // Attributes shown as key: value chips in the trace header (root span
-  // first, then the first span carrying the key).
+  // Attributes that the trace header shows as key: value chips. The root span comes first.
+  // Then comes the first span that has the key.
   std::vector<std::string> highlighted_attributes{
       "service.version", "deployment.environment.name", "deployment.environment", "http.route", "user.id"};
-  // "Linked from" lookups scan the trace's own window widened by this margin.
+  // "Linked from" lookups scan the window of the trace, widened by this margin.
   int linked_from_margin_minutes = 60;
   TraceFeatureSettings features;
 };
 
-// OpenTelemetry logs (ClickHouse exporter otel_logs table). ServiceName
-// access control reuses traces.service_allowlist.
+// OpenTelemetry logs (ClickHouse exporter otel_logs table). ServiceName access control reuses traces.service_allowlist.
 struct LogSettings {
   bool enabled = false;
   std::string database = "otel";
   std::string table = "otel_logs";
   int max_lookback_minutes = 7 * 24 * 60;
   size_t search_limit = 200;
-  // "token" (hasToken, index-backed by a tokenbf_v1/text Body index),
-  // "substring" (ILIKE-style scan) or "off" (no Body search).
+  // "token": hasToken, backed by a tokenbf_v1 or text index on Body.
+  // "substring": an ILIKE-style scan. "off": no search on Body.
   std::string body_search = "token";
-  // Logs of one trace (trace detail): at most trace_logs_limit records, read
-  // from the trace start - trace_margin_before_seconds to its end +
-  // trace_margin_after_seconds (records are often written after their span).
+  // Logs of one trace (trace detail): at most trace_logs_limit records.
+  // The read starts at the trace start minus trace_margin_before_seconds.
+  // It ends at the trace end plus trace_margin_after_seconds.
+  // Records are often written after their span.
   size_t trace_logs_limit = 1000;
   int trace_margin_before_seconds = 5;
   int trace_margin_after_seconds = 30;
@@ -70,8 +70,8 @@ struct MetricSettings {
   std::string table_prefix = "otel_metrics";
 };
 
-// What a host may change: whether a signal is on for it, and where its tables are. Everything else (the limits, the
-// allowlist, the features) is the same for every host.
+// A host can change two things. It can turn a signal on or off, and it can set where its tables are.
+// All other settings are the same for every host: the limits, the allowlist and the features.
 struct OtelHostOverride {
   std::optional<bool> traces_enabled;
   std::optional<std::string> traces_database;
@@ -111,8 +111,8 @@ inline OtelSettings apply_otel_override(OtelSettings defaults, const OtelHostOve
   return defaults;
 }
 
-// The tables ("database.table") that the system user must read for the signals that are on for a host: their tables, and
-// the skipping indices that the Logs and Metrics pages read (the access audit checks them, health_runner.hpp).
+// The tables ("database.table") that the system user must read for the signals that are on for a host.
+// The tables include the skipping indices that the Logs and Metrics pages read. The access audit checks them (health_runner.hpp).
 inline std::vector<std::string> otel_system_reads(const OtelSettings& otel) {
   std::vector<std::string> out;
   const auto add = [&out](const std::string& database, const std::string& table) {

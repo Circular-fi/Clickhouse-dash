@@ -1,12 +1,12 @@
-// Unit tests of the statements and the connections of ChDash (src/ch_query.hpp, src/ch_client_pool.hpp).
+// This file has unit tests of the statements and the connections of ChDash (src/ch_query.hpp, src/ch_client_pool.hpp).
 //
-// Without a server: the settings that a statement gets from its scope and the settings profile of the
-// user, the scopes, the cancel check.
-// With a server (CHDASH_TEST_CLICKHOUSE_URI=clickhouse://user:password@host:9000, the test stack has one):
-// a statement that a callback interrupts never leaves its packets to the next statement (the lease is
-// closed, or reopened when the caller goes on with it); a callback that stops reading keeps the
-// connection; the scope's settings reach ClickHouse; the deadline and the cancel stop a statement before
-// it is sent; the pool bounds its leases.
+// Without a server, the tests check the settings that a statement gets from its scope and from the settings profile of the
+// user. They also check the scopes and the cancel check.
+// With a server. The variable CHDASH_TEST_CLICKHOUSE_URI=clickhouse://user:password@host:9000 names the server, and the test stack has one:
+// These tests check the following points. A statement that a callback interrupts never leaves its packets for the next statement. The lease is
+// closed, or reopened when the caller goes on with it. A callback that stops reading keeps the connection.
+// The scope settings reach ClickHouse. The deadline and the cancel stop a statement before it is sent.
+// The pool bounds its leases.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_CH_QUERY_TESTS=ON
 //        cmake --build build --target chdash_ch_query_test
@@ -74,7 +74,7 @@ void test_settings_follow_the_scope_and_never_loosen_the_profile() {
   CHECK(setting(out, "max_execution_time") == "10");
   CHECK(setting(out, "max_rows_to_read") == "<unset>");
 
-  // A stricter profile wins: the setting is not sent (the profile's value stays).
+  // A stricter profile wins. The setting is not sent, and the value of the profile stays.
   ChSettingsProfile strict = open_profile();
   strict.max_memory_usage = 1'000'000'000ULL;
   strict.max_execution_time = 5;
@@ -90,7 +90,7 @@ void test_settings_follow_the_scope_and_never_loosen_the_profile() {
   CHECK(setting(out, "max_memory_usage") == "4000000000");
   CHECK(setting(out, "max_execution_time") == "10");
 
-  // The deadline: what remains, rounded up, and the smaller of it and the cap.
+  // The deadline is the time that remains, rounded up. The result is the smaller of that time and the cap.
   limits.deadline = now + std::chrono::milliseconds(3200);
   out = ch_query_settings(limits, open_profile(), now);
   CHECK(setting(out, "max_execution_time") == "4");
@@ -98,7 +98,7 @@ void test_settings_follow_the_scope_and_never_loosen_the_profile() {
   out = ch_query_settings(limits, open_profile(), now);
   CHECK(setting(out, "max_execution_time") == "1");
 
-  // A read cap carries its overflow mode; so does a result cap.
+  // A read cap carries its overflow mode. A result cap does too.
   ChQueryLimits reads;
   reads.max_rows_to_read = 1000;
   reads.read_overflow_mode = "break";
@@ -140,7 +140,7 @@ void test_read_only_and_the_overflow_modes() {
   CHECK(setting(out, "timeout_overflow_mode") == "throw");
   CHECK(setting(out, "max_result_rows") == "1000");
   CHECK(setting(out, "result_overflow_mode") == "throw");
-  // A profile that is already read only keeps its value; a stricter time limit keeps its own mode.
+  // A profile that is already read only keeps its value. A stricter time limit keeps its own mode.
   ChSettingsProfile strict = open_profile();
   strict.readonly = 2;
   strict.max_execution_time = 10;
@@ -150,6 +150,32 @@ void test_read_only_and_the_overflow_modes() {
   CHECK(setting(out, "timeout_overflow_mode") == "<unset>");
   CHECK(setting(out, "max_result_rows") == "<unset>");
   CHECK(setting(out, "result_overflow_mode") == "<unset>");
+}
+
+// This is the access of humans (docs/access.md). A run without query.run.write has readonly = 1, whatever the profile allows. The same applies
+// when the profile is not known (fail closed).
+void test_strict_read_only_of_the_access() {
+  const auto now = std::chrono::steady_clock::now();
+  ChQueryLimits limits;
+  limits.read_only_strict = true;
+  limits.read_only = true;  // the strict form wins
+  limits.max_execution_time_s = 30;
+  Settings out = ch_query_settings(limits, open_profile(), now);
+  CHECK(setting(out, "readonly") == "1");
+  CHECK(setting(out, "max_execution_time") == "30");
+  ChSettingsProfile loose = open_profile();
+  loose.readonly = 2;
+  CHECK(setting(ch_query_settings(limits, loose, now), "readonly") == "1");
+  ChSettingsProfile unknown;
+  out = ch_query_settings(limits, unknown, now);
+  CHECK(out.size() == 1 && setting(out, "readonly") == "1");
+  // A profile at readonly = 1 refuses every setting. Nothing is sent, and the statement is already read only.
+  ChSettingsProfile strict = open_profile();
+  strict.readonly = 1;
+  CHECK(ch_query_settings(limits, strict, now).empty());
+  // Without the strict form, an unknown profile gets nothing.
+  limits.read_only_strict = false;
+  CHECK(ch_query_settings(limits, unknown, now).empty());
 }
 
 void test_scopes_nest_and_the_cancel_check_throws() {
@@ -176,7 +202,7 @@ void test_scopes_nest_and_the_cancel_check_throws() {
         thrown = true;
       }
       CHECK(thrown);
-      // Once canceled, the scope stays canceled without asking again.
+      // Once canceled, the scope stays canceled. It does not ask again.
       thrown = false;
       try {
         ch_check_canceled();
@@ -192,8 +218,8 @@ void test_scopes_nest_and_the_cancel_check_throws() {
   CHECK(ChQueryScope::current() == nullptr);
 }
 
-// The query_id of a statement comes from its scope (the statements of a call of MCP, mcp_cost.hpp): one for each statement, kept by an
-// inner scope that copies the outer one, none outside of every scope.
+// The query_id of a statement comes from its scope. The statements of a call of MCP (mcp_cost.hpp) get one query_id each.
+// An inner scope copies the outer query_id. Outside every scope, there is no query_id.
 void test_a_scope_names_each_statement() {
   CHECK(ch_statement_query_id().empty());
   int made = 0;
@@ -267,10 +293,10 @@ void test_an_interrupted_statement_never_reaches_the_next_lease(const std::strin
       stopped = true;
     }
     CHECK(stopped);
-    // The rest of the stream is still in the socket: the connection is marked.
+    // The rest of the stream is still in the socket. The connection is marked.
     CHECK(ch_connection_dirty(*client));
   }
-  // The pool closed it: the next lease answers its own statement, not the packets of the previous one.
+  // The pool closed it. The next lease answers its own statement, not the packets of the previous one.
   for (int i = 0; i < 3; ++i) {
     auto client = lease(pool, uri);
     CHECK(!ch_connection_dirty(*client));
@@ -286,7 +312,7 @@ void test_a_caller_that_goes_on_gets_a_new_socket(const std::string& uri) {
   } catch (const Stop&) {
   }
   CHECK(ch_connection_dirty(*client));
-  // The same lease, the next statement (the catch-and-continue sites): a new socket first.
+  // The same lease runs the next statement (the catch-and-continue sites). A new socket opens first.
   CHECK(select_u64(*client, "SELECT toString(7)") == 7);
   CHECK(!ch_connection_dirty(*client));
 }
@@ -309,6 +335,34 @@ void test_a_server_error_keeps_the_connection(const std::string& uri) {
   auto again = lease(pool, uri);
   CHECK(again.get() == first);  // back in the idle pool, lent again
   CHECK(select_u64(*again, "SELECT toString(3)") == 3);
+}
+
+// on_statement of the scope gets one record for each statement (the trace of an MCP call). The record has the first word, the server, the time,
+// and the code of a server error. The record never has the text of the statement.
+void test_the_scope_observes_each_statement(const std::string& uri) {
+  auto pool = std::make_shared<ClickHouseClientPool>(4);
+  std::vector<ChStatementRecord> seen;
+  ChQueryLimits limits;
+  limits.on_statement = [&seen](const ChStatementRecord& record) { seen.push_back(record); };
+  ChQueryScope scope(std::move(limits));
+  auto client = lease(pool, uri);
+  CHECK(select_u64(*client, "  select toString(7)") == 7);
+  bool server_error = false;
+  try {
+    ch_select(*client, "SELECT throwIf(1, 'chdash test')", [](const clickhouse::Block&) {});
+  } catch (const clickhouse::ServerError&) {
+    server_error = true;
+  }
+  CHECK(server_error);
+  CHECK(seen.size() == 2);
+  if (seen.size() != 2) return;
+  CHECK(seen[0].operation == "SELECT");
+  CHECK(seen[0].error_type.empty() && seen[0].error_code == 0);
+  CHECK(!seen[0].server_address.empty() && seen[0].server_port > 0);
+  CHECK(seen[0].ended >= seen[0].started && seen[0].started.time_since_epoch().count() > 0);
+  CHECK(seen[1].operation == "SELECT");
+  CHECK(seen[1].error_code == 395);  // FUNCTION_THROW_IF_VALUE_IS_NON_ZERO
+  CHECK(seen[1].error_type == "395");
 }
 
 void test_a_callback_that_stops_reading_keeps_the_connection(const std::string& uri) {
@@ -344,7 +398,7 @@ void test_the_scope_settings_reach_clickhouse(const std::string& uri) {
   CHECK(select_text(*client, "SELECT toString(getSetting('log_comment'))") == "chdash:/native/test");
   CHECK(select_u64(*client, "SELECT toString(getSetting('max_memory_usage'))") == 123456789);
   CHECK(select_u64(*client, "SELECT toString(toUInt64(getSetting('max_execution_time')))") == 17);
-  // No query_id from the scope: ClickHouse names the statement (a UUID).
+  // The scope gives no query_id. ClickHouse names the statement (a UUID).
   CHECK(select_text(*client, "SELECT queryID()").size() == 36);
   // A SETTINGS clause of the SQL wins.
   CHECK(select_u64(*client, "SELECT toString(getSetting('max_memory_usage')) SETTINGS max_memory_usage = 99999") == 99999);
@@ -362,9 +416,25 @@ void test_the_scope_settings_reach_clickhouse(const std::string& uri) {
     CHECK(code == 164);
     CHECK(!ch_connection_dirty(*client));
   }
+  {
+    // The strict form of the access of humans sets readonly = 1. A SET in the statement is an error of the statement. It is never
+    // taken for a refusal of the ChDash settings. So no second attempt runs it without readonly.
+    ChQueryLimits strict = ChQueryScope::current_copy();
+    strict.read_only_strict = true;
+    ChQueryScope inner(std::move(strict));
+    CHECK(select_u64(*client, "SELECT toString(getSetting('readonly'))") == 1);
+    int code = 0;
+    try {
+      ch_execute(*client, "SET max_threads = 1");
+    } catch (const clickhouse::ServerError& error) {
+      code = error.GetCode();
+    }
+    CHECK(code == 164);
+    CHECK(select_u64(*client, "SELECT toString(getSetting('readonly'))") == 1);
+  }
 }
 
-// The query_id of the scope reaches ClickHouse for each kind of statement, and a SETTINGS clause does not change it.
+// The query_id of the scope reaches ClickHouse for each kind of statement. A SETTINGS clause does not change it.
 void test_the_query_id_of_the_scope_reaches_clickhouse(const std::string& uri) {
   auto pool = std::make_shared<ClickHouseClientPool>(4);
   auto client = lease(pool, uri);
@@ -419,7 +489,7 @@ void test_a_passed_deadline_or_a_cancel_stops_before_sending(const std::string& 
     CHECK(!ch_connection_dirty(*client));
   }
   {
-    // A caller that goes away while the statement streams: the statement stops, the connection is marked.
+    // A caller goes away while the statement streams. The statement stops, and the connection is marked.
     ChQueryLimits limits;
     int asked = 0;
     limits.canceled = [&asked] { return ++asked > 1; };
@@ -437,7 +507,7 @@ void test_a_passed_deadline_or_a_cancel_stops_before_sending(const std::string& 
   CHECK(select_u64(*client, "SELECT toString(9)") == 9);
 }
 
-// A name that a user chose (a database with a quote mark or a backslash) is a value of an IN list, one String parameter each.
+// A name that a user chose is a value of an IN list. This applies to a database with a quote mark or a backslash. Each name is one String parameter.
 void test_names_go_through_string_parameters_as_they_are(const std::string& uri) {
   auto pool = std::make_shared<ClickHouseClientPool>(4);
   auto client = lease(pool, uri);
@@ -482,7 +552,7 @@ void test_the_pool_bounds_its_leases(const std::string& uri) {
 
 }  // namespace
 
-// The settings of a MCP statement: readonly = 1 only when the profile leaves it at 0, the profile never contradicted.
+// These are the settings of an MCP statement. readonly = 1 applies only when the profile leaves it at 0. The profile is never contradicted.
 void test_mcp_settings_follow_the_profile() {
   ChMcpLimits limits;
   limits.max_rows = 1000;
@@ -492,7 +562,7 @@ void test_mcp_settings_follow_the_profile() {
   limits.sql_bytes = 100;
   limits.log_comment = "chdash-mcp key=k1";
 
-  // A user without a profile: everything, readonly = 1 first.
+  // A user without a profile gets all settings. readonly = 1 is set first.
   ChMcpSettings plan = ch_mcp_settings(limits, open_profile());
   CHECK(setting(plan.settings, "readonly") == "1");
   CHECK(setting(plan.settings, "max_execution_time") == "30");
@@ -507,7 +577,7 @@ void test_mcp_settings_follow_the_profile() {
   // An unreadable profile is a user without one.
   CHECK(setting(ch_mcp_settings(limits, ChSettingsProfile{}).settings, "readonly") == "1");
 
-  // readonly = 2 in the profile: ClickHouse refuses to change readonly, even to 1; the limits are still sent.
+  // With readonly = 2 in the profile, ClickHouse refuses to change readonly, even to 1. The limits are still sent.
   ChSettingsProfile two = open_profile();
   two.readonly = 2;
   plan = ch_mcp_settings(limits, two);
@@ -516,12 +586,12 @@ void test_mcp_settings_follow_the_profile() {
   CHECK(setting(plan.settings, "max_result_rows") == "1001");
   CHECK(setting(plan.settings, "log_comment") == "chdash-mcp key=k1");
 
-  // readonly = 1 in the profile: ClickHouse refuses every setting, so none is sent.
+  // With readonly = 1 in the profile, ClickHouse refuses every setting. So none is sent.
   ChSettingsProfile one = open_profile();
   one.readonly = 1;
   CHECK(ch_mcp_settings(limits, one).settings.empty());
 
-  // The profile wins. A limit that it sets and that is not larger than ours is not sent, and what the call returns follows it.
+  // The profile wins. A limit that it sets is not sent when it is not larger than ours. The result of the call follows the profile.
   ChSettingsProfile strict = two;
   strict.max_execution_time = 10;
   strict.max_result_rows = 200;
@@ -538,7 +608,7 @@ void test_mcp_settings_follow_the_profile() {
   CHECK(plan.max_rows == 200 && plan.rows_cut_by_profile);
   CHECK(plan.max_bytes == 4096 && plan.bytes_cut_by_profile);
 
-  // A guard rail below the profile (the configuration or a key that is stricter) is kept: it can only lower.
+  // A guard rail below the profile is kept. It comes from the configuration or from a stricter key. It can only lower a limit.
   ChSettingsProfile loose = two;
   loose.max_execution_time = 600;
   loose.max_result_rows = 50'000;
@@ -558,6 +628,7 @@ int main() {
   test_settings_follow_the_scope_and_never_loosen_the_profile();
   test_readonly_or_unknown_profile_gets_no_setting();
   test_read_only_and_the_overflow_modes();
+  test_strict_read_only_of_the_access();
   test_mcp_settings_follow_the_profile();
   test_scopes_nest_and_the_cancel_check_throws();
   test_a_scope_names_each_statement();
@@ -568,6 +639,7 @@ int main() {
       test_an_interrupted_statement_never_reaches_the_next_lease(uri);
       test_a_caller_that_goes_on_gets_a_new_socket(uri);
       test_a_server_error_keeps_the_connection(uri);
+      test_the_scope_observes_each_statement(uri);
       test_a_callback_that_stops_reading_keeps_the_connection(uri);
       test_the_scope_settings_reach_clickhouse(uri);
       test_the_query_id_of_the_scope_reaches_clickhouse(uri);

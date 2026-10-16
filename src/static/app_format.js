@@ -1,8 +1,8 @@
-// ns.format: the one place that turns numbers, sizes, durations and
-// instants into text (docs/ui-foundations.md). Pure functions, no DOM: the
-// loaders run this file first, so every other module can use it.
+// ns.format: the only module that turns numbers, sizes, durations and
+// instants into text (docs/ui-foundations.md). It has pure functions and no DOM.
+// The loaders run this file first, so every other module can use it.
 //
-//   count      120,064          en-US grouping on every browser
+//   count      120,064          en-US grouping in each browser
 //   compact    120.1K 3.4M 1.2B uppercase suffix, one decimal (trimmed)
 //   number     1,235 3.142 0.5 25K, four significant digits (measurements)
 //   bytes      0 B 205 B 1.7 KB 10.3 MB, 1024 base, one decimal from KB
@@ -15,8 +15,8 @@
 //              the browser's (time + timeTitle + iso)
 //   EMPTY      \u2014 for every absent value
 //
-// Sources stay Latin-1 (tests/harness/test_static_sources_latin1_contract.py):
-// characters above U+00FF are written as \u escapes.
+// The sources use only Latin-1 characters (tests/harness/test_static_sources_latin1_contract.py).
+// Write each character above U+00FF as a \u escape.
 
 const EMPTY = "\u2014";
 const ARROW = "\u2192";
@@ -26,8 +26,8 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const pad2 = (value) => String(value).padStart(2, "0");
 const pad3 = (value) => String(value).padStart(3, "0");
 
-// A finite number, or NaN for null, "", booleans and anything else that is
-// not a number (Number(null) is 0, which would print a value nobody sent).
+// This function gives a finite number, or NaN for null, "", booleans and other non-numbers.
+// Number(null) is 0. That value would print a number that nobody sent.
 function num(value) {
   if (typeof value === "number") return value;
   if (typeof value === "bigint") return Number(value);
@@ -35,7 +35,7 @@ function num(value) {
   return NaN;
 }
 
-// Up to three significant digits, trailing zeros dropped: 182, 18.2, 1.82.
+// This function keeps up to three significant digits. It drops trailing zeros: 182, 18.2, 1.82.
 function significant(value) {
   const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2;
   const fixed = value.toFixed(digits);
@@ -50,8 +50,8 @@ function trimOneDecimal(value) {
 
 const INTEGER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
-// Grouped en-US integer: "120,064". Integer strings and BigInts keep every
-// digit (UInt64 counts above 2^53).
+// This function gives a grouped en-US integer: "120,064".
+// Integer strings and BigInts keep every digit (UInt64 counts above 2^53).
 function count(value) {
   if (typeof value === "bigint") return value.toLocaleString("en-US");
   if (typeof value === "string" && /^\s*-?\d{16,}\s*$/.test(value)) {
@@ -66,9 +66,9 @@ function count(value) {
 
 const COMPACT_UNITS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
 
-// "120.1K", "3.4M", "1.2B": one decimal, ".0" dropped, a value that rounds
-// to 1000 of a unit moves up a unit. Below 1000: whole numbers grouped, and
-// a fraction keeps one decimal under 100 ("42.4").
+// This function gives "120.1K", "3.4M" and "1.2B". It uses one decimal and drops ".0".
+// A value that rounds to 1000 of a unit uses the next unit.
+// Below 1000, it gives whole numbers with grouping. A fraction keeps one decimal below 100 ("42.4").
 function compact(value) {
   const n = num(value);
   if (!Number.isFinite(n)) return EMPTY;
@@ -97,9 +97,9 @@ function compact(value) {
   return `${sign}${Math.round(abs)}`;
 }
 
-// A measured value (a gauge, a ratio, a metric sum): four significant
-// digits grouped en-US ("1,235", "3.142", "0.5"), compact from 10,000
-// ("25K", "1.2M"), an exponent below 0.0001 ("4.2e-5").
+// This function gives a measured value (a gauge, a ratio, a metric sum) with four significant digits.
+// It uses en-US grouping: "1,235", "3.142", "0.5". From 10,000, it uses compact form: "25K", "1.2M".
+// Below 0.0001, it uses an exponent: "4.2e-5".
 const NUMBER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 10 });
 
 function number(value) {
@@ -112,17 +112,17 @@ function number(value) {
   return n.toExponential(1).replace(/\.0e/, "e");
 }
 
-// "1 row", "120,064 rows": a grouped count and the word that agrees with it.
+// This function gives "1 row" and "120,064 rows": a grouped count and the matching word.
 function countLabel(value, singular, pluralWord = `${singular}s`) {
   const text = count(value);
   if (text === EMPTY) return EMPTY;
   return `${text} ${num(value) === 1 ? singular : pluralWord}`;
 }
 
-// One byte format for the whole app (util.formatBytes delegates here):
-// "0 B", "205 B", "1.7 KB", "10.3 MB", one decimal from KB up, 1024 base.
-// Never four integer digits: from 1000 of a unit the value reads in the
-// next one ("1000 B" is "1.0 KB", as a rate beside "1K/s").
+// This function is the one byte format for the whole app. util.formatBytes delegates here.
+// It gives "0 B", "205 B", "1.7 KB" and "10.3 MB". It uses one decimal from KB up and a 1024 base.
+// It never shows four integer digits. From 1000 of a unit, it uses the next unit.
+// For example, "1000 B" is "1.0 KB". This rule also applies to rates, such as "1K/s".
 const BYTE_UNITS = ["KB", "MB", "GB", "TB", "PB", "EB"];
 
 function bytes(value) {
@@ -132,7 +132,7 @@ function bytes(value) {
   let v = Math.abs(n);
   if (Math.round(v) < 1000) return `${sign}${Math.round(v)} B`;
   let unit = -1;
-  // 999.96 KB would print as "1000.0 KB": the rounded figure decides.
+  // 999.96 KB would print as "1000.0 KB". The rounded figure decides.
   while (unit < BYTE_UNITS.length - 1 && (unit < 0 ? Math.round(v) : Number(v.toFixed(1))) >= 1000) {
     v /= 1024;
     unit += 1;
@@ -145,8 +145,8 @@ function bytesRate(value) {
   return text === EMPTY ? EMPTY : `${text}/s`;
 }
 
-// A ratio (0.123) as a percentage: up to three significant digits ("12.3%",
-// "1.23%", "100%"), "<0.1%" for a value too small to show, "0%" only for 0.
+// This function gives a ratio (0.123) as a percentage. It uses up to three significant digits:
+// "12.3%", "1.23%", "100%". It gives "<0.1%" for a value too small to show, and "0%" only for 0.
 function percent(ratio) {
   const n = num(ratio);
   if (!Number.isFinite(n)) return EMPTY;
@@ -157,8 +157,8 @@ function percent(ratio) {
   return `${p < 0 ? "-" : ""}${significant(abs)}%`;
 }
 
-// Per-second rate of `unit` ("rows", "spans"): "1.2K rows/s", "3.46 rows/s".
-// A unit that already names its period ("rows/min") is kept as written.
+// This function gives a per-second rate of `unit` ("rows", "spans"): "1.2K rows/s", "3.46 rows/s".
+// A unit that already names its period ("rows/min") stays as written.
 function rate(value, unit = "") {
   const n = num(value);
   if (!Number.isFinite(n)) return EMPTY;
@@ -171,19 +171,20 @@ function rate(value, unit = "") {
 
 // ----------------------------------------------------------- durations
 
-// Decimal ns / \u00b5s / ms / s below a minute, then whole units two at a time
-// ("8 min 30 s", "2 h 5 min", "3 d 4 h"): the Traces convention.
+// Below a minute, this function gives decimal ns, \u00b5s, ms or s.
+// From a minute up, it gives whole units, two at a time: "8 min 30 s", "2 h 5 min", "3 d 4 h".
+// This is the Traces convention.
 function duration(nsValue) {
   const n = num(nsValue);
   if (!Number.isFinite(n) || n < 0) return EMPTY;
   const decimal = [[1e9, "s"], [1e6, "ms"], [1e3, `${MICRO}s`]];
-  // 999.6 ns rounds to "1000 ns": say "1 \u00b5s" instead.
+  // 999.6 ns rounds to "1000 ns". Use "1 \u00b5s" instead.
   if (n < 1e3) return Math.round(n) < 1e3 ? `${Math.round(n)} ns` : `1 ${MICRO}s`;
   if (n < 59.95e9) {
     for (const [factor, unit] of decimal) {
       if (n < factor) continue;
       const text = significant(n / factor);
-      // 999.7 ms rounds to "1000 ms": say "1 s" instead.
+      // 999.7 ms rounds to "1000 ms". Use "1 s" instead.
       if (Number(text) >= 1000 && unit !== "s") return `${significant(n / (factor * 1000))} ${unit === "ms" ? "s" : "ms"}`;
       return `${text} ${unit}`;
     }
@@ -195,7 +196,7 @@ function duration(nsValue) {
     const ratio = bigS / smallS;
     const whole = Math.floor(total / ratio);
     const rest = total % ratio;
-    // 59 min 59.6 s rounds to "60 min": move up to hours.
+    // 59 min 59.6 s rounds to "60 min". Use hours instead.
     if (whole >= (big === "min" ? 60 : big === "h" ? 24 : Infinity)) continue;
     return rest ? `${whole} ${big} ${rest} ${small}` : `${whole} ${big}`;
   }
@@ -212,8 +213,8 @@ duration.fromSeconds = fromUnit(1e9);
 
 // ------------------------------------------------------------- instants
 
-// Wall-clock fields of `ms` in "local" (the browser zone), "UTC" or an IANA
-// zone, with the zone's offset in minutes. null when the zone is unknown.
+// This function gives the wall-clock fields of `ms` in "local" (the browser zone), "UTC" or an IANA zone.
+// The fields include the zone offset in minutes. The value is null when the zone is unknown.
 const zoneFormats = new Map();
 
 function zoneFormat(zone) {
@@ -265,9 +266,9 @@ function offsetLabel(minutes) {
   return `UTC${sign}${pad2(Math.floor(abs / 60))}:${pad2(abs % 60)}`;
 }
 
-// The digits after the second: 3 for "ms", 9 for "ns" (from options.ns, an
-// epoch-nanosecond string or BigInt, when the caller has it; otherwise from
-// the fraction of `ms`).
+// This function gives the digits after the second: 3 for "ms" and 9 for "ns".
+// For "ns", it uses options.ns when the caller gives it. That value is an epoch-nanosecond string or BigInt.
+// Otherwise, it uses the fraction of `ms`.
 function fraction(ms, f, precision, nsValue) {
   if (precision === "ms") return `.${pad3(f.millis)}`;
   if (precision === "us") return `.${pad3(f.millis)}${String(Math.min(999, Math.round((ms - Math.floor(ms)) * 1000))).padStart(3, "0")}`;
@@ -280,7 +281,7 @@ function fraction(ms, f, precision, nsValue) {
   return `.${pad3(f.millis)}${String(Math.min(sub, 999999)).padStart(6, "0")}`;
 }
 
-// "16:29:57" and its fraction; "16:29" for precision "min".
+// "16:29:57" and its fraction. For precision "min", it gives "16:29".
 function clockText(f, frac, precision = "s") {
   return precision === "min" ? `${pad2(f.hour)}:${pad2(f.minute)}` : `${pad2(f.hour)}:${pad2(f.minute)}:${pad2(f.second)}${frac}`;
 }
@@ -294,7 +295,7 @@ function currentYear(nowMs, zone) {
   return f ? f.year : new Date().getFullYear();
 }
 
-// "Sep 12 16:29:57" in the browser's zone, 24 h. Options:
+// This function gives "Sep 12 16:29:57" in the browser zone, with a 24 h clock. Options:
 //   precision  "s" (default) | "min" (no seconds) | "ms" (".123") |
 //              "us" (".123456") | "ns" (".123456789")
 //   date       "auto" (default: the date, its year only when it is not the
@@ -325,7 +326,7 @@ function localZoneName() {
   }
 }
 
-// ISO 8601 in UTC, for exports, copies and tooltips: "2026-09-12T14:29:57.123Z".
+// This function gives ISO 8601 in UTC, for exports, copies and tooltips: "2026-09-12T14:29:57.123Z".
 function iso(ms) {
   const n = num(ms);
   if (!Number.isFinite(n)) return EMPTY;
@@ -333,8 +334,8 @@ function iso(ms) {
   return Number.isFinite(d.getTime()) ? d.toISOString() : EMPTY;
 }
 
-// The tooltip of a displayed instant, one line each: ISO 8601, browser
-// local time (zone and offset), UTC, and the server's zone when known.
+// This function gives the tooltip of a displayed instant, with one line each.
+// The lines show ISO 8601, the browser local time (zone and offset), UTC and the server zone when known.
 //   2026-09-12T14:29:57.123Z
 //   Sep 12, 2026 16:29:57.123 local (Europe/Paris, UTC+02:00)
 //   Sep 12, 2026 14:29:57.123 UTC
@@ -357,14 +358,14 @@ function timeTitle(ms, { serverTz = "", precision = "ms", ns: nsValue = null } =
   return lines.join("\n");
 }
 
-// ClickHouse DateTime text ("2026-09-12 16:29:57", DateTime64 ".123456")
-// as epoch ms. A zone-less value is wall-clock time in `zone`: an IANA name
-// (the server's timezone()), "UTC" or "local"; a value with "Z" or an offset
-// is absolute. NaN for other text, an unknown zone and the epoch-0 time
-// ClickHouse prints for an unset value ("1970-01-01 00:00:00" in UTC).
+// This function reads ClickHouse DateTime text ("2026-09-12 16:29:57", DateTime64 ".123456") and gives epoch ms.
+// A value without a zone is wall-clock time in `zone`. The zone is an IANA name (the server's timezone()),
+// "UTC" or "local". A value with "Z" or an offset is absolute.
+// The function gives NaN for other text, for an unknown zone and for the epoch-0 time.
+// ClickHouse prints that epoch-0 time for an unset value ("1970-01-01 00:00:00" in UTC).
 const CH_TIME = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?\s*(Z|[+-]\d{2}:?\d{2})?$/;
 
-// Epoch ms of ClickHouse DateTime text, 0 included (NaN when it does not parse).
+// This function gives epoch ms of ClickHouse DateTime text. Epoch 0 is included. It gives NaN when the text does not parse.
 function chTimeMs(text, zone) {
   const m = CH_TIME.exec(String(text ?? "").trim());
   if (!m) return NaN;
@@ -378,8 +379,8 @@ function chTimeMs(text, zone) {
     return wall - sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2))) * 60000;
   }
   if (zone === "UTC") return wall;
-  // The zone's offset at that wall clock: guess with the offset at the wall
-  // time read as UTC, then once more across a DST change.
+  // Get the zone offset at that wall clock. Start with the offset at the wall
+  // time read as UTC. Then check once more across a DST change.
   const first = fields(wall, zone);
   if (!first) return NaN;
   let ms = wall - first.offset * 60000;
@@ -393,10 +394,10 @@ function parseTime(text, { zone = "UTC" } = {}) {
   return ms === 0 ? NaN : ms;
 }
 
-// A server instant for display: { ms, text, title, iso }. text is
-// format.time() in the browser zone, title is format.timeTitle() with the
-// server line, iso is for copies. An unset (epoch 0) time is EMPTY. Text
-// that does not parse (or an unknown server zone) is shown as sent.
+// This function gives a server instant for display, as an object with ms, text, title and iso.
+// The text is format.time() in the browser zone. The title is format.timeTitle() with the server line.
+// The iso value is for copies. An unset (epoch 0) time gives EMPTY.
+// Text that does not parse, or has an unknown server zone, is shown as sent.
 function serverTime(value, { serverTz = "", precision = "s" } = {}) {
   const raw = String(value ?? "").trim();
   const zone = String(serverTz || "").trim();
@@ -410,14 +411,14 @@ function serverTime(value, { serverTz = "", precision = "s" } = {}) {
 
 const UNIT_WORDS = { s: "second", m: "minute", h: "hour", d: "day", w: "week", M: "month", y: "year" };
 
-// The label of a time range (the range buttons, a chart's range, a bucket):
-// absolute ms read as format.time does, "Sep 12 16:00 \u2192 17:00", the date
-// repeated only when it changes (its year only when it is not the current
-// year), browser-local 24 h time. options.precision: "auto" (default:
-// minutes, seconds for a range under 10 minutes), "s", "ms", "us", "ns" or
-// "day" (the dates alone). Relative raw sides ("now-1h", "now"): "Last 1
-// hour"; other relative ranges use the picker's names (setRangeNamer: the
-// time range picker, app_timerange.js, gives its describeRange when it loads).
+// This function gives the label of a time range, for a range button, a chart range or a bucket.
+// Absolute ms are read as format.time reads them: "Sep 12 16:00 \u2192 17:00".
+// The date is repeated only when it changes. The year is shown only when it is not the current year.
+// The time uses the browser zone and a 24 h clock.
+// options.precision: "auto" (default: minutes, seconds for a range under 10 minutes), "s", "ms", "us", "ns" or
+// "day" (the dates alone). Relative raw sides ("now-1h", "now") give "Last 1 hour".
+// Other relative ranges use the picker names from setRangeNamer. The time range picker
+// (app_timerange.js) gives its describeRange when it loads.
 let rangeNamer = null;
 function setRangeNamer(fn) {
   rangeNamer = typeof fn === "function" ? fn : null;
@@ -451,8 +452,9 @@ function range(from, to, { precision = "auto" } = {}) {
   return `${day(fa)} ${clock(fa, a)} ${ARROW} ${sameDay ? "" : `${day(fb)} `}${clock(fb, b)}`;
 }
 
-// "5 minutes ago", "1 hour ago": the largest whole unit, never negative. short: the units of duration ("45 s ago", "12 min ago",
-// "2 h ago", "6 d ago", then "1 y ago"), for a narrow cell.
+// This function gives "5 minutes ago" or "1 hour ago". It uses the largest whole unit and is never negative.
+// When short is set, it uses units of duration: "45 s ago", "12 min ago", "2 h ago", "6 d ago" and "1 y ago".
+// Use short for a narrow cell.
 const SHORT_AGO = [[31536000000, "y"], [86400000, "d"], [3600000, "h"], [60000, "min"], [1000, "s"]];
 function ago(ms, { now = NaN, short = false } = {}) {
   const n = num(ms);
@@ -475,14 +477,14 @@ function ago(ms, { now = NaN, short = false } = {}) {
 
 // ------------------------------------------------------------- absence
 
-// EMPTY for null, undefined, "" and NaN; otherwise formatter(value), or the
-// value as text.
+// This function gives EMPTY for null, undefined, "" and NaN. For other values, it gives formatter(value).
+// Without a formatter, it gives the value as text.
 function emptyIfNull(value, formatter) {
   if (value == null || value === "" || (typeof value === "number" && Number.isNaN(value))) return EMPTY;
   return typeof formatter === "function" ? formatter(value) : String(value);
 }
 
-// A SQL NULL inside a value cell: muted italic, the --json-null colour.
+// A SQL NULL in a value cell is shown in muted italic with the --json-null colour.
 function nullToken() {
   return '<span class="nullToken">NULL</span>';
 }

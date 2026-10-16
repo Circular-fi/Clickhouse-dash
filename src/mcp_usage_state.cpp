@@ -186,8 +186,8 @@ bool drop_before(std::vector<Usage::Bucket>& buckets, int64_t first_kept, size_t
 
 namespace {
 
-// Whether a bucket has its 512 cells. The overflow cells (at most 6) are not among them, so a bucket that is written and read
-// again keeps the same cells.
+// Whether a bucket has its 512 cells. The overflow cells (at most 6) are not among them.
+// So, a bucket that is written and then read again keeps the same cells.
 bool bucket_full(const Usage::Bucket& bucket) {
   if (bucket.cells.size() < kCellsPerBucket) return false;
   const auto overflow = std::count_if(bucket.cells.begin(), bucket.cells.end(), [](const Usage::Cell& cell) { return cell.key == overflow_key(cell.key); });
@@ -309,7 +309,8 @@ namespace {
 
 [[noreturn]] void bad(const std::string& what) { throw std::runtime_error(what); }
 
-// A text that is printable ASCII as the usage keeps it (the usage never writes anything else: a file that holds another byte is not ours).
+// A text is valid when it is printable ASCII, as the usage keeps it. The usage never writes another byte.
+// A file with another byte was not written by the usage.
 bool is_clean(std::string_view text, size_t max_bytes) { return text == mcp_usage_clean(text, max_bytes); }
 
 Usage::Entry& entry_of(Usage::State& state, std::string_view key, const char* row) {
@@ -355,7 +356,7 @@ void apply_client(Usage::State& state, const McpUsageClientRow& row, size_t max_
   client.last_seen = row.last_seen;
   client.requests = row.requests;
   entry.clients.push_back(std::move(client));
-  // More clients than the cap (a cap that was lowered, or a file that holds more): the ones seen last stay.
+  // There are more clients than the cap. This happens when the cap was lowered, or when a file holds more clients. The clients seen last stay.
   if (entry.clients.size() > max_clients) {
     const auto oldest = std::min_element(entry.clients.begin(), entry.clients.end(),
                                          [](const Usage::Client& a, const Usage::Client& b) { return a.last_seen < b.last_seen; });

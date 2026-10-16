@@ -30,13 +30,17 @@ observability {
 clickhouse {
   host {
     name       = "main"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
   }
   host {
     name       = "alt"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
     observability {
       traces  { enabled = false }
       logs    { database = "otel_alt"  table = "logs_copy" }
@@ -45,20 +49,29 @@ clickhouse {
   }
   host {
     name       = "nologs"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
     observability {
       logs { enabled = false }
     }
   }
   host {
     name       = "denied"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
     observability {
       traces { enabled = false }
       logs   { database = "not_granted_db"  table = "logs" }
       metrics { enabled = false }
     }
   }
+}
+
+# The access of humans (docs/access.md): no gateway in front of this server, so no check.
+access {
+  mode = "open"
 }

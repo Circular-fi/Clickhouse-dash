@@ -1,14 +1,16 @@
 #pragma once
 
-// Where the usage of the MCP keys is kept (docs/mcp.md, "Usage of a key"). McpUsage counts the state of its instance in memory; a store
-// loads it at the start, saves it, reads again the states of the other instances, and removes what an instance that is gone left.
+// Where the usage of the MCP keys is kept (docs/mcp.md, "Usage of a key"). McpUsage counts the state of its instance in memory.
+// A store loads that state at the start and saves it. A store also reads the states of the other instances again.
+// It removes the leftover state of an instance that is gone.
 //
-// The files mode (McpUsageFileStore) keeps one file for each instance in a directory that several instances can share:
+// In the files mode, McpUsageFileStore keeps one file for each instance. The directory can be shared by several instances:
 //   <dir>/<instance>.jsonl.zst
-// JSON Lines (one flat JSON object for each line) compressed with zstd. Every line has its `type` and its `instance`; the times are Unix
-// seconds. The lines are the rows of a table: the files can be read as they are (`clickhouse local`, DuckDB) and the same rows will go to a
-// database table in a mode to come. A file is written whole, to a temporary file that is renamed over it; an instance writes its own file
-// only and reads the others.
+// Each file uses JSON Lines, compressed with zstd. Each line is one flat JSON object. The times are Unix seconds.
+// Every line has its `type` and its `instance`. The lines are the rows of a table.
+// You can read the files as they are, with `clickhouse local` or DuckDB. The same rows go to a database table in a mode to come.
+// ChDash writes a file whole. It writes to a temporary file first, and then renames that file over the file of the instance.
+// An instance writes its own file only. It reads the other files.
 
 #include "mcp_usage.hpp"
 
@@ -63,18 +65,18 @@ struct McpUsageHeader {  // what a save says of the state that it writes
   int64_t retention_days = 0;
 };
 
-// A save in progress: the rows of the state of this instance go in one after the other (the key, its clients, its cells), then commit()
-// makes them the stored state. A writer that is dropped without commit() leaves the stored state as it was.
+// A save that is in progress. The rows of the state of this instance go in one after the other: the key, its clients and its cells.
+// Then commit() makes them the stored state. A writer that is dropped without commit() leaves the stored state as it was.
 class McpUsageWriter {
 public:
   virtual ~McpUsageWriter() = default;
   virtual void key(const McpUsageKeyRow& row) = 0;
   virtual void client(const McpUsageClientRow& row) = 0;
   virtual void cell(const McpUsageCellRow& row) = 0;
-  // Writes the rows that came so far: they are only held in memory until then, so that a caller that holds a lock while it hands the rows in
-  // (McpUsage does, one entry at a time) never waits for the disk.
+  // Writes the rows that came so far. Until then, the rows are only held in memory.
+  // So, a caller that holds a lock while it hands the rows in never waits for the disk. McpUsage does that, one entry at a time.
   virtual void flush() = 0;
-  // False, with the reason, when the state could not be stored.
+  // False, with the reason, when the state cannot be stored.
   virtual bool commit(std::string* error) = 0;
   // What the rows came to, before any compression: the size that the next save is due by.
   virtual size_t bytes() const = 0;
@@ -89,31 +91,34 @@ public:
   virtual const std::string& instance() const = 0;
   // Where the state of this instance is kept, for the log (the file of the files mode).
   virtual std::string location() const = 0;
-  // At the start: the state that this instance stored last. False when it stored none yet. Throws std::runtime_error (a message that never
-  // holds the content of the file) when what is stored is not valid: it is never replaced then.
+  // At the start, this function reads the state that this instance stored last. The result is false when it stored none yet.
+  // It throws std::runtime_error when the stored state is not valid. The message never holds the content of the file.
+  // The stored state is never replaced when it is not valid.
   virtual bool load(McpUsage::State* state, size_t max_clients) = 0;
-  // A save. Null when the state cannot be written: `status` says whether another process writes the same instance (`Conflict`: its file is
-  // not replaced) or the write failed (`Failed`, with `error`).
+  // A save. The result is null when the state cannot be written.
+  // `status` says whether another process writes the same instance (`Conflict`: its file is not replaced). It also says when the write failed (`Failed`, with `error`).
   virtual std::unique_ptr<McpUsageWriter> begin(const McpUsageHeader& header, McpUsageSaveStatus* status, std::string* error) = 0;
-  // The states of the other instances, by instance. What did not change since the last call is the same object. False when they cannot be
-  // listed, or when `cancel` was set (the stop): the caller keeps what it has. Never called from a request.
+  // The states of the other instances, by instance. A state that did not change since the last call is the same object.
+  // The result is false when the states cannot be listed, or when `cancel` was set at the stop. The caller then keeps what it has.
+  // Never call it from a request.
   virtual bool refresh(std::vector<McpUsage::Other>* others, size_t max_clients, const std::atomic<bool>& cancel) = 0;
-  // Removes the state of an instance that is gone: one that was written, and that its file says so, more than `retention_days` and a day ago.
+  // Removes the state of an instance that is gone. Only a state that was written, and that its file says so, is removed. The age must be more than `retention_days` and a day.
   virtual void prune(int64_t now, int64_t retention_days) = 0;
 };
 
-// The bounds of a file that is read, and that is written (a file of another instance is not trusted): its size compressed, its size once
-// decompressed (the decompression stops there, so that a zstd bomb never grows), and a line. The unit tests lower them.
+// The bounds of a file that is read and that is written. A file of another instance is not trusted.
+// The bounds are: the size compressed, the size once decompressed, and the size of a line.
+// The decompression stops at the bound, so that a zstd bomb never grows. The unit tests lower the bounds.
 struct McpUsageFileLimits {
   size_t max_compressed_bytes = 128u * 1024 * 1024;
   size_t max_decompressed_bytes = 512u * 1024 * 1024;
   size_t max_line_bytes = 64 * 1024;
 };
 
-// The files mode. It reads and writes the files of `dir` with the mode 0600 (the instances that share a directory run as the same user).
+// The files mode. It reads and writes the files of `dir` with the mode 0600. The instances that share a directory run as the same user.
 class McpUsageFileStore final : public McpUsageStore {
 public:
-  // `instance` must be valid (mcp_valid_usage_instance). A directory that anyone can write in, without the sticky bit, is a warning in the log.
+  // `instance` must be valid (mcp_valid_usage_instance). A directory that anyone can write in, without the sticky bit, gives a warning in the log.
   McpUsageFileStore(std::string dir, std::string instance, McpUsageFileLimits limits = {});
 
   const std::string& instance() const override { return instance_; }
@@ -128,7 +133,7 @@ public:
   static std::string file_name(const std::string& instance);
 
 private:
-  // What the last read of the file of an instance made of it.
+  // The result of the last read of the file of an instance.
   struct Seen {
     int64_t mtime_ns = 0;
     int64_t size = 0;
@@ -155,11 +160,12 @@ private:
   std::map<std::string, Seen> files_;
 };
 
-// Throws std::runtime_error (a message without the content of any file) when `dir` cannot hold the usage of `instance`: it is empty, does not
-// exist, is not a directory, ChDash cannot create files in it, or the file of this instance is there and is not valid (it is never replaced).
+// Throws std::runtime_error when `dir` cannot hold the usage of `instance`. The message never holds the content of any file.
+// The directory cannot hold the usage when it is empty, when it does not exist, or when it is not a directory.
+// The same error occurs when ChDash cannot create files in it, or when the file of this instance is not valid. ChDash never replaces that file.
 void mcp_check_usage_dir(const std::string& dir, const std::string& instance);
 
-// The host name of this machine (what an instance that the configuration leaves unnamed is called, when it is a valid instance).
+// The host name of this machine. An instance that the configuration leaves unnamed gets this name, when the name is a valid instance name.
 std::string mcp_usage_host_name();
 
 } // namespace chdash

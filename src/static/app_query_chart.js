@@ -1,13 +1,14 @@
-// Query result charts: a Table / Chart toggle for a result panel and a
-// client-side chart drawn from the rows the panel already received (no
-// re-query). Each result panel (the main one and every multiquery panel)
-// owns one controller, so its view and chart settings live with the result.
+// Query result charts. This file has a Table / Chart toggle for a result panel.
+// It also has a client-side chart. The chart uses the rows that the panel already received, so there is no re-query.
+// Each result panel (the main one and every multiquery panel) has one controller.
+// The controller keeps the view and the chart settings with the result.
 //
-// The chart is drawn once, when the stream has ended (done(): finished,
-// canceled or failed, with the rows received); while rows stream in, the
-// chart area only says how many have arrived. The rows are then parsed into
-// typed columns over a few frames (PARSE_BUDGET) and drawn by the shared
-// canvas engine (app_chart_core.js), loaded on the first Chart view.
+// The chart is drawn once, when the stream has ended.
+// The stream ends with done(): finished, canceled or failed, with the rows received.
+// While rows arrive, the chart area only shows how many have arrived.
+// The code parses the rows into typed columns over a few frames (PARSE_BUDGET).
+// The shared canvas engine (app_chart_core.js) draws the chart.
+// The engine loads on the first Chart view.
 
 import { dom, h } from "./app_dom.js";
 import { format as formatMod } from "./app_format.js";
@@ -23,21 +24,23 @@ import { wasm } from "./app_wasm.js";
 const { $, $$ } = dom;
 
 const viewPref = () => storage.pref(storage.KEYS.resultsView, "table", { allowed: ["table", "chart"] });
-// The Chart details panel (left of the plot): open or folded to its head, kept across results and pages.
+// The Chart details panel is left of the plot. It is open or folded to its head.
+// The panel keeps this state across results and pages.
 const detailsPref = () => storage.pref(storage.KEYS.chartDetails, "open", { allowed: ["open", "closed"] });
-// Coloured series slots (--qchart-1..8); further groups fold into "Other".
+// Coloured series slots (--qchart-1..8). Further groups are combined in "Other".
 const MAX_SERIES = 8;
 const PLOT_HEIGHT = 300;
-// Values parsed per model build (about 5 ms), and builds per frame for at
-// most PARSE_SLICE_MS: a large result (1,000,000 rows of 5 columns) is
-// parsed over several frames, then drawn once, instead of one long task.
+// The code parses values for each model build (about 5 ms).
+// Each frame runs builds for at most PARSE_SLICE_MS.
+// The code parses a large result (1,000,000 rows of 5 columns) over several frames.
+// The chart is then drawn once, not in one long task.
 const PARSE_BUDGET = 240000;
 const PARSE_SLICE_MS = 40;
 const SYNC_KEY = "query-results";
 // The chart engine: modules.json pages.query.lazy.chart.
 const CORE_GROUP = "chart";
-// The chart types: icon options (sprite names), named by aria-label (the
-// label) and title (the description), like the Table / Chart switch.
+// The chart types are icon options (sprite names).
+// They have an aria-label (the label) and a title (the description), like the Table / Chart switch.
 const CHART_TYPES = [
   ["line", "Line", "One line per series", "chart-line"],
   ["area", "Area", "Areas: stacked by default, the series add up", "chart-area-line"],
@@ -46,8 +49,9 @@ const CHART_TYPES = [
   ["number", "Number", "One big number per value (single-row results)", "number-123"],
 ];
 const NO_NUMERIC_TITLE = "Chart unavailable: the result has no numeric column";
-// The Table / Chart switch: icon options (16 px grid, stroked in
-// currentColor by .segmented__option svg), named by aria-label and title.
+// The Table / Chart switch has icon options.
+// The icons use a 16 px grid. The .segmented__option svg rule strokes them in currentColor.
+// The options have an aria-label and a title.
 const VIEW_ICONS = {
   table: iconMod("table"),
   chart: iconMod("chart-line"),
@@ -57,8 +61,9 @@ const VIEW_OPTIONS = [
   { value: "chart", label: "Chart view", title: "Chart the received rows", html: VIEW_ICONS.chart, iconOnly: true },
 ];
 
-// Work counters of every result chart (test and profiling hooks:
-// ns.queryChart.counters(), resetCounters()). Increments only.
+// Work counters of every result chart. They are test and profiling hooks:
+// ns.queryChart.counters() and resetCounters().
+// The code only increments the counters.
 const WASM_GROUP = "wasm-chartprep";
 // Below this many rows the copy into the kernel costs as much as it saves.
 const WASM_MIN_ROWS = 20000;
@@ -78,13 +83,13 @@ function storeView(view) {
 
 // --- Chart engine (lazy) ---------------------------------------------------
 
-// The chart engine (app_chart_core.js) is a lazy group of the page (modules.json pages.query.lazy.chart): null until
-// the first Chart view loads it.
+// The chart engine (app_chart_core.js) is a lazy group of the page (modules.json pages.query.lazy.chart).
+// The value is null until the first Chart view loads the engine.
 let chartCore = null;
 let corePromise = null;
 
-// The kernel of the general model path (src/wasm/chartprep.c) loads with the engine; without it (blocked, old
-// browser) generalPathJs answers.
+// The kernel of the general model path (src/wasm/chartprep.c) loads with the engine.
+// Without the kernel (blocked, or an old browser), generalPathJs gives the answer.
 let kernelPromise = null;
 function loadKernel() {
   if (!kernelPromise) {
@@ -161,10 +166,12 @@ function toNumber(value) {
 
 const ISO_TIME = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?\s*(Z|[+-]\d{2}:?\d{2})?$/;
 
-// Timestamps as the server writes them ("2026-10-01T09:27:06Z",
-// "...06.123Z", "...06+02:00", or local "2026-10-01 09:27:06") parse with
-// digit arithmetic: the date part is cached (rows usually share it), so no
-// Date or RegExp runs per row. Anything else returns NaN (slow path).
+// The code parses timestamps as the server writes them ("2026-10-01T09:27:06Z",
+// "...06.123Z", "...06+02:00", or local "2026-10-01 09:27:06").
+// The parser uses digit arithmetic.
+// It caches the date part, because rows usually share it.
+// No Date or RegExp runs per row.
+// Any other input returns NaN (slow path).
 const hourCache = new Map();
 let lastPrefix = "";
 let lastPrefixMs = 0;
@@ -205,7 +212,7 @@ function quickTimeText(text) {
   const mm = two(text, 14), ss = two(text, 17);
   if (!(mm >= 0 && mm < 60 && ss >= 0 && ss < 61)) return NaN;
   quickUtc = utc;
-  // UTC: cache the day; local: cache the hour (offsets change on DST days).
+  // UTC: the code caches the day. Local: the code caches the hour, because offsets change on DST days.
   const prefixLen = utc ? 10 : 13;
   let base;
   if (lastPrefixUtc === utc && lastPrefix.length === prefixLen && text.startsWith(lastPrefix)) base = lastPrefixMs;
@@ -228,11 +235,12 @@ function quickTimeText(text) {
   return ms + frac;
 }
 
-// Milliseconds since the epoch (fractional below a millisecond). A bare date
-// is a calendar day (local midnight), so it reads the same day everywhere.
-// A time without a zone is the wall clock of `serverTz` (the timezone() of
-// the host, ns.header.serverTimeZone) when it is known, as ClickHouse wrote it;
-// the browser's zone only when it is not. The API sends DateTime with "Z".
+// The function gives milliseconds since the epoch, with fractions below a millisecond.
+// A bare date is a calendar day (local midnight). It gives the same day everywhere.
+// A time without a zone is the wall clock of `serverTz` (the timezone() of the host, ns.header.serverTimeZone) when it is known.
+// The wall clock is as ClickHouse wrote it.
+// The browser zone applies only when `serverTz` is unknown.
+// The API sends DateTime with "Z".
 function toTimeMs(value, kind, serverTz = "") {
   if (value == null) return NaN;
   if (typeof value === "number") {
@@ -291,8 +299,9 @@ function pushValue(col, value) {
   col.data[col.length++] = value;
 }
 
-// One store per result: each column the chart reads is parsed once, up to
-// the rows received so far (rows only ever get appended).
+// One store exists per result.
+// The code parses each column that the chart reads once, up to the rows received so far.
+// Rows are only ever appended.
 function createStore() {
   let rowsRef = null;
   const columns = new Map(); // "kind:index" -> parsed column
@@ -302,7 +311,7 @@ function createStore() {
     columns.clear();
   }
 
-  // Parses the column up to row `end` (default: every row received).
+  // The function parses the column up to row `end` (default: every row received).
   function column(rows, index, kind, columnKindValue, end = rows.length) {
     if (rows !== rowsRef) reset(rows);
     const zone = kind === "time" ? header.serverTimeZone() : "";
@@ -349,7 +358,7 @@ const CHOICES = {
   missing: [["gap", "Gap"], ["connect", "Connect"], ["zero", "Zero"]],
 };
 
-// What the panel sets besides the columns; null is "the chart's own".
+// These are the settings of the panel, besides the columns. null means "the chart's own".
 function styleDefaults() {
   return { interp: "linear", lineWidth: null, fill: null, points: "auto", pointSize: null, stack: "normal", missing: "gap", yMin: null, yMax: null };
 }
@@ -388,8 +397,8 @@ function defaultConfig(meta) {
   const x = autoX(kinds);
   const series = [];
   for (let i = 0; i < kinds.length; i++) if (kinds[i] === "number" && i !== x && series.length < MAX_SERIES) series.push(i);
-  // A time series with a label column is usually the long form of
-  // GROUP BY time, label: one line per label.
+  // A time series with a label column is usually in the long form of
+  // GROUP BY time, label. It has one line per label.
   let group = -1;
   if (x >= 0 && axisKindOf(kinds[x]) === "time") {
     group = kinds.findIndex((kind, i) => kind === "string" && i !== x);
@@ -419,10 +428,11 @@ function slotColor(slot) {
   return palette.categorical(slot);
 }
 
-// What a model build learnt about the x column, kept for the next build of
-// the same result and configuration (rows are only appended): whether x is
-// ascending so far (the direct path) and has sub-millisecond instants, up
-// to which row. Once x goes down the general path stays.
+// A model build records what it learns about the x column.
+// The next build of the same result and configuration reuses the record. Rows are only appended.
+// The record states whether x is ascending so far (the direct path).
+// It also states whether x has sub-millisecond instants, and up to which row.
+// After x goes down, the general path stays.
 function modelKey(cfg) {
   return `${cfg.x}|${cfg.series.join(",")}|${cfg.group}`;
 }
@@ -490,8 +500,8 @@ function buildModel(cfg, meta, rows, store, scan = null, limit = rows.length) {
   }
   const perSeries = groupCol ? groupCount + (hasOther ? 1 : 0) : 1;
 
-  // Direct path: one row per x, already ascending (ORDER BY x, numbers(),
-  // GROUP BY with ORDER BY): the parsed columns are the drawn arrays.
+  // Direct path: one row per x, already ascending (ORDER BY x, numbers(), GROUP BY with ORDER BY).
+  // The parsed columns are the drawn arrays.
   // The x scan resumes where the previous build of this result stopped.
   const key = modelKey(cfg);
   const resume = scan && scan.key === key && scan.n <= n ? scan : null;
@@ -511,15 +521,17 @@ function buildModel(cfg, meta, rows, store, scan = null, limit = rows.length) {
   }
   model.scan = { key, n, increasing: false, direct: false, subMillisecond: false };
 
-  // General path: see generalPathJs (the reference) and generalPathWasm (src/wasm/chartprep.c, same results).
+  // The general path is in generalPathJs (the reference) and in generalPathWasm (src/wasm/chartprep.c, same results).
   const general = { xKind, xCol, X, n, seriesCols, series, groupCol, groupSlotOf, groupCount, perSeries, model };
   if (!(n >= WASM_MIN_ROWS && generalPathWasm(general))) generalPathJs(general);
   if (xKind === "time") model.subMillisecond = hasSubMillisecond(model.xs);
   return model;
 }
 
-// The rows sorted by x (stable), equal x merged (values summed), a NULL kept apart from a missing row (lines break
-// at NULL, connect over missing rows). Sets model.xs, model.skipped, model.summed and every line's values / nulls.
+// The function sorts the rows by x (stable).
+// It merges equal x values. The values are summed.
+// A NULL stays apart from a missing row. Lines break at NULL and connect over missing rows.
+// It sets model.xs, model.skipped, model.summed and the values and nulls of every line.
 function generalPathJs({ xKind, xCol, X, n, seriesCols, series, groupCol, groupSlotOf, groupCount, perSeries, model }) {
   let order;
   let valid = 0;
@@ -586,7 +598,8 @@ function generalPathJs({ xKind, xCol, X, n, seriesCols, series, groupCol, groupS
   model.lines.forEach((line, li) => { line.values = values[li]; line.nulls = nulls[li]; });
 }
 
-// The same results from the kernel, for results of WASM_MIN_ROWS rows or more: false when it is not loaded (or fails).
+// This function gives the same results from the kernel, for results of WASM_MIN_ROWS rows or more.
+// It gives false when the kernel is not loaded or fails.
 function generalPathWasm({ xKind, xCol, X, n, seriesCols, series, groupCol, groupSlotOf, groupCount, perSeries, model }) {
   const kernel = wasmEnabled && wasm && wasm.get("chartprep");
   if (!kernel || !wasm.ops.chartprep) return false;
@@ -627,8 +640,8 @@ function hasSubMillisecond(xs) {
 // --- Controller -----------------------------------------------------------
 
 function createController({ getData, viewRoot, onViewChange = null, toggleClassName = "" } = {}) {
-  // Table | Chart (icons) and the chart types: shared segmented controls
-  // (app_ui_segmented.js), the main panel's and every multiquery panel's.
+  // Table | Chart (icons) and the chart types use shared segmented controls.
+  // The controls are in app_ui_segmented.js. The main panel and every multiquery panel have them.
   const toggleEl = document.createElement("div");
   toggleEl.className = `resultsViewToggle ${toggleClassName}`.trim();
   toggleEl.hidden = true;
@@ -698,14 +711,14 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
   const seriesButton = $(".queryChart__seriesButton", hostEl);
   const seriesMenu = $(".queryChart__seriesMenu", hostEl);
   const groupSelect = $(".queryChart__group", hostEl);
-  // X axis, Y values and Split by: ns.menu pickers (app_ui_menu.js), the
-  // label inside the button ("X axis \u00b7 Auto (time)").
+  // X axis, Y values and Split by use ns.menu pickers (app_ui_menu.js).
+  // The label inside the button is, for example, "X axis \u00b7 Auto (time)".
   menu?.select(xSelect, { className: "queryChart__picker" });
   menu?.select(groupSelect, { className: "queryChart__picker" });
   const seriesPicker = menu?.multi(seriesButton, seriesMenu, { root: seriesButton.parentElement }) || null;
   const styleSelects = $$("select[data-cfg]", hostEl);
   const styleInputs = $$("input[data-cfg]", hostEl);
-  // The style pickers (Interpolation, Scale, Unit, Legend ...): their options are the CHOICES above.
+  // The style pickers (Interpolation, Scale, Unit, Legend ...) use the CHOICES above as their options.
   for (const select of styleSelects) {
     for (const [value, label] of CHOICES[select.dataset.cfg]) select.appendChild(h("option", { value }, label));
     menu?.select(select, { className: "queryChart__picker" });
@@ -726,8 +739,9 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     btn.dataset.title = title;
     typeButtons.set(type, btn);
   }
-  // A click pins the type, the pressed one included (Auto picks Number for
-  // one row, Bars for a text x axis): syncTypeButtons marks the result.
+  // A click pins the type, the pressed one included.
+  // Auto picks Number for one row, and Bars for a text x axis.
+  // syncTypeButtons marks the result.
   typesEl.addEventListener("click", (event) => {
     const btn = event.target instanceof Element ? event.target.closest("[data-type]") : null;
     if (!btn || btn.disabled || btn.getAttribute("aria-disabled") === "true" || !cfg) return;
@@ -768,12 +782,14 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
   let toolbarKey = "";
   let typeShown = "";
   let rangeKey = "";
-  // A zoom reset goes with the next data the chart gets (one draw).
+  // A zoom reset applies to the next data that the chart gets (one draw).
   let zoomReset = false;
-  // The chart works only while it can be seen: in the Chart view (effective),
-  // in a panel that is not collapsed (the host has a box) and in a tab that
-  // is not in the background. Hidden, rows only mark the model dirty; the
-  // chart is built when it shows.
+  // The chart works only while it can be seen.
+  // It must be in the Chart view (effective).
+  // It must be in a panel that is not collapsed (the host has a box).
+  // It must be in a tab that is not in the background.
+  // When hidden, rows only mark the model dirty.
+  // The chart is built when it shows.
   let hostVisible = false;
   const visibilityObserver = typeof ResizeObserver === "function"
     ? new ResizeObserver((entries) => {
@@ -788,9 +804,9 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
   const onDocumentVisibility = () => { if (!document.hidden) scheduleRender(); };
   document.addEventListener("visibilitychange", onDocumentVisibility);
   const canWork = () => !destroyed && effective === "chart" && hostVisible && !document.hidden;
-  // Until the terminal event the chart area only shows the streaming
-  // placeholder: the chart is drawn once, from the final rows (and a
-  // one-row result may still grow: the Number view needs the stream done).
+  // Until the terminal event, the chart area only shows the streaming placeholder.
+  // The chart is drawn once, from the final rows.
+  // A one-row result can still grow. The Number view needs the stream to be done.
   let streamDone = false;
 
   function chartable() {
@@ -892,8 +908,9 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     const type = effectiveType(rowCount);
     for (const [key, btn] of typeButtons) {
       if (key === "number") {
-        // aria-disabled, not disabled: the option stays hoverable and
-        // focusable, so its tooltip says why it is off (dimmed, CSS).
+        // Use aria-disabled, not disabled.
+        // The option stays hoverable and focusable.
+        // Its tooltip then gives the reason that it is off (dimmed, CSS).
         const disabled = !(rowCount === 1 && streamDone);
         if ((btn.getAttribute("aria-disabled") === "true") !== disabled) {
           if (disabled) btn.setAttribute("aria-disabled", "true");
@@ -908,7 +925,8 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     hostEl.dataset.chartType = type;
   }
 
-  // The style of the chart (Chart details: Graph styles, Axis, Legend, Tooltip): kept in cfg, drawn by the engine's options.
+  // The style of the chart is in the Chart details panel: Graph styles, Axis, Legend and Tooltip.
+  // cfg keeps the style. The engine's options draw it.
   function plotOptions(type) {
     const stackable = type === "area" || type === "bar";
     const stacked = stackable && cfg.stack !== "off";
@@ -943,7 +961,8 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     boundsEl.title = empty ? "Y max must be above Y min: the data's own edges are used." : "Fix the vertical axis. Empty: the data's own edge.";
   }
 
-  // The fields show cfg (once per toolbar build, or after a Reset: never while a value is being typed).
+  // The fields show cfg. The code updates them once per toolbar build, or after a Reset.
+  // It never updates them while a user types a value.
   function syncStyleFields() {
     for (const select of styleSelects) select._chdashMenu?.set(String(cfg[select.dataset.cfg]));
     for (const input of styleInputs) {
@@ -971,7 +990,7 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
       else {
         const text = input.value.trim();
         const value = text === "" ? NaN : Number(text);
-        // An out-of-range figure is held at the edge of its range.
+        // The range edge limits an out-of-range figure.
         const lo = input.min === "" ? -Infinity : Number(input.min), hi = input.max === "" ? Infinity : Number(input.max);
         cfg[key] = Number.isFinite(value) ? Math.min(hi, Math.max(lo, value)) : null;
       }
@@ -1136,15 +1155,16 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     delete hostEl.dataset.pointsDrawn;
   }
 
-  // The chart area while rows stream in, or while the final rows parse.
+  // The chart area while rows arrive, or while the final rows are parsed.
   function showStreaming(count, verb = "Streaming") {
     showMessage(`${verb}\u2026 ${formatMod.countLabel(count, "row")}`, { busy: true });
   }
 
   function render() {
     if (!canWork() || !meta || !cfg) return;
-    // A panel collapsed since the resize observer last reported (the end
-    // of a multiquery statement folds its panel): checked once per render.
+    // A panel can collapse after the resize observer last reports.
+    // The end of a multiquery statement collapses its panel.
+    // The code checks this once per render.
     if (typeof hostEl.checkVisibility === "function" && !hostEl.checkVisibility()) { hostVisible = false; return; }
     const rows = currentRows();
     syncTypeButtons(rows.length);
@@ -1162,9 +1182,10 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     const t0 = performance.now();
     counters.renders++;
     if (dirty || !model) {
-      // The direct path (ascending x) parses PARSE_BUDGET new values per
-      // build and builds for PARSE_SLICE_MS per frame; the chart is drawn
-      // once every row is parsed. The general path sorts every row anyway.
+      // The direct path (ascending x) parses PARSE_BUDGET new values for each build.
+      // Each frame builds for PARSE_SLICE_MS.
+      // The chart is drawn when every row is parsed.
+      // The general path sorts every row anyway.
       const perRow = 1 + cfg.series.length + (cfg.group >= 0 ? 1 : 0);
       const step = Math.max(1024, Math.floor(PARSE_BUDGET / perRow));
       do {
@@ -1177,7 +1198,7 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
         counters.modelMs += performance.now() - tm;
       } while (model.rowCount < rows.length && performance.now() - t0 < PARSE_SLICE_MS);
       if (model.rowCount < rows.length) {
-        // Rows left to parse: the next frame goes on.
+        // Rows are left to parse. The next frame continues.
         showStreaming(rows.length, "Charting");
         scheduleRender();
         return;
@@ -1265,13 +1286,14 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     h.replace(rangeText, rangeLabel(info));
   }
 
-  // Past this many added x values the steps of a regular time axis stay as they are (only the NULLs and the
-  // rows another series has are filled).
+  // Above this many added x values, the steps of a regular time axis stay as they are.
+  // Only the NULLs and the rows that another series has are filled.
   const MAX_ZERO_STEPS = 500000;
   let zeroed = null; // { model, xs, values } of the model it was made from
 
-  // The model with 0 where a line has no value. On a time axis with a regular step (a row per hour) the
-  // steps that have no row at all are added too, so a count of nothing reads as 0 instead of a break.
+  // The model uses 0 where a line has no value.
+  // On a time axis with a regular step (a row per hour), the code also adds the steps that have no row.
+  // A count of nothing then reads as 0, not as a break.
   function zeroFilled() {
     if (zeroed && zeroed.model === model) return zeroed;
     const xs = model.xs;
@@ -1310,7 +1332,7 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
     counters.plots++;
     const core = chartCore;
     const lines = model.lines;
-    // Zero: the rows a series misses (and its NULLs) read as 0 (a line or an area).
+    // Zero: the rows that a series misses, and its NULLs, read as 0 (a line or an area).
     const zero = cfg.missing === "zero" && (type === "line" || type === "area") ? zeroFilled() : null;
     const series = lines.map((line, j) => ({
       id: line.id,
@@ -1318,8 +1340,9 @@ function createController({ getData, viewRoot, onViewChange = null, toggleClassN
       color: slotColor(line.slot),
       values: zero ? zero.values[j] : line.values,
       nulls: zero ? null : line.nulls,
-      // Areas stack every line; bars stack the groups of one Y column and
-      // put the columns side by side (different measures never add up).
+      // Areas stack every line.
+      // Bars stack the groups of one Y column.
+      // Bars put the columns side by side. Different measures never add up.
       group: type === "area" ? 0 : line.seriesIndex,
     }));
     const data = {

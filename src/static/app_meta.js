@@ -95,8 +95,8 @@ function rebuildAutocompleteIndexes(hostMeta) {
 
 function notifyMetaChanged(hostId) {
   if (String(state.selectedHostId || "") !== String(hostId)) return;
-  // The editor's marks and the completion list (app_query_ui.js), and read-only SQL painted before the keywords /
-  // functions arrived (the Explorer card's expressions), repaint with them.
+  // The editor marks and the completion list (app_query_ui.js) repaint with the new data.
+  // Read-only SQL painted before the keywords and functions arrive (Explorer card expressions) repaints too.
   window.dispatchEvent(new CustomEvent("chdash:meta-changed", { detail: { hostId: String(hostId) } }));
 }
 
@@ -129,7 +129,8 @@ function applyFunctions(hostId, payload) {
     }))
     .filter((value) => value.name);
 
-  // Stored compact: a flag that is off and an empty origin are left out (hydrateFunctions reads them back as such).
+  // The stored form is compact. The program omits a flag that is off and an empty origin.
+  // hydrateFunctions treats the omitted fields as off or empty.
   storage.writeMeta(hostId, "functions", updatedAt, items.map((item) => {
     const slim = { name: item.name };
     if (item.is_aggregate) slim.is_aggregate = true;
@@ -163,7 +164,8 @@ function applyCatalog(hostId, type, payload) {
   if (!data || !Array.isArray(data.items)) return;
   const updatedAt = typeof data.updated_at_ms === "number" ? data.updated_at_ms : 0;
   const items = data.items.map(normalizeCatalogItem).filter(Boolean);
-  // Stored compact: the empty fields of an item are left out (normalizeCatalogItem fills them back).
+  // The stored form is compact. The program omits the empty fields of an item.
+  // normalizeCatalogItem restores the omitted fields.
   storage.writeMeta(hostId, type, updatedAt, items.map((item) => {
     const slim = { name: item.name };
     for (const field of ["database", "table", "type", "detail", "parent"]) if (item[field]) slim[field] = item[field];
@@ -226,12 +228,15 @@ function shouldRefresh(hostId, type) {
   return !updatedAt || Date.now() - updatedAt > clientTtlMs;
 }
 
-// A read that failed is not asked again at once: the autocomplete and the diagnostics ask for the columns of a table
-// on every pass (45 ms and 180 ms), and a host in trouble would get a request for each. The wait doubles to a cap.
+// The program does not send a failed read again at once.
+// The autocomplete and the diagnostics ask for the columns of a table on every pass (45 ms and 180 ms).
+// A host in trouble receives a request for each.
+// The wait doubles until it reaches a cap.
 const failures = new Map();
 const RETRY_MIN_MS = 5000;
 const RETRY_MAX_MS = 5 * 60 * 1000;
-// A metadata read has this long: a host that does not answer must not hold the key of the request forever.
+// A metadata read has this time limit.
+// A host that does not answer must not hold the request key forever.
 const META_TIMEOUT_MS = 10000;
 
 async function fetchAndStore(hostId, types, scope = null) {
@@ -283,9 +288,9 @@ function prepareHost(hostId) {
   if (!normalizedHostId) return null;
   const hostMeta = getHostMeta(normalizedHostId);
 
-  // Delete the old cluster-wide column payload by key only. Never read or
-  // parse it: a large system.columns catalog can expand to hundreds of
-  // megabytes once represented as JavaScript objects and autocomplete maps.
+  // Delete the old cluster-wide column payload by its key only.
+  // Do not read or parse it.
+  // A large system.columns catalog can expand to hundreds of megabytes when it is represented as JavaScript objects and autocomplete maps.
   storage.removeMeta(normalizedHostId, "columns");
   return hostMeta;
 }
@@ -340,7 +345,7 @@ function ensureTableColumns(database, table) {
     hostMeta.columnTables.set(key, entry);
     return Promise.resolve(entry.items);
   }
-  // Always the same answer: the columns, or null when they could not be read.
+  // The answer is always the same: the columns, or null when the columns cannot be read.
   return fetchAndStore(hostId, ["columns"], {
     database: normalizedDatabase,
     table: normalizedTable,
@@ -383,7 +388,8 @@ function hydrateFromStorage(hostId) {
   const hostMeta = prepareHost(normalizedHostId);
   if (!hostMeta) return;
   hydratedHosts.add(normalizedHostId);
-  // This host's catalogue is the one in use: the others' keys beyond the two most recent hosts go.
+  // The catalog of this host is the one in use.
+  // Remove the keys of the other hosts, except for the two most recent hosts.
   storage.touchMetaHost(normalizedHostId);
 
   const keywords = storage.readMeta(normalizedHostId, "keywords");
@@ -424,7 +430,7 @@ function scheduleBackgroundRefresh(delay = refreshPollMs) {
     try {
       maybeRefreshOnLoad();
     } catch {
-      // A later user action or scheduled refresh will retry.
+      // A later user action or a scheduled refresh retries the read.
     }
     scheduleBackgroundRefresh();
   }, delay);
@@ -439,28 +445,30 @@ document.addEventListener("visibilitychange", () => {
   try {
     maybeRefreshOnLoad();
   } catch {
-    // A later user action or scheduled refresh will retry.
+    // A later user action or a scheduled refresh retries the read.
   }
   scheduleBackgroundRefresh();
 });
 
-// The host's metadata follows the host selection (the header runs the hook before chdash:host-changed) and is prepared
-// for the host the page starts with. A page that uses the metadata calls this after ns.header.init().
+// The metadata of the host follows the host selection. The header runs the hook before chdash:host-changed.
+// The program also prepares the metadata for the host that the page loads first.
+// A page that uses the metadata calls this after ns.header.init().
 function init() {
   header.onHostSelected((hostId) => {
     if (!hostId) return;
-    // Host selection is the authoritative point where editor diagnostics can become meaningful. Hydrate the cached
-    // catalog immediately and refresh stale catalog types in the background instead of briefly treating an empty
-    // metadata object as proof that every reference is unknown.
+    // The host selection is the authoritative point where editor diagnostics become meaningful.
+    // Hydrate the cached catalog at once. Refresh stale catalog types in the background.
+    // Do not treat an empty metadata object, even briefly, as proof that every reference is unknown.
     activateHost(hostId);
     maybeRefreshOnLoad();
   });
   if (state.selectedHostId) prepareHost(state.selectedHostId);
 }
 
-// The highlighter colours function names from the host's function list. A returning visit restores the host from
-// storage without selecting it again, so nothing else loads that list: ask for the cached copy at once and for the
-// server's when it is missing. The marks repaint when it arrives (chdash:meta-changed).
+// The highlighter colors function names from the function list of the host.
+// A return visit restores the host from storage without a new selection. No other code loads that list.
+// Request the cached copy at once. Request the server copy when the cached copy is missing.
+// The marks repaint when the list arrives (chdash:meta-changed).
 function ensureHighlighterData() {
   const hostId = String(state.selectedHostId || "");
   if (!hostId) return;

@@ -1,33 +1,35 @@
-// The one SQL lexer of the page (ARCH-F-089). Everything on the page that has to tell the code of a statement from its
-// comments, its strings and its names reads the text through this module: the highlighter (app_highlight.js), the
-// autocomplete and its diagnostics (app_autocomplete.js), the cut of a script into statements (app_sql.js, app_run.js),
-// the types of a result column (app_results.js) and the SQL of the Explorer card (app_explorer_detail_model.js).
+// The one SQL lexer of the page (ARCH-F-089). Each part of the page that must tell the code of a statement from its
+// comments, its strings and its names reads the text through this module.
+// These parts are:
+//   - the highlighter (app_highlight.js);
+//   - the autocomplete and its diagnostics (app_autocomplete.js);
+//   - the cut of a script into statements (app_sql.js, app_run.js);
+//   - the types of a result column (app_results.js);
+//   - the SQL of the Explorer card (app_explorer_detail_model.js).
 //
-// It is the reference of the WebAssembly kernels. src/wasm/highlight.c and src/wasm/sqlscan.c read the text with the same
-// rules, byte for byte (tests/frontend/model/sql-lex-vectors.json holds cases that this module, the kernels and the native
-// test of the backend lexer read): a change here is a change there.
+// This module is the reference of the WebAssembly kernels. The files src/wasm/highlight.c and src/wasm/sqlscan.c read the
+// text with the same rules, byte for byte. The file tests/frontend/model/sql-lex-vectors.json holds test cases. This module,
+// the kernels and the native test of the backend lexer read these cases. A change here must also be a change in the kernels.
 //
 // The rules are those of the text that a person types in the editor. The backend lexer (src/sql_lexer.hpp) follows
-// ClickHouse; the page and the backend differ on purpose in four places (and in the line break of a comment), because
-// the page colours and cuts text that the server has not read yet:
-//   1. A "#" starts a line comment wherever it is (ClickHouse: only before a blank or "!"). The page shows a "#" that
-//      is not a comment as one, which tells the person that the server will refuse it.
+// ClickHouse. The page and the backend differ on purpose in four places, and in the line break of a comment. This is
+// because the page colours and cuts text that the server has not read yet:
+//   1. A "#" starts a line comment wherever it is (ClickHouse: only before a blank or "!").
+//      The page shows a "#" that is not a comment as a comment. This tells the person that the server refuses it.
 //   2. A block comment does not nest: /* a /* b */ c */ ends at the first "*/" (ClickHouse: it nests).
 //   3. $tag$ ... $tag$ is not a text (ClickHouse: it is). A $ is a letter of a word.
-//   4. A backslash in a name in backticks is a character (ClickHouse: it escapes). Text that the server wrote
-//      (the DDL of a table) uses the ClickHouse rules: spans(text, { clickhouse: true }) escapes there, and a doubled
-//      quote is part of the name.
-//   And a line comment ends at "\n" only; ClickHouse ends it at "\r" too.
+//   4. A backslash in a name in backticks is a character (ClickHouse: it escapes).
+//      For text that the server wrote (the DDL of a table), call spans(text, { clickhouse: true }).
+//      That call uses the ClickHouse escapes. In that text, a doubled quote is part of the name.
+// A line comment ends at "\n" only. ClickHouse also ends it at "\r".
 //
-// The spans, in the order of the text (a position is a UTF-16 index, as in the editor):
-//   LINE       "--" or "#" to the end of the line (the line break is part of it)
+// The spans follow the order of the text. A position is a UTF-16 index, as in the editor:
+//   LINE       "--" or "#" to the end of the line. The line break is part of the span.
 //   BLOCK      /* ... */
-//   STRING     'text': a backslash escapes the next character, '' is one quote
-//   DQUOTE     "name": a backslash escapes the next character ("" is two names side by side)
-//   BACKTICK   `name`: no escape
-// A span that the text ends before it closes runs to the end of the text.
-//
-// A function of this module takes `text` and does not keep it; none changes it.
+//   STRING     'text'. A backslash escapes the next character. '' is one quote.
+//   DQUOTE     "name". A backslash escapes the next character. "" is two names side by side.
+//   BACKTICK   `name`. No escape.
+// A span that the text does not close runs to the end of the text.
 
 const LINE = 1;
 const BLOCK = 2;
@@ -35,13 +37,13 @@ const STRING = 3;
 const DQUOTE = 4;
 const BACKTICK = 5;
 
-// What can start a span: the code units to look for between two spans.
+// The code units that can start a span. The scan looks for them between two spans.
 const STARTS = /[-#/'"`]/g;
 
-// Whether the run that quotedEnd() read last found its closing quote.
+// True when the run that quotedEnd() read last found its closing quote.
 let quoteClosed = false;
 
-// The end of the quoted run that starts at text[at] (one of ' " `): the index after its closing quote, or the length.
+// The end of the quoted run that starts at text[at] (one of ' " `). It is the index after the closing quote, or the length.
 function quotedEnd(text, at, clickhouse) {
   quoteClosed = false;
   const quote = text.charCodeAt(at);
@@ -55,7 +57,7 @@ function quotedEnd(text, at, clickhouse) {
       continue;
     }
     if (c === quote) {
-      // '' is one quote of the text; "" and `` are two names side by side, but one name of the DDL of the server.
+      // '' is one quote of the text. "" and `` are two names side by side. In the DDL of the server, they are one name.
       if ((quote === 39 || clickhouse) && text.charCodeAt(i + 1) === quote) {
         i += 2;
         continue;
@@ -68,7 +70,8 @@ function quotedEnd(text, at, clickhouse) {
   return length;
 }
 
-// The span that starts exactly at `at`: [kind, end, closed], or null. closed: the text holds the end of the span.
+// The span that starts exactly at `at`: [kind, end, closed]. It returns null when no span starts there.
+// closed is true when the text holds the end of the span.
 function spanAt(text, at, clickhouse = false) {
   const c = text.charCodeAt(at);
   if (c === 45) {
@@ -78,7 +81,7 @@ function spanAt(text, at, clickhouse = false) {
     const close = text.indexOf("*/", at + 2);
     return [BLOCK, close < 0 ? text.length : close + 2, close >= 0];
   } else if (c === 35) {
-    // falls to the line comment below
+    // Fall through to the line comment below.
   } else if (c === 39) {
     const end = quotedEnd(text, at, clickhouse);
     return [STRING, end, quoteClosed];
@@ -95,20 +98,21 @@ function spanAt(text, at, clickhouse = false) {
   return [LINE, nl < 0 ? text.length : nl + 1, nl >= 0];
 }
 
-// The next span that starts at or after `from`: { kind, start, end, closed }, or null. Scanning from a position that is inside a span
-// reads the rest of it as text: start from a position that is not (0, the end of a span, the start of a token).
+// The next span that starts at or after `from`: { kind, start, end, closed }. It returns null when no span is left.
+// Do not start the scan inside a span. A scan from such a position reads the rest of the span as text.
+// Start from 0, the end of a span or the start of a token.
 function nextSpan(text, from = 0, clickhouse = false) {
   STARTS.lastIndex = from;
   let match;
   while ((match = STARTS.exec(text))) {
     const found = spanAt(text, match.index, clickhouse);
     if (found) return { kind: found[0], start: match.index, end: found[1], closed: found[2] };
-    // A "-" that is not "--" or a "/" that is not "/*": the scan goes on after it.
+    // A "-" that is not "--", or a "/" that is not "/*", does not start a span. The scan goes on after it.
   }
   return null;
 }
 
-// Every span of the text, in order: an array of { kind, start, end, closed }.
+// Every span of the text, in order. The result is an array of { kind, start, end, closed }.
 function spans(text, { clickhouse = false } = {}) {
   const s = String(text ?? "");
   const out = [];
@@ -120,9 +124,9 @@ function spans(text, { clickhouse = false } = {}) {
   return out;
 }
 
-// The text with its comments and its strings written as spaces (a line break stays: positions and lines are the text's).
-// The names ("..." and `...`) stay: the diagnostics look for the tables and the columns that they name. They are read as
-// units, so a quote or a "--" inside a name is nothing. `names: true` blanks them too.
+// The text with its comments and its strings written as spaces. A line break stays, so positions and lines match the text.
+// The names ("..." and `...`) stay. The diagnostics look for the tables and the columns that the names refer to.
+// The names are read as units. A quote or a "--" inside a name is not a span. Set `names: true` to blank them too.
 function mask(text, { names = false } = {}) {
   const s = String(text ?? "");
   let out = "";
@@ -130,7 +134,7 @@ function mask(text, { names = false } = {}) {
   let scan = 0;
   for (let span = nextSpan(s, scan); span; span = nextSpan(s, scan)) {
     scan = span.end;
-    // A name is read as a unit, and written as it is unless the caller asks for it blank.
+    // A name is read as a unit. It is written as it is, unless the caller asks for it blank.
     if ((span.kind === DQUOTE || span.kind === BACKTICK) && !names) continue;
     out += s.slice(written, span.start) + s.slice(span.start, span.end).replace(/[^\n]/g, " ");
     written = span.end;
@@ -138,9 +142,9 @@ function mask(text, { names = false } = {}) {
   return out + s.slice(written);
 }
 
-// The scan that the statement functions share. It calls visit(index, character) for every character of the text that
-// is code (not inside a span), in order, and stops when visit returns true. Returns the index where it stopped, or the
-// length.
+// The scan that the statement functions share. It calls visit(index, character) for each character of the text that is code.
+// A character inside a span is skipped. The scan stops when visit returns true.
+// It returns the index where it stopped, or the length.
 function eachCode(text, visit, from = 0) {
   let i = from;
   const length = text.length;
@@ -154,9 +158,9 @@ function eachCode(text, visit, from = 0) {
   return length;
 }
 
-// { start, end } of the statement around `pos`: it starts after the last ";" that is code at depth 0 before pos and ends at
-// the first one at or after it (the end of the text without one). The depth counts the parentheses of the code from the
-// start of the text.
+// { start, end } of the statement around `pos`. The statement starts after the last ";" that is code at depth 0 before pos.
+// It ends at the first ";" at or after pos. Without such a ";", it ends at the end of the text.
+// The depth counts the parentheses of the code from the start of the text.
 function statementAt(text, pos = null) {
   const s = String(text ?? "");
   const cursor = Math.max(0, Math.min(s.length, pos == null ? s.length : Math.trunc(Number(pos)) || 0));
@@ -179,14 +183,14 @@ function statementAt(text, pos = null) {
   return { start, end };
 }
 
-// The start of the last statement of the text (what is before the cursor, when the text ends at the cursor).
+// The start of the last statement of the text. This is the statement before the cursor, when the text ends at the cursor.
 function statementStart(text) {
   const s = String(text ?? "");
   return statementAt(s, s.length).start;
 }
 
-// The pieces of a script between its ";" that are code, as [start, end) pairs (a script with n ";" has n + 1 pieces, empty
-// ones included; a ";" inside a parenthesis cuts too).
+// The pieces of a script between its ";" that are code. Each piece is a [start, end) pair.
+// A script with n ";" has n + 1 pieces, and empty pieces are included. A ";" inside a parenthesis also cuts the script.
 function splitRanges(text) {
   const s = String(text ?? "");
   const out = [];
@@ -202,8 +206,8 @@ function splitRanges(text) {
   return out;
 }
 
-// The index of the parenthesis that closes the one at text[open], or -1. Parentheses in a string, a name or a comment
-// do not count.
+// The index of the parenthesis that closes the one at text[open]. It returns -1 when no parenthesis closes it.
+// Parentheses in a string, a name or a comment do not count.
 function matchParen(text, open) {
   const s = String(text ?? "");
   let depth = 0;
@@ -222,9 +226,10 @@ function matchParen(text, open) {
   return found;
 }
 
-// The text cut at the separator where it is code at depth 0 (the depth counts "(" and ")"; brackets and braces when
-// `brackets` is true: a type, a default, a key). Each piece is trimmed, with its place in the text (+ base); the empty
-// pieces are dropped. Returns [{ text, start, end }].
+// The text cut at each separator that is code at depth 0. The depth counts "(" and ")".
+// When `brackets` is true, it also counts brackets and braces: a type, a default or a key.
+// Each piece is trimmed. Its place in the text is shown by `start` and `end`, plus base. Empty pieces are dropped.
+// The function returns [{ text, start, end }].
 function splitTopLevel(text, separator = ",", { base = 0, brackets = false, clickhouse = false } = {}) {
   const s = String(text ?? "");
   const out = [];

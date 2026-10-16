@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { installObservers, unexpectedFailures } from '../helpers/observability.js';
 
-// The failure filter that most specs end with (helpers/observability.js): an aborted request is excused only when the
-// page's own code aborted it on purpose (a signal given to fetch() fired while the fetch waited for its answer), once
-// per abort. An abort that came from anything else stays a failure, so a request cut in another way shows up instead
-// of passing as "superseded".
+// The failure filter that most specs end with (helpers/observability.js) excuses an aborted request in one case only.
+// The page code aborts the request on purpose. A signal given to fetch() fires while the fetch waits for its answer.
+// One abort excuses one failure. An abort from any other cause stays a failure.
+// So a request that stops in another way appears as a failure. It does not pass as "superseded".
 
 const SLOW = '**/api/version?slow=*';
 const slow = (page) => page.route(SLOW, async (route) => {
@@ -36,7 +36,7 @@ test('a read that util.latest superseded is excused, once per abort', async ({ p
   expect(obs.failedRequests[0].url).toContain('slow=1');
   expect(obs.failedRequests.voluntaryAborts).toHaveLength(1);
   expect(unexpectedFailures(obs.failedRequests)).toEqual([]);
-  // One abort excuses one failure: a second failure of the same URL is not covered.
+  // One abort excuses one failure. A second failure of the same URL is not excused.
   expect(unexpectedFailures(Object.assign([...obs.failedRequests, ...obs.failedRequests], { voluntaryAborts: obs.failedRequests.voluntaryAborts })))
     .toHaveLength(1);
 });
@@ -46,8 +46,8 @@ test('an abort that no signal asked for is a failure, and a signal that fires af
   await slow(page);
   await page.goto('/query');
   await expect(page.locator('#runButton')).toBeEnabled();
-  // A request cut in some other way than a signal given to fetch (here the close of an event stream, the way the
-  // page's own stream stops) is not one of the page's superseded reads.
+  // A request that stops in another way than a signal given to fetch is not a superseded read.
+  // One example is the close of an event stream, which is how the page's own stream stops.
   await page.evaluate(async () => {
     const stream = new EventSource('/api/hosts/stream?cut=1');
     await new Promise((resolve) => { stream.onopen = resolve; stream.onerror = resolve; });
@@ -57,7 +57,7 @@ test('an abort that no signal asked for is a failure, and a signal that fires af
   expect(obs.failedRequests.voluntaryAborts).toEqual([]);
   expect(unexpectedFailures(obs.failedRequests).filter((r) => r.url.includes('cut=1'))).toHaveLength(1);
 
-  // A signal that fires once the answer is in cancels nothing: it is not recorded as a voluntary abort of a request.
+  // A signal that fires after the answer arrives cancels nothing. It is not recorded as a voluntary abort.
   await page.goto('/query');
   await expect(page.locator('#runButton')).toBeEnabled();
   await page.evaluate(async () => {

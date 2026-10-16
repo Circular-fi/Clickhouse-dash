@@ -1,8 +1,7 @@
-// Stat tiles, one component for every page (css/10-components/stat.css): an
-// eyebrow label, the value and an optional sub line, in
-// sentence case. The map and graph panels, the Services detail strip, the
-// trace header, the Query metric rail, Explorer About, the Keeper tiles and
-// the pipeline columns draw them.
+// Stat tiles. One component serves every page (css/10-components/stat.css). A tile has
+// an eyebrow label, the value and an optional sub line. The label uses sentence case.
+// The map and graph panels, the Services detail strip, the trace header, the Query
+// metric rail, Explorer About, the Keeper tiles and the pipeline columns draw them.
 //
 //   stat.html({ label, value, sub, tone, title, inline, tag, className,
 //                     valueHtml, subHtml, attrs, dl }) -> HTML

@@ -5,8 +5,9 @@ import { openApp } from '../helpers/app.js';
 import { sqlCorpus, fuzzSql, loadKernel as loadKernelOf } from '../helpers/wasm.js';
 import { metaSpec, corpusMeta, fuzzScripts } from '../helpers/wasm-sql.js';
 
-// The editor diagnostics on WebAssembly (src/wasm/sqlscan.c, docs/wasm.md): the unknown table, column and function
-// marks of app_autocomplete.js are the same whether the JavaScript reference or the kernel scans the script.
+// The editor diagnostics on WebAssembly (src/wasm/sqlscan.c, docs/wasm.md). The unknown table,
+// column and function marks of app_autocomplete.js are the same. This holds whether the JavaScript
+// reference or the kernel scans the script.
 
 // WASM_FUZZ_SCALE=20 runs twenty times more seeded scripts.
 const SCALE = Math.max(1, Number(process.env.WASM_FUZZ_SCALE) || 1);
@@ -22,8 +23,9 @@ test.afterEach(async ({ page }, testInfo) => {
 
 const loadKernel = (page) => loadKernelOf(page, 'wasm-sqlscan', "window.ChDash.autocomplete.wasmReady()");
 
-// Builds the host metadata of a spec (the shapes of app_meta.js) in the page, with the column lists the editor reads
-// through ns.meta.getTableColumns; returns it, and restores the page's own functions with restore().
+// Build the host metadata of a spec in the page. The shapes follow app_meta.js.
+// The column lists are the ones that the editor reads through ns.meta.getTableColumns.
+// Return the metadata. Restore the page's own functions with restore().
 const BUILD_META = (spec, mode) => {
   const ns = window.ChDash;
   const lower = (list) => new Set(list.map((name) => name.toLowerCase()));
@@ -56,7 +58,7 @@ const BUILD_META = (spec, mode) => {
   return true;
 };
 
-// Runs both implementations on `texts` with the warning switches of `switches`; returns the first differences.
+// Run both implementations on `texts` with the warning switches of `switches`. Return the first differences.
 async function compare(page, texts, spec, mode, switches) {
   return page.evaluate(({ texts, spec, mode, switches, build }) => {
     // eslint-disable-next-line no-new-func
@@ -88,7 +90,7 @@ async function compare(page, texts, spec, mode, switches) {
 }
 
 test('the kernel loads as application/wasm and answers like the reference on a small script', async ({ page }) => {
-  // The Query editor asks for the kernel when it opens (docs/wasm.md): listen before the page loads.
+  // The Query editor asks for the kernel when it opens (docs/wasm.md). Listen before the page loads.
   const responses = [];
   page.on('response', (response) => { if (response.url().includes('/wasm/sqlscan.wasm')) responses.push(response); });
   await openApp(page);
@@ -108,7 +110,7 @@ test('the kernel marks the SQL files of the repository like the reference, whate
   expect((await loadKernel(page)).loaded).toBe(true);
   const corpus = sqlCorpus().map((file) => file.sql);
   expect(corpus.length).toBeGreaterThan(50);
-  // The reference needs seconds for a long script: the long text is a slice of the files, once per switch set.
+  // The reference needs seconds for a long script. The long text is a slice of the files, once per switch set.
   const texts = [...corpus, corpus.slice(0, 25).join(';\n')];
   for (const [mode, spec] of [['full', corpusMeta(corpus)], ['with-set', metaSpec('x')], ['no-tables', corpusMeta(corpus)], ['no-functions', corpusMeta(corpus)]]) {
     for (const switches of [[true, true, true], [true, false, false], [false, true, false], [false, false, true]]) {
@@ -254,8 +256,9 @@ test('the kernel cuts a script into statements like the one SQL lexer (app_sql.j
   expect(result.minChars).toBeGreaterThan(1000);
 });
 
-// The answers of the one SQL lexer (tests/frontend/model/sql-lex-vectors.json: the Node test of app_sql_lex.js reads the same
-// file, and so does the native test of the backend lexer): the kernels give them too.
+// These are the answers of the one SQL lexer (tests/frontend/model/sql-lex-vectors.json).
+// The Node test of app_sql_lex.js reads the same file. The native test of the backend lexer reads it too.
+// The kernels give the same answers.
 const VECTORS = JSON.parse(fs.readFileSync(new URL('../model/sql-lex-vectors.json', import.meta.url), 'utf8'));
 
 test('the kernels read the vectors of the one SQL lexer: the pieces of a script, the statement around a cursor, the strings and the comments', async ({ page }) => {
@@ -276,7 +279,7 @@ test('the kernels read the vectors of the one SQL lexer: the pieces of a script,
         const got = ns.autocomplete.statementAtWasm(vector.sql, pos);
         if (got !== vector.sql.slice(start, end)) bad.push({ label, what: 'statement', pos, got });
       }
-      // the colouring: a string or a "name" is a str token, a comment a com token (a name in backticks is plain)
+      // The colouring: a string or a "name" is a str token. A comment is a com token. A name in backticks is plain.
       const tokens = ns.highlight.lexAllWasm(vector.sql);
       if (tokens === null) { bad.push({ label, what: 'no tokens' }); continue; }
       const want = vector.spans.filter((span) => span[2] !== 'backtick').map(([start, end, kind]) => [start, end, kind === 'string' || kind === 'dquote' ? 'str' : 'com']);
@@ -318,7 +321,7 @@ test('performance budget: the kernel marks a long script faster than the JavaScr
   test.setTimeout(300_000);
   await openApp(page);
   expect((await loadKernel(page)).loaded).toBe(true);
-  // Clean scripts: balanced quotes and parentheses, as a person writes them (a stray quote makes one huge statement).
+  // Clean scripts have balanced quotes and parentheses, as a person writes them. A stray quote makes one huge statement.
   const scripts = fuzzScripts(9, 4000, 2, 0, { clean: true }).join(';\n');
   const rows = await page.evaluate(({ spec, build, scripts }) => {
     // eslint-disable-next-line no-new-func
@@ -337,10 +340,10 @@ test('performance budget: the kernel marks a long script faster than the JavaScr
       const cursor = text.length - 20;
       out.push({
         size,
-        // the reference needs minutes for 400,000 characters: only the kernel runs there
+        // The reference needs minutes for 400,000 characters. Only the kernel runs there.
         js: size > 100000 ? null : round(median(() => ac.diagnoseJs(text, meta), runs)),
         wasm: round(median(() => ac.diagnoseWasm(text, meta), runs)),
-        // the statement around the cursor: a new text each time, as in typing
+        // The statement around the cursor. Each time, the text is new, as when a person types.
         statementJs: round(median(() => ac.statementAtJs(text + ' '.repeat(Math.random() * 50 | 0), cursor), 15)),
         statementWasm: round(median(() => ac.statementAtWasm(text + ' '.repeat(Math.random() * 50 | 0), cursor), 15)),
         splitJs: round(median(() => window.ChDash.sql.splitSqlStatementsJs(text), 9)),

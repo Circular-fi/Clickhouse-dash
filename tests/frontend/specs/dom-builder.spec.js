@@ -1,10 +1,9 @@
 import { test, expect } from '@playwright/test';
 
-// ns.h, the one element builder, and the dom.byId / dom.$ / dom.$$ lookups
-// (src/static/app_dom.js, docs/ui-foundations.md "Building elements"): unit
-// checks in a real page. Strings are always text, props cover class, dataset,
-// style, aria, events with a lifecycle signal and attributes, h.html is the
-// only markup path, and the lookups stay inside their root.
+// This spec tests ns.h, the one element builder, and the dom.byId, dom.$ and dom.$$ lookups.
+// The source is src/static/app_dom.js. The contract is in docs/ui-foundations.md, section "Building elements".
+// These are unit checks in a real page. Strings are always text. Props cover class, dataset, style, aria, events with a lifecycle signal, and attributes.
+// h.html is the only markup path. The lookups stay inside their root.
 
 const PAGES = ['/query', '/explorer/catalog', '/observability/traces'];
 
@@ -53,7 +52,7 @@ test('dom builder: children are text, never markup', async ({ page }) => {
   expect(out.title).toBe('<img src=x onerror="window.__pwned=1">"\'&');
   expect(out.data).toBe(out.title);
   expect(out.images).toBe(0);
-  // null, undefined, false, true and "" add nothing; arrays flatten.
+  // The values null, undefined, false, true and "" add nothing. Arrays are flattened.
   expect(out.childNodes).toBe(6);
   await page.waitForTimeout(50);
   expect(await page.evaluate(() => window.__pwned)).toBeUndefined();

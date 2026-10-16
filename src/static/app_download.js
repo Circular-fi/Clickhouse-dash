@@ -40,8 +40,8 @@ function csvEscape(value) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-// results.csv, Download CSV and Download JSON: the serializer of the result tables
-// (ns.results.serialize), so they hold the same text as Copy CSV and Copy JSON.
+// results.csv, Download CSV and Download JSON use the serializer of the result tables (ns.results.serialize).
+// So they hold the same text as Copy CSV and Copy JSON.
 function rowsToCsv(snapshot) {
   return results.serialize.csv(snapshot);
 }
@@ -117,10 +117,9 @@ async function profilingFiles(entry, prefix) {
     if (!analysis || typeof analysis !== "object") {
       throw new Error("Invalid profiling response.");
     }
-    // Debug JSON deliberately keeps both representations: trace_compact is
-    // the exact 4K temporal-LOD JSON used by the live UI, while
-    // trace_spans_original preserves the ungrouped ClickHouse spans for
-    // offline diagnostics and exact timing inspection.
+    // Debug JSON keeps both representations on purpose.
+    // trace_compact is the exact 4K temporal-LOD JSON that the live UI uses.
+    // trace_spans_original keeps the ungrouped ClickHouse spans. Use it for offline diagnostics and exact timing inspection.
     return [{ name: `${prefix}profiling.json`, text: JSON.stringify(analysis, null, 2) }];
   } catch (e) {
     const detail = util.errorText(e, "Profiling request failed.");
@@ -227,10 +226,9 @@ async function tableDefinitionFiles(entry, prefix, executionPayload) {
     const engine = String(detail?.summary?.engine || "");
     for (const dep of dependencies) {
       const relation = String(dep?.relation || "").toLowerCase();
-      // Recursive query dependencies flow upstream. Buffer is the exception:
-      // reading a Buffer also depends on its flush target, which Explorer
-      // models as downstream, so include that target as part of the definition
-      // closure as well.
+      // Recursive query dependencies flow upstream. Buffer is the exception.
+      // A Buffer read also depends on its flush target. Explorer models that target as downstream.
+      // So include the flush target in the definition closure too.
       const include = relation === "upstream" || (engine === "Buffer" && relation === "downstream");
       if (!include) continue;
       const database = String(dep?.database || "");
@@ -373,8 +371,8 @@ function sortedQueries() {
   return queries.slice().sort((a, b) => Number(a.index || 0) - Number(b.index || 0));
 }
 
-// { "queries": [{ index, query, columns, data, error?, partial? }] }, two spaces per level; `data`
-// is the statement's rows as Download JSON writes them.
+// The format is { "queries": [{ index, query, columns, data, error?, partial? }] }, with two spaces per level.
+// `data` holds the rows of the statement, as Download JSON writes them.
 function buildGlobalJson() {
   const field = (key, value) => `      ${JSON.stringify(key)}: ${value}`;
   const queriesText = sortedQueries().map((entry, position) => {
@@ -463,8 +461,8 @@ async function buildArchiveFiles() {
     const prefix = many ? `query-${String(i + 1).padStart(3, "0")}/` : "";
     const execution = await loadExecutionPayload(entry);
     files.push({ name: `${prefix}query.sql`, text: String(entry.sql || "") });
-    // Debug archives keep one canonical tabular result representation. The
-    // normal Download JSON action remains available separately from Run.
+    // Debug archives keep one canonical tabular result representation.
+    // The normal Download JSON action stays available separately from Run.
     files.push({ name: `${prefix}results.csv`, text: rowsToCsv(entry.snapshot) });
     if (entry.errorText) files.push({ name: `${prefix}error.txt`, text: String(entry.errorText) });
     files.push(...executionFiles(execution, prefix));

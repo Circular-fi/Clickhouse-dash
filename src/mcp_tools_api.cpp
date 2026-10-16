@@ -13,8 +13,8 @@ namespace mcp_tools {
 
 // ---- API tools -----------------------------------------------------------------------------------------
 //
-// One wrapper for every tool of mcp_api_tools.cpp: it checks the arguments, calls the route of ChDash and hands
-// the answer back. A tool that is added to that table needs nothing here.
+// One wrapper serves every tool of mcp_api_tools.cpp. The wrapper checks the arguments, calls the route of ChDash,
+// and returns the answer. A tool that is added to that table needs nothing here.
 
 namespace {
 
@@ -38,10 +38,16 @@ std::string param_text(const rapidjson::Value& v, const std::string& name) {
   fail("invalid_argument", "params." + name + " must be a string, a number, a boolean or a list of them");
 }
 
-// The data scope of the key for an API tool that reads one table (Table) or lists them (Catalog): the call names
-// `database` (and `table`) in its params or its body. A name that is not a plain string is refused, never skipped:
-// the API could read another value of a list than the one that was checked.
-void check_api_scope(Ctx& ctx, const McpApiTool& api, const rapidjson::Value& args) {
+// The data scope of the key applies to an API tool that reads one table (Table) or lists them (Catalog).
+// The call names `database` (and `table`) in its params or its body. A name that is not a plain string is refused.
+// It is never skipped. Otherwise, the API could read another value of a list than the one that was checked.
+// The database and the table that the call names (empty when it names none), for the answer of an object that is not there.
+struct ScopedObject {
+  std::string database;
+  std::string table;
+};
+
+ScopedObject check_api_scope(Ctx& ctx, const McpApiTool& api, const rapidjson::Value& args) {
   const bool post = std::string(api.method) == "POST";
   const auto holder = args.FindMember(post ? "body" : "params");
   const rapidjson::Value* object = holder != args.MemberEnd() && holder->value.IsObject() ? &holder->value : nullptr;
@@ -60,20 +66,22 @@ void check_api_scope(Ctx& ctx, const McpApiTool& api, const rapidjson::Value& ar
   const bool has_table = text("table", &table);
   if (api.scope == McpApiScope::Catalog) {
     if (has_database && !mcp_scope_database_visible(ctx.key.databases, database)) {
-      fail("database_not_allowed", "this key cannot see the database " + database);
+      fail("not_found", "the database " + database + " does not exist or is not visible");
     }
-    return;
+    return ScopedObject{has_database ? database : std::string(), std::string()};
   }
   if (!has_database || !has_table || database.empty() || table.empty()) {
     fail("invalid_argument", std::string(post ? "body" : "params") + ".database and " + (post ? "body" : "params") + ".table are required");
   }
   if (!mcp_scope_table_allowed(ctx.key.databases, database, table)) {
-    fail("table_not_allowed", "this key cannot read " + database + "." + table);
+    fail("not_found", "the table " + database + "." + table + " does not exist or is not visible");
   }
+  return ScopedObject{database, table};
 }
 
-// The catalog of the Explorer, cut to what the key shows: the databases that a pattern names, the summary of a
-// database only when the key reads all of it (a summary counts every table), and the tables that a pattern allows.
+// The catalog of the Explorer, cut to what the key shows. It has the databases that a pattern names.
+// It has the summary of a database only when the key reads all of it, because a summary counts every table.
+// It has the tables that a pattern allows.
 void cut_catalog(const McpKey& key, rapidjson::Document* doc) {
   const auto cut = [&](const char* name, const auto& keep) {
     const auto it = doc->FindMember(name);
@@ -91,6 +99,11 @@ void cut_catalog(const McpKey& key, rapidjson::Document* doc) {
   cut("tables", [&](const rapidjson::Value& item) { return mcp_scope_table_allowed(key.databases, field(item, "database"), field(item, "name")); });
 }
 
+// The answer of a route of ChDash mixes the figures of the server with the text of the data.
+// Examples of the text are names, rows, log lines, span attributes and query texts.
+// The tool gives the whole answer in `untrusted` (contract 5.2). See docs/mcp.md, "Untrusted text".
+std::string in_untrusted(const std::string& answer) { return "{\"untrusted\":" + answer + "}"; }
+
 }  // namespace
 
 std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& args) {
@@ -98,10 +111,11 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
   const bool post = std::string(api.method) == "POST";
   reject_unknown(args, post ? std::initializer_list<const char*>{"host", "body"} : std::initializer_list<const char*>{"host", "params"});
   resolve_host(ctx, args);
-  if (api.scope == McpApiScope::Table || api.scope == McpApiScope::Catalog) check_api_scope(ctx, api, args);
+  ScopedObject named;
+  if (api.scope == McpApiScope::Table || api.scope == McpApiScope::Catalog) named = check_api_scope(ctx, api, args);
   if (!ctx.api) fail("api_unavailable", "this server cannot call its own API");
 
-  // The API serves the tool as the MCP user (mcp_identity.hpp): the host it names is the identity of the tool's family.
+  // The API serves the tool as the MCP user (mcp_identity.hpp). The host that it names is the identity of the family of the tool.
   const std::string api_host = mcp_api_host(ctx.host, mcp_api_identity(api));
   McpApiRequest request;
   request.method = api.method;
@@ -110,6 +124,7 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
   request.max_bytes = ctx.config.max_result_bytes;
   request.key_id = ctx.key.id;
   request.tool = info.name;
+  request.agent_caller = ctx.user_limits.agent_caller;
 
   if (const auto it = args.FindMember("params"); it != args.MemberEnd() && !it->value.IsNull()) {
     if (!it->value.IsObject()) fail("invalid_argument", "params must be an object of query parameters");
@@ -185,14 +200,20 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
       if (const auto it = doc.FindMember("reason"); it != doc.MemberEnd() && it->value.IsString()) not_granted = std::string(it->value.GetString()) == "not_granted";
       if (const auto it = doc.FindMember("hint"); it != doc.MemberEnd() && it->value.IsString()) hint = it->value.GetString();
     }
-    // The MCP user lacks a grant: the same code as the SQL tools, and the statement that gives it.
+    // The MCP user lacks a grant. This case has the same code as the SQL tools, and the same statement that gives the grant.
     if (not_granted) {
       code = "permission_denied";
       if (!hint.empty()) message += " Give it to the MCP user: " + hint;
     }
-    // A route that is not there (the router's own JSON 404, or none): the part of ChDash is off in its configuration.
+    // A route is not there (the router's own JSON 404, or none). The part of ChDash is off in its configuration.
     if (response.status == 404 && (code.empty() || (code == "not_found" && message == "Not Found"))) {
       fail("not_enabled", std::string("this part of ChDash is not enabled in its configuration (") + api.name + ")");
+    }
+    // An object that the MCP user cannot see, or that does not exist, gets the answer of an object out of scope.
+    // The code and the message are the same (contract 3.7).
+    if (response.status == 404 && code == "object_not_found" && !named.database.empty()) {
+      fail("not_found", named.table.empty() ? "the database " + named.database + " does not exist or is not visible"
+                                            : "the table " + named.database + "." + named.table + " does not exist or is not visible");
     }
     if (code.empty()) code = "api_error";
     if (message.empty()) message = "the API answered " + std::to_string(response.status);
@@ -204,9 +225,9 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
     rapidjson::StringBuffer cut_sb;
     Writer cut_w(cut_sb);
     doc.Accept(cut_w);
-    return finish(cut_sb);
+    return in_untrusted(finish(cut_sb));
   }
-  if (json && doc.IsObject()) return response.body;
+  if (json && doc.IsObject()) return in_untrusted(response.body);
   if (!json) fail("api_error", "the API did not answer JSON");
   rapidjson::StringBuffer sb;
   Writer w(sb);
@@ -214,7 +235,7 @@ std::string tool_api(Ctx& ctx, const McpToolInfo& info, const rapidjson::Value& 
   w.Key("result");
   doc.Accept(w);
   w.EndObject();
-  return finish(sb);
+  return in_untrusted(finish(sb));
 }
 
 }  // namespace mcp_tools

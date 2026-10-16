@@ -1,6 +1,7 @@
-// The adapter of src/wasm/color.c (src/static/wasm/color.wasm): the colour arithmetic of the page, in batches.
-// Every op answers { status: Uint8Array, ... }: per item 0 done, 1 "the JavaScript function returns its input unchanged",
-// 2 "the kernel does not decide" (the caller runs the JavaScript function for that item).
+// The adapter of src/wasm/color.c (src/static/wasm/color.wasm). It does the colour arithmetic of the page in batches.
+// Every op answers { status: Uint8Array, ... }. Each item has a status. 0 means done.
+// 1 means "the JavaScript function returns its input unchanged". 2 means "the kernel does not decide".
+// The caller then runs the JavaScript function for that item.
 //
 //   normalize(kernel, { texts })              texts: string[]                   -> { status, texts }   (app_palette.js normalize)
 //   parseChart(kernel, { texts })             texts: string[]                   -> { status, nums }    (r, g, b, a per item: chart parseColor)

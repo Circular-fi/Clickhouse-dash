@@ -1,6 +1,6 @@
-// The sidebar of the Explorer: the databases with their sizes, and the objects of one database that is opened. A database is read when it is
-// opened, never all of them at once: the first paint is the names of the databases and their totals; the objects of a database come from the
-// runner's own privileges (AclService), and only their names are looked up in system.tables.
+// The sidebar of the Explorer. It shows the databases with their sizes, and the objects of one database that is opened.
+// A database is read when it is opened. The sidebar never reads all databases at once. The first paint shows the names of the databases and their totals.
+// The objects of a database are found with the privileges of the runner (AclService). The names of these objects come from system.tables.
 #include "explorer_catalog.hpp"
 
 #include "explorer_rules.hpp"
@@ -69,10 +69,9 @@ bool load_explorer_catalog_index(
     }
   }
 
-  // Keep sidebar row/size statistics useful without loading the rich table detail payload. For a single lazily-expanded database, one
-  // bounded parts aggregation gives exact MergeTree rows/bytes for every visible table. The same GROUP BY also feeds the database detail
-  // object table (compressed / uncompressed data bytes, active part count, newest part time): extra sums over the already-scanned
-  // system.parts rows, no per-table query.
+  // The sidebar keeps its row and size statistics without the detailed table payload. For a single database that is expanded lazily, one
+  // bounded parts aggregation gives exact MergeTree rows and bytes for every visible table. The same GROUP BY also feeds the database detail
+  // object table: compressed and uncompressed data bytes, active part count and newest part time. These are extra sums over the system.parts rows already read. No per-table query is run.
   if (out.databases.size() == 1) {
     const std::string& database = out.databases.front();
     std::unordered_map<std::string, ExplorerTableSummary*> by_name;
@@ -94,8 +93,7 @@ bool load_explorer_catalog_index(
         }
       }, &ignored);
 
-    // The disks of this database's active parts, with their capacity: one GROUP BY over the same system.parts rows and the small
-    // system.disks.
+    // The disks of the active parts of this database, with their capacity. One GROUP BY reads the same system.parts rows and the small system.disks table.
     ignored.clear();
     std::map<std::string, uint64_t> disk_bytes;
     (void)try_select(system, database_disk_bytes_sql(database),
@@ -128,8 +126,8 @@ bool load_explorer_catalog_index(
       for (auto& [name, disk] : disks) out.database_disks.push_back(std::move(disk));
     }
 
-    // Replica health for the tree dot. Only the columns system.replicas serves from memory: total/active_replicas would cost one Keeper
-    // read per table on every 5 s navigation refresh (the table detail reads them fresh).
+    // Replica health for the tree dot. The query reads only the columns that system.replicas serves from memory. total/active_replicas cost one Keeper
+    // read per table on every 5 s navigation refresh. The table detail reads them fresh.
     ignored.clear();
     (void)try_select(system, database_replicas_sql(database),
       [&](const clickhouse::Block& block) {
@@ -147,8 +145,8 @@ bool load_explorer_catalog_index(
       }, &ignored);
   }
 
-  // The lightweight catalog intentionally asks only for identity + small sidebar statistics. Fill newly created runner-visible objects one
-  // by one if the technical system.tables snapshot lags behind ACL discovery.
+  // The lightweight catalog asks only for identity and small sidebar statistics. Fill each newly created object that the runner can see, one
+  // by one, if the system.tables snapshot is older than the ACL discovery.
   for (const auto& entry : allowed.tables()) {
     const std::string key = table_key(entry.database, entry.table);
     if (seen.count(key)) continue;

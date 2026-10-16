@@ -1,8 +1,8 @@
 // libFuzzer target: the bounded JSON parse of every request body (src/json_parse.hpp).
 //
-// A text that parses is walked the way the handlers walk it (Accept recurses once per level), written back
-// and parsed again: the depth bound must keep the walk inside the stack, and the written text must parse to the
-// same value.
+// A text that parses is walked the way the handlers walk it. Accept recurses once per level.
+// The fuzzer writes the text back and parses it again. The depth bound must keep the walk inside the stack.
+// The written text must parse to the same value.
 #include "json_parse.hpp"
 
 #include <rapidjson/document.h>
@@ -16,8 +16,9 @@
 
 namespace {
 
-// Equal values; two doubles within a few units in the last place count as equal: the default parse of rapidjson
-// (no kParseFullPrecisionFlag) may read a long or large literal one unit off, and read it back another unit off.
+// Equal values are equal. Two doubles within a few units in the last place count as equal.
+// The default parse of rapidjson (no kParseFullPrecisionFlag) may read a long or large literal one unit off.
+// It may read the value back another unit off.
 bool same(const rapidjson::Value& a, const rapidjson::Value& b) {
   if (a.IsDouble() || b.IsDouble()) {
     if (!a.IsNumber() || !b.IsNumber()) return false;

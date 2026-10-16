@@ -1,7 +1,7 @@
-// What a catalog entry is and how the Explorer names it (ARCH-F-155): the engine families, the size and the rows an object reports, the
-// kind of a tree row, the groups of a catalog, the function categories. Pure: no DOM, no state (tests/frontend/model/explorer-summary.test.cjs).
-// Numbers, sizes, percentages and instants come from ns.format (docs/ui-foundations.md): "120,064", "120.1K", "1.7 KB", "12.3%",
-// EMPTY (\u2014) for an absent value.
+// This module defines what a catalog entry is. It also defines how the Explorer names an entry (ARCH-F-155).
+// The module covers the engine families, the size and the rows of an object, the kind of a tree row, the groups of a catalog, and the function categories.
+// This module is pure. It has no DOM and no state (tests/frontend/model/explorer-summary.test.cjs).
+// Numbers, sizes, percentages and instants come from ns.format (docs/ui-foundations.md). Examples: "120,064", "120.1K", "1.7 KB", "12.3%". EMPTY (\u2014) marks an absent value.
 
 import { format } from "./app_format.js";
 
@@ -56,13 +56,10 @@ function isLogFamilySummary(summary) { return ["tinylog", "stripelog", "log"].in
 function isDistributedSummary(summary) { return engineKey(summary) === "distributed"; }
 
 function storageCatalogEligible(summary) {
-  // Keep sidebar eligibility independent from the currently loaded graph so
-  // changing databases cannot transiently grey valid tables. The catalog has
-  // enough durable signals to classify every engine supported by the Storage
-  // graph: MergeTree families, Log families, explicit disk/policy placement,
-  // and Buffer as the one non-persistent routing exception. System* virtual
-  // engines (for example system.columns / system.data_type_families) expose
-  // none of these signals and are therefore visibly disabled in Storage.
+  // Keep the sidebar eligibility independent of the loaded graph. So a change of database cannot disable valid tables for a moment.
+  // The catalog has enough durable signals to classify every engine that the Storage graph supports.
+  // These signals are: the MergeTree and Log families, explicit disk or policy placement, and Buffer. Buffer is the one non-persistent routing exception.
+  // System* virtual engines (for example system.columns and system.data_type_families) have none of these signals. So they are disabled in Storage.
   if (!summary) return false;
   if (isBufferSummary(summary)) return true;
   if (isMergeTreeSummary(summary) || isLogFamilySummary(summary)) return true;
@@ -96,9 +93,8 @@ function sizeLabelForSummary(summary) {
 function humanEngine(engine) {
   const value = String(engine || "");
   const compact = value.toLowerCase().replace(/[^a-z0-9]/g, "");
-  // ClickHouse's own engine names, as system.tables spells them: an engine
-  // given in another spelling (lower case, spaced) is written back that way,
-  // any other name is shown as sent.
+  // These are the ClickHouse engine names, as system.tables spells them.
+  // An engine that has another spelling (lower case or with spaces) is returned in that spelling. Any other name is shown as sent.
   const labels = {
     mergetree: "MergeTree",
     replacingmergetree: "ReplacingMergeTree",
@@ -132,11 +128,10 @@ function functionKey(item) {
   return `${item.kind || "Function"}\0${item.name || ""}`;
 }
 
-// Category names come from system.functions.categories, with the kind
-// ("Function", "Aggregate Function", "Table Function") as the backend
-// fallback when a function has none. Fold the spelling variants into one
-// group: "Aggregate Functions" + "Aggregate Function" -> "Aggregate",
-// uncategorized plain functions -> "Other" (ClickHouse's own catch-all).
+// The category names come from system.functions.categories. The kind is the backend fallback, when a function has no category.
+// The kind is "Function", "Aggregate Function" or "Table Function".
+// Fold the spelling variants into one group. For example, "Aggregate Functions" and "Aggregate Function" become "Aggregate".
+// Plain functions without a category go to "Other". This is the ClickHouse catch-all.
 const FUNCTION_CATEGORY_LABELS = new Map([
   ["aggregate", "Aggregate"],
   ["table", "Table functions"],
@@ -146,8 +141,7 @@ const FUNCTION_CATEGORY_LABELS = new Map([
 
 function functionCategory(item) {
   let value = String(item?.category || "").trim();
-  // system.functions.categories is represented as text by the native client
-  // on some versions. Keep the first meaningful category for navigation.
+  // Some versions of the native client send system.functions.categories as text. Keep the first meaningful category for navigation.
   value = value.replace(/^\[|\]$/g, "").trim();
   const first = value.split(",").map((part) => part.trim().replace(/^['\"]|['\"]$/g, "")).find(Boolean) || "";
   const kind = String(item?.kind || "");
@@ -158,7 +152,7 @@ function functionCategory(item) {
   return FUNCTION_CATEGORY_LABELS.get(key) || raw;
 }
 
-// Kind badge shown only where the group does not already say it.
+// The kind badge shows only where the group does not already show the kind.
 function functionKindBadge(item, category) {
   if (item?.user_defined) return "UDF";
   if (item?.kind === "Aggregate Function" && category !== "Aggregate") return "aggregate";
@@ -186,8 +180,7 @@ function uniqueMetaBits(values) {
   return out;
 }
 
-// Functions most queries use, offered as shortcuts while nothing is
-// selected (only those the server actually exposes are listed).
+// These functions are used by most queries. They are shortcuts while nothing is selected. Only the functions that the server exposes are listed.
 const POPULAR_FUNCTIONS = [
   "count", "sum", "avg", "uniq", "quantile", "argMax", "groupArray", "countIf",
   "if", "multiIf", "toDate", "toStartOfInterval", "formatDateTime", "dateDiff",
@@ -204,10 +197,9 @@ function healthLabel(table) {
   return health === "error" ? "Error" : health === "warning" ? "Warning" : "Healthy";
 }
 
-// Catalog payloads are replaced, never mutated in place, so their arrays are
-// stable cache keys. renderTableList() runs on every search keystroke and
-// previously re-filtered all tables and re-searched all summaries once per
-// database (O(databases x tables)).
+// Catalog payloads are replaced, never mutated in place. So their arrays are stable cache keys.
+// renderTableList() runs on every search keystroke. Before this cache, it filtered all tables and searched all summaries once for each database.
+// The cost was O(databases x tables).
 const catalogTablesByDatabase = new WeakMap();
 const catalogSummaryByDatabase = new WeakMap();
 function tablesByDatabase(tables) {
@@ -234,7 +226,7 @@ function summaryByDatabase(summaries) {
   return byName;
 }
 
-// Tree icon per object family: a sprite drawing (ns.icon) in the kind's colour.
+// The tree icon of each object family. The icon is a sprite image (ns.icon) in the color of the kind.
 const TREE_KINDS = {
   table: { icon: "table", label: "Table" },
   distributed: { icon: "table-share", label: "Distributed table" },
@@ -263,10 +255,10 @@ function barPercent(value, max) {
   return pct < 1 ? 0 : pct;
 }
 
-// Right-aligned badge of a tree row: bytes only, the one unit of the
-// column (on disk, or "RAM" for what Memory, Buffer and dictionaries hold
-// in memory); rows and the rest are in the row's title. Nothing for
-// objects that hold no data (views, MVs) or no measurable memory.
+// The right-aligned badge of a tree row shows bytes only. Bytes are the one unit of the column.
+// The bytes are on disk, or "RAM" for the data that Memory, Buffer and dictionaries hold in memory.
+// The rows and the other values are in the title of the row. The badge is empty for objects that hold no data (views and MVs).
+// It is also empty for objects with no measurable memory.
 function treeBadge(table) {
   const footprint = summaryFootprintBytes(table);
   const resident = isResidentMemorySummary(table);

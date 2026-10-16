@@ -25,14 +25,14 @@ struct QueryRegistryRecord {
   bool partial_execution = false;
   int64_t session_elapsed_ms = -1;
 
-  // Retained only for the bounded Deep Analyze replay window. It is always the
-  // SQL submitted to runner_uri; system_uri is never used to replay user SQL.
+  // Kept only for the bounded Deep Analyze replay window. It is always the
+  // SQL that was submitted to runner_uri. system_uri is never used to replay user SQL.
   std::string original_sql;
 
   std::chrono::steady_clock::time_point created_at{};
   std::chrono::steady_clock::time_point updated_at{};
-  // Wall-clock bounds are retained separately so system.query_log lookups can
-  // prune by its ORDER BY prefix (event_date, event_time) instead of scanning
+  // The wall-clock bounds are kept separately. So the system.query_log lookups can
+  // prune by its ORDER BY prefix (event_date, event_time). They do not scan
   // every log part for a query_id match.
   std::chrono::system_clock::time_point created_at_wall{};
   std::chrono::system_clock::time_point updated_at_wall{};
@@ -61,8 +61,8 @@ public:
       bool partial_execution,
       int64_t session_elapsed_ms);
 
-  // Query records are panel-scoped, not user-scoped. Host id is still checked
-  // so a public query id from one configured host cannot be reused on another.
+  // Query records are scoped to the panel, not to the user. The host id is still checked.
+  // So a public query id from one configured host cannot be used on another host.
   std::optional<QueryRegistryRecord> find(
       const std::string& query_id,
       const std::string& host_id);

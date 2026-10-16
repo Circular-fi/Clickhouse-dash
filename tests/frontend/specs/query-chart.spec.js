@@ -4,11 +4,11 @@ import { openApp, runQuery, runSuccessfulQuery, waitForTerminal, waitForBatch } 
 import { chartJson, xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
 import { captureCopies } from '../helpers/clipboard.js';
 
-// Query result Table / Chart view: the chart is drawn client-side from the
-// rows a result panel received, per panel (main and every multiquery panel),
-// on canvas by the shared engine (app_chart_core.js). Canvas pixels are not
-// read: the engine publishes what it drew on its root (data-series-stats,
-// data-points-drawn, data-x-min / data-x-max, data-zoomed, data-cursor-x...).
+// Query result Table / Chart view: the browser draws the chart from the rows that a result panel received.
+// Each panel has its own chart: the main panel and every multiquery panel. The shared engine
+// (app_chart_core.js) draws the chart on canvas. The test does not read canvas pixels. The engine publishes
+// what it draws on its root: data-series-stats, data-points-drawn, data-x-min / data-x-max, data-zoomed,
+// data-cursor-x...
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -28,7 +28,7 @@ const dataRows = 'tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)';
 const shotsDir = `${process.env.FRONTEND_ARTIFACTS_DIR || '/tmp'}/query-chart`;
 
 const mainToggle = (page) => page.locator('#resultsPanel .resultsViewToggle--main');
-// A chart picker (ns.menu.select over the hidden native select): its button, then the option.
+// The chart picker (ns.menu.select over the hidden native select) has two parts: the button, then the option.
 async function pickChart(chart, select, value) {
   const picker = chart.locator(`.tracePicker:has(> ${select})`);
   await picker.locator('.tracePicker__button').click();
@@ -54,11 +54,11 @@ async function seriesStats(chart) {
   return JSON.parse(await core(chart).getAttribute('data-series-stats'));
 }
 
-// The plot area (inside the axes) in page coordinates.
+// The plot area (inside the axes) uses page coordinates.
 async function plotBox(chart) {
   await expect(core(chart)).toHaveAttribute('data-plot', /\d/);
   const [left, top, width, height] = (await core(chart).getAttribute('data-plot')).split(' ').map(Number);
-  // The mouse only reaches what the viewport shows (1280 x 800 included).
+  // The mouse reaches only the part that the viewport shows (1280 x 800 included).
   await chart.locator('.chartCore__overlay').evaluate((el) => {
     const r = el.getBoundingClientRect();
     if (r.top < 0 || r.bottom > window.innerHeight) el.scrollIntoView({ block: 'center' });
@@ -67,8 +67,8 @@ async function plotBox(chart) {
   return { x: box.x + left, y: box.y + top, width, height, left };
 }
 
-// Hover the plot at a fraction of its width; returns the snapped index, the
-// exact x readout and the crosshair / pointer positions (plot css px).
+// Hover the plot at a fraction of its width. The function returns the snapped index, the exact x readout and
+// the crosshair / pointer positions (plot css px).
 async function hoverPlot(page, chart, fraction, yFraction = 0.5) {
   const box = await plotBox(chart);
   const x = box.x + box.width * fraction;
@@ -76,8 +76,8 @@ async function hoverPlot(page, chart, fraction, yFraction = 0.5) {
   await page.mouse.move(x, box.y + box.height * yFraction);
   const tooltip = chart.locator('.chartCore__tooltip');
   await expect(tooltip).toBeVisible();
-  // The cursor follows the pointer on the next frame: until the chart reports
-  // this pointer position, the tooltip and readouts are the previous hover's.
+  // The cursor follows the pointer on the next frame. Until the chart reports this pointer position, the
+  // tooltip and the readouts show the previous hover.
   await expect.poll(async () => {
     const at = await core(chart).getAttribute('data-pointer-px');
     return at === null ? Infinity : Math.abs(Number(at) - (x - overlay.x));
@@ -99,8 +99,8 @@ async function tooltipValues(chart) {
   return out;
 }
 
-// Click Chart and time it until the frame after the chart has drawn every
-// row (a large result is parsed over several frames).
+// Click Chart. Measure the time until the frame after the chart draws every row. A large result takes several
+// frames to parse.
 async function timeChartClick(page, scopeSelector, rows) {
   return page.evaluate(async ({ sel, rows: total }) => {
     const panel = document.querySelector(sel);
@@ -116,8 +116,8 @@ async function timeChartClick(page, scopeSelector, rows) {
   }, { sel: scopeSelector, rows });
 }
 
-// Every chart draw, per animation frame, while `run` streams a result: the
-// engine's and the Query chart's work counters, and the most draws one frame saw.
+// The test counts every chart draw per animation frame while `run` streams a result. The counters are the
+// work of the engine and of the Query chart, and the most draws that one frame saw.
 async function countWork(page, run) {
   await page.evaluate(() => {
     const ns = window.ChDash;
@@ -141,8 +141,8 @@ async function countWork(page, run) {
   });
 }
 
-// The page as in a background tab: document.hidden and visibilitychange
-// (a headless page never hides by itself).
+// The page is in a background tab, with document.hidden and visibilitychange. A headless page never hides by
+// itself.
 async function setPageHidden(page, hidden) {
   await page.evaluate((on) => {
     if (!window.__hiddenPatched) {
@@ -155,16 +155,16 @@ async function setPageHidden(page, hidden) {
   }, hidden);
 }
 
-// Lets `count` animation frames render.
+// Let `count` animation frames render.
 const frames = (page, count = 2) => page.evaluate((n) => new Promise((resolve) => {
   const step = (left) => (left ? requestAnimationFrame(() => step(left - 1)) : resolve());
   step(n);
 }), count);
 
-// About two seconds of rows, in blocks of 100.
+// The rows cover about two seconds, in blocks of 100.
 const SLOW_STREAM = 'SELECT number AS n, number * 2 AS d FROM numbers(4000) WHERE sleepEachRow(0.0005) = 0 SETTINGS max_block_size = 100';
 
-// Rows of the example query streamed in about 100 chunks.
+// The rows of the example query stream in about 100 chunks.
 const STREAMED = 'SELECT number, now() + number, [number, 1], number - 10, number + 2 FROM numbers(200000) SETTINGS max_block_size = 2000';
 
 test('the example query charts within budget, explains the Array column and reads x exactly', async ({ page }) => {
@@ -178,9 +178,9 @@ test('the example query charts within budget, explains the Array column and read
   const chart = mainChart(page);
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
   await expect(mainTable(page)).toBeHidden();
-  // Self-explanatory controls: the label inside each picker, an explicit Auto choice.
+  // The controls need no extra text: each picker has a label and an explicit Auto choice.
   await expect(chart.locator('.queryChart__data .tracePicker__button')).toHaveText([/^X axis \u00b7 /, /^Y values \u00b7 /, /^Split by \u00b7 /]);
-  // The three pickers share one look (ns.menu pickers).
+  // The three pickers have the same look (ns.menu pickers).
   const looks = await chart.locator('.queryChart__data .tracePicker__button').evaluateAll((els) => els.map((el) => {
     const cs = getComputedStyle(el);
     return [cs.appearance, cs.height, cs.borderTopColor, cs.borderRadius, cs.backgroundColor, cs.backgroundImage, cs.paddingRight];
@@ -206,15 +206,15 @@ test('the example query charts within budget, explains the Array column and read
   const plotW = (await plotBox(chart)).width;
   for (const s of Object.values(stats)) {
     expect(s.runs).toBe(1);
-    // 10,000 points over ~1,300 px: at most 4 vertices per device pixel column.
+    // The chart has 10,000 points over ~1,300 px: at most 4 vertices per device pixel column.
     expect(s.points).toBeLessThanOrEqual(Math.ceil(plotW) * 4 + 4);
     expect(s.points).toBeGreaterThan(plotW);
   }
-  // now() + 10,000 s can cross midnight: the end then repeats its date.
-  // The shared range label (ns.format.range), the date once unless it changes.
+  // The range now() + 10,000 s can cross midnight, so the end then repeats its date. The shared range label
+  // (ns.format.range) shows the date once, unless the date changes.
   await expect(chart.locator('.queryChart__rangeText')).toContainText(/plus\(now\(\), number\) [A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d{2}:\d{2}:\d{2}\.000 → ([A-Z][a-z]{2} \d{1,2}(?:, \d{4})? )?\d{2}:\d{2}:\d{2}\.000/);
 
-  // Crosshair: the readout is the exact instant of the snapped row, with ms.
+  // The crosshair readout shows the exact instant of the snapped row, with ms.
   const first = await hoverPlot(page, chart, 0);
   expect(first.index).toBe(0);
   const t0 = Date.parse(`${first.readout.replace(' ', 'T')}Z`);
@@ -232,7 +232,7 @@ test('the example query charts within budget, explains the Array column and read
       'plus(number, 2)': (n + 2).toLocaleString('en-US'),
     });
   }
-  // Keyboard: point by point.
+  // The keyboard moves point by point.
   await chart.locator('.chartCore__overlay').focus();
   await page.keyboard.press('Home');
   await expect(core(chart)).toHaveAttribute('data-cursor-index', '0');
@@ -247,7 +247,7 @@ test('the example query charts within budget, explains the Array column and read
   await page.mouse.move(2, 2);
   await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/example-10k.png` });
 
-  // 200,000 rows: same budget order, a min/max envelope per pixel.
+  // The 200,000 rows use the same budget order, with a min/max envelope per pixel.
   await mainToggle(page).locator('[data-view="table"]').click();
   await runSuccessfulQuery(page, EXAMPLE_200K);
   await expect(page.locator('#queryStatusText')).toHaveText(/done|finished|limit reached/i);
@@ -273,7 +273,7 @@ test('millisecond timestamps read to the millisecond; numeric x reads the exact 
   await page.keyboard.press('ArrowRight');
   await expect(core(chart)).toHaveAttribute('data-cursor-x', '2026-01-01 00:00:00.014');
   await expect(chart.locator('.chartCore__tooltip strong')).toHaveText('2026-01-01 00:00:00.014');
-  // Few points: dots are drawn and the x range is in the header.
+  // With few points, the chart draws dots. The x range is in the header.
   await expect(chart.locator('.queryChart__rangeText')).toContainText(/Jan 1(?:, 2026)? 00:00:00\.000 → 00:00:00\.343/);
 
   await runSuccessfulQuery(page, 'SELECT number / 8 AS x, number * 3 AS y, number AS z FROM numbers(20)');
@@ -316,15 +316,14 @@ test('drag zooms the x axis, double-click and Reset zoom restore it', async ({ p
   expect(Number(await root.getAttribute('data-y-max'))).toBeLessThan(fullYMax * 0.6);
   await expect(chart.locator('.queryChart__resetZoom')).toBeVisible();
   await expect(chart.locator('.queryChart__range')).toHaveClass(/is-zoomed/);
-  // The tooltip still reads full-resolution rows inside the zoomed range: the
-  // middle of the plot is the row at the middle of the range the drag chose
-  // (the drag lands within a pixel of 20 % / 40 %, a pixel being ~8 rows of
-  // the full axis, so the nominal 30 % row is not a 5-row target).
+  // The tooltip still reads full-resolution rows inside the zoomed range. The middle of the plot is the row
+  // at the middle of the range that the drag chooses. The drag lands within a pixel of 20 % / 40 %. One pixel
+  // is ~8 rows of the full axis, so the nominal 30 % row is not a 5-row target.
   const inside = await hoverPlot(page, chart, 0.5);
   expect(Math.abs(inside.index - Math.round((((zMin + zMax) / 2) - fullMin) / span * 9999))).toBeLessThanOrEqual(5);
   await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/zoomed.png` });
 
-  // Zooming again narrows further; double-click resets.
+  // Zoom again to narrow the range. Double-click resets the zoom.
   await zoomTo(0.25, 0.75);
   expect(Number(await root.getAttribute('data-x-max')) - Number(await root.getAttribute('data-x-min'))).toBeLessThan((zMax - zMin) * 0.6);
   const box = await plotBox(chart);
@@ -363,7 +362,7 @@ test('legend isolates on click, toggles on Ctrl+click, and lists total / min / m
   await hoverPlot(page, chart, 0.5);
   expect(Object.keys(await tooltipValues(chart))).toEqual(['number']);
   await page.mouse.move(2, 2);
-  // Clicking the isolated series shows every series again.
+  // A click on the isolated series shows every series again.
   await items.nth(0).click();
   await expect(root).toHaveAttribute('data-series-drawn', '3');
   // Ctrl+click hides / shows one series.
@@ -373,14 +372,16 @@ test('legend isolates on click, toggles on Ctrl+click, and lists total / min / m
   await items.nth(2).click({ modifiers: ['Control'] });
   await expect(root).toHaveAttribute('data-series-drawn', '3');
 
-  // Values mode: a table of calculations over the visible range. The button says which: the total, the min, the max, the mean and the last.
+  // Values mode is a table of calculations over the visible range. The button shows which one: the total, the
+  // min, the max, the mean and the last.
   await expect(chart.locator('.chartCore__legendMode')).toHaveAttribute('title', 'Show total / min / max / mean / last per series');
   await chart.locator('.chartCore__legendMode').click();
   const table = chart.locator('.chartCore__legendTable');
   await expect(table).toBeVisible();
   await expect(table.locator('thead th')).toHaveText(['Series', 'Total', 'Min', 'Max', 'Mean', 'Last']);
-  // The total is the sum of the series over the range: the numbers 0..9,999 add up to 49,995,000, minus(number, 10) is 10 less for each of the
-  // 10,000 rows (49,895,000) and plus(number, 2) is 2 more for each (50,015,000).
+  // The total is the sum of the series over the range. The numbers 0..9,999 add up to 49,995,000.
+  // minus(number, 10) is 10 less for each of the 10,000 rows (49,895,000). plus(number, 2) is 2 more for each
+  // (50,015,000).
   await expect(table.locator('tbody tr').first().locator('td')).toHaveText(['49,995,000', '0', '9,999', '4,999.5', '9,999']);
   await expect(table.locator('tbody tr').nth(1).locator('td')).toHaveText(['49,895,000', '-10', '9,989', '4,989.5', '9,989']);
   await expect(table.locator('tbody tr').nth(2).locator('td').first()).toHaveText('50,015,000');
@@ -395,8 +396,9 @@ test('legend isolates on click, toggles on Ctrl+click, and lists total / min / m
   expect(await page.evaluate(() => localStorage.getItem('chdash.chart.legendMode'))).toBe('list');
 });
 
-// The Values table of the legend is the figures of the range that the plot shows (docs/ui-foundations.md, "The legend"): its Total, Min, Max,
-// Mean and Last follow a zoom and come back with the reset. A NULL is no value: the Total adds the values that exist and the Mean is over them.
+// The Values table of the legend shows the figures of the range that the plot shows (docs/ui-foundations.md,
+// "The legend"). Its Total, Min, Max, Mean and Last follow a zoom and return with the reset. A NULL is not a
+// value. The Total adds the values that exist, and the Mean is over them.
 test('the legend table reads the range that the plot shows: a zoom changes its Total, Min, Max, Mean and Last, the reset brings them back, and a NULL is no value', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, EXAMPLE);
@@ -407,8 +409,8 @@ test('the legend table reads the range that the plot shows: a zoom changes its T
   const first = chart.locator('.chartCore__legendTable tbody tr').first().locator('td');
   const figures = async () => (await first.allTextContents()).map((text) => Number(text.replace(/,/g, '')));
   await expect(first).toHaveText(['49,995,000', '0', '9,999', '4,999.5', '9,999']);
-  // A drag from 40 % to 60 % of the plot zooms on the rows in between: the numbers 4,000 to 5,999 (a pixel is about 8 rows, so the edges are
-  // within a few pixels of them).
+  // A drag from 40 % to 60 % of the plot gives a zoom on the rows between them: the numbers 4,000 to 5,999. A
+  // pixel is about 8 rows, so the edges are within a few pixels of them.
   const box = await plotBox(chart);
   await page.mouse.move(box.x + box.width * 0.4, box.y + box.height / 2);
   await page.mouse.down();
@@ -426,13 +428,14 @@ test('the legend table reads the range that the plot shows: a zoom changes its T
   // The rows of the other series follow it too: minus(number, 10) is 10 below the first one.
   const second = chart.locator('.chartCore__legendTable tbody tr').nth(1).locator('td');
   expect(Number((await second.nth(1).textContent()).replace(/,/g, ''))).toBe(min - 10);
-  // The reset brings the whole range back.
+  // The reset restores the whole range.
   await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
   await expect(root).toHaveAttribute('data-zoomed', 'false');
   await expect(first).toHaveText(['49,995,000', '0', '9,999', '4,999.5', '9,999']);
 
-  // A NULL is no value: z has one value every second row (0, 2, ... 98) and a NULL on the last row, so its Total adds the 50 values that exist,
-  // its Mean is over them (49, not 24.5), and the Last is the last value that exists.
+  // A NULL is not a value. The z series has one value on every second row (0, 2, ... 98) and a NULL on the
+  // last row. Its Total adds the 50 values that exist. Its Mean is over them (49, not 24.5). The Last is the
+  // last value that exists.
   await runSuccessfulQuery(page, 'SELECT number AS x, toFloat64(number) AS y, if(number % 2 = 1, NULL, toFloat64(number)) AS z FROM numbers(100)');
   const rows = chart.locator('.chartCore__legendTable tbody tr');
   await expect(rows.first().locator('th')).toHaveText('y');
@@ -463,7 +466,7 @@ test('x axis picker: Auto, row number or an explicit column', async ({ page }) =
   await expect(chart.locator('.queryChart__seriesButton')).toHaveText('Y values \u00b7 minus(number, 10), plus(number, 2)');
   await expect(chart.locator('.queryChart__rangeText')).toContainText('number 0 → 9,999');
 
-  // A text-like column as x: one category per value, drawn as bars.
+  // A text-like column as x has one category for each value. The chart draws the categories as bars.
   await pickChart(chart, '.queryChart__x', '2');
   await expect(chart).toHaveAttribute('data-x-kind', 'category');
   await expect(chart.locator('.queryChart__types [data-type="bar"]')).toHaveAttribute('aria-pressed', 'true');
@@ -471,7 +474,7 @@ test('x axis picker: Auto, row number or an explicit column', async ({ page }) =
   await pickChart(chart, '.queryChart__x', 'auto');
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
   await expect(chart.locator('.queryChart__types [data-type="line"]')).toHaveAttribute('aria-pressed', 'true');
-  // The choice is kept for the next result with the same columns.
+  // The chart keeps this choice for the next result with the same columns.
   await pickChart(chart, '.queryChart__x', '0');
   await runSuccessfulQuery(page, EXAMPLE);
   await expect(x).toHaveValue('0');
@@ -483,7 +486,7 @@ test('time series result switches between table and chart, types and series pick
   await runSuccessfulQuery(page, TIME_SERIES);
   await expect(mainToggle(page)).toBeVisible();
   await expect(mainToggle(page).locator('[data-view="table"]')).toHaveAttribute('aria-pressed', 'true');
-  // Icons, named for assistive technology and in a tooltip.
+  // The icons have names for assistive technology and a tooltip.
   await expect(mainToggle(page).getByRole('button', { name: 'Table view' })).toHaveAttribute('title', 'Show the rows as a table');
   await expect(mainToggle(page).getByRole('button', { name: 'Chart view' })).toHaveAttribute('title', 'Chart the received rows');
   await expect(mainToggle(page).locator('.segmented__option svg')).toHaveCount(2);
@@ -496,8 +499,8 @@ test('time series result switches between table and chart, types and series pick
   await expect(mainTable(page)).toBeHidden();
   await expect(chart).toHaveAttribute('data-x-kind', 'time');
   await expect(chart.locator('.queryChart__types [data-type="line"]')).toHaveAttribute('aria-pressed', 'true');
-  // The chart types are icons too (the Tabler sprite through ns.icon), named
-  // by aria-label, described by their title.
+  // The chart types are icons too (the Tabler sprite through ns.icon). Each one has an aria-label as its name
+  // and a title as its description.
   const types = chart.locator('.queryChart__types');
   await expect(types).toHaveAttribute('role', 'group');
   await expect(types).toHaveAttribute('aria-label', 'Chart type');
@@ -512,12 +515,12 @@ test('time series result switches between table and chart, types and series pick
     await expect(option.locator('svg.icon use')).toHaveAttribute('href', new RegExp(`#i-${icon}$`));
     await expect(option.locator('svg')).toHaveAttribute('aria-hidden', 'true');
   }
-  // Number needs a single-row result: disabled, its title says why.
+  // Number needs a single-row result. The button is disabled, and its title gives the reason.
   const number = types.getByRole('button', { name: 'Number', exact: true });
   await expect(number.locator('svg.icon use')).toHaveAttribute('href', /#i-number-123$/);
   await expect(number).toBeDisabled();
   await expect(number).toHaveAttribute('title', 'Number needs a single-row result');
-  // Keyboard: Tab reaches an option, Enter picks it.
+  // The keyboard reaches an option with Tab. Enter picks it.
   await types.getByRole('button', { name: 'Area', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(core(chart)).toHaveAttribute('data-type', 'area');
@@ -528,7 +531,7 @@ test('time series result switches between table and chart, types and series pick
   await expect(chart.locator('.chartCore__legendItem')).toHaveCount(2);
   await expect(chart.locator('.queryChart__note')).toContainText('120 rows');
 
-  // Rows are sorted by t ascending: index i is number = 119 - i.
+  // The rows are sorted by t in ascending order. Index i is number = 119 - i.
   for (const fraction of [0.013, 0.37, 0.5, 0.81, 0.999]) {
     const { index, pointerX, crossX, box } = await hoverPlot(page, chart, fraction);
     const spacing = box.width / 119;
@@ -551,16 +554,16 @@ test('time series result switches between table and chart, types and series pick
   expect(Object.keys(await seriesStats(chart))).toEqual(['v', 'w']);
   await expect(chart.locator('.queryChart__types [data-type="number"]')).toBeDisabled();
 
-  // Series picker: w only.
+  // The series picker covers w only.
   await chart.locator('.queryChart__seriesButton').click();
   await chart.locator('.queryChart__seriesMenu input[value="1"]').uncheck();
   await page.keyboard.press('Escape');
   await expect(chart.locator('.queryChart__seriesButton')).toHaveText('Y values \u00b7 w');
   expect(Object.keys(await seriesStats(chart))).toEqual(['w']);
-  // One series: no legend (the engine shows one from two series up).
+  // With one series, the chart has no legend. The engine shows a legend from two series up.
   await expect(chart.locator('.chartCore__legendItem')).toHaveCount(0);
 
-  // Back to the table: the rows are still rendered.
+  // Return to the table. The rows are still rendered.
   await mainToggle(page).locator('[data-view="table"]').click();
   await expect(mainTable(page)).toBeVisible();
   await expect(chart).toBeHidden();
@@ -573,15 +576,15 @@ test('split-by column draws one series per value and folds the rest into Other',
   await showChart(mainToggle(page));
   const chart = mainChart(page);
   await expect(chart.locator('.queryChart__group')).toHaveValue('2');
-  // Long-form rows: each group has a row every third minute and its line
-  // connects across the other groups' minutes.
+  // Long-form rows: each group has a row every third minute. Its line connects across the minutes of the
+  // other groups.
   expect(await seriesStats(chart)).toEqual({ a: { points: 40, runs: 1 }, b: { points: 40, runs: 1 }, c: { points: 40, runs: 1 } });
   await expect(chart.locator('.chartCore__legendItem')).toHaveText(['a', 'b', 'c']);
   const { index } = await hoverPlot(page, chart, 0.5);
   const number = 119 - index;
   expect(await tooltipValues(chart)).toEqual({ [['a', 'b', 'c'][number % 3]]: String(number % 7) });
 
-  // More groups than colour slots: the top 8 by value, the rest in Other.
+  // If there are more groups than colour slots, the chart shows the top 8 by value. The rest goes in Other.
   await runSuccessfulQuery(page, 'SELECT toStartOfMinute(now() - intDiv(number, 12) * 60) AS t, toString(number % 12) AS g, number % 12 + 1 AS v FROM numbers(240)');
   await expect(chart).toBeVisible();
   await expect(chart.locator('.chartCore__legendItem')).toHaveCount(9);
@@ -608,7 +611,7 @@ test('string x draws bars, a single value shows a number, text-only results cann
   expect(await tooltipValues(chart)).toEqual({ c: '10' });
   await expect(chart.locator('.queryChart__rangeText')).toContainText('k 3 of 3 values');
 
-  // The chosen view is the default for the next result.
+  // The chart keeps the chosen view as the default for the next result.
   await runSuccessfulQuery(page, 'SELECT 1234567 AS answer');
   await expect(chart).toBeVisible();
   await expect(chart).toHaveAttribute('data-chart-type', 'number');
@@ -625,13 +628,12 @@ test('string x draws bars, a single value shows a number, text-only results cann
   await expect(chart).toBeHidden();
   await expect(page.locator(`#resultTableBody ${dataRows}`)).toHaveCount(3);
 
-  // Still the default: the next numeric result opens as a chart again.
+  // The chart remains the default. The next numeric result opens as a chart.
   await runSuccessfulQuery(page, BARS);
   await expect(chart).toBeVisible();
   await expect(core(chart)).toBeVisible();
 
-  // A single row with several columns: Number tiles in the chart, the
-  // vertical table in the table view.
+  // A single row with several columns has Number tiles in the chart. The table view shows the vertical table.
   await runSuccessfulQuery(page, "SELECT 1 AS a, 2.5 AS b, 'x' AS s");
   await expect(chart.locator('.queryChart__number')).toHaveCount(2);
   await mainToggle(page).locator('[data-view="table"]').click();
@@ -651,7 +653,7 @@ test('view choice persists across results and reloads; clear resets the panel', 
   await expect(core(mainChart(page))).toHaveAttribute('data-series-drawn', '2');
   await expect(mainToggle(page).locator('[data-view="chart"]')).toHaveAttribute('aria-pressed', 'true');
 
-  // Copy JSON still copies the rows from the chart view.
+  // Copy JSON copies the rows from the chart view, too.
   const readCopied = await captureCopies(page, { clipboard: true });
   await page.locator('#copyJsonButton').click();
   await expect.poll(() => readCopied().then((text) => { try { return JSON.parse(text).length; } catch (_) { return -1; } })).toBe(120);
@@ -663,7 +665,7 @@ test('view choice persists across results and reloads; clear resets the panel', 
   await expect(mainChart(page)).toBeVisible();
   await mainToggle(page).locator('[data-view="table"]').click();
   expect(await page.evaluate(() => localStorage.getItem('chdash.results.view'))).toBe('table');
-  // A hidden chart gives its canvas memory back.
+  // A hidden chart releases its canvas memory.
   expect(await mainChart(page).locator('canvas').evaluateAll((els) => els.map((c) => c.width * c.height))).toEqual([0]);
 });
 
@@ -699,7 +701,7 @@ test('multiquery panels chart independently, share the time crosshair and redraw
   await expect(panel(0).locator(`tbody ${dataRows}`)).toHaveCount(120);
   await expect(panel(2).locator('.queryChart')).toBeVisible();
 
-  // The virtualised panel charts all 3000 rows and still renders its table.
+  // The virtualised panel charts all 3000 rows. It also renders its table.
   await showChart(panel(3));
   await expect(panel(3).locator('.queryChart')).toHaveAttribute('data-x-kind', 'number');
   await expect(panel(3).locator('.queryChart__note')).toContainText('3,000 rows');
@@ -709,8 +711,8 @@ test('multiquery panels chart independently, share the time crosshair and redraw
   expect(mounted).toBeGreaterThan(0);
   expect(mounted).toBeLessThan(3000);
 
-  // Two time panels: hovering one draws the crosshair at the same instant
-  // in the other (Grafana's shared crosshair).
+  // Two time panels: a hover on one panel draws the crosshair at the same instant in the other (Grafana's
+  // shared crosshair).
   await showChart(panel(0));
   await showChart(panel(4));
   await panel(4).scrollIntoViewIfNeeded();
@@ -722,7 +724,7 @@ test('multiquery panels chart independently, share the time crosshair and redraw
   await page.mouse.move(2, 2);
   await expect(core(panel(0))).not.toHaveAttribute('data-sync-x', /./);
 
-  // Collapsing and re-expanding a charted panel redraws it at full width.
+  // A collapse and a re-expand of a charted panel redraw it at full width.
   await panel(2).locator('.resultsStack__toggle').click();
   await expect(panel(2).locator('.resultsStack__body')).toBeHidden();
   await panel(2).locator('.resultsStack__toggle').click();
@@ -758,9 +760,9 @@ test('a large streamed result shows a streaming placeholder, then charts once, d
     };
     requestAnimationFrame(tick);
   });
-  // About two seconds of streaming: 40 blocks of 5000 rows.
+  // The stream lasts about two seconds: 40 blocks of 5000 rows.
   await runQuery(page, 'SELECT number AS n, number % 1000 AS v, intDiv(number, 7) % 500 AS u FROM numbers(200000) WHERE sleepEachRow(0.00001) = 0 SETTINGS max_block_size = 5000');
-  // While the rows stream in, the chart area counts them and draws nothing.
+  // While the rows arrive, the chart area counts them and draws nothing.
   const chart = mainChart(page);
   await expect(chart.locator('.queryChart__message')).toHaveText(/^Streaming\u2026 [\d,]+ rows?$/, { timeout: 20_000 });
   await expect(chart.locator('.queryChart__message')).toHaveClass(/is-busy/);
@@ -792,10 +794,9 @@ test('a large streamed result shows a streaming placeholder, then charts once, d
 
 test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 d, on 1440 and 390 px pages', async ({ page }) => {
   await openApp(page);
-  // Every range starts at 22:30 (UTC, the browser's zone here), the first
-  // label just before a midnight: "Oct 2 2026" under 23:00 and "Oct 3 2026"
-  // under 00:00 ran into each other. Now 00:00 reads "Oct 3" (the year is
-  // the first date's), or the first date gives way to it ("Oct 3 2026").
+  // Every range starts at 22:30 (UTC, the browser's zone here). The first label is just before a midnight.
+  // "Oct 2 2026" under 23:00 and "Oct 3 2026" under 00:00 collided. Now 00:00 reads "Oct 3" (the year is the
+  // first date's). Or, the first date is replaced by "Oct 3 2026".
   const start = Date.UTC(2026, 9, 2, 22, 30) / 1000;
   const RANGES = [['1h', 60, 60], ['24h', 300, 288], ['7d', 3600, 168], ['30d', 3600, 720]];
   const chart = mainChart(page);
@@ -806,9 +807,10 @@ test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 
       await runSuccessfulQuery(page, `SELECT toDateTime(${start} + number * ${step}, 'UTC') AS t, number % 7 AS v FROM numbers(${count + 1})`);
       if (!(await chart.isVisible())) await showChart(mainToggle(page));
       await expect(chart).toHaveAttribute('data-x-kind', 'time');
-      // This result drawn (390 px decimates the 30 d points).
+      // The chart draws this result at 390 px, which decimates the 30 d points.
       await expect(root).toHaveAttribute('data-x-max', String((start + step * count) * 1000));
-      // [label, date line, left, right, date left, date right] of each label drawn.
+      // Each entry has this form for a label that the chart draws: [label, date line, left, right, date left,
+      // date right].
       const ticks = await chartJson(root, 'data-x-ticks');
       expect(ticks.length, `${name} at ${width}`).toBeGreaterThanOrEqual(3);
       expect(xLabelCollisions(ticks), `${name} at ${width}: ${JSON.stringify(ticks)}`).toEqual([]);
@@ -822,7 +824,7 @@ test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 
       if (name === '7d') expect(dated.slice(1).every((t) => /^[A-Z][a-z]{2} \d{1,2}$/.test(t[1])), JSON.stringify(dated)).toBe(true);
     }
   }
-  // A redraw of the same axis measures no text: the widths are cached.
+  // A redraw of the same axis measures no text. The widths are cached.
   const measured = await page.evaluate(async () => {
     const api = window.ChDash.chartCore.of(document.querySelector('#resultsPanel > .queryChart'));
     const before = window.ChDash.chartCore.counters();
@@ -892,21 +894,21 @@ test('chart follows the theme, resizes and never overflows the page', async ({ p
       await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/example-${theme}-${width}.png` });
     }
   }
-  // Resizing the window redraws at the new width; a narrow (mobile) window
-  // keeps the chart inside the panel.
+  // When the window is resized, the chart redraws at the new width. A narrow (mobile) window keeps the chart
+  // inside the panel.
   for (const width of [1100, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await expect.poll(() => chart.evaluate((host) => Math.abs(host.querySelector('.chartCore__plot').clientWidth - host.querySelector('canvas').getBoundingClientRect().width))).toBeLessThanOrEqual(1);
     expect(await chart.evaluate((host) => host.scrollWidth - host.clientWidth)).toBeLessThanOrEqual(1);
   }
   await page.locator('#resultsPanel').screenshot({ path: `${shotsDir}/example-mobile-390.png` });
-  // High-density screens: the backing store follows devicePixelRatio, with no
-  // resize to trigger the redraw (the chart's `resolution` media query does).
-  // Chromium's emulation re-evaluates media queries only when the viewport
-  // metrics change: an override that changes the scale factor alone sets
-  // devicePixelRatio without any change event or resize, which no real display
-  // change does. So the override also grows the viewport by 1 px in height,
-  // which leaves the plot width (and the resize observer) alone.
+  // High-density screens: the backing store follows devicePixelRatio. No resize triggers the redraw. The
+  // chart's `resolution` media query does trigger it.
+  //
+  // Chromium's emulation re-evaluates media queries only when the viewport metrics change. An override that
+  // changes the scale factor alone sets devicePixelRatio, without any change event or resize. No real display
+  // change does that. So the override also increases the viewport height by 1 px. This leaves the plot width
+  // and the resize observer unchanged.
   await page.setViewportSize({ width: 1280, height: 900 });
   const backing = () => chart.evaluate((host) => {
     const c = host.querySelector('canvas');
@@ -914,7 +916,7 @@ test('chart follows the theme, resizes and never overflows the page', async ({ p
     const plot = host.querySelector('.chartCore__plot').clientWidth;
     return { ratio: c.width / css, plot, fits: Math.abs(plot - css) <= 1, viewport: innerWidth, draws: Number(host.querySelector('.chartCore').dataset.draws) };
   });
-  // The 1280 px redraw has landed before the scale factor changes.
+  // The 1280 px redraw completes before the scale factor changes.
   await expect.poll(async () => { const b = await backing(); return b.viewport === 1280 && b.fits && b.ratio === 1; }).toBe(true);
   const at1x = await backing();
   const cdp = await page.context().newCDPSession(page);
@@ -933,13 +935,13 @@ test('a streamed result is drawn once, at the end: each value parsed once, one l
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'chart'));
   await page.evaluate(() => window.ChDash.queryChart.loadCore());
   const chart = mainChart(page);
-  // Nothing is parsed or drawn while the rows stream in.
+  // The chart does not parse or draw anything while the rows arrive.
   await page.evaluate(() => {
     const ns = window.ChDash;
     window.__beforeDone = null;
     const host = document.querySelector('#resultsPanel > .queryChart');
     const watch = () => {
-      // The last frame that showed the placeholder with rows received.
+      // The last frame that showed the placeholder, with the rows received.
       if (/^Streaming\u2026 [1-9]/.test(host.querySelector('.queryChart__message:not([hidden])')?.textContent || '')) {
         window.__beforeDone = { q: ns.queryChart.counters(), core: ns.chartCore.counters() };
       }
@@ -961,19 +963,19 @@ test('a streamed result is drawn once, at the end: each value parsed once, one l
   expect(before.q.modelBuilds).toBe(0);
   expect(before.core.draws).toBe(0);
   expect(before.q.plots).toBe(0);
-  // One chart, handed its data once.
+  // The chart receives its data once.
   expect(work.q.plots).toBe(1);
   expect(work.maxDrawsPerFrame).toBeLessThanOrEqual(1);
   expect(work.core.draws).toBeGreaterThan(0);
   expect(work.core.draws).toBeLessThanOrEqual(3);
-  // Columns appended once each: x and the three series of 200,000 rows,
-  // and the column types read once per result.
+  // Each column is appended once: x and the three series of 200,000 rows. The column types are read once for
+  // each result.
   expect(work.q.rowsParsed).toBe(4 * 200000);
   expect(work.q.typeDetections).toBe(5);
   // The series never changed: one legend, one toolbar.
   expect(work.core.legendBuilds).toBe(1);
   expect(work.q.toolbarBuilds).toBeLessThanOrEqual(1);
-  // Decimation read block summaries, not every point at every draw.
+  // Decimation reads block summaries, not every point at every draw.
   expect(work.core.tracedPoints).toBeLessThan(work.core.draws * 3 * 200000);
   expect(work.core.summarised).toBeLessThanOrEqual(3 * 200000 + 3 * 64 * work.core.setData);
 });
@@ -983,7 +985,8 @@ test('a canceled or failed query charts the rows it received', async ({ page }) 
   await openApp(page);
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'chart'));
   const chart = mainChart(page);
-  // Canceled mid-stream: the placeholder until then, the received rows after.
+  // The test cancels the stream mid-stream. The placeholder shows until then. The received rows show after
+  // that.
   await runQuery(page, 'SELECT number AS n, number % 13 AS v FROM numbers(100000) WHERE sleepEachRow(0.0005) = 0 SETTINGS max_block_size = 200');
   await expect(chart.locator('.queryChart__message')).toHaveText(/^Streaming… [1-9][\d,]* rows$/, { timeout: 20_000 });
   await expect(core(chart)).toHaveCount(0);
@@ -998,12 +1001,12 @@ test('a canceled or failed query charts the rows it received', async ({ page }) 
   expect(charted).toBeGreaterThanOrEqual(received);
   await expect(chart.locator('.queryChart__note')).toContainText(`${charted.toLocaleString('en-US')} rows`);
 
-  // Failed after some rows (a division by zero at row 3000): those rows.
+  // The result fails after some rows (a division by zero at row 3000). The chart shows those rows.
   await runQuery(page, 'SELECT number AS n, intDiv(10, 3000 - number) AS v FROM numbers(10000) SETTINGS max_block_size = 500');
   await waitForTerminal(page);
   await expect(page.locator('#queryStatusText')).toHaveText(/error/i);
-  // The chart, or (ClickHouse failed the first block) the empty message:
-  // never the placeholder once the stream has ended.
+  // The chart shows the data, or (ClickHouse failed the first block) the empty message. It never shows the
+  // placeholder after the stream has ended.
   await expect.poll(() => chart.evaluate((host) => host.dataset.rowsCharted
     || (host.dataset.stage === 'message' && !/^Streaming/.test(host.querySelector('.queryChart__message').textContent) ? 'message' : ''))).not.toBe('');
   const failedRows = Number(await chart.getAttribute('data-rows-charted')) || 0;
@@ -1029,7 +1032,7 @@ test('a hidden chart does no work: Table view, collapsed panel, background tab; 
     expect(work.core.layoutReads).toBe(0);
   };
 
-  // Table view while streaming: nothing parsed or drawn; the Chart view builds it.
+  // During a stream in the Table view, the chart does not parse or draw anything. The Chart view builds it.
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'table'));
   idle(await countWork(page, () => runSuccessfulQuery(page, STREAMED)));
   const shown = await countWork(page, async () => {
@@ -1039,7 +1042,7 @@ test('a hidden chart does no work: Table view, collapsed panel, background tab; 
   expect(shown.q.rowsParsed).toBe(4 * 200000);
   expect(shown.maxDrawsPerFrame).toBeLessThanOrEqual(1);
 
-  // A background tab: the chart waits, then charts every row in a few frames.
+  // In a background tab, the chart waits. Then it charts every row in a few frames.
   await setPageHidden(page, true);
   idle(await countWork(page, () => runSuccessfulQuery(page, STREAMED)));
   const back = await countWork(page, async () => {
@@ -1049,8 +1052,8 @@ test('a hidden chart does no work: Table view, collapsed panel, background tab; 
   expect(back.core.draws).toBeGreaterThan(0);
   expect(back.maxDrawsPerFrame).toBeLessThanOrEqual(1);
 
-  // A multiquery panel collapsed while its rows stream in (its chart only
-  // counts them meanwhile): nothing until it is expanded again.
+  // A multiquery panel collapses while its rows arrive. Its chart only counts the rows in that time. The
+  // chart draws nothing until the panel expands again.
   await enableMultiquery(page);
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'chart'));
   await runQuery(page, `SELECT 1 AS one, 2 AS two; ${SLOW_STREAM};`);
@@ -1072,9 +1075,8 @@ test('performance budget: 1,000,000 streamed rows of 5 numeric columns are drawn
   test.setTimeout(120_000);
   await openApp(page);
   await page.evaluate(() => window.ChDash.queryChart.loadCore());
-  // The server caps a result at 200,000 rows: the rows are fed to a result
-  // chart in the page, 100 chunks of 10,000 rows in separate tasks, as the
-  // stream delivers them.
+  // The server caps a result at 200,000 rows. The test feeds these rows to a result chart in the page, in 100
+  // chunks of 10,000 rows, each in a separate task, as the stream delivers them.
   const result = await page.evaluate(async () => {
     const ns = window.ChDash;
     const rows = [];
@@ -1111,14 +1113,14 @@ test('performance budget: 1,000,000 streamed rows of 5 numeric columns are drawn
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     const lastChunk = performance.now();
-    // Streaming parsed and drew nothing.
+    // During the stream, the chart did not parse or draw anything.
     const streamed = { q: ns.queryChart.counters(), draws: ns.chartCore.counters().draws };
     ctl.done();
     await new Promise((resolve) => {
       const check = () => (Number(ctl.hostEl.dataset.rowsCharted) === rows.length ? resolve() : requestAnimationFrame(check));
       requestAnimationFrame(check);
     });
-    // The frame after the final draw has been presented.
+    // The browser presents the frame after the final draw.
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const finalPaint = performance.now();
     stop = true;
@@ -1132,16 +1134,16 @@ test('performance budget: 1,000,000 streamed rows of 5 numeric columns are drawn
   expect(result.note).toContain('1,000,000 rows');
   expect(result.streamed.draws).toBe(0);
   expect(result.streamed.q.rowsParsed).toBe(0);
-  // Parsed over a few frames after the end, then drawn once.
+  // The chart parses the rows over a few frames after the end. Then it draws once.
   expect(result.plots).toBe(1);
   expect(result.maxDraws).toBeLessThanOrEqual(1);
   expect(result.finalPaintMs).toBeLessThan(1500);
   expect(Math.max(0, ...result.longTasks)).toBeLessThan(200);
 });
 
-// Audit round 2: the Chart details panel sits on the left of the plot and the rows note stays at the right end; the
-// Number icon is as tall as the other types'; off, it is dimmed and keeps a tooltip that says why (aria-disabled, not
-// disabled).
+// Audit round 2: the Chart details panel is on the left of the plot. The rows note stays at the right end.
+// The Number icon is as tall as the other types. When it is off, the icon is dimmed and keeps a tooltip that
+// gives the reason (aria-disabled, not disabled).
 test('chart details: on the left of the plot; the Number icon the size of the others, dimmed with its reason when off', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, TIME_SERIES);
@@ -1158,7 +1160,8 @@ test('chart details: on the left of the plot; the Number icon the size of the ot
   // The note ("120 rows") stays at the right end of the plot column.
   const note = await chart.locator('.queryChart__note').boundingBox();
   expect(note.x + note.width).toBeGreaterThan(plot.x + plot.width - 4);
-  // Off: aria-disabled (hover and focus show the title), dimmed, a click does nothing.
+  // When it is off, the button has aria-disabled. Hover and focus show the title. The button is dimmed, and a
+  // click does nothing.
   const number = chart.locator('.queryChart__types [data-type="number"]');
   await expect(number).toHaveAttribute('aria-disabled', 'true');
   expect(await number.evaluate((el) => el.disabled)).toBe(false);
@@ -1187,14 +1190,15 @@ test('chart details: on the left of the plot; the Number icon the size of the ot
   expect(heights.number).toBeGreaterThanOrEqual(heights.bar * 0.7);
 });
 
-// Chart details: fixed Y edges, and a panel that folds to a rail (and stays folded).
+// Chart details: fixed Y edges, and a panel that folds to a rail. The panel stays folded.
 test('chart details: fixed Y edges, and a panel that folds and stays folded', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, TIME_SERIES);
   await showChart(mainToggle(page));
   const chart = mainChart(page);
   await expect(core(chart)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
-  // Y max alone raises the top edge; both edges fix the axis; a pair that leaves no range is flagged and ignored.
+  // Y max alone raises the top edge. Both edges fix the axis. The chart flags and ignores a pair that leaves
+  // no range.
   await chart.locator('input[data-cfg="yMax"]').fill('50');
   await expect(core(chart)).toHaveAttribute('data-y-max', '50');
   await chart.locator('input[data-cfg="yMin"]').fill('-5');
@@ -1209,7 +1213,8 @@ test('chart details: fixed Y edges, and a panel that folds and stays folded', as
   await chart.locator('input[data-cfg="yMax"]').fill('40');
   await runSuccessfulQuery(page, TIME_SERIES);
   await expect(chart.locator('input[data-cfg="yMax"]')).toHaveValue('40');
-  // Fold: the fields go, the button stays, the plot takes the width; the choice is kept for the next chart.
+  // When the panel folds, it hides the fields, keeps the button, and gives the plot the full width. The chart
+  // keeps the choice for the next chart.
   await expect(core(chart)).toBeVisible();
   await expect(core(chart)).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/);
   const before = await core(chart).boundingBox();
@@ -1226,7 +1231,7 @@ test('chart details: fixed Y edges, and a panel that folds and stays folded', as
   await expect(mainChart(page).locator('.queryChart__detailsBody')).toBeVisible();
 });
 
-// Graph styles (Chart details): what the panel sets reaches the plot.
+// Graph styles (Chart details): the settings of the panel apply to the plot.
 test('chart details: stack, interpolation, fill, points and line width reach the plot', async ({ page }) => {
   await openApp(page);
   // Three groups share each minute, so a stack has three layers.
@@ -1238,7 +1243,7 @@ test('chart details: stack, interpolation, fill, points and line width reach the
   const num = async (name) => Number(await root.getAttribute(name));
   const field = (key) => chart.locator(`input[data-cfg="${key}"]`);
 
-  // Stack: 100% reads out of 100 (an area), Off draws each area on its own.
+  // Stack: 100% shows values out of 100 (an area). Off draws each area on its own.
   await chart.locator('.queryChart__types [data-type="area"]').click();
   await pickChart(chart, 'select[data-cfg="stack"]', 'percent');
   await expect.poll(() => num('data-y-max')).toBeGreaterThanOrEqual(100);
@@ -1269,7 +1274,8 @@ test('chart details: stack, interpolation, fill, points and line width reach the
   await expect(root).toHaveAttribute('data-interpolation', 'stepAfter');
 });
 
-// Missing values: a series that has no row at an x leaves a gap; Zero reads it as 0, Connect joins across.
+// Missing values: a series that has no row at an x leaves a gap. Zero reads the gap as 0. Connect joins the
+// points across the gap.
 test('chart details: Missing values Zero gives every series a value at every x', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, GROUPED);

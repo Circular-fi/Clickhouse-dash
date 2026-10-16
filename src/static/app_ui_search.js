@@ -1,17 +1,17 @@
-// ns.search: every search and filter field of the app, one behaviour and
-// one look (.uiSearch, css/10-components/search.css).
+// ns.search: the search and filter fields of the app.
+// All fields have one behaviour and one look (.uiSearch, css/10-components/search.css).
 //
 //   bind(input, onChange, { debounceMs, compact }) -> { flush(), cancel(), clear() }
-//     onChange(value) once typing pauses for debounceMs (the one delay,
-//     util.SEARCH_DEBOUNCE_MS = 200 ms; 0 for a cheap filter that follows
-//     every key), at once on Enter and on the field's clear button. Escape
-//     empties a filled field and stops there; on an empty field it goes on
-//     to close what holds the field (a menu, a panel).
+//     onChange(value) runs when the user pauses for debounceMs after a key press. This is the one delay,
+//     util.SEARCH_DEBOUNCE_MS = 200 ms. Use 0 for a cheap filter that runs on every key.
+//     onChange also runs at once on Enter and on the clear button of the field. Escape
+//     empties a filled field and stops there. On an empty field, Escape closes what holds
+//     the field (a menu, a panel).
 //   within(root, selector, onChange, options) -> { flush(), cancel() }
-//     The same for fields a view renders again: one delegated listener on
-//     `root`; onChange(value, input). flush() applies a typed value still
-//     waiting for the delay: call it before another control re-renders the
-//     view, so the render does not write the old value back into the field.
+//     The same behaviour for fields that a view renders again. One delegated listener on
+//     `root`; onChange(value, input). flush() applies a typed value that is still in the
+//     delay. Call it before another control renders the view, so the render does not write
+//     the old value back into the field.
 
 import { util } from "./app_util.js";
 
@@ -23,7 +23,7 @@ function controller(onChange, debounceMs) {
     typed(input) { last = input; if (later) later(); else run(); },
     now(input) { last = input; later?.cancel(); run(); },
     cancel() { later?.cancel(); },
-    // The waiting call now, if there is one.
+    // Run the pending call now, if there is one.
     flush() { later?.flush(); },
   };
 }

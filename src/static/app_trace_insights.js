@@ -1,8 +1,8 @@
-// Span insights on the trace page: exceptions with parsed stack traces,
-// highlighted attributes in the trace header, spans of other traces that
-// link to a span ("linked from", /api/traces/linked_from) and the
-// surrounding context of a span (/api/traces/context, a side panel).
-// app_trace_detail.js calls init() once.
+// This file shows the span insights on the trace page.
+// The insights are these: exceptions with parsed stack traces, and highlighted attributes in the trace header.
+// The insights also include spans of other traces that link to a span ("linked from", /api/traces/linked_from).
+// They also include the surrounding context of a span (/api/traces/context, a side panel).
+// The file app_trace_detail.js calls init() once.
 
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
@@ -24,9 +24,9 @@ const { byId, $, $$ } = dom;
 const fmt = format;
 
 // ------------------------------------------------------------ exceptions
-// OTel semantic conventions: an event named "exception" with
-// exception.type / exception.message / exception.stacktrace /
-// exception.escaped, or the same keys as span attributes.
+// This follows the OTel semantic conventions. An event named "exception" has these keys:
+// exception.type / exception.message / exception.stacktrace / exception.escaped.
+// The same keys can also be span attributes.
 
 const EXCEPTION_FRAMES_SHOWN = 5;
 const EXCEPTION_ICON = icon("bolt", { size: "sm" });
@@ -54,7 +54,7 @@ function exceptionFrom(attrs, source, event = null) {
   };
 }
 
-// Cheap pre-check before any JSON is parsed (waterfall rows, trace header).
+// This is a cheap pre-check. It runs before any JSON is parsed, for the waterfall rows and the trace header.
 function mayHaveException(span) {
   return String(span?.events_name || "").includes('"exception"') || String(span?.span_attributes || "").includes('"exception.');
 }
@@ -84,8 +84,8 @@ function exceptionTitle(item) {
 }
 
 // --- Stack trace parsing: Java/Kotlin, Python, Go, JavaScript (V8 and
-// Firefox/Safari), .NET and Ruby. Unparsed lines stay as text rows; a stack
-// without any recognised frame is shown as preformatted text.
+// Firefox/Safari), .NET and Ruby.
+// A line that the parser does not read stays as a text row. A stack without any recognised frame shows as preformatted text.
 const FRAME_PATTERNS = [
   // .NET: "at Ns.Type.Method(String arg) in /src/File.cs:line 42"
   { format: "dotnet", re: /^\s*at\s+(.+?\(.*?\))\s+in\s+(.+?):line\s+(\d+)\s*$/, map: (m) => ({ fn: m[1], file: m[2], line: m[3] }) },
@@ -130,7 +130,7 @@ function parseStackTrace(raw) {
     const goLoc = i + 1 < lines.length ? GO_LOCATION.exec(lines[i + 1]) : null;
     const goFn = goLoc && !/^\s/.test(line) ? GO_FUNCTION.exec(line.trim()) : null;
     if (goFn) {
-      // The argument words go; a method receiver "(*T)" stays.
+      // The argument words are removed. A method receiver "(*T)" stays.
       const fn = line.trim().replace(/\s+in goroutine \d+$/, "").replace(/\([^()]*\)$/, "");
       rows.push(frameRow("go", { fn, file: goLoc[1], line: goLoc[2] }, `${line}\n${lines[i + 1]}`));
       counts.go = (counts.go || 0) + 1;
@@ -177,9 +177,8 @@ function frameHtml(row, hidden) {
   return `<li class="traceStack__row traceStack__frame${row.library ? " is-library" : ""}"${hide} data-stack-frame${row.library ? ' title="Library or runtime frame"' : ""}><code class="traceStack__fn">${esc(row.fn || "<anonymous>")}</code>${loc ? `<span class="traceStack__loc">${esc(loc)}</span>` : ""}${row.code ? `<code class="traceStack__code">${esc(row.code)}</code>` : ""}</li>`;
 }
 
-// The frames nearest the throw stay visible: the first N (or the last N
-// for Python). Text rows (the exception line, "Caused by:", "... N more")
-// always show.
+// The frames nearest the throw stay visible: the first N frames, or the last N frames for Python.
+// Text rows always show. These rows are the exception line, "Caused by:", and "... N more".
 function stackHtml(item, spanId, index) {
   const stack = item.stack;
   if (!stack) return "";
@@ -232,8 +231,8 @@ function exceptionBadgeHtml(span) {
   return `<span class="traceSpanRow__exception" data-span-exception title="${esc(label)}" aria-label="${esc(label)}">${EXCEPTION_ICON}</span>`;
 }
 
-// Trace header: the spans with exceptions (count and the first one's
-// type), a button that focuses the first of them.
+// The trace header shows the spans with exceptions. It shows the count and the type of the first one.
+// A button focuses the first of these spans.
 const traceExceptionCache = new WeakMap();
 function traceExceptionSummary(cache) {
   let summary = traceExceptionCache.get(cache);
@@ -262,9 +261,8 @@ function traceExceptionTagHtml(cache) {
 }
 
 // ------------------------------------------------ highlighted attributes
-// traces.highlighted_attributes: each key from the root span (span
-// attributes, then resource attributes), else from the first span in tree
-// order that carries it.
+// traces.highlighted_attributes: each key comes from the root span (span attributes, then resource attributes).
+// If the root span does not have the key, the key comes from the first span in tree order that carries it.
 
 const highlightCache = new WeakMap();
 
@@ -388,8 +386,8 @@ async function loadLinkedFrom(spanId, { force = false } = {}) {
     params.start_ms = Math.floor(start / 1e6);
     params.end_ms = Math.ceil(end / 1e6);
   }
-  // One read for each span of a trace on this host: cut when the host changes (install), so the answer of the old host
-  // never lands under the same trace and span of the new one.
+  // Each span of a trace on this host has one read. The read is cancelled when the host changes (install).
+  // So the answer of the old host never lands under the same trace and span of the new one.
   const req = obsView.read(`traces.linked.${currentHost()}\u0000${key}`);
   try {
     const payload = await api.getTraceLinkedFrom(currentHost(), params, { signal: req.signal });
@@ -402,8 +400,7 @@ async function loadLinkedFrom(spanId, { force = false } = {}) {
   if (String(activeTraceCache().trace?.trace_id || "") === traceId) patchLinkedFrom(spanId);
 }
 
-// Loads when the References section opens (a section rendered open loads
-// from linkedFromRemoteHtml).
+// This loads when the References section opens. A section that renders open loads from linkedFromRemoteHtml.
 function onSectionToggle(spanId, key, open) {
   if (key === "references" && open) void loadLinkedFrom(String(spanId || ""));
 }
@@ -439,8 +436,8 @@ function panel() {
   if (el) return el;
   el = document.createElement("aside");
   el.id = "traceContextPanel";
-  // The detail panel shell's head and close button (ns.detailPanel), in a
-  // drawer over the trace under the page chrome.
+  // The head and close button belong to the detail panel shell (ns.detailPanel).
+  // The shell is a drawer over the trace, under the page chrome.
   el.className = "uiDetail traceContextPanel";
   el.setAttribute("role", "dialog");
   el.setAttribute("aria-modal", "false");
@@ -451,12 +448,12 @@ function panel() {
   el.addEventListener("click", onPanelClick);
   el.addEventListener("change", onPanelChange);
   el.addEventListener("keydown", (event) => {
-    // Escape goes on to ns.layers (the panel is a layer).
+    // Escape goes to ns.layers, because the panel is a layer.
     if (event.key === "Escape") return;
-    // The trace page's shortcuts (a/d, arrows, [ ]) are not for the panel.
+    // The shortcuts of the trace page (a/d, arrows, [ ]) do not apply to the panel.
     event.stopPropagation();
   });
-  // Up / Down between spans, Enter / Space open one (ns.table.rovingRows).
+  // Up and Down move between spans. Enter and Space open a span (ns.table.rovingRows).
   table.rovingRows(el, { rows: "tr[data-context-span]", onOpen: (row) => openContextRow(row) });
   return el;
 }
@@ -498,7 +495,7 @@ function openContext(spanId, trigger = null) {
   context.returnFocus = trigger;
   const el = panel();
   el.hidden = false;
-  // An ns.layers layer: Escape closes it, the focus goes back to its trigger.
+  // This is an ns.layers layer. Escape closes it, and the focus returns to its trigger.
   contextLayer = layers.push({ el, name: "traceContext", docked: true, opener: trigger, onDismiss: () => closeContext() });
   document.body.classList.add("has-trace-context");
   void loadContext("around");
@@ -509,7 +506,7 @@ let contextLayer = null;
 function closeContext() {
   context.open = false;
   util.latest.cancel("traces.context");
-  // The layer gives the focus back to the trigger (when it was in the panel).
+  // The layer returns the focus to the trigger, when the focus was in the panel.
   const layer = contextLayer;
   contextLayer = null;
   layer?.close();
@@ -537,7 +534,7 @@ function contextParams() {
 
 async function loadContext(direction) {
   if (!context.anchor) return;
-  // The edge row first: a page with no row to continue from returns before it aborts the request in flight.
+  // Check the edge row first. A page with no row to continue from returns before it aborts the request in flight.
   const paging = direction === "older" || direction === "newer";
   const edge = paging ? (direction === "older" ? context.rows[context.rows.length - 1] : context.rows[0]) : null;
   if (paging && !edge) return;
@@ -584,7 +581,7 @@ function signedOffset(row) {
   }
 }
 
-// The local time of day of a span start, to the millisecond.
+// This is the local time of day of a span start, to the millisecond.
 function clockText(row) {
   const ms = Math.floor(Number(row.start_ns) / 1e6);
   return Number.isFinite(ms) ? fmt.time(ms, { precision: "ms", date: "never" }) : String(row.timestamp || "");
@@ -594,7 +591,7 @@ function renderContext() {
   const el = byId("traceContextPanel");
   if (!el || !context.open || !context.anchor) return;
   const a = context.anchor;
-  // The window and filter rows: shared segmented controls (app_ui_segmented.js).
+  // The window and filter rows use shared segmented controls (app_ui_segmented.js).
   const windowsHtml = segmented.html(CONTEXT_WINDOWS.map(([ms, label]) => ({ value: ms, label })), { attr: "contextWindow", value: context.windowMs, size: "compact", label: "Time window", className: "traceContextSeg" });
   const unavailable = {
     service: a.service ? "" : "This span has no service name",
@@ -705,7 +702,7 @@ function copyStack(button) {
   copyText(body, button);
 }
 
-// Clicks inside the inline span inspector; true when handled.
+// This handles the clicks inside the inline span inspector. It returns true when it handles the click.
 function handleInspectorClick(event, target) {
   const contextButton = target.closest("[data-span-context]");
   if (contextButton) {
@@ -762,12 +759,12 @@ function handleHeaderClick(event) {
   }
 }
 
-// The start of a span in nanoseconds, as exactly as the JSON of the trace holds it.
+// This is the start of a span in nanoseconds. The value is as exact as the JSON of the trace holds it.
 const exactStartNs = (span) => traceJsonExactStartNs(span) || String(Math.round(Number(span.start_ns || 0)));
 
 function init() {
   byId("traceDetailHeader")?.addEventListener("click", handleHeaderClick);
-  // The highlighted attributes sit beside the view bar, no longer in the header.
+  // The highlighted attributes are beside the view bar. They are no longer in the header.
   byId("traceHighlights")?.addEventListener("click", handleHeaderClick);
   window.addEventListener("chdash:host-changed", () => {
     util.latest.cancelPrefix("traces.linked.");

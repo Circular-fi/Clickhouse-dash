@@ -20,7 +20,7 @@ namespace {
 
 using sql::QualifiedName;
 
-// Panels show the object's own SELECT; a pathological generated view must not turn one definition response into megabytes.
+// Panels show the SELECT of the object. A generated view with a pathological definition must not turn one definition response into megabytes.
 constexpr size_t kDefinitionSqlLimit = 32 * 1024;
 
 // `CLICKHOUSE(HOST ... TABLE 't')` -> `CLICKHOUSE`. Only the leading kind identifier is kept: connection arguments (host, user, masked
@@ -34,8 +34,8 @@ std::string leading_identifier(std::string_view text) {
   return out;
 }
 
-// A node id, and the ids that this graph gave out: two tables whose names put together make one id (`a.b` + `c` and `a` + `b.c`) do not share
-// it, the later one has a suffix.
+// A node id is unique in this graph. Two tables whose names join to one id (`a.b` + `c` and `a` + `b.c`) do not share it.
+// The later table gets a suffix.
 class NodeIds {
  public:
   std::string add(std::string_view database, std::string_view table) {
@@ -52,7 +52,7 @@ class NodeIds {
     by_key_.emplace(table_key(database, table), id);
     return id;
   }
-  // The id of a table that has a node; the plain id of an object that has none (an edge to it is dropped with its scope).
+  // The id of a table that has a node. The plain id of an object without a node. An edge to such an object is dropped with its scope.
   std::string of(std::string_view database, std::string_view table) const {
     const auto it = by_key_.find(table_key(database, table));
     return it == by_key_.end() ? table_node_id(database, table) : it->second;
@@ -64,7 +64,7 @@ class NodeIds {
 };
 
 void add_edge_unique(ExplorerGraph& graph, std::unordered_set<std::string>& seen, ExplorerGraphEdge edge) {
-  // "\0" as a string literal is empty; use an explicit NUL separator so different (from, to, kind) triples cannot collide in the dedup key.
+  // The string literal "\0" is empty. Use an explicit NUL separator, so that different (from, to, kind) triples cannot collide in the dedup key.
   std::string key;
   key.reserve(edge.from.size() + edge.to.size() + edge.kind.size() + 2);
   key += edge.from;
@@ -181,7 +181,7 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
 
   std::unordered_set<std::string> seen_edges;
 
-  // system.tables exposes the materialized views which depend on each current table. Filter both ends before serializing so a hidden MV
+  // system.tables gives the materialized views that depend on each current table. Filter both ends before serialization, so a hidden MV
   // cannot leak.
   for (const auto& dependency : inputs.dependencies) {
     const std::string& source_db = dependency.from_database;
@@ -204,8 +204,8 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
     });
   }
 
-  // A dictionary's source table is structured metadata as well (loading_dependencies_*), so the source -> dictionary edge needs no SOURCE()
-  // parsing. Best-effort: a server without these columns only loses the dictionary source edges, the rest of the topology stays exact.
+  // A dictionary's source table is structured metadata too (loading_dependencies_*). The source-to-dictionary edge needs no SOURCE()
+  // parsing. This is best effort. A server without these columns loses only the dictionary source edges. The rest of the topology stays exact.
   std::unordered_map<std::string, QualifiedName> dictionary_source_by_id;
   for (const auto& entry : inputs.dictionary_sources) {
     if (!allowed.allows_table(entry.dictionary_database, entry.dictionary)) continue;
@@ -221,8 +221,8 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
     });
   }
 
-  // Add engine-specific destinations and targeted SELECT dependencies. SQL parsing is deliberately limited to identifiers after
-  // FROM/JOIN/TO; unknown constructs are omitted rather than guessed.
+  // Add engine-specific destinations and targeted SELECT dependencies. The SQL parser is limited on purpose to identifiers after
+  // FROM/JOIN/TO. Unknown constructs are omitted, not guessed.
   std::set<std::string> referenced;
   for (const GraphTable* table_ptr : raw) {
     const GraphTable& table = *table_ptr;
@@ -316,9 +316,9 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
     }
   }
 
-  // Physical children are part of the same normalized model but are ignored in Logical mode. Storage topology models ClickHouse placement
-  // explicitly as table -> local replica -> storage policy -> ordered volumes -> disks. This keeps logical table dependencies completely
-  // out of the physical view and makes hot/warm/cold (including S3) policy order visible without guessing.
+  // Physical children are part of the same normalized model, but Logical mode ignores them. Storage topology models ClickHouse placement
+  // explicitly as: table -> local replica -> storage policy -> ordered volumes -> disks. This keeps logical table dependencies completely
+  // out of the physical view. It also makes the hot, warm and cold (including S3) policy order visible, without a guess.
   std::unordered_set<std::string> disk_nodes_created;
   std::unordered_set<std::string> policy_nodes_created;
   std::unordered_set<std::string> volume_nodes_created;
@@ -379,7 +379,7 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
     }
 
     // Log-family tables have real on-disk storage but no system.parts rows. Resolve their system.tables.data_paths against system.disks
-    // instead of incorrectly treating them as non-storing objects.
+    // instead of classifying them as non-storing objects.
     if (is_log_family(table.engine) && !table.data_paths.empty()) {
       std::unordered_set<std::string> attached;
       for (const auto& path : table.data_paths) {
@@ -428,9 +428,8 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
           out.nodes.push_back(std::move(volume_node));
         }
 
-        // A policy is ordered. Draw the first volume from the policy and then chain each colder tier from the previous volume instead of
-        // creating a star. This makes SSD -> HDD -> S3 placement readable and keeps the routing projection faithful to ClickHouse
-        // volume_priority.
+        // A policy is ordered. Draw the first volume from the policy. Then chain each colder tier from the previous volume, not as a star.
+        // This makes the SSD to HDD to S3 placement readable. The routing projection stays faithful to ClickHouse volume_priority.
         std::string volume_label = "priority " + std::to_string(volume.priority);
         if (volume.move_factor > 0.0) {
           std::ostringstream factor;
@@ -452,10 +451,10 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
       }
 
       // TTL is temporal metadata attached to the table, not another placement path. It is serialized on the logical root as an ordered
-      // timeline so it cannot distort the storage-policy DAG or create long crossing arrows.
+      // timeline, so it cannot distort the storage-policy DAG or create long crossing arrows.
     } else {
-      // Engines/policies which do not expose system.storage_policies still get a truthful fallback based on the disks that currently hold
-      // active parts.
+      // Engines and policies that do not expose system.storage_policies still get a fallback. The fallback uses the disks that hold
+      // active parts now.
       for (const auto& disk : summary.disks) {
         const std::string disk_id = ensure_disk_node(table.database, disk);
         add_edge_unique(out, seen_edges, {{}, physical_parent, disk_id, "contains", "disk", false});
@@ -463,10 +462,11 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
     }
   }
 
-  // Expand Distributed cluster topology once in bulk. The cluster rows do not reveal table names and are only attached to already-authorized
-  // Distributed nodes which reference that cluster. The topology of a cluster is made once and shared: a node for each shard and each replica,
-  // whatever the number of Distributed tables that name the cluster, and an edge from each of those tables to each shard. A cluster whose nodes do
-  // not fit the graph (kMaxGraphNodes, kMaxGraphEdges) has no topology, and a table whose shard edges do not fit has none: `truncated` says so.
+  // Expand the Distributed cluster topology once, in bulk. The cluster rows do not reveal table names. They attach only to
+  // Distributed nodes that are already authorized and that reference the cluster. The topology of a cluster is made once and shared.
+  // It has a node for each shard and each replica, whatever the number of Distributed tables that name the cluster. It also has an edge
+  // from each of those tables to each shard. A cluster whose nodes do not fit the graph (kMaxGraphNodes, kMaxGraphEdges) has no topology.
+  // A table whose shard edges do not fit has none. `truncated` says so.
   if (!referenced.empty()) {
     std::map<std::string, std::vector<const GraphTable*>> distributed_by_cluster;
     for (const GraphTable* table : raw) {
@@ -495,7 +495,7 @@ void build_explorer_graph(const ExplorerGraphInputs& inputs, const AllowedObject
       for (const GraphClusterRow* row : rows_it->second) shards.insert(row->shard);
       const size_t added = shards.size() + rows_it->second.size();
 
-      // The nodes of the cluster, once: the shards (in the order of the rows) and their replicas, with the edges between them.
+      // The nodes of the cluster, once each: the shards (in the order of the rows) and their replicas, with the edges between them.
       std::vector<std::string> shard_ids;
       const bool fits = out.nodes.size() + added <= kMaxGraphNodes && out.edges.size() + added <= kMaxGraphEdges;
       if (fits) {

@@ -8,8 +8,9 @@
 
 namespace chdash {
 
-// Streaming ZIP64 writer using STORE (no compression). It never retains entry
-// payloads. Memory grows only with the small central-directory metadata list.
+// This ZIP64 writer streams its output and uses STORE (no compression).
+// It does not keep entry payloads.
+// Memory grows only with the small central-directory metadata list.
 class Zip64StreamWriter {
 public:
   using WriteFn = std::function<bool(const char*, size_t)>;
@@ -37,9 +38,8 @@ private:
   };
 
   bool write_bytes(const void* data, size_t size);
-  // ZIP headers are assembled in `staged_` and sent as one sink write:
-  // emitting each 2-8 byte field separately produced ~16-22 chunked HTTP
-  // frames/send() calls per header.
+  // The code assembles ZIP headers in `staged_`. It sends each header as one sink write.
+  // A separate write for each 2-8 byte field made ~16-22 chunked HTTP frames/send() calls per header.
   bool stage(const void* data, size_t size);
   bool flush_staged();
   bool write_u16(uint16_t value);

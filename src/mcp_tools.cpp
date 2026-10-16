@@ -22,8 +22,15 @@ std::vector<std::string> mcp_data_tables(const McpObservabilityConfig& config, u
 
 McpToolOutcome McpTools::call_tool(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments,
                                    int64_t now) {
+  return call_tool_for(key, tool, arguments, now, McpCallInfo{});
+}
+
+McpToolOutcome McpTools::call_tool_for(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now,
+                                       const McpCallInfo& info) {
   using namespace mcp_tools;
   Ctx ctx = make_ctx(key, config_, db_, tool);
+  // The agent of the call goes into the log_comment of each statement (api_mcp.cpp, ClickHouseMcpDatabase).
+  for (McpDbLimits* limits : {&ctx.user_limits, &ctx.schema_limits, &ctx.system_limits, &ctx.system_schema_limits}) limits->agent_caller = info.agent_caller;
   ctx.api = api_;
   ctx.analysis = analysis_;
   ctx.now = now;

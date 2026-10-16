@@ -1,12 +1,12 @@
-// What the System sections share (docs/system.md): the pieces of a section's page, once (ARCH-F-196). A section
-// (app_system_overview.js, app_system_queries.js, app_system_disks.js) builds its content from them:
+// The parts that the System sections share (docs/system.md). Each part is written once (ARCH-F-196). A section
+// (app_system_overview.js, app_system_queries.js, app_system_disks.js) builds its content from these parts:
 //   sectionBar   its filter bar (the time range first, the section's filters, the refresh button);
 //   issueBlock   a panel that could not be read: why, and the GRANT to run;
 //   card, cardHead, part, dataTable   the cards, the parts of the Overview and the tables;
 //   errorTone    the tone of an error share (one threshold for every section);
 //   openInQuery  the Query page's editor with a statement, never run;
 //   hostId, number, features, seconds, SEP.
-// The charts and the time range of a section are app_system_charts.js's.
+// The charts and the time range of a section are in app_system_charts.js.
 
 import { api } from "./app_api.js";
 import { h } from "./app_dom.js";
@@ -24,14 +24,11 @@ const hostId = () => String(state?.selectedHostId || "");
 const features = () => featuresMod.get("system");
 const number = (value) => (value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value));
 
-// A section's filter bar (ctx.bar, ns.filterBar): the time range first
-// (`range`: its idPrefix; the picker root is returned for
-// ns.timeRange.create), the section's `fields` (pickers: { select,
-// narrow, summary }) and `chips` (toggle chips: { id, label, title,
-// pressed, onChange }), then at the right end the refresh icon button,
-// the action: a change applies at once. No live refresh: nothing reads on
-// a timer. No caption: the header names the server, the panels say what
-// they show.
+// The filter bar of a section (ctx.bar, ns.filterBar). The time range comes first.
+// `range` is its idPrefix. The picker root is returned for ns.timeRange.create.
+// Then come the section's `fields` (pickers: { select, narrow, summary }) and its `chips` (toggle chips: { id, label, title, pressed, onChange }).
+// The refresh icon button is at the right end. A change applies at once. There is no live refresh, so nothing reads on a timer.
+// There is no caption. The header names the server, and the panels say what they show.
 function sectionBar(ctx, { id, label, onRefresh, range = "", fields = [], chips = [] }) {
   const { bar } = ctx;
   const rangeRoot = range ? bar.range(range) : null;
@@ -63,8 +60,8 @@ function issueText(issue) {
   }
 }
 
-// A panel that could not be read: why, and the GRANT to run when a grant
-// is missing. One element per issue, in place of the panel's content.
+// A panel that could not be read. It shows why, and the GRANT to run when a grant is missing.
+// The function makes one element for each issue. The element replaces the content of the panel.
 function issueBlock(issue) {
   const el = h("div", { class: "systemIssue", dataset: { reason: issue.reason || "failed", panel: issue.panel || "" } },
     h("div", { class: "systemIssue__head" },
@@ -78,7 +75,7 @@ function issueBlock(issue) {
   return el;
 }
 
-// A card's head: its title, a count and an extra element (a badge).
+// The head of a card: its title, a count and an extra element (a badge).
 function cardHead(title, count = "", extra = null) {
   return h("div", { class: "systemCard__head" },
     h("h3", { class: "systemCard__title" }, title),
@@ -90,8 +87,7 @@ function card(key, title, count, extra) {
   return h("section", { class: "systemCard", dataset: { card: key } }, cardHead(title, count, extra));
 }
 
-// A part of the Overview: a heading (h2) and its content; extra sits on
-// the heading's right.
+// A part of the Overview has a heading (h2) and its content. The extra element sits on the right of the heading.
 function part(key, title, extra = null) {
   const head = h("div", { class: "pagePart__head" }, h("h2", { class: "pagePart__title", id: `systemPartTitle-${key}` }, title), extra);
   const body = h("div", { class: "pagePart__body" });
@@ -99,7 +95,7 @@ function part(key, title, extra = null) {
   return { el, head, body };
 }
 
-// A delay in whole seconds: "0 s" rather than "0 ns".
+// A delay in whole seconds. It shows "0 s", not "0 ns".
 const seconds = (value) => (Number(value) > 0 ? format.duration.fromSeconds(value) : "0 s");
 
 function dataTable(id, headers, rows) {
@@ -108,7 +104,7 @@ function dataTable(id, headers, rows) {
     h("table", { class: "dataTable dataTable--compact systemTable", id }, h("thead", null, head), h("tbody", null, rows))));
 }
 
-// The error share of a section's queries: neutral under 1 %, a warning to 5 %, danger from there.
+// The error share of the queries of a section. It is neutral under 1 %. It is a warning from 1 % to under 5 %. It is a danger from 5 %.
 const ERROR_WARN = 0.01;
 const ERROR_DANGER = 0.05;
 function errorTone(errors, calls) {
@@ -116,8 +112,8 @@ function errorTone(errors, calls) {
   return ratio >= ERROR_DANGER ? "error" : ratio >= ERROR_WARN ? "warn" : "neutral";
 }
 
-// The Query page's editor with `sql` (formatted by the server unless formatted is false), through the session draft the
-// Query page reads on load. It never runs there by itself.
+// This opens the editor of the Query page with `sql`. The server formats the SQL, unless formatted is false.
+// The SQL goes through the session draft that the Query page reads on load. The Query page never runs the SQL by itself.
 async function openInQuery(sql, { formatted = true } = {}) {
   let text = String(sql || "");
   if (formatted) {

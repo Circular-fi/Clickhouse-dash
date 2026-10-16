@@ -1,17 +1,22 @@
 #pragma once
 
-// The one place that writes a value or a name into the text of a SQL statement. Every other file calls these
-// functions: nothing else in src/ escapes a quote.
+// This file is the only place that writes a value or a name into SQL text.
+// Every other file calls these functions.
+// No other file in src/ escapes a quote.
 //
-// The rules are the ones of the ClickHouse lexer. In a 'string', a `name` and a "name" a backslash starts an
-// escape sequence, so the backslash itself is always escaped. (Doubling a quote is not enough: the name
-// `a\` followed by a doubled backtick would end the name early, and the rest of the text would be SQL.)
-// A control character is written as an escape sequence, so a value never breaks the line of a statement and
-// a NUL byte reaches the server whole.
+// The rules are the rules of the ClickHouse lexer.
+// In a 'string', a `name` and a "name", a backslash starts an escape sequence.
+// The function therefore escapes the backslash itself.
+// Doubling a quote is not enough.
+// For example, the name `a\` followed by a doubled backtick ends the name early, and the rest of the text becomes SQL.
+// A control character is written as an escape sequence.
+// A value therefore cannot break the line of a statement.
+// A NUL byte reaches the server whole.
 //
-// A value that a user chooses should be a bound parameter ({name:Type} and Query::SetParam, docs/configuration.md,
-// "Bound parameters") wherever ClickHouse takes one; these functions are for the names of objects (a name is not
-// a parameter) and for the few places where a parameter cannot stand.
+// Use a bound parameter for a value that a user chooses, where ClickHouse takes one.
+// A bound parameter uses {name:Type} and Query::SetParam (docs/configuration.md, "Bound parameters").
+// Use these functions for the names of objects, because a name is not a parameter.
+// Use them also for the few places where a parameter cannot stand.
 
 #include <cstdio>
 #include <string>
@@ -23,7 +28,7 @@ namespace sql {
 
 namespace detail {
 
-// `text` between `quote` marks, with the escapes above.
+// Return `text` between `quote` marks, with the escapes listed above.
 inline std::string quoted(std::string_view text, char quote) {
   std::string out;
   out.reserve(text.size() + 2);
@@ -55,7 +60,7 @@ inline std::string quoted(std::string_view text, char quote) {
 
 } // namespace detail
 
-// `name`: a database, a table, a column or any other name of an object.
+// `name`: a database, a table, a column, or another name of an object.
 inline std::string quote_ident(std::string_view name) { return detail::quoted(name, '`'); }
 
 // 'text': a string literal.
@@ -66,9 +71,11 @@ inline std::string quote_qualified(std::string_view database, std::string_view t
   return quote_ident(database) + "." + quote_ident(table);
 }
 
-// ['a', 'b']: an Array(String) literal ([] when empty). For a list that IN takes, use quote_list. As the text of an Array(String) query
-// parameter it is right only for values without a quote mark or a backslash (the hexadecimal trace ids): ClickHouse reads the text of
-// such a parameter with its own rules for them, which differ from this quoting. For other values use SqlParams (sql_params.hpp).
+// ['a', 'b']: an Array(String) literal ([] when empty).
+// For a list that IN takes, use quote_list.
+// Use this text as an Array(String) query parameter only for values without a quote mark or a backslash (the hexadecimal trace ids).
+// ClickHouse reads the text of such a parameter with its own rules for these values, which differ from this quoting.
+// For other values, use SqlParams (sql_params.hpp).
 inline std::string quote_array(const std::vector<std::string>& values) {
   std::string out = "[";
   for (size_t i = 0; i < values.size(); ++i) {
@@ -89,7 +96,8 @@ inline std::string quote_list(const std::vector<std::string>& values) {
   return out;
 }
 
-// `text` for the pattern of LIKE and ILIKE: % and _ match themselves. The result is still a text to quote_string.
+// Escape `text` for the pattern of LIKE and ILIKE, so that % and _ match themselves.
+// Pass the result to quote_string.
 inline std::string like_escape(std::string_view text) {
   std::string out;
   out.reserve(text.size() + 4);

@@ -1,9 +1,9 @@
 // ServiceName visibility shared by every OpenTelemetry signal (traces, logs,
-// metrics): traces.service_allowlist is the single allowlist, and each query
-// on a signal table ANDs service_allowlist_predicate() into its WHERE clause.
+// metrics). traces.service_allowlist is the single allowlist.
+// Each query on a signal table combines service_allowlist_predicate() with AND in its WHERE clause.
 //
-// Patterns: "*" (everything), "name" (exact), "prefix*", "*suffix", or any
-// other mix of literal text and "*" (an anchored regular expression).
+// Patterns: "*" (everything), "name" (exact), "prefix*", "*suffix".
+// Any other mix of literal text and "*" is an anchored regular expression.
 #pragma once
 
 #include "otel_settings.hpp"
@@ -62,7 +62,7 @@ inline std::string service_pattern_predicate(std::string_view pattern) {
   return "match(ServiceName, " + allowlist_quote_string(regex) + ")";
 }
 
-// "1" when a pattern is "*", "0" for an empty list, else an OR of patterns.
+// The result is "1" when a pattern is "*", and "0" for an empty list. Otherwise it is an OR of the patterns.
 inline std::string service_allowlist_predicate(const std::vector<std::string>& allowlist) {
   if (allowlist.empty()) return "0";
   for (const auto& pattern : allowlist) {
@@ -85,7 +85,7 @@ inline std::string service_allowlist_predicate(const TraceSettings& cfg) {
 
 } // namespace otel
 
-// Unqualified spelling used by the logs and metrics routes.
+// Unqualified spelling. The logs and metrics routes use it.
 using otel::service_allowlist_predicate;
 using otel::service_pattern_predicate;
 

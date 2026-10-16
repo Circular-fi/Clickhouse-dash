@@ -1,18 +1,23 @@
-// ns.header: what every page shell shares (app_ui.js held it together with the Query page's editor; that part is
-// app_query_ui.js now): the host picker and the hosts stream, the version badge and the feature flags
-// (/api/version), the page switcher (links), the theme, and the time zone of a host's DateTime text.
+// ns.header: the part that every page shell shares. Before, app_ui.js held this part with the Query page editor.
+// The Query page editor is now in app_query_ui.js.
+//
+// This module holds the host picker and the hosts stream. It also holds the version badge, the feature flags
+// (/api/version), the page switcher (links) and the theme. The module also gives the time zone of the DateTime text of a host.
 //
 //   header.init()                  binds the shell: menus, page switcher, theme, hosts stream, /api/version
-//   header.setSelectedHostId(id)   the one place a host is selected (the host is state.selectedHostId)
-//   header.onHostSelected(fn)      fn(hostId) runs inside setSelectedHostId, before chdash:host-changed, in the order
-//                                  the modules asked (the host's metadata, the editor, the Run buttons)
-//   header.applyHostPickerUi()     the picker's label, dot, ping and lock
-//   header.setPageSelectorValue(page)     the page switcher's label and current link
-//   header.serverTimeZone(hostId) / serverTime(value, { hostId, precision })    the zone of a host's DateTime text
+//   header.setSelectedHostId(id)   the only place where a host is selected (the host is state.selectedHostId)
+//   header.onHostSelected(fn)      fn(hostId) runs inside setSelectedHostId, before chdash:host-changed.
+//                                  The functions run in the order in which the modules asked for them
+//                                  (the host metadata, the editor, the Run buttons).
+//   header.applyHostPickerUi()     the label, dot, ping and lock of the picker
+//   header.setPageSelectorValue(page)     the label and the current link of the page switcher
+//   header.serverTimeZone(hostId) / serverTime(value, { hostId, precision })    the time zone of the DateTime text of a host
 //
-// The header never calls the modules of a page: it tells them by events. chdash:host-changed (detail.hostId: a host
-// was selected), chdash:api-online (detail.online: ns.api answered, or failed to), chdash:hosts (detail.snapshot: the
-// hosts stream sent a snapshot) and chdash:theme-applied (the theme changed: canvases draw again).
+// The header never calls the modules of a page. It sends these events to them:
+//   chdash:host-changed    detail.hostId: a host was selected.
+//   chdash:api-online      detail.online: ns.api answered, or failed to.
+//   chdash:hosts           detail.snapshot: the hosts stream sent a snapshot.
+//   chdash:theme-applied   the theme changed: the canvases draw again.
 
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
@@ -29,8 +34,9 @@ const { $$ } = dom;
   else if (mode === "system") delete dom.root.dataset.theme;
 })();
 
-// What the header shows, kept for the next load (the head script of the shell paints it before any module runs): the version
-// text and its title, and the selected host's id, name, ClickHouse version and health. Written only when it changed.
+// The header keeps what it shows for the next load. The head script of the shell paints it before any module runs.
+// It keeps the version text and its title. It also keeps the id, name, ClickHouse version and health of the selected host.
+// The header writes this data only when the data changed.
 const headerCache = { version: "", title: "", host: null, ...(storage.loadHeader() || {}) };
 let headerSaved = JSON.stringify(headerCache);
 
@@ -49,11 +55,11 @@ function safelyParseJson(text) {
   }
 }
 
-// /api/version: the version badge and the feature flags (ns.features; a
-// flag the server does not send keeps the defaults table's value).
+// /api/version: the version badge and the feature flags (ns.features).
+// A flag that the server does not send keeps the value of the defaults table.
 async function loadMeta() {
-  // The features are loaded once /api/version has answered or failed, whatever the page shows of it: a page without
-  // the version badge must not leave ns.features.ready waiting.
+  // The features load once /api/version answers or fails, even when the page does not show the version.
+  // A page without the version badge must not leave ns.features.ready waiting.
   const badge = dom.versionBadge;
   let data;
   try {
@@ -74,7 +80,7 @@ async function loadMeta() {
     const build = verObj && typeof verObj === "object" ? String(verObj.build_time || "") : String(data.build_time || "");
     const text = sha && sha !== "unknown" ? `${ver} (${sha})` : ver;
     badge.textContent = text;
-    // The badge is as wide as the name above it and cuts a longer text: the title has all of it.
+    // The badge is as wide as the name above it. It cuts a longer text, and the title has all of it.
     badge.title = `Backend version\n${text}${build ? `\nBuild: ${build}` : ""}`;
     headerCache.version = text;
     headerCache.title = badge.title;
@@ -85,13 +91,12 @@ async function loadMeta() {
   markFeaturesLoaded();
 }
 
-// The library waits for /api/version to pick its storage; without an answer
-// it stays in the browser.
+// The library waits for /api/version to select its storage. Without an answer, it stays in the browser.
 function markFeaturesLoaded() {
   features.markLoaded();
 }
 
-// A host's ping in ns.format's duration ("12 ms"), whole milliseconds.
+// The ping of a host uses the duration format of ns.format (for example "12 ms"), in whole milliseconds.
 function formatPingMsLabel(pingMs) {
   const ms = Number(pingMs);
   if (pingMs == null || !Number.isFinite(ms)) return format.EMPTY;
@@ -99,17 +104,17 @@ function formatPingMsLabel(pingMs) {
   return rounded < 1 ? "<1 ms" : format.duration.fromMs(rounded);
 }
 
-// timeZone() of a host (default: the selected one), from the health
-// snapshot (api/hosts): the zone of the DateTime text its system tables
-// print, for ns.format.serverTime. "" until the first version check.
+// timeZone() of a host (default: the selected host). It reads the health snapshot (api/hosts).
+// It gives the zone of the DateTime text that the system tables print, for ns.format.serverTime.
+// The value is "" until the first version check.
 function serverTimeZone(hostId = state.selectedHostId) {
   const hosts = state.hostsSnapshot && Array.isArray(state.hostsSnapshot.hosts) ? state.hostsSnapshot.hosts : [];
   const host = hostId ? hosts.find((h) => h && String(h.id) === String(hostId)) : null;
   return host && host.clickhouse_timezone ? String(host.clickhouse_timezone) : "";
 }
 
-// A DateTime text of a host's system tables, for display: browser-local
-// text, the tooltip with the server's zone, ISO for copies.
+// A DateTime text of the system tables of a host, for display.
+// The text shows the browser-local time. The tooltip shows the zone of the server. The copies use ISO.
 function serverTime(value, { hostId, precision } = {}) {
   return format.serverTime(value, { serverTz: serverTimeZone(hostId), precision });
 }
@@ -122,7 +127,7 @@ function pickDefaultHostId(snapshot) {
   return ids.length ? ids[0] : null;
 }
 
-// The modules that follow a host selection (onHostSelected), in the order they asked.
+// The modules that follow a host selection (onHostSelected), in the order that they asked.
 const hostHooks = [];
 const onHostSelected = (fn) => { hostHooks.push(fn); };
 
@@ -131,16 +136,16 @@ function setSelectedHostId(hostId) {
   if (state.selectedHostId) storage.setStoredHostId(state.selectedHostId);
   applyHostPickerUi();
 
-  // Host selection is the authoritative point where the host's metadata, the editor and the Run buttons follow.
+  // Host selection is the authoritative point. The metadata of the host, the editor and the Run buttons follow it.
   for (const fn of hostHooks) fn(state.selectedHostId);
   try {
     window.dispatchEvent(new CustomEvent("chdash:host-changed", { detail: { hostId: state.selectedHostId } }));
   } catch (_) {}
 }
 
-// The hosts stream answers every second with what is mostly the same: writing a text that is
-// already there still replaces its text node, which restyles and lays the page out again, once a
-// second on every page. Only a changed text is written.
+// The hosts stream answers every second. Mostly, the answer is the same as before.
+// If the text is already there, the write still replaces its text node. This restyles the page and computes the layout again.
+// This happens once a second on every page. Only a changed text is written.
 function setText(el, text) {
   if (el && el.textContent !== text) el.textContent = text;
 }
@@ -181,8 +186,8 @@ function applyHostPickerUi() {
   }
 
   if (dom.hostPickerButton) {
-    // A run keeps the host it started on: every statement of a batch, its
-    // history entry and its diagnostics go to that host (app_run.js).
+    // A run uses the host where it started. Every statement of a batch,
+    // its history entry and its diagnostics go to that host (app_run.js).
     const locked = !!state.isRunning;
     dom.hostPickerButton.disabled = !apiOnline || locked;
     const base = hostVersion ? `${label}\nClickHouse ${hostVersion}` : label;
@@ -192,9 +197,9 @@ function applyHostPickerUi() {
   }
 }
 
-// The header menus are ns.menu menus (app_ui_menu.js): open /
-// close motion, keys, focus return and the one outside-click / Escape
-// layer. Bound in init(); these keep the names other modules call.
+// The header menus are ns.menu menus (app_ui_menu.js). ns.menu handles the open and close motion, the keys,
+// the focus return, and the one layer for outside clicks and Escape. init() binds them.
+// These functions keep the names that other modules call.
 const menus = { host: null, page: null, theme: null };
 
 function closeHostMenu() {
@@ -439,11 +444,9 @@ function getResolvedTheme(mode) {
   }
 }
 
-// The page switcher (Query, Explorer, Observability, System, MCP) ships visible
-// in every page shell. Only a server with neither Explorer, System, any
-// Observability view (Traces, Logs, Metrics) nor MCP hides it; the head script of
-// each page applies the last known availability (chdash-page-select-hidden)
-// before first paint.
+// The page switcher (Query, Explorer, Observability, System, MCP) is visible by default in every page shell.
+// Only a server without Explorer, System, any Observability view (Traces, Logs, Metrics) and MCP hides it.
+// The head script of each page applies the last known availability (chdash-page-select-hidden) before the first paint.
 function applyPageNavigation(nav) {
   const explorerEnabled = nav.explorer !== false;
   const systemEnabled = nav.system !== false;
@@ -471,20 +474,20 @@ function applyProductFeatures() {
   if (!explorerEnabled && /\/explorer(?:\/|$)/.test(window.location.pathname)) {
     router.replace("", { path: "/query", view: "query" });
   }
-  // A turned-off view falls back to another (app_obs_page.js); with no
-  // view left the page itself is gone.
+  // If a view is disabled, the page uses another view (app_obs_page.js). When no
+  // view is left, the page itself is gone.
   if (!tracesEnabled && !logsEnabled && !metricsEnabled && document.body?.dataset?.page === "observability") {
     window.location.replace(api.resolveUrl("query"));
     return;
   }
-  // A trace is Traces': the page is gone with it; Observability's first
-  // remaining view, else Query.
+  // A trace page belongs to Traces: when Traces is disabled, the trace page is gone too.
+  // Observability then uses its first remaining view, or Query when no view is left.
   if (!tracesEnabled && document.body?.dataset?.page === "trace") {
     window.location.replace(api.resolveUrl(logsEnabled ? "observability/logs" : metricsEnabled ? "observability/metrics" : "query"));
     return;
   }
-  // The System page turned off (system.enabled = false): its routes are gone,
-  // a query shape's page (shape.html) with them.
+  // The System page is disabled (system.enabled = false). Its routes are gone,
+  // and the page of a query shape (shape.html) goes with them.
   if (!systemEnabled && ["system", "shape"].includes(document.body?.dataset?.page)) {
     window.location.replace(api.resolveUrl("query"));
     return;
@@ -506,8 +509,7 @@ function applyTheme(mode) {
   const resolved = getResolvedTheme(mode);
   if (mode === "system") delete dom.root.dataset.theme;
   else dom.root.dataset.theme = resolved;
-  // Drives the theme button icon from CSS (css/20-features/shell.css), like the head
-  // script does before the first paint.
+  // CSS sets the theme button icon (css/20-features/shell.css), as the head script does before the first paint.
   dom.root.dataset.themeMode = mode;
 
   if (dom.themeSelectButton) dom.themeSelectButton.setAttribute("aria-label", `Theme: ${mode}`);
@@ -520,18 +522,17 @@ function applyTheme(mode) {
     }
   }
 
-  // Canvas pixels are not CSS-reactive. The Explorer's graph draws again in the same
-  // visual transaction as the DOM theme switch instead of waiting for its
-  // next animation/activity frame.
+  // Canvas pixels are not reactive to CSS. The graph of the Explorer draws again in the same
+  // visual transaction as the DOM theme switch. It does not wait for the next animation or activity frame.
   window.dispatchEvent(new CustomEvent("chdash:theme-applied", { detail: { mode } }));
 }
 
 function init() {
-  // Menu entries follow the last known availability until /api/version answers.
+  // Menu entries keep the last known availability until /api/version answers.
   const cachedPageNav = storage?.loadPageNav?.();
   if (cachedPageNav) applyPageNavigation(cachedPageNav);
   loadMeta();
-  // The API answered, or did not: the picker shows it (the Run buttons follow on their own).
+  // The API answered, or did not: the picker shows it. The Run buttons follow this result by themselves.
   window.addEventListener("chdash:api-online", applyHostPickerUi);
 
   menus.host = menu?.bind(dom.hostPickerButton, dom.hostPickerMenu, {
@@ -540,8 +541,8 @@ function init() {
     canOpen: () => !dom.hostPicker?.classList.contains("is-static"),
   }) || null;
 
-  // The page switcher is a nav of links (header.html): every page is a document of its own, so a link is all it needs
-  // (a new tab, a copied address). Under 820 px the links fold into a menu under the current page's name.
+  // The page switcher is a nav of links (header.html). Every page is a separate document, so a link is enough for it
+  // (a new tab and a copied address both work). Under 820 px, the links are put into a menu under the name of the current page.
   menus.page = menu?.bind(dom.pageSelectButton, dom.pageSelectMenu, { items: "a[href]:not([hidden])", closeOnSelect: true, canOpen: () => !dom.pageSelect?.hidden }) || null;
   menus.theme = menu?.bind(dom.themeSelectButton, dom.themeSelectMenu) || null;
   if (dom.themeSelectMenu) {
@@ -567,8 +568,8 @@ function init() {
       });
     }
   } catch {
-    // No OS theme change events: System keeps the theme resolved above.
-    // Startup still has to finish (ready class, hosts stream).
+    // The OS sends no theme change events. System keeps the theme that is resolved above.
+    // Startup must still finish: the ready class and the hosts stream.
   }
 
   if (dom.root && dom.root.classList) dom.root.classList.add("is-ready");

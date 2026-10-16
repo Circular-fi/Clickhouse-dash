@@ -1,6 +1,6 @@
 #include "mcp_api_tools.hpp"
 
-// The window that the OpenTelemetry routes share, said once.
+// The OpenTelemetry routes share this window. It is defined here once.
 #define WINDOW "`start_ms` and `end_ms` (epoch milliseconds, together) or `lookback_minutes`"
 #define TRACE_FILTERS                                                                                           \
   "Filters: `service`, `operation`, `status` (Error, Ok or Unset; a list means any of), `service_not`, "         \
@@ -12,7 +12,7 @@
 
 namespace chdash {
 
-// One row for each read function of the ChDash API. The wrapper does the rest (see the header).
+// Each row is one read function of the ChDash API. The wrapper does the rest (see the header).
 const std::vector<McpApiTool>& mcp_api_tools() {
   static const std::vector<McpApiTool> tools = {
       // ---- Explorer: the databases, the tables and their lineage -------------------------------------

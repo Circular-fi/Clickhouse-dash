@@ -1,40 +1,38 @@
-// Query library and History: the two tabs (Saved, History) of the dialog the
-// Query toolbar's book button opens (the shared modal dialog of
-// app_ui_dialog.js; app_ui.js builds it, this module adds the preview pane).
+// The query library and History are the two tabs of the dialog.
+// The book button of the Query toolbar opens this dialog.
+// The dialog is the shared modal dialog of app_ui_dialog.js. app_ui.js builds it. This module adds the preview pane.
 //
-// app_ui.js loads this module the first time the dialog opens (or Ctrl+S is
-// used) and drives it through ns.queryLibrary. Save and Edit are a form in
-// the preview pane (createPaneForm); Move, Remove and the other prompts are
-// ns.dialog dialogs stacked over the library.
+// app_ui.js loads this module when the dialog opens for the first time. Ctrl+S also loads it.
+// app_ui.js then drives the module through ns.queryLibrary.
+// Save and Edit use a form in the preview pane (createPaneForm).
+// Move, Remove and the other prompts are ns.dialog dialogs. They are stacked over the library.
 //
-// Saved queries, folders and History are per host: the dialog shows the
-// selected host's only and follows a host switch (chdash:host-changed).
-// Saved holds root folders, storages with the same adapter interface,
-// browsable side by side:
-//   - one root for each library of the server (kind "server" for the first,
-//     "server~<name>" for the others; features.query_library.libraries gives
-//     their name and writable, and the root shows the name; a single library
-//     that keeps the name "default" shows "Shared server storage"): the REST API of features.query_library
-//     (/api/query-library?host_id=&library=, through api.request), shown only
-//     when the feature is enabled; read-only when the server says
-//     writable = false (the root then has no edit tools and takes no drop).
-//     Every folder / query change sends If-Match: <revision>; a 409 conflict
-//     reloads the library and retries once before the user is told.
-//   - "Local browser storage" (local): this browser (localStorage
-//     chdash.queryLibrary.v2, every folder and query with its host_id).
-//     Always editable. Entries without a host are purged on the first read.
-// The save, move and folder pickers offer both roots; moving an item from
-// one root to the other copies it into the target, then removes it from
-// its source. History is this browser's (IndexedDB: ns.history), never the
-// server's.
-// Both adapters resolve every change with the host's whole new library, so
-// the view never guesses what the server did.
+// Saved queries, folders and History belong to each host.
+// The dialog shows only the data of the selected host. It follows a host switch (chdash:host-changed).
+// Saved holds root folders. Storages with the same adapter interface are shown side by side:
+//   - One root for each library of the server. The first library has the kind "server".
+//     The other libraries have the kind "server~<name>".
+//     features.query_library.libraries gives the name and the writable flag of each library. The root shows the name.
+//     A single library that keeps the name "default" shows "Shared server storage".
 //
-// The list on the left only selects; every action of the selected item
-// (edit, move, remove...) is an icon button of the preview pane's head on
-// the right, and its foot holds one action: "Load" (Save and Edit take the
-// pane over with their form until they are saved or cancelled). History is the browser's
-// record of what ran: it cannot be edited, and entries are never removed.
+//     The REST API of features.query_library is used (/api/query-library?host_id=&library=, through api.request).
+//     The root is shown only when the feature is enabled.
+//     The root is read-only when the server says writable = false. Such a root has no edit tools and takes no drop.
+//     Every folder or query change sends If-Match: <revision>.
+//     A 409 conflict reloads the library. The change is retried once before the user receives a message.
+//   - "Local browser storage" (local): this browser. It uses the localStorage key chdash.queryLibrary.v2.
+//     The key holds every folder and query, with its host_id.
+//     This root is always editable. The first read purges the entries that have no host.
+// The save, move and folder pickers offer both roots. A move from one root to the other copies the item into the target.
+// Then the move removes the item from its source.
+// History belongs to this browser. It is stored in IndexedDB (ns.history). It never belongs to the server.
+// Both adapters resolve every change with the host's whole new library. The view never guesses what the server did.
+//
+// The list on the left only selects an item.
+// Each action of the selected item is an icon button in the head of the preview pane, on the right.
+// The foot of the pane holds one action: "Load".
+// Save and Edit replace the preview with their form. The form stays until the user saves or cancels it.
+// History is the record of what ran in this browser. It cannot be edited. Entries are never removed.
 
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
@@ -61,22 +59,24 @@ const API_BASE = "api/query-library";
 const MAX_DEPTH = 8;
 const MAX_NAME_CHARS = 200;
 const MAX_DESCRIPTION_CHARS = 4000;
-// What is read keeps the server's own limit (16 KiB): a description written by an import or another client is never cut
-// on the way in and then saved cut by a rename. The 4000 above is what the form takes.
+// The read keeps the server limit of 16 KiB.
+// The read never cuts a description that an import or another client wrote. A rename would otherwise save it cut.
+// The 4000 above is the limit of the form.
 const READ_DESCRIPTION_CHARS = 16384;
 const MAX_SQL_CHARS = 256 * 1024;
 const PROMPT_SQL_CHARS = 4000;
 const PANE_SQL_CHARS = 20000;
 const SERVER_RELOAD_AFTER_MS = 30000;
 const HOST_WAIT_MS = 5000;
-// util.latest keys of the list reloads.
+// The list reloads use util.latest keys.
 const LIBRARY_REQUEST = "queryLibrary:library";
 const HISTORY_REQUEST = "queryLibrary:history";
 const ELLIPSIS = "\u2026";
 const MIDDOT = " \u00b7 ";
 
-// The roots of Saved, in their order: one for each query library of the server (the first is "server", the others
-// "server~<name>"; /api/version lists them: features.query_library.libraries), then "local".
+// The roots of Saved appear in this order.
+// Each query library of the server has one root. The first is "server". The others are "server~<name>".
+// /api/version lists them in features.query_library.libraries. The "local" root comes last.
 const LOCAL_STORE = "local";
 const DEFAULT_SERVER_LABEL = "Shared server storage";
 const LOCAL_LABEL = "Local browser storage";
@@ -89,7 +89,7 @@ const fold = (value) => String(value == null ? "" : value).trim().toLocaleLowerC
 const newId = (prefix) => `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 const byName = (a, b) => String(a.name).localeCompare(String(b.name), "en", { numeric: true, sensitivity: "base" });
 
-// The library's names for the sprite's drawings (ns.icon).
+// This table gives the names of the library drawings in the sprite (ns.icon).
 const ICONS = {
   search: "search", lock: "lock", folder: "folder", folderOpen: "folder-open", folderPlus: "folder-plus", query: "file", file: "file", plus: "plus",
   dots: "dots", download: "arrow-down", check: "check", x: "x", chevronRight: "chevron-right", book: "book",
@@ -115,8 +115,9 @@ function oneLine(text, max = 160) {
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}${ELLIPSIS}` : flat;
 }
 
-// Instants and counts in ns.format (docs/ui-foundations.md): browser-local
-// 24 h "Sep 12 16:29:57" ("16:29:57" under a day heading), "1,234 queries".
+// ns.format shows instants and counts (docs/ui-foundations.md).
+// An instant is browser-local, in 24 h form: "Sep 12 16:29:57". Under a day heading it is "16:29:57".
+// A count reads "1,234 queries".
 
 function dayKey(ms) {
   const d = new Date(ms);
@@ -140,9 +141,9 @@ function readJson(key, fallback) {
   return value == null ? fallback : value;
 }
 
-// false when the browser refused the write (quota, private mode).
-// The library is the user's data and the metadata catalogue is a cache: when the browser refuses a write, the cache
-// goes first and the write is tried once more.
+// False when the browser refused the write (quota, private mode).
+// The library is the user data. The metadata catalogue is a cache.
+// When the browser refuses a write, the cache is dropped first. Then the write is tried once more.
 function writeJson(key, value) {
   const pref = storage.pref(key, null, { json: true });
   if (pref.set(value)) return true;
@@ -150,11 +151,11 @@ function writeJson(key, value) {
   return pref.set(value);
 }
 
-// The host whose library is shown: the one selected in the header.
+// This is the host whose library is shown. It is the host selected in the header.
 const currentHost = () => String(state.selectedHostId || "");
 
-// The editor's line-number setting (app_autocomplete.js keeps the root
-// class in step with it): the SQL preview shows its gutter when it is on.
+// This is the editor line-number setting. app_autocomplete.js keeps the root class in step with it.
+// The SQL preview shows the gutter when the setting is on.
 const lineNumbersOn = () => !document.documentElement.classList.contains("chdash-line-numbers-hidden");
 
 class LibraryError extends Error {
@@ -177,11 +178,16 @@ function cleanText(value, max) {
 const hostOf = (item) => (typeof item?.host_id === "string" ? item.host_id : item?.host_id == null ? "" : String(item.host_id));
 const emptyLibrary = () => ({ revision: 0, folders: [], queries: [] });
 
-// A library of the server is read in pages (docs/query-library.md, "REST API"): what is loaded is a part of it, and each item has its minimal
-// data (a name, a place, a date; for a folder the counts under it), never its SQL. `partial` marks it. `loaded` holds the folders whose
-// children are in (the empty string is the top level), `next` the offset of the next window of a level that is larger than a page,
-// `levelTotal` how many that level holds, `details` the queries that were opened (their SQL and description), `found` the queries that a
-// search returned (they may not be loaded in their folder), `failed` the folders that could not be read. The browser's library is whole.
+// The browser reads a library of the server in pages (docs/query-library.md, "REST API").
+// A part of the library is loaded, not the whole library. Each item has its minimal data: a name, a place and a date.
+// For a folder, the data holds the counts under it. An item never has its SQL.
+// `partial` marks such a library.
+// `loaded` holds the folders whose children are in. The empty string is the top level.
+// `next` is the offset of the next window of a level that is larger than a page.
+// `levelTotal` is how many items that level holds.
+// `details` holds the queries that were opened. Their SQL and description are kept there.
+// `found` holds the queries that a search returned. They may not be loaded in their folder.
+// `failed` holds the folders that could not be read. The browser library is always whole.
 const PAGE_SIZE = 100;
 const isPartial = (lib) => lib?.partial === true;
 function emptyPartialLibrary() {
@@ -190,15 +196,17 @@ function emptyPartialLibrary() {
     loaded: new Set(), next: new Map(), levelTotal: new Map(), details: new Map(), found: new Map(), failed: new Set(),
   };
 }
-// Read: the children of the folder were asked for (all of them, or a first window of a level that is larger than a page).
+// Read means the children of the folder were asked for: all of them, or a first window of a level that is larger than a page.
 const isRead = (lib, parentId) => !isPartial(lib) || lib.loaded.has(parentId || "") || lib.next.has(parentId || "");
 const hasMore = (lib, parentId) => isPartial(lib) && lib.next.has(parentId || "");
-// The SQL and the description of a query: its own in a whole library, the opened one in a partial library (null until it is read).
+// The SQL and the description of a query. In a whole library, the query holds its own.
+// In a partial library, the opened query holds them. The value is null until the read is done.
 const queryDetail = (lib, query) => (!query ? null : !isPartial(lib) ? query : lib.details.get(query.id) || null);
 const libraryQueryTotal = (lib) => (isPartial(lib) ? lib.totals.queries : lib.queries.length);
 const libraryFolderTotal = (lib) => (isPartial(lib) ? lib.totals.folders : lib.folders.length);
 
-// One answer of GET /api/query-library (the children of `parentId`) merged into a partial library.
+// The merge puts one answer of GET /api/query-library into a partial library.
+// The answer holds the children of `parentId`.
 function mergePage(lib, data, parentId) {
   const host = typeof data?.host_id === "string" ? data.host_id : "";
   const count = (value) => Math.max(0, Number(value) || 0);
@@ -240,8 +248,7 @@ function mergePage(lib, data, parentId) {
   return lib;
 }
 
-// Every folder and query belongs to one host: one without a host_id is
-// dropped (docs/query-library.md, "Entries without a host").
+// Every folder and query belongs to one host. An entry without a host_id is dropped (docs/query-library.md, "Entries without a host").
 function normalizeLibrary(raw) {
   const folders = [];
   const queries = [];
@@ -259,8 +266,7 @@ function normalizeLibrary(raw) {
     });
   }
   const folderHosts = new Map(folders.map((f) => [f.id, f.host_id]));
-  // A parent that does not exist, belongs to another host (or a cycle) puts
-  // the folder at the top level of its host.
+  // If the parent does not exist, belongs to another host, or forms a cycle, the folder goes to the top level of its host.
   for (const f of folders) {
     if (f.parent_id && folderHosts.get(f.parent_id) !== f.host_id) f.parent_id = null;
     const seen = new Set([f.id]);
@@ -291,7 +297,7 @@ function normalizeLibrary(raw) {
   return { revision: Number(raw?.revision) || 0, folders, queries };
 }
 
-// The part of a library that belongs to one host.
+// This is the part of a library that belongs to one host.
 function scopeToHost(lib, host) {
   return {
     revision: lib.revision,
@@ -305,7 +311,7 @@ const queryById = (lib, id) => lib.queries.find((q) => q.id === id) || lib.found
 const childFolders = (lib, parentId) => lib.folders.filter((f) => f.parent_id === (parentId || null)).sort(byName);
 const childQueries = (lib, folderId) => lib.queries.filter((q) => q.folder_id === (folderId || null)).sort(byName);
 
-// Level of a folder: 1 for a top-level folder.
+// The level of a folder. A top-level folder has level 1.
 function folderDepth(lib, id) {
   let depth = 0;
   let cur = folderById(lib, id);
@@ -316,7 +322,7 @@ function folderDepth(lib, id) {
   return depth;
 }
 
-// Levels a folder occupies with its subfolders: 1 for a leaf folder.
+// The number of levels that a folder takes with its subfolders. A leaf folder takes 1 level.
 function subtreeHeight(lib, id) {
   const kids = childFolders(lib, id);
   return 1 + (kids.length ? Math.max(...kids.map((k) => subtreeHeight(lib, k.id))) : 0);
@@ -341,15 +347,16 @@ function folderPath(lib, id) {
   return names;
 }
 
-// A folder as the pickers and the preview write it: "/" for the top
-// level of a root, then "/Operations", "/Operations/Merges".
+// This is how the pickers and the preview write a folder path. "/" is the top level of a root.
+// Then come paths such as "/Operations" and "/Operations/Merges".
 const folderPathText = (lib, id) => `/${folderPath(lib, id).join("/")}`;
 
-// The queries under every folder, subfolders included: folder id -> count (the top level is the whole library). One pass
-// for a library; it is kept while the library object is the same one.
+// The map holds the queries under every folder, subfolders included. It maps folder id to count.
+// The top level counts the whole library.
+// One pass builds the map for a library. The map is kept while the library object stays the same.
 const queryCountCache = new WeakMap();
 function queryCounts(lib) {
-  // A partial library does not hold every query: each folder says how many are under it.
+  // A partial library does not hold every query. Each folder gives the count of queries under it.
   if (isPartial(lib)) return new Map(lib.folders.map((f) => [f.id, f.query_count || 0]));
   const signature = `${lib.revision}:${lib.folders.length}:${lib.queries.length}`;
   const hit = queryCountCache.get(lib);
@@ -367,7 +374,7 @@ function queryCounts(lib) {
 const queriesText = (n) => (n ? format.countLabel(n, "query", "queries") : "Empty");
 
 function subtreeCounts(lib, id) {
-  // A partial library: the folders directly under it, and the queries under it, as the server counts them.
+  // A partial library gives the folders directly under it. It also gives the queries under it, as the server counts them.
   if (isPartial(lib)) {
     const folder = folderById(lib, id);
     return { folders: folder?.subfolder_count || 0, queries: folder?.query_count || 0 };
@@ -382,8 +389,8 @@ function subtreeCounts(lib, id) {
   return { folders, queries };
 }
 
-// A folder and everything in it, as a copy: its folders parents first (the
-// folder itself without a parent), their queries.
+// This makes a copy of a folder and everything in it. The copy lists the parent folders first.
+// The folder itself has no parent. Then come the queries.
 function subtreeOf(lib, folderId) {
   const folders = [];
   const queries = [];
@@ -450,10 +457,9 @@ function requireHost() {
   return host;
 }
 
-// chdash.queryLibrary.v2 holds the folders and queries of every host, each
-// with its host_id. An entry without a host is purged from the key the
-// first time it is read (no import of host-less entries: the old flat
-// chdash.savedQueries.v1 list is not read any more).
+// The key chdash.queryLibrary.v2 holds the folders and queries of every host. Each entry has its host_id.
+// An entry without a host is purged from the key the first time it is read.
+// The import of entries without a host is not done. The old flat list chdash.savedQueries.v1 is no longer read.
 function readLocalLibrary() {
   const raw = readJson(LOCAL_KEY, null);
   if (!raw || typeof raw !== "object" || raw.version !== 2) return emptyLibrary();
@@ -472,9 +478,9 @@ function writeLocalLibrary(lib) {
 }
 
 function createLocalAdapter() {
-  // Each change re-reads the stored library (another tab may have changed
-  // it), applies one validated edit to the current host's part and stores
-  // the whole library with the next revision.
+  // Each change reads the stored library again. Another tab may have changed it.
+  // The change applies one validated edit to the part of the current host.
+  // It stores the whole library with the next revision.
   const change = async (edit) => {
     const host = requireHost();
     const all = readLocalLibrary();
@@ -570,8 +576,8 @@ function createLocalAdapter() {
         return id;
       });
     },
-    // A folder copied in from the other root (subtreeOf), under parent_id:
-    // new ids, nothing merged or renamed. Resolves with the copy's id.
+    // A folder is copied in from the other root (subtreeOf) under parent_id.
+    // The copy gets new ids. Nothing is merged or renamed. The promise resolves with the id of the copy.
     copyTree({ parent_id = null, folders = [], queries = [] }) {
       return change((lib, host) => {
         assertFolderTarget(lib, parent_id);
@@ -601,8 +607,8 @@ function createLocalAdapter() {
   };
 }
 
-// The browser History (ns.history, app_history.js: IndexedDB, written by app_run.js): the
-// runs of the current host.
+// This is the browser History (ns.history). app_history.js stores it in IndexedDB.
+// app_run.js writes the runs. It lists the runs of the current host.
 function createLocalHistory() {
   const toEntry = (it) => ({
     id: `h_${it.ts_ms}`,
@@ -652,16 +658,18 @@ function errorFromResponse(status, payload) {
   return new LibraryError(code, String(payload?.message || fallback), { field: payload?.field, status });
 }
 
-// library: the name of the server's library this adapter reads and writes (?library=); "" for the default one.
-// keepOpen(): the ids of the folders that the page shows open, which a reload brings back with their children.
+// library: the name of the server library that this adapter reads and writes (?library=).
+// An empty string means the default library.
+// keepOpen() returns the ids of the folders that the page shows open. A reload brings these folders back with their children.
 function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
   let revision = null;
-  // The library this adapter loaded last: what a change was made from (change() compares it after a conflict).
+  // This is the library that the adapter loaded last. A change starts from this library.
+  // change() compares it after a conflict.
   let known = null;
 
-  // api.request (app_api.js), with the library revision as If-Match. Writes
-  // are accepted from this page only: a same-origin request with a JSON
-  // content type (the server refuses other types with 415).
+  // Requests go through api.request (app_api.js). The library revision is sent as If-Match.
+  // The server accepts writes from this page only. A write is a same-origin request with a JSON content type.
+  // The server refuses other content types with 415.
   async function request(method, path, body, { ifMatch = true, signal } = {}) {
     const headers = {};
     if (ifMatch && revision != null) headers["If-Match"] = String(revision);
@@ -677,8 +685,8 @@ function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
 
   const enc = encodeURIComponent;
 
-  // One page: the children of a folder (none: the top level), at most PAGE_SIZE items, the minimal data of each; cursor is the offset in
-  // a level that is larger than a page.
+  // One page holds the children of a folder. For the top level, no folder is given.
+  // A page has at most PAGE_SIZE items, each with its minimal data. cursor is the offset in a level that is larger than a page.
   const readPage = (parentId, cursor, signal) => {
     const query = new URLSearchParams({ host_id: requireHost(), limit: String(PAGE_SIZE) });
     if (parentId) query.set("parent_id", parentId);
@@ -686,12 +694,13 @@ function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
     return request("GET", `?${query}`, undefined, { ifMatch: false, signal });
   };
 
-  // The top level, and the folders that were open (a change reloads the library, and a folder that was open stays so).
+  // This reads the top level and the folders that were open. A change reloads the library.
+  // A folder that was open stays open.
   async function load({ signal } = {}) {
     const data = await readPage(null, 0, signal);
     revision = Number.isFinite(Number(data.revision)) ? Number(data.revision) : null;
     const lib = mergePage(emptyPartialLibrary(), data, null);
-    // Parents first: a folder that was open inside another one is read when that one is in.
+    // Read the parents first. A folder that was open inside another folder is read when that folder is in the library.
     let wanted = new Set(keepOpen());
     for (let pass = 0; pass <= MAX_DEPTH && wanted.size; pass += 1) {
       const now = [...wanted].filter((id) => lib.folders.some((f) => f.id === id) && !lib.loaded.has(id));
@@ -714,7 +723,8 @@ function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
     };
   }
 
-  // The children of a folder (none: the top level) from `cursor`, merged into the library that was loaded last.
+  // This reads the children of a folder, from `cursor`. For the top level, no folder is given.
+  // The children are merged into the library that was loaded last.
   async function loadChildren(parentId, { cursor = 0, signal } = {}) {
     const lib = known;
     if (!lib) return null;
@@ -723,7 +733,7 @@ function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
     return lib;
   }
 
-  // One query, whole.
+  // This reads one query in full.
   async function getQuery(id, { signal } = {}) {
     const data = await request("GET", `/queries/${enc(id)}?host_id=${enc(requireHost())}`, undefined, { ifMatch: false, signal });
     return {
@@ -734,7 +744,8 @@ function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
     };
   }
 
-  // The queries that hold every word of `text` (names, descriptions, SQL and folder paths), at most 100, with their path.
+  // This returns the queries that hold every word of `text`. The search covers names, descriptions, SQL and folder paths.
+  // It returns at most 100 queries, each with its path.
   async function searchQueries(text, { signal } = {}) {
     const data = await request("GET", `/search?host_id=${enc(requireHost())}&q=${enc(text)}`, undefined, { ifMatch: false, signal });
     return {
@@ -747,14 +758,15 @@ function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
     };
   }
 
-  // A folder and everything under it with the SQL, as the copy to another storage takes it.
+  // This returns a folder and everything under it, with the SQL. Another storage takes this copy.
   async function exportTree(folderId, { signal } = {}) {
     const data = await request("GET", `/export?host_id=${enc(requireHost())}&folder_id=${enc(folderId)}`, undefined, { ifMatch: false, signal });
     return subtreeOf(normalizeLibrary(data), folderId);
   }
 
-  // When the item a change names was changed in the meantime (its own updated_at_ms moved), the retry after a
-  // conflict does not replay it: it would overwrite the other person's edit, which is what If-Match is there to stop.
+  // The item of a change may be changed in the meantime. Its updated_at_ms then moves.
+  // In this case, the retry after a conflict does not replay the change.
+  // The replay would overwrite the edit of another person. If-Match exists to stop this overwrite.
   const stamp = (library, entity) => {
     if (!library || !entity) return null;
     const list = entity.kind === "folder" ? library.folders : library.queries;
@@ -762,10 +774,12 @@ function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
     return found ? found.updated_at_ms : null;
   };
 
-  // One change: on a 409 conflict, reload (new revision) and retry once, unless the item changed.
-  // idOf picks the new item's id out of the answer. entity: { kind, id } of the item an update or a delete names.
-  // The change itself is the answer: when it went through and the reload after it failed, the result says `stale`
-  // (the caller shows no error and reads the library again), never "the change failed".
+  // This makes one change. On a 409 conflict, reload the library (new revision).
+  // Then retry once, unless the item changed.
+  // idOf takes the id of the new item out of the answer.
+  // entity: { kind, id } of the item that an update or a delete names.
+  // The change itself is the answer. When the change went through but the reload failed, the result says `stale`.
+  // The caller then shows no error. It reads the library again. The result never says "the change failed".
   async function change(method, path, body, idOf = (response) => response?.id || "", entity = null) {
     const before = stamp(known, entity);
     const attempt = async () => {
@@ -811,9 +825,9 @@ function createServerAdapter(library = "", { keepOpen = () => [] } = {}) {
     createQuery: (input) => change("POST", "/queries", { ...input, host_id: requireHost() }),
     updateQuery: (id, patch) => change("PATCH", `/queries/${enc(id)}`, patch, undefined, { kind: "query", id }),
     deleteQuery: (id) => change("DELETE", `/queries/${enc(id)}`, undefined, undefined, { kind: "query", id }),
-    // A folder copied in from the browser's root: one all-or-nothing
-    // import in copy mode (nothing merged, skipped or renamed), under
-    // parent_id. Resolves with the copy's id.
+    // A folder is copied in from the browser root. The copy is one all-or-nothing import in copy mode.
+    // Nothing is merged, skipped or renamed. The import goes under parent_id.
+    // The promise resolves with the id of the copy.
     copyTree: ({ parent_id = null, folders = [], queries = [] }) => change("POST", "/import", {
       host_id: requireHost(),
       copy: true,
@@ -829,41 +843,45 @@ function freshHistoryState(q = "") {
   return { entries: [], loading: false, loaded: false, q, error: "" };
 }
 
-// One root: its adapter, the current host's library and its state. label and hint are what the tree and the preview say of it.
+// One root has an adapter, the library of the current host, and a state.
+// The label and the hint are the texts that the tree and the preview show for it.
 function newStore(kind, adapter, writable, { label, hint }) {
   return { kind, adapter, writable, label, hint, library: adapter.kind === "server" ? emptyPartialLibrary() : emptyLibrary(), loadError: "", fatal: "", loadedAt: 0 };
 }
 
-// The ids of the folders of one root that are open (the keys of ctl.expanded are "<root>:<folder id>").
+// These are the ids of the open folders of one root. The keys of ctl.expanded have the form "<root>:<folder id>".
 const openFolders = (kind) => [...ctl.expanded].filter((key) => key.startsWith(`${kind}:`)).map((key) => key.slice(kind.length + 1));
 
-// Every root but the browser's is a library of the server.
+// Every root, except the browser root, is a library of the server.
 const isServerStore = (store) => store.kind !== LOCAL_STORE;
 const rootLabel = (kind) => ctl.stores[kind]?.label || (kind === LOCAL_STORE ? LOCAL_LABEL : DEFAULT_SERVER_LABEL);
 
 const uiPrefs = readJson(UI_KEY, {});
 const ctl = {
   started: null,
-  // The roots by kind: "local" always, one for each library of the server when features.query_library is on; order is
-  // their order in the tree.
+  // This maps the roots by kind. "local" is always present.
+  // Each library of the server has a root when features.query_library is on.
+  // The order is the order in the tree.
   stores: {},
   order: [],
   history: null,
-  // The host the shown library and History belong to.
+  // This is the host to which the shown library and History belong.
   host: "",
-  // Open folders ("<store>:<folder id>") and closed roots ("<store>").
+  // This holds the open folders ("<store>:<folder id>") and the closed roots ("<store>").
   expanded: new Set(Array.isArray(uiPrefs.expanded) ? uiPrefs.expanded.filter((x) => typeof x === "string" && x.includes(":")) : []),
   closedRoots: new Set(Array.isArray(uiPrefs.closedRoots) ? uiPrefs.closedRoots.filter((x) => typeof x === "string") : []),
-  // The folders chosen last in the folder picker ("<store>:<folder id>"), the newest first.
+  // This holds the folders that the folder picker chose last ("<store>:<folder id>").
+  // The newest folder comes first.
   recent: Array.isArray(uiPrefs.recentFolders) ? uiPrefs.recentFolders.filter((x) => typeof x === "string" && x.includes(":")).slice(0, 8) : [],
-  // The name being typed in a row: { mode, ... }.
+  // The name that the user types in a row. It has the form { mode, ... }.
   editing: null,
-  // The Save / Edit form shown in the pane in place of the preview (createPaneForm), or null.
+  // The Save or Edit form shown in the pane instead of the preview (createPaneForm).
+  // The value is null when no form is shown.
   form: null,
-  // The highlighted item of each tab (its data-key), shown in the preview.
+  // This is the highlighted item of each tab, by its data-key. The preview shows it.
   selection: { saved: "", history: "" },
   search: "",
-  // The saved query the editor holds: { store, id, sql }.
+  // This is the saved query that the editor holds: { store, id, sql }.
   opened: null,
   busy: false,
   historyState: freshHistoryState(),
@@ -875,23 +893,26 @@ const storeList = () => ctl.order.map((kind) => ctl.stores[kind]).filter(Boolean
 const storeOf = (kind) => (Object.hasOwn(ctl.stores, kind) ? ctl.stores[kind] : null);
 const editableStore = (store) => !!store && store.writable && !store.fatal && !!ctl.host;
 const anyEditable = () => storeList().some(editableStore);
-// Where a new folder or query goes by default: the first library of the server that can take it, else this browser's.
+// This sets where a new folder or query goes by default. It is the first library of the server that can take it.
+// Otherwise, it is this browser root.
 const defaultStore = () => storeList().find((store) => isServerStore(store) && editableStore(store))?.kind || LOCAL_STORE;
 
 // ---- what a library of the server loads when it is asked for
 
-// The reads in flight, by what they read: a render asks for what it shows, and the same read is made once.
+// This holds the reads in flight, by what they read. A render asks for what it shows.
+// The same read is made once.
 const reading = new Map();
 const wanted = new Set();
 
-// A render of the whole library, and of the pane when it shows what was read.
+// This renders the whole library. It also renders the pane when the pane shows a read item.
 function shown() {
   if (ctl.rendered.library) renderLibrary({ keepFocus: true });
   else if (ctl.shown === "saved") renderPreview();
 }
 
-// The children of a folder (null: the top level) of a library of the server, read once; more: the next window of a level that is larger
-// than a page. Resolves when they are in (a failure is kept: the tree says so and offers to retry).
+// This reads the children of a folder (null: the top level) of a library of the server. Each read happens once.
+// It also reads the next window of a level that is larger than a page. The promise resolves when the children are in.
+// A failure is kept. The tree shows the failure and offers a retry.
 function ensureChildren(storeKind, parentId, { more = false } = {}) {
   const store = storeOf(storeKind);
   const lib = store?.library;
@@ -915,7 +936,8 @@ function ensureChildren(storeKind, parentId, { more = false } = {}) {
   return job;
 }
 
-// The SQL and the description of a query of a library of the server, read when the query is opened (the answer is kept with the library).
+// This reads the SQL and the description of a query of a library of the server.
+// The read happens when the query is opened. The answer is kept with the library.
 function ensureDetail(storeKind, id) {
   const store = storeOf(storeKind);
   const lib = store?.library;
@@ -938,8 +960,9 @@ function ensureDetail(storeKind, id) {
   return job;
 }
 
-// The query with its SQL and description, whichever the storage: the query itself in a whole library, the one that was read in a library of
-// the server; null (and a toast) when it cannot be read.
+// This returns the query with its SQL and description, for any storage.
+// In a whole library, it returns the query itself. In a library of the server, it returns the query that was read.
+// It returns null, and shows a toast, when the query cannot be read.
 async function fullQuery(storeKind, query) {
   const store = storeOf(storeKind);
   if (!store || !query) return null;
@@ -949,7 +972,7 @@ async function fullQuery(storeKind, query) {
   return detail;
 }
 
-// A folder with everything under it and the SQL, for a copy to another storage or an export.
+// This returns a folder with everything under it, and the SQL. The copy goes to another storage or to an export.
 async function fullSubtree(storeKind, folderId) {
   const store = storeOf(storeKind);
   if (!store) return { folders: [], queries: [] };
@@ -961,13 +984,13 @@ function saveUiPrefs() {
   writeJson(UI_KEY, { expanded: [...ctl.expanded].slice(-400), closedRoots: [...ctl.closedRoots], recentFolders: ctl.recent });
 }
 
-// /api/version picks the roots; without an answer in 4 s, the browser's only.
+// /api/version picks the roots. Without an answer in 4 s, only the browser root is used.
 function waitForFeatures() {
   return Promise.race([featuresMod.ready, new Promise((resolve) => setTimeout(resolve, 4000))]);
 }
 
-// The library belongs to a host: at page load (a ?saved= link) the hosts
-// may not be known yet, so the first selection is awaited (5 s at most).
+// The library belongs to a host. At page load, a ?saved= link can come before the hosts are known.
+// The first selection then waits for the hosts. It waits 5 s at most.
 function waitForHost() {
   if (currentHost()) return Promise.resolve();
   return new Promise((resolve) => {
@@ -989,14 +1012,14 @@ function start() {
       ctl.stores = {};
       ctl.order = [];
       if (features.enabled) {
-        // Older servers list no libraries: one, the default.
+        // Older servers list no libraries. For them, the list holds one library: the default.
         const libraries = Array.isArray(features.libraries) && features.libraries.length
           ? features.libraries
           : [{ name: "", writable: features.writable === true }];
         libraries.forEach((library, index) => {
-          // The kind goes into keys split on ":" and into attributes: the name is encoded (a name may hold any text).
+          // The kind goes into keys that split on ":", and into attributes. The name is encoded, because a name may hold any text.
           const kind = index === 0 ? "server" : `server~${encodeURIComponent(library.name)}`;
-          // The name is what the tree shows; a single library that was never named keeps the old "Shared server storage".
+          // The tree shows the name. A single library that was never named keeps the old name "Shared server storage".
           const label = libraries.length === 1 && (!library.name || library.name === "default") ? DEFAULT_SERVER_LABEL : String(library.name);
           ctl.stores[kind] = newStore(kind, createServerAdapter(index === 0 && !library.name ? "" : String(library.name), { keepOpen: () => openFolders(kind) }), library.writable === true, { label, hint: SERVER_HINT });
           ctl.order.push(kind);
@@ -1012,8 +1035,8 @@ function start() {
   return ctl.started;
 }
 
-// One root's library for the current host. A reload supersedes the one in
-// flight (util.latest): only the answer for the host shown now is used.
+// This reads the library of one root for the current host. A reload replaces the read in flight (util.latest).
+// Only the answer for the host shown now is used.
 async function reloadStore(store) {
   const token = util.latest(`${LIBRARY_REQUEST}:${store.kind}`);
   const host = currentHost();
@@ -1035,15 +1058,15 @@ async function reloadStore(store) {
   }
 }
 
-// Both roots of the current host.
+// This returns both roots of the current host.
 async function reloadLibrary() {
   ctl.host = currentHost();
   await Promise.all(storeList().map((store) => reloadStore(store)));
   if (ctl.rendered.library) renderLibrary();
 }
 
-// Another host is selected: its library and History replace the shown
-// ones (selection, preview and the opened query are the old host's).
+// The user selects another host. Its library and History replace the shown ones.
+// The selection, the preview and the opened query are those of the old host.
 function onHostChanged() {
   if (!ctl.started || currentHost() === ctl.host) return;
   ctl.selection = { saved: "", history: "" };
@@ -1064,9 +1087,9 @@ function onHostChanged() {
 
 window.addEventListener("chdash:host-changed", onHostChanged);
 
-// A change's answer: the root's new library (and the server's writable).
+// This is the answer to a change: the new library of the root, and the writable value of the server.
 function takeResult(store, result) {
-  // The change went through but the library could not be read after it: the shown one is read again.
+  // The change went through, but the library could not be read after it. The shown library is read again.
   if (result.stale) {
     void reloadStore(store).then(() => renderLibrary({ keepFocus: true }));
     return;
@@ -1077,10 +1100,10 @@ function takeResult(store, result) {
   store.loadedAt = Date.now();
 }
 
-// Runs one change of a root through its adapter, re-renders with the new
-// library and tells the user what failed (after a conflict retry, a
-// read-only answer...): in the dialog that asked for it (inDialog), else in
-// a toast. Validation errors always go back to the caller.
+// This runs one change of a root through its adapter. Then it renders the new library again.
+// It tells the user what failed, for example after a conflict retry or a read-only answer.
+// The message appears in the dialog that asked for the change (inDialog). Otherwise, it appears in a toast.
+// Validation errors always return to the caller.
 async function apply(storeKind, operation, { success = "", select = null, inDialog = false } = {}) {
   const store = storeOf(storeKind);
   if (!editableStore(store)) {
@@ -1091,8 +1114,9 @@ async function apply(storeKind, operation, { success = "", select = null, inDial
   const host = currentHost();
   try {
     const result = await operation(store.adapter);
-    // The host changed while the change was on its way: its answer is the old host's library, which must not replace
-    // the one that the new host is loading (the change itself was made, on the host it was asked for).
+    // The host changed while the change was on its way. Its answer is the library of the old host.
+    // This library must not replace the library that the new host is loading.
+    // The change itself was made on the host it was asked for.
     if (currentHost() !== host) return result;
     takeResult(store, result);
     if (typeof select === "function") ctl.selection.saved = select(result.id) || ctl.selection.saved;
@@ -1114,7 +1138,7 @@ async function apply(storeKind, operation, { success = "", select = null, inDial
   }
 }
 
-// A place in the library: a root and a folder of it (null: its top).
+// This is a place in the library: a root and a folder of that root. Null means the top of the root.
 const locValue = (loc) => `${loc.store}:${loc.folderId || ""}`;
 function parseLoc(value) {
   const text = String(value || "");
@@ -1124,9 +1148,9 @@ function parseLoc(value) {
 }
 const whereText = (loc) => `${rootLabel(loc.store)} ${folderPathText(storeOf(loc.store)?.library || emptyLibrary(), loc.folderId)}`;
 
-// Moves a query or a folder from one root to the other: a copy into the
-// target (the server's in one all-or-nothing request), then the removal
-// from the source. `patch` changes the query on the way (Edit, Save).
+// This moves a query or a folder from one root to the other.
+// It copies the item into the target. A copy to the server is one all-or-nothing request.
+// Then it removes the item from the source. The patch value changes the query on the way (Edit, Save).
 async function moveAcross(item, target, { inDialog = false, patch = null } = {}) {
   const source = storeOf(item.store);
   const dest = storeOf(target.store);
@@ -1136,7 +1160,7 @@ async function moveAcross(item, target, { inDialog = false, patch = null } = {})
     toast(message, "error");
     return false;
   }
-  // A second move while the first runs would copy the item twice and fail its removal.
+  // A second move, made while the first move runs, copies the item twice. Its removal then fails.
   if (ctl.busy) {
     const message = "Another change is still running.";
     if (inDialog) throw new LibraryError("busy", message);
@@ -1155,7 +1179,7 @@ async function moveAcross(item, target, { inDialog = false, patch = null } = {})
     if (item.kind === "query") {
       const listed = queryById(srcLib, item.id);
       if (!listed) throw new LibraryError("not_found", "That query no longer exists.");
-      // A query of the server is read whole (its SQL) before it goes to another storage.
+      // The query of the server is read in full, with its SQL, before it goes to another storage.
       const query = isPartial(srcLib) ? await ensureDetail(item.store, listed.id) : listed;
       if (!query) throw new LibraryError("server", "The query could not be read.");
       const input = { folder_id: folderId, name: query.name, description: query.description, sql: query.sql, ...(patch || {}) };
@@ -1179,7 +1203,7 @@ async function moveAcross(item, target, { inDialog = false, patch = null } = {})
     return false;
   }
   if (currentHost() === host) takeResult(dest, copied);
-  // The copy is in: the source's item goes.
+  // The copy is in. Now the source item is removed.
   let removed = true;
   try {
     const gone = item.kind === "query" ? await source.adapter.deleteQuery(item.id) : await source.adapter.deleteFolder(item.id, { recursive: true });
@@ -1212,13 +1236,13 @@ function setEditorSql(sql) {
   util.replaceTextAreaValue(dom.queryTextArea, String(sql || ""));
 }
 
-// Opening a query closes the dialog; the editor takes the focus.
+// Opening a query closes the dialog. The editor takes the focus.
 function closePanel() {
   queryUi.closeQueryLibrary({ restoreFocus: false });
 }
 
-// "Load": the editor takes the SQL (a saved query is then the
-// opened one, marked in the tree) and the dialog closes.
+// "Load": the editor takes the SQL. A saved query then becomes the opened query, marked in the tree.
+// The dialog closes.
 function openInEditor(item, { store = "", savedQuery = null } = {}) {
   if (!item) return;
   setEditorSql(item.sql);
@@ -1231,9 +1255,9 @@ function openInEditor(item, { store = "", savedQuery = null } = {}) {
 
 // ------------------------------------------------------------------ toast
 
-// In the top dialog (the page under a modal dialog is inert and hidden from
-// assistive technology); data-dialog-float moves it to the next one down
-// when that dialog closes.
+// In the top dialog, the page under a modal dialog is inert and hidden from assistive technology.
+// The data-dialog-float attribute moves the toast to the next dialog down.
+// This happens when that dialog closes.
 let toastTimer = 0;
 function toast(message, kind = "info") {
   let node = $(".qlToast");
@@ -1255,8 +1279,8 @@ function toast(message, kind = "info") {
 
 // ---------------------------------------------------------------- dialogs
 
-// A form prompt: the shared ns.dialog (app_ui_dialog.js), stacked over the
-// library. Resolves with the submitted value, or null when dismissed.
+// This is a form prompt. It uses the shared ns.dialog (app_ui_dialog.js), stacked over the library.
+// The promise resolves with the submitted value. It resolves with null when the user dismisses the prompt.
 function openDialog({ title, body, submitLabel = "Save", extraButtons = [], danger = false, wide = false, onSubmit }) {
   return dialog.open({
     title,
@@ -1306,19 +1330,22 @@ function textArea(name, value, placeholder) {
 
 // ------------------------------------------------------------ the folder picker
 
-// Where a query goes: the Folder of the Save and Edit form, and the target of Move to. It follows what the drives do
-// (Google Drive "Move to", Nextcloud "Choose target folder", Dropbox "Save to"): the choice reads as a path
-// (Team queries > Reports > Daily); it opens on a tree of the storages and their folders to browse (twisties and arrow
-// keys); the places chosen last come first; a box filters by name when there are many folders. A storage that cannot be
-// written is shown locked and cannot be chosen. In Move to, the tree is always open (inline).
+// The picker chooses where a query goes. It sets the Folder of the Save and Edit form, and the target of Move to.
+// It follows the same pattern as Google Drive ("Move to"), Nextcloud ("Choose target folder") and Dropbox ("Save to").
+// The choice shows as a path, for example: Team queries > Reports > Daily.
+// The picker opens on a tree of the storages and their folders. The user browses the tree with twisties and arrow keys.
+// The places chosen last come first. A box filters the folders by name when there are many folders.
+// A storage that cannot be written is shown locked. The user cannot choose it.
+// In Move to, the tree is always open (inline).
 //
 //   const picker = createFolderPicker({ name, selected, exclude, inline, labelId });
-//   picker.el            the control (a "change" event bubbles from it when the user picks a place)
-//   picker.value         "<store>:<folder id>" ("<store>:" is the top of a storage), "" when nothing can be chosen
-//   picker.set(loc)      picks a place (no event); false when it cannot be chosen
-//   picker.refresh()     the folders changed: builds the tree again with the same choice; true when it differed
+//   picker.el            the control. A "change" event bubbles from it when the user picks a place.
+//   picker.value         "<store>:<folder id>". "<store>:" is the top of a storage. The value is "" when nothing can be chosen.
+//   picker.set(loc)      chooses a place. No event is sent. It returns false when the place cannot be chosen.
+//   picker.refresh()     builds the tree again with the same choice. It returns true when the tree differed.
 //   picker.focus() / picker.hasFocus()
-// `exclude` ({ store, id } or a list): the folders being moved, which cannot go into themselves (nor deeper than MAX_DEPTH).
+// `exclude` takes { store, id } or a list. It holds the folders that are moved.
+// These folders cannot go into themselves or deeper than MAX_DEPTH.
 const PICKER_RECENT_SHOWN = 3;
 const PICKER_FILTER_FROM = 8;
 let pickerSeq = 0;
@@ -1350,7 +1377,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
       const walk = (parentId, parent, depth) => {
         for (const folder of childFolders(lib, parentId)) {
           if (moved.some((m) => m.store === store.kind && (folder.id === m.id || isInside(lib, folder.id, m.id)))) continue;
-          // lazy: a folder of the server whose subfolders were not read yet (they are read when it is opened).
+          // lazy: a folder of the server whose subfolders are not read yet. The subfolders are read when the folder opens.
           const lazy = isPartial(lib) && !isRead(lib, folder.id) && (folder.subfolder_count || 0) > 0;
           const node = { key: `${store.kind}:${folder.id}`, store, folderId: folder.id, label: folder.name, depth, parent, children: [], lazy, locked: false, disabled: !writable || (moved.length > 0 && folderDepth(lib, folder.id) + height > MAX_DEPTH), root: false };
           out.set(node.key, node);
@@ -1421,7 +1448,8 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     return icon(expanded.has(node.key) && (node.children.length || node.lazy) ? "folderOpen" : "folder");
   };
   const pathText = (node) => chain(node).map((n) => n.label).join(" / ");
-  // "/" for the top of a storage, "/Reports/Daily" for a folder (what the data attributes say, for tests and tools).
+  // "/" is the top of a storage. "/Reports/Daily" is a folder path.
+  // The data attributes hold these values, for tests and tools.
   const pathOf = (node) => (node.root ? "/" : `/${chain(node).slice(1).map((n) => n.label).join("/")}`);
 
   const drawTrigger = () => {
@@ -1449,7 +1477,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     li.dataset.section = section;
     li.dataset.path = pathOf(node);
     li.tabIndex = -1;
-    // The dialog of Move to puts the focus on the chosen place when it opens.
+    // The Move to dialog puts the focus on the chosen place when it opens.
     if (inline && node.key === value && section === "tree") li.setAttribute("autofocus", "");
     li.setAttribute("aria-level", String(flat ? 1 : node.depth));
     li.setAttribute("aria-selected", String(node.key === value));
@@ -1505,7 +1533,8 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     if (filtering) recentLabel.hidden = recentList.hidden = true;
     emptyRow.hidden = shown > 0;
     tree.hidden = shown === 0;
-    // One tab stop in the list: the chosen place (else the first row); the arrow keys move it.
+    // The list has one tab stop: the chosen place. If no place is chosen, the first row is the tab stop.
+    // The arrow keys move the tab stop.
     const stop = itemFor(value) || items()[0];
     if (stop) stop.tabIndex = 0;
   };
@@ -1560,7 +1589,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
     else expanded.delete(key);
     render();
     itemFor(key)?.focus({ preventScroll: true });
-    // The subfolders of a folder of the server are read when it is opened first.
+    // The subfolders of a folder of the server are read the first time the folder opens.
     if (opening && node.lazy) void ensureChildren(node.store.kind, node.folderId).then(() => refreshPicker());
   };
 
@@ -1651,7 +1680,7 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
       }
     });
   }
-  // Escape closes the picker and only it (the form and the dialog stay); in the filter it first clears the text.
+  // Escape closes the picker only. The form and the dialog stay open. In the filter, Escape clears the text first.
   el.addEventListener("keydown", (ev) => {
     if (ev.key !== "Escape" || inline || !isOpen) return;
     ev.preventDefault();
@@ -1713,10 +1742,10 @@ function createFolderPicker({ name, selected = null, exclude = null, inline = fa
   return api;
 }
 
-// Highlighted SQL, clipped (a prompt shows the start, the pane more):
-// the shared read-only SQL block (sqlBlock). The pane's block has its
-// copy button and, when the editor shows line numbers, their gutter (its
-// lines then scroll rather than wrap, so each number stays on its line).
+// This is the highlighted SQL, clipped. A prompt shows the start. The pane shows more.
+// It uses the shared read-only SQL block (sqlBlock).
+// The pane block has a copy button. When the editor shows line numbers, the block also has their gutter.
+// Its lines scroll and do not wrap. Thus each number stays on its line.
 function sqlPreview(sql, max = PROMPT_SQL_CHARS, { pane = false } = {}) {
   const text = String(sql || "");
   const clipped = text.length > max ? `${text.slice(0, max)}\n${ELLIPSIS}` : text;
@@ -1724,7 +1753,7 @@ function sqlPreview(sql, max = PROMPT_SQL_CHARS, { pane = false } = {}) {
   return sqlBlock({ sql: clipped, wrap: !gutter, gutter, copy: pane, label: "Query", className: "qlSql" });
 }
 
-// The place of a Saved row: a root, a folder, or a query's folder.
+// This is the place of a Saved row: a root, a folder, or the folder of a query.
 function locOfKey(key) {
   const sel = parseKey(key);
   if (!sel || !storeOf(sel.store)) return null;
@@ -1735,28 +1764,29 @@ function locOfKey(key) {
   return null;
 }
 
-// The selected place in Saved, as a default target: the selected root or
-// folder, a selected query's folder.
+// This is the selected place in Saved. It is the default target. It is the selected root or folder.
+// For a selected query, it is the folder of the query.
 const selectedLoc = () => locOfKey(ctl.selection.saved);
 
-// The saved query the editor holds (Ctrl+S updates it): { store, query }.
+// This is the saved query that the editor holds. Ctrl+S updates this query: { store, query }.
 async function openedQuery() {
   const store = ctl.opened ? storeOf(ctl.opened.store) : null;
   if (!store) return null;
-  // A query of the server may not be among the loaded ones: it is read by its id (with its description and its SQL).
+  // A query of the server may not be in the loaded items. The app reads the query by its id.
+  // The read includes the description and the SQL.
   const query = isPartial(store.library) ? await ensureDetail(store.kind, ctl.opened.id) : queryById(store.library, ctl.opened.id);
   return query ? { store: store.kind, query } : null;
 }
 
 // ------------------------------------------------------- the pane's form
 
-// Save and Edit are one form in the right pane of the library (no prompt over the dialog): the
-// pane shows it in place of the preview while ctl.form holds it. The form is built once and the
-// pane only attaches it again, so a render of the tree or the pane never loses what was typed.
-// Its folder follows the place that is selected in the tree. Escape drops it (the preview
-// is back), then the dialog closes as usual.
+// Save and Edit use one form in the right pane of the library. No prompt appears over the dialog.
+// The pane shows the form in place of the preview while ctl.form holds it.
+// The form is built once. The pane only attaches it again. Thus a render of the tree or the pane never loses the typed text.
+// The Folder of the form follows the place that is selected in the tree.
+// Escape drops the form, and the preview returns. A second Escape closes the dialog as usual.
 
-// The server's field names, as the form's fields.
+// These are the server field names, used as the fields of the form.
 const FORM_FIELD_OF = { name: "name", description: "description", folder_id: "folder_id", parent_id: "folder_id", target: "folder_id" };
 
 function formField(name, label, control) {
@@ -1767,9 +1797,12 @@ function formField(name, label, control) {
   return wrap;
 }
 
-// mode "save": rawText (the editor's or the History run's) and fromHistory; "edit": sqlText, shown only.
-// `submit(action, values)` ("submit" or "new") makes the change: true when it is done (it has closed the form),
-// false when it stays (the toast said why); it throws what the form shows (a LibraryError, under its field).
+// In mode "save", the form uses rawText (the text of the editor or of the History run) and fromHistory.
+// In mode "edit", the form uses sqlText. The form only shows this text.
+// `submit(action, values)` makes the change. The action is "submit" or "new".
+// It returns true when the change is done. The form is then closed.
+// It returns false when the form stays open. The toast says why.
+// It throws what the form shows, a LibraryError, under its field.
 function createPaneForm({ mode, key, title, name = "", description = "", where = null, rawText = "", fromHistory = null, sqlText = "", submitLabel = "Save", extraLabel = "", submit }) {
   const form = h("form", { class: "qlPaneForm" });
   form.noValidate = true;
@@ -1781,7 +1814,8 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
   back.setAttribute("aria-label", "Back to the list");
   back.title = "Back to the list";
   back.appendChild(icon("back"));
-  // The title names the form for a screen reader; it is not drawn (the Folder, Name and SQL say what the form is).
+  // The title names the form for a screen reader. The title is not drawn.
+  // The Folder, Name and SQL fields say what the form is.
   const heading = h("h3", { class: "qlPreview__title srOnly", id: "qlFormTitle" }, title);
   head.append(back, heading);
   form.setAttribute("aria-labelledby", heading.id);
@@ -1795,8 +1829,10 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
   const folderWrap = formField("folder_id", "Folder", folder.el);
   fields.append(nameWrap, descriptionWrap, folderWrap);
 
-  // The SQL: Save writes it as the formatter does unless the Formatted switch is released (as typed). A History run that was
-  // formatted has its text; the others wait for the formatter (a script it rejects is saved as typed, the switch released and locked).
+  // The SQL: Save writes the text as the formatter does, unless the Formatted switch is released.
+  // Then it writes the text as typed. A History run that was formatted already has its text.
+  // The other runs wait for the formatter. A script that the formatter rejects is saved as typed.
+  // Its switch is released and locked.
   const sqlBox = h("div", { class: "uiField qlForm__sql" });
   sqlBox.setAttribute("role", "group");
   const sqlLabel = h("span", { class: "uiField__label", id: "qlFormSqlLabel" });
@@ -1809,7 +1845,7 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
   let formattedText = fromHistory?.formatted ? String(fromHistory.sql || "") : null;
   let formatting = null;
   const chosen = () => (mode !== "save" ? sqlText : asTyped || !formattedText ? rawText : formattedText);
-  // The formatter changed nothing: there is one text to save, and the Formatted switch would offer a choice that is not one.
+  // The formatter changed nothing, so there is one text to save. The Formatted switch offers no real choice.
   const sameText = () => !!formattedText && formattedText.trim() === rawText.trim();
   const drawSql = () => {
     if (mode === "save") {
@@ -1821,12 +1857,13 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
       sqlLabel.textContent = "SQL";
     }
     const block = sqlPreview(chosen(), PANE_SQL_CHARS, { pane: true });
-    // The Formatted switch sits in the block, left of its copy button, as in a result's statement.
+    // The Formatted switch is in the block, left of the copy button. It is the same as in the statement of a result.
     if (formattedSwitch) block.appendChild(formattedSwitch);
     sqlBody.replaceChildren(block);
   };
   if (mode === "save") {
-    // The Formatted switch of the results (drawSql puts it in the block): the formatted text is what most saves want.
+    // The Formatted switch of the results is in the block. drawSql puts it there.
+    // Most saves want the formatted text.
     formattedSwitch = sqlBlock.formatSwitch({ rawName: "as typed", onChange: (on) => { asTyped = !on; drawSql(); } });
     formattedSwitch.id = "qlSaveFormatted";
     formattedSwitch.classList.add("sqlBlock__mode");
@@ -1937,11 +1974,13 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
     }
   });
 
-  // The folders of the tree changed (a folder made while saving): the list is built again with the same choice.
+  // The folders of the tree changed. For example, a folder was made while the save ran.
+  // The list is built again with the same choice.
   session.refreshFolders = () => {
     session.folder.refresh();
   };
-  // The place picked in the tree is the folder (a root or folder of a read-only storage is not offered).
+  // The place that the user picks in the tree becomes the folder.
+  // A root or a folder of a read-only storage is not offered.
   session.pickFolder = (loc) => {
     if (!loc) return;
     const before = session.folder.value;
@@ -1958,8 +1997,10 @@ function createPaneForm({ mode, key, title, name = "", description = "", where =
   return session;
 }
 
-// Where the form's query will sit, drawn in the tree: a dashed row in the folder of the Folder field (opened for it), at the
-// place its name sorts to. Edit shows it only when the query moves. It is for the eye: aria-hidden, the Folder field says it.
+// This shows where the query of the form will sit, in the tree. A dashed row appears in the folder of the Folder field.
+// The folder opens for it. The row sits at the place where its name sorts.
+// Edit shows the row only when the query moves. The row is for the eye only. It has aria-hidden.
+// The Folder field gives the same information.
 const GHOST_NAME = "New query";
 let ghost = null;
 let ghostOpens = new Set();
@@ -1998,18 +2039,19 @@ function ghostRow(level) {
   return li;
 }
 
-// The tree draws the place again (the Folder changed); the focus stays where it is.
+// The tree draws the place again, because the Folder changed. The focus stays where it is.
 function showGhost(session) {
   if (ctl.form === session && ctl.shown === "saved") renderTree();
 }
 
-// The name is typed: the dashed row follows it.
+// The name is typed. The dashed row follows the typed name.
 function syncGhostName() {
   const name = libraryEls.tree && $(".qlNode--ghost .qlRow__name", libraryEls.tree);
   if (name && ctl.form) name.textContent = ctl.form.draftName() || GHOST_NAME;
 }
 
-// Shows the form in the pane: the Saved tab, the form attached, its name field focused (a phone: the pane step).
+// This shows the form in the pane. It selects the Saved tab, attaches the form, and focuses the name field.
+// On a phone, it shows the pane step.
 async function openForm(session) {
   ctl.editing = null;
   ctl.form = session;
@@ -2021,7 +2063,7 @@ async function openForm(session) {
   session.focus();
 }
 
-// The form is there again (the same one), its name field focused.
+// The form is shown again. It is the same form, and its name field has the focus.
 function revealForm() {
   if (ctl.shown !== "saved") void queryUi.openQueryLibrary("saved", { focus: false }).then(() => revealForm());
   else {
@@ -2032,7 +2074,8 @@ function revealForm() {
   }
 }
 
-// The form is dropped: the preview of the selection is back, the focus on the selected row (a phone goes back to the list).
+// The form is dropped. The preview of the selection returns, and the focus goes to the selected row.
+// On a phone, the list returns.
 function closeForm() {
   const session = ctl.form;
   if (!session) return;
@@ -2049,7 +2092,7 @@ function cancelForm() {
   if (ctl.form && !ctl.form.busy) closeForm();
 }
 
-// The tree changed: a vanished query ends its Edit; the folder list follows the folders.
+// The tree changed. A query that vanished ends its Edit. The folder list follows the folders.
 function syncForm() {
   const session = ctl.form;
   if (!session) return;
@@ -2064,7 +2107,7 @@ function syncForm() {
   session.refreshFolders();
 }
 
-// Escape: the form first (focus anywhere in the dialog), then the dialog closes as usual.
+// Escape closes the form first, wherever the focus is in the dialog. A second Escape closes the dialog as usual.
 function onDialogKeydown(ev) {
   if (ev.key !== "Escape" || ev.defaultPrevented || ev.isComposing || !ctl.form || ctl.shown !== "saved" || rowMenu) return;
   if (ev.target instanceof Element && ev.target.closest("dialog") !== dom.queryLibraryMenu) return;
@@ -2073,14 +2116,14 @@ function onDialogKeydown(ev) {
   cancelForm();
 }
 
-// The tree selection (a click, the arrows, a new folder) is the form's Folder.
+// The tree selection sets the Folder of the form. A click, the arrow keys, or a new folder can make the selection.
 function formFollows(key) {
   ctl.form?.pickFolder(locOfKey(key));
 }
 
-// Save the editor (or a History run) as a library query, in either
-// root. When the editor holds a query opened from an editable root, the
-// form also offers to update it ("Update", and "Save as new").
+// Save the editor text, or a History run, as a library query. The query can go in either root.
+// When the editor holds a query that the user opened from an editable root, the form also offers an update.
+// The form offers the choices "Update" and "Save as new".
 async function beginSave({ sql = null, fromHistory = null } = {}) {
   await start();
   if (!ctl.host) {
@@ -2123,7 +2166,7 @@ async function beginSave({ sql = null, fromHistory = null } = {}) {
       const update = opened && action !== "new";
       let savedId = "";
       if (update && target.store !== opened.store) {
-        // The opened query moves to the other root with its new content.
+        // The opened query moves to the other root. It keeps its new content.
         const ok = await moveAcross({ kind: "query", store: opened.store, id: opened.query.id }, target, { inDialog: true, patch: input });
         if (!ok) return false;
         savedId = parseKey(ctl.selection.saved)?.id || "";
@@ -2137,7 +2180,7 @@ async function beginSave({ sql = null, fromHistory = null } = {}) {
         savedId = update ? opened.query.id : result.id;
       }
       if (sql == null && savedId) ctl.opened = { store: target.store, id: savedId, sql: rawText };
-      // The tree opens the folder it went into, the query highlighted; the pane shows it.
+      // The tree opens the folder that the query went into. The query is highlighted. The pane shows it.
       ctl.search = "";
       if (libraryEls.input) libraryEls.input.value = "";
       ctl.selection.saved = savedId ? keyOf("query", target.store, savedId) : "";
@@ -2151,13 +2194,13 @@ async function beginSave({ sql = null, fromHistory = null } = {}) {
   await openForm(session);
 }
 
-// After a change: the tree row of the query has the focus (a phone: the preview of it).
+// After a change, the tree row of the query has the focus. On a phone, the preview shows the query.
 function closeAfter() {
   if (isPhone()) enterPreview();
   else focusSelected();
 }
 
-// Edit (a query's name, description and folder; its SQL is only shown): the same form.
+// Edit changes the name, description and folder of a query. Its SQL is only shown. Edit uses the same form.
 async function beginEdit(storeKind, query) {
   const key = `edit:${storeKind}:${query.id}`;
   if (ctl.form?.key === key) {
@@ -2182,7 +2225,8 @@ async function beginEdit(storeKind, query) {
         if (!result) return false;
       }
       expandPath(target.store, target.folderId);
-      // The change drew the tree while the query sat in a folder that was closed: it is selected again, now that the folder is open.
+      // The change drew the tree while the query sat in a closed folder.
+      // The query is selected again, now that the folder is open.
       ctl.selection.saved = keyOf("query", target.store, target.store === storeKind ? query.id : parseKey(ctl.selection.saved)?.id || query.id);
       ctl.form = null;
       renderLibrary({ keepFocus: false });
@@ -2195,7 +2239,7 @@ async function beginEdit(storeKind, query) {
   await openForm(session);
 }
 
-// Moves one or several items into one folder of either root.
+// This moves one or several items into one folder of either root.
 async function moveDialog(items) {
   const list = (Array.isArray(items) ? items : [items]).map((item) => {
     const lib = storeOf(item.store)?.library;
@@ -2231,9 +2275,8 @@ async function moveDialog(items) {
   focusSelected();
 }
 
-// Moves a query or a folder within its root, or into the other root
-// (moveAcross). From the Move dialog (inDialog) a failure is thrown to the
-// dialog; from a drop it is a toast.
+// This moves a query or a folder within its root, or into the other root (moveAcross).
+// From the Move dialog (inDialog), a failure is thrown to the dialog. From a drop, a failure shows a toast.
 async function moveItem(item, target, { inDialog = false } = {}) {
   if (target.store !== item.store) return moveAcross(item, target, { inDialog });
   const lib = storeOf(item.store)?.library || emptyLibrary();
@@ -2269,13 +2312,13 @@ async function moveItem(item, target, { inDialog = false } = {}) {
   }
 }
 
-// Yes / no on the shared dialog (the focus starts on Cancel).
+// This shows a yes or no question on the shared dialog. The focus starts on Cancel.
 function confirmDialog({ title, message, confirmLabel = "Remove", danger = true }) {
   return dialog.confirm({ title, message, confirmLabel, danger, className: "qlDialog" });
 }
 
-// Removes the given items after one confirm; a folder goes with everything in it. A folder
-// the library shows (or holds the one it shows) takes you up to its parent.
+// This removes the given items after one confirm. A folder goes with everything in it.
+// If the removed folder is shown, or holds the shown folder, the view moves up to the parent of the removed folder.
 async function deleteItems(items) {
   const list = (items || []).map((item) => {
     const lib = storeOf(item.store)?.library;
@@ -2340,14 +2383,14 @@ async function deleteItems(items) {
 
 // ------------------------------------------------------------ library view
 
-// Saved is a tree, as in the Explorer: the storages ("Shared server storage"
-// then "Local browser storage") are its top folders and every folder opens
-// in place. A row's "..." menu (and the right click) changes it, ticked rows
-// are changed together, a folder or a query is named in place, and the
-// preview pane on the right shows the highlighted row.
+// Saved is a tree, as in the Explorer. The storages are its top folders: "Shared server storage" first, then "Local browser storage".
+// Every folder opens in place.
+// The "..." menu of a row, and a right click, act on the row.
+// Ticked rows change together. A folder or a query is named in place.
+// The preview pane on the right shows the highlighted row.
 const libraryEls = {};
 
-// Item keys: "r:<store>" a root, "f:<store>:<id>" a folder, "q:<store>:<id>" a query.
+// Item keys have these forms: "r:<store>" is a root, "f:<store>:<id>" is a folder, and "q:<store>:<id>" is a query.
 function keyOf(kind, store, id) {
   if (kind === "root") return `r:${store}`;
   return `${kind === "folder" ? "f" : "q"}:${store}:${id}`;
@@ -2363,7 +2406,7 @@ function parseKey(key) {
 
 const itemOfLi = (li) => ({ kind: li.dataset.kind, store: li.dataset.store, id: li.dataset.id || "" });
 
-// Opens every folder from the top of a root down to `folderId` (and the root).
+// This opens every folder from the top of a root down to `folderId`, and opens the root.
 function expandPath(storeKind, folderId) {
   const lib = storeOf(storeKind)?.library;
   let cur = lib ? folderById(lib, folderId) : null;
@@ -2375,8 +2418,8 @@ function expandPath(storeKind, folderId) {
   saveUiPrefs();
 }
 
-// The head of a tab's list (Saved and History alike): the search, then the
-// tab's own tools at the right end.
+// This is the head of the list of a tab, for Saved and History alike. It holds the search.
+// The tools of the tab are at the right end.
 function listHead(placeholder, { title = "" } = {}) {
   const head = h("div", { class: "ql__head" });
   const search = h("div", { class: "qlSearch" });
@@ -2399,7 +2442,8 @@ function buildLibraryShell(root) {
   root.dataset.rendered = "1";
   const wrap = h("div", { class: "ql" });
   const { head, input, actions } = listHead("Search the library", { title: "Searches names, descriptions and SQL" });
-  // The head's one tool: a new folder, inside the highlighted folder (else in a root).
+  // The head has one tool: the new folder. The new folder goes inside the highlighted folder.
+  // Without a highlighted folder, it goes in a root.
   const newFolder = iconButton("folderPlus", "New folder", "new-folder");
   actions.appendChild(newFolder);
   const notice = h("div", { class: "ql__notice" });
@@ -2414,8 +2458,8 @@ function buildLibraryShell(root) {
   root.appendChild(wrap);
   Object.assign(libraryEls, { root, wrap, input, actions, newFolder, notice, tree, foot, count });
 
-  // ns.search: the one delay; Enter (before the handler below) and Escape (a
-  // filled field) apply the field at once.
+  // ns.search sets the one delay. Enter applies the field at once, before the handler below runs.
+  // Escape also applies the field at once, when the field is filled.
   const searchField = search.bind(input, (value) => {
     ctl.search = value;
     ctl.editing = null;
@@ -2428,7 +2472,7 @@ function buildLibraryShell(root) {
       searchField.flush();
       select("saved", treeItems()[0]);
     } else if (ev.key === "Enter") {
-      // The first query found, in the preview.
+      // The preview shows the first query found.
       ev.preventDefault();
       const first = treeItems().find((li) => li.dataset.kind === "query");
       if (first) {
@@ -2490,7 +2534,7 @@ function renderNotice() {
   notice.hidden = !notice.childElementCount;
 }
 
-// The foot: the count of queries and the host. (Saving the editor's query is the editor's own button, beside the copy button.)
+// The foot shows the count of queries and the host. The editor has its own button to save its query, beside the copy button.
 function renderFoot() {
   const total = storeList().reduce((n, store) => n + libraryQueryTotal(store.library), 0);
   const count = format.countLabel(total, "query", "queries");
@@ -2500,8 +2544,9 @@ function renderFoot() {
 
 // ---- search
 
-// The search of the libraries of the server is made by the server (names, descriptions, SQL and paths of every query, at most 100 answers):
-// the page does not hold them. The answer of each storage is kept with the words it answered.
+// The server makes the search of its libraries. The search covers names, descriptions, SQL and paths of every query.
+// It returns at most 100 answers. The page does not keep these answers.
+// The answer of each storage is kept with the words that it answered.
 const searched = new Map();
 let searchToken = 0;
 function runSearch(text) {
@@ -2598,7 +2643,7 @@ function rowShell(kind, storeKind, id, level) {
   return li;
 }
 
-// The start of a row, up to its icon: the indentation, the twisty.
+// This is the start of a row, up to its icon. It holds the indentation and the twisty.
 function rowLead(level, { twisty = false } = {}) {
   const row = h("div", { class: "qlRow" });
   row.style.setProperty("--qlDepth", String(level - 1));
@@ -2609,7 +2654,8 @@ function rowLead(level, { twisty = false } = {}) {
   return row;
 }
 
-// The name typed in place: a new folder, or a folder renamed. Enter makes the change, Escape drops it.
+// This is the name that the user types in place. It is for a new folder, or for a renamed folder.
+// Enter makes the change. Escape drops the name.
 function editorRow(li, level, { value = "", placeholder = "Folder name", mode, onCommit }) {
   const row = rowLead(level);
   row.classList.add("qlRow--edit");
@@ -2676,7 +2722,7 @@ function editorRow(li, level, { value = "", placeholder = "Folder name", mode, o
   return input;
 }
 
-// The row of a new folder, first in the folder it goes into.
+// This is the row of a new folder. It comes first in the folder that the new folder goes into.
 function newFolderRow(level) {
   const li = h("li", { class: "qlNode qlNode--new" });
   li.setAttribute("role", "none");
@@ -2696,7 +2742,8 @@ function newFolderRow(level) {
   return li;
 }
 
-// A new folder in `parentId` (null: the top of the root): that folder opens, the name is typed in it.
+// This makes a new folder in `parentId`. Null means the top of the root.
+// The folder opens, and the user types the name in it.
 function startNewFolder({ store, parentId = null }) {
   if (!store || !editableStore(storeOf(store))) return;
   ctl.search = "";
@@ -2716,7 +2763,7 @@ function metaText(kind, store, entity) {
   return entity.updated_at_ms ? format.time(entity.updated_at_ms, { precision: "min" }) : "";
 }
 
-// A folder or a query row; `level` is its depth in the tree (a root is 1).
+// This makes a folder row or a query row. `level` is the depth of the row in the tree. A root has level 1.
 function fileRow(kind, storeKind, entity, level, { terms = null, path = "" } = {}) {
   const store = storeOf(storeKind);
   const li = rowShell(kind, storeKind, entity.id, level);
@@ -2736,7 +2783,7 @@ function fileRow(kind, storeKind, entity, level, { terms = null, path = "" } = {
         focusSelected();
       },
     });
-    // Once the row is in the tree: the name, selected, ready to be typed over.
+    // When the row is in the tree, the name is selected. The user can type over it.
     queueMicrotask(() => {
       input.focus();
       input.select();
@@ -2767,11 +2814,12 @@ function fileRow(kind, storeKind, entity, level, { terms = null, path = "" } = {
   return li;
 }
 
-// The children of a folder (or of a root: folderId null), one level deeper than their parent.
+// This makes the children of a folder, or of a root (folderId null). Each child is one level deeper than its parent.
 function appendFolderChildren(parentEl, storeKind, folderId, level) {
   const lib = storeOf(storeKind).library;
   if (ctl.editing?.mode === "new" && ctl.editing.store === storeKind && (ctl.editing.parentId || null) === (folderId || null)) parentEl.appendChild(newFolderRow(level));
-  // A folder of the server that is open and not read yet is asked for after this render, and said in the meantime.
+  // A folder of the server is open but not read yet. It is requested after this render.
+  // The tree says so in the meantime.
   if (!isRead(lib, folderId)) {
     if (lib.failed.has(folderId || "")) {
       parentEl.appendChild(actionRow("Could not be read.", "Retry", { retry: "", store: storeKind, parent: folderId || "" }, level));
@@ -2802,14 +2850,15 @@ function appendFolderChildren(parentEl, storeKind, folderId, level) {
     parentEl.appendChild(li);
   }
   if (!ghostPlaced) parentEl.appendChild(ghostRow(level));
-  // A level that is larger than a page: the next window is read on demand.
+  // A level that is larger than a page reads its next window on demand.
   if (hasMore(lib, folderId)) {
     const left = Math.max(0, (lib.levelTotal.get(folderId || "") || 0) - childFolders(lib, folderId).length - childQueries(lib, folderId).length);
     parentEl.appendChild(actionRow(`${format.count(left)} more`, `Show ${format.count(Math.min(left || PAGE_SIZE, PAGE_SIZE))} more`, { more: "", store: storeKind, parent: folderId || "" }, level));
   }
 }
 
-// A row of the tree that says something and offers one action (a button that the tree's click handler knows by its data attribute).
+// This is a row of the tree that shows a message and offers one action.
+// The tree click handler knows the button by its data attribute.
 function actionRow(text, label, data, level) {
   const li = h("li", { class: "qlTree__action" });
   li.setAttribute("role", "none");
@@ -2827,8 +2876,8 @@ function emptyFolderRow(text, level) {
   return empty;
 }
 
-// A root: "Shared server storage" or "Local browser storage", its count of queries, a lock badge
-// when read-only; open unless closed.
+// This is a root: "Shared server storage" or "Local browser storage". It shows the count of queries.
+// It shows a lock badge when the root is read-only. The root is open, unless it is closed.
 function rootRow(store) {
   const li = rowShell("root", store.kind, "", 1);
   const open = !ctl.closedRoots.has(store.kind) || ghost?.store === store.kind;
@@ -2878,13 +2927,13 @@ function renderTree({ keepFocus = false } = {}) {
     else if (!matches.results.length) tree.appendChild(emptyRow(matches.failed ? "The search could not be made." : `No saved query matches \u201c${ctl.search.trim()}\u201d.`));
     if (matches.truncated) tree.appendChild(emptyRow("The server shows its first 100 answers: add a word to narrow the search."));
   } else if (ctl.host) {
-    // Nothing saved is not a special screen: the roots, each saying it is empty.
+    // No saved query gets a special screen. The roots show instead, and each root says that it is empty.
     for (const store of storeList()) tree.appendChild(rootRow(store));
   }
   restoreSelection("saved");
-  // The focus stays in the tree: on the highlighted row, else on the first.
+  // The focus stays in the tree. It goes to the highlighted row. Without one, it goes to the first row.
   if (hadFocus && !tree.contains(document.activeElement)) (selectedItem("saved") || treeItems()[0])?.focus({ preventScroll: false });
-  // What the render showed as "Loading...": asked for now.
+  // The render showed "Loading...". The read of these items is requested now.
   const asked = [...wanted];
   wanted.clear();
   for (const item of asked) {
@@ -2917,7 +2966,7 @@ function focusSelected() {
   (selectedItem("saved") || treeItems()[0])?.focus({ preventScroll: true });
 }
 
-// A folder or a root opens or closes.
+// This opens or closes a folder or a root.
 function toggleFolder(li, open) {
   const isRoot = li.dataset.kind === "root";
   const key = isRoot ? li.dataset.store : `${li.dataset.store}:${li.dataset.id}`;
@@ -2959,7 +3008,7 @@ function menuItem(label, iconName, { key = "", danger = false, run }) {
   node.setAttribute("role", "menuitem");
   node.append(icon(iconName), h("span", { class: "runMenu__optText" }, label));
   if (key) node.appendChild(h("kbd", { class: "qlMenu__key" }, key));
-  // Once the menu has closed: a prompt opened while the menu is still a layer would close with it.
+  // The prompt opens after the menu closes. A prompt opened while the menu is a layer would close with the menu.
   node.addEventListener("click", () => setTimeout(run, 0));
   return node;
 }
@@ -2984,7 +3033,8 @@ function openRowMenu(li, { x = 0, y = 0, anchor = null } = {}) {
     menu.appendChild(menuItem(item.kind === "query" ? "Edit\u2026" : "Rename", "edit", { key: "F2", run: () => editItem(li) }));
     menu.appendChild(menuItem("Move to\u2026", "move", { key: `${mod}+M`, run: () => moveDialog(targetsOf(li)) }));
   }
-  // A folder, with everything in it, as a JSON file (a read-only storage's too: it only reads).
+  // This exports a folder, with everything in it, as a JSON file.
+  // A read-only storage can export too, because the export only reads.
   if (item.kind === "folder") menu.appendChild(menuItem("Export as JSON", "download", { run: () => exportFolder(item) }));
   if (canEdit) {
     menu.appendChild(h("div", { class: "qlMenu__sep", role: "separator" }));
@@ -3006,8 +3056,8 @@ function openRowMenu(li, { x = 0, y = 0, anchor = null } = {}) {
   });
 }
 
-// A folder and everything in it as a JSON file: the body POST /api/query-library/import takes (host_id,
-// folders, queries), so the file can be imported again.
+// This is a folder and everything in it, as a JSON file. The body of POST /api/query-library/import takes (host_id, folders, queries).
+// The file can be imported again.
 async function exportFolder(item) {
   const lib = storeOf(item.store)?.library;
   const folder = lib ? folderById(lib, item.id) : null;
@@ -3029,12 +3079,13 @@ async function exportFolder(item) {
   toast(`Exported ${format.countLabel(payload.queries.length, "query", "queries")} to ${name}.`);
 }
 
-// A search result, in its folder: the search is left and the folders above it open.
+// This shows a search result in its folder. The search ends, and the folders above the result open.
 async function revealQuery(item) {
   const store = storeOf(item.store);
   const query = store ? queryById(store.library, item.id) : null;
   if (!query) return;
-  // A library of the server holds the folders that were opened: the ones above this query are read, from the top level down.
+  // A library of the server keeps the folders that were opened.
+  // The folders above this query are read, from the top level down.
   if (isPartial(store.library)) {
     const detail = await ensureDetail(item.store, item.id);
     if (detail) {
@@ -3063,12 +3114,12 @@ async function loadItem(li) {
   if (query) openInEditor(query, { store: li.dataset.store, savedQuery: query });
 }
 
-// A click highlights the row (its preview on the right); a folder or a root also opens or closes. The
-// box ticks the row, "..." opens its menu. On a phone the twisty and the folder icon open or close a
-// folder, its name opens its preview.
+// A click highlights the row, and the preview shows on the right. A click on a folder or a root also opens or closes it.
+// The box ticks the row. The "..." button opens its menu.
+// On a phone, the twisty and the folder icon open or close a folder. The name of the folder opens its preview.
 function onTreeClick(ev) {
   const target = ev.target instanceof Element ? ev.target : null;
-  // "Show more" (the next window of a level that is larger than a page) and "Retry" (a folder that could not be read).
+  // "Show more" reads the next window of a level that is larger than a page. "Retry" reads a folder again.
   const action = target?.closest("[data-more], [data-retry]");
   if (action) {
     const lib = storeOf(action.dataset.store)?.library;
@@ -3085,12 +3136,12 @@ function onTreeClick(ev) {
     openRowMenu(li, { anchor: menuButton });
     return;
   }
-  // Was this row the selected one before the press? (The press focuses the row, and the focus selects it.)
+  // Was this row selected before the press? The press focuses the row. The focus then selects the row.
   const wasSelected = treePress?.key === li.dataset.key ? treePress.wasSelected : ctl.selection.saved === li.dataset.key;
   treePress = null;
   if (isFolderLike(li)) {
     if (isPhone()) {
-      // The twisty is small under a finger: the icon opens and closes too, the name shows the pane.
+      // The twisty is small under a finger. The icon also opens and closes the folder. The name shows the pane.
       if (!target.closest(".qlRow__twisty, .qlRow > .qlIcon")) {
         select("saved", li);
         enterPreview();
@@ -3099,8 +3150,9 @@ function onTreeClick(ev) {
       toggleFolder(li);
       return;
     }
-    // The chevron opens and closes. A click on the row selects a folder and opens it when it is closed; on the folder that
-    // is already selected (the blue frame) and open, it closes it as the chevron does.
+    // The chevron opens and closes the folder.
+    // A click on the row selects a folder. It opens the folder when the folder is closed.
+    // On a folder that is already selected (the blue frame) and open, the click closes it, as the chevron does.
     if (target.closest(".qlRow__twisty")) toggleFolder(li);
     else toggleFolder(li, !(wasSelected && li.getAttribute("aria-expanded") === "true"));
     return;
@@ -3109,7 +3161,7 @@ function onTreeClick(ev) {
   if (isPhone()) enterPreview();
 }
 
-// A double click loads a query (a folder already opened or closed with the first click).
+// A double click loads a query. The first click has already opened or closed a folder.
 function onTreeDoubleClick(ev) {
   const li = itemOf(ev.target);
   if (!li || li.dataset.kind !== "query" || (ev.target instanceof Element && ev.target.closest(".qlRow--edit, .qlRow__menu"))) return;
@@ -3124,12 +3176,14 @@ function onTreeContextMenu(ev) {
   openRowMenu(li, { x: ev.clientX, y: ev.clientY });
 }
 
-// A press on a row of the tree, until its click (or its context menu, drag or cancel) ends it. The press focuses the row
-// before the click: with the form open that focus sets the Folder and draws the tree again, and the row under the pointer
-// would be gone before the click reached it (a twisty never opened, a folder tapped on a phone never went back to the form).
-// While a press is on, the click that follows does what the focus would do.
+// A press on a row of the tree lasts until its click, context menu, drag or cancel ends it.
+// The press focuses the row before the click. When the form is open, this focus sets the Folder and draws the tree again.
+//
+// The row under the pointer can then be gone before the click reaches it. A twisty then never opens.
+// A folder tapped on a phone never returns to the form. While a press is active, the click that follows does what the focus does.
 let treePressed = false;
-// The row under the last press and whether it was the selected one then (see onTreeClick): the press itself selects it.
+// This holds the row under the last press. It also holds whether the row was selected then (see onTreeClick).
+// The press itself selects the row.
 let treePress = null;
 let treePressTimer = 0;
 
@@ -3146,10 +3200,11 @@ function endTreePointer() {
   clearTimeout(treePressTimer);
 }
 
-// The focus and the highlight move together (Tab back into the list).
+// The focus and the highlight move together. Tab returns to the list.
 function onTreeFocus(ev) {
-  // A button of an action row ("Show more", "Retry") is not the row of the storage that holds it: the focus selects nothing, and the
-  // tree does not scroll under the pointer between the press and the click.
+  // A button of an action row ("Show more", "Retry") is not the row of the storage that holds it.
+  // The focus selects nothing.
+  // The tree does not scroll under the pointer between the press and the click.
   if (ev.target instanceof Element && ev.target.closest(".qlTree__action")) return;
   if (treePressed && ctl.form) return;
   const li = itemOf(ev.target);
@@ -3245,7 +3300,7 @@ function onTreeKeydown(ev) {
     moveDialog(targetsOf(li));
     return;
   }
-  // Type-ahead: the next visible item starting with the typed letter.
+  // Type-ahead selects the next visible item that starts with the typed letter.
   if (ev.key.length === 1 && !mod && !ev.altKey && /\S/.test(ev.key)) {
     const letter = ev.key.toLocaleLowerCase();
     const ordered = [...items.slice(index + 1), ...items.slice(0, index + 1)];
@@ -3257,7 +3312,8 @@ function onTreeKeydown(ev) {
   }
 }
 
-// A folder is renamed in its row; a query has its form in the pane (name, description, folder, SQL).
+// A folder is renamed in its row. A query uses its form in the pane.
+// The form has the name, the description, the folder and the SQL.
 function editItem(li) {
   const entity = entityOf(li);
   if (!entity) return;
@@ -3274,8 +3330,9 @@ function editItem(li) {
 
 let dragItems = null;
 
-// A drop place: { store, folderId }. Within a root, a folder never goes into
-// itself; into the other root, both roots must be editable.
+// This is a drop place: { store, folderId }.
+// Within a root, a folder never goes into itself.
+// To drop into the other root, both roots must be editable.
 function canDropOne(item, target) {
   if (!item || !target || !target.store) return false;
   const source = storeOf(item.store);
@@ -3297,17 +3354,18 @@ function canDropOne(item, target) {
 
 const canDropInto = (items, target) => !!items && items.length > 0 && items.every((item) => canDropOne(item, target));
 
-// Under the pointer: a folder or a root row, a query's folder (or root), else the one root's top.
+// This finds the drop place under the pointer. It is a folder or a root row, or the folder or root of a query.
+// Otherwise, it is the top of the one root.
 function dropTargetOf(ev) {
   const li = itemOf(ev.target);
   if (!li) {
-    // The list's background: the one root's top, when there is one root.
+    // The list background is the top of the one root, when only one root exists.
     const only = storeList().length === 1 ? storeList()[0].kind : "";
     return only ? { target: { store: only, folderId: null }, el: libraryEls.tree } : { target: null, el: null };
   }
   if (li.dataset.kind === "root") return { target: { store: li.dataset.store, folderId: null }, el: li };
   if (li.dataset.kind === "folder") return { target: { store: li.dataset.store, folderId: li.dataset.id }, el: li };
-  // Over a query: its folder (or its root).
+  // Over a query, the drop place is the folder of the query, or its root.
   const parent = li.parentElement?.closest("li.qlNode[data-key]");
   if (parent) return { target: { store: parent.dataset.store, folderId: parent.dataset.kind === "folder" ? parent.dataset.id : null }, el: parent };
   return { target: null, el: null };
@@ -3327,7 +3385,7 @@ function onDragStart(ev) {
   try {
     ev.dataTransfer.effectAllowed = "copyMove";
     ev.dataTransfer.setData("application/x-chdash-library", JSON.stringify(dragItems));
-    // Dropped on the editor, a query inserts its SQL.
+    // A query dropped on the editor inserts its SQL.
     if (dragItems.length === 1 && dragItems[0].kind === "query") ev.dataTransfer.setData("text/plain", entityOf(li)?.sql || "");
   } catch (_) {}
   for (const item of dragItems) treeItems().find((x) => x.dataset.key === keyOf(item.kind, item.store, item.id))?.classList.add("is-dragging");
@@ -3369,13 +3427,14 @@ function onDragEnd() {
 
 // -------------------------------------------------------------- selection
 
-// One selection model for both tabs. Each tab lists items that carry a
-// data-key (Saved: "r:", "f:" / "q:" tree items, History: "h:<id>"
-// options) and ctl.selection holds the selected key of each tab. The
-// selected item is aria-selected and in the Tab order (roving tabindex),
-// and the preview pane shows it. A click or the arrows select; Enter (and a
-// click on a phone) moves on to the preview, whose "Load"
-// (Ctrl/Cmd+Enter) loads it.
+// Both tabs use one selection model. Each tab lists items that carry a data-key.
+// The data-key is "r:" for a root, "f:" or "q:" for a tree item in Saved, and "h:<id>" for an option in History.
+// ctl.selection holds the selected key of each tab.
+//
+// The selected item has aria-selected. It is in the Tab order, by roving tabindex.
+// The preview pane shows the selected item. A click or the arrow keys select an item.
+// Enter moves on to the preview. On a phone, a click does the same.
+// The "Load" button in the preview loads the item. Ctrl/Cmd+Enter does the same.
 const views = {
   saved: { items: () => treeItems(), preview: (key) => savedPreview(key) },
   history: { items: () => historyItems(), preview: (key) => historyPreview(key) },
@@ -3388,7 +3447,8 @@ function selectedItem(tab) {
   return key ? views[tab].items().find((x) => x.dataset.key === key) || null : null;
 }
 
-// Marks the selection. The Tab stop is the selected item, else the first.
+// This marks the selection. The Tab stop is the selected item.
+// If no item is selected, the Tab stop is the first item.
 function markSelection(tab) {
   const items = views[tab].items();
   const current = selectedItem(tab);
@@ -3410,8 +3470,8 @@ function select(tab, item, { focus = true } = {}) {
   if (ctl.shown === tab) renderPreview();
 }
 
-// After a render: the same key again (a renamed query, a reloaded History),
-// else the first item when the selected one is gone. Returns the Tab stop.
+// After a render, the same key is selected again. This happens for a renamed query or a reloaded History.
+// When the selected item is gone, the first item is selected. It returns the Tab stop.
 function restoreSelection(tab) {
   if (ctl.selection[tab] && !selectedItem(tab)) ctl.selection[tab] = views[tab].items()[0]?.dataset.key || "";
   const stop = markSelection(tab);
@@ -3424,14 +3484,13 @@ function selectionPreview() {
   return tab ? views[tab].preview(ctl.selection[tab]) : null;
 }
 
-// "Load" of the selection (a folder has none).
+// This is the "Load" action of the selection. A folder has no "Load" action.
 function loadSelection() {
   selectionPreview()?.actions?.find((a) => a.action === "load")?.run();
 }
 
-// The next step after a selection: its preview, focused on "Load"
-// (or the first tool). On a phone the pane replaces the list
-// (.is-previewing).
+// The next step after a selection shows the preview. The focus goes to "Load", or to the first tool.
+// On a phone, the pane replaces the list. The class .is-previewing marks this state.
 function enterPreview() {
   if (ctl.form && ctl.shown === "saved") {
     if (isPhone()) setPreviewStep(true);
@@ -3445,7 +3504,7 @@ function enterPreview() {
   ($(".qlPreview__foot .button--primary", pane) || $(".qlPreview__tools button", pane) || pane)?.focus({ preventScroll: true });
 }
 
-// Back to the list, on the selected item.
+// This returns to the list. The selected item keeps the selection.
 function leavePreview() {
   setPreviewStep(false);
   if (ctl.shown) (selectedItem(ctl.shown) || markSelection(ctl.shown))?.focus({ preventScroll: true });
@@ -3457,21 +3516,22 @@ function setPreviewStep(on) {
 
 // ---------------------------------------------------------- preview pane
 
-// The right pane of the dialog (#queryLibraryPreview, beside the views):
-// one component for both tabs, and the only place the item actions live.
-// A tab describes its selected item as
+// The right pane of the dialog is #queryLibraryPreview. It sits beside the views.
+// It is one component for both tabs. It is the only place for the item actions.
+// A tab describes its selected item in this form:
 //   { title, status, meta: node, description, facts: [[label, text | node]],
 //     error, sql, tools: [{ label, icon, action, run, danger }],
 //     actions: [{ label, action, run, primary }] }
-// and the pane renders it: its head on one line (the Back button of the
-// phone step, the title, the meta "Updated ..." or the run's time and
-// status, then the item's tools as icon buttons at the right end), the
-// facts, the highlighted SQL, then its foot: "Load" alone.
+//
+// The pane renders this description. Its head is on one line. The head holds the Back button of the phone step,
+// the title, and the meta text. The meta text is "Updated ..." or the time and status of a run.
+// The item tools are icon buttons at the right end of the head.
+// Then the pane shows the facts and the highlighted SQL. The foot holds "Load" alone.
 const PREVIEW_EMPTY = { saved: "Select a query to preview it here.", history: "Select a run to preview it here." };
 let paneModel = null;
 
-// The tab's list shows no item (its own empty state or a loader). Saved always
-// has its folder to show, except for a search that finds nothing.
+// The list of a tab can show no item. It then shows its own empty state, or a loader.
+// Saved always has a folder to show. The exception is a search that finds nothing.
 function listIsEmpty(tab) {
   const list = tab === "history" ? historyEls.list : libraryEls.tree;
   if (!list || !list.isConnected) return false;
@@ -3479,7 +3539,7 @@ function listIsEmpty(tab) {
   return !$("[role=option]", list);
 }
 
-// The pane, added beside the views the first time the dialog shows them.
+// The pane is added beside the views the first time the dialog shows them.
 function previewPane() {
   let pane = byId("queryLibraryPreview");
   const viewsEl = dom.queryLibraryViewSaved?.parentElement;
@@ -3517,13 +3577,13 @@ function onPreviewClick(ev) {
 }
 
 function onPreviewKeydown(ev) {
-  // The form has its own keys (Enter, Ctrl+Enter, and Escape on the dialog).
+  // The form has its own keys: Enter, Ctrl+Enter, and Escape on the dialog.
   if (ctl.form && ctl.shown === "saved") return;
   if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && !ev.altKey) {
     ev.preventDefault();
     loadSelection();
   } else if (ev.key === "Escape" && dom.queryLibraryViewSaved?.parentElement?.classList.contains("is-previewing")) {
-    // The phone step: Escape goes back to the list, not out of the dialog.
+    // On the phone step, Escape returns to the list. It does not close the dialog.
     ev.preventDefault();
     ev.stopPropagation();
     leavePreview();
@@ -3537,7 +3597,7 @@ function timeNode(ms) {
   return node;
 }
 
-// "Updated Oct 4 13:19:35", right of the title.
+// The text "Updated Oct 4 13:19:35" is right of the title.
 function updatedMeta(ms) {
   if (!ms) return null;
   return h("span", { class: "qlPreview__meta" }, "Updated ", timeNode(ms));
@@ -3547,9 +3607,10 @@ function contentsText(counts) {
   return [counts.queries ? format.countLabel(counts.queries, "query", "queries") : "", counts.folders ? format.countLabel(counts.folders, "subfolder") : ""].filter(Boolean).join(MIDDOT) || "Empty";
 }
 
-// What a folder (folderId) or a storage (null) holds, one level down: its subfolders with their count of queries, then its
-// queries with their description and last change. The pane lists them, and a click opens one.
-// How a level that is larger than a page is read in the pane: the entries that are in, and a button for the rest.
+// This shows what a folder (folderId) or a storage (null) holds, one level down.
+// It lists the subfolders with their count of queries. Then it lists the queries with their description and last change.
+// The pane lists them. A click opens one of them.
+// A level that is larger than a page is read in the pane. The pane shows the entries that are in, and a button for the rest.
 function entriesState(store, folderId) {
   const lib = store.library;
   if (!isPartial(lib)) return {};
@@ -3575,7 +3636,8 @@ function entriesOf(store, folderId) {
   return out;
 }
 
-// A click in the pane's list: the item is highlighted in the tree (a folder also opens), as if it had been clicked there.
+// A click in the list of the pane highlights the item in the tree. A folder also opens.
+// The result is the same as a click in the tree.
 function openEntry(key) {
   const sel = parseKey(key);
   const store = sel ? storeOf(sel.store) : null;
@@ -3637,7 +3699,8 @@ function savedPreview(key) {
   const listed = queryById(lib, sel.id);
   if (!listed) return null;
   const item = { kind: "query", store: store.kind, id: listed.id };
-  // The SQL and the description of a query of the server are read when it is opened: until then the pane says so.
+  // The SQL and the description of a query of the server are read when the query is opened.
+  // Until then, the pane says so.
   const query = queryDetail(lib, listed);
   if (!query) {
     void ensureDetail(store.kind, listed.id);
@@ -3660,11 +3723,13 @@ function savedPreview(key) {
   };
 }
 
-// A run that was not formatted when it ran (an older entry, a query typed unformatted) gets the formatter's text when
-// it is looked at: selected in the list, loaded, or saved. The list does not change (it shows each query on one
-// line), so nothing moves while the user reads. A script that the formatter rejects stays as typed.
+// A run that was not formatted when it ran gets the formatter text later. This happens for an older entry,
+// or for a query typed without formatting. The run gets the text when the run is viewed: selected in the list, loaded, or saved.
+// The list does not change, because it shows each query on one line. Nothing moves while the user reads.
+// A script that the formatter rejects stays as typed.
 const historyFormatting = new Map();
-// Load does not wait longer than this for the formatter (a slow or unreachable server): the editor gets the text as typed.
+// Load does not wait longer than this limit for the formatter, which can be slow or unreachable.
+// The editor then gets the text as typed.
 const HISTORY_FORMAT_WAIT_MS = 1500;
 function ensureHistoryFormatted(entry) {
   if (entry.formatted || !sqlMod?.formatText) return Promise.resolve(entry);
@@ -3692,12 +3757,13 @@ function historyPreview(key) {
   const facts = [];
   if (entry.elapsed_ms != null && Number.isFinite(Number(entry.elapsed_ms))) facts.push(["Elapsed", format.duration.fromMs(Number(entry.elapsed_ms))]);
   if (entry.rows != null && Number.isFinite(Number(entry.rows))) facts.push(["Rows", format.count(Number(entry.rows))]);
-  // A query longer than the History keeps is stored cut: Load would put a shorter text in the editor.
+  // The History stores a query longer than its limit cut. Load would then put a shorter text in the editor.
   if (entry.truncated) facts.push(["Text", `Cut at ${format.count(history.LIMITS.sqlChars)} characters`]);
   const tools = [];
   if (anyEditable()) tools.push({ label: "Save to library\u2026", icon: "save", action: "save", run: () => beginSave({ sql: entry.sql, fromHistory: entry }) });
   if (!entry.formatted) {
-    // The formatted text replaces the shown one once it arrives, unless the user has begun to read (scrolled the block).
+    // The formatted text replaces the shown text when it arrives. It does not replace the text
+    // when the user has begun to read, for example by scrolling the block.
     void ensureHistoryFormatted(entry).then(() => {
       if (!entry.formatted || ctl.shown !== "history" || ctl.selection.history !== key) return;
       const block = $(".qlSql .sqlBlock__body", previewPane());
@@ -3719,12 +3785,12 @@ function historyPreview(key) {
   };
 }
 
-// Renders the selection of the tab shown. The focus stays on the same
-// action (or the pane) when the pane had it.
+// This renders the selection of the tab shown.
+// The focus stays on the same action, or on the pane, when the pane had the focus.
 function renderPreview() {
   const pane = previewPane();
   if (!pane) return;
-  // Save and Edit: the form (built once) is the pane's content.
+  // For Save and Edit, the pane content is the form. The form is built once.
   if (ctl.form && ctl.shown === "saved") {
     paneModel = null;
     pane.setAttribute("aria-label", ctl.form.title);
@@ -3738,9 +3804,9 @@ function renderPreview() {
   const model = selectionPreview();
   paneModel = model;
   pane.replaceChildren();
-  // A tab with nothing listed (an empty library or History, a search
-  // without a match) is one empty state across the dialog: no second
-  // "select an item" pane beside it.
+  // A tab with nothing listed has one empty state across the dialog.
+  // This applies to an empty library, an empty History, or a search without a match.
+  // No second "select an item" pane appears beside it.
   pane.parentElement?.classList.toggle("is-empty", !model && listIsEmpty(ctl.shown));
   if (!model) {
     pane.appendChild(h("div", { class: "qlPreview__empty" }, PREVIEW_EMPTY[ctl.shown] || PREVIEW_EMPTY.saved));
@@ -3749,7 +3815,7 @@ function renderPreview() {
     return;
   }
   const content = h("div", { class: "qlPreview__content" });
-  // The head, one line: Back (phone), the title, its meta, the tools.
+  // The head is one line. It holds the Back button on a phone, the title, the meta text, and the tools.
   const head = h("div", { class: "qlPreview__head" });
   const back = h("button", { class: "qlIconButton qlPreview__back" });
   back.type = "button";
@@ -3806,7 +3872,8 @@ function renderPreview() {
   if (refocus !== null) ($(`[data-action="${refocus}"]`, pane) || pane).focus({ preventScroll: true });
 }
 
-// What a folder or a storage holds, as a list in the pane: each entry is a button that opens it in the tree.
+// This shows what a folder or a storage holds, as a list in the pane. Each entry is a button.
+// The button opens the entry in the tree.
 const CONTENTS_SHOWN = 200;
 function contentsList(model) {
   const wrap = h("section", { class: "qlContents" });
@@ -3847,13 +3914,13 @@ function buildHistoryShell(root) {
   root.replaceChildren();
   root.dataset.rendered = "1";
   const wrap = h("div", { class: "ql qh" });
-  // The same head as Saved: the search, its tools slot (empty here).
+  // The head is the same as in Saved. It holds the search and an empty slot for tools.
   const { head, input, actions } = listHead("Search the history");
   actions.hidden = true;
   const list = h("div", { class: "qhList" });
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", "Query history");
-  // The foot: the count and where it is stored, as Saved's.
+  // The foot shows the count and the storage place, as in Saved.
   const foot = h("div", { class: "ql__foot" });
   wrap.append(head, list, foot);
   root.appendChild(wrap);
@@ -3953,9 +4020,8 @@ function renderHistory({ keepFocus = false } = {}) {
   if (hadFocus && current) current.focus({ preventScroll: true });
 }
 
-// The current host's runs. A reload supersedes the one in flight
-// (util.latest), so a host switch or a typed search never shows an older
-// answer.
+// This holds the runs of the current host. A reload replaces the read in flight (util.latest).
+// Thus a host switch or a typed search never shows an older answer.
 async function loadHistory() {
   await start();
   const token = util.latest(HISTORY_REQUEST);
@@ -3973,8 +4039,8 @@ async function loadHistory() {
     const page = await ctl.history.list({ q: hs.q });
     if (!token.isCurrent() || ctl.historyState !== hs) return;
     const next = page.entries;
-    // Same entries (a refresh after a run that changed nothing shown): keep
-    // the rows, their focus and hover.
+    // The entries are the same. This happens after a run that changed nothing shown.
+    // Keep the rows, their focus, and their hover.
     const signature = (list) => list.map((e) => `${e.id}|${e.status}|${e.rows}|${e.elapsed_ms}`).join("\n");
     if (!hadError && hs.loaded && signature(next) === signature(hs.entries)) {
       unchanged = true;
@@ -3989,8 +4055,8 @@ async function loadHistory() {
   if (!unchanged) renderHistory();
 }
 
-// A click selects the run and shows it in the preview, with its actions
-// (the next step on a phone).
+// A click selects the run and shows it in the preview. The preview shows the actions of the run.
+// On a phone, the preview is the next step.
 function onHistoryClick(ev) {
   const item = historyItemOf(ev.target);
   if (!historyEntryOf(item)) return;
@@ -4041,7 +4107,7 @@ function onHistoryKeydown(ev) {
 
 async function show(tab) {
   const next = tab === "history" ? "history" : "saved";
-  // Each tab previews its own selection; a phone starts on the list.
+  // Each tab previews its own selection. On a phone, the dialog starts on the list.
   if (ctl.shown !== next) setPreviewStep(false);
   ctl.shown = next;
   renderPreview();
@@ -4068,7 +4134,7 @@ async function focus(tab) {
   else libraryEls.input?.focus();
 }
 
-// A burst of run-history changes reloads the list once.
+// A burst of run-history changes reloads the list one time.
 const reloadHistorySoon = util.debounce(() => loadHistory(), 150);
 function historyChanged() {
   if (ctl.historyState.loaded) reloadHistorySoon();
@@ -4078,21 +4144,21 @@ function historyChanged() {
 window.addEventListener("storage", (ev) => {
   if (ev.key === LOCAL_KEY && ctl.rendered.library && ctl.stores.local) void reloadStore(ctl.stores.local).then(() => renderLibrary());
 });
-// Another tab ran a query: app_history.js says so (BroadcastChannel) and the list reloads.
+// Another tab ran a query. app_history.js sends this message by BroadcastChannel. The list then reloads.
 window.addEventListener("chdash:query-history-changed", () => historyChanged());
 
-// The library query the editor holds unchanged (its id), for ?saved=.
+// This is the library query that the editor holds unchanged, by its id. It is used for ?saved=.
 function openedId(sqlText) {
   if (!ctl.opened) return "";
   return String(sqlText ?? editorSql()).trim() === String(ctl.opened.sql).trim() ? ctl.opened.id : "";
 }
 
-// ?saved=<id> at startup: the saved query of the current host (either
-// root), in the editor.
+// At startup, the ?saved=<id> link opens the saved query of the current host in the editor.
+// The query can be in either root.
 async function openSaved(id) {
   await start();
   for (const store of storeList()) {
-    // A library of the server is asked for the query by its id: it may not be among the ones that were loaded.
+    // The app asks a library of the server for the query by its id. The query may not be among the loaded queries.
     const query = isPartial(store.library) ? await ensureDetail(store.kind, String(id || "")) : queryById(store.library, String(id || ""));
     if (!query) continue;
     setEditorSql(query.sql);
@@ -4103,7 +4169,7 @@ async function openSaved(id) {
   return false;
 }
 
-// The dialog closed: nothing of it stays on screen.
+// The dialog closed. No part of it remains on screen.
 function hidden() {
   ctl.form = null;
   setPreviewStep(false);

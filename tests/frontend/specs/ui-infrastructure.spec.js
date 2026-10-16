@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { fetchedModules } from '../helpers/modules.js';
 
-// Shared UI infrastructure in the browser: the page description and its one
-// loader (loader), the state component (ns.uiState), feature flags
+// Shared UI infrastructure in the browser. This covers the page description and
+// its one loader (loader), the state component (ns.uiState), feature flags
 // (ns.features), superseded requests (util.latest + api {signal}), browser
 // storage (storage.pref), search fields (ns.search) and the live-region
-// conventions. The structural rules of the sources (no local copy of a shared
-// component) are tests/harness/test_frontend_code_rules.py.
+// conventions. The structural rules of the sources, such as no local copy of a
+// shared component, are in tests/harness/test_frontend_code_rules.py.
 
 const PAGES = [
   { path: '/query', name: 'query' },
@@ -34,13 +34,13 @@ for (const { path, name } of PAGES) {
         entry: ns.loader.page.entry,
         files: ns.loader.page.files,
         header: document.querySelectorAll('header.appHeader').length,
-        // The theme button shows one of its three sprite icons: the head script's mode.
+        // The theme button shows one of its three sprite icons. The icon follows the mode of the head script.
         themeIcon: [...document.querySelectorAll('#themeSelectText > .themeIcon')]
           .filter((el) => getComputedStyle(el).display !== 'none').map((el) => el.getAttribute('class')).join(' | '),
       };
     });
     expect(state.page).toBe(name);
-    // The shell's description of the page: its entry module and every module the entry imports (dependencies first).
+    // The shell describes the page. The description holds the entry module and every module that the entry imports. Dependencies come first.
     expect(state.entry).toBe(`app_page_${name}.js`);
     expect(state.files.at(-1)).toBe(state.entry);
     expect(state.files).toEqual(expect.arrayContaining(['app_format.js', 'app_palette.js', 'app_dom.js', 'app_ui_state.js', 'app_ui_search.js', 'app_loader.js', 'app_boot.js']));
@@ -69,7 +69,7 @@ test('ui infrastructure: ns.uiState renders empty, error, loading, banner and bu
     const error = ui.error(box, { body: 'It broke.', retry: () => { clicked += 10; } });
     const errorState = { role: error.getAttribute('role'), retry: error.querySelector('.uiState__action')?.textContent };
     error.querySelector('.uiState__action').click();
-    // Every way to build a loading block says its label; "Loading…" without one.
+    // Every way to build a loading block states a label. The text "Loading…" never appears without one.
     const sentence = (el) => [el.getAttribute('role'), el.querySelector('.uiState__title'), el.querySelector('.uiState__body')?.textContent];
     const host = document.createElement('div');
     host.innerHTML = ui.loadingHtml({ label: 'Loading the history…', compact: true });
@@ -152,7 +152,7 @@ test('ui infrastructure: util.errorText says what failed in a sentence, without 
       none: util.errorText(null),
     };
   });
-  // app_api.js errors read "code: message"; the sentence drops the code.
+  // Errors from app_api.js read "code: message". The sentence drops the code.
   expect(out.missing.raw).toMatch(/^[a-z_]+: /);
   expect(out.missing.text).toBe(out.missing.raw.replace(/^[a-z_]+: /, ''));
   expect(out.network).toBe('The server could not be reached. Check the connection and retry.');
@@ -244,8 +244,8 @@ test('ui infrastructure: ns.search waits for the one delay, Enter and Escape app
 for (const theme of ['dark', 'light']) {
   test(`ui infrastructure: every search field has the one look (${theme})`, async ({ page }) => {
     await page.addInitScript((mode) => localStorage.setItem('chdash.theme', mode), theme);
-    // A side panel's search (the Metrics catalog's search is the filter
-    // bar's since audit 2: the Traces attributes' stands for Observability).
+    // The search of a side panel is checked here. Since audit 2, the search of the Metrics catalog is the filter bar's.
+    // The Traces attributes search stands for Observability.
     await open(page, '/observability/traces');
     const metrics = await page.locator('#traceFacetsSearch').evaluate((el) => {
       const cs = getComputedStyle(el);
@@ -274,7 +274,7 @@ test('ui infrastructure: no pane is live, hover readouts are tooltips, the Explo
   expect(explorer).toEqual({ livePanes: 0, emptyState: false, title: 'All databases', banner: 'alert' });
   await page.goto('/observability/traces');
   await page.waitForFunction(() => !!window.ChDash?.uiState);
-  // One trace's pane is the trace page's, not the search page's.
+  // The pane of one trace belongs to the trace page, not to the search page.
   await expect(page.locator('#traceDetail')).toHaveCount(0);
   expect(await page.locator('#tracesError').getAttribute('role')).toBe('alert');
   expect(await page.locator('#tracesSearchButton .uiSpin').count()).toBe(1);
@@ -299,8 +299,8 @@ for (const theme of ['dark', 'light']) {
 }
 
 // Regression: the tree and the database page loaded a failed database again
-// on every render, a request loop against a failing server that also kept the
-// error from ever showing.
+// on every render. This made a request loop against a failing server. The loop
+// also kept the error from ever showing.
 test('ui infrastructure: a database whose objects fail to load says so in the tree and Retry loads them', async ({ page }) => {
   let failures = 1;
   let requests = 0;
@@ -313,8 +313,8 @@ test('ui infrastructure: a database whose objects fail to load says so in the tr
     }
     await route.continue();
   });
-  // The page's own count of the database's requests, made as it asks (the
-  // route above only sees a request once it reaches the network).
+    // The page keeps its own count of the database requests. It counts each request as the page sends it.
+    // The route above only sees a request when the request reaches the network.
   await page.addInitScript(() => {
     const native = window.fetch;
     window.__databaseFetches = 0;
@@ -331,8 +331,8 @@ test('ui infrastructure: a database whose objects fail to load says so in the tr
   await expect(failed).toBeVisible({ timeout: 15_000 });
   await expect(failed).toHaveAttribute('role', 'alert');
   await expect(failed.locator('.uiState__body')).toHaveText('Unable to load tables');
-  // A render loop asks again as it renders: two frames after the error shows,
-  // the page has still asked once.
+    // A render loop asks again while it renders. Two frames after the error shows,
+    // the page has still asked only once.
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   expect(await page.evaluate(() => window.__databaseFetches)).toBe(1);
   expect(requests).toBe(1);

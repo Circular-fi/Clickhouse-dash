@@ -1,15 +1,17 @@
-// Shared modal dialog: one shell for every modal of the Query page (the
-// profiling dialog, the query library and their form / confirm prompts).
+// Shared modal dialog. One shell serves every modal of the Query page.
+// These modals are the profiling dialog, the query library and their form and confirm prompts.
 //
-// The shell is a native <dialog> opened with showModal(): the browser traps
-// the focus inside it, makes the rest of the page inert and stacks a dialog
-// opened from another one above it (a confirm over the library). This module
-// adds what the browser does not: the shared markup and size classes,
-// a click on the backdrop closes, the focus moves in on open and goes back
-// to the opener (or a fallback) on close, and floating children (toasts)
-// follow the top dialog. Every open dialog is a modal layer of ns.layers
-// (app_ui_layers.js): Escape closes the top layer only (a menu or popover
-// over the dialog first), and the focus goes back through the layer.
+// The shell is a native <dialog> that opens with showModal(). The browser traps the focus
+// inside the dialog. It makes the rest of the page inert. It stacks a dialog that opens from
+// another dialog above it (a confirm over the library).
+//
+// This module adds what the browser does not give. It adds the shared markup and size classes.
+// A click on the backdrop closes the dialog. On open, the focus moves into the dialog.
+// On close, the focus returns to the opener, or to a fallback. Floating children (toasts)
+// follow the top dialog.
+//
+// Every open dialog is a modal layer of ns.layers (app_ui_layers.js). Escape closes only the
+// top layer. A menu or popover over the dialog closes first. The focus returns through the layer.
 //
 //   shell({ id, title, size, tabs, ... })   -> the elements of a new shell
 //   bind(dialog, { onClose, ... })           -> { open, close, isOpen }
@@ -17,15 +19,15 @@
 //   confirm({ title, message, ... })         -> Promise<boolean>
 //   host()                                   -> the top open dialog, or <body>
 //
-// Markup (query.html writes the profiling one; shell() builds the others):
+// Markup. query.html writes the profiling dialog. shell() builds the others:
 //   <dialog class="uiDialog uiDialog--lg|--sm">
 //     <div|form class="uiDialog__frame">
 //       <div class="uiDialog__head"> heading (title, subtitle), actions, close
 //       <div class="contentTabs uiDialog__tabs"> (optional) .contentTabs__tab buttons
 //       <div class="uiDialog__body">
-// A head that holds the tabs in place of the title (the query library):
+// A head can hold the tabs in place of the title (the query library):
 //       <div class="uiDialog__head uiDialog__head--tabs"> .uiDialog__tabs, actions, close
-// and the dialog is named by aria-label (the label of shell()).
+// The dialog gets its name from aria-label (the label of shell()).
 
 import { dom, h } from "./app_dom.js";
 import { icon } from "./app_ui_icon.js";
@@ -35,19 +37,19 @@ import { util } from "./app_util.js";
 
 const { $, $$ } = dom;
 
-// The open dialogs, bottom first (the top layer order), are ns.layers' modals.
+// The open dialogs are the ns.layers modals. They are listed bottom first, in the top layer order.
 let uid = 0;
 
 const { host } = layers;
 
-// A control the focus can go back to (not <body>: nothing was focused).
+// A control that the focus can return to. It is never <body>, which means nothing was focused.
 function isFocusable(node) {
   return node instanceof HTMLElement && node !== document.body && node.isConnected && !node.disabled
     && !node.closest("[hidden], [inert]") && node.getClientRects().length > 0;
 }
 
-// A tab row (.contentTabs, built by ns.tabs.render; the caller
-// binds and selects): { label, items: [{ id, label, controls, value }] }.
+// A tab row (.contentTabs) built by ns.tabs.render. The caller binds the row and selects a tab.
+// The row has this shape: { label, items: [{ id, label, controls, value }] }.
 function tabBar(tabs) {
   const bar = h("div", { class: "contentTabs uiDialog__tabs" });
   bar.setAttribute("role", "tablist");
@@ -56,9 +58,9 @@ function tabBar(tabs) {
   return { bar, buttons: [...bar.children] };
 }
 
-// tabs adds a tab bar under the head. With tabs.inHead the bar takes the
-// place of the title in the head, and label names the dialog (aria-label):
-// heading, title and subtitle are then null.
+// tabs adds a tab bar under the head. With tabs.inHead, the bar takes the place of the title
+// in the head. The label then names the dialog (aria-label). In that case, heading, title and
+// subtitle are null.
 function shell({ id = "", title = "", label = "", titleId = "", subtitleId = "", closeLabel = "Close", size = "lg", className = "", form = false, tabs = null } = {}) {
   const n = ++uid;
   const dialog = h("dialog", { class: `uiDialog uiDialog--${size}${className ? ` ${className}` : ""}` });
@@ -102,12 +104,14 @@ function shell({ id = "", title = "", label = "", titleId = "", subtitleId = "",
   return { dialog, frame, head, heading, title: titleEl, subtitle, actions, close, tabs: bar ? bar.bar : null, tabButtons: bar ? bar.buttons : [], body };
 }
 
-// Open / close behaviour of a shell. onClose runs once per close, however
-// the dialog closed (close button, Escape, backdrop, close()). The focus
-// goes back to the element focused at open, else to the first usable one
-// of fallbackFocus (an element, a list, or a function returning either).
-// canClose() answering false keeps the dialog open (Escape, the cross, the backdrop and close() all wait): a dialog
-// that is sending a change cannot be dismissed before it knows the result.
+// Open and close behaviour of a shell. onClose runs once per close. This is true for every
+// way of closing: the close button, Escape, the backdrop and close(). The focus returns to
+// the element that had focus at open. If there is none, the focus goes to the first usable
+// element of fallbackFocus. fallbackFocus is an element, a list, or a function that returns either.
+//
+// canClose() returns false to keep the dialog open. Escape, the close button, the backdrop and
+// close() all wait for it. A dialog that sends a change uses this. Such a dialog cannot close
+// before it knows the result.
 function bind(dialog, { onClose = null, closeButton = null, fallbackFocus = null, canClose = null } = {}) {
   if (!dialog) return null;
   let returnTo = null;
@@ -118,10 +122,10 @@ function bind(dialog, { onClose = null, closeButton = null, fallbackFocus = null
 
   const finish = () => {
     if (!layers.modalClosed(dialog)) return;
-    // Toasts and other floating children move to the dialog now on top.
+    // Toasts and other floating children move to the dialog that is now on top.
     for (const node of $$(":scope > [data-dialog-float]", dialog)) host().appendChild(node);
-    // The layer gives the focus back: to the opener, else to the first
-    // usable element of fallbackFocus.
+    // The layer returns the focus to the opener. If there is no opener, the focus goes to the
+    // first usable element of fallbackFocus.
     layer?.close({ restoreFocus: restore, force: true });
     layer = null;
     returnTo = null;
@@ -131,20 +135,20 @@ function bind(dialog, { onClose = null, closeButton = null, fallbackFocus = null
     if (typeof onClose === "function") onClose(result);
   };
 
-  // Escape: closed here at once, so the focus is back before the next key
-  // (the browser's own "close" event comes a task later).
+  // Escape: this code closes the dialog at once. The focus returns before the next key press.
+  // The browser's own "close" event comes one task later.
   dialog.addEventListener("cancel", (ev) => {
     if (ev.target !== dialog) return;
     ev.preventDefault();
     close();
   });
-  // Closed by the browser or by dialog.close() elsewhere. The event comes a
-  // task after the close: a dialog reopened meanwhile stays open.
+  // The browser or a dialog.close() call elsewhere closes the dialog. The event comes one
+  // task after the close. A dialog that is reopened in the meantime stays open.
   dialog.addEventListener("close", () => {
     if (!dialog.open) finish();
   });
-  // A click that both starts and ends on the backdrop (the dialog box
-  // itself is covered by its frame) closes; a drag out of a field does not.
+  // A click that starts and ends on the backdrop closes the dialog. The frame covers the
+  // dialog box itself. A drag out of a field does not close the dialog.
   dialog.addEventListener("pointerdown", (ev) => {
     pressedBackdrop = ev.target === dialog;
   });
@@ -159,8 +163,8 @@ function bind(dialog, { onClose = null, closeButton = null, fallbackFocus = null
     return dialog.open;
   }
 
-  // focus: the element to focus, or a function returning it (default: the
-  // dialog itself, so Tab starts at its first control).
+  // focus: the element to focus, or a function that returns it. The default is the
+  // dialog itself, so Tab starts at its first control.
   function open({ focus = null, returnFocus = null } = {}) {
     if (dialog.open) return;
     returnTo = returnFocus || (document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -196,14 +200,16 @@ function bind(dialog, { onClose = null, closeButton = null, fallbackFocus = null
   return { dialog, open, close, isOpen };
 }
 
-// A transient dialog: built, shown, removed when it closes. actions are its
-// footer buttons, [{ label, value, kind: "primary" | "danger", submit }]; the
-// submit one also answers Enter. onSubmit(value, form) may return false
-// (stay open), a value (resolve with it) or throw (the message shows in the
-// dialog, and err.field names the [data-field] control to mark and focus).
-// validate(form) answers "" when the form can be sent, else the reason: while there is
-// one, the submit button is off and its title says why (checked on every input and change).
-// Resolves with null when dismissed.
+// A transient dialog is built, shown and removed when it closes. actions are its footer buttons:
+// [{ label, value, kind: "primary" | "danger", submit }]. The submit button also answers Enter.
+//
+// onSubmit(value, form) can return false to stay open. It can return a value to resolve with that
+// value. It can also throw. The message then shows in the dialog, and err.field names the
+// [data-field] control to mark and focus.
+//
+// validate(form) returns "" when the form can be sent. Otherwise, it returns the reason. While a
+// reason exists, the submit button is off, and its title gives the reason. The check runs on every
+// input and change. The promise resolves with null when the user dismisses the dialog.
 function open({ title, body = null, actions = null, size = "sm", className = "", onSubmit = null, validate = null, focus = null, closeLabel = "Close" } = {}) {
   return new Promise((resolve) => {
     const parts = shell({ title, size, className, closeLabel, form: true });
@@ -237,8 +243,8 @@ function open({ title, body = null, actions = null, size = "sm", className = "",
     }
 
     let settled = false;
-    // True while onSubmit runs: the dialog stays open until the change has an answer (a key made while the dialog
-    // was dismissed would exist on the server and not in the list).
+    // True while onSubmit runs. The dialog stays open until the change has an answer.
+    // Otherwise, a key made after dismissal exists on the server but not in the list.
     let busy = false;
     const controller = bind(dialog, {
       canClose: () => !busy,
@@ -301,7 +307,7 @@ function open({ title, body = null, actions = null, size = "sm", className = "",
   });
 }
 
-// Yes / no. The focus starts on Cancel when the action destroys something.
+// Yes or no. The focus starts on Cancel when the action destroys something.
 async function confirm({ title, message, confirmLabel = "OK", cancelLabel = "Cancel", danger = false, className = "" } = {}) {
   const body = h("p", { class: "uiDialog__message" }, message);
   const answer = await open({

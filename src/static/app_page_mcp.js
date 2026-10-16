@@ -1,17 +1,18 @@
-// The MCP integration page (mcp.html, /mcp-integration, docs/mcp-integration-page.md): the endpoint
-// of the MCP server that is built into ChDash and the access keys of its clients. It is a page of
-// its own and not tied to a host: the header block and the keys table come from /api/mcp/meta and
-// /api/mcp/keys (ns.api, app_api.js), the key form and the one-time secret from app_mcp_form.js.
-// It is the first of the two MCP pages: the row of links under the header (Keys, Usage) is static
-// in the shell, and Usage is a page of its own (mcpusage.html, app_page_mcpusage.js).
+// This is the MCP integration page (mcp.html, /mcp-integration, docs/mcp-integration-page.md). It shows the endpoint
+// of the MCP server that is built into ChDash, and the access keys of its clients. It is a page of its own.
+// It is not tied to a host. The header block and the keys table come from /api/mcp/meta and
+// /api/mcp/keys (ns.api, app_api.js). The key form and the one-time secret come from app_mcp_form.js.
+// It is the first of the two MCP pages. The row of links under the header (Keys, Usage) is static
+// in the shell. Usage is a page of its own (mcpusage.html, app_page_mcpusage.js).
 //
-// This controller starts the page's modules (ns.loader), the header (ns.header.init: page switcher,
-// theme), loads the two answers and runs the actions of a key: create and delete (a key is never
-// changed). The details of a key open under its row (app_mcp_view.js). The keys (#mcpKeys, with the New key and Refresh buttons in its heading) and
-// the side column (#mcpSide) are drawn again after every change; #mcpState holds the loading, the
-// error and the "MCP is off" states. The page list of the switcher shows MCP only when /api/version reports
-// features.mcp.enabled; a page opened with MCP off shows the HCL block that turns it on. While the usage is off (meta.usage.enabled) the keys
-// have no column Used, no line of keys that keep usage and no usage in their details (the ClickHouse cost stays), and nothing reads it.
+// This controller starts the modules of the page (ns.loader) and the header (ns.header.init: page switcher,
+// theme). It loads the two answers. It runs the actions of a key: create and delete. A key is never changed.
+// The details of a key open under its row (app_mcp_view.js). The keys (#mcpKeys, with the New key and Refresh buttons in its heading) and
+// the side column (#mcpSide) are drawn again after every change. #mcpState holds the loading, the error, and the "MCP is off" states.
+// The page list of the switcher shows MCP only when /api/version reports features.mcp.enabled.
+// A page opened with MCP off shows the HCL block that turns it on.
+// While the usage is off (meta.usage.enabled), the keys have no column Used, no line of keys that keep usage, and no usage in their details (the ClickHouse cost stays).
+// Nothing reads the usage.
 
 import "./app_common.js";
 import { api } from "./app_api.js";
@@ -24,12 +25,12 @@ import { dialog } from "./app_ui_dialog.js";
 import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
-// openKeyId: the key whose details show; filterText: the text of the keys filter (both survive a redraw of the list).
-// usage: what each key did (the column Used, the keys that keep usage); deletedOpen, openDeletedId: the list of the keys that keep usage is
-// open, and the key of that list whose details show.
+// openKeyId: the key whose details show. filterText: the text of the keys filter. Both survive a redraw of the list.
+// usage: what each key did (the column Used, the keys that keep usage). deletedOpen: the list of the keys that keep usage is open.
+// openDeletedId: the key of that list whose details show.
 const state = { meta: null, keys: [], status: "loading", error: null, access: null, usage: null, openKeyId: "", filterText: "", deletedOpen: false, openDeletedId: "" };
-// Every read is cancelable (util.latest): "mcp.state" is the meta and the keys (a load or a reload: the newest wins and
-// aborts the one in flight), "mcp.access" the counts of the data of the keys, "mcp.usage" what the keys did.
+// Every read can be canceled (util.latest). "mcp.state" holds the meta and the keys. A load or a reload: the newest read wins and aborts the one in flight.
+// "mcp.access" holds the counts of the data of the keys. "mcp.usage" holds what the keys did.
 const STATE_KEY = "mcp.state";
 const actions = () => ({
   onCreate: createKey,
@@ -42,11 +43,11 @@ const actions = () => ({
   onDetailsClose: () => mcpForm.cancelDetails(),
 });
 
-// The window of the column Used: the last 7 days (the last 24 hours when the retention is shorter).
+// The window of the column Used is the last 7 days. It is the last 24 hours when the retention is shorter.
 const usageWindow = () => (state.meta?.usage?.windows?.includes("7d") ? "7d" : state.meta?.usage?.defaultWindow || "24h");
 
-// What each key did, asked once for all the keys after the table is drawn: the column Used, and the keys that keep usage without being in the
-// list (deleted, or known to another instance only). Nothing is asked while the usage is off.
+// The page asks once for what each key did, for all the keys, after the table is drawn. This covers the column Used, and the keys that keep usage without being in the
+// list (deleted, or known to another instance only). The page asks nothing while the usage is off.
 async function loadUsage() {
   if (state.status !== "ready" || !state.meta?.usage?.enabled) {
     util.latest.cancel("mcp.usage");
@@ -61,7 +62,7 @@ async function loadUsage() {
   } catch (error) {
     if (!req.isCurrent()) return;
     state.usage = null;
-    // The usage was turned off after the meta was read (a restart): the keys are drawn again as they are with the usage off.
+    // The usage was turned off after the meta was read (a restart). The keys are drawn again with the usage off.
     if (error?.mcp?.code === "not_enabled") {
       state.meta = { ...state.meta, usage: { ...state.meta.usage, enabled: false } };
       renderKeys();
@@ -77,8 +78,8 @@ function showUsage() {
   mcpView.renderDeleted(dom.byId("mcpKeys"), state.usage, liveView, actions());
 }
 
-// How many databases and tables each key reaches: asked once for all the keys, after the table is drawn, and written in
-// its cells (the table is not drawn again, so a key that is open stays open).
+// This shows how many databases and tables each key reaches. The page asks once for all the keys, after the table is drawn. It writes the counts in
+// the cells. The table is not drawn again, so a key that is open stays open.
 async function loadAccess({ refresh = false } = {}) {
   if (state.status !== "ready" || !state.keys.length) {
     util.latest.cancel("mcp.access");
@@ -97,7 +98,7 @@ async function loadAccess({ refresh = false } = {}) {
   }
 }
 
-// The view of the keys is the page's state, read when it is needed (a row that opens late reads the meta of now).
+// The view of the keys is the state of the page. The page reads it when it is needed. A row that opens late reads the current meta.
 const liveView = Object.defineProperties({}, {
   meta: { get: () => state.meta, enumerable: true },
   keys: { get: () => state.keys, enumerable: true },
@@ -113,14 +114,14 @@ function renderKeys({ refresh = false } = {}) {
   dom.byId("mcpLayout").hidden = false;
   dom.byId("mcpState").replaceChildren();
   mcpView.renderKeys(dom.byId("mcpKeys"), liveView, actions());
-  // The counts that are known show at once; they are asked again (the grants of a host are kept 60 s by the server).
+  // The counts that are known show at once. The page asks for them again. The server keeps the grants of a host for 60 s.
   if (state.access) mcpView.fillAccess(dom.byId("mcpKeys"), state.access);
   if (state.usage && state.status === "ready") showUsage();
   void loadAccess({ refresh });
   void loadUsage();
 }
 
-// Nothing of the keys or the side column shows: the state is loading, off or in error.
+// The keys and the side column show nothing. The state is loading, off, or in error.
 function clearBody() {
   dom.byId("mcpKeys").replaceChildren();
   dom.byId("mcpSide").replaceChildren();
@@ -132,9 +133,9 @@ function renderStateError(error) {
   clearBody();
 }
 
-// The first load: the header block and the keys, each with its own loading state.
-// `retried`: MCP turned off between the two reads (the meta said on, the keys say off): the meta is read once more,
-// and a second disagreement is an error, not a loop of requests.
+// The first load reads the header block and the keys. Each has its own loading state.
+// `retried`: MCP turned off between the two reads (the meta said on, the keys say off). The meta is read once more.
+// A second disagreement is an error. It is not a loop of requests.
 async function load({ retried = false } = {}) {
   const req = util.latest(STATE_KEY);
   state.status = "loading";
@@ -173,7 +174,7 @@ async function load({ retried = false } = {}) {
   renderKeys();
 }
 
-// A reload that keeps what is on screen: after an action, and the Refresh button.
+// This reload keeps what is on screen. It runs after an action, and after the Refresh button.
 async function reload(button = null) {
   const req = util.latest(STATE_KEY);
   if (button) {
@@ -193,7 +194,7 @@ async function reload(button = null) {
     state.keys = keys;
     state.status = "ready";
     mcpView.renderSide(dom.byId("mcpSide"), meta);
-    // The Refresh button reads the grants of the MCP users again; an action (a key made or deleted) uses what is kept.
+    // The Refresh button reads the grants of the MCP users again. An action (a key made or deleted) uses what is kept.
     renderKeys({ refresh: !!button });
   } catch (error) {
     if (!req.isCurrent()) return;
@@ -219,14 +220,14 @@ function clearAlert() {
   }
 }
 
-// The focus after a list that was drawn again: the same button of the same row, else New key.
+// After the list is drawn again, the focus moves to the same button of the same row. If that button is gone, the focus moves to New key.
 function focusRow(id, action) {
   const row = id ? dom.$(`tr[data-key-id="${CSS.escape(id)}"]`, dom.byId("mcpKeys")) : null;
   const target = (row && dom.$(`[data-action="${action}"]:not(:disabled)`, row)) || dom.byId("mcpNewKey");
   target?.focus();
 }
 
-// An action: the call, then a reload of the list. A failure shows above the table.
+// An action makes the call, then reloads the list. A failure shows above the table.
 async function run(call, { id = "", action = "", message = "" } = {}) {
   clearAlert();
   try {
@@ -236,7 +237,7 @@ async function run(call, { id = "", action = "", message = "" } = {}) {
     focusRow(id, action);
     return result;
   } catch (error) {
-    // A key that is gone, or MCP turned off meanwhile: the list is stale. The reload draws the
+    // A key is gone, or MCP turned off meanwhile. The list is stale. The reload draws the
     // table again, so the error shows after it.
     if (["not_found", "mcp_disabled", "storage_not_configured"].includes(error?.mcp?.code)) await reload();
     showAlert(error);
@@ -251,7 +252,7 @@ async function createKey(opener) {
     opener?.focus?.();
     return;
   }
-  // The secret shows at once and only once: the list is read again behind the dialog, never in front of it.
+  // The secret shows at once and only once. The list is read again behind the dialog, never in front of it.
   const reloading = reload();
   uiState.announce(`Key ${result.key.name} created`);
   await mcpForm.showSecret({ meta: state.meta, key: result.key, secret: result.secret });
@@ -259,7 +260,7 @@ async function createKey(opener) {
   focusRow(result.key.id, "open");
 }
 
-// What a destructive action touches: the hosts of the key.
+// This lists what a destructive action touches: the hosts of the key.
 function reach(key) {
   const hosts = !key.hosts.length ? "no host" : key.hosts.includes("*") ? "all hosts" : key.hosts.join(", ");
   return `This key reads ${hosts}.`;
@@ -284,7 +285,7 @@ async function start() {
   header.setPageSelectorValue("mcp");
   header.init();
   shell.edgeCues(dom.byId("mcpTabs"));
-  // A page restored from the back/forward cache is as old as the visit: it reads again.
+  // A page restored from the back/forward cache is as old as the visit. It reads again.
   window.addEventListener("pageshow", (event) => { if (event.persisted) void reload(); });
   await load();
 }

@@ -11,9 +11,12 @@ using namespace monitor_internal;
 
 namespace {
 
-// The time of one read, as for a section of System > Queries: a window of a busy server ends with window_too_large instead.
+// The time of one read is the same as for a section of System > Queries.
+// A window of a busy server ends with window_too_large instead.
 constexpr int kCostSeconds = 15;
-// The (user, tool) pairs that one read groups: far more than a key has (a user or two, 64 tools at most).
+// One read groups the (user, tool) pairs.
+// There are far more pairs than a key has.
+// A key has one or two users and 64 tools at most.
 constexpr uint64_t kCostGroups = 10000;
 
 int64_t window_seconds(std::string_view name) {
@@ -30,7 +33,9 @@ std::optional<McpCostWindow> mcp_cost_window(std::string_view name, int64_t max_
   if (name != "1h" && name != "6h" && name != "24h" && name != "7d") return std::nullopt;
   McpCostWindow window;
   window.name = std::string(name);
-  // To the end of the current minute: a second request in the same minute reads the same window (the cache keeps it 60 s).
+  // The window ends at the end of the current minute.
+  // A second request in the same minute reads the same window.
+  // The cache keeps it 60 s.
   window.to_s = now_s - now_s % 60 + 60;
   const int64_t span = window_seconds(name);
   const int64_t cap = std::max<int64_t>(1, max_lookback_hours) * 3600;
@@ -40,9 +45,10 @@ std::optional<McpCostWindow> mcp_cost_window(std::string_view name, int64_t max_
 }
 
 std::string mcp_cost_sql(const McpCostWindow& window, uint64_t max_rows_to_read) {
-  // The rows of the statements of the key: finished or failed, the first statement of each query only (a distributed query logs its
-  // parts on the other servers, with is_initial_query = 0). The prefix is read first (PREWHERE): the other columns only for its rows.
-  // QUERY_WAS_CANCELLED (394, 735): a statement that ChDash stopped once it had what the call asked for (the rows of the key's cap).
+  // Read only the rows of finished or failed statements. Use the first statement of each query only.
+  // A distributed query logs its parts on the other servers, with is_initial_query = 0.
+  // Read the prefix first (PREWHERE). Read the other columns only for the rows that match the prefix.
+  // QUERY_WAS_CANCELLED (394, 735) is a statement that ChDash stopped, once it had what the call asked for (the rows of the key's cap).
   return "SELECT toString(user), splitByChar('/', query_id)[3] AS tool, toString(count()), "
          "toString(countIf(type != 'QueryFinish' AND exception_code NOT IN (394, 735))), "
          "toString(countIf(type != 'QueryFinish' AND exception_code IN (394, 735))), "

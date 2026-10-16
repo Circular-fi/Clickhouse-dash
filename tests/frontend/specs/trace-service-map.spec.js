@@ -5,18 +5,18 @@ import {
   settle, cameraIdle, contrast, tokenColors, pixel, colorDistance, expectDotGrid, expectKitChrome, expectLabelsClear, measureFrames, installFrameProbe, visibleArea, expectCentred, expectClearOfChrome, expectTouchCanvas, expectFullFit, expectFit, expectLevelOfDetail, expectOwnLanes,
 } from '../helpers/graph-kit.js';
 
-// Service map tab of the Traces page (after HyperDX's DBServiceMapPage), drawn
-// with the shared canvas graph kit like the Explorer graph: tab state in the
-// URL, the search filters on /api/traces/service_map, the layered layout with
-// orthogonal edges, cards (service colour strip, spans · errors, p95, health),
-// edges (dash = call kind, colour = errors, width = calls) and their always
-// visible "calls · p95" labels, hover halo, click = recentre + select, the
-// hand-off to the Search tab, keyboard access, the phone layout (the canvas
-// with touch pan / pinch and a bottom-sheet panel: there is no List view),
-// both themes and performance budgets.
-// The graphs are mocked (the OTel fixture is one flat star); one smoke test
-// reads the fixture. ChDash.traceMap.inspect() reports the drawn frame in
-// client coordinates.
+// Service map tab of the Traces page (after HyperDX's DBServiceMapPage). It is drawn with the shared canvas graph kit.
+// The Explorer graph uses the same kit. The tests cover the tab state in the URL,
+// the search filters on /api/traces/service_map, and the layered layout with orthogonal edges.
+// The tests cover cards (service colour strip, spans · errors, p95, health),
+// edges (dash = call kind, colour = errors, width = calls) and their always visible "calls · p95" labels.
+// The tests cover the hover halo, a click that recentres and selects, and the hand-off to the Search tab.
+// They also cover keyboard access and the phone layout. The phone layout has the canvas with touch pan and pinch,
+// and a bottom-sheet panel. There is no List view on the phone.
+// The tests also cover both themes and the performance budgets.
+// The graphs are mocked. The OTel fixture is one flat star.
+// One smoke test reads the fixture.
+// ChDash.traceMap.inspect() reports the drawn frame in client coordinates.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -34,8 +34,8 @@ const node = (service, spans, errors, p95) => ({
 });
 const edge = (source, target, calls, errors, p95, kind = 'sync') => ({ source, target, kind, ...node('', calls, errors, p95), service: undefined, calls });
 
-// A chain, a fan-out, a cycle (email <-> checkout), an erroring edge, an
-// asynchronous (producer -> consumer) call and an isolated service.
+// The mock graph has a chain, a fan-out, and a cycle (email <-> checkout).
+// It also has an erroring edge, an asynchronous (producer -> consumer) call, and an isolated service.
 export const MAP = {
   v: 1, source_host_id: 'local', range: [0, 3600_000], edge_rule: 'parent_child_cross_service',
   sampled: true, sample_factor: 12, truncated: false,
@@ -108,18 +108,18 @@ test('the Service map tab lives in the URL and sends the search filters', async 
   expect(sent.getAll('tag')).toEqual(['span:http.method=GET']);
   expect(sent.getAll('service_not')).toEqual(['cron']);
   expect(Number(sent.get('end_ms')) - Number(sent.get('start_ms'))).toBe(2 * 3600_000);
-  // The search bar and chips stay: they filter the map too.
+  // The search bar and chips stay. They filter the map too.
   await expect(page.locator('#tracesForm')).toBeVisible();
   await expect(page.locator('#tracesFilterChips .traceFilterChip')).toHaveCount(2);
 
-  // Search on the map tab refreshes the map, not the result list.
+  // A search on the map tab refreshes the map, not the result list.
   const listBefore = searches.length;
   const mapBefore = maps.length;
   await page.locator('#tracesSearchButton').click();
   await expect.poll(() => maps.length).toBeGreaterThan(mapBefore);
   expect(searches.length).toBe(listBefore);
 
-  // Reload keeps the tab; Back returns to the Search tab.
+  // Reload keeps the tab. Back returns to the Search tab.
   await page.reload();
   await expect.poll(async () => (await page.evaluate(() => window.ChDash?.traceMap?.inspect?.().nodes.length || 0)), { timeout: 30_000 }).toBe(MAP.nodes.length);
   await expect(tab).toHaveAttribute('aria-selected', 'true');
@@ -171,7 +171,7 @@ test('cards, orthogonal edges, dash by call kind, labels on every edge, the lege
   expect(at.checkout.x).toBeGreaterThan(at.frontend.x);
   expect(at.payment.x).toBeGreaterThan(at.checkout.x);
   expect(at.postgres.x).toBeGreaterThan(at.payment.x);
-  // Rectangular cards of one size; the strip is the Traces service colour.
+  // Rectangular cards of one size. The strip is the Traces service colour.
   const sizes = new Set(state.nodes.map((n) => `${Math.round(n.width)}x${Math.round(n.height)}`));
   expect(sizes.size).toBe(1);
   // The strip pixel is the service colour the Traces list uses (--trace-span-color-N).
@@ -198,8 +198,8 @@ test('cards, orthogonal edges, dash by call kind, labels on every edge, the lege
     expect(n.x + n.width, n.service).toBeLessThanOrEqual(canvas.x + canvas.width + 1);
     expect(n.y + n.height, n.service).toBeLessThanOrEqual(canvas.y + canvas.height + 1);
   }
-  // Orthogonal edges; dash pattern = call kind; colour = error severity;
-  // width grows mildly with the calls; the cycle's back call is routed too.
+  // Orthogonal edges. The dash pattern shows the call kind, and the colour shows the error severity.
+  // The width grows mildly with the calls. The cycle's back call is routed too.
   const edgeOf = (source, target) => state.edges.find((e) => e.source === source && e.target === target);
   for (const e of state.edges) expect(e.orthogonal, e.id).toBe(true);
   expect(edgeOf('frontend', 'checkout').severity).toBe('err');
@@ -211,7 +211,7 @@ test('cards, orthogonal edges, dash by call kind, labels on every edge, the lege
   expect(edgeOf('email', 'checkout').back).toBe(true);
   expect(edgeOf('cart', 'redis').width).toBeGreaterThan(edgeOf('email', 'checkout').width);
   expect(edgeOf('cart', 'redis').width).toBeLessThanOrEqual(3.6);
-  // Every edge carries its "calls · p95" label, none on another label or a card.
+  // Every edge carries its "calls · p95" label. No label is on another label or a card.
   expect(state.edgeLabels).toHaveLength(MAP.edges.length);
   expect(state.edgeLabels.find((l) => l.id === 'cart\x1fredis').text).toBe('900K · p95 2 ms');
   expectLabelsClear(state);
@@ -256,7 +256,7 @@ test('zoom tools, + - 0 keys, wheel and drag pan, and the minimap once a card is
   const fitted = await inspect(page);
   await page.locator('#traceMapZoomIn').click();
   await page.locator('#traceMapZoomIn').click();
-  // The fit leaves room for the chrome: a wide screen may need a third step.
+  // The fit leaves room for the chrome. A wide screen may need a third step.
   if (!(await inspect(page)).minimapVisible) await page.locator('#traceMapZoomIn').click();
   let state = await inspect(page);
   expect(state.scale).toBeGreaterThan(fitted.scale);
@@ -344,9 +344,9 @@ test('a click recentres on the service and opens its panel; "Search this service
   await cameraIdle(page, 'ChDash.traceMap');
   let state = await inspect(page);
   expect(state.selected).toEqual({ kind: 'node', id: 'checkout' });
-  // Recentred in the visible canvas the panel and the chrome leave free (the
-  // kit's visible area: below the toolbar, above the legend, status line and
-  // minimap).
+  // Recentred in the visible canvas. The panel and the chrome leave this area free.
+  // This is the kit visible area: below the toolbar, above the legend, status line,
+  // and minimap.
   const canvas = await page.locator('#traceMapCanvas').boundingBox();
   const panelBox = await panel.boundingBox();
   const free = await visibleArea(page, '#traceMapCanvas', '#traceMapPanel');
@@ -415,10 +415,10 @@ test('an edge label opens the call panel and "Search errors" searches the callee
   expect(last.status).toBe('Error');
   await expect(page.locator('.traceSearchBody')).toBeVisible();
 
-  // "Focus map" keeps the map tab with the service filter. Back on its tab,
-  // the map first loads the current filters (the callee's errors): wait for
-  // that load, or the card is picked on the map it replaces and "Focus map"'s
-  // own request races it.
+  // "Focus map" keeps the map tab with the service filter. Back on that tab,
+  // the map first loads the current filters (the callee's errors). Wait for
+  // that load. Otherwise the card is picked on the map that it replaces,
+  // and the "Focus map" request races it.
   const shown = maps.length;
   await page.locator('#tracesTab-map').click();
   await expect.poll(() => maps.length).toBeGreaterThan(shown);
@@ -547,8 +547,8 @@ test.describe('on a phone', () => {
     await mockMap(page);
     await openMap(page);
     // T-E2: the map opens on its entry service and the services it calls at
-    // 0.7 or more (full cards, labels never ~6 px), the rest a pan away, the
-    // minimap giving the whole.
+    // 0.7 or more (full cards, labels never ~6 px). The rest is one pan away.
+    // The minimap shows the whole map.
     await cameraIdle(page, 'ChDash.traceMap');
     await settle(page);
     const opened = await inspect(page);
@@ -618,10 +618,10 @@ test('performance budget: a 120-service map lays out, routes and redraws within 
   expect(pan.p95, 'pan frame p95 (ms)').toBeLessThan(25);
 });
 
-// Dense maps: every service calls most others, like a fresh stack's newest
-// hour (12 services, 132 call paths: every ordered pair). The layered layout
-// puts them in one row of columns, so every route detours around cards: the
-// router took 45 s of main thread on 12 / 132 before its step budget.
+// Dense maps: every service calls most others, as in the newest hour of a fresh stack.
+// The hour has 12 services and 132 call paths, one for every ordered pair.
+// The layered layout puts them in one row of columns. So every route detours around cards.
+// The router took 45 s of main thread on 12 / 132 before its step budget.
 function denseMap(services, paths, seed = 1) {
   let state = seed;
   const random = () => { state = (state * 1103515245 + 12345) & 0x7fffffff; return state / 0x7fffffff; };

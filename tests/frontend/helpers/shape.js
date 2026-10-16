@@ -1,7 +1,7 @@
-// The shape of a JSON value: what a client of the answer depends on, without its values. An object is its keys, an array
-// is the merge of the shapes of its elements (a key that any element has), a scalar is its type; null stands for "no value"
-// and fits any type on the other side. compareShapes() lists what differs between the answer of a real server and the answer
-// of the fake that a spec runs a page against.
+// The shape of a JSON value: what a client of the answer depends on, without its values.
+// An object is its keys. An array is the merge of the shapes of its elements, so a key that any element has counts.
+// A scalar is its type. Null stands for "no value" and fits any type on the other side.
+// compareShapes() lists what differs between the answer of a real server and the answer of the fake that a spec runs a page against.
 export function shapeOf(value) {
   if (value === null || value === undefined) return 'null';
   if (Array.isArray(value)) return value.length ? ['array', mergeShapes(value.map(shapeOf))] : ['array', 'empty'];
@@ -27,8 +27,8 @@ function mergeTwo(a, b) {
 
 const isObject = (shape) => shape !== null && typeof shape === 'object' && !Array.isArray(shape);
 
-// Differences of `fake` from `real`, as "path: what" lines: a key only the real answer has, a key only the fake has, a
-// type that differs.
+// Differences of `fake` from `real`, as "path: what" lines.
+// Each line names a key that only the real answer has, a key that only the fake has, or a type that differs.
 export function compareShapes(real, fake, path = '$') {
   if (real === 'null' || fake === 'null' || real === 'empty' || fake === 'empty') return [];
   if (isObject(real) && isObject(fake)) {

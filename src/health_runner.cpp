@@ -27,12 +27,12 @@ static int64_t now_ms() {
 static constexpr int64_t kSystemTablesRefreshMs = 10 * 60 * 1000;
 static constexpr int64_t kHostVersionRefreshMs = 10 * 60 * 1000;
 // A health connection is useful only while checks are frequent. Close it
-// before a long sleep so ClickHouse never has to reap an idle dashboard socket
+// before a long sleep. ClickHouse then never has to reap an idle dashboard socket
 // through its receive/idle timeout path.
 static constexpr int kMaxPersistentHealthClientIdleMs = 60 * 1000;
 
-// What bounds one audit of a host: the runner stops, or the time budget is spent. A query that the budget does not
-// allow is not sent, and what it would have said is unknown (never reported as a missing grant).
+// Two limits bound one audit of a host: the runner stops, or the time budget is spent. A query that the budget does not
+// let run is not sent. The result of that query is unknown, so it is never reported as a missing grant.
 struct AuditBudget {
   const std::atomic<bool>* stop = nullptr;
   std::chrono::steady_clock::time_point deadline;
@@ -41,8 +41,8 @@ struct AuditBudget {
   }
 };
 
-// A detection is read again after kSystemTablesRefreshMs; after 1 min while query_log is missing (ClickHouse creates
-// it at its first flush); after 30 s when it failed: the host then says "not checked", never "no query_log".
+// A detection is read again after kSystemTablesRefreshMs. While query_log is missing, the read repeats after 1 min,
+// because ClickHouse creates query_log at its first flush. When the read failed, it repeats after 30 s. The host then says "not checked", never "no query_log".
 static int64_t system_tables_refresh_ms(const HostSystemTables& tables) {
   if (!tables.checked) return 30 * 1000;
   if (!tables.query_log) return 60 * 1000;
@@ -80,8 +80,8 @@ static HostSystemTables detect_system_tables(clickhouse::Client* client, int64_t
   return out;
 }
 
-// CHECK GRANT: true when the grant is held; `known` is false when the server did not answer in a way that
-// can be read (an unsupported form, a missing table): the audit then says nothing about it.
+// CHECK GRANT: the result is true when the grant is held. `known` is false when the server gives no answer that
+// the runner can read, for example an unsupported form or a missing table. The audit then says nothing about the grant.
 static bool check_grant(clickhouse::Client& client, const std::string& expression, bool* known, const AuditBudget& budget) {
   *known = false;
   bool granted = false;
@@ -116,14 +116,14 @@ static std::string user_of(const std::string& uri) {
 }
 
 // The system tables that the Explorer and the System page read with the system user. Without
-// one of them a figure of the page is missing (the first line of each pair says which).
+// one of them, a figure of the page is missing. The first line of each pair says which table is meant.
 static const char* const kSystemReads[] = {"system.databases", "system.tables", "system.columns", "system.parts", "system.disks", "system.dictionaries",
                                              "system.metrics", "system.asynchronous_metrics", "system.clusters", "system.query_log"};
-// What the runner reads for the Functions page and for the dictionaries.
+// The runner reads these tables for the Functions page and for the dictionaries.
 static const char* const kRunnerReads[] = {"system.functions", "system.documentation", "system.dictionaries"};
 
-// Does the user of the client read any table? A database-wide SELECT is enough; else a table of a database it can SHOW.
-// nullopt: the budget ran out before an answer (the audit then says nothing).
+// Does the user of the client read any table? A database-wide SELECT is enough. Otherwise, a table of a database that the user can SHOW is enough.
+// nullopt: the budget ran out before an answer. The audit then says nothing.
 static std::optional<bool> reads_a_table(clickhouse::Client& client, const AuditBudget& budget) {
   std::vector<std::string> databases;
   if (budget.exhausted()) return std::nullopt;
@@ -182,7 +182,7 @@ static HostAccess audit_access(
 
   if (system) {
     std::vector<std::string> reads(std::begin(kSystemReads), std::end(kSystemReads));
-    // The OpenTelemetry tables of this host (they can differ from a host to another), then the extra reads of the settings.
+    // Read the OpenTelemetry tables of this host. They can differ from host to host. Then read the extra settings.
     for (const auto& table : otel_system_reads(host.otel)) reads.push_back(table);
     reads.insert(reads.end(), extra_system_reads.begin(), extra_system_reads.end());
     for (const auto& table : reads) {
@@ -226,8 +226,8 @@ static HostAccess audit_access(
       out.warnings.push_back("The " + who + " has no SELECT on system.dictionaries: SHOW DICTIONARIES is refused, so a dictionary shows in the Explorer only when SHOW TABLES lists it.");
     }
   }
-  // The MCP user: the API tools run as this user (mcp_identity.hpp), so what the pages ask of the runner and of the
-  // system user, the tools ask of it.
+  // The MCP user runs the API tools (mcp_identity.hpp). What the pages ask of the runner and of the
+  // system user, the tools ask of the MCP user too.
   if (settings.mcp_audit && !host.mcp_uri.empty() && !budget.exhausted()) {
     out.mcp_user = user_of(host.mcp_uri);
     std::string error;
@@ -240,7 +240,7 @@ static HostAccess audit_access(
       out.warnings.push_back("The " + who + " cannot connect: " + out.mcp_error);
     } else {
       out.mcp_connected = true;
-      // The profile of the user: the limits that a key can lower and never raise (the page says which one binds).
+      // The profile of the user holds the limits. A key can lower these limits, but it never raises them. The page says which limit binds.
       const ChSettingsProfile profile = ch_connection_profile(*mcp);
       out.mcp_profile_known = profile.known;
       out.mcp_readonly = profile.readonly;
@@ -270,10 +270,10 @@ static HostAccess audit_access(
 
 struct HostVersion {
   std::string version;
-  // The server's timezone(): ClickHouse prints DateTime values of system
-  // tables in it, and the UI converts them to the browser's zone.
+  // The server timezone comes from timezone(). ClickHouse prints DateTime values of system
+  // tables in this zone. The UI converts them to the browser zone.
   std::string timezone;
-  // max_query_size: ClickHouse refuses a text that it parses (formatQuery, EXPLAIN AST) when it is longer.
+  // max_query_size: ClickHouse refuses a text that it parses (formatQuery, EXPLAIN AST) when the text is longer.
   size_t max_query_size = 0;
 };
 
@@ -295,7 +295,7 @@ static HostVersion detect_host_version(clickhouse::Client* client) {
   } catch (...) {
     return HostVersion{};
   }
-  // Apart from the version: a server that cannot say it keeps the version.
+  // Apart from the version. A server that cannot say its version keeps the version.
   try {
     ch_select(*client,
       "SELECT toString(getSetting('max_query_size'))",
@@ -319,7 +319,7 @@ HealthRunner::HealthRunner(std::vector<HostSpec> hosts, HealthSettings settings)
   : hosts_(std::move(hosts)), settings_(std::move(settings)) {
 
 
-  // Initialize snapshot with all hosts non-healthy.
+  // Initialize the snapshot. All hosts start non-healthy.
   std::lock_guard<std::mutex> lk(mu_);
   ctx_.reserve(hosts_.size());
   for (const auto& h : hosts_) {
@@ -352,7 +352,7 @@ void HealthRunner::start() {
 
 void HealthRunner::stop() {
   {
-    // Under the lock: a thread that checked the flag and is about to wait cannot miss the notification.
+    // Do this under the lock. A thread that checks the flag and then waits cannot miss the notification.
     std::lock_guard<std::mutex> lk(mu_);
     stop_ = true;
   }
@@ -422,14 +422,14 @@ size_t HealthRunner::healthy_count() const {
 
 void HealthRunner::ping_loop(size_t index) {
   using namespace std::chrono;
-  // The statements of the health checks and of the access audit are labelled (ch_query.hpp).
+  // The health checks and the access audit label their statements (ch_query.hpp).
   ChQueryLimits limits;
   limits.log_comment = "chdash:health";
   ChQueryScope scope(std::move(limits));
   const HostSpec spec = hosts_[index];
   const auto timeout = milliseconds(settings_.timeout_ms);
-  // One runner client per host, owned by this thread: the health of a host is measured with the credentials that
-  // run the user queries (the system user is only audited).
+  // Each host has one runner client, and this thread owns it. The health of a host is measured with the credentials that
+  // run the user queries. The system user is only audited.
   std::shared_ptr<clickhouse::Client> client;
   int64_t version_checked_at_ms = 0;
 
@@ -441,7 +441,7 @@ void HealthRunner::ping_loop(size_t index) {
     std::string error;
 
     if (!client) {
-      // DNS and connect may block for the timeout: outside the lock, in this host's thread only.
+      // DNS and connect may block until the timeout. Run them outside the lock, in this host's thread only.
       std::string err;
       client = make_client_from_uri(spec.runner_uri, timeout, timeout, timeout, &err);
       if (!client) error = err.empty() ? "client initialization failed" : err;
@@ -461,7 +461,7 @@ void HealthRunner::ping_loop(size_t index) {
         error = "unknown ping failure";
       }
       if (!ok) {
-        // A stale socket (the server or a proxy closed it): reconnect once before the host is reported down.
+        // A stale socket is a socket that the server or a proxy closed. Reconnect once before the host is reported down.
         try {
           client->ResetConnection();
           ping();
@@ -498,7 +498,7 @@ void HealthRunner::ping_loop(size_t index) {
         ctx.last_error.clear();
       } else {
         const std::string message = error.empty() ? "ping failed" : error;
-        // A failure is logged when the host goes down and when its reason changes, not at every retry.
+        // Log a failure when the host goes down and when its reason changes. Do not log it at every retry.
         if (was_healthy || ctx.last_error != message) {
           log_event(LogLevel::Warn, "health.host_down", {{"host", spec.id}, {"error", message}});
         }
@@ -517,8 +517,8 @@ void HealthRunner::ping_loop(size_t index) {
     // A host without a connection is retried every second.
     int interval_ms = settings_.interval_ms;
     if (!client) interval_ms = std::min(interval_ms, 1000);
-    // A health connection is useful only while checks are frequent: close it before a long sleep, so ClickHouse
-    // never reaps an idle dashboard socket through its receive timeout.
+    // A health connection is useful only while checks are frequent. Close it before a long sleep. ClickHouse
+    // then never reaps an idle dashboard socket through its receive timeout.
     if (interval_ms > kMaxPersistentHealthClientIdleMs) client.reset();
     if (sleep_until(tick_start + milliseconds(interval_ms))) break;
   }
@@ -544,7 +544,7 @@ void HealthRunner::audit_loop() {
       }
       if (!due) continue;
 
-      // Connections of the audit only (a clickhouse::Client serves one thread): the ping thread keeps its own.
+      // This connection is for the audit only. A clickhouse::Client serves one thread. The ping thread keeps its own connection.
       const AuditBudget budget{&stop_flag_, steady_clock::now() + milliseconds(kAuditBudgetMs)};
       std::string runner_error;
       auto runner = make_client_from_uri(spec.runner_uri, timeout, timeout, timeout, &runner_error);
@@ -576,8 +576,8 @@ void HealthRunner::audit_loop() {
         auto& ctx = ctx_[index];
         ctx.audit_due = false;
         ctx.last.system_tables = tables;
-        // A finding is logged when it appears and when it changes, once for each: the start of the
-        // process, or a grant that is revoked later. A host with no finding says nothing.
+        // The runner logs a finding when it appears and when it changes, once for each finding. This happens at the start of the
+        // process, or for a grant that is revoked later. A host with no finding says nothing.
         if (access.warnings != ctx.last.access.warnings) {
           for (const auto& warning : access.warnings) {
             log_event(LogLevel::Warn, "access.finding", {{"host", spec.id}, {"finding", warning}});
@@ -589,7 +589,7 @@ void HealthRunner::audit_loop() {
       cv_.notify_all();
     }
 
-    // Until a host turns healthy again (its audit is due now), or the next check of the 10-minute refresh.
+    // Wait until a host turns healthy again (its audit is due now), or until the next check of the 10-minute refresh.
     std::unique_lock<std::mutex> lk(mu_);
     cv_.wait_for(lk, seconds(5), [&] {
       if (stop_) return true;

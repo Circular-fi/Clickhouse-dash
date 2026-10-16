@@ -13,9 +13,9 @@ namespace {
 using sql::quote_ident;
 }
 
-// ClickHouse may pretty-print complex types returned by DESCRIBE with newlines/indentation.
-// This produces noisy JSON ("\n    ") in result_meta. Normalize it to a single-line form
-// while keeping the type parseable for the frontend.
+// ClickHouse can pretty-print complex types that DESCRIBE returns, with newlines and indentation.
+// This produces noisy JSON ("\n    ") in result_meta. The code normalizes the type to a single line.
+// The type stays parseable for the frontend.
 std::string normalize_type_string(std::string s) {
   std::string out;
   out.reserve(s.size());
@@ -32,7 +32,7 @@ std::string normalize_type_string(std::string s) {
     const char ch = s[i];
     const char prev = (i > 0) ? s[i - 1] : '\0';
 
-    // Preserve content inside quotes/backticks (best-effort).
+    // Keep the content inside quotes and backticks. This is a best-effort step.
     if (!in_btick && ch == '\'' && prev != '\\') {
       in_squote = !in_squote;
       space_pending = false;
@@ -159,9 +159,9 @@ std::string describe_cache_key(
     std::string_view database,
     std::string_view sql
 ) {
-  // Keep cache keys small even for multi-hundred-kilobyte editor buffers. Two
-  // independently seeded 64-bit hashes plus the SQL length make accidental
-  // collisions negligible for this process-local, short-lived cache.
+  // Keep the cache keys small, even for editor buffers of several hundred kilobytes.
+  // Two independently seeded 64-bit hashes and the SQL length make accidental
+  // collisions negligible. The cache is local to the process and short-lived.
   const uint64_t hash_a = fnv1a64(sql, UINT64_C(14695981039346656037));
   const uint64_t hash_b = fnv1a64(sql, UINT64_C(7809847782465536322));
   std::string key;
@@ -280,8 +280,9 @@ static bool has_256_bit_int_type(std::string_view type) {
   return icontains(type, "UInt256") || icontains(type, "Int256");
 }
 
-// clickhouse-cpp reads Decimal32/64/128 (a precision up to 38) natively, and the cell encoder writes
-// them at their scale. Only a wider Decimal (Decimal256: DESCRIBE prints Decimal(76, S)) needs text.
+// clickhouse-cpp reads Decimal32/64/128 natively, up to a precision of 38.
+// The cell encoder writes them at their scale. Only a wider Decimal needs text.
+// Decimal256 is one such type: DESCRIBE prints Decimal(76, S).
 static bool has_wide_decimal_type(std::string_view type) {
   if (icontains(type, "Decimal256")) return true;
   for (size_t at = 0; at + 8 < type.size(); ++at) {
@@ -301,8 +302,8 @@ static bool has_wide_decimal_type(std::string_view type) {
 }
 
 // A type with a structure (Array, Map, Tuple, Nested, JSON, Dynamic, Variant) is sent as the JSON text
-// of toJSONString(); a scalar as the text of toString(), which is exact (toJSONString() drops the
-// trailing zeros of a Decimal).
+// of toJSONString(). A scalar is sent as the text of toString(). This text is exact.
+// toJSONString() drops the trailing zeros of a Decimal.
 bool is_structured_type(std::string_view type) {
   std::string_view inner = type;
   for (int guard = 0; guard < 4; ++guard) {
@@ -443,7 +444,7 @@ std::vector<const ResultColumnPlan*> resolve_column_plans(const clickhouse::Bloc
       resolved_column_plans[i] = &result_plan[i].second;
     }
   } else if (!result_plan.empty()) {
-    // Defensive fallback for servers that reorder DESCRIBE metadata.
+    // A defensive fallback for servers that reorder the DESCRIBE metadata.
     for (size_t i = 0; i < block.GetColumnCount(); ++i) {
       const auto& block_name = block.GetColumnName(i);
       for (const auto& item : result_plan) {

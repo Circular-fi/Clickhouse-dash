@@ -50,10 +50,11 @@ std::string resolve_buffer_database_arg(const std::string& arg, const std::strin
 }
 
 void normalize_buffer_runtime_rows(std::vector<ExplorerTableSummary>& summaries) {
-  // system.tables.total_rows for Buffer is the readable surface: resident rows plus the underlying destination. Snapshot *those exact
-  // system.tables values* before system.parts later replaces MergeTree row counts. Mixing a Buffer total captured at T1 with a destination
-  // parts count captured at T2 makes a flush race look like resident rows appearing/disappearing. The raw snapshot also makes Buffer ->
-  // Buffer chains order-independent.
+  // The readable surface of a Buffer is system.tables.total_rows. It is the resident rows plus the destination table.
+  // Snapshot those exact system.tables values before system.parts replaces the MergeTree row counts.
+  // Do not mix a Buffer total from T1 with a destination parts count from T2.
+// A flush race then looks like resident rows that appear or disappear.
+  // The raw snapshot also makes Buffer -> Buffer chains order-independent.
   std::unordered_map<std::string, std::optional<uint64_t>> raw_rows;
   raw_rows.reserve(summaries.size());
   for (const auto& table : summaries) {
@@ -74,8 +75,8 @@ void normalize_buffer_runtime_rows(std::vector<ExplorerTableSummary>& summaries)
     const auto target = raw_rows.find(table_key(target_database, args[1]));
     const std::optional<uint64_t>* const target_rows = target == raw_rows.end() ? nullptr : &target->second;
     if (!target_rows || !*target_rows) {
-      // The target may be hidden by the runner ACL or unable to expose an exact lightweight row count. In either case, resident Buffer
-      // rows are unknown.
+      // The target may be hidden by the runner ACL. It may also be unable to expose an exact lightweight row count.
+      // In either case, the resident Buffer rows are unknown.
       table.rows.reset();
       continue;
     }
@@ -83,8 +84,8 @@ void normalize_buffer_runtime_rows(std::vector<ExplorerTableSummary>& summaries)
     const uint64_t readable_rows = **own_rows;
     const uint64_t target_readable_rows = **target_rows;
     if (readable_rows < target_readable_rows) {
-      // Never clamp an inconsistent cross-object snapshot to zero: zero would be a fabricated resident-row count. A future refresh can
-      // resolve the race.
+      // Never clamp an inconsistent cross-object snapshot to zero. Zero is a fabricated resident-row count.
+      // A later refresh can resolve the race.
       table.rows.reset();
       continue;
     }
@@ -112,7 +113,7 @@ ExplorerStorageDatabase storage_of_database(const std::string& database, const s
       item.parts = parts_it->second.parts;
     } else if (meta_it != meta_by_table.end()) {
       if (is_resident_memory_engine(item.engine)) {
-        // RAM allocation: reported, but never drawn as disk area.
+        // RAM allocation. It is reported, but never drawn as a disk area.
         entry.resident_bytes += meta_it->second.bytes.value_or(0);
         continue;
       }
@@ -148,13 +149,14 @@ std::vector<ExplorerDatabaseSummary> database_summaries_of(const std::vector<Exp
     db.name = table.database;
     ++db.tables;
     db.rows += table.rows.value_or(0);
-    // Database/ClickHouse footprint is disk-backed storage. Resident Memory, Buffer and dictionary allocations are deliberately not mixed into it.
+    // The Database and ClickHouse footprint is disk-backed storage.
+    // Resident Memory, Buffer and dictionary allocations are not mixed into it on purpose.
     db.bytes += table.logical_bytes.value_or(0);
   }
 
-  // system.parts has no rows for the Log-family engines. Their table-level total_bytes is still disk-backed, so fold it into the database
-  // disk distribution when system.tables.data_paths resolves unambiguously to one configured disk. This keeps the database total and its disk
-  // breakdown in the same physical unit.
+  // system.parts has no rows for the Log-family engines. Their table-level total_bytes is still disk-backed.
+  // If system.tables.data_paths resolves to exactly one configured disk, add these bytes to the database disk distribution.
+  // This keeps the database total and its disk breakdown in the same physical unit.
   for (const auto& table : tables) {
     if (!is_log_family(table.engine) || !table.logical_bytes || table.data_paths.empty()) continue;
     std::set<std::string> matched_disks;
@@ -171,8 +173,8 @@ std::vector<ExplorerDatabaseSummary> database_summaries_of(const std::vector<Exp
   for (auto& [name, db] : by_database) {
     std::set<std::string> disk_names;
     for (const auto& table : tables) if (table.database == name) disk_names.insert(table.disks.begin(), table.disks.end());
-    // Log-family tables do not populate summary.disks through system.parts. Include any disk resolved from their data_paths above so the
-    // database breakdown actually exposes the same disk bytes already counted here.
+    // Log-family tables do not fill summary.disks through system.parts.
+    // Include the disk that the data_paths above resolved to. Then the database breakdown shows the same disk bytes that are already counted here.
     for (const auto& [key, _] : bytes_by_disk) {
       if (key.first == name) disk_names.insert(key.second);
     }
@@ -195,8 +197,8 @@ std::vector<ExplorerDatabaseSummary> database_summaries_of(const std::vector<Exp
 }
 
 void resolve_function_aliases(ExplorerFunctionsCatalog& catalog) {
-  // Resolve documented aliases before the catalog is sent to the browser. ClickHouse commonly documents aliases as `Alias of `target`.`.
-  // Keep the chain bounded and cycle-safe so malformed/custom documentation can never create unbounded recursion in the UI.
+  // Resolve the documented aliases before the catalog is sent to the browser. ClickHouse commonly documents aliases as `Alias of `target`.`.
+  // Keep the chain bounded and cycle-safe. Malformed or custom documentation can then never cause unbounded recursion in the UI.
   auto lower = [](std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return value;
@@ -214,8 +216,8 @@ void resolve_function_aliases(ExplorerFunctionsCatalog& catalog) {
   std::unordered_map<std::string, size_t> function_by_name;
   for (size_t i = 0; i < functions.size(); ++i) {
     const std::string key = lower(functions[i].name);
-    // Prefer scalar/aggregate functions over table functions on a rare name collision because aliases in function documentation target
-    // callable names.
+    // On a rare name collision, prefer scalar and aggregate functions over table functions.
+    // Aliases in function documentation target callable names.
     if (!function_by_name.count(key) || functions[i].kind != "Table Function") function_by_name[key] = i;
   }
   constexpr size_t kMaxAliasDepth = 8;

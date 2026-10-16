@@ -1,5 +1,7 @@
-// The Preview tab of the table card: the first rows of the table (50, 100 or 500), as the Query result table shows them, and the way to open
-// the SELECT in Query. A table or a limit that comes while a preview loads takes over (ARCH-F-102).
+// The Preview tab of the table card.
+// It shows the first rows of the table (50, 100 or 500), as the Query result table shows them.
+// It also gives a way to open the SELECT in Query.
+// A table or a limit that arrives while a preview loads replaces that preview (ARCH-F-102).
 
 import { api } from "./app_api.js";
 import { h } from "./app_dom.js";
@@ -33,8 +35,9 @@ function setPreviewLimit(limit) {
   actions.renderTabContent();
 }
 
-// The preview in flight is named by its table and its limit. A table or a limit that comes while another preview
-// loads aborts that one and loads its own: the card never waits for a preview that was asked for something else.
+// The preview in flight is named by its table and its limit.
+// A table or a limit that arrives while another preview loads aborts that preview.
+// Then it loads its own preview. The card never waits for a preview that was asked for something else.
 let previewing = "";
 const previewWanted = () => `${model.selectedKey}\0${previewLimit()}`;
 
@@ -55,7 +58,8 @@ async function loadPreview() {
     result = await api.getExplorerTableData(state.selectedHostId, s.database, s.name, limit, { signal: req.signal });
   } catch (e) {
     if (util.isAbort(e)) {
-      // Superseded (another preview took the slot and set `previewing`) or cut by a host change.
+      // This preview is superseded. Another preview took the slot and set `previewing`.
+      // A host change can also cut it.
       if (previewing === want && !req.isCurrent()) previewing = "";
       return;
     }
@@ -63,15 +67,16 @@ async function loadPreview() {
   }
   if (previewing !== want) return;
   previewing = "";
-  // A late answer for another table or limit is dropped.
+  // The code drops a late answer for another table or limit.
   if (model.selectedKey !== key || model.detail?.summary?.name !== s.name) return;
   if (result && !result.error) result.requested_limit = limit;
   if (limit === previewLimit()) model.preview = result;
   if (model.tab === "Preview") actions.renderTabContent();
 }
 
-// Explorer and Query are separate HTML documents. The SQL waits in the session draft that Query reads when it opens, otherwise the
-// textarea does not exist yet and the statement is lost.
+// Explorer and Query are separate HTML documents.
+// The SQL waits in the session draft. Query reads the draft when it opens.
+// Otherwise the textarea does not exist yet, and the statement is lost.
 function openSqlInQuery(sql) {
   const text = String(sql || "");
   storage.pref(storage.KEYS.editorDraft, "", { session: true }).set(text);
@@ -134,8 +139,8 @@ function createDataSettingsControl() {
   menu.appendChild(option);
   root.append(button, menu);
 
-  // An ns.menu menu (app_ui_menu.js) in a portal: the card re-renders
-  // and clips; the list opens fixed under the gear, right-aligned.
+  // The ns.menu menu (app_ui_menu.js) sits in a portal. The card re-renders and clips the menu.
+  // The list opens fixed under the gear, right-aligned.
   const settings = menuMod?.bind(button, menu, { root, portal: true, portalAlign: "end", closeOnSelect: true });
 
   option.addEventListener("click", () => {
@@ -147,11 +152,11 @@ function createDataSettingsControl() {
   return root;
 }
 
-// Preview cells are query results: every value stays as the API sent it
-// (decision 45: no grouping, no compact numbers, no reformatted dates),
-// like the Query result table; only a data NULL takes the NULL token.
-// The value as the result tables write it (ns.results.cellText: a Map as an object, the
-// digits of a UInt64 as sent).
+// Preview cells are query results. Every value stays as the API sent it (decision 45).
+// Do not group digits, do not use compact numbers and do not reformat dates.
+// This matches the Query result table. Only a data NULL takes the NULL token.
+// The result tables write a value as ns.results.cellText does.
+// A Map is written as an object. The digits of a UInt64 stay as sent.
 function previewCellText(value, type) {
   if (value == null) return "NULL";
   const text = results?.cellText?.(value, type);
@@ -171,7 +176,7 @@ function renderPreviewToolbar(container, detail) {
   const count = h("span", { class: "explorerPreviewToolbar__count" }, rows == null ? `LIMIT ${limit}` : `${format.countLabel(rows, "row")} (LIMIT ${limit})`);
   info.appendChild(count);
   if (total != null && rows != null) info.appendChild(h("span", { class: "explorerPreviewToolbar__total" }, `of ${format.count(total)} in the table`));
-  // The row limit: the shared segmented control (app_ui_segmented.js).
+  // The row limit uses the shared segmented control (app_ui_segmented.js).
   const limits = h("div", { class: "explorerPreviewLimits" });
   segmented?.render(limits, PREVIEW_LIMITS.map((value) => ({ value, label: String(value), title: `Preview the first ${value} rows` })), { attr: "limit", value: limit, size: "compact", label: "Preview row limit" });
   segmented?.bind(limits, { attr: "limit", onChange: (value) => { if (Number(value) !== previewLimit()) setPreviewLimit(Number(value)); return false; } });
@@ -210,7 +215,7 @@ function renderTransposedPreview(container, columns, types, row, previewColumns,
           td.classList.add("explorerPreviewTable__value");
           if (item.value == null) {
             td.classList.add("is-null");
-            // The shared NULL token of the result tables (ns.format.nullToken()).
+            // The result tables share this NULL token (ns.format.nullToken()).
             if (results?.setNullCell) results.setNullCell(td);
             else td.textContent = "NULL";
             return;
@@ -228,7 +233,7 @@ function renderPreviewTab(container, detail) {
   renderPreviewToolbar(container, detail);
   if (!model.preview) {
     container.appendChild(uiState.block("loading", { label: "Loading the preview\u2026" }));
-    // Nothing waits for another table's preview: this one is asked for unless it is already in flight.
+    // This preview does not wait for another table's preview. It is requested unless it is already in flight.
     if (previewing !== previewWanted()) setTimeout(loadPreview, 0);
     return;
   }
@@ -237,10 +242,10 @@ function renderPreviewTab(container, detail) {
   const sourceColumns = previewColumns.map((c) => c.name);
   const sourceRows = Array.isArray(model.preview.rows) ? model.preview.rows : [];
   if (!sourceRows.length) return container.appendChild(emptyNote("The table returned no rows."));
-  // AggregateFunction preview values are finalized/stringified server-side so
-  // clickhouse-cpp never has to decode aggregate states. If every returned
-  // finalized value is numeric, expose a numeric presentation type to the
-  // shared result table so Explorer gets the same background gauges as Query.
+  // The server finalizes and stringifies AggregateFunction preview values.
+  // Then clickhouse-cpp never has to decode aggregate states.
+  // If every returned finalized value is numeric, the code exposes a numeric presentation type
+  // to the shared result table. Explorer then gets the same background gauges as Query.
   const sourceTypes = previewColumns.map((c, columnIndex) => {
     if (!aggregatePreviewColumn(c)) return c.type;
     const values = sourceRows.map((row) => Array.isArray(row) ? row[columnIndex] : null).filter((value) => value != null && String(value).trim() !== "");
@@ -260,8 +265,8 @@ function renderPreviewTab(container, detail) {
     rowDetails: true,
     decorateHeader: (th, headCtx) => {
       const sourceIndex = projected.sourceColumnIndexes?.[headCtx.columnIndex] ?? headCtx.columnIndex;
-      // Type sub-header drawn by CSS from data-type, so the header text
-      // stays the column name (row details, copy and tests read it).
+      // CSS draws the type sub-header from data-type.
+      // The header text stays the column name. Row details, copy and tests read it.
       const type = projected.types[headCtx.columnIndex] || "";
       if (type) {
         th.dataset.type = type;

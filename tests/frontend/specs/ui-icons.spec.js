@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 
-// Icons (docs/ui-foundations.md, "Icons"): one sprite, static/icons.svg?v=<hash>,
-// drawn through <svg class="icon"><use href="...#i-name"/></svg> (ns.icon), and
-// the logo mark before "ClickHouse Dash" in the header of every page.
+// Icons (docs/ui-foundations.md, "Icons"). There is one sprite: static/icons.svg?v=<hash>.
+// Draw each icon through <svg class="icon"><use href="...#i-name"/></svg> (ns.icon).
+// The logo mark stands before "ClickHouse Dash" in the header of every page.
 
 const PAGES = [
   { name: 'query', path: '/query', ready: '#runButton' },
@@ -15,8 +15,8 @@ async function open(page, { path, ready }) {
   await expect(page.locator(ready)).toBeVisible({ timeout: 15_000 });
 }
 
-// Every visible sprite icon: its box, the symbol it names, and whether the browser drew it
-// (the <use> has a box only once the sprite has loaded and holds the symbol).
+// Every visible sprite icon has a box, names a symbol, and is drawn by the browser.
+// The <use> element has a box only when the sprite is loaded and holds the symbol.
 async function visibleIcons(page) {
   return page.evaluate(() => [...document.querySelectorAll('svg.icon')].filter((svg) => {
     const box = svg.getBoundingClientRect();
@@ -96,11 +96,11 @@ for (const width of [1440, 390, 360]) {
           probe.remove();
           return {
             w: box.width, h: box.height,
-            // Up to 600 px the logo stands for the name: the name stays for a screen reader, clipped to a pixel.
+            // Up to 600 px, the logo stands for the name. The name stays for a screen reader, clipped to one pixel.
             beforeName: innerWidth <= 600 ? name.getBoundingClientRect().width <= 1 : box.right <= name.getBoundingClientRect().left,
-            // The mark stands in the middle of the brand: the name with the version under it (the name alone up to 600 px).
+            // The mark stands in the middle of the brand. The name has the version under it. Up to 600 px, only the name is shown.
             centred: Math.abs((box.top + box.bottom) / 2 - (brand.getBoundingClientRect().top + brand.getBoundingClientRect().bottom) / 2) <= 1,
-            // The version is small text under the name, as wide as the name at most (a longer text ends with an ellipsis); up to 600 px it is not drawn.
+            // The version is small text under the name. It is as wide as the name at most. A longer text ends with an ellipsis. Up to 600 px, it is not drawn.
             versionUnderName: innerWidth <= 600
               ? getComputedStyle(version).display === 'none'
               : version.getBoundingClientRect().top >= name.getBoundingClientRect().bottom - 1

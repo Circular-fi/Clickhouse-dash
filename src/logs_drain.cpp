@@ -8,7 +8,7 @@
 
 namespace chdash::logs {
 
-// Patterns: masking + a Drain port (He et al. 2017, as in HyperDX's
+// Patterns use masking and a Drain port (He et al. 2017, as in HyperDX's
 // common-utils/drain: depth 4, similarity 0.4, 100 children per node).
 
 const std::string kParam = "<*>";
@@ -21,8 +21,8 @@ bool is_word(char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0 |
 
 }  // namespace
 
-// Replaces variable parts with <*>: quoted strings, UUIDs, long hex ids,
-// IPv4 addresses and numbers that are not glued to a word (v1 stays).
+// Replace the variable parts with <*>: quoted strings, UUIDs, long hex ids,
+// IPv4 addresses and numbers that are not attached to a word. A version such as v1 stays.
 std::string mask_body(std::string_view body) {
   std::string out;
   out.reserve(std::min<size_t>(body.size(), 2048));
@@ -42,7 +42,7 @@ std::string mask_body(std::string_view body) {
       }
     }
     if (is_hex(c) && (i == 0 || !is_word(body[i - 1]))) {
-      // Run of hex digits and dashes (UUIDs, trace ids, traceparent parts).
+      // A run of hex digits and dashes (UUIDs, trace ids, traceparent parts).
       size_t j = i;
       size_t hex_count = 0;
       bool digit = false, dash = false;

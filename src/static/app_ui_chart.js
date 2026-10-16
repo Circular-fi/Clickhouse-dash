@@ -1,7 +1,6 @@
-// Chart chrome, one component for every page (css/10-components/chart.css).
-// The plot itself is the chart engine (app_chart_core.js) and its
-// legend; this module gives every chart the same card and every trend line
-// the same sparkline.
+// Chart chrome. One component serves every page (css/10-components/chart.css).
+// The chart engine (app_chart_core.js) draws the plot and its legend. This module
+// gives every chart the same card. It also gives every trend line the same sparkline.
 //
 //   chartUi.cardHtml({ title, meta, actions, body, legend, className, id,
 //                      tag, titleTag, titleId, metaId, bodyClass, bodyId,
@@ -12,10 +11,10 @@
 //       <div class="chartCard__body"/> [<footer class="chartCard__legend"/>]
 //     title / meta are text; actions, body and legend are trusted HTML.
 //   chartUi.sparkline.html(values, { max, min, area, alt, marks, className, label })
-//     an SVG polyline (and area) in --sparkline-color, viewBox 100 x 24,
-//     stretched to its box; alt: a second series (errors) in --danger;
-//     marks: one entry per value, null or a tone ("warn", "danger",
-//     "accent") drawn as a dot on the line (an anomaly).
+//     an SVG polyline (and area) in --sparkline-color, viewBox 100 x 24. The
+//     polyline stretches to its box. alt: a second series (errors) in --danger.
+//     marks: one entry per value. Each entry is null or a tone ("warn", "danger",
+//     "accent"). A tone draws a dot on the line (an anomaly).
 //   chartUi.sparkline.draw(el, values, options) writes it into el.
 
 import { util } from "./app_util.js";
@@ -41,8 +40,8 @@ function chartCardHtml({
 const W = 100;
 const H = 24;
 
-// values: numbers (null / NaN: a gap is bridged), evenly spaced; or
-// { xs, values } with xs in any unit. Each point is "x,y", or null for a gap.
+// values: numbers, evenly spaced. A null or NaN value is a gap, and the line
+// bridges it. Or pass { xs, values } with xs in any unit. Each point is "x,y", or null for a gap.
 function coords(values, xs, min, max) {
   const n = values.length;
   const x0 = xs ? xs[0] : 0;
@@ -66,8 +65,8 @@ function points(values, xs, min, max) {
 
 const MARK_TONES = new Set(["warn", "danger", "accent"]);
 
-// A dot per marked value: a zero-length round-capped stroke, so it stays
-// round in the stretched viewBox.
+// Each marked value gets a dot. The dot is a zero-length stroke with round caps.
+// The stroke stays round in the stretched viewBox.
 function marksHtml(values, marks, xs, min, max) {
   if (!Array.isArray(marks) || !marks.some(Boolean)) return "";
   const at = coords(values, xs, min, max);

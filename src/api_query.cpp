@@ -98,6 +98,9 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   const std::string registry_sql = sql;
 
   const std::string stats_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
+    // A user that has query.run.read, but not query.run.write, runs with readonly = 1 (docs/access.md, contract 11.6).
+  QuerySessionOptions run_options = cfg_.query_options;
+  run_options.read_only_strict = access_read_only();
   auto session = std::make_shared<QuerySession>(
       qid,
       host_id,
@@ -107,7 +110,7 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
       stats_uri,
       client_pool_,
       cfg_.result_preview_row_limit,
-      cfg_.query_options,
+      run_options,
       detailed_profiling,
       [registry = query_registry_, qid](const std::string& native_query_id) {
         if (registry) registry->add_native_query_id(qid, native_query_id);
@@ -132,9 +135,8 @@ void Server::handle_query_run(const httplib::Request& req, httplib::Response& re
   if (query_registry_) {
     query_registry_->register_query(qid, host_id, run_mode, registry_sql);
   }
-  // The query starts when the SSE consumer attaches. A client that abandons
-  // POST /run therefore cannot execute an expensive query and fill the queue
-  // without ever consuming the result.
+    // The query starts when the SSE consumer attaches. A client that abandons POST /run cannot execute an expensive query.
+    // So it cannot fill the queue and never read the result.
 
   JwtClaims claims;
   claims.query_id = qid;
@@ -189,19 +191,19 @@ void Server::handle_query_cancel(const httplib::Request& req, httplib::Response&
     if (it != sessions_.end()) session = it->second;
   }
 
-  // The answer says what happened (docs/configuration.md, "Authorization model"): `stopped` when a run of this server
-  // owned the query and stopped streaming it, `killed` how many ClickHouse queries KILL QUERY found
-  // (0: nothing was running any more), `kill_error` when the KILL could not run.
+    // The answer shows what happened (docs/configuration.md, "Authorization model").
+    // The value `stopped` means that a run of this server owned the query and stopped the streaming of it.
+    // The value `killed` is the number of ClickHouse queries that KILL QUERY found. Zero means that nothing was running any more.
+    // The value `kill_error` means that the KILL could not run.
   KillOutcome kill;
   if (session) {
     session->request_cancel();
-    // Compatibility retries use distinct native ids while keeping the public
-    // browser id stable. Cancel every native attempt owned by the session.
+        // Compatibility retries use distinct native ids. The public browser id stays stable.
+        // Cancel every native attempt that the session owns.
     kill = session->cancel_native_queries_best_effort(false);
   } else {
-    // The session may already have been reaped while ClickHouse still finishes
-    // removing a compatibility attempt. Match both the public id and the
-    // deterministic retry prefix without relying on in-memory session state.
+        // The session can already be removed while ClickHouse still removes a compatibility attempt.
+        // Match both the public id and the deterministic retry prefix. Do not rely on the in-memory session state.
     const std::string& cancel_uri = host->system_uri.empty() ? host->runner_uri : host->system_uri;
     const std::string qid_quoted = sql::quote_string(qid);
     const std::string retry_prefix_quoted = sql::quote_string(qid + "-attempt-");

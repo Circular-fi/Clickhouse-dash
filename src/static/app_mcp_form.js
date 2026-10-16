@@ -1,33 +1,35 @@
-// The dialogs of the MCP integration page (docs/mcp-integration-page.md).
+// The dialogs of the MCP integration page. The docs are in docs/mcp-integration-page.md.
 //
 //   ns.mcpForm.openKeyForm({ meta, submit })        Promise<result | null>
-//       The dialog (ns.dialog) that makes a key. A key is made or deleted, never changed, so there is no
-//       edit form. The name, the host, the data and the limits are at the left; at the right the
-//       permissions, one card for each family of tools (a group of the server's table), with one check
-//       box for the family and, behind the arrow, one for each tool. A key reads one host (a radio
-//       button for each host that has an mcp_uri): the tools that the MCP user of that host cannot
-//       serve are greyed and say which grant is missing, and a host whose MCP user cannot connect
-//       cannot be chosen. The submit button stays off, and says why in its title, until the key is valid.
-//       Two kinds of tool are not a plain choice (the catalog of the meta says which): a tool that every key has
-//       (`always`: the analysis of the key's own limits and usage) shows checked and locked, "Every key has it",
-//       and is never sent; a tool that "*" does not give (`explicitOnly`: the usage of all the keys) is a check
-//       box of its own, off by default, that no "all" box of the family ticks, and it says so. A tool that the
-//       server does not offer now (`available`: the usage is off, or the setting that the tool needs) is not shown.
-//       submit(input) sends it (ns.api.createMcpKey) and returns the answer, which resolves the promise.
-//       A validation error of the server (err.mcp.field, err.mcp.reason) shows under its field and the
-//       dialog stays open; any other error shows at the foot of the dialog.
+//       The dialog (ns.dialog) makes a key. A key is made or deleted, never changed, so there is no edit form.
+//       The name, the host, the data and the limits are at the left. At the right are the permissions: one card for each family of tools (a group of the server's table).
+//       Each card has one check box for the family. Behind the arrow, each tool has a check box.
+//
+//       A key reads one host. A radio button is shown for each host that has an mcp_uri.
+//       The tools that the MCP user of that host cannot serve are greyed. Each one says which grant is missing.
+//       A host whose MCP user cannot connect cannot be chosen.
+//       The submit button stays off until the key is valid. Its title says why.
+//
+//       Two kinds of tool are not a plain choice. The catalog of the meta says which tools they are.
+//       A tool that every key has is marked `always`. It is the analysis of the key's own limits and usage. It shows checked and locked, with the text "Every key has it". It is never sent.
+//       A tool that "*" does not give is marked `explicitOnly`. It is the usage of all the keys. It is a check box of its own, off by default. No "all" box of the family ticks it, and the form says so.
+//       A tool that the server does not offer now is not shown. The `available` flag marks such a tool. The flag is off when the usage is off, or when the setting that the tool needs is not on.
+//
+//       submit(input) sends it (ns.api.createMcpKey). It returns the answer, which resolves the promise.
+//       A validation error of the server (err.mcp.field, err.mcp.reason) shows under its field, and the dialog stays open. Any other error shows at the foot of the dialog.
 //   ns.mcpForm.keyDetails({ meta, key, deleted })    the details of a key (a node): its facts and its permissions by family
-//       The details of a key: its source, its hosts, its data, its limits and every permission it
-//       holds, by family, with what each one does, the data it reads, then what it did (its usage, while the
-//       usage is on) and what its statements cost ClickHouse (app_mcp_usage.js). It is read-only. A key that
-//       is not in the list but keeps usage (deleted: true: deleted, or known to another instance only) shows
-//       its host, when it was deleted (or where it comes from), its usage and its cost only.
+//       The details of a key show its source, its hosts, its data, its limits and its permissions.
+//       The permissions are sorted by family. Each one says what it does and the data that it reads.
+//
+//       The details also show what the key did, while the usage is on. They show what its statements cost in ClickHouse (app_mcp_usage.js). The details are read-only.
+//
+//       A key that is not in the list keeps its usage. This happens when deleted is true: the key is deleted, or only another instance knows it.
+//       Such a key shows its host, when it was deleted or where it comes from. It shows its usage and its cost only.
 //   ns.mcpForm.forgetDetails() / cancelDetails()     the next details read again (Refresh) / the reads in flight stop (they close)
 //   ns.mcpForm.showSecret({ meta, key, secret })   Promise<void>
-//       The panel after a create: the secret and the commands that connect a client. It is the only time
-//       the secret shows: the server keeps its hash, and no call gives it again. Nothing of it stays:
-//       the dialog and its nodes go when it closes, and the secret is never written to localStorage,
-//       sessionStorage or the address.
+//       The panel after a create shows the secret and the commands that connect a client. It is the only time that the secret shows.
+//       The server keeps only the hash of the secret. No call gives the secret again.
+//       Nothing of the secret stays. The dialog and its nodes go when it closes. The secret is never written to localStorage, sessionStorage or the address.
 
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
@@ -43,14 +45,14 @@ import { util } from "./app_util.js";
 const { $, $$ } = dom;
 const EMPTY = format.EMPTY;
 
-// The tools that a new key holds: the data tools (hosts, databases, tables, rows). The other families are chosen.
+// A new key holds these tools: the data tools (hosts, databases, tables, rows). The user chooses the other families.
 const DEFAULT_GROUPS = new Set(["data"]);
 const NEEDS_EVERYTHING = "Needs the data pattern * alone: ClickHouse Dash cannot limit this tool to some tables.";
-// What a tool that is not a plain choice says in the form.
+// The text that the form shows for a tool that is not a plain choice.
 const ALWAYS_NOTE = "Every key has it";
 const EXPLICIT_NOTE = "\"*\" does not include it";
 
-// What the server's reason says when it sends no sentence of its own.
+// The text for the server's reason, when the server sends no sentence of its own.
 const REASON_TEXT = {
   required: "This field is required.",
   type: "This value has the wrong type.",
@@ -67,22 +69,22 @@ const REASON_TEXT = {
   invalid_json: "The request was not valid JSON.",
 };
 
-// The description of a tool is written for the model that calls it. The form shows its first
-// sentence without the code quotes; the title keeps the whole text.
+// The description of a tool is written for the model that calls it. The form shows its first sentence, without the code quotes.
+// The title keeps the whole text.
 const plainText = (text) => String(text || "").replace(/`/g, "");
 const firstSentence = (text) => plainText(text).split(/(?<=\.)\s/)[0];
 
-// The MCP user of a host, as a phrase: "The MCP user chdash_mcp".
+// The MCP user of a host, as a phrase. For example: "The MCP user chdash_mcp".
 const mcpUser = (host) => (host.mcp.user ? `The MCP user ${host.mcp.user}` : "The MCP user");
-// Who lacks the grants of a tool (the MCP user, or the system user for the OpenTelemetry pages).
+// The user that lacks the grants of a tool. It is the MCP user, or the system user for the OpenTelemetry pages.
 const lacking = (gap) => `The ${gap.role}${gap.user ? ` ${gap.user}` : ""}`;
 
-// The tools that the server offers now: the form and the details draw these (a tool that is not available is not shown).
+// The tools that the server offers now. The form and the details draw these tools. A tool that is not available is not shown.
 const offered = (meta) => meta.tools.filter((tool) => tool.available);
 
-// The groups that have tools, in the order of the server, then any group that the server forgot to list. A family with
-// sections (Observability: Traces, Logs, Metrics) is one group for each section ("Observability - Traces"), so that no card
-// holds the three signals; a tool of such a family without a known section stays in a group of the family's own title.
+// The groups that have tools come in the order of the server. Then come the groups that the server forgot to list.
+// A family with sections (Observability: Traces, Logs, Metrics) has one group for each section, such as "Observability - Traces".
+// So no card holds the three signals. A tool of such a family without a known section stays in a group with the family's own title.
 // Every group says which tools it owns.
 function groupsOf(meta) {
   const catalog = offered(meta);
@@ -109,7 +111,7 @@ function groupsOf(meta) {
 
 // --- Fields ----------------------------------------------------------------------------
 
-// A field: its label, the control(s), a hint and the place where its error shows.
+// A field has a label, the control or controls, a hint, and the place where its error shows.
 function fieldWrap(name, label, content, { hint = "", group = false, required = true } = {}) {
   const wrap = h(group ? "fieldset" : "div", { class: "uiField", dataset: { wrap: name } });
   const error = h("div", { class: "uiField__error", id: `mcpFieldError-${name}`, role: "alert", hidden: true });
@@ -134,9 +136,9 @@ function checkbox({ id, label, checked, disabled = false, title = "", value = ""
 
 // --- The key form ----------------------------------------------------------------------
 
-// The form follows the page that makes a fine-grained token on GitHub: a name, the access (the
-// repositories there, the hosts and the data here) and the permissions. Every permission is read-only,
-// so each one is a check box: there is no level to choose.
+// The form follows the page that makes a fine-grained token on GitHub. It has a name, the access and the permissions.
+// The access is the repositories there. Here, it is the hosts and the data.
+// Every permission is read-only. So each one is a check box. There is no level to choose.
 function buildForm(meta) {
   const form = h("div", { class: "uiForm mcpKeyForm" });
 
@@ -144,13 +146,13 @@ function buildForm(meta) {
   const name = h("input", { id: "mcpField-name", class: "uiInput", type: "text", name: "name", dataset: { field: "name" }, autocomplete: "off", spellcheck: "false", maxlength: "32", placeholder: "ci-bot" });
   const nameField = fieldWrap("name", "Name", name, { hint: "a-z, 0-9, - and _, 32 characters at most." });
 
-  // Host: a key reads one host. One radio button for each host that has an mcp_uri, one under the other.
+  // Host: a key reads one host. There is one radio button for each host that has an mcp_uri. The buttons are one under the other.
   // A host whose MCP user cannot connect is greyed with the reason. The first usable host is chosen.
   const hostBoxes = [];
   const hostList = h("div", { class: "uiChecks mcpHostChecks", role: "radiogroup", "aria-label": "Host" });
   const usable = (host) => host.mcp.state !== "unavailable";
   const firstUsable = meta.hosts.findIndex(usable);
-  // One host only: there is nothing to choose, so it is shown as a fact (and not as a control that does nothing).
+  // One host only. There is nothing to choose, so it is shown as a fact, not as a control that does nothing.
   const onlyHost = meta.hosts.length === 1;
   meta.hosts.forEach((host, index) => {
     const down = !usable(host);
@@ -159,7 +161,7 @@ function buildForm(meta) {
     input.checked = index === firstUsable;
     input.disabled = down;
     if (onlyHost) {
-      // The radio stays, hidden, as the holder of the choice (the form reads the chosen host from it).
+      // The radio stays, hidden. It holds the choice. The form reads the chosen host from it.
       input.hidden = true;
       input.dataset.field = "hosts";
       const status = down ? "error" : host.healthy === false ? "warn" : host.healthy === true ? "ok" : "idle";
@@ -186,13 +188,13 @@ function buildForm(meta) {
     hostList.appendChild(label);
   });
   if (!meta.hosts.length) hostList.appendChild(h("p", { class: "mcpNote" }, "No host has an mcp_uri in the config: a key cannot read data."));
-  // What the MCP user of the chosen host cannot do: said once, under the choice; the tools say it each.
+  // The text says what the MCP user of the chosen host cannot do. It appears once, under the choice. Each tool also says it.
   const hostNote = h("p", { class: "mcpNote mcpHostNote" });
   const hostsField = fieldWrap("hosts", "Host", [hostList, hostNote], { group: true });
 
-  // Data: the patterns, one per line. * alone is every database and table.
+  // Data: the patterns, one per line. "*" alone means every database and table.
   const patterns = h("textarea", { id: "mcpField-databases", class: "uiInput uiInput--area uiInput--mono", name: "databases", dataset: { field: "databases" }, rows: "3", spellcheck: "false", autocomplete: "off", placeholder: "otel\nanalytics.events\nlogs_*.*" });
-  // Everything by default: the MCP user already limits what a key reads, a pattern narrows it more.
+  // Everything is the default. The MCP user already limits what a key reads. A pattern narrows it more.
   patterns.value = "*";
   const dataField = fieldWrap("databases", "Data", patterns, { hint: "One pattern per line: db, db.table, * as a wildcard. * alone is everything (the default): the MCP user's grants still apply." });
 
@@ -204,8 +206,8 @@ function buildForm(meta) {
   const rowsField = fieldWrap("max_rows", "Max rows", rows, { required: false, hint: " " });
   const timeoutField = fieldWrap("timeout_seconds", "Timeout (s)", timeout, { required: false, hint: " " });
   const limitsRow = h("div", { class: "mcpFieldRow" }, rowsField, timeoutField);
-  // The largest value of a limit is the smaller of the configuration of MCP and the profile of the ClickHouse user of the host: the
-  // input stops at it as the number is typed, and the line under it says which of the two it is.
+  // The largest value of a limit is the smaller of two values. The first is the configuration of MCP. The second is the profile of the ClickHouse user of the host.
+  // The input stops at this value while the number is typed. The line under it says which of the two values it is.
   const limitInputs = [
     { input: rows, wrap: rowsField, key: "maxRows", fallback: () => limits.maxRows, unit: "", config: "mcp.max_rows", profile: "max_result_rows", noun: "rows" },
     { input: timeout, wrap: timeoutField, key: "timeoutSeconds", fallback: () => limits.queryTimeoutSeconds, unit: " s", config: "mcp.query_timeout_seconds", profile: "max_execution_time", noun: "seconds" },
@@ -219,7 +221,7 @@ function buildForm(meta) {
     const by = !cap || cap.source === "mcp" ? `limited by the MCP server (${item.config})`
       : cap.source === "clickhouse" ? `limited by the ClickHouse user${user} (its settings profile, ${item.profile})`
       : `set by the MCP server (${item.config}) and by the ClickHouse user${user} (${item.profile})`;
-    // A profile with readonly = 1 refuses every limit that ChDash sends: the time is the profile's alone.
+    // A profile with readonly = 1 refuses every limit that ChDash sends. The time is the profile's alone.
     const refused = item.key === "timeoutSeconds" && host?.mcp.profile.readonly === 1 ? " This user's profile is readonly = 1: ClickHouse refuses the limits of ChDash, so only the profile bounds the time." : "";
     return { max, text: `At most ${amount}: ${by}.${refused}` };
   };
@@ -230,11 +232,11 @@ function buildForm(meta) {
       item.input.placeholder = max != null ? `Default ${format.count(max)}${item.unit}` : "Default";
       const hint = $(".uiField__hint", item.wrap);
       if (hint) hint.textContent = text;
-      // A value that a new choice of host makes too large is brought back at once.
+      // A new choice of host can make a value too large. Such a value is brought back at once.
       if (max != null && item.input.value !== "" && Number(item.input.value) > max) item.input.value = String(max);
     }
   };
-  // As soon as the number is above the largest one, it becomes the largest one (no waiting for the form to be sent).
+  // As soon as the number is above the largest one, it becomes the largest one. The form does not wait until it is sent.
   const capInput = (item) => {
     const max = Number(item.input.max);
     const hint = $(".uiField__hint", item.wrap);
@@ -245,9 +247,9 @@ function buildForm(meta) {
   };
   for (const item of limitInputs) item.input.addEventListener("input", () => capInput(item));
 
-  // Permissions: one card for each family. The check box of a card is all its tools; the arrow opens
-  // the tools, one check box each. A tool that every key has (always) is checked and locked, and one that "*" does not give (explicitOnly)
-  // is not ticked by the box of its family: the box chooses the plain tools only, and a family that has none has no box.
+  // Permissions: there is one card for each family. The check box of a card selects all its tools. The arrow opens the tools, and each tool has its own check box.
+  // A tool that every key has (always) is checked and locked. A tool that "*" does not give (explicitOnly) is not ticked by the box of its family.
+  // So the box chooses the plain tools only. A family that has none has no box.
   const toolBoxes = [];
   const cards = [];
   const groupsBox = h("div", { class: "mcpGroups" });
@@ -285,8 +287,8 @@ function buildForm(meta) {
       cards.push({ group, card, single: true, box: true, all: only, members, reason, count: null });
       continue;
     }
-    // The box of the family. A family with no plain tool (the analysis of a key's own usage: one tool that every key has, one to name) has a
-    // title and no box: the input is only the holder of the state that sync() writes, and it is never in the page.
+    // The box of the family. A family with no plain tool has a title and no box. For example, the analysis of a key's own usage has one tool that every key has.
+    // The input is only the holder of the state that sync() writes. It is never in the page.
     const box = plain.length > 0;
     const all = box
       ? checkbox({ id: `mcpGroup-${group.id}`, label: group.title, checked: false, title: group.note })
@@ -298,7 +300,7 @@ function buildForm(meta) {
     reason.hidden = true;
     const card = h("div", { class: "mcpGroup", dataset: { group: group.id } },
       h("div", { class: "mcpGroup__head" }, all.wrap, h("span", { class: "mcpGroup__note", title: group.note }, group.note), reason, count, toggle), body);
-    // A family that holds a tool to name, or only tools that every key has, shows them at once: nothing hides what the key will hold.
+    // A family that holds a tool to name, or only tools that every key has, shows them at once. Nothing hides what the key will hold.
     const startsOpen = !box || tools.some((tool) => tool.explicitOnly);
     if (startsOpen) {
       body.hidden = false;
@@ -311,22 +313,22 @@ function buildForm(meta) {
       toggle.setAttribute("aria-expanded", String(open));
       card.classList.toggle("is-open", open);
     });
-    // On "input", not "change": the form's own "input" listener (the summary of the state) runs after this
-    // one, whereas it would run first and undo the click.
+    // Use "input", not "change". The form's own "input" listener, which makes the summary of the state, runs after this one.
+    // Otherwise the listener runs first and undoes the click.
     all.input.addEventListener("input", () => {
       for (const member of members) if (!member.input.disabled && !member.tool.explicitOnly) member.input.checked = all.input.checked;
     });
     groupsBox.appendChild(card);
     cards.push({ group, card, box, all, members, count, reason });
   }
-  // The field "tools" is the first box that is in the page (the error of the field takes the focus there).
+  // The field "tools" is the first box in the page. The error of the field takes the focus there.
   const first = cards.find((item) => item.box);
   if (first) first.all.input.dataset.field = "tools";
   else if (cards.length) cards[0].members[0].input.dataset.field = "tools";
 
   const patternList = () => [...new Set(patterns.value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
   const isEverything = () => { const list = patternList(); return list.length === 1 && list[0] === "*"; };
-  // The tools that need all the data are locked, and cleared, until the data is *.
+  // The tools that need all the data are locked and cleared. They stay so until the data is "*".
   const chosenHost = () => hostBoxes.find((box) => box.input.checked)?.host || null;
   // The tools that the MCP user of the chosen host cannot serve: name -> { grants, statement }.
   const gapsOf = (host) => new Map((host?.mcp.unavailableTools || []).map((item) => [item.tool, item]));
@@ -337,7 +339,7 @@ function buildForm(meta) {
     const gaps = gapsOf(host);
     for (const box of toolBoxes) {
       if (box.tool.always) {
-        // Every key has it: checked and locked, nothing to choose and nothing to send (the form sends the boxes that are on and free).
+        // Every key has it. The box is checked and locked. There is nothing to choose and nothing to send. The form sends the boxes that are on and free.
         box.input.checked = true;
         box.input.disabled = true;
         box.lock = "";
@@ -348,21 +350,21 @@ function buildForm(meta) {
       const locked = !!gap || needsData;
       if (locked) box.input.checked = false;
       box.input.disabled = locked;
-      // Why it is locked, in the order of what the person fixes first: the data, then the grant of the host.
+      // The reason why it is locked. The reasons come in the order of what the person fixes first: the data, then the grant of the host.
       box.lock = needsData ? "all" : gap ? "grant" : "";
       box.wrap.classList.toggle("is-disabled", locked);
       box.wrap.title = needsData ? NEEDS_EVERYTHING
         : gap ? `${lacking(gap)} cannot serve this tool: it lacks ${gap.grants.join(", ")}.\n${gap.statement}`
         : plainText(box.tool.description);
     }
-    // Said once under the choice of the host: how many tools are greyed, and by what.
+    // The text appears once under the choice of the host. It says how many tools are greyed, and why.
     hostNote.hidden = !host;
     if (host) {
       const lost = gaps.size;
       const note = host.mcp.state === "ok"
         ? `Tools run as ${host.mcp.user || "the MCP user"}.${lost ? ` ${lost} ${lost === 1 ? "tool needs" : "tools need"} a grant that this user lacks: ${lost === 1 ? "it is" : "they are"} greyed.` : ""}`
         : "The MCP user of this host is not checked yet.";
-      // A note that changes after the choice of another host is said (the first one is read with the form).
+      // A note changes after the choice of another host. The first note is read with the form.
       if (hostNote.textContent && hostNote.textContent !== note) uiState.announce(note);
       hostNote.textContent = note;
     }
@@ -374,9 +376,9 @@ function buildForm(meta) {
       return "unavailable";
     };
     for (const item of cards) {
-      // What the person chose: the tools that every key has are on, and are not a choice.
+      // What the person chose. The tools that every key has are on. They are not a choice.
       const chosen = item.members.filter((box) => box.input.checked && !box.tool.always).length;
-      // The tools that the person can lock out of a family: those that every key has are not among them, so a family is "all locked" without them.
+      // The tools that the person can lock out of a family. Tools that every key has are not among them. So a family is "all locked" without them.
       const choosable = item.members.filter((box) => !box.tool.always);
       if (item.single) {
         const only = item.members[0];
@@ -387,7 +389,7 @@ function buildForm(meta) {
         item.reason.title = only.wrap.title;
         continue;
       }
-      // The box of the family is its plain tools: not the ones that every key has, nor the ones that "*" does not give.
+      // The box of the family covers its plain tools. It does not cover the tools that every key has. It does not cover the tools that "*" does not give.
       const free = item.members.filter((box) => !box.input.disabled && !box.tool.explicitOnly);
       const on = free.filter((box) => box.input.checked).length;
       item.all.input.disabled = !free.length;
@@ -421,7 +423,7 @@ function buildForm(meta) {
   }
 
   form.append(h("div", { class: "mcpKeyForm__side" }, nameField, hostsField, dataField, limitsRow), h("div", { class: "mcpKeyForm__perms" }, toolsField));
-  // A hint is the description of its field: a screen reader reads it with the label.
+  // A hint describes its field. A screen reader reads it with the label.
   for (const wrap of $$("[data-wrap]", form)) {
     const hint = $(".uiField__hint", wrap);
     const control = $("[data-field]", wrap);
@@ -494,7 +496,7 @@ function openKeyForm({ meta, submit }) {
       { label: "Cancel", value: null },
       { label: "Create key", value: "submit", kind: "primary", submit: true },
     ],
-    // The button is off while the key cannot be valid: its title names the first thing that is missing.
+    // The button is off while the key cannot be valid. Its title names the first thing that is missing.
     validate: () => checkInput(meta, read())[0]?.text || "",
     async onSubmit(_value, frame) {
       clearFieldErrors(frame);
@@ -522,30 +524,30 @@ function openKeyForm({ meta, submit }) {
 // --- The details of a key --------------------------------------------------------------
 // They show under the key in the table (app_mcp_view.js), one key at a time.
 
-// The tools a key holds: the names it lists, or every tool it can hold when it lists "*" (the tools that
-// need all the data only when its data is "*" alone, and not the ones that "*" does not give), and the ones that
-// every key has (mcpView.heldTools: the same rule as the Tools cell of the table).
+// The tools a key holds. These are the names that it lists. When it lists "*", these are every tool that it can hold.
+// The tools that need all the data count only when its data is "*" alone. The tools that "*" does not give do not count.
+// The tools that every key has count too. The rule is the same as the Tools cell of the table (mcpView.heldTools).
 function grantedTools(meta, key) {
   return mcpView.heldTools(meta, key);
 }
 
 // --- The data that a key reaches ---------------------------------------------------------
 
-// The reads of "Data it reads", by key id, and the slot of the read in flight (the page cancels the slots with this
-// prefix when it closes the details of a key).
+// The reads of "Data it reads" are stored by key id. The slot of a read in flight is stored too.
+// The page cancels the slots with this prefix when it closes the details of a key.
 const REACH_SLOT = "mcp.reach.";
 const REACH_TTL_MS = 60000;
 const reachCache = new Map();
 
-// What the MCP ClickHouse user of each host may read, cut by the patterns of the key, as databases that open on
-// their tables. A table that the user reads only in part says "some columns".
+// What the MCP ClickHouse user of each host may read. The patterns of the key cut it. It is shown as databases that open on their tables.
+// A table that the user reads only in part says "some columns".
 function reachSection(key) {
   const body = h("div", { class: "mcpReach__body" });
   const refresh = h("button", { type: "button", class: "button button--small mcpReach__refresh", title: "Check the grants of the MCP user again" }, "Check again");
   const section = h("section", { class: "mcpReach", dataset: { reach: key.id }, "aria-label": `Data that ${key.name} reads` },
     h("h3", { class: "mcpDetails__title" }, "Data it reads", refresh), body);
-  // One read for each key: opening the details again within a minute shows what was read (the server keeps the grants
-  // of a host 60 s as well), "Check again" reads anew, and closing the details aborts a read in flight.
+  // There is one read for each key. Opening the details again within a minute shows what was read. The server keeps the grants of a host for 60 s as well.
+  // "Check again" reads anew. Closing the details aborts a read in flight.
   const slot = `${REACH_SLOT}${key.id}`;
   const load = async (again) => {
     const cached = reachCache.get(key.id);
@@ -614,8 +616,8 @@ function reachBody(access) {
   return wrap;
 }
 
-// A key that is not in the list but keeps usage: its host and when it was deleted (or where it comes from: only another instance knows
-// it), then what it did and what it cost (its usage stays for the retention of the usage).
+// A key that is not in the list keeps its usage. Its host is shown, and when it was deleted. If it was not deleted, its origin is shown: only another instance knows it.
+// Then the details show what it did and what it cost. The usage stays for the retention of the usage.
 function deletedDetails(meta, key) {
   const deleted = key.deletedAt != null;
   const about = h("dl", { class: "mcpAbout" },
@@ -637,8 +639,8 @@ function keyDetails({ meta, key, deleted = false }) {
   };
   const limitOf = (own, global, unit) => (own != null ? `${format.count(own)}${unit}` : global != null ? `${format.count(global)}${unit} (default)` : EMPTY);
   const everything = key.databases.length === 1 && key.databases[0] === "*";
-  // The host of the key, and what its MCP user can serve. A key reads one host: a key of an older file that names
-  // several keeps working, and says so.
+  // The host of the key, and what its MCP user can serve. A key reads one host. A key from an older file can name several hosts.
+  // Such a key keeps working, and the details say so.
   const host = key.hosts.length === 1 ? meta.hosts.find((item) => item.name === key.hosts[0]) || null : null;
   const gaps = new Map((host?.mcp.unavailableTools || []).map((item) => [item.tool, item]));
   const hostText = () => {
@@ -660,17 +662,16 @@ function keyDetails({ meta, key, deleted = false }) {
     h("dt", null, "Rows"), h("dd", null, limitOf(key.maxRows, meta.limits.maxRows, "")),
     h("dt", null, "Timeout"), h("dd", null, limitOf(key.timeoutSeconds, meta.limits.queryTimeoutSeconds, " s")));
 
-  // Permissions: the families, each with what the key holds in it (n of m) and the tools it holds.
-  // Two columns of the same height. A family weighs its head plus a row for each tool that the key holds in
-  // it; the tallest families go first, each into the shorter column, then every column is put back in the
-  // order of the families.
+  // Permissions: the families. Each family shows what the key holds in it (n of m) and the tools that it holds.
+  // There are two columns of the same height. A family weighs its head plus a row for each tool that the key holds in it.
+  // The tallest families go first. Each one goes into the shorter column. Then every column is put back in the order of the families.
   const cards = groupsOf(meta).map((group, index) => {
     const tools = offered(meta).filter(group.owns);
     const mine = tools.filter((tool) => held.has(tool.name));
     const node = h("div", { class: `mcpGrantGroup${mine.length ? "" : " is-empty"}`, dataset: { group: group.id } },
       h("div", { class: "mcpGrantGroup__head" }, h("span", { class: "mcpGrantGroup__title" }, group.title), h("span", { class: "mcpGrantGroup__count" }, `${mine.length} of ${tools.length}`)),
       mine.length ? h("ul", { class: "mcpGrants" }, mine.map((tool) => {
-        // A tool that the MCP user of the host cannot serve says which grant is missing (the key keeps it).
+        // A tool that the MCP user of the host cannot serve says which grant is missing. The key keeps the tool.
         const gap = gaps.get(tool.name);
         const lost = !!gap;
         const note = gap ? `not served: ${gap.user || "the " + gap.role} lacks ${gap.grants[0].replace(/^SELECT ON /, "")}${gap.grants.length > 1 ? " and more" : ""}`
@@ -691,13 +692,13 @@ function keyDetails({ meta, key, deleted = false }) {
   columns.sort((x, y) => Math.min(...x.cards.map((c) => c.index)) - Math.min(...y.cards.map((c) => c.index)));
   const perms = h("div", { class: "mcpGranted" }, columns.map((column) =>
     h("div", { class: "mcpGrantCol" }, column.cards.sort((x, y) => x.index - y.index).map((card) => card.node))));
-  // The data that the key reaches: asked when the details open (the server checks the grants of the MCP user).
+  // The data that the key reaches is asked when the details open. The server checks the grants of the MCP user.
   const reach = reachSection(key);
   const lostCount = granted.filter((tool) => gaps.has(tool.name)).length;
   const body = h("div", { class: "mcpDetails" }, about,
     h("div", { class: "mcpDetails__perms" }, h("h3", { class: "mcpDetails__title" }, "Permissions", h("span", { class: "pagePart__count" }, `${granted.length} of ${offered(meta).length}`),
       lostCount ? h("span", { class: "mcpWarn mcpLostCount", title: "The user that runs these tools on this host lacks a grant. The key keeps them; they answer with an error." }, `${lostCount} not served`) : null), perms),
-    // What the key may read, then what it did and what that cost.
+    // What the key may read. Then what it did, and what that cost.
     reach, ...mcpUsage.sections(key, { meta }));
 
   return body;
@@ -727,7 +728,7 @@ function showSecret({ meta, key, secret }) {
     className: "mcpDialog mcpDialog--secret",
     actions: [{ label: "Done", value: "done", kind: "primary", submit: true }],
   }).then(() => {
-    // The dialog is gone; the nodes that held the secret go with it.
+    // The dialog is gone. The nodes that held the secret go with it.
     body.replaceChildren();
   });
 }

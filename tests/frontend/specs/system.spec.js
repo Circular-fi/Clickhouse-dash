@@ -4,15 +4,13 @@ import { fetchedModules } from '../helpers/modules.js';
 import { xLabelCollisions, xRepeatedYears } from '../helpers/charts.js';
 import { captureCopies, copiedText } from '../helpers/clipboard.js';
 
-// The System page (docs/system.md): its entry in the page switcher, its
-// underlined section tabs (Overview, Queries, Disks), its addresses and Back /
-// Forward, the redirects of the Explorer's former Monitoring and Server
-// operations addresses, the merged Overview (tiles, databases, cluster,
-// performance, activity, top to bottom), and the
-// degraded states from mocked answers (single node, no Keeper, a panel the
-// system account may not read, an answer that fails).
+// These tests cover the System page (docs/system.md).
+// They check its entry in the page switcher and its underlined section tabs (Overview, Queries, Disks).
+// They check its addresses, Back / Forward, and the redirects of the Explorer's former Monitoring and Server operations addresses.
+// They check the merged Overview (tiles, databases, cluster, performance, activity, from top to bottom).
+// They check the degraded states from mocked answers (single node, no Keeper, a panel the system account may not read, and an answer that fails).
 
-// The sections are three pages of their own: the row is links, the current page marked.
+// The sections are three pages of their own. The row holds links. The page marks the current one.
 const tabs = (page) => page.locator('.systemPage__tabs a');
 const selectedSection = (page) => page.locator('.systemPage__tabs a[aria-current="page"]');
 const panel = (page, section) => page.locator(`#systemPanel-${section}`);
@@ -23,7 +21,7 @@ async function openOverview(page, path = '/system') {
   await expect(page.locator('#systemTopology')).toBeVisible({ timeout: 20_000 });
 }
 
-// The real answer (fetched first), changed by `edit`.
+// The test fetches the real answer first. `edit` changes it.
 function routeJson(pattern) {
   return async (page, edit) => {
     await page.route(pattern, async (route) => {
@@ -56,7 +54,7 @@ test('the page switcher opens the System page: Overview, Queries, Disks', async 
   await expect(tabs(page)).toHaveText(['Overview', 'Queries', 'Disks']);
   await expect(selectedSection(page)).toHaveText('Overview');
   await expect(panel(page, 'overview')).toBeVisible();
-  // From the System page, the other pages are a click away.
+    // From the System page, a click opens each other page.
   await expect(page.locator('#pageSelectMenu a:visible')).toHaveText(['Query', 'Explorer', 'Observability', 'System']);
   await page.locator('#navExplorerLink').click();
   await expect(page).toHaveURL(/\/explorer\/catalog$/, { timeout: 20_000 });
@@ -72,13 +70,13 @@ test('the Explorer shows only Catalog | Functions and loads no System module', a
 
 test('the Overview runs top to bottom: tiles, databases, cluster, performance, activity, and no caption line', async ({ page }) => {
   await openOverview(page);
-  // The parts in order, one under the other.
+    // The parts appear in order, one under the other.
   const order = ['#systemServer', '#systemPart-databases', '#systemPart-cluster', '#systemPart-performance', '#systemPart-activity'];
   for (const selector of order) await expect(page.locator(selector)).toBeAttached();
   const tops = await page.evaluate((list) => list.map((selector) => document.querySelector(selector).getBoundingClientRect().top), order);
   for (let i = 1; i < tops.length; i++) expect(tops[i], order[i]).toBeGreaterThan(tops[i - 1]);
   await expect(page.locator('.pagePart__title')).toHaveText(['Databases', 'Cluster', 'Performance', 'Activity']);
-  // No "This server: ... · Updated ..." line in any section: the header names the host.
+    // No "This server: ... · Updated ..." line appears in any section. The header names the host.
   for (const section of ['overview', 'queries', 'disks']) {
     if (section !== 'overview') await page.locator(`#systemTab-${section}`).click();
     await expect(panel(page, section)).toBeVisible();
@@ -88,14 +86,14 @@ test('the Overview runs top to bottom: tiles, databases, cluster, performance, a
   await page.locator('#systemTab-overview').click();
   await expect(page.locator('#hostPickerText')).toHaveText(/\S/);
 
-  // Eight tiles, each figure once: the charts below never repeat them.
+    // Eight tiles show each figure once. The charts below never repeat them.
   await expect(tiles(page)).toHaveCount(8);
   await expect(tiles(page).locator('.statTile__label')).toHaveText(['Uptime', 'CPU', 'Memory', 'Load', 'Queries', 'Connections', 'Parts', 'Delayed inserts']);
   await expect(page.locator('[data-tile="uptime"] .statTile__value')).toHaveText(/^\d+ (?:s|min|h|d)/);
   await expect(page.locator('[data-tile="memory"] .statTile__sub')).toContainText(/of \d+(?:\.\d)? [KMGT]?B/);
   await expect(page.locator('.systemTiles')).toHaveCount(1);
 
-  // Topology: the two replicas of chdash_cluster, this server marked.
+    // Topology: the two replicas of chdash_cluster. The page marks this server.
   const cluster = page.locator('#systemTopology .systemCluster[data-cluster="chdash_cluster"]');
   await expect(cluster.locator('.systemCluster__shape')).toHaveText('1 shard × 2 replicas');
   await expect(cluster.locator('tbody tr')).toHaveCount(2);
@@ -103,7 +101,7 @@ test('the Overview runs top to bottom: tiles, databases, cluster, performance, a
   await expect(cluster.locator('tbody tr.is-local')).toContainText('this server');
   await expect(page.locator('#systemTopology .systemCard__note')).toContainText('The cluster "default" has only this server');
 
-  // One Keeper card (embedded in the test server), the Activity has none.
+    // The test server embeds one Keeper card. The Activity section has none.
   const keeper = page.locator('#systemKeeper');
   await expect(keeper.locator('.systemCard__head')).toContainText('Connected');
   await expect(keeper.locator('.kvList')).toContainText(/Leader|Follower|Standalone/);
@@ -122,16 +120,16 @@ test('the Overview runs top to bottom: tiles, databases, cluster, performance, a
   // No dead area under the shorter column: the two columns end within a card's height.
   expect(Math.abs((replicationBox.y + replicationBox.height) - (keeperBox.y + keeperBox.height))).toBeLessThan(160);
 
-  // Performance and Activity draw on the same page.
+    // Performance and Activity are on the same page.
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#systemActivityReplicas')).toContainText('replicated_events', { timeout: 20_000 });
-  // The Replication card has no "Show the tables" link: the replicas are the Activity's, further down.
+    // The Replication card has no "Show the tables" link. The replicas belong to the Activity, further down.
   await expect(page.locator('#systemReplicationTables')).toHaveCount(0);
   await expect(page.locator('#systemReplication .systemCard__head button')).toHaveCount(0);
 });
 
 test('the treemap of the databases draws their bytes on disk and a database opens its Explorer card', async ({ page }) => {
-  // Sizes that spread (no database holds most of the bytes): the treemap.
+    // Sizes that spread across databases (no database holds most of the bytes) use the treemap.
   await routeJson(/\/api\/system\/disks\?/)(page, (json) => {
     const names = [...new Set((json.usage?.rows || []).map((row) => row.database))];
     for (const row of json.usage?.rows || []) row.bytes = 1_000_000_000 + names.indexOf(row.database) * 100_000_000;
@@ -190,7 +188,7 @@ test('the sections are pages of their own: links, deep links and Back / Forward'
   await expect(page.locator('#systemDiskCards .systemDisk').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#systemBar-disks')).toBeVisible();
   await expect(page.locator('#systemBar-overview')).toHaveCount(0);
-  // The links are plain links, followed one after the other.
+    // The links are plain links. The test follows them one after the other.
   await page.locator('#systemTab-overview').click();
   await expect(page).toHaveURL(/\/system$/);
   await expect(selectedSection(page)).toHaveText('Overview');
@@ -207,8 +205,8 @@ test('the sections are pages of their own: links, deep links and Back / Forward'
   await expect(selectedSection(page)).toHaveText('Overview');
   await expect(panel(page, 'overview')).toBeVisible();
 
-  // A deep link opens its section; an unknown one is the Overview (the server redirects it,
-  // the query string kept).
+    // A deep link opens its section. An unknown section opens the Overview.
+    // The server redirects it and keeps the query string.
   await page.goto('/system/queries');
   await expect(selectedSection(page)).toHaveText('Queries', { timeout: 20_000 });
   await page.goto('/system/no-such-section?from=now-6h&to=now');
@@ -225,15 +223,15 @@ test('the former Explorer addresses redirect to the matching System address, par
   await page.goto('/explorer/_monitoring/disks');
   await expect(page).toHaveURL(/\/system\/disks$/, { timeout: 20_000 });
   await expect(selectedSection(page)).toHaveText('Disks');
-  // Performance: the Overview, its charts in view, the range kept.
+    // Performance: the Overview shows its charts, and the range is kept.
   await page.goto('/explorer/_monitoring/performance?from=now-3h&to=now');
   await expect(page).toHaveURL(/\/system\?from=now-3h&to=now#performance$/, { timeout: 20_000 });
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Time range · Last 3 hours');
-  // It stays in view while the parts above it fill in.
+    // It stays in view while the parts above it load.
   await expect(page.locator('#systemDatabaseMap .explorerTreemap__node, #systemDatabaseStrip .explorerStorageStrip__segment').first()).toBeAttached({ timeout: 20_000 });
   await expect(page.locator('#systemTopology')).toBeAttached({ timeout: 20_000 });
   await expect(page.locator('#systemPart-performance')).toBeInViewport({ timeout: 20_000 });
-  // The v2.14.0 Server operations and the former Activity: the Overview's Activity.
+    // The v2.14.0 Server operations and the former Activity are the Overview's Activity.
   for (const path of ['/explorer/_operations', '/explorer/_monitoring/activity']) {
     await page.goto(path);
     await expect(page).toHaveURL(/\/system#activity$/, { timeout: 20_000 });
@@ -267,8 +265,7 @@ test('the Activity reports replica health and lists problems first; the Keeper c
   await expect(keeper).toContainText('Connected');
   await expect(keeper.locator('[data-row="latency"]')).toContainText(/\d+(?:\.\d+)? (?:ns|\u00b5s|ms|s) average/);
 
-  // Synthetic problems: failing mutation, lagging read-only replica,
-  // postponed queue and a Distributed queue with errors.
+    // Synthetic problems: a failing mutation, a lagging read-only replica, a postponed queue, and a Distributed queue with errors.
   const activity = {
     version: 1, host_id: 'local', generated_at_ms: Date.now(), stale: false, row_limit: 200, unavailable_sections: [], truncated_sections: ['merges'],
     merges: [{ database: 'chdash_ui', table: 'weather_observations', elapsed_seconds: 12.5, progress: 0.42, num_parts: 3, result_part_name: '202609_1_9_2', partition_id: '202609', is_mutation: false, merge_type: 'Regular', total_bytes_compressed: 1048576, bytes_read_uncompressed: 0, rows_read: 0, memory_usage: 2097152 }],
@@ -301,7 +298,7 @@ test('the Activity reports replica health and lists problems first; the Keeper c
 });
 
 test('no live refresh: no Live / Auto-refresh control, and no request fires on a timer after load, even a stored former choice', async ({ page }) => {
-  // A browser that stored the former Auto-refresh choice: ignored, then removed.
+    // A browser can store the former Auto-refresh choice. The page ignores it and then removes it.
   await page.addInitScript(() => { if (!sessionStorage.getItem('sl.seeded')) { sessionStorage.setItem('sl.seeded', '1'); localStorage.setItem('chdash.system.autoRefresh', '1'); } });
   await page.clock.install();
   const counts = { overview: 0, keeper: 0, activity: 0, series: 0, disks: 0 };
@@ -313,7 +310,7 @@ test('no live refresh: no Live / Auto-refresh control, and no request fires on a
     else if (url.includes('/api/system/series?')) counts.series += 1;
     else if (url.includes('/api/system/disks?')) counts.disks += 1;
   });
-  // A link with a live= / auto= parameter (none was ever written) is tolerated.
+    // The page tolerates a link with a live= / auto= parameter. No such link was ever written.
   await openOverview(page, '/system?live=1&auto=1');
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   const bar = page.locator('#systemBar-overview');
@@ -321,8 +318,8 @@ test('no live refresh: no Live / Auto-refresh control, and no request fires on a
   await expect(bar).not.toContainText(/auto-refresh|live/i);
   expect(await page.evaluate(() => localStorage.getItem('chdash.system.autoRefresh'))).toBeNull();
   await roundTrip(page);
-  // Five minutes on the clock, the tab visible, then hidden and back: nothing reads. A timer that read would have
-  // sent its request inside runFor; the round trip after it reports every request sent by then.
+    // Five minutes pass on the clock. The tab is visible, then hidden, then visible again. No request is sent.
+    // A timer that reads sends its request inside runFor. The round trip after it reports every request sent until then.
   const before = { ...counts };
   for (let i = 0; i < 10; i++) {
     await page.clock.runFor(30_000);
@@ -332,7 +329,7 @@ test('no live refresh: no Live / Auto-refresh control, and no request fires on a
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
   await roundTrip(page);
   expect(counts).toEqual(before);
-  // The refresh button reads every part again (the counters do count).
+    // The refresh button reads every part again. The counters do count.
   await page.locator('#systemRefresh-overview').click();
   await expect.poll(() => counts.overview).toBeGreaterThan(before.overview);
   await expect.poll(() => counts.series).toBeGreaterThan(before.series);
@@ -355,7 +352,7 @@ test('a single server without Keeper says so instead of drawing empty cards', as
   await expect(topology.locator('table')).toHaveCount(0);
   await expect(page.locator('#systemNoKeeper .uiState__title')).toHaveText('No Keeper configured');
   await expect(page.locator('#systemKeeper .badge')).toHaveCount(0);
-  // No replicated table: no replication card.
+    // The stack has no replicated table, so there is no replication card.
   await expect(page.locator('#systemReplication')).toHaveCount(0);
 });
 
@@ -385,11 +382,11 @@ test('each part of the Overview degrades on its own', async ({ page }) => {
   await page.route(/\/api\/system\/overview\?/, fail(503, 'system_monitor_unavailable'));
   await page.route(/\/api\/system\/activity\?/, fail(503, 'system_activity_unavailable'));
   await page.goto('/system');
-  // The tiles and the cluster cards: a banner with Retry, the cluster part gone.
+    // The tiles and the cluster cards show a banner with Retry. The cluster part is gone.
   await expect(page.locator('#systemServer .uiBanner')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#systemPart-cluster')).toBeHidden();
   await expect(page.locator('#systemActivity .uiBanner')).toBeVisible();
-  // The rest draws.
+    // The rest of the page renders.
   await expect(page.locator('#systemDatabaseMap .explorerTreemap__node, #systemDatabaseStrip .explorerStorageStrip__segment').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   // Retry once the answer is back.
@@ -398,7 +395,7 @@ test('each part of the Overview degrades on its own', async ({ page }) => {
   await expect(tiles(page)).toHaveCount(8, { timeout: 20_000 });
   await expect(page.locator('#systemTopology')).toBeVisible();
 
-  // The databases, the charts: each its own state.
+    // The databases and the charts each have their own state.
   await page.unrouteAll({ behavior: 'ignoreErrors' });
   await page.route(/\/api\/system\/disks\?/, fail(503, 'system_monitor_unavailable'));
   await page.route(/\/api\/system\/series\?/, fail(503, 'system_monitor_unavailable'));
@@ -408,7 +405,7 @@ test('each part of the Overview degrades on its own', async ({ page }) => {
   await expect(page.locator('#systemPerfNotes .uiBanner')).toBeVisible();
   await expect(tiles(page)).toHaveCount(8, { timeout: 20_000 });
   await expect(page.locator('#systemActivityReplicas')).toBeVisible({ timeout: 20_000 });
-  // A usage panel the system account may not read: the databases say so.
+    // A usage panel that the system account may not read. The databases part says so.
   await page.unrouteAll({ behavior: 'ignoreErrors' });
   await routeJson(/\/api\/system\/disks\?/)(page, (json) => {
     json.usage = { rows: [], disks: {}, truncated: false };
@@ -429,7 +426,7 @@ test('the page follows system.enabled', async ({ page }) => {
   await page.goto('/explorer/catalog');
   await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
   await expect(page.locator('#navSystemLink')).toBeHidden();
-  // A System page still open when the server turns it off leaves for Query.
+    // When the server disables it, an open System page moves to Query.
   await page.goto('/system');
   await expect(page).toHaveURL(/\/query$/, { timeout: 20_000 });
 });
@@ -440,8 +437,7 @@ for (const width of [390, 360]) {
 
     test(`the Overview fits the viewport without sideways overflow at ${width} px`, async ({ page }, testInfo) => {
       test.skip(testInfo.project.name !== 'desktop-1440', 'the phone viewport is pinned: one project is enough');
-      // Neither the page nor the section scrolls sideways: wide tables
-      // scroll in their own wrap.
+            // Neither the page nor the section scrolls sideways. Wide tables scroll in their own wrap.
       const panelOverflow = () => panel(page, 'overview').evaluate((el) => el.scrollWidth - el.clientWidth);
       await openOverview(page);
       await expect(page.locator('#systemReplication')).toBeVisible();
@@ -449,14 +445,14 @@ for (const width of [390, 360]) {
       await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
       expect(await panelOverflow()).toBeLessThanOrEqual(0);
-      // The tabs on their own row, the filter bar under them; two tiles a row; the topology keeps its key columns.
+            // The tabs are on their own row, and the filter bar is under them. Two tiles are in each row. The topology keeps its key columns.
       const tabsBox = await page.locator('.systemPage__tabs').boundingBox();
       const bar = await page.locator('#systemBar-overview').boundingBox();
       expect(bar.y).toBeGreaterThanOrEqual(tabsBox.y + tabsBox.height - 1);
       const rows = await tiles(page).evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().top)));
       expect(new Set(rows).size).toBe(4);
       await expect(page.locator('#systemTopology thead th:visible')).toHaveText(['Shard', 'Replica', 'Host', 'Errors']);
-      // 40 px targets: the tabs, refresh, the range (the bar unfolded from its summary line).
+            // 40 px targets: the tabs, refresh, and the range. The bar unfolds from its summary line.
       await page.locator('#systemBar-overview .obsFilterSummary').click();
       for (const selector of ['#systemTab-overview', '#systemRefresh-overview', '#systemPerfRangeButton']) {
         const box = await page.locator(selector).boundingBox();
@@ -469,18 +465,18 @@ for (const width of [390, 360]) {
 }
 
 // ---------------------------------------------------------------------------
-// Performance: the Overview's ten charts on the shared engine over /api/system/series.
-// The windows are relative to now (the default 1 h, or the server's own
-// windows), so a fresh stack with minutes of logs draws as a long-lived one.
+// Performance: the Overview has ten charts on the shared engine. The charts use /api/system/series.
+// The windows are relative to now (the default 1 h, or the server's own windows).
+// So a fresh stack with minutes of logs looks like a long-lived one.
 
 const CHARTS = ['queries', 'latency', 'cpu', 'memory', 'merges', 'inserts', 'parts', 'pools', 'reads', 'replication'];
 const chartCard = (page, id) => page.locator(`#systemChart-${id}`);
 const chartRoot = (page, id) => chartCard(page, id).locator('.chartCore');
-// The charts drawn on a plot: a chart at 0 over the whole range (no
-// replication delay on a healthy stack) is a one-line card (.is-flat).
+// A chart that stays at 0 over the whole range is a one-line card (.is-flat).
+// This happens on a healthy stack, with no replication delay.
 const drawnCharts = (page) => page.locator('#systemPerfGrid .systemChart:not([hidden]):not(.is-flat)').evaluateAll((els) => els.map((el) => el.dataset.chart));
 
-// The next series answer whose window spans about `spanMs`.
+// The next series answer has a window that spans about `spanMs`.
 function seriesOf(page, spanMs) {
   return page.waitForResponse((response) => {
     const url = new URL(response.url());
@@ -498,7 +494,7 @@ async function openPerformance(page, query = '') {
   await expect(chartRoot(page, 'cpu')).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
 }
 
-// The real series answer (fetched first), changed by `edit`.
+// The test fetches the real series answer first. `edit` changes it.
 async function routeSeries(page, edit) {
   await page.route(/\/api\/system\/series\?/, async (route) => {
     const response = await route.fetch();
@@ -508,7 +504,7 @@ async function routeSeries(page, edit) {
   });
 }
 
-// A source this server lacks: its status, its series gone, its panel listed.
+// A source that this server lacks has a status, no series, and a listed panel.
 function dropSource(json, source, status, names, message = '') {
   json.sources[source] = { ...json.sources[source], status, message, rows_read: 0, elapsed_ms: 0 };
   for (const name of names) delete json.series[name];
@@ -529,11 +525,11 @@ test('Performance draws ten charts of this server over the default hour', async 
   await expect(page).toHaveURL(/\/system$/);
   await expect(selectedSection(page)).toHaveText('Overview');
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Time range \u00b7 Last 1 hour');
-  // The range leads the filter bar, where Queries and Disks have theirs (not on the part's heading).
+    // The range leads the filter bar. Queries and Disks have their range there, not on the part's heading.
   await expect(page.locator('#systemBar-overview .obsFilterBar__range #systemPerfRangeButton')).toBeVisible();
   await expect(page.locator('#systemPart-performance .pagePart__head #systemPerfRangeButton')).toHaveCount(0);
-  // Every chart has a card; the replicated fixture shows Replication too
-  // (a line when its delay stays 0).
+    // Every chart has a card. The replicated fixture shows Replication too.
+    // The Replication card is a line when its delay stays 0.
   for (const id of CHARTS) {
     await expect(chartCard(page, id)).toBeVisible();
     if (await chartCard(page, id).evaluate((el) => el.classList.contains('is-flat'))) continue;
@@ -544,7 +540,7 @@ test('Performance draws ten charts of this server over the default hour', async 
   await expect(chartCard(page, 'queries').locator('.chartCore__legendItem')).toHaveText(['SELECT', 'INSERT', 'Other', 'Failed']);
   await expect(chartCard(page, 'latency').locator('.chartCore__legendItem')).toHaveText(['p50', 'p95', 'p99']);
   await expect(chartCard(page, 'cpu').locator('.chartCard__meta')).toContainText(/\d+ cores?/);
-  // Two charts a row at desktop width, each filling its cell.
+    // Two charts a row at desktop width. Each one fills its cell.
   const boxes = await page.locator('#systemPerfGrid .systemChart:not(.is-flat)').evaluateAll((els) => els.map((el) => {
     const r = el.getBoundingClientRect();
     const plot = el.querySelector('.chartCore').getBoundingClientRect();
@@ -552,9 +548,9 @@ test('Performance draws ten charts of this server over the default hour', async 
   }));
   expect(new Set(boxes.map((box) => box.left)).size).toBe(2);
   for (const box of boxes) expect(box.plot).toBeGreaterThan(box.width - 24);
-  // No notes: every log is there.
+    // The page has no notes. Every log is there.
   await expect(page.locator('#systemPerfNotes .systemIssue')).toHaveCount(0);
-  // No live refresh control.
+    // The page has no live refresh control.
   await expect(page.locator('#systemAutoRefresh-overview')).toHaveCount(0);
 });
 
@@ -585,7 +581,7 @@ test('a drag over one chart sets the range of every chart and the address', asyn
   // About 40 % of the hour.
   expect(range.to - range.from).toBeGreaterThan(15 * 60_000);
   expect(range.to - range.from).toBeLessThan(35 * 60_000);
-  // Every chart redraws on the new window (10 s or 30 s buckets around it).
+    // Every chart draws the new window again (10 s or 30 s buckets around it).
   for (const id of await drawnCharts(page)) {
     const root = chartRoot(page, id);
     await expect.poll(async () => Number(await root.getAttribute('data-x-min')), { timeout: 15_000 }).toBeGreaterThan(before);
@@ -601,7 +597,7 @@ test('a drag over one chart sets the range of every chart and the address', asyn
   await expect(page).toHaveURL(/\/system$/);
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Time range \u00b7 Last 1 hour');
   await expect.poll(async () => Number(await chartRoot(page, 'memory').getAttribute('data-x-min')), { timeout: 15_000 }).toBeLessThan(range.from - 60_000);
-  // A deep link opens its range; another section's page is not given it.
+    // A deep link opens its range. Another section's page does not get the range.
   await page.goForward();
   await expect(page).toHaveURL(/\/system\?from=/);
   await page.locator('#systemTab-queries').click();
@@ -613,7 +609,7 @@ test('the picker applies a quick range and writes it to the address', async ({ p
   await page.locator('#systemPerfRangeButton').click();
   const panel = page.locator('#systemPerfTimeRangePanel');
   await expect(panel).toBeVisible();
-  // The panel stays in the viewport (it hangs from the button's right edge).
+    // The panel stays in the viewport. It hangs from the button's right edge.
   const box = await panel.boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize().width);
@@ -683,7 +679,7 @@ test('without any history the charts point to the current values above', async (
   await expect(tiles(page)).toHaveCount(8);
   await expect(page.locator('.systemTiles')).toHaveCount(1);
   await expect(page.locator('#systemPerfNotes .systemIssue__code')).toHaveText('GRANT SELECT ON system.asynchronous_metric_log TO chdash_system');
-  // query_log still gives queries/s and the latency; the rest is hidden, not eight empty cards.
+    // query_log still gives queries/s and the latency. The page hides the rest. The page does not show eight empty cards.
   await expect(page.locator('#systemPerfGrid .systemChart:visible')).toHaveCount(2);
   await expect(chartCard(page, 'queries')).toBeVisible();
   await expect(chartCard(page, 'latency')).toBeVisible();
@@ -704,7 +700,7 @@ test('the error share reads neutral under 1 %, warning to 5 %, danger past it', 
 });
 
 test('each section page loads its own section and none of the others', async ({ page }) => {
-  // The modules the page fetched: a module is a request, not a <script> element of its own.
+    // The modules that the page fetched: a module is a request, not a <script> element of its own.
   const modules = async () => {
     const files = await fetchedModules(page);
     const has = (name) => files.includes(name);
@@ -727,7 +723,7 @@ test('each section page loads its own section and none of the others', async ({ 
 
 test('Performance renders ten charts over 30 days within the performance budget', async ({ page }) => {
   await openPerformance(page);
-  // Long tasks from here on: the 30-day answer and its ten charts.
+    // The long tasks below belong to the 30-day answer and its ten charts.
   await page.evaluate(() => {
     window.__longTasks = [];
     new PerformanceObserver((list) => { for (const entry of list.getEntries()) window.__longTasks.push(Math.round(entry.duration)); })
@@ -786,10 +782,9 @@ for (const width of [390, 360]) {
 }
 
 // ---------------------------------------------------------------------------
-// Queries: the top query shapes of the window (/api/system/queries,
-// the runner account), a shape's page (/system/queries/<hash>) and Open in Query.
-// Every stack has queries in its last hour (the tests' own), so the default
-// window is enough; the degraded states are mocked answers.
+// Queries: the top query shapes of the window (/api/system/queries, the runner account), a shape's page (/system/queries/<hash>), and Open in Query.
+// Every stack has queries in its last hour (the tests' own). So the default window is enough.
+// The degraded states are mocked answers.
 
 const queryRows = (page) => page.locator('#systemQueriesTable tbody tr');
 
@@ -801,10 +796,10 @@ async function openQueries(page, query = '') {
   await expect(queryRows(page).first()).toBeVisible({ timeout: 30_000 });
 }
 
-// The real queries answer (fetched first), changed by `edit`.
+// The test fetches the real queries answer first. `edit` changes it.
 async function routeQueries(page, edit) {
   await page.route(/\/api\/system\/queries\?/, async (route) => {
-    // A request still in flight when the test ends is let go.
+        // The test releases a request that is still in flight when the test ends.
     try {
       const response = await route.fetch();
       const json = await response.json();
@@ -841,7 +836,7 @@ test('Queries lists the top query shapes of the hour, sorted by total time', asy
   const count = await queryRows(page).count();
   expect(count).toBeGreaterThan(0);
   expect(count).toBeLessThanOrEqual(50);
-  // The normalized SQL is highlighted text (the highlighter's spans), two lines at most.
+    // The normalized SQL uses the highlighter's spans. It has two lines at most.
   const sql = queryRows(page).first().locator('.systemQueries__sql');
   await expect(sql.locator('.sqlBlock__code')).not.toBeEmpty();
   expect(await sql.getAttribute('title')).toBeTruthy();
@@ -871,7 +866,7 @@ test('the headers sort and the kind and Hide ChDash filter, through the address'
   await expect(page).toHaveURL(/sort=calls&kind=Select$/);
   await expect(page.locator('.systemQueries__kindPicker .tracePicker__button')).toHaveText('Kind \u00b7 SELECT');
   await expect.poll(async () => [...new Set(await queryRows(page).evaluateAll((rows) => rows.map((row) => row.dataset.kind)))], { timeout: 20_000 }).toEqual(['Select']);
-  // ChDash's own queries: shown on request (a toggle chip of the bar).
+    // ChDash's own queries appear on request. A toggle chip in the bar shows them.
   await expect(page.locator('#systemQueriesHide')).toHaveAttribute('aria-pressed', 'true');
   const asked = page.waitForRequest((request) => request.url().includes('/api/system/queries?') && request.url().includes('hide_chdash=0'));
   await page.locator('#systemQueriesHide').click();
@@ -898,7 +893,7 @@ test('the charts of a shape are built once: a series hidden in a legend stays hi
   await expect(failed).toHaveAttribute('aria-pressed', 'true');
   await failed.click();
   await expect(failed).toHaveAttribute('aria-pressed', 'false');
-  // Another order reads the shape again and draws the view again.
+    // Another order reads the shape again. The page draws the view again.
   const answer = page.waitForResponse((response) => /\/api\/system\/queries\/\d+\?/.test(response.url()) && response.request().method() === 'GET');
   await page.locator('#systemQueryRunsOrder [data-order="latest"]').click();
   await answer;
@@ -914,7 +909,7 @@ test('a row opens its shape as a page of its own: timeline, runs, deep link and 
   const row = queryRows(page).first();
   const hash = await row.getAttribute('data-hash');
   expect(hash).toMatch(/^\d+$/);
-  // A real navigation: the shape is /system/queries/<hash>, not a pane of the list.
+    // A real navigation opens /system/queries/<hash>. It is not a pane of the list.
   await page.evaluate(() => { window.__sameDocument = true; });
   await Promise.all([page.waitForURL(new RegExp(`/system/queries/${hash}\\?sort=calls$`)), row.click()]);
   expect(await page.evaluate(() => window.__sameDocument)).toBeUndefined();
@@ -927,8 +922,8 @@ test('a row opens its shape as a page of its own: timeline, runs, deep link and 
   for (const id of ['systemTabs', 'systemQueriesTable']) await expect(page.locator(`#${id}`), id).toHaveCount(0);
   await expect(page.locator('#systemQueriesList')).toBeHidden();
   await expect(queryRows(page)).toHaveCount(0);
-  // The head holds the way back, the time range and the refresh button; the query is
-  // right under it, so the page has no title of its own and no copy button for the hash.
+    // The head holds the way back, the time range, and the refresh button.
+    // The query is right under it. So the page has no title of its own and no copy button for the hash.
   const head = drill.locator('.systemQuery__head');
   await expect(head.locator('#systemQueryBack')).toBeVisible();
   await expect(head.locator('#systemQueriesRangeButton')).toBeVisible();
@@ -936,7 +931,7 @@ test('a row opens its shape as a page of its own: timeline, runs, deep link and 
   await expect(drill.locator('.systemQuery__name, .systemQuery__copyHash')).toHaveCount(0);
   await expect(page.locator('#systemBar-queries')).toHaveCount(0);
   await expect(page.locator('#systemQuerySql')).toBeVisible({ timeout: 20_000 });
-  // The browser tab names the shape by its first words, so several shapes can be told apart.
+    // The browser tab names the shape by its first words. Several shapes can be told apart.
   await expect(page).toHaveTitle(/ \u00b7 Query shape$/);
   expect((await page.title()).length).toBeLessThanOrEqual(90);
   await expect(drill.locator('.systemQuery__tiles .statTile__label')).toHaveText(['Calls', 'Errors', 'Total time', 'p95', 'Read', 'Memory', 'CPU'], { timeout: 20_000 });
@@ -950,7 +945,7 @@ test('a row opens its shape as a page of its own: timeline, runs, deep link and 
   // The slowest first.
   const durations = await runs.locator('td:nth-child(2)').allTextContents();
   expect(durations.length).toBe(total);
-  // The latest runs instead: the order is in the address, next to the list's parameters.
+    // The latest runs are shown instead. The order is in the address, next to the list's parameters.
   await page.locator('#systemQueryRunsOrder [data-order="latest"]').click();
   await expect(page).toHaveURL(new RegExp(`/system/queries/${hash}\\?sort=calls&runs=latest$`));
   await expect(page.locator('#systemQueryRunsOrder [data-order="latest"]')).toHaveAttribute('aria-pressed', 'true');
@@ -968,8 +963,8 @@ test('a row opens its shape as a page of its own: timeline, runs, deep link and 
   await expect(page).toHaveURL(/\/system\/queries\?sort=calls$/);
   await expect(page.locator('body')).toHaveAttribute('data-page', 'system');
   await expect(queryRows(page).first()).toBeVisible();
-  // The browser's Forward returns to the shape, a deep link opens it, and so does
-  // the former address (?q=), with the list's parameters kept.
+    // The browser's Forward returns to the shape. A deep link opens the shape, and so does the former address (?q=).
+    // The list's parameters are kept.
   await page.goForward();
   await expect(page).toHaveURL(new RegExp(`/system/queries/${hash}\\?sort=calls&runs=latest$`));
   await expect(drill).toBeVisible();
@@ -997,8 +992,8 @@ test('on a wide screen a shape\'s figures sit right of its query, two to a row, 
   await expect(sql).toBeVisible();
   await expect(charts).toBeVisible();
   const [sqlBox, tilesBox, chartsBox] = [await sql.boundingBox(), await tiles.boundingBox(), await charts.boundingBox()];
-  // The figures: right of the query, level with its top, a short query stretched to their height;
-  // the charts run under both, the right one under the figures (no empty space there).
+    // The figures sit right of the query, level with its top. A short query stretches to their height.
+    // The charts run under both. The right one is under the figures, so no empty space is left there.
   expect(tilesBox.x).toBeGreaterThanOrEqual(sqlBox.x + sqlBox.width);
   expect(Math.abs(tilesBox.y - sqlBox.y)).toBeLessThan(4);
   expect(Math.abs(sqlBox.height - tilesBox.height)).toBeLessThan(3);
@@ -1017,7 +1012,7 @@ test('on a wide screen a shape\'s figures sit right of its query, two to a row, 
   // The runs stay full width under all of it.
   const runsBox = await page.locator('.systemQuery__runs').boundingBox();
   expect(runsBox.y).toBeGreaterThanOrEqual(tilesBox.y + tilesBox.height);
-  // At 1280 px and below the figures go back under the query, the charts under them.
+    // At 1280 px and below, the figures move under the query. The charts move under the figures.
   await page.setViewportSize({ width: 1200, height: 900 });
   await expect.poll(async () => (await tiles.boundingBox()).y).toBeGreaterThanOrEqual((await sql.boundingBox()).y + (await sql.boundingBox()).height - 1);
   const narrow = await tiles.boundingBox();
@@ -1032,7 +1027,7 @@ test('a shape\'s SQL has line numbers and the Query editor\'s colours (keywords,
     const response = await route.fetch();
     const json = await response.json();
     json.normalized = 'SELECT count() AS calls, toDate(now()) AS day, sum(bytes) FROM db.events WHERE id IN (?..) AND ts > ? GROUP BY day ORDER BY calls DESC LIMIT ?';
-    // The server formats it (normalized_formatted); the page draws what it is given.
+        // The server formats it (normalized_formatted). The page draws what it receives.
     json.normalized_formatted = 'SELECT\n    count() AS calls,\n    toDate(now()) AS day,\n    sum(bytes)\nFROM db.events\nWHERE (id IN (?..)) AND (ts > ?)\nGROUP BY day\nORDER BY calls DESC\nLIMIT ?';
     await route.fulfill({ response, json });
   });
@@ -1045,7 +1040,7 @@ test('a shape\'s SQL has line numbers and the Query editor\'s colours (keywords,
   const numbers = (await block.locator('.sqlBlock__gutter').textContent()).trim().split('\n');
   expect(numbers[0]).toBe('1');
   expect(numbers.length).toBeGreaterThan(1);
-  // The editor's highlighter with the host's function list: keywords and functions each have a colour.
+    // The editor's highlighter uses the host's function list. Keywords and functions each have a colour.
   await expect(block.locator('.tok-kw').first()).toBeVisible();
   await expect(block.locator('.tok-fn').first()).toBeVisible({ timeout: 20_000 });
   const colour = (selector) => block.locator(selector).first().evaluate((el) => getComputedStyle(el).color);
@@ -1079,7 +1074,7 @@ test('a shape\'s time range and refresh button are in its head: the range applie
   await head.locator('#systemQueriesRangeButton').click();
   await page.locator('#systemQueriesQuickRanges .timeRangeList__item[data-from="now-6h"]').click();
   await expect(page).toHaveURL(new RegExp(`/system/queries/${hash}\\?from=now-6h&to=now&sort=calls$`));
-  // The head is drawn again with the new window; the controls stay in it.
+    // The page draws the head again with the new window. The controls stay in it.
   await expect(head.locator('#systemQueriesRangeButton')).toContainText('Last 6 hours');
   const refreshed = page.waitForRequest((request) => request.url().includes(`/api/system/queries/${hash}?`) && request.url().includes('refresh=1'));
   await head.locator('#systemRefresh-queries').click();
@@ -1108,15 +1103,15 @@ test('Open in Query puts the example or the history in the editor without runnin
   await expect(editor).toHaveValue(new RegExp(`normalized_query_hash = ${hash}`));
   await expect(editor).toHaveValue(/FROM system\.query_log/);
   await expect(editor).toHaveValue(/event_time >= now\(\) - INTERVAL 1 HOUR/);
-  // The editor has its text; a run, if the page started one, was sent before this round trip reports.
+    // The editor has its text. The page sends a run, if it started one, before this round trip reports.
   await roundTrip(page);
   expect(runs).toEqual([]);
 });
 
-// The text the last copy put on the clipboard (http origins have no async
-// clipboard to read: copy.text selects a textarea and runs the copy command).
+// The text that the last copy put on the clipboard.
+// HTTP origins have no async clipboard to read. copy.text selects a textarea and runs the copy command.
 
-// Order by: the server's allowlist, in this order; the header each one sorts.
+// Order by: the server's allowlist, in this order. Each entry names the header that it sorts.
 const ORDER_BY = [
   ['calls', 'Calls', 'calls'], ['total_time', 'Total time', 'total'], ['avg', 'Avg', 'avg'], ['p95', 'p95', 'p95'],
   ['max', 'Max', 'max'], ['errors', 'Errors', 'errors'], ['read_rows', 'Read rows', 'rows'], ['read_bytes', 'Read bytes', 'bytes'],
@@ -1141,8 +1136,7 @@ test('Order by: every measure of the allowlist, on the server, in the address, o
   await orderPicker(page).locator('.tracePicker__button').click();
   await expect(orderPicker(page).locator('.tracePicker__option')).toHaveText(ORDER_BY.map(([, label]) => label));
   await page.keyboard.press('Escape');
-  // A pick reads the top 50 by that measure: the request, the address and
-  // the header's arrow follow.
+    // A pick reads the top 50 by that measure. The request, the address, and the header's arrow follow.
   for (const [value, label, col] of ORDER_BY.filter(([value]) => value !== 'total_time')) {
     const asked = listRequest(page, (params) => params.get('sort') === value);
     await pick(orderPicker(page), value);
@@ -1225,7 +1219,7 @@ test('Errors and User filter the list on the server, in the address, with Back',
   await expect(page).toHaveURL(/queries\?user=chdash_runner$/);
   await expect(userPicker(page).locator('.tracePicker__button')).toHaveText(/^User \u00b7 chdash_runner/);
   await expect.poll(async () => [...new Set(await page.locator('#systemQueriesTable tbody td.is-mid.systemQueries__names').allTextContents())], { timeout: 20_000 }).toEqual(['chdash_runner']);
-  // The other users stay offered while one is picked.
+    // The other users stay offered when one user is selected.
   await userPicker(page).locator('.tracePicker__button').click();
   await expect(options).toHaveCount(labels.length);
   await page.keyboard.press('Escape');
@@ -1260,18 +1254,17 @@ test('a user name with quotes and backslashes is sent as it is and matches no qu
   expect(answer.queries).toEqual([]);
   await expect(page.locator('#systemQueriesEmpty')).toBeVisible({ timeout: 20_000 });
   await expect(userPicker(page).locator('.tracePicker__button')).toHaveText(`User \u00b7 ${user}`);
-  // The address keeps it as it is; a filter change writes it back whole
-  // (the unknown errors value is not).
+    // The address keeps it as it is. A filter change writes the whole value to the address. The unknown errors value is not written to the address.
   await pick(page.locator('.systemQueries__kindPicker'), 'Select');
   await expect.poll(() => new URL(page.url()).searchParams.get('kind')).toBe('Select');
   expect(new URL(page.url()).searchParams.get('user')).toBe(user);
   expect(new URL(page.url()).searchParams.get('errors')).toBeNull();
 });
 
-// The database and table filters (user, 2026-10-04 evening): two pickers
-// after User, "Database · All" and "Table · All" (narrowed by the database),
-// the window's names from the list read; a pick is a bound parameter of the
-// read, kept in the address, restored by Back / Forward.
+// The database and table filters (user, 2026-10-04 evening) are two pickers after User.
+// The pickers are "Database · All" and "Table · All". The database narrows the table picker.
+// The window's names come from the list read.
+// A pick is a bound parameter of the read. The address keeps it, and Back / Forward restore it.
 const DB_CHOICES = [{ name: 'chdash_ui', calls: 9 }, { name: "o'brien", calls: 3 }];
 const TABLE_CHOICES = [{ name: 'chdash_ui.weather_observations', calls: 9 }, { name: 'chdash_ui.my.dotted', calls: 2 }, { name: "o'brien.t\\x", calls: 1 }];
 async function routeObjectChoices(page) {
@@ -1300,14 +1293,14 @@ test('Database and Table filter the list on the server, narrowed by the database
   await expect(tablePicker.locator('.tracePicker__button')).toHaveText('Table · All');
   await databasePicker.locator('.tracePicker__button').click();
   await expect(databasePicker.locator('.tracePicker__option')).toHaveText(['All', 'chdash_ui (9)', "o'brien (3)"]);
-  // A database: the read, the address, and the tables narrowed to it.
+    // A database filter sends the read, writes the address, and narrows the tables to it.
   let asked = listRequest(page, (params) => params.get('database') === 'chdash_ui' && !params.has('table'));
   await databasePicker.locator('.tracePicker__option[data-value="chdash_ui"]').click();
   await asked;
   await expect(page).toHaveURL(/queries\?database=chdash_ui$/);
   await tablePicker.locator('.tracePicker__button').click();
   await expect(tablePicker.locator('.tracePicker__option')).toHaveText(['All', 'chdash_ui.weather_observations (9)', 'chdash_ui.my.dotted (2)']);
-  // A table with a dot in its name: sent whole.
+    // The page sends a table name with a dot whole.
   asked = listRequest(page, (params) => params.get('database') === 'chdash_ui' && params.get('table') === 'chdash_ui.my.dotted');
   await tablePicker.locator('.tracePicker__option[data-value="chdash_ui.my.dotted"]').click();
   await asked;
@@ -1344,8 +1337,8 @@ test('a database or table name with quotes, backslashes and dots goes to the ser
   await expect(page.locator('#systemQueriesEmpty')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.systemQueries__databasePicker .tracePicker__button')).toHaveText(`Database · ${database}`);
   await expect(page.locator('.systemQueries__tablePicker .tracePicker__button')).toHaveText(`Table · ${table}`);
-  // The address keeps them whole through another filter's change; an
-  // invalid table (no dot) never reaches the server.
+    // The address keeps them whole through a change of another filter.
+    // An invalid table (no dot) never reaches the server.
   await pick(page.locator('.systemQueries__kindPicker'), 'Select');
   await expect.poll(() => new URL(page.url()).searchParams.get('kind')).toBe('Select');
   expect(new URL(page.url()).searchParams.get('database')).toBe(database);
@@ -1378,21 +1371,21 @@ test('a shape\'s SQL is formatted by the server (normalized_formatted), with no 
   expect(shown.split('\n').length).toBeGreaterThan(1);
   expect(shown).toMatch(/^SELECT\b/);
   expect(shown).toMatch(/\n\s*FROM\b/);
-  // The normalized placeholders are back: no numeric stand-in left.
+    // The normalized placeholders are back. No numeric stand-in is left.
   expect(shown).not.toMatch(/\b9\d{4}\b/);
-  // What is shown is what the server answered: normalized_formatted, and nothing went to the formatter from the page.
+    // The page shows what the server answered: normalized_formatted. No request went to the formatter from the page.
   const answer = await details[details.length - 1];
   expect(answer.normalized_formatted).toBe(shown);
   expect(formats).toEqual([]);
   // The same placeholders, in the same order, as the normalized query.
   const placeholders = (text) => (text.match(/\?(\.\.)?/g) || []).join(' ');
   expect(placeholders(shown)).toBe(placeholders(answer.normalized));
-  // Copy gives the formatted text; no other copy button (the raw text is not offered).
+    // Copy gives the formatted text. There is no other copy button. The raw text is not offered.
   await captureCopies(page);
   await wrap.locator('.sqlBlock__copy').click();
   await expect.poll(() => copiedText(page)).toBe(shown.replace(/\s+$/, ''));
   await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
-  // Still no call to the formatter after the Raw / Formatted switch.
+    // The page still makes no call to the formatter after the Raw / Formatted switch.
   await page.locator('#systemQueryView').getByRole('button', { name: 'Raw' }).click();
   await expect(wrap).toHaveAttribute('data-raw', '1');
   await page.locator('#systemQueryView').getByRole('button', { name: 'Formatted' }).click();
@@ -1421,7 +1414,7 @@ test('opening a shape\'s page makes no request to /api/format, whatever the serv
   });
   await page.goto(`/system/queries/${hash}?sort=calls&runs=latest`);
   await expect(page.locator('#systemQuerySql')).toHaveAttribute('data-formatted', '0', { timeout: 30_000 });
-  // The page waits for nothing: after the settling of its network, still no call.
+    // The page does not wait for anything. After its network settles, it still makes no call.
   await page.waitForLoadState('networkidle');
   expect(formats).toEqual([]);
 });
@@ -1434,7 +1427,7 @@ test('a shape\'s formatted INSERT is drawn as the server laid it out: one column
     const response = await route.fetch();
     const json = await response.json();
     json.normalized = `INSERT INTO db.events (${columns.join(', ')}) FORMAT Native`;
-    // The layout itself is the formatter's (tests/backend-functional/test_system.py runs a real INSERT through it).
+        // The formatter gives the layout itself (tests/backend-functional/test_system.py runs a real INSERT through it).
     json.normalized_formatted = ['INSERT INTO db.events', '(', ...columns.map((name, i) => `    ${name}${i < columns.length - 1 ? ',' : ''}`), ')', 'FORMAT Native'].join('\n');
     await route.fulfill({ response, json });
   });
@@ -1464,7 +1457,7 @@ test('a long shape SQL scrolls inside its block (no "Show all N lines"), and Raw
   const wrap = page.locator('#systemQuerySql');
   await expect(wrap).toHaveAttribute('data-formatted', '1', { timeout: 30_000 });
   const block = wrap.locator('.sqlBlock');
-  // A scroll bar, no fold: the block is as tall as 14 lines and its body scrolls.
+    // The block has a scroll bar and no fold. It is as tall as 14 lines, and its body scrolls.
   await expect(block.locator('.sqlBlock__expand')).toHaveCount(0);
   await expect(block).toHaveClass(/\bis-scroll\b/);
   const body = block.locator('.sqlBlock__body');
@@ -1474,7 +1467,7 @@ test('a long shape SQL scrolls inside its block (no "Show all N lines"), and Raw
   expect((await block.locator('.sqlBlock__gutter').textContent()).trim().split('\n').length).toBeGreaterThan(40);
   await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   expect(await body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-  // The text is the formatter's (one column to a line); Raw shows what query_log has, and back.
+    // The text comes from the formatter, one column to a line. Raw shows what query_log has. Another click returns to the formatted text.
   const view = page.locator('#systemQueryView');
   const raw = view.getByRole('button', { name: 'Raw' });
   const formatted = view.getByRole('button', { name: 'Formatted' });
@@ -1514,7 +1507,7 @@ test('a shape\'s SQL that the server could not format (normalized_formatted null
   await expect(page.locator('#systemQueryCopyRaw')).toHaveCount(0);
   expect(seen).toBeTruthy();
   expect((await wrap.locator('.sqlBlock__code').textContent()).replace(/\s+$/, '')).toBe(seen.replace(/\s+$/, ''));
-  // Raw and Formatted show the same text, the formatted one being the raw one.
+    // Raw and Formatted show the same text. The formatted view has the same text as the raw view.
   await page.locator('#systemQueryView').getByRole('button', { name: 'Raw' }).click();
   await expect(wrap).toHaveAttribute('data-raw', '1');
   await page.locator('#systemQueryView').getByRole('button', { name: 'Formatted' }).click();
@@ -1535,7 +1528,7 @@ test('a runner without the grant sees the GRANT; a disabled query_log says how t
   await expect(issue).toContainText('The runner account cannot read system.query_log');
   await expect(issue.locator('.systemIssue__code')).toHaveText(grant);
   await expect(issue.locator('.systemIssue__copy')).toHaveAttribute('aria-label', 'Copy the GRANT statement');
-  // The list's filters leave the bar; the range and the refresh button stay.
+    // The list's filters leave the bar. The range and the refresh button stay.
   for (const selector of ['.systemQueries__kindPicker', '.systemQueries__errorsPicker', '.systemQueries__userPicker', '.systemQueries__databasePicker', '.systemQueries__tablePicker', '.systemQueries__orderPicker', '#systemQueriesHide']) {
     await expect(page.locator(selector), selector).toBeHidden();
   }
@@ -1563,7 +1556,7 @@ test('a window past the read cap or the lookback narrows in one click', async ({
   await issue.locator('#systemQueriesNarrow').click();
   await expect(page).toHaveURL(/queries\?from=now-15m&to=now$/);
   await expect(queryRows(page).first()).toBeVisible({ timeout: 20_000 });
-  // Past query_log_max_lookback_hours (a deep link): the last 7 days instead.
+    // Past query_log_max_lookback_hours (a deep link), the page shows the last 7 days instead.
   await page.goto('/system/queries?from=now-30d&to=now');
   const lookback = page.locator('#systemQueriesNotes .systemIssue[data-reason="range_too_large"]');
   await expect(lookback).toContainText('at most 7 days', { timeout: 20_000 });
@@ -1599,12 +1592,12 @@ for (const width of [390, 360]) {
       await openQueries(page);
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
       expect(await paneOverflow()).toBeLessThanOrEqual(0);
-      // The query and its total time; the calls, kind and users in its meta line.
+            // The query and its total time. The calls, kind, and users are in its meta line.
       await expect(page.locator('#systemQueriesTable thead th:visible')).toHaveText(['Query', 'Total time']);
       await expect(queryRows(page).first().locator('.systemQueries__metaCalls')).toBeVisible();
-      // The filter bar folds into its summary line; unfolded, it wraps: Kind,
-      // Errors, User, Order by and Hide ChDash all visible inside the
-      // viewport, none cut, none overlapping.
+            // The filter bar folds into its summary line.
+            // Unfolded, the bar wraps. Kind, Errors, User, Order by, and Hide ChDash all show inside the viewport.
+            // The page cuts no item, and no item overlaps another.
       await expect(page.locator('#systemBar-queries .obsFilterSummary')).toHaveAttribute('aria-expanded', 'false');
       await page.locator('#systemBar-queries .obsFilterSummary').click();
       const filters = ['.systemQueries__kindPicker', '.systemQueries__errorsPicker', '.systemQueries__userPicker', '.systemQueries__databasePicker', '.systemQueries__tablePicker', '.systemQueries__orderPicker', '#systemQueriesHide'];
@@ -1631,7 +1624,7 @@ for (const width of [390, 360]) {
       // 40 px targets, the rows too.
       expect(await smallTouchTargets(page)).toEqual([]);
       expect((await queryRows(page).first().boundingBox()).height).toBeGreaterThanOrEqual(40);
-      // The range alone on its first row; the refresh button ends the bar.
+            // The range is alone on its first row. The refresh button ends the bar.
       const range = await page.locator('#systemQueriesRangeButton').boundingBox();
       const refresh = await page.locator('#systemRefresh-queries').boundingBox();
       const barBox = await page.locator('#systemBar-queries').boundingBox();
@@ -1650,13 +1643,13 @@ for (const width of [390, 360]) {
 }
 
 // ---------------------------------------------------------------------------
-// Disks: a card per disk, the growth, the bytes by database (a database opens
-// its storage in the Explorer) and the policies, over /api/system/disks and the
-// series panel disk_growth. Fill tones and forecasts come from mocked answers:
-// the stack's own disk is whatever the machine has.
+// Disks: a card for each disk, the growth, the bytes by database, and the policies.
+// A database opens its storage in the Explorer.
+// The page reads /api/system/disks and the series panel disk_growth.
+// Fill tones and forecasts come from mocked answers. The stack's own disk is whatever the machine has.
 
-// The card of a disk (one per filesystem: data-disks lists its disks) and the
-// disk's own facts (the card of a disk alone, or its block in a shared card).
+// The card of a disk: one per filesystem. data-disks lists its disks.
+// The disk's own facts are on the card of a disk alone, or in its block on a shared card.
 const diskCard = (page, name) => page.locator(`#systemDiskCards .systemDisk[data-disks~="${name}"]`);
 const diskOwn = (page, name) => page.locator(`#systemDiskCards [data-disk="${name}"]`);
 
@@ -1672,9 +1665,9 @@ test('Disks shows a card per disk, its growth, the bytes by database and the pol
   await openDisks(page);
   await expect(selectedSection(page)).toHaveText('Disks');
   await expect(page.locator('#systemDisksRangeButton')).toHaveText('Time range · Last 7 days');
-  // No Auto-refresh: the disks are cached a minute, the growth five.
+  // No Auto-refresh: the cache keeps the disks for a minute, and the growth for five.
   await expect(page.locator('#systemAutoRefresh-disks')).toHaveCount(0);
-  // Three tiles: no "Soonest full" (each disk's card says how long it lasts).
+    // Three tiles, and no "Soonest full" tile. Each disk's card says how long it lasts.
   await expect(page.locator('.systemDisks__tiles > .statTile .statTile__label')).toHaveText(['Disks', 'Fullest', 'ClickHouse data']);
   await expect(page.locator('[data-tile="soonest"]')).toHaveCount(0);
   await expect(panel(page, 'disks')).not.toContainText('Soonest full');
@@ -1687,12 +1680,12 @@ test('Disks shows a card per disk, its growth, the bytes by database and the pol
   }
   await expect(diskOwn(page, 'fixture_hot').locator('[data-fact="policies"]')).toContainText('fixture_tiered / hot');
   await expect(diskOwn(page, 'fixture_warm').locator('[data-fact="policies"]')).toContainText('fixture_tiered / warm');
-  // The growth charts draw (the week, or whatever this stack holds).
+    // The growth charts show the week, or whatever this stack holds.
   await expect(page.locator('#systemDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#systemDiskChart-merge_tree')).toBeVisible();
   await expect(page.locator('#systemDiskChart-written')).toBeVisible();
   await expect(page.locator('#systemDiskChart-used .chartCore__legendItem').first()).toContainText('default');
-  // Bytes by database: the tiered fixture on its hot disk, a share bar beside its figure.
+    // Bytes by database: the tiered fixture is on its hot disk. A share bar is beside its figure.
   const hot = page.locator('.systemDiskDb[data-disk="fixture_hot"]');
   await expect(hot.locator('tbody tr[data-database="chdash_ui"] .shareBar__text')).toHaveText(/%$/);
   await expect(hot.locator('.explorerStorageStrip__segment[data-database="chdash_ui"]')).toBeAttached();
@@ -1706,7 +1699,7 @@ test('a database opens on its storage in the Explorer, from the table or the sta
   await openDisks(page);
   const hot = page.locator('.systemDiskDb[data-disk="fixture_hot"]');
   const link = hot.locator('tbody tr[data-database="chdash_ui"] a.systemDiskDb__link');
-  // The former Storage tab address: the database page, scrolled to its storage.
+    // The former Storage tab address opens the database page, scrolled to its storage.
   await expect(link).toHaveAttribute('href', /\/explorer\/catalog\/chdash_ui\?tab=storage$/);
   await link.click();
   await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui$/, { timeout: 20_000 });
@@ -1752,7 +1745,7 @@ test('days until full: a growing disk, a flat one, too little history', async ({
     set('fixture_hot', { status: 'not_growing', slope_bytes_per_day: -(2 ** 20), days_until_full: null });
     set('fixture_warm', { status: 'not_enough_history', points: 3, span_seconds: 1200, slope_bytes_per_day: null, days_until_full: null });
   });
-  // Three filesystems (the fixture's disks share one: their capacities apart).
+    // Three filesystems. The fixture's disks share one filesystem, with their capacities apart.
   await routeDisks(page, (json) => {
     json.disks.forEach((disk, index) => { disk.total_space = (1000 + index) * 2 ** 30; disk.free_space = Math.round(disk.total_space * 0.5); });
   });
@@ -1762,7 +1755,7 @@ test('days until full: a growing disk, a flat one, too little history', async ({
   await expect(until('default')).toHaveAttribute('data-tone', 'error');
   await expect(until('fixture_hot').locator('.systemDisk__value')).toContainText('Not growing');
   await expect(until('fixture_warm').locator('.systemDisk__value')).toContainText('Not enough history');
-  // The forecast lives on the disk's card only.
+    // The forecast appears on the disk's card only.
   await expect(page.locator('[data-tile="soonest"]')).toHaveCount(0);
 });
 
@@ -1831,7 +1824,7 @@ for (const width of [390, 360]) {
       await expect(page.locator('#systemDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 20_000 });
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
       expect(await panel(page, 'disks').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
-      // One card a row, long paths wrapped rather than cut.
+            // Each row holds one card. Long paths wrap, and the page does not cut them.
       const cards = await page.locator('#systemDiskCards .systemDisk').evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().left)));
       expect(new Set(cards).size).toBe(1);
       const path = diskOwn(page, 'fixture_warm').locator('[data-fact="path"] .systemDisk__value');
@@ -1842,8 +1835,8 @@ for (const width of [390, 360]) {
         expect(await wrap.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
       }
       await expect(page.locator('#systemDiskPolicyTable thead th:visible')).toHaveText(['Policy', 'Volume', 'Disks']);
-      // 40 px targets, the database links included; unfolded, the range
-      // leads the bar and the refresh button ends it.
+            // 40 px targets, and the database links too.
+            // Unfolded, the range leads the bar. The refresh button ends it.
       await page.locator('#systemBar-disks .obsFilterSummary').click();
       expect(await smallTouchTargets(page)).toEqual([]);
       const range = await page.locator('#systemDisksRangeButton').boundingBox();
@@ -1856,20 +1849,20 @@ for (const width of [390, 360]) {
 }
 
 // ---------------------------------------------------------------------------
-// Time axes of every System chart: the labels and the date lines under
-// them never run into each other ("Oct 2 2026Oct 3 2026" under the first
-// ticks of a 24 h Disks chart), and the year shows on the first date only
-// (and where it changes), at each quick range, on a desktop and a phone page.
+// The labels and the date lines under them never overlap.
+// The fault looked like "Oct 2 2026Oct 3 2026" under the first ticks of a 24 h Disks chart.
+// The year shows on the first date only, and where it changes.
+// This holds at each quick range, on a desktop and on a phone page.
 
 test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 d, on 1440 and 390 px pages', async ({ page }) => {
   test.setTimeout(180_000);
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     for (const section of ['overview', 'queries', 'disks']) {
-      // Queries reads at most 7 days of query_log (a longer range offers the last 7 days).
+            // Queries reads at most 7 days of query_log. A longer range offers the last 7 days.
       for (const range of section === 'queries' ? ['1h', '24h', '7d'] : ['1h', '24h', '7d', '30d']) {
         await page.goto(`${section === 'overview' ? '/system' : `/system/${section}`}?from=now-${range}&to=now`);
-        // Queries charts the timeline of a shape: the first one opens.
+                // Queries charts the timeline of a shape. The first one opens.
         if (section === 'queries') {
           await expect(queryRows(page).first()).toBeVisible({ timeout: 30_000 });
           await queryRows(page).first().click();
@@ -1893,9 +1886,9 @@ test('time axes keep their labels and date lines apart at 1 h, 24 h, 7 d and 30 
 });
 
 // ---------------------------------------------------------------------------
-// Audit round 2, System: the Overview's range in the tab row, charts at 0 as
-// one line, legend swatches, axis units; the query shape's title, durations
-// and kind casing; one card per filesystem on Disks, the cards sharing the row.
+// Audit round 2, System.
+// The checks cover the Overview's range in the tab row, charts at 0 as one line, legend swatches, and axis units.
+// They also cover the query shape's title, durations, and kind casing. They cover one card per filesystem on Disks, with the cards in one row.
 
 test.describe('audit round 2: System', () => {
   test('the Overview\'s time range leads its filter bar, before the refresh button, as on Queries and Disks', async ({ page }) => {
@@ -1928,7 +1921,7 @@ test.describe('audit round 2: System', () => {
     const flat = await card.boundingBox();
     expect(flat.width).toBeGreaterThan(grid.width - 2);
     expect(flat.height).toBeLessThan(110);
-    // Last in the grid; the charts above it two a row, an odd one out on the whole row.
+        // Last in the grid. The charts above it are two in a row. An odd one out takes the whole row.
     const cards = await page.locator('#systemPerfGrid .systemChart:not([hidden])').evaluateAll((els) => els
       .map((el) => ({ id: el.dataset.chart, top: el.getBoundingClientRect().top, width: el.getBoundingClientRect().width, alone: el.classList.contains('is-alone') }))
       .sort((a, b) => a.top - b.top));
@@ -1986,7 +1979,7 @@ test.describe('audit round 2: System', () => {
     await row.click();
     const shape = await (await answer).json();
     const drill = page.locator('#systemQuery');
-    // The query is drawn under the head, which has no title; the hash only names a shape without text.
+        // The page draws the query under the head. The head has no title. The hash names a shape only when the shape has no text.
     if (normalized) await expect(page.locator('#systemQuerySql')).toBeVisible({ timeout: 20_000 });
     await expect(drill.locator('.systemQuery__hash')).toHaveCount(normalized ? 0 : 1);
     await expect(drill.locator('.systemQuery__kind')).toHaveCount(0);
@@ -1996,7 +1989,7 @@ test.describe('audit round 2: System', () => {
     await expect(cpu).not.toHaveText(/\d\.\d{3,} s/);
     await expect(page.locator('#systemQueryChart-cpu .chartCore')).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/, { timeout: 20_000 });
     for (const label of JSON.parse(await page.locator('#systemQueryChart-cpu .chartCore').getAttribute('data-y-ticks'))) expect(label).toMatch(/^0$| (ms|s)$/);
-    // The duration chart: p50 and p95, room above the largest run (yHeadroom).
+        // The duration chart shows p50 and p95. It leaves room above the largest run (yHeadroom).
     const latency = page.locator('#systemQueryChart-latency .chartCore');
     await expect(latency).toHaveAttribute('data-points-drawn', /^[1-9]\d*$/);
     expect(Object.keys(JSON.parse(await latency.getAttribute('data-series-stats')))).toEqual(['p50', 'p95']);
@@ -2033,7 +2026,7 @@ test.describe('audit round 2: System', () => {
     });
     expect(result.sparse.marked).toBe('1');
     expect(result.dense.marked).toBe('0');
-    // The largest sparse value is 3: 15 % of the range above it.
+        // The largest sparse value is 3, and 15 % of the range lies above it.
     expect(result.sparse.yMax).toBeGreaterThanOrEqual(3.4);
   });
 
@@ -2073,7 +2066,8 @@ test.describe('audit round 2: System', () => {
     await expect(cards).toHaveCount(3);
     const grid = await page.locator('#systemDiskCards').boundingBox();
     const boxes = await cards.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ top: Math.round(r.top), left: r.left, right: r.right, width: r.width })));
-    // One row (3 x 340 px fit at desktop width), the last card ending at the grid's edge.
+        // Three 340 px cards fit in one row at desktop width. The last card ends at the grid's edge.
+    
     expect(new Set(boxes.map((box) => box.top)).size).toBe(1);
     expect(Math.abs(boxes[boxes.length - 1].right - (grid.x + grid.width))).toBeLessThanOrEqual(1);
     for (const box of boxes) expect(box.width).toBeGreaterThanOrEqual(340);

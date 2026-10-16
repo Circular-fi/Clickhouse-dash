@@ -114,6 +114,40 @@ void HttpMetrics::write(std::string& out) const {
   }
 }
 
+void McpOperationMetrics::observe(std::string_view method, std::string_view tool, std::string_view status, double seconds) {
+  std::lock_guard<std::mutex> lock(mu_);
+  std::array<std::string, 3> labels{std::string(method), std::string(tool), std::string(status)};
+  if (series_.size() >= kMaxSeries && series_.find(labels) == series_.end()) labels[2] = "other";
+  Series& stats = series_[labels];
+  ++stats.count;
+  stats.seconds += seconds;
+  for (size_t i = 0; i < kBuckets.size(); ++i) {
+    if (seconds <= kBuckets[i]) ++stats.buckets[i];
+  }
+}
+
+void McpOperationMetrics::write(std::string& out) const {
+  prom_family(out, "mcp_server_operation_duration_seconds", "histogram",
+              "Time of each request of the MCP endpoint, by method, tool and status (OpenTelemetry mcp.server.operation.duration).");
+  std::lock_guard<std::mutex> lock(mu_);
+  for (const auto& [labels, stats] : series_) {
+    const std::string_view method = labels[0];
+    const std::string_view tool = labels[1];
+    const std::string_view status = labels[2];
+    for (size_t i = 0; i < kBuckets.size(); ++i) {
+      std::string le;
+      append_number(le, kBuckets[i]);
+      prom_sample(out, "mcp_server_operation_duration_seconds_bucket", {{"method", method}, {"tool", tool}, {"status", status}, {"le", le}},
+                  static_cast<double>(stats.buckets[i]));
+    }
+    prom_sample(out, "mcp_server_operation_duration_seconds_bucket", {{"method", method}, {"tool", tool}, {"status", status}, {"le", "+Inf"}},
+                static_cast<double>(stats.count));
+    prom_sample(out, "mcp_server_operation_duration_seconds_sum", {{"method", method}, {"tool", tool}, {"status", status}}, stats.seconds);
+    prom_sample(out, "mcp_server_operation_duration_seconds_count", {{"method", method}, {"tool", tool}, {"status", status}},
+                static_cast<double>(stats.count));
+  }
+}
+
 MeteredTaskQueue::MeteredTaskQueue(size_t threads, size_t max_threads, size_t max_queued, std::shared_ptr<HttpMetrics> metrics)
     : pool_(threads, max_threads, max_queued), metrics_(std::move(metrics)) {}
 

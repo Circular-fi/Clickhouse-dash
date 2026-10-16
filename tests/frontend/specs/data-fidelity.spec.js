@@ -3,12 +3,11 @@ import { installObservers } from '../helpers/observability.js';
 import { openApp, runSuccessfulQuery } from '../helpers/app.js';
 import { captureCopies } from '../helpers/clipboard.js';
 
-// The screen, the copies and the downloads show exactly the values that ClickHouse stores
-// (docs/telemetry.md, "Result values"). The 2.17 page rounded every integer above 2^53
-// (cityHash64(1) read 10577349846663553000), reparsed a String that looked like JSON, copied the
-// String '007' as 7, unescaped 'C:\new' into a line break, showed NaN as NULL, Float32 0.1 as
-// 0.10000000149011612 and a UUID with its bytes swapped, and wrote four different JSON / CSV texts
-// for the same result.
+// The screen, the copies and the downloads show exactly the values that ClickHouse stores (docs/telemetry.md, "Result values").
+// The 2.17 page had these faults. It rounded every integer above 2^53 (cityHash64(1) read 10577349846663553000).
+// It reparsed a String that looked like JSON. It copied the String '007' as 7. It unescaped 'C:\new' into a line break.
+// It showed NaN as NULL. It showed Float32 0.1 as 0.10000000149011612. It swapped the bytes of a UUID.
+// It wrote four different JSON / CSV texts for the same result.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -42,7 +41,7 @@ const rows = (n) => `SELECT
 FROM numbers(${n})`;
 
 const COLUMNS = ['hash', 'u64max', 'i64min', 'dec', 'dec_scale', 'uuid', 'code', 'json_text', 'quoted', 'f_nan', 'f_inf', 'f_ninf', 'f32', 'path', 'ip', 'm', 'z', 'backslash_n', 'n'];
-// The text of each cell of the first row, as ClickHouse prints the value (z is NULL).
+// Each cell shows the text of its value, as ClickHouse prints it (z is NULL).
 const SHOWN = {
   hash: '10577349846663553072',
   u64max: '18446744073709551615',
@@ -63,9 +62,9 @@ const SHOWN = {
   backslash_n: '\\N',
   n: '0',
 };
-// The first row of Copy JSON / Download JSON, as text: the digits of a number type are an exact JSON
-// number (JSON.parse in a test would round them), NaN and the infinities stay strings, a Map is an
-// object in its stored order, a String is never reparsed.
+// This is the first row of Copy JSON and Download JSON, as text.
+// The digits of a number type are an exact JSON number. JSON.parse in a test can round them.
+// NaN and the infinities stay strings. A Map is an object in its stored order. A String is never reparsed.
 const FIRST_ROW_JSON_TEXT = `{
     "hash": 10577349846663553072,
     "u64max": 18446744073709551615,
@@ -128,7 +127,7 @@ test('Copy cell, Copy row and the row details keep the value: no number from a s
   const first = page.locator(`#resultTableBody ${dataRows}`).first();
   const cells = first.locator('td');
   const copyCell = async (column) => {
-    // The menu closes on scroll: let a scroll-into-view settle before the click.
+    // The menu closes on scroll. Wait until the scroll into view settles, before the click.
     const cell = cells.nth(COLUMNS.indexOf(column) + 1);
     await cell.scrollIntoViewIfNeeded();
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -145,10 +144,10 @@ test('Copy cell, Copy row and the row details keep the value: no number from a s
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await cells.nth(1).click({ button: 'right' });
   await page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Copy row' }).click();
-  // Copy row is the object of the row, at the top level: two spaces less than inside Copy JSON's array.
+  // Copy row gives the object of the row at the top level. Its indent is two spaces less than inside the array of Copy JSON.
   await expect.poll(copied).toBe(FIRST_ROW_JSON_TEXT.replace(/\n {2}/g, '\n'));
 
-  // The details show the same raw texts: 'C:\new' keeps its backslash, the JSON-looking String is not reformatted.
+  // The details show the same raw texts. 'C:\new' keeps its backslash. The String that looks like JSON is not reformatted.
   await cells.nth(1).click({ button: 'right' });
   await page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Details' }).click();
   const values = page.locator('tr.resultTable__detailRow .rowDetails__value');
@@ -218,14 +217,14 @@ test('a multiquery panel copies its rows with the same serializer, column names 
   await expect.poll(async () => { text = await copied(); return text; }).not.toBe('');
   expect(text.startsWith(`[\n  ${FIRST_ROW_JSON_TEXT},`)).toBe(true);
 
-  // Copy all: every statement, its rows written the same way.
+  // Copy all writes every statement, and its rows are written the same way.
   await page.locator('#copyJsonButton').click();
   await expect.poll(async () => { text = await copied(); return text; }).not.toBe('');
   const all = JSON.parse(text);
   expect(all.queries).toHaveLength(2);
   expect(all.queries[0].columns).toEqual(COLUMNS);
   expect(all.queries[1].data).toEqual([{ one: 1 }]);
-  // The rows of a statement are written as Copy JSON writes them, two levels deeper.
+  // Copy JSON writes the rows of a statement the same way. The rows are two levels deeper.
   expect(text).toContain(FIRST_ROW_JSON_TEXT.replace(/\n/g, '\n      '));
 });
 
@@ -247,7 +246,7 @@ test('a JSON column keeps its big integers and the order of its keys', async ({ 
 test('a numeric sort compares the digits of a UInt64 and of a long Decimal exactly; inf sorts as a number, nan with the NULLs', async ({ page }) => {
   await openApp(page);
   const order = await page.evaluate(() => {
-    // The sort paths are exports of app_results_sort.js, which the page hands to window.ChDash.
+    // The sort paths are exports of app_results_sort.js. The page gives them to window.ChDash.
     const t = window.ChDash;
     const values = [
       '12345678901234567890.123456789', '12345678901234567890.123456788', '-12345678901234567890.123456789',
@@ -305,7 +304,7 @@ test('a chart time without a zone is the wall clock of the server, not of the br
   expect(out.date).toBe(out.localDate);
 });
 
-// Copy JSON keeps no wrapping that says nothing: one row is its object, one column is its values, one value is itself.
+// Copy JSON adds no wrapper that says nothing. One row is its object. One column is its values. One value is itself.
 test('Copy JSON: one row is an object, one column is a list of values, one value is the value', async ({ page }) => {
   await openApp(page);
   const copied = await captureCopies(page, { clipboard: true, consume: true });
@@ -316,15 +315,15 @@ test('Copy JSON: one row is an object, one column is a list of values, one value
     await expect.poll(async () => { text = await copied(); return text; }).not.toBe('');
     return text;
   };
-  // Several rows, several columns: the list of objects, as before.
+  // Several rows and several columns give a list of objects, as before.
   expect(JSON.parse(await copy('SELECT number AS n, toString(number) AS s FROM numbers(2)'))).toEqual([{ n: 0, s: '0' }, { n: 1, s: '1' }]);
-  // One row: its object, not a list of one.
+  // One row gives its object, not a list of one.
   expect(JSON.parse(await copy("SELECT 7 AS n, 'a' AS s"))).toEqual({ n: 7, s: 'a' });
-  // One column: the values, not objects of one key.
+  // One column gives the values, not objects of one key.
   expect(JSON.parse(await copy('SELECT number FROM numbers(3)'))).toEqual([0, 1, 2]);
-  // One row of one column: the value itself (a string stays a JSON string, a structure its structure).
+  // One row of one column gives the value itself. A string stays a JSON string, and a structure stays a structure.
   expect(JSON.parse(await copy("SELECT 'x' AS s"))).toBe('x');
   expect(JSON.parse(await copy('SELECT [1, 2] AS a'))).toEqual([1, 2]);
-  // No row: still a list.
+  // No row still gives a list.
   expect(JSON.parse(await copy('SELECT number FROM numbers(3) WHERE number > 5'))).toEqual([]);
 });

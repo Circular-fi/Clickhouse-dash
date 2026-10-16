@@ -1,5 +1,5 @@
-// The object tree of the Catalog: the databases and their objects with their sizes, the search, the type chips (Tables, Views, MV,
-// Dict, System) and the rule that an object that is shown cannot be hidden by a chip.
+// This module builds the object tree of the Catalog. The tree shows the databases and their objects, with their sizes.
+// The tree also has the search, the type chips (Tables, Views, MV, Dict, System), and the rule for these chips. A chip cannot hide an object that the tree shows.
 
 import { dom, h } from "./app_dom.js";
 import { loadDatabaseTables } from "./app_explorer_data.js";
@@ -27,8 +27,7 @@ function visibilityRequirementsForCurrentObject() {
   return {
     includeSystem: !!graphRequirements.includeSystem || !!table && isSystemDatabaseName(table.database)
       || !!model.selectedDatabase && isSystemDatabaseName(model.selectedDatabase),
-    // A selected object cannot be hidden by the filter that would exclude
-    // it: its type chip stays pressed and locked until the selection moves.
+    // A selected object cannot be hidden by the filter that would exclude it. Its type chip stays pressed and locked until the selection moves.
     kind: table ? filterKindOf(table) : null,
     includeNonStoring: !!table && nonStoringSummary(table) || !!graphRequirements.includeNonStoring,
   };
@@ -62,9 +61,8 @@ function syncFilterChips(required) {
     const locked = system ? !!required.includeSystem : required.kind === key;
     chip.setAttribute("aria-pressed", String(pressed));
     chip.classList.toggle("is-on", pressed);
-    // A locked chip stays focusable (aria-disabled, not disabled) and
-    // names its reason to assistive tech (aria-describedby) as well as in
-    // its tooltip; its width never changes (the lock dot overlays it).
+    // A locked chip stays focusable. It uses aria-disabled, not disabled. It names its reason to assistive tech (aria-describedby) and in its tooltip.
+    // Its width never changes. The lock dot covers the chip.
     const reason = system ? "Required while the selected object belongs to a system database." : "Required while the selected object is of this type.";
     chip.disabled = false;
     chip.classList.toggle("is-locked", locked);
@@ -122,9 +120,8 @@ function visibleTables() {
   const storageMode = model.mode === "graph" && parts.graph?.isStorageMode?.();
   return (model.catalog?.tables || []).filter((table) => {
     if (!model.includeSystem && ["system", "information_schema", "INFORMATION_SCHEMA"].includes(String(table.database || ""))) return false;
-    // Buffer is a special case in Storage: although it owns no persistent
-    // parts, it is a real write-routing object and is shown together with the
-    // table it flushes into. Other non-storing objects still obey the toggle.
+    // Buffer is a special case in Storage. Buffer owns no persistent parts. But it is a real write-routing object.
+    // The tree shows it with the table where it flushes its data. Other non-storing objects still obey the toggle.
     const storageBuffer = storageMode && engineKey(table) === "buffer";
     if (!model.includeNonStoring && nonStoringSummary(table) && !storageBuffer) return false;
     if (!q) return true;
@@ -132,11 +129,10 @@ function visibleTables() {
   });
 }
 
-// Text with every case-insensitive occurrence of `query` wrapped in <mark>.
-// A tree name cut in the middle when it does not fit: the head ends in an
-// ellipsis, the tail (the end that tells "events_local" from "events_dist")
-// stays, and the title gives the whole name. Search matches are marked
-// across both parts.
+// Text with every case-insensitive match of `query` wrapped in <mark>.
+// A tree name that does not fit is cut in the middle. The head ends in an ellipsis.
+// The tail stays, so the end of the name shows (for example "events_local" or "events_dist"). The title gives the whole name.
+// Search matches are marked across both parts.
 function middleText(className, text, query) {
   const value = String(text || "");
   const q = String(query || "").toLowerCase();
@@ -159,8 +155,8 @@ function middleText(className, text, query) {
     if (at < to) el.appendChild(document.createTextNode(value.slice(at, to)));
     return el;
   };
-  // The tail starts at the last "_", "." or "-" ("chdash_rich_\u2026_scratch2"
-  // and "chdash_rich_\u2026_scratch" cut alike), else on the last third.
+  // The tail starts at the last "_", "." or "-" ("chdash_rich_\u2026_scratch2" and "chdash_rich_\u2026_scratch" are cut alike).
+  // If there is no such separator, the tail starts at the last third.
   // The cut never splits a search match.
   let cut = value.length > 12 ? value.length - Math.min(10, Math.ceil(value.length / 3)) : value.length;
   const sep = Math.max(value.lastIndexOf("_"), value.lastIndexOf("."), value.lastIndexOf("-"));
@@ -172,7 +168,7 @@ function middleText(className, text, query) {
   return el;
 }
 
-// The databases the tree lists (the System chip adds the system ones).
+// The databases that the tree lists. The System chip adds the system databases.
 function visibleDatabases() {
   const catalog = model.catalog;
   return [...new Set([
@@ -183,8 +179,7 @@ function visibleDatabases() {
     .sort((a, b) => a.localeCompare(b));
 }
 
-// The tree's root: the Catalog root (the databases overview in Browse,
-// every database in Graph).
+// The root of the tree is the Catalog root. In Browse, this is the databases overview. In Graph, it is every database.
 function treeRootRow(count) {
   const current = model.section === "tables" && !model.selectedKey && !model.selectedDatabase && !selectionScope().database;
   return rootRow({ id: "explorerTreeRoot", icon: "stack", label: "All databases", count, title: "All databases: their sizes and the databases overview", current, open: () => actions.openCatalogRoot() });
@@ -194,7 +189,7 @@ function renderTableList() {
   if (!dom.explorerTableList) return;
   clear(dom.explorerTableList);
   syncScopeUp();
-  // The databases overview follows the catalog (a load, the System chip).
+  // The databases overview follows the catalog. A load or the System chip changes it.
   if (browseRootShown()) actions.renderBrowseRoot();
   const catalog = model.catalog;
   const databases = visibleDatabases();
@@ -204,7 +199,7 @@ function renderTableList() {
     return;
   }
 
-  // Its count (the databases shown) is written once the loop below knows it.
+  // The count of the databases shown is written after the loop knows it.
   const root = treeRootRow(0);
   dom.explorerTableList.appendChild(root);
   const query = String(dom.explorerSearchInput?.value || "").trim().toLowerCase();
@@ -221,8 +216,8 @@ function renderTableList() {
     const loaded = model.databaseTablesLoaded.has(database);
     const loading = model.databaseTablesLoading.has(database);
     const databaseMatches = !!query && database.toLowerCase().includes(query);
-    // While searching, a loaded database without any match is dropped and a
-    // loaded database with matches is shown open (its stored state is kept).
+    // While the user searches, a loaded database without any match is dropped. A loaded database with matches is shown open.
+    // Its stored state is kept.
     if (query && loaded && !items.length && !databaseMatches) continue;
     shown += 1;
     const expanded = model.expandedDatabases.has(database) || (!!query && loaded && items.length > 0);
@@ -239,9 +234,8 @@ function renderTableList() {
         const selectedTableInDatabase = typeof model.selectedKey === "string" && model.selectedKey.startsWith(`${database}\0`);
         const selectedDatabase = model.selectedDatabase === database;
         if (selectedTableInDatabase || selectedDatabase) {
-          // Collapsing the branch that currently owns the detail view should
-          // never leave a hidden table selected. Switch to the database view
-          // while keeping the branch collapsed.
+          // A collapse of the branch that owns the detail view must never leave a hidden table selected. Switch to the database view.
+          // Keep the branch collapsed.
           actions.selectDatabase(database, { expand: false });
           return;
         }
@@ -258,13 +252,11 @@ function renderTableList() {
     let objects = "";
     if (loaded) objects = format.countLabel(allItems.length, "object");
     else if (databaseSummary && Number.isFinite(Number(databaseSummary.tables))) objects = format.countLabel(Number(databaseSummary.tables), "object");
-    // The row's figure column is bytes only (as on object rows): the
-    // object count is in the title, so it never takes the name's room;
-    // the column says "Loading\u2026" while the branch loads.
+    // The figure column of the row shows bytes only, as on object rows. The object count is in the title, so it does not use the room of the name.
+    // The column says "Loading\u2026" while the branch loads.
     const countText = loading ? "Loading\u2026" : "";
     const bytes = databaseBytes(database);
-    // Sizes are plain figures: the shares are in the databases overview
-    // and the database page, as bars of their own.
+    // Sizes are plain figures. The shares are in the databases overview and on the database page, as bars of their own.
     const size = h("span", { class: "explorerTreeDatabase__size" }, bytes == null ? "" : format.bytes(bytes));
     if (bytes == null || loading) size.hidden = true;
     headerMain.title = [database, objects, bytes == null ? "" : `${format.bytes(bytes)} on disk`].filter(Boolean).join(" \u00b7 ");
@@ -303,8 +295,7 @@ function renderTableList() {
           const name = middleText("explorerTreeObject__name", table.name, query);
           const srKind = h("span", { class: "srOnly" }, `${TREE_KINDS[kind].label}, `);
           button.append(icon, srKind, name);
-          // Replicated tables carry the replica health dot (item 19); other
-          // tables only show a dot when they are not healthy.
+          // Replicated tables show the replica health dot (item 19). Other tables show a dot only when they are not healthy.
           const replicaDot = parts.detail?.replicaHealthDot?.(table);
           const health = String(table.health || "healthy");
           if (replicaDot) {

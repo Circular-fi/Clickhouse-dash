@@ -119,9 +119,9 @@ void QueryLibraryStore::refresh_locked() {
     return;
   }
   if (!migration.changed()) return;
-  // A version-1 file, entries without a host, or an earlier release's history: they are dropped in memory;
-  // a writable library also rewrites the file (atomically, as version 2). A
-  // read-only library never touches the file.
+  // A version-1 file, entries without a host, or the history of an earlier release: they are dropped in memory.
+  // A writable library also rewrites the file, atomically, as version 2.
+  // A read-only library never touches the file.
   const std::string counts = "from version " + std::to_string(migration.from_version) + ", dropped " +
                              std::to_string(migration.dropped_folders) + " folders, " +
                              std::to_string(migration.dropped_queries) + " queries without a host_id, dropped " +
@@ -177,7 +177,7 @@ void QueryLibraryStore::check_if_match_locked(const std::string* if_match) const
   throw e;
 }
 
-// The host of a request: required, and one of the configured hosts.
+// The host of a request. It is required, and it must be one of the configured hosts.
 std::string QueryLibraryStore::require_host_locked(const std::string* raw, const std::string& field) const {
   if (!raw || raw->empty()) throw validation(field, "required", field + " is required");
   if (raw->size() > kQueryLibraryMaxHostIdBytes || has_control(*raw, false) ||
@@ -197,7 +197,7 @@ std::string QueryLibraryStore::new_id_locked(char prefix, const QueryLibraryStat
   }
 }
 
-// Serialize, then replace the file atomically.
+// Serialize the data. Then replace the file atomically.
 void QueryLibraryStore::commit_locked(QueryLibraryState candidate) {
   candidate.updated_at_ms = now_ms();
   const std::string text = serialize_query_library_file(candidate);
@@ -261,7 +261,7 @@ QueryLibraryStore::Response query_response(int status, const QueryLibraryQuery& 
 
 namespace {
 
-// What every read says first: the host, the revision, whether the library can be written, and its limits.
+// Every read gives these values first: the host, the revision, whether the library can be written, and its limits.
 void write_read_header(JsonWriter& w, const std::string& host, int64_t revision, int64_t updated_at_ms, bool writable,
                        const std::string& load_error, const QueryLibraryOptions& options) {
   w.Key("host_id"); write_string(w, host);
@@ -305,7 +305,7 @@ QueryLibraryStore::Response QueryLibraryStore::get_page(const std::string* host_
     if (page.next_cursor) w.Uint64(*page.next_cursor);
     else w.Null();
     w.Key("level_total"); w.Uint64(page.level_total);
-    // The whole library of the host (what the Query page counts), and the queries under the parent.
+    // The whole library of the host, which the Query page counts. Also the queries under the parent.
     w.Key("totals");
     w.StartObject();
     w.Key("folders"); w.Uint64(page.host_folders);
@@ -408,7 +408,7 @@ QueryLibraryStore::Response QueryLibraryStore::search(const std::string* host_ra
 QueryLibraryStore::Response QueryLibraryStore::export_library(const std::string* host_raw, const std::string* folder_raw) {
   return guarded([&]() -> Response {
     const std::string host = require_host_locked(host_raw, "host_id");
-    // One folder: it and every folder under it, and their queries.
+    // One folder, with every folder under it and their queries.
     std::unordered_set<std::string> keep;
     if (folder_raw && !folder_raw->empty()) {
       const QueryLibraryFolder* folder = find_folder(state_, *folder_raw);
@@ -601,7 +601,7 @@ QueryLibraryStore::Response QueryLibraryStore::update_query(const std::string& i
     QueryLibraryQuery* q = find_query(candidate, id);
     if (!q) throw not_found("query not found");
     QueryLibraryQuery next = *q;
-    // A query stays on its host: a folder of another host is refused.
+    // A query stays on its host. A folder of another host is refused.
     if (const auto host = read_host_field(member(doc, "host_id"), "host_id"); host && *host != next.host_id) {
       throw host_mismatch("host_id", "a saved query cannot move to another host");
     }
@@ -644,8 +644,8 @@ QueryLibraryStore::Response QueryLibraryStore::delete_query(const std::string& i
   });
 }
 
-// Import (typically the browser's localStorage library of one host, once) into the library of the request's host_id: the rules are in
-// query_library_import.hpp.
+// Import the library of one host into the library of the request's host_id. This is typically the browser's localStorage library, done once.
+// The rules are in query_library_import.hpp.
 QueryLibraryStore::Response QueryLibraryStore::import_library(std::string_view body, const std::string* if_match) {
   return guarded([&]() -> Response {
     require_editable_locked();

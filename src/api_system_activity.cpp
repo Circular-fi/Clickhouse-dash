@@ -1,6 +1,6 @@
-// The routes of the System Activity and of the Keeper status (/api/system/activity, /api/system/keeper). Both are fixed, allowlisted, bounded reads
-// (system_activity.cpp); no SQL or filter is taken from the request. Activity rows that name an object pass the runner SHOW boundary before they
-// are kept; the Keeper status is server-level and names no object. A route is an adapter over SystemService (system_service.hpp).
+// The routes of the System Activity and of the Keeper status are /api/system/activity and /api/system/keeper. Both are fixed, allowlisted, bounded reads
+// (system_activity.cpp). No SQL or filter comes from the request. Activity rows that name an object pass the runner SHOW boundary before they
+// are kept. The Keeper status is server-level and names no object. A route is an adapter over SystemService (system_service.hpp).
 #include "server.hpp"
 
 #include "api_error.hpp"

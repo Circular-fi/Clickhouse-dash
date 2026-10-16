@@ -1,5 +1,5 @@
-// What a row of a result table offers: the right-click menu (copy the cell, the row, the column; the links to the traces that
-// the row names) and the row details that open under the row, the keyboard rows, and the virtual body that keeps the details
+// What a row of a result table offers. The right-click menu copies the cell, the row, or the column. It also has the links to the traces that
+// the row names. The row details open under the row. The module also has the keyboard rows, and the virtual body that keeps the details
 // in place (docs/ui-foundations.md, "Row details").
 
 import { api } from "./app_api.js";
@@ -25,34 +25,32 @@ function findVerticalScrollOwner(el) {
 }
 
 // --- Row details: right-click a result row > "Details" ------------------
-// The row expands in place: a detail <tr> (one <td colspan>) is inserted
-// right after its data row and shows the row vertically, like a one-row
-// result. Rows are bound to their data through a WeakMap instead of being
-// referenced by DOM node: virtualized tables unmount/remount <tr> elements
-// on scroll, so the detail row follows the row *data* and is re-inserted
-// after whichever <tr> currently renders it. Virtualized renderers add the
-// detail's measured height to their range math and spacers (see
-// rowDetailsVirtualSlot). Shift+right-click keeps the native menu (not
-// advertised in the menu).
+// The row expands in place. A detail <tr> (one <td colspan>) is inserted right after its data row.
+// The detail shows the row vertically, like a one-row result.
+// Rows are bound to their data through a WeakMap, not through their DOM node. Virtualized tables unmount and remount <tr> elements on scroll.
+//
+// So the detail row follows the row *data*. It is inserted again after the <tr> that renders the row now.
+// Virtualized renderers add the measured height of the detail to their range math and spacers (see rowDetailsVirtualSlot).
+// Shift and right-click together keep the native menu. The menu does not advertise this.
 const rowDetailsBindings = new WeakMap(); // <tr> -> { row, label }
 const rowDetailsSources = new WeakMap(); // <table> -> { getContext, rowCount, viewRows, relayout }
 let rowDetailsMenu = null;
 let rowDetailsView = null;
 
-// `rowCount()` gates the menu (single-row results are already vertical);
-// `viewRows()` returns the virtualized view rows (null when not virtual);
-// `relayout()` re-runs the virtual range after the detail height changed.
-// `allRows()` returns every data row (Copy column).
+// `rowCount()` controls the menu. Single-row results are already vertical, so they have no menu.
+// `viewRows()` returns the virtualized view rows. It returns null when the table is not virtual.
+// `relayout()` runs the virtual range again after the height of a detail changes.
+// `allRows()` returns every data row (for the Copy column action).
 function registerRowDetailsSource(table, getContext, { rowCount = null, viewRows = null, relayout = null, allRows = null } = {}) {
   if (table && typeof getContext === "function") rowDetailsSources.set(table, { getContext, rowCount, viewRows, relayout, allRows });
   if (table && table.tBodies[0]) bindKeyboardRows(table.tBodies[0]);
 }
 
-// Keyboard rows (ns.table.rovingRows): every data row is focusable with a roving
-// tabindex, Right / Left step into its cells, Up / Down keep the column,
-// Enter opens the row's Details; Shift+F10 or the ContextMenu key opens the
-// row menu on the focused row or cell. Virtual windows rebuild their rows:
-// data-row-key brings focus back to the same row.
+// Keyboard rows (ns.table.rovingRows): every data row can take focus with a roving tabindex. Right and Left move into its cells.
+// Up and Down keep the column. Enter opens the row Details.
+//
+// Shift+F10, or the ContextMenu key, opens the row menu on the focused row or cell. Virtual windows rebuild their rows.
+// The data-row-key attribute gives the focus back to the same row.
 function markKeyboardRow(tr, key) {
   if (!tr || key == null || key === "") return;
   tr.tabIndex = -1;
@@ -99,8 +97,8 @@ function selectedTextWithin(el) {
   return String(sel.toString() || "");
 }
 
-// The expanded row of a virtualized tbody: `{ index, height }` in view-row
-// coordinates, or null. Rows after `index` sit `height` px lower.
+// The expanded row of a virtualized tbody, in view-row coordinates: `{ index, height }`, or null.
+// Rows after `index` sit `height` px lower.
 function rowDetailsVirtualSlot(tbody) {
   const view = rowDetailsView;
   if (!view || !tbody || !view.table.contains(tbody)) return null;
@@ -110,9 +108,8 @@ function rowDetailsVirtualSlot(tbody) {
   return view.index >= 0 ? view : null;
 }
 
-// Extra spacer height for a virtual window [start, end): the detail height
-// lives in the top spacer while its row is above the window, in the bottom
-// spacer while below, and in the real detail <tr> while mounted.
+// Extra spacer height for a virtual window [start, end). The detail height is in the top spacer while its row is above the window.
+// It is in the bottom spacer while the row is below the window. It is in the real detail <tr> while that <tr> is mounted.
 function rowDetailsSpacerExtra(slot, start, end) {
   if (!slot) return { top: 0, bottom: 0 };
   slot.side = slot.index < start ? -1 : slot.index >= end ? 1 : 0;
@@ -130,8 +127,8 @@ function virtualRowAt(y, rowH, slot) {
   return (y - height) / rowH;
 }
 
-// Swaps a virtual window's rows while the mounted detail <tr> stays in the
-// DOM (no re-layout of its content, text selection inside it survives).
+// Swaps the rows of a virtual window. The mounted detail <tr> stays in the DOM.
+// Its content is not laid out again, so the text selection inside it survives.
 function replaceVirtualBodyRows(tbody, frag) {
   const view = rowDetailsView;
   const keep = view && view.el.parentNode === tbody ? view.el : null;
@@ -192,7 +189,7 @@ function syncRowDetailsWidth(view) {
   if (width > 0) view.content.style.width = `${width}px`;
 }
 
-// Returns true when the measured height changed (virtual math must follow).
+// Returns true when the measured height changed. The virtual math must follow the change.
 function measureRowDetails(view) {
   if (!view.el.isConnected) return false;
   const height = view.el.getBoundingClientRect().height;
@@ -205,9 +202,8 @@ function relayoutRowDetails(view) {
   if (typeof view.source.relayout === "function") view.source.relayout();
 }
 
-// Every renderer calls this after (re)building a tbody: re-insert the detail
-// right after the <tr> now rendering its row, or close it when that row is
-// gone. A virtualized row that is merely unmounted keeps the detail open.
+// Every renderer calls this after it builds a tbody. It inserts the detail again, right after the <tr> that now renders its row.
+// It closes the detail when that row is gone. A virtualized row that is only unmounted keeps the detail open.
 function refreshRowDetailsAfterRender(tbody) {
   const view = rowDetailsView;
   if (!view || !tbody || !view.table.contains(tbody)) return;
@@ -232,8 +228,8 @@ function refreshRowDetailsAfterRender(tbody) {
   if (measureRowDetails(view) && rowDetailsVirtualSlot(tbody)) relayoutRowDetails(view);
 }
 
-// Portion of the detail above the scroll viewport: removing it would pull
-// the rows the user is looking at upward, so closing scrolls back by it.
+// The part of the detail above the scroll viewport. A removal of it would move the rows that the user looks at upward.
+// So a close of the detail scrolls back by this height.
 function rowDetailsHeightAboveViewport(view) {
   if (!view.el.isConnected) {
     return view.side < 0 && rowDetailsVirtualSlot(view.table.tBodies[0] || null) ? view.height : 0;
@@ -253,8 +249,7 @@ function closeRowDetailsMenu({ restoreFocus = false } = {}) {
   rowDetailsMenu?.close({ focus: restoreFocus });
 }
 
-// The cells an action applies to, lit while its menu item is hovered or
-// focused: the cell, the row, or the column (mounted cells and header).
+// The cells that an action applies to. They are lit while the menu item is hovered or focused: the cell, the row, or the column (mounted cells and header).
 function rowMenuTargetCells(table, tr, columnIndex, scope) {
   const offset = tr && tr.cells[0] && tr.cells[0].classList.contains("dataTable__rowNum") ? 1 : 0;
   const col = columnIndex + offset;
@@ -272,8 +267,8 @@ function rowMenuTargetCells(table, tr, columnIndex, scope) {
   return cells;
 }
 
-// The column as a JSON array of its values, in data order, spelled
-// like Copy row / Copy JSON.
+// The column as a JSON array of its values, in data order. The values are spelled
+// as in Copy row and Copy JSON.
 function columnCopyText(ctx, rows, columnIndex) {
   const ast = ctx.typeAsts[columnIndex] || null;
   const values = [];
@@ -284,17 +279,16 @@ function columnCopyText(ctx, rows, columnIndex) {
 }
 
 // --- Trace links: a row that holds OpenTelemetry trace ids ----------------
-// A value is a trace id when, read raw (never the displayed text) and
-// trimmed, it is exactly 32 hex digits (W3C trace-context: 16 bytes) and
-// not all zeros; an id inside a longer string does not count. The values
-// looked at are String / FixedString cells and the elements of their
-// arrays (Links.TraceId, groupArray(TraceId)). The same id found again is
-// one link (its first place names it); distinct ids are one link each, in
-// column order. A span id (16 hex digits, not all zeros) goes with the
-// trace column it belongs to by name: TraceId with SpanId (span_id,
-// spanId), Links.TraceId[i] with Links.SpanId[i], <prefix>trace_id with
-// <prefix>span_id; two different candidates leave the span out. Only
-// offered when the traces feature is on.
+// A value is a trace id when it is exactly 32 hex digits (W3C trace-context: 16 bytes), and it is not all zeros.
+// The check reads the raw value, never the displayed text, and trims it. An id inside a longer string does not count.
+// The values checked are String and FixedString cells, and the elements of their arrays (Links.TraceId, groupArray(TraceId)).
+//
+// The same id found again is one link. Its first place names it. Distinct ids are one link each, in column order.
+//
+// A span id has 16 hex digits, and it is not all zeros. It goes with the trace column that it belongs to by name.
+// The pairs are: TraceId with SpanId (span_id, spanId), Links.TraceId[i] with Links.SpanId[i], and <prefix>trace_id with <prefix>span_id.
+//
+// When two different candidates exist, the span is left out. Links are offered only when the traces feature is on.
 const TRACE_ID_RE = /^[0-9a-f]{32}$/;
 const SPAN_ID_RE = /^[0-9a-f]{16}$/;
 const TEXT_TYPE_RE = /^(?:(?:LowCardinality|Nullable)\()*(?:String|FixedString\(\d+\))\)*$/;
@@ -307,12 +301,12 @@ function hexId(value, pattern) {
   return pattern.test(id) && /[1-9a-f]/.test(id) ? id : "";
 }
 
-// "TraceId", "trace_id" and "traceId" read "traceid"; "Links.TraceId"
-// reads "links.traceid".
+// The names are compared in lower case. "TraceId", "trace_id" and "traceId" all read "traceid".
+// "Links.TraceId" reads "links.traceid".
 const idColumnKey = (name) => String(name ?? "").replace(/_/g, "").toLowerCase();
 
-// "text" (String, FixedString), "array" (an Array of them) or "" for a
-// column; a column of unknown type is judged by its value.
+// The kind is "text" for String or FixedString, "array" for an Array of them, or "" for a column.
+// A column of unknown type is judged by its value.
 function idColumnShape(type, value) {
   const t = String(type || "").replace(/\s+/g, "");
   if (!t) return Array.isArray(value) ? "array" : "text";
@@ -325,8 +319,8 @@ function arrayElements(value) {
   return Array.isArray(value) ? value : [];
 }
 
-// Every trace id of the row, in column order: { label, columnIndex,
-// element (1-based array index, 0 for a plain cell), key, traceId }.
+// Every trace id of the row, in column order. Each entry has the label, the column index, the element, the key, and the trace id.
+// The element is a 1-based array index, or 0 for a plain cell.
 function traceCandidates(ctx, row) {
   const out = [];
   for (let i = 0; i < ctx.columns.length; i++) {
@@ -347,7 +341,7 @@ function traceCandidates(ctx, row) {
   return out;
 }
 
-// The span of one trace id place: "", a span id, or AMBIGUOUS.
+// The span of one trace id place. It is "", a span id, or AMBIGUOUS.
 function spanOf(ctx, row, place) {
   if (!place.key.endsWith("traceid")) return "";
   const spanKey = `${place.key.slice(0, -"traceid".length)}spanid`;
@@ -363,8 +357,7 @@ function spanOf(ctx, row, place) {
   return spans.size ? [...spans][0] : "";
 }
 
-// [{ traceId, spanId, label, columnIndex, others: [labels], href }], one
-// per distinct trace id.
+// Returns a list of { traceId, spanId, label, columnIndex, others: [labels], href } entries. There is one entry for each distinct trace id.
 function rowTraceLinks(ctx, row) {
   if (!features.get("traces.enabled") || !ctx || !Array.isArray(row)) return [];
   const itemById = new Map();
@@ -387,12 +380,12 @@ function rowTraceLinks(ctx, row) {
   });
 }
 
-// The row menu and its submenus: an ns.menu context menu at the pointer
-// (app_ui_menu.js: keys, focus, the outside click / Escape layer, scroll,
-// resize and blur close it). Items are role=menuitem buttons, or links for
-// "Open trace" (a new tab). Arrows, Home and End move in the menu that has
-// the focus; ArrowRight, Enter, a click or hovering opens a submenu,
-// ArrowLeft and Escape close it back on its item.
+// The row menu and its submenus. It is an ns.menu context menu at the pointer (app_ui_menu.js).
+// The menu handles the keys, the focus, and the outside click and Escape layer. The menu closes on scroll, resize, and blur.
+//
+// Items are role=menuitem buttons, or links for "Open trace" (a new tab). Arrows, Home and End move in the menu that has the focus.
+// ArrowRight, Enter, or a click opens a submenu. So does a hover. ArrowLeft and Escape close the submenu.
+// The focus then returns to its item.
 function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1, tr = null) {
   closeRowDetailsMenu();
   const el = document.createElement("div");
@@ -426,9 +419,9 @@ function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1, 
     node.addEventListener("blur", clearHighlight);
     return node;
   };
-  // href: a link opened in a new tab (the results stay), else onPick runs;
-  // the menu closes after the pick. column: the cell the item is about
-  // (default: the right-clicked one).
+  // href: a link opened in a new tab (the results stay). Otherwise, onPick runs.
+  // The menu closes after the pick. column: the cell that the item is about
+  // (default: the right-clicked cell).
   const addItem = (text, onPick, scope = "", { href = "", column = columnIndex, title = "", list = el } = {}) => {
     const node = itemNode(href ? "a" : "button", text, { scope, column, title });
     if (href) {
@@ -465,8 +458,7 @@ function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1, 
   const absolute = (href) => new URL(href, window.location.href).href;
   addItem("Details", () => openRowDetails(binding, table, returnFocus));
   const ctx = rowDetailsContext(table);
-  // The row's traces, in Observability: flat entries for one trace id, a
-  // submenu of the distinct ids (column order, capped) for several.
+  // The traces of the row, in Observability. One trace id gives flat entries. Several distinct ids give a submenu, in column order, with a cap.
   const traces = rowTraceLinks(ctx, binding.row);
   if (traces.length === 1) {
     const [link] = traces;
@@ -486,8 +478,7 @@ function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1, 
     addSubmenu("Open trace", fillTraces(null));
     addSubmenu("Copy trace link", fillTraces((link) => copy(absolute(link.href))));
   }
-  // The value of the cell under the pointer, spelled as the result copy
-  // spells single values (strings raw, JSON pretty-printed, NULL empty).
+  // The value of the cell under the pointer is spelled like the result copy spells a single value. Strings are raw, JSON is pretty-printed, and NULL is empty.
   const onColumn = ctx && Number.isInteger(columnIndex) && columnIndex >= 0 && columnIndex < ctx.columns.length;
   if (onColumn) {
     addItem("Copy cell", () => copy(buildCopyValue(binding.row[columnIndex], ctx.typeAsts[columnIndex] || null)), "cell");
@@ -517,8 +508,7 @@ function openRowDetailsMenu(clientX, clientY, binding, table, columnIndex = -1, 
   for (const { trigger, list, fill } of submenus) menu.submenu(trigger, list, { parent: handle, onOpen: fill });
 }
 
-// `silent`: the table is being cleared/rebuilt, skip scroll compensation and
-// the virtual relayout.
+// `silent`: the table is cleared or rebuilt. Do not run the scroll compensation or the virtual relayout.
 function closeRowDetails({ restoreFocus = false, silent = false } = {}) {
   const view = rowDetailsView;
   if (!view) return;
@@ -536,8 +526,8 @@ function closeRowDetails({ restoreFocus = false, silent = false } = {}) {
   }
 }
 
-// Copy row and the details' Copy JSON: the row as one object (an array when two columns have
-// the same name), its values spelled like Copy JSON.
+// Copy row and the Copy JSON of the details give the row as one object. When two columns have the same name, the row is an array.
+// The values are spelled like Copy JSON.
 function rowJsonText(ctx, row) {
   return jsonText(row, rowsAst(ctx.columns, ctx.typeAsts).row, 2);
 }
@@ -550,8 +540,7 @@ function buildRowDetailsContent(ctx, row, label, onClose) {
   content.tabIndex = -1;
   if (label) content.dataset.row = String(label);
 
-  // Exactly the one-row (LIMIT 1) vertical presentation; the only additions
-  // are two small overlay actions that do not take a layout row.
+  // This is the one-row (LIMIT 1) vertical presentation. The only additions are two small overlay actions. They do not take a layout row.
   const actions = document.createElement("div");
   actions.className = "rowDetails__actions";
   const copyBtn = document.createElement("button");
@@ -571,10 +560,9 @@ function buildRowDetailsContent(ctx, row, label, onClose) {
   closeBtn.addEventListener("click", onClose);
   actions.append(copyBtn, closeBtn);
 
-  // The shared key / value list (app_ui_kv.js): one row per column, the
-  // value as the one-row view prints it (the raw single-value renderer:
-  // pretty JSON / arrays / maps, NULL token), a copy action per value;
-  // tuple-flattened columns arrive already flattened.
+  // The shared key and value list (app_ui_kv.js) has one row for each column. The value is shown as the one-row view prints it
+  // (the raw single-value renderer: pretty JSON, arrays, maps, NULL token). Each value has a copy action.
+  // Tuple-flattened columns arrive already flattened.
   const list = document.createElement("dl");
   list.className = "kvList rowDetails__list";
   for (let i = 0; i < ctx.columns.length; i++) {
@@ -587,7 +575,7 @@ function buildRowDetailsContent(ctx, row, label, onClose) {
     line.dataset.kvJson = jsonText(raw === undefined ? null : raw, ctx.typeAsts[i] || null, 0);
     const name = document.createElement("dt");
     name.className = "kvList__key rowDetails__name";
-    // Column name only, like the one-row view (no type line).
+    // Show only the column name, as the one-row view does. There is no type line.
     name.textContent = colName;
     name.title = colName;
     const value = document.createElement("dd");
@@ -620,10 +608,10 @@ function openRowDetails(binding, table, returnFocus = null) {
   const source = rowDetailsSources.get(table);
   if (!source || !binding) return;
   const ctx = rowDetailsContext(table);
-  // Opening on another row replaces the current detail.
+  // The details of another row replace the current detail.
   closeRowDetails();
   const row = binding.row;
-  // Closing a previous detail may have re-rendered a virtual window.
+  // A close of a previous detail can render a virtual window again.
   const anchor = findRowDetailsAnchor(table, row);
   if (!anchor) return;
   const label = binding.label == null || binding.label === "" ? "" : String(binding.label);
@@ -650,15 +638,14 @@ function openRowDetails(binding, table, returnFocus = null) {
   relayoutRowDetails(view);
   if (rowDetailsView !== view) return;
 
-  // Only the close cross (or Escape from inside the detail) and opening
-  // another row's Details close it: clicks elsewhere, selecting, sorting
-  // or scrolling keep it open.
+  // Only the close button closes the detail. Escape from inside the detail closes it too.
+  // Details of another row also close it. Clicks elsewhere, selection, sort actions, or scroll actions keep it open.
   listenUntilClosed(disposers, document, "keydown", (ev) => {
     if (ev.key !== "Escape" || rowDetailsMenu || !el.contains(document.activeElement)) return;
     ev.preventDefault();
     closeRowDetails({ restoreFocus: true });
   });
-  // Back / Forward close it (ns.router: the one popstate listener).
+  // The Back and Forward actions close it. The ns.router module has the one popstate listener.
   disposers.push(router.on("", () => closeRowDetails()));
   if (typeof ResizeObserver === "function") {
     const observer = new ResizeObserver(() => {
@@ -673,9 +660,8 @@ function openRowDetails(binding, table, returnFocus = null) {
   try { content.focus({ preventScroll: true }); } catch { null; }
 }
 
-// The menu a keyboard opened (onResultRowMenuKey) also gets the browser's
-// contextmenu event of the same key press: it must not open twice or let
-// the native menu through (Shift+F10 carries shiftKey).
+// The menu that a keyboard opens (onResultRowMenuKey) also gets the browser contextmenu event of the same key press.
+// The menu must not open twice, and the native menu must not appear. Shift+F10 carries shiftKey.
 let keyboardMenuAt = -Infinity;
 
 function rowMenuAt(target, clientX, clientY) {
@@ -686,7 +672,7 @@ function rowMenuAt(target, clientX, clientY) {
   const table = tr.closest("table");
   const source = table ? rowDetailsSources.get(table) : null;
   if (!source) return false;
-  // A single-row result is already shown vertically: keep the native menu.
+  // A single-row result is already shown vertically. Keep the native menu.
   const count = typeof source.rowCount === "function" ? Number(source.rowCount()) || 0 : 0;
   if (count < 2) return false;
   // Data cells follow the row-number cell.

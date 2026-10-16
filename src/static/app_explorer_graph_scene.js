@@ -1,5 +1,5 @@
-// The scene of the Explorer graph: the projections of the payload with their caches, the visible nodes and edges (the neighbourhood of the focus,
-// the database groups of the overview), the layout of what is visible and the routing of the Lineage edges.
+// This module holds the scene of the Explorer graph.
+// It has the projections of the payload and their caches. It has the visible nodes and edges, which are the neighbourhood of the focus or the database groups of the overview. It also has the layout of the visible objects and the routing of the Lineage edges.
 
 import { isStorageRouteEdge as storageRouteKind } from "./app_explorer_graph_geometry.js";
 import { layoutNodes } from "./app_explorer_graph_layout.js";
@@ -9,7 +9,7 @@ import { graphKit } from "./app_graph_kit.js";
 
 const kit = graphKit;
 
-// The request that the scope on screen makes (graphRequestOptions of app_explorer_graph_model.js).
+// The request that the scope on screen makes. See graphRequestOptions in app_explorer_graph_model.js.
 function scopeRequest(refresh = false) {
   return graphRequestOptions({
     detailMode: model.detailMode,
@@ -22,8 +22,8 @@ function scopeRequest(refresh = false) {
   }, refresh);
 }
 
-// A projection depends only on the payload object and the visibility inputs of the model, yet draw / minimap / status asked for it ~11 times
-// per frame (each call sorting every edge with localeCompare). Payloads are replaced, never mutated, so object identity is a sound cache key.
+// A projection depends only on the payload object and the visibility inputs of the model. Yet draw, minimap and status ask for it about 11 times per frame.
+// Each call sorts every edge with localeCompare. Payloads are replaced, never mutated. So object identity is a valid cache key.
 function cachedProjection(slot, build) {
   const cache = model[slot];
   if (cache
@@ -63,19 +63,16 @@ function isStorageRouteEdge(edge) {
 function canUseStorageForTable(database, table) {
   if (!model.graph) return null;
   const id = `table:${String(database || "")}.${String(table || "")}`;
-  // A table from another database can legitimately be absent from the
-  // currently scoped graph. Absence is not evidence that it has no storage:
-  // return unknown so Explorer may switch scope/database and refresh the
-  // graph before evaluating the table in its new payload.
+  // A table from another database can be absent from the scoped graph. Absence does not prove that the table has no storage.
+  // Return null, which means unknown. Explorer can then change the scope or the database and refresh the graph.
+  // After that, Explorer evaluates the table in the new payload.
   const exists = (model.graph.nodes || []).some((node) => node.id === id && node.layer === "logical");
   if (!exists) return null;
   return canUseStorageForId(id);
 }
 
-// visibleNodes()/visibleEdges() run several times per animated frame (edges,
-// minimap, animation check, status). Memoise them on the projection object
-// plus the neighbourhood inputs; callers treat the returned arrays as
-// read-only.
+// visibleNodes()/visibleEdges() run several times per animated frame, for edges, minimap, the animation check and the status.
+// Memoise them on the projection object and the neighbourhood inputs. Callers must treat the returned arrays as read-only.
 function visibleSet() {
   let projection;
   if (model.detailMode === "physical") projection = storageProjection();
@@ -95,9 +92,8 @@ function visibleSet() {
   let edges = projection.edges;
   model.groupStats = null;
   if (model.detailMode !== "physical") {
-    // A payload scoped to exactly the current request (focus, depth and
-    // per-node expansions) is already the neighbourhood. The client-side
-    // ring only bridges the time until a new focus/depth arrives.
+    // A payload that has exactly the scope of the current request (focus, depth and per-node expansions) is already the neighbourhood.
+    // The client-side ring covers the time until a new focus or depth arrives.
     const exactScope = !!model.focusedId && model.graphRequestKey === graphRequestKey(scopeRequest(false));
     const logicalIds = exactScope || !model.focusedId || !model.graph ? null : neighborhoodIds(logicalProjection(), model.focusedId, model.focusDepth);
     if (logicalIds) nodes = projection.nodes.filter((node) => logicalIds.has(node.id));
@@ -146,7 +142,7 @@ function computeLayout({ preserveExisting = false, preserveIds = null } = {}) {
   model.routeJob?.cancel();
   model.routeJob = null;
   model.lineageRouteCache = null;
-  // A layout that routes in a Worker starts at once, so the status says "Routing edges" from the first frame.
+  // A layout that routes in a Worker starts at once. So the status shows "Routing edges" from the first frame.
   if (model.detailMode === "logical" && kit.routeEdgesJobWanted(visibleEdges().length)) ensureLineageRouteCache();
   model.worldBounds = bounds;
 }
@@ -161,9 +157,9 @@ function ensureLineageRouteCache() {
   if (model.lineageRouteCache instanceof Map) return model.lineageRouteCache;
   const edges = visibleEdges().filter((edge) => !isStorageRouteEdge(edge));
   const options = { isSecondary: isLogicalDependencyEdge };
-  // A large layout routes in a Worker: until it answers the edges are drawn as curves and carry no labels (a placeholder
-  // stands for the routes, so the label cache stays valid), then the routes replace it and the graph redraws. A small
-  // one, or a browser without the Worker or the kernel, routes here at once.
+  // A large layout routes in a Worker. Until the Worker answers, the edges are drawn as curves and have no labels.
+  // A placeholder stands for the routes, so the label cache stays valid. Then the routes replace the placeholder and the graph redraws.
+  // A small layout routes here at once. So does a browser that has no Worker or no kernel.
   const layout = model.layout;
   const job = model.detailMode === "logical" ? kit.routeEdgesJob(layout, edges, options) : null;
   if (job) {
@@ -181,8 +177,8 @@ function ensureLineageRouteCache() {
     job.promise.then((routes) => {
       if (model.lineageRouteCache !== placeholder) return;
       if (routes) return finish(routes);
-      // The Worker could not route (absent, cut, failed): route here, in slices of the main thread and not in one block
-      // that freezes the page for seconds on a large database.
+      // The Worker could not route (it is absent, stopped, or failed). Route here, in slices on the main thread.
+      // Do not route in one block. One block freezes the page for seconds on a large database.
       const run = kit.runSliced(kit.routeEdgesSteps(layout, edges, options));
       if (run.done) return finish(run.value);
       model.routeJob = run;

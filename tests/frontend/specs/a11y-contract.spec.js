@@ -6,11 +6,11 @@ import { requireInstance } from '../helpers/instances.js';
 import { mockTraceResults, SYNTHETIC_TRACES } from '../helpers/traces.js';
 import { INSTANCES, install, newServer, setUsage } from '../helpers/mcp-fake.js';
 
-// Accessibility contract (docs/ui-foundations.md, "Accessibility"): in both themes, the colours that carry
-// meaning reach their WCAG ratio (text 4.5:1, the edge of a field 3:1, the focus ring 3:1), the pages give axe
-// nothing to report, the keyboard has a skip link and a landmark to land in, the ARIA of the lists and the
-// separators is valid, and the forced-colors (Windows high contrast) rules keep the icons and the selection.
-// The look of each fixed finding is in the design review (UI-111 ... UI-127); this file is what keeps it fixed.
+// Accessibility contract (docs/ui-foundations.md, "Accessibility"). In both themes, the colours that carry meaning reach their WCAG ratio:
+// text 4.5:1, the edge of a field 3:1, and the focus ring 3:1. The pages give axe nothing to report.
+// The keyboard has a skip link and a landmark to land in. The ARIA of the lists and the separators is valid.
+// The forced-colors rules (Windows high contrast) keep the icons and the selection.
+// The look of each fixed finding is in the design review (UI-111 ... UI-127). This file keeps each finding fixed.
 
 const THEMES = ['dark', 'light'];
 const FIRST = SYNTHETIC_TRACES[0];
@@ -19,8 +19,8 @@ const useTheme = (page, theme) => page.addInitScript((value) => localStorage.set
 
 // --- colour maths, in the page (the tokens resolve through ns.palette.resolve) -------------------------------
 
-// Contrast of each pair, from tokens: [{ fg, bg, ratio }]. fg may carry an alpha: it is composited over `over`
-// (the field's own fill) and then compared with bg (what the field sits on).
+// The contrast of each pair, from tokens: [{ fg, bg, ratio }]. The fg value may have an alpha.
+// The alpha is composited over `over`, the own fill of the field. Then the result is compared with bg, which is what the field sits on.
 function contrastsOf(page, theme, pairs) {
   return page.evaluate(({ theme, pairs }) => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -70,8 +70,8 @@ const FIELD_SELECTOR = [
   '.tracePicker__button', '.editorWrap',
 ].join(', ');
 
-// Each visible field: the contrast of its border (over its own fill) and of its fill against what it sits on, and of
-// its placeholder against its fill.
+// For each visible field, this checks the contrast of its border (over its own fill). It checks the contrast of its fill against what it sits on.
+// It checks the contrast of its placeholder against its fill.
 function fieldContrasts(page) {
   return page.evaluate((selector) => {
     const parse = (s) => { const m = /rgba?\(([^)]+)\)/.exec(s); if (!m) return null; const p = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
@@ -97,7 +97,7 @@ function fieldContrasts(page) {
       const bw = parseFloat(style.borderTopWidth) || 0;
       const bc = parse(style.borderTopColor);
       const border = bw > 0 && bc && bc.a > 0 ? ratio(over(bc, inside), outside) : 0;
-      // The editor's textarea is bare: its frame (.editorWrap, a field of its own here) carries the edge.
+      // The textarea of the editor has no border of its own. Its frame, .editorWrap, is a field of its own here, and the frame carries the edge.
       const row = { field: `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}.${[...el.classList].join('.')}`, edge: el.matches('.editorInput') ? Infinity : Math.max(border, ratio(inside, outside)) };
       if (el.placeholder) {
         const ph = getComputedStyle(el, '::placeholder');
@@ -130,8 +130,8 @@ for (const theme of THEMES) {
       await page.waitForTimeout(1500);
       const fields = await fieldContrasts(page);
       expect(fields.length).toBeGreaterThan(0);
-      // The frame of the Query editor is a large surface with its own fill, a gutter and an accent on focus: the owner chose it softer
-      // than the edge of a small field in the dark theme (--editor-border), so it only has to stand out from its surroundings.
+      // The frame of the Query editor is a large surface. It has its own fill, a gutter, and an accent on focus. The owner chose a softer edge for it
+      // than the edge of a small field in the dark theme (--editor-border). The frame only has to stand out from its surroundings.
       const edgeMin = (f) => (f.field.includes('editorWrap') ? 1.5 : 3);
       expect(fields.filter((f) => f.edge < edgeMin(f)), 'edge below 3:1 (1.5:1 for the editor frame)').toEqual([]);
       expect(fields.filter((f) => f.placeholder != null && f.placeholder < 4.5), 'placeholder below 4.5:1').toEqual([]);
@@ -275,7 +275,7 @@ test('axe (dark): the MCP page has no violation', async ({ page }) => {
   await expect(page.locator('#mcpWorkspace')).toBeVisible();
   await page.waitForTimeout(1500);
   expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
-  // The details of a key, with what it did and what its statements cost ClickHouse.
+  // The details of a key show what the key did, and what its statements cost ClickHouse.
   await page.locator('#mcpKeysBody tbody tr[data-key-id] [data-action="open"]').first().click();
   await expect(page.locator('.mcpUsage .mcpUsage__body')).toBeVisible();
   await page.locator('.mcpCost').getByRole('button', { name: 'ClickHouse cost' }).click();
@@ -284,12 +284,13 @@ test('axe (dark): the MCP page has no violation', async ({ page }) => {
   expect((await new AxeBuilder({ page }).analyze()).violations.map((v) => v.id)).toEqual([]);
 });
 
-// The Usage tab of the MCP pages has a filter bar (Group by and five lists of check boxes, the window, Refresh), six charts with their
-// legends (a list, or the Values table) and filter chips; it has no table. Usage is made first on the instance, with the key of the config file
-// that reads everything (an initialize that names a client, tools/list, a tool call, a method that nobody knows and a notification), so that
-// every part has something to show. Both themes: the muted hints and the warning colours are on the tab. The instance of the contract is one
-// key, one instance and a few clients, whatever ran on it before: a list that has one value is off (disabled in place, a pick cannot be made),
-// and a legend entry of a dimension that has one value is not a filter, so what is offered is asked of the page and not assumed.
+// The Usage tab of the MCP pages has a filter bar. The bar has Group by, five lists of check boxes, the window and Refresh.
+// The tab also has six charts with their legends (a list, or the Values table) and filter chips. It has no table.
+// Usage is made first on the instance, with the key of the config file that reads everything. The calls are an initialize that names a client,
+// tools/list, a tool call, a method that nobody knows, and a notification. So every part has something to show.
+// Both themes: the muted hints and the warning colours are on the tab. The instance of the contract is one key, one instance and a few clients,
+// whatever ran on it before. A list that has one value is off (disabled in place, a pick cannot be made).
+// A legend entry of a dimension that has one value is not a filter. So what is offered is asked of the page and not assumed.
 const MCP_ALL_DATA_KEY = 'a11da7a0-0000-4000-8000-000000000001';
 
 async function makeMcpUsage(request, base) {
@@ -317,16 +318,16 @@ for (const theme of THEMES) {
     const violations = async () => (await new AxeBuilder({ page }).analyze()).violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
     const settled = () => expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
     expect(await violations()).toEqual([]);
-    // A legend entry is a filter: the chip, the pressed entry and the dimmed ones have no violation either (the methods of the contract are
-    // several, so their entries can be pressed; a dimension with one value locks its entries, which is its own state below).
+    // A legend entry is a filter. The chip, the pressed entry and the dimmed entries have no violation either.
+    // The methods of the contract are several, so their entries can be pressed. A dimension with one value locks its entries. That is its own state, below.
     await page.locator('.mcpOverview__chart[data-chart="requests"] .chartCore__legendItem[aria-pressed="false"]').first().click();
     await expect(page.locator('.mcpOverview__chips .chip')).toHaveCount(1);
     await settled();
     await page.waitForTimeout(600);
     expect(await violations(), 'a legend entry pressed').toEqual([]);
-    // The Values table of the legends (the charts that drew switch together; the method that was picked has no error, no refusal and no call on
-    // this instance, so the cards of those say that they have nothing to draw): a table with a name, a scope on each header, and its entries are
-    // buttons.
+    // The Values table of the legends shows the charts that drew. These charts switch together.
+    // The method that was picked has no error, no refusal and no call on this instance. So the cards of those charts say that they have nothing to draw.
+    // The table has a name and a scope on each header. Its entries are buttons.
     const drawn = await page.locator('.mcpOverview__chart .chartCore').count();
     expect(drawn).toBeGreaterThanOrEqual(2);
     await page.locator('.mcpOverview__chart[data-chart="requests"] .chartCore__legendMode').click();
@@ -335,8 +336,8 @@ for (const theme of THEMES) {
     expect(await violations(), 'the Values tables').toEqual([]);
     await page.locator('.mcpOverview__chart[data-chart="requests"] .chartCore__legendMode').click();
     await expect(page.locator('.mcpOverview__chart .chartCore__legendTable')).toHaveCount(0);
-    // The lists of the bar are dialogs of check boxes, open: they have no violation, and a pick leaves none either (the chips and the box). A list
-    // that has one value is off: it cannot be opened (its button is disabled, with its title), and that state has no violation either.
+    // The lists of the bar are dialogs of check boxes, and they are open. They have no violation. A pick leaves no violation either, for the chips and the box.
+    // A list that has one value is off. It cannot be opened, because its button is disabled, with its title. That state has no violation either.
     const off = [];
     for (const dimension of ['key', 'method', 'client', 'result', 'instance']) {
       if (await page.locator(`#mcpPickerButton-${dimension}`).isDisabled()) {
@@ -351,7 +352,7 @@ for (const theme of THEMES) {
       await expect(page.locator(`#mcpPickerMenu-${dimension}`)).toBeHidden();
     }
     expect(await violations(), `the lists that are off (${off.join(', ') || 'none'})`).toEqual([]);
-    // A pick in a list is one more chip (the lists keep every filter but their own: the result that the others leave may be none, or one).
+    // A pick in a list is one more chip. The lists keep every filter except their own. The result that the other filters leave may be none, or one.
     const chipsBefore = await page.locator('.mcpOverview__chips .chip').count();
     if (!(await page.locator('#mcpPickerButton-result').isDisabled())) {
       await page.locator('#mcpPickerButton-result').click();
@@ -365,8 +366,8 @@ for (const theme of THEMES) {
     // The page reads when the clicks of a list pause.
     await page.waitForTimeout(600);
     await settled();
-    // Group by (a list of four choices, the result among them), the window and the six charts grouped by another dimension: pressed states, and
-    // the empty chart of a window that has nothing to draw.
+    // Group by is a list of four choices. The result is one of them. The window and the six charts are grouped by another dimension. This shows the pressed states,
+    // and the empty chart of a window that has nothing to draw.
     await page.locator('#mcpGroupButton').click();
     await expect(page.locator('.mcpBar__groupPicker .tracePicker__option')).toHaveText(['Key', 'Method', 'Client', 'Result']);
     await page.waitForTimeout(300);
@@ -386,11 +387,12 @@ for (const theme of THEMES) {
   });
 }
 
-// The instances that share the usage directory (docs/mcp-integration-page.md, "Instances"): the Instance list of the bar of the Usage tab (it says
-// how many instances the usage sums, and when each one wrote) and its badges, the warnings above the tiles (a file that was skipped, a name that
-// two ChDash write under), the note "Summed over 2 instances" in the usage of a key with its list in a popover (the Keys page), and the state
-// "Usage is off". The instance of the contract has one directory, one instance and the usage on, so none of these can be made there: they run
-// against the in-memory server of the page specs (helpers/mcp-fake.js), which mcp-contract.spec.js keeps in the shape of the real answers.
+// The instances that share the usage directory (docs/mcp-integration-page.md, "Instances") have these parts.
+// The Instance list is in the bar of the Usage tab. It says how many instances the usage sums, and when each one wrote. Each instance has a badge.
+// The warnings above the tiles cover a file that was skipped, and a name that two ChDash instances use for writing.
+// The note "Summed over 2 instances" is in the usage of a key. Its list is in a popover on the Keys page. The state "Usage is off" is another part.
+// The instance of the contract has one directory, one instance and the usage on. So none of these parts can be made there.
+// They run against the in-memory server of the page specs (helpers/mcp-fake.js). mcp-contract.spec.js keeps that server in the shape of the real answers.
 const mcpViolations = async (page) => (await new AxeBuilder({ page }).analyze()).violations.map((v) => ({ id: v.id, nodes: v.nodes.slice(0, 3).map((n) => n.target.join(' ')) }));
 const mcpSettled = (page) => expect(page.locator('.mcpOverview__body')).not.toHaveAttribute('aria-busy', 'true');
 
@@ -401,12 +403,12 @@ for (const theme of THEMES) {
     await page.goto('/mcp-integration/usage');
     await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
     await mcpSettled(page);
-    // The tab has no note and no popover of its own ("Summed over 2 instances" is the head of the usage of a key): the Instance list says it.
+    // The tab has no note and no popover of its own. "Summed over 2 instances" is the heading of the usage of a key. The Instance list says it instead.
     await expect(page.locator('.mcpInstances')).toHaveCount(0);
     await expect(page.locator('#mcpPickerButton-instance')).toHaveText('Instance · All (2)');
     expect(await mcpViolations(page), 'the tab').toEqual([]);
-    // The Instance list is offered with two instances: a dialog of check boxes, a row of two lines for each instance (this one first in the
-    // sense that it is marked), then a pick and its chip.
+    // The Instance list is offered with two instances. It is a dialog of check boxes, with a row of two lines for each instance.
+    // This instance comes first, because it is marked. Then a pick makes its chip.
     await expect(page.locator('#mcpPickerButton-instance')).toBeEnabled();
     await page.locator('#mcpPickerButton-instance').click();
     await expect(page.locator('#mcpPickerMenu-instance')).toBeVisible();
@@ -434,11 +436,11 @@ for (const theme of THEMES) {
     await page.goto('/mcp-integration/usage');
     await expect(page.locator('.mcpOverview__tiles .statTile')).toHaveCount(7);
     await mcpSettled(page);
-    // One banner for the conflict and one for the two skipped files, above the tiles; they are notices, not alerts.
+    // One banner shows the conflict, and one banner shows the two skipped files. Both are above the tiles. They are notices, not alerts.
     await expect(page.locator('.mcpOverview__warnings .uiBanner--warn')).toHaveCount(2);
     await expect(page.locator('.mcpOverview__warnings .uiBanner--warn').first()).toHaveAttribute('role', 'status');
     expect(await mcpViolations(page), 'the warnings').toEqual([]);
-    // The Instance list has each of the three files, with its badge (conflict, skipped) and its last write ("no write yet" for a file that has none).
+    // The Instance list has each of the three files. Each file has its badge (conflict or skipped) and its last write. A file with no write shows "no write yet".
     await page.locator('#mcpPickerButton-instance').click();
     await expect(page.locator('#mcpPickerMenu-instance')).toBeVisible();
     await expect(page.locator('#mcpPickerMenu-instance .badge')).toHaveText(['conflict', 'skipped', 'skipped']);
@@ -448,8 +450,8 @@ for (const theme of THEMES) {
     await page.keyboard.press('Escape');
   });
 
-  // The Keys page says that the usage of a key is a sum, in its details: "Summed over 2 instances" is a button that opens the list of the
-  // instances in a popover, and a file that is left out is a warning under it.
+  // The Keys page says that the usage of a key is a sum. This is in its details. "Summed over 2 instances" is a button.
+  // The button opens the list of the instances in a popover. A file that is excluded has a warning under the button.
   test(`axe (${theme}): the usage of a key with two instances has no violation, with the note, its popover and the warning about a file that is left out`, async ({ page }) => {
     const server = newServer();
     server.instances = [INSTANCES()[0], { instance: 'chdash-1', written_at: '2026-10-14T09:58:50Z', status: 'skipped', reason: 'invalid' }];
@@ -480,7 +482,7 @@ for (const theme of THEMES) {
     await expect(page.locator('#mcpUsageOff .uiState__title')).toHaveText('Usage is off');
     await page.waitForTimeout(500);
     expect(await mcpViolations(page), 'the Usage tab, usage off').toEqual([]);
-    // The keys: no column Used, no note about it; the ClickHouse cost of a key stays in its details.
+    // The keys page has no column Used, and no note about it. The ClickHouse cost of a key stays in its details.
     await page.goto('/mcp-integration');
     await expect(page.locator('#mcpKeysBody tbody tr[data-key-id]').first()).toBeVisible();
     await expect(page.locator('#mcpKeysBody th', { hasText: /^Used$/ })).toHaveCount(0);
@@ -494,8 +496,9 @@ for (const theme of THEMES) {
     expect(await mcpViolations(page), 'the details of a key, usage off').toEqual([]);
   });
 
-  // The form of a key has the card of the analysis of the key's own limits and usage: two tools that every key has (checked and locked, "Every key has it")
-  // and, as mcp.usage.all_keys is on on this instance, the one a key must name (off by default): a card that is open, with a locked box among them.
+  // The form of a key has the card of the analysis of the key own limits and usage. It has two tools that every key has.
+  // They are checked and locked, with "Every key has it". Because mcp.usage.all_keys is on in this instance, the form also has the tool that a key must name.
+  // That tool is off by default. The card is open, with a locked box among them.
   test(`axe (${theme}): the New key form with its MCP analysis card has no violation`, async ({ page }) => {
     const base = (process.env.MCP_CONTRACT_BASE_URL || '').replace(/\/$/, '');
     requireInstance(test, 'MCP_CONTRACT_BASE_URL', base);
@@ -513,7 +516,7 @@ for (const theme of THEMES) {
     await expect(card.locator('#mcpTool-mcp_analysis_all_usage')).toBeEnabled();
     await page.waitForTimeout(400);
     expect(await mcpViolations(page), 'the form with its analysis card').toEqual([]);
-    // The tool that "*" leaves out is ticked by hand: no violation either, and the card says how many tools it has.
+    // The tool that "*" omits is ticked by hand. This has no violation either. The card says how many tools it has.
     await card.locator('#mcpTool-mcp_analysis_all_usage').check();
     await expect(card.locator('.mcpGroup__count')).toHaveText('3/3');
     expect(await mcpViolations(page), 'the form with the usage of all the keys ticked').toEqual([]);
@@ -565,7 +568,7 @@ test('skip link: the first Tab shows it over the header, Enter lands the next Ta
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.x).toBeGreaterThanOrEqual(0);
     await page.keyboard.press('Enter');
-    // The address stays: no fragment is written.
+    // The address stays the same. No fragment is written.
     expect(new URL(page.url()).hash, url).toBe('');
     await page.keyboard.press('Tab');
     const inside = await page.evaluate(() => !!document.activeElement?.closest('main'));
@@ -603,7 +606,7 @@ test('trace results: the title is a link, the card is not a control, and Enter o
   expect(await card.evaluate((el) => ({ role: el.getAttribute('role'), tabindex: el.getAttribute('tabindex'), tag: el.tagName }))).toEqual({ role: null, tabindex: null, tag: 'LI' });
   const link = card.locator('a.traceResult__wideTitle');
   await expect(link).toHaveAttribute('href', new RegExp(`/observability/traces/${FIRST.trace_id}`));
-  // No control inside a control: every tab stop of the card is a link or a button.
+  // No control is inside another control. Every tab stop of the card is a link or a button.
   expect(await card.evaluate((el) => [...el.querySelectorAll('[tabindex="0"]')].filter((node) => !node.matches('a, button')).length)).toBe(0);
   await link.focus();
   await Promise.all([page.waitForURL(new RegExp(`/observability/traces/${FIRST.trace_id}`)), page.keyboard.press('Enter')]);
@@ -629,7 +632,7 @@ test('trace waterfall: the column separator has its value, bounds and arrow keys
   await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('ArrowLeft');
   await expect(separator).toHaveAttribute('aria-valuenow', String(now - 2));
-  // A row holds buttons (the fold box, the badges): it is a group named by what it shows, never a button.
+  // A row holds buttons, such as the fold box and the badges. The row is a group named by what it shows. It is never a button.
   const row = page.locator('#traceWaterfall .traceSpanRow').first();
   expect(await row.getAttribute('role')).toBe('group');
   await expect(row).toHaveAttribute('aria-label', /: .+, \d/);
@@ -652,7 +655,7 @@ test('logs: the records are a grid of rows and cells, counted for the window, wi
   await expect(rows.first()).toHaveAttribute('aria-rowindex', '2');
   expect(await rows.first().locator(':scope > [role="gridcell"]').count()).toBeGreaterThan(1);
   expect(await rows.first().locator(':scope > :not([role="gridcell"])').count()).toBe(0);
-  // The viewport scrolls, so it is the keyboard's stop (the grid takes the focus by script only).
+  // The viewport scrolls, so it is the stop for the keyboard. The grid takes the focus by script only.
   await expect(page.locator('#logsTableViewport')).toHaveAttribute('tabindex', '0');
   await expect(grid).toHaveAttribute('tabindex', '-1');
   // Patterns are buttons in a list, not rows of a table.
@@ -726,7 +729,7 @@ test('forced colors: mask icons take the text colour, a selection is outlined, a
   await page.goto('/query');
   await runSuccessfulQuery(page, 'SELECT number AS id FROM numbers(8)');
   expect(await page.evaluate(() => matchMedia('(forced-colors: active)').matches)).toBe(true);
-  // A chevron drawn by a mask (the header's host picker): its background is the text colour, not the canvas.
+  // A chevron is drawn by a mask, as in the header host picker. Its background is the text colour, not the canvas.
   const arrow = await page.locator('#hostPickerButton').evaluate((el) => {
     const s = getComputedStyle(el, '::after');
     return { bg: s.backgroundColor, canvas: getComputedStyle(document.body).backgroundColor };
@@ -739,7 +742,7 @@ test('forced colors: mask icons take the text colour, a selection is outlined, a
   const outline = await pressed.evaluate((el) => { el.blur(); const s = getComputedStyle(el); return { style: s.outlineStyle, width: s.outlineWidth }; });
   expect(outline.style).toBe('solid');
   expect(parseFloat(outline.width)).toBeGreaterThanOrEqual(2);
-  // The bar of a numeric cell is still drawn: the cell opts out of the forcing and says its bar colour.
+  // The bar of a numeric cell is still drawn. The cell does not take the forced colors, and it names its bar colour.
   const cell = page.locator('#resultTableBody td.cellBar').first();
   await expect(cell).toBeVisible();
   expect(await cell.evaluate((el) => ({ adjust: getComputedStyle(el).forcedColorAdjust, image: getComputedStyle(el).backgroundImage }))).toEqual({ adjust: 'none', image: expect.stringContaining('gradient') });

@@ -74,9 +74,8 @@ struct ExplorerTableSummary {
   uint64_t active_parts = 0;
   uint64_t partitions = 0;
   std::vector<std::string> disks;
-  // Raw storage roots reported by system.tables. These are intentionally kept
-  // backend-only: they let non-MergeTree disk engines (TinyLog/Log/StripeLog)
-  // resolve their storage medium without pretending they own system.parts.
+  // Raw storage roots reported by system.tables. These values stay in the backend only.
+  // They let non-MergeTree disk engines (TinyLog, Log and StripeLog) find their storage medium. They do not mean that these engines own system.parts.
   std::vector<std::string> data_paths;
   std::string last_part_time;
 
@@ -107,12 +106,9 @@ struct ExplorerDatabaseSummary {
   std::vector<ExplorerDatabaseDisk> disks;
 };
 
-// Server-wide storage distribution used by the Explorer "System" section.
-// Byte values are local on-disk bytes (`bytes_on_disk` of active parts for
-// MergeTree families, `system.tables.total_bytes` for other disk engines).
-// Memory/Buffer/Dictionary allocations are RAM, not disk, and are therefore
-// accumulated separately in resident_bytes instead of being mixed into the
-// treemap areas.
+// Server-wide storage distribution, used by the Explorer "System" section.
+// Byte values are local on-disk bytes. For MergeTree families, these are the `bytes_on_disk` of active parts. For other disk engines, they are `system.tables.total_bytes`.
+// Memory, Buffer and Dictionary allocations are RAM and not disk. They go to resident_bytes. They do not mix into the treemap areas.
 struct ExplorerStorageTable {
   std::string name;
   std::string engine;
@@ -129,8 +125,8 @@ struct ExplorerStorageDatabase {
   // Runner-visible objects, and the subset that owns on-disk bytes.
   uint64_t objects = 0;
   uint64_t storing_tables = 0;
-  // Largest storing tables first. The list is bounded; the remainder is kept
-  // as exact aggregate counters so parent totals always reconcile.
+  // The largest storing tables come first. The list is bounded. The remainder is stored in
+  // exact aggregate counters, so that parent totals always reconcile.
   std::vector<ExplorerStorageTable> tables;
   uint64_t omitted_tables = 0;
   uint64_t omitted_bytes = 0;
@@ -144,16 +140,16 @@ struct ExplorerStorageMap {
   std::vector<ExplorerStorageDatabase> databases;
 };
 
-// A section of the Explorer that could not be read because of a missing grant: the answer degrades (the
-// figures of the section are absent) and says which grant to give.
+// A section of the Explorer that a missing grant makes unreadable. The answer degrades. The figures of the section are absent,
+// and the answer names the grant to give.
 struct ExplorerUnavailableIssue {
   std::string section;
   std::string user;
   std::string grant;
 };
 
-// A section that cannot be read for want of a grant degrades the answer; any other error stays fatal.
-// Returns true when the error is a missing grant: the section is then listed, with the grant to give.
+// A section that cannot be read because of a missing grant degrades the answer. Any other error stays fatal.
+// Returns true when the error is a missing grant. The section is then listed, with the grant to give.
 template <typename Out>
 inline bool degrade_on_denied(const std::string& section, const std::string& section_error, Out& out) {
   const auto denied = parse_access_denied(section_error);
@@ -172,12 +168,12 @@ struct ExplorerCatalog {
   std::vector<std::string> databases;
   std::vector<ExplorerDatabaseSummary> database_summaries;
   std::vector<ExplorerTableSummary> tables;
-  // One lazily expanded database: the local disks its active parts are on.
+  // One lazily expanded database: the local disks that its active parts use.
   std::vector<ExplorerDatabaseDisk> database_disks;
-  // The sections that a missing grant of the system user left out (storage, query ingress, replication...).
+  // The sections that the system user cannot read because of a missing grant (storage, query ingress, replication...).
   std::vector<std::string> unavailable_sections;
   std::vector<ExplorerUnavailableIssue> unavailable_issues;
-  // A bound of the privilege discovery stopped it: objects that were not checked are not listed.
+  // A bound of the privilege discovery stopped the discovery. Objects that were not checked are not listed.
   bool acl_truncated = false;
 };
 
@@ -204,8 +200,8 @@ struct ExplorerColumnInfo {
 struct ExplorerColumnStorageSummary {
   uint64_t compact_parts = 0;
   uint64_t wide_parts = 0;
-  // Exact parent-part footprint split by on-disk part format. These counters
-  // include the files owned by the parent part, so Browse can use them as the
+  // These counters give the exact footprint of the parent part, split by on-disk part format. The counters
+  // include the files that the parent part owns. Browse can use them as the
   // allocation basis for a composition that reconciles to bytes_on_disk.
   std::optional<uint64_t> compact_on_disk_bytes;
   std::optional<uint64_t> wide_on_disk_bytes;
@@ -251,9 +247,9 @@ struct ExplorerIndexProjectionInfo {
   std::string expression;
   std::optional<uint64_t> compressed_bytes;
   std::optional<uint64_t> uncompressed_bytes;
-  // Available for projection parts. Skipping indexes do not expose a separate
-  // bytes_on_disk counter in system.parts; their compressed bytes are accounted
-  // explicitly and the parent-part residual remains with Wide/Compact.
+  // Available for projection parts. Skipping indexes have no separate
+  // bytes_on_disk counter in system.parts. Their compressed bytes are counted
+  // explicitly, and the parent-part residual stays with Wide or Compact.
   std::optional<uint64_t> on_disk_bytes;
 };
 
@@ -283,11 +279,11 @@ struct ExplorerDependencyInfo {
   std::string database;
   std::string table;
   std::string relation;
-  // What links the two objects: materialized_view, view, buffer,
+  // The link between the two objects: materialized_view, view, buffer,
   // distributed_route or dependency (system.tables.dependencies_*).
   std::string kind = "dependency";
-  // Engine of the related object, read from system.tables once its name has
-  // passed the runner visibility check (empty when it cannot be resolved).
+  // The engine of the related object. The engine is read from system.tables after the name has
+  // passed the runner visibility check. It is empty when the engine cannot be resolved.
   std::string engine;
 };
 
@@ -329,8 +325,8 @@ struct ExplorerReplicationQueueItem {
 struct ExplorerTableDetail {
   uint64_t generated_at_ms = 0;
   ExplorerTableSummary summary;
-  // Scope totals are loaded lazily with the selected table so Browse can keep
-  // Table / Database / ClickHouse percentages without bloating the list API.
+  // Scope totals load lazily with the selected table. Browse can keep
+  // Table, Database and ClickHouse percentages so the list API stays small.
   std::optional<uint64_t> database_footprint_bytes;
   std::optional<uint64_t> clickhouse_footprint_bytes;
   std::string create_table_query;
@@ -341,10 +337,8 @@ struct ExplorerTableDetail {
   std::string distributed_cluster;
   std::string distributed_database;
   std::string distributed_table;
-  // Actual default codecs observed on active MergeTree parts. A column with no
-  // explicit CODEC() uses one of these part defaults; keeping the set avoids the
-  // misleading browser label "server default" when ClickHouse can tell us what
-  // was really written.
+  // The actual default codecs seen on active MergeTree parts. A column without an explicit CODEC() uses one of these part defaults.
+  // The set avoids the misleading browser label "server default". ClickHouse can tell the real codec that was written.
   std::vector<std::string> default_compression_codecs;
   std::vector<ExplorerColumnInfo> columns;
   ExplorerColumnStorageSummary column_storage;
@@ -386,8 +380,8 @@ struct ExplorerFunctionInfo {
   std::string introduced_in;
   std::string source;
   std::string origin;
-  // Resolved server-side before the catalog leaves the backend. The browser
-  // never follows aliases itself, which keeps recursion/cycle policy in one
+  // The server resolves this before the catalog leaves the backend. The browser
+  // never follows aliases itself. This keeps the recursion and cycle policy in one
   // bounded implementation.
   std::vector<ExplorerFunctionAliasDocument> alias_documents;
   bool user_defined = false;
@@ -412,15 +406,14 @@ struct ExplorerPreview {
 
 class AclView;
 
-// The identities of the two connections (acl_identity_key of their URIs), for the caches keyed by identity
-// (DdlTextCache).
+// The identities of the two connections, given by acl_identity_key of their URIs. The caches use these identities as keys (DdlTextCache).
 struct ExplorerIdentities {
   std::string system;
   std::string runner;
 };
 
-// The caches that the loaders of the catalog, of the graph and of the System activity share. Server owns one (the cached texts of
-// the DDL and the replica counts live as long as the server, and a test makes its own).
+// The caches that the loaders of the catalog, of the graph and of the System activity share. The server owns one cache.
+// The cached DDL texts and replica counts live as long as the server. A test creates its own cache.
 class ReplicaCountCache;
 struct ExplorerCaches {
   ExplorerCaches();
@@ -445,10 +438,9 @@ bool load_explorer_database_summaries(
     std::vector<ExplorerDatabaseSummary>& out,
     std::string* error);
 
-// Builds the storage distribution of every runner-visible object. Object names
-// come exclusively from the runner's ACL (AclView: SHOW and CHECK GRANT as the runner); the
-// system context only contributes byte/row counters for names already in that
-// boundary (one aggregated system.parts query + one system.tables query).
+// Builds the storage distribution of every runner-visible object. The object names come only from the runner's ACL
+// (AclView: SHOW and CHECK GRANT as the runner). The system context adds only byte and row counters for names already in that boundary.
+// The function runs one aggregated system.parts query and one system.tables query.
 bool load_explorer_storage_map(
     ChExecutor& system,
     ChExecutor& runner,
@@ -504,10 +496,8 @@ struct ExplorerReplicaCounts {
   uint64_t active = 0;
 };
 
-// total_replicas / active_replicas of the given replicated tables, through
-// the per-server 60 s cache shared with the catalog (each uncached table
-// costs one Keeper request). Keyed by database + '\0' + table; tables whose
-// lookup failed are absent.
+// total_replicas and active_replicas of the given replicated tables. These values come from the per-server 60 s cache shared with the catalog.
+// Each table that is not in the cache costs one Keeper request. The key is database + '\0' + table. Tables whose lookup failed are absent.
 std::unordered_map<std::string, ExplorerReplicaCounts> load_cached_replica_counts(
     ChExecutor& system,
     ExplorerCaches& caches,

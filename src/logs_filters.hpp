@@ -1,8 +1,8 @@
 #pragma once
 
-// The filters of the Logs routes, once the table is known: what the request asks (logs_request.hpp) checked against the columns that the
-// table has (otel_caches.hpp, LogsSchema) and written as a WHERE clause. The values that a user wrote are query parameters
-// (sql_params.hpp), so the clause never holds a text of a user. Pure: no clock (the caller gives `now_ms`), no ClickHouse.
+// The filters of the Logs routes apply once the table is known. The code checks what the request asks (logs_request.hpp) against the columns that the
+// table has (otel_caches.hpp, LogsSchema). It writes the result as a WHERE clause. The values that a user wrote are query parameters
+// (sql_params.hpp), so the clause never holds a text of a user. The code is pure: it reads no clock (the caller gives `now_ms`) and it does not use ClickHouse.
 
 #include "error_envelope.hpp"
 #include "logs_request.hpp"

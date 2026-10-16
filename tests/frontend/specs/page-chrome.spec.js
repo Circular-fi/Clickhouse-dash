@@ -3,15 +3,18 @@ import { expandExplorerDatabase, horizontalOverflow, runSuccessfulQuery, smallTo
 import { appReady } from '../helpers/modules.js';
 import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
-// The page shell (style.css "Page shell" block): one full-bleed chrome for
-// Query, Explorer, Observability and System. Header, then the page's nav row (40 px,
-// --nav-row-h; 41 px on a phone or a touch screen, where its tabs keep 40 px on its border), then the regions edge to edge on a flat background, split by
-// 1 px borders and inset by the 12 px gutter (10 px at --bp-md and below).
-// The document never scrolls: each page's content region is its scroller.
-// Desktop blocks run on every project (1920 / 1440 / 1280) in both themes;
-// the phone block pins 390 x 844.
+// The page shell (style.css "Page shell" block) gives one full-bleed chrome to
+// Query, Explorer, Observability and System. The header comes first, then the nav row.
+// The nav row of each page is 40 px high (--nav-row-h). On a phone or a touch screen, it is 41 px high.
+// Its tabs keep 40 px on its border.
+//
+// Below the nav row, the regions go edge to edge on a flat background.
+// The regions are split by 1 px borders and inset by the 12 px gutter (10 px at --bp-md and below).
+// The document never scrolls. The content region of each page is its scroller.
+// Desktop blocks run on every project (1920 / 1440 / 1280) in both themes.
+// The phone block pins 390 x 844.
 
-// shells: the page wrapper and the frame boxes in it, each edge to edge.
+// The shells are the page wrapper and the frame boxes in it. Each one is edge to edge.
 const PAGES = {
   query: { path: '/query', ready: '#runButton', nav: null, shells: ['#queryWorkspace', '.panel--query', '.panel--metrics', '#resultsPanel'] },
   explorer: { path: '/explorer/catalog/chdash_ui/weather_observations/columns', ready: '#explorerDetailName', nav: '#explorerTopBar', shells: ['#explorerWorkspace', '.explorerShell', '.explorerGrid:not([hidden])', '#explorerCatalogMain'] },
@@ -30,7 +33,7 @@ async function open(page, name) {
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
-// Geometry and style of the chrome, in one pass.
+// This section sets the geometry and the style of the chrome in one pass.
 function chrome({ nav: navSelector, shells: shellSelectors }) {
   const box = (el) => {
     if (!el) return null;
@@ -49,14 +52,14 @@ function chrome({ nav: navSelector, shells: shellSelectors }) {
   const header = document.querySelector('body > .appHeader');
   const nav = navSelector ? document.querySelector(navSelector) : null;
   const main = document.querySelector('main[role="main"]:not([hidden])');
-  // Scroll containers above the chrome: none, so the chrome never scrolls away.
+  // There are no scroll containers above the chrome. So the chrome never scrolls away.
   const scrollingAncestor = (el) => {
     for (let node = el?.parentElement; node && node !== document.documentElement; node = node.parentElement) {
       if (/(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node.id || node.className;
     }
     return null;
   };
-  // The page frame: none of its boxes is a rounded, shadowed or inset card.
+  // The page frame has no rounded, shadowed or inset card. None of its boxes is a card.
   const vw = window.innerWidth;
   const shells = shellSelectors.map((selector) => document.querySelector(selector))
     .filter((el) => el && el.getClientRects().length)
@@ -64,7 +67,7 @@ function chrome({ nav: navSelector, shells: shellSelectors }) {
       const s = getComputedStyle(el);
       return { el: el.id || String(el.className).split(' ')[0], radius: parseFloat(s.borderTopLeftRadius) || 0, shadow: s.boxShadow, margin: s.margin };
     });
-  // The frame boxes, laid side by side or stacked, cover the width edge to edge.
+  // The frame boxes cover the width edge to edge. They are side by side or stacked.
   const frameRight = Math.max(...shellSelectors.map((selector) => document.querySelector(selector))
     .filter((el) => el && el.getClientRects().length).map((el) => el.getBoundingClientRect().right));
   const se = document.scrollingElement;
@@ -93,9 +96,8 @@ async function measure(page, name) {
 }
 
 function expectFrame(m, name, gutter) {
-  // Full bleed: the page wrapper spans the viewport from x = 0, right under
-  // the header (#explorerTopBar and the System tab row are its first row;
-  // #obsNav sits before it).
+  // Full bleed: the page wrapper spans the viewport from x = 0. It is right under the header.
+  // #explorerTopBar and the System tab row are its first row. #obsNav is before it.
   expect(m.main.x, name).toBe(0);
   expect(Math.round(m.main.w), name).toBe(m.vw);
   const chromeBottom = m.nav ? m.nav.bottom : m.header.bottom;
@@ -107,12 +109,12 @@ function expectFrame(m, name, gutter) {
     expect(shell.shadow, `${name}: ${shell.el} shadow`).toBe('none');
     expect(shell.margin, `${name}: ${shell.el} margin`).toBe('0px');
   }
-  // The header and the nav row: the same inset, separator and surface.
+  // The header and the nav row have the same inset, separator and surface.
   expect(m.headerPad, name).toBe(gutter);
   expect(m.headerBorder, name).toEqual(['1px', m.tokens.border]);
   if (m.nav) {
-    // 40 px, 41 on a phone (the tabs standing on its 1 px border keep 40 px of hit area); on a phone the Explorer's Catalog
-    // modes and the System section's controls may take a line of their own.
+    // The row is 40 px high, or 41 px on a phone. The tabs on its 1 px border keep 40 px of hit area.
+    // On a phone, the Explorer's Catalog modes and the System section's controls can take a line of their own.
     const navH = m.vw <= 760 ? 41 : 40;
     if ((name === 'explorer' || name === 'system') && m.vw <= 600) expect(Math.round(m.nav.h), `${name} nav row height`).toBeGreaterThanOrEqual(navH);
     else expect(Math.round(m.nav.h), `${name} nav row height`).toBe(navH);
@@ -120,7 +122,7 @@ function expectFrame(m, name, gutter) {
     expect(m.navPad, name).toBe(gutter);
     expect(m.navStyle, name).toEqual(['1px', m.tokens.border, m.tokens.panel]);
   }
-  // Flat page background; the document never scrolls, the chrome is outside every scroller.
+  // The page background is flat. The document never scrolls. The chrome is outside every scroller.
   expect(m.bodyBg, name).toEqual(['none', m.tokens.bg]);
   expect(m.doc.overflowY, name).toBe('hidden');
   expect(m.doc.bodyOverflowY, name).toBe('hidden');
@@ -128,7 +130,7 @@ function expectFrame(m, name, gutter) {
   expect(m.chromeScroller, name).toEqual([null, null]);
   // No horizontal overflow.
   expect(m.doc.sw, name).toBeLessThanOrEqual(m.vw);
-  // --shell-top: the bottom of the header and the nav row (app_dom.js).
+  // --shell-top is the bottom of the header and the nav row (app_dom.js).
   expect(m.shellTop, name).toBe(`${Math.round(chromeBottom)}px`);
 }
 
@@ -180,17 +182,17 @@ for (const theme of ['dark', 'light']) {
       expect(Math.abs(m.rail.x - m.editor.right)).toBeLessThanOrEqual(0.5);
       expect(Math.abs(m.results.y - m.editor.bottom)).toBeLessThanOrEqual(0.5);
       expect(new Set(m.panelBg).size).toBe(1);
-      // The gutter: the editor, its toolbar and the results header start 12 px in.
+      // The gutter applies to the editor, its toolbar and the results header. They start 12 px in.
       expect(m.editorWrap.x).toBe(12);
       expect(m.status.x).toBe(12);
       expect(m.title.x).toBe(12);
-      // The results header row lines up with the editor toolbar: same inset,
-      // a nav-row height, a separator, then the table edge to edge.
+      // The results header row lines up with the editor toolbar. It has the same inset.
+      // It has the height of a nav row and a separator. Then the table goes edge to edge.
       expect(Math.round(m.header.h)).toBe(40);
       expect(m.headerBorder).toBe('1px');
       expect(m.table.x).toBe(0);
       expect(m.tableBorder).toEqual(['0px', '0px']);
-      // One scroller: the workspace, under a header that stays put.
+      // The workspace is the one scroller. It is under a header that stays in place.
       expect(m.scroll.overflowY).toBe('auto');
       expect(m.scroll.sh).toBeGreaterThan(m.scroll.ch);
       const before = await page.locator('body > .appHeader').boundingBox();
@@ -198,7 +200,7 @@ for (const theme of ['dark', 'light']) {
       expect(await page.locator('#queryWorkspace').evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
       expect(await page.locator('body > .appHeader').boundingBox()).toEqual(before);
       expect(await page.evaluate(() => document.scrollingElement.scrollTop)).toBe(0);
-      // The editor / results split still resizes.
+      // The split between the editor and the results still resizes.
       const wrap = page.locator('.editorWrap');
       await page.locator('#queryWorkspace').evaluate((el) => { el.scrollTop = 0; });
       const initial = await wrap.boundingBox();
@@ -233,9 +235,9 @@ for (const theme of ['dark', 'light']) {
       expect(m.treeBorder).toBe('1px');
       expect(Math.abs(m.main.x - m.tree.right)).toBeLessThanOrEqual(0.5);
       expect(Math.round(m.main.right)).toBe(m.vw);
-      // One row: 40 px, the gutter, the separator; the tabs sit 12 px in,
-      // then the divider and Browse | Graph, on the same line, standing on
-      // the row's bottom border like the view tabs (second-level sections).
+      // One row has these parts: 40 px, the gutter and the separator. The tabs sit 12 px in.
+      // Then come the divider and Browse | Graph, on the same line.
+      // They stand on the bottom border of the row, like the view tabs (second-level sections).
       expect(m.rows[0].slice(0, 3)).toEqual(['40px', '12px', '1px']);
       expect(Math.round(m.top.h)).toBe(40);
       expect(m.navTabs.y).toBeGreaterThanOrEqual(m.top.y);
@@ -249,7 +251,7 @@ for (const theme of ['dark', 'light']) {
       // The tree starts under the row.
       expect(Math.abs(m.tree.y - m.top.bottom)).toBeLessThanOrEqual(1);
       expect(m.detailPad).toBe('12px');
-      // The card's Storage tab and Graph keep the frame; Functions mirrors the tree.
+      // The Storage tab and the Graph of the card keep the frame. Functions mirrors the tree.
       await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Storage' }).click();
       await expect(page.locator('#explorerDetailTabs [aria-selected="true"]')).toHaveText('Storage');
       expectFrame(await measure(page, 'explorer'), 'explorer storage tab', 12);
@@ -279,9 +281,8 @@ test.describe('page chrome on a phone', () => {
     }
     expect(new Set(Object.values(headers)).size, JSON.stringify(headers)).toBe(1);
 
-    // Explorer: the tree drawer opens under the nav row (Browse | Graph on
-    // the row's own line); the Functions overview scrolls inside its pane,
-    // never the document.
+    // Explorer: the tree drawer opens under the nav row. Browse | Graph is on the row's own line.
+    // The Functions overview scrolls inside its pane. It never scrolls the document.
     await page.goto('/explorer/catalog');
     await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
     const toggle = page.locator('#explorerTreeToggle');
@@ -305,22 +306,22 @@ test.describe('page chrome on a phone', () => {
   });
 });
 
-// Touch screens (docs/ui-foundations.md, "Touch and phones"): on a coarse
-// pointer every control takes 40 px or more on both axes, on phones and the
-// tablet alike, and no page scrolls sideways.
+// Touch screens (docs/ui-foundations.md, "Touch and phones") have a coarse pointer.
+// On a coarse pointer, every control takes 40 px or more on both axes. This applies to phones and tablets.
+// No page scrolls sideways.
 const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
 const TOUCH_STATES = {
   query: async (page) => {
     await page.goto('/query');
     await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
     await runSuccessfulQuery(page, 'SELECT city, count() AS n, round(avg(temperature_c), 2) AS avg_t FROM chdash_ui.weather_observations GROUP BY city ORDER BY n DESC');
-    // The suggestions of the last typed word (DESC) may still be on their way: dismiss them, so the
-    // audit never meets the transient popup (its rows are not page controls).
+    // The suggestions of the last typed word (DESC) can still be on their way. Dismiss them.
+    // Then the audit never meets the transient popup. Its rows are not page controls.
     await page.locator('#queryTextArea').evaluate((el) => el.blur());
     await page.keyboard.press('Escape');
     await expect(page.locator('.autocompleteMenu:visible')).toHaveCount(0);
   },
-  // The profiling dialog: the pipeline's controls, then the tracing tree's toggles.
+  // The profiling dialog has the pipeline's controls. Then it has the toggles of the tracing tree.
   pipeline: async (page) => {
     await page.goto('/query');
     await expect(page.locator('#runButton')).toBeEnabled({ timeout: 15_000 });
@@ -333,23 +334,23 @@ const TOUCH_STATES = {
     await expect(page.locator('#analysisModal .traceViewer__toggle').first()).toBeVisible({ timeout: 15_000 });
   },
   explorer: (page) => open(page, 'explorer'),
-  // All databases: the overview table's database links.
+  // All databases: the database links of the overview table.
   databases: async (page) => {
     await page.goto('/explorer/catalog');
     await expect(page.locator('#explorerDatabasesOverview .explorerDatabaseObjectsTable__open').first()).toBeVisible({ timeout: 15_000 });
-    // The tree drawer (it opens on a phone) closed, its slide over.
+    // Close the tree drawer. It opens on a phone. Wait until its slide is over.
     await page.keyboard.press('Escape');
     await expect.poll(() => page.locator('#explorerListPane').evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
   },
-  // A database page: its objects table's links.
+  // A database page: the links of its objects table.
   database: async (page) => {
     await page.goto('/explorer/catalog/chdash_ui');
     await expect(page.locator('#explorerDatabaseObjects .explorerDatabaseObjectsTable__open').first()).toBeVisible({ timeout: 15_000 });
-    // The tree drawer (it opens on a phone) closed, its slide over.
+    // Close the tree drawer. It opens on a phone. Wait until its slide is over.
     await page.keyboard.press('Escape');
     await expect.poll(() => page.locator('#explorerListPane').evaluate((el) => el.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
   },
-  // The Functions overview: the popular chips and the Categories grid.
+  // The Functions overview has the popular chips and the Categories grid.
   functions: async (page) => {
     await page.goto('/explorer/functions');
     await expect(page.locator('#explorerFunctionCategories .explorerFunctionOverview__category').first()).toBeVisible({ timeout: 15_000 });
@@ -360,12 +361,12 @@ const TOUCH_STATES = {
     await expect(page.locator('#systemTopology')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('#systemDatabaseMap .explorerTreemap__node, #systemDatabaseStrip .explorerStorageStrip__segment').first()).toBeVisible({ timeout: 20_000 });
   },
-  // The Overview's charts and activity, scrolled into view.
+  // Scroll the Overview's charts and activity into view.
   performance: async (page) => {
     await page.goto('/system#performance');
     await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.systemActivitySection').first()).toBeVisible({ timeout: 20_000 });
-    // The part's heading at the top of the scroller: no control cut by its edge.
+    // The heading of the part is at the top of the scroller. No control is cut by its edge.
     await page.locator('#systemPart-performance').evaluate((el) => el.scrollIntoView({ block: 'start' }));
   },
   activity: async (page) => {
@@ -392,7 +393,7 @@ const TOUCH_STATES = {
     await page.goto(`/observability/traces/${trace.trace_id}`);
     await expect(page.locator('#traceWaterfall .traceSpanRow')).toHaveCount(trace.spans.length, { timeout: 20_000 });
   },
-  // A span open: the inspector's summaries and copy buttons (its title row is the trace views').
+  // A span is open. This checks the inspector's summaries and copy buttons. Its title row is the title row of the trace views.
   span: async (page) => {
     const trace = nestedTrace();
     await routeTrace(page, trace);
@@ -424,7 +425,7 @@ test.describe('touch screens', () => {
         const { only = '' } = (await show(page)) || {};
         await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), name).toBe(true);
-        // A treemap rectangle or a strip segment (the size bands) is as large as its share of the data.
+        // A treemap rectangle or a strip segment (the size bands) has the size of its share of the data.
         expect(await smallTouchTargets(page, { skip: ['.explorerTreemap__node', '.explorerStorageStrip__segment'], only }), `${name} @ ${size.width}`).toEqual([]);
         expect(await horizontalOverflow(page), `${name} @ ${size.width}`).toBeLessThanOrEqual(0);
       }
@@ -442,7 +443,7 @@ test.describe('touch screens', () => {
     await nav.evaluate((el) => { el.scrollLeft = el.scrollWidth; });
     await expect(nav).toHaveClass(/has-edge-start/);
     await expect(nav).not.toHaveClass(/has-edge-end/);
-    // A row that fits carries no cue.
+    // A row that fits has no cue.
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(nav).not.toHaveClass(/has-edge-(start|end)/);
   });

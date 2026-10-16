@@ -56,8 +56,8 @@ static std::string build_hosts_json(const HostsSnapshot& snap) {
     w.Key("processors_profile_log"); w.Bool(h.system_tables.processors_profile_log);
     w.Key("opentelemetry_span_log"); w.Bool(h.system_tables.opentelemetry_span_log);
     w.EndObject();
-    // What each identity may do (CHECK GRANT): a host is healthy when it answers, and this says whether
-    // its users can do the work. "warnings" is empty when nothing is missing.
+    // This shows what each identity may do (CHECK GRANT). A host is healthy when it answers.
+    // This value says whether its users can do the work. "warnings" is empty when nothing is missing.
     w.Key("access");
     w.StartObject();
     w.Key("checked"); w.Bool(h.access.checked);
@@ -101,8 +101,8 @@ void Server::handle_api_hosts(const httplib::Request&, httplib::Response& res) {
 void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response& res) {
   if (!health_) return json_error(res, 500, "no_runner", "health runner not initialized");
 
-  // The chunked response callback sets Content-Type once. Avoid duplicate header
-  // values, which are legal at the HTTP layer but break strict SSE clients.
+  // The chunked response callback sets Content-Type once. Do not send duplicate header
+  // values. The HTTP layer allows them, but strict SSE clients fail on them.
   res.set_header("Cache-Control", "no-cache");
   res.set_header("Connection", "keep-alive");
   res.set_header("X-Accel-Buffering", "no");
@@ -116,8 +116,8 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
     std::chrono::steady_clock::time_point last_hosts_emit{};
   };
 
-  // Each open stream holds a worker thread. Past max_host_streams the page gets 503 and polls
-  // GET /api/hosts instead (app_ui.js startHostsSse), so the threads stay for the queries.
+  // Each open stream holds a worker thread. Past max_host_streams, the page gets 503 and polls
+  // GET /api/hosts instead (app_ui.js startHostsSse). This keeps the threads for the queries.
   if (active_host_streams_.fetch_add(1) >= cfg_.server.max_host_streams) {
     active_host_streams_.fetch_sub(1);
     return json_error(res, 503, "too_many_streams", "too many host status streams are open: poll /api/hosts");
@@ -135,7 +135,7 @@ void Server::handle_api_hosts_stream(const httplib::Request&, httplib::Response&
   res.set_chunked_content_provider(
       "text/event-stream; charset=utf-8",
       [st, runner, this](size_t, httplib::DataSink& sink) {
-        // The server stops (Server::stop): the stream ends, the page reconnects to another replica or polls.
+        // The server stops (Server::stop). The stream ends. The page reconnects to another replica or polls.
         if (stopping()) {
           sink.done();
           return true;

@@ -1,21 +1,23 @@
-// The values of a result, with no page behind them (docs/telemetry.md, "Result values"): how the API sends them, how they
-// are parsed, written as text (a cell, a copy, JSON, CSV), their types, the flattening of a tuple and the figures of a
-// numeric column. The Node unit tests run this module in a bare context (tests/frontend/model/results-values.test.cjs).
+// This module covers the values of a result (docs/telemetry.md, "Result values").
+// It covers how the API sends the values, and how the module parses them.
+// It covers how the module writes them as text (a cell, a copy, JSON, CSV).
+// It also covers their types, the flattening of a tuple, and the figures of a numeric column.
+// The Node unit tests run this module in a bare context (tests/frontend/model/results-values.test.cjs).
 
 import { sqlLex } from "./app_sql_lex.js";
 import { state } from "./app_state.js";
 
 const NUMERIC_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
 
-// A JSON number that a double cannot keep as written (12345678901234567890, 1.500, 1e100): its text.
+// A JSON number that a double cannot keep as written (12345678901234567890, 1.500, 1e100). The value is its text.
 class JsonNumber {
   constructor(text) { this.text = text; }
   toString() { return this.text; }
   valueOf() { return Number(this.text); }
 }
 
-// A JSON object read from text, as [key, value] pairs in their order: a JavaScript object would
-// put the keys that are numbers first ({"10":1,"2":2} reads {"2":2,"10":1}).
+// A JSON object read from text, as [key, value] pairs in their order.
+// A JavaScript object puts the keys that are numbers first. For example, {"10":1,"2":2} reads as {"2":2,"10":1}.
 class JsonObject {
   constructor(entries) { this.entries = entries; }
 }
@@ -28,8 +30,8 @@ function exactNumber(text) {
   return Number.isFinite(n) && String(n) === text;
 }
 
-// Whether JSON.parse would change the text: a number that a double does not keep as written, or
-// an object key that JavaScript reorders. One linear scan; the usual text has neither.
+// Check whether JSON.parse changes the text. It changes a number that a double does not keep as written.
+// It also changes an object key that JavaScript reorders. The check uses one linear scan. The usual text has neither.
 function jsonParseChanges(text) {
   const n = text.length;
   let i = 0;
@@ -62,8 +64,8 @@ function jsonParseChanges(text) {
   return false;
 }
 
-// JSON text to values without loss: objects are JsonObject, a number a double cannot keep is a
-// JsonNumber. Throws on text that is not JSON.
+// Parse JSON text to values without loss. An object becomes a JsonObject. A number that a double cannot keep becomes a JsonNumber.
+// The function throws on text that is not JSON.
 function parseJsonLossless(text) {
   const n = text.length;
   let i = 0;
@@ -146,7 +148,7 @@ function parseJsonLossless(text) {
   return out;
 }
 
-// The values of JSON text, or undefined when the text is not JSON (the text is then shown as is).
+// The values of JSON text. The function returns undefined when the text is not JSON. The caller then shows the text as it is.
 function parseJsonText(text) {
   try {
     return jsonParseChanges(text) ? parseJsonLossless(text) : JSON.parse(text);
@@ -155,22 +157,22 @@ function parseJsonText(text) {
   }
 }
 
-// A column whose value has a structure: Array, Map, Tuple, or a type that holds any JSON value.
+// A column with a structure: Array, Map, Tuple, or a type that holds any JSON value.
 function isStructuredType(ast) {
   if (!ast) return false;
   if (ast.kind !== "Scalar") return true;
   return /^(?:JSON|Object\s*\(|Dynamic|Variant\s*\(|Nested\s*\()/i.test(String(ast.name || ""));
 }
 
-// The value of a cell of a structured column that arrived as JSON text, parsed; any other value
-// as it is.
+// Parse the value of a cell in a structured column when the value arrived as JSON text.
+// Any other value stays as it is.
 function decodeStructuredText(value, ast) {
   if (typeof value !== "string" || !isStructuredType(ast)) return value;
   const parsed = parseJsonText(value);
   return parsed === undefined ? value : parsed;
 }
 
-// The text of a scalar value: a string as it is, a number or a boolean as JavaScript writes it.
+// The text of a scalar value. A string stays as it is. A number or a boolean is written as JavaScript writes it.
 function scalarText(value) {
   if (typeof value === "string") return value;
   if (value instanceof JsonNumber) return value.text;
@@ -181,8 +183,8 @@ function isScalarValue(value) {
   return value === null || typeof value !== "object" || value instanceof JsonNumber;
 }
 
-// The [key, value] pairs of a value written as a JSON object, or null for a list. A Map arrives as
-// pairs and is written as an object in its stored order; a named Tuple as an object of its fields.
+// The [key, value] pairs of a value that is written as a JSON object. The function returns null for a list.
+// A Map arrives as pairs, and is written as an object in its stored order. A named Tuple is written as an object of its fields.
 function objectEntries(value, ast) {
   if (value instanceof JsonObject) return value.entries;
   if (Array.isArray(value)) {
@@ -199,7 +201,7 @@ function objectEntries(value, ast) {
   return null;
 }
 
-// The type of the value at `key` / `index` inside a value of type `ast`.
+// The type of the value at `key` or `index` inside a value of type `ast`.
 function childType(ast, index, key) {
   if (!ast) return null;
   if (ast.kind === "Array") return ast.inner || null;
@@ -219,10 +221,10 @@ function childType(ast, index, key) {
 
 const JSON_NUMBER_TEXT = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 
-// A value as JSON text: `indent` 0 is compact (JSON.stringify's spelling), else that many spaces per
-// level. The digits of a number type (a UInt64, a Decimal: strings from the API) and a JsonNumber
-// are written as a JSON number, exactly; nan and inf stay strings (JSON has no such number). A
-// value of a Map or named Tuple type is an object.
+// A value as JSON text. The `indent` value 0 gives compact text, as JSON.stringify writes it.
+// Any other `indent` value gives that many spaces per level.
+// The API sends the digits of a number type (a UInt64, a Decimal) as strings. The writer writes these digits, and a JsonNumber, as a JSON number, exactly.
+// nan and inf stay strings, because JSON has no such number. A value of a Map type or a named Tuple type is an object.
 function jsonText(value, ast = null, indent = 0) {
   const out = [];
   const colon = indent ? ": " : ":";
@@ -261,14 +263,14 @@ function jsonText(value, ast = null, indent = 0) {
   return out.join("");
 }
 
-// The text of a cell: a scalar as it is, a structure as compact JSON. null for SQL NULL.
+// The text of a cell. A scalar stays as it is. A structure becomes compact JSON. The function returns null for SQL NULL.
 function valueText(value, ast) {
   if (value === null || value === undefined) return null;
   return isScalarValue(value) ? scalarText(value) : jsonText(value, ast, 0);
 }
 
-// The rows of a result as JSON: an array of objects (column: value), or of arrays when two columns
-// have the same name (an object would lose one). Copy JSON, Download JSON, Copy row and Debug use it.
+// The rows of a result as JSON. The result is an array of objects (column: value).
+// It is an array of arrays when two columns have the same name, because an object would lose one. Copy JSON, Download JSON, Copy row and Debug use this function.
 function rowsAst(columns, asts) {
   const names = columns.map((column) => String(column ?? ""));
   const unique = new Set(names).size === names.length;
@@ -280,9 +282,9 @@ function resultJsonText(columns, asts, rows, indent = 2) {
   return jsonText(rows, rowsAst(columns, asts), indent);
 }
 
-// What Copy JSON puts on the clipboard: the same values, without the wrapping that says nothing. One row is its
-// object, not a list of one; one column is its values, not objects of one key; one row of one column is the
-// value itself. Download JSON keeps the list of objects (a program reads the same shape for every result).
+// The text that Copy JSON puts on the clipboard. It has the same values, without the wrapping.
+// One row gives its object, not a list of one row. One column gives its values, not objects of one key.
+// One row of one column gives the value itself. Download JSON keeps the list of objects. A program reads the same shape for every result.
 function resultCopyJsonText(columns, asts, rows, indent = 2) {
   const oneRow = rows.length === 1;
   if (columns.length === 1) {
@@ -294,9 +296,9 @@ function resultCopyJsonText(columns, asts, rows, indent = 2) {
   return jsonText(rows[0], rowsAst(columns, asts).row, indent);
 }
 
-// CSV (RFC 4180): a field is quoted only when it has to be; a NULL is a bare \N, as ClickHouse
-// writes CSV, and a text that is exactly \N is quoted so it never reads as NULL. A structure is
-// its compact JSON. Copy CSV, Download CSV and the Debug archive use it.
+// CSV (RFC 4180). A field is quoted only when it must be quoted.
+// A NULL is a bare \N, as ClickHouse writes CSV. A text that is exactly \N is quoted, so it never reads as NULL.
+// A structure is its compact JSON. Copy CSV, Download CSV and the Debug archive use this function.
 function csvField(text) {
   if (text === null) return "\\N";
   const quote = text === "\\N" || /[",\r\n]/.test(text) || /^[ \t]|[ \t]$/.test(text);
@@ -322,7 +324,7 @@ function resultCsvText(columns, asts, rows) {
   return lines.join("\n");
 }
 
-// A result snapshot (getSnapshot: flattened columns, their types, the rows) as JSON or CSV.
+// The function converts a result snapshot (getSnapshot: flattened columns, their types, the rows) to JSON or CSV.
 function snapshotParts(snapshot) {
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
   const columns = Array.isArray(snap.columns) ? snap.columns.map((column) => String(column ?? "")) : [];
@@ -341,8 +343,8 @@ const serialize = {
   },
 };
 
-// The parts of a type's arguments, cut where the separator is outside a parenthesis, a string and a name (the one SQL
-// lexer, app_sql_lex.js): Enum8('a,b' = 1, 'c' = 2) has two parts.
+// The parts of a type's arguments. The function cuts the text at each separator that is outside a parenthesis, a string and a name.
+// It uses the one SQL lexer (app_sql_lex.js). For example, Enum8('a,b' = 1, 'c' = 2) has two parts.
 function splitTopLevel(str, sepChar) {
   return sqlLex.splitTopLevel(str, sepChar).map((part) => part.text);
 }
@@ -446,7 +448,7 @@ function createTupleFlattenPlan(columns, types, enabled = state.runOptFlattenTup
   const safeTypes = Array.isArray(types) ? types.map((type) => String(type ?? "")) : [];
   const descriptors = [];
   const tupleColumnIndexes = [];
-  // Structured columns that may arrive as JSON text (decodeStructuredText).
+  // Structured columns that can arrive as JSON text (decodeStructuredText).
   const decodes = [];
   let changed = false;
 
@@ -457,10 +459,10 @@ function createTupleFlattenPlan(columns, types, enabled = state.runOptFlattenTup
     return false;
   };
 
-  // Return leaf projections for every Tuple nested directly or below one or
-  // more Array wrappers. Array wrappers are preserved: Array(Tuple(a UInt64,
-  // b String)) becomes two display columns named .a/.b with types
-  // Array(UInt64)/Array(String), without exploding rows.
+  // Return the leaf projections of every Tuple. The Tuple is nested directly, or below one or more Array wrappers.
+  // The function keeps the Array wrappers.
+  // For example, Array(Tuple(a UInt64, b String)) gives two display columns. Their names are .a and .b.
+  // Their types are Array(UInt64) and Array(String). The rows do not explode.
   const collectTupleLeaves = (ast) => {
     if (!ast) return [];
 
@@ -541,9 +543,9 @@ function createTupleFlattenPlan(columns, types, enabled = state.runOptFlattenTup
   };
 }
 
-// A row as the tables keep it: the JSON text of a structured column parsed once
-// (decodeStructuredText), then the Tuple columns split into their fields when the
-// plan flattens them. A row that needs neither is the row the server sent.
+// The function returns a row as the tables keep it.
+// It parses the JSON text of a structured column once (decodeStructuredText).
+// Then it splits the Tuple columns into their fields, when the plan flattens them. A row that needs neither change stays as the server sent it.
 function flattenTupleRow(row, plan) {
   if (!plan) return row;
   const decodes = Array.isArray(plan.decodes) ? plan.decodes : [];
@@ -585,11 +587,11 @@ function extractFiniteNumber(raw) {
   return Number.isFinite(n) ? n : null;
 }
 
-// The bar spans the column's range from its baseline: 0 for a column
-// without negatives (bars stay proportional to the values), else its most
-// negative value. With -10, -3, 0, 5, 12 the -10 cell is empty and the 12
-// cell full. `max` / `min` are the column's max(0, largest) and
-// min(0, smallest).
+// The bar spans the range of the column, from its baseline.
+// The baseline is 0 for a column without negatives. Then the bars stay proportional to the values.
+// Otherwise, the baseline is the most negative value.
+// With -10, -3, 0, 5, 12, the -10 cell is empty and the 12 cell is full.
+// `max` and `min` are the column's max(0, largest) and min(0, smallest).
 function computeGaugeScale(n, max, min) {
   const range = max - min;
   if (!(range > 0) || n === null || n === undefined) return 0;
@@ -610,7 +612,7 @@ function extractDecimalScale(raw) {
     return dot >= 0 ? Math.max(0, s.length - dot - 1) : 0;
   }
   if (typeof raw !== "string") return 0;
-  // Most cells have no dot (integers): no trim, no RegExp.
+  // Most cells have no dot, because they are integers. The code skips the trim and the RegExp for them.
   if (raw.indexOf(".") < 0) return 0;
   const s = raw.trim();
   if (!s) return 0;
@@ -648,11 +650,11 @@ function formatNumericCellText(raw, colIndex, scaleArr) {
   return formatNumericWithScale(raw, scale);
 }
 
-// In-cell bar of a Query result cell (ns.table.cellBar): every numeric
-// value, from the column's lowest value: (v - min) / (max - min), so the
-// lowest value has an empty bar and a constant column no fill. The bars are
-// drawn once, when the stream has ended (gaugesEnabled), from the minimum
-// and maximum of the final rows; NULL has none.
+// The in-cell bar of a Query result cell (ns.table.cellBar).
+// The bar starts at the lowest value of the column: (v - min) / (max - min).
+// So the lowest value has an empty bar. A constant column has no fill.
+// The bars are drawn once, when the stream has ended (gaugesEnabled).
+// They use the minimum and maximum of the final rows. NULL has no bar.
 function queryBarPercent(n, min, max) {
   if (n === null || n === undefined) return null;
   const range = max - min;
@@ -669,8 +671,8 @@ function isScalarNumericType(typeAst) {
   return false;
 }
 
-// Copy cell: a scalar as it is (a string raw, the digits of a UInt64), a structure as indented JSON,
-// NULL as nothing.
+// Copy cell. A scalar stays as it is (a string raw, the digits of a UInt64). A structure becomes indented JSON.
+// NULL becomes nothing.
 function buildCopyValue(value, ast) {
   if (value === null || value === undefined) return "";
   return isScalarValue(value) ? scalarText(value) : jsonText(value, ast, 2);

@@ -60,12 +60,13 @@ query_library {
 mcp {
   enabled = true
 
-  key {
-    name      = "smoke"
-    secret    = "5a0c0000-0000-4000-8000-000000000012"
-    hosts     = ["unreachable"]
-    tools     = ["list_hosts"]
-    databases = ["*"]
+  mcp_key "smoke" {
+    token_env  = "CHDASH_SMOKE_KEY"
+    tools      = ["list_hosts"]
+    scope {
+      hosts     = ["unreachable"]
+      databases = ["*"]
+    }
   }
 }
 
@@ -73,8 +74,17 @@ clickhouse {
   host {
     name       = "unreachable"
     label      = "Unreachable ClickHouse"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse.invalid:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse.invalid:9000"
-    mcp_uri    = "clickhouse://chdash_mcp:mcp_test@clickhouse.invalid:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse.invalid:9000"
+    system_uri = "clickhouse://chdash_system@clickhouse.invalid:9000"
+    mcp_uri    = "clickhouse://chdash_mcp@clickhouse.invalid:9000"
+    # The secrets come from the environment: the smoke test sets these variables (SMOKE_ENV of release_smoke.py).
+    runner_password_env = "CHDASH_SMOKE_RUNNER_PASSWORD"
+    system_password_env = "CHDASH_SMOKE_SYSTEM_PASSWORD"
+    mcp_password_env    = "CHDASH_SMOKE_MCP_PASSWORD"
   }
+}
+
+# The access of humans (docs/access.md): no gateway in front of this server, so no check.
+access {
+  mode = "open"
 }

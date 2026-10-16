@@ -1,4 +1,4 @@
-// The adapter of src/wasm/chartprep.c (src/static/wasm/chartprep.wasm): the general path of the Query chart model
+// The adapter of src/wasm/chartprep.c (src/static/wasm/chartprep.wasm). It is the general path of the Query chart model
 // (app_query_chart.js, generalPathJs).
 //
 //   ops.chartprep.general(kernel, { X, n, series, codes, groupSlotOf, groupCount, perSeries, categoryCount })

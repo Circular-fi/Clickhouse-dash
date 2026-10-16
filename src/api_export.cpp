@@ -166,10 +166,10 @@ struct ClientDisconnected final : public std::runtime_error {
 
 std::shared_ptr<clickhouse::Client> make_export_client(const std::string& runner_uri, int receive_timeout_ms,
                                                        std::string* error) {
-  // A streamed export owns its native socket. Never return a partially-canceled
-  // multi-terabyte connection to the interactive pool. receive_timeout_ms (export
-  // block): a statement that sends nothing for that long fails; 0 = no limit. The
-  // socket has TCP keepalive, so a peer that is gone is seen without it.
+  // A streamed export owns its native socket.
+  // Never return a partly canceled connection of several terabytes to the interactive pool.
+  // receive_timeout_ms (export block): a statement that sends nothing for that long fails. The value 0 means no limit.
+  // The socket has TCP keepalive. So a peer that is gone is seen without the timeout.
   const auto receive = std::chrono::milliseconds(std::max(0, receive_timeout_ms));
   return make_client_from_uri(
       runner_uri,
@@ -179,8 +179,8 @@ std::shared_ptr<clickhouse::Client> make_export_client(const std::string& runner
       error);
 }
 
-// KILL QUERY for one exported statement, through the system account like the cancel of a run (docs/configuration.md,
-// "Authorization model"): the runner has no KILL QUERY grant, and the statement is stopped by the account that holds it.
+// KILL QUERY stops one exported statement. It uses the system account, like the cancel of a run (docs/configuration.md,
+// "Authorization model"). The runner has no KILL QUERY grant. The system account holds that grant and stops the statement.
 void cancel_export_best_effort(
     const HostSpec& host,
     const std::string& query_id) {
@@ -189,11 +189,10 @@ void cancel_export_best_effort(
   kill_queries(uri, "query_id = " + sql::quote_string(query_id), false);
 }
 
-// While an exported statement runs, a thread checks the download every second. A
-// statement that sends nothing for a long time (a long DDL, OPTIMIZE FINAL, a
-// mutation with mutations_sync) never reaches the callbacks that see a closed
-// download: the watchdog stops it with KILL QUERY, so an abandoned export gives
-// its slot back at once.
+// While an exported statement runs, a thread checks the download every second.
+// A statement can send nothing for a long time. Examples are a long DDL, OPTIMIZE FINAL, or a mutation with mutations_sync.
+// Such a statement never reaches the callbacks that see a closed download.
+// The watchdog stops it with KILL QUERY. So an abandoned export gives its slot back at once.
 class DownloadWatchdog {
  public:
   DownloadWatchdog(std::function<bool()> download_open, std::function<void()> on_closed)
@@ -237,8 +236,8 @@ class DownloadWatchdog {
   std::thread thread_;
 };
 
-// The objects of the runner come from its ACL (AclService, shared with the other pages); the run and the stream ask it
-// both, which costs one discovery per identity and TTL, not one per request.
+// The objects of the runner come from its ACL (AclService, shared with the other pages). The run and the stream both ask it.
+// This costs one discovery per identity and TTL. It does not cost one discovery per request.
 bool preflight_export_metadata(
     const HostSpec& host,
     const std::shared_ptr<ClickHouseClientPool>& pool,
@@ -279,19 +278,17 @@ bool preflight_export_metadata(
 
   if (!flush_logs) return true;
   try {
-    // The streamed archive treats execution.csv as required metadata. Validate
-    // the exact privilege before the HTTP download begins so a missing grant
-    // cannot produce a superficially successful ZIP with collector_error.
-    // CHECK GRANT validates it without performing a server-wide flush; the
-    // collector flushes later only if a query_log row is actually missing.
+    // The streamed archive treats execution.csv as required metadata. Validate the exact privilege before the HTTP download begins.
+    // A missing grant cannot produce a ZIP that looks successful, with collector_error.
+    // CHECK GRANT validates the privilege without a server-wide flush.
+    // The collector flushes later, only if a query_log row is actually missing.
     bool granted = false;
     bool decoded = false;
     try {
       granted = check_grant_expression(*system, "SYSTEM FLUSH LOGS ON *.*", &decoded);
     } catch (const std::exception&) {
-      // Some ClickHouse/clickhouse-cpp combinations cannot decode CHECK GRANT
-      // result variants. The connection is replaced and the exact privilege is
-      // then proven by one (shared) flush, as before.
+      // Some ClickHouse and clickhouse-cpp combinations cannot decode CHECK GRANT results. The connection is replaced.
+      // The exact privilege is then proven by one shared flush, as before.
       if (pool) pool->invalidate(system);
       system = pool ? pool->acquire(system_uri, std::chrono::seconds(5), std::chrono::seconds(15),
                                     std::chrono::seconds(15), &connect_error)
@@ -379,10 +376,9 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
     job.queries.push_back(std::move(sql));
   }
 
-  // Export execution metadata is part of the download contract, not a
-  // best-effort decoration. Fail the JSON handshake while the UI can still
-  // render an explicit error instead of starting an archive we cannot fully
-  // describe.
+  // Export execution metadata is part of the download contract. It is not a best-effort decoration.
+  // Fail the JSON handshake while the UI can still show an explicit error.
+  // Do not start an archive that the export cannot fully describe.
   std::shared_ptr<const AclTableSet> preflight_allowed;
   std::string preflight_error;
   if (!preflight_export_metadata(
@@ -424,8 +420,8 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
   writer.Key("export_id"); write_json_text(writer, job.export_id);
   writer.Key("format"); writer.String(export_format_name(format));
   writer.Key("expires_in_ms"); writer.Int(cfg_.export_settings.token_ttl_ms);
-  // The stream starts with a POST that carries the token in its JSON body. The token is in no address: no log, no history of a
-  // browser, no Referer and no proxy keeps it.
+  // The stream starts with a POST. The POST carries the token in its JSON body. The token is in no address.
+  // No log, no browser history, no Referer and no proxy keeps it.
   writer.Key("stream_url"); writer.String("api/export/stream");
   writer.Key("token"); write_json_text(writer, token);
   writer.EndObject();
@@ -434,8 +430,8 @@ void Server::handle_export_run(const httplib::Request& req, httplib::Response& r
   res.set_content(buffer.GetString(), "application/json");
 }
 
-// GET never starts an export: the stream runs the SQL of the export, which can be a command, so a method that a browser or a proxy
-// sends on its own (a prefetch, an <img>) must not reach it.
+// GET never starts an export. The stream runs the SQL of the export, and that SQL can be a command.
+// A method that a browser or a proxy sends on its own (a prefetch, an <img>) must not reach the stream.
 void Server::handle_export_stream_not_allowed(const httplib::Request&, httplib::Response& res) {
   res.set_header("Allow", "POST");
   json_error(res, 405, "method_not_allowed", "Start the export stream with POST api/export/stream and the token in the JSON body.");
@@ -473,9 +469,8 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
     return json_error(res, 404, "export_not_found", "Export is unavailable or expired.");
   }
 
-  // Revalidate at token consumption time. Grants or connectivity may have
-  // changed after the handshake. Crucially, this still happens before the
-  // attachment headers/chunked body are committed.
+  // Revalidate at token consumption time. Grants or connectivity may have changed after the handshake.
+  // This still happens before the attachment headers and the chunked body are committed. This step is crucial.
   std::shared_ptr<const AclTableSet> stream_allowed;
   std::string preflight_error;
   if (!preflight_export_metadata(
@@ -509,10 +504,12 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
   auto allowed = std::move(stream_allowed);
   const HostSpec host_copy = *host;
   auto stream_started = std::make_shared<std::atomic<bool>>(false);
+  // Without query.run.write, every statement of the export runs with readonly = 1 (docs/access.md).
+  const bool read_only = access_read_only();
 
   res.set_chunked_content_provider(
       "application/zip",
-      [this, stream_job, allowed, host_copy, stream_started](size_t, httplib::DataSink& sink) -> bool {
+      [this, stream_job, allowed, host_copy, stream_started, read_only](size_t, httplib::DataSink& sink) -> bool {
         bool expected = false;
         if (!stream_started->compare_exchange_strong(expected, true)) {
           sink.done();
@@ -537,12 +534,13 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
         const std::string system_uri = host_copy.system_uri.empty() ? host_copy.runner_uri : host_copy.system_uri;
         bool stop_after_error = false;
 
-        // The statements of the export carry its bounds and its label (ch_query.hpp), and the
-        // next one does not start once the download is gone.
+        // The statements of the export carry its bounds and its label (ch_query.hpp).
+        // The next statement does not start after the download is gone.
         ChQueryLimits limits;
         limits.log_comment = "chdash-export";
         limits.max_execution_time_s = cfg_.export_settings.max_execution_time_s;
         limits.max_memory_usage = cfg_.export_settings.max_memory_usage;
+        limits.read_only_strict = read_only;
         limits.canceled = [&sink] { return sink.is_writable && !sink.is_writable(); };
         ChQueryScope scope(std::move(limits));
 
@@ -555,13 +553,13 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
           const std::string result_name = prefix + (stream_job->format == ExportFormat::Csv ? "results.csv" : "results.json");
 
           if (!write_text_entry(zip, prefix + "query.sql", sql)) return false;
-          // The server stops (Server::stop): the archive ends with an error.txt that says so, not cut in the middle.
+          // The server stops (Server::stop). The archive ends with an error.txt that says so. It is not cut in the middle.
           static constexpr const char* kStopped = "The server stopped before the export finished. Run the export again once the server is back.";
           if (stopping()) {
             if (!write_text_entry(zip, prefix + "error.txt", kStopped)) return false;
             break;
           }
-          // A stop kills the ClickHouse query of this export, which may send nothing for long (a DDL, an OPTIMIZE).
+          // A stop kills the ClickHouse query of this export. The query can send nothing for a long time (a DDL, an OPTIMIZE).
           struct StopHook {
             Server& server;
             uint64_t id;
@@ -592,16 +590,15 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
                 }
               });
 
-              // Execute is the arbitrary-query API in clickhouse-cpp. Attach a
-              // data callback for every statement instead of guessing from the
-              // first SQL keyword which commands may return blocks.
+              // Execute is the arbitrary-query API in clickhouse-cpp. Attach a data callback to every statement.
+              // Do not guess from the first SQL keyword which commands may return blocks.
               query.OnDataCancelable([&](const clickhouse::Block& block) -> bool {
                 if (disconnected || (sink.is_writable && !sink.is_writable())) {
                   disconnected = true;
                   return false;
                 }
-                // A command answers with a block that has no column (its header): it opens no member, the synthetic status
-                // member below stands for it.
+                // A command answers with a block that has no column (its header). It opens no member.
+                // The synthetic status member below stands for it.
                 if (block.GetColumnCount() == 0) return true;
                 if (!result_entry_open) {
                   if (!zip.begin_entry(result_name)) {
@@ -620,8 +617,8 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
                 return true;
               });
 
-              // User/panel SQL always executes through runner_uri, including
-              // CREATE/ALTER/INSERT/etc. system_uri is never used here.
+              // User and panel SQL always run through runner_uri. This includes CREATE, ALTER, INSERT and so on.
+              // system_uri is never used here.
               {
                 DownloadWatchdog watchdog(
                     [&sink] { return !sink.is_writable || sink.is_writable(); },
@@ -641,17 +638,15 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
                 result_entry_open = false;
               }
               if (!result_entry_written) {
-                // A successful statement that produced no result blocks gets a
-                // stable synthetic result instead of an ambiguous empty/missing
-                // archive member.
+                // A successful statement that produced no result blocks gets a stable synthetic result.
+                // This avoids an ambiguous empty or missing archive member.
                 const std::string payload = command_result_payload(stream_job->format);
                 if (!write_text_entry(zip, result_name, payload)) return false;
                 result_entry_written = true;
               }
             } catch (const ClientDisconnected&) {
-              // The dedicated connection closes with `client` below, which also makes
-              // ClickHouse stop the statement; the KILL covers a server that does not
-              // read the socket while the statement runs.
+              // The dedicated connection closes with `client` below. This also makes ClickHouse stop the statement.
+              // The KILL covers a server that does not read the socket while the statement runs.
               disconnected = true;
               cancel_export_best_effort(host_copy, query_id);
             } catch (const ChQueryCanceled&) {
@@ -668,7 +663,7 @@ void Server::handle_export_stream(const httplib::Request& req, httplib::Response
             result_entry_open = false;
           }
           if (query_failed && !result_entry_written) {
-            // Preserve a stable archive layout even when the runner fails
+            // Keep a stable archive layout, even when the runner fails
             // before ClickHouse emits the first result block.
             if (!write_text_entry(zip, result_name, std::string_view{})) return false;
             result_entry_written = true;

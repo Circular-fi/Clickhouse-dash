@@ -1,11 +1,11 @@
 #pragma once
 
-// SQL helpers of the MCP tools (docs/mcp.md): a lexer-level statement splitter
-// and checker for run_query / explain_query, and the builder that turns the
-// query_table arguments into one SELECT. Pure code, no ClickHouse needed.
+// SQL helpers of the MCP tools (docs/mcp.md). These helpers have a lexer-level statement splitter
+// and checker for run_query and explain_query. They also have the builder that turns the
+// query_table arguments into one SELECT. This is pure code. It needs no ClickHouse.
 //
-// The splitter is a guard rail, not the security boundary: the boundary is
-// readonly=1 on every query and the grants of the ClickHouse MCP user.
+// The splitter is a guard rail, not the security boundary. The boundary is readonly=1 on every query
+// and the grants of the ClickHouse MCP user.
 
 #include <cstdint>
 #include <optional>
@@ -22,18 +22,19 @@ struct McpSqlScan {
   // empty_sql, invalid_sql, multiple_statements, statement_not_allowed, clause_not_allowed, function_not_allowed
   std::string error;
   std::string message;
-  // The statement without its closing `;` (comments before and inside stay).
+  // The statement without its closing `;`. Comments before and inside it stay.
   std::string statement;
-  // First word, upper case ("SELECT"); empty when there is none.
+  // The first word in upper case ("SELECT"). It is empty when there is none.
   std::string first_keyword;
 };
 
-// Splits `sql` the way ClickHouse reads it: single-quoted strings, quoted
-// identifiers, heredocs ($tag$ ... $tag$), `--` / `#` line comments and block
-// comments hide their `;`. Accepts exactly one statement (one closing `;` is
-// fine). The first word must be in `allowed_first_words` (upper case). Rejects
-// INTO OUTFILE, a SETTINGS clause (it would change the limits of the key), and
-// the table functions that read files, URLs, remote servers and other databases.
+// Splits `sql` the way ClickHouse reads it. A `;` inside a single-quoted string does not end the statement.
+// The same applies to a quoted identifier, a heredoc ($tag$ ... $tag$), a `--` or `#` line comment, and a block comment.
+// Accepts exactly one statement. One closing `;` is fine.
+//
+// The first word must be in `allowed_first_words` (upper case).
+// Rejects INTO OUTFILE, and a SETTINGS clause, which would change the limits of the key.
+// Rejects the table functions that read files, URLs, remote servers and other databases.
 McpSqlScan mcp_scan_single_statement(std::string_view sql, const std::vector<std::string>& allowed_first_words);
 
 // ---- query_table ---------------------------------------------------------------
@@ -43,9 +44,9 @@ enum class McpTypeClass { Integer, UnsignedInteger, Float, Decimal, Bool, Text, 
 struct McpTypeInfo {
   McpTypeClass cls = McpTypeClass::Unsupported;
   bool nullable = false;
-  // String and FixedString: LIKE works.
+  // String and FixedString types support LIKE.
   bool like_ok = false;
-  // AggregateFunction(...): a binary state that is no use as a value.
+  // AggregateFunction(...) has a binary state. This state is no use as a value.
   bool aggregate_state = false;
 };
 McpTypeInfo mcp_classify_type(std::string_view clickhouse_type);
@@ -53,7 +54,7 @@ McpTypeInfo mcp_classify_type(std::string_view clickhouse_type);
 struct McpColumn {
   std::string name;
   std::string type;
-  // Average uncompressed bytes per row when the table reports it, or 0.
+  // Average uncompressed bytes per row, when the table reports it. Otherwise 0.
   uint64_t avg_row_bytes = 0;
 };
 
@@ -110,7 +111,7 @@ inline constexpr size_t kMcpMaxInValues = 100;
 inline constexpr size_t kMcpMaxOrderBy = 8;
 inline constexpr size_t kMcpMaxColumns = 500;
 
-// `query.limit` is written as is (the caller clamps it and adds the probe row).
+// `query.limit` is written as is. The caller clamps it and adds the probe row.
 McpBuiltQuery mcp_build_table_query(const McpTableQuery& query, const std::vector<McpColumn>& real_columns);
 
 } // namespace chdash

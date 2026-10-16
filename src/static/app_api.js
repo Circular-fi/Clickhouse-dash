@@ -13,8 +13,8 @@ function requestHeaders(base = {}) {
   return { ...base };
 }
 
-// Whether the API answers: state.apiOnline, and chdash:api-online (detail.online) when it changes. The header's host
-// picker and the Run buttons follow on their own (app_header.js, app_run.js).
+// Tells whether the API answers. The page keeps the answer in state.apiOnline.
+// It fires chdash:api-online (detail.online) when the answer changes. The host picker of the header and the Run buttons follow it on their own (app_header.js, app_run.js).
 function setApiOnline(online) {
   const next = online !== false;
   if (state.apiOnline === next) return;
@@ -22,8 +22,8 @@ function setApiOnline(online) {
   window.dispatchEvent(new CustomEvent("chdash:api-online", { detail: { online: next } }));
 }
 
-// The answer of a response: its JSON, `null` when the body is empty, and `undefined` when it is
-// not JSON (a page of a proxy: its text is kept for the error).
+// The function gives the answer of a response: its JSON. The result is `null` when the body is empty.
+// The result is `undefined` when the body is not JSON, for example a page of a proxy. The function keeps the text of that page for the error.
 async function readBody(response) {
   const text = await response.text();
   if (!text) return { payload: {}, text };
@@ -49,8 +49,8 @@ function apiError(norm, fallback) {
   return err;
 }
 
-// A request the caller aborted (its AbortSignal, e.g. util.latest): no
-// network error, no offline flag; util.isAbort(error) is true.
+// A request that the caller aborts (with its AbortSignal, for example util.latest) is not a network error.
+// It does not set the offline flag. util.isAbort(error) is true for it.
 function abortError() {
   const err = new Error("The request was aborted.");
   err.name = "AbortError";
@@ -58,8 +58,8 @@ function abortError() {
   return err;
 }
 
-// A request that got no answer in time: a network failure that the caller
-// can tell from its own abort (code "timeout", not util.isAbort).
+// A request that gets no answer in time is a network failure. The caller can tell it apart from its own abort.
+// Its code is "timeout", and util.isAbort does not match it.
 function timeoutError(ms) {
   const err = new Error(`The server did not answer within ${Math.round(ms / 1000)} s.`);
   err.name = "TimeoutError";
@@ -67,20 +67,17 @@ function timeoutError(ms) {
   return err;
 }
 
-// Every request ends: no answer within this time is an error, not a spinner
-// that never stops. A call that may run longer says so (timeoutMs).
+// Every request ends. If there is no answer within this time, the request is an error. The page does not show a spinner that never stops.
+// A call that can run longer sets its own time limit with timeoutMs.
 const DEFAULT_TIMEOUT_MS = 30000;
 
-// The one request path of every api.* call: the request headers, the
-// online flag, a JSON answer and one error shape (Error with .code,
-// .payload, and for an HTTP error .status and .body, the answer as sent).
-// options: { method, body (JSON-encoded), headers (added, e.g. If-Match),
-// signal, timeoutMs (default 30 s; 0: none) }.
-// The timeout covers the headers and the body of the answer. A timeout does
-// not turn the online flag off (one slow call is not a dead server).
+// The one request path of every api.* call. It sets the request headers and the online flag. It reads a JSON answer and one error shape.
+// The error is an Error with .code and .payload. For an HTTP error, it also has .status and .body, which hold the answer as the server sent it.
+// options: { method, body (JSON-encoded), headers (added, for example If-Match), signal, timeoutMs (default 30 s; 0: none) }.
+// The timeout covers the headers and the body of the answer. A timeout does not turn the online flag off. One slow call does not mean a dead server.
 async function request(path, { method = "GET", body, headers, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   if (signal?.aborted) throw abortError();
-  // One controller cuts the fetch: the caller's signal and the timer both abort it.
+    // One controller stops the fetch. The caller's signal and the timer both abort it.
   const cut = new AbortController();
   let timedOut = false;
   const onCallerAbort = () => cut.abort();
@@ -116,11 +113,10 @@ async function request(path, { method = "GET", body, headers, signal, timeoutMs 
       if (known) throw known;
       throw apiError(util.normalizeApiErrorPayload(null, { error_code: "network_error", message: "The answer was cut." }), "Network error.");
     }
-    // Online: the transport answered with something the application sent. A 5xx with no JSON of ours is a proxy in
-    // front of a stopped server.
+        // Online: the transport gave an answer that the application sent. A 5xx answer with no JSON of ours comes from a proxy in front of a stopped server.
     setApiOnline(response.status < 500 || (read.payload !== null && typeof read.payload === "object" && Object.keys(read.payload).length > 0));
     if (!response.ok) {
-      // The status first: an HTML page of a proxy (413, 502, 504) is an error with its status, not "invalid_api_response".
+            // Check the status first. An HTML page of a proxy (413, 502, 504) is an error with its status. It is not "invalid_api_response".
       const object = read.payload && typeof read.payload === "object" ? read.payload : {};
       const err = apiError(util.buildApiErrorFromResponse(response.status, object), `Request failed with status ${response.status}`);
       err.status = response.status;
@@ -243,8 +239,8 @@ async function getTraceAnalytics(hostId, filters = {}, { signal } = {}) {
   return getJson(`api/traces/analytics?${traceQuery(hostId, filters).toString()}`, { signal });
 }
 
-// Duration heatmap (traces per time bucket x log duration row) and the
-// attribute comparison of a box of it (app_trace_heatmap.js).
+// Duration heatmap: traces per time bucket x log duration row.
+// The attribute comparison of one box of the heatmap is also here (app_trace_heatmap.js).
 async function getTraceHeatmap(hostId, filters = {}, { signal } = {}) {
   return getJson(`api/traces/heatmap?${traceQuery(hostId, filters).toString()}`, { signal });
 }
@@ -253,8 +249,8 @@ async function getTraceDeltas(hostId, filters = {}, { signal } = {}) {
   return getJson(`api/traces/deltas?${traceQuery(hostId, filters).toString()}`, { signal });
 }
 
-// Attribute keys / one key's values of the spans matching the filters
-// (bounded and cached server-side; "estimated" when a cap stopped the scan).
+// Attribute keys, or the values of one key, of the spans that match the filters.
+// The server bounds and caches this data. The answer says "estimated" when a cap stopped the scan.
 async function getTraceFacets(hostId, filters = {}, { signal } = {}) {
   return getJson(`api/traces/facets?${traceQuery(hostId, filters).toString()}`, { signal });
 }
@@ -263,8 +259,7 @@ async function getTraceFacetValues(hostId, filters = {}, { signal } = {}) {
   return getJson(`api/traces/facet_values?${traceQuery(hostId, filters).toString()}`, { signal });
 }
 
-// Services view (RED metrics of entry spans): the search filters plus
-// detail (one service's drill-down), scope (entry | root) and exact.
+// Services view: RED metrics of entry spans. The parameters are the search filters, detail (the drill-down of one service), scope (entry | root) and exact.
 function traceServicesQuery(hostId, filters = {}) {
   const query = traceQuery(hostId, filters);
   for (const key of ["detail", "exact"]) {
@@ -308,8 +303,7 @@ async function getTraceContext(hostId, params = {}, { signal } = {}) {
   return getJson(`api/traces/context?${optionalParams(hostId, params).toString()}`, { signal });
 }
 
-// Logs of one trace: the trace bounds (epoch ns) and its services bound
-// the lookup; span_id narrows it to one span.
+// Logs of one trace. The trace bounds (epoch ns) and its services limit the lookup. span_id narrows the lookup to one span.
 async function getTraceLogs(hostId, { traceId, startNs, endNs, services = [], spanId = "", limit = 0 } = {}, { signal } = {}) {
   if (!traceId) throw new Error("No trace selected.");
   const query = new URLSearchParams({ trace_id: String(traceId), start_ns: String(startNs), end_ns: String(endNs) });
@@ -372,9 +366,9 @@ async function getSystemDiskGrowth(hostId, { fromMs, toMs }, refresh = false, { 
   return getJson(`api/system/series?${query.toString()}`, { signal });
 }
 
-// System page, Queries: the top query shapes of a window
-// (allowlisted sort / kind; hideChdash drops the system account's queries).
-// errors: all | with | without; user: one user's queries ("" for all).
+// System page, Queries: the top query shapes of a window.
+// The sort and the kind must be in an allowlist. hideChdash drops the queries of the system account.
+// errors: all | with | without. user: the queries of one user ("" for all).
 async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, errors, user, database, table, hideChdash = true }, refresh = false, { signal } = {}) {
   if (!hostId) throw new Error("No host selected.");
   const query = new URLSearchParams({ host_id: String(hostId), from_ms: String(Math.floor(fromMs)), to_ms: String(Math.ceil(toMs)) });
@@ -389,8 +383,7 @@ async function getSystemQueries(hostId, { fromMs, toMs, sort, kind, errors, user
   return getJson(`api/system/queries?${query.toString()}`, { signal });
 }
 
-// One query shape (its normalized_query_hash, a decimal string): timeline,
-// its 20 slowest / latest / largest runs and the latest run's text.
+// One query shape, by its normalized_query_hash (a decimal string). The answer has the timeline, its 20 slowest, latest and largest runs, and the text of the latest run.
 async function getSystemQuery(hostId, hash, { fromMs, toMs, order, hideChdash = true }, refresh = false, { signal } = {}) {
   if (!hostId) throw new Error("No host selected.");
   if (!/^\d{1,20}$/.test(String(hash || ""))) throw new Error("Invalid query hash.");
@@ -408,10 +401,11 @@ async function getExplorerFunctions(hostId, refresh = false, { signal } = {}) {
   return getJson(`api/explorer/functions?${query.toString()}`, { signal });
 }
 
-// One entry for each text of `sqls` (POST api/format answers a status for each statement, so one that fails does not fail the
-// others): { status: "formatted", formatted } or { status: "error" | "skipped", error }, `error` the payload of the API's error
-// ({ error_code, message, index, clickhouse }, util.normalizeApiErrorPayload). A request that fails as a whole (an unknown host,
-// a body that is refused, the network) rejects.
+// The function gives one entry for each text in `sqls`.
+// POST api/format answers a status for each statement. So one statement that fails does not fail the others.
+// An entry is { status: "formatted", formatted } or { status: "error" | "skipped", error }.
+// `error` holds the payload of the API's error ({ error_code, message, index, clickhouse }, from util.normalizeApiErrorPayload).
+// A request that fails as a whole rejects. This happens for an unknown host, a refused body or a network error.
 async function formatSqlsEach(hostId, sqls, { signal } = {}) {
   if (!hostId) throw new Error("No host selected.");
   if (!Array.isArray(sqls)) throw new Error("formatSqls expects an array.");
@@ -434,7 +428,7 @@ async function formatSqlsEach(hostId, sqls, { signal } = {}) {
   });
 }
 
-// The Error of a statement that was not formatted: the message, the code and the payload of the API, which `index` places in the text.
+// The function gives the Error of a statement that was not formatted. The Error has the message, the code and the payload of the API. The `index` of the payload places the error in the text.
 function formatFailure(item) {
   const norm = item.error;
   const err = new Error(util.buildApiErrorText(norm, "Format failed."));
@@ -443,7 +437,7 @@ function formatFailure(item) {
   return err;
 }
 
-// The formatted texts, in order. It rejects with the first statement that was not formatted (the others of the batch were).
+// The function gives the formatted texts, in order. It rejects with the first statement that was not formatted. The other statements of the batch are formatted.
 async function formatSqls(hostId, sqls, { signal } = {}) {
   const items = await formatSqlsEach(hostId, sqls, { signal });
   const failed = items.find((item) => item.status !== "formatted");
@@ -498,8 +492,8 @@ async function cancelQuery(cancelToken, { signal } = {}) {
   return !!(payload && payload.ok);
 }
 
-// A route's query string from the caller's parameters: a URLSearchParams
-// as built, or an object (arrays repeat the key; null and "" are left out).
+// The function builds a route's query string from the parameters of the caller.
+// The parameters are a URLSearchParams, as built, or an object. An array repeats its key. The function leaves out null and "" values.
 function queryOf(params) {
   if (params instanceof URLSearchParams) return params;
   const query = new URLSearchParams();
@@ -519,8 +513,8 @@ async function getLogs(endpoint, params, { signal } = {}) {
   return getJson(`api/logs/${endpoint}?${query.toString()}`, { signal });
 }
 
-// Spans mode of the trace search (app_trace_spans.js): one row per span,
-// keyset pages by cursor; and one span's full record.
+// Spans mode of the trace search (app_trace_spans.js). It gives one row for each span, in keyset pages with a cursor.
+// It also gives the full record of one span.
 async function searchTraceSpans(params, { signal } = {}) {
   return getJson(`api/traces/spans?${queryOf(params).toString()}`, { signal });
 }
@@ -531,9 +525,8 @@ async function getTraceSpan(hostId, { traceId, spanId, timestampNs } = {}, { sig
   return getJson(`api/traces/span?${query.toString()}`, { signal });
 }
 
-// Metrics browser routes (app_metrics.js, docs/metrics.md): the enabled
-// kinds, the catalog of a window, a panel's series and exemplars, and its
-// attribute keys (or one key's values with `key`).
+// Metrics browser routes (app_metrics.js, docs/metrics.md). They give the enabled kinds, the catalog of a window, the series and exemplars of a panel, and its attribute keys.
+// With `key`, they give the values of one attribute key.
 async function getMetricsMeta(params, { signal } = {}) {
   return getJson(`api/metrics/meta?${queryOf(params).toString()}`, { signal });
 }
@@ -555,43 +548,43 @@ async function getMetricsAttributes(params, { signal } = {}) {
 }
 
 // --- MCP integration (docs/mcp.md, app_page_mcp.js) -------------------------------
-// The one place that knows the JSON of /api/mcp/*: the page's modules read the shapes
-// normalized here and never the raw answers, so a change of the server's JSON is fixed here.
-//   getMcpMeta()                  the state, endpoint, hosts, tool groups, tools and limits ({ enabled: false } when off). `usage` says whether the
-//                                 usage is counted (`usage.enabled`: mcp.usage in the config), as which instance, and for how long; a tool says
-//                                 whether every key has it (`always`), whether "*" leaves it out (`explicitOnly`) and whether it is offered now
+// This is the one place that knows the JSON of /api/mcp/*. The page modules read the shapes that are normalized here. They never read the raw answers.
+// So a change of the server's JSON needs a fix here only.
+//   getMcpMeta()                  the state, endpoint, hosts, tool groups, tools and limits ({ enabled: false } when off).
+//                                 `usage` says whether the usage is counted (`usage.enabled`: mcp.usage in the config), as which instance, and for how long.
+//                                 A tool says whether every key has it (`always`), whether "*" excludes it (`explicitOnly`) and whether it is offered now.
 //   getMcpKeys()                  [key]
-//   createMcpKey(input)           { key, secret }   (the secret comes once: no call gives it again)
-//   getMcpKeyAccess(id, {refresh})  the data that a key reaches: the tables of the MCP user of each host, cut by the key's patterns
+//   createMcpKey(input)           { key, secret }   (the secret is given once: no later call gives it again)
+//   getMcpKeyAccess(id, {refresh})  the data that a key reaches: the tables of the MCP user of each host, filtered by the key's patterns
 //   getMcpAccessSummary({refresh})  for each key, how many databases and tables it reaches (a Map by key id)
-//   getMcpUsageSummary({window})  what each key did in a window: { keys: Map by key id, others: [the keys that are not in the list of keys: the
-//                                 deleted ones, which keep usage, and those that only another instance knows (`elsewhere`)], instances }
+//   getMcpUsageSummary({window})  what each key did in a window: { keys: Map by key id, others: [the keys that are not in the list of keys:
+//                                 the deleted ones, which keep their usage, and the keys that only another instance knows (`elsewhere`)], instances }
 //   getMcpKeyUsage(id, {window})  what one key did: totals, one point for each step of the window (1 min to 1 day), tools, results, clients
-//   getMcpUsageOverview({window, group, order, orders, filters})  what every key did, cut by key, method, client, instance, result and type
-//                                 (the Usage tab): totals, a series of six figures for each group of `group` (key, method, client or result,
-//                                 the biggest by `order`, and once more by each of `orders`: `series.rankings`), the facet of each
-//                                 dimension, and the instances with their figures (the facet of the filter by instance)
+//   getMcpUsageOverview({window, group, order, orders, filters})  what every key did, grouped by key, method, client, instance, result and type (the Usage tab).
+//                                 The answer has the totals and a series of six figures for each group of `group` (key, method, client or result).
+//                                 The groups are the biggest by `order`. The same groups are ranked once more by each of `orders` (`series.rankings`).
+//                                 It also has the facet of each dimension and the instances with their figures (the facet of the filter by instance).
 //   getMcpKeyCost(id, {window, refresh})  what the statements of a key cost ClickHouse (read from system.query_log)
 //   deleteMcpKey(id)              id
-// A failed call rejects with an Error that carries err.mcp = { status, code, message, field, reason }
-// (the answer's `error_code`, `message`, `field` and `reason`; `field` without a position suffix: "tools[1]" is "tools"). A usage route of a
-// server that has the usage off answers 404 with the code `not_enabled`: the page does not ask while `meta.usage.enabled` is false, and takes
-// that answer (the meta is older than a restart) as "Usage is off".
-// The usage answers say which instances they sum (`instances`, this one first): a ChDash that shares mcp.usage.dir with others counts the files
-// of all of them.
+// A failed call rejects with an Error. The Error has err.mcp = { status, code, message, field, reason }.
+// These values come from the answer: `error_code`, `message`, `field` and `reason`. `field` has no position suffix, so "tools[1]" gives "tools".
+// A usage route of a server with the usage off answers 404 with the code `not_enabled`. The page does not ask while `meta.usage.enabled` is false.
+// The page takes that answer as "Usage is off". The meta can be older than a restart.
+// The usage answers say which instances they sum. The list is in `instances`, with this one first.
+// A ChDash that shares mcp.usage.dir with other instances counts the files of all of them.
 const mcpText = (value) => (typeof value === "string" ? value : "");
 const mcpList = (value) => (Array.isArray(value) ? value.map((item) => String(item)) : []);
 const mcpLimit = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : null);
-// A count of the usage or of the cost (a JSON number; a string of digits is read too). 0 when absent.
+// The function gives a count of the usage or of the cost. The count is a JSON number, or a string of digits. The result is 0 when the count is absent.
 const mcpCount = (value) => (Number.isFinite(Number(value)) && value !== null && value !== "" ? Number(value) : 0);
-// An ISO time of the server, as milliseconds; null when absent.
+// The function gives an ISO time of the server, in milliseconds. The result is null when the time is absent.
 const mcpTime = (value) => {
   const ms = typeof value === "string" && value ? Date.parse(value) : NaN;
   return Number.isFinite(ms) ? ms : null;
 };
 
-// What a key of a host can ask for at most, and what binds it: "mcp" (the configuration of MCP), "clickhouse" (the settings profile of the
-// ClickHouse user of the host) or "both" (equal). null when the server did not say.
+// The most that a key of a host can ask for, and the limit that binds it.
+// The limit is "mcp" (the MCP configuration), "clickhouse" (the settings profile of the ClickHouse user of the host) or "both" (the two are equal). The value is null when the server does not say.
 function normalizeMcpHostLimit(raw) {
   if (!raw || typeof raw !== "object") return null;
   const value = mcpLimit(raw.value);
@@ -609,7 +602,7 @@ function normalizeMcpHostUser(raw) {
     state,
     error: mcpText(mcp.error),
     readsNothing: mcp.reads_nothing === true,
-    // The settings profile of the MCP user (readonly, and the limits that it sets: 0 = none).
+        // The settings profile of the MCP user. It sets readonly and the limits: 0 means none.
     profile: {
       known: profile.known === true,
       readonly: Number(profile.readonly) || 0,
@@ -619,7 +612,7 @@ function normalizeMcpHostUser(raw) {
     limits: { maxRows: normalizeMcpHostLimit(caps.max_rows), timeoutSeconds: normalizeMcpHostLimit(caps.timeout_seconds) },
     unavailableTools: (Array.isArray(mcp.unavailable_tools) ? mcp.unavailable_tools : []).map((item) => ({
       tool: mcpText(item?.tool),
-      // Who lacks the grants: "MCP user" or "system user", and its name.
+            // Gives the user that lacks the grants: "MCP user" or "system user", and its name.
       role: mcpText(item?.role) || "MCP user",
       user: mcpText(item?.user),
       grants: mcpList(item?.grants),
@@ -645,12 +638,12 @@ function normalizeMcpMeta(raw) {
       name: mcpText(host?.name),
       label: mcpText(host?.label),
       healthy: host?.healthy === true ? true : host?.healthy === false ? false : null,
-      // The MCP user of the host: "ok" (it connects), "unavailable" (it does not: no key can read the host) or
-      // "unknown" (not checked yet). The tools it cannot serve come with the grant that is missing.
+            // The state of the MCP user of the host: "ok" (it connects), "unavailable" (it does not connect, so no key can read the host) or "unknown" (not checked yet).
+            // The answer gives the missing grant for each tool that the user cannot serve.
       mcp: normalizeMcpHostUser(host?.mcp),
     })).filter((host) => host.name),
-    // The families of permissions, in the order of the page. A group is a row of the server's table: the page
-    // draws whatever the server sends.
+        // The families of permissions, in the order of the page. A group is a row of the server's table.
+        // The page draws each row that the server sends.
     toolGroups: (Array.isArray(meta.tool_groups) ? meta.tool_groups : []).map((group) => ({
       id: mcpText(group?.id),
       title: mcpText(group?.title) || mcpText(group?.id),
@@ -664,11 +657,11 @@ function normalizeMcpMeta(raw) {
       section: mcpText(tool?.section),
       description: mcpText(tool?.description),
       needsAllData: tool?.needs_all_data === true,
-      // Every key has it, whatever its list of tools says (the tools of the analysis of the key's own limits and usage).
+            // Every key has this tool, whatever the key's list of tools says. The tools analyze the key's own limits and usage.
       always: tool?.always === true,
-      // "*" does not give it: a key has it only when its list names it.
+            // The character "*" does not give this tool. A key has the tool only when its list names it.
       explicitOnly: tool?.explicit_only === true,
-      // The server offers it now (the usage is on, the setting that it needs is on): a tool that is not offered is not shown.
+            // The server offers the tool now, when the usage is on and the setting that the tool needs is on. The page does not show a tool that is not offered.
       available: tool?.available !== false,
     })).filter((tool) => tool.name),
     limits: {
@@ -685,9 +678,10 @@ function normalizeMcpMeta(raw) {
   };
 }
 
-// The usage of the keys (mcp.usage in the config): whether it is counted, where (`storage`: the files of a directory that several ChDash may
-// share), as which instance, for how long, the windows of its answers and those of the cost. The cost does not depend on the usage: a usage
-// that is off sends the windows of the cost only. `allKeys`: the setting that lets a key read the usage of all the keys.
+// The usage of the keys (mcp.usage in the config). The data says whether the usage is counted, and where.
+// `storage` names the files of a directory that several ChDash instances may share. It also gives the instance, the time for which the usage is counted, and the windows of its answers and of the cost.
+// The cost does not depend on the usage. A usage that is off sends the windows of the cost only.
+// `allKeys` is the setting that lets a key read the usage of all the keys.
 function normalizeMcpUsageMeta(raw) {
   const usage = raw && typeof raw === "object" ? raw : {};
   const windows = mcpList(usage.windows);
@@ -712,9 +706,12 @@ function normalizeMcpKey(raw) {
     name: mcpText(key.name),
     source: key.source === "config" ? "config" : "ui",
     secretHint: mcpText(key.secret_hint),
-    // What the page shows of the secret: the shape of a UUID, the hint in clear, a bullet for the other characters.
-    // The server keeps the hash of a secret only: nothing gives the secret after its creation.
+        // The page shows this part of the token: the hint in clear text. A bullet replaces each other character.
+        // For an older key, the bullets have the shape of a UUID.
     secretMask: mcpText(key.secret_mask),
+        // The user for whom a key of the configuration acts, and the expiry of that key (mcp_key.subject, mcp_key.expires).
+    subject: mcpText(key.subject) || null,
+    expiresAt: mcpText(key.expires_at) || null,
     hosts: mcpList(key.hosts),
     tools: mcpList(key.tools),
     databases: mcpList(key.databases),
@@ -724,7 +721,7 @@ function normalizeMcpKey(raw) {
   };
 }
 
-// The body of a create or an edit: the fields the caller names (camelCase), in the server's names.
+// The body of a create or of an edit. It holds the fields that the caller names, in camelCase and with the server's names.
 function mcpKeyBody(input = {}) {
   const names = { name: "name", hosts: "hosts", tools: "tools", databases: "databases", maxRows: "max_rows", timeoutSeconds: "timeout_seconds" };
   const body = {};
@@ -754,7 +751,7 @@ async function mcpRequest(path, options = {}) {
   }
 }
 
-// A server without the MCP routes answers 404: the same as MCP turned off.
+// A server without the MCP routes answers 404. This is the same answer as for MCP that is off.
 async function getMcpMeta({ signal } = {}) {
   try {
     return normalizeMcpMeta(await mcpRequest("/meta", { signal }));
@@ -774,8 +771,7 @@ async function createMcpKey(input, { signal } = {}) {
   return { key: normalizeMcpKey(payload?.key), secret: mcpText(payload?.secret) };
 }
 
-// The data that a key reaches (GET /api/mcp/keys/<id>/access): for each host of the key, the tables that the MCP
-// ClickHouse user may read, cut by the patterns of the key.
+// The data that a key reaches (GET /api/mcp/keys/<id>/access). For each host of the key, it gives the tables that the MCP ClickHouse user may read, filtered by the patterns of the key.
 async function getMcpKeyAccess(id, { refresh = false, signal } = {}) {
   const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/access${refresh ? "?refresh=1" : ""}`, { signal });
   return {
@@ -796,7 +792,7 @@ async function getMcpKeyAccess(id, { refresh = false, signal } = {}) {
         truncated: database?.truncated === true,
         tables: (Array.isArray(database?.tables) ? database.tables : []).map((table) => ({
           name: mcpText(table?.name),
-          // "all", or "some" when the user reads some columns only (they are checked when a tool opens the table).
+                    // The value is "all", or "some" when the user reads only some columns. The columns are checked when a tool opens the table.
           columns: table?.columns === "all" || table?.columns === "some" ? table.columns : Number(table?.columns) || 0,
         })),
       })),
@@ -804,9 +800,9 @@ async function getMcpKeyAccess(id, { refresh = false, signal } = {}) {
   };
 }
 
-// How many databases and tables each key reaches (GET /api/mcp/access): what the MCP user of the host of the key may read,
-// cut by the patterns of the key. A Map of the key id to { status: "ok" | "unavailable" | "no_host", databases, tables,
-// partialTables, host, user, error }. The grants of a host are read once for all its keys.
+// The function gives how many databases and tables each key reaches (GET /api/mcp/access). It shows what the MCP user of the host of the key may read, filtered by the patterns of the key.
+// The result is a Map from the key id to { status: "ok" | "unavailable" | "no_host", databases, tables, partialTables, host, user, error }.
+// The grants of a host are read once, for all its keys.
 async function getMcpAccessSummary({ refresh = false, signal } = {}) {
   const payload = await mcpRequest(`/access${refresh ? "?refresh=1" : ""}`, { signal });
   const out = new Map();
@@ -827,8 +823,8 @@ async function getMcpAccessSummary({ refresh = false, signal } = {}) {
   return out;
 }
 
-// One line of the usage of a key in a window. `elsewhere`: the key is not in this instance's list of keys, only another instance knows it
-// (its usage came from the file of that instance).
+// One line of the usage of a key in a window.
+// `elsewhere` means that the key is not in the list of keys of this instance. Only another instance knows the key. Its usage came from the file of that instance.
 function normalizeMcpUsageLine(item) {
   return {
     id: mcpText(item?.id),
@@ -847,9 +843,9 @@ function normalizeMcpUsageLine(item) {
   };
 }
 
-// An instance that an answer of the usage sums, as the server lists it (this one first): the last write of its file, and whether the file could
-// be read. `skipped`: a file that is not valid, of another version or too large is left out of the figures, with the `reason`; `conflict`: another
-// ChDash writes under the name of this instance, so this one does not save its counts.
+// An instance that an answer of the usage sums. The server lists it, with this one first. The entry has the last write of its file, and whether the file could be read.
+// `skipped`: a file that is not valid, of another version or too large is not in the figures. The `reason` tells why.
+// `conflict`: another ChDash writes under the name of this instance. So this instance does not save its counts.
 function normalizeMcpInstance(item) {
   return {
     instance: mcpText(item?.instance),
@@ -859,8 +855,8 @@ function normalizeMcpInstance(item) {
   };
 }
 
-// The window of an answer of the usage: its name, from its start to the time of the answer, since when the usage is counted, and the instances
-// that it sums.
+// The window of an answer of the usage. It has the name of the window, its start, and the time of the answer.
+// It also has since when the usage is counted, and the instances that it sums.
 const mcpUsageWindow = (payload) => ({
   window: mcpText(payload?.window),
   from: mcpTime(payload?.from),
@@ -870,9 +866,9 @@ const mcpUsageWindow = (payload) => ({
   instances: (Array.isArray(payload?.instances) ? payload.instances : []).map(normalizeMcpInstance).filter((item) => item.instance),
 });
 
-// What each key did in a window (GET /api/mcp/usage): `keys` is a Map of the id of a live key to its line; `others` the keys that are not
-// in this instance's list, the last deletion first: the deleted keys that still keep usage (`deletedAt`), and the keys that only another
-// instance knows (`elsewhere`).
+// What each key did in a window (GET /api/mcp/usage).
+// `keys` is a Map from the id of a live key to its line.
+// `others` has the keys that are not in the list of this instance. The last deletion comes first. It has the deleted keys that still keep usage (`deletedAt`), and the keys that only another instance knows (`elsewhere`).
 async function getMcpUsageSummary({ window = "", signal } = {}) {
   const payload = await mcpRequest(`/usage${window ? `?window=${encodeURIComponent(window)}` : ""}`, { signal });
   const keys = new Map();
@@ -886,8 +882,9 @@ async function getMcpUsageSummary({ window = "", signal } = {}) {
   return { ...mcpUsageWindow(payload), keys, others };
 }
 
-// The step of a series, in seconds (60 for a minute, 86400 for a day): a window is cut in steps of its own (1 h by the minute, 6 h by 5
-// minutes, 24 h by 15 minutes, 7 d by 3 hours, 30 d by 12 hours, 90 d and 365 d by the day). A step that is not a number is a day.
+// The function gives the step of a series, in seconds (60 for a minute, 86400 for a day).
+// A window has steps of its own: 1 h by the minute, 6 h by 5 minutes, 24 h by 15 minutes, 7 d by 3 hours, 30 d by 12 hours, and 90 d and 365 d by the day.
+// A step that is not a number is a day.
 const mcpStep = (value) => (Number(value) > 0 ? Number(value) : 86400);
 
 // What one key did in a window (GET /api/mcp/keys/<id>/usage). `series.points` has one point for each step of the window.
@@ -948,22 +945,26 @@ async function getMcpKeyUsage(id, { window = "", signal } = {}) {
   };
 }
 
-// The six dimensions that the Usage tab filters by, in the order of its filter parameters (it groups by key, method, client or result).
+// The six dimensions for the filters of the Usage tab, in the order of its filter parameters. The tab groups by key, method, client or result.
 const MCP_USAGE_DIMENSIONS = ["key", "method", "client", "instance", "result", "type"];
 // The metrics that rank the groups of a series (`order`, and the members of `rankings`).
 const MCP_USAGE_ORDERS = ["requests", "errors", "refused", "calls", "bytes"];
 
-// What every key did in a window (GET /api/mcp/usage/overview), cut by `filters` ({ key, method, client, instance, result, type }: lists of
-// values, any of the values of one dimension and all the dimensions together; each a repeated parameter). The totals and the series have every
-// filter; the facet of a dimension (its list of values) has all but its own, so a filter shows its alternatives. `series.groups` are the biggest
-// groups of `group` (`rest` is what the others add up to), the biggest by `order` (requests, errors, refused, calls or bytes: the server's
-// default is requests, and it echoes the one it used as `order`), each with six series of one value for each step of the window (`series.times`):
-// the requests, the errors, the requests that were refused (the rate limit and the refusals before the message was read), the tool calls, the
-// time of the tool calls added up (ms) and the bytes returned. A group that has none of the metric that ranks is in `rest`. `orders` asks for the
-// same groups ranked by more metrics in the same read: `series.rankings` has a { groups, rest } for each one (the steps are those of the series),
-// and is empty without them. When the dimension of `group` is filtered the groups are the values that were picked, whatever the order: the page
-// leaves `orders` out then. `instances` is the facet of the instance: every instance that the server knows, with the state of its file and its
-// figures (an instance that has no request in the view is there with zeros), not the plain list of the other answers.
+// What every key did in a window (GET /api/mcp/usage/overview). The `filters` value is { key, method, client, instance, result, type }, with lists of values.
+// Any value of one dimension passes that filter. All dimensions together must pass. Each filter is a repeated parameter.
+//
+// The totals and the series have every filter. The facet of a dimension (its list of values) has all filters but its own. So a filter shows its alternatives.
+// `series.groups` has the biggest groups of `group`. `rest` is what the other groups add up to.
+//
+// The groups are the biggest by `order` (requests, errors, refused, calls or bytes). The server's default is requests. The answer repeats the order that it used, as `order`.
+// Each group has six series, with one value for each step of the window (`series.times`).
+// They are: the requests, the errors, the requests that were refused (the rate limit and the refusals before the message was read), the tool calls, the time of the tool calls added up (ms) and the bytes returned.
+//
+// A group that has none of the metric that ranks is in `rest`. `orders` asks for the same groups ranked by more metrics in the same read. `series.rankings` has a { groups, rest } for each one. The steps are those of the series, and `series.rankings` is empty without `orders`.
+//
+// When the dimension of `group` is filtered, the groups are the values that were picked, whatever the order. The page then does not send `orders`.
+//
+// `instances` is the facet of the instance. It has every instance that the server knows, with the state of its file and its figures. An instance with no request in the view is there with zeros. It is not the plain list of the other answers.
 async function getMcpUsageOverview({ window = "", group = "", order = "", orders = [], filters = {}, signal } = {}) {
   const params = new URLSearchParams();
   if (window) params.set("window", window);
@@ -976,7 +977,7 @@ async function getMcpUsageOverview({ window = "", group = "", order = "", orders
   const list = (value) => (Array.isArray(value) ? value : []);
   const totals = payload?.totals && typeof payload.totals === "object" ? payload.totals : {};
   const series = payload?.series && typeof payload.series === "object" ? payload.series : {};
-  // One value for each time (a time that does not read is left out with its values), whatever the answer holds.
+  // The function gives one value for each time. A time that does not read is not in the result, and neither are its values.
   const sentTimes = list(series.t).map(mcpTime);
   const kept = sentTimes.map((t, i) => (t == null ? -1 : i)).filter((i) => i >= 0);
   const times = kept.map((i) => sentTimes[i]);
@@ -984,7 +985,7 @@ async function getMcpUsageOverview({ window = "", group = "", order = "", orders
     const sent = list(raw);
     return kept.map((i) => mcpCount(sent[i]));
   };
-  // The six series of a group, or of what the chart folds into `rest`.
+    // The six series of a group, or of the values that the chart puts into `rest`.
   const figures = (item) => ({
     requests: values(item?.requests),
     errors: values(item?.errors),
@@ -993,7 +994,7 @@ async function getMcpUsageOverview({ window = "", group = "", order = "", orders
     durationMsSum: values(item?.duration_ms_sum),
     bytes: values(item?.bytes),
   });
-  // A ranking: its groups and what the others add up to (the answer's own `groups` and `rest`, and the member of each of `rankings`).
+  // A ranking has its groups and the total of the others. These are the `groups` and `rest` of the answer, and a member for each of `rankings`.
   const ranked = (item) => ({
     groups: list(item?.groups).map((group) => ({
       id: mcpText(group?.id),
@@ -1047,7 +1048,8 @@ async function getMcpUsageOverview({ window = "", group = "", order = "", orders
       bytes: mcpCount(item?.bytes),
       lastUsedAt: mcpTime(item?.last_used_at),
     })).filter((item) => item.id),
-    // kind: "call" (a tool), "request" (a method of the MCP protocol) or "refused" (`unread`: refused before the message was read).
+        // kind: "call" (a tool), "request" (a method of the MCP protocol) or "refused".
+        // For "refused", `unread` says that the message was refused before it was read.
     methods: list(payload?.methods).map((item) => ({
       method: mcpText(item?.method),
       kind: item?.kind === "request" || item?.kind === "refused" ? item.kind : "call",
@@ -1061,8 +1063,8 @@ async function getMcpUsageOverview({ window = "", group = "", order = "", orders
     })).filter((item) => item.method),
     results: list(payload?.results).map((item) => ({ result: mcpText(item?.result), count: mcpCount(item?.count), keys: mcpCount(item?.keys) })).filter((item) => item.result),
     types: list(payload?.types).map((item) => ({ type: mcpText(item?.type), requests: mcpCount(item?.requests) })).filter((item) => item.type),
-    // A client is named by the clientInfo of its initialize, else by the product of its User-Agent, else "unknown" ("other": the names past
-    // the caps). `versions` (five at most, the latest first) and `lastSeenAt` are those of the clients that the keys have kept for life.
+        // The clientInfo of its initialize gives the name of a client. If that is absent, the product of its User-Agent gives the name. Otherwise, the name is "unknown". The name is "other" for the names past the caps.
+        // `versions` has five versions at most, the latest first. `versions` and `lastSeenAt` are the values of the clients that the keys have kept for life.
     clients: list(payload?.clients).map((item) => ({
       client: mcpText(item?.client),
       requests: mcpCount(item?.requests),
@@ -1091,7 +1093,7 @@ async function getMcpUsageOverview({ window = "", group = "", order = "", orders
       bytes: mcpCount(item?.bytes),
       keys: mcpCount(item?.keys),
     })).filter((item) => item.instance),
-    // The rows that the server cut (200 for a table); a value that a filter selects is never cut.
+        // The server cuts the rows (to 200 for a table). The server never cuts a value that a filter selects.
     omitted: { keys: mcpCount(omitted.keys), methods: mcpCount(omitted.methods), results: mcpCount(omitted.results), clients: mcpCount(omitted.clients), instances: mcpCount(omitted.instances) },
   };
 }
@@ -1110,8 +1112,8 @@ const mcpCostFigures = (raw) => ({
   memoryPeakBytes: mcpCount(raw?.memory_peak_bytes),
 });
 
-// What the statements of a key cost ClickHouse in a window (GET /api/mcp/keys/<id>/cost), read from system.query_log of its host.
-// status "unavailable" says why in `reason` (with the GRANT `statement` when the runner may not read query_log).
+// The function gives what the statements of a key cost ClickHouse in a window (GET /api/mcp/keys/<id>/cost). It reads system.query_log of the host of the key.
+// The status "unavailable" gives the reason in `reason`. The reason has the GRANT `statement` when the runner may not read query_log.
 async function getMcpKeyCost(id, { window = "", refresh = false, signal } = {}) {
   const query = [window ? `window=${encodeURIComponent(window)}` : "", refresh ? "refresh=1" : ""].filter(Boolean).join("&");
   const payload = await mcpRequest(`/keys/${encodeURIComponent(id)}/cost${query ? `?${query}` : ""}`, { signal });
@@ -1146,15 +1148,10 @@ async function deleteMcpKey(id, { signal } = {}) {
   return id;
 }
 
-// A server-sent event stream read with fetch, with the surface of EventSource that
-// the Query page uses: addEventListener(type, fn), onerror, close(), readyState.
-// Chrome's own EventSource needs about as long again as the bytes take to arrive
-// (37 MB of rows: 700 ms against 350 ms for fetch with the same JSON.parse), because
-// it splits and dispatches the stream on the main thread line by line. Here the
-// chunks are decoded once and cut at the blank line that ends an event (the server
-// writes "\n" line ends only).
-// A stream that fails or ends fires "error" without data, like EventSource, but
-// never reconnects: a run is not repeated. A named "error" event keeps its data.
+// This is a server-sent event stream. It reads the stream with fetch. It has the surface of the EventSource that the Query page uses: addEventListener(type, fn), onerror, close() and readyState.
+// Chrome's own EventSource needs about as long again as the bytes take to arrive. For 37 MB of rows it takes 700 ms, against 350 ms for fetch with the same JSON.parse. EventSource splits and dispatches the stream on the main thread, line by line.
+// This code decodes the chunks once. It cuts them at the blank line that ends an event. The server writes "\n" line ends only.
+// A stream that fails or ends fires "error" without data, as EventSource does. It never reconnects, so a run is not repeated. A named "error" event keeps its data.
 const STREAM_CONNECTING = 0;
 const STREAM_OPEN = 1;
 const STREAM_CLOSED = 2;
@@ -1189,15 +1186,15 @@ class FetchEventStream {
   }
 
   emit(type, data, status = 0) {
-    // `status`: the HTTP status of an answer that was not a stream (a result stream that expired is a 404, one that
-    // was read already a 409); 0 for a stream that was cut.
+        // `status` is the HTTP status of an answer that is not a stream. A result stream that expired gives 404. A result stream that was already read gives 409.
+        // The value is 0 for a stream that was cut.
     const event = { type, data, target: this, status };
     for (const listener of this.listeners.get(type) || []) {
       if (this.closed) return;
       try {
         listener.call(this, event);
       } catch (error) {
-        // A failing listener does not end the stream (EventSource reports it and goes on).
+                // A failing listener does not end the stream. EventSource reports the error and continues.
         if (typeof reportError === "function") reportError(error);
         else setTimeout(() => { throw error; }, 0);
       }
@@ -1205,7 +1202,7 @@ class FetchEventStream {
     if (type === "error" && typeof this.onerror === "function" && !this.closed) this.onerror.call(this, event);
   }
 
-  // One event: its lines, "event:" (the type, "message" by default), "data:" (joined by a newline), comments ignored.
+    // One event has lines. An "event:" line gives the type, and "message" is the default. Lines "data:" are joined by a newline. Comment lines are ignored.
   dispatch(block) {
     let type = "message";
     let data = null;
@@ -1254,31 +1251,29 @@ class FetchEventStream {
           end = buffer.indexOf("\n\n", start);
         }
         if (start) buffer = buffer.slice(start);
-        // The next search starts where this one ended (a blank line can be cut between two chunks).
+                // The next search starts where the previous search stopped. A blank line can be cut between two chunks.
         from = Math.max(0, buffer.length - 1);
       }
     } catch (error) {
-      // A failed read ends the stream like its end does.
+            // A failed read ends the stream, as the normal end does.
     }
     if (this.closed) return;
-    // The end of the stream, normal or not: the page already has its "done" or it fails the run.
+        // At the end of the stream, normal or not, the page already has its "done" event. If not, the run fails.
     this.readyState = STREAM_CLOSED;
     this.emit("error", undefined, status);
   }
 }
 
-// The event stream of a run: the fetch reader. There is no EventSource fallback: a native EventSource reconnects by
-// itself, and a run is never repeated (the server refuses a second attach with 409 and cancels the query when the
-// stream ends); every browser the page supports reads a response body as a stream.
+// The event stream of a run uses the fetch reader. There is no EventSource fallback.
+// A native EventSource reconnects by itself. A run is never repeated, because the server refuses a second attach with 409 and cancels the query when the stream ends.
+// Every browser that the page supports reads a response body as a stream.
 function openEventStream(url) {
   return new FetchEventStream(url);
 }
 
-// Every request of the page's API client rejects with util.errorText's
-// message (the original text on error.rawMessage), so a view shows a
-// sentence rather than "trace_not_found: Trace was not found...". Called
-// once by the controller of a page that shows API errors (Observability,
-// one trace).
+// Every request of the API client of the page rejects with the message of util.errorText. The original text stays on error.rawMessage.
+// A view then shows a sentence, not "trace_not_found: Trace was not found...".
+// The controller of a page that shows API errors calls this function once (Observability, one trace).
 function humanizeErrors() {
   const client = api;
   if (!client || client.__humanErrors) return;
@@ -1299,7 +1294,7 @@ function humanizeErrors() {
   Object.defineProperty(client, "__humanErrors", { value: true });
 }
 
-// Every call takes a last { signal } (AbortSignal, e.g. util.latest).
+// Every call takes a last { signal } (AbortSignal, for example util.latest).
 export const api = { resolveUrl, request, getJson, postJson, getHosts, getVersion,
   setApiOnline, formatSqls, formatSqlsEach, formatFailure, runSql, openEventStream, analyzeQuery, getQueryExecution, cancelQuery, getMeta,
   getExplorerCatalog, getExplorerTable, getExplorerTableData, getExplorerFunctions,

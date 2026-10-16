@@ -12,7 +12,8 @@ namespace system_page {
 
 namespace {
 
-// The answer of a cache: the value, or the error of the route (503 with the code and the message of the read that failed, or the default).
+// The answer of a cache is the value, or the error of the route.
+// The error is 503, with the code and the message of the read that failed, or the default.
 template <typename T>
 Result<Cached<T>> finished(const typename TtlCache<std::string, T>::Result& result, const char* default_code, const char* default_message) {
   using Out = Result<Cached<T>>;
@@ -31,7 +32,7 @@ std::string runner_user_of(const HostSpec& host) {
   return parsed ? parsed->user : std::string();
 }
 
-// A connection could not be had: the code and the message of the read.
+// No connection was available. The error holds the code and the message of the read.
 bool no_connection(const std::unique_ptr<ChExecutor>& db, const std::string& error, const char* code, const char* fallback, std::string& out_code,
                    std::string& out_message) {
   if (db) return false;
@@ -73,7 +74,7 @@ Result<Cached<SystemMonitorOverview>> SystemService::overview(const RequestConte
   const std::string key = request.host_id + std::string("\0monitor-overview", 17);
   const AclAccess access = ports_.runner_access(host);
   if (request.refresh) acl_.invalidate(access);
-  // Served at once past its TTL while one refresh runs: the fetch owns what it uses.
+  // The value is served at once past its TTL while one refresh runs. The fetch owns what it uses.
   auto result = caches_.overview.get_revalidating(
       key,
       [this, access, host, caps](SystemMonitorOverview& value, std::string& code, std::string& message) {
@@ -105,7 +106,7 @@ Result<Cached<SystemMonitorSeries>> SystemService::series(const RequestContext&,
   const std::string key = request.host_id + std::string("\0monitor-series\0", 16) + "performance" + "|" + std::to_string(window.from_s) + "-" +
                           std::to_string(window.to_s) + "/" + std::to_string(window.step_s) +
                           (window.span_s > window.query_log_max_span_s ? "/no-query-log" : "");
-  // Relative windows move with the clock: a window nobody asks for again leaves the cache with its age or the LRU.
+  // Relative windows move with the clock. A window that nobody asks for again leaves the cache, by its age or by the LRU.
   auto result = caches_.series.get(
       key,
       [&](SystemMonitorSeries& value, std::string& code, std::string& message) {
@@ -120,8 +121,10 @@ Result<Cached<SystemMonitorSeries>> SystemService::series(const RequestContext&,
   return finished<SystemMonitorSeries>(result, "system_monitor_unavailable", "The performance history is unavailable.");
 }
 
-// Disk growth (/series?panel=disk_growth): each disk's used bytes over the window, its trend and days until full, the MergeTree tables' bytes, and
-// what the runner-visible databases wrote and moved. The window was validated with the request; 5 minutes for each aligned window.
+// Disk growth (/series?panel=disk_growth) gives these values.
+// It gives the used bytes of each disk over the window, the trend of each disk, and the days until each disk is full.
+// It gives the bytes of the MergeTree tables. It also gives what the databases that the runner can see wrote and moved.
+// The window was validated with the request. The cache keeps each aligned window for 5 minutes.
 Result<Cached<SystemMonitorDiskGrowth>> SystemService::disk_growth(const RequestContext&, const HostSpec& host, const SeriesRequest& request) const {
   const MonitorSeriesWindow& window = request.window;
   const auto caps = capabilities(host);
@@ -174,20 +177,22 @@ Result<Cached<SystemMonitorDisks>> SystemService::disks(const RequestContext&, c
   return finished<SystemMonitorDisks>(result, "system_monitor_unavailable", "The disks are unavailable.");
 }
 
-// The top shapes of the window's queries by an allowlisted measure, read from system.query_log with the RUNNER account (ClickHouse grants
-// decide; the Query page reads the same rows).
+// The top shapes of the queries in the window, by an allowlisted measure.
+// The code reads system.query_log with the RUNNER account. ClickHouse grants decide what the account reads.
+// The Query page reads the same rows.
 Result<Cached<SystemMonitorQueries>> SystemService::queries(const RequestContext&, const HostSpec& host, const QueriesRequest& request) const {
   const auto caps = capabilities(host);
   MonitorQueriesRequest query = request.query;
   query.system_user = caps->system_user;
   query.runner_user = runner_user_of(host);
   const std::string hide = query.hide_chdash ? "1" : "0";
-  // Every filter is in the key; the user, the database and the table last, length-prefixed (any byte).
+  // Every filter is in the key. The user, the database and the table come last, length-prefixed (any byte).
   const std::string key = request.host_id + std::string("\0monitor-queries\0", 17) + std::to_string(query.from_s) + "-" + std::to_string(query.to_s) +
                           "|" + query.sort + "|" + query.kind + "|" + query.errors + "|" + hide + "|" + std::to_string(query.user.size()) + ":" +
                           query.user + "|" + std::to_string(query.database.size()) + ":" + query.database + "|" +
                           std::to_string(query.table.size()) + ":" + query.table;
-  // A second viewer of the same window waits for the read in flight rather than starting another (phase 1 may take its whole 15 s budget).
+  // A second viewer of the same window waits for the read in flight. The code does not start another read.
+  // Phase 1 may take its whole 15 s budget.
   const AclAccess access = ports_.runner_access(host);
   if (request.refresh) acl_.invalidate(access);
   auto result = caches_.queries.get(
@@ -209,7 +214,8 @@ Result<Cached<SystemMonitorQueries>> SystemService::queries(const RequestContext
   return finished<SystemMonitorQueries>(result, "system_monitor_unavailable", "The top queries are unavailable.");
 }
 
-// One query shape: its timeline over the window and its 20 slowest, latest or largest runs, with the latest run's text. Runner account, as the list.
+// One query shape. The answer holds its timeline over the window, and its 20 slowest, latest or largest runs.
+// It also holds the text of the latest run. It uses the runner account, as the list does.
 Result<Cached<SystemMonitorQuery>> SystemService::query(const RequestContext&, const HostSpec& host, const QueryRequest& request) const {
   const auto caps = capabilities(host);
   MonitorQueriesRequest query = request.query;
@@ -238,13 +244,15 @@ Result<Cached<SystemMonitorQuery>> SystemService::query(const RequestContext&, c
 
 std::shared_ptr<const std::string> SystemService::shape_text_formatted(const RequestContext&, const HostSpec& host, const std::string& normalized) const {
   if (!ports_.format || normalized.empty() || normalized.size() > kShapeFormatMaxInputBytes) return nullptr;
-  // The host (its identity: an MCP identity has a host of its own) and the text, as a digest: the text can be 64 KiB.
+  // The key holds the host, which is its identity, and the text, as a digest.
+  // An MCP identity has a host of its own. The text can be 64 KiB.
   const std::string key = host.id + std::string("\0shape-format\0", 14) + std::to_string(normalized.size()) + ":" + sha256_hex(normalized);
   try {
     const auto result = caches_.shape_format.get(key, [&](ShapeFormatted& value, std::string& code, std::string& message) {
       const ShapeFormat shape = format_shape_text(normalized, [&](const std::string& masked) { return ports_.format(host, masked); });
       if (shape.status == ShapeFormatStatus::Transient) {
-        // Not kept as a value: the cache answers this error for a moment, and then asks again.
+        // The error is not kept as a value. The cache answers this error for a moment.
+        // Then it asks again.
         code = "format_unavailable";
         message = "The formatter could not be asked.";
         return false;
@@ -260,8 +268,9 @@ std::shared_ptr<const std::string> SystemService::shape_text_formatted(const Req
   }
 }
 
-// The Activity is live state: never older than the Explorer cache TTL, at most one read a second per host however many pages auto-refresh; past its
-// TTL it is served at once while one refresh runs (the fetch owns what it uses).
+// The Activity is live state. It is never older than the Explorer cache TTL.
+// The code makes at most one read a second for each host, however many pages auto-refresh.
+// Past its TTL, the value is served at once while one refresh runs. The fetch owns what it uses.
 Result<Cached<SystemActivity>> SystemService::activity(const RequestContext&, const HostSpec& host, const HostRequest& request) const {
   const std::string key = request.host_id + std::string("\0ops-activity", 13);
   const AclAccess access = ports_.runner_access(host);

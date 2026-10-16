@@ -1,6 +1,6 @@
-// Generated from the SQL that ClickHouse logged for the requests of the code before the split of src/api_traces.cpp (the battery of
-// the differential check): the statements that the builders of src/trace_sql.cpp must still write, byte for byte. @IDS@ stands for a
-// list of trace ids, and @OLDEST@ @NEWEST@ @FIRST@ @END@ for the nanosecond bounds that a test chooses.
+// Generated from the SQL that ClickHouse logged for the requests of the code before the split of src/api_traces.cpp.
+// The battery of the differential check made it. The builders of src/trace_sql.cpp must still write these statements byte for byte.
+// @IDS@ stands for a list of trace ids. @OLDEST@, @NEWEST@, @FIRST@ and @END@ stand for the nanosecond bounds that a test chooses.
 #pragma once
 
 namespace golden {

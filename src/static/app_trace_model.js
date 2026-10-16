@@ -1,13 +1,15 @@
-// The trace of a span list, with no page behind it (ARCH-F-155): the tree of the spans, the critical path, the extent and the
-// bounds of a trace, the durations on an axis, the sort of a list of traces, the spans, events and links of a span as data and
-// the JSON text of a trace. The Node unit tests run this module in a bare context (tests/frontend/model/trace-model.test.cjs).
+// This file gives the trace of a span list, with no page behind it (ARCH-F-155).
+// It holds the tree of the spans, the critical path, the extent and the bounds of a trace.
+// It also holds the durations on an axis and the sort of a list of traces.
+// It holds the spans, events and links of a span as data, and the JSON text of a trace.
+// The Node unit tests run this module in a bare context (tests/frontend/model/trace-model.test.cjs).
 
 import { format } from "./app_format.js";
 
 const fmt = format;
 
-// Duration axis steps: 1-2-5 below a second, then clock-friendly steps
-// (seconds, minutes, hours, days), so minute axes read 2 min, 5 min, 15 min.
+// Duration axis steps: 1-2-5 below a second. Above a second, the steps are clock-friendly: seconds, minutes, hours and days.
+// So minute axes read 2 min, 5 min and 15 min.
 const DURATION_AXIS_STEPS_NS = (() => {
   const steps = [];
   for (let decade = 1; decade < 1e9; decade *= 10) for (const m of [1, 2, 5]) steps.push(m * decade);
@@ -18,10 +20,10 @@ const DURATION_AXIS_STEPS_NS = (() => {
   return steps;
 })();
 
-// Jaeger's ['auto', 'auto'] duration domain: the data range padded by 5 %
-// on each side (a flat series by 10 % of its value), snapped to whole
-// steps, so close percentiles do not flatten against a zero baseline. The
-// step is the finest one whose labels all differ.
+// Jaeger's ['auto', 'auto'] duration domain: the data range, padded by 5 % on each side.
+// A flat series is padded by 10 % of its value instead.
+// The domain snaps to whole steps. So close percentiles do not flatten against a zero baseline.
+// The step is the finest one whose labels all differ.
 function durationAxis(minNsValue, maxNsValue, targetIntervals = 7) {
   let lo = Math.max(0, Number(minNsValue) || 0);
   let hi = Math.max(lo, Number(maxNsValue) || 0);
@@ -46,9 +48,9 @@ function durationAxis(minNsValue, maxNsValue, targetIntervals = 7) {
   return { axisMin: 0, axisMax: last, values: [{ value: 0, label: "0" }, { value: last, label: fmt.duration(last) }] };
 }
 
-// Evenly spaced ticks over a window of `durationNs` that starts `offsetNs`
-// after the trace start (a zoomed waterfall): labels are offsets from the
-// trace start, like Jaeger's, never restarting at 0.
+// Evenly spaced ticks over a window of `durationNs`. The window starts `offsetNs` after the trace start (a zoomed waterfall).
+// The labels are offsets from the trace start, like Jaeger's.
+// They never restart at 0.
 function durationTicks(durationNs, count = 5, offsetNs = 0) {
   const duration = Math.max(1, Number(durationNs || 0));
   const offset = Math.max(0, Number(offsetNs || 0));
@@ -61,27 +63,27 @@ function durationTicks(durationNs, count = 5, offsetNs = 0) {
   });
 }
 
-// fmt.duration, with the extra decimals a deep zoom needs so adjacent
-// ticks never read the same ("50.003 ms", "50.005 ms").
+// fmt.duration, with the extra decimals that a deep zoom needs.
+// Adjacent ticks then never read the same, for example "50.003 ms" and "50.005 ms".
 function tickDurationLabel(ns, stepNs) {
   const text = fmt.duration(ns);
   const match = /^(\d+(?:\.(\d+))?) (µs|ms|s)$/.exec(text);
   if (!match || !(stepNs > 0)) return text;
   const factor = match[3] === "s" ? 1e9 : match[3] === "ms" ? 1e6 : 1e3;
-  // One decimal below the step's leading digit: a 0.25 ms step reads 74.75.
+  // One decimal below the step's leading digit. A 0.25 ms step reads 74.75.
   const needed = Math.min(6, Math.max(0, Math.ceil(-Math.log10(stepNs / factor)) + 1));
   return needed > (match[2] || "").length ? `${(ns / factor).toFixed(needed)} ${match[3]}` : text;
 }
 
-// Wall-clock time `offsetNs` after the epoch-ns instant `startNs`,
-// browser-local: 10:59:59.312, with microseconds when the tick step is
-// below a millisecond. The offset is added to the start's sub-millisecond
-// remainder, not to the epoch value, which a double only holds to ~256 ns.
+// Wall-clock time that is `offsetNs` after the epoch-ns instant `startNs`, in the local time of the browser.
+// An example is 10:59:59.312.
+// Microseconds appear when the tick step is below a millisecond.
+// The offset is added to the sub-millisecond remainder of the start, not to the epoch value.
+// A double holds the epoch value only to ~256 ns.
 function wallClockLabel(startNs, offsetNs = 0, stepNs = Infinity) {
   if (!Number.isFinite(startNs) || !Number.isFinite(offsetNs)) return "";
   const startMs = Math.floor(startNs / 1e6);
-  // Whole nanoseconds: a view fraction like 0.49999999999999994 must not
-  // read one millisecond early.
+  // Use whole nanoseconds. A view fraction like 0.49999999999999994 must not read one millisecond early.
   const withinNs = Math.round(Math.max(0, startNs - startMs * 1e6) + offsetNs);
   const ms = startMs + Math.floor(withinNs / 1e6);
   const base = fmt.time(ms, { precision: "ms", date: "never" });
@@ -128,8 +130,8 @@ function parseStartMs(value) {
   return Number.isFinite(ms) ? ms : NaN;
 }
 
-// A trace's services read in the order they joined it: by their earliest
-// span start (offset from the trace start), then by name.
+// The services of a trace read in the order that they joined the trace.
+// The order uses the earliest span start (offset from the trace start), then the name.
 function orderByFirstSpan(stats) {
   return stats.sort((a, b) => (a.first_span_ns - b.first_span_ns) || (a.service < b.service ? -1 : a.service > b.service ? 1 : 0));
 }
@@ -150,8 +152,8 @@ function unpackAnalytics(payload, previous = null) {
   };
 }
 
-// Bucket starts on a regular grid from the first to the last bucket, the
-// value of each (0 / NaN where the answer has none).
+// Bucket starts lie on a regular grid, from the first to the last bucket.
+// The value of each bucket is 0 or NaN where the answer has none.
 function bucketGrid(buckets, bucketMs, empty) {
   const first = buckets[0][0];
   const count = Math.max(1, Math.min(20000, Math.round((buckets[buckets.length - 1][0] - first) / bucketMs) + 1));
@@ -162,8 +164,8 @@ function bucketGrid(buckets, bucketMs, empty) {
   return { starts, slot, empty };
 }
 
-// The list follows the sort picker; the table sorts by its column headers
-// (both directions), starting from the picker's order.
+// The list follows the sort picker. The table sorts by its column headers, in both directions.
+// The table starts from the order of the picker.
 const LIST_SORTS = {
   recent: { key: "start", dir: "desc" },
   longest: { key: "duration", dir: "desc" },
@@ -198,7 +200,7 @@ function traceSortValue(trace, key) {
 
 function sortTraces(rows, { key, dir }) {
   const sign = dir === "asc" ? 1 : -1;
-  // Ties keep the newest trace first, then the trace id, in both directions.
+  // Ties keep the newest trace first. Then the trace ID decides, in both directions.
   return rows.sort((a, b) => {
     const av = traceSortValue(a, key), bv = traceSortValue(b, key);
     const cmp = typeof av === "string" ? compareText(av, bv) : av - bv;
@@ -206,7 +208,7 @@ function sortTraces(rows, { key, dir }) {
   });
 }
 
-// An all-zero parent id is how some exporters write "no parent".
+// An all-zero parent ID is how some exporters write "no parent".
 function parentSpanId(span) {
   const id = String(span?.parent_span_id || "");
   return /^0*$/.test(id) ? "" : id;
@@ -223,7 +225,7 @@ function buildTree(spans) {
     else roots.push(node);
   }
   const cmp = (a, b) => Number(a.span.start_ns || 0) - Number(b.span.start_ns || 0) || String(a.span.span_id || "").localeCompare(String(b.span.span_id || ""));
-  // Iterative: a long parent chain must not exhaust the call stack.
+  // This loop is iterative. A long parent chain must not exhaust the call stack.
   roots.sort(cmp);
   const stack = roots.map((root) => [root, 0]);
   while (stack.length) {
@@ -235,8 +237,8 @@ function buildTree(spans) {
   return { nodes, roots };
 }
 
-// Single pass, no argument spreading: Math.min(...list) throws RangeError
-// once a trace approaches ~100k spans and allocates two temporary arrays.
+// The code uses a single pass and does not spread arguments.
+// Math.min(...list) throws a RangeError when a trace approaches ~100k spans. It also allocates two temporary arrays.
 function spanExtent(spans) {
   let start = Infinity;
   let end = -Infinity;
@@ -263,9 +265,10 @@ function spanKey(node) {
   return String(node?.span?.span_id || "");
 }
 
-// The structures that the views of one trace read, built once from its spans: the tree, the span of each id, the order
-// of the waterfall, the spans with an error below them, the counts and the bounds. The caches of a view (events,
-// decorations, critical path) hang from it.
+// This block holds the structures that the views of one trace read. The code builds them once from the spans.
+// These structures are the tree, the span of each ID, and the order of the waterfall.
+// They also hold the spans with an error below them, the counts and the bounds.
+// The caches of a view (events, decorations and critical path) are attached to it.
 function createTraceCache(trace) {
   const spans = trace?.spans || [];
   const tree = buildTree(spans);
@@ -324,10 +327,11 @@ function createTraceCache(trace) {
 }
 
 // --- Critical path (Jaeger's CriticalPath/index.ts) ------------------------
-// From each root, follow the last finishing child; on the way back, the child
-// that finished last before the returning child started. A consumer child
-// of a producer does not block it, and children are first clipped to their
-// parent (sanitizeOverFlowingChildren). Iterative, so deep traces are safe.
+// From each root, follow the child that finishes last.
+// On the way back, take the child that finished last before the child that returns started.
+// A consumer child of a producer does not block it.
+// Children are first clipped to their parent (sanitizeOverFlowingChildren).
+// The code is iterative, so deep traces are safe.
 function criticalPathSections(cache) {
   if (cache.criticalPath) return cache.criticalPath;
   const byNode = new Map();
@@ -340,10 +344,10 @@ function criticalPathSections(cache) {
     else byNode.set(node, [{ start, end }]);
   };
   for (const root of cache.tree.roots) {
-    // Like Jaeger, a span whose parent is missing (an orphan) and its
-    // subtree get no critical path.
+    // Like Jaeger, a span with a missing parent (an orphan) gets no critical path.
+    // Its subtree gets no critical path either.
     if (parentSpanId(root.span)) continue;
-    // Pre-order over blocking descendants: parents are clipped first.
+    // Pre-order over blocking descendants. Parents are clipped first.
     const list = [];
     const stack = [[root, null]];
     while (stack.length) {
@@ -399,7 +403,7 @@ function criticalPathSections(cache) {
   return byNode;
 }
 
-// A span's sections; a collapsed span shows those of its whole hidden subtree.
+// A span's sections. A collapsed span shows the sections of its whole hidden subtree.
 function criticalSectionsFor(cache, node, collapsed) {
   const byNode = criticalPathSections(cache);
   if (!collapsed) return byNode.get(node) || [];
@@ -427,25 +431,25 @@ function parseStructuredValue(raw) {
   return null;
 }
 
-// "Copy trace JSON" document: what /api/traces/trace returned for the open
-// trace, spans ordered by start time (then span id), 2-space indented:
+// The "Copy trace JSON" document is what /api/traces/trace returns for the open trace.
+// The spans are ordered by start time, then by span ID. The document has a 2-space indent, as shown:
 //   { trace_id, truncated, span_count, spans: [{ trace_id, span_id,
 //     parent_span_id, service_name, span_name, span_kind, timestamp,
 //     start_ns, duration_ns, status_code, status_message,
 //     span_attributes?, resource_attributes?,
 //     events?: [{ timestamp, name, attributes }],
 //     links?: [{ trace_id, span_id, attributes }] }] }
-// The endpoint ships attributes, events and links as JSON-encoded columns;
-// they are decoded here, events and links zipped into one object each. Keys
-// marked ? exist only when the endpoint returns them (per-feature columns).
-// start_ns keeps the endpoint's exact integer (see traceJsonExactStartNs).
+// The endpoint sends attributes, events and links as JSON-encoded columns.
+// This code decodes them. Events and links are zipped into one object each.
+// Keys marked ? exist only when the endpoint returns them (per-feature columns).
+// start_ns keeps the exact integer of the endpoint (see traceJsonExactStartNs).
 const TRACE_JSON_SPAN_KEYS = ["trace_id", "span_id", "parent_span_id", "service_name", "span_name", "span_kind",
   "timestamp", "start_ns", "duration_ns", "status_code", "status_message"];
 const TRACE_JSON_EXACT_NS = "\u0000exact-ns:";
 
-// start_ns is an epoch in nanoseconds, past 2^53: the parsed JSON number
-// lost its last digits. The span's `timestamp` string ends with the exact
-// nanoseconds of its second, which restore the integer the endpoint sent.
+// start_ns is an epoch in nanoseconds, above 2^53. The parsed JSON number loses its last digits.
+// The span's `timestamp` string ends with the exact nanoseconds of its second.
+// These nanoseconds restore the integer that the endpoint sent.
 function traceJsonExactStartNs(span) {
   const rounded = Number(span.start_ns);
   const fraction = /\.(\d{9})$/.exec(String(span.timestamp || ""));
@@ -506,7 +510,7 @@ function jsonList(raw) {
   return Array.isArray(value) ? value : [];
 }
 
-// A span's events, ordered by time (then by position in the span).
+// The events of a span are ordered by time. Then their position in the span decides.
 function spanEventList(span) {
   const times = jsonList(span.events_timestamp);
   const names = jsonList(span.events_name);
@@ -535,8 +539,8 @@ function spanLinkList(span) {
   }));
 }
 
-// Spans of the loaded trace that link to a span ("linked from"): only what
-// the trace already holds, computed once per trace.
+// The spans of the loaded trace that link to a span are shown as "linked from".
+// This code uses only what the trace already holds. It computes the list once per trace.
 function linkedFromList(cache, span) {
   if (!cache.linkedFrom) {
     cache.linkedFrom = new Map();

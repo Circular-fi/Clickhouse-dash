@@ -1,11 +1,13 @@
-// Services tab of the Traces page, after HyperDX's ServicesDashboardPage:
-// RED metrics (rate, errors, duration) of every service's entry spans
-// (SpanKind Server / Consumer or root spans) from /api/traces/services, a
-// sortable table with sparklines and, per service, a detail panel with rate
-// / error rate / latency charts, release markers (first span of each
-// service.version), the most time-consuming endpoints, the slowest spans and
-// the database statements (/api/traces/services/db). The search bar's
-// range, pickers and chips apply here as span filters of the entry spans.
+// Services tab of the Traces page, after HyperDX's ServicesDashboardPage.
+// It shows RED metrics (rate, errors and duration) of the entry spans of every service.
+// The entry spans are SpanKind Server or Consumer spans, or root spans.
+// The data comes from /api/traces/services.
+//
+// The view is a sortable table with sparklines.
+// For each service, a detail panel shows the rate, error rate and latency charts.
+// The panel also shows the release markers (first span of each service.version).
+// It shows the most time-consuming endpoints, the slowest spans and the database statements (/api/traces/services/db).
+// The range, pickers and chips of the search bar apply here as span filters of the entry spans.
 
 import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
@@ -55,12 +57,12 @@ const view = {
 
 // ------------------------------------------------------------ formatting
 
-// A failed request's Retry: "list", "detail" or "db" (onClick).
-// A failed step's state block, its Retry handled by the view's click listener.
+// The Retry of a failed request. The value is "list", "detail" or "db" (onClick).
+// The state block of a failed step. The click listener of the view handles its Retry.
 const failedHtml = (text, what) => uiState.errorHtml({ body: text, compact: true, retry: { attrs: { "data-svc-retry": what } } });
 const emptyHtml = (text, options = {}) => uiState.emptyHtml({ body: text, compact: true, ...options });
 
-// A request rate in the largest unit it reaches 1 in: 2.4/s, 29/min, 6/h.
+// A request rate, in the largest unit where the value is 1 or more: 2.4/s, 29/min, 6/h.
 const RATE_UNITS = [{ per: 1, suffix: "/s", word: "second" }, { per: 60, suffix: "/min", word: "minute" }, { per: 3600, suffix: "/h", word: "hour" }];
 function rateUnit(perSecond) {
   const value = Number(perSecond);
@@ -68,9 +70,9 @@ function rateUnit(perSecond) {
   return RATE_UNITS.find((unit) => value * unit.per >= 1) || RATE_UNITS[RATE_UNITS.length - 1];
 }
 
-// The shared error-rate level of a percentage (ns.palette.errorLevel: below
-// 1 % neutral, 1-5 % warning, 5 % and more danger): the cell class and the
-// stat tile tone.
+// The shared error-rate level of a percentage is set by ns.palette.errorLevel.
+// Below 1 % the level is neutral. From 1 % to 5 % it is a warning. From 5 % it is a danger.
+// The level sets the cell class and the tone of the stat tile.
 const ERROR_CLASS = { neutral: "", warn: " is-errorWarn", danger: " is-errorDanger" };
 const ERROR_TONE = { neutral: "", warn: "warn", danger: "error" };
 const errorLevel = (pct) => palette.errorLevel((Number(pct) || 0) / 100);
@@ -84,11 +86,9 @@ function rateText(perSecond, unit = rateUnit(perSecond)) {
 // Error rates and time shares are kept in percent (0-100).
 const percentText = (value) => fmt.percent(Number(value || 0) / 100);
 
-// Axis ticks of a detail chart (app_chart_core.js yAxis): round values in
-// [0, max], each labelled by the table's own formatter, so the axis, the
-// cursor readout, the tooltip and the table share one unit and precision
-// ("29/min" in the table against "20/min, 40/min"; "1.21%" against
-// "0.50%, 1%, 1.50%").
+// The axis ticks of a detail chart (app_chart_core.js yAxis) are round values in [0, max].
+// The table's own formatter labels each tick. The axis, the cursor readout, the tooltip and the table therefore share one unit and precision.
+// Examples: "29/min" in the table, against "20/min, 40/min" on the axis. "1.21%" against "0.50%, 1%, 1.50%".
 function unitAxis(yMax, label) {
   const ticks = chartCore.linearTicks(0, yMax > 0 ? yMax : 1, 4);
   const top = ticks.values[ticks.values.length - 1];
@@ -96,7 +96,7 @@ function unitAxis(yMax, label) {
   return { min: 0, max, step: ticks.step, ticks: ticks.values.map((v) => ({ v, label: label(v) })) };
 }
 
-// Seconds of the window a payload describes.
+// The seconds of the window that a payload describes.
 function windowSeconds(payload) {
   const range = Array.isArray(payload?.window) ? payload.window : payload?.range || [0, 1];
   return Math.max(1, (Number(range[1]) - Number(range[0])) / 1000);
@@ -140,15 +140,15 @@ function requestFilters(filters) {
   return out;
 }
 
-// Relative ranges resolve anew for every search: within the same minute
-// the answer is reused (Back from a trace, tab switches).
+// Relative ranges are resolved again for every search.
+// Within the same minute, the answer is reused (Back from a trace, tab switches).
 function keyOf(params) {
   const { start_ms: startMs, end_ms: endMs, ...rest } = params;
   return JSON.stringify({ ...rest, minutes: timeRange.minuteKey(startMs, endMs) });
 }
 
-// force: an explicit search (Search button, scope / exact toggles) asks
-// again even within the same minute.
+// force: an explicit search asks again, even within the same minute.
+// An explicit search is the Search button, or a change of the scope / exact toggles.
 async function run(filters, { force = false } = {}) {
   view.filters = filters;
   view.searchKey = traceSearch.searchKey() || "";
@@ -252,15 +252,14 @@ function sortRows(rows) {
   });
 }
 
-// The shared sparkline (chartUi.sparkline): the series over the searched range,
-// a neutral line, no area (a noisy series filled in grey reads as a box
-// behind the line, in the light theme above all), bound to the data (no zero baseline: the
-// range ends are gaps, and a P95 of a bucket without spans is no value),
-// labelled with its peak (each row has its own scale). Only anomalies take
-// a colour, the three worst of a row at most: a request bucket at the
-// shared error-rate thresholds (palette.errorLevel: amber from 1 %, red
-// from 5 %) with two errors or more, a P95 bucket above twice the row's
-// median in the accent.
+// The shared sparkline (chartUi.sparkline) draws the series over the searched range.
+// It draws a neutral line, with no area. A noisy series filled in grey looks like a box behind the line, in the light theme above all.
+// The sparkline is bound to the data. It has no zero baseline. The range ends are gaps. A P95 of a bucket without spans is no value.
+// It is labelled with its peak, because each row has its own scale.
+//
+// Only anomalies take a colour, and at most the three worst of a row.
+// A request bucket takes a colour at the shared error-rate thresholds (palette.errorLevel: amber from 1 %, red from 5 %) with two errors or more.
+// A P95 bucket takes the accent colour when it is above twice the median of the row.
 const SPIKE_FACTOR = 2;
 const SPARK_MARK = { neutral: null, warn: "warn", danger: "danger" };
 const MIN_MARK_ERRORS = 2;
@@ -277,8 +276,8 @@ function sparkline(points, field, cls, peakText) {
   const hi = drawn.length ? Math.max(...drawn) : 1;
   let marks;
   if (field === "spans") {
-    // The worst buckets only: a few errors in a quiet minute are noise, so
-    // a bucket needs MIN_MARK_ERRORS errors, and at most MAX_MARKS show.
+    // Only the worst buckets get a mark. A few errors in a quiet minute are noise.
+    // A bucket needs MIN_MARK_ERRORS errors. At most MAX_MARKS marks show.
     marks = points.map(() => null);
     points.map((p, i) => ({ i, rate: p.spans > 0 ? p.errors / p.spans : 0, errors: p.errors }))
       .filter((b) => b.errors >= MIN_MARK_ERRORS && palette.errorLevel(b.rate) !== "neutral")
@@ -300,8 +299,8 @@ function sparkline(points, field, cls, peakText) {
   return `<span class="traceSvcTrend__cell"${peak ? ` title="Peak in the range: ${esc(peak)}"` : ""}>${svg}<span class="traceSvcTrend__peak">${esc(peak)}</span></span>`;
 }
 
-// A sortable header (ns.table): the sort state in aria-sort.
-// `tier`: "low", "mid" or "xs" for a column that leaves the table when the window is narrower than its breakpoint (UI-130, table.css).
+// A sortable header (ns.table) keeps the sort state in aria-sort.
+// `tier`: "low", "mid" or "xs". A column with a tier leaves the table when the window is narrower than its breakpoint (UI-130, table.css).
 function headerCell(key, label, title, numeric = true, tier = "") {
   return table.sortHeadHtml({ key, label, title, sort: view.sort, num: numeric, className: tier ? `is-${tier}` : "", attrs: { "data-svc-sort": key } });
 }
@@ -333,8 +332,8 @@ function tableHtml(rows) {
       <tbody>${body}</tbody></table>`;
 }
 
-// The "Time share" / "Total time" cell: the text over the shared in-cell
-// bar, in the service's colour.
+// The "Time share" / "Total time" cell shows the text over the shared in-cell bar.
+// The bar has the colour of the service.
 function shareCell(share, text, title, attrs = "") {
   const pct = Math.max(0, Math.min(100, Number(share) || 0));
   return `<td class="num cellBar traceSvcShare"${attrs} title="${esc(title)}" style="${table.cellBarStyle(pct, "var(--trace-service-color, var(--accent-fill))")}">${esc(text)}</td>`;
@@ -352,7 +351,7 @@ function statusHtml(payload) {
   return bits.join("");
 }
 
-// Entry spans | Root spans: the shared segmented control (app_ui_segmented.js).
+// Entry spans | Root spans: this is the shared segmented control (app_ui_segmented.js).
 function scopeHtml() {
   return segmented.html([
     { value: "entry", label: "Entry spans", title: "Spans receiving work: SpanKind Server or Consumer, or root spans" },
@@ -374,7 +373,7 @@ function render() {
   else if (!count) bodyHtml = emptyHtml(`No ${view.scope === "root" ? "root" : "entry"} spans match in this range.`);
   else bodyHtml = tableHtml(rows);
   releaseDetailCharts();
-  // A re-render (Back / Forward, a new answer) keeps the focus on its row.
+  // A new render (Back / Forward, or a new answer) keeps the focus on its row.
   const active = document.activeElement;
   const focusedRow = active instanceof Element && root.contains(active) && active.matches("[data-svc-row]") ? active.getAttribute("data-svc-row") : null;
   const shell = skeleton();
@@ -393,11 +392,11 @@ function render() {
   renderDetail();
 }
 
-// The view: the list (.traceSvc__main) and, beside it, the service
-// detail, a docked ns.detailPanel sticky under the search bar (a bottom
-// sheet on narrow windows). Built once; renders fill them.
+// The view has the list (.traceSvc__main). Beside the list is the service detail.
+// The detail is a docked ns.detailPanel. It sticks under the search bar. On narrow windows, it is a bottom sheet.
+// The view is built once. Each render fills these elements.
 let detailPanel = null;
-// svc= of the open detail (ns.router.panel).
+// svc= is the parameter of the open detail (ns.router.panel).
 const svcParam = address.panel("svc");
 
 function skeleton() {
@@ -419,12 +418,13 @@ function skeleton() {
 
 // ------------------------------------------------------------ the detail
 
-// The detail charts draw on the shared canvas engine (app_chart_core.js):
-// per chart one canvas, the engine's cursor and tooltip (one crosshair over
-// the three charts), release markers as DOM annotations, drag to search a
-// range. points: [{ t (bucket start), ... }].
-// P50 and P99 show by default; the legend toggles the others, and the
-// choice holds for the next service and answer.
+// The detail charts draw on the shared canvas engine (app_chart_core.js).
+// Each chart has one canvas. The engine provides the cursor and the tooltip. One crosshair spans the three charts.
+// The release markers are DOM annotations. A drag searches a range.
+// points: [{ t (bucket start), ... }].
+//
+// P50 and P99 show by default. The legend shows or hides the other series.
+// The choice holds for the next service and answer.
 let latencyHidden = ["p95"];
 const SUCCESS_COLOR = "var(--muted)";
 
@@ -434,7 +434,7 @@ function detailChart(container, { start, end, bucketMs, points, series, type, ax
   const n = grid.starts.length;
   const xs = new Float64Array(n);
   for (let i = 0; i < n; i += 1) xs[i] = grid.starts[i] + bucketMs / 2;
-  // Lines break over buckets without spans (NULL); bars there are empty.
+  // Lines break at buckets without spans (NULL). Bars are empty at these buckets.
   const nulls = new Uint8Array(n).fill(1);
   points.forEach((p, k) => { nulls[grid.slot[k]] = 0; });
   const columns = series.map((s) => {
@@ -449,14 +449,14 @@ function detailChart(container, { start, end, bucketMs, points, series, type, ax
       return { min: scale.axisMin, max: scale.axisMax, ticks: scale.values.map((t) => ({ v: t.value, label: t.label })) };
     };
   } else {
-    // "rate" (values already in the table's rate unit) and "percent": the
-    // axis labels are what the readouts print.
+    // "rate" (values already in the table's rate unit) and "percent".
+    // The axis labels are the values that the readouts print.
     yAxis = (yMin, yMax) => unitAxis(yMax, format);
   }
   const byIndex = new Map(points.map((p, k) => [grid.slot[k], p]));
   mountChart(container, "service", {
     height: DETAIL_CHART_HEIGHT, xKind: "time", xs, xDomain: [start, end], zoom: null,
-    // The engine legend shows for the charts with several series.
+    // The engine legend shows for the charts that have several series.
     series: columns, type, stack: type === "bar", syncKey: "traces-service", tooltipNulls: false,
     yAxis, annotations: releases,
     ...(hidden ? { hidden, onHiddenChange } : {}),
@@ -468,7 +468,7 @@ function detailChart(container, { start, end, bucketMs, points, series, type, ax
   });
 }
 
-// The detail's charts leave with it (their engine state is released).
+// The charts of the detail go away with it. Their engine state is released.
 function releaseDetailCharts() {
   $$("[data-svc-chart]", detailPanel?.el).forEach((el) => unmountChart(el));
 }
@@ -482,19 +482,19 @@ function drawDetailCharts() {
   const start = Number(range[0]), end = Math.max(start + 1000, Number(range[1]));
   const bucketMs = Math.max(1000, Number(payload.bucket_ms || 60000));
   const bucketSeconds = bucketMs / 1000;
-  // A release marker names what it marks: "release 1.15.0".
+  // A release marker names its release. Example: "release 1.15.0".
   const releases = (payload.releases || []).map((r) => ({ label: `release ${r[0]}`, x: Number(r[1]), title: `Release ${r[0]}: first span ${fmt.time(Number(r[1]))}`, className: "traceSvcRelease" }));
   const spansText = (p) => `${fmt.count(p.spans)} spans${p.errors ? `, ${fmt.count(p.errors)} errors` : ""}`;
-  // The rate chart counts in the unit of the service's Requests figure
-  // (table row and detail header): 29/min there, a per-minute axis here.
+  // The rate chart uses the unit of the Requests figure of the service.
+  // This figure is in the table row and in the detail header. It is 29/min there, and the axis is per minute here.
   const unit = rateUnit(detailRow(payload, view.detailName)?.rate);
   const perUnit = unit.per / bucketSeconds;
   const rate = $('[data-svc-chart="rate"]', panel);
   if (rate) detailChart(rate, {
     start, end, bucketMs, points, type: "bar", axis: "rate", releases, footer: spansText, format: (v) => rateText(v / unit.per, unit),
     series: [
-      // Success is the neutral mass, errors the one hue (danger): a
-      // service colour (amber, red) would read as a warning.
+      // Success uses the neutral colour. Errors use one hue, the danger colour.
+      // A service colour (amber, red) would look like a warning.
       { id: "ok", label: "Successful", color: SUCCESS_COLOR, value: (p) => Math.max(0, p.spans - p.errors) * perUnit },
       { id: "errors", label: "Errors", color: "var(--danger)", value: (p) => p.errors * perUnit },
     ],
@@ -562,7 +562,7 @@ function dbHtml() {
     }).join("")}</tbody></table>${payload.estimated ? '<div class="traceSvcNote">\u2248 The read cap or time budget stopped the scan: counts are partial.</div>' : ""}`;
 }
 
-// The selected service's totals row of a detail payload (rates included).
+// The totals row of the selected service in a detail payload. The rates are included.
 function detailRow(payload, name) {
   return payload ? withRates((payload.services || []).map(statsRow), payload).find((r) => r.name === name) || null : null;
 }
@@ -602,12 +602,12 @@ function renderDetail() {
         <section class="traceSvcSection"><h4>Slowest spans</h4>${slowestHtml(payload)}</section>
         <section class="traceSvcSection"><h4>Database statements</h4>${dbHtml()}</section>`;
   }
-  // The shell's head: eyebrow, the service (its colour dot), its actions.
+  // The head of the shell has the eyebrow, the service (with its colour dot) and the actions.
   panel.style.setProperty("--trace-service-color", palette.service(name));
   detailPanel.setHead({ eyebrow: "Service", title: `<i class="serviceSwatch" aria-hidden="true"></i>${esc(name)}`, html: true });
   detailPanel.title.setAttribute("title", name);
   detailPanel.setActions(`${detail.loading && payload ? badge.html("Loading\u2026", { size: "md" }) : ""}<button type="button" class="button button--primary button--small" data-svc-search="${esc(name)}" title="Search the traces of ${esc(name)}">Search traces</button>`);
-  // The totals strip between the head and the body (it does not scroll).
+  // The totals strip is between the head and the body. It does not scroll.
   let strip = $(":scope > .traceSvcStats", panel);
   if (stats) {
     if (!strip) {
@@ -625,9 +625,9 @@ function renderDetail() {
 
 // --------------------------------------------------------------- actions
 
-// Opening the detail pushes a history entry (svc=); another service in the
-// open detail replaces it; closing goes Back to the entry before it (or
-// replaces, when the entry is not the detail's own: a link, a reload).
+// The detail adds a history entry (svc=) when it opens.
+// Another service in the open detail replaces this entry.
+// Back from the detail goes to the entry before it. If that entry is not the detail's own (a link, a reload), the close replaces the entry instead.
 function openDetail(name, { push = true } = {}) {
   const opening = !view.detailName;
   view.detailName = name || "";
@@ -645,8 +645,7 @@ function openDetail(name, { push = true } = {}) {
   if (view.detailName) void loadDetail();
 }
 
-// The close button, Escape (ns.layers) and a click on the open service's
-// row: focus goes back to the service's row.
+// The close button, Escape (ns.layers) and a click on the row of the open service: the focus goes back to the row of the service.
 function closeDetail({ fromPanel = false } = {}) {
   const name = view.detailName;
   if (!name) return;
@@ -735,7 +734,7 @@ function applyParams(params) {
   const name = params.get("svc") || "";
   const changed = name !== view.detailName;
   view.detailName = name;
-  // Back / Forward within the view (sort, detail): no new search.
+  // Back / Forward within the view (sort, detail) does not run a new search.
   if (view.payload && root && !root.hidden) {
     render();
     if (changed && name) void loadDetail();
@@ -745,16 +744,15 @@ function applyParams(params) {
 function mount(element) {
   root = element;
   root.addEventListener("click", onClick);
-  // The database statements' inline SQL (string-built): one toggle.
+  // One toggle shows or hides the inline SQL of the database statements (built as a string).
   sqlBlock.bind(root);
-  // Up / Down move between services, Enter / Space open one (ns.table.rovingRows);
+  // Up / Down move between services. Enter / Space open a service (ns.table.rovingRows).
   // Escape closes the detail (ns.layers).
   table.rovingRows(root, { rows: "tr.traceSvcRow", onOpen: (row) => openDetail(row.getAttribute("data-svc-row") || "") });
   render();
 }
 
-// Shown from a click or Back / Forward: the current search refreshes the
-// view unless it already shows it.
+// The view is shown after a click or Back / Forward. The current search refreshes the view, unless the view already shows it.
 function onShow() {
   const key = traceSearch.searchKey() || "";
   if (key !== view.searchKey || (!view.payload && !view.loading)) void actions.search({ url: "none" });

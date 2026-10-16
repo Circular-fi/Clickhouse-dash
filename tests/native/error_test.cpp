@@ -1,5 +1,5 @@
-// Unit tests of the one error answer of the API (src/error_envelope.cpp, src/ch_error.cpp, src/api_error.cpp): the JSON
-// envelope, the classification of a ClickHouse failure by its code, and the answer that each kind of failure gets.
+// This file has unit tests of the one error answer of the API (src/error_envelope.cpp, src/ch_error.cpp, src/api_error.cpp). The tests check the JSON
+// envelope. They check the classification of a ClickHouse failure by its code, and the answer that each kind of failure gets.
 // No ClickHouse is needed.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_ERROR_TESTS=ON
@@ -81,10 +81,10 @@ void test_the_envelope() {
   CHECK_EQ(str(doc, "error_code"), std::string("trace_not_found"));
   CHECK_EQ(str(doc, "message"), std::string("No such trace: \"x\"\n"));
   CHECK(doc["retryable"].IsBool() && !doc["retryable"].GetBool());
-  // The one name of the code: there is no second key with it.
+  // The code has one name. No second key uses it.
   CHECK(!doc.HasMember("error"));
 
-  // The advice follows the status unless it is set.
+  // The advice follows the status, unless the advice is set.
   for (const int status : {429, 503, 504}) {
     ApiError retry;
     retry.status = status;
@@ -103,7 +103,7 @@ void test_the_envelope() {
   set.retryable = false;
   CHECK(!parse(error_json(set))["retryable"].GetBool());
 
-  // What a case adds.
+  // This is what each case adds.
   ApiError rich;
   rich.status = 400;
   rich.code = "validation";
@@ -133,7 +133,7 @@ void test_the_envelope() {
   CHECK_EQ(doc["clickhouse"]["col"].GetInt(), 11);
   CHECK_EQ(str(doc, "error_code"), std::string("validation"));
 
-  // A text that holds a NUL byte or invalid UTF-8 stays valid JSON, whole.
+  // A text that holds a NUL byte or invalid UTF-8 stays valid JSON. The text stays whole.
   ApiError raw;
   raw.status = 500;
   raw.code = "c";
@@ -141,7 +141,7 @@ void test_the_envelope() {
   doc = parse(error_json(raw));
   CHECK_EQ(std::string(doc["message"].GetString(), doc["message"].GetStringLength()), std::string("a\0b\xEF\xBF\xBD", 6));
 
-  // A ClickHouse refusal for lack of a grant says so in members of its own.
+  // A ClickHouse refusal for lack of a grant states this in members of its own.
   ApiError denied;
   denied.status = 403;
   denied.code = "logs_not_granted";
@@ -169,10 +169,10 @@ void test_the_classification_is_by_code() {
   CHECK(kind(47) == ChErrorKind::NotFound);
   CHECK(kind(62) == ChErrorKind::BadQuery);
   CHECK(kind(1) == ChErrorKind::Other);
-  // The words of the message decide nothing: a text that says TIMEOUT_EXCEEDED under another code is another code.
+  // The words of the message decide nothing. A text that says TIMEOUT_EXCEEDED under another code is another code.
   CHECK(classify_clickhouse_error(server_error(1, "Code: 159. TIMEOUT_EXCEEDED: Timeout exceeded")).kind == ChErrorKind::Other);
   CHECK(classify_clickhouse_error(server_error(159, "nothing to see")).kind == ChErrorKind::Timeout);
-  // Failures that did not come from the server.
+  // These failures did not come from the server.
   CHECK(classify_clickhouse_error(ChQueryCanceled()).kind == ChErrorKind::Canceled);
   CHECK(classify_clickhouse_error(std::system_error(ETIMEDOUT, std::system_category(), "recv")).kind == ChErrorKind::Timeout);
   CHECK(classify_clickhouse_error(std::system_error(EAGAIN, std::system_category(), "recv")).kind == ChErrorKind::Timeout);
@@ -204,7 +204,7 @@ void test_the_answer_of_each_failure() {
   CHECK_EQ(down.status, 503);
   CHECK_EQ(down.code, std::string("host_unavailable"));
   CHECK(error_json(down).find("\"retryable\":true") != std::string::npos);
-  // Anything else keeps the code of the route: 503 for a refusal of ClickHouse, 500 for a fault of ChDash.
+  // Anything else keeps the code of the route. 503 is for a refusal of ClickHouse, and 500 is for a fault of ChDash.
   auto other = answer(server_error(1, "something else"));
   CHECK_EQ(other.status, 503);
   CHECK_EQ(other.code, std::string("logs_search_failed"));
@@ -246,7 +246,7 @@ void test_the_parameters_of_a_route() {
   CHECK(parse_whole_double(".5") == std::optional<double>(0.5));
   for (const char* text : {"", "abc", "1.5x", " 1", "inf", "nan", "0x1p3", "1e999", "-"}) CHECK(!parse_whole_double(text));
 
-  // A name that the route does not read is a 400.
+  // A name that the route does not read gets a 400 status.
   httplib::Request req;
   req.params.emplace("host_id", "local");
   req.params.emplace("refresh", "1");

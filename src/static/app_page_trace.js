@@ -1,18 +1,15 @@
-// The page of one trace (trace.html, /observability/traces/<trace id>): a
-// page of its own, not a pane of the Observability page. It has the page
-// header, but not the Observability view tabs (#obsNav: Traces, Logs,
-// Metrics) nor the trace search.
+// This is the page of one trace (trace.html, /observability/traces/<trace id>). It is a page of its own.
+// It is not a pane of the Observability page. It has the page header.
+// It does not have the Observability view tabs (#obsNav: Traces, Logs, Metrics) or the trace search.
 //
 //   /observability/traces/<traceId>[?span=&view=&<search context>]
 //
-// The search parameters of the address (time range, filters, search tab)
-// are the context the trace was opened from: "back to search" returns to
-// /observability/traces with them, and a filter picked on a value of the
-// trace opens that search with the filter applied (app_trace_search.js,
-// detail mode). The view of this page is app_trace_detail.js: it shares the model, the address and the helpers of
-// app_trace_store.js with the search, and does not load the parts of the search page (the results, the charts, the
-// duration heatmap, the Spans mode and the Services / Service map tabs). This entry starts the view as app_obs_page.js
-// starts one: header, then the view's lifecycle scope and init().
+// The search parameters of the address (time range, filters, search tab) hold the context that the trace was opened from.
+// The "back to search" link returns to /observability/traces with these parameters.
+// A filter that a person picks on a value of the trace opens that search with the filter applied (app_trace_search.js, detail mode).
+// The view of this page is app_trace_detail.js. It shares the model, the address and the helpers of app_trace_store.js with the search.
+// It does not load the parts of the search page (the results, the charts, the duration heatmap, the Spans mode and the Services / Service map tabs).
+// This entry starts the view as app_obs_page.js starts one: the header, then the view's lifecycle scope and init().
 import "./app_common.js";
 import { api } from "./app_api.js";
 import { boot } from "./app_boot.js";
@@ -27,8 +24,8 @@ async function start() {
   header.init();
   lifecycle.enter("traces");
   traceDetail.init();
-  // Back / Forward within the trace page: another ?span= / ?view= / ?tab=,
-  // or a linked trace opened in place. Leaving the page is the browser's.
+  // Back / Forward within the trace page: another ?span= / ?view= / ?tab= address, or a linked trace opened in place.
+  // The browser handles the exit from the page.
   router.on("/observability", () => traceDetail.onLocation());
 }
 

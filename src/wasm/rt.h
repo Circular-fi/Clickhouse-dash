@@ -1,13 +1,16 @@
-/* rt.h: the tiny runtime of the ChDash WebAssembly kernels.
+/* rt.h: the small runtime of the ChDash WebAssembly kernels.
  *
- * A kernel is one freestanding C file (no libc, no JavaScript glue file): clang builds it for wasm32 with
- * tools/build_wasm.py. This header gives it fixed-width types, an arena allocator and the Math functions
- * of the host (imported from JavaScript so that the numbers are the ones the JavaScript reference uses).
+ * A kernel is one freestanding C file. It has no libc and no JavaScript glue file.
+ * Use clang to build it for wasm32 with tools/build_wasm.py.
+ * This header gives the kernel fixed-width types, an arena allocator and the Math functions of the host.
+ * The host imports the Math functions from JavaScript, so the numbers match the JavaScript reference.
  *
- * Memory model: the page writes the input into the memory of the instance, calls an export and reads
- * the result back. wasm_alloc() takes bytes from an arena that grows the memory on demand;
- * wasm_mark() / wasm_release() free everything allocated after the mark, so one call of a kernel leaves
- * no trace. Data a kernel keeps between calls (a keyword table) is allocated before the first mark.
+ * Memory model: the page writes the input into the memory of the instance.
+ * The page calls an export and reads the result back.
+ * wasm_alloc() takes bytes from an arena. The arena grows the memory on demand.
+ * wasm_mark() / wasm_release() free everything that was allocated after the mark.
+ * So one call of a kernel leaves no trace.
+ * Data that a kernel keeps between calls (a keyword table) is allocated before the first mark.
  */
 #ifndef CHDASH_WASM_RT_H
 #define CHDASH_WASM_RT_H
@@ -27,7 +30,7 @@ typedef __SIZE_TYPE__ usize;
 #define EXPORT(name) __attribute__((export_name(#name)))
 #define IMPORT(name) __attribute__((import_module("env"), import_name(#name)))
 
-/* Math of the host: the same results as Math.sin() and the others in the JavaScript reference. */
+/* Math of the host. The results are the same as Math.sin() and the other functions in the JavaScript reference. */
 IMPORT(sin) f64 js_sin(f64 x);
 IMPORT(cos) f64 js_cos(f64 x);
 IMPORT(atan2) f64 js_atan2(f64 y, f64 x);
@@ -44,7 +47,7 @@ static usize wasm_top = 0;
 
 static inline usize wasm_align(usize n) { return (n + 15u) & ~(usize)15u; }
 
-/* n bytes of zero-or-not memory (the arena is not cleared), 16-byte aligned; 0 when the memory is full. */
+/* n bytes of memory, 16-byte aligned. The memory can contain zeros or other values (the arena is not cleared). The result is 0 when the memory is full. */
 static void *wasm_alloc(usize n) {
   if (wasm_top == 0) wasm_top = wasm_align((usize)&__heap_base);
   usize start = wasm_top;

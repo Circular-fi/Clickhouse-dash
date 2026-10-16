@@ -1,7 +1,10 @@
-// The controller of the Functions page (functions.html, /explorer/functions[/<name>]): the list of the functions of the host and the card of one.
-// It starts the page, applies its address (a function, or the overview), loads the functions of the host and forgets them when the host changes.
-// It shares the store and the modules of the Functions list (app_explorer_functions.js) with the Catalog's controller (app_explorer.js) and loads
-// none of the Catalog (the tree, the database page, the table card, the graph).
+// The controller of the Functions page (functions.html, /explorer/functions[/<name>]).
+// It controls the list of the functions of the host and the card of one function.
+// It starts the page. It applies the address (a function, or the overview).
+// It loads the functions of the host. It forgets them when the host changes.
+// It shares the store and the modules of the Functions list (app_explorer_functions.js).
+// It shares them with the Catalog controller (app_explorer.js).
+// It loads none of the Catalog (the tree, the database page, the table card, the graph).
 
 import { dom, shell } from "./app_dom.js";
 import { forgetFunctionsLoad, refreshFunctions, renderFunctionDetail, renderFunctionList, revealSelectedFunction } from "./app_explorer_functions.js";
@@ -18,7 +21,7 @@ import { util } from "./app_util.js";
 
 const { $$ } = dom;
 
-// The page is on screen: the Explorer is a feature the server can turn off, and then nothing of it runs.
+// The page is on screen. The server can turn off the Explorer. Then none of it runs.
 function openPage() {
   if (explorerFeatures().enabled === false) return false;
   model.active = true;
@@ -34,7 +37,8 @@ function showFunctions() {
   if (model.active) refreshFunctions(false);
 }
 
-// The address: a function opens its card, the bare address the overview. Back / Forward come here too (ns.router).
+// The address: a function opens its card. The bare address opens the overview.
+// Back / Forward also come here (ns.router).
 function applyRouteFromLocation() {
   const route = parseExplorerRoute();
   model.routeIntent = route;
@@ -48,7 +52,7 @@ function applyRouteFromLocation() {
     renderFunctionDetail();
     revealSelectedFunction("center");
   } else if (model.selectedFunctionKey) {
-    // Back to the Functions overview (All functions, then Back).
+    // Go back to the Functions overview (All functions, then Back).
     model.selectedFunctionKey = null;
     renderFunctionList();
   }
@@ -56,8 +60,9 @@ function applyRouteFromLocation() {
 }
 
 function resetForHost() {
-  // Everything of the old host stops now: its read aborts, and the load that was waiting on it is forgotten, so the new host starts its own
-  // (ARCH-F-097, ARCH-F-140).
+  // Everything of the old host stops now. Its read aborts.
+  // The load that waits on that read is forgotten. The new host starts its own load.
+  // (ARCH-F-097, ARCH-F-140)
   util.latest.cancelPrefix("explorer.");
   forgetFunctionsLoad();
   model.loadingFunctions = false;
@@ -68,11 +73,11 @@ function resetForHost() {
 }
 
 function init() {
-  // The detail pane scrolls: a keyboard user reaches it (a region while it overflows).
+  // The detail pane scrolls. A keyboard user can reach it (a region while it overflows).
   for (const pane of $$(".explorerDetailPane")) util.scrollFocus(pane, { label: pane.id ? "Object details" : "Function details", mutations: true });
-  // Back / Forward within the page (ns.router: the one popstate listener).
+  // Back and Forward inside the page (ns.router: the one popstate listener).
   router.on("/explorer", () => applyRouteFromLocation());
-  // The Catalog | Functions row is links to two pages.
+  // The Catalog | Functions row has links to two pages.
   shell?.edgeCues?.(shellEl("explorerNavTabs"));
   sidePanel("explorerFunctionListPane");
   shellEl("explorerTreeToggle")?.addEventListener("click", () => setTreeDrawerOpen(!model.treeOpen));
@@ -82,9 +87,9 @@ function init() {
   dom.explorerFunctionRefreshButton?.addEventListener("click", () => refreshFunctions(true));
   searches.functions = search.bind(dom.explorerFunctionSearchInput, () => renderFunctionList());
   dom.explorerFunctionCategorySelect?.addEventListener("change", renderFunctionList);
-  // Function kind chips, like the tree's type chips: a filled chip is a
-  // kind the list shows (every chip filled when nothing narrows it). One
-  // kind at a time; pressing the only filled chip again lists every function.
+  // Function kind chips work like the tree's type chips. A filled chip is a kind that the list shows.
+  // Every chip is filled when no filter narrows the list. Only one kind is active at a time.
+  // Press the only filled chip again to list every function.
   const functionChips = [...($$(".explorerFilterChip[data-function-kind]", shellEl("explorerFunctionFilters")) || [])];
   for (const chip of functionChips) {
     chip.addEventListener("click", () => {

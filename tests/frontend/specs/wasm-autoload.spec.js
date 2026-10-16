@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { runSuccessfulQuery } from '../helpers/app.js';
 
-// The WebAssembly kernels load on their own (docs/wasm.md, "When a kernel loads"). The other wasm-*.spec.js
-// files call loadGroup() themselves, so they cannot see a page that never asks for its kernel: the v2.17.0
-// candidate asked only after `ns.wasm` existed, and `ns.wasm` comes with the first kernel group, so the Query
-// page never fetched one. These tests only use the page, the way a person does, and watch the network.
+// The WebAssembly kernels load on their own (docs/wasm.md, "When a kernel loads").
+// The other wasm-*.spec.js files call loadGroup() themselves. So they cannot see
+// a page that never asks for its kernel. The v2.17.0 candidate asked only after
+// `ns.wasm` existed. The object `ns.wasm` comes with the first kernel group. So
+// the Query page never fetched a kernel. These tests use only the page, as a
+// person does, and watch the network.
 
 const wasmRequests = (page) => {
   const seen = [];
@@ -69,14 +71,14 @@ test('a blocked kernel never breaks the page: the Query page still highlights an
   await editor.click();
   await page.keyboard.press('Control+A');
   await page.keyboard.insertText(longSql());
-  // The page asked for the highlight kernel (the text is long), was refused, and the JavaScript lexer coloured the
-  // text: keywords and numbers carry their token classes.
+  // The page asked for the highlight kernel because the text is long. The request was refused.
+  // The JavaScript lexer coloured the text. Keywords and numbers carry their token classes.
   await expect.poll(() => blocked, { timeout: 8000 }).toContain('highlight');
   const overlay = page.locator('.editorHighlight');
   await expect(overlay.locator('.tok-kw').first()).toHaveText('SELECT');
   await expect(overlay.locator('.tok-num').first()).toBeVisible();
   await expect(editor).toHaveValue(/SELECT col0 \+ 1 AS c0/);
-  // A numeric result of 6000 rows sorts on the JavaScript path: the largest value comes first.
+  // A numeric result of 6000 rows sorts on the JavaScript path. The largest value comes first.
   await runSuccessfulQuery(page, 'SELECT number AS n FROM numbers(6000)');
   await expect.poll(() => blocked, { timeout: 8000 }).toContain('rowsort');
   const header = page.locator('#resultTableHead th[data-sort-key="0"]');

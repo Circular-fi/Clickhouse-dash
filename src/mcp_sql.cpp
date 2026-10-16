@@ -18,8 +18,8 @@ enum class Tok { Word, Quoted, String, Number, Punct };
 
 using sql::is_digit;
 
-// What the checks of this file read: the tokens of the one lexer of the backend (sql_lexer.hpp) without the blanks and
-// the comments.
+// The checks of this file read the tokens of the one lexer of the backend (sql_lexer.hpp).
+// The checks ignore the blanks and the comments.
 struct Token {
   Tok kind;
   std::string text;  // Word and Punct: the text; the others: empty
@@ -35,7 +35,7 @@ std::string upper(std::string_view s) {
   return out;
 }
 
-// Returns false (with `error`) on an unterminated string, identifier, comment or heredoc.
+// Returns false, with `error`, on an unterminated string, identifier, comment or heredoc.
 bool tokenize(std::string_view s, std::vector<Token>* out, std::string* error) {
   for (const sql::Token& token : sql::lex(s)) {
     switch (token.kind) {
@@ -85,8 +85,8 @@ bool tokenize(std::string_view s, std::vector<Token>* out, std::string* error) {
   return true;
 }
 
-// Table functions that read files, URLs, remote servers or other databases. The grants of the
-// ClickHouse MCP user are the boundary; this list only gives a clear message first.
+// Table functions that read files, URLs, remote servers or other databases.
+// The grants of the ClickHouse MCP user are the boundary. This list only gives a clear message first.
 bool denied_function(const std::string& upper_name) {
   static const std::unordered_set<std::string> denied = {
       "FILE", "FILECLUSTER", "URL", "URLCLUSTER", "REMOTE", "REMOTESECURE", "S3", "S3CLUSTER", "HDFS", "HDFSCLUSTER",
@@ -152,8 +152,9 @@ McpSqlScan mcp_scan_single_statement(std::string_view sql, const std::vector<std
     if (word == "INTO" && i + 1 < count && tokens[i + 1].kind == Tok::Word && upper(tokens[i + 1].text) == "OUTFILE") {
       return scan_fail("clause_not_allowed", "INTO OUTFILE is not allowed");
     }
-    // `SETTINGS name = value` would change the limits that ChDash sends (a profile at readonly = 2 lets a statement change
-    // them, and the clause wins): the limits of the key apply. A column, an alias or a table named settings is no clause.
+    // A `SETTINGS name = value` clause would change the limits that ChDash sends.
+    // A profile at readonly = 2 lets a statement change them, and the clause wins. So the limits of the key apply.
+    // A column, an alias or a table named settings is no clause.
     if (word == "SETTINGS" && i + 2 < count && (tokens[i + 1].kind == Tok::Word || tokens[i + 1].kind == Tok::Quoted) &&
         tokens[i + 2].kind == Tok::Punct && tokens[i + 2].text == "=") {
       return scan_fail("clause_not_allowed", "SETTINGS is not allowed: the limits of the key apply");

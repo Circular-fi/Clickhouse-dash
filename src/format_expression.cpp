@@ -1,5 +1,5 @@
-// The expressions of the formatter: calls, windows, arrays, arithmetic, CASE, IN, EXISTS and the boolean conditions.
-// The declarations that the units share are in format_internal.hpp.
+// This unit formats the expressions: calls, windows, arrays, arithmetic, CASE, IN, EXISTS, and the boolean conditions.
+// format_internal.hpp contains the declarations that the units share.
 
 #include "format_internal.hpp"
 
@@ -7,11 +7,8 @@ namespace chdash {
 namespace fmt {
 
 namespace {
-// A comma list whose items carry `--` comments: each whole-line comment
-// before an item belongs after the previous item (it was written after that
-// item's comma), comments before the first item stay above it. Returns false
-// when a comment sits inside an item (block comments, a comment within a
-// value), which the caller then leaves alone.
+// A comma list has items with `--` comments. Each whole-line comment before an item belongs after the previous item. That comment was written after the comma of that item.
+// Comments before the first item stay above it. The function returns false when a comment is inside an item, such as a block comment or a comment within a value. The caller then does not change the list.
 struct CommentedItems {
   vector<string> items;
   vector<string> after;
@@ -29,12 +26,10 @@ bool split_commented_items(string_view inner, CommentedItems* out) {
       else out->after.back() += (out->after.back().empty() ? "" : " ") + lead;
       value = rest;
     }
-    // An empty item is a trailing comma (`('a',)` is a one-element tuple,
-    // not a parenthesized string): leave such a list as written.
+    // An empty item is a trailing comma. `('a',)` is a one-element tuple, not a parenthesized string. Keep such a list as written.
     if (value.empty()) return false;
     auto [code, trailing] = split_inline_comment(value);
-    // Comments nested in brackets are laid out by the item's own formatter;
-    // a block comment at the item's top level has no place here.
+    // The item's own formatter formats the comments nested in brackets. A block comment at the top level of the item has no place here.
     if (contains_top_level_comment(code)) return false;
     out->items.push_back(trim_ascii_spaces(code));
     out->after.push_back(trailing);
@@ -57,16 +52,14 @@ string Formatter::format_over_clause(string_view expr) {
   return head + " OVER (\n" + indent_block(join_lines(lines), 4) + "\n)";
 }
 
-// The clauses of a window specification (the body of `OVER (...)` or of
-// `WINDOW name AS (...)`), one per line. `forced` is set when the
-// specification is always laid out one clause per line (PARTITION BY or a
-// frame); an empty result means it is not a clause list.
+// The clauses of a window specification, one per line. The specification is the body of `OVER (...)` or of `WINDOW name AS (...)`.
+// `forced` is set when the specification always has one clause per line (PARTITION BY or a frame). An empty result means that the text is not a clause list.
 vector<string> Formatter::window_spec_lines(string_view inner_view, size_t head_size, bool* forced) {
   const FormatDepthGuard guard(depth);
   const string inner(inner_view);
   const int part_pos = find_top_level_keyword(inner, "PARTITION BY");
   const int order_pos = find_top_level_keyword(inner, "ORDER BY");
-  // Window frame: ROWS or RANGE (formatQuery always prints the BETWEEN form).
+  // Window frame: ROWS or RANGE. formatQuery always prints the BETWEEN form.
   string frame_kw = "ROWS BETWEEN";
   int rows_pos = find_top_level_keyword(inner, frame_kw);
   if (const int range_pos = find_top_level_keyword(inner, "RANGE BETWEEN");
@@ -79,9 +72,8 @@ vector<string> Formatter::window_spec_lines(string_view inner_view, size_t head_
   vector<string> lines;
   *forced = inner.find('\n') != string::npos || part_pos >= 0 || rows_pos >= 0;
 
-  // `OVER (base_window ROWS BETWEEN ...)` extends a named window: the name
-  // before the first clause is part of the definition (EXPLAIN AST does not
-  // show it, so dropping it would go unnoticed) and stays the first line.
+  // `OVER (base_window ROWS BETWEEN ...)` extends a named window. The name before the first clause is part of the definition. EXPLAIN AST does not show this name.
+  // Such a removal goes unnoticed. The name stays the first line.
   size_t first_clause = inner.size();
   for (const int clause_pos : {part_pos, order_pos, rows_pos}) {
     if (clause_pos >= 0) first_clause = std::min(first_clause, static_cast<size_t>(clause_pos));
@@ -91,8 +83,8 @@ vector<string> Formatter::window_spec_lines(string_view inner_view, size_t head_
   if (part_pos >= 0) {
     const size_t end = (order_pos >= 0) ? static_cast<size_t>(order_pos) : ((rows_pos >= 0) ? static_cast<size_t>(rows_pos) : inner.size());
     const string body = trim_ascii_spaces(inner.substr(static_cast<size_t>(part_pos) + 12, end - static_cast<size_t>(part_pos) - 12));
-    // A partition list with comments after its commas: one key per line, each
-    // comment after its key (kept as written it drifted on every pass).
+    // A partition list with comments after its commas has one key on each line. Each comment follows its key.
+    // If kept as written, the layout drifted on every pass.
     CommentedItems keys;
     if (mask_sql_surface(body).has_comments && split_commented_items(body, &keys)) {
       string block = keys.before_first.empty() ? string() : keys.before_first + "\n";
@@ -126,15 +118,13 @@ vector<string> Formatter::window_spec_lines(string_view inner_view, size_t head_
   return lines;
 }
 
-// `WINDOW name AS (spec), ...`: a definition that fits stays on one line; a
-// longer one lays its specification out like `OVER (...)`, one clause per line.
+// `WINDOW name AS (spec), ...`. A definition that fits stays on one line. A longer definition formats its specification like `OVER (...)`, with one clause per line.
 string Formatter::format_window_clause(string_view body) {
   const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(body);
   const bool commented = mask_sql_surface(text).has_comments;
-  // Without comments, line breaks are only an earlier layout of this clause
-  // (the comment-preserving path keeps them): each definition is judged on
-  // one line, so a second pass gives the same result.
+  // Without comments, line breaks are only an earlier layout of this clause. The comment-preserving path keeps them.
+  // Each definition is judged on one line. So a second pass gives the same result.
   const auto items = split_top_level(commented ? text : collapse_whitespace(text), ',');
   const bool single = items.size() == 1 && (!commented || text.find('\n') == string::npos);
   const size_t indent = single ? 0 : 4;
@@ -245,9 +235,7 @@ string Formatter::format_function_call(string_view expr, bool force) {
     }
     string current = remainder.empty() ? trim_ascii_spaces(raw) : remainder;
     if (current.empty()) continue;
-    // A comment before the first argument has no argument to trail: it stays
-    // on its own line above that argument (the expression formatter keeps a
-    // leading comment line).
+    // A comment before the first argument has no argument to follow. It stays on its own line above that argument. The expression formatter keeps a comment line at the start.
     if (!leading_comment.empty() && args.empty()) current = leading_comment + "\n" + current;
     args.push_back(current);
     comments_after.emplace_back();
@@ -265,8 +253,7 @@ string Formatter::format_function_call(string_view expr, bool force) {
     return compact;
   };
 
-  // The compact forms below join the source arguments: never with a comment
-  // between or inside them.
+  // The compact forms below join the source arguments. They never join arguments that have a comment between or inside them.
   bool arg_comments = false;
   for (size_t i = 0; i < args.size(); ++i) {
     arg_comments = arg_comments || !comments_after[i].empty() || mask_sql_surface(args[i]).has_comments;
@@ -338,10 +325,8 @@ string Formatter::format_function_call(string_view expr, bool force) {
   vector<string> rendered;
   rendered.reserve(args.size());
   for (size_t i = 0; i < args.size(); ++i) {
-    // A condition argument (`if(c, ...)`, `sumIf(x, c)`, `countIf(a AND b)`)
-    // is laid out like a WHERE condition, which also drops the parentheses
-    // formatQuery puts around each operand. It stays wrapped here; the width
-    // pass joins it back onto one line when it fits at its final position.
+    // A condition argument (`if(c, ...)`, `sumIf(x, c)`, `countIf(a AND b)`) uses the layout of a WHERE condition. That layout also removes the parentheses that formatQuery puts around each operand.
+    // The argument stays wrapped here. The width pass joins it onto one line when it fits at its final position.
     const bool condition = (iequals_ascii(name, "if") && i == 0) ||
         (find_top_level_arrow(args[i]) < 0 && !looks_like_query(args[i]) && !contains_top_level_comment(args[i]) &&
          (find_top_level_keyword(args[i], "AND") >= 0 || find_top_level_keyword(args[i], "OR") >= 0));
@@ -363,9 +348,8 @@ string Formatter::format_function_call(string_view expr, bool force) {
   }
 
   if (!multiline) {
-    // An inline call still carries its formatted arguments, so a condition
-    // nested in it (`nullIf(countIf((a = 1) AND (b = 2)), 0)`) loses the
-    // operand parentheses formatQuery added, as it would in an exploded call.
+    // An inline call still has its formatted arguments. So a condition nested in it (`nullIf(countIf((a = 1) AND (b = 2)), 0)`) loses the operand parentheses that formatQuery added.
+    // The same happens in a split call.
     string inline_call = name + "(";
     for (size_t i = 0; i < rendered.size(); ++i) {
       if (rendered[i].find('\n') != string::npos || (i < comments_after.size() && !comments_after[i].empty())) return {};
@@ -377,10 +361,8 @@ string Formatter::format_function_call(string_view expr, bool force) {
   }
 
   string out = name + "(\n";
-  // Pair layouts keep a comment written after a pair's second element at the
-  // end of the pair line; a comment after the first element of a pair (or
-  // after a multi-line element) has no place there, so the call falls back to
-  // one argument per line.
+  // Pair layouts keep a comment that follows a pair's second element at the end of the pair line.
+  // A comment after the first element of a pair, or after a multi-line element, has no place there. The call then uses one argument on each line.
   auto comment_after = [&](size_t i) { return i < comments_after.size() ? comments_after[i] : string(); };
   auto with_comment = [&](size_t i) { const string c = comment_after(i); return c.empty() ? string() : " " + c; };
   auto pairs_fit_comments = [&](size_t first) {
@@ -398,8 +380,8 @@ string Formatter::format_function_call(string_view expr, bool force) {
     out += "    " + rendered.back() + with_comment(rendered.size() - 1) + "\n)";
     return out;
   }
-  // `CASE x WHEN ... END` reaches us as caseWithExpression(x, w1, t1, ..., else):
-  // the operand keeps its own line, then one `when, then` pair per line.
+  // `CASE x WHEN ... END` reaches this code as caseWithExpression(x, w1, t1, ..., else). The operand keeps its own line.
+  // Then each `when, then` pair is on its own line.
   if (iequals_ascii(name, "caseWithExpression") && rendered.size() >= 4 && rendered.size() % 2 == 0 &&
       comment_after(0).empty() && pairs_fit_comments(1)) {
     out += "    " + rendered.front() + ",\n";
@@ -418,8 +400,7 @@ string Formatter::format_function_call(string_view expr, bool force) {
     return out;
   }
   for (size_t i = 0; i < rendered.size(); ++i) {
-    // Among several arguments an unindented `/ rhs` line would read as the
-    // next argument; a sole argument keeps its operators aligned.
+    // Among several arguments, an unindented `/ rhs` line reads as the next argument. A sole argument keeps its operators aligned.
     out += indent_block(rendered.size() > 1 ? hang_operator_continuations(rendered[i], true) : rendered[i], 4);
     if (i + 1 < rendered.size()) append_item_comma(out);
     if (i < comments_after.size() && !comments_after[i].empty()) out += " " + comments_after[i];
@@ -429,12 +410,9 @@ string Formatter::format_function_call(string_view expr, bool force) {
   return out;
 }
 
-// Parametric aggregates `name(params)(args)` (windowFunnel(3600)(...),
-// quantiles(0.5, 0.9)(x), sequenceMatch('(?1)(?2)')(t, c1, c2)): both lists
-// follow the ordinary function-call rules. The argument list is laid out as a
-// call whose head is the whole `name(params)` prefix, so it wraps exactly when
-// a plain call of the same length would; the parameter list goes vertical only
-// when the head alone does not fit.
+// Parametric aggregates `name(params)(args)` (windowFunnel(3600)(...), quantiles(0.5, 0.9)(x), sequenceMatch('(?1)(?2)')(t, c1, c2)). Both lists follow the ordinary function-call rules.
+// The argument list uses the layout of a call. The head of that call is the whole `name(params)` prefix. So the list wraps when a plain call of the same length wraps.
+// The parameter list goes vertical only when the head alone does not fit.
 string Formatter::format_parametric_call(const string& name, string_view params_src, string_view args_part, bool force) {
   const FormatDepthGuard guard(depth);
   const size_t wrap_threshold = std::min<size_t>(threshold, 80);
@@ -446,8 +424,7 @@ string Formatter::format_parametric_call(const string& name, string_view params_
   }
   head += ")";
   const bool multiline_params = head.size() + 1 > wrap_threshold || params_src.find('\n') != string_view::npos;
-  // Same-width stand-in for the head: format_function_call only accepts an
-  // identifier before the argument list.
+  // Use a stand-in of the same width for the head. format_function_call accepts only an identifier before the argument list.
   string stand_in(head.size(), 'P');
   if (multiline_params) {
     string block;
@@ -467,12 +444,9 @@ string Formatter::format_parametric_call(const string& name, string_view params_
   return head + args_rendered.substr(stand_in.size());
 }
 
-// Long arithmetic wraps at the operators of its lowest precedence level, one
-// operand per line with the operator leading (`a * w\n+ b * w\n+ c * w`), so
-// the grouping the parser applies is visible from the layout. Operands keep
-// their own structure: a parenthesized operand that is itself too long opens
-// a block. Continuation lines are returned unindented; the enclosing context
-// (SELECT item, WHERE term, function argument) decides how far they hang.
+// Long arithmetic wraps at the operators of its lowest precedence level. Each line holds one operand, and the operator leads the line (`a * w\n+ b * w\n+ c * w`). The layout then shows the grouping that the parser applies.
+// Operands keep their own structure. A parenthesized operand that is too long opens a block.
+// The function returns the continuation lines unindented. The enclosing context (SELECT item, WHERE term, or function argument) decides how far they hang.
 string Formatter::format_arith_chain(string_view expr, bool force) {
   const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(expr);
@@ -499,13 +473,11 @@ string Formatter::format_arith_chain(string_view expr, bool force) {
     rendered.push_back(format_arith_operand(operand, threshold, &block));
     blocks.push_back(block);
     any_block = any_block || block;
-    // Short chains stay inline even when an operand alone would expand (a
-    // three-argument call); heavy operands (lambdas, subqueries) never do.
+    // Short chains stay inline. This is true even when one operand alone expands, such as a three-argument call. Heavy operands, such as lambdas and subqueries, never expand.
     if (operand.find('\n') != string::npos || contains_heavy_structure(operand)) multiline = true;
   }
   if (!multiline) return {};
-  // Sibling groups read alike: once one operand opened a block, other long
-  // parenthesized chains open theirs too (`(\n...\n) / (\n...\n)`).
+  // Sibling groups read alike. When one operand opens a block, other long parenthesized chains open a block too. Example: `(\n...\n) / (\n...\n)`.
   if (any_block) {
     for (size_t i = 0; i < operands.size(); ++i) {
       if (blocks[i]) continue;
@@ -517,10 +489,8 @@ string Formatter::format_arith_chain(string_view expr, bool force) {
       }
     }
   }
-  // A block operand (a scalar subquery, a long parenthesized chain) opens on
-  // the operator's line, as formatQuery prints it (`a / (\n    SELECT ...\n)`):
-  // leading its own line, the operator would hang one level deeper than the
-  // block it opens and closes.
+  // A block operand (a scalar subquery, or a long parenthesized chain) opens on the line of the operator. formatQuery prints it this way, for example `a / (\n    SELECT ...\n)`.
+  // If the operator leads its own line, it hangs one level deeper than the block that it opens and closes.
   vector<bool> query_blocks(operands.size(), false);
   for (size_t i = 0; i < operands.size(); ++i) {
     const string inner = unwrap_outer_parens(operands[i]);
@@ -528,8 +498,7 @@ string Formatter::format_arith_chain(string_view expr, bool force) {
   }
   string out = rendered.front();
   for (size_t i = 0; i < operators.size(); ++i) {
-    // After a closing block the operator continues on the `)` line, as `) AS`
-    // does for a multiline call; otherwise it leads the next line.
+    // After a closing block, the operator continues on the `)` line. This is the same as `) AS` for a multiline call. Otherwise, the operator leads the next line.
     const size_t nl = out.rfind('\n');
     const string last_line = out.substr(nl == string::npos ? 0 : nl + 1);
     const bool opens_block = (query_blocks[i + 1] || blocks[i + 1]) && starts_with_ci(rendered[i + 1], "(\n");
@@ -542,8 +511,7 @@ string Formatter::format_arith_chain(string_view expr, bool force) {
 string Formatter::format_arith_operand(string_view operand, size_t block_width, bool* block) {
   const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(operand);
-  // `(a * w + b * w + ...)` too long for one line: open a block and wrap the
-  // chain inside it at the same rules.
+  // If `(a * w + b * w + ...)` is too long for one line, open a block. Wrap the chain inside it by the same rules.
   if (const string inner = unwrap_outer_parens(s); !inner.empty() && s.find('\n') == string::npos &&
       utf8_width(s) + 8 > block_width) {
     if (const string chain = format_arith_chain(inner, true); !chain.empty()) {
@@ -554,12 +522,8 @@ string Formatter::format_arith_operand(string_view operand, size_t block_width, 
   return format_expression(s);
 }
 
-// A CASE expression with `--` comments after its branches (the comment
-// path: formatQuery would turn it into multiIf and drop them) gets the CASE
-// layout: `CASE [operand]`, one branch per line one level deeper, each comment
-// after its branch, `END` back at the expression's indentation. Kept verbatim,
-// its continuation lines were indented again on every pass. Returns {} for
-// any other shape (a comment inside a branch or before the first WHEN).
+// A CASE expression with `--` comments after its branches uses the comment path. formatQuery changes it into multiIf and removes the comments. The CASE layout is used instead: `CASE [operand]`, then one branch per line, one level deeper. Each comment follows its branch, and `END` is at the indentation of the expression.
+// If kept as written, the continuation lines were indented again on every pass. The function returns {} for any other shape, such as a comment inside a branch or before the first WHEN.
 string Formatter::format_commented_case(string_view expr) {
   const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(expr);
@@ -590,7 +554,7 @@ string Formatter::format_commented_case(string_view expr) {
   for (size_t m = 0; m < marks.size(); ++m) {
     const size_t next = m + 1 < marks.size() ? marks[m + 1] : end_pos;
     const string branch = trim_ascii_spaces(string_view(s).substr(marks[m], next - marks[m]));
-    // The branch's comments must all trail its code: `-- ...` lines only.
+    // The comments of a branch must all follow its code. Use only `-- ...` lines.
     size_t comment_at = string::npos;
     ScanState bs;
     for (size_t i = 0; i < branch.size() && comment_at == string::npos; ++i) {
@@ -620,10 +584,8 @@ string Formatter::format_expression(string_view expr) {
   if (s.empty()) return s;
   if (contains_top_level_comment(s)) {
     if (string commented_case = format_commented_case(s); !commented_case.empty()) return commented_case;
-    // A comment that trails the previous list item arrives at the head of
-    // this one (`-- note\n    f(\n        x\n    )`). The code after it is
-    // formatted normally: kept verbatim, its input indentation would be
-    // indented again on every pass.
+    // A comment that follows the previous list item arrives at the head of this item (`-- note\n    f(\n        x\n    )`). The code after the comment is formatted normally.
+    // If kept verbatim, its input indentation is indented again on every pass.
     string lead;
     string rest;
     if (starts_with_ci(s, "/*")) {
@@ -636,9 +598,8 @@ string Formatter::format_expression(string_view expr) {
       std::tie(lead, rest) = split_leading_line_comment(s);
     }
     if (!lead.empty() && !rest.empty()) return lead + "\n" + format_expression(rest);
-    // Whole-line comments after the code (`a\n-- note`, before FROM): the code is formatted, and each
-    // comment line comes back at the indentation of the item. Kept verbatim, its input indentation
-    // would be indented again on every pass.
+    // Whole-line comments after the code (`a\n-- note`, before FROM). The code is formatted. Each comment line returns to the indentation of the item.
+    // If kept verbatim, its input indentation is indented again on every pass.
     if (lead.empty()) {
       const vector<string> lines = split_lines_keep(s);
       size_t code_lines = lines.size();
@@ -661,14 +622,11 @@ string Formatter::format_expression(string_view expr) {
     }
     return cleanup_surface(s);
   }
-  // On the local path the user's line breaks reach this point (formatQuery
-  // joins them). Without comments they carry no meaning: an expression the
-  // formatter does not re-render (`f(\n    x\n).1`) would otherwise keep its
-  // input indentation and be indented again on every pass.
+  // On the local path, the line breaks of the user reach this point. formatQuery joins them. Without comments, the line breaks have no meaning.
+  // An expression that the formatter does not render again (`f(\n    x\n).1`) keeps its input indentation. It is then indented again on every pass.
   if (s.find('\n') != string::npos && !mask_sql_surface(s).has_comments) s = collapse_whitespace(s);
-  // A tuple literal with comments between its items: one item per line, like
-  // an array literal, instead of the input lines (which kept their input
-  // indentation and drifted on every pass).
+  // A tuple literal with comments between its items has one item on each line, as an array literal does. The formatter does not use the input lines.
+  // Those lines kept their input indentation and drifted on every pass.
   if (s.size() > 2 && s.front() == '(' && find_matching_paren(s, 0) == s.size() - 1) {
     const string inner = trim_ascii_spaces(s.substr(1, s.size() - 2));
     CommentedItems list;
@@ -689,8 +647,7 @@ string Formatter::format_expression(string_view expr) {
     const size_t close = find_matching_paren(s, 0);
     if (close != string::npos && close + 1 < s.size() && s[close + 1] == '.') {
       const string inner = trim_ascii_spaces(s.substr(1, close - 1));
-      // Only an atom may lose its parentheses before `.`: `(x + 1).1` is
-      // tupleElement(x + 1, 1), while `x + 1.1` adds a float.
+      // Only an atom can lose its parentheses before `.`. `(x + 1).1` is tupleElement(x + 1, 1), but `x + 1.1` adds a float.
       bool atom = !inner.empty();
       ScanState st;
       for (size_t k = 0; atom && k < inner.size(); ++k) {
@@ -705,8 +662,7 @@ string Formatter::format_expression(string_view expr) {
   if (auto q = format_parenthesized_query(s); !q.empty()) return q;
   if (const int arrow = find_top_level_arrow(s); arrow > 0) {
     string lhs = cleanup_surface(trim_ascii_spaces(s.substr(0, static_cast<size_t>(arrow))));
-    // Parameters with comments between them (`(k, -- key` …) are laid out
-    // like a commented tuple, one per line.
+    // Parameters with comments between them (`(k, -- key` …) use the layout of a commented tuple, with one parameter per line.
     if (lhs.find('\n') != string::npos && mask_sql_surface(lhs).has_comments) lhs = format_expression(lhs);
     string rhs_src = trim_ascii_spaces(s.substr(static_cast<size_t>(arrow) + 2));
     const bool grouped_rhs = !unwrap_outer_parens(rhs_src).empty();
@@ -747,8 +703,7 @@ string Formatter::format_expression(string_view expr) {
         }
       }
     }
-    // `x -> (a, b)` returns a tuple: its parentheses are the tuple, not a
-    // grouping, and dropping them would make `b` the next function argument.
+    // `x -> (a, b)` returns a tuple. Its parentheses are the tuple, not a grouping. Without them, `b` becomes the next function argument.
     if (const string inner = unwrap_outer_parens(rhs); !inner.empty() && !looks_like_query(inner) && find_top_level_keyword(inner, "AND") < 0 &&
         find_top_level_keyword(inner, "OR") < 0 && split_top_level(inner, ',').size() == 1) rhs = trim_ascii_spaces(inner);
     return lhs + " -> " + rhs;
@@ -768,8 +723,7 @@ string Formatter::format_expression(string_view expr) {
       if (inner.empty()) return strip_atomic_parentheses(side);
       if (find_top_level_keyword(inner, "AND") >= 0 || find_top_level_keyword(inner, "OR") >= 0 || split_top_level(inner, ',').size() > 1) return side;
       if (find_top_level_keyword(inner, "SELECT") >= 0 || find_top_level_keyword(inner, "IN") >= 0) return side;
-      // `(a > b) = (c > d)`: comparisons chain left to right, so a
-      // parenthesized comparison beside another comparator is load-bearing.
+      // `(a > b) = (c > d)`. Comparisons chain from left to right. So a parenthesized comparison next to another comparator is required.
       if (find_top_level_comparator(inner, nullptr) >= 0) return side;
       string collapsed = collapse_whitespace(inner);
       if (starts_with_ci(collapsed, "now() - toInterval") || starts_with_ci(collapsed, "now() + toInterval")) return collapsed;
@@ -778,15 +732,13 @@ string Formatter::format_expression(string_view expr) {
     };
     string lhs = strip_side(trim_ascii_spaces(s.substr(0, static_cast<size_t>(cmp))));
     string rhs = strip_side(trim_ascii_spaces(s.substr(static_cast<size_t>(cmp) + op.size())));
-    // A comparison too long for one line wraps the arithmetic on either side
-    // (left side first); the continuation hangs under the comparison.
+    // A comparison that is too long for one line wraps the arithmetic on either side. The left side is wrapped first. The continuation hangs under the comparison.
     if (s.find('\n') == string::npos && utf8_width(lhs) + utf8_width(rhs) + op.size() + 2 > threshold) {
       if (string chain = format_arith_chain(lhs, true); !chain.empty()) lhs = std::move(chain);
       else if (string rchain = format_arith_chain(rhs, true); !rchain.empty()) rhs = std::move(rchain);
       else if (string call = format_function_call(lhs); !call.empty()) lhs = std::move(call);
     }
-    // A scalar subquery beside a comparator is a block, its `(` on the
-    // comparison line: `x > (\n    SELECT ...\n)` (formatQuery's layout).
+    // A scalar subquery next to a comparator is a block. Its `(` is on the comparison line: `x > (\n    SELECT ...\n)`, as in formatQuery.
     for (string* side : {&lhs, &rhs}) {
       if (const string inner = unwrap_outer_parens(*side); !inner.empty() && looks_like_query(inner)) {
         *side = "(\n" + indent_block(format_statement(inner), 4) + "\n)";
@@ -795,12 +747,8 @@ string Formatter::format_expression(string_view expr) {
     s = lhs + " " + op + " " + rhs;
   }
   s = strip_lambda_parentheses(s);
-  // Kept as written. With a comment inside a line (`f(a, -- c` ...), the
-  // text keeps its line breaks; its continuation lines carry the input's absolute indentation, which the
-  // caller would indent again on every pass: hang them one level under the
-  // first line instead (stable, since the result is its own input).
-  // An already exploded shape (first line ending with its opener) keeps its
-  // own relative layout.
+  // Kept as written. With a comment inside a line (`f(a, -- c` ...), the text keeps its line breaks. Its continuation lines carry the absolute indentation of the input, and the caller indents them again on every pass.
+  // So hang them one level under the first line instead. This is stable, because the result is its own input. A shape that is already split (first line ends with its opener) keeps its own relative layout.
   const string first_code = rtrim_spaces(split_inline_comment(s.substr(0, s.find('\n'))).first);
   const bool opener_line = !first_code.empty() && (first_code.back() == '(' || first_code.back() == '[');
   if (s.find('\n') != string::npos && !opener_line && mask_sql_surface(s).has_comments) {
@@ -833,9 +781,8 @@ string Formatter::format_exists_subquery(string_view expr) {
   return prefix + "exists(\n" + indent_block(format_statement(inner), 4) + "\n)";
 }
 
-// The left operand of IN. A tuple written with comments between its items
-// (`(a, -- c\n b) NOT IN ...`) is laid out like a commented tuple, one item per
-// line; kept as written, it carried its input indentation into every pass.
+// The left operand of IN. A tuple that is written with comments between its items (`(a, -- c\n b) NOT IN ...`) uses the layout of a commented tuple, with one item per line.
+// If kept as written, the tuple carried its input indentation into every pass.
 string Formatter::commented_operand(string_view s) {
   const FormatDepthGuard guard(depth);
   string left = trim_ascii_spaces(s);
@@ -863,7 +810,7 @@ string Formatter::format_in_subquery(string_view expr, bool break_after_in) {
       static const char* ops[] = {"GLOBAL IN", "IN"};
       for (const char* raw : ops) {
         const string_view op(raw);
-        // The operator is a word of its own: the `in` of `admin(` or of `join` is part of a name.
+        // The operator is a word of its own. The `in` of `admin(` or of `join` is part of a name.
         const bool word_start = i == 0 || !is_ident_char(expr[i - 1]);
         const bool word_end = i + op.size() >= expr.size() || !is_ident_char(expr[i + op.size()]);
         if (word_start && word_end && i + op.size() <= expr.size() && iequals_ascii(expr.substr(i, op.size()), op)) {
@@ -894,14 +841,13 @@ string Formatter::format_in_literal(string_view expr) {
       for (const char* raw : ops) {
         const string_view op(raw);
         if (i + op.size() > expr.size() || !iequals_ascii(expr.substr(i, op.size()), op)) continue;
-        // Whole words only: the `in` of `argMin(` or `min_value` is not IN.
+        // Match whole words only. The `in` of `argMin(` or `min_value` is not IN.
         if ((i > 0 && is_ident_char(expr[i - 1])) ||
             (i + op.size() < expr.size() && is_ident_char(expr[i + op.size()]))) continue;
         const string left = commented_operand(expr.substr(0, i));
         string right = trim_ascii_spaces(expr.substr(i + op.size()));
         if (left.empty() || right.empty()) continue;
-        // `IN tuple(('a', -- c\n 1))`: a call with comments inside is laid out
-        // by the call formatter; kept as written it drifted on every pass.
+        // `IN tuple(('a', -- c\n 1))`. A call with comments inside uses the layout of the call formatter. If kept as written, it drifted on every pass.
         if (right.front() != '(' && right.front() != '[' && mask_sql_surface(right).has_comments) right = format_expression(right);
 
         const size_t wrap_threshold = std::min<size_t>(threshold, 80);
@@ -926,10 +872,8 @@ string Formatter::format_in_literal(string_view expr) {
 
         const string right_inner = unwrap_outer_parens(right);
         if (!right_inner.empty() && looks_like_query(right_inner)) continue;
-        // A value list with comments: one value per line, each comment kept
-        // after the value it follows (the width pass never touches lines
-        // with comments, so they would otherwise keep their input indentation
-        // and drift on every pass).
+        // A value list with comments has one value on each line. Each comment stays after the value that it follows.
+        // The width pass never changes lines with comments. Otherwise, those lines keep their input indentation and drift on every pass.
         if (!right_inner.empty() && mask_sql_surface(right_inner).has_comments) {
           CommentedItems list;
           if (!split_commented_items(right_inner, &list)) return {};
@@ -946,13 +890,12 @@ string Formatter::format_in_literal(string_view expr) {
           }
           return rendered + ")";
         }
-        // A commented tuple on the left is already laid out (commented_operand).
+        // A commented tuple on the left is already formatted (commented_operand).
         if (mask_sql_surface(left).has_comments && left.find('\n') != string::npos) return left + " " + string(op) + " " + right;
         const string left_inner = unwrap_outer_parens(left);
         if (left_inner.empty() || split_top_level(left_inner, ',').size() <= 1) continue;
         if (compact.size() <= wrap_threshold && left.find('\n') == string::npos) return {};
-        // A long value list on the right is split by the width pass, one
-        // value per line; the tuple on the left stays whole.
+        // The width pass splits a long value list on the right, with one value on each line. The tuple on the left stays whole.
         if (right.size() > left.size() && left.find('\n') == string::npos) return {};
         const auto left_items = split_top_level(left_inner, ',');
         string rendered_left = "(\n";

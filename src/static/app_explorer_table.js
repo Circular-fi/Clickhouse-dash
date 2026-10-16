@@ -1,5 +1,5 @@
-// The card of a table in Browse: selecting a table (the branch of its database, the summary that the tree already has, then the card
-// from the server), and the three parts of the card that app_explorer_detail.js draws (the header, the tabs, the tab content).
+// This module selects a table in Browse. It uses the branch of the database, then the summary that the tree already has, then the card from the server.
+// It also has the three parts of the card that app_explorer_detail.js draws: the header, the tabs and the tab content.
 
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
@@ -19,13 +19,13 @@ function renderTabContent() { parts.detail?.renderTabContent(); }
 
 async function selectTable(database, table, force = false, { history = "push", graphOrigin = false } = {}) {
   if (model.mode === "graph" && parts.graph?.isStorageMode?.() && parts.graph?.canUseStorageForTable?.(database, table) === false) return;
-  // This selection takes its serial first: a click that comes while a branch loads supersedes it, and the older one
-  // stops at the next check instead of replacing the newer card (ARCH-F-100).
+  // This selection takes its serial first. A later click replaces this selection while a branch loads.
+  // The older selection then stops at the next check, so it does not replace the newer card (ARCH-F-100).
   const serial = ++model.detailSerial;
   const startHost = String(state.selectedHostId || "");
   const superseded = () => serial !== model.detailSerial || String(state.selectedHostId || "") !== startHost;
-  // The top-level catalog intentionally contains only database names. Load
-  // exactly the branch the user is navigating to before resolving selection.
+  // The top-level catalog has only database names. Load exactly the branch that the user navigates to.
+  // Do this before the selection resolves.
   if (model.catalog && !model.databaseTablesLoaded.has(database)) {
     await loadDatabaseTables(database, false);
     if (superseded()) return;
@@ -44,14 +44,12 @@ async function selectTable(database, table, force = false, { history = "push", g
   model.selectedKey = key;
   model.selectedDatabase = null;
   model.expandedDatabases.add(database);
-  // A selected object must never be hidden by the visibility switch that is
-  // required to render it. Lock the corresponding option until selection
-  // moves away from a system/non-storing object.
+  // Never hide a selected object with the visibility switch that the render needs. Lock the related option.
+  // Keep it locked while the selection is a system or non-storing object.
   syncVisibilityOptionLocks({ propagate: true });
   if (model.mode !== "browse") {
-    // Graph renders nothing from the card. Keep only the lightweight
-    // catalog selection (the graph focus) and leave the card request until
-    // the user switches to Browse.
+    // Graph renders nothing from the card. Keep only the light catalog selection (the graph focus).
+    // Do not request the card until the user switches to Browse.
     model.detail = null;
     model.preview = null;
     model.detailLoading = false;
@@ -64,9 +62,8 @@ async function selectTable(database, table, force = false, { history = "push", g
   renderTableList();
   setError(null);
 
-  // The sidebar already owns a fresh table summary. Paint it immediately
-  // instead of replacing the whole detail pane with a 1-2s loading screen
-  // while the richer physical metadata is collected.
+  // The sidebar already has a fresh table summary. Paint it at once.
+  // Do not replace the whole detail pane with a loading screen of 1-2 s. The richer physical metadata is still collected.
   const sidebarSummary = selectedTable();
   model.detail = sidebarSummary ? {
     summary: { ...sidebarSummary },
@@ -94,8 +91,7 @@ async function selectTable(database, table, force = false, { history = "push", g
   }
 
   const hostId = String(state.selectedHostId || "");
-  // Browse detail delegates to fetchTableDetail(), whose network path calls
-  // api.getExplorerTable only after the graph-mode early return above.
+  // The Browse detail calls fetchTableDetail(). Its network path calls api.getExplorerTable only after the early return for graph mode above.
   const req = util.latest("explorer.detail");
   try {
     const detail = await fetchTableDetail(hostId, database, table, !!force, req.signal);
@@ -111,8 +107,7 @@ async function selectTable(database, table, force = false, { history = "push", g
     syncExplorerUrl(history);
     uiState.announce(`${database}.${table} loaded.`);
 
-    // SQL formatting is cosmetic and must never delay the first usable table
-    // view. Format after the raw DDL/detail has already been rendered.
+    // The SQL format step is cosmetic. It must never delay the first usable table view. Format the SQL after the raw DDL and detail render.
     if (detail.ddl) {
       void api.formatSqls(hostId, [String(detail.ddl)], { signal: util.latest("explorer.ddlformat").signal }).then((formatted) => {
         if (!Array.isArray(formatted) || !formatted[0]) return;

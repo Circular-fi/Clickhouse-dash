@@ -2,19 +2,19 @@ import { test, expect } from '@playwright/test';
 import { runSuccessfulQuery } from '../helpers/app.js';
 import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
-// Cross-cutting foundations (docs/ui-foundations.md): guards that hold on
-// every page, so a later page or component cannot bring the old drift back.
-//  - type: no element computes Arial (form controls inherit the page font),
-//    and code / pre / kbd / samp are the mono token at the size around them;
-//  - tabs: every row of sections is the one underline row (.contentTabs);
+// Cross-cutting foundations (docs/ui-foundations.md). These guards hold on
+// every page. A later page or component cannot bring the old drift back.
+//  - type: no element computes Arial. Form controls inherit the page font.
+//    code, pre, kbd and samp use the mono token at the size around them.
+//  - tabs: every row of sections is the one underline row (.contentTabs).
 //  - contrast: the header's version badge and the size maps' labels keep
-//    4.5:1 in both themes;
-//  - dates: the range buttons read through ns.format.range, never ISO;
-//  - headings: one h1 per page, an h2 per Observability view and per card.
+//    4.5:1 in both themes.
+//  - dates: the range buttons read through ns.format.range, never ISO.
+//  - headings: one h1 per page. One h2 per Observability view and per card.
 
 const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
 
-// Each page and a state that shows its type, its tab rows and its code.
+// Each page, and each state that shows its type, its tab rows and its code.
 const PAGES = {
   query: async (page) => {
     await page.goto('/query');
@@ -97,7 +97,7 @@ test('every row of sections is the one underline row (tabs), never a pill row', 
   for (const name of ['explorer', 'ddl', 'functions', 'traces', 'trace', 'logs', 'metrics', 'system']) {
     await PAGES[name](page);
     await settle(page);
-    // A row is a tablist, or a row of links to pages of their own (Observability, System): same look.
+    // A row is a tablist. A row of links to pages of their own (Observability, System) has the same look.
     const rows = await page.evaluate(() => [...document.querySelectorAll('[role="tablist"], .contentTabs[role="group"]')].filter((list) => list.getClientRects().length && getComputedStyle(list).visibility !== 'hidden').map((list) => {
       const tabs = [...list.querySelectorAll('[role="tab"], a.contentTabs__tab')].filter((tab) => tab.getClientRects().length);
       const selected = tabs.find((tab) => tab.getAttribute('aria-selected') === 'true' || tab.getAttribute('aria-current') === 'page');
@@ -115,15 +115,15 @@ test('every row of sections is the one underline row (tabs), never a pill row', 
     expect(rows.length, name).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.classes, `${name} ${row.id}`).toEqual([true, true]);
-      // The selected tab: a 2 px underline, no pill (no fill, no frame, no radius).
+      // The selected tab has a 2 px underline. It has no pill: no fill, no frame and no radius.
       expect(row.selected, `${name} ${row.id}`).toEqual({ bg: 'rgba(0, 0, 0, 0)', radius: '0px', bottom: '2px solid', top: '0px', shadow: 'none' });
       for (const color of row.other) expect(color, `${name} ${row.id}`).toBe('rgba(0, 0, 0, 0)');
     }
   }
 });
 
-// Effective contrast of each element's text over what it is drawn on (the
-// backgrounds of its ancestors composed, opacity folded into the text).
+// Effective contrast of the text of each element over its background.
+// The backgrounds of the ancestors are composed. Opacity is folded into the text.
 async function contrasts(page, selector) {
   return page.evaluate((selector) => {
     const parse = (text) => {
@@ -194,14 +194,14 @@ test('the range buttons read the shared range format (Sep 12 12:30 → 13:30), n
   await expect(button).toHaveText('Sep 12 12:30 → 13:30');
   const shared = await page.evaluate(() => window.ChDash.format.range(new Date(2026, 8, 12, 12, 30).getTime(), new Date(2026, 8, 12, 13, 30).getTime()));
   await expect(button).toHaveText(shared);
-  // Across midnight the date repeats; under ten minutes the seconds show.
+  // Across midnight, the date repeats. Under ten minutes, the seconds show.
   expect(await page.evaluate(() => [
     window.ChDash.format.range(new Date(2026, 8, 11, 23, 0).getTime(), new Date(2026, 8, 12, 1, 0).getTime()),
     window.ChDash.format.range(new Date(2026, 8, 12, 12, 30, 5).getTime(), new Date(2026, 8, 12, 12, 35, 10).getTime()),
     window.ChDash.format.range(new Date(2026, 8, 12, 12, 30, 5, 120).getTime(), new Date(2026, 8, 12, 12, 30, 5, 460).getTime(), { precision: 'ms' }),
     window.ChDash.format.range(new Date(2026, 8, 12).getTime(), new Date(2026, 8, 14).getTime(), { precision: 'day' }),
   ])).toEqual(['Sep 11 23:00 → Sep 12 01:00', 'Sep 12 12:30:05 → 12:35:10', 'Sep 12 12:30:05.120 → 12:30:05.460', 'Sep 12 → Sep 14']);
-  // The System Overview's performance range too.
+  // The performance range of the System Overview is also checked.
   await page.goto(`/system${HOUR}`);
   await expect(page.locator('#systemPerfRangeButton')).toHaveText('Sep 12 12:30 → 13:30', { timeout: 20_000 });
 });

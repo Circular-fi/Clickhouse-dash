@@ -16,7 +16,7 @@ class SystemLogFlushGate;
 struct QueryAnalysisOptions {
   int log_lookup_timeout_ms = 2000;
   bool flush_logs = false;
-  // The gate that shares one SYSTEM FLUSH LOGS between callers (Server owns it). Without one nothing is flushed.
+  // The gate that shares one SYSTEM FLUSH LOGS between callers. The Server owns the gate. Without a gate, nothing is flushed.
   SystemLogFlushGate* flush_gate = nullptr;
   bool include_original_trace_fields = false;
 };
@@ -126,11 +126,11 @@ struct QueryAnalysisResult {
   bool processor_trace_summary_available = false;
   uint64_t processor_trace_bucket_us = 0;
   bool logs_pending = false;
-  // Profiling-only logs (processors, OpenTelemetry spans) not published yet.
+  // Profiling-only logs (processors, OpenTelemetry spans) are not published yet.
   bool profiling_logs_pending = false;
   // Fatal collection failures (system context, mandatory flush, core query_log)
-  // are surfaced by the API as an explicit non-2xx error. Optional profiling
-  // tables keep their dedicated availability/error fields below.
+  // are shown by the API as an explicit non-2xx error. Optional profiling tables
+  // keep their own availability and error fields, which are listed below.
   std::string fatal_error;
   std::string query_log_error;
   std::string processors_profile_error;

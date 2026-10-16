@@ -94,9 +94,10 @@ size_t bucket_of(const std::vector<double>& bounds, double upper) {
   return static_cast<size_t>(at - bounds.begin());
 }
 
-// Adds explicit-bucket counts. Rows with the same bounds add up bucket by bucket. Rows with other bounds are re-bucketed onto the sorted
-// union of their bounds: each source bucket's count goes to the bucket that has its upper bound, so the result does not depend on the
-// order of the rows (a row with no bounds is one +Inf bucket).
+// Adds explicit-bucket counts. Rows with the same bounds add up, bucket by bucket.
+// Rows with other bounds are re-bucketed onto the sorted union of their bounds.
+// The count of each source bucket goes to the bucket that has its upper bound. So, the result does not depend on the order of the rows.
+// A row with no bounds is one +Inf bucket.
 void merge_hist(Cell& into, const std::vector<double>& bounds, const std::vector<double>& counts) {
   if (counts.empty()) return;
   if (into.counts.empty()) {
@@ -378,7 +379,7 @@ void add_series_row(const clickhouse::Block& block, size_t row, Mode mode, std::
 
 RankedGroups rank_groups(std::map<std::string, Group>* groups, Mode mode, const std::string& agg, double bucket_seconds, int top_k,
                          bool per_series) {
-  // Rank groups: quantiles by their observation count, everything else by the sum of |value| over the buckets.
+  // Ranks the groups. Quantiles rank by their observation count. Everything else ranks by the sum of |value| over the buckets.
   const bool rank_by_count = (mode == Mode::Histogram || mode == Mode::Exponential) && is_quantile_agg(agg);
   RankedGroups out;
   for (auto& [key, group] : *groups) {

@@ -22,6 +22,8 @@ option(CHDASH_BUILD_EXPLORER_TESTS "Build the unit tests of the Explorer: the SQ
 option(CHDASH_BUILD_LOGS_TESTS "Build the unit tests of the Logs page below its routes: the filters, the statements, the patterns and the service on a fake executor (no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_METRICS_TESTS "Build the unit tests of the Metrics page: the request, the SQL, the aggregation of the rows, the service (a fake executor, no ClickHouse needed)" OFF)
 option(CHDASH_BUILD_TRACE_TESTS "Build the unit tests of the Traces page: the request, the filters, the SQL, the search strategies (a fake executor, no ClickHouse needed)" OFF)
+option(CHDASH_BUILD_TELEMETRY_TESTS "Build the unit tests of the OTLP export: the encoding, the queue, the batches, the spans of an MCP call, with a fake OTLP receiver" OFF)
+option(CHDASH_BUILD_ACCESS_TESTS "Build the unit tests of the access of humans: the signatures, the identity token, the rules of the routes, the client of the PDP (no network)" OFF)
 option(CHDASH_BUILD_FUZZERS "Build the libFuzzer targets of tests/fuzz (clang only)" OFF)
 
 set(CHDASH_SEMVER_VALUE "dev" CACHE STRING "Semantic version embedded in the binary")
@@ -64,6 +66,36 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(rapidjson)
 
+# The signature checks of the identity token (docs/access.md): Ed25519 (EdDSA) from Monocypher and P-256 (ES256) from
+# micro-ecc. The build has no OpenSSL (the release binary is a static musl executable), and these two C files have no other
+# dependency. ChDash only verifies signatures with public keys: no secret goes through them.
+enable_language(C)
+FetchContent_Declare(
+  monocypher
+  GIT_REPOSITORY https://github.com/LoupVaillant/Monocypher.git
+  GIT_TAG        0d85f98c9d9b0227e42cf795cb527dff372b40a4 # 4.0.2
+)
+FetchContent_Declare(
+  micro_ecc
+  GIT_REPOSITORY https://github.com/kmackay/micro-ecc.git
+  GIT_TAG        541b3a78026420a3e369c4c9281c396b5e531113 # master, 2024-11
+)
+FetchContent_MakeAvailable(monocypher micro_ecc)
+add_library(chdash_signatures STATIC
+  ${monocypher_SOURCE_DIR}/src/monocypher.c
+  ${monocypher_SOURCE_DIR}/src/optional/monocypher-ed25519.c
+  ${micro_ecc_SOURCE_DIR}/uECC.c)
+target_include_directories(chdash_signatures SYSTEM PUBLIC
+  ${monocypher_SOURCE_DIR}/src ${monocypher_SOURCE_DIR}/src/optional ${micro_ecc_SOURCE_DIR})
+# P-256 only, and no compressed point.
+target_compile_definitions(chdash_signatures PUBLIC
+  uECC_SUPPORTS_secp160r1=0 uECC_SUPPORTS_secp192r1=0 uECC_SUPPORTS_secp224r1=0 uECC_SUPPORTS_secp256r1=1
+  uECC_SUPPORTS_secp256k1=0 uECC_SUPPORT_COMPRESSED_POINT=0)
+set_target_properties(chdash_signatures PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# The access of humans (docs/access.md): the identity token, the actions and their routes, the PDP.
+set(CHDASH_ACCESS_SOURCES access_identity.cpp access_actions.cpp access_pdp.cpp signature_verify.cpp)
+
 if (CHDASH_BUILD_CODEC_TESTS)
   add_executable(chdash_processor_codec_test ../tests/native/processor_json_driver.cpp)
   target_include_directories(chdash_processor_codec_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
@@ -72,7 +104,7 @@ if (CHDASH_BUILD_CODEC_TESTS)
 endif()
 
 # The tools of MCP: the dispatch, what the tools share, and the tools by family.
-set(CHDASH_MCP_TOOL_SOURCES mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp mcp_tools_analysis.cpp)
+set(CHDASH_MCP_TOOL_SOURCES mcp_untrusted.cpp mcp_trace.cpp mcp_tools.cpp mcp_tool_support.cpp mcp_tools_schema.cpp mcp_tools_query.cpp mcp_tools_otel.cpp mcp_tools_api.cpp mcp_tools_analysis.cpp)
 
 # The query library: the store, the file format, the rules of the tree, the import, the reading of a request.
 set(CHDASH_QUERY_LIBRARY_SOURCES query_library.cpp query_library_file.cpp query_library_import.cpp query_library_read.cpp query_library_request.cpp query_library_rules.cpp)
@@ -90,12 +122,13 @@ if (CHDASH_BUILD_MCP_TESTS)
   # (the guard of the writes, the page policy, the asset versions), the random source and the log lines.
   add_executable(chdash_mcp_test ../tests/native/mcp_test.cpp
     mcp_scope.cpp mcp_identity.cpp mcp_grants.cpp mcp_api_tools.cpp mcp_keys.cpp mcp_usage.cpp mcp_usage_state.cpp mcp_usage_store.cpp mcp_sql.cpp mcp_protocol.cpp ${CHDASH_MCP_TOOL_SOURCES}
-    error_envelope.cpp request_context.cpp config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp)
+    error_envelope.cpp request_context.cpp config.cpp config_secret.cpp config_schema.cpp telemetry_settings.cpp hcl.cpp ch_uri.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} ch_query.cpp jwt.cpp secure_random.cpp log.cpp http_guard.cpp metrics.cpp health_runner.cpp
+    ${CHDASH_ACCESS_SOURCES} otlp_export.cpp)
   target_include_directories(chdash_mcp_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_mcp_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
-  target_link_libraries(chdash_mcp_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  target_link_libraries(chdash_mcp_test PRIVATE clickhouse-cpp-lib chdash_signatures Threads::Threads)
   chdash_configure_target(chdash_mcp_test)
 endif()
 
@@ -226,16 +259,42 @@ if (CHDASH_BUILD_REQUEST_TESTS)
   chdash_configure_target(chdash_request_test)
 endif()
 
+if (CHDASH_BUILD_TELEMETRY_TESTS)
+  # The OTLP export (docs/server-telemetry.md): the JSON of the two requests, the endpoint and the durations of the file, the queue and
+  # its drops, the batches and the retries against a fake OTLP receiver in the process, and the spans and the log record of an MCP call.
+  add_executable(chdash_telemetry_test ../tests/native/telemetry_test.cpp
+    telemetry_settings.cpp otlp_export.cpp mcp_telemetry.cpp mcp_trace.cpp ch_query.cpp metrics.cpp log.cpp secure_random.cpp)
+  target_include_directories(chdash_telemetry_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_telemetry_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_telemetry_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  chdash_configure_target(chdash_telemetry_test)
+endif()
+
+if (CHDASH_BUILD_ACCESS_TESTS)
+  # The access of humans (docs/access.md): the signature checks against the vectors of the RFCs, the PEM keys, the identity token, the
+  # actions and the rule of each route, and the client of the PDP on a fake transport.
+  add_executable(chdash_access_test ../tests/native/access_test.cpp
+    ${CHDASH_ACCESS_SOURCES} jwt.cpp log.cpp mcp_trace.cpp secure_random.cpp otlp_export.cpp metrics.cpp)
+  target_include_directories(chdash_access_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  target_include_directories(chdash_access_test SYSTEM PRIVATE ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(chdash_access_test PRIVATE chdash_signatures Threads::Threads)
+  chdash_configure_target(chdash_access_test)
+endif()
+
 if (CHDASH_BUILD_CONFIG_TESTS)
   # The configuration file: the table of keys and their bounds, the errors, the derived values, the URIs, the HCL parser.
   add_executable(chdash_config_test ../tests/native/config_test.cpp
-    config.cpp config_schema.cpp hcl.cpp ch_uri.cpp ch_query.cpp error_envelope.cpp mcp_keys.cpp mcp_usage.cpp mcp_usage_state.cpp mcp_usage_store.cpp mcp_scope.cpp mcp_api_tools.cpp mcp_identity.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} jwt.cpp
-    secure_random.cpp log.cpp health_runner.cpp ch_client_pool.cpp)
+    config.cpp config_secret.cpp config_schema.cpp telemetry_settings.cpp hcl.cpp ch_uri.cpp ch_query.cpp error_envelope.cpp mcp_keys.cpp mcp_usage.cpp mcp_usage_state.cpp mcp_usage_store.cpp mcp_scope.cpp mcp_api_tools.cpp mcp_identity.cpp ${CHDASH_QUERY_LIBRARY_SOURCES} jwt.cpp
+    secure_random.cpp log.cpp health_runner.cpp ch_client_pool.cpp ${CHDASH_ACCESS_SOURCES} otlp_export.cpp mcp_trace.cpp metrics.cpp)
   target_include_directories(chdash_config_test PRIVATE ${CMAKE_CURRENT_LIST_DIR})
   target_include_directories(chdash_config_test SYSTEM PRIVATE ${clickhouse_cpp_SOURCE_DIR} ${httplib_SOURCE_DIR} ${rapidjson_SOURCE_DIR}/include)
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
-  target_link_libraries(chdash_config_test PRIVATE clickhouse-cpp-lib Threads::Threads)
+  target_link_libraries(chdash_config_test PRIVATE clickhouse-cpp-lib chdash_signatures Threads::Threads)
   chdash_configure_target(chdash_config_test)
 endif()
 
@@ -316,7 +375,11 @@ if (CHDASH_BUILD_APP)
   add_executable(chdash
     main.cpp
     config.cpp
+    config_secret.cpp
     config_schema.cpp
+    telemetry_settings.cpp
+    otlp_export.cpp
+    mcp_telemetry.cpp
     server.cpp
     api_error.cpp
     error_envelope.cpp
@@ -440,6 +503,8 @@ if (CHDASH_BUILD_APP)
     http_guard.cpp
     metrics.cpp
     server_http.cpp
+    server_access.cpp
+    ${CHDASH_ACCESS_SOURCES}
   )
 endif()
 
@@ -515,6 +580,7 @@ if (CHDASH_BUILD_APP)
   find_package(Threads REQUIRED)
   target_link_libraries(chdash PRIVATE
     clickhouse-cpp-lib
+    chdash_signatures
     Threads::Threads
   )
   # The stack of every thread (musl, the release binaries and the test image: 128 KiB by default, which

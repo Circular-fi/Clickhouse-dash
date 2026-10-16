@@ -3,9 +3,9 @@ import { installObservers } from '../helpers/observability.js';
 import { buildRoutingCase, buildLayeredCase, buildDenseCase, scaleCatalog } from '../helpers/wasm-layout.js';
 import { settle, measureFrames, expectLabelsClear } from '../helpers/graph-kit.js';
 
-// The layout kernels (src/wasm/router.c, docs/wasm.md): the orthogonal router of the graph kit on WebAssembly gives the
-// routes of the JavaScript router (kit.routeEdgesJs, the reference) point for point, on seeded random graphs of several
-// shapes, and the page keeps its JavaScript router when the kernel is not there.
+// The layout kernels (src/wasm/router.c, docs/wasm.md). The orthogonal router of the graph kit on
+// WebAssembly gives the routes of the JavaScript router (kit.routeEdgesJs, the reference) point for point.
+// This holds on seeded random graphs of several shapes. The page keeps its JavaScript router when the kernel is not there.
 
 // WASM_FUZZ_SCALE=10 runs ten times more seeded graphs (a deeper check before a release).
 const SCALE = Math.max(1, Number(process.env.WASM_FUZZ_SCALE) || 1);
@@ -26,7 +26,7 @@ const openGraphPage = async (page) => {
   return page.evaluate(async () => !!(await window.ChDash.wasm.load('router')));
 };
 
-// Runs both routers on each case; returns the first differences.
+// Run both routers on each case. Return the first differences.
 async function compare(page, cases) {
   return page.evaluate(({ cases, buildSource }) => {
     // eslint-disable-next-line no-new-func
@@ -133,7 +133,7 @@ const openLayeredPage = async (page) => {
   return page.evaluate(async () => !!(await window.ChDash.wasm.load('layered')));
 };
 
-// The columns, their order, the levels, the back edges and the rows of both layouts, for each case.
+// Compare the columns, their order, the levels, the back edges and the rows of both layouts, for each case.
 async function compareLayered(page, cases) {
   return page.evaluate(({ cases, buildSource }) => {
     // eslint-disable-next-line no-new-func
@@ -190,7 +190,7 @@ test('the layered kernel gives its arena back after each column: a 1,500-object 
     const build = new Function(`return (${buildSource})()`)();
     const ns = window.ChDash;
     const kernel = ns.wasm.get('layered');
-    // One column of 1,500 cards with no edges: the row assignment of that column takes n x slots f64 and i32.
+    // One column has 1,500 cards and no edges. The row assignment of that column takes n x slots f64 and i32.
     const options = build({ seed: 5, nodes: 1500, edges: 0, rowGrid: true });
     const input = ns.wasm.layered.pack(options);
     const status = ns.wasm.ops.layered.run(kernel, input).status;
@@ -199,7 +199,7 @@ test('the layered kernel gives its arena back after each column: a 1,500-object 
   }, { buildSource: buildLayeredCase.toString() });
   expect(result.status).toBe(0);
   expect(result.bytes).not.toBe(null);
-  // 1,500 x 1,501 x 12 bytes = 27 MB for one pass: without the release the 12 passes took ~330 MB; one pass is the peak.
+  // 1,500 x 1,501 x 12 bytes = 27 MB for one pass. Without the release, the 12 passes took ~330 MB. One pass is the peak.
   expect(result.bytes).toBeLessThan(120 * 1024 * 1024);
 });
 
@@ -364,7 +364,7 @@ test('performance budget: the kernels run the dense service maps and the 2k-obje
     }
     return out;
   }, { dense: buildDenseCase.toString() });
-  // The labels of the Explorer layout: the same routes, 550 labels, the cards as obstacles.
+  // The labels of the Explorer layout use the same routes. There are 550 labels. The cards are obstacles.
   await page.evaluate(async () => { await window.ChDash.loader.loadGroup('wasm-labels'); await window.ChDash.wasm.load('labels'); });
   const labels = await page.evaluate(() => {
     const kit = window.ChDash.graphKit;

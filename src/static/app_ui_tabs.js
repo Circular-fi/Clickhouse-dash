@@ -1,14 +1,14 @@
-// Tab rows: every row of sections is one underline row (.contentTabs /
-// .contentTabs__tab; .contentTabs--nav in a page's nav row): the Explorer
-// views and the Catalog's Browse | Graph, the Observability views and the
-// Traces Search | Services | Service map, the System sections, the Explorer table card, Logs
-// Results | Patterns and the log record tabs, the trace detail views and
-// the dialog tabs. Modes (another presentation of the same scope) are
-// segmented controls (ns.segmented), never tabs.
-// bind() owns role=tablist / tab, aria-selected and .is-active, the roving
-// tabindex (Tab reaches the selected tab only), Left / Right / Home / End
-// (which move and select, automatic activation) and the click; the caller
-// shows the panel in onSelect. render() builds a row's buttons for rows
+// Tab rows. Every row of sections is one underline row (.contentTabs /
+// .contentTabs__tab; .contentTabs--nav in a page's nav row). Examples are the Explorer
+// views, the Catalog's Browse | Graph, the Observability views, the Traces
+// Search | Services | Service map, the System sections, the Explorer table card, Logs
+// Results | Patterns and the log record tabs, the trace detail views, and
+// the dialog tabs. A mode is another presentation of the same scope. Use a
+// segmented control (ns.segmented) for a mode, never a tab.
+// bind() owns role=tablist and role=tab, aria-selected and .is-active. It also owns
+// the roving tabindex: Tab reaches only the selected tab. Left, Right, Home and End
+// move the selection and select the tab (automatic activation). bind() also handles the click.
+// The caller shows the panel in onSelect. render() builds the buttons of a row for rows
 // drawn from data. No other module handles tab keys (harness contract
 // test_ui_tabs_menus_contract.py).
 
@@ -33,7 +33,7 @@ function find(list, value, attr = "tab") {
   return tabsOf(list).find((tab) => tab.dataset[attr] === value) || null;
 }
 
-// Marks the tab whose value is `value` selected (the others not); in a row
+// Marks the tab whose value is `value` as selected. The other tabs are not selected. In a row
 // that scrolls sideways (a phone), the selected tab scrolls into view.
 function select(list, value, attr = "tab") {
   if (!list) return;
@@ -46,8 +46,8 @@ function select(list, value, attr = "tab") {
   }
 }
 
-// Scrolls a sideways-scrolling row (only it, never the page) so the tab
-// shows whole.
+// Scrolls a row that scrolls sideways. Only the row scrolls, never the page. The tab
+// then shows whole.
 function reveal(list, tab) {
   if (!(list.scrollWidth > list.clientWidth + 1) || tab.hidden) return;
   const box = tab.getBoundingClientRect();
@@ -56,9 +56,9 @@ function reveal(list, tab) {
   else if (left + box.width > list.scrollLeft + list.clientWidth) list.scrollLeft = left + box.width - list.clientWidth;
 }
 
-// render(list, items, { attr = "tab", selected }): one
-// button per item { value, label, id, controls, hidden, title }, selected
-// marked; the row keeps the focused tab focused across the rebuild.
+// render(list, items, { attr = "tab", selected }) makes one
+// button per item { value, label, id, controls, hidden, title }. The selected item is marked.
+// The row keeps the focused tab focused after the rebuild.
 function render(list, items, { attr = "tab", selected = "" } = {}) {
   if (!list) return;
   const focused = list.contains(document.activeElement) ? document.activeElement?.dataset?.[attr] : null;
@@ -80,15 +80,15 @@ function render(list, items, { attr = "tab", selected = "" } = {}) {
 }
 
 // bind(list, { attr = "tab", onSelect(value, { via: "click" | "key" }) }):
-// the tab's value is its data-<attr>. onSelect may rebuild the row or
-// resolve later (a promise): the selected tab keeps the keyboard focus.
+// The value of a tab is its data-<attr>. onSelect may rebuild the row, or
+// it may resolve later (a promise). The selected tab keeps the keyboard focus.
 // Returns { select(value), render(items, options) }.
 function bind(list, { attr = "tab", onSelect = null } = {}) {
   if (!list) return { select: () => {}, render: () => {} };
   list.setAttribute("role", "tablist");
   for (const tab of tabsOf(list)) tab.setAttribute("role", "tab");
-  // A row too narrow for its tabs scrolls sideways and fades the side it
-  // hides tabs on (ns.shell.edgeCues).
+  // A row that is too narrow for its tabs scrolls sideways. It fades the side that
+  // hides tabs (ns.shell.edgeCues).
   shell?.edgeCues?.(list);
   list.addEventListener("click", (event) => {
     const tab = event.target instanceof Element ? event.target.closest('[role="tab"]') : null;

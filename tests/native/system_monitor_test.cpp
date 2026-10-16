@@ -1,7 +1,7 @@
-// Unit tests of the System page below its routes (no ClickHouse needed): the SQL builders and the disk forecast of every section
-// (src/system_overview.cpp, system_series.cpp, system_queries.cpp, system_disks.cpp), the Activity and the Keeper status
-// (src/system_activity.cpp), the parsing of a request (src/system_request.cpp), the JSON (src/system_json.cpp), and the service on a fake
-// executor with a fake ACL source (src/system_service.cpp).
+// Unit tests of the System page below its routes. No ClickHouse is needed.
+// They check the SQL builders and the disk forecast of every section (src/system_overview.cpp, system_series.cpp, system_queries.cpp, system_disks.cpp).
+// They check the Activity and the Keeper status (src/system_activity.cpp), the request parser (src/system_request.cpp), and the JSON (src/system_json.cpp).
+// They check the service on a fake executor with a fake ACL source (src/system_service.cpp).
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF
 //          -DCHDASH_BUILD_SYSTEM_TESTS=ON
@@ -63,7 +63,7 @@ const double kNaN = std::numeric_limits<double>::quiet_NaN();
 const uint64_t kTiB = 1ULL << 40;
 const uint64_t kGiB = 1ULL << 30;
 
-// Hourly samples of a disk growing `per_day` bytes a day from `start`.
+// Hourly samples of a disk that grows by `per_day` bytes a day from `start`.
 void hourly(size_t hours, double start, double per_day, std::vector<uint64_t>& times, std::vector<double>& used) {
   times.clear();
   used.clear();
@@ -156,7 +156,7 @@ void trend_needs_enough_history() {
   const auto fresh = monitor_disk_trend(times, used, kTiB, 2 * kTiB);
   CHECK(fresh.status == "not_enough_history");
   CHECK(!fresh.days_until_full);
-  // Missing buckets do not count.
+  // Buckets without data do not count.
   hourly(48, 100.0 * kGiB, 10.0 * kGiB, times, used);
   for (size_t i = 0; i < 44; ++i) used[i] = kNaN;
   const auto sparse = monitor_disk_trend(times, used, kTiB, 2 * kTiB);
@@ -319,8 +319,8 @@ using nt::Rows;
 using nt::server_error;
 using namespace chdash::system_page;
 
-// A fake identity of the runner: databases and their tables, each readable ("all") or not ("none"). `down` makes every statement fail as a lost
-// connection does.
+// A fake identity of the runner: databases and their tables. Each one is readable ("all") or not ("none").
+// `down` makes every statement fail, as a lost connection does.
 struct FakeAcl : AclSource {
   std::map<std::string, std::map<std::string, std::string>> objects;
   bool down = false;
@@ -396,14 +396,14 @@ HostSpec system_host() {
   return host;
 }
 
-// The caches of a service, with the options of the tests (no background refresh: a stale answer is read again).
+// The caches of a service, with the options of the tests. No background refresh runs. A stale answer is read again.
 struct SystemTestCaches {
   TtlCache<std::string, MonitorCapabilities> capabilities{TtlCache<std::string, MonitorCapabilities>::Options{}};
   TtlCache<std::string, SystemMonitorOverview> overview{TtlCache<std::string, SystemMonitorOverview>::Options{}};
   TtlCache<std::string, SystemMonitorSeries> series{TtlCache<std::string, SystemMonitorSeries>::Options{}};
   TtlCache<std::string, SystemMonitorQueries> queries{TtlCache<std::string, SystemMonitorQueries>::Options{}};
   TtlCache<std::string, SystemMonitorQuery> query{TtlCache<std::string, SystemMonitorQuery>::Options{}};
-  // A failure of the formatter is asked again at once (no back-off), so a test sees that it was not kept.
+  // The code asks the formatter again at once after a failure (no back-off). A test then sees that the answer was not kept.
   static TtlCache<std::string, ShapeFormatted>::Options no_backoff() {
     TtlCache<std::string, ShapeFormatted>::Options options;
     options.failure_backoff = std::chrono::milliseconds(0);
@@ -425,13 +425,13 @@ struct ServiceRig {
   bool system_up = true, runner_up = true;
   int counts_asked = 0;
   std::vector<std::pair<std::string, std::string>> counted_tables;
-  // The formatter of a host: what it was asked (the masked text, the host), and what it answers (by default a layout of one clause a line).
+  // The formatter of a host. It records what it is asked (the masked text, the host). It answers by default with a layout of one clause a line.
   std::vector<std::string> formatted_sqls, formatted_hosts;
   std::function<ShapeFormatReply(const std::string&)> formatter = [](const std::string& sql) { return layout(sql); };
   std::unique_ptr<SystemService> service;
 
-  // A stand-in for formatQuery: FROM, WHERE and LIMIT start a line, a comma is followed by a new line, and the expressions before an AS are
-  // padded to one column when the text has more than one (what the real formatter does).
+  // A stand-in for formatQuery. FROM, WHERE and LIMIT start a line. A comma is followed by a new line.
+  // The expressions before an AS are padded to one column when the text has more than one. The real formatter does the same.
   static ShapeFormatReply layout(const std::string& sql) {
     ShapeFormatReply reply;
     std::string out;
@@ -528,7 +528,7 @@ void a_request_that_names_the_host_only() {
   CHECK(!parse_host_request(make_request({{"host_id", "local"}, {"x", "1"}}), &host, &error));
   CHECK_EQ(error.code, std::string("unknown_parameter"));
   CHECK_EQ(error.message, std::string("Unknown parameter: x."));
-  // The unknown parameter is refused before the host is looked at.
+  // The unknown parameter is refused before the code checks the host.
   CHECK(!parse_host_request(make_request({{"x", "1"}}), &host, &error));
   CHECK_EQ(error.code, std::string("unknown_parameter"));
 }
@@ -670,7 +670,7 @@ void a_series_is_written_to_six_digits_and_a_size_keeps_all_of_them() {
   CHECK_EQ(series_number(INFINITY), std::string("null"));
   // Past what a double keeps whole, the six digits.
   CHECK_EQ(series_number(1e300), std::string("1e+300"));
-  // A series of the answer: the numbers parse back to the value.
+  // A series of the answer: each number parses to the original value.
   SystemMonitorSeries series;
   series.window.from_s = 1000;
   series.window.to_s = 1090;
@@ -701,13 +701,13 @@ void the_average_query_time_counts_the_queries_that_ended() {
   window.step_s = 60;
   std::vector<std::string> names, missing;
   const std::string sql = monitor_series_metric_log_sql(caps, window, &names, &missing);
-  // The time is added when a query ends: the queries of the bucket are the ones that started in it, less the growth of the running ones.
+  // The time is added when a query ends: the queries of the bucket are the ones that started in it, less the growth of the queries that still run.
   CHECK(contains(sql, "toFloat64(sum(ProfileEvent_QueryTimeMicroseconds) / greatest(sum(ProfileEvent_Query) + "
                       "lagInFrame(argMax(CurrentMetric_Query, event_time), 1, argMax(CurrentMetric_Query, event_time)) OVER (ORDER BY t) - "
                       "argMax(CurrentMetric_Query, event_time), 1) / 1000) AS avg_query_ms"));
   CHECK(std::find(names.begin(), names.end(), "avg_query_ms") != names.end());
   CHECK(missing.size() == 26);
-  // A server that does not log the running queries cannot give it.
+  // A server that does not log the queries that still run cannot give it.
   MonitorCapabilities no_gauge = caps;
   no_gauge.columns.erase("metric_log.CurrentMetric_Query");
   names.clear();
@@ -812,7 +812,7 @@ void a_full_read_is_cut_even_when_the_runner_sees_few_of_its_rows() {
   SystemActivity activity;
   std::string error;
   CHECK(load_system_activity(db, counts, view, 200, activity, &error));
-  // The merges: the 201 rows that were read were all that there was to look at, and the runner sees two of them.
+  // The merges: the 201 rows that the code read were all the rows there were, and the runner sees two of them.
   CHECK_EQ(activity.merges.size(), size_t(2));
   CHECK(std::find(activity.truncated_sections.begin(), activity.truncated_sections.end(), "merges") != activity.truncated_sections.end());
   // The mutations: the read was not full.
@@ -1000,7 +1000,7 @@ void the_series_drop_a_connection_that_broke_and_keep_the_rest() {
   CHECK_EQ(series.sources.at("metric_log").status, std::string("ok"));
   CHECK_EQ(series.sources.at("asynchronous_metric_log").status, std::string("failed"));
   CHECK_EQ(series.buckets.size(), size_t(168));
-  // The connection that broke is not lent again; the sources that read are kept.
+  // The code does not lend the broken connection again. The sources that read are kept.
   CHECK_EQ(rig.system.invalidated, 1);
   const rapidjson::Document doc = parse_json(series_json("local", request, series, false, rig.settings));
   CHECK_EQ(doc["sources"]["asynchronous_metric_log"]["status"].GetString(), std::string("failed"));
@@ -1009,7 +1009,7 @@ void the_series_drop_a_connection_that_broke_and_keep_the_rest() {
   // The same aligned window is one read.
   CHECK(rig.service->series(context, system_host(), request));
   CHECK_EQ(rig.system.count("FROM system.metric_log"), size_t(1));
-  // A window wider than the lookback of query_log leaves it out, and is another key.
+  // A window wider than the lookback of query_log is limited by that lookback, and it is another key.
   request.window.span_s = 8 * 86400;
   const auto wide = rig.service->series(context, system_host(), request);
   CHECK(wide && wide.value->value->sources.at("query_log").status == "out_of_range");
@@ -1035,7 +1035,7 @@ void the_queries_are_read_as_the_runner_and_keyed_by_their_filters() {
   CHECK_EQ(first.value->value->hint, std::string("GRANT SELECT ON system.query_log TO runner_account"));
   CHECK_EQ(first.value->value->request.system_user, std::string("system_account"));
   CHECK_EQ(first.value->value->request.runner_user, std::string("runner_account"));
-  // The system account of the detection is kept out of the list when the chdash reads are hidden.
+  // The list omits the system account of the detection when the chdash reads are hidden.
   CHECK(rig.runner.sqls[0].find("user != 'system_account'") != std::string::npos);
   // The same filters are one read; another user is another one.
   CHECK(rig.service->queries(context, system_host(), request));
@@ -1212,24 +1212,24 @@ void a_text_that_cannot_be_masked_is_refused() {
   CHECK(!mask_shape_placeholders(many + ", ?"));
 }
 
-// The AS column that the formatter aligned keeps its alignment: a placeholder is shorter than its stand-in, and the width goes back to the
-// padding of the line, the first AS of it.
+// The AS column that the formatter aligned keeps its alignment. A placeholder is shorter than its stand-in.
+// The width returns to the padding of the line, at the first AS of it.
 void restoring_the_placeholders_keeps_the_as_column() {
   const std::vector<std::string> two = {"?", "?"};
   CHECK_EQ(*restore_shape_placeholders("SELECT\n    sleepEachRow(90900)  AS `s`,\n    number               AS `n`\nFROM numbers(90901)", two),
            std::string("SELECT\n    sleepEachRow(?)      AS `s`,\n    number               AS `n`\nFROM numbers(?)"));
-  // A list is three bytes against five: two come back.
+  // A list is three bytes against five: the code restores two bytes.
   CHECK_EQ(*restore_shape_placeholders("SELECT\n    x IN (90900)  AS `a`,\n    y             AS `b`", {"?.."}),
            std::string("SELECT\n    x IN (?..)    AS `a`,\n    y             AS `b`"));
   // Two placeholders on the line: the width of both.
   CHECK_EQ(*restore_shape_placeholders("a(90900, 90901)  AS x", two), std::string("a(?, ?)          AS x"));
-  // One space before AS is no padding; a line without AS or without a placeholder is left alone; only the first AS of a line is padded.
+  // One space before AS is no padding. The code does not change a line without AS or without a placeholder. Only the first AS of a line is padded.
   CHECK_EQ(*restore_shape_placeholders("SELECT 90900 AS x", {"?"}), std::string("SELECT ? AS x"));
   CHECK_EQ(*restore_shape_placeholders("  a  AS x,\n  90900", {"?"}), std::string("  a  AS x,\n  ?"));
   CHECK_EQ(*restore_shape_placeholders("f(90900)  AS x, g(1)  AS y", {"?"}), std::string("f(?)      AS x, g(1)  AS y"));
 }
 
-// Every placeholder comes back exactly once, or the text is not used.
+// Every placeholder is restored exactly once, or the text is not used.
 void a_placeholder_that_did_not_come_back_once_refuses_the_text() {
   CHECK(!restore_shape_placeholders("SELECT 90900", {"?", "?"}));        // 90901 was lost
   CHECK(!restore_shape_placeholders("SELECT 90900, 90900", {"?"}));      // twice
@@ -1251,7 +1251,7 @@ void the_shape_is_formatted_by_the_function_it_is_given() {
   const ShapeFormat done = format_shape_text("SELECT a FROM t WHERE x IN (?..) LIMIT ?", format);
   CHECK(done.status == ShapeFormatStatus::Formatted);
   CHECK_EQ(done.text, std::string("SELECT a\nFROM t\nWHERE x IN (?..)\nLIMIT ?"));
-  // The formatter got numbers, never a question mark, and was asked once.
+  // The formatter receives numbers, never a question mark, and the code asks it once.
   CHECK_EQ(asked.size(), size_t(1));
   CHECK_EQ(asked[0], std::string("SELECT a FROM t WHERE x IN (90900) LIMIT 90901"));
   // The blanks around the answer are not kept.
@@ -1332,7 +1332,7 @@ void a_shape_that_cannot_be_formatted_is_null_and_is_not_asked_again() {
   CHECK(rig.service->shape_text_formatted(context, system_host(), largest) != nullptr);
 }
 
-// A failure that is not the text's (the host is down, the time ran out) is not kept: the next request asks again. And nothing escapes.
+// A failure that is not the text's (the host is down, or the timeout is reached) is not kept: the next request asks again. And nothing escapes.
 void a_formatter_that_failed_is_asked_again_and_never_throws() {
   ServiceRig rig;
   RequestContext context;
@@ -1387,7 +1387,7 @@ std::string reason_of_code(int code) {
   return monitor_reason_of(clickhouse::ServerException(exception));
 }
 
-// ARCH-B-087: the limits of memory (241) and of rows or bytes (396) are a window that is too large, as the limits of rows (158) and of time (159).
+// ARCH-B-087: a window that is too large triggers the limits of memory (241) and of rows or bytes (396). The limits of rows (158) and of time (159) trigger in the same way.
 void reasons_follow_the_error_code() {
   CHECK(reason_of_code(60) == "disabled");
   CHECK(reason_of_code(497) == "not_granted");

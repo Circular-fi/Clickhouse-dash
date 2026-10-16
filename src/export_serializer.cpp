@@ -20,9 +20,9 @@
 namespace chdash {
 namespace {
 
-// Shortest round-trip representation in the type of the value (Float32 0.1 stays "0.1", not the
-// "0.10000000149011612" of the widened double), without the locale and allocation overhead of an
-// ostringstream per cell. NaN and infinities as ClickHouse prints them.
+// Use the shortest round-trip representation in the type of the value.
+// Float32 0.1 stays "0.1". It does not become the "0.10000000149011612" of the widened double.
+// This avoids the locale and allocation overhead of an ostringstream per cell. Write NaN and infinities as ClickHouse prints them.
 template <typename Float>
 std::string float_text(Float value) {
   if (std::isnan(value)) return "nan";
@@ -67,8 +67,8 @@ std::string scalar_text(const clickhouse::ItemView& item, const clickhouse::Type
     case Type::Decimal32:
     case Type::Decimal64:
     case Type::Decimal128: {
-      // Decimal32/64 are stored in 4/8 bytes: reading them as Int128 threw
-      // and aborted every CSV export containing e.g. a Decimal(18,6) column.
+      // Decimal32 and Decimal64 are stored in 4 and 8 bytes.
+      // The read of them as Int128 threw an error. It aborted every CSV export that had a column such as Decimal(18,6).
       const auto* decimal = type.As<clickhouse::DecimalType>();
       return detail::decimal_to_string(
           detail::decimal_raw_value(item, decimal ? decimal->GetPrecision() : 38),
@@ -78,8 +78,8 @@ std::string scalar_text(const clickhouse::ItemView& item, const clickhouse::Type
       break;
   }
 
-  // Structural/less common types are represented as compact JSON in a CSV
-  // cell. This stays lossless and avoids inventing an ad-hoc delimiter grammar.
+  // Write structural and less common types as compact JSON in a CSV cell.
+  // This stays lossless. It avoids an ad-hoc delimiter grammar.
   return {};
 }
 
@@ -179,9 +179,10 @@ bool ExportSerializer::append_char(char value) {
   return true;
 }
 
-// RFC 4180: a field is quoted only when it has to be (a comma, a quote, a line break, or a blank at
-// either end), and a quote inside is doubled. A NULL is a bare \N, as ClickHouse writes CSV
-// (format_csv_null_representation); a text that is exactly \N is quoted, so it never reads as NULL.
+// RFC 4180: quote a field only when it must be quoted.
+// Quote it for a comma, a quote, a line break, or a blank at either end. Double a quote inside the field.
+// A NULL is a bare \N, as ClickHouse writes CSV (format_csv_null_representation).
+// A text that is exactly \N is quoted. So it never reads as NULL.
 bool ExportSerializer::write_csv_field(std::string_view value) {
   bool quote = value == "\\N";
   for (const char c : value) {
@@ -258,7 +259,7 @@ bool ExportSerializer::write_csv_row(size_t row) {
 }
 
 bool ExportSerializer::write_json_row(size_t row) {
-  // One JSON object for the row, serialized into a reused buffer.
+  // Write one JSON object for the row into a reused buffer.
   json_row_.Clear();
   rapidjson::Writer<rapidjson::StringBuffer> w(json_row_);
   w.StartObject();
@@ -300,7 +301,7 @@ bool ExportSerializer::write_block(const clickhouse::Block& block) {
     }
     ++rows_written_;
   }
-  // Release the block's column references; capacity is kept for the next one.
+  // Release the column references of the block. Keep the capacity for the next block.
   encoders_.clear();
   columns_.clear();
   return true;

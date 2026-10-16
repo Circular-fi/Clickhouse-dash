@@ -1,18 +1,20 @@
-// Unit tests of the path of a result to the browser: the JSON cell encoder (src/json_clickhouse.hpp),
-// the thread that encodes the blocks (src/block_encoder.hpp), and what a run builds on them: the plan of
-// the columns and the SQL that wraps a statement (src/query_result_plan.cpp), the events of a result
-// (src/query_result_events.cpp) and the cost that the ProfileEvents packets report (src/query_run_profile.cpp). The Query page rows, the exports,
-// the MCP rows and the Explorer preview all write their cells with the cell encoder, which resolves the
-// nested structure of a column once, so a row costs no dynamic_cast, no shared_ptr copy and no
-// allocation. Each case checks the exact JSON text, and the same text from a reference encoder that
-// keeps the generic algorithm (it slices a Map or Array cell out of its column, as the code did
-// before the cell encoder). No ClickHouse needed.
+// Unit tests of the path of a result to the browser.
+// The tests cover these parts: the JSON cell encoder (src/json_clickhouse.hpp), the thread that encodes the blocks (src/block_encoder.hpp),
+// and the parts that a run builds on them. These parts are the plan of the columns and the SQL that wraps a statement
+// (src/query_result_plan.cpp), the events of a result (src/query_result_events.cpp), and the cost that the ProfileEvents packets
+// report (src/query_run_profile.cpp).
+//
+// The Query page rows, the exports, the MCP rows, and the Explorer preview all write their cells with the cell encoder.
+// The cell encoder resolves the nested structure of a column once. A row then costs no dynamic_cast, no shared_ptr copy, and no allocation.
+// Each case checks the exact JSON text. The same text must come from a reference encoder.
+// The reference encoder keeps the generic algorithm. It slices a Map or Array cell out of its column, as the code did before the cell encoder.
+// No ClickHouse is needed.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_RESULT_TESTS=ON
 //        cmake --build build --target chdash_result_path_test
 // Run:   ./build/chdash_result_path_test   (exit code 0 = every check passed)
 //        ./build/chdash_result_path_test --bench   (prints the time of 100000 map cells)
-// The Python harness (test_native_unit_tests.py) runs it when RESULT_PATH_TEST_BINARY points at it.
+// The Python harness (test_native_unit_tests.py) runs the binary when RESULT_PATH_TEST_BINARY names it.
 
 #include "block_encoder.hpp"
 #include "json_clickhouse.hpp"
@@ -142,7 +144,7 @@ std::string reference(const ColumnRef& col, size_t row) {
   return std::string(sb.GetString(), sb.GetSize());
 }
 
-// The cell encoder and the reference agree on every row, and the first row has the stated JSON.
+// The cell encoder and the reference agree on every row. The first row has the stated JSON.
 void check_column(const ColumnRef& col, const std::vector<std::string>& expected) {
   CHECK_EQ(col->Size(), expected.size());
   for (size_t row = 0; row < expected.size(); ++row) {
@@ -262,8 +264,8 @@ void test_maps() {
   check_column(std::make_shared<clickhouse::ColumnMap>(storage), {"[[\"10\",\"18446744073709551615\"],[\"2\",\"0\"]]"});
 }
 
-// The value contract of docs/telemetry.md ("Result values"): every value as ClickHouse stores it, in a
-// form that JSON.parse in a browser does not change.
+// The value contract of docs/telemetry.md ("Result values") applies to each value.
+// Each value is written as ClickHouse stores it, in a form that JSON.parse in a browser does not change.
 void test_value_contract() {
   auto int64 = make<clickhouse::ColumnInt64>();
   int64->Append(std::numeric_limits<int64_t>::min());
@@ -313,8 +315,9 @@ void test_value_contract() {
   check_column(text, {"\"a\\u0000b\"", "\"\xEF\xBF\xBD\\u0000z\"", "\"caf\xc3\xa9\""});
 }
 
-// clickhouse-cpp reads a Bool as a ColumnBool (CH_MAP_BOOL_TO_UINT8 is off): true or false, also inside a Nullable
-// and an Array. A UInt8 whose declared type is Bool (a DESCRIBE plan of an older projection) is true or false too.
+// clickhouse-cpp reads a Bool as a ColumnBool, because CH_MAP_BOOL_TO_UINT8 is off.
+// A Bool is true or false. This is also true inside a Nullable and an Array.
+// A UInt8 with the declared type Bool is true or false too. This happens in a DESCRIBE plan of an older projection.
 void test_bool_is_true_or_false() {
   auto flags = make<clickhouse::ColumnBool>();
   flags->Append(true);
@@ -342,7 +345,7 @@ void test_declared_bool_is_true_or_false() {
   CHECK_EQ(declared(flags, 0, "Bool"), std::string("true"));
   CHECK_EQ(declared(flags, 1, "Bool"), std::string("false"));
   CHECK_EQ(declared(flags, 0, "UInt8"), std::string("1"));
-  // A JSON value that arrives as text stays that text: no number is rounded, no zero dropped.
+  // A JSON value that arrives as text stays that text. The code does not round a number or drop a zero.
   auto json = make<clickhouse::ColumnString>();
   json->Append("{\"id\":12345678901234567890,\"a\":1.0}");
   CHECK_EQ(declared(json, 0, "JSON"), std::string("\"{\\\"id\\\":12345678901234567890,\\\"a\\\":1.0}\""));
@@ -408,8 +411,9 @@ ColumnRef make_map_column(int rows) {
   return map;
 }
 
-// A budget as a ratio, so a loaded machine does not break it: reading a Map cell in place stays far
-// cheaper than slicing it out of its column (15 times on the development machine, 4 times is the floor).
+// The budget is a ratio, so that a loaded machine does not break it.
+// A Map cell that is read in place stays far cheaper than a slice of it out of its column.
+// The development machine shows 15 times. 4 times is the floor.
 void test_map_cells_are_read_in_place() {
   const ColumnRef map = make_map_column(20000);
   double encoder_ms = 1e18;
@@ -459,7 +463,7 @@ void test_block_encoder_encodes_every_block_in_order() {
   CHECK_EQ(ordered, true);
 }
 
-// At most `depth` blocks wait: the next submit blocks until the encoder takes one.
+// At most `depth` blocks wait. The next submit blocks until the encoder takes one.
 void test_block_encoder_bounds_the_queue() {
   std::mutex mu;
   std::condition_variable cv;
@@ -471,7 +475,7 @@ void test_block_encoder_bounds_the_queue() {
     cv.wait(lk, [&] { return release; });
     ++encoded;
   }, 2);
-  // One block is in the encoder (blocked in its callback), two wait: the fourth must block.
+  // One block is in the encoder, blocked in its callback. Two blocks wait. The fourth must block.
   encoder.submit(block_of(1), canceled);
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   encoder.submit(block_of(1), canceled);
@@ -493,7 +497,7 @@ void test_block_encoder_bounds_the_queue() {
   CHECK_EQ(encoded.load(), 4);
 }
 
-// The encoder's failure (a cell too large, the result limit) stops the next submit and the end.
+// A failure of the encoder (a cell too large, or the result limit) stops the next submit and the end.
 void test_block_encoder_failure_reaches_the_receiving_thread() {
   std::atomic<bool> canceled{false};
   int calls = 0;
@@ -527,7 +531,7 @@ void test_block_encoder_cancel_stops_a_waiting_submit() {
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   canceled = true;
   {
-    // The receiving side wakes a waiting submit through the encoder's own signal, as a cancel does in the session.
+    // The receiving side wakes a waiting submit through the encoder's own signal. A cancel does the same in the session.
     std::lock_guard<std::mutex> lk(mu);
     release = true;
   }
@@ -538,7 +542,7 @@ void test_block_encoder_cancel_stops_a_waiting_submit() {
   encoder.finish();
 }
 
-// Leaving the scope with blocks waiting (an error in the client) joins the thread without encoding them.
+// When the scope ends with blocks that wait (an error in the client), the code joins the thread without encoding them.
 void test_block_encoder_destructor_drops_what_waits() {
   std::atomic<bool> canceled{false};
   std::atomic<int> encoded{0};
@@ -646,7 +650,7 @@ void test_the_answer_of_describe_is_a_plan() {
   CHECK_EQ(plan[1].first, std::string("big"));
   CHECK(plan[1].second.mode == ResultTransportMode::Stringify && plan[1].second.transport_type == "String");
   CHECK(plan[2].second.transport_type == "Nullable(String)" && plan[2].second.original_type == "Nullable(JSON)");
-  // The columns are found by their names, then by their places; a block with fewer than two columns says nothing.
+  // The code finds the columns by their names, then by their places. A block with fewer than two columns gives no answer.
   ResultPlan swapped;
   add_described_columns(block_of({{"type", strings({"UInt8"})}, {"name", strings({"x"})}}), &swapped);
   CHECK(swapped.size() == 1 && swapped[0].first == "x" && swapped[0].second.original_type == "UInt8");
@@ -736,10 +740,10 @@ void test_a_result_is_meta_then_rows() {
   size_t total_bytes = 0;
   for (size_t i = 1; i < out.list.size(); ++i) total_bytes += out.list[i].second.size();
   CHECK_EQ(out.bytes, total_bytes);
-  // The meta event is sent once; a block with no rows sends none; the next block of rows goes on.
+  // The meta event is sent once. A block with no rows sends none. The next block of rows goes on.
   out.writer.write(block_of({{"n", std::make_shared<clickhouse::ColumnUInt8>()}, {"big", strings({})}}));
   CHECK_EQ(out.list.size(), size_t(4));
-  // After a restart (the run goes again with another plan) the meta event is sent again, and the count starts from 0.
+  // After a restart, the run starts again with another plan. The meta event is sent again, and the count starts from 0.
   out.writer.restart();
   CHECK_EQ(out.writer.rows_returned(), uint64_t(0));
   out.writer.begin_attempt(nullptr, false, false, true);
@@ -761,7 +765,7 @@ void test_a_result_stops_at_its_row_limit_and_its_cell_limit() {
   out.writer.write(block_of({{"n", numbers}}));
   CHECK_EQ(out.rows, size_t(3));
   CHECK_EQ(out.list.back().second, std::string("{\"query_id\":\"q1\",\"rows\":[[0],[1],[2]]}"));
-  // Rows that have more bytes than a cell may hold fail the run, with the name of the setting.
+  // Rows with more bytes than a cell may hold fail the run. The error gives the name of the setting.
   ResultEventLimits tight;
   tight.max_result_cell_bytes = 4;
   Events small(tight);
@@ -773,7 +777,7 @@ void test_a_result_stops_at_its_row_limit_and_its_cell_limit() {
     message = e.what();
   }
   CHECK(message.find("result_cell_too_large") == 0 && message.find("query.max_result_cell_bytes (4 bytes)") != std::string::npos);
-  // A Bool that clickhouse-cpp reads as UInt8, or an opaque state, is written as its plan declares it.
+  // The code writes a Bool that clickhouse-cpp reads as UInt8, or an opaque state, as its plan declares it.
   Events declared(ResultEventLimits{});
   const ResultPlan plan = {{"b", plan_of("Bool")}};
   declared.writer.begin_attempt(&plan, false, true, false);
@@ -800,7 +804,7 @@ clickhouse::Block profile_block(const std::vector<std::string>& hosts, const std
 void test_the_profile_events_of_a_run() {
   RunProfile profile;
   CHECK(!profile.cpu_time_available && profile.current_mem_bytes == -1 && profile.peak_mem_bytes == -1);
-  // Only the aggregate of the query group (thread 0) counts: increments add up, gauges are the last value of a host.
+  // Only the aggregate of the query group (thread 0) counts. Increments add up. Gauges keep the last value of a host.
   CHECK(profile.apply(profile_block({"a", "a", "a", "a", "b"}, {0, 0, 5, 0, 0}, {"increment", "increment", "increment", "gauge", "gauge"},
                                     {"UserTimeMicroseconds", "SystemTimeMicroseconds", "UserTimeMicroseconds", "MemoryTrackerUsage", "MemoryTrackerUsage"},
                                     {100, 30, 9999, 1000, 500})));
@@ -813,13 +817,13 @@ void test_the_profile_events_of_a_run() {
   CHECK_EQ(profile.current_mem_bytes, int64_t{1200});  // a: 700 (replaced), b: 500
   CHECK_EQ(profile.peak_mem_bytes, int64_t{4000});
   CHECK_EQ(profile.user_time_us_total, int64_t{150});
-  // A negative gauge is 0, a negative increment adds nothing, an increment saturates, another event is ignored.
+  // A negative gauge becomes 0. A negative increment adds nothing. An increment saturates. Another event is ignored.
   CHECK(profile.apply(profile_block({"a", "a", "a"}, {0, 0, 0}, {"gauge", "increment", "increment"}, {"MemoryTrackerUsage", "UserTimeMicroseconds", "Other"}, {-5, -7, 1})));
   CHECK_EQ(profile.current_mem_bytes, int64_t{500});
   CHECK_EQ(profile.user_time_us_total, int64_t{150});
   CHECK(profile.apply(profile_block({"a"}, {0}, {"increment"}, {"UserTimeMicroseconds"}, {std::numeric_limits<int64_t>::max()})));
   CHECK_EQ(profile.user_time_us_total, std::numeric_limits<int64_t>::max());
-  // A block without rows, or without the columns of the packet, is not read.
+  // The code does not read a block without rows or without the columns of the packet.
   CHECK(!profile.apply(profile_block({}, {}, {}, {}, {})));
   CHECK(!profile.apply(block_of({{"x", strings({"y"})}})));
   profile.reset();

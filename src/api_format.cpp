@@ -43,8 +43,8 @@ void set_format_cache_header(httplib::Response& res, size_t hits, size_t misses)
   res.set_header("X-Chdash-Format-Cache", value);
 }
 
-// The status and the code of a failure (docs/operations.md, "Errors"): a text that ClickHouse refuses is the user's (422);
-// a connection that fails is 502; a time that runs out is 504; a ClickHouse that cannot do it is 503.
+// The status and the code of a failure (docs/operations.md, "Errors"). A text that ClickHouse refuses is an error of the user (422).
+// A connection that fails gives 502. A timeout gives 504. A ClickHouse that cannot do the work gives 503.
 int format_error_status(FormatQueryFailureKind kind) {
   if (is_format_transport_failure(kind)) return 502;
   if (kind == FormatQueryFailureKind::timeout) return 504;
@@ -52,7 +52,7 @@ int format_error_status(FormatQueryFailureKind kind) {
   return 422;
 }
 
-// What the formatter says of a text that it did not lay out: {"warning": {"code": ..., "message": ...}} (the answer is the text as written).
+// The formatter gives this warning for a text that it did not lay out: {"warning": {"code": ..., "message": ...}}. The answer is the text as written.
 void write_warning(rapidjson::Writer<rapidjson::StringBuffer>& w, const FormatOutcome& outcome) {
   if (!outcome.warning) return;
   w.Key("warning");
@@ -91,7 +91,7 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
   const FormatterHost formatter = formatter_host(health_.get(), host_id);
   settings.cache_scope = host_id + '\x1f' + formatter.version;
   settings.clickhouse_max_query_size = formatter.max_query_size;
-  // `"cache": false` formats from scratch (the idempotence checks of the formatter suite run the formatter on its own output).
+  // `"cache": false` formats from scratch. The idempotence checks of the formatter suite run the formatter on its own output.
   settings.use_cache = !(doc.HasMember("cache") && doc["cache"].IsBool() && !doc["cache"].GetBool());
   settings.max_sql_bytes = kMaxFormatSqlBytes;
   PooledFormatPort port(client_pool_, health_.get(), *host, host_id);
@@ -112,9 +112,9 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
     set_format_cache_header(res, stats.cache_hits + stats.deduplicated, stats.cache_misses);
     if (port.reconnect_attempted()) res.set_header("X-Chdash-Format-Reconnect", "1");
   };
-  // A text that could not be formatted: the answer names it (`index` in a batch) and, for an error of ClickHouse, where.
+  // A text that could not be formatted. The answer names it (`index` in a batch). For an error of ClickHouse, the answer names the place.
   const auto fail = [&](const std::string& sql, const FormatOutcome& outcome, const int* index) {
-    // The position is in the text that the user sent (the service counted it back from the text that ClickHouse read).
+    // The position is in the text that the user sent. The service counts it back from the text that ClickHouse read.
     const auto loc = parse_clickhouse_error_location(outcome.error, sql);
     const ClickHouseErrorLocation* locp = (loc.has_code || loc.has_position || loc.has_line_col || loc.has_near) ? &loc : nullptr;
     if (port.reconnect_attempted()) res.set_header("X-Chdash-Format-Reconnect", "1");
@@ -137,9 +137,9 @@ void Server::handle_api_format(const httplib::Request& req, httplib::Response& r
       texts.emplace_back(arr[i].GetString(), arr[i].GetStringLength());
     }
 
-    // One text gives up after 2 s (postprocess_format_query). The batch has a time of its own (kMaxFormatBatchTime): the texts that
-    // start after it are skipped, and so are the ones that follow a caller that went away or a server that stops. A text that fails
-    // fails alone: every other text has its own answer.
+    // One text stops after 2 s (postprocess_format_query). The batch has a time limit of its own (kMaxFormatBatchTime).
+    // The texts that start after this time are skipped. The same applies to a caller that went away, or to a server that stops.
+    // A failed text affects no other text. Every other text has its own answer.
     FormatBatchLimits limits;
     limits.deadline = std::chrono::steady_clock::now() + kMaxFormatBatchTime;
     limits.stop = [this, &req] { return stopping() || (req.is_connection_closed && req.is_connection_closed()); };

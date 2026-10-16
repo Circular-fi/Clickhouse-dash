@@ -1,10 +1,13 @@
 #pragma once
 
-// The formatted text of a query shape (docs/system.md, "Queries"). A shape's text is normalizeQuery's: its literals are `?` and its lists
-// `?..`, which no SQL parser accepts. The formatter (format_service.hpp) gets a numeric literal in their place (a normalized query has no
-// number of its own in the range of the masks), and the placeholders come back after it; the AS column that the formatter aligned keeps
-// its alignment. Quoted text and comments are left alone. This unit has no I/O: the formatter is the caller's (a function), so the rules
-// are tested without ClickHouse.
+// This unit formats the text of a query shape. See docs/system.md, "Queries".
+// The text of a shape is the output of normalizeQuery. Its literals are `?`, and its lists are `?..`. No SQL parser accepts these placeholders.
+//
+// The formatter (format_service.hpp) gets a numeric literal in place of each placeholder.
+// A normalized query has no number of its own in the range of the masks. After the format step, the placeholders come back.
+// The AS column that the formatter aligned keeps its alignment. Quoted text and comments are left alone.
+//
+// This unit has no I/O. The caller supplies the formatter as a function. The rules are tested without ClickHouse.
 
 #include <cstddef>
 #include <functional>
@@ -27,16 +30,18 @@ struct ShapeMask {
   std::vector<std::string> marks;
 };
 
-// The masked text, or nothing when it cannot be masked: more placeholders than kShapeMaskMax, or a number of the range of the masks
-// already in the text (it could not be told from a stand-in).
+// The masked text. Nothing is returned when the text cannot be masked.
+// This happens when there are more placeholders than kShapeMaskMax. It also happens when the text already has a number of the range of the masks.
+// Such a number cannot be told from a stand-in.
 std::optional<ShapeMask> mask_shape_placeholders(std::string_view normalized);
 
-// The formatted text with its placeholders back, or nothing when the formatter did not keep every one of them exactly once. A line that gives
-// width back (a placeholder is shorter than its stand-in) gives it to the padding of the AS column of that line.
+// The formatted text, with its placeholders back. Nothing is returned when the formatter did not keep every placeholder exactly once.
+// A placeholder is shorter than its stand-in. A line that gets this width back gives it to the padding of its AS column.
 std::optional<std::string> restore_shape_placeholders(std::string_view formatted, const std::vector<std::string>& marks);
 
-// What the formatter said of a masked text: its text, or nothing. `transient`: the failure is not the text's (the host is down, the time
-// ran out, ClickHouse refused), so the same text may be formatted a moment later.
+// This is what the formatter said of a masked text. The result is the text, or nothing.
+// `transient` is set when the failure is not the text's fault. The host may be down, or the time may run out, or ClickHouse may refuse.
+// The same text may then be formatted a moment later.
 struct ShapeFormatReply {
   std::optional<std::string> text;
   bool transient = false;
@@ -45,10 +50,13 @@ using ShapeFormatFn = std::function<ShapeFormatReply(const std::string& masked_s
 
 enum class ShapeFormatStatus {
   Formatted,
-  // The text cannot be formatted, and will not be (no text, too many placeholders, a number of the masks in it, a text that the formatter
-  // refuses or that it did not lay out, a placeholder that did not come back): the answer is the raw text.
+  // The text cannot be formatted, and it never will be.
+  // Examples are: no text, too many placeholders, or a number of the masks in the text.
+  //
+  // The formatter can refuse a text, or it can fail to format it. A placeholder can also fail to come back.
+  // The answer is the raw text.
   Unformattable,
-  // The formatter could not be asked: not kept.
+  // The formatter cannot be asked. The result is not kept.
   Transient,
 };
 
@@ -57,10 +65,11 @@ struct ShapeFormat {
   std::string text;  // Formatted only
 };
 
-// The normalized text of a shape, formatted. `format` is called at most once, with the masked text.
+// The normalized text of a shape, formatted. The function calls `format` at most once, with the masked text.
 ShapeFormat format_shape_text(std::string_view normalized, const ShapeFormatFn& format);
 
-// What the cache of the service keeps for a text: the formatted text, or that it cannot be formatted.
+// This is what the cache of the service keeps for a text.
+// It keeps the formatted text, or it keeps the fact that the text cannot be formatted.
 struct ShapeFormatted {
   bool formatted = false;
   std::string text;

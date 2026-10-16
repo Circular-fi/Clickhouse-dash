@@ -1,6 +1,6 @@
-// The Explorer page, Functions (functions.html, /explorer/functions[/<name>]): the list of the functions of the host and
-// the card of one, under a controller of their own (app_explorer_functions_page.js): the page loads none of the Catalog
-// (the tree, the database page, the table card, the graph, the size views).
+// This is the Explorer page, Functions (functions.html, /explorer/functions[/<name>]). It shows the list of the functions of the host and
+// the card of one function. A controller of its own (app_explorer_functions_page.js) runs this page.
+// The page does not load the Catalog parts (the tree, the database page, the table card, the graph, the size views).
 import "./app_common.js";
 import { boot } from "./app_boot.js";
 import { functionsPage } from "./app_explorer_functions_page.js";

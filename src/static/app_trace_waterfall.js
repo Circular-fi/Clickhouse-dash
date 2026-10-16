@@ -1,5 +1,6 @@
-// The waterfall of the trace page (the Jaeger UI's timeline): the tree of the spans with their bars, the critical path, the overview
-// and its brush, the header and the service filters, the virtual window of a long trace, the keys, and the focus on a span.
+// This file has the waterfall of the trace page. It works like the timeline of the Jaeger UI.
+// The waterfall shows the tree of the spans with their bars. It also has the critical path, the overview and its brush, and the header and service filters.
+// It also has the virtual window of a long trace, the keys, and the focus on a span.
 
 import { dom, h, shell } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -19,12 +20,13 @@ import { util } from "./app_util.js";
 const { byId, $, $$ } = dom;
 const fmt = format;
 
-// The Service & Operation column, in percent of the waterfall's width: the bounds are the separator's
-// aria-valuemin / aria-valuemax, its arrow keys step it by 2.
+// The Service & Operation column has its width in percent of the waterfall width.
+// The bounds are the aria-valuemin and aria-valuemax values of the separator.
+// Its arrow keys move it in steps of 2.
 const WATERFALL_LABEL_MIN_PCT = 18;
 const WATERFALL_LABEL_MAX_PCT = 60;
 
-// Tree order, without the descendants of collapsed spans.
+// This is the tree order. It leaves out the descendants of collapsed spans.
 function visibleNodes(cache) {
   const rows = [];
   let hiddenBelow = -1;
@@ -39,7 +41,7 @@ function visibleNodes(cache) {
   return rows;
 }
 
-// Event markers only need each event's time and label; parse the JSON arrays once.
+// Event markers need only the time and the label of each event. Parse the JSON arrays one time.
 function spanEventMarkers(cache, span) {
   let markers = cache.events.get(span);
   if (!markers) {
@@ -56,17 +58,17 @@ function spanEventMarkers(cache, span) {
 }
 
 // --- Span decorations (Jaeger's spanDecorations.ts) ------------------------
-// A namespace icon (db, http, messaging, rpc: the first attribute namespace
-// present) and the values of well-known attributes, both in the name
-// column: muted mono text (method, status, db / rpc / messaging system),
-// and a chip only for an http status of 400 or more (amber 4xx, red 5xx).
+// A namespace icon shows the first attribute namespace that is present: db, http, messaging, or rpc.
+// It also shows the values of well-known attributes in the name column.
+// These values are muted mono text: method, status, and the db, rpc, or messaging system.
+// A chip appears only for an http status of 400 or more (amber for 4xx, red for 5xx).
 const DECORATION_ICONS = {
   db: icon("database", { size: "sm" }),
   http: icon("world", { size: "sm" }),
   messaging: icon("message", { size: "sm" }),
   rpc: icon("arrows-exchange", { size: "sm" }),
 };
-// The chip tone of an http status: "warn" for 4xx, "error" for 5xx, none below.
+// The chip tone of an http status is "warn" for 4xx and "error" for 5xx. Below 400, there is no tone.
 const httpStatusTone = (value) => {
   const code = Number(String(value).trim());
   return code >= 500 && code < 600 ? "error" : code >= 400 && code < 500 ? "warn" : "";
@@ -122,9 +124,9 @@ function spanDecorations(cache, span) {
 }
 
 // --- Trace overview (Jaeger's SpanGraph) -----------------------------------
-// One row per span in tree order (the waterfall with every branch open),
-// Jaeger's geometry: 60..200 px high, rows H/N apart and 1..6 px tall. A
-// canvas above OVERVIEW_CANVAS_ABOVE spans, elements (with tooltips) below.
+// This is the overview of the trace. It has one row for each span, in tree order. Every branch is open.
+// The geometry follows Jaeger: the overview is 60..200 px high. The rows are H/N apart and 1..6 px tall.
+// Above OVERVIEW_CANVAS_ABOVE spans, the overview uses a canvas. Below that number, it uses elements with tooltips.
 const OVERVIEW_CANVAS_ABOVE = 1000;
 
 function overviewGeometry(count) {
@@ -171,8 +173,8 @@ function syncOverviewSelection() {
   selection.style.width = `${((hi - lo) * 100).toFixed(3)}%`;
 }
 
-// Zoom / pan of the waterfall (overview selection, timeline drag, keys).
-// One deferred waterfall render per frame (overview drags).
+// Zoom and pan the waterfall with the overview selection, a timeline drag, or the keys.
+// Use one deferred waterfall render for each frame. Overview drags use this render.
 const waterfallFrame = util.rafOnce(() => renderWaterfall());
 function setTraceViewRange(range, { deferred = false } = {}) {
   const [lo, hi] = viewRangeOf(range);
@@ -215,8 +217,8 @@ function renderTraceOverview(spans, bounds) {
     selection.style.width = `${((b-a)*100).toFixed(3)}%`;
     return [a, b];
   };
-  // A range change only moves the selection box; the bars are unchanged, so
-  // update the box in place instead of rebuilding one element per span.
+  // A range change only moves the selection box. The bars do not change. Update the box in place.
+  // Do not rebuild one element for each span.
   graph.addEventListener("dblclick", (event) => {
     event.preventDefault();
     model.traceViewRange = updateSelection([0, 1]);
@@ -259,8 +261,8 @@ function renderTraceOverview(spans, bounds) {
   });
 }
 
-// The services panel is folded; its toggle (a tool of the Timeline, in the view bar) says how many
-// services the trace has, and how many of them show once some are deselected.
+// The services panel is folded. Its toggle is a tool of the Timeline, in the view bar.
+// The toggle shows how many services the trace has. It also shows how many of them are visible when some are deselected.
 function updateServicesToggle(total, shown) {
   const button = dom.byId("traceServicesToggle");
   if (!button) return;
@@ -297,8 +299,8 @@ function renderTraceServiceFilters(spans) {
   const allSelected = services.every((service) => !model.disabledServices.has(service));
   const toggleLabel = allSelected ? "Deselect all" : "Select all";
   updateServicesToggle(services.length, services.filter((service) => !model.disabledServices.has(service)).length);
-  // Service toggles: the shared chip badge with the service bar; the error
-  // count is a solid error badge. "Select all" is the chips' clear link.
+  // The service toggles use the shared chip badge of the service bar. The error count is a solid error badge.
+  // The "Select all" link is the clear link of the chips.
   dom.traceServiceFilters.innerHTML = badge.clearHtml(toggleLabel, { "data-trace-toggle-all": true, title: `${toggleLabel} services` }, "traceServiceFilterReset") + services.map((service) => {
     const row = stats.get(service);
     const disabled = model.disabledServices.has(service);
@@ -323,7 +325,7 @@ function renderTraceServiceFilters(spans) {
   }
 }
 
-// fmt.time to the second, then the milliseconds (set smaller), browser-local.
+// fmt.time shows the time to the second. Then it shows the milliseconds in a smaller font. The time uses the local time of the browser.
 function traceStartParts(ns) {
   const ms = Math.floor(Number(ns) / 1e6);
   if (!Number.isFinite(ms)) return null;
@@ -332,9 +334,8 @@ function traceStartParts(ns) {
 
 const WARNING_ICON = icon("alert-triangle", { size: "sm" });
 
-// Jaeger's TracePageHeader items: Trace start, Duration, Services, Depth,
-// Total spans (plus Errors), and an Incomplete tag when spans reference a
-// parent missing from the trace.
+// The items of the TracePageHeader of Jaeger are: Trace start, Duration, Services, Depth, Total spans (plus Errors).
+// An Incomplete tag shows when a span refers to a parent that is not in the trace.
 function renderTraceHeader() {
   const trace = model.activeTrace;
   const spans = trace?.spans || [];
@@ -397,8 +398,8 @@ function spanRowClass(active, error, clipLeft = false, clipRight = false) {
   return `traceSpanRow${active ? " is-active" : ""}${error ? " is-error" : ""}${clipLeft ? " clipping-left" : ""}${clipRight ? " clipping-right" : ""}`;
 }
 
-// Tree indentation per level (Jaeger's SpanTreeOffset); a level's guide
-// line runs through the middle of its toggle box.
+// This is the tree indentation for each level (Jaeger's SpanTreeOffset).
+// The guide line of a level runs through the middle of its toggle box.
 const TREE_INDENT_PX = 18;
 const TREE_LINE_X = 13;
 
@@ -413,10 +414,10 @@ function spanInspectorRowHtml(node, cache) {
   return `<div class="traceSpanInspectorRow" style="--trace-service-color:${palette.service(span.service_name)};--trace-depth-x:${serviceLineX}px"><div class="traceSpanInspectorRow__spacer"><span class="traceSpanRow__guides" aria-hidden="true">${spanRowGuides(depth)}</span></div><div class="traceSpanInspectorRow__panel">${renderSpanInspectorCard(span, cache.spans, cache.bounds)}</div></div>`;
 }
 
-// Guides of every ancestor in its service colour, an elbow from the parent
-// into this span, then a toggle box with the child count (tinted when
-// collapsed) or a dot for a leaf. A guide stops after the ancestor's last
-// child. Hovering a guide or a box highlights that span's subtree guides.
+// Each ancestor has a guide in its service colour. An elbow runs from the parent into this span.
+// Then a toggle box shows the child count. The box is tinted when collapsed. A leaf has a dot instead.
+// A guide stops after the last child of its ancestor.
+// Hover over a guide or a box to highlight the guides of that span subtree.
 function treeOffsetHtml(node, cache) {
   const ancestors = [];
   for (let parent = cache.parentOf.get(node); parent; parent = cache.parentOf.get(parent)) ancestors.push(parent);
@@ -440,15 +441,15 @@ function treeOffsetHtml(node, cache) {
   return `<span class="traceTreeOffset${count ? " is-parent" : ""}">${html}</span>`;
 }
 
-// View window shared by the full render and in-place row updates.
+// The view window is shared by the full render and the in-place row updates.
 function waterfallContext(cache) {
   const { start: fullStart, end: fullEnd } = cache.extent;
   const fullTotal = Math.max(1, fullEnd - fullStart);
   const [viewLo, viewHi] = viewRangeOf();
   const start = fullStart + fullTotal * viewLo;
   const end = fullStart + fullTotal * viewHi;
-  // Offset and width of the window straight from the fractions: differences
-  // of epoch-ns doubles are only good to ~256 ns.
+  // Get the offset and the width of the window from the fractions. Do not use differences of epoch-ns doubles.
+  // They are accurate to about 256 ns only.
   return { cache, fullStart, start, end, offset: fullTotal * viewLo, total: Math.max(1, fullTotal * (viewHi - viewLo)), zoomed: viewLo > 0 || viewHi < 1 };
 }
 
@@ -468,9 +469,10 @@ const WATERFALL_ICONS = {
   resetZoom: icon("zoom-out"),
 };
 
-// Jaeger's Ticks: 5 ticks, labels at least 130 px apart (every 2nd, 4th...
-// label when narrower), the first and last always labelled. Each label is
-// the offset from the trace start with the wall-clock time below it.
+// These are the Ticks of Jaeger. There are 5 ticks.
+// The labels are at least 130 px apart. When the space is narrower, show every 2nd, 4th, and so on, label.
+// The first and last labels are always shown.
+// Each label is the offset from the trace start. The wall-clock time is below it.
 const TIMELINE_TICKS = 5;
 const MIN_TICK_LABEL_SPACING_PX = 130;
 
@@ -523,9 +525,9 @@ function renderWaterfall() {
 }
 
 // --- Virtualised waterfall (Jaeger's ListView) -----------------------------
-// Above VIRTUAL_ROWS_ABOVE rows only the rows in and around the viewport are
-// in the DOM, between two spacers; an open span's inspector counts with its
-// measured height (an estimate until it has been drawn once).
+// Above VIRTUAL_ROWS_ABOVE rows, only the rows in and around the viewport are in the DOM, between two spacers.
+// An open span inspector counts with its measured height.
+// Until it is drawn one time, the height is an estimate.
 const VIRTUAL_ROWS_ABOVE = 1000;
 const VIRTUAL_OVERSCAN = 40;
 const SPAN_ROW_PX = 24;
@@ -549,7 +551,7 @@ function virtualOffsets(nodes) {
   return offsets;
 }
 
-// Index of the item at `y` px into the body.
+// This returns the index of the item at `y` px into the body.
 function virtualIndexAt(offsets, y) {
   let lo = 0;
   let hi = offsets.length - 2;
@@ -562,7 +564,7 @@ function virtualIndexAt(offsets, y) {
 
 function renderVirtualWaterfall(ctx, nodes) {
   const root = dom.traceWaterfall;
-  // Read before the body is replaced: an emptied body would clamp it.
+  // Read the scroll position before the body is replaced. If the body is empty, it clamps the position.
   const scrollTop = root.scrollTop;
   const offsets = virtualOffsets(nodes);
   virtualWaterfall = { ctx, nodes, offsets, first: 0, last: 0 };
@@ -594,8 +596,8 @@ function updateVirtualWindow(force = false, knownScrollTop = null) {
   watchInspectorHeights(body);
 }
 
-// Keep the spacers true to the inspectors' drawn heights (they change when
-// a section inside is opened).
+// Keep the spacers equal to the drawn heights of the inspectors.
+// The heights change when a section inside is opened.
 function watchInspectorHeights(body) {
   if (typeof ResizeObserver === "undefined") return;
   if (!inspectorObserver) {
@@ -641,9 +643,9 @@ function criticalPathHtml(cache, node, collapsed, ctx) {
   }).join("");
 }
 
-// A bar ending past BAR_LABEL_EDGE % has no room for its label after it:
-// the label goes before it when the bar starts at BAR_LABEL_ROOM % or later,
-// else inside it.
+// A bar that ends past BAR_LABEL_EDGE % has no room for its label after it.
+// The label goes before the bar when the bar starts at BAR_LABEL_ROOM % or later.
+// Otherwise, the label goes inside the bar.
 const BAR_LABEL_EDGE = 88;
 const BAR_LABEL_ROOM = 40;
 
@@ -660,21 +662,22 @@ function spanRowHtml(node, ctx) {
   const width = inView ? Math.max(0.24, Math.min(100 - left, ((clippedEnd - clippedStart) / total) * 100)) : 0;
   const error = isErrorSpan(span);
   const collapsed = node.children.length > 0 && model.collapsed.has(id);
-  // Jaeger's hasChildError: a collapsed span hiding an error span.
+  // This is the hasChildError check of Jaeger. A collapsed span can hide an error span.
   const childError = !error && collapsed && cache.errorBelow.has(node);
   const active = model.openSpanIds.has(id);
   const color = palette.service(span.service_name);
-  // The bar's label: after the bar, before it from the right half on, and
-  // when the bar reaches the right edge (past BAR_LABEL_EDGE %: a root, a
-  // long child) before it if there is room there, else inside it in the
-  // bar's readable text colour: never cut by the edge ("3!"), never missing.
+  // The label of the bar goes after the bar.
+  // From the right half on, the label goes before the bar.
+  // When the bar reaches the right edge (past BAR_LABEL_EDGE %: a root or a long child), the label goes before the bar if there is room.
+  // Otherwise, the label goes inside the bar, in the readable text colour of the bar.
+  // The edge never cuts the label ("3!"). The label is never absent.
   const barEnd = left + width;
   const labelInside = barEnd > BAR_LABEL_EDGE && left < BAR_LABEL_ROOM;
   const labelLeft = !labelInside && (barEnd > BAR_LABEL_EDGE || left + (width / 2) >= 62);
   const spanRef = `${span.service_name || "unknown"}::${span.span_name || "span"}`;
   const durationText = fmt.duration(span.duration_ns);
-  // The row is a group (its toggle and badges are buttons: a button role would nest them) named by what it
-  // shows; Enter opens its details, the toggle folds its children.
+  // The row is a group. Its toggle and badges are buttons, so the row cannot also be a button.
+  // The group is named by what it shows. Enter opens its details. The toggle folds its children.
   const rowLabel = `${span.service_name || "unknown"}: ${span.span_name || "span"}, ${durationText}${node.children.length ? `, ${fmt.countLabel(node.children.length, "child")}${collapsed ? " (folded)" : ""}` : ""}`;
   const barLabel = labelLeft
     ? `<span class="traceSpanBar__label"><i class="traceSpanBar__ref">${esc(spanRef)}</i><span class="traceSpanBar__sep">|</span><b>${esc(durationText)}</b></span>`
@@ -692,7 +695,7 @@ function spanRowHtml(node, ctx) {
     ? badge.html("!", { tone: "error", solid: true, className: "badge--count traceSpanRow__errorBadge", title: "Span status: Error", attrs: { "aria-label": "Error span" } })
     : childError ? badge.html("!", { tone: "error", className: "badge--count traceSpanRow__errorBadge traceSpanRow__errorBadge--hollow", title: "An error span is inside this collapsed branch", attrs: { "aria-label": "Error span in this collapsed branch" } }) : "")
     + (parts.traceInsights?.exceptionBadgeHtml(span) || "");
-  // Log count badge and log markers (app_trace_logs.js).
+  // This is the log count badge and the log markers (app_trace_logs.js).
   const logs = parts.traceLogs;
   return `<div class="${spanRowClass(active, error, inView && spanStart < start, inView && spanEnd > end)}" data-span-id="${esc(id)}" role="group" tabindex="0" data-label="${esc(rowLabel)}" aria-label="${esc(`${rowLabel}${active ? ", details open" : ""}`)}">
         <div class="traceSpanRow__label" style="--trace-service-color:${color}"><div class="traceSpanRow__labelContent">${treeOffsetHtml(node, cache)}<span class="traceSpanRow__serviceDot"></span>${decorations.iconHtml}${errorIcon}<span class="traceSpanRow__service${collapsed ? " is-children-collapsed" : ""}">${esc(span.service_name || "unknown")}</span><span class="traceSpanRow__name">${esc(span.span_name || "span")}</span>${decorations.pillsHtml}${logs?.spanBadgeHtml?.(span) || ""}</div></div>
@@ -703,14 +706,13 @@ function spanRowHtml(node, ctx) {
 function waterfallRowHtml(node, ctx) {
   const rowHtml = spanRowHtml(node, ctx);
   const inspector = model.openSpanIds.has(String(node.span.span_id || "")) ? spanInspectorRowHtml(node, ctx.cache) : "";
-  // The span's logs listed under it (app_trace_logs.js), after its inspector.
+  // This list shows the logs of the span (app_trace_logs.js). It comes after the inspector.
   return rowHtml + inspector + (parts.traceLogs?.inlineRowHtml?.(node, ctx) || "");
 }
 
-// Folding or unfolding one branch only removes or inserts that branch's
-// descendant rows (contiguous after it in tree order) and redraws its own
-// row; the rest of the waterfall is unchanged, so patch the DOM instead of
-// re-rendering it.
+// To fold or unfold one branch, remove or insert only the descendant rows of that branch.
+// These rows follow the branch in tree order.
+// Redraw the row of the branch itself. The rest of the waterfall does not change, so patch the DOM. Do not render it again.
 function toggleSpanCollapse(toggle) {
   const id = String(toggle.getAttribute("data-toggle-span") || "");
   const collapsing = !model.collapsed.has(id);
@@ -721,7 +723,7 @@ function toggleSpanCollapse(toggle) {
   const ctx = waterfallContext(cache);
   const refocus = toggle === document.activeElement;
   if (!node || cache.duplicateIds.size || !row?.isConnected || virtualWaterfall) {
-    // A virtualised list redraws its window (and may leave that mode).
+    // A virtualised list redraws its window. It can leave that mode.
     renderWaterfall();
     if (refocus) $(`[data-toggle-span="${window.CSS?.escape ? CSS.escape(id) : id}"]`, dom.traceWaterfall)?.focus({ preventScroll: true });
     return;
@@ -731,7 +733,7 @@ function toggleSpanCollapse(toggle) {
   const fresh = template.content.firstElementChild;
   row.replaceWith(fresh);
   if (refocus) $("[data-toggle-span]", fresh)?.focus({ preventScroll: true });
-  // A span row's attachments (inspector, logs) stay with it.
+  // The attachments of a span row (inspector, logs) stay with the row.
   const isAttachment = (el) => el?.classList.contains("traceSpanInspectorRow") || el?.classList.contains("traceSpanLogsRow");
   let own = fresh;
   while (isAttachment(own.nextElementSibling)) own = own.nextElementSibling;
@@ -765,7 +767,7 @@ function toggleSpanCollapse(toggle) {
   if (html.length) own.insertAdjacentHTML("afterend", html.join(""));
 }
 
-// Jaeger's TimelineCollapser actions, over the spans in tree order.
+// These are the TimelineCollapser actions of Jaeger. They act on the spans in tree order.
 function parentNodeIds(cache) {
   return cache.order.filter((node) => node.children.length).map(spanKey);
 }
@@ -780,7 +782,7 @@ function collapseAllSpans() {
   renderWaterfall();
 }
 
-// Expand +1: open the shallowest collapsed span of each branch.
+// Expand +1 opens the shallowest collapsed span of each branch.
 function expandOneLevel() {
   if (!model.collapsed.size) return;
   const next = new Set(model.collapsed);
@@ -799,7 +801,7 @@ function expandOneLevel() {
   renderWaterfall();
 }
 
-// Collapse +1: collapse the deepest open parents of each branch.
+// Collapse +1 collapses the deepest open parents of each branch.
 function collapseOneLevel() {
   const cache = activeTraceCache();
   const parents = parentNodeIds(cache);
@@ -819,8 +821,8 @@ function collapseOneLevel() {
   renderWaterfall();
 }
 
-// Opening or closing one span's inspector only changes that row: patch it in
-// place instead of re-rendering (and re-parsing) every row of the trace.
+// Open or close the inspector of one span. This changes only that row.
+// Patch the row in place. Do not render and parse every row of the trace again.
 function toggleSpanInspector(row) {
   const id = String(row.getAttribute("data-span-id") || "");
   model.activeSpanId = id;
@@ -845,14 +847,14 @@ function setWaterfallLabelWidth(pct) {
   resizer?.setAttribute("aria-valuetext", `${model.waterfallLabelPct}% of the width`);
 }
 
-// Jaeger's keyboard pan / zoom steps (fractions of the trace per key press).
+// These are the keyboard pan and zoom steps of Jaeger. Each step is a fraction of the trace for each key press.
 const VIEW_MIN_RANGE = 0.01;
 const VIEW_CHANGE_BASE = 0.005;
 const VIEW_CHANGE_LARGE = 0.05;
 
 function adjustedViewRange(startChange, endChange) {
   const [viewStart, viewEnd] = viewRangeOf();
-  // A pan keeps the window width at the trace edges (Jaeger shrinks it).
+  // A pan keeps the window width at the trace edges. Jaeger shrinks the window instead.
   if (startChange === endChange) {
     const shift = Math.max(-viewStart, Math.min(1 - viewEnd, startChange));
     return [viewStart + shift, viewEnd + shift];
@@ -871,8 +873,9 @@ function adjustedViewRange(startChange, endChange) {
   return [start, end];
 }
 
-// Jaeger's keyboard-mappings.ts: [ ] expand / collapse all, o / p one
-// level, a d or arrows pan, up / down zoom, shift for large steps.
+// These are the keyboard mappings of Jaeger (keyboard-mappings.ts).
+// The [ and ] keys expand and collapse all spans. The o and p keys act on one level.
+// The a and d keys, or the arrow keys, pan. Up and down zoom. Shift gives large steps.
 function onTraceKeydown(event) {
   if (!model.activeTrace || dom.traceDetail?.hidden) return;
   if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -917,8 +920,8 @@ function setHoveredAncestor(id) {
   for (const el of $$(selector, root)) el.classList.add("is-guide-hovered");
 }
 
-// Jaeger's TimelineViewingLayer: drag across the timeline header to zoom
-// into that part of the current view.
+// This is the TimelineViewingLayer of Jaeger.
+// Drag across the timeline header to zoom into that part of the current view.
 function startTimelineDrag(header, event) {
   const rect = header.getBoundingClientRect();
   if (!rect.width) return;
@@ -954,9 +957,9 @@ function startTimelineDrag(header, event) {
   header.addEventListener("pointercancel", cancel);
 }
 
-// The waterfall body is rebuilt on every render, so its controls are handled
-// by delegation on the persistent container instead of re-binding listeners
-// to every row, toggle and link after each render.
+// The waterfall body is rebuilt on every render.
+// Handle its controls by delegation on the persistent container.
+// Do not bind listeners to every row, toggle, and link after each render.
 function initWaterfallEvents() {
   const root = dom.traceWaterfall;
   if (!root) return;
@@ -999,7 +1002,7 @@ function initWaterfallEvents() {
       setWaterfallLabelWidth(model.waterfallLabelPct + (event.key === "ArrowRight" ? 2 : -2));
       return;
     }
-    // Enter / Space on a toggle box is its own click.
+    // Enter or Space on a toggle box works as its own click.
     if (target.closest("[data-toggle-span], button, a")) return;
     const row = target.closest("[data-span-id]");
     if (row && root.contains(row) && (event.key === "Enter" || event.key === " ")) {
@@ -1061,8 +1064,8 @@ function initWaterfallEvents() {
   root.addEventListener("pointercancel", stopResize);
 }
 
-// Copy JSON / Download JSON: the shared split control (copy.split), the
-// same as a query's results.
+// Copy JSON and Download JSON use the shared split control (copy.split).
+// This control is the same as the control for the results of a query.
 function copyTraceJsonText() {
   const trace = model.activeTrace;
   return trace?.spans?.length ? traceJsonText(trace) : "";
@@ -1076,8 +1079,9 @@ function downloadTraceJson() {
 
 let traceCopySplit = null;
 
-// Deep link target (?span=): expands the span's ancestors, shows its service
-// and time window, opens its inspector, scrolls to it and highlights it.
+// This is the target of a deep link (?span=).
+// It expands the ancestors of the span and shows its service and time window.
+// It opens the inspector, scrolls to the span, and highlights it.
 function focusSpanInTimeline(spanId, { push = false, replace = true, scroll = true } = {}) {
   const id = String(spanId || "");
   const cache = activeTraceCache();
@@ -1114,14 +1118,17 @@ function focusSpanInTimeline(spanId, { push = false, replace = true, scroll = tr
   return true;
 }
 
-// The inspector (and the modules of the views) scroll to a span through the store: the waterfall owns it.
+// The inspector and the modules of the views scroll to a span through the store. The waterfall owns this action.
 actions.focusSpan = focusSpanInTimeline;
 
-// The waterfall and its header on the trace page: the events of the rows and the brush, the Copy / Download split of the
-// trace JSON, the fold of the services, the keys while Traces shows, and the redraw of the overview for a new theme.
+// The waterfall and its header on the trace page have these parts.
+// Part 1: the events of the rows and the brush.
+// Part 2: the Copy and Download split of the trace JSON, and the fold of the services.
+// Part 3: the keys while Traces shows, and the redraw of the overview for a new theme.
 function initWaterfall() {
   initWaterfallEvents();
-  // On a phone the trace header's stats, highlights and service filters are rows that scroll sideways (traces.css): fade the side they hide.
+  // On a phone, the stats, highlights, and service filters of the trace header are rows. They scroll sideways (traces.css).
+  // Fade the side that they hide.
   for (const row of [dom.traceDetailStats, dom.byId("traceHighlights"), dom.traceServiceFilters]) shell?.edgeCues?.(row);
   dom.byId("traceServicesToggle")?.addEventListener("click", (event) => {
     setServicesOpen(event.currentTarget.getAttribute("aria-expanded") !== "true");
@@ -1133,9 +1140,9 @@ function initWaterfall() {
       items: [{ el: dom.traceDownloadJsonButton, onSelect: downloadTraceJson }],
     });
   }
-  // The trace page's keys ([ ] o p, a / d, arrows) while Traces shows.
+  // The keys of the trace page ([ ] o p, a d, arrows) work while Traces shows.
   lifecycle.bind("traces", (scope) => scope.listen(document, "keydown", onTraceKeydown));
-  // The canvas overview holds resolved colours: redraw it for a new theme.
+  // The canvas overview keeps resolved colours. Redraw it for a new theme.
   const redrawOverview = () => {
     const graph = $('[data-overview-mode="canvas"]', dom.traceOverview);
     if (graph && model.activeTrace) renderTraceOverview(activeTraceCache().spans, activeTraceCache().bounds);

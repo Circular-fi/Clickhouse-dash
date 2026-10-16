@@ -1,10 +1,12 @@
-// The Browse pane when no table is open: the databases overview (the size treemap and the table of the databases), the page of one
-// database (its objects, then its storage) and the "not found" page for an address that names nothing.
+// This file builds the Browse pane when no table is open. The pane has three parts.
+// The first part is the databases overview: the size treemap and the table of the databases.
+// The second part is the page of one database, with its objects and then its storage.
+// The third part is the "not found" page. It shows for an address that names nothing.
 //
-// The areas of the storage are local on-disk bytes, the same accounting as the database header and the sidebar summaries
-// (system.parts bytes_on_disk for MergeTree, total_bytes for Log-family and other disk engines). Memory, Buffer and Dictionary
-// objects report resident RAM (isResidentMemorySummary): mixing RAM into an on-disk area would make the storage view disagree with
-// the header total, so resident bytes are left out of the areas and reported separately.
+// The areas of the storage are local on-disk bytes. This is the same accounting as the database header and the sidebar summaries.
+// system.parts bytes_on_disk gives the value for MergeTree. total_bytes gives the value for Log-family and other disk engines.
+// Memory, Buffer and Dictionary objects report resident RAM (isResidentMemorySummary).
+// RAM in an on-disk area makes the storage view disagree with the header total. So the code leaves resident bytes out of the areas and reports them separately.
 
 import { dom, h } from "./app_dom.js";
 import { loadDatabaseTables } from "./app_explorer_data.js";
@@ -17,12 +19,10 @@ import { uiState } from "./app_ui_state.js";
 import { table } from "./app_ui_table.js";
 import { util } from "./app_util.js";
 
-// The Catalog root in Browse ("All databases", the tree's first row): a
-// treemap of the visible databases by on-disk bytes (app_explorer_treemap.js,
-// as on the System Overview; a database opens its page), then the
-// databases overview (objects, rows, size and share of the server for
-// each, from the catalog's database summaries). The header carries the
-// count and the total; the section repeats neither.
+// The Catalog root in Browse is "All databases", the first row of the tree.
+// It shows a treemap of the visible databases by on-disk bytes (app_explorer_treemap.js). The treemap looks the same as on the System Overview. A database opens its page.
+// Below the treemap is the databases overview. It shows the objects, rows, size and share of the server for each database, from the catalog's database summaries.
+// The header carries the count and the total. The section repeats neither.
 function renderBrowseRoot() {
   destroyDatabaseTreemap();
   const databases = visibleDatabases();
@@ -52,7 +52,7 @@ function renderBrowseRoot() {
   if (dom.explorerSummaryCards) { dom.explorerSummaryCards.hidden = true; dom.explorerSummaryCards.replaceChildren(); }
   if (dom.explorerDetailTabs) { dom.explorerDetailTabs.hidden = true; dom.explorerDetailTabs.replaceChildren(); }
   clear(dom.explorerDetailContent);
-  // No section title: the page's h2 ("All databases") already names it.
+  // This section has no title. The h2 of the page ("All databases") already names it.
   const section = h("section", { class: "explorerSection explorerDatabasesOverview", "aria-label": "Databases" });
   dom.explorerDetailContent.appendChild(section);
   renderDatabasesTreemap(section, rows);
@@ -64,7 +64,7 @@ function renderBrowseRoot() {
     className: "explorerResultTable explorerDatabasesTable",
     compact: true,
     nullsLast: true,
-    // On a phone the table keeps the database, its size and its share of the server.
+    // On a phone, the table keeps the database, its size and its share of the server. It removes the other columns.
     priorities: [null, "xs", "xs"],
     decorateHeader: (th, ctx) => {
       th.title = { 1: "Tables, views, dictionaries and other objects", 2: "Rows of the tables that report them", 3: "On-disk bytes of active parts", 4: "Share of the on-disk bytes of the databases listed" }[ctx.columnIndex] || "";
@@ -92,11 +92,9 @@ function renderBrowseRoot() {
   }
 }
 
-// The databases overview's size band: one rectangle per visible database
-// with on-disk bytes, the ones under 1% of the total grouped into Others
-// (drawn as soon as one database holds data, as on the System Overview);
-// always a treemap (strip: "never"), even when one database holds most of
-// the bytes, at the size band's height.
+// The size band of the databases overview has one rectangle for each visible database with on-disk bytes.
+// Databases under 1% of the total go into one group named Others. This group is drawn as soon as one database holds data, as on the System Overview.
+// The band is always a treemap (strip: "never"). This holds even when one database holds most of the bytes. The treemap is drawn at the height of the size band.
 function renderDatabasesTreemap(container, rows) {
   const storageView = parts.storage;
   if (!storageView) return;
@@ -126,10 +124,9 @@ function renderDatabasesTreemap(container, rows) {
   });
 }
 
-// An address naming a database (or a table) this host does not show: a
-// "not found" page with the ways out, instead of a fabricated empty
-// database in the tree. The address stays as typed; Refresh reloads the
-// catalog and applies it again (the object may have just been created).
+// An address that names a database (or a table) that this host does not show gets a "not found" page.
+// The page lists the ways out. It does not show a fabricated empty database in the tree.
+// The address stays as typed. Refresh reloads the catalog and applies the address again. The object may have just been created.
 function showNotFound(database, table = "") {
   clearSelection();
   const db = String(database || "");
@@ -193,10 +190,10 @@ function databaseStorageTree(database) {
   return { root, residentBytes };
 }
 
-// The storage of a database page, above its objects (the size band first,
-// then the table): a treemap of its tables (or one share strip when fewer
-// than three hold >= 1%), and the disks it uses (into disksContainer, under
-// the objects); nothing when nothing of it is stored (on disk or in RAM).
+// The storage of a database page appears above its objects. The size band comes first, then the table.
+// The storage has a treemap of its tables. If fewer than three tables hold >= 1%, it shows one share strip instead.
+// It also has the disks that the database uses. These go into disksContainer, under the objects.
+// If nothing of the database is stored (on disk or in RAM), the storage section is not drawn.
 // A table opens on its own Storage tab.
 function renderDatabaseStorage(container, database, disksContainer = null) {
   destroyDatabaseTreemap();
@@ -235,7 +232,7 @@ function renderDatabaseDetail(database) {
     if (error) showDetailState("error", { title: "The database could not be loaded", body: util.errorText(error, name), retry: () => void loadDatabaseTables(name, true) });
     else showDetailState("loading", { label: `Loading the tables of ${name}\u2026` });
     if (dom.explorerDetail) dom.explorerDetail.hidden = true;
-    // A failed load waits for Retry (no automatic retry loop against a failing server).
+    // A failed load waits for Retry. The code does not retry in a loop against a failing server.
     if (!error && !model.databaseTablesLoading.has(name)) void loadDatabaseTables(name);
     return;
   }
@@ -252,7 +249,7 @@ function renderDatabaseDetail(database) {
   if (dom.explorerHealthBadge) { dom.explorerHealthBadge.hidden = true; dom.explorerHealthBadge.textContent = ""; }
   if (dom.explorerWarnings) { dom.explorerWarnings.hidden = true; dom.explorerWarnings.replaceChildren(); }
   if (dom.explorerSummaryCards) { dom.explorerSummaryCards.hidden = true; dom.explorerSummaryCards.replaceChildren(); }
-  // One page, no tabs.
+  // This is one page. It has no tabs.
   if (dom.explorerDetailTabs) { dom.explorerDetailTabs.hidden = true; dom.explorerDetailTabs.replaceChildren(); }
   const focus = model.databaseFocus;
   model.databaseFocus = "";
@@ -262,24 +259,24 @@ function renderDatabaseDetail(database) {
     dom.explorerDetailContent.appendChild(uiState.block("empty", { body: "No objects in this database." }));
     return;
   }
-  // Tables by size (the size band), then the objects, then the disks.
+  // The order is: tables by size (the size band), then the objects, then the disks.
   const body = h("div", { class: "explorerDatabaseCard" });
   dom.explorerDetailContent.appendChild(body);
   const disks = document.createDocumentFragment();
   const storage = renderDatabaseStorage(body, name, disks);
   renderDatabaseObjects(body, name, tables);
   body.appendChild(disks);
-  // A former ?tab=storage address: the storage, once, at the top of the pane.
+  // A former ?tab=storage address shows the storage one time, at the top of the pane.
   if (focus === "storage" && storage) requestAnimationFrame(() => storage.scrollIntoView({ block: "start" }));
 }
 
-// Database detail object table: every visible object of the database in the
-// shared Query result table (sortable headers, numeric gauges). Data comes
-// only from the per-database catalog payload already loaded for the sidebar
-// and the treemap (system.tables + one system.parts GROUP BY), never from
-// per-table requests. Missing values sort last in both directions.
-// Uncompressed bytes live in the Ratio tooltip so the table fits a 1280 px
-// window without horizontal scrolling.
+// This is the object table of the database detail. It shows every visible object of the database.
+// It uses the shared Query result table, with sortable headers and numeric gauges.
+// The data comes only from the per-database catalog payload. The sidebar and the treemap already load this payload.
+// The payload uses system.tables and one system.parts GROUP BY. The code never sends requests for each table.
+// Missing values sort last in both directions.
+//
+// Uncompressed bytes appear in the Ratio tooltip. So the table fits a 1280 px window without horizontal scrolling.
 const DATABASE_OBJECT_COLUMNS = ["Name", "Engine", "Rows", "Size", "Compressed", "Ratio", "% database", "Parts", "Modified"];
 const DATABASE_OBJECT_TYPES = ["String", "String", "UInt64", "UInt64", "UInt64", "Float64", "Float64", "UInt64", "DateTime"];
 const DATABASE_OBJECT_BYTE_COLUMNS = new Set([3, 4]);
@@ -314,13 +311,13 @@ function databaseObjectRow(table, onDiskTotal) {
   return row;
 }
 
-// Columns drawn with an in-cell bar normalised to the column maximum.
+// Columns with an in-cell bar. The bar is normalised to the column maximum.
 const DATABASE_OBJECT_BAR_COLUMNS = new Set([2, 3, 4, 6]);
 
 function renderDatabaseObjects(container, database, tables) {
   const section = h("section", { class: "explorerSection explorerDatabaseObjects" });
   const head = h("div", { class: "explorerSectionHead" });
-  // The page header counts the objects.
+  // The page header shows the number of objects.
   head.append(h("h3", { class: "explorerSectionTitle" }, "Objects"));
   section.appendChild(head);
   container.appendChild(section);
@@ -344,8 +341,8 @@ function renderDatabaseObjects(container, database, tables) {
     className: "explorerResultTable explorerDatabaseObjectsTable",
     compact: true,
     nullsLast: true,
-    // Name, Rows, Size, % database and Modified stay as long as they fit; Engine, Compressed, Ratio and Parts go first (Ratio keeps the
-    // figures of the two in its tooltip, and the Engine is in the card of the object), then Modified, then Rows.
+    // Name, Rows, Size, % database and Modified stay visible as long as they fit. Engine, Compressed, Ratio and Parts are removed first.
+    // The Ratio tooltip keeps the figures of the two. The Engine appears in the card of the object. Modified is removed next, then Rows.
     priorities: [null, "low", "xs", null, "low", "low", null, "low", "mid"],
     decorateHeader: (th, ctx) => {
       th.title = {
@@ -406,7 +403,7 @@ function renderDatabaseObjects(container, database, tables) {
       }
       if (ctx.columnIndex === 6) { setBar(td, value, maxima[6], format.percent(value / 100)); return true; }
       if (ctx.columnIndex === 8) {
-        // Server DateTime text, shown in the browser's zone (decision 48).
+        // The server DateTime text is shown in the zone of the browser (decision 48).
         const time = header.serverTime(value);
         td.textContent = time.text;
         td.title = time.title || String(value);

@@ -1,11 +1,17 @@
 # Complete file configuration. Start with:
 #   chdash --config /path/to/config.hcl
 #
-# Application configuration is HCL-only. Environment variables are not an
-# application configuration interface. Omitted attributes use the defaults shown below.
+# Application configuration is HCL-only. The file is the only source: ChDash reads an
+# environment variable only when the file names it with an attribute that ends in _env.
+# Omitted attributes use the defaults shown below.
 # A value outside the range that a comment gives stops the start with an error that names
-# the key (nothing is clamped). `chdash --config <file> --print-config` shows what applies;
-# docs/configuration-reference.md lists every key with its range.
+# the key (nothing is clamped). `chdash --config <file> --print-config` shows what applies,
+# and where each value comes from; docs/configuration-reference.md lists every key with its range.
+#
+# A secret (a password, the secret of an MCP key) is never written in this file. Each secret
+# has two forms, and exactly one applies: <name>_env = "VAR" (the value is in the environment
+# variable VAR) or <name>_file = "/path" (the value is the content of the file, without its
+# last line end). Each is read one time, at start.
 
 server {
   listen_host = "0.0.0.0"
@@ -22,7 +28,8 @@ server {
   # query.max_sql_bytes plus 1 MiB (or the query library file, when larger).
   max_body_bytes      = 0
   # Open host status streams (one per visible page). Past it, a page polls
-  # GET /api/hosts every 5 s instead. At most half of max_worker_threads.
+  # GET /api/hosts every 5 s instead. At most half of max_worker_threads: a higher
+  # value stops the start.
   max_host_streams    = 64
   # How long one write of a response waits for a client that does not read
   # (a paused download, a slow disk). Past it, the response ends: an export or
@@ -253,9 +260,13 @@ query_library {
 mcp {
   enabled        = false
   # Keys made on the MCP page. The directory must exist; the file is created
-  # (mode 0600) on the first write and holds the secrets of the keys.
+  # (mode 0600) on the first write and holds the hashes of the tokens of the keys.
   # storage_file = "/var/lib/chdash/mcp_keys.json"
-  manage_from_ui = true  # false: the page is read-only
+  # Which keys apply: "static" (the mcp_key blocks only; the page is read-only),
+  # "dynamic" (the keys of the page only) or "hybrid" (the two).
+  keys {
+    mode = "hybrid"
+  }
   # auth_header  = "Authorization"  # the header of the key; a name like "X-ChDash-Key" when a proxy in front uses Authorization
   # What each key did (calls, errors, clients). Off by default: nothing is counted. When it is on, each ChDash (an instance)
   # keeps its counts in a file of its own in a directory that several ChDash can share; every answer adds up the instances.
@@ -280,18 +291,72 @@ mcp {
   # header that is not listed answers 403. A request without Origin is accepted.
   allowed_origins       = []
 
-  # Keys of the configuration (read-only on the page). A name, one host in hosts,
-  # and exactly one of secret and secret_file (a UUID version 4: 3f2b8c1e-5d4a-4b7e-9c60-1a2b3c4d5e6f).
-  # key {
-  #   name            = "ci-bot"      # a-z 0-9 - _ ; the prefix ui_ is reserved
-  #   secret_file     = "/run/secrets/chdash-mcp-ci"
-  #   hosts           = ["prod"]      # the host of the key: one name of a host that has an mcp_uri (one key for each host)
-  #   tools           = ["list_databases", "list_tables", "describe_table", "query_table"]  # or ["*"]
-  #   databases       = ["otel", "analytics.events"]  # db, db.table, * wildcard; ["*"] = all data
-  #   max_rows        = 200           # lowers the global cap
-  #   timeout_seconds = 10            # lowers the global cap
+  # Keys of the configuration (read-only on the page). The label is the name of the key.
+  # The token is mcp_ and 43 base64url characters; give it with token_file or token_env,
+  # never in the file. Make one with: printf 'mcp_%s\n' "$(head -c 32 /dev/urandom | basenc --base64url | tr -d '=')"
+  # mcp_key "ci-bot" {                                  # a-z 0-9 - _ ; the prefix ui_ is reserved
+  #   token_file = "/run/secrets/chdash-mcp-ci"         # or: token_env = "CHDASH_MCP_CI_KEY"
+  #   subject    = "alice"                              # the user for whom the key operates (optional)
+  #   tools      = ["list_databases", "list_tables", "describe_table", "query_table"]  # or ["*"]
+  #   expires    = "2027-10-15T00:00:00Z"               # RFC 3339 (optional)
+  #   scope {
+  #     hosts     = ["prod"]                            # one host that has an mcp_uri (one key for each host)
+  #     databases = ["otel", "analytics.events"]        # db, db.table, * wildcard; ["*"] = all data
+  #   }
+  #   limits {
+  #     max_rows              = 200                     # lowers the global cap
+  #     timeout_seconds       = 10                      # lowers the global cap
+  #     rate_limit_per_minute = 60                      # lowers the global cap
+  #   }
   # }
   # run_query and explain_query (free SQL) need databases = ["*"].
+  # ["*"] gives every tool but the restricted one, mcp_analysis_all_usage: a key must name it.
+}
+
+# The access of humans (docs/access.md, MCP server contract section 11). The block is required:
+# a file without it stops the start, so nobody gets the open mode by mistake.
+#   authzen: an access gateway authenticates the human and sends a signed identity token in a
+#            header. ChDash verifies it on each request of the pages and of the API (401
+#            without a valid token), and asks the PDP (OpenID AuthZEN) for each action (403
+#            when the answer is false). Without query.run.write, a run has readonly = 1.
+#   open:    no check at all. ChDash writes a warning at each start. Use it only for a server
+#            alone on a closed network. It takes no identity block and no pdp block.
+# The MCP endpoint (POST /mcp) is not concerned: it keeps its keys (mcp block below).
+access {
+  mode = "authzen"
+  identity {
+    # header         = "X-Identity-Token"   # never a cookie, never a query parameter
+    issuer           = "https://access.example.internal"   # the iss of the tokens
+    audience         = "db"                 # the name of this server: in aud, and the service id for the PDP
+    # The PEM public keys of the issuer (Ed25519 or P-256). One of public_keys, public_keys_env
+    # and public_keys_file.
+    public_keys_file = "/run/secrets/db_identity_keys.pem"
+    # max_age        = "5m"                 # exp - iat is at most this value (1s to 24h)
+  }
+  pdp {
+    # http only: ChDash has no TLS client. Keep the network private to ChDash and the PDP.
+    url        = "http://pdp.example.internal:4182"   # or: url_env, url_file
+    # The token of this server at the PDP is a secret: token_file or token_env only.
+    token_file = "/run/secrets/db_pdp_token"
+    # timeout  = "500ms"                    # no answer in this time: the decision is false
+    # cache_ttl = "30s"                     # 0s: no cache. A failure is never kept.
+  }
+}
+
+# The OTLP export of MCP (docs/server-telemetry.md): one SERVER span for each request of POST /mcp, one child
+# span for each ClickHouse statement of the call, and the call log as OTLP log records. OTLP/HTTP with the JSON
+# encoding, http only (send to a collector on the same host or in the same pod). ChDash reads no OTEL_*
+# variable: to take the endpoint from one, name it with otlp_endpoint_env.
+telemetry {
+  enabled = false
+  # otlp_endpoint         = "http://otel-collector:4318"   # or: otlp_endpoint_env = "OTEL_EXPORTER_OTLP_ENDPOINT"
+  # service_name          = "chdash"
+  # export_interval       = "5s"                           # an integer and ms, s, m or h
+  # export_timeout        = "10s"
+  # connect_timeout       = "2s"
+  # max_queue_size        = 2048                           # past it a new item is dropped and counted
+  # max_export_batch_size = 512
+  # call_log              = true
 }
 
 analysis {
@@ -331,18 +396,25 @@ clickhouse {
   host {
     name       = "local"
     label      = "ClickHouse local"
+    # A URI gives the user and the address, never the password: a password in a URI
+    # stops the start.
     runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
     system_uri = "clickhouse://chdash_system@clickhouse:9000"
 
     # Keep the runner and technical system credentials separate. The runner is
     # the authorization boundary for panel SQL; the system account is reserved
     # for backend-generated metadata/log queries and cancellation.
-    runner_password_file = "/run/secrets/chdash_runner_password"
-    system_password_file = "/run/secrets/chdash_system_password"
+    # Each password has a _file form and an _env form: give exactly one. password_file
+    # (or password_env) gives one password to both URIs; use it instead of the
+    # two attributes below, not with them.
+    runner_password_file = "/run/secrets/chdash_runner_password"  # or: runner_password_env = "CHDASH_RUNNER_PASSWORD"
+    system_password_file = "/run/secrets/chdash_system_password"  # or: system_password_env = "CHDASH_SYSTEM_PASSWORD"
 
     # The MCP identity (docs/mcp.md): a separate, read-only ClickHouse user.
     # A host without mcp_uri is invisible to MCP. There is no fallback to the
-    # runner or system credentials, nor to password_file; the password is in the URI.
-    # mcp_uri = "clickhouse://chdash_mcp:<password>@clickhouse:9000"
+    # runner or system credentials, nor to password_file: mcp_uri has its own
+    # mcp_password_file or mcp_password_env.
+    # mcp_uri           = "clickhouse://chdash_mcp@clickhouse:9000"
+    # mcp_password_file = "/run/secrets/chdash_mcp_password"
   }
 }

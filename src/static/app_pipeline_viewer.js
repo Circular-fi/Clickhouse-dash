@@ -5,7 +5,7 @@ import { segmented } from "./app_ui_segmented.js";
 import { uiState } from "./app_ui_state.js";
 import { util } from "./app_util.js";
 
-// The lookups of app_dom.js; absent when a test loads the model without a page.
+// The lookups come from app_dom.js. They are absent when a test loads the model without a page.
 const { $ } = dom || {};
 const cleanupByContainer = new WeakMap();
 function dispose(container) {
@@ -13,8 +13,8 @@ function dispose(container) {
   cleanupByContainer.delete(container);
 }
 
-// ns.format (docs/ui-foundations.md): durations from microseconds
-// ("2.6 ms", "350 \u00b5s"), counts ("120,064"), bytes ("1.7 KB"), shares.
+// ns.format (docs/ui-foundations.md) formats these values:
+// durations from microseconds ("2.6 ms", "350 \u00b5s"), counts ("120,064"), bytes ("1.7 KB"), and shares.
 const durationUs = format.duration.fromUs;
 
 function operationName(value) {
@@ -125,8 +125,8 @@ function buildProcessorTraceSummary(rows, spans, context, bucketUs = 0) {
   return { byFamily, allSegments };
 }
 
-// Sorted cost buckets and disjoint sets keep matching O((P + S) log P).
-// Empty buckets are skipped without rescanning already matched processors.
+// Sorted cost buckets and disjoint sets keep the cost of a match at O((P + S) log P).
+// Empty buckets are skipped. The code does not scan already matched processors again.
 function costIndex(candidates) {
   const byCost = new Map();
   for (const candidate of candidates) {
@@ -226,7 +226,7 @@ function buildProcessorGroups(processors, context) {
     const parents = Array.isArray(row.parent_ids) ? row.parent_ids.map(identity) : [];
     const invalid = !id || id === "0" || !planStep || parents.some((parent) => !parent);
     if (invalid) invalidIdentities += 1;
-    // plan_step=0 has no logical step: keep its different processor types apart.
+    // plan_step=0 has no logical step. Keep its different processor types apart.
     const processorName = operationName(row.name || "Processor");
     const key = keyOf(host, query, planStep || `invalid-${groups.size}`,
       planStep === "0" ? processorName : "");
@@ -362,8 +362,9 @@ function attachTiming(groups, summary, spans, context, summaryBucketUs = 0) {
       best.group.timingSources.add("summary");
     }
   }
-  // Backward-compatible fallback, per family: never assign duplicate names to
-  // the busiest stage or suppress other families after one summary match.
+  // This is a backward-compatible fallback, per family.
+  // Never assign duplicate names to the busiest stage.
+  // Never suppress other families after one summary match.
   for (const span of spans) {
     const scope = context.resolve(span);
     if (!scope) continue;
@@ -501,8 +502,9 @@ function selectWindow(model, start, finish) {
   return { start: offset, finish: offset + width, width };
 }
 
-// Display bins are a bounded projection of measured intervals. Summary work
-// is spread inside its own aggregation window only; its internal gaps are unknown.
+// Display bins are a bounded projection of measured intervals.
+// Summary work is spread inside its own aggregation window only.
+// The internal gaps of the summary work are unknown.
 function projectActivity(segments, start, finish, count = 192) {
   count = Math.max(1, Math.min(512, Math.floor(number(count)) || 1));
   const width = Math.max(1, finish - start) / count;
@@ -565,7 +567,7 @@ function render(container, options = {}) {
   container.replaceChildren();
   container.classList.remove("traceViewerHost");
   container.classList.add("pipelineViewerHost");
-  // icon: a sprite drawing before the label (after it with iconAfter).
+  // icon: a sprite drawing that comes before the label. With iconAfter, it comes after the label.
   const button = (label, title, action, icon = "", iconAfter = false) => {
     const node = h("button", { class: "pipelineViewer__control" }, label);
     if (icon) node[iconAfter ? "append" : "prepend"](iconMod.el(icon, { size: "sm" }));
@@ -600,8 +602,8 @@ function render(container, options = {}) {
   const overviewTables = Array.isArray(options.overview?.tables) ? options.overview.tables.map(String).filter(Boolean) : [];
   const root = h("div");
   root.className = "pipelineViewer";
-  // The figures, then the reading guide folded under "How to read this"
-  // (closed by default: the rows speak first).
+  // The figures come first. The reading guide is folded under "How to read this".
+  // It is closed by default, so the rows come first.
   const header = h("div", { class: "pipelineViewer__summary" });
   const scale = h("span", { class: "pipelineViewer__densityLegend" }, "Height + shade: work density ");
   scale.append(h("span", { class: "pipelineViewer__densityRamp" }), document.createTextNode(" low \u2192 high"));
@@ -646,7 +648,8 @@ function render(container, options = {}) {
   }
 
   const controls = h("div", { class: "pipelineViewer__controls" });
-  // `say`: a control moved the view, and the new range is said through the page's one live region (uiState.announce).
+  // `say`: a control moved the view.
+  // The code announces the new range through the one live region of the page (uiState.announce).
   const setView = (start, finish, say = false) => {
     view = selectWindow(model, start, finish);
     drawTimelines();
@@ -657,7 +660,7 @@ function render(container, options = {}) {
     const width = Math.min(model.window, Math.max(1, view.width * factor));
     setView(view.start + (view.width - width) / 2, view.start + (view.width + width) / 2, true);
   };
-  // Every control says what it does (glyph and word).
+  // Every control states what it does (glyph and word).
   const reset = button("Full query", "Show the complete query", () => setView(0, model.window, true));
   const back = button("Earlier", "Move to earlier activity", () => shift(-1), "chevron-left");
   const zoomOut = button("Zoom out", "Zoom out", () => zoom(2), "zoom-out");
@@ -759,8 +762,8 @@ function render(container, options = {}) {
   });
 
   const hint = h("div", { class: "pipelineViewer__hint" });
-  // The hover readout; at rest, the one-line way to use it (the reading
-  // guide is under "How to read this").
+  // The hover readout. At rest, it shows the one-line way to use it.
+  // The reading guide is under "How to read this".
   const defaultHint = () => "Hover a row for its times; its magnifier focuses the stage.";
   hint.textContent = defaultHint();
   table.appendChild(body);
@@ -790,8 +793,8 @@ function render(container, options = {}) {
   }
   const scrollFrame = util.rafOnce(() => { if (root.isConnected) mountRows(); });
   body.addEventListener("scroll", () => { if (virtual) scrollFrame(); }, { passive: true });
-  // Resizing changes the visible row count. Disconnect as soon as this view
-  // is replaced; the observer must never retain an old profiling payload.
+  // A resize changes the visible row count. Disconnect the observer when this view is replaced.
+  // The observer must never keep an old profiling payload.
   const resize = typeof ResizeObserver === "function" && virtual ? new ResizeObserver(() => {
     if (!root.isConnected) { resize.disconnect(); return; }
     mountRows();

@@ -1,15 +1,16 @@
-// The adapter of src/wasm/router.c (src/static/wasm/router.wasm): the orthogonal edge router of app_graph_kit.js.
+// The adapter of src/wasm/router.c (src/static/wasm/router.wasm). It is the orthogonal edge router of app_graph_kit.js.
 // It runs in the page and in a Worker (ns.wasm.worker).
 //
 //   ops.router.route(kernel, { items, edges, maxSteps, searchSteps })
 //     items: Float64Array, five numbers per card: x, y, width, height, lineageRow (NaN: none)
 //     edges: Int32Array, four numbers per edge: from card index, to card index (-1: no such card), secondary (0 / 1), rank of the id
-//     returns { status, routes: Float64Array, stats: [steps, cheap, exhausted] }; status 0 is done,
-//     -2 means "the JavaScript router must answer", -1 no memory. routes holds, for each route in order, its edge index,
-//     its point count and its points (x, y).
+//     returns { status, routes: Float64Array, stats: [steps, cheap, exhausted] }. Status 0 is done.
+//     Status -2 means "the JavaScript router must answer". Status -1 means no memory.
+//     routes holds, for each route in order, its edge index, its point count and its points (x, y).
 //
-// ns.wasm.router.pack(items, edges, options) turns the arguments of kit.routeEdges() into that input (null when the kernel
-// cannot take them: two edges with one id); ns.wasm.router.unpack(result, items, edges) gives back the Map of kit.routeEdges().
+// ns.wasm.router.pack(items, edges, options) turns the arguments of kit.routeEdges() into that input.
+// It returns null when the kernel cannot take them: two edges with one id.
+// ns.wasm.router.unpack(result, items, edges) returns the Map of kit.routeEdges().
 import { wasm } from "./app_wasm.js";
 
 const LINEAGE_NODE_PORT_TOP_OFFSET = 36;
@@ -28,7 +29,7 @@ wasm.ops.router = {
   },
 };
 
-// Dense ranks of the ids under localeCompare (the order the JavaScript router sorts them in); equal ids rank equal.
+// Dense ranks of the ids under localeCompare. This is the order that the JavaScript router uses to sort them. Equal ids get equal ranks.
 function idRanks(edges) {
   const order = edges.map((edge, i) => i);
   order.sort((a, b) => String(edges[a].id).localeCompare(String(edges[b].id)));

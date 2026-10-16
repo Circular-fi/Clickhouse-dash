@@ -1,4 +1,4 @@
-// The camera of the Explorer graph: Fit, the anchor that a layout change keeps still, the box of a database, the zoom floor and the clamp.
+// The camera of the Explorer graph. It has Fit, the anchor that a layout change keeps still, the box of a database, the zoom floor and the clamp.
 
 import { dom } from "./app_dom.js";
 import { isNonStoringNode } from "./app_explorer_graph_model.js";
@@ -9,8 +9,7 @@ import { graphKit } from "./app_graph_kit.js";
 
 const kit = graphKit;
 
-// Scale at which the whole graph fits the part of the canvas its chrome
-// leaves free (may be unreadable).
+// The scale at which the whole graph fits the part of the canvas that the chrome leaves free. The text may be unreadable at this scale.
 function overviewScale() {
   const { width, height } = kit.safeArea(dom.explorerGraphCanvas);
   const bounds = model.worldBounds;
@@ -19,8 +18,8 @@ function overviewScale() {
   return Math.max(0.02, Math.min(cap, Math.min(width / bounds.width, height / bounds.height) * 0.92));
 }
 
-// The world box around a card and the cards it shares a visible edge with
-// (what a phone fits on open).
+// The world box around a card. The box also covers the cards that share a visible edge with the card.
+// A phone fits this box on open.
 function neighbourhoodBox(id) {
   const item = id ? model.layout.get(id) : null;
   if (!item) return null;
@@ -35,11 +34,10 @@ function neighbourhoodBox(id) {
   return { x: minX - 24, y: minY - 24, width: maxX - minX + 48, height: maxY - minY + 48 };
 }
 
-// Fit (kit.fitView): the whole graph when it is readable as a whole; a
-// graph slightly too large opens at the readable scale on the focused
-// object (or the requested anchor, else the top-left of the graph), the
-// minimap giving the rest; a much larger one shows whole with compact
-// cards. A phone opens on the focus and its neighbours, then pans.
+// Fit uses kit.fitView. If the whole graph is readable as a whole, the whole graph is shown.
+// If the graph is slightly too large, it opens at the readable scale. It opens on the focused object, or on the requested anchor, or on the top-left of the graph.
+// The minimap shows the rest. If the graph is much larger, it shows the whole graph with compact cards.
+// A phone opens on the focus and its neighbours. Then the user pans.
 function fitToScreen({ anchorId = null, anchorBox = null } = {}) {
   const { width, height } = canvasSize();
   const bounds = model.worldBounds;
@@ -127,7 +125,7 @@ function databaseBounds({ includeGroupCards = false } = {}) {
   const groups = new Map();
   for (const item of model.layout.values()) {
     if (item.node.layer !== "logical") continue;
-    // A collapsed database card is its own frame; bands wrap expanded ones.
+    // A collapsed database card is its own frame. Bands wrap the expanded database cards.
     if (!includeGroupCards && item.node.kind === "database_group") continue;
     const key = item.node.database || "default";
     const current = groups.get(key) || { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity, count: 0 };
@@ -141,17 +139,15 @@ function databaseBounds({ includeGroupCards = false } = {}) {
   return groups;
 }
 
-// Centred in the visible canvas once the side panel has settled (its
-// content arrives after it opens), and again when it closes (kit
-// follow()).
+// Center the node in the visible canvas after the side panel settles. Its content arrives after the panel opens.
+// Do this again when the panel closes. The kit follow() call does this work.
 function centerOnNode(id) {
   if (!model.layout.get(id) || !model.view) return;
   model.view.follow(id);
 }
 
 function minimumZoomScale() {
-  // Zoom-out stops at the whole-graph overview: below the readable Fit the
-  // cards switch to their compact level of detail.
+  // Zoom-out stops at the whole-graph overview. Below the readable Fit, the cards switch to their compact level of detail.
   const fitScale = Number(model.fitScale);
   const floor = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 0.06;
   return Math.min(floor, overviewScale());

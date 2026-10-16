@@ -1,14 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Shared pieces of the WebAssembly equivalence specs (docs/wasm.md): the SQL corpus of the repository, a seeded
-// generator of awkward SQL, and a seeded random source. A spec runs the JavaScript reference and the kernel on the
-// same inputs and compares the answers.
+// Shared pieces of the WebAssembly equivalence specs (docs/wasm.md).
+// They include the SQL corpus of the repository, a seeded generator of awkward SQL, and a seeded random source.
+// A spec runs the JavaScript reference and the kernel on the same inputs. Then it compares the answers.
 
-// The SQL files of the repository: the formatter corpus (tests/api/format/input) and the fixtures, when the test
-// image has them (WASM_SQL_DIRS, colon separated, replaces the list; an empty WASM_SQL_DIRS asks for no corpus). A
-// corpus that is missing or small is an error, not a quieter run: the comparisons would pass on the generated texts
-// alone and say nothing of the real SQL of the repository.
+// The SQL files of the repository: the formatter corpus (tests/api/format/input) and the fixtures, when the test image has them.
+// The variable WASM_SQL_DIRS sets the directories, separated by colons. It replaces the list. An empty WASM_SQL_DIRS means no corpus.
+// A corpus that is missing or small is an error, not a quieter run. Otherwise the comparisons pass on the generated texts alone.
+// Such a run says nothing about the real SQL of the repository.
 export const MIN_CORPUS_FILES = 50;
 
 export function sqlCorpus() {
@@ -26,8 +26,9 @@ export function sqlCorpus() {
   return out;
 }
 
-// Loads a kernel group in the page and waits for its kernel: `ready` is the expression that answers with the kernel
-// (the module's own ready()). Answers { loaded, fallbacks } (streaming compile fallbacks of the loader).
+// Loads a kernel group in the page and waits for its kernel.
+// `ready` is the expression that answers with the kernel, for example the module's own ready().
+// The answer is { loaded, fallbacks }. The fallbacks are the streaming compile fallbacks of the loader.
 export async function loadKernel(page, group, ready) {
   await page.evaluate((name) => window.ChDash.loader.loadGroup(name), group);
   return page.evaluate(`(async () => {
@@ -36,7 +37,7 @@ export async function loadKernel(page, group, ready) {
   })()`);
 }
 
-// A small deterministic generator (LCG): the same numbers on every run and machine.
+// A small deterministic generator (LCG). It gives the same numbers on every run and on every machine.
 export function rng(seed) {
   let state = seed >>> 0;
   const next = () => {
@@ -66,7 +67,7 @@ const STRINGS = ["'plain'", "'it''s'", "'a\\'b'", "'tail\\", "'open", "''", "'mu
 const COMMENTS = ['-- line\n', '-- end of text', '# hash\n', '#x', '/* block */', '/* a\nb */', '/* open', '/**/', '/*/', '*/', '--\n', '/* -- */', '-- /* \n*/'];
 const PUNCT = ['(', ')', ',', '.', ';', '=', '<', '>', '<=', '*', '+', '-', '/', '%', '[', ']', '{', '}', ':', '||', '&', '"', "'", '`', '\\', ' ', ' ', '﻿', '😀', '\ud800', '\udc00', '<b>', '&amp;'];
 const SPACES = [' ', ' ', ' ', '  ', '\n', '\t', '\r\n', ''];
-// A quoted name with a letter beyond ASCII before a "(": the kernel hands the text to the JavaScript lexer.
+// A quoted name with a letter beyond ASCII before a "(". The kernel hands the text to the JavaScript lexer.
 const NON_ASCII_CALLS = ['`caf\u00e9`(', '`\u212aount`(', '`\u00c9`('];
 const CALLS = ['count(', 'sum (', 'toDate/* c */(', 'now\n(', 'toString(', 'uniqState(', 'sumState (', 'myCsFn(', 'MYCSFN(', 'unknownFn(', 'Date(', 'date(', 'x(',
   '`count`(', '`sum` (', '`my col`(', '`uniq`State(', '`uniqState`(', '`café`(', '`Kount`(', '`now` -- c\n(', 'if(', 'IF(', 'Array(', 'State('];

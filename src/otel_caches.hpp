@@ -1,9 +1,9 @@
 #pragma once
 
-// The caches of what the Logs, Metrics and Traces-logs routes read about a source before they query it: which columns and indexes its
-// table has, which kind tables exist, and the answer of the detection of the meta routes. Each is a TtlCache: one read per source at a
-// time (single-flight), the key comes from the configuration only. The Server owns them (server.hpp), so a Server has its own, and the
-// route code gets the cache as an argument.
+// The caches hold what the Logs, Metrics and Traces-logs routes read about a source before they query it.
+// This data includes the columns and indexes of its table, the kind tables that exist, and the answer of the detection of the meta routes.
+// Each cache is a TtlCache. It makes one read per source at a time (single-flight). Its key comes from the configuration only.
+// The Server owns the caches (server.hpp), so each Server has its own. The route code gets the cache as an argument.
 
 #include "ttl_cache.hpp"
 
@@ -14,7 +14,7 @@
 
 namespace chdash {
 
-// ---- /api/logs/meta and /api/metrics/meta: the serialized answer of the detection. Successful lookups only: no back-off, no stale answer.
+// ---- /api/logs/meta and /api/metrics/meta: the serialized answer of the detection. The cache keeps successful lookups only. It has no back-off and no stale answer.
 constexpr auto kSignalMetaCacheTtl = std::chrono::seconds(60);
 constexpr size_t kSignalMetaCacheMaxEntries = 256;
 
@@ -30,8 +30,8 @@ inline SignalMetaCache::Options signal_meta_cache_options() {
   return options;
 }
 
-// ---- The Logs page: which optional columns and indexes the exporter layout has (api_logs.cpp). Kept kSchemaCacheTtl; a table that is not
-// there yet (the exporter creates it) a few seconds only.
+// ---- The Logs page: which optional columns and indexes the exporter layout has (api_logs.cpp). The cache keeps them for kSchemaCacheTtl.
+// A table that does not exist yet is kept for a few seconds only. The exporter creates it.
 constexpr auto kSchemaCacheTtl = std::chrono::seconds(60);
 
 struct LogsSchema {
@@ -45,7 +45,7 @@ struct LogsSchema {
   bool log_attributes = false;
   bool resource_attributes = false;
   bool scope_attributes = false;
-  // Map(String, String) attribute columns (the facets read their key subcolumns; a JSON column filters but is not faceted).
+  // Map(String, String) attribute columns. The facets read their key subcolumns. A JSON column filters, but it is not faceted.
   bool log_attributes_map = false;
   bool resource_attributes_map = false;
   bool scope_attributes_map = false;
@@ -65,8 +65,8 @@ inline LogsSchemaCache::Options logs_schema_cache_options() {
   return options;
 }
 
-// ---- The logs of a trace: the schema facts of the query, from one system.columns read (api_trace_logs.cpp). A missing table is not kept:
-// the exporter may create it any time.
+// ---- The logs of a trace: the schema facts of the query, from one system.columns read (api_trace_logs.cpp). A missing table is not kept.
+// The exporter can create the table at any time.
 constexpr auto kLogColumnsCacheTtl = std::chrono::seconds(60);
 constexpr size_t kLogColumnsCacheMaxEntries = 256;
 
@@ -94,12 +94,12 @@ inline LogColumnsCache::Options log_columns_cache_options() {
   return options;
 }
 
-// ---- The Metrics page: the kind tables of a source, kept like the catalog (metrics_service.hpp).
+// ---- The Metrics page: the kind tables of a source. The cache keeps them like the catalog (metrics_service.hpp).
 constexpr auto kCatalogTtl = std::chrono::seconds(60);
 constexpr size_t kCatalogCacheMaxEntries = 256;
 
-// The kinds whose table exists, and among them the kinds whose table has ScopeName and ScopeVersion (the exporter writes both): a series is
-// told from another by its scope too when it can be.
+// The kinds whose table exists. Among them are the kinds whose table has ScopeName and ScopeVersion (the exporter writes both).
+// A series is told apart from another series by its scope too, when the kind has these scope columns.
 struct KindTables {
   std::set<std::string> kinds;
   std::set<std::string> with_scope;

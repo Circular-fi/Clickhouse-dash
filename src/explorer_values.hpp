@@ -1,8 +1,10 @@
 #pragma once
 
-// What the readers of the Explorer (the catalog, the table card, the storage map, the graph) share when they read a row of ClickHouse: the
-// text of a column, the numbers and flags that it holds, the key of a table, and the SELECT that reports its failure instead of throwing it.
-// Every column is read as text (`toString(...)` in the statement), so one decoder serves every version of the server.
+// The readers of the Explorer share these helpers when they read a row of ClickHouse.
+// The readers are the catalog, the table card, the storage map and the graph.
+// The helpers read the text of a column, and the numbers and flags that it holds.
+// They also give the key of a table, and a SELECT that reports its failure without a throw.
+// Every column is read as text (`toString(...)` in the statement). So one decoder serves every version of the server.
 
 #include "ch_block_numeric.hpp"
 #include "ch_block_value.hpp"
@@ -55,9 +57,9 @@ inline std::optional<double> parse_double(const std::string& value) {
 inline bool truthy(const std::string& value) { return value == "1" || value == "true" || value == "TRUE"; }
 
 inline bool block_bool_at(const clickhouse::Block& block, size_t column, size_t row) {
-  // DESCRIBE returns is_subcolumn as a native UInt8 on current ClickHouse releases. Do not force it through the textual metadata decoder:
-  // that decoder is intentionally strict and would reject a perfectly valid native boolean column. Keep a textual fallback for older
-  // server/client variants.
+  // On current ClickHouse releases, DESCRIBE returns is_subcolumn as a native UInt8.
+  // Do not pass it through the textual metadata decoder. That decoder is strict on purpose.
+  // It rejects a valid native boolean column. Keep a textual fallback for older server and client variants.
   try {
     return ch_block_u64_at(block, column, row) != 0;
   } catch (const std::exception&) {
@@ -65,7 +67,7 @@ inline bool block_bool_at(const clickhouse::Block& block, size_t column, size_t 
   }
 }
 
-// The values of a column that ClickHouse joined with the unit separator (char(31)); an empty value is dropped.
+// The values of a column that ClickHouse joined with the unit separator (char(31)). An empty value is dropped.
 inline std::vector<std::string> split_unit_separator(std::string_view value) {
   std::vector<std::string> out;
   size_t start = 0;
@@ -77,8 +79,8 @@ inline std::vector<std::string> split_unit_separator(std::string_view value) {
   return out;
 }
 
-// ClickHouse may expose an internal `row`/`_row` pseudo dependency for view-like objects. It is implementation metadata, not a navigable
-// object.
+// ClickHouse can expose an internal `row`/`_row` pseudo dependency for view-like objects.
+// It is implementation metadata, not a navigable object.
 inline bool is_row_pseudo_object(std::string_view table) {
   std::string normalized;
   normalized.reserve(table.size());
@@ -102,7 +104,7 @@ inline bool contains_ci(std::string_view haystack, std::string_view needle) {
   return false;
 }
 
-// The key of a table in the maps of a read: the database, a NUL byte, the table (a name may hold any other byte).
+// The key of a table in the maps of a read. It holds the database, a NUL byte and the table. A name can hold any other byte.
 inline std::string table_key(std::string_view database, std::string_view table) {
   std::string key;
   key.reserve(database.size() + table.size() + 1);
@@ -116,8 +118,8 @@ inline std::string qualified_ident(std::string_view database, std::string_view t
   return sql::quote_ident(database) + "." + sql::quote_ident(table);
 }
 
-// A SELECT that reports its failure in *error and returns false, instead of throwing it: a section of an answer that cannot be read leaves
-// its figures out, and the answer says so.
+// A SELECT that reports its failure in *error and returns false. It does not throw.
+// A section of an answer that cannot be read leaves its figures out. The answer says so.
 template <typename Fn>
 bool try_select(ChExecutor& db, const std::string& sql, Fn&& fn, std::string* error = nullptr) {
   try {

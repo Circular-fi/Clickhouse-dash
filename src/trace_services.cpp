@@ -35,8 +35,8 @@ Result<ServicesOutcome> run_services(ChExecutor& db, const ServicesQuery& query)
   out.span_kind = query.span_scope == "root" ? kServiceRootSpans : kServiceEntrySpans;
   const bool detail = !query.detail.empty();
 
-  // The count chart grid of /api/traces/analytics (same bucket sizes and bucket_origin_ms anchoring, align_buckets widens to whole
-  // buckets).
+  // The count chart grid of /api/traces/analytics has the same bucket sizes and the same bucket_origin_ms anchor. The
+  // parameter align_buckets widens the window to whole buckets.
   out.bucket_ms = static_cast<int64_t>(choose_bucket_seconds(query.end_ms - query.start_ms)) * 1000;
   out.origin_ms = grid_origin_ms(query.bucket_origin_ms, out.bucket_ms);
   out.range_start_ms = query.align_buckets ? grid_floor_ms(query.start_ms, out.bucket_ms, out.origin_ms) : query.start_ms;
@@ -50,7 +50,7 @@ Result<ServicesOutcome> run_services(ChExecutor& db, const ServicesQuery& query)
     out.estimate_ms = elapsed_ms_since(started);
   } catch (const std::exception& e) {
     log_event(LogLevel::Warn, "traces.estimate_failed", {{"route", "services"}, {"error", std::string(e.what()).substr(0, 300)}});
-    // Without an estimate the window is read whole (still time-bounded).
+    // Without an estimate, the window is read whole. The read is still time-bounded.
     db.invalidate();
     std::string error;
     if (!db.renew(&error)) {
@@ -85,10 +85,11 @@ Result<ServicesOutcome> run_services(ChExecutor& db, const ServicesQuery& query)
     db.invalidate();
     throw;
   }
-  // Only the time budget stops this read (skip indexes and the slices make read_rows fall short of total_rows without any cap).
+  // Only the time budget stops this read. The skip indexes and the slices can make read_rows smaller than total_rows, even
+  // without any cap.
   out.partial = out.read.elapsed_ms + 250 >= static_cast<uint64_t>(kServicesTimeBudgetSeconds) * 1000;
 
-  // Detail: the slowest entry spans of the (sampled) window, and releases.
+  // Detail: the slowest entry spans of the sampled window, and the releases.
   if (detail) {
     try {
       const auto started = std::chrono::steady_clock::now();
@@ -105,8 +106,9 @@ Result<ServicesOutcome> run_services(ChExecutor& db, const ServicesQuery& query)
       db.invalidate();
       throw;
     }
-    // Releases (HyperDX useReleaseAnnotations): the first span of each service.version in the whole window, any span kind. The
-    // key's bloom filter index skips granules without it; a read cap bounds the rest.
+    // Releases (HyperDX useReleaseAnnotations) use the first span of each service.version in the whole window, with any span
+    // kind. The bloom filter index of the key skips the granules that do not have the key. A read cap bounds the rest of the
+    // granules.
     out.releases_supported = query.releases_supported;
     if (out.releases_supported) {
       try {
@@ -122,7 +124,7 @@ Result<ServicesOutcome> run_services(ChExecutor& db, const ServicesQuery& query)
         out.releases_ms = release_read.elapsed_ms;
       } catch (const std::exception& e) {
         log_event(LogLevel::Warn, "traces.release_markers_failed", {{"error", std::string(e.what()).substr(0, 300)}});
-        // Markers are decoration: a failure leaves them out.
+        // Markers are only decoration. A failure leaves them out.
         db.invalidate();
         out.releases.clear();
         out.releases_estimated = true;

@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-// Cross-page invariants: forced themes match the OS themes token for token,
-// one keyboard focus ring, hidden native selects take no Tab stop, and
-// startup completes without matchMedia.
+// Cross-page invariants: the forced themes match the OS themes token for token.
+// There is one keyboard focus ring. Hidden native selects take no Tab stop.
+// Startup completes without matchMedia.
 
-// Every custom property on <html>, resolved.
+// This test resolves every custom property on <html>.
 async function rootTokens(page) {
   return page.evaluate(() => {
     const style = getComputedStyle(document.documentElement);
@@ -34,7 +34,8 @@ for (const path of ['/explorer/catalog', '/observability/traces']) {
       try {
         const system = await tokensFor(systemPage, path, theme, 'system');
         const forced = await tokensFor(forcedPage, path, other, theme);
-        // Run-time values (editor height, widths set by scripts) are not palette tokens.
+        // Run-time values, such as the editor height or the widths that scripts
+        // set, are not palette tokens.
         const names = Object.keys(system).filter((name) => !/Height|Width|-width|-top|--p$/.test(name));
         expect(names.length).toBeGreaterThan(100);
         const differ = names.filter((name) => system[name] !== forced[name]).map((name) => `${name}: ${system[name]} vs ${forced[name]}`);
@@ -81,10 +82,11 @@ test.describe('one focus ring', () => {
     await tag.focus();
     expectRing(await focusRing(tag));
 
-    // Keyboard focus on tree rows and toolbar buttons.
+    // This test checks the keyboard focus on tree rows and toolbar buttons.
     await page.goto('/explorer/catalog');
     await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
-    // The side panel head: the search, then the refresh button on its line.
+    // The side panel head has the search. The refresh button is on the same
+    // line.
     await page.locator('#explorerSearchInput').focus();
     await page.keyboard.press('Tab');
     await expect(page.locator('#explorerRefreshButton')).toBeFocused();
@@ -111,7 +113,8 @@ test.describe('hidden native selects', () => {
         await expect(select).toHaveAttribute('tabindex', '-1');
         await expect(select).toHaveAttribute('aria-hidden', 'true');
       }
-      // Walk the page with Tab: never a native select, and the picker buttons are reached.
+      // Walk the page with Tab. A native select is never reached, and the
+      // picker buttons are reached.
       await page.locator('body').click({ position: { x: 1, y: 1 } });
       const visited = [];
       for (let i = 0; i < 40; i += 1) {
@@ -139,7 +142,7 @@ test('startup completes when matchMedia throws', async ({ page }) => {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/explorer/catalog');
   await expect(page.locator('html')).toHaveClass(/is-ready/, { timeout: 15_000 });
-  // The hosts stream started: the host picker reports the host, not offline.
+  // The hosts stream starts. The host picker reports the host, not offline.
   await expect(page.locator('#hostPickerText')).not.toHaveText(/^\s*$|offline|loading/i, { timeout: 15_000 });
   expect(errors).toEqual([]);
 });

@@ -78,7 +78,7 @@ void write_strings(rapidjson::Writer<rapidjson::StringBuffer>& w, const char* ke
   w.EndArray();
 }
 
-// The answer's status in the Overview's unavailable_panels shape.
+// The status of the answer, in the shape of the unavailable_panels of the Overview.
 void write_queries_status(rapidjson::Writer<rapidjson::StringBuffer>& w, const std::string& status, const std::string& message,
                           const std::string& hint, uint64_t suggested_span_s) {
   write_string(w, "status", status);
@@ -103,8 +103,9 @@ void write_queries_status(rapidjson::Writer<rapidjson::StringBuffer>& w, const s
 
 } // namespace
 
-// Six significant digits (a chart needs no more), except that a number of a million or more is written whole: a size in bytes keeps every digit,
-// and a growth of a few megabytes on a terabyte disk is not rounded away. "null" for a bucket without a sample.
+// Six significant digits are written, because a chart needs no more.
+// A number of a million or more is written whole, so a size in bytes keeps every digit.
+// A growth of a few megabytes on a terabyte disk is not rounded away. "null" is written for a bucket without a sample.
 std::string series_number(double value) {
   if (!std::isfinite(value)) return "null";
   if (std::fabs(value) >= 1e6 && std::fabs(value) < 9007199254740992.0) return std::to_string(static_cast<long long>(std::llround(value)));
@@ -122,7 +123,7 @@ std::string overview_json(const std::string& host_id, const SystemMonitorOvervie
   write_string(w, "host_id", host_id);
   w.Key("generated_at_ms"); w.Uint64(overview.generated_at_ms);
   w.Key("stale"); w.Bool(stale);
-  // Every figure is this server's own (system tables are per node); the
+  // Every figure is this server's own, because system tables are per node. The
   // clusterAllReplicas view is opt-in (system.cluster_fanout).
   write_string(w, "scope", "server");
 
@@ -225,7 +226,7 @@ std::string series_json(const std::string& host_id, const SeriesRequest& request
   write_string(w, "scope", "server");
   w.Key("generated_at_ms"); w.Uint64(series.generated_at_ms);
   w.Key("stale"); w.Bool(stale);
-  // The window asked for, and the aligned one the buckets cover.
+  // The window that was asked for, and the aligned window that the buckets cover.
   w.Key("requested");
   w.StartObject();
   w.Key("from_ms"); w.Uint64(from_ms);
@@ -276,8 +277,7 @@ std::string series_json(const std::string& host_id, const SeriesRequest& request
   }
   w.EndObject();
 
-  // The sources that could not be read, in the Overview's shape (the
-  // window being wider than query_log's lookback is not a failure).
+  // The sources that cannot be read, in the Overview's shape. A window wider than query_log's lookback is not a failure.
   w.Key("unavailable_panels");
   w.StartArray();
   for (const auto& [name, source] : series.sources) {
@@ -324,9 +324,8 @@ std::string growth_json(const std::string& host_id, const SeriesRequest& request
   w.Key("trend_min_points"); w.Uint64(kMonitorDiskTrendMinPoints);
   w.Key("trend_min_span_seconds"); w.Uint64(kMonitorDiskTrendMinSpanSeconds);
   w.EndObject();
-  // Which form of the per-disk metrics this server logs: "key" (26.8+:
-  // metric 'DiskUsed' with the disk in `key`, the legacy names read too) or
-  // "names" (DiskUsed_<disk>).
+  // The form of the per-disk metrics that this server logs. "key" means 26.8 and later:
+  // metric 'DiskUsed' with the disk in `key`, and the legacy names are read too. "names" means DiskUsed_<disk>.
   write_string(w, "disk_metric_form", data.key_column ? "key" : "names");
 
   w.Key("timestamps");
@@ -692,7 +691,7 @@ std::string query_json(const std::string& host_id, uint64_t from_ms, uint64_t to
   w.EndObject();
   write_string(w, "kind", data.kind);
   write_string(w, "normalized", data.normalized);
-  // The same text laid out by the formatter, with its placeholders; null when it could not be (the page shows `normalized`).
+  // The same text, laid out by the formatter, with its placeholders. The value is null when the formatter cannot lay out the text. The page then shows `normalized`.
   w.Key("normalized_formatted");
   if (normalized_formatted) write_string_value(w, *normalized_formatted);
   else w.Null();
@@ -912,7 +911,7 @@ std::string keeper_json(const std::string& host_id, const SystemKeeperStatus& ke
   }
   w.EndObject();
   // Average wait per Keeper transaction since server start. The browser
-  // derives the recent latency from two snapshots while auto-refreshing.
+  // derives the recent latency from two snapshots. The snapshots come from the auto-refresh.
   const uint64_t transactions = event("ZooKeeperTransactions");
   w.Key("average_wait_ms");
   if (transactions > 0) w.Double(static_cast<double>(event("ZooKeeperWaitMicroseconds")) / 1000.0 / static_cast<double>(transactions));

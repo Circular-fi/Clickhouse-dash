@@ -1,10 +1,10 @@
 /* wasm_native_rt.h: src/wasm/rt.h for a native build of a WebAssembly kernel (the fuzz targets of tests/fuzz).
  *
  * A fuzz target includes this file, then the kernel source (src/wasm/<name>.c). The guard CHDASH_WASM_RT_H is
- * set here, so the #include "rt.h" of the kernel adds nothing: the kernel gets the same types and functions,
+ * set here. So the #include "rt.h" of the kernel adds nothing. The kernel gets the same types and functions,
  * with these differences:
- *   - wasm_alloc() takes each block from malloc, so AddressSanitizer sees the end of every block (in the
- *     arena of the browser, an overflow runs into the next block silently);
+ *   - wasm_alloc() takes each block from malloc. AddressSanitizer then sees the end of every block. In the
+ *     arena of the browser, an overflow runs into the next block silently.
  *   - wasm_mark() / wasm_release() keep the meaning of rt.h: a release frees every block taken after the mark;
  *   - the Math imports of the host are the functions of libm;
  *   - wasm_alloc() returns 0 past CHDASH_FUZZ_WASM_MEMORY bytes, like a full memory of the instance.
@@ -45,7 +45,7 @@ static inline f64 js_hypot(f64 x, f64 y) { return hypot(x, y); }
 #define CHDASH_FUZZ_WASM_MEMORY (512u * 1024u * 1024u)
 #endif
 
-/* Every live block, in the order of allocation; a mark is a count of blocks. */
+/* Every live block, in the order of allocation. A mark is a count of blocks. */
 static void **native_blocks = 0;
 static usize *native_sizes = 0;
 static usize native_count = 0, native_cap = 0, native_bytes = 0;

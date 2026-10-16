@@ -1,7 +1,7 @@
 // libFuzzer target: the HCL parser of the configuration file (src/hcl.cpp).
 //
-// The only failure the parser may report is HclParseError (main prints it with its line): any other exception, a
-// crash or a stack overflow is a finding. A parsed object is walked with the typed readers of the config loader.
+// The only failure that the parser may report is HclParseError. The main function prints it with its line.
+// Any other exception, a crash or a stack overflow is a finding. A parsed object is walked with the typed readers of the config loader.
 #include "hcl.hpp"
 
 #include <cstdint>

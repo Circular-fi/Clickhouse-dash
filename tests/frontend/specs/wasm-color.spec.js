@@ -2,9 +2,10 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { rng, loadKernel as loadKernelOf } from '../helpers/wasm.js';
 
-// The colour arithmetic on WebAssembly (src/wasm/color.c, docs/wasm.md): normalize, readable text, hash slots, sequential and
-// categorical slots (ns.palette.batch), mixColorBatch (the graph kit), parseColors and rgbaBatch (the chart engine). Each batch
-// op must give what the single JavaScript function gives, byte for byte; the items the kernel hands back run the single function.
+// The colour arithmetic on WebAssembly (src/wasm/color.c, docs/wasm.md): normalize, readable text,
+// hash slots, sequential and categorical slots (ns.palette.batch), mixColorBatch (the graph kit),
+// parseColors and rgbaBatch (the chart engine). Each batch operation must give the same result as
+// the single JavaScript function, byte for byte. The items that the kernel hands back run the single function.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -73,7 +74,7 @@ test('normalize, readable text, slots and steps give the single functions\' answ
     const out = {};
     const same = (list, ref) => { const bad = []; list.forEach((v, i) => { if (JSON.stringify(v) !== JSON.stringify(ref[i]) && bad.length < 3) bad.push({ i, got: v, want: ref[i] }); }); return bad; };
     out.normalize = same(b.normalizeBatch(texts, true), texts.map((t) => b.normalize(t)));
-    // How many items the kernel itself answered (the rest ran the single function).
+    // Count the items that the kernel answered itself. The rest ran the single function.
     const kernel = window.ChDash.wasm.get('color');
     const direct = window.ChDash.wasm.ops.color.normalize(kernel, { texts: texts.map((t) => String(t).trim()) });
     out.decided = direct.status.filter((s) => s !== 2).length / texts.length;
@@ -142,7 +143,8 @@ test('without the kernel (the file is blocked) every batch answers like the sing
 });
 
 test('the trace graph and the flame view keep their colours with the kernel loaded', async ({ page }) => {
-  // The pages call the batches themselves (heat fills, flame labels): a long list goes through the kernel and the same strings come back.
+  // The pages call the batches themselves, for heat fills and flame labels. A long list goes through the kernel.
+  // The same strings come back.
   await openTraces(page);
   expect((await loadKernel(page)).loaded).toBe(true);
   const state = await page.evaluate(() => {

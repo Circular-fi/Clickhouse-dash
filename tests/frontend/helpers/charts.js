@@ -1,7 +1,6 @@
-// Canvas charts (src/static/app_chart_core.js): the engine publishes what it
-// drew on its root (.chartCore): data-points-drawn, data-series-stats,
-// data-x-ticks / data-y-ticks (labels drawn), data-plot (plot box), data-y-min /
-// data-y-max, data-cursor-index (snapped x), data-pick (picked point / cell).
+// Canvas charts (src/static/app_chart_core.js): the engine publishes what it drew on its root (.chartCore).
+// The attributes are data-points-drawn, data-series-stats, data-x-ticks and data-y-ticks (labels drawn).
+// Also data-plot (plot box), data-y-min and data-y-max, data-cursor-index (snapped x) and data-pick (picked point / cell).
 
 export const chartCore = (scope) => scope.locator('.chartCore').first();
 
@@ -10,9 +9,10 @@ export async function chartJson(root, attribute) {
   return text ? JSON.parse(text) : null;
 }
 
-// The x labels of data-x-ticks ([label, date line, left, right, date left,
-// date right], canvas px) that come closer than gap px to the one before,
-// on the label line or on the date line, as "a | b" texts: [] when none do.
+// This function finds the x labels of data-x-ticks that come closer than gap px to the one before.
+// Each entry is [label, date line, left, right, date left, date right], in canvas px.
+// The overlap is on the label line or on the date line. The result has "a | b" texts.
+// The result is [] when none do.
 export function xLabelCollisions(ticks, gap = 4) {
   const out = [];
   for (let i = 1; i < ticks.length; i += 1) {
@@ -25,8 +25,8 @@ export function xLabelCollisions(ticks, gap = 4) {
   return out;
 }
 
-// The date lines of data-x-ticks that repeat the year of the one before
-// (the year shows on the first date line and where it changes).
+// The date lines of data-x-ticks that repeat the year of the one before.
+// The year shows on the first date line and where it changes.
 export function xRepeatedYears(ticks) {
   const out = [];
   let year = '';

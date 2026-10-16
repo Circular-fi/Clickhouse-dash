@@ -1,20 +1,21 @@
-// Copy to clipboard, one component for every page (css/10-components/copy.css):
+// Copy to clipboard. One component serves every page (css/10-components/copy.css):
 //
-//   copy.text(text, control)      copies, then gives `control` the feedback
-//   copy.button(button, getText)  an icon button (.uiCopy): the copy icon,
-//                                   a tooltip (title / aria-label) and the
-//                                   feedback; getText() may return a promise
+//   copy.text(text, control)      copies the text and gives `control` the feedback
+//   copy.button(button, getText)  an icon button (.uiCopy). It has the copy icon,
+//                                 a tooltip (title / aria-label) and the feedback.
+//                                 getText() may return a promise.
 //   copy.buttonHtml({ label, attrs, className })
-//                                   the same button as an HTML string, for the
-//                                   modules that render strings and delegate
-//                                   clicks to copy.text
+//                                 the same button as an HTML string. Use it in the
+//                                 modules that render strings and delegate
+//                                 clicks to copy.text.
 //   copy.split(options)           the "Copy JSON" split button and its menu
-//   copy.download(name, text)     its "Download JSON": the text as a file
+//   copy.download(name, text)     the "Download JSON" item, which saves the text as a file
 //
-// One feedback, held FEEDBACK_MS: the control gets .is-copied (.is-copyFailed
-// when the clipboard refused) and reads "Copied" ("Copy failed"): a text
-// button swaps its label, an icon button shows the check icon and an
-// announced "Copied" tip (ns.popover.flash; data-copied holds the state).
+// The feedback lasts FEEDBACK_MS. The control gets .is-copied. When the clipboard
+// refuses, the control gets .is-copyFailed. The control reads "Copied" or "Copy failed".
+//
+// A text button swaps its label. An icon button shows the check icon and an
+// announced "Copied" tip (ns.popover.flash). The data-copied attribute holds the state.
 
 import { dom } from "./app_dom.js";
 import { icon } from "./app_ui_icon.js";
@@ -35,9 +36,9 @@ async function writeText(text) {
     await navigator.clipboard.writeText(value);
     return;
   }
-  // http:// origins have no async clipboard: a selected, off-screen textarea,
-  // in the top modal dialog when one is open (the page under it is inert, so
-  // a textarea there could not take the selection), e.g. the query library.
+  // http:// origins have no async clipboard. This code uses a selected, off-screen textarea.
+  // It puts the textarea in the top modal dialog when one is open. The page under
+  // the dialog is inert, so a textarea there cannot take the selection. An example is the query library.
   const area = document.createElement("textarea");
   area.value = value;
   area.setAttribute("readonly", "");
@@ -53,8 +54,8 @@ async function writeText(text) {
 
 const timers = new WeakMap();
 
-// The text a text button shows: its .uiCopy__label, or its own text when it
-// has no element children (an icon button keeps its icon and gets a bubble).
+// The text of a text button is its .uiCopy__label. If the button has no element
+// children, the text is its own text. An icon button keeps its icon and gets a bubble.
 function labelOf(control) {
   const label = $(":scope > .uiCopy__label", control);
   if (label) return label;
@@ -98,7 +99,7 @@ async function copyText(text, control = null) {
 
 const esc = (value) => util.escapeHtml(value ?? "");
 
-// The copy icon, and the check that replaces it while the button says "copied".
+// The copy icon. The check icon replaces it while the button says "copied".
 const ICON = icon("copy", { size: "sm", className: "uiCopy__icon" }) + icon("check", { size: "sm", className: "uiCopy__done" });
 
 // attrs: { "data-copy-trace": id, ... } (values are escaped).
@@ -107,8 +108,8 @@ function copyButtonHtml({ label = "Copy", attrs = {}, className = "", disabled =
   return `<button type="button" class="uiCopy${className ? ` ${esc(className)}` : ""}" title="${esc(label)}" aria-label="${esc(label)}"${extra}${disabled ? " disabled" : ""}>${ICON}</button>`;
 }
 
-// button: an existing <button> (kept, and filled with the icon when empty) or
-// null for a new one. Returns the button.
+// button: an existing <button>. The function keeps it and fills it with the icon when it is empty.
+// Or pass null for a new button. The function returns the button.
 function copyButton(button, getText, { label = "Copy", className = "" } = {}) {
   const el = button || document.createElement("button");
   if (!button) el.type = "button";
@@ -128,8 +129,8 @@ function copyButton(button, getText, { label = "Copy", className = "" } = {}) {
 
 // ------------------------------------------------------------ split button
 
-// The menu of a split button is an ns.menu split (app_ui_menu.js): keys,
-// focus, placement and dismissal (ns.layers) are ns.menu's.
+// The menu of a split button is an ns.menu split (app_ui_menu.js). ns.menu handles
+// the keys, the focus, the placement and the dismissal (ns.layers).
 function menuDriver(root, main, toggle, menu) {
   const handle = menuMod.split(main, toggle, menu, { root });
   return {
@@ -154,12 +155,12 @@ function menuItem({ id = "", label }) {
 
 // copySplit({ root, label = "Copy JSON", title, getText, items, className })
 //   root:  existing markup (.runSplit.copySplit > .runSplit__buttons >
-//          .runSplit__main + .runSplit__toggle, then .runMenu), or none for a
-//          new control (append the returned .el).
-//   getText(): the main button's text (may return a promise); "" copies nothing.
-//   items: [{ el | id, label, copy(): text, onSelect(event) }]: an item with
-//          copy() copies its text (feedback on the main button); onSelect runs
-//          otherwise. Every item closes the menu.
+//          .runSplit__main + .runSplit__toggle, then .runMenu). For a new control,
+//          pass none. Then append the returned .el.
+//   getText(): returns the main button's text. It may return a promise. "" copies nothing.
+//   items: [{ el | id, label, copy(): text, onSelect(event) }]. An item with
+//          copy() copies its text, and the feedback shows on the main button.
+//          Otherwise, onSelect runs. Every item closes the menu.
 // Returns { el, main, toggle, menu, items, setDisabled(on), open(), close(), isOpen() }.
 function copySplit({ root = null, label = "Copy JSON", title = "", getText = null, items = [], className = "" } = {}) {
   let el = root;
@@ -221,7 +222,7 @@ function copySplit({ root = null, label = "Copy JSON", title = "", getText = nul
   return { el, main, toggle, menu, items: byKey, setDisabled, open: driver.open, close: driver.close, isOpen: driver.isOpen };
 }
 
-// The "Download JSON" of a copy split: text saved as a file.
+// The "Download JSON" item of a copy split saves the text as a file.
 function downloadText(name, text, type = "application/json") {
   const blob = new Blob([String(text ?? "")], { type });
   const url = URL.createObjectURL(blob);

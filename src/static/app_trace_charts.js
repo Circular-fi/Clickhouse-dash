@@ -1,5 +1,6 @@
-// The charts of the Traces search on the shared canvas engine: one chart per card, kept across answers, and the message that
-// takes the place of a chart (loading, empty, error with Retry).
+// The charts of the Traces search use the shared canvas engine.
+// Each card shows one chart. The charts are kept across answers.
+// A card can show a message in place of its chart: loading, empty, or error with a Retry button.
 
 import { chartCore } from "./app_chart_core.js";
 import { dom } from "./app_dom.js";
@@ -12,17 +13,18 @@ const { byId, $, $$ } = dom;
 const fmt = format;
 
 // --- Analytics charts on the shared canvas engine ------------------------
-// app_chart_core.js loads with the traces view. One chart per card, kept
-// across answers (setData) and resized by the engine itself, so a resize or
-// a new answer redraws a canvas instead of rebuilding an SVG; the cursor,
-// the tooltip and the drag-to-zoom are the engine's (Grafana-like), shared
-// by the two charts and the heatmap (one crosshair on the same time axis).
+// The file app_chart_core.js loads with the traces view.
+// Each card keeps one chart across answers (setData). The engine resizes the chart.
+// A resize or a new answer redraws a canvas. The engine does not rebuild an SVG.
+//
+// The engine owns the cursor, the tooltip and the drag-to-zoom (Grafana-like).
+// The two charts and the heatmap share one crosshair on the same time axis.
 const CHART_HEIGHT = 196;
 const CHART_SYNC_KEY = "traces-analytics";
 const mountedCharts = new WeakMap(); // card body -> { kind, chart }
 
-// The chart of kind `kind` in `container` with these options: the same
-// chart redrawn, or a new one replacing what the card shows.
+// Use these options for the chart of kind `kind` in `container`.
+// The chart is redrawn, or a new chart replaces the one that the card shows.
 function mountChart(container, kind, options) {
   if (!container || !chartCore) return null;
   const held = mountedCharts.get(container);
@@ -53,8 +55,8 @@ function zoomSearchRange(range) {
   void actions.applyRange({ from: format(from), to: format(to) }, "chart");
 }
 
-// retry: "analytics" or "durations" adds a Retry button (handled by the
-// search view's click listener, init).
+// retry: "analytics" or "durations" adds a Retry button.
+// The click listener of the search view handles this button (init).
 function chartMessage(container, text, isError = false, retry = "") {
   if (!container) return;
   unmountChart(container);

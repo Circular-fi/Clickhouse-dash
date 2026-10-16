@@ -16,9 +16,8 @@ health {
 }
 
 mcp {
-  enabled        = true
-  storage_file   = "/data/mcp_keys.json"
-  manage_from_ui = true
+  enabled      = true
+  storage_file = "/data/mcp_keys.json"
 
   max_rows              = 100
   max_result_bytes      = 20000
@@ -27,54 +26,74 @@ mcp {
   max_memory_bytes      = 536870912
   rate_limit_per_minute = 600
 
-  key {
-    name      = "ro2"
-    secret    = "20a7c0de-0000-4000-8000-000000000001"
-    hosts     = ["ro2"]
-    tools     = ["*"]
-    databases = ["*"]
+  mcp_key "ro2" {
+    token_file = "/run/secrets/chdash-test/mcp-key-ro2"
+    tools      = ["*"]
+    scope {
+      hosts     = ["ro2"]
+      databases = ["*"]
+    }
   }
-  key {
-    name      = "ro2cap"
-    secret    = "20a7c0de-0000-4000-8000-000000000002"
-    hosts     = ["ro2cap"]
-    tools     = ["*"]
-    databases = ["*"]
+  mcp_key "ro2cap" {
+    token_file = "/run/secrets/chdash-test/mcp-key-ro2cap"
+    tools      = ["*"]
+    scope {
+      hosts     = ["ro2cap"]
+      databases = ["*"]
+    }
   }
-  key {
-    name      = "ro2cap-low"
-    secret    = "20a7c0de-0000-4000-8000-000000000003"
-    hosts     = ["ro2cap"]
-    tools     = ["*"]
-    databases = ["*"]
-    max_rows  = 3
+  mcp_key "ro2cap-low" {
+    token_file = "/run/secrets/chdash-test/mcp-key-ro2cap-low"
+    tools      = ["*"]
+    scope {
+      hosts     = ["ro2cap"]
+      databases = ["*"]
+    }
+    limits {
+      max_rows = 3
+    }
   }
-  key {
-    name      = "ro1"
-    secret    = "20a7c0de-0000-4000-8000-000000000004"
-    hosts     = ["ro1"]
-    tools     = ["*"]
-    databases = ["*"]
+  mcp_key "ro1" {
+    token_file = "/run/secrets/chdash-test/mcp-key-ro1"
+    tools      = ["*"]
+    scope {
+      hosts     = ["ro1"]
+      databases = ["*"]
+    }
   }
 }
 
 clickhouse {
   host {
     name       = "ro2"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
-    mcp_uri    = "clickhouse://chdash_mcp_ro2:mcp_ro2_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_mcp_ro2@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_mcp_ro2"
   }
   host {
     name       = "ro2cap"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
-    mcp_uri    = "clickhouse://chdash_mcp_ro2cap:mcp_ro2cap_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_mcp_ro2cap@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_mcp_ro2cap"
   }
   host {
     name       = "ro1"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
-    mcp_uri    = "clickhouse://chdash_mcp_ro1:mcp_ro1_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_mcp_ro1@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_mcp_ro1"
   }
+}
+
+# The access of humans (docs/access.md): no gateway in front of this server, so no check.
+access {
+  mode = "open"
 }

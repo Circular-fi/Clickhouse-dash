@@ -6,11 +6,11 @@ import { sqlBlock } from "./app_ui_sql.js";
 import { util } from "./app_util.js";
 import { wasm } from "./app_wasm.js";
 
-// The lookups of app_dom.js; absent when a test loads the model without a page.
+// The lookups of app_dom.js. They are absent when a test loads the model without a page.
 const { $ } = dom || {};
 
 const tabSize = 4;
-// util.escapeHtml is the one escaper (app_util.js loads first).
+// util.escapeHtml is the only escaper. app_util.js loads first.
 const escapeHtml = (s) => util.escapeHtml(String(s ?? ""));
 
 const wrapHtml = (raw, kind) => {
@@ -25,10 +25,9 @@ const wrapHtml = (raw, kind) => {
   return x;
 };
 
-// ClickHouse data type names, as DDL spells them (case-sensitive, so a
-// column called "date" stays plain): ONE type token for all of them
-// (DateTime64, Float64, Nullable, LowCardinality...), whether the server's
-// keyword or function lists happen to name them or not.
+// ClickHouse data type names, as DDL writes them. The match is case-sensitive, so a column called "date" stays plain.
+// Every data type name gets ONE type token (DateTime64, Float64, Nullable, LowCardinality...).
+// This is true whether or not the server's keyword or function lists name them.
 const TYPE_NAME = /^(?:U?Int(?:8|16|32|64|128|256)|Float(?:32|64)|BFloat16|Decimal(?:32|64|128|256)?|Bool|Boolean|String|FixedString|UUID|Date|Date32|DateTime|DateTime32|DateTime64|Time|Time64|Enum|Enum8|Enum16|Array|Tuple|Map|Nested|Nullable|LowCardinality|IPv4|IPv6|JSON|Object|Dynamic|Variant|AggregateFunction|SimpleAggregateFunction|Nothing|Point|Ring|LineString|MultiLineString|Polygon|MultiPolygon|Geometry|Interval(?:Nanosecond|Microsecond|Millisecond|Second|Minute|Hour|Day|Week|Month|Quarter|Year)|QBit)$/;
 const isTypeName = (word) => TYPE_NAME.test(word);
 
@@ -79,13 +78,13 @@ const commonKeywords = new Set(
   ].map((x) => x.toLowerCase())
 );
 
-// The gap between the words of a keyword (GROUP ... BY): blanks, `--` and `#` line comments, and
-// block comments. A block comment ends at the nearest `*/` from which the rest matches, or a later
-// one (so `GROUP /* x */ y */ BY` is one keyword, as the WASM kernel reads it: highlight.c
-// ws_loop). That reach makes every block comment of the gap part of one span, so the gap is
-// written as units without a block comment, or those units around one lazy `/* ... */`: a single
-// way to read each gap. (The former `(?:\s+|/\*[\s\S]*?\*/|...)+` could split a run of n blanks
-// in 2^n ways, and a failed match tried them all: the tab froze on each key press.)
+// The gap between the words of a keyword (GROUP ... BY) holds blanks, `--` and `#` line comments, and block comments.
+// A block comment ends at the nearest `*/` from which the rest matches, or at a later one.
+// For example, `GROUP /* x */ y */ BY` is one keyword, as the WASM kernel reads it (highlight.c ws_loop).
+// This reach makes every block comment of the gap part of one span.
+// So the gap is written as units with no block comment, or as those units around one lazy `/* ... */`.
+// That gives one way to read each gap. The former pattern `(?:\s+|/\*[\s\S]*?\*/|...)+` could split a run of n blanks in 2^n ways.
+// A failed match tried them all, so the tab froze on each key press.
 const gapUnit = String.raw`(?:\s|--[^\n]*\n|#[^\n]*\n)`;
 const ws = String.raw`(?:${gapUnit}+|${gapUnit}*/\*[\s\S]*?\*/${gapUnit}*)`;
 const keywordPatterns = [
@@ -324,9 +323,9 @@ const tokenizePlain = (text, base) => {
   return out;
 };
 
-// The tokens of the text. The comments and the strings are the spans of the one SQL lexer (app_sql_lex.js: src/wasm/highlight.c
-// reads the text with the same rules); what is between them is plain text, in which tokenizePlain finds the words. A
-// name in backticks is plain text too (tokenizePlain reads it as a unit).
+// The tokens of the text. The comments and the strings are the spans of the one SQL lexer (app_sql_lex.js; src/wasm/highlight.c
+// reads the text with the same rules). The text between them is plain text. The function tokenizePlain finds the words in it.
+// A name in backticks is plain text too. tokenizePlain reads it as a unit.
 const SPAN_KIND = { [sqlLex.LINE]: "com", [sqlLex.BLOCK]: "com", [sqlLex.STRING]: "str", [sqlLex.DQUOTE]: "str" };
 
 const lexAllJs = (text) => {
@@ -349,10 +348,10 @@ const lexAllJs = (text) => {
 };
 
 // ----------------------------------------------------------- WebAssembly lexer
-// src/wasm/highlight.c lexes a long text faster than lexAllJs and gives the same tokens, byte for byte
-// (tests/frontend/specs/wasm-highlight.spec.js). A short text stays on the JavaScript path: it is instant, and
-// the copy into the kernel would cost more than it saves. The kernel loads on the first long text (that text
-// takes the JavaScript path); without it, or when it cannot judge a name, lexAllJs answers.
+// src/wasm/highlight.c lexes a long text faster than lexAllJs. It gives the same tokens, byte for byte
+// (tests/frontend/specs/wasm-highlight.spec.js). A short text uses the JavaScript path. That path is instant,
+// and the copy into the kernel costs more than it saves. The kernel loads on the first long text. That text still uses the JavaScript path.
+// Without the kernel, or when it cannot judge a name, lexAllJs answers.
 const WASM_MIN_CHARS = 2000;
 const KINDS = ["plain", "kw", "fn", "num", "null", "type", "str", "com"];
 let wasmAsked = false;
@@ -366,7 +365,7 @@ const requestWasm = () => {
   group.then(() => (wasm && wasm.ops.highlight ? wasm.load("highlight") : null)).catch(() => {});
 };
 
-// The host's sets, uploaded again only when one of the Set objects changed.
+// The sets of the host are uploaded again only when one of the Set objects changed.
 const syncWasmMeta = (kernel) => {
   const kw = getKeywordSet();
   const fn = getFunctionMeta();
@@ -377,7 +376,7 @@ const syncWasmMeta = (kernel) => {
   wasmKey = key;
 };
 
-// { tokens: Int32Array, html: string, count } or null (no kernel yet, or the reference must answer).
+// The result is { tokens: Int32Array, html: string, count } or null. It is null when no kernel is loaded yet, or when the reference must answer.
 const wasmLex = (s) => {
   const kernel = wasm && wasm.get("highlight");
   if (!kernel || !wasm.ops.highlight) {
@@ -537,9 +536,10 @@ const scanPartial = (prevText, newText, prevTokens, diffStart, syncNewBase, sync
 
   let sync = null;
 
-  // The scan reads the spans of the one lexer and, between them, the plain text one character at a time: the new text
-  // stops being read as soon as it matches the old tokens again (canSyncAt). A comment or a string that closes is a
-  // place where that can happen; one that the text ends before it closes, and a name in backticks, are not.
+  // The scan reads the spans of the one lexer. Between the spans, it reads the plain text one character at a time.
+  // The new text stops being read when it matches the old tokens again (canSyncAt).
+  // A comment or a string that closes is a place where that can happen. A comment or a string that the text ends before it closes,
+  // and a name in backticks, are not such a place.
   while (i < s.length && !sync) {
     const span = sqlLex.nextSpan(s, i);
     const stop = span ? span.start : s.length;
@@ -820,9 +820,9 @@ const attach = (ta) => {
   };
 
   const withTrailingNewlineSentinel = (html) => {
-    // A textarea displays an extra empty visual line when the value ends with a newline.
-    // Some browsers collapse the final empty line in the overlay <pre>, which
-    // creates a one-line drift when scrolled all the way to the bottom.
+    // A textarea shows an extra empty visual line when the value ends with a newline.
+    // Some browsers collapse the final empty line in the overlay <pre>. This creates a one-line drift
+    // when the view is scrolled all the way to the bottom.
     if (!prevText.endsWith("\n")) return html;
     return `${html}<span class="editorTrailingNewline">&nbsp;</span>`;
   };
@@ -915,10 +915,10 @@ const attach = (ta) => {
     if (scrollbarX === lastOverlayScrollbarX) return;
     lastOverlayScrollbarX = scrollbarX;
 
-    // The textarea max scrollTop increases when a horizontal scrollbar is present.
-    // The overlay scrollbar is hidden, so its max scrollTop would otherwise be
-    // smaller and it gets clamped near the bottom, creating a half-line drift.
-    // Keep the same visible box and add the scrollbar height to overlay scrollHeight.
+    // The max scrollTop of the textarea increases when a horizontal scrollbar is present.
+    // The overlay scrollbar is hidden. Its max scrollTop would otherwise be smaller, and the value is clamped near the bottom.
+    // This creates a half-line drift.
+    // Keep the same visible box. Add the scrollbar height to the overlay scrollHeight.
     const pad = scrollbarX ? `${scrollbarX}px` : "";
     pre.style.bottom = "0px";
     pre.style.paddingBottom = pad;
@@ -933,8 +933,8 @@ const attach = (ta) => {
     const top = ta.scrollTop;
     const left = ta.scrollLeft;
     pre.scrollTop = top;
-    // If the browser still clamps because of sub-pixel scrollbar metrics, grow the
-    // invisible bottom pad by the missing delta and retry once.
+    // If the browser still clamps because of sub-pixel scrollbar metrics, enlarge the invisible bottom pad by the delta that is not yet added.
+    // Then retry once.
     if (Math.abs(pre.scrollTop - top) > 1) {
       const currentPad = Number.parseFloat(pre.style.paddingBottom || "0") || 0;
       pre.style.paddingBottom = `${Math.ceil(currentPad + Math.max(0, top - pre.scrollTop))}px`;
@@ -1128,14 +1128,14 @@ function toHtml(text) {
 
 function renderInto(element, text) {
   if (!element) return;
-  // lexAll escapes every raw token before adding the small fixed set of span
-  // wrappers. Expose this shared renderer so Query and Explorer use the same
-  // keyword/function metadata without duplicating SQL tokenization.
+  // lexAll escapes every raw token. Then it adds the small fixed set of span wrappers.
+  // Expose this shared renderer, so that Query and Explorer use the same keyword/function metadata.
+  // They do not duplicate the SQL tokenization.
   element.innerHTML = toHtml(text);
 }
 
 export const highlight = { attach, toHtml, renderInto };
-// lexAllJs is the reference of the tests; lexAllWasm answers null until the kernel is loaded.
+// lexAllJs is the reference of the tests. lexAllWasm answers null until the kernel is loaded.
 Object.assign(highlight, { lexAllJs, lexAllWasm, wasmMinChars: WASM_MIN_CHARS, ready: () => (wasm ? wasm.load("highlight") : Promise.resolve(null)) });
-// The read-only SQL blocks colour their text with it once it has loaded (app_ui_sql.js).
+// The read-only SQL blocks color their text with it, after it has loaded (app_ui_sql.js).
 sqlBlock.useHighlighter(highlight);

@@ -1,4 +1,4 @@
-// Arithmetic of the formatter: the redundant parentheses that formatQuery writes and the chain of operators of an expression.
+// Arithmetic of the formatter. It handles the redundant parentheses that formatQuery writes, and the chain of operators of an expression.
 // The declarations that the units share are in format_internal.hpp.
 
 #include "format_internal.hpp"
@@ -104,9 +104,9 @@ constexpr int kArithUnknown = -100;
 }  // namespace
 
 namespace {
-// Precedence of a binary operator token; kArithUnknown for anything else.
-// `||` is deliberately unknown: the parser flattens `a || b || c` into one
-// concat() call, so its parentheses are not transparent.
+// Precedence of a binary operator token. kArithUnknown is the result for anything else.
+// `||` is unknown on purpose. The parser flattens `a || b || c` into one concat() call.
+// So its parentheses are not transparent.
 int arith_binary_precedence(string_view op) {
   if (op == "+" || op == "-") return kArithAdditive;
   if (op == "*" || op == "/" || op == "%") return kArithMultiplicative;
@@ -126,9 +126,9 @@ bool arith_word_is(string_view word, std::initializer_list<const char*> words) {
 
 string strip_redundant_arith_parentheses(string_view s) {
   vector<ArithToken> t = lex_arith_tokens(s);
-  // Comments are whitespace to the parser: the neighbours of a group are the
-  // code tokens around it. Seen as a token, a `-- c` before `-(1)` made the
-  // minus look binary and `-(1)` (negate(1)) became the literal `-1`.
+  // The parser treats comments as whitespace. The neighbours of a group are the code tokens around it.
+  // If a `-- c` is seen as a token before `-(1)`, the minus looks binary.
+  // Then `-(1)` (negate(1)) becomes the literal `-1`.
   t.erase(std::remove_if(t.begin(), t.end(), [](const ArithToken& tok) { return tok.kind == ArithTokenKind::Comment; }), t.end());
   if (t.empty()) return string(s);
   auto text = [&](size_t k) { return s.substr(t[k].begin, t[k].end - t[k].begin); };
@@ -158,8 +158,8 @@ string strip_redundant_arith_parentheses(string_view s) {
                                        "THEN", "ELSE", "WHEN", "CASE", "IN", "BETWEEN", "LIMIT", "OFFSET"});
   };
 
-  // Lowest operator precedence directly inside the group (open, close);
-  // kArithUnknown when the content is not a plain operator chain.
+  // Lowest operator precedence directly inside the group (open, close).
+  // The result is kArithUnknown when the content is not a plain operator chain.
   auto inner_precedence = [&](size_t open, size_t close, bool beside_operator) {
     int lowest = std::numeric_limits<int>::max();
     bool expect_operand = true;
@@ -176,9 +176,8 @@ string strip_redundant_arith_parentheses(string_view s) {
           continue;
         }
         if (tok.kind == ArithTokenKind::Open) {
-          // `((a + b))`: the outer group is kept and the inner one decided
-          // alone (inside the outer one). Dropping both, each judged by its
-          // original neighbours, turned `((a + b)) * c` into `a + b * c`.
+          // `((a + b))`: the outer group is kept. The inner group is decided alone, inside the outer one.
+          // Dropping both groups turned `((a + b)) * c` into `a + b * c`. Each group was judged by its original neighbours.
           if (k == open + 1 && match[k] == close - 1) return kArithUnknown;
           ++operands;
           expect_operand = false;
@@ -187,8 +186,8 @@ string strip_redundant_arith_parentheses(string_view s) {
         }
         return kArithUnknown;
       }
-      // Postfix forms bind tighter than any operator: calls, parametric
-      // calls, subscripts and tuple/member access.
+      // Postfix forms bind tighter than any operator.
+      // These forms are calls, parametric calls, subscripts and tuple or member access.
       if (tok.kind == ArithTokenKind::Open && (text(k) == "(" || text(k) == "[") &&
           (t[k - 1].kind == ArithTokenKind::Word || t[k - 1].kind == ArithTokenKind::Close || text(k) == "[")) {
         k = match[k];
@@ -213,9 +212,8 @@ string strip_redundant_arith_parentheses(string_view s) {
     // `(intDiv(a, b)) * c`, `(0.5) * x`: an atom next to an arithmetic
     // operator binds tighter than it anyway.
     if (operands == 1 && beside_operator) return kArithUnary;
-    // `concat((concat(a, b)), c)`: a lone operand wrapped as a whole function
-    // argument is transparent. Keyword lists are not: `GROUPING SETS ((a), ())`
-    // and `IN ((1), (2))` give their groups meaning.
+    // `concat((concat(a, b)), c)`: a lone operand wrapped as a whole function argument is transparent.
+    // Keyword lists are not transparent. `GROUPING SETS ((a), ())` and `IN ((1), (2))` give their groups meaning.
     const size_t owner = parent[open];
     const bool call_argument = owner != string::npos && owner > 0 && text(owner) == "(" &&
         t[owner - 1].kind == ArithTokenKind::Word &&
@@ -266,7 +264,7 @@ string strip_redundant_arith_parentheses(string_view s) {
     if (inner == kArithUnknown) continue;
     // Binary operators are left-associative: `(a - b) - c` equals
     // `a - b - c`, but `a - (b - c)` and `a + (b + c)` are different trees.
-    // Comparisons do not chain, so equal precedence keeps the group.
+    // Comparisons do not chain. So equal precedence keeps the group.
     const bool right_ok = inner > right || (inner == right && inner >= kArithAdditive);
     if (inner > left && right_ok) {
       drop[open] = true;
@@ -286,7 +284,7 @@ string strip_redundant_arith_parentheses(string_view s) {
         k + 1 < t.size() && (text(k + 1) == "-" || text(k + 1) == "+")) {
       out.push_back(' ');
     }
-    // Keep a single separating space where `(` or `)` sat between tokens.
+    // Keep one space where `(` or `)` was between tokens.
     if (t[k].kind == ArithTokenKind::Open) {
       while (cursor < s.size() && s[cursor] == ' ' && !out.empty() && (out.back() == ' ' || out.back() == '(' || out.back() == '[')) ++cursor;
     } else {
@@ -351,10 +349,9 @@ bool split_arith_chain(string_view s, vector<ArithChainOperator>* ops) {
   return !expect_operand && operands >= 2;
 }
 
-// Re-indent continuation lines of an operator chain (`\n/ rhs`, `\n- rhs`)
-// that sit at bracket depth 0 so they hang one level under the first operand.
-// `logical` also hangs `AND` / `OR` continuations: inside an argument list a
-// wrapped condition must not start its lines where the next argument starts.
+// Re-indent the continuation lines of an operator chain that sit at bracket depth 0 (`\n/ rhs`, `\n- rhs`).
+// Such lines hang one level under the first operand.
+// `logical` also hangs `AND` / `OR` continuations. Inside an argument list, a wrapped condition must not start its lines where the next argument starts.
 string hang_operator_continuations(const string& value, bool logical) {
   const string masked = mask_sql_surface(value).code_lower;
   vector<int> line_depths{0};

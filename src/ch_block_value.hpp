@@ -28,11 +28,12 @@ inline std::string ch_block_text_at(
     return std::string(value.data(), value.size());
   }
 
-  // clickhouse-cpp exposes LowCardinality(String), Nullable(String) and
-  // FixedString values through ItemView. This is intentionally strict: all
-  // callers select textual metadata (usually via toString()), so receiving a
-  // non-textual item means the metadata contract changed and must be surfaced
-  // as an error rather than silently converted to an empty string.
+  // clickhouse-cpp exposes LowCardinality(String), Nullable(String) and FixedString values through ItemView.
+  // This check is intentionally strict.
+  // All callers select textual metadata, usually with toString().
+  // A non-textual item means that the metadata contract changed.
+  // The code must surface such an item as an error. It must not convert the item to an empty string silently.
+  //
   // In particular, clickhouse::Type::LowCardinality is not a ColumnString.
   const auto item = values->GetItem(row);
   if (item.type == clickhouse::Type::Void) return {};

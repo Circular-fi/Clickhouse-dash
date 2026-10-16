@@ -1,8 +1,9 @@
 #pragma once
 
-// A fake ClickHouse for the formatter (src/format_service.hpp): formatQuery answers the text that it got, and EXPLAIN AST the tokens of the
-// text (no comment, no parenthesis, no case, no backtick), so two layouts of one statement have one tree and a statement that was corrupted
-// has another. Shared by tests/native/format_test.cpp and the fuzz target tests/fuzz/fuzz_format.cpp.
+// A fake ClickHouse for the formatter (src/format_service.hpp). formatQuery returns the text that it gets.
+// EXPLAIN AST returns the tokens of the text. The tokens have no comment, no parenthesis, no case and no backtick.
+// So two layouts of one statement have one tree. A corrupted statement has another tree.
+// The file tests/native/format_test.cpp and the fuzz target tests/fuzz/fuzz_format.cpp share this file.
 
 #include "format_service.hpp"
 #include "sql_lexer.hpp"
@@ -13,8 +14,9 @@
 
 namespace chdash {
 
-// The tokens of a text that give its meaning in the fake: no blank, no comment, words in lower case, a name between backticks as the name,
-// and no parenthesis (formatQuery of ClickHouse prints the parentheses of the text and EXPLAIN AST does not show them).
+// The fake takes these tokens from a text as its meaning: no blank, no comment, and words in lower case.
+// A name between backticks is taken as the name.
+// The fake takes no parenthesis. The formatQuery of ClickHouse prints the parentheses of the text, but EXPLAIN AST does not show them.
 inline std::string fake_tree(const std::string& sql) {
   std::string out;
   const auto tokens = sql::lex(sql);
@@ -23,7 +25,7 @@ inline std::string fake_tree(const std::string& sql) {
     if (sql::is_trivia(token.kind)) continue;
     std::string text(token.text(sql));
     if (text == "(" || text == ")") continue;
-    // A comma before the closing parenthesis of a list is no element: ClickHouse takes `(a UInt8,)` as `(a UInt8)`.
+    // A comma before the closing parenthesis of a list is not an element. ClickHouse reads `(a UInt8,)` as `(a UInt8)`.
     if (text == ",") {
       size_t next = i + 1;
       while (next < tokens.size() && sql::is_trivia(tokens[next].kind)) ++next;
@@ -39,13 +41,13 @@ inline std::string fake_tree(const std::string& sql) {
 class FakePort : public FormatQueryPort {
 public:
   std::vector<std::string> format_calls, ast_calls;
-  // What each call answers: nothing set, the text (formatQuery) or its tokens (EXPLAIN AST).
+  // The answer of each call is nothing when no answer is set, the text (formatQuery), or the tokens (EXPLAIN AST).
   FormatQueryFailureKind format_fails = FormatQueryFailureKind::none;
   std::string format_error = "Syntax error";
   FormatQueryFailureKind ast_fails = FormatQueryFailureKind::none;
-  // Fails (as a syntax error) the EXPLAIN AST of a text that holds this word.
+  // EXPLAIN AST fails with a syntax error for a text that holds this word.
   std::string ast_refuses;
-  // An error of ClickHouse at the first place of the sent text where this marker is (the text of formatQuery fails with it).
+  // ClickHouse gives an error at the first place of the sent text where this marker is. The formatQuery text fails with this error.
   std::string error_marker;
 
   FormatQueryResult format_query(const std::string& sql, size_t) override {

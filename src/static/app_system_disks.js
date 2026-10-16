@@ -1,6 +1,5 @@
-// The System page's Disks section (docs/system.md "Disks"): which disk, how
-// full, how quickly it grows and which databases fill it, on the selected
-// server. Two answers:
+// The Disks section of the System page (docs/system.md "Disks"). It shows which disk is used, how full it is,
+// how quickly it grows, and which databases fill it. It covers the selected server. It uses two answers:
 //   /api/system/disks              the disks (capacity, free,
 //     unreserved, keep_free_space, kind, flags, policy membership), the
 //     storage policies and the bytes of each runner-visible database on
@@ -10,15 +9,14 @@
 //     until its free space is gone, the MergeTree bytes, and the bytes the
 //     visible databases wrote and moved (part_log); cached 5 min.
 //
-// The section does not redo the Explorer's database storage: a database opens
-// its page, scrolled to its storage (/explorer/catalog/<db>?tab=storage). The window is the
-// Observability time range picker in the tab row (from / to in the
-// address, absent for the default system.disk_growth_days); no
-// Auto-refresh. Each disk's card says how long its free space lasts.
+// This section does not repeat the database storage of the Explorer. A database opens its page, scrolled to its storage
+// (/explorer/catalog/<db>?tab=storage). The time range picker of the Observability tab row sets the window.
+// Its from and to values are in the address. Without them, the window is the default system.disk_growth_days.
+// This section has no auto-refresh. The card of each disk says how long its free space lasts.
 //
-// Fill: neutral under 80 %, warning from 80 %, danger from 90 %. Days
-// until full: shown only when the disk grows over enough history (the
-// server's rule), warning under 30 days, danger under 7.
+// The fill of a disk is neutral under 80 %. It is a warning from 80 %, and a danger from 90 %.
+// The days until full appear only when the disk grows over enough history (the rule of the server).
+// They are a warning under 30 days, and a danger under 7 days.
 
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
@@ -45,7 +43,7 @@ const FILL_DANGER = 0.9;
 const FULL_WARN_DAYS = 30;
 const FULL_DANGER_DAYS = 7;
 const TOP_DATABASES = 8;
-// A drag narrower than this widens around its centre.
+// A drag that is narrower than this value widens around its centre.
 const MIN_ZOOM_MS = 15 * 60000;
 
 const settings = () => kit.features() || {};
@@ -55,7 +53,7 @@ const defaultRange = () => ({ from: `now-${timeRange.minutesToSpan(growthDays() 
 
 // --- Figures -----------------------------------------------------------------
 
-// The share of the disk that is not free, and its tone.
+// The share of the disk that is not free, and its tone. It returns null when the disk reports no capacity.
 function fillOf(disk) {
   const total = Number(disk?.total_space) || 0;
   if (!(total > 0)) return null;
@@ -124,8 +122,8 @@ function createDisks(ctx) {
     host: "",
   };
 
-  // The filter bar: the growth's time range, the refresh button. No
-  // Auto-refresh: the disks are cached a minute, their growth 5 min.
+  // The filter bar has the time range of the growth and the refresh button. There is no
+  // auto-refresh. The server caches the disks for one minute and the growth for five minutes.
   const controls = kit.sectionBar(ctx, { id: "disks", label: "the disks", range: "systemDisks", onRefresh: () => void load(true) });
   const pickerRoot = controls.rangeRoot;
 
@@ -138,7 +136,7 @@ function createDisks(ctx) {
     kit.cardHead("Growth"), growthNotes, grid);
   const databases = h("section", { class: "systemCard", id: "systemDiskDatabases", dataset: { card: "databases" } });
   const policies = h("section", { class: "systemCard", id: "systemDiskPolicies", dataset: { card: "policies" } });
-  // The cards, the charts and the tables are h3: this h2 (under the page's h1) is for the screen reader only.
+  // The cards, the charts and the tables use h3 headings. This h2 is under the page h1. It is for the screen reader only.
   const body = h("div", { class: "systemDisks", id: "systemDisks" }, h("h2", { class: "srOnly" }, "Disks"), notes, tiles, cards, growthCard, databases, policies);
   ctx.panel.append(body);
 
@@ -159,7 +157,7 @@ function createDisks(ctx) {
     { id: "merge_tree", title: "MergeTree data", help: "Bytes of the MergeTree tables' active parts on this server (TotalBytesOfMergeTreeTables, asynchronous_metric_log)." },
     { id: "written", title: "Written and moved", help: "Bytes of the new parts the runner-visible databases wrote (inserts) and of the parts moved between disks by TTL or the storage policy (part_log). The tooltip adds the moves." },
   ];
-  // The growth charts, built once; each holds its chart once drawn.
+  // The growth charts are built once. Each entry holds its chart after the first draw.
   const charts = systemCharts.grid({
     root: grid,
     specs: CHARTS,
@@ -173,8 +171,8 @@ function createDisks(ctx) {
 
   // --- Loading -------------------------------------------------------------
 
-  // The reads in flight, by name: each is the newest of its slot (util.latest). A read that was replaced or cut by a
-  // host change leaves this set alone, so the busy state follows the reads that are really running.
+  // The reads in progress, by name. Each read is the newest read of its slot (util.latest). A read that was replaced, or
+  // that a host change cut, does not change this set. So the busy state follows the reads that really run.
   const inflight = new Set();
 
   async function loadDisks(force, host) {
@@ -201,7 +199,7 @@ function createDisks(ctx) {
     const resolved = range.check();
     const invalid = resolved.error;
     if (invalid) {
-      // The range on screen is not the one that a read in flight was asked for: that read stops, so its answer
+      // The range on screen is not the range that a read in progress asked for. That read stops. Its answer
       // never replaces this message with the data of another range.
       util.latest.cancel("system.diskgrowth");
       inflight.delete("growth");
@@ -310,11 +308,10 @@ function createDisks(ctx) {
       h("dd", { class: ["systemDisk__value", mono && "mono"] }, value, sub ? h("span", { class: "systemDisk__sub" }, sub) : null));
   }
 
-  // Disks on one filesystem (the default disk and disks under its path,
-  // the same device): the same capacity and free space, to the MiB (two
-  // reads of a busy disk differ by what was written between them). They
-  // share one card: its fill, free space and forecast once, then each
-  // disk's own data, path and policies.
+  // Disks on one filesystem are the default disk and the disks under its path. They are on the same device.
+  // They have the same capacity and the same free space, to the MiB. Two reads of a busy disk differ by the data written between them.
+  // They share one card. The card shows the fill, the free space and the forecast once. Then it shows the data, the path
+  // and the policies of each disk.
   const SAME_FREE_BYTES = 2 ** 20;
   const isLocal = (disk) => !disk.is_remote && !(disk.object_storage_type && disk.object_storage_type !== "None") && Number(disk.total_space) > 0;
   function filesystems(disks) {
@@ -331,8 +328,8 @@ function createDisks(ctx) {
     return groups;
   }
 
-  // The forecast of a filesystem: the soonest full of its disks (one device,
-  // one free space: their trends agree but for the samples they have).
+  // The forecast of a filesystem is the soonest full date of its disks. The disks share one device and one free space.
+  // Their trends agree, except for the samples that each disk has.
   function groupForecast(group) {
     const days = (disk) => Number((state.growth?.disks || []).find((item) => item.name === disk.name)?.trend?.days_until_full);
     const list = group.map((disk) => ({ disk, forecast: forecastOf(state.growth, disk.name, state.growthError) }));
@@ -340,11 +337,11 @@ function createDisks(ctx) {
     return (growing[0] || list[0]).forecast;
   }
 
-  // A path breaks after a "/", never inside a segment: <wbr> after each slash (else "/var/lib/clickhouse/disks/fixture_" and
-  // "hot/" on two lines).
+  // A path breaks after a "/", never inside a segment. The function adds <wbr> after each slash.
+  // Without it, a path can break as "/var/lib/clickhouse/disks/fixture_" and "hot/" on two lines.
   const pathNodes = (path) => String(path).split(/(?<=\/)/).flatMap((part, index) => (index ? [h("wbr"), part] : [part]));
 
-  // A disk's own facts: its share of the visible data, its path and policies.
+  // The own facts of a disk: its share of the visible data, its path and its policies.
   function diskFacts(data, disk) {
     const usage = usageOf(data, disk.name);
     return [
@@ -385,8 +382,7 @@ function createDisks(ctx) {
         h.replace(meter, h("span", { class: "systemDisk__noCapacity" }, "Capacity not reported"));
         summary = usage ? `${format.bytes(usage.bytes)} of active parts (the visible databases)` : "Object storage reports no capacity";
       }
-      // Space reserved by merges, mutations and fetches on any of the disks
-      // is gone from the filesystem's free space.
+      // The space that merges, mutations and fetches reserve on any disk is gone from the free space of the filesystem.
       const reserved = group.reduce((sum, item) => sum + (item.unreserved_space == null ? 0 : Math.max(0, (Number(item.free_space) || 0) - Number(item.unreserved_space))), 0);
       const unreserved = group.every((item) => item.unreserved_space == null) ? null : Math.max(0, (Number(disk.free_space) || 0) - reserved);
       const facts = [
@@ -463,9 +459,9 @@ function createDisks(ctx) {
     const mergeTree = systemCharts.column(data.series?.merge_tree_bytes, xs.length);
     let lastMergeTree = NaN;
     for (let i = mergeTree.length - 1; i >= 0; i--) if (mergeTree[i] === mergeTree[i]) { lastMergeTree = mergeTree[i]; break; }
-    // Disks on one filesystem report the same used bytes: one line for them, named after all of them. The
-    // filesystems are the cards' (same capacity, same free space): their samples may differ by a few bytes, so
-    // two lines would lie on each other and the legend would name a colour nobody sees.
+    // Disks on one filesystem report the same used bytes. They get one line, with the names of all of them. The
+    // filesystems are those of the cards (same capacity, same free space). Their samples can differ by a few bytes.
+    // Two lines would lie on each other. The legend would then name a colour that nobody sees.
     const filesystemOf = new Map();
     for (const group of filesystems(state.disks?.disks || [])) for (const disk of group) filesystemOf.set(disk.name, group[0].name);
     const lines = [];
@@ -506,7 +502,7 @@ function createDisks(ctx) {
       },
     };
     for (const [id, entry] of charts.entries) drawChart(entry, specs[id], xs, step);
-    // Written and moved takes the row when it has no neighbour.
+    // The written and moved chart takes the whole row when it has no neighbour.
     charts.entries.get("written").card.classList.toggle("is-alone", charts.entries.get("merge_tree").card.hidden);
   }
 
@@ -533,7 +529,7 @@ function createDisks(ctx) {
 
   // --- Bytes by database -----------------------------------------------------
 
-  // A database's link: its Explorer page, scrolled to its storage.
+  // The link of a database leads to its Explorer page, scrolled to its storage.
   function databaseLink(name, { className = "", label = null } = {}) {
     const href = ctx.databaseHref(name, { tab: "storage" });
     const link = h(href ? "a" : "button", {
@@ -575,10 +571,9 @@ function createDisks(ctx) {
       const others = Math.max(0, total - listed);
       const othersCount = Math.max(0, (Number(totals[disk].databases) || own.length) - top.length);
       const share = (bytes) => (total > 0 ? bytes / total : 0);
-      // The disk's share strip: the size band of the Explorer and the
-      // Overview (ns.explorerTreemap.band, one colour rule), always a strip
-      // here; a click opens the database's storage. The table under it
-      // names the databases (its legend).
+      // This is the share strip of the disk. It is the size band of the Explorer and of the Overview
+      // (ns.explorerTreemap.band, with one colour rule). Here, it is always a strip. A click opens the storage of the database.
+      // The table under the strip names the databases. The table is the legend.
       const strip = h("div", { class: "systemDiskDb__strip" });
       explorerTreemap?.band(strip, {
         tree: { kind: "server", name: disk, bytes: total, count: Math.max(own.length, Number(totals[disk].databases) || 0), children: top.map((row) => ({ kind: "database", name: row.database, path: row.database, database: row.database, bytes: Number(row.bytes) || 0, count: 1 })) },
@@ -682,7 +677,7 @@ function createDisks(ctx) {
   }
 
   return {
-    // query: the address's from / to when the address opened the section.
+    // query: the from / to values of the address, when the address opened the section.
     show(addressQuery) {
       if (addressQuery !== undefined) range.read(new URLSearchParams(String(addressQuery || "")));
       if (state.host && state.host !== kit.hostId()) resetForHost();
@@ -692,8 +687,8 @@ function createDisks(ctx) {
       else if (!timeRange.sameRange(state.loadedRange, range.value)) void loadGrowth(false);
     },
     refresh(force = true) {
-      // A Refresh while the first read runs (nothing has landed: state.host is set at launch) does not throw that
-      // read away; a forced read replaces it.
+      // A refresh while the first read runs does not stop that read. Nothing has arrived yet, because state.host is set at launch.
+      // A forced read replaces the first read.
       if (state.host && state.host !== kit.hostId()) resetForHost();
       void load(force);
     },

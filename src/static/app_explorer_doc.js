@@ -1,5 +1,6 @@
-// The documentation of a function: the text that the server sends (a small subset of Markdown) shown without HTML, the code in it
-// highlighted like the Query editor.
+// The documentation of a function.
+// The server sends the text as a small subset of Markdown. The page shows it without HTML.
+// The code in the text is highlighted like the Query editor.
 
 import { h } from "./app_dom.js";
 import { clear, model } from "./app_explorer_store.js";
@@ -15,10 +16,10 @@ function safeDocHref(raw) {
 
 function renderHighlightedCode(codeEl, source) {
   const text = String(source || "");
-  // Reuse the exact SQL lexer/highlighter used by the Query editor. This is
-  // important for CREATE statements: identifiers stay identifiers, while
-  // functions are highlighted only when they are known functions followed
-  // by `(`, using the selected host's function metadata.
+  // Reuse the exact SQL lexer and highlighter of the Query editor.
+  // This is important for CREATE statements. Identifiers stay identifiers.
+  // Functions are highlighted only when they are known functions followed by `(`.
+  // The check uses the function metadata of the selected host.
   if (highlight && typeof highlight.renderInto === "function") {
     highlight.renderInto(codeEl, text);
     return;
@@ -26,9 +27,9 @@ function renderHighlightedCode(codeEl, source) {
   codeEl.textContent = text;
 }
 
-// Inline markdown: [label](href), `code` and **bold**. A link's label is
-// inline markdown too ("[`Array(T)`](/sql-reference/data-types/array)"
-// reads as code, with or without the link).
+// Inline markdown: [label](href), `code` and **bold**.
+// A link's label is also inline markdown.
+// "[`Array(T)`](/sql-reference/data-types/array)" reads as code, with or without the link.
 function appendMarkdownInline(parent, text) {
   const source = String(text || "");
   const re = /\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*/g;

@@ -1,11 +1,13 @@
-// Unit tests of the query library: the store (src/query_library.cpp), and below it the units that it calls without a file: the reading of a
-// request (query_library_request.cpp), the rules of the tree (query_library_rules.cpp) and the import (query_library_import.cpp).
+// Unit tests of the query library. They test the store (src/query_library.cpp).
+// They also test the units below the store that work without a file.
+// These units are the request reader (query_library_request.cpp), the rules of the tree (query_library_rules.cpp),
+// and the import (query_library_import.cpp).
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF
 //          -DCHDASH_BUILD_QUERY_LIBRARY_TESTS=ON
 //        cmake --build build --target chdash_query_library_test
 // Run:   ./build/chdash_query_library_test   (exit code 0 = every check passed)
-// The Python harness (test_native_unit_tests.py) runs it when QUERY_LIBRARY_TEST_BINARY points at it.
+// The Python harness (test_native_unit_tests.py) runs the binary when QUERY_LIBRARY_TEST_BINARY names it.
 
 #include "query_library.hpp"
 #include "query_library_read.hpp"
@@ -88,7 +90,7 @@ std::string read_file(const std::string& path) {
 }
 
 void write_plain(const std::string& path, const std::string& text) {
-  // Replace with a new inode, like an editor's "save as" (rename).
+  // Replace the file with a new inode, as an editor does with a save as (rename).
   const std::string tmp = path + ".edit";
   {
     std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
@@ -190,7 +192,7 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   CHECK_STATUS(store.create_folder("not json", nullptr), 400);
   CHECK_STATUS(store.create_folder(folder_body("x", "f_missing"), nullptr), 400);
 
-  // Depth: 8 levels allowed, the 9th refused.
+  // Depth: the code allows 8 levels and refuses the 9th.
   std::vector<std::string> chain{reports};
   for (int level = 2; level <= 8; ++level) {
     r = store.create_folder(folder_body("L" + std::to_string(level), chain.back()), nullptr);
@@ -201,7 +203,7 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   CHECK_STATUS(r, 400);
   CHECK(str(json(r), "reason") == "depth");
 
-  // Moves: no cycles, no moving into itself.
+  // Moves: the code refuses cycles and a move into the folder itself.
   r = store.update_folder(reports, "{\"parent_id\":\"" + chain[3] + "\"}", nullptr);
   CHECK_STATUS(r, 400);
   CHECK(str(json(r), "reason") == "cycle");
@@ -212,7 +214,7 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   r = store.create_folder(folder_body("Other"), nullptr);
   CHECK_STATUS(r, 201);
   const std::string other = str(json(r), "id");
-  // Moving the 8-level chain below Other would make it 9 deep.
+  // A move of the 8-level chain below Other makes it 9 levels deep.
   r = store.update_folder(reports, "{\"parent_id\":\"" + other + "\"}", nullptr);
   CHECK_STATUS(r, 400);
   CHECK(str(json(r), "reason") == "depth");
@@ -256,7 +258,7 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   const std::string garbage = "abc";
   CHECK_STATUS(store.update_query(query, "{\"name\":\"x\"}", &garbage), 400);
 
-  // Delete: non-empty folder needs recursive.
+  // Delete: a non-empty folder needs the recursive option.
   r = store.delete_folder(other, false, nullptr);
   CHECK_STATUS(r, 409);
   CHECK(str(json(r), "error_code") == "not_empty");
@@ -272,15 +274,15 @@ void test_crud_tree_and_conflicts(const std::string& dir) {
   CHECK(lib["folders"].Size() == 0);
   CHECK(lib["queries"].Size() == 1);
 
-  // Persistence: a new store on the same file sees the same library.
+  // Persistence: a new store on the same file reads the same library.
   QueryLibraryStore again(options_for(path));
   auto lib2 = json(again.export_library(LOCAL, nullptr));
   CHECK(num(lib2, "revision") == num(lib, "revision"));
   CHECK(lib2["queries"].Size() == 1);
 }
 
-// The history of the runs is the browser's: a file of an earlier release that
-// still holds one loads without it, and nothing the store writes carries one.
+// The history of the runs is in the browser. A file of an earlier release that still holds one loads without it.
+// The store never writes a history to a file.
 void test_history_is_not_kept(const std::string& dir) {
   const std::string path = dir + "/history.json";
   write_plain(path, "{\"version\":2,\"revision\":3,\"folders\":[],\"queries\":["
@@ -308,7 +310,7 @@ void test_history_is_not_kept(const std::string& dir) {
     file.Parse(read_file(path).c_str());
     CHECK(!file.HasMember("history"));
 
-    // Read-only: the history is ignored in memory and the file is not touched.
+    // Read-only: the store ignores the history in memory and does not touch the file.
     const std::string ro_path = dir + "/history-ro.json";
     write_plain(ro_path, "{\"version\":2,\"revision\":1,\"folders\":[],\"queries\":[],"
                          "\"history\":[{\"id\":\"h_1\",\"sql\":\"SELECT history_marker_3\",\"host_id\":\"local\"}]}");
@@ -355,7 +357,7 @@ void test_malformed_and_reload(const std::string& dir) {
     CHECK(json(r).HasMember("load_error"));
     CHECK(read_file(path) == broken);  // never overwritten
 
-    // Fixing the file on disk clears the error without a restart.
+    // A fix of the file on disk clears the error. No restart is needed.
     write_plain(path, "{\"version\":2,\"revision\":7,\"folders\":[{\"id\":\"f_a\",\"host_id\":\"local\",\"parent_id\":null,\"name\":\"A\"}],"
                       "\"queries\":[{\"id\":\"q_a\",\"host_id\":\"local\",\"folder_id\":\"f_a\",\"name\":\"Q\",\"sql\":\"SELECT secret_marker_123\"}]}");
     lib = json(store.export_library(LOCAL, nullptr));
@@ -422,9 +424,9 @@ void test_import(const std::string& dir) {
   CHECK(str(r, "reason") == "cycle");
   CHECK(num(json(store.export_library(LOCAL, nullptr)), "revision") == revision);  // nothing new: no write
 
-  // "copy": a folder moved in from the browser's storage, under an existing
-  // folder: nothing merged, skipped or renamed (the same query twice stays
-  // twice), a clashing folder name is a 400 duplicate and writes nothing.
+  // "copy": a folder moves in from the browser's storage, under an existing folder.
+  // The store does not merge, skip or rename anything. The same query twice stays twice.
+  // A clashing folder name is a 400 duplicate, and the store writes nothing.
   std::string imported;
   const auto folders_now = json(store.export_library(LOCAL, nullptr));  // a named document: a range-for over a temporary dangles
   for (const auto& f : folders_now["folders"].GetArray()) {
@@ -477,8 +479,8 @@ void test_file_limit(const std::string& dir) {
   CHECK(static_cast<size_t>(st.st_size) <= o.max_file_bytes);
 }
 
-// Folders and queries belong to one host: reads filter by it, the
-// host is required and must be configured, a move across hosts is refused.
+// Folders and queries belong to one host. Reads filter by host.
+// The host is required and must be configured. The store refuses a move across hosts.
 void test_per_host(const std::string& dir) {
   const std::string path = dir + "/hosts.json";
   QueryLibraryStore store(options_for(path));
@@ -575,9 +577,9 @@ void test_per_host(const std::string& dir) {
   }
 }
 
-// A version-1 file (folders without a host) and entries without a host:
-// dropped on load. A writable library rewrites the file as version 2; a
-// read-only one serves the cleaned library and never touches the file.
+// A version-1 file has folders without a host. Entries without a host are dropped on load.
+// A writable library rewrites the file as version 2. A read-only library serves the cleaned library
+// and never touches the file.
 const char* kVersion1 =
     "{\"version\":1,\"revision\":4,\"folders\":["
     "{\"id\":\"f_ops\",\"parent_id\":null,\"name\":\"Operations\"},"
@@ -627,7 +629,7 @@ void test_migration(const std::string& dir) {
     CHECK(file["queries"].Size() == 2);
     CHECK(!file.HasMember("history"));  // an earlier release's history is dropped
     CHECK(num(file, "revision") == 4);
-    // Loading the rewritten file changes nothing more.
+    // The load of the rewritten file changes nothing more.
     const std::string rewritten = read_file(path);
     QueryLibraryStore again(options_for(path));
     check_migrated(again);
@@ -635,7 +637,7 @@ void test_migration(const std::string& dir) {
     // Still editable after the migration.
     CHECK_STATUS(again.create_folder(folder_body("Operations"), nullptr), 201);
 
-    // Read-only: the same library in memory, the file untouched.
+    // Read-only: the store keeps the same library in memory and does not touch the file.
     const std::string ro_path = dir + "/v1-readonly.json";
     write_plain(ro_path, kVersion1);
     auto o = options_for(ro_path);
@@ -646,7 +648,7 @@ void test_migration(const std::string& dir) {
     CHECK_STATUS(ro.create_folder(folder_body("x"), nullptr), 403);
     CHECK(read_file(ro_path) == kVersion1);
 
-    // A version-2 file holding entries without a host: dropped and rewritten too.
+    // A version-2 file that holds entries without a host drops them and rewrites the file.
     const std::string v2_path = dir + "/v2-hostless.json";
     write_plain(v2_path, "{\"version\":2,\"revision\":1,\"folders\":[{\"id\":\"f_x\",\"name\":\"X\"}],"
                          "\"queries\":[{\"id\":\"q_x\",\"name\":\"X\",\"sql\":\"SELECT 1\",\"host_id\":\"local\"}]}");
@@ -657,7 +659,7 @@ void test_migration(const std::string& dir) {
     v2file.Parse(read_file(v2_path).c_str());
     CHECK(v2file["folders"].Size() == 0);
 
-    // An external edit dropping in a version-1 file is migrated on reload.
+    // An external edit that adds a version-1 file migrates it on reload.
     write_plain(v2_path, kVersion1);
     check_migrated(v2);
     v2file.Parse(read_file(v2_path).c_str());
@@ -728,7 +730,7 @@ void test_the_rules_of_the_tree() {
   CHECK(folder_depth(state, std::string("f4")) == 1);
   const auto subtree = folder_subtree(state, "f1");
   CHECK(subtree.size() == 3 && subtree[0].second == 1 && subtree[2].first == "f3" && subtree[2].second == 3);
-  // A name is free per host and folder, and compared without the case of ASCII letters.
+  // A name is free per host and folder. The code compares names without the case of ASCII letters.
   CHECK(folder_name_taken(state, "local", std::nullopt, "OPS", nullptr));
   CHECK(!folder_name_taken(state, "local", std::nullopt, "OPS", &f1_id));
   CHECK(folder_name_taken(state, "other", std::nullopt, "OPS", nullptr));
@@ -746,7 +748,7 @@ void test_the_rules_of_the_tree() {
   CHECK(refused_with([&] { existing_folder_ref(state, member(doc, "gone"), "gone", "local"); }) == "validation/gone/not_found");
   CHECK(!existing_folder_ref(state, member(doc, "top"), "top", "local").has_value());
   CHECK(existing_folder_ref(state, member(doc, "ok"), "ok", "local") == std::string("f1"));
-  // An import compares name + SQL, ignoring the suffix that an earlier import added.
+  // An import compares name and SQL. It ignores the suffix that an earlier import added.
   CHECK(import_key("Top (2)", "S") == import_key("Top", "S"));
   CHECK(import_key("Top (x)", "S") != import_key("Top", "S"));
   CHECK(import_key("Top", "S") != import_key("Top", "T"));
@@ -778,7 +780,7 @@ void test_the_fields_of_a_request() {
   CHECK(trim_ascii(" \t x \n") == "x");
   CHECK(fold_ascii("AbC-\xC3\x89") == "abc-\xC3\x89");
   CHECK(truncate_utf8("a\xC3\xA9" "b", 2) == "a");
-  // The error answer: the one envelope, with what a client reads to fix the call.
+  // The error answer uses the one envelope. It gives what a client reads to fix the call.
   LibraryError e = validation("name", "duplicate", "taken");
   e.revision = 9;
   const auto answer = render_error(e);
@@ -790,7 +792,7 @@ void test_the_import_into_a_state() {
   auto state = small_state();
   int next = 0;
   const NewId new_id = [&](char prefix, const chdash::QueryLibraryState&) { return std::string(1, prefix) + "_n" + std::to_string(++next); };
-  // The payload: a folder under one of its own (by import id), one that exists (merged), a query twice, one of them known.
+  // The payload has a folder under one of its own (by import id), a folder that exists (merged), a query twice, and one of the queries is known.
   const auto doc = parsed(
       "{\"folders\":[{\"id\":\"a\",\"name\":\"Mine\"},{\"id\":\"b\",\"parent_id\":\"a\",\"name\":\"Inner\"},{\"name\":\"ops\"}],"
       "\"queries\":[{\"name\":\"Q\",\"sql\":\"SELECT 2\",\"folder_id\":\"b\"},{\"name\":\"Q\",\"sql\":\"SELECT 2\",\"folder_id\":\"b\"},"
@@ -800,7 +802,7 @@ void test_the_import_into_a_state() {
   CHECK(out.imported_queries == 2 && out.skipped_queries == 2);
   CHECK(out.changed());
   CHECK(out.folder_ids.size() == 2 && out.folder_ids[0].first == "a" && out.folder_ids[0].second == "f_n1" && out.folder_ids[1].second == "f_n2");
-  // The merged folder has no id in the payload, so it is not listed. The clash of "Top" is renamed.
+  // The merged folder has no id in the payload, so the answer does not list it. The clash of "Top" is renamed.
   CHECK(state.folders.size() == 6 && state.folders[5].parent_id == std::string("f_n1") && state.folders[5].created_at_ms == 1234);
   bool renamed = false;
   for (const auto& q : state.queries) renamed |= q.name == "Top (2)" && q.sql == "SELECT 9" && q.id == "q_n4";
@@ -809,7 +811,7 @@ void test_the_import_into_a_state() {
   auto again = state;
   const auto repeat = import_into(again, doc, "local", 1000, new_id, 1234);
   CHECK(!repeat.changed() && repeat.skipped_queries == 4 && repeat.merged_folders == 3 && again.queries.size() == state.queries.size());
-  // A copy refuses a folder that its parent already holds, and writes nothing that the caller keeps.
+  // A copy refuses a folder that its parent already holds. It writes nothing that the caller keeps.
   auto copied = small_state();
   const auto clash = parsed("{\"copy\":true,\"folders\":[{\"name\":\"ops\"}]}");
   CHECK(refused_with([&] { import_into(copied, clash, "local", 1000, new_id, 1); }) == "validation/folders[0].name/duplicate");
@@ -826,13 +828,13 @@ void test_the_import_into_a_state() {
   CHECK(run("{\"folders\":[{\"id\":\"a\",\"name\":\"A\"},{\"id\":\"a\",\"name\":\"B\"}]}") == "validation/folders[1].id/duplicate");
   CHECK(run("{\"queries\":[{\"name\":\"Q\",\"sql\":\"SELECT 1000000000000\"}]}") == "too_large/queries[0].sql/");
   CHECK(run("{\"queries\":[3]}") == "validation/queries[0]/type");
-  // Nothing to import changes nothing.
+  // An import with nothing to import changes nothing.
   CHECK(run("{}") == "accepted");
 }
 
 } // namespace
 
-// The page of the tree: at most 100 items, as many levels deep as fit, a first level larger than a page in windows.
+// The page of the tree has at most 100 items and as many levels as fit. A first level larger than a page comes in windows.
 chdash::QueryLibraryFolder test_folder(const std::string& id, const std::string& name, const std::string& parent = "") {
   chdash::QueryLibraryFolder f;
   f.id = id;
@@ -865,17 +867,17 @@ void test_the_page_of_the_tree() {
   CHECK(page.depth == 1 && page.complete && !page.next_cursor);
   CHECK(page.loaded.size() == 10 && page.query_count.at("f3") == 9 && page.child_count.at("f3") == 9);
   CHECK(page.host_folders == 10 && page.host_queries == 90);
-  // One more folder: 11 + 99 = 110 items do not fit. The page keeps the levels that do: the folders only, and their children wait.
+  // One more folder: 11 + 99 = 110 items do not fit. The page keeps the levels that fit: the folders only. Their children wait.
   s.folders.push_back(test_folder("f10", "Team 10"));
   for (int j = 0; j < 9; ++j) s.queries.push_back(test_query("q10_" + std::to_string(j), "Query " + std::to_string(j), "f10"));
   page = library_page(s, *LOCAL, std::nullopt, 0, 100);
   CHECK(page.folders.size() == 11 && page.queries.empty() && page.depth == 0);
   CHECK(!page.complete && page.loaded.empty() && page.query_count.at("f10") == 9 && page.child_count.at("f10") == 9);
-  // A folder of the page is read on its own: its children, one level (they fit).
+  // The code reads a folder of the page on its own. It reads its children, one level (they fit).
   page = library_page(s, *LOCAL, std::string("f10"), 0, 100);
   CHECK(page.folders.empty() && page.queries.size() == 9 && page.complete && page.level_total == 9);
   CHECK(page.parent_queries == 9 && page.host_queries == 99);
-  // The names are ordered without the case, folders first; "Team 1" comes before "Team 10" and "Team 2".
+  // The names are ordered without the case. Folders come first. "Team 1" comes before "Team 10" and "Team 2".
   page = library_page(s, *LOCAL, std::nullopt, 0, 100);
   CHECK(page.folders.front()->name == "Team 0" && page.folders[1]->name == "Team 1" && page.folders[2]->name == "Team 10");
   // A first level larger than a page comes in windows: 250 queries at the top level.
@@ -888,14 +890,14 @@ void test_the_page_of_the_tree() {
   auto last = library_page(flat, *LOCAL, std::nullopt, 200, 100);
   CHECK(last.queries.size() == 50 && !last.next_cursor);
   CHECK(first.queries.front()->name == "Q000" && second.queries.front()->name == "Q100" && last.queries.back()->name == "Q249");
-  // The windows cover the level once, folders first: 120 folders and 50 queries.
+  // The windows cover the level once. Folders come first: 120 folders and 50 queries.
   chdash::QueryLibraryState mixed;
   for (int i = 0; i < 120; ++i) mixed.folders.push_back(test_folder("f" + std::to_string(i), "F" + std::string(i < 10 ? "00" : i < 100 ? "0" : "") + std::to_string(i)));
   for (int i = 0; i < 50; ++i) mixed.queries.push_back(test_query("q" + std::to_string(i), "Q" + std::to_string(i)));
   auto m1 = library_page(mixed, *LOCAL, std::nullopt, 0, 100);
   auto m2 = library_page(mixed, *LOCAL, std::nullopt, 100, 100);
   CHECK(m1.folders.size() == 100 && m1.queries.empty() && m2.folders.size() == 20 && m2.queries.size() == 50 && !m2.next_cursor);
-  // A limit below the maximum is kept; above it is cut to the maximum.
+  // A limit below the maximum is kept. A limit above it is cut to the maximum.
   CHECK(library_page(flat, *LOCAL, std::nullopt, 0, 10).queries.size() == 10);
   CHECK(library_page(flat, *LOCAL, std::nullopt, 0, 5000).queries.size() == 100);
   // The other host has its own library.
@@ -907,7 +909,7 @@ void test_the_search_and_the_detail_of_a_query(const std::string& dir) {
   const std::string ops = str(json(store.create_folder(folder_body("Operations"), nullptr)), "id");
   CHECK_STATUS(store.create_query(query_body("Active parts", "SELECT table FROM system.parts", ops), nullptr), 201);
   CHECK_STATUS(store.create_query(query_body("The answer", "SELECT 42 AS answer"), nullptr), 201);
-  // The page has no SQL; one query has it, with the folders above it.
+  // The page has no SQL. One query has the SQL, with the folders above it.
   auto page = json(store.get_page(LOCAL, nullptr, 0, 100));
   CHECK(page["queries"].Size() == 2 && !page["queries"][0].HasMember("sql") && !page["queries"][0].HasMember("description"));
   CHECK(page["folders"][0]["query_count"].GetInt() == 1 && page["folders"][0]["loaded"].GetBool());
@@ -919,13 +921,13 @@ void test_the_search_and_the_detail_of_a_query(const std::string& dir) {
   CHECK_STATUS(store.get_query(OTHER, id), 404);
   const std::string missing = "f_missing";
   CHECK_STATUS(store.get_page(LOCAL, &missing, 0, 100), 404);
-  // The search reads the name, the description, the SQL and the path, every word, without the case.
+  // The search reads the name, the description, the SQL, and the path. It checks every word, without the case.
   auto found = json(store.search(LOCAL, "PARTS operations", 100));
   CHECK(found["total"].GetInt() == 1 && str(found["results"][0], "path") == "/Operations");
   CHECK(json(store.search(LOCAL, "answer", 100))["results"].Size() == 1);
   CHECK(json(store.search(LOCAL, "nothing like it", 100))["total"].GetInt() == 0);
   CHECK_STATUS(store.search(LOCAL, "   ", 100), 400);
-  // The export of a folder: it and what is under it, with the SQL; the export of the host: everything.
+  // The export of a folder gives the folder and what is under it, with the SQL. The export of the host gives everything.
   auto exported = json(store.export_library(LOCAL, &ops));
   CHECK(exported["folders"].Size() == 1 && exported["queries"].Size() == 2 && exported["queries"][0].HasMember("sql"));
   CHECK(json(store.export_library(LOCAL, nullptr))["queries"].Size() == 3);

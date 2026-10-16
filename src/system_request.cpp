@@ -28,8 +28,9 @@ std::string one_of(const std::vector<std::string>& names) {
 
 bool member(const std::vector<std::string>& names, const std::string& value) { return std::find(names.begin(), names.end(), value) != names.end(); }
 
-// The window of the Queries (the list and a drill-down share it). Absent: the last default_lookback_minutes (at most the lookback); a window
-// ending in the future ends now; wider than query_log_max_lookback_hours is refused.
+// The window of the Queries. The list and a drill-down share it.
+// When absent, the window is the last default_lookback_minutes, at most the lookback. A window that ends in the future ends now.
+// A window wider than query_log_max_lookback_hours is refused.
 bool queries_window(const httplib::Request& req, const SystemSettings& settings, uint64_t now_ms, uint64_t& from_ms, uint64_t& to_ms, ApiError* error) {
   const uint64_t max_span_ms = static_cast<uint64_t>(settings.query_log_max_lookback_hours) * 3'600'000ULL;
   to_ms = now_ms;
@@ -92,7 +93,7 @@ bool parse_series_request(const httplib::Request& req, const SystemSettings& set
   const std::string panel = req.has_param("panel") ? param(req, "panel") : std::string("performance");
   if (panel != "performance" && panel != "disk_growth") return fail(error, 400, "invalid_panel", "panel must be performance or disk_growth.");
   request.growth = panel == "disk_growth";
-  // Cluster fan-out (clusterAllReplicas) is opt-in: system.cluster_fanout.
+  // Cluster fan-out (clusterAllReplicas) is opt-in: it needs system.cluster_fanout.
   const std::string scope = req.has_param("scope") ? param(req, "scope") : std::string("server");
   if (scope == "cluster") {
     if (!settings.cluster_fanout) return fail(error, 400, "cluster_fanout_disabled", "The cluster view is off (system.cluster_fanout).");
@@ -100,7 +101,7 @@ bool parse_series_request(const httplib::Request& req, const SystemSettings& set
   }
   if (scope != "server") return fail(error, 400, "invalid_scope", "scope must be server or cluster.");
 
-  // The window: the default lookback when absent, at most max_lookback_days.
+  // The window uses the default lookback when it is absent. It is at most max_lookback_days.
   const uint64_t max_span_ms = static_cast<uint64_t>(settings.max_lookback_days) * 86'400'000ULL;
   uint64_t to_ms = now_ms;
   uint64_t from_ms = 0;
@@ -110,12 +111,12 @@ bool parse_series_request(const httplib::Request& req, const SystemSettings& set
   if (req.has_param("from_ms")) {
     if (!parse_ms(param(req, "from_ms"), from_ms)) return fail(error, 400, "invalid_range", "from_ms must be a whole number of milliseconds.");
   } else {
-    // Disk growth opens on system.disk_growth_days.
+    // Disk growth uses the system.disk_growth_days setting.
     const uint64_t lookback = request.growth ? static_cast<uint64_t>(settings.disk_growth_days) * 86'400'000ULL
                                              : static_cast<uint64_t>(settings.default_lookback_minutes) * 60'000ULL;
     from_ms = to_ms > lookback ? to_ms - lookback : 0;
   }
-  // A window ending in the future ends now.
+  // A window that ends in the future ends now.
   to_ms = std::min(to_ms, now_ms);
   if (from_ms >= to_ms) return fail(error, 400, "invalid_range", "from_ms must be before to_ms (and before now).");
   if (to_ms - from_ms > max_span_ms) {
@@ -159,7 +160,7 @@ bool parse_queries_request(const httplib::Request& req, const SystemSettings& se
   if (!user.empty() && !monitor_queries_user_valid(user)) {
     return fail(error, 400, "invalid_user", "user must be 1 to " + std::to_string(kMonitorQueryUserMaxBytes) + " bytes without control characters.");
   }
-  // One database and / or one table ("database.table") the shapes involve, or any (absent or empty).
+  // One database and / or one table ("database.table") that the shapes involve. Absent or empty means any.
   const std::string database = param(req, "database");
   if (!database.empty() && !monitor_queries_database_valid(database)) {
     return fail(error, 400, "invalid_database", "database must be 1 to " + std::to_string(kMonitorQueryObjectMaxBytes) + " bytes without control characters.");
@@ -215,7 +216,8 @@ bool parse_query_request(const httplib::Request& req, const std::string& hash_te
   request.from_ms = from_ms;
   request.to_ms = to_ms;
   MonitorQueriesRequest& q = request.query;
-  // The Performance steps (at most 300 buckets); the window aligned to the step, which a minute-aligned window already is up to 1 min steps.
+  // The Performance steps have at most 300 buckets.
+  // The window is aligned to the step. A minute-aligned window is already aligned for steps up to 1 min.
   q.step_s = monitor_series_step_seconds((to_ms - from_ms + 999) / 1000);
   q.from_s = from_ms / 1000 / q.step_s * q.step_s;
   q.to_s = ((to_ms + 999) / 1000 + q.step_s - 1) / q.step_s * q.step_s;

@@ -1,28 +1,25 @@
-// Menus, pickers and dropdowns: one behaviour for every popup list of the
-// app (the header host / page / theme menus, the Run and Copy split
-// menus, the run settings, the Observability pickers, the Explorer, chart
-// and editor menus, the click-to-filter and row context menus). Each
-// family keeps its look (themeSelect / tracePicker / runMenu...); this
-// module owns:
-//  - open / close: aria-expanded on the button, the root's open / closing
-//    classes (themeSelect--open / --closing, or is-open) and the 160 ms
-//    close motion before the list is hidden;
-//  - one menu open at a time (a submenu keeps its parents open);
-//  - placement: the list stays in the viewport (shifted, flipped above the
-//    button, or capped in height); a floating menu (portal, context menu,
-//    submenu) mounts in the open <dialog> that holds its anchor, since the
-//    page outside a modal dialog is inert;
-//  - keys: Down / Up / Home / End move between the items, a typed prefix
-//    jumps to the next item starting with it, Enter / Space activate,
-//    Escape closes and returns the focus to the button, Tab closes;
-//    Down / Up on the button open the list;
-//  - focus: opened from the keyboard, the selected item (or the first)
-//    takes the focus, from a pointer the list itself; on
-//    a close by Escape or a pick the button gets it back, unless the pick
-//    moved it somewhere else (a dialog it opened);
-//  - dismissal: every open menu is an ns.layers layer (the one Escape and
-//    outside-press listener of the page); layer() below is the only code
-//    that knows it.
+// Menus, pickers and dropdowns. All popup lists of the app use one behaviour.
+// This applies to the header host, page and theme menus, the Run and Copy split menus,
+// the run settings, the Observability pickers, the Explorer, the chart and editor menus,
+// the click-to-filter menu and the row context menus. Each family keeps its own look
+// (themeSelect / tracePicker / runMenu...).
+//
+// This module owns:
+//  - open / close: aria-expanded on the button. The root gets the open and closing classes
+//    (themeSelect--open / --closing, or is-open). The list hides after a 160 ms close motion.
+//  - one menu open at a time. A submenu keeps its parents open.
+//  - placement: the list stays in the viewport. It is shifted, flipped above the button,
+//    or capped in height. A floating menu (portal, context menu, submenu) mounts in the open
+//    <dialog> that holds its anchor. The page outside a modal dialog is inert.
+//  - keys: Down / Up / Home / End move between the items. A typed prefix jumps to the next
+//    item that starts with it. Enter / Space activate the item. Escape closes the menu and
+//    returns the focus to the button. Tab closes the menu. Down / Up on the button open the list.
+//  - focus: when the menu opens from the keyboard, the selected item (or the first item)
+//    takes the focus. From a pointer, the list itself takes the focus. A close by Escape
+//    or a pick gives the focus back to the button, unless the pick moved the focus
+//    somewhere else (for example to a dialog that the pick opened).
+//  - dismissal: every open menu is an ns.layers layer. This is the one Escape and
+//    outside-press listener of the page. layer() below is the only code that knows it.
 //
 //   bind(button, menu, options)  -> handle   an action or settings menu
 //   select(selectEl, options)    -> handle   a single-choice picker over a
@@ -54,11 +51,11 @@ const TEXT_FIELD = 'input:not([type="checkbox"]):not([type="radio"]):not([type="
 const MARGIN = 8;
 
 // ---- Dismiss layer -------------------------------------------------------
-// Every open menu is an ns.layers layer (app_ui_layers.js: the page's one
-// Escape and outside-press listener, the stack shared with popovers,
-// panels and dialogs). layer() is the only code here that knows it. An
-// entry is { el(): the elements that count as inside, onDismiss(reason:
-// "outside" | "escape" | ...) }; ns.menu moves the focus itself.
+// Every open menu is an ns.layers layer. app_ui_layers.js holds the one Escape and
+// outside-press listener of the page. The stack is shared with popovers, panels and dialogs.
+// layer() is the only code here that knows it.
+// An entry is { el(): the elements that count as inside, onDismiss(reason:
+// "outside" | "escape" | ...) }. ns.menu moves the focus itself.
 function layer(entry) {
   const handle = layers?.push({ el: entry.el, onDismiss: (reason) => { entry.onDismiss(reason); }, returnFocus: false, name: "menu" }) || null;
   return { release: () => { handle?.release?.(); } };
@@ -67,7 +64,7 @@ function layer(entry) {
 // ---- Shared state --------------------------------------------------------
 const openHandles = new Set();
 
-// Opening a menu closes the others, except the ones it is nested in.
+// When a menu opens, the other menus close. The parent menus of the new menu stay open.
 function closeOthers(handle) {
   for (const other of [...openHandles]) {
     if (other === handle || (handle.button && other.contains(handle.button))) continue;
@@ -95,18 +92,18 @@ function focusItem(el) {
   try { el?.focus({ preventScroll: false }); } catch { /* detached */ }
 }
 
-// A pick on a link item: the link navigates once its click is over (a
-// link removed or hidden during its click does not navigate).
+// A pick on a link item. The link navigates when its click is over. A link that is
+// removed or hidden during its click does not navigate.
 function afterPick(item, fn) {
   if (item?.matches?.("a[href]")) setTimeout(fn, 0);
   else fn();
 }
 
 // ---- Placement -----------------------------------------------------------
-// Keeps an open list in the viewport with the CSS `translate` property
-// (independent of the families' transform motion): shifted left / right,
-// flipped above the anchor when the space below is short and above is
-// larger, or capped in height (it scrolls).
+// Keeps an open list in the viewport. It uses the CSS `translate` property, which is
+// independent of the transform motion of the families. The list is shifted left or right.
+// It is flipped above the anchor when the space below is short and the space above is
+// larger. Otherwise, the list is capped in height and it scrolls.
 function place(menu, anchor, { flip = true, gap = 4 } = {}) {
   if (!menu || menu.hidden) return;
   menu.style.translate = "";
@@ -136,17 +133,17 @@ function place(menu, anchor, { flip = true, gap = 4 } = {}) {
   if (dx || dy) menu.style.translate = `${Math.round(dx)}px ${Math.round(dy)}px`;
 }
 
-// A floating menu mounts in the open <dialog> that holds its anchor: the
-// page outside a modal dialog is inert.
+// A floating menu mounts in the open <dialog> that holds its anchor. The page outside a
+// modal dialog is inert.
 function host(anchor) {
   const dialog = anchor instanceof Element ? anchor.closest("dialog[open]") : null;
   return dialog || document.body;
 }
 
-// A floating menu at a point (x, y), or under an anchor's box: fixed,
-// clamped to the viewport, opened above (the point, or the anchor's top)
-// when it does not fit below. align "end" lines its right edge up with
-// the anchor's.
+// A floating menu at a point (x, y), or under the box of an anchor. The menu is fixed
+// and clamped to the viewport. It opens above the point, or above the top of the anchor,
+// when it does not fit below. With align "end", the right edge of the menu lines up with
+// the right edge of the anchor.
 function placeFloating(menu, { x = 0, y = 0, anchor = null, align = "start", gap = 4 } = {}) {
   const vw = document.documentElement.clientWidth || window.innerWidth || 0;
   const vh = window.innerHeight || 0;
@@ -210,24 +207,24 @@ function bindKeys(menu, { items, close, back = null }) {
 
 // ---- bind ------------------------------------------------------------------
 // options:
-//   root            element holding the open / closing classes (default:
+//   root            element that holds the open and closing classes (default:
 //                   the button's .themeSelect / .runSplit / .picker)
 //   openClass       default themeSelect--open (themeSelect roots), else is-open
 //   closingClass    default themeSelect--closing (themeSelect roots)
 //   items           selector of the list's items (default: the ARIA item roles)
 //   focus           "item" (default: the selected or first item), "first",
-//                   "last", "menu", "none" or a function returning the element
+//                   "last", "menu", "none" or a function that returns the element
 //   closeOnSelect   true / false; default: a pick closes, except the
 //                   menuitemcheckbox / menuitemradio items of a settings menu
 //   canOpen()       false keeps it closed (a one-option picker)
 //   onOpen()        before it shows (fill the list); onClose()
-//   trigger         false: the button's click is the caller's (it calls toggle)
+//   trigger         false: the caller handles the click on the button. The caller calls toggle.
 //   placement       false: CSS alone places the list
-//   portal          true: the list opens fixed in host(button) (out of a
-//                   clipping or re-rendered container), aligned with the
-//                   button ("start" / "end": portalAlign) and gets is-open
-//   keys            false: a panel with its own keys and picks (the time
-//                   range panel): no item keys, a click inside never closes
+//   portal          true: the list opens fixed in host(button). It is not inside a container that clips it or
+//                   re-renders it. It aligns with the button ("start" / "end": portalAlign)
+//                   and gets the is-open class.
+//   keys            false: a panel with its own keys and picks (the time range panel).
+//                   The menu sets no item keys. A click inside the panel never closes it.
 //   inside()        more elements that count as inside
 function bind(button, menu, options = {}) {
   if (!button || !menu) return null;
@@ -262,7 +259,7 @@ function bind(button, menu, options = {}) {
     if (typeof how === "function") { focusItem(how() || menu); return; }
     if (how === "menu") { menu.focus({ preventScroll: true }); return; }
     const list = items();
-    // A listbox opens on its selected option, a menu on its first item.
+    // A listbox opens on its selected option. A menu opens on its first item.
     const target = how === "last" ? list[list.length - 1] : how === "first" || role !== "listbox" ? list[0] : (selectedItem(list) || list[0]);
     if (target) focusItem(target);
     else menu.focus({ preventScroll: true });
@@ -283,8 +280,8 @@ function bind(button, menu, options = {}) {
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
     openHandles.add(handle);
-    // The closed style is laid out first, so adding the open class now
-    // still runs the opening motion and the list can take the focus.
+    // The closed style is laid out first. Therefore, adding the open class now
+    // still runs the motion of the open state, and the list can take the focus.
     void menu.offsetHeight;
     if (openClass) root?.classList.add(openClass);
     if (portal) menu.classList.add("is-open");
@@ -297,8 +294,8 @@ function bind(button, menu, options = {}) {
     options.onOpened?.();
   }
 
-  // focus: true (always), false (never) or "auto" (default: back to the
-  // button when the focus was in the list and nothing else took it).
+  // focus: true (always), false (never) or "auto" (default). With "auto", the focus goes
+  // back to the button when the focus was in the list and nothing else took the focus.
   function close({ immediate = false, focus = "auto" } = {}) {
     const wasOpen = isOpen();
     if (!wasOpen && menu.hidden) return;
@@ -319,7 +316,7 @@ function bind(button, menu, options = {}) {
       if (portal) {
         menu.classList.remove("is-open");
         for (const prop of ["position", "left", "top", "right", "bottom"]) menu.style.removeProperty(prop);
-        // Back in its place; gone with it when that place left the page.
+        // The element returns to its place. It is removed too when that place left the page.
         if (home?.parent?.isConnected) {
           if (menu.parentNode !== home.parent) home.parent.insertBefore(menu, home.next?.parentNode === home.parent ? home.next : null);
         } else if (home?.parent) menu.remove();
@@ -342,9 +339,9 @@ function bind(button, menu, options = {}) {
     else open();
   }
 
-  // A pointer opens the list with the focus on the list itself (no ring
-  // on an item; Down / Up go on from there); Enter / Space open it on its
-  // selected or first item.
+  // A pointer opens the list, and the focus goes to the list itself. No focus ring
+  // shows on an item. Down / Up then move from there. Enter / Space open the list
+  // on its selected or first item.
   if (options.trigger !== false) {
     button.addEventListener("click", (event) => {
       if (button.disabled) return;
@@ -376,13 +373,15 @@ function bind(button, menu, options = {}) {
 }
 
 // ---- select ----------------------------------------------------------------
-// A single-choice picker over a native <select> (the data source: hidden,
-// tabindex -1, aria-hidden). The button reads "<label> - <option>"
-// (data-field-label on the select, or options.label). It adopts the
-// markup a page ships (root .tracePicker around the select, its button
-// and list) or builds it. A pick sets the select's value, fires its
-// change event and calls onChange(value). Mutations of the select (new
-// options, disabled) refresh it; so does a "tracepicker-refresh" event.
+// A single-choice picker over a native <select>. The native select is the data source.
+// It is hidden, with tabindex -1 and aria-hidden. The button reads "<label> - <option>"
+// (data-field-label on the select, or options.label).
+//
+// The picker adopts the markup that a page ships (root .tracePicker around the select,
+// with its button and list). Otherwise, the picker builds the markup.
+// A pick sets the select's value, fires its change event and calls onChange(value).
+// Changes of the select (new options, disabled) refresh the picker. A "tracepicker-refresh"
+// event also refreshes it.
 //   options: { label, className, onChange(value), disableWhenEmpty }
 function select(selectEl, options = {}) {
   if (!selectEl) return null;
@@ -426,8 +425,8 @@ function select(selectEl, options = {}) {
     const disableWhenEmpty = options.disableWhenEmpty ?? selectEl.dataset.disableWhenEmpty === "1";
     const hasValues = [...selectEl.options].some((option) => !option.hidden && String(option.value || "").length > 0);
     const unavailable = !!selectEl.disabled || (disableWhenEmpty && !hasValues);
-    // The label in a span of its own: a long value ends in an ellipsis (a
-    // flex button cannot cut its bare text), the whole of it in the title.
+    // The label is in a span of its own. A long value ends in an ellipsis, because a
+    // flex button cannot cut its bare text. The title shows the whole value.
     const full = label() ? `${label()} \u00b7 ${text}` : text;
     button.replaceChildren(h("span", { class: "tracePicker__label" }, full));
     button.title = full;
@@ -457,7 +456,7 @@ function select(selectEl, options = {}) {
     refresh();
   }
 
-  // Runs before bind's own click handler (capture): the pick, then the close.
+  // This handler runs before the click handler of bind, in the capture phase. It runs the pick first, then the close.
   list.addEventListener("click", (event) => {
     const item = event.target instanceof Element ? event.target.closest(".tracePicker__option") : null;
     if (!item || item.disabled || !list.contains(item)) return;
@@ -480,19 +479,19 @@ function select(selectEl, options = {}) {
 }
 
 // ---- multi -----------------------------------------------------------------
-// A multi-select list: checkboxes (or aria-checked options) that stay
-// open on each pick; the caller renders the list (onOpen) and the button
-// label ("Service - 2 selected"). A listbox is marked multiselectable; a
-// popup that holds check boxes and other controls is a dialog (the MCP
-// Usage pickers), which has no such state.
+// A multi-select list. It has checkboxes (or aria-checked options) that keep the list
+// open on each pick. The caller renders the list (onOpen) and the button
+// label ("Service - 2 selected"). A listbox is marked multiselectable.
+// A popup that holds check boxes and other controls is a dialog (the MCP
+// Usage pickers). That dialog has no such state.
 function multi(button, menu, options = {}) {
   if (menu?.getAttribute("role") === "listbox") menu.setAttribute("aria-multiselectable", "true");
   return bind(button, menu, { items: 'input[type="checkbox"], button, [role="option"]', closeOnSelect: false, ...options });
 }
 
 // ---- split -----------------------------------------------------------------
-// A split button: the main action stays a plain button; the toggle next
-// to it opens the menu of the other actions (Run | Run with profiling,
+// A split button. The main action stays a plain button. The toggle next to it opens
+// the menu of the other actions (Run | Run with profiling,
 // Copy JSON | Copy CSV / Download).
 function split(main, toggle, menu, options = {}) {
   const root = options.root !== undefined ? options.root : (main || toggle)?.closest(".runSplit") || null;
@@ -503,10 +502,12 @@ function split(main, toggle, menu, options = {}) {
 const floating = new WeakMap(); // menu element -> { current handle }
 
 // A menu at a point (a right click: x, y) or under an anchor (a click on a
-// value: anchor, align): mounted in host(anchor), fixed, kept in the
-// viewport, its first item focused. It closes on a pick, Escape (focus
-// back to returnFocus), a pointer outside, a scroll outside it, a resize
-// or the window losing focus. options: { x, y, anchor, align, returnFocus,
+// value: anchor, align). The menu is mounted in host(anchor) and is fixed. It stays in the
+// viewport, and its first item gets the focus. The menu closes on a pick. It also closes on
+// Escape, which gives the focus back to returnFocus. It closes on a pointer outside the menu,
+// on a scroll outside the menu, on a resize, or when the window loses the focus.
+//
+// options: { x, y, anchor, align, returnFocus,
 // expanded (an element whose aria-expanded follows the menu), remove
 // (default true: the menu leaves the document on close; false: hidden),
 // within (the element whose open dialog hosts it), onClose }.
@@ -525,7 +526,7 @@ function context(menu, { x = 0, y = 0, anchor = null, align = "start", returnFoc
       const current = state.current;
       afterPick(item, () => current?.close({ focus: false }));
     });
-    // Another item pointed at or focused closes the open submenu.
+    // When another item gets the pointer or the focus, the open submenu closes.
     const leaveSubmenus = (event) => {
       const item = event.target instanceof Element ? event.target.closest(ITEMS) : null;
       if (!item || item.closest(LISTS) !== menu) return;
@@ -571,7 +572,7 @@ function context(menu, { x = 0, y = 0, anchor = null, align = "start", returnFoc
   };
   state.current = handle;
   openHandles.add(handle);
-  // The anchor counts as inside: a click on it again is the caller's toggle.
+  // The anchor counts as inside. A click on it again is handled by the toggle of the caller.
   entry = layer({
     el: () => [menu, expanded, ...[...openHandles].filter((h) => h.parent === handle).map((h) => h.menu)].filter(Boolean),
     onDismiss: (reason) => handle.close({ focus: reason === "escape" }),
@@ -586,9 +587,9 @@ function context(menu, { x = 0, y = 0, anchor = null, align = "start", returnFoc
 }
 
 // A submenu of `item` (a role=menuitem of a context menu) in `list` (a
-// role=menu element): opens on a click, Enter, Space, Right or when the
-// pointer enters the item, beside it (flipped left when it does not
-// fit); Left or Escape close it back on its item; a pick closes the
+// role=menu element). The submenu opens on a click, on Enter, on Space, on Right, or when the
+// pointer enters the item. It opens beside the item, or on the left when it does not
+// fit. Left or Escape closes the submenu and returns the focus to its item. A pick closes the
 // whole menu. options: { parent (the context menu's handle), onOpen(list)
 // (fill it) }.
 function submenu(item, list, { parent = null, onOpen = null } = {}) {
@@ -620,8 +621,8 @@ function submenu(item, list, { parent = null, onOpen = null } = {}) {
         list.style.top = `${Math.round(Math.max(4, Math.min(a.top - 4, vh - h - 4)))}px`;
         item.setAttribute("aria-expanded", "true");
         openHandles.add(handle);
-        // The parent menu counts as inside: pointing back at it is the
-        // parent's business (another item closes the submenu).
+        // The parent menu counts as inside. The parent handles a pointer that points back at it.
+        // Another item closes the submenu.
         entry = layer({ el: () => [list, item, parent?.menu].filter(Boolean), onDismiss: (reason) => handle.close({ focus: reason === "escape" }) });
       }
       if (focus !== "none") focusItem(items()[0]);
@@ -656,7 +657,7 @@ function submenu(item, list, { parent = null, onOpen = null } = {}) {
   return handle;
 }
 
-// Closes every open menu (a view hides, a dialog opens).
+// Closes every open menu. This happens when a view hides or a dialog opens.
 function closeAll() {
   for (const handle of [...openHandles]) handle.close({ immediate: true, focus: false });
 }

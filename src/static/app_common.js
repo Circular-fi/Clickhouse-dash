@@ -1,8 +1,8 @@
-// What every page runs first, whether the page uses it or not: the foundations (formats, colours, the DOM lookups, the
-// address bar's router, the stack of layers, the page state) and the components (popovers, panels, tabs, menus, icons,
-// states, tables, badges, copy, SQL blocks, key / value lists, stat tiles, chart cards). Some install a listener at once
-// (the one popstate listener of ns.router, the one Escape listener of the layers), some are what the page's own modules
-// import in turn. Each page entry (app_page_<page>.js) imports this file first.
+// Every page runs this file first, whether the page uses it or not.
+// It loads the foundations: formats, colours, the DOM lookups, the address bar's router, the stack of layers and the page state.
+// It also loads the components: popovers, panels, tabs, menus, icons, states, tables, badges, copy, SQL blocks, key / value lists, stat tiles and chart cards.
+// Some modules install a listener at once. These are the one popstate listener of ns.router and the one Escape listener of the layers.
+// Other modules are imports that the page's own modules use. Each page entry (app_page_<page>.js) imports this file first.
 import "./app_format.js";
 import "./app_palette.js";
 import "./app_dom.js";

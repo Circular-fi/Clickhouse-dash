@@ -1,13 +1,15 @@
-// Unit tests of the MCP server side: scopes, keys and their file, the rate limit, the SQL
-// scanner and builder, the protocol (with a fake backend), the tools (with a fake database)
-// and the startup errors of the mcp { } configuration block. Also the HTTP hardening of the
-// server (http_guard.hpp), the random source, the log lines, the metrics text, the worker group
-// and the stop of the health runner. No ClickHouse needed.
+// These are the unit tests of the MCP server side. They check the scopes, the keys and their file,
+// the rate limit, the SQL scanner and builder. They check the protocol, with a fake backend, and
+// the tools, with a fake database. They also check the startup errors of the mcp { } configuration
+// block. They also check the HTTP hardening of the server (http_guard.hpp) and the random source.
+// They check the log lines, the metrics text, the worker group and the stop of the health runner.
+//
+// No ClickHouse is needed.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_MCP_TESTS=ON
 //        cmake --build build --target chdash_mcp_test
-// Run:   ./build/chdash_mcp_test   (exit code 0 = every check passed)
-// The Python harness (test_native_unit_tests.py) runs it when MCP_TEST_BINARY points at it.
+// Run:   ./build/chdash_mcp_test   (exit code 0 means that every check passed)
+// The Python harness (test_native_unit_tests.py) runs it when MCP_TEST_BINARY names it.
 
 #include "config.hpp"
 #include "health_runner.hpp"
@@ -25,6 +27,8 @@
 #include "sql_literal.hpp"
 #include "mcp_tool_support.hpp"
 #include "mcp_tools.hpp"
+#include "mcp_trace.hpp"
+#include "mcp_untrusted.hpp"
 #include "mcp_usage.hpp"
 #include "mcp_usage_store.hpp"
 #include "metrics.hpp"
@@ -50,6 +54,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -176,8 +181,10 @@ void test_scope() {
   CHECK_EQ(hosts.size(), size_t(2));
   CHECK_EQ(hosts[0], std::string("a"));
 
-  // SQL tools go only with all data, even when named; "*" never grants them without it. "*" does not give the tool that a key must name
-  // (mcp_analysis_all_usage), and the tools that every key has (the limits, the usage) come with any list, an empty one too.
+  // SQL tools are given only with all data, even when the key names them. The wildcard "*" never
+  // gives them without all data. The wildcard does not give the tool that a key must name
+  // (mcp_analysis_all_usage). The tools that every key has (the limits and the usage) come with any
+  // list, even an empty one.
   CHECK_EQ(mcp_effective_tools({"*"}, {"otel"}).size(), size_t(mcp_tool_catalog().size() - 3));  // all but the SQL tools and the one to name
   CHECK_EQ(mcp_effective_tools({"*"}, {"*"}).size(), size_t(mcp_tool_catalog().size() - 1));  // all but the one to name
   CHECK_EQ(mcp_effective_tools({"run_query", "list_hosts"}, {"otel"}).size(), size_t(3));  // list_hosts, and the two that every key has
@@ -191,7 +198,8 @@ void test_scope() {
   CHECK(!mcp_find_tool("query_table")->needs_all_data);
 }
 
-// The analysis of the keys in the catalog: a family of three tools, how each one is given to a key, and what the configuration must turn on.
+// The analysis of the keys in the catalog is a family of three tools. The rules below set how each
+// tool reaches a key. They also set what the configuration must enable.
 void test_analysis_scope() {
   const McpToolInfo* limits = mcp_find_tool("mcp_analysis_my_limits");
   const McpToolInfo* mine = mcp_find_tool("mcp_analysis_my_usage");
@@ -204,14 +212,15 @@ void test_analysis_scope() {
     CHECK(std::string(tool->title).size() > 3 && std::string(tool->description).size() > 40);
     CHECK_EQ(mcp_tool_reads(*tool), unsigned(kMcpReadsNone));  // no grant of the MCP user or of the system user is theirs
   }
-  // How each is given: the limits to every key, the usage to every key while it is counted, all the keys to a key that names it.
+  // Each tool reaches a key as follows. The limits go to every key. The usage goes to every key
+  // while the server counts it. The read of all the keys goes to a key that names it.
   CHECK(limits->always && !limits->explicit_only);
   CHECK_EQ(limits->needs, unsigned(kMcpNeedsNothing));
   CHECK(mine->always && !mine->explicit_only);
   CHECK_EQ(mine->needs, unsigned(kMcpNeedsUsage));
   CHECK(!all->always && all->explicit_only);
   CHECK_EQ(all->needs, unsigned(kMcpNeedsUsage | kMcpNeedsAllKeys));
-  // No other tool has a flag, and the family is the last of the groups and holds the last three tools.
+  // No other tool has a flag. The family is the last group, and it holds the last three tools.
   for (const auto& tool : mcp_tool_catalog()) {
     const bool analysis = std::string(tool.group) == "mcp_analysis";
     CHECK_EQ(tool.always || tool.explicit_only || tool.needs != 0, analysis);
@@ -225,7 +234,8 @@ void test_analysis_scope() {
   CHECK_EQ(std::string(groups.back().title), std::string("MCP analysis"));
   CHECK(std::string(groups.back().note).size() > 10);
 
-  // What the configuration turns on. The reading of all the keys counts only with the usage.
+  // The configuration enables these tools. The read of all the keys is counted only when the usage
+  // is on.
   const McpToolAvailability off{};
   const McpToolAvailability usage{true, false};
   const McpToolAvailability only_all_keys{false, true};
@@ -238,7 +248,7 @@ void test_analysis_scope() {
   for (const auto& tool : catalog) {
     if (std::string(tool.group) != "mcp_analysis") CHECK(mcp_tool_available(tool, off));  // nothing else depends on the configuration
   }
-  // The reason names the setting that is off, and is empty for a tool that is offered.
+  // The reason names the setting that is off. The reason is empty for a tool that is offered.
   CHECK(mcp_tool_unavailable_reason(*limits, off).empty());
   CHECK(mcp_tool_unavailable_reason(*all, everything).empty());
   CHECK(contains(mcp_tool_unavailable_reason(*mine, off), "mcp.usage.enabled"));
@@ -247,8 +257,9 @@ void test_analysis_scope() {
   CHECK(contains(mcp_tool_unavailable_reason(*all, only_all_keys), "mcp.usage.enabled"));
   CHECK(contains(mcp_tool_unavailable_reason(*all, usage), "mcp.usage.all_keys"));
 
-  // The tools of a key: "*" does not give the tool that a key must name, the tools that every key has come with any list (an empty one too),
-  // and the order is the one of the catalog.
+  // The tools of a key follow these rules. The wildcard "*" does not give the tool that a key must
+  // name. The tools that every key has come with any list, even an empty one. The order is the
+  // order of the catalog.
   const auto names = [](std::initializer_list<const char*> list) {
     std::vector<std::string> out;
     for (const char* name : list) out.emplace_back(name);
@@ -264,7 +275,8 @@ void test_analysis_scope() {
   CHECK(mcp_effective_tools({"mcp_analysis_all_usage", "list_hosts"}, {"otel"}) ==
         names({"list_hosts", "mcp_analysis_my_limits", "mcp_analysis_my_usage", "mcp_analysis_all_usage"}));
   CHECK(mcp_effective_tools({"mcp_analysis_my_limits", "list_hosts"}, {}) == names({"list_hosts", "mcp_analysis_my_limits", "mcp_analysis_my_usage"}));
-  // A tool that the configuration does not offer is never listed, named or not.
+  // A tool that the configuration does not offer is never listed. This holds even when the key
+  // names it.
   CHECK(mcp_effective_tools({}, {}, off) == names({"mcp_analysis_my_limits"}));
   CHECK(mcp_effective_tools({"mcp_analysis_all_usage"}, {}, off) == names({"mcp_analysis_my_limits"}));
   CHECK(mcp_effective_tools({"mcp_analysis_all_usage"}, {}, usage) == names({"mcp_analysis_my_limits", "mcp_analysis_my_usage"}));
@@ -272,7 +284,8 @@ void test_analysis_scope() {
         names({"mcp_analysis_my_limits", "mcp_analysis_my_usage", "mcp_analysis_all_usage"}));
   CHECK(mcp_effective_tools({"*"}, {"*"}, usage).size() == mcp_tool_catalog().size() - 1);
   CHECK(mcp_effective_tools({"*"}, {"*"}, off).size() == mcp_tool_catalog().size() - 2);
-  // What a key is entitled to does not depend on the configuration (a tool that is off but named is `not_enabled`, never `tool_not_allowed`).
+  // The rights of a key do not depend on the configuration. A tool that is off but named gives
+  // `not_enabled`, never `tool_not_allowed`.
   CHECK(mcp_scope_tool_allowed({}, {}, "mcp_analysis_my_limits"));
   CHECK(mcp_scope_tool_allowed({}, {}, "mcp_analysis_my_usage"));
   CHECK(!mcp_scope_tool_allowed({}, {}, "mcp_analysis_all_usage"));
@@ -288,29 +301,39 @@ void test_secrets_time_validation() {
   const std::string a = mcp_generate_secret();
   const std::string b = mcp_generate_secret();
   CHECK(a != b);
-  // A version 4 UUID: 8-4-4-4-12 lower-case hex digits, version nibble 4, variant 8, 9, a or b.
-  CHECK_EQ(a.size(), size_t(36));
-  CHECK_EQ(a.size(), kMcpSecretBytes);
-  for (size_t i = 0; i < a.size(); ++i) {
+  // A token of the contract (3.1) has the form mcp_ and the base64url text of 32 random bytes. It
+  // has no padding, and it has 47 characters in total.
+  CHECK_EQ(a.size(), size_t(47));
+  CHECK_EQ(a.size(), kMcpTokenBytes);
+  CHECK_EQ(a.substr(0, 4), std::string("mcp_"));
+  for (size_t i = 4; i < a.size(); ++i) {
     const char c = a[i];
-    if (i == 8 || i == 13 || i == 18 || i == 23) CHECK_EQ(c, '-');
-    else CHECK((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+    CHECK((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '_');
   }
-  CHECK_EQ(a[14], '4');
-  CHECK(a[19] == '8' || a[19] == '9' || a[19] == 'a' || a[19] == 'b');
-  // The bits of the random source show: a thousand secrets, no repeat, every hex digit seen at the first place.
+  CHECK(mcp_valid_token(a) && mcp_valid_secret(a) && !mcp_legacy_secret(a));
+  // An older key has a token that is a UUID version 4. ChDash accepts this token until the operator
+  // replaces it.
+  CHECK(mcp_legacy_secret("a11da7a0-0000-4000-8000-000000000001") && mcp_valid_secret("a11da7a0-0000-4000-8000-000000000001"));
+  CHECK(!mcp_valid_token("a11da7a0-0000-4000-8000-000000000001"));
+  CHECK(!mcp_valid_secret("mcp_" + std::string(42, 'a')) && !mcp_valid_secret("mcp_" + std::string(43, '=')) && !mcp_valid_secret(""));
+  // This test checks the bits of the random source. It makes a thousand tokens, and none repeats.
+  // Most of the 64 characters appear in the first position.
   {
     std::set<std::string> seen;
     std::set<char> first;
     for (int i = 0; i < 1000; ++i) {
       const std::string one = mcp_generate_secret();
       CHECK(seen.insert(one).second);
-      first.insert(one[0]);
+      first.insert(one[4]);
     }
-    CHECK_EQ(first.size(), size_t(16));
+    CHECK(first.size() >= 50);
   }
-  CHECK_EQ(mcp_secret_hint(a), a.substr(0, 8));
-  // The mask of a secret, from its hint: the shape of a UUID, the hyphens and the hint in clear, a bullet for the others.
+  // The hint of a token is its first 12 characters. The hint of an older key is its first 8
+  // characters.
+  CHECK_EQ(mcp_secret_hint(a), a.substr(0, 12));
+  CHECK_EQ(mcp_secret_hint("a11da7a0-0000-4000-8000-000000000001"), std::string("a11da7a0"));
+  // The mask of a secret is built from its hint. The mask shows the shape of a UUID, the hyphens
+  // and the hint in clear text. It shows a bullet for each of the other characters.
   const auto bullets = [](size_t n) {
     std::string out;
     for (size_t i = 0; i < n; ++i) out += "\xE2\x80\xA2";
@@ -318,9 +341,12 @@ void test_secrets_time_validation() {
   };
   CHECK_EQ(mcp_secret_mask("3f2a9c1e"), "3f2a9c1e-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
   CHECK_EQ(mcp_secret_mask(mcp_secret_hint("a11da7a0-0000-4000-8000-000000000001")), "a11da7a0-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
-  // A hint that is not known, or not the start of a UUID, shows nothing.
+  // A hint that is unknown, or that is not the start of a UUID, shows nothing.
   CHECK_EQ(mcp_secret_mask(""), bullets(8) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(4) + "-" + bullets(12));
   CHECK_EQ(mcp_secret_mask("chm_"), mcp_secret_mask(""));
+  // The mask of an mcp_ token shows the hint. It then shows a bullet for each of the 35 other
+  // characters.
+  CHECK_EQ(mcp_secret_mask(mcp_secret_hint(a)), a.substr(0, 12) + bullets(35));
   McpHash hash{};
   CHECK(mcp_parse_hash_hex(mcp_hash_hex(mcp_hash_secret("abc")), &hash));
   CHECK(hash == mcp_hash_secret("abc"));
@@ -383,7 +409,7 @@ void test_secrets_time_validation() {
     CHECK_EQ(reason(k), std::string("hosts:unknown_host"));
     k.hosts = {"prod", "prod"};
     CHECK_EQ(reason(k), std::string("hosts:duplicate"));
-    // A key reads one host at most, and names it.
+    // A key reads one host at most. The key names that host.
     k.hosts = {"*"};
     CHECK_EQ(reason(k), std::string("hosts:invalid"));
     k.hosts = {"prod", "stage"};
@@ -404,9 +430,10 @@ void test_secrets_time_validation() {
     k.tools = {"*"};
     k.databases = {"otel"};
     CHECK_EQ(reason(k), std::string("ok"));  // "*" quietly leaves the SQL tools out
-    // The tools of the analysis of the keys read no table: any data scope will do, also when the configuration does not offer them (the
-    // usage may be off, or the reading of all the keys: the key names them, and tools/list and tools/call decide at run time). A tool that
-    // every key has is harmless in a list.
+    // The tools of the analysis of the keys read no table. Any data scope is enough for them. This
+    // holds even when the configuration does not offer them. The usage can be off, or the read of
+    // all the keys can be off. The key must name them, and tools/list and tools/call decide at run
+    // time. A tool that every key has is harmless in a list.
     k.tools = {"mcp_analysis_all_usage", "mcp_analysis_my_limits", "mcp_analysis_my_usage"};
     CHECK_EQ(reason(k), std::string("ok"));
     k.tools = {"mcp_analysis_my_usage", "mcp_analysis_my_usage"};
@@ -450,8 +477,8 @@ void test_secrets_time_validation() {
   CHECK_EQ(input_error(R"({"hosts":"prod"})"), std::string("hosts:type"));
   CHECK_EQ(input_error(R"({"hosts":[1]})"), std::string("hosts:type"));
   CHECK_EQ(input_error(R"({"max_rows":"5"})"), std::string("max_rows:type"));
-  // A field that a key does not have is refused: a client that sends an expiry or a memory limit must not believe
-  // that its key has one (fields that no longer exist included).
+  // ChDash refuses a field that a key does not have. A client that sends an expiry or a memory
+  // limit must not believe that its key has one. This includes the fields that no longer exist.
   const std::string full = R"("name":"a","hosts":["prod"],"tools":["*"],"databases":["*"])";
   CHECK_EQ(input_error(("{" + full + R"(,"expires_at":"2027-01-01"})").c_str()), std::string("expires_at:unknown_field"));
   CHECK_EQ(input_error(("{" + full + R"(,"max_memory_bytes":1})").c_str()), std::string("max_memory_bytes:unknown_field"));
@@ -515,12 +542,13 @@ void test_store(const std::string& dir) {
     CHECK_EQ(created.key->id.size(), size_t(15));
     CHECK_EQ(created.key->id.substr(0, 3), std::string("ui_"));
     CHECK_EQ(created.key->source, std::string("ui"));
-    CHECK_EQ(created.secret.size(), size_t(36));
-    CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 8));
+    CHECK_EQ(created.secret.size(), size_t(47));
+    CHECK(mcp_valid_token(created.secret));
+    CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 12));
     CHECK_EQ(created.key->created_at.value_or(0), now);
 
-    // The file: version 1, the hash that authenticates and the hint (mode 0600). Never the secret: it comes once,
-    // in the answer of the create.
+    // The file holds version 1, the hash that authenticates, and the hint (mode 0600). It never
+    // holds the secret. The secret comes once, in the answer to the create call.
     CHECK(::access(file.c_str(), F_OK) == 0);
     struct stat st;
     CHECK(::stat(file.c_str(), &st) == 0 && (st.st_mode & 0777) == 0600);
@@ -535,14 +563,14 @@ void test_store(const std::string& dir) {
     CHECK_EQ(doc["version"].GetInt(), 1);
     CHECK_EQ(doc["keys"].Size(), 1u);
 
-    // Authentication by the secret; the config key too.
-    auto auth = store.authenticate(created.secret);
+    // The secret authenticates a key. A key from the configuration uses the same rule.
+    auto auth = store.authenticate(created.secret, 0);
     CHECK(auth.status == McpKeyStore::AuthStatus::Ok);
     CHECK_EQ(auth.key.id, created.key->id);
-    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f").status == McpKeyStore::AuthStatus::Ok);
-    CHECK(store.authenticate("").status == McpKeyStore::AuthStatus::Missing);
-    CHECK(store.authenticate("chm_nope").status == McpKeyStore::AuthStatus::Unknown);
-    CHECK(store.authenticate(std::string(600, 'x')).status == McpKeyStore::AuthStatus::Unknown);
+    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f", 0).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate("", 0).status == McpKeyStore::AuthStatus::Missing);
+    CHECK(store.authenticate("chm_nope", 0).status == McpKeyStore::AuthStatus::Unknown);
+    CHECK(store.authenticate(std::string(600, 'x'), 0).status == McpKeyStore::AuthStatus::Unknown);
     CHECK_EQ(store.list().size(), size_t(2));
     CHECK(!contains(read_file(file), "last_used"));  // when a key was used is its usage's (test_usage)
 
@@ -559,8 +587,9 @@ void test_store(const std::string& dir) {
     bad = store.create(input_of(R"({"name":"x","hosts":["prod"],"tools":["run_query"],"databases":["otel"]})"), now);
     CHECK_EQ(bad.reason, std::string("needs_all_data"));
 
-    // The store keeps the hint, never the secret: no key of the list holds it, in any of its fields.
-    CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 8));
+    // The store keeps the hint and never the secret. No key of the list holds the secret, in any of
+    // its fields.
+    CHECK_EQ(created.key->secret_hint, created.secret.substr(0, 12));
     for (const auto& key : store.list()) {
       rapidjson::StringBuffer sb;
       McpJsonWriter w(sb);
@@ -569,18 +598,18 @@ void test_store(const std::string& dir) {
       CHECK(!contains(sb.GetString(), "secret_available"));
     }
 
-    // A key is made or deleted: there is no update, no rotation and no switch (the store has none).
+    // A key is made or deleted. The store has no update, no rotation and no switch.
     const std::string id = created.key->id;
-    CHECK(store.authenticate(created.secret).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate(created.secret, 0).status == McpKeyStore::AuthStatus::Ok);
     const std::string second_secret = created.secret;
 
-    // A restart reads the same keys back; the hash decides who gets in.
+    // A restart reads the same keys again. The hash decides who can authenticate.
     McpKeyStore again(store_options(file));
     CHECK_EQ(again.list().size(), size_t(2));
-    CHECK_EQ(again.list()[1].secret_hint, second_secret.substr(0, 8));
+    CHECK_EQ(again.list()[1].secret_hint, second_secret.substr(0, 12));
     CHECK(read_file(file).find(second_secret) == std::string::npos);
-    CHECK(again.authenticate(second_secret).status == McpKeyStore::AuthStatus::Ok);
-    CHECK(again.authenticate("not-the-secret").status == McpKeyStore::AuthStatus::Unknown);
+    CHECK(again.authenticate(second_secret, 0).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(again.authenticate("not-the-secret", 0).status == McpKeyStore::AuthStatus::Unknown);
     CHECK_EQ(again.list()[1].name, std::string("ci-bot"));
 
     // A failed write restores the memory and answers storage_error.
@@ -593,7 +622,7 @@ void test_store(const std::string& dir) {
     CHECK_EQ(store.list().size(), size_t(2));
     CHECK_EQ(store.remove(id).error, std::string("storage_error"));
     CHECK_EQ(store.list().size(), size_t(2));
-    CHECK(store.authenticate(second_secret).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate(second_secret, 0).status == McpKeyStore::AuthStatus::Ok);
     CHECK(::rename(moved.c_str(), dir.c_str()) == 0);
     CHECK_EQ(read_file(file), before);
 
@@ -601,13 +630,13 @@ void test_store(const std::string& dir) {
     const auto removed = store.remove(id);
     CHECK_EQ(removed.status, 200);
     CHECK_EQ(store.list().size(), size_t(1));
-    CHECK(store.authenticate(second_secret).status == McpKeyStore::AuthStatus::Unknown);
+    CHECK(store.authenticate(second_secret, 0).status == McpKeyStore::AuthStatus::Unknown);
     CHECK_EQ(store.remove(id).error, std::string("not_found"));
     CHECK_EQ(store.remove("cfg-key").error, std::string("config_key"));
     CHECK_EQ(parse(read_file(file))["keys"].Size(), 0u);
   }
 
-  // No storage file: UI keys cannot be made; config keys still work.
+  // No storage file means that UI keys cannot be made. Config keys still work.
   {
     McpStoreOptions o = store_options("");
     McpKeyStore store(o);
@@ -615,22 +644,40 @@ void test_store(const std::string& dir) {
     CHECK(!store.can_manage());
     CHECK_EQ(store.create(input_of(kNewKey), now).error, std::string("storage_not_configured"));
     CHECK_EQ(store.create(input_of(kNewKey), now).status, 409);
-    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f").status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f", 0).status == McpKeyStore::AuthStatus::Ok);
   }
 
-  // manage_from_ui = false: every write is refused; the file is read.
+  // With keys.mode = static, the store refuses every write. The keys of the file do not apply
+  // (contract 3.5).
   {
     McpStoreOptions o = store_options(file);
     McpKeyStore writable(o);
     const auto made = writable.create(input_of(kNewKey), now);
-    o.manage_from_ui = false;
+    CHECK(mcp_valid_token(made.secret));
+    CHECK_EQ(made.key->secret_hint, made.secret.substr(0, 12));
+    o.mode = McpKeysMode::Static;
     McpKeyStore ro(o);
     CHECK(!ro.can_manage());
-    CHECK_EQ(ro.list().size(), size_t(2));
-    CHECK(ro.authenticate(made.secret).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(!ro.manage_from_ui());
+    CHECK_EQ(ro.list().size(), size_t(1));
+    CHECK(ro.authenticate(made.secret, 0).status == McpKeyStore::AuthStatus::Unknown);
     CHECK_EQ(ro.create(input_of(kNewKey), now).error, std::string("manage_disabled"));
     CHECK_EQ(ro.create(input_of(kNewKey), now).status, 403);
     CHECK_EQ(ro.remove(made.key->id).error, std::string("manage_disabled"));
+    // The hybrid mode reads the file. The key of the page applies.
+    o.mode = McpKeysMode::Hybrid;
+    McpKeyStore both(o);
+    CHECK(both.authenticate(made.secret, 0).status == McpKeyStore::AuthStatus::Ok);
+  }
+
+  // An expired key has the status of an unknown key from its expiry on.
+  {
+    McpStoreOptions o = store_options(file);
+    o.config_keys.front().expires_at = 1000;
+    McpKeyStore store(o);
+    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f", 999).status == McpKeyStore::AuthStatus::Ok);
+    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f", 1000).status == McpKeyStore::AuthStatus::Expired);
+    CHECK(store.authenticate("c0f19000-0000-4000-8000-00000000000f", 5000).status == McpKeyStore::AuthStatus::Expired);
   }
 }
 
@@ -682,7 +729,7 @@ void test_store_startup_errors(const std::string& dir) {
     CHECK(threw);
   }
   {
-    // The hash of a file key reused by a config key.
+    // A config key reuses the hash of a file key.
     const auto doc = parse(read_file(good));
     McpHash hash{};
     CHECK(mcp_parse_hash_hex(doc["keys"][0]["secret_sha256"].GetString(), &hash));
@@ -699,7 +746,8 @@ void test_store_startup_errors(const std::string& dir) {
     CHECK(threw);
   }
   {
-    // A file that has no hint for its key (an early one): the key loads and works, its mask shows nothing.
+    // A file with no hint for its key comes from an early version. The key loads and works, but its
+    // mask shows nothing.
     const auto doc = parse(read_file(good));
     const std::string hash = doc["keys"][0]["secret_sha256"].GetString();
     const std::string body = R"({"version":1,"keys":[{"id":"ui_0a1b2c3d4e5f","name":"old","secret_sha256":")" + hash +
@@ -714,8 +762,9 @@ void test_store_startup_errors(const std::string& dir) {
     CHECK_EQ(read_file(legacy), body);  // nothing to take out: the file is not written
   }
   {
-    // A key file that holds a secret in clear is not a file of this ChDash (it stores the hash only): the start is
-    // refused, with a message that names the key and does not repeat the secret.
+    // A key file that holds a secret in clear text is not a file of this ChDash. This ChDash stores
+    // the hash only. The start is refused. The message names the key and does not repeat the
+    // secret.
     const std::string secret = "a11da7a0-0000-4000-8000-0000000000bb";
     const std::string body = R"({"version":1,"keys":[{"id":"ui_00000000000a","name":"kept","secret_sha256":")" + mcp_hash_hex(mcp_hash_secret(secret)) +
                              R"(","secret":")" + secret + R"(","secret_hint":"a11da7a0","hosts":["prod"],"tools":["*"],"databases":["*"]}]})";
@@ -751,8 +800,9 @@ struct UsageCall {
   std::string user_agent = "agent/1";
 };
 
-// The name that a key of these tests has: its id, except for the id of a key made on the page (ui_ and 12 hex digits), which no name may be
-// (mcp_valid_key_name): a file that holds such a name is not valid, and another instance would skip it.
+// The name of a key in these tests is its id. The exception is the id of a key made on the page,
+// which starts with ui_ and has 12 hex digits. No name may have this form (mcp_valid_key_name). A
+// file that holds such a name is not valid, and another instance skips it.
 std::string usage_key_name(const std::string& id) { return id.rfind("ui_", 0) == 0 ? "page-" + id.substr(3) : id; }
 
 void usage_record(McpUsage& usage, const UsageCall& call) {
@@ -778,7 +828,7 @@ void usage_record(McpUsage& usage, const UsageCall& call) {
 
 McpUsageKeyRef usage_key(const std::string& id) { return McpUsageKeyRef{id, usage_key_name(id), "prod", "config"}; }
 
-// The JSON of the details of a key, or "" for a 404.
+// The JSON of the details of a key is returned. The result is an empty string for a 404.
 std::string usage_detail(const McpUsage& usage, const std::string& id, bool live, const std::string& window, int64_t now) {
   const McpUsageKeyRef key = usage_key(id);
   const auto range = mcp_usage_window(window, usage.retention_days(), now);
@@ -798,7 +848,8 @@ std::string usage_list(const McpUsage& usage, const std::vector<std::string>& li
   return sb.GetString();
 }
 
-// The count of `field` for `name` in an array of the details (tools by "tool", statuses by "status").
+// The count of `field` for `name` in an array of the details. Tools are counted by "tool", and
+// statuses by "status".
 uint64_t usage_count(const rapidjson::Value& rows, const char* by, const std::string& name, const char* field) {
   for (const auto& row : rows.GetArray()) {
     if (std::string(row[by].GetString()) == name) return row[field].GetUint64();
@@ -808,7 +859,7 @@ uint64_t usage_count(const rapidjson::Value& rows, const char* by, const std::st
 
 // ---- the files of the usage: JSON Lines, compressed with zstd ----
 
-// The text of a zstd stream, or the end of the test when it is not one.
+// The text of a zstd stream. If the data is not a zstd stream, the test ends.
 std::string zstd_text(const std::string& packed) {
   std::string out;
   ZSTD_DCtx* context = ZSTD_createDCtx();
@@ -838,7 +889,7 @@ std::string zstd_pack(const std::string& text) {
   return out;
 }
 
-// A usage file that a test writes: the lines, one for each row.
+// A usage file that a test writes. It holds one line for each row.
 void write_usage_lines(const std::string& path, const std::vector<std::string>& lines) {
   std::string text;
   for (const auto& line : lines) text += line + "\n";
@@ -847,7 +898,8 @@ void write_usage_lines(const std::string& path, const std::vector<std::string>& 
 
 std::string usage_path(const std::string& dir, const std::string& instance) { return dir + "/" + instance + ".jsonl.zst"; }
 
-// The usage of an instance that keeps its state in a directory (several instances can share it).
+// The usage of an instance that keeps its state in a directory. Several instances can share the
+// directory.
 McpUsageOptions usage_options(const std::string& dir, const std::string& instance, int64_t retention_days = 90, McpUsageFileLimits limits = {}) {
   McpUsageOptions options;
   options.store = std::make_shared<McpUsageFileStore>(dir, instance, limits);
@@ -855,7 +907,7 @@ McpUsageOptions usage_options(const std::string& dir, const std::string& instanc
   return options;
 }
 
-// The lines of a usage file as JSON objects (a file that is not there has none).
+// The lines of a usage file, as JSON objects. A file that does not exist has no lines.
 std::vector<rapidjson::Document> usage_rows(const std::string& path) {
   std::vector<rapidjson::Document> rows;
   if (::access(path.c_str(), F_OK) != 0) return rows;
@@ -885,7 +937,8 @@ std::vector<const rapidjson::Value*> usage_rows_of(const std::vector<rapidjson::
   return out;
 }
 
-// The first bucket of a tier (d1 by default) of a key of a usage file, as the cells "type/client/method/result:count", sorted.
+// The first bucket of a tier of a key in a usage file. The default tier is d1. The cells appear as
+// "type/client/method/result:count", sorted.
 std::vector<std::string> usage_file_cells(const std::vector<rapidjson::Document>& rows, const char* tier = "d1", const std::string& key = "k1") {
   int64_t first = 0;
   for (const auto* row : usage_rows_of(rows, "cell")) {
@@ -902,7 +955,7 @@ std::vector<std::string> usage_file_cells(const std::vector<rapidjson::Document>
   return out;
 }
 
-// The starts of the buckets of a tier of a key, in the order of the file, each one once.
+// The starts of the buckets of a tier of a key, in the order of the file. Each start appears once.
 std::vector<int64_t> usage_starts(const std::vector<rapidjson::Document>& rows, const std::string& key, const char* tier) {
   std::vector<int64_t> out;
   for (const auto* row : usage_rows_of(rows, "cell")) {
@@ -913,7 +966,8 @@ std::vector<int64_t> usage_starts(const std::vector<rapidjson::Document>& rows, 
   return out;
 }
 
-// The cells (rows of a file) of a tier of a key, with their counts, in the order of the file.
+// The cells of a tier of a key, with their counts, in the order of the file. Each cell is one row
+// of the file.
 std::vector<const rapidjson::Value*> usage_tier_cells(const std::vector<rapidjson::Document>& rows, const std::string& key, const char* tier) {
   std::vector<const rapidjson::Value*> out;
   for (const auto* row : usage_rows_of(rows, "cell")) {
@@ -922,13 +976,13 @@ std::vector<const rapidjson::Value*> usage_tier_cells(const std::vector<rapidjso
   return out;
 }
 
-// The file of a usage that is saved now.
+// The usage file, as it is saved now.
 std::vector<rapidjson::Document> usage_file_of(McpUsage& usage, const std::string& path, int64_t now) {
   CHECK(usage.save(now));
   return usage_rows(path);
 }
 
-// The lines of a file, as the code writes them (the header first).
+// The lines of a file, as the code writes them. The header comes first.
 std::string usage_header_line(const std::string& instance, int64_t since, int64_t written_at, const std::string& boot = "boot-1", int64_t retention = 90) {
   return R"({"type":"header","instance":")" + instance + R"(","format":"chdash-mcp-usage","version":1,"boot":")" + boot + R"(","since":)" +
          std::to_string(since) + R"(,"written_at":)" + std::to_string(written_at) + R"(,"retention_days":)" + std::to_string(retention) + "}";
@@ -954,8 +1008,8 @@ std::string usage_cell_line(const std::string& instance, const std::string& key,
          R"(,"rows":)" + std::to_string(rows) + R"(,"bytes":)" + std::to_string(bytes) + "}";
 }
 
-// Whether a usage file of these bytes stops the start of this instance (and is never rewritten): the start and the check of the
-// configuration both refuse it, and the file stays as it was.
+// A usage file with these bytes stops the start of this instance, and it is never rewritten. The
+// start and the check of the configuration both refuse it. The file stays as it was.
 bool usage_bytes_refused(const std::string& dir, const std::string& instance, const std::string& bytes) {
   const std::string path = usage_path(dir, instance);
   write_file(path, bytes);
@@ -981,9 +1035,12 @@ bool usage_file_refused(const std::string& dir, const std::string& instance, con
   return usage_bytes_refused(dir, instance, zstd_pack(text));
 }
 
-// The requests of the keys k1, k2 and a deleted key, as three clients would make them, in the order of the time (a clock that
-// goes back counts in the last bucket). The usage must be opened at `now - 4 days` or before, for a retention of 30 days.
-// k1: 12 requests, 2 of them 3 days ago; k2: 7; gone: 4, yesterday, and deleted after them. `now` is a whole hour.
+// The requests of the keys k1, k2 and a deleted key, as three clients make them, in the order of
+// the time. A clock that goes back counts in the last bucket. The usage must open at `now - 4 days`
+// or before, for a retention of 30 days.
+//
+// k1 has 12 requests, 2 of them 3 days ago. k2 has 7 requests. The key gone has 4 requests, all
+// yesterday, and it is deleted after them. `now` is a whole hour.
 void usage_scenario(McpUsage& usage, int64_t now) {
   const int64_t day = 86400;
   const std::string code = "claude-code/2.1.0 (node)";
@@ -1044,7 +1101,7 @@ void usage_scenario(McpUsage& usage, int64_t now) {
   usage.mark_deleted(usage_key("gone"), now + 100);
 }
 
-// The text of the overview of a usage for a query that must be valid.
+// The text of the usage overview for a query that must be valid.
 std::string usage_overview_text(const McpUsage& usage, const std::vector<std::string>& live, const std::string& window, int64_t now,
                                 McpUsageOverviewQuery query = {}) {
   const auto wrong = mcp_usage_overview_check(&query);
@@ -1083,8 +1140,9 @@ uint64_t usage_sum(const rapidjson::Value& values) {
   return sum;
 }
 
-// What every answer holds: the groups and the rest add up to the totals, for each of the six metrics, at each point and in all; the
-// points are the ones of the window, a step apart, and the step is a number of seconds. Returns the requests at each point.
+// Every answer holds these facts. The groups and the rest add up to the totals. This is true for
+// each of the six metrics, at each point and in all. The points are the points of the window, one
+// step apart. The step is a number of seconds. The function returns the requests at each point.
 std::vector<uint64_t> check_series(const rapidjson::Value& doc) {
   const char* metrics[] = {"requests", "errors", "calls", "duration_ms_sum", "bytes", "refused"};
   const size_t metric_count = sizeof(metrics) / sizeof(metrics[0]);
@@ -1116,8 +1174,9 @@ std::vector<uint64_t> check_series(const rapidjson::Value& doc) {
   for (const auto& group : series["groups"].GetArray()) add(group);
   add(series["rest"]);
   CHECK_EQ(all, doc["totals"]["requests"].GetUint64());
-  // The six metrics of the points add up to the tiles (the time of the calls, to the average of the tile; the refusals, to the 429 and the
-  // requests that were refused before they were read).
+  // The six metrics of the points add up to the tiles. The time of the calls adds up to the average
+  // of the tile. The refusals add up to the 429 responses and to the requests that are refused
+  // before they are read.
   uint64_t sums[metric_count] = {};
   std::vector<uint64_t> requests;
   for (size_t p = 0; p < points; ++p) {
@@ -1146,9 +1205,10 @@ std::vector<std::string> usage_members(const rapidjson::Value& object) {
   return out;
 }
 
-// What a ranking of the series (`series.rankings.<order>`) holds: the counts of the series, ranked another way. At each point and for each of
-// the six metrics its groups and its `rest` add up to the tiles, as the ones of the series do (check_series, on a copy that has the ranking
-// in place of them).
+// A ranking of the series (`series.rankings.<order>`) holds the counts of the series, ranked in
+// another way. At each point, and for each of the six metrics, its groups and its `rest` add up to
+// the tiles. The groups of the series add up in the same way (check_series). That check uses a copy
+// that holds the ranking in place of those groups.
 void check_ranking(const rapidjson::Value& doc, const char* order) {
   rapidjson::Document copy;
   copy.CopyFrom(doc, copy.GetAllocator());
@@ -1183,8 +1243,9 @@ void check_facets_add_up(const rapidjson::Value& doc) {
   CHECK_EQ(instances, requests);
 }
 
-// Whether the series and every facet add up to the requests, as one answer (no CHECK inside: the test that counts while the overview
-// reads has loops whose length depends on the time, and its number of checks must not).
+// This function checks whether the series and every facet add up to the requests, in one answer. It
+// has no CHECK inside it. The test that calls it runs loops whose length depends on the time. The
+// number of checks of that test must not depend on the time.
 bool usage_overview_adds_up(const rapidjson::Value& doc) {
   const uint64_t requests = doc["totals"]["requests"].GetUint64();
   uint64_t series = doc["series"]["rest"]["total"].GetUint64();
@@ -1224,7 +1285,8 @@ void test_usage(const std::string& dir) {
   const int64_t hour = 3600;
   const int64_t day = 86400;
 
-  // The windows that a retention keeps: the three short ones always, then one for each tier that the retention reaches.
+  // A retention keeps these windows. The three short windows are always kept. Then one window is
+  // kept for each tier that the retention reaches.
   const auto names = [](std::initializer_list<const char*> list) { return std::vector<std::string>(list.begin(), list.end()); };
   CHECK(mcp_usage_windows(1) == names({"1h", "6h", "24h"}));
   CHECK(mcp_usage_windows(6) == names({"1h", "6h", "24h"}));
@@ -1238,7 +1300,8 @@ void test_usage(const std::string& dir) {
   CHECK_EQ(mcp_usage_default_window(7), std::string("7d"));
   CHECK_EQ(mcp_usage_default_window(6), std::string("24h"));
   CHECK_EQ(mcp_usage_default_window(3), std::string("24h"));
-  // Each window reads the tier of its step, aligned on UTC: from is the start of the step that holds the time, less points - 1 steps.
+  // Each window reads the tier of its step. The windows are aligned on UTC. The value `from` is the
+  // start of the step that holds the time, less points - 1 steps.
   {
     const struct {
       const char* name;
@@ -1259,7 +1322,8 @@ void test_usage(const std::string& dir) {
       CHECK_EQ(w->points, want.points);
       CHECK_EQ(w->tier, want.tier);
       CHECK_EQ(mcp_iso_utc(w->from), std::string(want.from));
-      // Anywhere in a step: the same window, and it ends with the step that holds the time.
+      // Any time in a step gives the same window. The window ends with the step that holds the
+      // time.
       for (const int64_t at : {now, now + 1, now + want.step - 1, now + 5 * want.step + 7, now + 1000003}) {
         const auto later = mcp_usage_window(want.name, 365, at);
         CHECK(later.has_value());
@@ -1280,7 +1344,7 @@ void test_usage(const std::string& dir) {
   CHECK_EQ(mcp_usage_clean("  a\x01" "b\xc3\xa9  ", 64), std::string("a?b??"));
   CHECK_EQ(mcp_usage_clean("abcdef", 3), std::string("abc"));
   CHECK_EQ(mcp_usage_clean("   ", 8), std::string(""));
-  // The ids of keys: a name of the configuration, or ui_ and 12 hexadecimal digits.
+  // A key id is a name of the configuration, or ui_ and 12 hexadecimal digits.
   CHECK(mcp_valid_key_id("all-data"));
   CHECK(mcp_valid_key_id("ui_0a1b2c3d4e5f"));
   CHECK(!mcp_valid_key_id(""));
@@ -1296,7 +1360,7 @@ void test_usage(const std::string& dir) {
     McpUsage usage(options, now);
     CHECK_EQ(usage.instance(), std::string("local"));  // without a store (the unit tests) an instance is named by the options
     CHECK_EQ(usage.since(), now);
-    // A key that is not used: zeros while it exists, a 404 once it does not.
+    // A key that is not used has zeros while it exists. A key that does not exist gives a 404.
     CHECK(contains(usage_detail(usage, "k1", true, "24h", now), "\"calls\":0"));
     CHECK_EQ(usage_detail(usage, "k1", false, "24h", now), std::string(""));
 
@@ -1371,7 +1435,8 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(totals["duration_ms_max"].GetUint64(), uint64_t(30));
     CHECK_EQ(totals["rows"].GetUint64(), uint64_t(5));
     CHECK_EQ(totals["bytes"].GetUint64(), uint64_t(300 + 300 + 1000 + 100 + 50 + 50));
-    // One point for each 15 minutes (the step is a number of seconds), the calls in the current one.
+    // One point covers each 15 minutes. The step is a number of seconds. The calls go in the
+    // current point.
     CHECK(doc["series"]["step"].IsInt64());
     CHECK_EQ(doc["series"]["step"].GetInt64(), int64_t(900));
     CHECK_EQ(doc["series"]["points"].Size(), 96u);
@@ -1381,7 +1446,7 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(doc["series"]["points"][95]["errors"].GetUint64(), uint64_t(2));
     CHECK_EQ(doc["series"]["points"][0]["calls"].GetUint64(), uint64_t(0));
     CHECK_EQ(std::string(doc["series"]["points"][1]["t"].GetString()), mcp_iso_utc(now - 94 * 900));
-    // The step of each window is a number of seconds, and its points are those of the window.
+    // The step of each window is a number of seconds. Its points are the points of the window.
     const struct {
       const char* window;
       int64_t step;
@@ -1394,7 +1459,8 @@ void test_usage(const std::string& dir) {
       CHECK_EQ(each["series"]["points"].Size(), item.points);
       CHECK_EQ(each["totals"]["requests"].GetUint64(), uint64_t(7));
     }
-    // The tools (the most called first, then by name) and the results: the calls, and the requests that failed.
+    // The tools are sorted by the most calls first, then by name. The results show the calls and
+    // the requests that failed.
     CHECK_EQ(doc["tools"].Size(), 2u);
     CHECK_EQ(std::string(doc["tools"][0]["tool"].GetString()), std::string("query_table"));
     CHECK_EQ(usage_count(doc["tools"], "tool", "run_query", "errors"), uint64_t(1));
@@ -1407,7 +1473,8 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(usage_count(doc["statuses"], "status", "415_unsupported_media", "count"), uint64_t(1));
     CHECK_EQ(usage_count(doc["statuses"], "status", "rpc_error_32601", "count"), uint64_t(1));
     CHECK_EQ(doc["statuses"].Size(), 5u);
-    // The clients: the initialize named the client, the requests after it with its User-Agent are its own.
+    // The clients: the initialize request names the client. The requests after it, with its
+    // User-Agent, belong to that client.
     CHECK_EQ(doc["clients"].Size(), 2u);
     CHECK_EQ(std::string(doc["clients"][1]["name"].GetString()), std::string("claude-code"));
     CHECK_EQ(std::string(doc["clients"][1]["version"].GetString()), std::string("2.1.0"));
@@ -1415,7 +1482,7 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(std::string(doc["clients"][0]["user_agent"].GetString()), std::string("agent/1"));
     CHECK_EQ(std::string(doc["clients"][0]["name"].GetString()), std::string(""));
 
-    // The list: the live keys in their order (zeros for a key that was not used).
+    // The list shows the live keys in their order. A key that was not used has zeros.
     const auto listed = parse(usage_list(usage, {"k2", "k1"}, "7d", now + 60));
     CHECK_EQ(listed["keys"].Size(), 2u);
     CHECK_EQ(std::string(listed["keys"][0]["id"].GetString()), std::string("k2"));
@@ -1431,7 +1498,8 @@ void test_usage(const std::string& dir) {
     CHECK(!usage.last_used_all().count("k2"));
   }
 
-  // The windows: each one reads its own tier, by the minute up to the day, then by 3 hours, 12 hours and the UTC day.
+  // The windows: each window reads its own tier. The tiers run by the minute up to the day, then by
+  // 3 hours, 12 hours and the UTC day.
   {
     McpUsageOptions options;
     options.retention_days = 30;
@@ -1448,7 +1516,8 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(calls("24h"), uint64_t(2));
     CHECK_EQ(calls("7d"), uint64_t(3));
     CHECK_EQ(calls("30d"), uint64_t(4));
-    // By the step of the window: 3 hours, the 3-hour step of now (09:00) holds now, the one before it holds now - 2 hours.
+    // For the 3-hour step of the window, the 3-hour step of now (09:00) holds now. The step before
+    // it holds now - 2 hours.
     const auto week = parse(usage_detail(usage, "k1", true, "7d", now));
     CHECK_EQ(week["series"]["step"].GetInt64(), int64_t(10800));
     CHECK_EQ(week["series"]["points"].Size(), 56u);
@@ -1460,7 +1529,7 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(last_hour["series"]["step"].GetInt64(), int64_t(60));
     CHECK_EQ(last_hour["series"]["points"].Size(), 60u);
     CHECK_EQ(last_hour["series"]["points"][59]["calls"].GetUint64(), uint64_t(1));
-    // A clock that goes back counts in the last bucket.
+    // A clock that moves backward counts in the last bucket.
     UsageCall back;
     back.at = now - 3 * day;
     back.tool = "list_tables";
@@ -1469,7 +1538,7 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(calls("24h"), uint64_t(3));
   }
 
-  // The retention: older days go, and the memory stays bounded between two saves.
+  // The retention removes older days. The memory stays bounded between two saves.
   {
     McpUsageOptions options;
     options.retention_days = 7;
@@ -1483,7 +1552,8 @@ void test_usage(const std::string& dir) {
     CHECK(!mcp_usage_window("30d", 7, now).has_value());
     CHECK_EQ(parse(usage_detail(usage, "k1", true, "7d", now))["totals"]["calls"].GetUint64(), uint64_t(7));
     CHECK_EQ(parse(usage_detail(usage, "k1", true, "24h", now))["totals"]["calls"].GetUint64(), uint64_t(1));
-    // The day of the oldest bucket of each tier is at most the retention old: nothing is kept past it.
+    // The day of the oldest bucket of each tier is at most as old as the retention. Nothing is kept
+    // past it.
     const std::string file = usage_path(dir, "retention");
     std::filesystem::remove(file);
     McpUsage kept(usage_options(dir, "retention", 7), now - 30 * day);
@@ -1502,7 +1572,8 @@ void test_usage(const std::string& dir) {
     CHECK_EQ(usage_starts(rows, "k1", "m15").size(), 1u);
   }
 
-  // A deleted key: its usage stays until the retention ends; a key that was never used, 2 hours.
+  // A deleted key keeps its usage until the retention ends. A key that was never used is kept for 2
+  // hours.
   {
     McpUsageOptions options;
     options.retention_days = 7;
@@ -1530,23 +1601,24 @@ void test_usage(const std::string& dir) {
     usage_record(usage, late);
     CHECK(contains(usage_detail(usage, "a", false, "7d", now + 5), "\"deleted_at\":\"" + mcp_iso_utc(now + 1) + "\""));
     CHECK_EQ(parse(usage_detail(usage, "a", false, "7d", now + 5))["totals"]["calls"].GetUint64(), uint64_t(2));
-    // At most max_deleted entries: the oldest deletion goes.
+    // At most max_deleted entries are kept. The oldest deletion is removed.
     usage.mark_deleted(usage_key("c"), now + 6);
     CHECK_EQ(usage_detail(usage, "a", false, "7d", now + 7), std::string(""));
     CHECK(!usage_detail(usage, "b", false, "7d", now + 7).empty());
-    // A key that was never used: no line in the list, gone after 2 hours.
+    // A key that was never used has no line in the list. It is removed after 2 hours.
     usage.mark_deleted(usage_key("never"), now + 8);
     CHECK(!usage_detail(usage, "never", false, "7d", now + 9).empty());
     listed = parse(usage_list(usage, {}, "7d", now + 9));
     for (const auto& item : listed["keys"].GetArray()) CHECK(std::string(item["id"].GetString()) != "never");
     usage.save(now + 8 + 2 * hour);
     CHECK_EQ(usage_detail(usage, "never", false, "7d", now + 9 + 2 * hour), std::string(""));
-    // Older than the retention: gone.
+    // An entry older than the retention is removed.
     usage.save(now + 8 * day);
     CHECK_EQ(usage_detail(usage, "b", false, "24h", now + 8 * day), std::string(""));
   }
 
-  // The start: a key that is gone is deleted; a key of the configuration that is back takes its entry again.
+  // At the start, a key that no longer exists is deleted. A key of the configuration that returns
+  // gets its entry again.
   {
     McpUsage usage(McpUsageOptions{}, now);
     for (const char* id : {"gone", "back"}) {
@@ -1562,7 +1634,8 @@ void test_usage(const std::string& dir) {
     CHECK(contains(usage_detail(usage, "back", false, "24h", now + 3), "\"deleted_at\":null"));
   }
 
-  // The clients: at most 8, the one seen least recently goes; a client without a name takes the one of its initialize.
+  // The clients: at most 8 are kept. The client seen least recently is removed. A client without a
+  // name takes the name from its initialize request.
   {
     McpUsage usage(McpUsageOptions{}, now);
     for (int i = 0; i < 9; ++i) {
@@ -1588,8 +1661,9 @@ void test_usage(const std::string& dir) {
     for (const auto& client : doc["clients"].GetArray()) CHECK(std::string(client["user_agent"].GetString()) != "agent/0");
   }
 
-  // The file: JSON Lines compressed with zstd, written atomically (0600, no temporary file left), only when something changed, read back by the
-  // next start.
+  // The file uses JSON Lines compressed with zstd. The code writes it atomically, with mode 0600
+  // and no temporary file left behind. It writes the file only when something changed. The next
+  // start reads the file again.
   {
     const std::string file = usage_path(dir, "file-instance");
     {
@@ -1607,7 +1681,7 @@ void test_usage(const std::string& dir) {
       CHECK(::stat(file.c_str(), &st) == 0 && (st.st_mode & 0777) == 0600);
       for (const auto& item : std::filesystem::directory_iterator(dir)) CHECK(!contains(item.path().filename().string(), ".tmp"));
       const auto rows = usage_rows(file);
-      // The first line is the header; every line has its type and its instance.
+      // The first line is the header. Each line has its type and its instance.
       CHECK(rows.size() >= 3);
       for (const auto& row : rows) CHECK_EQ(text_of(row, "instance"), std::string("file-instance"));
       CHECK_EQ(text_of(rows[0], "type"), std::string("header"));
@@ -1618,7 +1692,8 @@ void test_usage(const std::string& dir) {
       CHECK_EQ(rows[0]["written_at"].GetInt64(), now + 6);
       CHECK_EQ(rows[0]["retention_days"].GetInt64(), int64_t(90));
       CHECK_EQ(rows[0].MemberCount(), 8u);
-      // A key row, its client rows, then a cell row for each tier: the cells have the six tiers, and the start is the one of the step of the tier.
+      // A key row comes first, then its client rows. A cell row follows for each tier. The cells
+      // have the six tiers. The start is the start of the step of the tier.
       const auto keys = usage_rows_of(rows, "key");
       CHECK_EQ(keys.size(), size_t(1));
       CHECK_EQ(text_of(*keys[0], "key"), std::string("k1"));
@@ -1650,11 +1725,11 @@ void test_usage(const std::string& dir) {
       CHECK_EQ(text_of(*minute[0], "method"), std::string("query_table"));
       CHECK_EQ(text_of(*minute[0], "result"), std::string("table_not_allowed"));
       CHECK_EQ((*minute[0])["count"].GetUint64(), uint64_t(1));
-      // Nothing changed: the file is not written again.
+      // If nothing changed, the code does not write the file again.
       const std::string before = read_file(file);
       CHECK(usage.save(now + 7));
       CHECK_EQ(read_file(file), before);
-      // A failed write keeps the counts to write; a save that is due writes them.
+      // A failed write keeps the counts. The next save that is due writes them.
       usage_record(usage, call);
       const std::string moved = dir + "-moved";
       CHECK(::rename(dir.c_str(), moved.c_str()) == 0);
@@ -1681,8 +1756,10 @@ void test_usage_cells(const std::string& dir) {
   const std::string file = usage_path(dir, "cells");
   const McpUsageOptions options = usage_options(dir, "cells");
 
-  // The method of a request: a method of the protocol as it is (exact, case sensitive), "other" for any other, "invalid" when
-  // the message could not be read, "unread" for what was refused before it was read. A tool is the name of the tool.
+  // The method of a request is a method of the protocol, as it is written. The match is exact and
+  // case sensitive. The value "other" covers any other method. The value "invalid" applies when the
+  // message could not be read. The value "unread" applies to a request that was refused before it
+  // was read. A tool is the name of the tool.
   {
     McpUsage usage(options, now);
     const auto request = [&](const std::string& method, const std::string& status = "ok") {
@@ -1746,7 +1823,8 @@ void test_usage_cells(const std::string& dir) {
     }
   }
 
-  // A text that a client chose is never kept: 5000 notifications with 5000 names are one cell, in a file that stays small.
+  // ChDash never keeps a text that a client chooses. For example, 5000 notifications with 5000
+  // names make one cell, in a file that stays small.
   {
     std::filesystem::remove(file);
     McpUsage usage(options, now);
@@ -1764,7 +1842,8 @@ void test_usage_cells(const std::string& dir) {
     CHECK(zstd_text(read_file(file)).size() < 3000);  // a cell for each of the six tiers, never one for each name
   }
 
-  // The caps: a bucket keeps 512 cells, and a request that has no cell goes to the overflow cell of its type, so the totals are exact.
+  // The caps work as follows. A bucket keeps 512 cells. A request that has no cell goes to the
+  // overflow cell of its type. The totals stay exact.
   {
     std::filesystem::remove(file);
     McpUsage usage(options, now);
@@ -1778,7 +1857,8 @@ void test_usage_cells(const std::string& dir) {
       call.rows = 1;
       usage_record(usage, call);
     }
-    // An error of a tool past the cap is counted as an error: its overflow cell is (call, other, other).
+    // An error of a tool past the cap counts as an error. Its overflow cell is (call, other,
+    // other).
     for (int i = 0; i < 5; ++i) {
       UsageCall call;
       call.at = now + 2;
@@ -1794,7 +1874,7 @@ void test_usage_cells(const std::string& dir) {
     CHECK_EQ(doc["totals"]["rows"].GetUint64(), uint64_t(tools));
     CHECK_EQ(doc["totals"]["bytes"].GetUint64(), uint64_t(tools * 10));
     CHECK_EQ(doc["totals"]["duration_ms_max"].GetUint64(), uint64_t(9));
-    // The tools: the 512 that had a cell, and "other" for the rest (ok and error).
+    // The 512 tools that had a cell keep their names. The rest count as "other" (ok and error).
     CHECK_EQ(doc["tools"].Size(), 513u);
     CHECK_EQ(usage_count(doc["tools"], "tool", "other", "calls"), uint64_t(tools - 512 + 5));
     CHECK_EQ(usage_count(doc["tools"], "tool", "other", "errors"), uint64_t(5));
@@ -1804,12 +1884,14 @@ void test_usage_cells(const std::string& dir) {
     for (const char* tier : {"m1", "m5", "m15", "h3", "h12", "d1"}) {
       CHECK_EQ(usage_tier_cells(saved, "k1", tier).size(), size_t(514));  // 512, and the two cells of overflow, in every tier
     }
-    // It reads back as it was written: the overflow cells are not among the 512 of a bucket, so nothing folds again.
+    // It is read again as it was written. The overflow cells are not among the 512 cells of a
+    // bucket, so nothing folds again.
     McpUsage again(options, now + 30);
     CHECK_EQ(usage_detail(again, "k1", true, "24h", now + 30), usage_detail(usage, "k1", true, "24h", now + 30));
   }
 
-  // The names are 4096 at most (a cell holds a name in 12 bits): a tool past them is counted as "other", and the totals stay exact.
+  // The names are 4096 at most, because a cell holds a name in 12 bits. A tool past this limit
+  // counts as "other". The totals stay exact.
   {
     McpUsage usage(McpUsageOptions{}, now);
     for (int k = 0; k < 10; ++k) {
@@ -1826,7 +1908,8 @@ void test_usage_cells(const std::string& dir) {
     CHECK_EQ(doc["totals"]["calls"].GetUint64(), uint64_t(5000));
     CHECK_EQ(doc["methods"].Size(), 200u);  // the facet is cut at 200 rows
     CHECK(doc["omitted"]["methods"].GetUint64() > 3000);
-    // The first key has its 500 tools; the last has none left to name: all its calls are "other".
+    // The first key has its 500 tools. The last key has no names left, so all its calls are
+    // "other".
     const auto first = parse(usage_detail(usage, "key-0", false, "24h", now));
     CHECK_EQ(first["tools"].Size(), 500u);
     CHECK_EQ(usage_count(first["tools"], "tool", "other", "calls"), uint64_t(0));
@@ -1836,8 +1919,9 @@ void test_usage_cells(const std::string& dir) {
     CHECK_EQ(last["totals"]["calls"].GetUint64(), uint64_t(500));
   }
 
-  // The cap of all the buckets: the cells that it stops are the overflow cell of their type. A request makes a cell in each of the six
-  // tiers, so a cap of 6 cells holds the cells of the first one.
+  // The cap applies to all the buckets. The cells that the cap stops go to the overflow cell of
+  // their type. A request makes a cell in each of the six tiers. A cap of 6 cells holds the cells
+  // of the first request.
   {
     McpUsageOptions small;
     small.max_cells = 6;
@@ -1854,7 +1938,8 @@ void test_usage_cells(const std::string& dir) {
     CHECK_EQ(doc["totals"]["errors"].GetUint64(), uint64_t(4));
     CHECK_EQ(usage_count(doc["statuses"], "status", "other", "count"), uint64_t(3));
     CHECK_EQ(usage_count(doc["statuses"], "status", "a_error", "count"), uint64_t(1));
-    // Every tier has the same: the cell that was made, and the overflow cell of the three that came after.
+    // Every tier has the same pattern. Each tier has the cell that was made, and the overflow cell
+    // of the three that came after.
     for (const char* window : {"1h", "6h", "7d", "30d", "90d"}) {
       const auto each = parse(usage_detail(usage, "k1", true, window, now));
       CHECK_EQ(each["totals"]["calls"].GetUint64(), uint64_t(4));
@@ -1871,8 +1956,8 @@ void test_usage_cells(const std::string& dir) {
     CHECK_EQ(again["totals"]["requests"].GetUint64(), uint64_t(5));
   }
 
-  // The file as it is read: the rows are validated, the duplicates add up, a cell without request is ignored, and what is past the cap of a
-  // bucket folds into the overflow cell.
+  // The file is checked when it is read. The rows are validated. Duplicates add up. A cell without
+  // a request is ignored. Anything past the cap of a bucket folds into the overflow cell.
   {
     const std::string name = "bad";
     const std::string bad = usage_path(dir, name);
@@ -1880,7 +1965,7 @@ void test_usage_cells(const std::string& dir) {
     const int64_t today = now - now % 86400;
     const std::string header = usage_header_line(name, now - 1000, now - 500);
     const std::string key = usage_key_line(name, "k1");
-    // A file of the header, the key k1 and these lines.
+    // The test file holds a header, the key k1, and these lines.
     const auto with = [&](std::vector<std::string> more) {
       std::vector<std::string> lines = {header, key};
       lines.insert(lines.end(), more.begin(), more.end());
@@ -2040,7 +2125,7 @@ void test_usage_cells(const std::string& dir) {
       CHECK_EQ(usage_figure(doc["clients"], "client", "a\"b\\c", "requests"), uint64_t(16));
       CHECK_EQ(doc["clients"].Size(), 5u);
     }
-    // The duplicates add up (the largest time is the largest), a cell without request is ignored.
+    // Duplicates add up. The largest time is kept. A cell without a request is ignored.
     write_usage_lines(bad, with({cell("d1", today, "agent", "list_hosts", "ok", 1, 10, 10, 3, 100), cell("d1", today, "agent", "list_hosts", "ok", 2, 40, 30, 4, 200),
                                  cell("d1", today, "agent", "list_hosts", "ok", 0, 99, 99, 9, 9), cell("d1", today, "agent", "other_tool", "ok", 0)}));
     {
@@ -2054,7 +2139,8 @@ void test_usage_cells(const std::string& dir) {
       CHECK_EQ(doc["totals"]["bytes"].GetUint64(), uint64_t(300));
       CHECK_EQ(doc["tools"].Size(), 1u);
     }
-    // More cells than the cap of a bucket: the ones past it fold into the overflow cell of their type, nothing is dropped.
+    // The file has more cells than the cap of a bucket. The cells past the cap fold into the
+    // overflow cell of their type. Nothing is dropped.
     std::vector<std::string> many_cells;
     for (int i = 0; i < 600; ++i) many_cells.push_back(cell("d1", today, "agent", "t" + std::to_string(i), "ok", 1, 2, 2, 0, 1));
     many_cells.push_back(cell("d1", today, "agent", "ping", "ok", 4, 0, 0, 0, 0, "request"));
@@ -2085,8 +2171,8 @@ void test_usage_cells(const std::string& dir) {
       CHECK_EQ(usage_figure(overview["clients"], "client", "agent", "requests"), uint64_t(512));
       CHECK_EQ(usage_figure(overview["clients"], "client", "other", "requests"), uint64_t(92));
     }
-    // A client name past the 16 of a key is "other" when the file is read, and the cells that this makes equal are one: 20 names in one
-    // bucket; the totals are the same.
+    // When the file is read, a client name past the 16 of a key becomes "other". Cells that become
+    // equal are merged into one. The test uses 20 names in one bucket. The totals stay the same.
     std::vector<std::string> names20;
     for (int i = 0; i < 20; ++i) names20.push_back(cell("m1", minute, "name-" + std::to_string(i), "list_hosts", "ok", static_cast<uint64_t>(i + 1), 1, 1, 0, 1));
     write_usage_lines(bad, with(names20));
@@ -2226,19 +2312,21 @@ void test_usage_overview() {
     CHECK_EQ(run_group["calls"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(4));
     CHECK_EQ(run_group["duration_ms_sum"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(150));
     CHECK_EQ(run_group["bytes"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(1190));
-    // A protocol request is a request and has its bytes, and it is no call: its time is not in the series, as it is not in the tiles.
+    // A protocol request counts as a request, and it has its bytes. It is not a call, so its time
+    // is not in the series or in the tiles.
     const auto& init_group = *usage_row(doc["series"]["groups"], "id", "initialize");
     CHECK_EQ(init_group["requests"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(2));
     CHECK_EQ(init_group["calls"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(0));
     CHECK_EQ(init_group["duration_ms_sum"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(0));
     CHECK_EQ(init_group["bytes"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(550));
-    // A refusal has its bytes, and is no error.
+    // A refusal has its bytes. It is not an error.
     const auto& unread_group = *usage_row(doc["series"]["groups"], "id", "unread");
     CHECK_EQ(unread_group["requests"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(2));
     CHECK_EQ(unread_group["errors"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(0));
     CHECK_EQ(unread_group["bytes"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(110));
-    // The refusals are a metric of their own, the 429 and what was refused before it was read: unread has the two that there are, and no other
-    // group has one.
+    // The refusals are a metric of their own. They cover the 429 responses and the requests that
+    // are refused before they are read. The group unread holds both kinds of refusal. No other
+    // group has a refusal.
     CHECK_EQ(unread_group["refused"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(2));
     CHECK_EQ(usage_sum(unread_group["refused"]), uint64_t(2));
     for (const auto& group : doc["series"]["groups"].GetArray()) {
@@ -2246,7 +2334,7 @@ void test_usage_overview() {
     }
     CHECK_EQ(usage_sum(doc["series"]["rest"]["refused"]), uint64_t(0));
 
-    // The keys: the most requests first, the deleted key with when it was deleted.
+    // The keys are sorted by requests, the most first. The deleted key shows when it was deleted.
     CHECK(usage_names(doc["keys"], "id") == names({"k1", "k2", "gone"}));
     const auto& k1 = doc["keys"][0];
     CHECK_EQ(k1["requests"].GetUint64(), uint64_t(12));
@@ -2268,8 +2356,9 @@ void test_usage_overview() {
     CHECK_EQ(std::string(gone["deleted_at"].GetString()), mcp_iso_utc(now + 100));
     CHECK_EQ(gone["rate_limited"].GetUint64(), uint64_t(0));
 
-    // The methods: a row for each type and method. A tool is a "call", a method of the protocol a "request", what was refused before
-    // it was read is "refused". The time of a protocol request is its own (the latency of initialize).
+    // The methods have a row for each type and method. A tool has the type "call". A method of the
+    // protocol has the type "request". A request that is refused before it is read has the type
+    // "refused". The time of a protocol request is its own, such as the latency of initialize.
     CHECK_EQ(doc["methods"].Size(), 8u);
     const auto* hosts = usage_row(doc["methods"], "method", "list_hosts");
     CHECK(hosts != nullptr);
@@ -2300,7 +2389,7 @@ void test_usage_overview() {
     CHECK_EQ(usage_figure(doc["methods"], "method", "unread", "errors"), uint64_t(0));  // a refusal is not an error
     CHECK_EQ(std::string(doc["methods"][0]["method"].GetString()), std::string("list_hosts"));  // the most requests first
 
-    // The results: all the requests, the successful protocol requests too.
+    // The results count all the requests. This includes the successful protocol requests.
     CHECK_EQ(usage_figure(doc["results"], "result", "ok", "count"), uint64_t(18));
     CHECK_EQ(usage_figure(doc["results"], "result", "ok", "keys"), uint64_t(3));
     for (const char* result : {"timeout", "rpc_error_32601", "429_rate_limited", "query_failed", "415_unsupported_media_type"}) {
@@ -2317,8 +2406,9 @@ void test_usage_overview() {
     CHECK_EQ(usage_figure(doc["types"], "type", "limited", "requests"), uint64_t(1));
     CHECK_EQ(usage_figure(doc["types"], "type", "rejected", "requests"), uint64_t(1));
 
-    // The clients, from the cells of the window: the name that the client gave (clientInfo), else the product of its User-Agent. The
-    // most requests first, then by name; the counters are those of a key.
+    // The clients come from the cells of the window. A client has the name that it gave
+    // (clientInfo), or else the product of its User-Agent. The most requests come first, then the
+    // name. The counters are those of a key.
     CHECK_EQ(doc["clients"].Size(), 3u);
     CHECK(usage_names(doc["clients"], "client") == names({"claude-code", "claude-ai", "agent"}));
     const auto& code = doc["clients"][0];
@@ -2347,8 +2437,8 @@ void test_usage_overview() {
     CHECK_EQ(ai["keys"].GetUint64(), uint64_t(1));
     CHECK(usage_strings(ai["versions"]) == names({"0.1"}));
     CHECK_EQ(std::string(ai["last_seen_at"].GetString()), mcp_iso_utc(now + 26));
-    // The client that gave no name is the product of its User-Agent (agent/1): two keys used it. It has no version, and the last sight is
-    // the latest of the records of the keys.
+    // A client that gives no name takes the product of its User-Agent (agent/1). Two keys used this
+    // client. The client has no version. Its last sight is the latest of the records of the keys.
     const auto& agent = doc["clients"][2];
     CHECK_EQ(agent["requests"].GetUint64(), uint64_t(6));
     CHECK_EQ(agent["calls"].GetUint64(), uint64_t(6));
@@ -2376,7 +2466,7 @@ void test_usage_overview() {
     check_facets_add_up(doc);
     CHECK_EQ(at[95], uint64_t(17));
     CHECK(usage_names(doc["keys"], "id") == names({"k1", "k2"}));  // a key without a request is not a row
-    // The clients are those of the window: the deleted key's one did nothing in it.
+    // The clients are those of the window. The client of the deleted key did nothing in the window.
     CHECK(usage_names(doc["clients"], "client") == names({"claude-code", "claude-ai"}));
     const auto hour = usage_overview(usage, live, "1h", now);
     CHECK_EQ(hour["series"]["step"].GetInt64(), int64_t(60));
@@ -2389,7 +2479,7 @@ void test_usage_overview() {
     CHECK_EQ(six["series"]["t"].Size(), 72u);
     CHECK_EQ(six["totals"]["requests"].GetUint64(), uint64_t(17));
     CHECK_EQ(check_series(six)[71], uint64_t(17));
-    // 30 days (by 12 hours): all of it; 90 days are not offered by this retention.
+    // 30 days (by 12 hours) show all of the data. This retention does not offer 90 days.
     const auto month = usage_overview(usage, live, "30d", now);
     CHECK_EQ(month["series"]["step"].GetInt64(), int64_t(43200));
     CHECK_EQ(month["totals"]["requests"].GetUint64(), uint64_t(23));
@@ -2398,7 +2488,8 @@ void test_usage_overview() {
     CHECK(usage_names(month["clients"], "client") == names({"claude-code", "claude-ai", "agent"}));
   }
 
-  // A filter on the type: the totals, the series and the other facets follow it; the facet of the types does not.
+  // A filter on the type applies to the totals, the series and the other facets. The facet of the
+  // types does not follow the filter.
   {
     const auto doc = usage_overview(usage, live, "7d", now, usage_query("method", {}, {}, {}, {"call"}));
     CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(15));
@@ -2448,14 +2539,15 @@ void test_usage_overview() {
     CHECK_EQ(usage_figure(doc["methods"], "method", "list_hosts", "requests"), uint64_t(11));
     CHECK_EQ(usage_figure(doc["types"], "type", "call", "requests"), uint64_t(4));
     CHECK_EQ(usage_figure(doc["types"], "type", "request", "requests"), uint64_t(0));
-    // The clients that ran it: the one that has no request of it is not a row.
+    // The clients that ran it are listed. A client with no request for it is not a row.
     CHECK(usage_names(doc["clients"], "client") == names({"claude-code", "claude-ai"}));
     CHECK_EQ(usage_figure(doc["clients"], "client", "claude-code", "requests"), uint64_t(3));
     CHECK_EQ(usage_figure(doc["clients"], "client", "claude-code", "errors"), uint64_t(1));
     CHECK_EQ(usage_figure(doc["clients"], "client", "claude-ai", "requests"), uint64_t(1));
   }
 
-  // Filters of two dimensions are AND; the values of one are OR. A value that was chosen stays in its facet at 0.
+  // Filters on two dimensions combine with AND. The values of one dimension combine with OR. A
+  // value that was chosen stays in its facet at 0.
   {
     const auto doc = usage_overview(usage, live, "7d", now, usage_query("method", {}, {"list_hosts"}, {"timeout"}));
     CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(0));
@@ -2466,13 +2558,14 @@ void test_usage_overview() {
     CHECK_EQ(doc["series"]["groups"][0]["total"].GetUint64(), uint64_t(0));
     for (const char* metric : {"requests", "errors", "calls", "duration_ms_sum", "bytes", "refused"}) CHECK_EQ(doc["series"]["groups"][0][metric].Size(), 56u);
     check_series(doc);
-    // methods: the requests that ended with timeout (any method), and list_hosts, which was chosen
+    // Methods: the requests that ended with a timeout (any method), and list_hosts, which was
+    // chosen.
     CHECK(usage_names(doc["methods"], "method") == names({"run_query", "list_hosts"}));
     CHECK_EQ(usage_figure(doc["methods"], "method", "list_hosts", "requests"), uint64_t(0));
     CHECK(usage_row(doc["methods"], "method", "list_hosts")->HasMember("duration_ms_avg"));
     CHECK((*usage_row(doc["methods"], "method", "list_hosts"))["duration_ms_avg"].IsNull());
     CHECK_EQ(std::string((*usage_row(doc["methods"], "method", "list_hosts"))["kind"].GetString()), std::string("call"));
-    // results: the requests of list_hosts, and the timeout that was chosen
+    // Results: the requests of list_hosts, and the timeout that was chosen.
     CHECK(usage_names(doc["results"], "result") == names({"ok", "timeout"}));
     CHECK_EQ(usage_figure(doc["results"], "result", "ok", "count"), uint64_t(11));
     CHECK_EQ(usage_figure(doc["results"], "result", "timeout", "count"), uint64_t(0));
@@ -2485,7 +2578,8 @@ void test_usage_overview() {
     CHECK(usage_names(either["series"]["groups"], "id") == names({"run_query", "tools/list", "ping"}));  // in the order of the request, ping at 0
     CHECK_EQ(either["series"]["groups"][2]["total"].GetUint64(), uint64_t(0));
     check_series(either);
-    // A method of the protocol that nothing called is a "request" row at 0, "unread" is "refused", a name that is no method is a tool.
+    // A method of the protocol that nothing called is a "request" row at 0. "unread" is "refused".
+    // A name that is no method is a tool.
     CHECK_EQ(std::string((*usage_row(either["methods"], "method", "ping"))["kind"].GetString()), std::string("request"));
     const auto kinds = usage_overview(usage, live, "7d", now, usage_query("method", {}, {"unread", "initialize", "list_tables"}, {"nothing_like_it"}));
     CHECK_EQ(std::string((*usage_row(kinds["methods"], "method", "unread"))["kind"].GetString()), std::string("refused"));
@@ -2493,7 +2587,8 @@ void test_usage_overview() {
     CHECK_EQ(std::string((*usage_row(kinds["methods"], "method", "list_tables"))["kind"].GetString()), std::string("call"));
   }
 
-  // Values that nothing has: they keep nothing, and they are in their facet at 0 (a key that is not there is known by its id).
+  // Values that nothing has keep nothing, and they appear in their facet at 0. A key that is not
+  // there is known by its id.
   {
     const auto doc = usage_overview(usage, live, "7d", now, usage_query("key", {"ui_000000000000", "k2"}, {"nope"}, {"nothing_here"}));
     CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(0));
@@ -2516,7 +2611,7 @@ void test_usage_overview() {
     CHECK_EQ(doc["clients"].Size(), 0u);
   }
 
-  // A deleted key: in the keys with when it was deleted, and a filter on it cuts the clients too.
+  // A deleted key appears in the keys with its deletion time. A filter on it cuts the clients too.
   {
     const auto doc = usage_overview(usage, live, "7d", now, usage_query("key", {"gone"}));
     CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(4));
@@ -2529,10 +2624,11 @@ void test_usage_overview() {
     CHECK_EQ(std::string(doc["clients"][0]["client"].GetString()), std::string("agent"));
     CHECK_EQ(doc["clients"][0]["keys"].GetUint64(), uint64_t(1));
     CHECK_EQ(doc["clients"][0]["requests"].GetUint64(), uint64_t(4));
-    // The versions and the last sight are those of the records of the keys that the filter keeps: the deleted key's record alone.
+    // The versions and the last sight come from the records of the keys that the filter keeps. For
+    // the deleted key, only its own record counts.
     CHECK_EQ(doc["clients"][0]["versions"].Size(), 0u);
     CHECK_EQ(std::string(doc["clients"][0]["last_seen_at"].GetString()), mcp_iso_utc(now - day + 8));
-    // In 24 hours it did nothing: a row at 0, as a key that was chosen.
+    // In 24 hours it did nothing. It has a row at 0, as a key that was chosen does.
     const auto hours = usage_overview(usage, live, "24h", now, usage_query("method", {"gone"}));
     CHECK_EQ(hours["totals"]["requests"].GetUint64(), uint64_t(0));
     const auto* row = usage_row(hours["keys"], "id", "gone");
@@ -2543,7 +2639,8 @@ void test_usage_overview() {
     CHECK_EQ(hours["clients"].Size(), 0u);  // the clients are those of the window
   }
 
-  // The client filter: the totals, the series and the other facets follow it; the facet of the clients does not.
+  // The client filter applies to the totals, the series and the other facets. The facet of the
+  // clients does not follow it.
   {
     const auto doc = usage_overview(usage, live, "7d", now, usage_query("method", {}, {}, {}, {}, {"claude-ai"}));
     CHECK_EQ(doc["filters"]["client"].Size(), 1u);
@@ -2576,7 +2673,7 @@ void test_usage_overview() {
     CHECK_EQ(usage_figure(cut["clients"], "client", "claude-code", "requests"), uint64_t(3));
     CHECK_EQ(usage_figure(cut["clients"], "client", "claude-ai", "requests"), uint64_t(2));
     CHECK_EQ(usage_figure(cut["clients"], "client", "agent", "requests"), uint64_t(6));
-    // Two clients are OR; a client that nothing counted keeps nothing.
+    // Two clients combine with OR. A client that nothing counted keeps nothing.
     const auto two = usage_overview(usage, live, "7d", now, usage_query("method", {}, {}, {}, {}, {"claude-ai", "agent"}));
     CHECK_EQ(two["totals"]["requests"].GetUint64(), uint64_t(13));
     check_series(two);
@@ -2584,7 +2681,8 @@ void test_usage_overview() {
     CHECK_EQ(nobody["totals"]["requests"].GetUint64(), uint64_t(0));
     CHECK_EQ(nobody["keys"].Size(), 0u);
     check_series(nobody);
-    // A chosen client is in its facet at 0, with what the records of the keys say of it: when nothing of it matches the other filters.
+    // A chosen client appears in its facet at 0. The records of the keys give its details. This
+    // happens when nothing of the client matches the other filters.
     const auto zero = usage_overview(usage, live, "7d", now, usage_query("method", {}, {"ping"}, {}, {}, {"claude-ai", "nobody"}));
     CHECK_EQ(zero["totals"]["requests"].GetUint64(), uint64_t(0));
     CHECK_EQ(zero["clients"].Size(), 2u);
@@ -2658,7 +2756,8 @@ void test_usage_overview() {
     CHECK_EQ(code["calls"][now_point].GetUint64(), uint64_t(6));
     CHECK_EQ(code["duration_ms_sum"][now_point].GetUint64(), uint64_t(160));
     CHECK_EQ(code["bytes"][now_point].GetUint64(), uint64_t(2060));
-    // The values that were chosen, in their order, a client that has no request is a line of zeros; no `rest`.
+    // The chosen values appear in their order. A client with no request is a line of zeros. There
+    // is no `rest`.
     const auto chosen = usage_overview(usage, live, "7d", now, usage_query("client", {}, {}, {}, {}, {"claude-ai", "nobody", "agent"}));
     CHECK(usage_names(chosen["series"]["groups"], "id") == names({"claude-ai", "nobody", "agent"}));
     CHECK_EQ(chosen["series"]["groups"][1]["total"].GetUint64(), uint64_t(0));
@@ -2672,9 +2771,15 @@ void test_usage_overview() {
     check_series(day_doc);
   }
 
-  // The order of the groups: the metric that ranks them is `order` (the requests when it is not asked). The groups are the 8 with the most of it
-  // (the same total: the smaller id first), the others are in `rest`, and a group with none of it is in `rest` too, however few groups there
-  // are: the codes that are not errors, when the errors rank. The `total` of a group stays its requests, and the order moves no figure.
+  // The order of the groups is set by the metric `order`. The requests rank the groups when no
+  // order is asked.
+  //
+  // The 8 groups with the most of that metric come first. When two groups have the same total, the
+  // smaller id comes first. The other groups go in `rest`. A group with none of the metric also
+  // goes in `rest`, however few groups there are.
+  //
+  // For example, the codes that are not errors go in `rest` when the errors rank. The `total` of a
+  // group stays its requests. The order moves no figure.
   {
     const auto ranked = [&](const std::string& group, const std::string& order) {
       McpUsageOverviewQuery query = usage_query(group);
@@ -2689,7 +2794,7 @@ void test_usage_overview() {
       CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(23));
       check_series(doc);
     };
-    // The requests are the default, and the answer says the order next to the group.
+    // The requests are the default order. The answer shows the order next to the group.
     shows(ranked("method", "requests"),
           names({"list_hosts", "run_query", "initialize", "unread", "notifications/initialized", "other", "resources/list", "tools/list"}), 0, 0);
     CHECK_EQ(std::string(ranked("method", "requests")["order"].GetString()), std::string("requests"));
@@ -2711,7 +2816,8 @@ void test_usage_overview() {
     shows(ranked("client", "errors"), names({"claude-code", "claude-ai"}), 1, 6);
     shows(ranked("type", "errors"), names({"call", "request"}), 2, 2);
 
-    // The refusals, the 429 and what was refused before it was read: unread has the two, k1 the 429 and k2 the other.
+    // The refusals are the 429 responses and the requests that are refused before they are read.
+    // The group unread has both kinds. k1 has the 429 response, and k2 has the other kind.
     const auto by_refused = ranked("method", "refused");
     shows(by_refused, names({"unread"}), 7, 21);
     CHECK_EQ(usage_sum(by_refused["series"]["groups"][0]["refused"]), uint64_t(2));
@@ -2722,14 +2828,16 @@ void test_usage_overview() {
     shows(ranked("client", "refused"), names({"claude-ai", "claude-code"}), 1, 6);
     shows(ranked("type", "refused"), names({"limited", "rejected"}), 2, 21);
 
-    // The calls (the protocol requests have none), and the bytes (the same number: by name, and no byte is `rest`).
+    // This section lists the calls, and the protocol requests have none. It lists the bytes next,
+    // with the same number ranked by name. No byte is in `rest`.
     shows(ranked("method", "calls"), names({"list_hosts", "run_query"}), 6, 8);
     shows(ranked("key", "calls"), names({"k1", "gone", "k2"}), 0, 0);  // the deleted key made 4 calls, k2 3
     shows(ranked("client", "calls"), names({"agent", "claude-code", "claude-ai"}), 0, 0);  // agent and claude-code have 6
     shows(ranked("method", "bytes"), names({"run_query", "list_hosts", "initialize", "tools/list", "resources/list", "unread"}), 2, 2);
     shows(ranked("type", "bytes"), names({"call", "request", "rejected", "limited"}), 0, 0);
 
-    // A dimension that is filtered keeps the values that were chosen, in their order, whatever the order and the figures.
+    // A filtered dimension keeps the chosen values, in their order. This holds for any order and
+    // any figure.
     for (const char* order : {"requests", "errors", "refused", "calls", "bytes"}) {
       McpUsageOverviewQuery query = usage_query("method", {}, {"list_hosts", "run_query", "ping", "unread"});
       query.order = order;
@@ -2752,8 +2860,11 @@ void test_usage_overview() {
     }
   }
 
-  // The rankings: `orders` asks for the groups of more metrics in the same read (a chart for each metric). Each ranking is made as the `groups` and the
-  // `rest` of the series are for that order alone, from the same counts; the series keeps following `order`. Nothing asked, nothing added.
+  // The rankings: `orders` asks for the groups of more metrics in the same read. Each ranking is a
+  // chart for one metric, with its own `groups` and `rest`. Each ranking is made from the same
+  // counts, for that order alone. The series keeps following `order`.
+  //
+  // If nothing is asked, nothing is added.
   {
     const auto asked = [&](const std::string& group, const std::string& order, std::vector<std::string> orders, std::vector<std::string> methods = {}) {
       McpUsageOverviewQuery query = usage_query(group, {}, std::move(methods));
@@ -2763,14 +2874,16 @@ void test_usage_overview() {
     };
     const std::vector<std::string> every = {"requests", "errors", "refused", "calls", "bytes"};
 
-    // Without `orders` the series is what it was: its step, its points, its groups and its rest, and the answer does not name the orders.
+    // Without `orders`, the series does not change. It keeps its step, its points, its groups and
+    // its rest. The answer does not name the orders.
     const auto alone = asked("method", "requests", {});
     CHECK(usage_members(alone["series"]) == names({"step", "t", "groups", "rest"}));
     CHECK(!alone["series"].HasMember("rankings"));
     CHECK(!alone.HasMember("orders"));
     CHECK(usage_members(alone) == usage_members(asked("method", "requests", {"errors"})));  // the same members at the top: `rankings` is in the series
 
-    // One ranking: the series is the one of `order` still, and the ranking is the series of the other order.
+    // With one ranking, the series keeps the order of `order`. The ranking is the series of the
+    // other order.
     {
       const auto doc = asked("method", "requests", {"errors"});
       CHECK(usage_members(doc["series"]) == names({"step", "t", "groups", "rest", "rankings"}));
@@ -2791,8 +2904,9 @@ void test_usage_overview() {
       CHECK(doc["series"]["step"] == alone["series"]["step"]);
     }
 
-    // The series follows `order`, and the rankings are the other metrics: here the errors rank the series, and the rankings are the calls and the
-    // bytes (the ranking of the errors is not asked, so it is not there).
+    // The series follows `order`. The rankings are the other metrics. In this test, the errors rank
+    // the series. The rankings are the calls and the bytes. The ranking of the errors is not asked,
+    // so it is not there.
     {
       const auto doc = asked("method", "errors", {"calls", "bytes"});
       CHECK(usage_names(doc["series"]["groups"], "id") == names({"run_query", "resources/list"}));
@@ -2803,7 +2917,8 @@ void test_usage_overview() {
       check_series(doc);
     }
 
-    // By method, the four metrics that the page draws next to the requests: each ranking has its own groups, the others summed in its `rest`.
+    // By method, the page draws four metrics next to the requests. Each ranking has its own groups.
+    // The other groups are summed in its `rest`.
     {
       const auto doc = asked("method", "requests", {"errors", "refused", "calls", "bytes"});
       const auto& rankings = doc["series"]["rankings"];
@@ -2870,7 +2985,8 @@ void test_usage_overview() {
       CHECK(reversed["series"]["rankings"]["errors"] == doc["series"]["rankings"]["errors"]);
     }
 
-    // A dimension that is filtered keeps the values that were chosen, in their order, in every ranking: the same groups for each order.
+    // A filtered dimension keeps the chosen values, in their order, in every ranking. Each order
+    // has the same groups.
     {
       const auto doc = asked("method", "requests", every, {"list_hosts", "run_query", "ping", "unread"});
       for (const auto& order : every) {
@@ -2926,8 +3042,9 @@ void test_usage_overview() {
   }
 }
 
-// The tiers of an entry: an event is in every tier that the retention keeps, each tier keeps the points of its window and no more, the
-// prune trims each one, and nothing is kept past the retention.
+// The tiers of an entry work as follows. An event is in every tier that the retention keeps. Each
+// tier keeps the points of its window and no more. The prune trims each tier. Nothing is kept past
+// the retention.
 void test_usage_tiers(const std::string& dir) {
   const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;  // 10:00
   const int64_t hour = 3600;
@@ -2939,7 +3056,7 @@ void test_usage_tiers(const std::string& dir) {
     size_t points;
   } tiers[] = {{"m1", 60, 60}, {"m5", 300, 72}, {"m15", 900, 96}, {"h3", 10800, 56}, {"h12", 43200, 60}, {"d1", 86400, 30}};
 
-  // One event is in every tier, in the bucket of the step of its tier; the next one adds to them.
+  // One event is in every tier, in the bucket of the step of its tier. The next event adds to them.
   {
     std::filesystem::remove(file);
     McpUsage usage(usage_options(dir, "tiers"), now);
@@ -2966,7 +3083,8 @@ void test_usage_tiers(const std::string& dir) {
       CHECK_EQ(cell["rows"].GetUint64(), uint64_t(3));
       CHECK_EQ(cell["bytes"].GetUint64(), uint64_t(50));
     }
-    // Two minutes later: a bucket of its own by the minute, the same one in the other tiers (the same 5 and 15 minutes, 3 and 12 hours).
+    // Two minutes later, the event has a bucket of its own, by the minute. The other tiers hold it
+    // in the same bucket, for the 5 and 15 minutes, and for 3 and 12 hours.
     call.at = now + 1234 + 120;
     call.duration_ms = 9;
     call.rows = 1;
@@ -2991,8 +3109,9 @@ void test_usage_tiers(const std::string& dir) {
     }
   }
 
-  // Each tier keeps the points of its window as the events come (40 days by 3 hours, then 2 days by the minute, for a retention of 30
-  // days): 60 minutes, 72 steps of 5 minutes, 96 of 15 minutes, 56 of 3 hours, 60 of 12 hours and 30 days.
+  // As the events arrive, each tier keeps the points of its window. For a retention of 30 days, the
+  // windows are 40 days by 3 hours, then 2 days by the minute. The sizes are 60 minutes, 72 steps
+  // of 5 minutes, 96 steps of 15 minutes, 56 steps of 3 hours, 60 steps of 12 hours and 30 days.
   {
     std::filesystem::remove(file);
     McpUsage usage(usage_options(dir, "tiers", 30), now - 40 * day);
@@ -3015,8 +3134,11 @@ void test_usage_tiers(const std::string& dir) {
       CHECK_EQ(starts.back(), end - end % tier.step);
       CHECK_EQ(starts.front(), end - end % tier.step - (static_cast<int64_t>(tier.points) - 1) * tier.step);
     }
-    // The prune trims each tier to the window of the time of the save: two hours later, with no event, nothing of the last hour is left,
-    // and a step of each other tier. Of 5 minutes: 48 steps (3.9 hours), of 15 minutes: 88, of 3 hours: 55, of 12 hours: 59.
+    // The prune trims each tier to the window of the time of the save. Two hours later, with no
+    // event, nothing of the last hour is left, and a step of each other tier is left.
+    //
+    // The 5-minute tier has 48 steps (3.9 hours). The 15-minute tier has 88 steps. The 3-hour tier
+    // has 55 steps. The 12-hour tier has 59 steps.
     const struct {
       const char* name;
       size_t size;
@@ -3024,7 +3146,7 @@ void test_usage_tiers(const std::string& dir) {
     CHECK(usage.save(end + 2 * hour));
     const auto trimmed = usage_rows(file);
     for (const auto& tier : later) CHECK_EQ(usage_starts(trimmed, "k1", tier.name).size(), tier.size);
-    // A year later: nothing is left, the entry of the key stays.
+    // A year later, nothing is left. The entry of the key stays.
     CHECK(usage.save(end + 365 * day));
     const auto empty = usage_rows(file);
     for (const auto& tier : tiers) CHECK_EQ(usage_starts(empty, "k1", tier.name).size(), size_t(0));
@@ -3033,7 +3155,8 @@ void test_usage_tiers(const std::string& dir) {
     CHECK_EQ(text_of(*usage_rows_of(empty, "key")[0], "key"), std::string("k1"));
   }
 
-  // The retention decides which tiers are kept: 3 hours from 7 days, 12 hours from 30 days; nothing is kept past it.
+  // The retention decides which tiers are kept. The 3-hour tier is kept from 7 days. The 12-hour
+  // tier is kept from 30 days. Nothing is kept past the retention.
   for (const int64_t retention : {1, 6, 7, 29, 30, 90}) {
     std::filesystem::remove(file);
     McpUsage usage(usage_options(dir, "tiers", retention), now);
@@ -3045,13 +3168,15 @@ void test_usage_tiers(const std::string& dir) {
     for (const char* name : {"m1", "m5", "m15", "d1"}) CHECK_EQ(usage_starts(doc, "k1", name).size(), size_t(1));
     CHECK_EQ(usage_starts(doc, "k1", "h3").size(), retention >= 7 ? size_t(1) : size_t(0));
     CHECK_EQ(usage_starts(doc, "k1", "h12").size(), retention >= 30 ? size_t(1) : size_t(0));
-    // The window of a tier is offered when the tier is kept, and only then; the short windows answer whatever the retention.
+    // A window of a tier is offered only when the tier is kept. The short windows answer any
+    // retention.
     CHECK_EQ(mcp_usage_window("7d", retention, now).has_value(), retention >= 7);
     CHECK_EQ(mcp_usage_window("30d", retention, now).has_value(), retention >= 30);
     CHECK_EQ(parse(usage_detail(usage, "k1", true, "24h", now + 10))["totals"]["calls"].GetUint64(), uint64_t(1));
   }
 
-  // A retention that is lowered at the start: the tiers that it does not reach are emptied (and written so at the next save), the days are cut.
+  // A retention that is lowered at the start empties the tiers that it does not reach. The next
+  // save writes the empty tiers. The days are cut.
   {
     std::filesystem::remove(file);
     {
@@ -3074,7 +3199,7 @@ void test_usage_tiers(const std::string& dir) {
     CHECK_EQ(usage_starts(doc, "k1", "h12").size(), size_t(0));
     CHECK_EQ(usage_starts(doc, "k1", "d1").size(), size_t(3));  // the last 5 days hold the events of 4, 2 and 0 days ago
     CHECK_EQ(usage_starts(doc, "k1", "m15").size(), size_t(1));
-    // Raised again: the tiers fill from the next event on, the days stay.
+    // When the retention is raised again, the tiers fill from the next event. The days stay.
     McpUsage raised(usage_options(dir, "tiers", 90), now + 120);
     UsageCall call;
     call.at = now + 120;
@@ -3086,8 +3211,9 @@ void test_usage_tiers(const std::string& dir) {
     CHECK_EQ(usage_starts(again, "k1", "d1").size(), size_t(3));
   }
 
-  // A deleted key goes when its last day (d1) is gone, though a finer tier still holds the end of that day; the cells of all its tiers
-  // are given back (retention 1 keeps 4 tiers: a cap of 4 cells holds the 4 of one request).
+  // A deleted key is removed when its last day (d1) is gone. A finer tier can still hold the end of
+  // that day. The cells of all its tiers are released. Retention 1 keeps 4 tiers. A cap of 4 cells
+  // holds the 4 cells of one request.
   {
     McpUsageOptions options;
     options.retention_days = 1;
@@ -3104,7 +3230,7 @@ void test_usage_tiers(const std::string& dir) {
     CHECK(!usage_detail(usage, "a", false, "1h", late + 2).empty());
     CHECK(usage.save(after));
     CHECK_EQ(usage_detail(usage, "a", false, "1h", after), std::string(""));  // the minute tier still held it: the key is gone all the same
-    // Its 4 cells are free: a new key makes its own 4 cells, not the overflow cell.
+    // Its 4 cells are free. A new key makes its own 4 cells, not the overflow cell.
     UsageCall other;
     other.id = "b";
     other.at = after;
@@ -3115,8 +3241,8 @@ void test_usage_tiers(const std::string& dir) {
     CHECK_EQ(usage_count(doc["tools"], "tool", "other", "calls"), uint64_t(0));
   }
 
-  // The same for the deletion that the cap of deleted keys makes: the cells of every tier of the oldest one are given back (a cap of 12
-  // cells holds the 6 of two keys).
+  // The same rule applies to a deletion that the cap of deleted keys makes. The cells of every tier
+  // of the oldest deleted key are released. A cap of 12 cells holds the 6 cells of two keys.
   {
     McpUsageOptions options;
     options.max_deleted = 1;
@@ -3143,7 +3269,8 @@ void test_usage_tiers(const std::string& dir) {
     CHECK_EQ(usage_count(doc["tools"], "tool", "other", "calls"), uint64_t(0));
   }
 
-  // The file as it is written is the file as it is read, whatever the window: six tiers, the cells, the clients and their records.
+  // The file that is written is the file that is read, for any window. It holds six tiers, the
+  // cells, the clients and their records.
   {
     std::filesystem::remove(file);
     McpUsage usage(usage_options(dir, "tiers", 30), now - 4 * day);
@@ -3162,7 +3289,8 @@ void test_usage_tiers(const std::string& dir) {
         CHECK_EQ(usage_detail(again, id, false, window, now + 200), usage_detail(usage, id, false, window, now + 200));
       }
     }
-    // What the second one counts next is what the first one counts: the ids of the names are no part of the file.
+    // What the second one counts next is what the first one counts. The ids of the names are not
+    // part of the file.
     UsageCall call;
     call.at = now + 300;
     call.tool = "list_hosts";
@@ -3174,14 +3302,17 @@ void test_usage_tiers(const std::string& dir) {
   }
 }
 
-// The client of a request, the name that its cells carry: the name that it gave, else the product of its User-Agent, else unknown. At
-// most 16 names for a key and 4096 in all; past them a request counts as "other", and the totals stay exact.
+// The client of a request is the name that its cells carry. This is the name that the client gave.
+// If there is none, it is the product of its User-Agent. If that is missing, the name is unknown. A
+// key has at most 16 names, and 4096 names in all. Past these limits, a request counts as "other".
+// The totals stay exact.
 void test_usage_clients(const std::string& dir) {
   const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;
   const int64_t day = 86400;
 
-  // The requests of a key, each with the User-Agent and the clientInfo that it sends: a tool call (a request that is no initialize
-  // names no client: its client is the one that was last seen with its User-Agent).
+  // The requests of a key each have a User-Agent and a clientInfo, if the client sends them. A tool
+  // call is a request that is not an initialize. It names no client, so its client is the one that
+  // was last seen with its User-Agent.
   const auto call = [](McpUsage& usage, const std::string& key, const std::string& agent, const std::string& name = "", const std::string& version = "",
                        int64_t at = 1'800'007'200 - 1'800'007'200 % 3600) {
     UsageCall item;
@@ -3201,8 +3332,9 @@ void test_usage_clients(const std::string& dir) {
   };
   const auto list = [](std::initializer_list<const char*> values) { return std::vector<std::string>(values.begin(), values.end()); };
 
-  // The name: clientInfo, else the product of the User-Agent (the text before the first "/" or space), else unknown. The version is
-  // never in the name.
+  // The name comes from clientInfo. If there is no clientInfo, the name is the product of the
+  // User-Agent, which is the text before the first "/" or space. If neither exists, the name is
+  // unknown. The version is never part of the name.
   {
     McpUsage usage(McpUsageOptions{}, now);
     call(usage, "k1", "ua-one/9", "My Client", "1.0");                  // the name that the client gave: spaces inside are kept
@@ -3238,17 +3370,20 @@ void test_usage_clients(const std::string& dir) {
     CHECK_EQ(usage_figure(doc["clients"], "client", std::string(64, 'n'), "requests"), uint64_t(1));
     CHECK_EQ(usage_figure(doc["clients"], "client", std::string(63, 's'), "requests"), uint64_t(1));
     check_series(doc);
-    // The names that were counted are valid names of a client: the file and the filter take them back.
+    // The names that were counted are valid names of a client. The file and the filter read them
+    // again.
     for (const auto& row : doc["clients"].GetArray()) {
       McpUsageOverviewQuery query = usage_query("client", {}, {}, {}, {}, {row["client"].GetString()});
       CHECK(!mcp_usage_overview_check(&query).has_value());
     }
-    // The records of the clients (their life) are as before: the name, the version and the User-Agent that the client sent.
+    // The records of the clients keep their life, as before. Each record holds the name, the
+    // version and the User-Agent that the client sent.
     const auto detail = parse(usage_detail(usage, "k1", true, "24h", now));
     CHECK_EQ(detail["clients"].Size(), 8u);  // at most 8 records
   }
 
-  // The version is no part of the name: two versions of a client are one client, with its versions listed, the one seen last first.
+  // The version is not part of the name. Two versions of a client are one client. Its versions are
+  // listed, the version seen last first.
   {
     McpUsage usage(McpUsageOptions{}, now);
     call(usage, "k1", "up/1", "Upgraded", "1.0", now + 1);
@@ -3278,8 +3413,9 @@ void test_usage_clients(const std::string& dir) {
     CHECK(usage_strings(five["clients"][0]["versions"]) == list({"7.0", "6.0", "5.0", "4.0", "3.0"}));
   }
 
-  // A key uses 16 names, then "other"; the names unknown and other count in no cap; another key has its own 16, and a name that the first
-  // one could not take is not in the table: a filter on it keeps nothing, until a key takes it.
+  // A key uses 16 names, and then "other". The names unknown and other count in no cap. Another key
+  // has its own 16 names. A name that the first key could not take is not in the table. A filter on
+  // that name keeps nothing, until a key takes it.
   {
     McpUsage usage(McpUsageOptions{}, now);
     for (int i = 0; i < 20; ++i) call(usage, "k1", "client-" + std::to_string(i) + "/1");
@@ -3298,12 +3434,14 @@ void test_usage_clients(const std::string& dir) {
     CHECK_EQ(usage_figure(doc["clients"], "client", "unknown", "requests"), uint64_t(1));
     check_series(doc);
     check_facets_add_up(doc);
-    // Grouped by client: the same, 8 groups and the rest; filtered: the others are not in it.
+    // Grouped by client, the rule is the same: 8 groups and the rest. When filtered, the other
+    // clients are not in it.
     const auto by = usage_overview(usage, {"k1"}, "24h", now, usage_query("client"));
     CHECK_EQ(by["series"]["groups"].Size(), 8u);
     CHECK_EQ(by["series"]["rest"]["groups"].GetUint64(), uint64_t(10));
     check_series(by);
-    // A name that no key took keeps nothing; "other" has the requests of the names that were refused.
+    // A name that no key took keeps nothing. "other" has the requests of the names that were
+    // refused.
     const auto refused = usage_overview(usage, {"k1"}, "24h", now, usage_query("method", {}, {}, {}, {}, {"client-17"}));
     CHECK_EQ(refused["totals"]["requests"].GetUint64(), uint64_t(0));
     const auto others = usage_overview(usage, {"k1"}, "24h", now, usage_query("method", {}, {}, {}, {}, {"other"}));
@@ -3315,7 +3453,8 @@ void test_usage_clients(const std::string& dir) {
     CHECK_EQ(usage_overview(usage, {"k1", "k2"}, "24h", now, usage_query("method", {}, {}, {}, {}, {"client-17"}))["totals"]["requests"].GetUint64(), uint64_t(1));
   }
 
-  // A key that the cap of a bucket stops: its requests are in the overflow cell, whose client is other; the totals stay exact.
+  // A key that the cap of a bucket stops has its requests in the overflow cell. The client of that
+  // cell is other. The totals stay exact.
   {
     McpUsage usage(McpUsageOptions{}, now);
     for (int i = 0; i < 600; ++i) {
@@ -3333,14 +3472,16 @@ void test_usage_clients(const std::string& dir) {
     check_series(doc);
   }
 
-  // The table has 4096 names: a name that does not fit in it is "other" (the key has room for it, the table has none). A name that the
-  // table has is still taken by a key that has room.
+  // The table has 4096 names. A name that does not fit in the table is "other". This happens even
+  // when the key has room for it, because the table has no room. A name that the table already has
+  // is still taken by a key that has room.
   {
     McpUsage usage(McpUsageOptions{}, now);
     for (int k = 0; k < 255; ++k) {
       for (int n = 0; n < 16; ++n) call(usage, "key-" + std::to_string(k), "n" + std::to_string(k * 16 + n) + "/1");
     }
-    // 4080 names, and 2 fixed: 14 more fit; the 16 of the next key are 14 names and 2 that do not.
+    // The table has 4080 names, and 2 are fixed. 14 more names fit. The 16 names of the next key
+    // are 14 names that fit, and 2 names that do not.
     for (int n = 0; n < 16; ++n) call(usage, "key-255", "n" + std::to_string(4080 + n) + "/1");
     call(usage, "key-256", "late-name/1");  // the table is full
     call(usage, "key-256", "n0/1");          // a name that it has
@@ -3358,13 +3499,14 @@ void test_usage_clients(const std::string& dir) {
     CHECK_EQ(count("n4095"), uint64_t(0));
     CHECK_EQ(count("late-name"), uint64_t(0));
     CHECK_EQ(count("other"), uint64_t(2 + 1));  // n4094, n4095 and late-name
-    // The key that came last has its other cell: its client is other, its requests are counted.
+    // The key that came last has its other cell. The client of that cell is other, and its requests
+    // are counted.
     const auto last = usage_overview(usage, none, "24h", now, usage_query("method", {"key-256"}));
     CHECK_EQ(last["totals"]["requests"].GetUint64(), uint64_t(3));
   }
 
-  // The names that a key uses are counted again from its cells: when the file is read and when a day goes. The caps follow the cells, not
-  // the names that were once counted.
+  // The names that a key uses are counted again from its cells. This happens when the file is read,
+  // and when a day is removed. The caps follow the cells, not the names that were counted once.
   {
     std::filesystem::remove(usage_path(dir, "clients"));
     {
@@ -3384,7 +3526,7 @@ void test_usage_clients(const std::string& dir) {
       CHECK_EQ(usage_figure(doc["clients"], "client", "old-3", "requests"), uint64_t(2));
       CHECK(usage_row(doc["clients"], "client", "again") == nullptr);
       CHECK(again.save(now + 20));
-      // The day of the cells goes: the names are free, and the key takes new ones.
+      // When the day of the cells is removed, the names are free. The key then takes new names.
       CHECK(again.save(now + 4 * day));
       call(again, "k1", "fresh-0/1", "", "", now + 4 * day);
       call(again, "k1", "fresh-1/1", "", "", now + 4 * day);
@@ -3394,8 +3536,9 @@ void test_usage_clients(const std::string& dir) {
     }
   }
 
-  // The record that the request chose may be the one that goes (the least recently seen of the 8, with a clock that went back): the
-  // request is counted all the same, under its name.
+  // The record that the request chose can be the one that is removed. That record is the least
+  // recently seen of the 8, with a clock that moved backward. The request is counted all the same,
+  // under its name.
   {
     McpUsage usage(McpUsageOptions{}, now);
     for (int i = 0; i < 8; ++i) call(usage, "k1", "agent-" + std::to_string(i) + "/1", "", "", now + 100 + i);
@@ -3409,14 +3552,16 @@ void test_usage_clients(const std::string& dir) {
   }
 }
 
-// The 8 largest groups of the series, and the others summed in `rest`; the caps of the facets and of the clients.
+// The 8 largest groups of the series are shown. The other groups are summed in `rest`. This section
+// also sets the caps of the facets and of the clients.
 void test_usage_overview_caps() {
   const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;
   const int64_t day = 86400;
   McpUsageOptions options;
   options.retention_days = 30;
 
-  // 10 tools: the 8 largest, the tie of the 8th and 9th by name, the others in `rest` at each point.
+  // There are 10 tools. The 8 largest come first. A tie between the 8th and 9th is broken by name.
+  // The others go in `rest` at each point.
   {
     McpUsage usage(options, now - day);
     const int counts[] = {10, 9, 8, 7, 6, 5, 4, 3, 3, 1};
@@ -3437,7 +3582,8 @@ void test_usage_overview_caps() {
     CHECK(usage_names(doc["series"]["groups"], "id") == std::vector<std::string>({"t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7"}));
     CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), uint64_t(2));
     CHECK_EQ(doc["series"]["rest"]["total"].GetUint64(), uint64_t(4));  // t8 and t9
-    // The hour before (point 91 of 96, by 15 minutes) and the current one (point 95): the metrics of `rest` are summed as the requests are.
+    // The hour before is point 91 of 96 (by 15 minutes). The current one is point 95. The metrics
+    // of `rest` are summed as the requests are.
     CHECK_EQ(doc["series"]["rest"]["requests"][91].GetUint64(), uint64_t(1));
     CHECK_EQ(doc["series"]["rest"]["requests"][95].GetUint64(), uint64_t(3));
     CHECK_EQ(doc["series"]["rest"]["calls"][91].GetUint64(), uint64_t(1));
@@ -3464,8 +3610,11 @@ void test_usage_overview_caps() {
     check_series(everyone);
   }
 
-  // The same by the metric of `order`: the 8 with the most of it (the same total: the smaller id first) and the others in `rest`. Ten tools, whose
-  // errors rank them otherwise than their requests do: t8 ties with t5, t6 and t7 for the 8th place, and t0, which has requests, has no error.
+  // The same rule applies to the metric of `order`. The 8 tools with the most of that metric come
+  // first. If the totals are the same, the smaller id comes first. The others go in `rest`.
+  //
+  // This test has 10 tools. Their errors rank them in another order than their requests do. t8 ties
+  // with t5, t6 and t7 for the 8th place. t0 has requests, but it has no error.
   {
     McpUsage usage(options, now - day);
     const int errors[] = {0, 3, 3, 5, 4, 2, 2, 2, 2, 6};
@@ -3510,8 +3659,9 @@ void test_usage_overview_caps() {
     CHECK_EQ(none["series"]["rest"]["groups"].GetUint64(), uint64_t(10));
     CHECK_EQ(none["series"]["rest"]["total"].GetUint64(), uint64_t(74));
     check_series(none);
-    // The four other orders in one read: each ranking is the series of its order alone, the ties and the groups that have none of the metric
-    // included (t0 has no error; nobody has a refusal, and no call has a byte); the series itself stays the one of the requests.
+    // One read gives the four other orders. Each ranking is the series of its own order alone.
+    // Ties, and groups that have none of the metric, are included. t0 has no error, nobody has a
+    // refusal, and no call has a byte. The series itself stays the series of the requests.
     query.order = "requests";
     query.orders = {"errors", "refused", "calls", "bytes"};
     const auto together = usage_overview(usage, {"k1"}, "24h", now, query);
@@ -3537,7 +3687,8 @@ void test_usage_overview_caps() {
     check_series(together);
   }
 
-  // At most 200 rows for each facet, the clients too (the values that were chosen are always there); `omitted` counts what was cut.
+  // Each facet has at most 200 rows. The clients have the same limit. The values that were chosen
+  // are always there. `omitted` counts the rows that were cut.
   {
     McpUsage usage(options, now - day);
     std::vector<std::string> keys;
@@ -3573,7 +3724,8 @@ void test_usage_overview_caps() {
     CHECK_EQ(std::string(doc["clients"][0]["client"].GetString()), clients.front());  // the same requests: by name
     CHECK_EQ(std::string(doc["clients"][199]["client"].GetString()), clients[199]);
     CHECK_EQ(doc["series"]["groups"].Size(), 1u);
-    // The values that were chosen are kept, however far they come (a facet ignores its own filter, so the others stay).
+    // The values that were chosen are kept, however far down the list they are. A facet ignores its
+    // own filter, so the other values stay.
     const auto kept_key = usage_overview(usage, {}, "24h", now, usage_query("method", {keys.back()}));
     CHECK_EQ(kept_key["keys"].Size(), 201u);
     CHECK_EQ(kept_key["omitted"]["keys"].GetUint64(), uint64_t(49));
@@ -3585,7 +3737,8 @@ void test_usage_overview_caps() {
     CHECK_EQ(kept_result["omitted"]["results"].GetUint64(), uint64_t(49));
     CHECK(usage_row(kept_result["results"], "result", results.back()) != nullptr);
     CHECK_EQ(kept_result["totals"]["requests"].GetUint64(), uint64_t(1));
-    // A client that was chosen is kept in its facet too, however far it comes: it ignores its own filter, so the others stay.
+    // A client that was chosen is kept in its facet too, however far down the list it is. The facet
+    // ignores its own filter, so the other clients stay.
     const auto kept_client = usage_overview(usage, {}, "24h", now, usage_query("method", {}, {}, {}, {}, {clients.back()}));
     CHECK_EQ(kept_client["clients"].Size(), 201u);
     CHECK_EQ(kept_client["omitted"]["clients"].GetUint64(), uint64_t(49));
@@ -3602,7 +3755,8 @@ void test_usage_overview_caps() {
   }
 }
 
-// The rules of the parameters of the overview (the route answers 400 validation, with the field and the reason, when one fails).
+// The rules below check the parameters of the overview. The route answers with 400 validation, with
+// the field and the reason, when a rule fails.
 void test_usage_overview_check() {
   const auto check = [](McpUsageOverviewQuery query) { return mcp_usage_overview_check(&query); };
   const auto fails = [&](McpUsageOverviewQuery query, const char* field, const char* reason) {
@@ -3624,7 +3778,8 @@ void test_usage_overview_check() {
     if (error) CHECK_EQ(error->message, std::string("group must be key, method, client, result, type or instance"));
   }
 
-  // The order that ranks the groups of the series: one of five metrics, the requests when it is not given. It is the same for every group.
+  // The order ranks the groups of the series. It is one of five metrics. The requests rank the
+  // groups when no order is given. The same order applies to every group.
   CHECK_EQ(McpUsageOverviewQuery{}.order, std::string("requests"));
   const auto ordered = [](const std::string& group, const std::string& order, std::vector<std::string> keys = {}) {
     McpUsageOverviewQuery query = usage_query(group, std::move(keys));
@@ -3648,7 +3803,8 @@ void test_usage_overview_check() {
   fails(ordered("key", "nope", {"Bad Key"}), "order", "invalid");      // then the order, before the filters
   fails(ordered("key", "errors", {"Bad Key"}), "key", "invalid");
 
-  // The orders of the rankings of the series: the five metrics, each one once (so at most 5), in the order of the request. None is the default.
+  // The orders of the rankings of the series are the five metrics. Each metric appears once, so
+  // there are at most 5 orders. The orders keep the order of the request. None is the default.
   CHECK(McpUsageOverviewQuery{}.orders.empty());
   const auto ranked_by = [](std::vector<std::string> orders, std::vector<std::string> keys = {}) {
     McpUsageOverviewQuery query = usage_query("method", std::move(keys));
@@ -3675,7 +3831,8 @@ void test_usage_overview_check() {
     CHECK(error.has_value());
     if (error) CHECK_EQ(error->message, std::string("orders must be requests, errors, refused, calls or bytes"));
   }
-  // Past 5 values (the repeats are not counted) it is too many, and that is said before the values are checked.
+  // More than 5 values is too many. Repeated values are not counted. The route reports this before
+  // it checks the values.
   fails(ranked_by({"requests", "errors", "refused", "calls", "bytes", "nope"}), "orders", "too_many");
   fails(ranked_by({"requests", "errors", "refused", "calls", "bytes", "duration_ms_sum"}), "orders", "too_many");
   fails(ranked_by({"a", "b", "c", "d", "e", "f"}), "orders", "too_many");
@@ -3711,7 +3868,8 @@ void test_usage_overview_check() {
   for (const char* method : {"", "has space", "tools/call:run_query", "a-b", "a.b", "caf\xc3\xa9", "a\nb"}) fails(usage_query("method", {}, {method}), "method", "invalid");
   fails(usage_query("method", {}, {std::string(65, 'x')}), "method", "invalid");
 
-  // A client is a name as the cells keep it: printable ASCII, 1 to 64 bytes, no space at either end (a space inside is valid).
+  // A client is a name as the cells keep it. The name has printable ASCII characters, 1 to 64
+  // bytes, and no space at either end. A space inside the name is valid.
   CHECK(!check(usage_query("client", {}, {}, {}, {}, {"claude-code", "Visual Studio Code", "other", "unknown", "a\"b\\c", "x y", std::string(64, 'c'), "~", "!"})).has_value());
   for (const char* client : {"", " ", " x", "x ", "  x  ", "caf\xc3\xa9", "a\nb", "a\tb", "a\x01" "b", "a\x7f" "b"}) {
     fails(usage_query("client", {}, {}, {}, {}, {client}), "client", "invalid");
@@ -3724,7 +3882,8 @@ void test_usage_overview_check() {
     if (error) CHECK_EQ(error->message, std::string("client must be a client name (printable ASCII, 1 to 64 bytes)"));
   }
 
-  // An instance is a name as the files keep it: A-Z a-z 0-9 . _ -, 1 to 64 bytes.
+  // An instance is a name as the files keep it. Its characters are A-Z a-z 0-9 . _ -, and its
+  // length is 1 to 64 bytes.
   CHECK(!check(usage_query("instance", {}, {}, {}, {}, {}, {"chdash-0", "a.b_c-d", "A", "0", ".", "..", std::string(64, 'x')})).has_value());
   for (const char* instance : {"", " ", "has space", "a/b", "a,b", "caf\xc3\xa9", "a\n", "a\tb", "a:b", "a*"}) {
     fails(usage_query("instance", {}, {}, {}, {}, {}, {instance}), "instance", "invalid");
@@ -3744,7 +3903,7 @@ void test_usage_overview_check() {
   CHECK(!check(usage_query("type", {}, {}, {}, {"call", "request", "limited", "rejected"})).has_value());
   for (const char* type : {"", "Call", "tool", "refused", "calls", "call,request"}) fails(usage_query("type", {}, {}, {}, {type}), "type", "invalid");
 
-  // At most 20 values for each dimension; a value that is repeated counts once.
+  // Each dimension has at most 20 values. A repeated value counts once.
   std::vector<std::string> keys;
   std::vector<std::string> methods;
   std::vector<std::string> results;
@@ -3774,7 +3933,9 @@ void test_usage_overview_check() {
     CHECK(query.clients == std::vector<std::string>({"x", "y"}));
     CHECK(query.instances == std::vector<std::string>({"i2", "i1"}));
   }
-  // The first rule that fails is the answer: the group, the order, the orders, then the keys, the methods, the clients, the instances, the results and the types.
+  // The first rule that fails gives the answer. The rules are checked in this order: the group, the
+  // order, the orders, the keys, the methods, the clients, the instances, the results and the
+  // types.
   fails(usage_query("nope", {"Bad Key"}, {"has space"}), "group", "invalid");
   fails(usage_query("key", {"Bad Key"}, {"has space"}, {"A"}, {"x"}, {" x"}), "key", "invalid");
   fails(usage_query("key", {}, {"has space"}, {"A"}, {"x"}, {" x"}), "method", "invalid");
@@ -3783,7 +3944,8 @@ void test_usage_overview_check() {
   fails(usage_query("key", {}, {}, {"A"}, {"x"}), "result", "invalid");
 }
 
-// Counting while the overview reads: an entry at a time, never a name read outside the lock (the names grow and move).
+// The code counts while the overview reads. It counts one entry at a time. It never reads a name
+// outside the lock, because the names grow and move.
 void test_usage_overview_while_counting() {
   const int64_t now = 1'800'007'200 - 1'800'007'200 % 3600;
   McpUsageOptions options;
@@ -3817,7 +3979,7 @@ void test_usage_overview_while_counting() {
 
 // ---- several instances that share a directory ----------------------------------------------------------
 
-// A request that a test counts on an instance: a tool call by default.
+// A test counts a request on an instance. The default request is a tool call.
 void usage_count_call(McpUsage& usage, const std::string& id, int64_t at, const std::string& tool, const std::string& status = "ok", int64_t ms = 10,
                       uint64_t rows = 0, uint64_t bytes = 100, const std::string& agent = "agent/1") {
   UsageCall call;
@@ -3832,8 +3994,9 @@ void usage_count_call(McpUsage& usage, const std::string& id, int64_t at, const 
   usage_record(usage, call);
 }
 
-// The answers of the instances that share a directory add up: by cell, with the key, the client and the instance as dimensions; a key that only
-// another instance knows is "elsewhere" or deleted; the files of the others are read in the background and swapped in whole.
+// The answers of the instances that share a directory add up. The cells use the key, the client and
+// the instance as dimensions. A key that only another instance knows is "elsewhere" or deleted. The
+// files of the other instances are read in the background. Each file is swapped in whole.
 void test_usage_instances(const std::string& root) {
   const int64_t now = 1'800'007'200;  // a whole hour
   const int64_t day = 86400;
@@ -3866,7 +4029,8 @@ void test_usage_instances(const std::string& root) {
   }
   const std::vector<std::string> live = {"k1", "k2"};
 
-  // Before the files of the others are read, an instance sees itself only: they are read in the background.
+  // Before the files of the others are read, an instance sees only itself. The other files are read
+  // in the background.
   CHECK_EQ(alpha.instances().size(), size_t(1));
   CHECK_EQ(parse(usage_detail(alpha, "k1", true, "7d", now + 60))["totals"]["requests"].GetUint64(), uint64_t(3));
   CHECK_EQ(alpha.since(), now - day);
@@ -3890,7 +4054,8 @@ void test_usage_instances(const std::string& root) {
   CHECK_EQ(beta.instances()[0].instance, std::string("beta"));
   CHECK_EQ(beta.instances()[1].instance, std::string("alpha"));
 
-  // The details of a key add up the instances: the cells, the first and the last use, the records of the clients.
+  // The details of a key add up across the instances. This covers the cells, the first and the last
+  // use, and the records of the clients.
   {
     const auto doc = parse(usage_detail(alpha, "k1", true, "7d", now + 60));
     CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(6));  // alpha: initialize and 2 calls; beta: 3 calls
@@ -3921,7 +4086,7 @@ void test_usage_instances(const std::string& root) {
     for (const char* member : {"requests", "calls", "errors", "rows", "bytes", "duration_ms_avg", "duration_ms_max"}) {
       CHECK_EQ(other["totals"][member].GetUint64(), doc["totals"][member].GetUint64());
     }
-    // The instances that are summed: one of them only.
+    // Only one of the instances is summed.
     const McpUsageKeyRef key = usage_key("k1");
     const McpUsageWindow window = *mcp_usage_window("7d", 90, now + 60);
     McpUsageDetailQuery only;
@@ -3952,8 +4117,8 @@ void test_usage_instances(const std::string& root) {
     CHECK_EQ(brief["omitted"]["statuses"].GetUint64(), uint64_t(0));
     CHECK_EQ(brief["totals"]["requests"].GetUint64(), uint64_t(6));
   }
-  // A key that only beta knows: found, with its recorded name, as seen on another instance; a key that beta deleted is deleted; a key that
-  // nobody knows is a 404 (unless it is live).
+  // A key that only beta knows is found. It has its recorded name, as seen on another instance. A
+  // key that beta deleted is deleted. A key that nobody knows gives a 404, unless it is live.
   {
     const auto elsewhere = parse(usage_detail(alpha, "ui_0a1b2c3d4e5f", false, "7d", now + 60));
     CHECK(elsewhere["elsewhere"].GetBool());
@@ -3971,8 +4136,9 @@ void test_usage_instances(const std::string& root) {
     CHECK(!parse(usage_detail(alpha, "k1", true, "7d", now + 60))["elsewhere"].GetBool());
     CHECK_EQ(usage_count(parse(usage_detail(alpha, "k2", true, "7d", now + 60))["statuses"], "status", "timeout", "count"), uint64_t(1));
   }
-  // The list: the live keys with the instances summed, then the keys that are not live here and that have usage: the deleted ones first
-  // (the last deletion first), then the ones that another instance only knows.
+  // The list shows the live keys, with the instances summed. Then it shows the keys that are not
+  // live here and that have usage. The deleted keys come first, with the last deletion first. The
+  // keys that only another instance knows come last.
   {
     const auto doc = parse(usage_list(alpha, live, "7d", now + 60));
     CHECK(!doc.HasMember("persisted"));
@@ -3999,7 +4165,8 @@ void test_usage_instances(const std::string& root) {
     CHECK_EQ(alpha.entry_key("ui_0a1b2c3d4e5f")->host, std::string("prod"));
     CHECK(!alpha.entry_key("nobody").has_value());
   }
-  // The overview: the totals and every facet add up the instances; a key is counted once in a row that both have.
+  // The overview totals and every facet add up the instances. A key is counted once in a row that
+  // both instances have.
   {
     const auto doc = usage_overview(alpha, live, "7d", now + 60, usage_query("instance"));
     CHECK_EQ(std::string(doc["group"].GetString()), std::string("instance"));
@@ -4045,7 +4212,8 @@ void test_usage_instances(const std::string& root) {
     CHECK_EQ(doc["series"]["groups"][0]["total"].GetUint64(), uint64_t(5));
     CHECK_EQ(doc["series"]["groups"][1]["total"].GetUint64(), uint64_t(4));
     CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), uint64_t(0));
-    // The keys: k1 has the requests of both instances; the deleted key and the key of another instance are named.
+    // The keys: k1 has the requests of both instances. The deleted key and the key of the other
+    // instance are named.
     CHECK(usage_names(doc["keys"], "id") == names({"k1", "k2", "old", "ui_0a1b2c3d4e5f"}));
     CHECK_EQ(usage_figure(doc["keys"], "id", "k1", "requests"), uint64_t(6));
     CHECK_EQ(std::string((*usage_row(doc["keys"], "id", "k1"))["last_used_at"].GetString()), mcp_iso_utc(now + 12));
@@ -4061,14 +4229,16 @@ void test_usage_instances(const std::string& root) {
     CHECK_EQ(usage_figure(doc["results"], "result", "ok", "count"), uint64_t(8));
     CHECK_EQ(usage_figure(doc["results"], "result", "ok", "keys"), uint64_t(3));
     CHECK_EQ(usage_figure(doc["results"], "result", "timeout", "count"), uint64_t(1));
-    // The clients of the two instances, by name; the versions and the last sight from the records of both.
+    // The clients of the two instances appear by name. The versions and the last sight come from
+    // the records of both.
     CHECK(usage_names(doc["clients"], "client") == names({"beta-agent", "claude-code", "agent"}));
     CHECK_EQ(usage_figure(doc["clients"], "client", "beta-agent", "keys"), uint64_t(3));
     CHECK(usage_strings((*usage_row(doc["clients"], "client", "claude-code"))["versions"]) == names({"2.1.0"}));
     CHECK_EQ(std::string((*usage_row(doc["clients"], "client", "beta-agent"))["last_seen_at"].GetString()), mcp_iso_utc(now + 14));
     CHECK_EQ(doc["omitted"]["instances"].GetUint64(), uint64_t(0));
   }
-  // A filter on the instance: the totals, the series and the other facets follow it; the facet of the instances does not.
+  // A filter on the instance applies to the totals, the series and the other facets. The facet of
+  // the instances does not follow it.
   {
     const auto doc = usage_overview(alpha, live, "7d", now + 60, usage_query("method", {}, {}, {}, {}, {}, {"beta"}));
     CHECK(usage_strings(doc["filters"]["instance"]) == names({"beta"}));
@@ -4111,7 +4281,8 @@ void test_usage_instances(const std::string& root) {
     CHECK_EQ(usage_figure(ghost["instances"], "instance", "ghost", "requests"), uint64_t(0));
     CHECK((*usage_row(ghost["instances"], "instance", "ghost"))["written_at"].IsNull());
     CHECK_EQ(usage_figure(ghost["instances"], "instance", "alpha", "requests"), uint64_t(4));
-    // The values of the filter, in a group by instance: in their order, 0 for the one that is not there; two instances are OR.
+    // The values of the filter keep their order in a group by instance. The value is 0 for an
+    // instance that is not there. Two instances combine with OR.
     const auto chosen = usage_overview(alpha, live, "7d", now + 60, usage_query("instance", {}, {}, {}, {}, {}, {"beta", "ghost", "alpha"}));
     CHECK(usage_names(chosen["series"]["groups"], "id") == names({"beta", "ghost", "alpha"}));
     CHECK_EQ(chosen["series"]["groups"][1]["total"].GetUint64(), uint64_t(0));
@@ -4143,7 +4314,8 @@ void test_usage_instances(const std::string& root) {
     const auto kept_doc = usage_overview(alpha, live, "7d", now + 60, kept);
     CHECK(usage_row(kept_doc["keys"], "id", "ui_0a1b2c3d4e5f") != nullptr);
   }
-  // The files of the others are read again when they change: a new count shows after the next read, and a restart of an instance too.
+  // The files of the others are read again when they change. A new count shows after the next read.
+  // A restart of an instance has the same effect.
   {
     usage_count_call(beta, "k1", now + 80, "list_hosts", "ok", 20, 1, 50, "beta-agent/1");
     CHECK_EQ(parse(usage_detail(alpha, "k1", true, "7d", now + 90))["totals"]["requests"].GetUint64(), uint64_t(6));  // not read yet
@@ -4163,8 +4335,9 @@ void test_usage_instances(const std::string& root) {
   }
 }
 
-// The files of the other instances are not trusted: the ones that are not valid, or past a bound, are skipped and listed with a reason; links and
-// other files are never read; a file of an instance that is gone is removed, and nothing else is.
+// The files of the other instances are not trusted. A file that is not valid, or that is past a
+// bound, is skipped. It is listed with a reason. Links and other files are never read. A file of an
+// instance that is gone is removed. No other file is removed.
 void test_usage_other_files(const std::string& root) {
   const int64_t now = 1'800'007'200;
   const int64_t day = 86400;
@@ -4196,7 +4369,8 @@ void test_usage_other_files(const std::string& root) {
   write_usage_lines(dir + "/toolong.jsonl.zst", {usage_header_line("toolong", now - day, now - 100), usage_key_line("toolong", "kg"),
                                                  usage_client_line("toolong", "kg", "n", "v", "a", 1, 2, 3) + std::string(2000, ' ')});
   {
-    // A stream that holds more than the bound once decompressed (100 lines of 900 bytes) and is a few hundred bytes compressed.
+    // A stream holds more than the bound once it is decompressed: 100 lines of 900 bytes.
+    // Compressed, it is a few hundred bytes.
     std::vector<std::string> lines = {usage_header_line("bomb", now - day, now - 100), usage_key_line("bomb", "kg")};
     for (int i = 0; i < 100; ++i) lines.push_back(usage_client_line("bomb", "kg", "n", "v", "a", 1, 2, 3) + std::string(800, ' '));
     write_usage_lines(dir + "/bomb.jsonl.zst", lines);
@@ -4211,7 +4385,8 @@ void test_usage_other_files(const std::string& root) {
     }
     write_file(dir + "/huge.jsonl.zst", noise);  // larger than the bound for a compressed file
   }
-  // What is never read: a link (even to a valid file), a directory, a name that is not the name of an instance, what is not a usage file.
+  // These items are never read: a link (even to a valid file), a directory, a name that is not the
+  // name of an instance, and a file that is not a usage file.
   std::filesystem::create_symlink(dir + "/good.jsonl.zst", dir + "/linked.jsonl.zst");
   std::filesystem::create_directory(dir + "/adir.jsonl.zst");
   write_usage_lines(dir + "/bad name.jsonl.zst", valid("bad name"));
@@ -4242,7 +4417,7 @@ void test_usage_other_files(const std::string& root) {
   CHECK(contains(by_name.at("toolong").reason, "longer than 1 KiB") && contains(by_name.at("toolong").reason, "line 3"));
   CHECK(contains(by_name.at("versioned").reason, "version must be 1") && contains(by_name.at("versioned").reason, "line 1"));
   CHECK(!contains(by_name.at("bad").reason, "not zstd at all"));  // a reason never repeats the content
-  // They count for nothing; the one that is valid is summed.
+  // They count for nothing. Only the valid file is summed.
   CHECK_EQ(me.since(), now - day);
   const auto detail = parse(usage_detail(me, "kg", false, "90d", now));
   CHECK_EQ(detail["totals"]["requests"].GetUint64(), uint64_t(3));
@@ -4261,7 +4436,8 @@ void test_usage_other_files(const std::string& root) {
     CHECK_EQ(usage_figure(doc["instances"], "instance", "me", "requests"), uint64_t(0));
     check_facets_add_up(doc);
   }
-  // A file that changes is read again: the one that was not valid becomes valid, and its counts are added; one that is gone is gone.
+  // A file that changes is read again. A file that was not valid can become valid, and then its
+  // counts are added. A file that is gone stays gone.
   write_usage_lines(dir + "/bad.jsonl.zst", valid("bad", 5));
   me.refresh_others(now + 60);
   CHECK_EQ(others_of(me).at("bad").status, std::string("ok"));
@@ -4270,18 +4446,19 @@ void test_usage_other_files(const std::string& root) {
   me.refresh_others(now + 120);
   CHECK(others_of(me).count("good") == 0);
   CHECK_EQ(parse(usage_detail(me, "kg", false, "90d", now))["totals"]["requests"].GetUint64(), uint64_t(5));
-  // The files that were not usage files are as they were.
+  // Files that are not usage files stay as they were.
   CHECK(std::filesystem::is_symlink(dir + "/linked.jsonl.zst"));
   CHECK(std::filesystem::is_directory(dir + "/adir.jsonl.zst"));
   CHECK(std::filesystem::exists(dir + "/notes.txt") && std::filesystem::exists(dir + "/bad name.jsonl.zst"));
-  // A directory that is gone keeps what was read.
+  // A directory that is gone keeps the data that was read.
   std::filesystem::rename(dir, dir + "-gone");
   me.refresh_others(now + 180);
   CHECK_EQ(parse(usage_detail(me, "kg", false, "90d", now))["totals"]["requests"].GetUint64(), uint64_t(5));
   std::filesystem::rename(dir + "-gone", dir);
 
-  // The file of an instance that is gone is removed: its header and its file are both older than the retention and a day. Another file is
-  // never removed: a file that is not valid, a file that was written lately, a file that is not a usage file.
+  // The file of an instance that is gone is removed. Its header and its file are both older than
+  // the retention and a day. ChDash never removes another file. This includes a file that is not
+  // valid, a file that was written lately, and a file that is not a usage file.
   const std::string old_dir = root + "/gone";
   std::filesystem::create_directory(old_dir);
   const int64_t ancient = now - 400 * day;
@@ -4317,7 +4494,8 @@ void test_usage_other_files(const std::string& root) {
   }
   CHECK_EQ(others_of(keeper).at("old-header").status, std::string("ok"));
   CHECK_EQ(others_of(keeper).at("garbage").status, std::string("skipped"));
-  // A file that was rewritten after it was read is not removed on a read that is out of date.
+  // A file that was rewritten after it was read is not removed. This holds on a read that is out of
+  // date.
   write_usage_lines(old_dir + "/revived.jsonl.zst", lines_at("revived", ancient));
   age(old_dir + "/revived.jsonl.zst", ancient);
   keeper.refresh_others(now + 120);
@@ -4328,7 +4506,8 @@ void test_usage_other_files(const std::string& root) {
   CHECK_EQ(others_of(keeper).at("revived").status, std::string("ok"));
   CHECK_EQ(others_of(keeper).at("revived").written_at, now - 5);
 
-  // An instance that stops: refresh_others does nothing more (the stop of the server), and what was read stays.
+  // When an instance stops, refresh_others does nothing more. This is the stop of the server. The
+  // data that was read stays.
   keeper.cancel();
   write_usage_lines(old_dir + "/late.jsonl.zst", lines_at("late", now));
   keeper.refresh_if_due(now + 600);
@@ -4354,7 +4533,8 @@ void test_usage_other_files(const std::string& root) {
   }
   CHECK(contains(message, "symbolic link") && contains(message, "mine.jsonl.zst"));
 
-  // A save that would write more than the bound fails, and writes nothing: no file, no temporary file.
+  // A save that writes more than the bound fails, and writes nothing. No file and no temporary file
+  // is written.
   const std::string tiny_dir = root + "/tiny";
   std::filesystem::create_directory(tiny_dir);
   McpUsageFileLimits tiny;
@@ -4367,8 +4547,9 @@ void test_usage_other_files(const std::string& root) {
   CHECK_EQ(parse(usage_detail(small, "k1", true, "24h", now + 80))["totals"]["calls"].GetUint64(), uint64_t(20));
 }
 
-// Two processes with the same instance name: the one that writes second finds a file that it did not write, written lately: its counts stay in
-// memory and the answers say so. A restart is no conflict.
+// Two processes can have the same instance name. The process that writes second finds a file that
+// it did not write, and that was written lately. Its counts stay in memory, and the answers say so.
+// A restart is not a conflict.
 void test_usage_conflict(const std::string& root) {
   const int64_t now = 1'800'007'200;
   const std::string dir = root + "/twins";
@@ -4393,11 +4574,13 @@ void test_usage_conflict(const std::string& root) {
   CHECK_EQ(std::string(parse(usage_detail(b, "k1", true, "24h", now + 30))["instances"][0]["status"].GetString()), std::string("conflict"));
   CHECK(!b.save(now + 30));
   CHECK_EQ(read_file(file), before);
-  // The files of the others are not touched either, and the other process goes on to write its own file.
+  // The files of the others are not touched either. The other process continues to write its own
+  // file.
   usage_count_call(a, "k1", now + 40, "list_hosts");
   CHECK(a.save(now + 50));
   CHECK(read_file(file) != before);
-  // The writer is gone for 2 minutes (its file is not written any more): the next save takes the file over.
+  // The writer is gone for 2 minutes, and its file is not written any more. The next save takes
+  // control of the file.
   CHECK(!b.save(now + 100));
   CHECK(b.save(now + 200));
   CHECK_EQ(b.instances()[0].status, std::string("ok"));
@@ -4406,7 +4589,8 @@ void test_usage_conflict(const std::string& root) {
   CHECK_EQ(usage_file_cells(usage_rows(file), "d1").size(), size_t(1));
   CHECK_EQ(usage_file_cells(usage_rows(file), "d1")[0], std::string("call/agent/list_hosts/ok:2"));  // b wrote its own state
 
-  // A restart is not a conflict: the file that it finds is the one that the process that stopped wrote, and nobody wrote since.
+  // A restart is not a conflict. The file that it finds is the one that the stopped process wrote.
+  // Nobody has written it since.
   const std::string again_dir = root + "/restart";
   std::filesystem::create_directory(again_dir);
   {
@@ -4419,7 +4603,8 @@ void test_usage_conflict(const std::string& root) {
   CHECK(second.save(now + 20));
   CHECK_EQ(second.instances()[0].status, std::string("ok"));
   CHECK_EQ(parse(usage_detail(second, "k1", true, "24h", now + 30))["totals"]["calls"].GetUint64(), uint64_t(2));  // the state that it read, and its own
-  // ...but a process that starts, and then another one writes the file, is one: the file is no longer as it was read.
+  // ...but a process that starts, and then another process writes the file, is a conflict. The file
+  // is no longer as it was read.
   McpUsage third(usage_options(again_dir, "solo"), now + 30);
   usage_count_call(second, "k1", now + 40, "list_hosts");
   CHECK(second.save(now + 45));
@@ -4428,14 +4613,16 @@ void test_usage_conflict(const std::string& root) {
   CHECK_EQ(third.instances()[0].status, std::string("conflict"));
 }
 
-// The names of the instances together pass the 4096 that one instance has: the answers keep them all, by their text.
+// The names of the instances together pass the limit of 4096 that one instance has. The answers
+// keep all of them, by their text.
 void test_usage_many_names(const std::string& root) {
   const int64_t now = 1'800'007'200;
   const std::string dir = root + "/names";
   std::filesystem::create_directory(dir);
   McpUsage a(usage_options(dir, "a"), now);
   McpUsage b(usage_options(dir, "b"), now);
-  // 6 keys with 500 tools each: 3000 names for each instance, 6000 together (a bucket keeps 512 cells).
+  // There are 6 keys with 500 tools each. This gives 3000 names for each instance, and 6000 names
+  // together. A bucket keeps 512 cells.
   for (int k = 0; k < 6; ++k) {
     for (int t = 0; t < 500; ++t) {
       usage_count_call(a, "key-" + std::to_string(k), now + 1, "a_" + std::to_string(k) + "_" + std::to_string(t));
@@ -4457,7 +4644,7 @@ void test_usage_many_names(const std::string& root) {
     CHECK_EQ(one["totals"]["requests"].GetUint64(), uint64_t(1));
     CHECK_EQ(usage_figure(one["methods"], "method", name, "requests"), uint64_t(1));
   }
-  // Each instance has its 3000: the one of the other instance is summed by the key.
+  // Each instance has its 3000 names. The names of the other instance are summed by the key.
   const auto first = parse(usage_detail(a, "key-0", false, "24h", now + 30));
   CHECK_EQ(first["tools"].Size(), 1000u);
   CHECK_EQ(first["totals"]["calls"].GetUint64(), uint64_t(1000));
@@ -4487,17 +4674,18 @@ void test_rate_limiter() {
   for (int i = 0; i < 2; ++i) CHECK(limiter.allow("burst", t0 + 10'000'000, 2, &retry));
   CHECK(!limiter.allow("burst", t0 + 10'000'000, 2, &retry));
 
-  // peek: the bucket as it stands, and no token taken. 60 a minute is one token a second.
+  // peek returns the bucket as it stands, and takes no token. 60 a minute is one token a second.
   {
     McpRateLimiter peeking;
     const int64_t t = 5'000'000;
-    // A key that has no bucket yet has a full one, and looking does not make it.
+    // A key that has no bucket yet has a full one, and a look does not create it.
     McpRateStatus fresh = peeking.peek("p", t, 60);
     CHECK_EQ(fresh.per_minute, int64_t(60));
     CHECK_EQ(fresh.remaining, int64_t(60));
     CHECK_EQ(fresh.next_call_in_seconds, int64_t(0));
     CHECK_EQ(fresh.full_in_seconds, int64_t(0));
-    // One call: 59 are left, however often we look, and the bucket is full again in about a second.
+    // One call leaves 59 tokens, however often the test looks. The bucket is full again in about a
+    // second.
     CHECK(peeking.allow("p", t, 60, &retry));
     for (int i = 0; i < 3; ++i) {
       const McpRateStatus after_one = peeking.peek("p", t, 60);
@@ -4505,19 +4693,21 @@ void test_rate_limiter() {
       CHECK_EQ(after_one.next_call_in_seconds, int64_t(0));
       CHECK(after_one.full_in_seconds >= 1 && after_one.full_in_seconds <= 2);
     }
-    // Empty: no call fits, the next token comes in about a second, the bucket is full in about a minute.
+    // The bucket is empty. No call fits. The next token arrives in about a second. The bucket is
+    // full in about a minute.
     for (int i = 0; i < 59; ++i) CHECK(peeking.allow("p", t, 60, &retry));
     const McpRateStatus empty = peeking.peek("p", t, 60);
     CHECK_EQ(empty.remaining, int64_t(0));
     CHECK(empty.next_call_in_seconds >= 1 && empty.next_call_in_seconds <= 2);
     CHECK(empty.full_in_seconds >= 59 && empty.full_in_seconds <= 61);
     CHECK(!peeking.allow("p", t, 60, &retry));
-    // The refill is counted at the time that is asked, and looking later does not move the bucket: a call at the old time is still refused.
+    // The refill is counted at the time that is asked. A look later does not move the bucket. A
+    // call at the old time is still refused.
     const McpRateStatus half = peeking.peek("p", t + 30'000, 60);
     CHECK(half.remaining >= 29 && half.remaining <= 30);
     CHECK_EQ(half.next_call_in_seconds, int64_t(0));
     CHECK(!peeking.allow("p", t, 60, &retry));
-    // It never exceeds the burst, a bucket is one for each key, and a lower limit cuts what a bucket holds.
+    // It never exceeds the burst. Each key has one bucket. A lower limit cuts what a bucket holds.
     CHECK_EQ(peeking.peek("p", t + 10'000'000, 60).remaining, int64_t(60));
     CHECK_EQ(peeking.peek("other", t, 60).remaining, int64_t(60));
     CHECK_EQ(peeking.peek("p", t + 10'000'000, 10).remaining, int64_t(10));
@@ -4575,7 +4765,8 @@ void test_sql_scanner() {
   }
   CHECK_EQ(code("SELECT 1 INTO OUTFILE '/tmp/x'"), std::string("clause_not_allowed"));
   CHECK_EQ(code("SELECT 1 into /* c */ outfile 'x'"), std::string("clause_not_allowed"));
-  // A SETTINGS clause would change the limits of the key (a profile at readonly = 2 lets a statement change them).
+  // A SETTINGS clause can change the limits of the key. A profile at readonly = 2 lets a statement
+  // change them.
   for (const char* bad : {"SELECT 1 SETTINGS max_execution_time = 3600", "select 1 settings /* c */ `max_memory_usage` = 0",
                           "SELECT 1 SETTINGS \"max_rows_to_read\"=0", "SELECT * FROM (SELECT 1 SETTINGS max_result_rows = 0)",
                           "SELECT 1 FORMAT JSON SETTINGS log_comment = 'x'", "EXPLAIN SELECT 1 SETTINGS readonly = 0",
@@ -4670,7 +4861,8 @@ void test_sql_builder() {
   q.table = "t";
   q.limit = 100;
 
-  // No column list: the wide and the aggregate-state columns are left out and named.
+  // Without a column list, the wide columns and the aggregate-state columns are omitted. The answer
+  // names them.
   auto built = mcp_build_table_query(q, columns);
   CHECK(built.ok);
   CHECK_EQ(built.sql, std::string("SELECT `id`, `name`, `score`, `price`, `ok`, `ts`, `tags`, `we\\`ird`, `level` FROM `db`.`t` LIMIT 100"));
@@ -4759,7 +4951,7 @@ void test_sql_builder() {
     x.filters = {filter("id", "in", std::vector<McpScalar>(101, I("1")), true)};
     CHECK_EQ(mcp_build_table_query(x, columns).error, std::string("invalid_argument"));
   }
-  // Every column omitted: send them all rather than an empty SELECT.
+  // If every column is omitted, send them all. Never send an empty SELECT.
   {
     McpTableQuery x;
     x.database = "d";
@@ -4775,6 +4967,7 @@ void test_sql_builder() {
 struct FakeBackend : McpToolBackend {
   std::vector<std::string> calls;
   bool throws = false;
+  std::string last_caller;  // agent.caller of the last call
   McpToolOutcome call_tool(const McpKey&, const std::string& tool, const rapidjson::Value& arguments, int64_t) override {
     if (throws) throw std::runtime_error("boom");
     calls.push_back(tool);
@@ -4783,12 +4976,20 @@ struct FakeBackend : McpToolBackend {
     o.rows = 3;
     if (tool == "list_hosts") {
       o.json = R"({"hosts":[]})";
+    } else if (tool == "query_table" && arguments.HasMember("data")) {
+      // Data of the database: a value with control characters, in untrusted.
+      o.json = "{\"host\":\"prod\",\"untrusted\":{\"rows\":[[\"a\\u0007b\\nc\\td\\re\\u009f\"]]},\"row_count\":1}";
     } else if (arguments.HasMember("fail")) {
       return mcp_tool_error("query_failed", "it failed");
     } else {
       o.json = R"({"ok":true})";
     }
     return o;
+  }
+  McpToolOutcome call_tool_for(const McpKey& key, const std::string& tool, const rapidjson::Value& arguments, int64_t now,
+                               const McpCallInfo& info) override {
+    last_caller = info.agent_caller;
+    return call_tool(key, tool, arguments, now);
   }
 };
 
@@ -4814,8 +5015,8 @@ void test_protocol() {
   const McpKey narrow = a_key({"*"}, {"otel"});
   const int64_t now = 1'800'000'000;
 
-  // initialize negotiates the version.
-  for (const char* v : {"2025-06-18", "2025-03-26", "2024-11-05"}) {
+  // initialize negotiates the version (a legacy version).
+  for (const char* v : {"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}) {
     const auto r = mcp_handle_message(rpc("initialize", std::string("{\"protocolVersion\":\"") + v + "\",\"capabilities\":{}}"), all, backend, info, now);
     CHECK_EQ(r.http_status, 200);
     const auto doc = parse(r.body);
@@ -4825,7 +5026,8 @@ void test_protocol() {
     CHECK_EQ(std::string(doc["result"]["serverInfo"]["version"].GetString()), std::string("9.9"));
     CHECK_EQ(doc["id"].GetInt(), 1);
   }
-  // initialize keeps who the client is, for the usage of the key (at most 256 bytes each); a client that says nothing is fine.
+  // initialize keeps the identity of the client, for the usage of the key. Each field has at most
+  // 256 bytes. A client that says nothing is fine.
   {
     const auto r = mcp_handle_message(rpc("initialize", R"({"protocolVersion":"2025-06-18","clientInfo":{"name":"claude-code","version":"2.1.0"}})"), all, backend, info, now);
     CHECK_EQ(r.client_name, std::string("claude-code"));
@@ -4838,8 +5040,13 @@ void test_protocol() {
     CHECK_EQ(mcp_handle_message(rpc("ping"), all, backend, info, now).client_name, std::string(""));
   }
   {
+    // A version that ChDash does not know gets the newest legacy version. The stateless version
+    // gets it too, because it has no initialize.
     const auto r = mcp_handle_message(rpc("initialize", R"({"protocolVersion":"1999-01-01"})"), all, backend, info, now);
-    CHECK_EQ(std::string(parse(r.body)["result"]["protocolVersion"].GetString()), std::string("2025-06-18"));
+    CHECK_EQ(std::string(parse(r.body)["result"]["protocolVersion"].GetString()), std::string("2025-11-25"));
+    CHECK_EQ(r.protocol_version, std::string("2025-11-25"));
+    const auto modern = mcp_handle_message(rpc("initialize", R"({"protocolVersion":"2026-07-28"})"), all, backend, info, now);
+    CHECK_EQ(std::string(parse(modern.body)["result"]["protocolVersion"].GetString()), std::string("2025-11-25"));
     CHECK_EQ(parse(mcp_handle_message(rpc("initialize"), all, backend, info, now).body)["error"]["code"].GetInt(), kRpcInvalidParams);
     CHECK_EQ(parse(mcp_handle_message(rpc("initialize", "{}"), all, backend, info, now).body)["error"]["code"].GetInt(), kRpcInvalidParams);
   }
@@ -4855,12 +5062,18 @@ void test_protocol() {
     for (const auto& t : doc["result"]["tools"].GetArray()) {
       CHECK(t["inputSchema"].IsObject());
       CHECK(t["description"].IsString());
+      // A tool that reads has annotations (contract 4.3). destructiveHint appears only with
+      // readOnlyHint false.
       CHECK(t["annotations"]["readOnlyHint"].GetBool());
+      CHECK(t["annotations"]["idempotentHint"].GetBool());
+      CHECK(!t["annotations"]["openWorldHint"].GetBool());
+      CHECK(!t["annotations"].HasMember("destructiveHint"));
       out.push_back(t["name"].GetString());
     }
     return out;
   };
-  // This backend turns nothing on (the usage is off): no tool of the usage is offered, and every key has the limits.
+  // This backend enables nothing. The usage is off, so no tool of the usage is offered. Every key
+  // has the limits.
   CHECK_EQ(names(all).size(), mcp_tool_catalog().size() - 2);  // every tool but the two that the usage needs
   CHECK_EQ(names(narrow).size(), mcp_tool_catalog().size() - 4);  // ... and the two SQL tools
   CHECK(names(a_key({"list_hosts"}, {"*"})) == std::vector<std::string>({"list_hosts", "mcp_analysis_my_limits"}));
@@ -4879,8 +5092,9 @@ void test_protocol() {
     CHECK_EQ(std::string(doc["result"]["content"][0]["text"].GetString()), std::string(R"({"hosts":[]})"));
     CHECK(doc["result"]["structuredContent"]["hosts"].IsArray());
   }
-  // structuredContent is the same JSON again: only for a client of 2025-06-18 or later, and for a request without the protocol header.
-  // The text content is there for every client (ARCH-B-073).
+  // structuredContent is the same JSON again. It appears only for a client of 2025-06-18 or later,
+  // and only for a request without the protocol header. The text content is there for every client
+  // (ARCH-B-073).
   {
     const std::string call = rpc("tools/call", R"({"name":"list_hosts","arguments":{}})");
     for (const char* version : {"", "2025-06-18"}) {
@@ -4902,7 +5116,7 @@ void test_protocol() {
     const auto failed = parse(mcp_handle_message(rpc("tools/call", R"({"name":"query_table","arguments":{"fail":1}})"), all, backend, info, now, "2024-11-05").body);
     CHECK(failed["result"]["isError"].GetBool());
     CHECK(!failed["result"].HasMember("structuredContent"));
-    CHECK_EQ(std::string(parse(failed["result"]["content"][0]["text"].GetString())["error"].GetString()), std::string("query_failed"));
+    CHECK_EQ(std::string(parse(failed["result"]["content"][0]["text"].GetString())["error"]["code"].GetString()), std::string("query_failed"));
   }
   // A tool failure is a result with isError, not a JSON-RPC error.
   {
@@ -4910,23 +5124,43 @@ void test_protocol() {
     const auto doc = parse(r.body);
     CHECK(!doc.HasMember("error"));
     CHECK(doc["result"]["isError"].GetBool());
-    CHECK_EQ(std::string(doc["result"]["structuredContent"]["error"].GetString()), std::string("query_failed"));
+    // The error structure of the contract (6.1): code, message, retryable.
+    CHECK_EQ(std::string(doc["result"]["structuredContent"]["error"]["code"].GetString()), std::string("query_failed"));
+    CHECK(!doc["result"]["structuredContent"]["error"]["retryable"].GetBool());
     const auto text = parse(doc["result"]["content"][0]["text"].GetString());
-    CHECK_EQ(std::string(text["message"].GetString()), std::string("it failed"));
+    CHECK_EQ(std::string(text["error"]["message"].GetString()), std::string("it failed"));
     CHECK_EQ(r.outcome.error_code, std::string("query_failed"));
   }
-  // A tool the key does not hold never reaches the backend.
+  // A tool the key does not hold never reaches the backend: -32602, the answer of a tool that does not exist (contract 3.6).
   {
     backend.calls.clear();
     const auto r = mcp_handle_message(rpc("tools/call", R"({"name":"run_query","arguments":{"sql":"SELECT 1"}})"), narrow, backend, info, now);
     const auto doc = parse(r.body);
-    CHECK(doc["result"]["isError"].GetBool());
-    CHECK_EQ(std::string(doc["result"]["structuredContent"]["error"].GetString()), std::string("tool_not_allowed"));
+    CHECK_EQ(r.http_status, 200);
+    CHECK_EQ(doc["error"]["code"].GetInt(), kRpcInvalidParams);
+    CHECK(!r.tool_called);
+    CHECK_EQ(r.tool, std::string("run_query"));
     CHECK(backend.calls.empty());
+    const auto unknown = parse(mcp_handle_message(rpc("tools/call", R"({"name":"no_such_tool","arguments":{}})"), narrow, backend, info, now).body);
+    CHECK_EQ(std::string(unknown["error"]["message"].GetString()), std::string("Unknown tool: no_such_tool"));
+    CHECK_EQ(std::string(doc["error"]["message"].GetString()), std::string("Unknown tool: run_query"));
     // Not even run_query named explicitly, with a restricted scope.
     const McpKey sneaky = a_key({"run_query", "query_table"}, {"otel"});
-    CHECK(parse(mcp_handle_message(rpc("tools/call", R"({"name":"run_query","arguments":{}})"), sneaky, backend, info, now).body)["result"]["isError"].GetBool());
+    CHECK_EQ(parse(mcp_handle_message(rpc("tools/call", R"({"name":"run_query","arguments":{}})"), sneaky, backend, info, now).body)["error"]["code"].GetInt(),
+             kRpcInvalidParams);
     CHECK(backend.calls.empty());
+  }
+  // The data of a result: data_notice first, and each control character but \n and \t is U+FFFD (contract 5.2).
+  {
+    const auto r = mcp_handle_message(rpc("tools/call", R"({"name":"query_table","arguments":{"data":1}})"), all, backend, info, now);
+    const auto doc = parse(r.body);
+    const auto& content = doc["result"]["structuredContent"];
+    CHECK_EQ(std::string(content.MemberBegin()->name.GetString()), std::string("data_notice"));
+    CHECK_EQ(std::string(content["data_notice"].GetString()), std::string(kMcpDataNotice));
+    CHECK_EQ(std::string(content["untrusted"]["rows"][0][0].GetString()), std::string("a\xEF\xBF\xBD" "b\nc\td\xEF\xBF\xBD" "e\xEF\xBF\xBD"));
+    CHECK_EQ(std::string(doc["result"]["content"][0]["text"].GetString()), r.outcome.json);
+    // A result without untrusted data has no notice.
+    CHECK(!contains(mcp_handle_message(rpc("tools/call", R"({"name":"list_hosts"})"), all, backend, info, now).body, "data_notice"));
   }
   // Unknown tool, bad params.
   CHECK_EQ(parse(mcp_handle_message(rpc("tools/call", R"({"name":"nope"})"), all, backend, info, now).body)["error"]["code"].GetInt(), kRpcInvalidParams);
@@ -4935,7 +5169,7 @@ void test_protocol() {
   CHECK_EQ(parse(mcp_handle_message(rpc("tools/call", "[1]"), all, backend, info, now).body)["error"]["code"].GetInt(), kRpcInvalidParams);
   // arguments may be absent.
   CHECK(parse(mcp_handle_message(rpc("tools/call", R"({"name":"list_hosts"})"), all, backend, info, now).body)["result"].IsObject());
-  // A throwing backend becomes internal_error, without its message.
+  // A backend that throws becomes internal_error, without its message.
   backend.throws = true;
   {
     const auto r = mcp_handle_message(rpc("tools/call", R"({"name":"list_hosts"})"), all, backend, info, now);
@@ -5034,13 +5268,290 @@ void test_protocol() {
   }
 }
 
-// A backend that says what the configuration turns on.
+// The protocol 2026-07-28 (contract 1, 2.5) uses server/discover, headers that agree with the
+// message, and resultType. It has no initialize and no ping. The legacy generation stays on the
+// same endpoint.
+McpRequestHeaders modern_headers(const std::string& method, const std::string& name = {}) {
+  McpRequestHeaders h;
+  h.has_protocol_version = true;
+  h.protocol_version = "2026-07-28";
+  h.has_method = true;
+  h.method = method;
+  if (!name.empty()) {
+    h.has_name = true;
+    h.name = name;
+  }
+  return h;
+}
+
+std::string modern_rpc(const std::string& method, const std::string& params_without_meta = "", const std::string& extra_meta = "") {
+  std::string params = "{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\"" + extra_meta + "}";
+  if (!params_without_meta.empty()) params += "," + params_without_meta;
+  params += "}";
+  return rpc(method, params);
+}
+
+void test_protocol_modern() {
+  FakeBackend backend;
+  McpServerInfo info;
+  info.version = "9.9";
+  const McpKey all = a_key({"*"}, {"*"});
+  const McpKey narrow = a_key({"list_hosts"}, {"*"});
+  const int64_t now = 1'800'000'000;
+  const auto handle = [&](const std::string& body, const McpRequestHeaders& h, const McpKey& key) {
+    return mcp_handle_message(body, key, backend, info, now, h);
+  };
+
+  // server/discover: the versions, the capabilities, and the name and the version of the server in _meta.
+  {
+    const auto r = handle(modern_rpc("server/discover"), modern_headers("server/discover"), all);
+    CHECK_EQ(r.http_status, 200);
+    CHECK(r.modern);
+    CHECK_EQ(r.protocol_version, std::string("2026-07-28"));
+    const auto doc = parse(r.body);
+    const auto& result = doc["result"];
+    CHECK_EQ(std::string(result["resultType"].GetString()), std::string("complete"));
+    std::vector<std::string> versions;
+    for (const auto& v : result["supportedVersions"].GetArray()) versions.push_back(v.GetString());
+    CHECK(versions == mcp_protocol_versions());
+    CHECK(versions.front() == "2026-07-28" && std::find(versions.begin(), versions.end(), "2025-11-25") != versions.end());
+    CHECK(result["capabilities"].HasMember("tools"));
+    CHECK_EQ(std::string(result["_meta"]["io.modelcontextprotocol/serverInfo"]["name"].GetString()), std::string("chdash"));
+    CHECK_EQ(std::string(result["_meta"]["io.modelcontextprotocol/serverInfo"]["version"].GetString()), std::string("9.9"));
+    CHECK(!result.HasMember("serverInfo"));
+  }
+  // Each result has resultType: tools/list and tools/call. A tool result has structuredContent.
+  {
+    const auto list = parse(handle(modern_rpc("tools/list"), modern_headers("tools/list"), all).body);
+    CHECK_EQ(std::string(list["result"]["resultType"].GetString()), std::string("complete"));
+    CHECK(list["result"]["tools"].IsArray());
+    const auto r = handle(modern_rpc("tools/call", R"("name":"list_hosts","arguments":{})"), modern_headers("tools/call", "list_hosts"), all);
+    const auto call = parse(r.body);
+    CHECK_EQ(std::string(call["result"]["resultType"].GetString()), std::string("complete"));
+    CHECK(call["result"]["structuredContent"].IsObject());
+    CHECK(r.tool_called);
+    // The name in the Base64 form of the header.
+    const auto b64 = handle(modern_rpc("tools/call", R"("name":"list_hosts")"), modern_headers("tools/call", "=?base64?bGlzdF9ob3N0cw==?="), all);
+    CHECK(b64.tool_called && b64.http_status == 200);
+    // A tool error has resultType too.
+    const auto failed = parse(handle(modern_rpc("tools/call", R"("name":"query_table","arguments":{"fail":1})"), modern_headers("tools/call", "query_table"), all).body);
+    CHECK_EQ(std::string(failed["result"]["resultType"].GetString()), std::string("complete"));
+    CHECK(failed["result"]["isError"].GetBool());
+  }
+  // A header that does not agree with the message, or is not there: 400 and -32020 (conformance T03).
+  {
+    const auto mismatch = [&](const std::string& body, const McpRequestHeaders& h) {
+      const auto r = handle(body, h, all);
+      CHECK_EQ(r.http_status, 400);
+      CHECK_EQ(r.rpc_error, kRpcHeaderMismatch);
+      CHECK_EQ(parse(r.body)["error"]["code"].GetInt(), kRpcHeaderMismatch);
+      CHECK(!r.tool_called);
+    };
+    McpRequestHeaders no_method = modern_headers("tools/list");
+    no_method.has_method = false;
+    no_method.method.clear();
+    mismatch(modern_rpc("tools/list"), no_method);
+    mismatch(modern_rpc("tools/list"), modern_headers("tools/call"));
+    McpRequestHeaders old_version = modern_headers("tools/list");
+    old_version.protocol_version = "2025-11-25";
+    mismatch(modern_rpc("tools/list"), old_version);
+    McpRequestHeaders no_version = modern_headers("tools/list");
+    no_version.has_protocol_version = false;
+    no_version.protocol_version.clear();
+    mismatch(modern_rpc("tools/list"), no_version);
+    mismatch(modern_rpc("tools/call", R"("name":"list_hosts")"), modern_headers("tools/call"));
+    mismatch(modern_rpc("tools/call", R"("name":"list_hosts")"), modern_headers("tools/call", "query_table"));
+    mismatch(modern_rpc("tools/call", R"("name":"list_hosts")"), modern_headers("tools/call", "=?base64?!!?="));
+    McpRequestHeaders repeated = modern_headers("tools/list");
+    repeated.repeated = true;
+    mismatch(modern_rpc("tools/list"), repeated);
+    // The version of the stateless protocol in the header of a legacy message (no _meta).
+    McpRequestHeaders legacy_header;
+    legacy_header.has_protocol_version = true;
+    legacy_header.protocol_version = "2026-07-28";
+    mismatch(rpc("tools/list"), legacy_header);
+  }
+  // A version that ChDash does not support: 400 and -32022 with data.supported (conformance T04).
+  {
+    const auto unsupported = [&](const std::string& body, const McpRequestHeaders& h, const char* requested) {
+      const auto r = handle(body, h, all);
+      CHECK_EQ(r.http_status, 400);
+      CHECK_EQ(r.rpc_error, kRpcUnsupportedVersion);
+      const auto doc = parse(r.body);
+      CHECK_EQ(doc["error"]["code"].GetInt(), kRpcUnsupportedVersion);
+      CHECK_EQ(doc["error"]["data"]["supported"].Size(), static_cast<rapidjson::SizeType>(mcp_protocol_versions().size()));
+      if (requested) CHECK_EQ(std::string(doc["error"]["data"]["requested"].GetString()), std::string(requested));
+      else CHECK(doc["error"]["data"]["requested"].IsNull());
+    };
+    unsupported(rpc("server/discover", R"({"_meta":{"io.modelcontextprotocol/protocolVersion":"1900-01-01"}})"), modern_headers("server/discover"), "1900-01-01");
+    unsupported(rpc("server/discover", R"({"_meta":{"io.modelcontextprotocol/protocolVersion":5}})"), modern_headers("server/discover"), nullptr);
+    unsupported(rpc("server/discover", R"({"_meta":{"io.modelcontextprotocol/protocolVersion":"<script>"}})"), modern_headers("server/discover"), nullptr);
+    McpRequestHeaders legacy_header;
+    legacy_header.has_protocol_version = true;
+    legacy_header.protocol_version = "1999-01-01";
+    unsupported(rpc("tools/list"), legacy_header, "1999-01-01");
+  }
+  // No initialize and no ping in the stateless protocol; no server/discover in the legacy one.
+  {
+    CHECK_EQ(handle(modern_rpc("ping"), modern_headers("ping"), all).rpc_error, kRpcMethodNotFound);
+    CHECK_EQ(handle(modern_rpc("initialize", R"("protocolVersion":"2026-07-28")"), modern_headers("initialize"), all).rpc_error, kRpcMethodNotFound);
+    const auto legacy = mcp_handle_message(rpc("server/discover"), all, backend, info, now);
+    CHECK_EQ(legacy.rpc_error, kRpcMethodNotFound);
+    CHECK_EQ(legacy.http_status, 200);
+    // A legacy version in _meta has the legacy rules.
+    const auto in_meta = handle(rpc("ping", R"({"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18"}})"), McpRequestHeaders{}, all);
+    CHECK(!in_meta.modern && in_meta.rpc_error == 0);
+    CHECK_EQ(in_meta.protocol_version, std::string("2025-06-18"));
+  }
+  // A tool that the key does not have: -32602, as a tool that does not exist (contract 3.6).
+  {
+    const auto r = handle(modern_rpc("tools/call", R"("name":"query_table")"), modern_headers("tools/call", "query_table"), narrow);
+    CHECK_EQ(r.rpc_error, kRpcInvalidParams);
+    CHECK_EQ(r.http_status, 200);
+  }
+  // The client names itself in _meta.
+  {
+    const auto r = handle(modern_rpc("tools/list", "", R"(,"io.modelcontextprotocol/clientInfo":{"name":"agent-x","version":"1.2"})"), modern_headers("tools/list"), all);
+    CHECK_EQ(r.client_name, std::string("agent-x"));
+    CHECK_EQ(r.client_version, std::string("1.2"));
+  }
+  // The trace context is read from _meta first, then from the headers (contract 7.3). The agent
+  // goes to the tools for the log_comment.
+  {
+    const std::string meta_trace = R"(,"traceparent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01","baggage":"agent.run_id=0192-run,agent.caller=meta-agent,agent.on_behalf_of=alice")";
+    McpRequestHeaders h = modern_headers("tools/call", "list_hosts");
+    h.traceparent = "00-11111111111111111111111111111111-2222222222222222-01";
+    h.baggage = "agent.caller=header-agent";
+    const auto from_meta = handle(modern_rpc("tools/call", R"("name":"list_hosts")", meta_trace), h, all);
+    CHECK_EQ(from_meta.trace.source, std::string("meta"));
+    CHECK_EQ(from_meta.trace.trace_id, std::string("4bf92f3577b34da6a3ce929d0e0e4736"));
+    CHECK_EQ(from_meta.trace.run_id, std::string("0192-run"));
+    CHECK_EQ(from_meta.trace.caller, std::string("meta-agent"));
+    CHECK_EQ(from_meta.trace.on_behalf_of, std::string("alice"));
+    CHECK_EQ(backend.last_caller, std::string("meta-agent"));
+    const auto from_headers = handle(modern_rpc("tools/call", R"("name":"list_hosts")"), h, all);
+    CHECK_EQ(from_headers.trace.source, std::string("headers"));
+    CHECK_EQ(from_headers.trace.trace_id, std::string("11111111111111111111111111111111"));
+    CHECK_EQ(from_headers.trace.caller, std::string("header-agent"));
+    CHECK_EQ(backend.last_caller, std::string("header-agent"));
+    // A legacy request reads the same context.
+    McpRequestHeaders legacy;
+    legacy.baggage = "agent.caller=old-agent";
+    CHECK_EQ(handle(rpc("tools/call", R"({"name":"list_hosts"})"), legacy, all).trace.caller, std::string("old-agent"));
+    // The context is read for a notification and an error too, for the call log.
+    CHECK_EQ(handle(R"({"jsonrpc":"2.0","method":"notifications/initialized"})", legacy, all).trace.caller, std::string("old-agent"));
+  }
+}
+
+void test_trace_and_untrusted() {
+  // traceparent: version 00, 32 and 16 hexadecimal characters in lower case, never all zeros.
+  std::string trace;
+  std::string span;
+  CHECK(mcp_parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", &trace, &span));
+  CHECK_EQ(trace, std::string("4bf92f3577b34da6a3ce929d0e0e4736"));
+  CHECK_EQ(span, std::string("00f067aa0ba902b7"));
+  CHECK(!mcp_parse_traceparent("00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01", &trace, &span));
+  CHECK(!mcp_parse_traceparent("00-00000000000000000000000000000000-00f067aa0ba902b7-01", &trace, &span));
+  CHECK(!mcp_parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01", &trace, &span));
+  CHECK(!mcp_parse_traceparent("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", &trace, &span));
+  CHECK(!mcp_parse_traceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-x", &trace, &span));
+  CHECK(mcp_parse_traceparent("01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-later", &trace, &span));
+  CHECK(!mcp_parse_traceparent("garbage", &trace, &span));
+  // baggage: the three agent keys are percent-decoded. The properties and the other keys are
+  // ignored. Control characters are removed.
+  McpTraceContext ctx;
+  mcp_parse_baggage(" other=1, agent.caller = triage%20bot ;prop=x,agent.run_id=0192abc,agent.on_behalf_of=bob%0Aeve", &ctx);
+  CHECK_EQ(ctx.caller, std::string("triage bot"));
+  CHECK_EQ(ctx.run_id, std::string("0192abc"));
+  CHECK_EQ(ctx.on_behalf_of, std::string("bobeve"));
+  McpTraceContext long_one;
+  mcp_parse_baggage("agent.caller=" + std::string(500, 'a'), &long_one);
+  CHECK_EQ(long_one.caller.size(), size_t(128));
+  // The precedence is _meta, then the headers. A traceparent that is not valid gives no trace, but
+  // the baggage stays.
+  const auto meta = mcp_trace_context("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", "", true, "", "agent.caller=h");
+  CHECK(meta.source == "meta" && meta.caller.empty() && meta.trace_id.size() == 32);
+  const auto headers = mcp_trace_context("", "", false, "bad", "agent.caller=h");
+  CHECK(headers.source == "headers" && headers.caller == "h" && headers.trace_id.empty());
+  CHECK(mcp_trace_context("", "", false, "", "").source.empty());
+  // The text of a log field and of a log_comment.
+  CHECK_EQ(mcp_log_text("a\x01" "b\xC2\x85" "c\xC3\xA9", 64), std::string("abc\xC3\xA9"));
+  CHECK_EQ(mcp_log_text("\xC3\xA9\xC3\xA9", 3), std::string("\xC3\xA9"));
+  CHECK_EQ(mcp_comment_caller("bot one'); DROP"), std::string("bot_one____DROP"));
+  CHECK_EQ(mcp_comment_caller(std::string(100, 'x')).size(), size_t(64));
+  CHECK_EQ(mcp_random_hex(8).size(), size_t(16));
+  CHECK(mcp_random_hex(16) != mcp_random_hex(16));
+
+  // The untrusted text is handled as follows. The control characters of each string become U+FFFD
+  // (not \n, \t), raw or escaped. data_notice comes first.
+  {
+    std::string json = R"({"host":"h","untrusted":{"rows":[["a\u0001b","c\nd\te","f\rg","h\bi","j\u007fk","l\u0085m","\"untrusted\":x"]]}})";
+    mcp_frame_untrusted(json);
+    const auto doc = parse(json);
+    CHECK_EQ(std::string(doc.MemberBegin()->name.GetString()), std::string("data_notice"));
+    const auto& row = doc["untrusted"]["rows"][0];
+    CHECK_EQ(std::string(row[0].GetString()), std::string("a\xEF\xBF\xBD" "b"));
+    CHECK_EQ(std::string(row[1].GetString()), std::string("c\nd\te"));
+    CHECK_EQ(std::string(row[2].GetString()), std::string("f\xEF\xBF\xBD" "g"));
+    CHECK_EQ(std::string(row[3].GetString()), std::string("h\xEF\xBF\xBD" "i"));
+    CHECK_EQ(std::string(row[4].GetString()), std::string("j\xEF\xBF\xBD" "k"));
+    CHECK_EQ(std::string(row[5].GetString()), std::string("l\xEF\xBF\xBD" "m"));
+    CHECK_EQ(std::string(row[6].GetString()), std::string("\"untrusted\":x"));
+    // A second pass changes nothing.
+    std::string again = json;
+    mcp_frame_untrusted(again);
+    CHECK_EQ(again, json);
+  }
+  {
+    // Raw bytes: a DEL and a C1 character in UTF-8.
+    std::string json = std::string("{\"untrusted\":{\"v\":\"a\x7f" "b\xC2\x9F" "c\"}}");
+    mcp_frame_untrusted(json);
+    CHECK_EQ(std::string(parse(json)["untrusted"]["v"].GetString()), std::string("a\xEF\xBF\xBD" "b\xEF\xBF\xBD" "c"));
+  }
+  {
+    // A text that only names untrusted in a value is not an untrusted object: no notice.
+    std::string json = R"({"note":"untrusted","x":"\"untrusted\":1"})";
+    CHECK(!mcp_has_untrusted(json));
+    mcp_frame_untrusted(json);
+    CHECK(!contains(json, "data_notice"));
+    CHECK(mcp_has_untrusted(R"({"a":[{"untrusted" : {}}]})"));
+  }
+
+  // The histogram of the operations: bounded labels, the buckets of the conventions of MCP.
+  McpOperationMetrics metrics;
+  metrics.observe("tools/call", "query_table", "ok", 0.015);
+  metrics.observe("tools/call", "query_table", "ok", 3.0);
+  metrics.observe("tools/list", "", "rpc_-32020", 0.001);
+  std::string out;
+  metrics.write(out);
+  CHECK(contains(out, "# TYPE mcp_server_operation_duration_seconds histogram"));
+  CHECK(contains(out, "mcp_server_operation_duration_seconds_bucket{method=\"tools/call\",tool=\"query_table\",status=\"ok\",le=\"0.02\"} 1"));
+  CHECK(contains(out, "mcp_server_operation_duration_seconds_bucket{method=\"tools/call\",tool=\"query_table\",status=\"ok\",le=\"5\"} 2"));
+  CHECK(contains(out, "mcp_server_operation_duration_seconds_count{method=\"tools/call\",tool=\"query_table\",status=\"ok\"} 2"));
+  CHECK(contains(out, "mcp_server_operation_duration_seconds_count{method=\"tools/list\",tool=\"\",status=\"rpc_-32020\"} 1"));
+  McpOperationMetrics many;
+  for (size_t i = 0; i < McpOperationMetrics::kMaxSeries + 10; ++i) many.observe("tools/call", "t", "s" + std::to_string(i), 0.1);
+  std::string bounded;
+  many.write(bounded);
+  CHECK(contains(bounded, "status=\"other\"} 10"));
+
+  // A tool error has the structure of the contract (6.1): retryable for a timeout and a dependency that does not operate.
+  for (const char* code : {"timeout", "unavailable", "api_unavailable"}) {
+    CHECK(mcp_error_retryable(code));
+    CHECK(parse(mcp_tool_error(code, "x").json)["error"]["retryable"].GetBool());
+  }
+  for (const char* code : {"not_found", "invalid_argument", "query_failed", "permission_denied"}) CHECK(!mcp_error_retryable(code));
+}
+
+// A backend that states what the configuration enables.
 struct ConfiguredBackend : FakeBackend {
   McpToolAvailability configured;
   McpToolAvailability availability() const override { return configured; }
 };
 
-// The tools of the analysis in the protocol: who is listed them, who may call them, and what a tool that the configuration does not offer says.
+// This section tests the tools of the analysis in the protocol. It checks which keys list the
+// tools, which keys may call them, and what a tool answers when the configuration does not offer
+// it.
 void test_analysis_protocol() {
   ConfiguredBackend backend;
   McpServerInfo info;
@@ -5069,8 +5580,10 @@ void test_analysis_protocol() {
   const std::vector<std::string> limits_and_usage = names({"mcp_analysis_my_limits", "mcp_analysis_my_usage"});
   const std::vector<std::string> all_three = names({"mcp_analysis_my_limits", "mcp_analysis_my_usage", "mcp_analysis_all_usage"});
 
-  // The usage is off (nothing is turned on): every key has the limits, and nothing more. A tool that the usage needs is not listed, also for the key that
-  // names it, and a call is `not_enabled` for the key that holds it (always, or by its name) and `tool_not_allowed` for the key that does not.
+  // The usage is off, so nothing is enabled. Every key has the limits, and nothing more. A tool
+  // that the usage needs is not listed. This holds even for the key that names it. A call gives
+  // `not_enabled` for the key that holds the tool, always or by its name. For a key that does not
+  // hold the tool, a call gives -32602.
   backend.configured = McpToolAvailability{};
   CHECK(analysis_tools(star) == limits_only);
   CHECK(analysis_tools(empty) == limits_only);
@@ -5084,15 +5597,16 @@ void test_analysis_protocol() {
     CHECK_EQ(usage.outcome.error_code, std::string("not_enabled"));
     CHECK(contains(usage.outcome.json, "mcp.usage.enabled"));
     CHECK(backend.calls.empty());  // it never reaches the backend
-    CHECK_EQ(std::string(parse(usage.body)["result"]["structuredContent"]["error"].GetString()), std::string("not_enabled"));
+    CHECK_EQ(std::string(parse(usage.body)["result"]["structuredContent"]["error"]["code"].GetString()), std::string("not_enabled"));
     const auto all = run(named, "mcp_analysis_all_usage");
     CHECK_EQ(all.outcome.error_code, std::string("not_enabled"));
     CHECK(contains(all.outcome.json, "mcp.usage.enabled"));
     CHECK(backend.calls.empty());
-    CHECK_EQ(run(star, "mcp_analysis_all_usage").outcome.error_code, std::string("tool_not_allowed"));  // not named: it is not told that it is off
+    CHECK_EQ(run(star, "mcp_analysis_all_usage").rpc_error, kRpcInvalidParams);  // not named: it is not told that it is off
   }
 
-  // The usage is on and reading all the keys is not: the usage is offered to every key, the tool of all the keys is not, also when named.
+  // The usage is on, but the read of all the keys is off. The usage is offered to every key. The
+  // tool for all the keys is not offered, even when a key names it.
   backend.configured = McpToolAvailability{true, false};
   CHECK(analysis_tools(star) == limits_and_usage);
   CHECK(analysis_tools(empty) == limits_and_usage);
@@ -5106,16 +5620,17 @@ void test_analysis_protocol() {
     CHECK(backend.calls.empty());
   }
 
-  // Both are on: "*" does not give the tool of all the keys, the list of the key must name it. It is listed in the order of the catalog.
+  // Both are on. The wildcard "*" does not give the tool for all the keys. The key must name it in
+  // its list. The tool is listed in the order of the catalog.
   backend.configured = McpToolAvailability::everything();
   CHECK(analysis_tools(star) == limits_and_usage);
   CHECK(analysis_tools(empty) == limits_and_usage);
   CHECK(analysis_tools(named) == all_three);
   {
     const auto refused = run(star, "mcp_analysis_all_usage");
-    CHECK_EQ(refused.outcome.error_code, std::string("tool_not_allowed"));
+    CHECK_EQ(refused.rpc_error, kRpcInvalidParams);
     CHECK(backend.calls.empty());
-    CHECK_EQ(run(empty, "mcp_analysis_all_usage").outcome.error_code, std::string("tool_not_allowed"));
+    CHECK_EQ(run(empty, "mcp_analysis_all_usage").rpc_error, kRpcInvalidParams);
     CHECK(backend.calls.empty());
     const auto allowed = run(named, "mcp_analysis_all_usage");
     CHECK(!allowed.outcome.is_error && allowed.tool_called);
@@ -5146,7 +5661,7 @@ void test_analysis_protocol() {
       CHECK(tool["title"].IsString() && tool["description"].IsString() && std::string(tool["description"].GetString()).size() > 40);
       CHECK_EQ(std::string(tool["inputSchema"]["type"].GetString()), std::string("object"));
       CHECK(!tool["inputSchema"]["additionalProperties"].GetBool());
-      CHECK(tool["annotations"]["readOnlyHint"].GetBool() && !tool["annotations"]["destructiveHint"].GetBool());
+      CHECK(tool["annotations"]["readOnlyHint"].GetBool() && !tool["annotations"].HasMember("destructiveHint"));
     }
     CHECK(properties(*by_name["mcp_analysis_my_limits"]).empty());  // no argument, and no `host`: the key has one
     CHECK(properties(*by_name["mcp_analysis_my_usage"]) == std::set<std::string>({"window", "series", "include_cost", "instance"}));
@@ -5233,7 +5748,15 @@ rapidjson::Document call(McpTools& tools, const McpKey& key, const std::string& 
   }
   const McpToolOutcome o = tools.call_tool(key, tool, a, 0);
   if (out) *out = o;
-  return parse(o.json);
+  rapidjson::Document doc = parse(o.json);
+  // An API tool and the usage of the keys give the answer of their route in `untrusted` (contract
+  // 5.2). The tests read that answer.
+  if (doc.IsObject() && doc.MemberCount() == 1 && doc.HasMember("untrusted")) {
+    rapidjson::Document inner;
+    inner.CopyFrom(doc["untrusted"], inner.GetAllocator());
+    return inner;
+  }
+  return doc;
 }
 
 // The API tools: one wrapper for every row of mcp_api_tools.cpp.
@@ -5274,7 +5797,8 @@ void test_api_tools() {
     // The groups of the families that the API has.
     for (const char* id : {"data", "explorer", "system", "observability", "query", "sql", "mcp_analysis"}) CHECK(groups.count(id) == 1);
     CHECK_EQ(groups.size(), size_t(7));
-    // A family has at least two tools (no card is a lone check box), and a section belongs to a family that lists it.
+    // A family has at least two tools. No card is a lone check box. A section belongs to a family
+    // that lists it.
     std::map<std::string, int> per_group;
     for (const auto& tool : mcp_tool_catalog()) {
       ++per_group[tool.group];
@@ -5302,11 +5826,13 @@ void test_api_tools() {
   api.answer.status = 200;
   api.answer.body = R"({"version":3,"databases":["otel"]})";
 
-  // A GET: the params become the query string, the host is added, the answer comes back as it is.
+  // A GET request puts the params in the query string. It adds the host. The answer returns as it
+  // is.
   {
     McpToolOutcome o;
     auto doc = call(tools, all, "explorer_catalog", R"({"params":{"database":"otel","refresh":1}})", &o);
     CHECK(!o.is_error);
+    CHECK_EQ(o.json, std::string(R"({"untrusted":{"version":3,"databases":["otel"]}})"));  // the answer of the route, in untrusted
     CHECK_EQ(doc["version"].GetInt(), 3);
     CHECK_EQ(api.calls.size(), size_t(1));
     CHECK_EQ(api.calls[0].method, std::string("GET"));
@@ -5331,15 +5857,15 @@ void test_api_tools() {
     auto doc = call(tools, all, "system_query", R"({"params":{"hash":"1a2b-3c","order":"duration"}})");
     CHECK_EQ(api.calls[0].path, std::string("/api/system/queries/1a2b-3c"));
     CHECK_EQ(query_of(api.calls[0]), std::string("order=duration&host_id=prod\x1f" "mcp"));
-    CHECK_EQ(std::string(call(tools, all, "system_query", "{}")["error"].GetString()), std::string("invalid_argument"));
-    CHECK(contains(call(tools, all, "system_query", "{}")["message"].GetString(), "params.hash is required"));
+    CHECK_EQ(std::string(call(tools, all, "system_query", "{}")["error"]["code"].GetString()), std::string("invalid_argument"));
+    CHECK(contains(call(tools, all, "system_query", "{}")["error"]["message"].GetString(), "params.hash is required"));
     for (const char* bad : {"../x", "a/b", "a b", "", "%2e"}) {
-      CHECK_EQ(std::string(call(tools, all, "system_query", std::string("{\"params\":{\"hash\":\"") + bad + "\"}}")["error"].GetString()), std::string("invalid_argument"));
+      CHECK_EQ(std::string(call(tools, all, "system_query", std::string("{\"params\":{\"hash\":\"") + bad + "\"}}")["error"]["code"].GetString()), std::string("invalid_argument"));
     }
     CHECK_EQ(api.calls.size(), size_t(1));
   }
 
-  // A POST: the body goes as JSON, with the host added.
+  // A POST sends the body as JSON, with the host added.
   {
     api.calls.clear();
     call(tools, all, "explorer_table_data", R"({"body":{"database":"otel","table":"otel_logs","limit":3}})");
@@ -5353,32 +5879,34 @@ void test_api_tools() {
     // The client cannot name another host in the body: the host argument decides.
     call(tools, all, "explorer_table_data", R"({"body":{"host_id":"other","database":"d","table":"t"}})");
     CHECK_EQ(std::string(parse(api.calls[1].body)["host_id"].GetString()), std::string("prod\x1f" "mcp"));
-    CHECK_EQ(std::string(call(tools, all, "explorer_table_data", R"({"body":[1]})")["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(call(tools, all, "explorer_table_data", R"({"body":[1]})")["error"]["code"].GetString()), std::string("invalid_argument"));
     // A GET tool has no body, a POST tool no params.
-    CHECK_EQ(std::string(call(tools, all, "explorer_catalog", R"({"body":{}})")["error"].GetString()), std::string("invalid_argument"));
-    CHECK_EQ(std::string(call(tools, all, "explorer_table_data", R"({"params":{}})")["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(call(tools, all, "explorer_catalog", R"({"body":{}})")["error"]["code"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(call(tools, all, "explorer_table_data", R"({"params":{}})")["error"]["code"].GetString()), std::string("invalid_argument"));
     // The Explorer follows the patterns of the key, on top of what the MCP user may read.
     {
       McpKey narrow = a_key({"*"}, {"otel.otel_logs", "chdash_ui", "metrics.cpu*"});
       narrow.hosts = {"prod"};
       api.calls.clear();
-      // A table that a pattern allows goes through; one that none allows never reaches the API.
+      // A table that a pattern allows is accepted. A table that no pattern allows never reaches the
+      // API.
       call(tools, narrow, "explorer_table", R"({"params":{"database":"otel","table":"otel_logs"}})");
       call(tools, narrow, "explorer_table", R"({"params":{"database":"chdash_ui","table":"anything"}})");
       call(tools, narrow, "explorer_table_data", R"({"body":{"database":"metrics","table":"cpu_load"}})");
       CHECK_EQ(api.calls.size(), size_t(3));
       for (const char* arguments : {R"({"params":{"database":"otel","table":"otel_traces"}})", R"({"params":{"database":"system","table":"query_log"}})"}) {
-        CHECK_EQ(std::string(call(tools, narrow, "explorer_table", arguments)["error"].GetString()), std::string("table_not_allowed"));
+        CHECK_EQ(std::string(call(tools, narrow, "explorer_table", arguments)["error"]["code"].GetString()), std::string("not_found"));
       }
-      CHECK_EQ(std::string(call(tools, narrow, "explorer_table_data", R"({"body":{"database":"otel","table":"otel_traces"}})")["error"].GetString()), std::string("table_not_allowed"));
-      CHECK_EQ(std::string(call(tools, narrow, "explorer_graph_definition", R"({"params":{"database":"system","table":"tables"}})")["error"].GetString()), std::string("table_not_allowed"));
-      // A name that is not one plain string is never let through (the API could read another value than the one checked).
+      CHECK_EQ(std::string(call(tools, narrow, "explorer_table_data", R"({"body":{"database":"otel","table":"otel_traces"}})")["error"]["code"].GetString()), std::string("not_found"));
+      CHECK_EQ(std::string(call(tools, narrow, "explorer_graph_definition", R"({"params":{"database":"system","table":"tables"}})")["error"]["code"].GetString()), std::string("not_found"));
+      // A name that is not one plain string is always refused (the API could read another value
+      // than the one checked).
       for (const char* arguments : {R"({"params":{"database":["otel","system"],"table":"otel_logs"}})", R"({"params":{"database":"otel"}})", R"({"params":{"table":"otel_logs"}})", R"({"params":{"database":"otel","table":""}})", "{}"}) {
-        CHECK_EQ(std::string(call(tools, narrow, "explorer_table", arguments)["error"].GetString()), std::string("invalid_argument"));
+        CHECK_EQ(std::string(call(tools, narrow, "explorer_table", arguments)["error"]["code"].GetString()), std::string("invalid_argument"));
       }
       CHECK_EQ(api.calls.size(), size_t(3));
       // The catalog: a database that no pattern names is refused; the answer is cut to the patterns.
-      CHECK_EQ(std::string(call(tools, narrow, "explorer_catalog", R"({"params":{"database":"system"}})")["error"].GetString()), std::string("database_not_allowed"));
+      CHECK_EQ(std::string(call(tools, narrow, "explorer_catalog", R"({"params":{"database":"system"}})")["error"]["code"].GetString()), std::string("not_found"));
       api.answer.body = R"({"version":3,"database":"","databases":["chdash_ui","metrics","otel","system"],)"
                         R"("database_summaries":[{"name":"chdash_ui","tables":9},{"name":"metrics","tables":3},{"name":"otel","tables":5},{"name":"system","tables":99}],)"
                         R"("tables":[{"database":"otel","name":"otel_logs"},{"database":"otel","name":"otel_traces"},{"database":"metrics","name":"cpu_load"},{"database":"metrics","name":"mem"},{"database":"system","name":"tables"},{"database":"chdash_ui","name":"t"}],"disks":[{"name":"default"}]})";
@@ -5386,7 +5914,8 @@ void test_api_tools() {
       std::vector<std::string> databases;
       for (const auto& d : cut["databases"].GetArray()) databases.push_back(d.GetString());
       CHECK(databases == (std::vector<std::string>{"chdash_ui", "metrics", "otel"}));
-      // Only a database that the key reads whole keeps its summary: the others count tables that the key does not read.
+      // Only a database that the key reads in full keeps its summary. The others count tables that
+      // the key does not read.
       CHECK_EQ(cut["database_summaries"].Size(), 1u);
       CHECK_EQ(std::string(cut["database_summaries"][0]["name"].GetString()), std::string("chdash_ui"));
       std::vector<std::string> tables;
@@ -5399,19 +5928,21 @@ void test_api_tools() {
       // in the list and in the call: see above).
       call(tools, narrow, "explorer_functions", "{}");
       call(tools, narrow, "format_sql", R"({"body":{"sqls":["select 1"]}})");
-      // System, Traces, Logs and Metrics are read with the system user, as the pages do: the patterns of the key cut
-      // nothing there, the permission is what gives the tool (this key allows only otel.otel_logs).
+      // System, Traces, Logs and Metrics are read with the system user, as the pages do. The
+      // patterns of the key cut nothing there. The permission is what gives the tool. This key
+      // allows only otel.otel_logs.
       const size_t before = api.calls.size();
       for (const char* name : {"system_overview", "logs_meta", "traces_search", "metrics_series"}) call(tools, narrow, name, "{}");
       CHECK_EQ(api.calls.size(), before + 4);
       api.answer.body = R"({"version":3,"databases":["otel"]})";
     }
-    // A key without a host reads nothing, the Query helpers included: they read the version of a host.
+    // A key without a host reads nothing. This includes the Query helpers, which read the version
+    // of a host.
     McpKey nohost = a_key({"*"}, {"*"});
     nohost.hosts = {};
     api.calls.clear();
-    CHECK_EQ(std::string(call(tools, nohost, "format_sql", R"({"body":{"sql":"select 1"}})")["error"].GetString()), std::string("no_host"));
-    CHECK_EQ(std::string(call(tools, nohost, "explorer_catalog", "{}")["error"].GetString()), std::string("no_host"));
+    CHECK_EQ(std::string(call(tools, nohost, "format_sql", R"({"body":{"sql":"select 1"}})")["error"]["code"].GetString()), std::string("no_host"));
+    CHECK_EQ(std::string(call(tools, nohost, "explorer_catalog", "{}")["error"]["code"].GetString()), std::string("no_host"));
     CHECK(api.calls.empty());
     // format_sql: a POST whose body keeps `sql` and gains the host.
     call(tools, all, "format_sql", R"({"body":{"sql":"select 1"}})");
@@ -5425,26 +5956,26 @@ void test_api_tools() {
     api.calls.clear();
     McpKey two = a_key({"*"}, {"*"});
     two.hosts = {"prod", "stage"};
-    CHECK_EQ(std::string(call(tools, two, "system_overview", "{}")["error"].GetString()), std::string("host_required"));
-    CHECK_EQ(std::string(call(tools, two, "system_overview", R"({"host":"nope"})")["error"].GetString()), std::string("host_not_allowed"));
+    CHECK_EQ(std::string(call(tools, two, "system_overview", "{}")["error"]["code"].GetString()), std::string("host_required"));
+    CHECK_EQ(std::string(call(tools, two, "system_overview", R"({"host":"nope"})")["error"]["code"].GetString()), std::string("not_found"));
     call(tools, two, "system_overview", R"({"host":"stage"})");
     CHECK_EQ(query_of(api.calls[0]), std::string("host_id=stage\x1f" "mcp"));
     CHECK_EQ(api.calls.size(), size_t(1));
     // The host is not a param.
-    CHECK_EQ(std::string(call(tools, all, "system_overview", R"({"params":{"host_id":"stage"}})")["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(call(tools, all, "system_overview", R"({"params":{"host_id":"stage"}})")["error"]["code"].GetString()), std::string("invalid_argument"));
   }
 
   // The identity of a tool is the one of its family (mcp_identity.hpp), and the answer shows the host as the client named it.
   {
     api.calls.clear();
     api.answer.body = R"({"version":1,"host_id":"prod\u001fmcp","source_host_id":"prod\u001Fmcp"})";
-    // One identity for every tool that reads ClickHouse: the MCP user as runner, the system user as for the pages
-    // (the OpenTelemetry tables, the System page).
+    // Every tool that reads ClickHouse has one identity. The MCP user is the runner. The system
+    // user is the identity for the pages, as in the OpenTelemetry tables and the System page.
     for (const char* name : {"explorer_catalog", "explorer_table", "system_overview", "system_queries", "traces_meta", "traces_search", "logs_meta", "logs_search", "metrics_meta", "metrics_series"}) {
       call(tools, all, name, "{}");
       CHECK(contains(query_of(api.calls.back()) + api.calls.back().body, "prod\x1f" "mcp"));
     }
-    // The query library asks no ClickHouse user: the host as it is.
+    // The query library asks for no ClickHouse user. It uses the host as it is.
     call(tools, all, "query_library", "{}");
     CHECK_EQ(query_of(api.calls.back()), std::string("host_id=prod"));
     auto doc = call(tools, all, "system_overview", "{}");
@@ -5459,46 +5990,57 @@ void test_api_tools() {
     api.calls.clear();
     for (const char* bad : {R"({"nope":1})", R"({"params":"x"})", R"({"params":{"a b":1}})", R"({"params":{"a":{"b":1}}})", R"({"params":{"a":[[1]]}})",
                             R"({"params":{"a":null}})"}) {
-      CHECK_EQ(std::string(call(tools, all, "traces_search", bad)["error"].GetString()), std::string("invalid_argument"));
+      CHECK_EQ(std::string(call(tools, all, "traces_search", bad)["error"]["code"].GetString()), std::string("invalid_argument"));
     }
     CHECK(api.calls.empty());
     // A value that is too long, a list that is too long.
-    CHECK_EQ(std::string(call(tools, all, "traces_search", "{\"params\":{\"q\":\"" + std::string(9000, 'x') + "\"}}")["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(call(tools, all, "traces_search", "{\"params\":{\"q\":\"" + std::string(9000, 'x') + "\"}}")["error"]["code"].GetString()), std::string("invalid_argument"));
     std::string many = "{\"params\":{\"service\":[";
     for (int i = 0; i < 65; ++i) many += std::string(i ? "," : "") + "\"s\"";
-    CHECK_EQ(std::string(call(tools, all, "traces_search", many + "]}}")["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(call(tools, all, "traces_search", many + "]}}")["error"]["code"].GetString()), std::string("invalid_argument"));
     CHECK(api.calls.empty());
   }
 
-  // The answers of the API: an error keeps its code and message, an absent route is `not_enabled`, a list goes under `result`.
+  // The answers of the API follow these rules. An error keeps its code and message. An absent route
+  // gives `not_enabled`. A list goes under `result`.
   {
     McpToolOutcome o;
     api.answer = {400, R"({"error_code":"invalid_metrics_range","message":"start_ms and end_ms (milliseconds) are required."})", false, ""};
     auto doc = call(tools, all, "metrics_catalog", "{}", &o);
     CHECK(o.is_error);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_metrics_range"));
-    CHECK(contains(doc["message"].GetString(), "start_ms and end_ms"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("invalid_metrics_range"));
+    CHECK(contains(doc["error"]["message"].GetString(), "start_ms and end_ms"));
     api.answer = {404, R"({"error_code":"unknown_host","message":"Logs source host is not configured."})", false, ""};
-    CHECK_EQ(std::string(call(tools, all, "logs_search", "{}")["error"].GetString()), std::string("unknown_host"));
+    CHECK_EQ(std::string(call(tools, all, "logs_search", "{}")["error"]["code"].GetString()), std::string("unknown_host"));
+    // The MCP user gets the out-of-scope answer for a table or database that it cannot see
+    // (contract 3.7).
+    api.answer = {404, R"({"error_code":"object_not_found","message":"Object not found or has no readable columns."})", false, ""};
+    const auto unseen = call(tools, all, "explorer_table", R"({"params":{"database":"otel","table":"secret_table"}})");
+    CHECK_EQ(std::string(unseen["error"]["code"].GetString()), std::string("not_found"));
+    CHECK_EQ(std::string(unseen["error"]["message"].GetString()), std::string("the table otel.secret_table does not exist or is not visible"));
+    const auto unseen_db = call(tools, all, "explorer_catalog", R"({"params":{"database":"hidden"}})");
+    CHECK_EQ(std::string(unseen_db["error"]["message"].GetString()), std::string("the database hidden does not exist or is not visible"));
+    // Without a named object, the code of the route stays.
+    CHECK_EQ(std::string(call(tools, all, "explorer_catalog", "{}")["error"]["code"].GetString()), std::string("object_not_found"));
     api.answer = {404, "", false, ""};
     doc = call(tools, all, "query_library", "{}");
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("not_enabled"));
-    CHECK(contains(doc["message"].GetString(), "query_library"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("not_enabled"));
+    CHECK(contains(doc["error"]["message"].GetString(), "query_library"));
     api.answer = {500, "boom", false, ""};
-    CHECK_EQ(std::string(call(tools, all, "system_disks", "{}")["error"].GetString()), std::string("api_error"));
+    CHECK_EQ(std::string(call(tools, all, "system_disks", "{}")["error"]["code"].GetString()), std::string("api_error"));
     api.answer = {0, "", false, "the API of ChDash did not answer: Connection"};
     doc = call(tools, all, "system_disks", "{}");
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("api_unavailable"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("api_unavailable"));
     api.answer = {200, "", true, ""};
-    CHECK_EQ(std::string(call(tools, all, "system_disks", "{}")["error"].GetString()), std::string("result_too_large"));
+    CHECK_EQ(std::string(call(tools, all, "system_disks", "{}")["error"]["code"].GetString()), std::string("result_too_large"));
     api.answer = {200, R"([1,2,3])", false, ""};
     doc = call(tools, all, "system_disks", "{}");
     CHECK_EQ(doc["result"].Size(), 3u);
     api.answer = {200, "not json", false, ""};
-    CHECK_EQ(std::string(call(tools, all, "system_disks", "{}")["error"].GetString()), std::string("api_error"));
+    CHECK_EQ(std::string(call(tools, all, "system_disks", "{}")["error"]["code"].GetString()), std::string("api_error"));
     // Without a client, the tool says so.
     McpTools alone(tools_config(), db);
-    CHECK_EQ(std::string(call(alone, all, "system_disks", "{}")["error"].GetString()), std::string("api_unavailable"));
+    CHECK_EQ(std::string(call(alone, all, "system_disks", "{}")["error"]["code"].GetString()), std::string("api_unavailable"));
   }
 
   // The scope of the key: API tools need all the data, in the list and in the call.
@@ -5520,8 +6062,7 @@ void test_api_tools() {
     CHECK(listed(narrow).count("run_query") == 0 && listed(narrow).count("explain_query") == 0);
     CHECK(listed(all).count("explorer_catalog") == 1 && listed(all).count("traces_search") == 1);
     const auto refused = parse(mcp_handle_message(rpc("tools/call", R"({"name":"run_query","arguments":{"sql":"select 1"}})"), narrow, backend, info, 0).body);
-    CHECK(refused["result"]["isError"].GetBool());
-    CHECK_EQ(std::string(refused["result"]["structuredContent"]["error"].GetString()), std::string("tool_not_allowed"));
+    CHECK_EQ(refused["error"]["code"].GetInt(), kRpcInvalidParams);  // the answer of a tool that does not exist
     // The schema comes from the row: a GET has params, a POST a body.
     const auto doc = parse(mcp_handle_message(rpc("tools/list"), all, backend, info, 0).body);
     for (const auto& t : doc["result"]["tools"].GetArray()) {
@@ -5537,7 +6078,8 @@ void test_api_tools() {
 
 // ---- the analysis tools, with a server that answers as told ---------------------------------------------------------------
 
-// What the server says to the tools of the analysis, and what they asked of it.
+// This fake server states what it says to the tools of the analysis. It also records what the tools
+// asked of it.
 struct FakeAnalysis : McpAnalysis {
   McpToolAvailability on = McpToolAvailability::everything();
   std::vector<std::string> windows = {"1h", "6h", "24h", "7d", "30d", "90d"};
@@ -5606,8 +6148,8 @@ void test_analysis_tools() {
   reader.hosts = {"prod"};
   McpKey star = a_key({"*"}, {"*"});
   star.hosts = {"prod"};
-  const auto error_of = [](const rapidjson::Document& doc) { return doc.HasMember("error") ? std::string(doc["error"].GetString()) : std::string(); };
-  const auto message_of = [](const rapidjson::Document& doc) { return doc.HasMember("message") ? std::string(doc["message"].GetString()) : std::string(); };
+  const auto error_of = [](const rapidjson::Document& doc) { return doc.HasMember("error") ? std::string(doc["error"]["code"].GetString()) : std::string(); };
+  const auto message_of = [](const rapidjson::Document& doc) { return doc.HasMember("error") ? std::string(doc["error"]["message"].GetString()) : std::string(); };
   using Bad = std::vector<std::pair<std::string, std::string>>;  // arguments, and what the message says
 
   // mcp_analysis_my_limits: the key, the instance, the bucket of the rate limit, and each cap with its source.
@@ -5639,7 +6181,8 @@ void test_analysis_tools() {
     CHECK(cap(doc, "max_memory_bytes") == Cap(1000000000, "mcp"));
     CHECK(cap(doc, "max_rows_to_read") == Cap(5000000, "mcp"));
 
-    // A key that lowers the cap of its host: its own value. One above it (the cap was lowered after the key was made) has the cap of the host.
+    // A key that lowers the cap of its host has its own value. A key with a value above the host
+    // cap (the cap was lowered after the key was made) has the cap of the host.
     McpKey tight = plain;
     tight.max_rows = 20;
     tight.timeout_seconds = 5;
@@ -5662,7 +6205,8 @@ void test_analysis_tools() {
     CHECK(cap(doc, "max_rows") == Cap(1000, "mcp") && cap(doc, "timeout_seconds") == Cap(30, "mcp"));
     analysis.limits_answer = said;
 
-    // No limit is null: a limit of 0 in the configuration is "none", and a client would read 0 as no rows. The instance has no name while the usage is off.
+    // No limit is null. A limit of 0 in the configuration means "none". A client reads 0 as no
+    // rows. The instance has no name while the usage is off.
     McpToolsConfig unbound = tools_config();
     unbound.max_rows_to_read = 0;
     McpTools unbound_tools(unbound, db, nullptr, &analysis);
@@ -5685,7 +6229,8 @@ void test_analysis_tools() {
     CHECK(!o.is_error);
     analysis.on = McpToolAvailability::everything();
 
-    // It takes no argument (a key has one host), and a failure on the side of the server is its code.
+    // It takes no argument, because a key has one host. A failure on the server side gives its own
+    // code.
     doc = call(tools, plain, "mcp_analysis_my_limits", R"({"host":"prod"})", &o);
     CHECK(o.is_error);
     CHECK_EQ(error_of(doc), std::string("invalid_argument"));
@@ -5705,7 +6250,8 @@ void test_analysis_tools() {
     CHECK(tools.availability().usage && tools.availability().all_keys);
   }
 
-  // mcp_analysis_my_usage: the usage of its own key, with a bounded number of rows; the series and the cost only when asked.
+  // mcp_analysis_my_usage gives the usage of its own key, with a bounded number of rows. It gives
+  // the series and the cost only when asked.
   {
     analysis.usage_calls = 0;
     McpToolOutcome o;
@@ -5745,7 +6291,8 @@ void test_analysis_tools() {
     CHECK_EQ(doc["totals"]["requests"].GetInt(), 3);
     analysis.cost_answer = R"({"host":"prod","window":"24h","status":"ok","totals":{"statements":2}})";
 
-    // Arguments that are not valid are `invalid_argument`, and the rule is in the message: the server is not asked.
+    // Arguments that are not valid give `invalid_argument`. The rule is in the message. The server
+    // is not asked.
     std::string many = R"({"instance":[)";
     for (int i = 0; i < 21; ++i) many += std::string(i ? "," : "") + "\"i" + std::to_string(i) + "\"";
     many += "]}";
@@ -5790,7 +6337,8 @@ void test_analysis_tools() {
     CHECK(o.is_error);
     CHECK_EQ(error_of(doc), std::string("invalid_argument"));
     analysis.fail_code.clear();
-    // The cap of a result holds: an answer that is larger than max_result_bytes is refused, with what to do.
+    // The cap of a result holds. An answer that is larger than max_result_bytes is refused. The
+    // message says what to do.
     McpToolsConfig small = tools_config();
     small.max_result_bytes = 32;  // the fake's answers are longer than that
     McpTools capped(small, db, nullptr, &analysis);
@@ -5804,7 +6352,8 @@ void test_analysis_tools() {
     CHECK_EQ(error_of(doc), std::string("not_enabled"));
   }
 
-  // mcp_analysis_all_usage: the usage of every key, cut and grouped; never a cost; and only for a key that names the tool.
+  // mcp_analysis_all_usage gives the usage of every key, cut and grouped. It never gives a cost. It
+  // is given only to a key that names the tool.
   {
     analysis.overview_calls = 0;
     analysis.cost_calls = 0;
@@ -5887,7 +6436,8 @@ void test_analysis_tools() {
     }
     CHECK_EQ(analysis.cost_calls, 0);  // never a cost, whatever it is asked
 
-    // The second lock: a key that does not name the tool is refused whoever calls (the protocol refuses it before), `*` too. The server is not asked.
+    // The second lock refuses a key that does not name the tool, whoever calls. The protocol
+    // refuses it before. The wildcard `*` is refused too. The server is not asked.
     analysis.overview_calls = 0;
     for (const McpKey* key : {&plain, &star}) {
       doc = call(tools, *key, "mcp_analysis_all_usage", "{}", &o);
@@ -5921,8 +6471,9 @@ void test_analysis_tools() {
     CHECK_EQ(error_of(doc), std::string("not_enabled"));
   }
 
-  // Through the protocol, with the tools of a real McpTools: the usage on, then off. A tool of the analysis counts as any call (its outcome
-  // has a code, no host and no rows).
+  // This test uses the protocol, with the tools of a real McpTools. It enables the usage, and then
+  // disables it. A tool of the analysis counts as any call. Its outcome has a code, no host and no
+  // rows.
   {
     McpServerInfo info;
     analysis.on = McpToolAvailability::everything();
@@ -5962,7 +6513,7 @@ void test_observability() {
   McpKey all = a_key({"*"}, {"*"});
   McpKey narrow = a_key({"*"}, {"otel"});
   narrow.max_rows = 5;
-  const auto id = [](const rapidjson::Document& doc) { return std::string(doc["error"].GetString()); };
+  const auto id = [](const rapidjson::Document& doc) { return std::string(doc["error"]["code"].GetString()); };
   const std::string traces = "`otel`.`otel_traces`";
 
   // list_services: spans and errors for each service, in the window, never above the row cap of the key.
@@ -5970,7 +6521,7 @@ void test_observability() {
     db.rules = {{"countIf(StatusCode = 'Error')", table_of({"s", "n", "e", "a"}, {{"\"checkout\"", "120", "3", "12.5"}, {"\"cart\"", "40", "0", "3.25"}})}};
     auto doc = call(tools, narrow, "list_services", "{}");
     CHECK_EQ(doc["services"].Size(), 2u);
-    CHECK_EQ(std::string(doc["services"][0]["service"].GetString()), std::string("checkout"));
+    CHECK_EQ(std::string(doc["services"][0]["untrusted"]["service"].GetString()), std::string("checkout"));
     CHECK_EQ(doc["services"][0]["spans"].GetInt(), 120);
     CHECK_EQ(doc["services"][0]["errors"].GetInt(), 3);
     CHECK(!doc["truncated"].GetBool());
@@ -5983,7 +6534,7 @@ void test_observability() {
     CHECK_EQ(db.calls.back().limits.key_id, narrow.id);
     doc = call(tools, all, "list_services", R"({"signal":"logs","since_minutes":15})");
     CHECK(contains(db.calls.back().sql, "`otel`.`otel_logs`") && contains(db.calls.back().sql, "INTERVAL 15 MINUTE"));
-    CHECK_EQ(std::string(call(tools, all, "list_services", R"({"signal":"metrics"})")["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(call(tools, all, "list_services", R"({"signal":"metrics"})")["error"]["code"].GetString()), std::string("invalid_argument"));
     CHECK_EQ(id(call(tools, all, "list_services", R"({"since_minutes":0})")), std::string("invalid_argument"));
     CHECK_EQ(id(call(tools, all, "list_services", R"({"since_minutes":99999999})")), std::string("invalid_argument"));
   }
@@ -6076,8 +6627,8 @@ void test_observability() {
     CHECK(contains(closed_db.calls.back().sql, " AND 0 "));
   }
 
-  // The tables can differ from a host to another: a call reads the tables of the host that it names, and a signal that is
-  // off for that host is not_enabled there only.
+  // The tables can differ from one host to another. A call reads the tables of the host that it
+  // names. A signal that is off for that host gives not_enabled for that host only.
   {
     McpToolsConfig two = tools_config();
     McpObservabilityConfig stage = two.observability;
@@ -6115,16 +6666,16 @@ void test_observability() {
     auto doc = call(tools, all, "get_trace", R"({"trace_id":"0af7651916cd43dd8448eb211c80319c"})");
     CHECK_EQ(std::string(doc["trace_id"].GetString()), std::string("0af7651916cd43dd8448eb211c80319c"));
     CHECK_EQ(doc["spans"].Size(), 2u);
-    CHECK_EQ(std::string(doc["spans"][0]["service"].GetString()), std::string("checkout"));
+    CHECK_EQ(std::string(doc["spans"][0]["untrusted"]["service"].GetString()), std::string("checkout"));
     CHECK_EQ(std::string(doc["spans"][1]["parent_span_id"].GetString()), std::string("b7ad6b7169203331"));
-    CHECK_EQ(std::string(doc["spans"][0]["status_message"].GetString()), std::string("card declined"));
+    CHECK_EQ(std::string(doc["spans"][0]["untrusted"]["status_message"].GetString()), std::string("card declined"));
     CHECK_EQ(db.calls.size(), size_t(2));
     CHECK(contains(db.calls[1].sql, "parseDateTime64BestEffort('2026-10-08 10:00:00.000000000', 9) - INTERVAL 1 MINUTE"));
     CHECK(contains(db.calls[1].sql, "ORDER BY Timestamp"));
     // The trace is not known: not found, not an empty list.
     db.rules.clear();
     CHECK_EQ(id(call(tools, all, "get_trace", R"({"trace_id":"0af7651916cd43dd8448eb211c80319c"})")), std::string("trace_not_found"));
-    // The index answers a failure: the lookback window still bounds the read.
+    // When the index fails, the lookback window still bounds the read.
     db.calls.clear();
     db.rules = {{"WHERE TraceId = '0af7651916cd43dd8448eb211c80319c' AND Timestamp >= now() - INTERVAL 10080 MINUTE", table_of({"a", "b", "c", "d", "e", "f", "g", "h", "i"},
         {{"\"b7ad6b7169203331\"", "\"\"", "\"checkout\"", "\"POST /pay\"", "\"Server\"", "\"2026-10-08 10:00:00.000000000\"", "5", "\"Ok\"", "\"\""}})}};
@@ -6140,12 +6691,22 @@ void test_observability() {
     auto doc = call(tools, all, "search_logs",
                     R"({"service":"checkout","severity":"warn","contains":"declined","trace_id":"0af7651916cd43dd8448eb211c80319c","since_minutes":5,"limit":10})");
     CHECK_EQ(doc["records"].Size(), 1u);
-    CHECK_EQ(std::string(doc["records"][0]["message"].GetString()), std::string("card declined"));
+    CHECK_EQ(std::string(doc["records"][0]["untrusted"]["message"].GetString()), std::string("card declined"));
+    CHECK_EQ(std::string(doc["records"][0]["untrusted"]["service"].GetString()), std::string("checkout"));
+    CHECK(!doc["records"][0].HasMember("message") && !doc["records"][0].HasMember("message_truncated"));
     CHECK_EQ(doc["records"][0]["severity_number"].GetInt(), 17);
+    // A message longer than 2000 characters is cut. The record says so next to the untrusted text
+    // (contract 5.2, rule 7).
+    CHECK(contains(db.calls.back().sql, "lengthUTF8(Body) > 2000 AS message_truncated"));
     const std::string& sql = db.calls.back().sql;
     CHECK(contains(sql, "SeverityNumber >= 13") && contains(sql, "positionCaseInsensitive(Body, 'declined') > 0"));
     CHECK(contains(sql, "TraceId = '0af7651916cd43dd8448eb211c80319c'") && contains(sql, "INTERVAL 5 MINUTE"));
     CHECK(contains(sql, "ORDER BY Timestamp DESC LIMIT 11") && contains(sql, "substringUTF8(Body, 1, 2000)"));
+    db.rules = {{"FROM `otel`.`otel_logs`", table_of({"t", "s", "sev", "n", "tr", "sp", "b", "cut"},
+        {{"\"2026-10-08 10:00:00.000000000\"", "\"checkout\"", "\"ERROR\"", "17", "\"\"", "\"\"", "\"long\"", "1"}})}};
+    const auto cut = call(tools, all, "search_logs", "{}");
+    CHECK(cut["records"][0]["message_truncated"].GetBool());
+    CHECK_EQ(std::string(cut["records"][0]["untrusted"]["message"].GetString()), std::string("long"));
     CHECK_EQ(id(call(tools, all, "search_logs", R"({"severity":"loud"})")), std::string("invalid_argument"));
     CHECK_EQ(id(call(tools, all, "search_logs", R"({"trace_id":"nope"})")), std::string("invalid_argument"));
   }
@@ -6161,7 +6722,8 @@ void test_observability() {
     for (const char* kind : {"gauge", "sum", "histogram"}) CHECK(contains(sql, std::string("`otel`.`otel_metrics_") + kind + "`"));
     CHECK(contains(sql, "MetricName LIKE 'http.%'") && contains(sql, "ServiceName = 'checkout'"));
 
-    // The kind is found by looking in the tables, in order, for the first point of the metric.
+    // The kind comes from the first point of the metric in the tables. The tables are read in
+    // order.
     db.calls.clear();
     db.rules = {
         {"toStartOfInterval", table_of({"t", "v", "n"}, {{"\"2026-10-08 10:00:00\"", "4", "12"}, {"\"2026-10-08 10:01:00\"", "9", "12"}})},
@@ -6220,23 +6782,23 @@ void test_tools() {
     McpToolOutcome o;
     auto doc = call(tools, narrow, "list_databases", "{}", &o);
     CHECK(o.is_error);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("host_required"));
-    CHECK(contains(doc["message"].GetString(), "prod, stage"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("host_required"));
+    CHECK(contains(doc["error"]["message"].GetString(), "prod, stage"));
     doc = call(tools, narrow, "list_databases", R"({"host":"nope"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("host_not_allowed"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("not_found"));
     McpKey no_host = a_key({"*"}, {"*"});
     no_host.hosts = {};
     doc = call(tools, no_host, "list_databases", "{}", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("no_host"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("no_host"));
     McpKey star = a_key({"*"}, {"*"});
     star.hosts = {"*"};
     doc = call(tools, star, "list_databases", "{}", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("host_required"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("host_required"));
     CHECK(db.calls.empty());
     // An unknown argument is refused with its name.
     doc = call(tools, all, "list_databases", R"({"nope":1})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_argument"));
-    CHECK(contains(doc["message"].GetString(), "nope"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("invalid_argument"));
+    CHECK(contains(doc["error"]["message"].GetString(), "nope"));
   }
 
   // list_hosts.
@@ -6253,7 +6815,7 @@ void test_tools() {
     CHECK(db.calls.empty());
   }
 
-  // list_databases: the scope filters after the read, and the key's row cap does not cut it.
+  // list_databases: the scope filters apply after the read. The row cap of the key does not cut it.
   {
     db.rules = {{"system.databases", table_of({"name", "engine", "comment"},
         {{"\"chdash_ui\"", "\"Atomic\"", "\"\""}, {"\"otel\"", "\"Atomic\"", "\"c\""}, {"\"system\"", "\"Atomic\"", "\"\""}, {"\"secret_db\"", "\"Atomic\"", "\"\""}})}};
@@ -6295,8 +6857,13 @@ void test_tools() {
     CHECK_EQ(doc["tables"].Size(), 1u);
     CHECK(contains(db.calls.back().sql, "name LIKE 'fixture\\\\_%'"));
     McpToolOutcome o;
+    // A database out of the scope looks like a database that does not exist: an empty list, and no statement (contract 3.7).
+    const size_t statements = db.calls.size();
     doc = call(tools, narrow, "list_tables", R"({"host":"prod","database":"system"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("database_not_allowed"));
+    CHECK(!o.is_error);
+    CHECK_EQ(doc["tables"].Size(), 0u);
+    CHECK_EQ(doc["count"].GetInt(), 0);
+    CHECK_EQ(db.calls.size(), statements);
     doc = call(tools, narrow, "list_tables", R"({"host":"prod","database":"otel"})", &o);
     CHECK(!o.is_error);
     CHECK(contains(db.calls.back().sql, "database = 'otel'"));
@@ -6321,14 +6888,20 @@ void test_tools() {
     CHECK_EQ(doc["columns"].Size(), 2u);
     CHECK(doc["columns"][0]["in_sorting_key"].GetBool());
     CHECK(!doc["columns"][0]["in_sampling_key"].GetBool());
-    CHECK_EQ(std::string(doc["columns"][1]["default_expression"].GetString()), std::string("'x'"));
+    CHECK_EQ(std::string(doc["columns"][1]["untrusted"]["default_expression"].GetString()), std::string("'x'"));
+    // The text that the users of the database write is in untrusted: the CREATE statement and the
+    // comments.
+    CHECK_EQ(std::string(doc["untrusted"]["create_table_query"].GetString()), std::string("CREATE TABLE t"));
+    CHECK_EQ(std::string(doc["untrusted"]["comment"].GetString()), std::string("my table"));
+    CHECK_EQ(std::string(doc["columns"][1]["untrusted"]["comment"].GetString()), std::string("c"));
+    CHECK(!doc.HasMember("comment") && !doc.HasMember("create_table_query"));
     doc = call(tools, narrow, "describe_table", R"({"host":"prod","database":"chdash_ui","table":"other"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("table_not_allowed"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("not_found"));
     doc = call(tools, narrow, "describe_table", R"({"host":"prod","database":"chdash_ui"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("invalid_argument"));
     db.rules.clear();
     doc = call(tools, narrow, "describe_table", R"({"host":"prod","database":"otel","table":"nope"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("table_not_found"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("not_found"));
   }
 
   // query_table.
@@ -6349,8 +6922,8 @@ void test_tools() {
     CHECK_EQ(db.calls[1].limits.max_rows_to_read, int64_t(5000000));
     CHECK_EQ(db.calls[0].limits.max_rows, kMcpSchemaReadRows);
     CHECK_EQ(doc["row_count"].GetInt(), 2);
-    CHECK_EQ(doc["rows"][1][0].GetInt(), 2);
-    CHECK_EQ(std::string(doc["rows"][1][1].GetString()), std::string("b"));
+    CHECK_EQ(doc["untrusted"]["rows"][1][0].GetInt(), 2);
+    CHECK_EQ(std::string(doc["untrusted"]["rows"][1][1].GetString()), std::string("b"));
     CHECK_EQ(doc["columns"][0]["name"].GetString(), std::string("id"));
     CHECK_EQ(doc["limit"].GetInt(), 3);
     CHECK(!doc["truncated"].GetBool());
@@ -6370,24 +6943,24 @@ void test_tools() {
     CHECK_EQ(db.calls.back().limits.timeout_seconds, int64_t(30));
     // Errors.
     doc = call(tools, narrow, "query_table", R"({"host":"prod","database":"otel","table":"otel_logs","columns":["zzz"]})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("unknown_column"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("unknown_column"));
     doc = call(tools, narrow, "query_table", R"({"host":"prod","database":"system","table":"tables"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("table_not_allowed"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("not_found"));
     doc = call(tools, narrow, "query_table", R"({"host":"prod","database":"otel","table":"otel_logs","limit":0})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("invalid_argument"));
     doc = call(tools, narrow, "query_table", R"({"host":"prod","database":"otel","table":"otel_logs","filters":[{"column":"id","op":"=","value":{"a":1}}]})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("invalid_argument"));
     doc = call(tools, narrow, "query_table", R"({"host":"prod","database":"otel","table":"otel_logs","filters":[{"column":"id","op":"=","value":1,"extra":1}]})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("invalid_argument"));
     doc = call(tools, narrow, "query_table", R"({"host":"prod","database":"otel","table":"otel_logs","filters":"id=1"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_argument"));
-    // Truncated by the cap is reported as it came.
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("invalid_argument"));
+    // A result cut by the cap is reported as it came.
     db.rules[1].second.truncated = true;
     doc = call(tools, narrow, "query_table", R"({"host":"prod","database":"otel","table":"otel_logs"})");
     CHECK(doc["truncated"].GetBool());
     db.rules.clear();
     doc = call(tools, narrow, "query_table", R"({"host":"prod","database":"otel","table":"otel_logs"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("table_not_found"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("not_found"));
   }
 
   // run_query: one statement, the caps of the key.
@@ -6399,15 +6972,15 @@ void test_tools() {
     CHECK(!o.is_error);
     CHECK_EQ(db.calls[0].sql, std::string("SELECT 1"));
     CHECK(doc["truncated"].GetBool());
-    CHECK_EQ(doc["rows"][0][0].GetInt(), 1);
+    CHECK_EQ(doc["untrusted"]["rows"][0][0].GetInt(), 1);
     doc = call(tools, all, "run_query", R"({"sql":"SELECT 1; DROP TABLE t"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("multiple_statements"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("multiple_statements"));
     doc = call(tools, all, "run_query", R"({"sql":"DROP TABLE t"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("statement_not_allowed"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("statement_not_allowed"));
     doc = call(tools, all, "run_query", "{\"sql\":\"SELECT '" + std::string(300, 'x') + "'\"}", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("sql_too_large"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("sql_too_large"));
     doc = call(tools, all, "run_query", "{}", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("invalid_argument"));
     CHECK_EQ(db.calls.size(), size_t(1));
   }
 
@@ -6430,11 +7003,11 @@ void test_tools() {
     call(tools, all, "explain_query", R"({"sql":"SELECT 1","type":"estimate"})");
     CHECK_EQ(db.calls.back().sql, std::string("EXPLAIN ESTIMATE SELECT 1"));
     doc = call(tools, all, "explain_query", R"({"sql":"SELECT 1","type":"bogus"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("invalid_argument"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("invalid_argument"));
     doc = call(tools, all, "explain_query", R"j({"sql":"INSERT INTO t VALUES (1)"})j", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("statement_not_allowed"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("statement_not_allowed"));
     doc = call(tools, all, "explain_query", R"({"sql":"SELECT 1; SELECT 2"})", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("multiple_statements"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("multiple_statements"));
     // A bare second statement cannot hide behind the EXPLAIN prefix.
     const size_t n = db.calls.size();
     call(tools, all, "explain_query", R"({"sql":"SELECT 1 -- ; DROP"})");
@@ -6447,21 +7020,41 @@ void test_tools() {
     McpToolOutcome o;
     auto doc = call(tools, all, "run_query", R"({"sql":"SELECT 1"})", &o);
     CHECK(o.is_error);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("timeout"));
-    CHECK(contains(doc["message"].GetString(), "DB::Exception"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("timeout"));
+    CHECK(contains(doc["error"]["message"].GetString(), "DB::Exception"));
     CHECK_EQ(o.error_code, std::string("timeout"));
     db.fail_code = "permission_denied";
     doc = call(tools, all, "list_databases", "{}", &o);
-    CHECK_EQ(std::string(doc["error"].GetString()), std::string("permission_denied"));
+    CHECK_EQ(std::string(doc["error"]["code"].GetString()), std::string("permission_denied"));
     db.fail_code.clear();
   }
 }
 
 // ---- configuration ---------------------------------------------------------------------------------------------
 
+// A secret is never written in the file. It is in a file (secret_file) or in a variable
+// (secret_env). To keep the cases short, a test writes `secret = "<value>"`. This function puts the
+// value in a file of the directory, and it names that file instead. config_test.cpp checks that the
+// clear form is refused.
+std::string with_secret_files(const std::string& dir, const std::string& hcl) {
+  static const std::regex clear("\\bsecret = \"([^\"]*)\"");
+  std::string out;
+  size_t last = 0;
+  int index = 0;
+  for (auto it = std::sregex_iterator(hcl.begin(), hcl.end(), clear); it != std::sregex_iterator(); ++it) {
+    const std::string path = dir + "/test-secret-" + std::to_string(index++);
+    write_file(path, (*it)[1].str() + "\n");
+    out += hcl.substr(last, static_cast<size_t>(it->position()) - last) + "secret_file = \"" + path + "\"";
+    last = static_cast<size_t>(it->position() + it->length());
+  }
+  return out + hcl.substr(last);
+}
+
 AppConfig load(const std::string& dir, const std::string& hcl) {
   const std::string path = dir + "/chdash.hcl";
-  write_file(path, hcl);
+  // Every configuration file must have the access block (docs/access.md). These tests have no
+  // gateway.
+  write_file(path, with_secret_files(dir, hcl) + "\naccess {\n  mode = \"open\"\n}\n");
   return load_config_from_file(path);
 }
 
@@ -6478,14 +7071,14 @@ const char* kHosts = R"(
 clickhouse {
   host {
     name = "prod"
-    runner_uri = "clickhouse://runner:r@h:9000"
-    system_uri = "clickhouse://system:s@h:9000"
-    mcp_uri = "clickhouse://chdash_mcp:m@h:9000"
+    runner_uri = "clickhouse://runner@h:9000"
+    system_uri = "clickhouse://system@h:9000"
+    mcp_uri = "clickhouse://chdash_mcp@h:9000"
   }
   host {
     name = "stage"
-    runner_uri = "clickhouse://runner:r@h2:9000"
-    system_uri = "clickhouse://system:s@h2:9000"
+    runner_uri = "clickhouse://runner@h2:9000"
+    system_uri = "clickhouse://system@h2:9000"
   }
 }
 )";
@@ -6496,7 +7089,7 @@ const char* kSecret24 = "01234567-89ab-4def-8123-456789abcdef";
 void test_tool_support() {
   using namespace mcp_tools;
   struct NoDatabase : McpDatabase {
-    McpDbResult run(const std::string&, const std::string&, const McpDbLimits&) override { throw McpDbError("host_unavailable", "down"); }
+    McpDbResult run(const std::string&, const std::string&, const McpDbLimits&) override { throw McpDbError("unavailable", "down"); }
     std::optional<bool> host_healthy(const std::string&) override { return std::nullopt; }
   } database;
   McpToolsConfig config;
@@ -6509,7 +7102,8 @@ void test_tool_support() {
   key.max_rows = 100;
   key.timeout_seconds = 5;
 
-  // The limits: the key may only lower them; the schema tools read more rows than the key shows; the OpenTelemetry tools run as the system user.
+  // The limits: the key can only lower them. The schema tools read more rows than the key shows.
+  // The OpenTelemetry tools run as the system user.
   Ctx ctx = make_ctx(key, config, database);
   CHECK_EQ(ctx.max_rows, int64_t{100});
   CHECK_EQ(ctx.user_limits.max_rows, int64_t{100});
@@ -6542,7 +7136,7 @@ void test_tool_support() {
     return std::string("ok:") + c.host;
   };
   CHECK_EQ(resolve("{\"host\":\"stage\"}", key), std::string("ok:stage"));
-  CHECK_EQ(resolve("{\"host\":\"other\"}", key), std::string("host_not_allowed"));
+  CHECK_EQ(resolve("{\"host\":\"other\"}", key), std::string("not_found"));
   CHECK_EQ(resolve("{}", key), std::string("host_required"));
   McpKey one = key;
   one.hosts = {"prod"};
@@ -6558,7 +7152,7 @@ void test_tool_support() {
     run(failing, "SELECT 1", failing.user_limits);
     CHECK(false);
   } catch (const ToolFailure& f) {
-    CHECK_EQ(f.code, std::string("host_unavailable"));
+    CHECK_EQ(f.code, std::string("unavailable"));
   }
 
   // The arguments.
@@ -6598,20 +7192,20 @@ void test_tool_support() {
   write_columns(w, res);
   write_rows(w, res);
   w.EndObject();
-  CHECK_EQ(finish(sb), std::string("{\"columns\":[{\"name\":\"a\",\"type\":\"UInt8\"},{\"name\":\"b\",\"type\":\"String\"}],\"rows\":[[1,\"x\"],[null,null]],\"row_count\":2}"));
+  CHECK_EQ(finish(sb), std::string("{\"columns\":[{\"name\":\"a\",\"type\":\"UInt8\"},{\"name\":\"b\",\"type\":\"String\"}],\"untrusted\":{\"rows\":[[1,\"x\"],[null,null]]},\"row_count\":2}"));
   CHECK_EQ(glob_conditions("name", {"a*", "b_"}), std::string("name LIKE 'a%' OR name LIKE 'b\\\\_'"));
   CHECK_EQ(describe_table_filter("d'b", "t", "name"), std::string("database = 'd\\'b' AND name = 't'"));
 }
 
 void test_config(const std::string& dir) {
   const std::string hosts = kHosts;
-  // No mcp block: off, and the existing configs keep working.
+  // No mcp block: MCP is off. The existing configurations keep working.
   {
     const AppConfig cfg = load(dir, hosts);
     CHECK(!cfg.mcp.enabled);
     CHECK(cfg.mcp.keys.empty());
     CHECK_EQ(cfg.hosts.size(), size_t(2));
-    CHECK_EQ(cfg.hosts[0].mcp_uri, std::string("clickhouse://chdash_mcp:m@h:9000"));
+    CHECK_EQ(cfg.hosts[0].mcp_uri, std::string("clickhouse://chdash_mcp@h:9000"));
     CHECK_EQ(cfg.hosts[1].mcp_uri, std::string(""));
     CHECK_EQ(cfg.mcp.max_rows, int64_t(1000));
     CHECK_EQ(cfg.mcp.max_result_bytes, int64_t(1048576));
@@ -6626,7 +7220,7 @@ void test_config(const std::string& dir) {
   // A full block.
   const std::string storage = dir + "/ok-keys.json";
   const std::string secret_file = dir + "/secret.txt";
-  write_file(secret_file, std::string("  f11e0000-0000-4000-8000-000000000010 \r\n\n"));
+  write_file(secret_file, std::string("f11e0000-0000-4000-8000-000000000010\r\n"));  // the last line end is not part of the secret
   {
     const AppConfig cfg = load(dir, std::string(R"(
 mcp {
@@ -6682,7 +7276,7 @@ mcp {
     CHECK_EQ(cfg.mcp.keys[0].secret_hint, std::string(kSecret24).substr(0, 8));
     CHECK_EQ(cfg.mcp.keys[1].secret_hint, std::string("f11e0000"));
     CHECK_EQ(cfg.mcp.keys[2].secret_hint, std::string("54a00000"));
-    CHECK(cfg.mcp.keys[1].secret_hash == mcp_hash_secret("f11e0000-0000-4000-8000-000000000010"));  // trimmed
+    CHECK(cfg.mcp.keys[1].secret_hash == mcp_hash_secret("f11e0000-0000-4000-8000-000000000010"));  // without the line end
     CHECK(cfg.mcp.keys[2].secret_hash == mcp_hash_secret("54a00000-0000-4000-8000-000000000011"));
     CHECK(::access(storage.c_str(), F_OK) != 0);  // loading the config never creates the file
   }
@@ -6706,9 +7300,12 @@ mcp {
     CHECK_EQ(read_file(bad), std::string("{not json"));
     CHECK(contains(load_error(dir, "mcp { enabled = true\n storage_file = \"" + dir + "/missing-dir/k.json\" }\n" + hosts), "does not exist"));
   }
-  // 8. the usage (mcp { usage { } }): off by default; when it is on, a directory that exists and where ChDash can create files, a name
-  // of this instance (the host name when none is given), and a file of this instance that is a usage file of this ChDash (it is never
-  // rewritten when it is not), which is not the key file or a library.
+  // 8. The usage (mcp { usage { } }) is off by default. When it is on, the directory must exist,
+  // and ChDash must be able to create files in it. The instance needs a name, and the host name is
+  // used when none is given.
+  //
+  // A file of this instance must be a usage file of this ChDash. That file is never rewritten when
+  // it is not a usage file. The file must not be the key file or the file of a query library.
   {
     const std::string usage_dir = dir + "/usage-dir";
     ::mkdir(usage_dir.c_str(), 0700);
@@ -6729,7 +7326,7 @@ mcp {
     CHECK(!off.mcp.usage.all_keys);
     const AppConfig keys_only = load(dir, "mcp { enabled = true\n storage_file = \"" + keys_file + "\" }\n" + hosts);
     CHECK(!keys_only.mcp.usage.enabled);
-    // The block off (or with a directory that is not there) is not checked: nothing is counted.
+    // A block that is off, or that has a missing directory, is not checked. Nothing is counted.
     CHECK_EQ(load_error(dir, with_usage(usage_block(" enabled = false\n dir = \"/no/such/dir\"\n instance = \"bad name\""))), std::string(""));
     // On: the values that the block gives.
     const AppConfig cfg = load(dir, with_usage(usage_block(on + " instance = \"chdash-0\"\n retention_days = 30\n all_keys = true\n storage = \"files\"")));
@@ -6777,7 +7374,8 @@ mcp {
     CHECK(contains(load_error(dir, "mcp { enabled = true\n storage_file = \"" + usage_dir + "/./chdash-0.jsonl.zst\"\n" + usage_block(on + " instance = \"chdash-0\"") + "}\n" + hosts), "key file"));
     const std::string library = usage_dir + "/chdash-0.jsonl.zst";
     CHECK(contains(load_error(dir, "query_library {\n enabled = true\n file = \"" + library + "\"\n}\n" + with_usage(usage_block(on + " instance = \"chdash-0\""))), "query library"));
-    // The file of this instance: another instance's file in the directory is not looked at, and this one is checked and never rewritten.
+    // The file of this instance: the test does not read another instance's file in the directory.
+    // This file is checked, and it is never rewritten.
     write_usage_lines(usage_path(usage_dir, "someone-else"), {"not even a header"});
     CHECK_EQ(load_error(dir, with_usage(usage_block(on + " instance = \"chdash-0\""))), std::string(""));
     const std::string own = usage_path(usage_dir, "chdash-0");
@@ -6814,7 +7412,7 @@ mcp {
   }
   const std::string s2 = "secret = \"a07e7e70-0000-4000-8000-0000000000aa\"";
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("x", s2) + "}\n" + hosts), "two keys have the name x"));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("y", s1) + "}\n" + hosts), "same secret"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1) + key("y", s1) + "}\n" + hosts), "same token"));
   // A key has a secret that the page can show: a hash alone is refused.
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("y", "secret_sha256 = \"" + mcp_hash_hex(mcp_hash_secret(kSecret24)) + "\"") + "}\n" + hosts), "secret_sha256 is not accepted"));
   {
@@ -6835,8 +7433,9 @@ mcp {
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1, "[\"*\"]", "[\"*\"]", "[\"*\"]") + "}\n" + hosts), "names its host"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1, "[\"*\"]", "[\"*\"]", "[\"prod\", \"stage\"]") + "}\n" + hosts), "one host at most"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n" + key("x", s1, "[\"drop_table\"]") + "}\n" + hosts), "drop_table"));
-  // The tools of the analysis of the keys are names that a key may hold with any data, while the usage is off too (it is off here): the key
-  // names them, and tools/list and tools/call decide at run time, so a configuration does not stop when the usage is turned off.
+  // The tools of the analysis of the keys are names that a key can hold with any data. This holds
+  // while the usage is off too, and it is off here. The key names them. tools/list and tools/call
+  // decide at run time. A configuration does not stop when the usage is disabled.
   CHECK_EQ(load_error(dir, "mcp { enabled = true\n" +
                               key("x", s1, "[\"mcp_analysis_my_limits\", \"mcp_analysis_my_usage\", \"mcp_analysis_all_usage\"]", "[\"otel\"]") + "}\n" + hosts),
            std::string(""));
@@ -6849,12 +7448,14 @@ mcp {
   CHECK(contains(load_error(dir, "mcp { enabled = true\n bogus = 1 }\n" + hosts), "unknown attribute bogus"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n colour = \"red\" } }\n" + hosts), "unknown attribute colour"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n extra { a = 1 } }\n" + hosts), "unknown block extra"));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\" } }\n" + hosts), "exactly one of secret and secret_file is required"));
-  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_file = \"/x\" } }\n" + hosts), "exactly one of"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\" } }\n" + hosts), "exactly one of secret_env and secret_file is required"));
+  CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_env = \"CHDASH_TEST_X\" } }\n" + hosts), "give exactly one of secret_env and secret_file"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n key { name = \"x\"\n " + s1 + "\n secret_sha256 = \"00\" } }\n" + hosts), "secret_sha256 is not accepted"));
 
   // The other rules of a key.
-  // A secret is a UUID version 4, nothing else: not a short one, not a long random one, not another version or variant.
+  //
+  // A secret is a UUID version 4, and nothing else. It is not a short value, a long random value,
+  // or a UUID of another version or variant.
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"short\"") + "}\n" + hosts), "UUID version 4"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"" + std::string(36, 'a') + "\"") + "}\n" + hosts), "UUID version 4"));
   CHECK(contains(load_error(dir, "mcp { enabled = true\n " + key("x", "secret = \"a11da7a0-0000-1000-8000-000000000001\"") + "}\n" + hosts), "UUID version 4"));
@@ -6888,20 +7489,20 @@ mcp {
   // The identities of the API tools (mcp_identity.hpp): one entry for each host that has an mcp_uri, with MCP on.
   {
     const std::string one_key = "mcp { enabled = true\n" + key("x", s1) + "}\n";
-    const AppConfig cfg = load(dir, one_key + "clickhouse { host { name = \"prod\"\n runner_uri = \"clickhouse://r:rp@h:9000\"\n system_uri = \"clickhouse://s:sp@h:9000\"\n mcp_uri = \"clickhouse://m:mp@h:9000\" }\n"
+    const AppConfig cfg = load(dir, one_key + "clickhouse { host { name = \"prod\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"clickhouse://m@h:9000\" }\n"
                                     " host { name = \"stage\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\" } }");
     CHECK_EQ(cfg.mcp_hosts.size(), size_t(1));  // none for stage: it has no mcp_uri
     CHECK_EQ(cfg.mcp_hosts[0].id, std::string("prod\x1f" "mcp"));
-    CHECK_EQ(cfg.mcp_hosts[0].runner_uri, std::string("clickhouse://m:mp@h:9000"));  // the MCP user decides what is visible
-    CHECK_EQ(cfg.mcp_hosts[0].system_uri, std::string("clickhouse://s:sp@h:9000"));  // the system user only adds figures
+    CHECK_EQ(cfg.mcp_hosts[0].runner_uri, std::string("clickhouse://m@h:9000"));  // the MCP user decides what is visible
+    CHECK_EQ(cfg.mcp_hosts[0].system_uri, std::string("clickhouse://s@h:9000"));  // the system user only adds figures
     CHECK(cfg.mcp_hosts[0].mcp_uri.empty());
     CHECK_EQ(cfg.hosts.size(), size_t(2));  // they are never in the list of the hosts
     // MCP off: no identity at all.
     CHECK(load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"clickhouse://m@h:9000\" } }").mcp_hosts.empty());
     // A host name never holds a control character: the identities are made with one.
     CHECK(contains(load_error(dir, "clickhouse { host { name = \"a\x1f" "mcp\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\" } }"), "control character"));
-    // The identities are visible to the context of an API tool only (request_context.hpp): a request of a browser never has
-    // one, whatever it sends.
+    // The identities are visible only to the context of an API tool (request_context.hpp). A
+    // request from a browser never has one, whatever it sends.
     {
       httplib::Request forged;
       forged.set_header("X-ChDash-Internal", std::string(32, '0'));
@@ -6917,16 +7518,23 @@ mcp {
 
   // clickhouse.host: the MCP identity is separate.
   {
-    // The file of the password is read at the start (a file that cannot be read stops it).
+    // The file of a password is read one time, at the start. A file that cannot be read stops the
+    // start. The password of MCP has its own attributes. The shared password never applies to
+    // mcp_uri.
     const std::string password_file = dir + "/runner-pw";
+    const std::string mcp_password_file = dir + "/mcp-pw";
     write_file(password_file, "secret\n");
-    const AppConfig cfg = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"" + password_file + "\"\n mcp_uri = \"clickhouse://m:pw@h:9000\" } }");
-    CHECK_EQ(cfg.hosts[0].mcp_uri, std::string("clickhouse://m:pw@h:9000"));  // the password is in the URI; password_file never applies
-    CHECK(contains(cfg.hosts[0].runner_uri, "password_file="));
-    const AppConfig no_mcp = load(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"" + password_file + "\" } }");
-    CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n password_file = \"" + dir + "/missing-pw\" } }"), "cannot open password_file"));
+    write_file(mcp_password_file, "pw\n");
+    const std::string head = "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n";
+    const AppConfig cfg = load(dir, head + " password_file = \"" + password_file + "\"\n mcp_uri = \"clickhouse://m@h:9000\"\n mcp_password_file = \"" + mcp_password_file + "\" } }");
+    CHECK_EQ(cfg.hosts[0].mcp_uri, std::string("clickhouse://m:pw@h:9000"));  // the password of MCP is its own
+    CHECK_EQ(cfg.hosts[0].runner_uri, std::string("clickhouse://r:secret@h:9000"));
+    CHECK_EQ(cfg.hosts[0].system_uri, std::string("clickhouse://s:secret@h:9000"));
+    const AppConfig no_mcp = load(dir, head + " password_file = \"" + password_file + "\" } }");
+    CHECK(contains(load_error(dir, head + " password_file = \"" + dir + "/missing-pw\" } }"), "cannot open " + dir + "/missing-pw"));
     CHECK_EQ(no_mcp.hosts[0].mcp_uri, std::string(""));
-    CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_password_file = \"/x\" } }"), "unknown attribute mcp_password_file"));
+    CHECK_EQ(load(dir, head + " mcp_uri = \"clickhouse://m@h:9000\"\n password_file = \"" + password_file + "\" } }").hosts[0].mcp_uri, std::string("clickhouse://m@h:9000"));
+    CHECK(contains(load_error(dir, head + " mcp_password_file = \"/x\" } }"), "mcp_password_file needs mcp_uri"));
     CHECK(contains(load_error(dir, "clickhouse { host { name = \"p\"\n runner_uri = \"clickhouse://r@h:9000\"\n system_uri = \"clickhouse://s@h:9000\"\n mcp_uri = \"http://x\" } }"), "mcp_uri"));
   }
 }
@@ -6957,7 +7565,8 @@ clickhouse {
   }
 }
 )";
-  // The canonical form: one block, a section for each signal, one allowlist for the three.
+  // The canonical form has one block, a section for each signal, and one allowlist for the three
+  // signals.
   const std::string block = R"(
 observability {
   service_allowlist = ["api*", "auth"]
@@ -6981,7 +7590,8 @@ observability {
     CHECK_EQ(a.otel.traces.database, std::string("otel"));
     CHECK(a.otel.logs.enabled && a.otel.metrics.enabled);
     CHECK_EQ(a.otel.traces.max_lookback_minutes, 600);
-    // A host that overrides where its tables are (and nothing else): the rest is the block's.
+    // A host that overrides the location of its tables, and nothing else, keeps the rest of the
+    // block settings.
     const HostSpec& b = cfg.hosts[1];
     CHECK_EQ(b.otel.traces.database, std::string("eu"));
     CHECK_EQ(b.otel.traces.table, std::string("spans"));
@@ -7016,7 +7626,7 @@ metrics { enabled = true }
     CHECK(!cfg.hosts[1].otel.logs.enabled);
   }
   {
-    // A host may turn a signal on that the block leaves off, with its tables.
+    // A host can enable a signal that the block leaves off, with its tables.
     const AppConfig cfg = load(dir, R"(
 observability { traces { enabled = false } }
 clickhouse {
@@ -7092,14 +7702,15 @@ void test_grants(const std::string& dir) {
   CHECK(mcp_data_tables(obs, kMcpReadsTraces | kMcpReadsLogs).size() == 2);
   CHECK(mcp_data_tables(obs, kMcpReadsFunctions).empty() && mcp_data_tables(obs, kMcpReadsNone).empty());
   CHECK(mcp_data_tables(mcp_observability_config(OtelSettings()), kMcpReadsAll).empty());
-  // The system user reads the OpenTelemetry tables, with the size and the skipping indices of Logs and Metrics, for the pages'
-  // tools and the simple tools alike. The MCP user itself reads only the documentation of the functions.
+  // The system user reads the OpenTelemetry tables. This includes the size and the skipping indices
+  // of Logs and Metrics. It serves the pages' tools and the simple tools alike. The MCP user itself
+  // reads only the documentation of the functions.
   CHECK(mcp_system_reads(cfg, kMcpReadsTraces) == std::vector<std::string>{"otel.otel_traces"});
   const auto logs = mcp_system_reads(cfg, kMcpReadsLogs);
   CHECK(has(logs, "otel.otel_logs") && has(logs, "system.parts") && has(logs, "system.data_skipping_indices"));
   cfg.traces.database = "tel";
   CHECK(has(mcp_system_reads(cfg, kMcpReadsTraces), "tel.otel_traces"));
-  // The tables of a host can differ from another's: the settings of each host decide.
+  // The tables of a host can differ from those of another host. The settings of each host decide.
   OtelSettings other = cfg;
   other.traces.database = "eu";
   other.traces.table = "spans";
@@ -7141,8 +7752,8 @@ void test_grants(const std::string& dir) {
            std::string("GRANT SELECT ON system.parts, system.documentation TO chdash_mcp;"));
   CHECK_EQ(mcp_grant_statement({"SELECT ON a.b"}, ""), std::string("GRANT SELECT ON a.b TO <user>;"));
 
-  // A key made from the page asks the running server before it is stored (live_check); a key of the file or of
-  // the configuration never does.
+  // A key made from the page asks the running server before it is stored (live_check). A key from
+  // the file or from the configuration never does.
   McpStoreOptions options = store_options(dir + "/live.json");
   options.config_keys.clear();
   int asked = 0;
@@ -7330,7 +7941,8 @@ void test_metrics_text() {
   CHECK(contains(out, "chdash_http_requests_total{method=\"GET\",route=\"/api/hosts\",code=\"200\"} 1\n"));
   CHECK(contains(out, "chdash_http_requests_total{method=\"GET\",route=\"/api/hosts\",code=\"503\"} 1\n"));
   CHECK(contains(out, "chdash_http_requests_total{method=\"GET\",route=\"-\",code=\"400\"} 1\n"));
-  // Buckets are cumulative: 0.003 s in every bucket, 0.3 s from 0.5 s on.
+  // The buckets are cumulative. A value of 0.003 s counts in every bucket. A value of 0.3 s counts
+  // in every bucket from 0.5 s on.
   CHECK(contains(out, "chdash_http_request_duration_seconds_bucket{method=\"GET\",route=\"/api/hosts\",le=\"0.005\"} 1\n"));
   CHECK(contains(out, "chdash_http_request_duration_seconds_bucket{method=\"GET\",route=\"/api/hosts\",le=\"0.5\"} 2\n"));
   CHECK(contains(out, "chdash_http_request_duration_seconds_bucket{method=\"GET\",route=\"/api/hosts\",le=\"+Inf\"} 2\n"));
@@ -7357,8 +7969,9 @@ void test_worker_group() {
   CHECK(!stuck.close_and_wait(std::chrono::milliseconds(20)));
 }
 
-// The health runner ends at once on stop(): a sleeping ping thread (the longest interval) and the audit thread wake up,
-// and one ping thread for each host means two hosts that refuse the connection are both checked in one interval.
+// The health runner ends at once when stop() is called. The ping thread wakes even when its
+// interval is the longest. The audit thread wakes too. Each host has its own ping thread, so two
+// hosts that refuse the connection are both checked in one interval.
 void test_health_runner_stops_at_once() {
   HostSpec host;
   host.id = "unreachable";
@@ -7381,7 +7994,7 @@ void test_health_runner_stops_at_once() {
   CHECK(!runner.all_healthy());
   CHECK_EQ(runner.healthy_count(), size_t{0});
   CHECK(!runner.snapshot().hosts.front().error.empty());
-  // Down hosts are retried every second; a stop during the wait ends both threads at once.
+  // Down hosts are retried every second. When stop() is called, both threads end at once.
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   const auto started = std::chrono::steady_clock::now();
   runner.stop();
@@ -7417,6 +8030,8 @@ int main() {
   test_sql_quoting_and_types();
   test_sql_builder();
   test_protocol();
+  test_protocol_modern();
+  test_trace_and_untrusted();
   test_analysis_protocol();
   test_tools();
   test_observability();

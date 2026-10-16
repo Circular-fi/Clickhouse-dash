@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 
-// ns.popover (app_ui_popover.js): one placement (place: flipped, kept 8 px
-// inside the viewport), one tooltip (.uiTip, role=tooltip, never a live
-// region on hover), one click-opened popover shell (.uiPopover, an
-// ns.layers layer) and the "Copied" flash (role=status).
+// ns.popover (app_ui_popover.js): one placement. The placement flips when needed
+// and keeps 8 px inside the viewport. One tooltip (.uiTip, role=tooltip) is never
+// a live region on hover. One click-opened popover shell (.uiPopover) is an
+// ns.layers layer. The "Copied" flash has role=status.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -79,7 +79,7 @@ for (const theme of ['dark', 'light']) {
         await expect(tip).toHaveText('Alpha');
         await page.keyboard.press('Escape');
         await expect(tip).toBeHidden();
-        // One shared tip (a treemap on the page keeps its own pointer tip, ns.popover.follow).
+        // One shared tip. A treemap on the page keeps its own pointer tip (ns.popover.follow).
         expect(await page.locator('.uiTip:not([data-treemap-tooltip])').count()).toBe(1);
       });
 
@@ -118,8 +118,8 @@ for (const theme of ['dark', 'light']) {
         await expect(pop).toHaveCount(0);
         await anchor.click();
         await expect(pop).toBeVisible();
-        // A scroll event that leaves the anchor in place (the one of a scroll
-        // made before opening) keeps it; one that moves the anchor closes it.
+        // A scroll event that leaves the anchor in place keeps the popover open.
+        // This is the scroll made before the popover opens. A scroll event that moves the anchor closes it.
         await page.evaluate(() => window.dispatchEvent(new Event('scroll')));
         await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
         await expect(pop).toBeVisible();

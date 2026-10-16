@@ -17,13 +17,13 @@ const KEYWORDS = ['select', 'from', 'where', 'prewhere', 'group', 'by', 'order',
 const TABLE_FUNCTIONS = ['numbers', 'url', 'file', 's3', 'remote'];
 const DATA_TYPES = ['UInt64', 'String', 'DateTime', 'Nullable', 'Array', 'LowCardinality', 'Decimal', 'Float64'];
 
-// The metadata a page holds for the host: variants cover a page before its catalog arrives and a partial one.
+// The metadata that a page holds for the host. The variants cover a page before its catalog arrives, and a partial catalog.
 export function metaSpec(variant) {
   return { variant, tables: TABLES, functions: FUNCTIONS, keywords: KEYWORDS, tableFunctions: TABLE_FUNCTIONS, dataTypes: DATA_TYPES };
 }
 
-// Names (and columns) of the repository's SQL files, so the corpus finds its tables: every table after FROM / JOIN, with
-// a few of the identifiers of the corpus as columns.
+// Names, and columns, of the SQL files of the repository. The corpus finds its tables this way: every table after FROM / JOIN.
+// A few identifiers of the corpus are used as columns.
 export function corpusMeta(corpus) {
   const tables = new Map();
   const idents = new Set();
@@ -61,7 +61,7 @@ const CLAUSES = ['', '', '', ' WHERE {c} > 1', ' WHERE {c} IN (SELECT {c} FROM s
 const NOISE = ['-- comment from\n', '/* block select */', "'string with ; and FROM x'", '"dq ; from"', '`bt from; (`', '\n', '  ', '\t', ';', ')', '(', "'", '`', '-- unterminated', '/* unterminated',
   ' ', ' ', '😀', '\ud800', '$', 'x$y', '1abc', '.'];
 
-// Templates that leave a quote or a parenthesis open, or end a script item too early: left out of the clean scripts.
+// These templates leave a quote or a parenthesis open, or end a script item too early. The clean scripts omit them.
 const BROKEN = /unfinished|x -> $|\{c\} AS$|^shop\.\s?$|^\u00e9t\u00e9/;
 let clean = false;
 const choose = (r, list) => { const item = r.pick(list); return clean && BROKEN.test(item) ? choose(r, list) : item; };
@@ -73,7 +73,7 @@ function fill(template, r) {
     .replace(/\{a2\}/g, () => r.pick(ALIASES));
 }
 
-// One statement of a realistic script: CTEs and scalars, a projection, sources, clauses, a subquery now and then.
+// One statement of a realistic script. The statement has CTEs and scalars, a projection, sources, clauses, and sometimes a subquery.
 function statement(r, depth = 0) {
   let sql = '';
   if (r.next() < 0.22) {
@@ -98,7 +98,7 @@ function statement(r, depth = 0) {
   return sql;
 }
 
-// `count` scripts: realistic statements joined by ";", some mutated (characters dropped or inserted).
+// A `count` script has realistic statements joined by ";". Some statements are mutated, with characters dropped or inserted.
 export function fuzzScripts(seed, count, statements = 4, mutate = 0.35, options = {}) {
   clean = !!options.clean;
   const r = rng(seed);

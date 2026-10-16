@@ -1,66 +1,70 @@
-// One dismiss stack for everything that opens over the page: menus,
-// popovers, side and detail panels, bottom sheets and dialogs.
+// One dismiss stack for all elements that open over the page.
+// Menus, popovers, side panels, detail panels, bottom sheets and dialogs use this stack.
 //
 //   ns.layers.push({ el, onDismiss, modal, trapFocus, ... }) -> handle
-//     handle.close({ restoreFocus = true, force }) -> takes the layer off
-//       (and the layers opened from it); the focus goes back to the opener
-//       when it was inside the layer (or nowhere; force: in any case)
-//     handle.release() -> close({ restoreFocus: false }) (the owner moves
-//       the focus itself), handle.isOpen(), handle.isTop(), handle.update({ ... })
+//     handle.close({ restoreFocus = true, force }) -> removes the layer
+//       and the layers opened from it. The focus returns to the opener
+//       when the focus was inside the layer. If not, the focus does not move.
+//       With force, the focus goes to the opener in any case.
+//     handle.release() -> close({ restoreFocus: false }). The owner moves
+//       the focus itself. Also: handle.isOpen(), handle.isTop(), handle.update({ ... })
 //   ns.layers.top() / ns.layers.handleOf(el) / ns.layers.isOpen(el)
 //   ns.layers.size() / ns.layers.closeAll(reason)
 //
-// The module owns the page's only Escape and click-outside listeners:
-//   - Escape closes the top layer only (the top one on screen: a layer of a
-//     hidden view waits for its view). A handler that consumed the key
-//     first (event.preventDefault(), e.g. a field clearing its text or an
-//     editor closing its suggestions) keeps it; Escape typed in a text
-//     field outside the top layer stays the field's.
-//   - One capture pointerdown listener: a press outside the top layers
-//     dismisses each of them that closes on an outside press (`outside`,
-//     on by default unless the layer is `modal` or `docked`), down to the
-//     first layer the press is inside or a modal one.
-//   - trapFocus keeps Tab inside the layer.
-// onDismiss(reason, event) runs when the stack dismisses a layer ("escape",
-// "outside", "parent", "close-all", "abort"); the owner closes its UI
-// there. It may return false to stay open; otherwise the layer is taken
-// off once it returns.
+// This module owns the only Escape and click-outside listeners of the page:
+//
+//   - Escape closes only the top layer. The top layer is the one on screen.
+//     A layer of a hidden view waits for its view.
+//     A handler that consumes the key first keeps it. Such a handler calls
+//     event.preventDefault(), for example a field that clears its text or an
+//     editor that closes its suggestions.
+//     Escape typed in a text field outside the top layer belongs to the field.
+//   - One capture pointerdown listener. A press outside the top layers dismisses
+//     each layer that closes on an outside press (`outside`, on by default unless
+//     the layer is `modal` or `docked`). The dismissal goes down to the first layer
+//     that contains the press, or to a modal layer.
+//   - trapFocus keeps the Tab key inside the layer.
+//
+// onDismiss(reason, event) runs when the stack dismisses a layer. The reasons are
+// "escape", "outside", "parent", "close-all" and "abort". The owner closes its UI
+// in this function. The function can return false to keep the layer open.
+// Otherwise, the stack removes the layer after the function returns.
 //
 // Options:
-//   el          the layer's root element (required), or a list of
-//               elements / a function returning one (every element counts
-//               as inside; the first is the root): ns.menu's entries
+//   el          the root element of the layer (required). It can also be a list of
+//               elements, or a function that returns one. Every element counts as
+//               inside. The first element is the root. Example: the entries of ns.menu.
 //   onDismiss   (reason, event) => void | false
-//   opener      the element the focus returns to (default: the focused
-//               element when pushed); a press on it is not "outside"
-//   inside      more elements a press inside does not dismiss (a toggle
-//               button, an anchor)
-//   modal       nothing under the layer takes outside presses or Escape
-//   docked      a panel beside the content (not dismissed by outside presses)
-//   outside     override the outside-press default
-//   escape      false: Escape does not dismiss this layer (it is skipped)
-//   trapFocus   Tab cycles inside el
-//   focus       element (or () => element) focused once pushed
-//   returnFocus false: never move the focus on close
-//   fallbackFocus element (or () => element) when the opener is gone
-//   signal      an AbortSignal: the layer is dismissed ("abort") when it aborts
-//   name        a label for debugging (ns.layers.debug())
+//   opener      the element that gets the focus back (default: the focused
+//               element when the layer is pushed). A press on it is not an outside press.
+//   inside      more elements. A press inside them does not dismiss the layer
+//               (for example a toggle button or an anchor).
+//   modal       no element under the layer gets outside presses or Escape.
+//   docked      a panel beside the content. An outside press does not dismiss it.
+//   outside     overrides the default for outside presses.
+//   escape      false: Escape does not dismiss this layer. The stack skips the layer.
+//   trapFocus   the Tab key cycles the focus inside el.
+//   focus       element (or () => element) that gets the focus when the layer is pushed.
+//   returnFocus false: the focus does not move on close.
+//   fallbackFocus element (or () => element) that gets the focus when the opener is removed.
+//   signal      an AbortSignal. The layer is dismissed with "abort" when the signal aborts.
+//   name        a label for the debug output of ns.layers.debug().
 //
-// ns.lifecycle: listener scopes bound to a view's visibility.
+// ns.lifecycle: listener scopes that follow the visibility of a view.
 //   ns.lifecycle.scope(parent?) -> { signal, listen(target, type, fn, opts),
 //     add(dispose), child(), dispose(), active }
-//   ns.lifecycle.enter(name) -> the scope of a view just shown (the previous
-//     one is disposed); ns.lifecycle.leave(name) disposes it when the view is
-//     hidden; ns.lifecycle.current(name) -> the shown view's scope or null;
-//     ns.lifecycle.bind(name, (scope) => ...) runs on every enter(name) (and
-//     at once when the view shows): a module binds its global listeners
-//     there, with scope.listen(), and they last while the view shows.
-//   Names: "traces", "logs", "metrics" (app_obs_page.js and the trace page:
-//   a page shows one view for as long as it lives, so the scope is never
-//   left), and "explorer:browse", "explorer:graph", "explorer:storage",
-//   "explorer:functions" (app_explorer_shell.js: the modes alternate in the page).
-//   Listeners bound with { signal: scope.signal } go away with the scope:
-//   switching views never adds listeners.
+//   ns.lifecycle.enter(name) -> the scope of the view that is just shown. The previous
+//     scope is disposed. ns.lifecycle.leave(name) disposes the scope when the view is
+//     hidden. ns.lifecycle.current(name) -> the scope of the shown view, or null.
+//     ns.lifecycle.bind(name, (scope) => ...) runs on every enter(name). It also runs
+//     at once when the view is shown. A module binds its global listeners
+//     here, with scope.listen(). The listeners last while the view is shown.
+//   Names: "traces", "logs" and "metrics" (app_obs_page.js and the trace page).
+//   A page shows one view for as long as the page exists. The scope is never left.
+//   The names "explorer:browse", "explorer:graph", "explorer:storage" and
+//   "explorer:functions" belong to app_explorer_shell.js. The modes alternate in the page.
+//   Listeners bound with { signal: scope.signal } end with the scope.
+//   When a view changes, no listener is added.
 
 import { dom } from "./app_dom.js";
 
@@ -117,7 +121,7 @@ function enter(name) {
   }
   return next;
 }
-// bindFn(scope) runs each time the view is shown (now, when it shows).
+// bindFn(scope) runs each time the view is shown. If the view is already shown, it runs now.
 function bind(name, bindFn) {
   if (typeof bindFn !== "function") return;
   if (!binders.has(name)) binders.set(name, []);
@@ -146,8 +150,7 @@ const FOCUSABLE = "a[href], area[href], button:not([disabled]), input:not([disab
 
 const resolve = (value) => (typeof value === "function" ? value() : value);
 
-// On screen: connected and laid out (a layer of a hidden view, or a closed
-// dialog, waits).
+// On screen: connected and laid out. A layer of a hidden view or a closed dialog waits.
 function rendered(el) {
   return !!el && el.isConnected && el.getClientRects().length > 0;
 }
@@ -170,7 +173,7 @@ function textField(node) {
   return !["button", "checkbox", "radio", "range", "color", "file", "submit", "reset", "image"].includes(node.type);
 }
 
-// Every element of a layer (el may be a list, or a function returning one).
+// Every element of a layer. The el option can be a list or a function that returns one.
 function elementsOf(layer) {
   const value = layer.elFn ? layer.elFn() : layer.root;
   return (Array.isArray(value) ? value : [value]).filter((node) => node instanceof Element);
@@ -205,15 +208,14 @@ function prune() {
   }
 }
 
-// Layers opened from this one (their element or opener is inside it) go
-// with it.
+// Layers opened from this one are removed with it. Their element or opener is inside this layer.
 function children(layer) {
   const at = index(layer);
   return stack.slice(at + 1).filter((other) => holds(layer, other.el) || holds(layer, other.opener));
 }
 
-// force: the opener gets the focus wherever it is now (a native dialog
-// gives it back to the element focused before it opened by itself).
+// force: the opener gets the focus wherever the focus is now. A native dialog
+// gives the focus back to the element that had it before the dialog opened by itself.
 function restoreFocusFrom(layer, force = false) {
   if (layer.returnFocus === false) return;
   const active = document.activeElement;
@@ -233,7 +235,7 @@ function remove(layer, { restoreFocus = true, force = false } = {}) {
   if (restoreFocus) restoreFocusFrom(layer, force);
 }
 
-// The stack asks the owner to close.
+// The stack asks the owner to close the layer.
 function dismiss(layer, reason, event) {
   if (index(layer) < 0) return false;
   let kept = false;
@@ -296,8 +298,8 @@ function push(options = {}) {
     name: "",
     unlisten: null,
   };
-  // The focus comes back to what had it when the layer opened (not to an
-  // element of the layer itself).
+  // The focus returns to the element that had it when the layer opened.
+  // The focus does not go to an element of the layer itself.
   if (active instanceof HTMLElement && active !== document.body && !holds(layer, active)) layer.opener = active;
   configure(layer, options);
   if (options.signal) {
@@ -327,7 +329,7 @@ function closedHandle(el) {
   return Object.freeze({ id: 0, el, close() {}, release() {}, dismiss() { return false; }, isOpen: () => false, isTop: () => false, update() {} });
 }
 
-// The top layer on screen, optionally the top one taking Escape.
+// The top layer on screen. An option limits the search to the top layer that takes Escape.
 function topLayer(filter = null) {
   for (let i = stack.length - 1; i >= 0; i -= 1) {
     const layer = stack[i];
@@ -353,7 +355,7 @@ function onKeydown(event) {
   const layer = topLayer((candidate) => candidate.escape);
   if (!layer) return;
   const target = event.target instanceof Element ? event.target : null;
-  // Escape typed in a field of the page (not in a layer) is the field's.
+  // Escape typed in a field of the page, outside any layer, belongs to the field.
   if (target && textField(target) && !insideAny(target)) return;
   event.preventDefault();
   dismiss(layer, "escape", event);
@@ -397,7 +399,7 @@ function onPointerdown(event) {
     if (inside(layer, target)) return;
     if (layer.outside) dismiss(layer, "outside", event);
     if (layer.modal) {
-      // The page under a modal layer is out of reach: the focus stays in it.
+      // The page under a modal layer cannot be reached. The focus stays inside the layer.
       if (index(layer) >= 0) event.preventDefault();
       return;
     }
@@ -428,8 +430,8 @@ function debug() {
 document.addEventListener("keydown", onKeydown);
 document.addEventListener("pointerdown", onPointerdown, true);
 
-// The open modal dialogs, bottom first (app_ui_dialog.js adds and removes its own). The page outside a modal dialog is
-// inert, so a floating thing (menu, popover, tip, the copy fallback) mounts in the top one: host().
+// The open modal dialogs, bottom first. app_ui_dialog.js adds and removes its own dialogs.
+// The page outside a modal dialog is inert. A floating element (menu, popover, tip, copy fallback) mounts in the top dialog: host().
 const modals = [];
 const modalOpened = (dialog) => { modals.push(dialog); };
 const modalClosed = (dialog) => {

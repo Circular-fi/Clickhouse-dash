@@ -1,7 +1,8 @@
-// The pure part of the table card (ARCH-F-127): what the Explorer's table card says about a detail payload, as data. The SQL expressions of the
-// card (keys, defaults, codecs, TTL), the rows of the Columns tab, the split of the storage, the tabs an object has, the sections of Operations
-// and the SELECT of the preview. No DOM, no state: tests/frontend/model/explorer-detail-model.test.cjs.
-// Numbers, sizes and percentages come from ns.format (docs/ui-foundations.md); EMPTY marks an absent value.
+// This is the pure part of the table card (ARCH-F-127). It gives the data that the table card shows for a detail payload.
+// The data covers these parts: the SQL expressions of the card, the rows of the Columns tab, and the split of the storage.
+// It also covers the tabs of an object, the sections of Operations and the SELECT of the preview. The SQL expressions cover keys, defaults, codecs and TTL.
+// This file has no DOM and no state. The test is tests/frontend/model/explorer-detail-model.test.cjs.
+// Numbers, sizes and percentages come from ns.format (docs/ui-foundations.md). EMPTY marks an absent value.
 
 import { humanEngine, isDictionarySummary, isDistributedSummary, isLogFamilySummary, isMergeTreeSummary, isViewLikeSummary, quoteIdent, summaryFootprintBytes } from "./app_explorer_summary.js";
 import { format } from "./app_format.js";
@@ -12,20 +13,20 @@ const PREVIEW_LIMITS = [50, 100, 500];
 
 // ---- SQL expressions of the card (keys, defaults, codecs, TTL) -----------
 //
-// Pure helpers, also exported for the harness unit test
-// (tests/harness/explorer_card_unit.js).
+// These pure helpers are also exported for the harness unit test (tests/harness/explorer_card_unit.js).
 
 const OPENERS = { "(": ")", "[": "]", "{": "}" };
 const CLOSERS = new Set([")", "]", "}"]);
 
-// Index just past a quoted run that starts at text[at] (' " or `). The text is the server's (the DDL of a table): it is
-// read with the rules of ClickHouse, in which a backslash escapes the next character and a doubled quote is the quote
-// in a name as in a string (the one SQL lexer, app_sql_lex.js, spans with { clickhouse: true }).
+// Returns the index just past a quoted run that starts at text[at] (' " or `).
+// The text comes from the server (the DDL of a table). The code reads it with the rules of ClickHouse.
+// In ClickHouse, a backslash escapes the next character. A doubled quote is the quote in a name, as in a string.
+// The one SQL lexer (app_sql_lex.js) finds the spans with { clickhouse: true }.
 function skipQuoted(text, at) {
   return sqlLex.spanAt(text, at, true)[1];
 }
 
-// Index of the bracket that closes text[open], or -1.
+// Returns the index of the bracket that closes text[open], or -1.
 function matchingClose(text, open) {
   const stack = [];
   for (let i = open; i < text.length; i += 1) {
@@ -40,16 +41,14 @@ function matchingClose(text, open) {
   return -1;
 }
 
-// Top-level comma-separated elements: commas inside parentheses, brackets,
-// braces, strings and quoted identifiers do not split.
+// Returns the top-level comma-separated elements. Commas inside parentheses, brackets, braces, strings and quoted identifiers do not split an element.
 function splitTopLevel(text) {
   return sqlLex.splitTopLevel(text, ",", { brackets: true, clickhouse: true }).map((part) => part.text);
 }
 
-// The elements of a key (ORDER BY, PRIMARY KEY, PARTITION BY, SAMPLE BY),
-// in key order: "service, toStartOfHour(ts)" -> ["service",
-// "toStartOfHour(ts)"]. One pair of parentheses, or tuple(...), around the
-// whole key is the tuple itself; tuple() is an empty key.
+// Returns the elements of a key (ORDER BY, PRIMARY KEY, PARTITION BY, SAMPLE BY), in key order.
+// Example: "service, toStartOfHour(ts)" -> ["service", "toStartOfHour(ts)"].
+// One pair of parentheses, or tuple(...), around the whole key is the tuple itself. tuple() is an empty key.
 function keyElements(expression) {
   let text = String(expression || "").trim();
   for (;;) {
@@ -61,8 +60,8 @@ function keyElements(expression) {
   return splitTopLevel(text);
 }
 
-// The identifiers an expression reads (not the functions it calls, not
-// its strings): `a b`, "x", plain and dotted names (n.key).
+// Returns the identifiers that an expression reads. It does not return the functions that the expression calls, or its strings.
+// Examples: `a b`, "x", plain names and dotted names (n.key).
 function expressionIdentifiers(expression) {
   const text = String(expression || "");
   const names = new Set();
@@ -87,8 +86,8 @@ function expressionIdentifiers(expression) {
   return names;
 }
 
-// Positions (0-based) of the key elements that read a column; a subcolumn
-// (n.key) counts for its column n.
+// Returns the positions (0-based) of the key elements that read a column.
+// A subcolumn (n.key) counts for its column n.
 function keyColumnPositions(expression, column) {
   const name = String(column || "");
   if (!name) return [];
@@ -101,9 +100,8 @@ function keyColumnPositions(expression, column) {
   return positions;
 }
 
-// engine_full is "Engine(args) PARTITION BY ... ORDER BY ... TTL ...
-// SETTINGS a = 1, b = 'x'": the arguments and the settings are the
-// parts no other tile shows.
+// engine_full has this form: "Engine(args) PARTITION BY ... ORDER BY ... TTL ... SETTINGS a = 1, b = 'x'".
+// The arguments and the settings are the parts that no other tile shows.
 function engineArguments(summary) {
   const full = String(summary.engine_full || "").trim();
   const engine = String(summary.engine || "");
@@ -118,7 +116,7 @@ function engineArguments(summary) {
 
 function engineSettingsOf(summary) {
   const full = String(summary.engine_full || "");
-  // The last top-level SETTINGS clause (strings may hold the word).
+  // Returns the last top-level SETTINGS clause. Strings can hold the word too.
   let at = -1;
   for (let i = 0; i < full.length; i += 1) {
     const ch = full[i];
@@ -162,7 +160,7 @@ function ratioLabel(uncompressed, compressed) {
   return `${ratio >= 10 ? ratio.toFixed(0) : ratio.toFixed(1)}\u00d7`;
 }
 
-// Shares are kept on a 0-100 scale for the bars; ns.format.percent takes a ratio.
+// Shares use a 0-100 scale for the bars. ns.format.percent takes a ratio instead.
 function percentText(value) {
   return value == null ? DASH : format.percent(Number(value) / 100);
 }
@@ -207,8 +205,8 @@ function extractTableTtl(detail) {
   return match ? String(match[1] || "").trim().replace(/\s+/g, " ") : "";
 }
 
-// "observed_at + toIntervalDay(30) RECOMPRESS CODEC(ZSTD(3))" ->
-// "observed_at + 30 d \u2192 RECOMPRESS ZSTD(3)"; a bare rule deletes.
+// Example: "observed_at + toIntervalDay(30) RECOMPRESS CODEC(ZSTD(3))" ->
+// "observed_at + 30 d -> RECOMPRESS ZSTD(3)". A bare rule deletes the data.
 // The two sides around the arrow are coloured as SQL (ttlRuleEl).
 function prettyTtlParts(rule) {
   const units = { Second: "s", Minute: "min", Hour: "h", Day: "d", Week: "w", Month: "mo", Quarter: "q", Year: "y" };
@@ -227,8 +225,8 @@ function isImplementationSubcolumn(column) {
   return /(?:^|\.)(?:size|size\d+)$/i.test(String(column.name || ""));
 }
 
-// [badge text, title, kind] of each key a column is part of, with its
-// position(s) in the key: "ORDER BY \u00b7 0" (About > Keys lists them).
+// Returns [badge text, title, kind] for each key that a column is part of. The result includes the position or positions in the key.
+// Example: "ORDER BY · 0". The About > Keys list shows them.
 function columnKeyBadges(column, summary) {
   const badges = [];
   const pk = String(summary?.primary_key || "");
@@ -259,7 +257,7 @@ function shortCodec(codec) {
 function columnRows(detail) {
   const tableFootprint = summaryFootprintBytes(detail.summary || {});
   const observedDefaults = (detail.default_compression_codecs || []).map((value) => String(value || "").trim()).filter(Boolean);
-  // The codec as SQL, and a note when it is the table's default.
+  // The codec appears as SQL. A note appears when the codec is the default of the table.
   const defaultCodec = !isMergeTreeSummary(detail.summary)
     ? ["", ""]
     : observedDefaults.length === 1
@@ -270,8 +268,7 @@ function columnRows(detail) {
   const allColumns = Array.isArray(detail.columns) ? detail.columns : [];
   const visibleColumns = allColumns.filter((column) => !isImplementationSubcolumn(column));
   // A storage Tuple hierarchy is not limited to a top-level Tuple(...).
-  // Array(Tuple(...)) and deeper Array wrappers expose the same named
-  // physical subcolumns and use the same disclosure control.
+  // Array(Tuple(...)) and deeper Array wrappers show the same named physical subcolumns. They use the same disclosure control.
   const tupleRoots = allColumns
     .filter((column) => !column?.is_subcolumn && /Tuple\s*\(/i.test(String(column?.type || "")))
     .map((column) => String(column.name || ""))
@@ -315,9 +312,8 @@ function columnRows(detail) {
       tuple_parent: tupleParent,
     });
 
-    // size0/sizeN are real on-disk Array offset streams. Keep the
-    // implementation names out of the UI, but account for their bytes as
-    // one explicit physical child so the children add up to the parent.
+    // size0 and sizeN are real on-disk Array offset streams. Do not show the implementation names in the UI.
+    // Count their bytes as one explicit physical child. So the children add up to the parent.
     if (tupleRoot) {
       const implementation = implementationByRoot.get(tupleRoot) || [];
       if (implementation.length) {
@@ -349,10 +345,9 @@ function columnRows(detail) {
   return rows;
 }
 
-// The column sizes as a treemap (app_explorer_treemap.js): top-level
-// columns, compressed or uncompressed bytes (a segmented switch, kept
-// for the session), coloured by type family; drawn when three columns
-// or more hold >= 1% of the table's column bytes.
+// The column sizes appear as a treemap (app_explorer_treemap.js).
+// The treemap shows the top-level columns, in compressed or uncompressed bytes. A segmented switch selects the mode. The switch keeps this mode for the session.
+// The columns are coloured by type family. The treemap is drawn when three columns or more hold >= 1% of the table's column bytes.
 const COLUMN_MEASURES = [
   { value: "compressed", label: "Compressed", measure: "Compressed bytes of the column data (local replica)" },
   { value: "uncompressed", label: "Uncompressed", measure: "Uncompressed bytes of the column data (local replica)" },
@@ -401,9 +396,8 @@ function storageComposition(detail) {
   const rawWide = wideParts > 0 ? optionalNumber(storage.wide_on_disk_bytes) : (compactParts > 0 ? 0 : null);
   const rawCompact = compactParts > 0 ? optionalNumber(storage.compact_on_disk_bytes) : (wideParts > 0 ? 0 : null);
   const projectionBytes = structureOnDiskBytes(detail, "projection:");
-  // ClickHouse exposes skipping-index compressed bytes, but not a standalone
-  // bytes_on_disk counter. Account those known index files explicitly; all
-  // remaining parent-part overhead stays in the Wide/Compact base footprint.
+  // ClickHouse exposes the compressed bytes of skipping indexes. It has no separate bytes_on_disk counter for them.
+  // Count these known index files explicitly. All other parent-part overhead stays in the Wide/Compact base footprint.
   const indexBytes = structureCompressedBytes(detail, "index:", detail.summary?.secondary_indices_bytes);
 
   const known = [footprint, rawWide, rawCompact, projectionBytes, indexBytes].every((value) => value != null);
@@ -423,10 +417,9 @@ function storageComposition(detail) {
     } else if (compactParts > 0 && wideParts <= 0) {
       compactBytes = baseBytes;
     } else {
-      // Allocate the reconciled parent-part residual using the exact
-      // bytes_on_disk ratio of Wide vs Compact active parts. Keep one side as
-      // the arithmetic remainder so the four categories sum exactly to the
-      // table's bytes_on_disk footprint rather than merely approximately.
+      // Allocate the reconciled parent-part residual with the exact bytes_on_disk ratio of the Wide and Compact active parts.
+      // Use one side as the arithmetic remainder. So the four categories give an exact sum for the table's bytes_on_disk footprint.
+      // The sum is not an approximation.
       wideBytes = baseBytes * (rawWide / rawBase);
       compactBytes = baseBytes - wideBytes;
     }
@@ -450,8 +443,8 @@ function storageComposition(detail) {
   };
 }
 
-// Partitions: a treemap when three or more hold >= 1% of the table, then
-// the list (largest first) with each partition's share of the table.
+// Partitions: the code draws a treemap when three or more partitions hold >= 1% of the table.
+// Then it draws the list, largest first. The list shows the share of the table for each partition.
 function partitionTree(detail) {
   const s = detail.summary || {};
   const path = `${s.database || ""}.${s.name || ""}`;
@@ -501,8 +494,8 @@ function aggregatePreviewColumn(column) {
   return /^AggregateFunction\s*\(/i.test(String(column.type || "").trim());
 }
 
-// The sections of the Operations tab, without their renderers (app_explorer_detail_operations.js adds them): what each has to say, and
-// whether it has anything to show.
+// This list gives the sections of the Operations tab, without their renderers. app_explorer_detail_operations.js adds the renderers.
+// For each section, the list gives what the section says, and whether the section has anything to show.
 function operationSectionList(detail) {
   const s = detail.summary || {};
   const r = s.replication || {};
@@ -546,8 +539,8 @@ function operationSectionList(detail) {
   ].filter(Boolean);
 }
 
-// Operations is shown when one of its sections has something to show;
-// otherwise About carries the one-line idle summary.
+// The Operations tab appears when one of its sections has something to show.
+// Otherwise, the About panel shows the one-line idle summary.
 function hasOperations(detail) {
   const summary = detail?.summary || {};
   if (isViewLikeSummary(summary) || isDictionarySummary(summary)) return false;
@@ -555,14 +548,14 @@ function hasOperations(detail) {
   return operationSectionList(detail).some((item) => item.hasData);
 }
 
-// The tabs of the card that an object has (a tab without content is hidden).
+// The tabs of the card that an object has. A tab without content is hidden.
 function availableTabs(detail) {
   const summary = detail?.summary || {};
   const loading = !!detail?._loading;
   const viewLike = isViewLikeSummary(summary);
   const empty = isEmptyRowSummary(summary);
   const tabs = ["Columns"];
-  // An empty table has nothing to preview or inspect physically.
+  // An empty table has nothing to preview. It also has nothing to inspect physically.
   if (!viewLike && !empty) tabs.push("Preview");
   if (!empty && (isMergeTreeSummary(summary) || isLogFamilySummary(summary))) tabs.push("Storage");
   if (!empty && hasOperations(detail)) tabs.push("Operations");
@@ -571,8 +564,8 @@ function availableTabs(detail) {
   return tabs;
 }
 
-// The SELECT that the preview opens in Query: every column of the table (an aggregate state through finalizeAggregation) and the limit of
-// the preview. `previewColumns` are the columns that the preview answered with.
+// The preview opens a SELECT in Query. The SELECT has every column of the table. An aggregate state goes through finalizeAggregation.
+// The SELECT also has the limit of the preview. `previewColumns` are the columns that the preview answered with.
 function buildPreviewSelectSql(detail, previewColumns, limit) {
   const s = detail?.summary || {};
   const previewByName = new Map(

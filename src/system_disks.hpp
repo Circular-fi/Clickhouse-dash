@@ -15,11 +15,11 @@ class AclView;
 class ChExecutor;
 
 // ---------------------------------------------------------------------------
-// Disks: the server's disks, its storage policies and the bytes each
-// runner-visible database keeps on each disk (/api/system/disks),
-// then how the disks grow (/api/system/series?panel=disk_growth).
-// System context; anything that names a database is restricted to the
-// databases the runner can SHOW, inside the SQL, and re-checked per row.
+// Disks: the server's disks, its storage policies, and the bytes that each
+// runner-visible database keeps on each disk (/api/system/disks).
+// Then, how the disks grow (/api/system/series?panel=disk_growth).
+// These reads use the system context. Any query that names a database is limited to the
+// databases that the runner can SHOW. This limit is in the SQL, and each row is checked again.
 
 constexpr size_t kMonitorDiskRowLimit = 200;
 constexpr size_t kMonitorPolicyRowLimit = 500;
@@ -30,7 +30,7 @@ struct MonitorDisk {
   std::string path;
   uint64_t free_space = 0;
   uint64_t total_space = 0;
-  // Absent on servers without the column (detected).
+  // Absent on servers without the column. The detection finds this.
   std::optional<uint64_t> unreserved_space;
   std::optional<uint64_t> keep_free_space;
   std::string type;
@@ -42,8 +42,8 @@ struct MonitorDisk {
   std::optional<bool> is_remote;
 };
 
-// One volume of a storage policy (system.storage_policies: one row per
-// volume, in priority order).
+// One volume of a storage policy. system.storage_policies has one row for each
+// volume, in priority order.
 struct MonitorStorageVolume {
   std::string policy;
   std::string volume;
@@ -58,8 +58,8 @@ struct MonitorStorageVolume {
 };
 
 // Active parts of one runner-visible database on one disk. disk_bytes and
-// disk_parts are the disk's totals over every runner-visible database (window
-// functions, so a cut list still knows what it leaves out).
+// disk_parts are the disk's totals over every runner-visible database. They are window
+// functions, so a cut list still knows what it leaves out.
 struct MonitorDiskUsage {
   std::string disk;
   std::string database;
@@ -86,26 +86,26 @@ struct SystemMonitorDisks {
 };
 
 // Disks, policies and the bytes by disk and database. Returns false only when
-// nothing at all could be read.
+// no data can be read.
 bool load_system_monitor_disks(ChExecutor& system, AclView& runner_acl, const MonitorCapabilities& caps,
                                  SystemMonitorDisks& out, std::string* error);
 
-// The SQL, exposed for the contract and unit tests (no I/O). `databases` are
-// the runner-visible ones (quoted here).
+// The SQL, exposed for the contract and unit tests. It does no I/O. `databases` are
+// the runner-visible ones. They are quoted here.
 std::string monitor_disks_sql(const MonitorCapabilities& caps);
 std::string monitor_storage_policies_sql(const MonitorCapabilities& caps);
 // The bytes of the active parts by disk and database, of the databases of `databases_list` (monitor_databases_list).
 std::string monitor_disk_usage_sql(const std::string& databases_list);
-// The visible databases as query parameters, one String for each name (a name is a value, never SQL text: it can hold a quote mark or a
-// backslash; an Array(String) parameter would need the quoting rules of the version of ClickHouse). The list is the inside of
-// `database IN (...)`: "{p1:String}, {p2:String}, ...". monitor_databases_params gives the values that go with the statement.
+// The visible databases are query parameters, one String for each name. A name is a value and never SQL text.
+// It can hold a quote mark or a backslash. An Array(String) parameter needs the quoting rules of the ClickHouse version.
+// The list is the inside of `database IN (...)`: "{p1:String}, {p2:String}, ...". monitor_databases_params gives the values that belong to the statement.
 std::string monitor_databases_list(const std::vector<std::string>& databases);
 ChParams monitor_databases_params(const std::vector<std::string>& databases);
 
-// Growth: a disk's trend over the window and, when it grows, the days until
-// its free space is gone. Never extrapolated from too little history (fewer
-// than kMonitorDiskTrendMinPoints buckets, or a span under
-// kMonitorDiskTrendMinSpanSeconds) or from a flat or falling trend.
+// Growth: the trend of a disk over the window. When the disk grows, this gives the days until
+// its free space is gone. Never extrapolate from too little history. That is fewer
+// than kMonitorDiskTrendMinPoints buckets, or a span under kMonitorDiskTrendMinSpanSeconds.
+// Never extrapolate from a flat or falling trend.
 //   status  growing | not_growing | not_enough_history | no_capacity (the
 //           disk reports no total, object storage)
 constexpr size_t kMonitorDiskTrendMinPoints = 6;
@@ -138,26 +138,26 @@ struct SystemMonitorDiskGrowth {
   MonitorSeriesWindow window;
   std::vector<uint64_t> buckets;
   std::vector<MonitorDiskGrowth> disks;
-  // merge_tree_bytes (asynchronous_metric_log), written_bytes, moved_bytes
-  // and moves (part_log, runner-visible databases), one value per bucket.
+  // The series keys are merge_tree_bytes (asynchronous_metric_log), written_bytes, moved_bytes
+  // and moves (part_log, runner-visible databases). Each key has one value for each bucket.
   std::map<std::string, std::vector<double>> series;
-  // disks, asynchronous_metric_log, part_log.
+  // The sources are disks, asynchronous_metric_log and part_log.
   std::map<std::string, MonitorSeriesSource> sources;
-  // ClickHouse 26.8+: asynchronous_metric_log has a `key` column and names
-  // the per-disk metric DiskUsed with key = '<disk>' (unless the server keeps
-  // the legacy names): both forms are read.
+  // ClickHouse 26.8 and later: asynchronous_metric_log has a `key` column. It names
+  // the per-disk metric DiskUsed with key = '<disk>'. A server that keeps
+  // the legacy names does not use this form. Both forms are read.
   bool key_column = false;
 };
 
 void load_system_monitor_disk_growth(ChExecutor& system, AclView& runner_acl, const MonitorCapabilities& caps,
                                        const MonitorSeriesWindow& window, SystemMonitorDiskGrowth& out);
 
-// The growth SQL. with_key: the 26.8 form, `(metric IN ('DiskUsed_<d>', ...)
-// OR (metric = 'DiskUsed' AND key IN ('<d>', ...)))`, the disk being
+// The growth SQL. with_key selects the 26.8 form: `(metric IN ('DiskUsed_<d>', ...)
+// OR (metric = 'DiskUsed' AND key IN ('<d>', ...)))`. The disk is
 // `if(metric = 'DiskUsed', key, substring(metric, 10))`. Disk names come from
-// system.disks and are quoted here.
+// system.disks, and they are quoted here.
 std::string monitor_disk_growth_sql(const MonitorSeriesWindow& window, const std::vector<std::string>& disks, bool with_key);
-// Names the databases through `databases_list` too.
+// The SQL also names the databases through `databases_list`.
 std::string monitor_disk_written_sql(const MonitorSeriesWindow& window, const std::string& databases_list);
 
 } // namespace chdash

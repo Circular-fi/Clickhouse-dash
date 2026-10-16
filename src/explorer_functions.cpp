@@ -1,6 +1,6 @@
-// The functions of the Explorer: the documentation and the structured fields of every function that the runner may call, read as the runner
-// (the runner is ClickHouse's own boundary of what it sees: a user-defined function is a function of the runner), then the aliases that the
-// documentation names (explorer_rules.hpp).
+// The functions of the Explorer: the documentation and the structured fields of each function that the runner may call.
+// The runner is the ClickHouse boundary of what it sees: a user-defined function is a function of the runner. The runner reads the fields.
+// Then add the aliases that the documentation names (explorer_rules.hpp).
 #include "explorer_catalog.hpp"
 
 #include "explorer_rules.hpp"
@@ -56,9 +56,10 @@ bool load_explorer_functions(
   }
   out.documentation_available = true;
 
-  // The 26.7 system.functions schema exposes its documentation fields as Strings (not arrays). Querying every structured field lets the UI
-  // present syntax/arguments/return/examples independently while system.documentation remains the source of the complete version-matched
-  // Markdown body. This query runs with runner_uri so UDF discovery never becomes a metadata privilege escalation path.
+  // The 26.7 system.functions schema gives its documentation fields as Strings, not arrays.
+  // The query reads every structured field. The UI then shows the syntax, the arguments, the return value and the examples as separate parts.
+  // The system.documentation table stays the source of the complete Markdown body for the same version.
+  // This query runs with runner_uri. UDF discovery then never becomes a metadata privilege escalation path.
   std::string functions_error;
   const bool functions_loaded = try_select(runner, function_list_sql(),
       [&](const clickhouse::Block& block) {
@@ -94,8 +95,8 @@ bool load_explorer_functions(
           item->category = block_string_at(block, 11, row);
           if (item->category.empty()) item->category = item->kind;
 
-          // Built-ins keep the richer assembled Markdown from system.documentation. UDFs generally have no embedded docs, so use the
-          // structured description/create query when that is all the runner can expose.
+          // Built-in functions keep the richer Markdown from system.documentation.
+          // UDFs generally have no embedded docs. If the runner exposes only the structured description or create query, use those.
           if (item->description.empty()) item->description = short_description;
           if (item->syntax.empty() && item->user_defined) item->syntax = create_query;
         }

@@ -1,9 +1,9 @@
-// Unit tests of the Traces page below its routes: the parsing of a request (src/trace_request.cpp), the span filters and the SQL
-// that they become (src/trace_filters.cpp), the statements (src/trace_sql.cpp), and the strategies of the search and of the
-// analytics, which run on a fake executor (no ClickHouse server).
+// Unit tests of the Traces page below its routes. These tests cover the parse of a request (src/trace_request.cpp).
+// They also cover the span filters and the SQL that they become (src/trace_filters.cpp), and the statements (src/trace_sql.cpp).
+// They also cover the strategies of the search and of the analytics. These run on a fake executor, with no ClickHouse server.
 //
-// The texts that these tests expect are the ones that the code before the split logged for the same requests: a statement
-// that changes its text fails here. A change on purpose changes the expected text in the same commit.
+// The texts that these tests expect are the texts that the code before the split logged for the same requests. A statement whose text changes fails here.
+// If you change a statement on purpose, change the expected text in the same commit.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_TRACE_TESTS=ON
 //        cmake --build build --target chdash_trace_test
@@ -56,7 +56,7 @@ httplib::Request request(std::initializer_list<std::pair<const char*, const char
   return req;
 }
 
-// The " AND ..." filter text of a request, as the search puts it after `WHERE 1`; attribute maps are both usable.
+// The " AND ..." filter text of a request. The search puts it after `WHERE 1`. Both attribute maps are usable.
 std::string filter_sql_of(std::initializer_list<std::pair<const char*, const char*>> params, std::string* error = nullptr,
                           std::string* code = nullptr) {
   const auto req = request(params);
@@ -82,7 +82,7 @@ std::string filter_sql_of(std::initializer_list<std::pair<const char*, const cha
 void test_column_filters() {
   CHECK_EQ(filter_sql_of({{"service", "api-gateway"}, {"operation", "GET /api/v1/home"}}),
            std::string(" AND ServiceName = 'api-gateway' AND SpanName = 'GET /api/v1/home'"));
-  // Several values of a column are any of them, sorted and without duplicates.
+  // A column with several values matches any one of them. The values are sorted and have no duplicates.
   CHECK_EQ(filter_sql_of({{"service", "auth"}, {"service", "api-gateway"}, {"service", "auth"}}),
            std::string(" AND ServiceName IN ('api-gateway', 'auth')"));
   CHECK_EQ(filter_sql_of({{"service_not", "api-gateway"}}), std::string(" AND NOT (ServiceName = 'api-gateway')"));
@@ -90,7 +90,7 @@ void test_column_filters() {
   CHECK_EQ(filter_sql_of({{"status_not", "Ok"}}), std::string(" AND NOT (StatusCode = 'Ok')"));
   CHECK_EQ(filter_sql_of({{"status", "Error"}}), std::string(" AND StatusCode = 'Error'"));
   CHECK_EQ(filter_sql_of({}), std::string());
-  // An empty value is no filter.
+  // An empty value sets no filter.
   CHECK_EQ(filter_sql_of({{"service", ""}, {"status", ""}}), std::string());
 }
 
@@ -99,18 +99,18 @@ void test_tag_filters() {
   const std::string span_eq = "(mapContains(SpanAttributes, 'server.address') AND SpanAttributes['server.address'] = '" + value + "')";
   const std::string resource_eq = "(mapContains(ResourceAttributes, 'server.address') AND ResourceAttributes['server.address'] = '" + value + "')";
   CHECK_EQ(filter_sql_of({{"tag", "span:server.address=frontend.shop.svc.cluster.local"}}), " AND " + span_eq);
-  // No scope: either map.
+  // No scope: either map applies.
   CHECK_EQ(filter_sql_of({{"tag", "server.address=frontend.shop.svc.cluster.local"}}), " AND (" + span_eq + " OR " + resource_eq + ")");
   CHECK_EQ(filter_sql_of({{"tag_not", "span:server.address=frontend.shop.svc.cluster.local"}}), " AND NOT " + span_eq);
   CHECK_EQ(filter_sql_of({{"tag_exists", "span:server.address"}}), std::string(" AND mapContains(SpanAttributes, 'server.address')"));
   CHECK_EQ(filter_sql_of({{"tag_missing", "span:server.address"}}), std::string(" AND NOT mapContains(SpanAttributes, 'server.address')"));
-  // The older single-tag form is the same filter.
+  // The older single-tag form gives the same filter.
   CHECK_EQ(filter_sql_of({{"tag_scope", "span"}, {"tag_key", "server.address"}, {"tag_value", "frontend.shop.svc.cluster.local"}}),
            " AND " + span_eq);
-  // Several values of one key: any of them.
+  // Several values of one key: any one of them matches.
   CHECK_EQ(filter_sql_of({{"tag", "span:k=b"}, {"tag", "span:k=a"}}),
            std::string(" AND (mapContains(SpanAttributes, 'k') AND SpanAttributes['k'] IN ('a', 'b'))"));
-  // A quote in a value is escaped, never SQL.
+  // The code escapes a quote in a value. The quote is never SQL.
   CHECK_EQ(filter_sql_of({{"tag", "span:k=a' OR 1=1 --"}}),
            std::string(" AND (mapContains(SpanAttributes, 'k') AND SpanAttributes['k'] = 'a\\' OR 1=1 --')"));
 }
@@ -149,25 +149,25 @@ void test_unusable_attribute_maps() {
   std::string error;
   CHECK(parse_trace_filters(req, &spec, &error));
   std::string out, code;
-  // The column is not a Map: 400 trace_tag_search_unsupported.
+  // The column is not a Map. The result is 400 trace_tag_search_unsupported.
   AttributeColumns plain;
   CHECK(!tag_filters_sql(spec.tags, plain, &out, &code, &error));
   CHECK_EQ(code, std::string("trace_tag_search_unsupported"));
   CHECK_EQ(filter_error_status(code), 400);
-  // The columns could not be read: a failure of the server, 503 trace_schema_unavailable.
+  // The columns cannot be read. This is a failure of the server: 503 trace_schema_unavailable.
   AttributeColumns unknown;
   unknown.lookup_failed = true;
   CHECK(!tag_filters_sql(spec.tags, unknown, &out, &code, &error));
   CHECK_EQ(code, std::string("trace_schema_unavailable"));
   CHECK_EQ(filter_error_status(code), 503);
-  // Turned off by traces.features: 400 trace_filter_disabled, whatever the table holds.
+  // traces.features disables the filter: 400 trace_filter_disabled, whatever the table holds.
   AttributeColumns off;
   off.span_map = true;
   off.span_enabled = false;
   CHECK(!tag_filters_sql(spec.tags, off, &out, &code, &error));
   CHECK_EQ(code, std::string("trace_filter_disabled"));
   CHECK_EQ(error, std::string("Attribute filters on this scope are disabled by traces.features."));
-  // A facet's own filters are skipped.
+  // The code skips the filters of the facet itself.
   AttributeColumns usable;
   usable.span_map = true;
   out.clear();
@@ -205,7 +205,7 @@ void test_span_columns() {
 // ---- the numbers and the window ----
 
 void test_number_parameters() {
-  // A number is the whole text of the value; anything else is the default.
+  // A number must be the whole text of the value. Any other text gives the default.
   CHECK_EQ(int_param(request({{"limit", "20"}}), "limit", 100, 1, 500), 20);
   CHECK_EQ(int_param(request({{"limit", "123abc"}}), "limit", 100, 1, 500), 100);
   CHECK_EQ(int_param(request({{"limit", " 12"}}), "limit", 100, 1, 500), 100);
@@ -228,7 +228,7 @@ void test_read_rows_limit() {
   CHECK_EQ(read_rows_limit_param(request({}), cap), cap);
   CHECK_EQ(read_rows_limit_param(request({{"read_rows_limit", "abc"}}), cap), cap);
   CHECK_EQ(read_rows_limit_param(request({{"read_rows_limit", "999999999999"}}), cap), cap);
-  // Rounded down to 1, 2 or 5 times a power of ten, so the requests share a few cache keys.
+  // The code rounds down to 1, 2 or 5 times a power of ten. The requests then share a few cache keys.
   CHECK_EQ(read_rows_limit_param(request({{"read_rows_limit", "3000"}}), cap), uint64_t(2000));
   CHECK_EQ(read_rows_limit_param(request({{"read_rows_limit", "7777"}}), cap), uint64_t(5000));
   CHECK_EQ(read_rows_limit_param(request({{"read_rows_limit", "1"}}), cap), uint64_t(1));
@@ -299,7 +299,7 @@ void test_common_sql() {
 }
 
 void test_buckets_and_grid() {
-  // About 60 buckets, never below a minute.
+  // The code makes about 60 buckets. A bucket is never below a minute.
   CHECK_EQ(choose_bucket_seconds(3600 * 1000LL), 60);
   CHECK_EQ(choose_bucket_seconds(24 * 3600 * 1000LL), 1800);
   CHECK_EQ(choose_bucket_seconds(7 * 24 * 3600 * 1000LL), 10800);
@@ -307,7 +307,7 @@ void test_buckets_and_grid() {
   CHECK_EQ(choose_quantile_bucket_seconds(3600 * 1000LL), 60);
   CHECK_EQ(choose_quantile_bucket_seconds(24 * 3600 * 1000LL), 900);
   CHECK_EQ(choose_quantile_bucket_seconds(7 * 24 * 3600 * 1000LL), 7200);
-  // The grid: the origin modulo the size, and the floor of a time on it, also before the origin.
+  // The grid: the origin modulo the size. The floor of a time on the grid is also correct before the origin.
   CHECK_EQ(grid_origin_ms(1234567, 60000), int64_t(34567));
   CHECK_EQ(grid_origin_ms(-1, 60000), int64_t(59999));
   CHECK_EQ(grid_floor_ms(100000, 60000, 34567), int64_t(94567));
@@ -318,7 +318,7 @@ void test_buckets_and_grid() {
 }
 
 
-// The golden text with its placeholders filled.
+// The golden text, with its placeholders filled.
 std::string fill(std::string text, const std::map<std::string, std::string>& values) {
   for (const auto& [key, value] : values) {
     const std::string mark = "@" + key + "@";
@@ -327,7 +327,7 @@ std::string fill(std::string text, const std::map<std::string, std::string>& val
   return text;
 }
 
-// The window of the battery of the differential check: an hour of the rich fixture day.
+// The window of the battery of the differential check: one hour of the rich fixture day.
 constexpr int64_t kAStart = 1789207200000LL, kAEnd = 1789210800000LL;
 // A whole day of it.
 constexpr int64_t kCStart = 1789171200000LL, kCEnd = 1789257600000LL;
@@ -348,7 +348,7 @@ const std::string kServiceFilter = " AND ServiceName = 'api-gateway'";
 const std::string kTagFilter =
     " AND (mapContains(SpanAttributes, 'server.address') AND SpanAttributes['server.address'] = 'frontend.shop.svc.cluster.local')";
 
-// The trace ids of a statement are bound ({ids:Array(String)}), never written into its text.
+// The code binds the trace ids of a statement ({ids:Array(String)}). It never writes them into its text.
 const std::string kIdsParam = "{ids:Array(String)}";
 
 // ---- the statements, against the text that the code before the split wrote ----
@@ -363,7 +363,7 @@ void test_search_statements_are_unchanged() {
   const std::string batch = batch_ids_sql(service.index_table, index_window_predicate(kAStart, kAEnd), 1789208771633818901LL, 1789210797855243093LL);
   CHECK_EQ(batch_match_sql(service, batch), fill(golden::kBatchMatch, {{"OLDEST", "1789208771633818901"}, {"NEWEST", "1789210797855243093"}}));
 
-  // A broad filter: the size of the index window, the probe, the rank in one pass, the summary with the exact bounds.
+  // A broad filter has these statements: the index window size, the probe, the rank in one pass, and the summary with exact bounds.
   const auto both = scope_of(kAStart, kAEnd, kServiceFilter, duration_having(20, 400));
   CHECK_EQ(index_count_sql(both.index_table, kAStart, kAEnd), std::string(golden::kBroadIndexCount));
   CHECK_EQ(broad_probe_sql(both, 1000), std::string(golden::kBroadProbe));
@@ -376,7 +376,7 @@ void test_search_statements_are_unchanged() {
   CHECK_EQ(summary_sql(both, 1789207260000000000LL, 1789207261500000000LL, 100),
            fill(golden::kSummarySpanBounds, {{"IDS", kIdsParam}, {"FIRST", "1789207260000000000"}, {"END", "1789207261500000000"}}));
 
-  // The newest slice of a wide window, and the probe of its rows for traces that started before it.
+  // The newest slice of a wide window. The probe finds the rows of traces that started before it.
   const auto wide = scope_of(kCStart, kCEnd, "", duration_having(100, 0));
   RankSlice slice;
   slice.scope = &wide;
@@ -392,7 +392,7 @@ void test_search_statements_are_unchanged() {
   broad_slice.having = broad_having(wide_service.span_filters, wide_service.having);
   broad_slice.fetch = 21;
   CHECK_EQ(rank_sql(broad_slice), std::string(golden::kRankSliceBroad));
-  // A filter on an attribute: the traces are the candidate_ids of a CTE.
+  // A filter on an attribute: the candidate_ids of a CTE hold the traces.
   const auto tagged = scope_of(kAStart, kAEnd, kTagFilter, duration_having(20, 0));
   RankSlice narrow;
   narrow.scope = &tagged;
@@ -435,13 +435,13 @@ void test_delta_statements_are_unchanged() {
   const auto filtered = scope_of(kAStart, kAEnd, kServiceFilter);
   CHECK_EQ(deltas_sample_sql(filtered, delta_windows(filtered, 1789207800000LL, 1789209000000LL, 5000), 10000000, 5000000000ULL, 1000),
            std::string(golden::kDeltasSampleFiltered));
-  // A box of 20 minutes is read whole, one core.
+  // A box of 20 minutes is read in one piece, on one core.
   CHECK_EQ(delta_windows(filtered, 1789207800000LL, 1789209000000LL, 5000).cores.size(), size_t(1));
   const auto wide = scope_of(kCStart, kCEnd);
   CHECK_EQ(deltas_sample_sql(wide, delta_windows(wide, 1789174800000LL, 1789243200000LL, 3000), 100000000, 3000000000ULL, 300),
            std::string(golden::kDeltasSampleWide));
-  // The attribute pass: the ids are the parameters {ids_in} and {all_ids}; this text could not be taken from a log (ClickHouse
-  // writes a statement with its parameters filled in), so it is the text of the code before the split.
+  // The attribute pass: the ids are the parameters {ids_in} and {all_ids}. This text cannot be taken from a log.
+  // ClickHouse writes a statement with its parameters filled in. So this text is the text of the code before the split.
   const std::string reads = "((Timestamp >= fromUnixTimestamp64Milli(1789207790000) AND Timestamp <= fromUnixTimestamp64Milli(1789209010000)))";
   const DeltaWindows one = delta_windows(filtered, 1789207800000LL, 1789209000000LL, 5000);
   CHECK_EQ(one.reads, reads);
@@ -484,14 +484,14 @@ void test_service_map_sampling() {
   CHECK_EQ(service_map_sampling(kAStart, kAEnd, 3000000, 0).trace_factor, uint64_t(1));
   CHECK_EQ(service_map_sampling(kAStart, kAEnd, 3000001, 0).trace_factor, uint64_t(2));
   CHECK_EQ(service_map_sampling(kAStart, kAEnd, 10000000, 0).trace_factor, uint64_t(4));
-  // Above the read budget (12 M spans) only slices of the window are read: ~12 M of the 48 M spans, 3 minutes each, evenly spaced.
+  // Above the read budget (12 M spans), the code reads only slices of the window. It reads about 12 M of the 48 M spans: 3 minutes each, evenly spaced.
   const ServiceMapSampling wide = service_map_sampling(kAStart, kAEnd + 23 * 3600 * 1000LL, 48000000, 0);
   CHECK(wide.slices > 0);
   CHECK(wide.time_coverage < 0.3 && wide.time_coverage > 0.2);
   CHECK(wide.sampled());
   CHECK(wide.time_predicate.find(" OR ") != std::string::npos);
   CHECK(wide.scale() > 3.0);
-  // A window shorter than a slice is read whole.
+  // A window shorter than a slice is read in one piece.
   const ServiceMapSampling tiny = service_map_sampling(0, 900, 48000000, 0);
   CHECK_EQ(tiny.slices, 0);
   CHECK_EQ(tiny.time_coverage, 1.0);
@@ -526,17 +526,17 @@ void test_index_without_filters_takes_the_newest_traces() {
   CHECK_EQ(out.rows[0].trace_id, std::string("t1"));
   CHECK_EQ(out.rows[0].operation, std::string("GET /home"));
   CHECK_EQ(out.rows[0].service_stats.size(), size_t(2));
-  // The services of a trace by span count, then by name.
+  // The services of a trace, by span count and then by name.
   CHECK_EQ(out.rows[0].service_stats[0].service, std::string("api-gateway"));
   CHECK_EQ(out.rows[0].service_stats[0].spans, uint64_t(8));
   CHECK_EQ(out.rows[0].service_stats[1].first_span_ns, uint64_t(1000));
-  // Two statements: the first slice of the index, and the summary of the three traces (the fourth is not asked for).
+  // Two statements: the first slice of the index, and the summary of the three traces. The fourth trace is not asked for.
   CHECK_EQ(db.sqls.size(), size_t(2));
   CHECK_EQ(db.sqls[0], std::string(golden::kIndexSliceFirst));
   std::string expected = fill(golden::kSummaryIndexBounds, {{"IDS", kIdsParam}});
   expected.replace(expected.rfind("LIMIT 20"), 8, "LIMIT 3");
   CHECK_EQ(db.sqls[1], expected);
-  // The three traces of the page are the parameter of the statement.
+  // The statement takes the three traces of the page as its parameter.
   CHECK_EQ(db.params[1].size(), size_t(1));
   CHECK_EQ(db.params[1][0].first, std::string("ids"));
   CHECK_EQ(db.params[1][0].second, std::string("['t1', 't2', 't3']"));
@@ -556,18 +556,18 @@ void test_a_filter_tests_the_traces_of_the_index_in_pages() {
   CHECK_EQ(out.search_path, std::string("trace_index_filtered"));
   CHECK_EQ(out.rank_by, std::string("newest_index_row"));
   CHECK_EQ(out.rows.size(), size_t(2));
-  // The page is every trace whose newest index row lies between the newest and the oldest start of the page.
+  // The page holds every trace whose newest index row lies between the newest and the oldest start of the page.
   CHECK_EQ(db.count("AS batch_bounds"), size_t(1));
   size_t match_at = 0;
   for (size_t i = 0; i < db.sqls.size(); ++i) {
     if (db.sqls[i].find("AS batch_bounds") != std::string::npos) match_at = i;
   }
   CHECK_EQ(db.sqls[match_at], fill(golden::kBatchMatch, {{"OLDEST", "1789208771633818901"}, {"NEWEST", "1789210797855243093"}}));
-  // The matching traces keep the rank of the index, whatever the order of the answer of the match.
+  // The traces that match keep the rank of the index. The order of the answer does not change this rank.
   CHECK_EQ(db.params.back()[0].second, std::string("['t2', 't4']"));
 }
 
-// The index of a busy window: every slice holds 20,000 traces, none of which matches.
+// The index of a busy window: every slice holds 20,000 traces, and none of them matches.
 Rows busy_slice(const std::string&) {
   static int64_t next = 0;
   Rows rows;
@@ -582,7 +582,7 @@ void test_the_scan_cap_gives_way_to_the_span_aggregation() {
   db.on("argMinIf(SpanName", summary_rows({"s1"}));
   db.on("ORDER BY min(Timestamp) DESC LIMIT 5", {{"s1", "1789210000000000000", "0"}});
   const SearchOutcome out = search_with(db, status, false, 5);
-  // 64,000 traces were tested (pages of 1,000, 4,000, 16,000, 32,000 and 11,000) and none matched.
+  // The code tests 64,000 traces (pages of 1,000, 4,000, 16,000, 32,000 and 11,000). None of them matches.
   CHECK_EQ(db.count("AS batch_bounds"), size_t(5));
   CHECK_EQ(out.fallback_reason, std::string("index_scan_cap"));
   CHECK_EQ(out.search_path, std::string("span_aggregation"));
@@ -598,7 +598,7 @@ void test_an_error_of_the_index_gives_way_to_the_span_aggregation() {
   db.on("argMinIf(SpanName", summary_rows({"s1", "s2"}));
   db.on("ORDER BY min(Timestamp) DESC LIMIT 4", {{"s1", "1789210000000000000", "0"}, {"s2", "1789209000000000000", "0"}});
   const SearchOutcome out = search_with(db, a, false, 4);
-  // No filter, no duration: the index would have answered; the span aggregation did, and the answer says why.
+  // No filter and no duration: the index can answer. The span aggregation answers instead, and the answer says why.
   CHECK_EQ(out.fallback_reason, std::string("index_error"));
   CHECK_EQ(out.search_path, std::string("span_aggregation"));
   CHECK_EQ(out.rank_by, std::string("first_span"));
@@ -617,7 +617,7 @@ void test_a_caller_that_went_away_stops_the_search() {
     stopped = true;
   }
   CHECK(stopped);
-  // Nothing was asked after the stop.
+  // The code asks nothing after the stop.
   CHECK_EQ(db.sqls.size(), size_t(1));
 }
 
@@ -648,7 +648,7 @@ void test_a_duration_bound_ranks_the_spans_and_reads_their_bounds() {
   CHECK_EQ(db.sqls[0], std::string(golden::kBroadIndexCount));
   CHECK_EQ(db.sqls[1], std::string(golden::kBroadProbe));  // threshold: a quarter of 2,300 index rows, at least 1,000
   CHECK_EQ(db.sqls[2], std::string(golden::kRankBroadDurationWhole));
-  // The summary reads from the first span of the traces to the last span end that the duration filter already computed.
+  // The summary reads from the first span of the traces to the last span end. The duration filter computed that end already.
   CHECK_EQ(db.sqls[3], fill(golden::kSummarySpanBounds, {{"IDS", kIdsParam}, {"FIRST", "1789207260000000000"}, {"END", "1789207302000000000"}}));
   CHECK_EQ(out.rows.size(), size_t(2));
 }
@@ -659,20 +659,20 @@ void test_a_filter_that_few_traces_match_keeps_the_narrow_form() {
   db.on("SELECT toString(count()) FROM `otel`.`otel_traces_trace_id_ts`", {{"2300"}});
   db.on("SELECT toString(count()) FROM (SELECT TraceId", {{"999"}});
   CHECK(!filters_are_broad(db, both));
-  // A bigger index raises the threshold with it.
+  // A bigger index raises the threshold too.
   FakeDb big;
   big.on("SELECT toString(count()) FROM `otel`.`otel_traces_trace_id_ts`", {{"100000"}});
   big.on("SELECT toString(count()) FROM (SELECT TraceId", {{"24999"}});
   CHECK(!filters_are_broad(big, both));
   CHECK(big.sqls[1].find("LIMIT 25000)") != std::string::npos);
-  // No filter or no index: no question asked.
+  // No filter or no index: the code asks no question.
   FakeDb none;
   CHECK(!filters_are_broad(none, scope_of(kAStart, kAEnd)));
   auto no_index = both;
   no_index.index_table.clear();
   CHECK(!filters_are_broad(none, no_index));
   CHECK(none.sqls.empty());
-  // A failure keeps the narrow form, which needs no index.
+  // A failure keeps the narrow form. The narrow form needs no index.
   FakeDb broken;
   broken.fail_on("count()", [] { throw std::runtime_error("no such table"); });
   CHECK(!filters_are_broad(broken, both));
@@ -681,8 +681,8 @@ void test_a_filter_that_few_traces_match_keeps_the_narrow_form() {
 void test_the_ranking_widens_from_the_newest_slice() {
   FakeDb db;
   const auto wide = scope_of(kCStart, kCEnd, "", duration_having(100, 0));
-  // The newest 1/16 of the window holds three traces, one of which started before the slice: it is dropped, and the slice is
-  // too thin for the 10 that are wanted, so the whole window is read.
+  // The newest 1/16 of the window holds three traces. One of them started before the slice, so the code drops it.
+  // The slice is too thin for the 10 traces that are wanted. The code therefore reads the whole window.
   db.on("ORDER BY min(Timestamp) DESC LIMIT 26",
         {{"a", "1789257000000000000", "1789257000500000000"}, {"b", "1789256000000000000", "1789256000400000000"}, {"c", "1789255000000000000", "1789255000900000000"}}, 1);
   db.on("SELECT DISTINCT toString(TraceId)", {{"b"}});
@@ -708,7 +708,7 @@ void test_the_ranking_widens_from_the_newest_slice() {
   CHECK_EQ(first.back().trace_id, std::string("n9"));
   CHECK_EQ(enough.sqls.size(), size_t(2));  // the slice and its probe
 
-  // A window of an hour is read whole at once.
+  // A window of one hour is read in one piece.
   FakeDb hour;
   hour.on("ORDER BY min(Timestamp) DESC LIMIT 10", {{"h", "1789207300000000000", "0"}});
   CHECK_EQ(rank_traces_by_start(hour, scope_of(kAStart, kAEnd), false, 10).size(), size_t(1));
@@ -730,7 +730,7 @@ void test_charts_come_from_the_index_when_nothing_restricts_them() {
   CHECK_EQ(result.value->trace_counts[1].second, uint64_t(7));
   CHECK(result.value->have_counts && !result.value->have_durations);
   CHECK_EQ(db.sqls[0], std::string(golden::kIndexCounts));
-  // The quantiles are never read from the index.
+  // The code never reads the quantiles from the index.
   FakeDb both;
   both.on("FROM trace_durations GROUP BY bucket_ms", {{"1789207200000", "5", "1", "2", "3", "4"}});
   const auto spans = run_analytics(both, a, false, grid, true, true);
@@ -739,7 +739,7 @@ void test_charts_come_from_the_index_when_nothing_restricts_them() {
   CHECK_EQ(spans.value->quantiles.size(), size_t(1));
   CHECK_EQ(spans.value->quantiles[0].p99, uint64_t(4));
   CHECK_EQ(both.count("trace_id_ts"), size_t(0));
-  // A filter, a duration bound or an allowlist rules the index out.
+  // A filter, a duration bound or an allowlist excludes the index.
   FakeDb filtered;
   filtered.on("FROM trace_durations GROUP BY bucket_ms", {});
   CHECK_EQ(run_analytics(filtered, scope_of(kAStart, kAEnd, kTagFilter), false, grid, true, false).value->analytics_path, std::string("span_aggregation"));
@@ -773,7 +773,7 @@ void test_a_broken_index_falls_back_on_a_new_connection() {
   CHECK(result);
   CHECK_EQ(result.value->analytics_path, std::string("span_aggregation"));
   CHECK_EQ(db.renewed, 1);
-  // When no other connection can be had, the route says so.
+  // When no other connection is available, the route says so.
   FakeDb down;
   down.renew_ok = false;
   down.fail_on("FROM (SELECT min(Start) AS first_start", [] { throw std::runtime_error("index table is missing"); });
@@ -793,8 +793,8 @@ void test_charts_parameter() {
 }
 
 void test_the_heatmap_bins() {
-  // Fine bins 10..14 (32 per octave): the lowest row starts at the bin of the 1 % quantile (cumulative count of 2 of 200); every
-  // count is kept.
+  // Fine bins 10..14 (32 per octave): the lowest row starts at the bin of the 1 % quantile.
+  // The cumulative count is 2 of 200. Every count is kept.
   std::map<int, uint64_t> totals{{8, 1}, {10, 94}, {11, 5}, {14, 100}};
   std::map<std::pair<int64_t, int>, uint64_t> cells{{{60000, 8}, 1}, {{60000, 10}, 40}, {{120000, 10}, 54}, {{120000, 11}, 5}, {{120000, 14}, 100}};
   const HeatmapBins bins = bin_heatmap(cells, totals, 8);
@@ -804,13 +804,13 @@ void test_the_heatmap_bins() {
   CHECK_EQ(bins.edges[0], std::exp2(10.0 / 32));
   CHECK_EQ(bins.edges[5], std::exp2(15.0 / 32));
   CHECK_EQ(bins.below_count, uint64_t(1));
-  // A trace faster than the lowest row is counted in it.
+  // The code counts a trace faster than the lowest row in that row.
   CHECK_EQ((bins.cells.at({60000, 0})), uint64_t(41));
   CHECK_EQ((bins.cells.at({120000, 0})), uint64_t(54));
   CHECK_EQ((bins.cells.at({120000, 1})), uint64_t(5));
   CHECK_EQ((bins.cells.at({120000, 4})), uint64_t(100));
   CHECK_EQ(bins.max_count, uint64_t(100));
-  // Many fine bins merge into the wanted rows.
+  // Many fine bins merge into the rows that are wanted.
   std::map<int, uint64_t> spread;
   std::map<std::pair<int64_t, int>, uint64_t> spread_cells;
   for (int bin = 100; bin < 200; ++bin) {
@@ -842,14 +842,14 @@ void test_the_ranking_of_the_deltas() {
   std::vector<DeltaKey> keys;
   // 90 % of the selection and 10 % of the baseline: a score of 80, plus 2 for a key of the conventions.
   keys.push_back(key("span", "http.route", 100, 100, 2, 2, {{"/cart", 90, 10, 0, 0}, {"/home", 10, 90, 0, 0}}));
-  // A column of the table is always boosted.
+  // The code always boosts a column of the table.
   keys.push_back(key("column", "StatusCode", 100, 100, 2, 2, {{"Error", 30, 0, 0, 0}, {"Ok", 70, 100, 0, 0}}));
   // The same distribution on both sides says nothing.
   keys.push_back(key("span", "host.arch", 100, 100, 1, 1, {{"arm64", 100, 100, 0, 0}}));
-  // An identifier by its name, and by its values: hidden.
+  // The code hides an identifier by its name and by its values.
   keys.push_back(key("span", "user.request_id", 100, 100, 100, 100, {{"a", 1, 0, 0, 0}}));
   keys.push_back(key("span", "session", 100, 100, 4, 4, {{"0123456789abcdef0123", 50, 0, 0, 0}, {"fedcba9876543210fedc", 50, 0, 0, 0}}));
-  // Almost every value is new on both sides: hidden as high cardinality.
+  // Almost every value is new on both sides. The code hides the key as high cardinality.
   keys.push_back(key("span", "cart.total", 100, 100, 99, 98, {{"12.5", 5, 0, 0, 0}}));
   const DeltaRanking ranking = rank_deltas(std::move(keys), 100, 100, 1000, 9000, false);
   CHECK_EQ(ranking.ranked_keys, size_t(2));
@@ -865,12 +865,12 @@ void test_the_ranking_of_the_deltas() {
   CHECK_EQ(ranking.hidden[0].reason, std::string("id_like"));
   CHECK_EQ(ranking.hidden[1].reason, std::string("id_like"));
   CHECK_EQ(ranking.hidden[2].reason, std::string("high_cardinality"));
-  // The baseline of "all": both samples, weighted by the traces that they stand for (here 10 % selection).
+  // The baseline of "all" uses both samples. Each sample is weighted by the traces that it stands for (here 10 % selection).
   std::vector<DeltaKey> again;
   again.push_back(key("span", "http.route", 100, 100, 2, 2, {{"/cart", 90, 10, 0, 0}}));
   const DeltaRanking all = rank_deltas(std::move(again), 100, 100, 1000, 9000, true);
   CHECK_EQ(all.ranked[0].values[0].base_pct, 18.0);  // (0.9 * 1000 + 0.1 * 9000) / 10000 = 18 %
-  // The names that never explain a difference.
+  // Names that never explain a difference.
   CHECK(id_or_time_key("Trace_ID") && id_or_time_key("http.request_id") && id_or_time_key("created_at") && !id_or_time_key("http.route"));
   CHECK(id_like_value("550e8400-e29b-41d4-a716-446655440000") && id_like_value("1234567890123") && !id_like_value("GET /home"));
   CHECK(semconv_key("service.name") && semconv_key("custom.http.route") && !semconv_key("custom.thing"));
@@ -880,7 +880,7 @@ void test_the_ranking_of_the_deltas() {
 
 // ---- the service ----
 
-// The caches of a service of a test: its own, so nothing is shared between two tests.
+// Each service of a test has its own caches, so no cache is shared between two tests.
 struct TestCaches {
   AttributeMapCache attribute_maps{attribute_map_cache_options()};
   PrefillCache prefill{PrefillCache::Options{}};
@@ -923,7 +923,7 @@ void test_the_service_cannot_connect() {
   CHECK_EQ(answer.error.message, std::string("pool_exhausted: no connection"));
   TraceService silent([](const HostSpec&, std::string*) -> std::unique_ptr<ChExecutor> { return nullptr; }, cache.refs());
   CHECK_EQ(silent.search(context, trace_host(), window_request(), 10).error.message, std::string("Cannot connect to trace ClickHouse source."));
-  // The connection comes before the checks of what the route asked: a request that is wrong in two ways says the first.
+  // The connection comes before the checks of the route request. A request that is wrong in two ways reports the first error.
   AnalyticsRequest bad;
   bad.window = window_request();
   bad.charts = "none";
@@ -938,7 +938,7 @@ void test_the_attribute_columns_are_read_once_for_the_filters_of_a_source() {
   RequestContext context;
   WindowRequest request = window_request();
   request.filters.tags.push_back(TagFilter{"span", TagOp::Eq, "server.address", "frontend.shop.svc.cluster.local"});
-  // No trace index: the spans are ranked, with the filter as a CTE.
+  // No trace index: the code ranks the spans, with the filter as a CTE.
   HostSpec host = trace_host();
   host.otel.traces.trace_index_table.clear();
   const auto first = service.search(context, host, request, 10);
@@ -946,7 +946,7 @@ void test_the_attribute_columns_are_read_once_for_the_filters_of_a_source() {
   CHECK_EQ(db.count("FROM system.columns"), size_t(1));
   CHECK_EQ(db.sqls[0], std::string("SELECT toString(name), toString(type) FROM system.columns WHERE database = 'otel' AND `table` = 'otel_traces' AND name IN ('SpanAttributes','ResourceAttributes')"));
   CHECK(db.count("mapContains(SpanAttributes, 'server.address')") > 0);
-  // The second request of the source reads the cache; a request with no tag filter never asks.
+  // The second request of the source reads the cache. A request with no tag filter never asks the source.
   CHECK(service.search(context, host, request, 10));
   CHECK_EQ(db.count("FROM system.columns"), size_t(1));
 }
@@ -963,7 +963,7 @@ void test_a_table_that_cannot_be_read_is_not_a_table_without_maps() {
   CHECK(!answer);
   CHECK_EQ(answer.error.status, 503);
   CHECK_EQ(answer.error.code, std::string("trace_schema_unavailable"));
-  // Columns that are not Maps: 400. Columns that traces.features turns off: 400 too, with its own code.
+  // Columns that are not Maps: 400. Columns that traces.features disables: 400 too, with its own code.
   FakeDb plain;
   TestCaches plain_cache;
   TraceService plain_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(plain)); }, plain_cache.refs());
@@ -1039,7 +1039,7 @@ void test_the_box_of_the_deltas_is_checked() {
   baseline.baseline = "everything";
   CHECK_EQ(answer(baseline).error.code, std::string("invalid_trace_baseline"));
   CHECK_EQ(answer(baseline).error.status, 400);
-  // Nothing was read for a request that is wrong.
+  // The code reads nothing for a request that is wrong.
   CHECK(db.sqls.empty());
 }
 
@@ -1067,11 +1067,11 @@ void test_the_deltas_compare_two_samples() {
   CHECK_EQ(answer.value->samples.ids_out.size(), size_t(2));
   CHECK_EQ(answer.value->samples.total_out, uint64_t(400));
   CHECK_EQ(answer.value->ranking.ranked.size(), size_t(2));
-  // Both keys explain all of the difference (a score of 102); the column of the table goes first.
+  // Both keys explain all of the difference (a score of 102). The column of the table comes first.
   CHECK_EQ(answer.value->ranking.ranked[0].key, std::string("StatusCode"));
   CHECK_EQ(answer.value->ranking.ranked[1].key, std::string("http.route"));
   CHECK(answer.value->window_sampled);
-  // The ids of the sample are the parameters of the attribute pass, not its text.
+  // The ids of the sample are the parameters of the attribute pass. They are not part of its text.
   const ChParams& sent = db.params.back();
   CHECK_EQ(sent.size(), size_t(2));
   CHECK_EQ(sent[0].first, std::string("ids_in"));
@@ -1140,19 +1140,19 @@ void test_the_service_map_and_its_json() {
   CHECK(fallback);
   CHECK_EQ(fallback.value->estimate_source, std::string("window"));
   CHECK_EQ(failing.renewed, 1);
-  // One hour is six ten-minute windows of the read budget: the map reads slices, not the window.
+  // One hour is six ten-minute windows of the read budget. The map reads slices, not the whole window.
   CHECK_EQ(fallback.value->estimated_spans, kServiceMapReadRows * 6);
   CHECK(fallback.value->sampling.slices > 0);
 }
 
 void test_the_order_of_a_search_is_named_by_its_path() {
-  // The two orders (ARCH-B-083): the index ranks a trace by the Start of its newest index row, the spans by its first span. The paths name which.
+  // The two orders (ARCH-B-083): the index ranks a trace by the Start of its newest index row. The spans rank a trace by its first span. The paths name the order.
   CHECK_EQ(rank_by_of("trace_index"), std::string("newest_index_row"));
   CHECK_EQ(rank_by_of("trace_index_filtered"), std::string("newest_index_row"));
   CHECK_EQ(rank_by_of("trace_index_then_spans"), std::string("newest_index_row_then_first_span"));
   CHECK_EQ(rank_by_of("span_aggregation"), std::string("first_span"));
   CHECK_EQ(rank_by_of("span_duration_two_phase"), std::string("first_span"));
-  // A search that was never run says the order of the span paths (the default of the outcome).
+  // A search that never ran states the order of the span paths (the default of the outcome).
   CHECK_EQ(SearchOutcome{}.rank_by, std::string("first_span"));
 }
 
@@ -1171,17 +1171,17 @@ void test_the_json_of_the_search() {
   CHECK(!doc.HasParseError());
   CHECK_EQ(doc["v"].GetInt(), 3);
   CHECK_EQ(std::string(doc["search_path"].GetString()), std::string("trace_index"));
-  // The answer says how its traces are ordered: by the newest index row of the window, not by the first span.
+  // The answer states how its traces are ordered: by the newest index row of the window, not by the first span.
   CHECK_EQ(std::string(doc["rank_by"].GetString()), std::string("newest_index_row"));
   CHECK(!doc.HasMember("fallback_reason"));
   CHECK_EQ(doc["rows"].Size(), rapidjson::SizeType(2));
-  // The services of the rows are in a dictionary; a row holds their index.
+  // The services of the rows are in a dictionary. A row holds the index of each service.
   CHECK_EQ(doc["services"].Size(), rapidjson::SizeType(2));
   CHECK_EQ(std::string(doc["services"][0].GetString()), std::string("api-gateway"));
   CHECK_EQ(doc["rows"][0][3].GetUint64(), uint64_t(0));
   CHECK_EQ(doc["rows"][0][8].GetUint64(), uint64_t(0));  // missing parents
   CHECK_EQ(doc["columns"].Size(), rapidjson::SizeType(9));
-  // With a restricted allowlist the count of missing parents would say what is hidden: it is zero.
+  // With a restricted allowlist, the count of parents that the allowlist hides states what is hidden. The count is zero.
   HostSpec restricted = trace_host();
   restricted.otel.traces.service_allowlist = {"api-*"};
   FakeDb limited;
@@ -1197,7 +1197,7 @@ void test_the_json_of_the_search() {
   rapidjson::Document hidden_doc;
   hidden_doc.Parse(search_json(*hidden.value).c_str());
   CHECK_EQ(hidden_doc["rows"][0][8].GetUint64(), uint64_t(0));
-  // The statements of the restricted search carry the allowlist.
+  // The statements of the restricted search contain the allowlist.
   CHECK(limited.count("startsWith(ServiceName, 'api-')") > 0);
 }
 
@@ -1236,7 +1236,7 @@ void test_the_json_of_the_charts_and_the_heatmap() {
   CHECK_EQ(hm["bins_per_octave"].GetInt(), 32);
   CHECK(hm["rows"].GetInt() > 0 && hm["rows"].GetInt() <= 8);
   CHECK_EQ(hm["y_edges_ns"].Size(), rapidjson::SizeType(hm["rows"].GetInt() + 1));
-  // The analytics are off for the host: the parse says so before anything is read (trace_request.hpp).
+  // The analytics are disabled for the host. The parse states this before the code reads anything (trace_request.hpp).
   httplib::Request req;
   TraceSettings off;
   off.analytics = false;
@@ -1263,7 +1263,7 @@ void test_services_statements_are_unchanged() {
   const std::string root = from(hour, kServiceRootSpans, "");
   CHECK_EQ(services_estimate_sql(root), std::string(golden::kServicesRootEstimate));
   CHECK_EQ(services_sql(root, 60000, 0, false), std::string(golden::kServicesRoot));
-  // The drill-down groups by endpoint too, and reads the slowest spans and the releases of the service.
+  // The drill-down groups by endpoint too. It reads the slowest spans and the releases of the service.
   const std::string detail = from(hour, entry, " AND ServiceName = 'api-gateway'");
   CHECK_EQ(services_estimate_sql(detail), std::string(golden::kServicesDetailEstimate));
   CHECK_EQ(services_sql(detail, 60000, 0, true), std::string(golden::kServicesDetail));
@@ -1272,7 +1272,7 @@ void test_services_statements_are_unchanged() {
   const std::string filtered = from(hour, entry, " AND StatusCode = 'Error' AND ServiceName = 'api-gateway' AND Duration >= 5000000");
   CHECK_EQ(services_estimate_sql(filtered), std::string(golden::kServicesDetailFilteredEstimate));
   CHECK_EQ(services_sql(filtered, 60000, 0, true), std::string(golden::kServicesDetailFiltered));
-  // A day of 565 M spans is read as 48 slices, one for each chart bucket of 30 minutes.
+  // A day of 565 M spans is read as 48 slices: one for each chart bucket of 30 minutes.
   const int64_t day_start = 1789689600000LL, day_end = 1789776000000LL;
   const ServicesWindow sampled = services_window(day_start, day_end, 1800000, 0, 564912223ULL, false);
   CHECK(sampled.sampled);
@@ -1284,13 +1284,13 @@ void test_services_statements_are_unchanged() {
 
 void test_services_window_sampling() {
   const int64_t day_start = 1789689600000LL, day_end = 1789776000000LL;
-  // Up to 150 M spans: the window is read whole. exact=1 asks for the whole window whatever its size.
+  // Up to 150 M spans: the window is read in one piece. exact=1 asks for the whole window, whatever its size.
   const ServicesWindow small = services_window(day_start, day_end, 1800000, 0, 150000000ULL, false);
   CHECK(!small.sampled);
   CHECK_EQ(small.time_sql, time_predicate(day_start, day_end));
   CHECK_EQ(small.factor, 1.0);
   CHECK(!services_window(day_start, day_end, 1800000, 0, 900000000ULL, true).sampled);
-  // Above it: one slice in each bucket, at a stable offset, together 8.8 % of the window for 565 M spans.
+  // Above that limit: one slice in each bucket, at a stable offset. Together, the slices are 8.8 % of the window for 565 M spans.
   const ServicesWindow big = services_window(day_start, day_end, 1800000, 0, 564912223ULL, false);
   CHECK_EQ(big.sampled_ms, int64_t(7632000));
   CHECK(std::fabs(big.factor - 86400000.0 / 7632000.0) < 1e-9);
@@ -1385,7 +1385,7 @@ void test_the_services_read_stops_at_its_time_budget_and_keeps_what_it_has() {
   const auto result = run_services(db, services_query());
   CHECK(result.value->partial);
   CHECK_EQ(result.value->services.size(), size_t(2));
-  // The release markers are decoration: a failure leaves them out and says so.
+  // The release markers are decoration. A failure leaves them out and states this.
   FakeDb marks;
   marks.on_block("EXPLAIN ESTIMATE", [](const std::string&) { return estimate_block(10); });
   marks.on("GROUPING SETS", services_rows());
@@ -1397,7 +1397,7 @@ void test_the_services_read_stops_at_its_time_budget_and_keeps_what_it_has() {
   CHECK(kept);
   CHECK(kept.value->releases.empty() && kept.value->releases_estimated);
   CHECK_EQ(marks.invalidated, 1);
-  // The services of the view are what the scan answers: a failure of the scan is the failure of the route.
+  // The scan gives the services of the view. A failure of the scan is a failure of the route.
   FakeDb failing;
   failing.on_block("EXPLAIN ESTIMATE", [](const std::string&) { return estimate_block(10); });
   failing.fail_on("GROUPING SETS", [] { throw server_error(241, "Memory limit exceeded"); });
@@ -1440,7 +1440,7 @@ void test_the_database_statements() {
   CHECK_EQ(out.rows[0].total_ns, 5000.0);
   CHECK_EQ(out.rows[0].p95, uint64_t(300));
   CHECK_EQ(out.read.read_rows, kServicesDbReadRowsCap);
-  // The span attributes are not a Map the page may read: nothing is asked.
+  // The page may not read the span attributes, since they are not a Map. The code asks nothing.
   FakeDb none;
   const DbOutcome unsupported = run_services_db(none, services_query(), false);
   CHECK(!unsupported.supported && unsupported.rows.empty() && none.sqls.empty());
@@ -1464,7 +1464,7 @@ void test_the_services_service_builds_the_where_of_the_entry_spans() {
   request.max_duration_ms = 90;
   const auto answer = service.services(context, trace_host(), request);
   CHECK(answer);
-  // The filters, then the service of the drill-down, then the bounds of the span's own duration.
+  // The filters, then the service of the drill-down, then the bounds of the duration of the span.
   CHECK(db.sqls[1].find(" WHERE 1 AND StatusCode = 'Error' AND ServiceName = 'api' AND Duration >= 5000000 AND Duration <= 90000000") != std::string::npos);
   CHECK_EQ(answer.value->span_scope, std::string("entry"));
   rapidjson::Document doc;
@@ -1479,7 +1479,7 @@ void test_the_services_service_builds_the_where_of_the_entry_spans() {
   CHECK(doc.HasMember("slowest") && doc.HasMember("releases"));
   CHECK_EQ(doc["estimated"].GetBool(), false);
   CHECK_EQ(doc["exact_rows_limit"].GetUint64(), kServicesExactRows);
-  // The database statements: the same where.
+  // The database statements have the same WHERE clause.
   FakeDb dbs;
   TraceService db_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(dbs)); }, cache.refs());
   dbs.on("FROM system.columns", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "String"}});
@@ -1490,7 +1490,7 @@ void test_the_services_service_builds_the_where_of_the_entry_spans() {
   sd.Parse(services_db_json(*statements.value).c_str());
   CHECK_EQ(sd["supported"].GetBool(), true);
   CHECK_EQ(sd["statements"].Size(), rapidjson::SizeType(1));
-  // A source whose span attributes are not a Map has no statements, and no statement is asked for.
+  // A source whose span attributes are not a Map has no statements. The code asks for no statement.
   FakeDb plain;
   TestCaches plain_cache;
   TraceService plain_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(plain)); }, plain_cache.refs());
@@ -1541,7 +1541,7 @@ void test_the_services_request() {
 
 void test_prefill_and_facet_statements_are_unchanged() {
   const std::string table = "`otel`.`otel_traces`";
-  // The first pass reads the newest 5 minutes, the second the whole window without the pairs that are known.
+  // The first pass reads the newest 5 minutes. The second pass reads the whole window, without the known pairs.
   CHECK_EQ(prefill_pass_sql(table, 1789210500000LL, kAEnd, "1", "", "", 20000000), std::string(golden::kPrefillSeed));
   const std::set<std::pair<std::string, std::string>> known{{"a", "x"}, {"b", "it's"}};
   const std::string excluded = prefill_excluded_sql(known);
@@ -1556,14 +1556,14 @@ void test_prefill_and_facet_statements_are_unchanged() {
   CHECK_EQ(facet_values_sql(table, kAStart, kAEnd, "1", "", "span", "server.address", 10, 50000000), std::string(golden::kFacetValues));
   CHECK_EQ(facet_values_sql(table, kAStart, kAEnd, "1", " AND ServiceName = 'api-gateway'", "span", "server.address", 3, 50000000),
            std::string(golden::kFacetValuesFiltered));
-  // A source with one map only reads that one.
+  // A source with one map reads only that map.
   const std::string span_only = facet_keys_sql(table, kAStart, kAEnd, "1", "", true, false, 1000);
   CHECK(span_only.find("ResourceAttributes") == std::string::npos && span_only.find("SpanAttributes.keys AS sk") != std::string::npos);
 }
 
 void test_the_prefill_reads_what_it_does_not_know() {
   FakeDb db;
-  // The seed holds most of the pairs; the pass over the whole window finds one more and completes.
+  // The seed holds most of the pairs. The pass over the whole window finds one more pair and completes the list.
   db.on_fn("LIMIT 1 BY ServiceName, SpanName", [](const std::string& sql) -> Rows {
     if (sql.find("NOT IN") == std::string::npos) return {{"api", "GET /"}, {"api", "POST /"}};
     return {{"auth", "login"}};
@@ -1582,8 +1582,8 @@ void test_the_prefill_reads_what_it_does_not_know() {
   FakeDb short_window;
   short_window.on("LIMIT 1 BY ServiceName, SpanName", {{"api", "GET /"}});
   CHECK_EQ(read_prefill(short_window, "`t`", "1", "", kAEnd - 60000, kAEnd, kPrefillReadRows).passes, 1);
-  // A pass that its read cap cut is repeated, without the pairs found so far, until it finds nothing new (and then the list is a
-  // subset: estimated).
+  // A pass that its read cap cut is repeated, without the pairs found so far.
+  // The code repeats the pass until it finds nothing new. The list is then a subset, and it is estimated.
   FakeDb cut;
   cut.bounded_result.read_rows = kPrefillPassRows;
   cut.on_fn("LIMIT 1 BY ServiceName, SpanName", [](const std::string& sql) -> Rows {
@@ -1594,7 +1594,7 @@ void test_the_prefill_reads_what_it_does_not_know() {
   CHECK(subset.estimated);
   CHECK_EQ(subset.passes, 2);
   CHECK_EQ(subset.read_rows, uint64_t(2) * kPrefillPassRows);
-  // The read budget bounds the passes: a budget of one pass leaves no row for the second.
+  // The read budget limits the passes. A budget of one pass leaves no row for the second pass.
   FakeDb budget;
   budget.bounded_result.read_rows = 1000;
   budget.on("LIMIT 1 BY ServiceName, SpanName", {{"api", "GET /"}});
@@ -1617,7 +1617,7 @@ void test_the_facet_keys_and_values_are_sorted_and_bounded() {
   CHECK_EQ(keys.keys[1].scope, std::string("resource"));
   CHECK_EQ(keys.keys[4].key, std::string("rare"));
   CHECK(!keys.estimated);
-  // A read that reached its cap, or a sample that is full, is an estimate.
+  // A read that reaches its cap is an estimate. A sample that is full is an estimate too.
   FakeDb capped;
   capped.bounded_result.read_rows = 1000;
   capped.on("sumMap(sk", {{"10", "span", "k", "1"}});
@@ -1651,7 +1651,7 @@ void test_the_schema_of_the_source() {
   read_schema(db, trace_host().otel.traces, &out);
   CHECK(out.schema_ok && out.index_available);
   CHECK_EQ(db.sqls[1], std::string("SELECT toString(count()) FROM system.tables WHERE database = 'otel' AND name = 'otel_traces_trace_id_ts'"));
-  // A column that the page reads is missing: not ok. No trace index table: nothing is asked about it.
+  // A column that the page reads is absent: the result is not ok. Without a trace index table, the code asks nothing about it.
   FakeDb missing;
   missing.on("FROM system.columns", {{"Timestamp"}, {"TraceId"}});
   HostSpec host = trace_host();
@@ -1660,7 +1660,7 @@ void test_the_schema_of_the_source() {
   read_schema(missing, host.otel.traces, &partial);
   CHECK(!partial.schema_ok && !partial.index_available);
   CHECK_EQ(missing.sqls.size(), size_t(1));
-  // The service reads it fresh, and the maps that it reads replace the cached ones.
+  // The service reads it fresh. The maps that it reads replace the cached ones.
   FakeDb source;
   TestCaches cache;
   TraceService service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(source)); }, cache.refs());
@@ -1723,7 +1723,7 @@ void test_the_prefill_and_the_facets_are_cached_by_window_and_filters() {
   CHECK_EQ(doc["pairs"][0][2].GetUint64(), uint64_t(1));  // the count is kept for compatibility
   CHECK_EQ(doc["range"][0].GetInt64(), kAStart + 1500);   // the range that was asked, not the aligned one
   CHECK_EQ(doc["scan"]["read_rows_limit"].GetUint64(), kPrefillReadRows);
-  // A tag filter has its own entry, and narrows the pairs.
+  // A tag filter has its own entry, and it narrows the pairs.
   PrefillRequest tagged = prefill;
   tagged.filters.tags.push_back(TagFilter{"span", TagOp::Eq, "k", "v"});
   CHECK(service.prefill(context, trace_host(), tagged));
@@ -1766,7 +1766,7 @@ void test_the_prefill_and_the_facets_are_cached_by_window_and_filters() {
   own.limit = 6;
   CHECK(service.facet_values(context, trace_host(), own));
   CHECK_EQ(db.count("SpanAttributes['k'] = 'v1'"), size_t(0));
-  // A failure of the scan is a 503 with its own code, and is not kept.
+  // A failure of the scan gives 503 with its own code. The code does not keep the failure.
   FakeDb failing;
   TraceService failing_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(failing)); }, cache.refs());
   failing.on("FROM system.columns", {{"SpanAttributes", "Map(String, String)"}, {"ResourceAttributes", "Map(String, String)"}});
@@ -1778,13 +1778,13 @@ void test_the_prefill_and_the_facets_are_cached_by_window_and_filters() {
   CHECK_EQ(failed.error.status, 503);
   CHECK_EQ(failed.error.code, std::string("trace_facet_values_failed"));
   CHECK_EQ(failing.invalidated, 1);
-  // A scope that is not a Map is refused before the scan; one that traces.features turned off too.
+  // A scope that is not a Map is refused before the scan. A scope that traces.features disables is refused too.
   FakeDb plain;
   TestCaches plain_cache;
   TraceService plain_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(plain)); }, plain_cache.refs());
   plain.on("FROM system.columns", {{"SpanAttributes", "String"}, {"ResourceAttributes", "Map(String, String)"}});
   CHECK_EQ(plain_service.facet_values(context, trace_host(), values).error.code, std::string("trace_tag_search_unsupported"));
-  // With no usable map the keys are answered empty, without a scan.
+  // With no usable map, the keys are answered empty, and the code makes no scan.
   FacetRequest none = facets;
   none.aligned_start_ms = kAStart + 60000;
   FakeDb nothing;
@@ -1808,7 +1808,7 @@ void test_the_requests_of_the_discovery_routes() {
   CHECK_EQ(error.code, std::string("invalid_trace_range"));
   CHECK(!parse_prefill(request({{"start_ms", "1000"}, {"end_ms", "2000"}, {"status", "Bad"}}), traces, &prefill, &error));
   CHECK_EQ(error.code, std::string("invalid_trace_filter"));
-  // The prefill does not refuse a filter that traces.features turned off: the pickers stay selectable.
+  // The prefill does not refuse a filter that traces.features disables. The pickers stay selectable.
   TraceSettings no_service = traces;
   no_service.features.service_filter = false;
   CHECK(parse_prefill(request({{"start_ms", "1000"}, {"end_ms", "2000"}, {"service", "api"}}), no_service, &prefill, &error));
@@ -1843,7 +1843,7 @@ void test_trace_statements_are_unchanged() {
   CHECK_EQ(linked_from_sql(traces, kTraceId, "", 1789207197855LL, 1789214397877LL, "1"), std::string(golden::kLinkedFrom));
   CHECK_EQ(linked_from_sql(traces, kTraceId, kSpanId, 1789203600000LL, 1789214400000LL, "1"), std::string(golden::kLinkedFromSpan));
   CHECK_EQ(span_sql(traces, kTraceId, kSpanId, kAnchorNs, "1"), std::string(golden::kSpanOne));
-  // What traces.features turns off is not selected: a constant stands in its place.
+  // The code does not select what traces.features disables. A constant takes its place.
   TraceSettings off = traces;
   off.features.span_attributes = false;
   off.features.events = false;
@@ -1851,7 +1851,7 @@ void test_trace_statements_are_unchanged() {
   const std::string limited = trace_detail_sql(off, kTraceId, "1");
   CHECK(limited.find("toJSONString(SpanAttributes)") == std::string::npos && limited.find("'{}', toJSONString(ResourceAttributes), '[]', '[]', '[]', '[]', '[]', '[]'") != std::string::npos);
   CHECK(span_sql(off, kTraceId, kSpanId, 1, "1").find("'[]', '[]', '[]'") != std::string::npos);
-  // With a restricted allowlist a link names only a span of the trace that the allowlist shows.
+  // With a restricted allowlist, a link names only a span of the trace that the allowlist shows.
   const std::string restricted = linked_from_sql(traces, kTraceId, "", 1000, 2000, "(ServiceName = 'a')");
   CHECK(restricted.find("AS visible_targets") != std::string::npos && restricted.find("has(visible_targets, s)") != std::string::npos);
   CHECK(restricted.find("arrayExists") != std::string::npos);
@@ -1876,9 +1876,9 @@ void test_trace_statements_are_unchanged() {
 void test_a_parent_that_the_allowlist_hides_is_never_named() {
   const std::unordered_set<std::string> shown{"a", "b"};
   CHECK_EQ(std::string(visible_parent("", false)), std::string());
-  // Every service allowed: every parent is named.
+  // Every service is allowed. Every parent is named.
   CHECK_EQ(std::string(visible_parent("p", true)), std::string("p"));
-  // A restricted allowlist: an answer about many traces names none; an answer about one trace names the parents that it shows too.
+  // A restricted allowlist: an answer about many traces names no parent. An answer about one trace names the parents that it shows too.
   CHECK_EQ(std::string(visible_parent("p", false)), std::string());
   CHECK_EQ(std::string(visible_parent("a", false, &shown)), std::string("a"));
   CHECK_EQ(std::string(visible_parent("hidden", false, &shown)), std::string());
@@ -1906,7 +1906,7 @@ void test_the_spans_of_a_trace_hide_the_parents_that_the_allowlist_hides() {
   const auto all = service.trace_detail(context, trace_host(), request);
   CHECK(all);
   CHECK_EQ(all.value->spans.size(), size_t(3));
-  // Every service allowed: a parent that no span of the answer carries is still named (it may be in another window).
+  // Every service is allowed. A parent that no span of the answer carries is still named. It may be in another window.
   CHECK_EQ(all.value->spans[2].parent_span_id, std::string());  // the parents of an answer about one trace are the spans that it shows
   CHECK_EQ(all.value->spans[1].parent_span_id, std::string("s1"));
   rapidjson::Document doc;
@@ -1916,7 +1916,7 @@ void test_the_spans_of_a_trace_hide_the_parents_that_the_allowlist_hides() {
   CHECK_EQ(doc["spans"].Size(), rapidjson::SizeType(3));
   CHECK_EQ(std::string(doc["spans"][0]["span_attributes"].GetString()), std::string("{\"k\":\"v\"}"));
   CHECK_EQ(doc["truncated"].GetBool(), false);
-  // traces.features turns a part of the answer off.
+  // traces.features disables a part of the answer.
   HostSpec off = trace_host();
   off.otel.traces.features.events = false;
   off.otel.traces.features.span_attributes = false;
@@ -1924,7 +1924,7 @@ void test_the_spans_of_a_trace_hide_the_parents_that_the_allowlist_hides() {
   rapidjson::Document less;
   less.Parse(trace_detail_json(*limited.value).c_str());
   CHECK(!less["spans"][0].HasMember("events_name") && !less["spans"][0].HasMember("span_attributes") && less["spans"][0].HasMember("links_span_id"));
-  // More spans than traces.max_spans_per_trace: the answer says that it is cut.
+  // More spans than traces.max_spans_per_trace: the answer states that it is cut.
   HostSpec small = trace_host();
   small.otel.traces.max_spans_per_trace = 2;
   const auto cut = service.trace_detail(context, small, request);
@@ -1945,7 +1945,7 @@ void test_the_detail_of_a_trace_says_what_is_missing() {
   CHECK(!missing);
   CHECK_EQ(missing.error.status, 404);
   CHECK_EQ(missing.error.code, std::string("trace_not_found"));
-  // The detail needs the trace index: after the connection, as the route always did.
+  // The detail needs the trace index. The code reads it after the connection, as the route always did.
   HostSpec no_index = trace_host();
   no_index.otel.traces.trace_index_table.clear();
   const auto unavailable = service.trace_detail(context, no_index, request);
@@ -1981,7 +1981,7 @@ void test_one_span_by_its_key() {
   CHECK_EQ(std::string(doc["span"]["parent_span_id"].GetString()), std::string("parent"));
   CHECK_EQ(doc["span"]["start_ns"].GetInt64(), kAnchorNs);
   CHECK_EQ(std::string(doc["span"]["start_ns_text"].GetString()), std::to_string(kAnchorNs));
-  // A restricted allowlist: an answer about one span cannot know which parents are hidden, so it names none.
+  // A restricted allowlist: an answer about one span cannot know which parents are hidden. It names no parent.
   HostSpec restricted = trace_host();
   restricted.otel.traces.service_allowlist = {"api"};
   const auto hidden = service.span(context, restricted, request);
@@ -2008,12 +2008,12 @@ void test_the_spans_that_link_to_a_trace() {
   LinkedFromRequest request;
   request.source_host_id = "local";
   request.trace_id = kTraceId;
-  // traces.features turns the links off.
+  // traces.features disables the links.
   HostSpec off = trace_host();
   off.otel.traces.features.links = false;
   CHECK_EQ(service.linked_from(context, off, request).error.code, std::string("trace_links_disabled"));
   CHECK(db.sqls.empty());  // nothing is asked, not even a connection
-  // Without a window the trace index gives the bounds of the trace; a trace that it does not know is a 404.
+  // Without a window, the trace index gives the bounds of the trace. A trace that the index does not know gives 404.
   CHECK_EQ(service.linked_from(context, trace_host(), request).error.code, std::string("trace_not_found"));
   db.on("FROM `otel`.`otel_traces_trace_id_ts` WHERE TraceId", {{"3", "1789207200000", "1789210796000"}});
   Rows links;
@@ -2026,7 +2026,7 @@ void test_the_spans_that_link_to_a_trace() {
   const auto answer = service.linked_from(context, trace_host(), request);
   CHECK(answer);
   CHECK_EQ(answer.value->range_source, std::string("trace_index"));
-  // The window of the trace, widened by traces.linked_from_margin_minutes (60) on each side, and the end that the index gave, plus 1 ms.
+  // The window of the trace is widened by traces.linked_from_margin_minutes (60) on each side. The end that the index gave is taken, plus 1 ms.
   CHECK_EQ(answer.value->lo_ms, int64_t(1789207200000LL - 3600000));
   CHECK_EQ(answer.value->hi_ms, int64_t(1789210796001LL + 3600000));
   CHECK(answer.value->truncated);
@@ -2038,7 +2038,7 @@ void test_the_spans_that_link_to_a_trace() {
   CHECK_EQ(doc["limit"].GetUint64(), uint64_t(100));
   CHECK_EQ(std::string(doc["rows"][0]["link_span_ids"].GetString()), "[\"" + kSpanId + "\"]");
   CHECK_EQ(std::string(doc["rows"][0]["parent_span_id"].GetString()), std::string("parent"));  // every service is allowed
-  // A window from the caller is used as it is (and checked).
+  // The code uses a window from the caller as it is, and checks it.
   LinkedFromRequest windowed = request;
   windowed.has_range = true;
   windowed.start_ms = kAStart;
@@ -2050,7 +2050,7 @@ void test_the_spans_that_link_to_a_trace() {
   CHECK_EQ(service.linked_from(context, trace_host(), windowed).error.code, std::string("invalid_trace_range"));
   windowed.end_ms = kAStart + int64_t(8) * 24 * 3600 * 1000;
   CHECK_EQ(service.linked_from(context, trace_host(), windowed).error.message, std::string("Trace time range exceeds traces.max_lookback_minutes."));
-  // Without a trace index the window must be given.
+  // Without a trace index, the caller must give the window.
   HostSpec no_index = trace_host();
   no_index.otel.traces.trace_index_table.clear();
   CHECK_EQ(service.linked_from(context, no_index, request).error.code, std::string("trace_index_unavailable"));
@@ -2077,7 +2077,7 @@ void test_the_context_of_a_span() {
   const auto answer = service.context(context, trace_host(), request);
   CHECK(answer);
   const ContextOutcome& out = answer.value->outcome;
-  // "around" asks for the nearest spans of each side: 2 at or before the anchor, and 1 after (limit 3, the older side gets the odd one).
+  // "around" asks for the nearest spans of each side: 2 at or before the anchor, and 1 after. The limit is 3, and the older side gets the odd one.
   CHECK(out.query_older && out.query_newer);
   CHECK_EQ(out.older.size(), size_t(2));
   CHECK_EQ(out.newer.size(), size_t(1));
@@ -2089,14 +2089,14 @@ void test_the_context_of_a_span() {
   CHECK(!doc.HasParseError());
   CHECK_EQ(doc["has_newer"].GetBool(), true);
   CHECK_EQ(doc["has_older"].GetBool(), true);
-  // The rows: the newer ones (oldest of them first), then the older ones, newest first: one list in time order, newest first.
+  // The rows: the newer ones (oldest of them first), then the older ones (newest first). The result is one list in time order, newest first.
   CHECK_EQ(doc["rows"].Size(), rapidjson::SizeType(3));
   CHECK_EQ(std::string(doc["rows"][0]["span_id"].GetString()), std::string("n1"));
   CHECK_EQ(std::string(doc["rows"][1]["span_id"].GetString()), std::string("o1"));
   CHECK_EQ(std::string(doc["rows"][0]["parent_span_id"].GetString()), std::string("p"));
   CHECK_EQ(std::string(doc["timestamp_ns"].GetString()), std::to_string(kAnchorNs));
   CHECK_EQ(doc["range_ns"].Size(), rapidjson::SizeType(2));
-  // One span on the newer side is wanted when the limit is 1: nothing on that side, and a probe says whether there is more.
+  // When the limit is 1, no span on the newer side is wanted. A probe states whether there is more.
   FakeDb probe;
   TraceService probe_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(probe)); }, cache.refs());
   probe.on("Timestamp <= ", {span_row("t", "o1", "p", "api", kAnchorNs - 1)[0]});
@@ -2164,7 +2164,7 @@ void test_the_filters_of_the_context() {
   ContextRequest bogus = request;
   bogus.filter = "bogus";
   CHECK_EQ(refused(bogus).message, std::string("filter must be any, service, host, pod or attribute."));
-  // traces.features turns the attribute scope off: its own code. Columns that are not Maps: another one.
+  // traces.features disables the attribute scope: its own code. Columns that are not Maps: another code.
   HostSpec off = trace_host();
   off.otel.traces.features.span_attributes = false;
   CHECK_EQ(refused(attribute, off).code, std::string("context_filter_disabled"));
@@ -2209,7 +2209,7 @@ void test_the_requests_of_the_detail_routes() {
   CHECK_EQ(context.filter, std::string("any"));
   CHECK_EQ(context.direction, std::string("around"));
   CHECK_EQ(context.limit, 50);
-  // A window that is not one of the four: refused; present and empty: refused; a text that is not a number keeps the default.
+  // A window that is not one of the four is refused. A window that is present and empty is refused too. A text that is not a number keeps the default.
   CHECK(!parse_context(request({{"timestamp_ns", "1789210797865030093"}, {"window_ms", "5"}}), &context, &error));
   CHECK_EQ(error.code, std::string("invalid_context_window"));
   CHECK(!parse_context(request({{"timestamp_ns", "1789210797865030093"}, {"window_ms", ""}}), &context, &error));
@@ -2260,7 +2260,7 @@ void test_the_span_search_statements_are_unchanged() {
   CHECK(span_columns_sql({SpanAttributeColumn{"span", "server.address"}, SpanAttributeColumn{"resource", "host.name"}}, maps, &columns_sql, &code, &message));
   columns.select = std::string("SELECT ") + kSpanSearchColumns + columns_sql + " FROM " + table;
   CHECK_EQ(span_slice_sql(columns, 1789209900000000001LL, end_ns, "", 5), std::string(golden::kSpansColumns));
-  // After a row key: the keyset; and the copies of a key that a page seam would split.
+  // After a row key: the keyset. The copies of a key that a page seam splits are also kept.
   const std::string keyset = span_keyset_sql(1789210000000000000LL, "span", "trace");
   CHECK_EQ(keyset, std::string(" AND (Timestamp < fromUnixTimestamp64Nano(1789210000000000000) OR (Timestamp = fromUnixTimestamp64Nano(1789210000000000000) "
                                 "AND (SpanId < 'span' OR (SpanId = 'span' AND TraceId < 'trace'))))"));
@@ -2303,7 +2303,7 @@ void test_the_span_cursor() {
   CHECK_EQ(next_span_slice_ns(15 * kNsPerMinute), int64_t(60 * kNsPerMinute));
   CHECK_EQ(next_span_slice_ns(kNsPerMinute), int64_t(15 * kNsPerMinute));
   CHECK_EQ(next_span_slice_ns(1440 * kNsPerMinute), int64_t(1440 * kNsPerMinute));
-  // A slice that fails for its read bound or its time is a guard stop; any other failure is not.
+  // A slice that fails on its read bound or its time is a guard stop. Any other failure is not a guard stop.
   CHECK(slice_guard_error(server_error(158, "Too many rows")));
   CHECK(slice_guard_error(server_error(159, "Timeout exceeded")));
   CHECK(!slice_guard_error(server_error(60, "Unknown table")));
@@ -2326,7 +2326,7 @@ Row span_search_row(const std::string& id, int64_t ts_ns, const std::string& tra
 void test_a_dense_range_answers_from_its_first_slice() {
   FakeDb db;
   const int64_t end_ns = kAEnd * kNsPerMs;
-  // limit 3: the slice has 4 rows (need + 1): the page ends after the third, and the cursor is that row.
+  // limit 3: the slice has 4 rows (need + 1). The page ends after the third row, and the cursor is that row.
   db.on("LIMIT 4", {span_search_row("d", end_ns - 10), span_search_row("c", end_ns - 20), span_search_row("b", end_ns - 30), span_search_row("a", end_ns - 40)});
   const SpanSearchOutcome out = run_span_search(db, search_plan(3));
   CHECK_EQ(out.rows.size(), size_t(3));
@@ -2334,13 +2334,13 @@ void test_a_dense_range_answers_from_its_first_slice() {
   CHECK(out.next.present && out.next.after_key);
   CHECK_EQ(out.next.span_id, std::string("b"));
   CHECK_EQ(out.next.ts_ns, end_ns - 30);
-  // The next page starts with a slice about 4x the time that this page covered (never below a minute, never wider than this slice).
+  // The next page starts with a slice of about 4x the time that this page covered. The slice is never below a minute and never wider than this slice.
   CHECK_EQ(out.next.slice_ns, kNsPerMinute);
   CHECK_EQ(out.slices.size(), size_t(1));
   CHECK_EQ(out.slices[0].hi_ns, end_ns);
   CHECK_EQ(out.slices[0].lo_ns, end_ns - 15 * kNsPerMinute + 1);
   CHECK_EQ(db.sqls.size(), size_t(1));
-  // The next page: after that row, with the width that it asked for.
+  // The next page starts after that row, with the width that it asked for.
   SpanSearchPlan next = search_plan(3);
   next.cursor = out.next;
   FakeDb second;
@@ -2354,7 +2354,7 @@ void test_a_dense_range_answers_from_its_first_slice() {
 void test_copies_of_the_boundary_key_stay_on_one_page() {
   FakeDb db;
   const int64_t end_ns = kAEnd * kNsPerMs;
-  // The third and the fourth row are the same span exported twice: the page takes both, so the strict keyset after it skips none.
+  // The third and the fourth row are the same span, exported twice. The page takes both rows, so the strict keyset after it skips none.
   db.on("LIMIT 4", {span_search_row("d", end_ns - 10), span_search_row("c", end_ns - 20), span_search_row("b", end_ns - 30), span_search_row("b", end_ns - 30)});
   db.on("PREWHERE Timestamp = ", {span_search_row("b", end_ns - 30), span_search_row("b", end_ns - 30), span_search_row("b", end_ns - 30)});
   const SpanSearchOutcome out = run_span_search(db, search_plan(3));
@@ -2368,7 +2368,7 @@ void test_copies_of_the_boundary_key_stay_on_one_page() {
 void test_a_sparse_range_widens_the_slice() {
   FakeDb db;
   const int64_t end_ns = kAEnd * kNsPerMs;
-  // Nothing in the first 15 minutes, one span in the next hour, and the range ends: the page is the whole range.
+  // Nothing is in the first 15 minutes, and one span is in the next hour. The range ends, so the page is the whole range.
   db.on("LIMIT 4", {}, 1);
   db.on("LIMIT 4", {span_search_row("a", end_ns - 40 * kNsPerMinute)}, 1);
   const SpanSearchOutcome out = run_span_search(db, search_plan(3));
@@ -2376,7 +2376,7 @@ void test_a_sparse_range_widens_the_slice() {
   CHECK(out.exhausted && !out.incomplete);
   CHECK_EQ(out.slices.size(), size_t(2));
   CHECK_EQ(out.slices[0].lo_ns, end_ns - 15 * kNsPerMinute + 1);
-  // The second slice starts right under the first, and is 4x as wide, up to the start of the range.
+  // The second slice starts right under the first. It is 4x as wide and ends at the start of the range.
   CHECK_EQ(out.slices[1].hi_ns, end_ns - 15 * kNsPerMinute);
   CHECK_EQ(out.slices[1].lo_ns, kAStart * kNsPerMs);
 }
@@ -2390,7 +2390,7 @@ void test_a_spent_budget_gives_a_resume_point() {
   CHECK(out.incomplete && !out.exhausted);
   CHECK_EQ(out.stop_reason, std::string("time_budget"));
   CHECK(out.next.present && !out.next.after_key);
-  // Strictly before the slice that was read, and the width that the next page starts with.
+  // Strictly before the slice that the code read, and the width that the next page starts with.
   CHECK_EQ(out.next.ts_ns, plan.end_ns - 15 * kNsPerMinute);
   CHECK_EQ(out.next.slice_ns, 15 * kNsPerMinute);
   CHECK_EQ(db.sqls.size(), size_t(1));
@@ -2398,7 +2398,7 @@ void test_a_spent_budget_gives_a_resume_point() {
 
 void test_a_slice_that_fails_a_guard_is_retried_narrower_then_a_resume_point() {
   const int64_t end_ns = kAEnd * kNsPerMs;
-  // The first slice of the page is too heavy: it is read again, narrower (an eighth of its width).
+  // The first slice of the page is too heavy. The code reads it again, narrower (an eighth of its width).
   FakeDb db;
   db.fail_on("LIMIT 4", [] { throw server_error(159, "Timeout exceeded"); }, 1);
   db.on("LIMIT 4", {span_search_row("a", end_ns - 10)});
@@ -2417,7 +2417,7 @@ void test_a_slice_that_fails_a_guard_is_retried_narrower_then_a_resume_point() {
   }
   CHECK(thrown);
   CHECK_EQ(heavy.sqls.size(), size_t(2));
-  // A guard after answered slices is a resume point with a narrower slice, and says which guard.
+  // A guard after answered slices is a resume point with a narrower slice. The answer states which guard stopped the read.
   FakeDb later;
   later.on("LIMIT 4", {}, 1);
   later.fail_on("LIMIT 4", [] { throw server_error(158, "Too many rows to read"); });
@@ -2467,7 +2467,7 @@ void test_the_span_search_service_and_its_request() {
   parsed.source_host_id = "local";
   const auto answer = service.spans(context, trace_host(), parsed);
   CHECK(answer);
-  // The service filter and the duration go to PREWHERE with the allowlist; the two attribute columns follow the eleven.
+  // The service filter and the duration go to PREWHERE with the allowlist. The two attribute columns follow the eleven columns.
   const std::string& sql = db.sqls.back();
   CHECK(sql.find("PREWHERE Timestamp >= ") != std::string::npos);
   CHECK(sql.find(" AND 1 AND ServiceName = 'api' AND Duration >= 1500000 WHERE 1 ORDER BY") != std::string::npos);
@@ -2493,7 +2493,7 @@ void test_the_span_search_service_and_its_request() {
   tagged.filters.tags.push_back(TagFilter{"span", TagOp::Eq, "k", "v"});
   CHECK_EQ(plain_service.spans(context, trace_host(), tagged).error.code, std::string("trace_tag_search_unsupported"));
   CHECK_EQ(plain.count("LIMIT 3"), size_t(0));
-  // A failure of the scan: the code of the route, and the connection is not lent again.
+  // A failure of the scan gives the code of the route. The connection is not returned to the pool.
   FakeDb failing;
   TraceService failing_service([&](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(failing)); }, cache.refs());
   failing.fail_on("LIMIT 3", [] { throw server_error(60, "Unknown table"); });
@@ -2540,7 +2540,7 @@ void test_the_span_search_request() {
   CHECK_EQ(error.message, std::string("At most 16 span kinds are accepted."));
   CHECK(!parse_spans(request({{"start_ms", "1000"}, {"end_ms", "9000"}, {"columns", ","}, {"columns", "span:"}}), traces, &parsed, &error));
   CHECK_EQ(error.code, std::string("invalid_trace_columns"));
-  // A cursor of this range; one that is past its end, or is not a cursor, is refused.
+  // A cursor of this range. A cursor that is past its end, or that is not a cursor, is refused.
   SpanCursor cursor;
   cursor.ts_ns = 5000 * kNsPerMs;
   cursor.slice_ns = kNsPerMinute;
@@ -2580,7 +2580,7 @@ void test_the_budget_of_a_route_narrows_the_bounds_of_the_request() {
     CHECK(scope.remaining_ms() > 40 * 1000 && scope.remaining_ms() <= 45 * 1000);
   }
   CHECK(ChQueryScope::current() == nullptr);  // the scope of the route ends with it
-  // A bound that the request has narrower stays: the budget never raises one.
+  // A bound that the request sets narrower stays as it is. The budget never raises a bound.
   context.limits.deadline = clock::now() + std::chrono::seconds(10);
   context.limits.max_rows_to_read = 1000;
   {
@@ -2589,7 +2589,7 @@ void test_the_budget_of_a_route_narrows_the_bounds_of_the_request() {
     CHECK_EQ(ChQueryScope::current()->max_rows_to_read, uint64_t(1000));
     CHECK(scope.remaining_ms() <= 10 * 1000);
   }
-  // No bound at all (a call of MCP has no deadline): the budget gives one. A budget of 0 leaves the request's bounds alone.
+  // No bound at all (a call of MCP has no deadline): the budget gives one. A budget of 0 leaves the bounds of the request unchanged.
   RequestContext open;
   {
     BudgetScope scope(open, kSearchBudget);
@@ -2601,19 +2601,19 @@ void test_the_budget_of_a_route_narrows_the_bounds_of_the_request() {
     CHECK_EQ(scope.remaining_ms(), std::numeric_limits<int64_t>::max());
     CHECK_EQ(ChQueryScope::current()->max_rows_to_read, uint64_t(0));
   }
-  // A cap of the budget sets how it fails when it is reached: the page's read cap fails, it never cuts the answer.
+  // A cap of the budget sets how it fails when the cap is reached. The read cap of the page fails the request. It never cuts the answer.
   {
     BudgetScope scope(open, kTraceDetailBudget);
     CHECK_EQ(ChQueryScope::current()->read_overflow_mode, std::string("throw"));
   }
-  // The route reaches the statements: a statement after the deadline fails at once with the timeout of ClickHouse.
+  // The route reaches the statements. A statement after the deadline fails at once with the timeout of ClickHouse.
   RequestContext late;
   late.limits.deadline = clock::now() - std::chrono::seconds(1);
   BudgetScope scope(late, RouteBudget{1000, 0});
   CHECK_EQ(scope.remaining_ms(), int64_t(0));
 }
 
-// A search through a filter that few traces match: the index is walked in pages of `candidate_cap` traces.
+// A search through a filter that few traces match: the code walks the index in pages of `candidate_cap` traces.
 Rows hits_of(const std::string& prefix, int count, int64_t first_ns) {
   Rows rows;
   for (int i = 0; i < count; ++i) rows.push_back({prefix + std::to_string(i), std::to_string(first_ns - static_cast<int64_t>(i) * 1000000)});
@@ -2635,7 +2635,7 @@ void test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones(
   CHECK_EQ(out.fallback_reason, std::string("index_scan_cap"));
   CHECK(!out.partial);
   CHECK_EQ(out.rows.size(), size_t(5));
-  // 50 traces were tested (one page of the cap), 2 of them matched, and 3 more are wanted.
+  // The code tests 50 traces (one page of the cap). Two of them match, and 3 more are wanted.
   size_t rank_at = 0, summary_at = 0;
   for (size_t i = 0; i < db.sqls.size(); ++i) {
     if (db.sqls[i].find("NOT IN {excluded") != std::string::npos) rank_at = i;
@@ -2643,8 +2643,8 @@ void test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones(
   }
   CHECK(rank_at > 0 && summary_at > rank_at);
   const std::string& rank = db.sqls[rank_at];
-  // The ranking reads the spans at or before the oldest trace that was tested (the 50th hit), never the traces that were selected, and finds the
-  // traces that match with the candidate_ids of a CTE (the broad form would miss a trace whose matching span is after the bound).
+  // The rank step reads the spans at or before the oldest trace that the code tested (the 50th hit). It never reads the traces that were selected.
+  // The rank step finds the traces that match with the candidate_ids of a CTE. The broad form misses a trace whose span that matches lies after the bound.
   CHECK(rank.find("Timestamp <= fromUnixTimestamp64Nano(" + std::to_string(newest - 49 * 1000000)) != std::string::npos);
   CHECK(rank.find("WITH candidate_ids AS (") == 0);
   CHECK(rank.find("HAVING countIf") == std::string::npos);
@@ -2652,9 +2652,9 @@ void test_the_scan_cap_keeps_the_traces_found_and_completes_with_the_older_ones(
   CHECK_EQ(db.params[rank_at].size(), size_t(1));
   CHECK_EQ(db.params[rank_at][0].first, std::string("excluded"));
   CHECK_EQ(db.params[rank_at][0].second, std::string("['h3', 'h7']"));
-  // The summary is the one of the index (the traces are of two kinds): the ids of both.
+  // The summary is the one of the index. The traces are of two kinds, so the summary has the ids of both.
   CHECK_EQ(db.params[summary_at][0].second, std::string("['h3', 'h7', 'c1', 'c2', 'c3']"));
-  // Nothing is kept when nothing matched: the whole window is ranked by the spans, as before.
+  // The code keeps nothing when no trace matches. The whole window is ranked by the spans, as before.
   FakeDb none;
   none.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, newest), 1);
   none.on("argMinIf(SpanName", summary_rows({"w1"}));
@@ -2673,7 +2673,7 @@ void test_a_search_that_runs_out_of_time_answers_with_what_it_found() {
   db.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, kAEnd * kNsPerMs), 1);
   db.on("AS batch_bounds", {{"h1"}});
   db.on("AS trace_bounds", summary_rows({"h1"}));
-  // The time of the route is enough for the first page of the index, then short (less than the reserve of the summary).
+  // The time of the route is enough for the first page of the index. Then the time is short, and it is less than the reserve of the summary.
   int calls = 0;
   SearchBudget budget;
   budget.remaining_ms = [&calls] { return ++calls <= 1 ? int64_t(30000) : int64_t(2000); };
@@ -2684,9 +2684,9 @@ void test_a_search_that_runs_out_of_time_answers_with_what_it_found() {
   CHECK_EQ(out.rank_by, std::string("newest_index_row"));
   CHECK_EQ(out.rows.size(), size_t(1));
   CHECK_EQ(db.count("AS batch_bounds"), size_t(1));  // one page was tested
-  // The traces that were found are summarized: the budget keeps the time for it.
+  // The code summarizes the traces that it found. The budget keeps the time for the summary.
   CHECK_EQ(db.count("AS trace_bounds"), size_t(1));
-  // The scan cap with traces to keep and no time for the completion: the traces that were found are the answer, partial.
+  // The scan cap has traces to keep, and there is no time for the completion. The traces that the code found are the answer, and the answer is partial.
   FakeDb capped;
   capped.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, kAEnd * kNsPerMs), 1);
   capped.on("AS batch_bounds", {{"h1"}});
@@ -2701,7 +2701,7 @@ void test_a_search_that_runs_out_of_time_answers_with_what_it_found() {
   CHECK_EQ(kept.rank_by, std::string("newest_index_row"));
   CHECK_EQ(capped.count("NOT IN {excluded"), size_t(0));
   CHECK_EQ(kept.rows.size(), size_t(1));
-  // The budget is checked before each page: a route with no time left tests nothing and answers an empty partial list.
+  // The budget is checked before each page. A route with no time left tests nothing and answers an empty partial list.
   FakeDb none;
   none.on("GROUP BY TraceId LIMIT 20001", hits_of("h", 20000, kAEnd * kNsPerMs));
   SearchBudget spent;
@@ -2709,7 +2709,7 @@ void test_a_search_that_runs_out_of_time_answers_with_what_it_found() {
   const SearchOutcome empty = search_traces(none, service, true, 5, spent);
   CHECK(empty.partial && empty.rows.empty());
   CHECK_EQ(none.count("AS batch_bounds"), size_t(0));
-  // The JSON says that the answer is partial, and why; an answer that is not partial says nothing.
+  // The JSON states that the answer is partial, and why. An answer that is not partial states nothing.
   SearchAnswer answer;
   answer.source_host_id = "local";
   answer.outcome = out;
@@ -2725,7 +2725,7 @@ void test_a_search_that_runs_out_of_time_answers_with_what_it_found() {
 }
 
 void test_the_ranking_of_the_older_part_is_exact_for_a_wide_window() {
-  // A window of a day: the newest 1/16 of the older part first, with the probe of its traces, then the whole older part.
+  // A window of a day: the code reads the newest 1/16 of the older part first, with the probe of its traces. Then it reads the whole older part.
   FakeDb db;
   const auto wide = scope_of(kCStart, kCEnd, kServiceFilter);
   RankBounds bounds;
@@ -2736,7 +2736,7 @@ void test_the_ranking_of_the_older_part_is_exact_for_a_wide_window() {
   db.on("ORDER BY min(Timestamp) DESC LIMIT 2", {{"a", "1789250000000000000", "0"}, {"d", "1789240000000000000", "0"}});
   const auto ranked = rank_traces_by_start(db, wide, false, 2, bounds);
   CHECK_EQ(ranked.size(), size_t(2));
-  // The slice is the newest 1/16 of the older part (not of the window), every statement carries the bound and the exclusion.
+  // The slice is the newest 1/16 of the older part, not of the window. Every statement contains the bound and the exclusion.
   const int64_t range = bounds.upper_ns - kCStart * kNsPerMs;
   CHECK(db.sqls[0].find("Timestamp >= fromUnixTimestamp64Nano(" + std::to_string(bounds.upper_ns - range / 16) + ")") != std::string::npos);
   // The first slice, the second (empty, so the window widens), and the whole older part.
@@ -2746,10 +2746,10 @@ void test_the_ranking_of_the_older_part_is_exact_for_a_wide_window() {
     CHECK(db.sqls[i].find("TraceId NOT IN {excluded:Array(String)}") != std::string::npos);
     CHECK_EQ(db.params[i].size(), size_t(1));
   }
-  // The probe asks whether a trace has a span before the slice, wherever it ends (not bounded above, not excluded).
+  // The probe asks whether a trace has a span before the slice, wherever that span ends. The probe is not bounded above and not excluded.
   CHECK(db.sqls[1].find("Timestamp < fromUnixTimestamp64Nano(") != std::string::npos);
   CHECK(db.sqls[1].find("excluded") == std::string::npos);
-  // No bound: the statement is the one of before (the goldens of the search statements are unchanged).
+  // No bound: the statement is the same as before. The goldens of the search statements are unchanged.
   FakeDb plain;
   plain.on("ORDER BY min(Timestamp) DESC LIMIT 3", {});
   rank_traces_by_start(plain, scope_of(kAStart, kAEnd), false, 3);

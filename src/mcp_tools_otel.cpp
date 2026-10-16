@@ -13,9 +13,9 @@ namespace mcp_tools {
 
 // ---- observability --------------------------------------------------------------------------------------
 //
-// Six simple tools on the OpenTelemetry tables of the ClickHouse exporter (traces, logs, metrics). ChDash
-// writes the SQL, so the client needs none; every statement is bounded by a time window and a row limit, and
-// reads only the tables that the key's data scope allows.
+// Six simple tools read the OpenTelemetry tables of the ClickHouse exporter (traces, logs, metrics).
+// ChDash writes the SQL, so the client needs none. Every statement is bounded by a time window and a row limit.
+// Each statement reads only the tables that the key's data scope allows.
 
 namespace {
 
@@ -44,8 +44,9 @@ void need_metrics(const Ctx& ctx) {
   if (!obs(ctx).metrics) fail("not_enabled", "metrics are not enabled in the ChDash configuration (metrics { enabled = true })");
 }
 
-// The services that the pages show (traces.service_allowlist, the allowlist of the three signals): ANDed into the WHERE of
-// every query of these tools. They read with the system user, so a key never reads more than the pages show.
+// The services that the pages show are set by traces.service_allowlist, the allowlist of the three signals.
+// The allowlist is ANDed into the WHERE clause of every query of these tools. The tools read with the system user.
+// So a key never reads more than the pages show.
 std::string visible_services(const Ctx& ctx) { return otel::service_allowlist_predicate(obs(ctx).service_allowlist); }
 
 // Minutes back from now, within what the configuration allows.
@@ -68,8 +69,14 @@ bool hex_id(const std::string& text) {
   });
 }
 
-// An object for each row, its fields named by `names` (the SQL columns come in the same order).
-void write_records(Writer& w, const char* key, const McpDbResult& res, const std::vector<const char*>& names, size_t keep) {
+// An object for each row, with its fields named by `names`. The SQL columns come in the same order.
+// The fields of `untrusted` are text of the telemetry (a service, a span name, a log line, a metric label).
+// They go in the object `untrusted` of the row (contract 5.2).
+// A field whose name ends with _truncated is a flag. It is written next to `untrusted`, and only when it is true.
+void write_records(Writer& w, const char* key, const McpDbResult& res, const std::vector<const char*>& names, size_t keep,
+                   const std::vector<std::string>& untrusted) {
+  const auto is_untrusted = [&](const char* name) { return std::find(untrusted.begin(), untrusted.end(), name) != untrusted.end(); };
+  const auto is_flag = [](std::string_view name) { return name.size() > 10 && name.substr(name.size() - 10) == "_truncated"; };
   w.Key(key);
   w.StartArray();
   size_t written = 0;
@@ -77,8 +84,26 @@ void write_records(Writer& w, const char* key, const McpDbResult& res, const std
     if (written++ >= keep) break;
     w.StartObject();
     for (size_t i = 0; i < names.size() && i < row.size(); ++i) {
+      if (is_untrusted(names[i])) continue;
+      if (is_flag(names[i])) {
+        if (row[i] == "1" || row[i] == "true") {
+          w.Key(names[i]);
+          w.Bool(true);
+        }
+        continue;
+      }
       w.Key(names[i]);
       put_cell(w, row[i]);
+    }
+    if (!untrusted.empty()) {
+      w.Key("untrusted");
+      w.StartObject();
+      for (size_t i = 0; i < names.size() && i < row.size(); ++i) {
+        if (!is_untrusted(names[i])) continue;
+        w.Key(names[i]);
+        put_cell(w, row[i]);
+      }
+      w.EndObject();
     }
     w.EndObject();
   }
@@ -87,7 +112,7 @@ void write_records(Writer& w, const char* key, const McpDbResult& res, const std
 
 // The answer of a list: the rows kept, how many, and whether more existed than the limit.
 std::string finish_records(Ctx& ctx, const McpDbResult& res, const char* key, const std::vector<const char*>& names, int64_t limit,
-                           const std::function<void(Writer&)>& extra = nullptr) {
+                           const std::function<void(Writer&)>& extra = nullptr, const std::vector<std::string>& untrusted = {}) {
   const size_t keep = static_cast<size_t>(limit);
   const bool more = res.rows.size() > keep || res.truncated;
   rapidjson::StringBuffer sb;
@@ -95,7 +120,7 @@ std::string finish_records(Ctx& ctx, const McpDbResult& res, const char* key, co
   w.StartObject();
   w.Key("host"); put(w, ctx.host);
   if (extra) extra(w);
-  write_records(w, key, res, names, keep);
+  write_records(w, key, res, names, keep, untrusted);
   w.Key("count"); w.Uint64(std::min(res.rows.size(), keep));
   w.Key("truncated"); w.Bool(more);
   w.Key("elapsed_ms"); w.Int64(res.elapsed_ms);
@@ -133,7 +158,7 @@ std::string tool_list_services(Ctx& ctx, const rapidjson::Value& args) {
   return finish_records(ctx, res, "services", names, limit, [&](Writer& w) {
     w.Key("signal"); put(w, signal);
     w.Key("since_minutes"); w.Int64(minutes);
-  });
+  }, {"service"});
 }
 
 std::string tool_search_traces(Ctx& ctx, const rapidjson::Value& args) {
@@ -172,7 +197,8 @@ std::string tool_search_traces(Ctx& ctx, const rapidjson::Value& args) {
                         [&](Writer& w) {
                           w.Key("since_minutes"); w.Int64(minutes);
                           w.Key("order"); put(w, order);
-                        });
+                        },
+                        {"service", "operation"});
 }
 
 std::string tool_get_trace(Ctx& ctx, const rapidjson::Value& args) {
@@ -183,7 +209,7 @@ std::string tool_get_trace(Ctx& ctx, const rapidjson::Value& args) {
   if (!hex_id(trace_id)) fail("invalid_argument", "trace_id must be 32 hexadecimal characters");
   const std::string table = qualified(obs(ctx).traces_database, obs(ctx).traces_table);
 
-  // The window of the trace: from its index when the configuration has one, else the whole lookback.
+  // The window of the trace comes from its index, when the configuration has one. Otherwise, it is the whole lookback.
   std::string range = window("Timestamp", std::max<int64_t>(1, obs(ctx).max_lookback_minutes));
   if (!obs(ctx).traces_index_table.empty()) {
     try {
@@ -207,7 +233,7 @@ std::string tool_get_trace(Ctx& ctx, const rapidjson::Value& args) {
       ctx.system_limits);
   if (res.rows.empty()) fail("trace_not_found", "no span of the trace " + trace_id + " in the last " + std::to_string(obs(ctx).max_lookback_minutes) + " minutes");
   return finish_records(ctx, res, "spans", {"span_id", "parent_span_id", "service", "operation", "kind", "started", "duration_ms", "status", "status_message"}, limit,
-                        [&](Writer& w) { w.Key("trace_id"); put(w, trace_id); });
+                        [&](Writer& w) { w.Key("trace_id"); put(w, trace_id); }, {"service", "operation", "status_message"});
 }
 
 std::string tool_search_logs(Ctx& ctx, const rapidjson::Value& args) {
@@ -237,11 +263,12 @@ std::string tool_search_logs(Ctx& ctx, const rapidjson::Value& args) {
     where += " AND TraceId = " + sql::quote_string(*trace);
   }
   const McpDbResult res = run(ctx,
-      "SELECT toString(Timestamp) AS time, ServiceName, SeverityText, SeverityNumber, TraceId, SpanId, substringUTF8(Body, 1, 2000) AS message FROM " +
+      "SELECT toString(Timestamp) AS time, ServiceName, SeverityText, SeverityNumber, TraceId, SpanId, substringUTF8(Body, 1, 2000) AS message, "
+      "lengthUTF8(Body) > 2000 AS message_truncated FROM " +
           qualified(obs(ctx).logs_database, obs(ctx).logs_table) + " WHERE " + where + " ORDER BY Timestamp DESC LIMIT " + std::to_string(limit + 1),
       ctx.system_limits);
-  return finish_records(ctx, res, "records", {"time", "service", "severity", "severity_number", "trace_id", "span_id", "message"}, limit,
-                        [&](Writer& w) { w.Key("since_minutes"); w.Int64(minutes); });
+  return finish_records(ctx, res, "records", {"time", "service", "severity", "severity_number", "trace_id", "span_id", "message", "message_truncated"},
+                        limit, [&](Writer& w) { w.Key("since_minutes"); w.Int64(minutes); }, {"service", "message"});
 }
 
 std::string tool_list_metrics(Ctx& ctx, const rapidjson::Value& args) {
@@ -265,7 +292,7 @@ std::string tool_list_metrics(Ctx& ctx, const rapidjson::Value& args) {
   const int64_t limit = ctx.max_rows;
   const McpDbResult res = run(ctx, "SELECT * FROM (" + sql + ") ORDER BY MetricName, kind LIMIT " + std::to_string(limit + 1), ctx.system_limits);
   return finish_records(ctx, res, "metrics", {"kind", "name", "unit", "description"}, limit,
-                        [&](Writer& w) { w.Key("since_minutes"); w.Int64(minutes); });
+                        [&](Writer& w) { w.Key("since_minutes"); w.Int64(minutes); }, {"name", "unit", "description"});
 }
 
 std::string tool_query_metric(Ctx& ctx, const rapidjson::Value& args) {

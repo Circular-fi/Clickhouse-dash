@@ -1,7 +1,7 @@
 #pragma once
 
-// The scope of the Explorer graph as the code before the split wrote it (src/api_explorer.cpp), kept verbatim as the reference that the native
-// tests compare the new implementation with (explorer_graph_scope.cpp) on graphs that they generate.
+// This is the scope of the Explorer graph, as the code before the split wrote it (src/api_explorer.cpp). It is kept verbatim as the reference that the native
+// tests compare with the new implementation (explorer_graph_scope.cpp). The tests use graphs that they generate.
 
 #include "explorer_graph.hpp"
 
@@ -25,7 +25,7 @@ struct ExplorerGraphRequestScope {
   bool physical = false;
   bool include_system = false;
   bool include_non_storing = true;
-  // Per-node one-hop expansions on top of the global depth: (upstream, id).
+  // Per-node one-hop expansions go on top of the global depth: (upstream, id).
   std::vector<std::pair<bool, std::string>> expansions;
 };
 
@@ -89,13 +89,13 @@ ExplorerGraph scope_graph(
     return scope.include_system || !is_system_database(node.database);
   };
 
-  // Directed logical adjacency, filled only for a focused Lineage scope.
+  // This is the directed logical adjacency. It is filled only for a focused Lineage scope.
   std::unordered_map<std::string, std::vector<std::string>> downstream;
   std::unordered_map<std::string, std::vector<std::string>> upstream;
   struct SemanticWalk { std::vector<std::string> neighbors; std::vector<std::string> intermediates; };
-  // One semantic hop from `start` in one direction. When non-storing objects
-  // are hidden, View/MV/Buffer nodes cost zero hops (same rule as depth) and
-  // are walked through; they are reported separately as intermediates.
+  // This is one semantic hop from `start` in one direction. When non-storing objects
+  // are hidden, View/MV/Buffer nodes cost zero hops (same rule as depth).
+  // The walk goes through them. They are reported separately as intermediates.
   auto semantic_walk = [&](const std::string& start, bool up) {
     SemanticWalk walk;
     const auto& links = up ? upstream : downstream;
@@ -140,10 +140,10 @@ ExplorerGraph scope_graph(
           upstream[edge.to].push_back(edge.from);
         }
 
-        // Depth is a user-visible semantic hop count. When non-storing objects
-        // are hidden, View/MV/Buffer intermediates cost zero hops so:
-        // table -> view -> mv -> table is depth 1, not depth 3. We still ship
-        // those hidden intermediates inside the scoped payload so the browser
+        // Depth is a semantic hop count that the user sees. When non-storing objects
+        // are hidden, View, MV and Buffer intermediates cost zero hops. For example:
+        // table -> view -> mv -> table is depth 1, not depth 3. The code still ships
+        // those hidden intermediates inside the scoped payload, so the browser
         // can contract them into the correct typed edge.
         std::unordered_map<std::string, int> distance;
         std::deque<std::string> queue;
@@ -171,8 +171,8 @@ ExplorerGraph scope_graph(
         for (const auto& [id, _] : distance) included.insert(id);
 
         // Per-node expansions add one semantic hop in one direction from an
-        // anchor that is itself shown. Applied to a fixed point so a chain of
-        // expansions (expand A, then the node it revealed) is order-free; an
+        // anchor that is itself shown. The rule is applied to a fixed point, so a chain of
+        // expansions (expand A, then the node it revealed) is order-free. An
         // anchor that is no longer shown expands nothing.
         if (!scope.expansions.empty()) {
           bool grew = true;
@@ -180,7 +180,7 @@ ExplorerGraph scope_graph(
             grew = false;
             for (const auto& [up, anchor] : scope.expansions) {
               if (!included.count(anchor)) continue;
-              // Hidden intermediates on the way are shipped for contraction.
+              // The hidden intermediates on the way are shipped for contraction.
               const auto walk = semantic_walk(anchor, up);
               for (const auto& id : walk.neighbors) if (included.insert(id).second) grew = true;
               for (const auto& id : walk.intermediates) if (included.insert(id).second) grew = true;
@@ -189,7 +189,7 @@ ExplorerGraph scope_graph(
         }
         focused_lineage = true;
       } else if (scope.physical && storage_enabled) {
-        // Storage mode needs only the focused table, Buffer routes that feed or
+        // Storage mode needs only the focused table. It also needs the Buffer routes that feed or
         // drain it, and their physical descendants. Do not ship the unrelated
         // database-wide physical topology to the browser.
         std::unordered_set<std::string> logical_roots{scope.focus_id};
@@ -236,8 +236,8 @@ ExplorerGraph scope_graph(
   out.nodes.reserve(included.size());
   for (const auto& node : graph.nodes) if (included.count(node.id)) out.nodes.push_back(node);
   if (focused_lineage) {
-    // Lets the browser draw a per-node "+N" only where something is left to
-    // expand, without shipping the next ring.
+    // This lets the browser draw a per-node "+N" only where something is left to
+    // expand. The browser does not receive the next ring.
     for (auto& node : out.nodes) {
       if (node.layer != "logical") continue;
       for (const bool up : {true, false}) {

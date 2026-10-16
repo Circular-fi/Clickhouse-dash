@@ -1,29 +1,34 @@
 #pragma once
 
-// The one SQL lexer of the backend. Every file that has to tell the code of a statement from its comments, its
-// strings and its names (the KILL QUERY policy, the position of an error, the check of the MCP SQL, the lineage
-// of a view, the SQL formatter) reads the statement through this file. The rules are the ones of the lexer of
-// ClickHouse (checked on 26.7):
+// This is the one SQL lexer of the backend.
+// Every file that must tell the code of a statement from its comments, its strings and its names reads the statement through this file.
+// Examples are the KILL QUERY policy, the position of an error, the check of the MCP SQL, the lineage of a view and the SQL formatter.
+// The rules are the rules of the lexer of ClickHouse (checked on 26.7):
 //
-//  - A blank is a space, a tab, a newline, a form feed or a vertical tab, and also one of the Unicode spaces
-//    below (a statement with U+00A0 between KILL and QUERY is a KILL QUERY for the server).
-//  - A line comment starts with "--", or with "#" followed by a blank or "!", and ends before the line break.
-//    A "#" followed by anything else is not a token of the language: the server refuses the statement.
-//  - A block comment starts with "/*" and ends with "*/". It nests: "/* a /* b */ c */" is one comment.
-//  - 'text', "name" and `name` end at the same quote mark. A backslash escapes the next byte, and a doubled
-//    quote mark is one quote mark of the text.
-//  - $tag$ ... $tag$ is a text without escapes ($$ ... $$ with an empty tag). The tag is made of letters,
-//    digits and underscores and does not start with a digit.
-//  - A word is made of letters, digits, "_" and "$" (it may start with "$" when no heredoc starts there). The server
-//    refuses a non-ASCII letter in a bare name; the lexer keeps such bytes in the word, so a position stays where
-//    the user wrote it.
+//  - A blank is a space, a tab, a newline, a form feed or a vertical tab.
+//    A blank also includes one of the Unicode spaces below.
+//    For example, a statement with U+00A0 between KILL and QUERY is a KILL QUERY for the server.
+//  - A line comment starts with "--". It also starts with "#" followed by a blank or "!".
+//    It ends before the line break.
+//    A "#" followed by anything else is not a token of the language. The server refuses the statement.
+//  - A block comment starts with "/*" and ends with "*/".
+//    It nests: "/* a /* b */ c */" is one comment.
+//  - 'text', "name" and `name` end at the same quote mark.
+//    A backslash escapes the next byte. A doubled quote mark is one quote mark of the text.
+//  - $tag$ ... $tag$ is a text without escapes. $$ ... $$ is a text without escapes with an empty tag.
+//    The tag is made of letters, digits and underscores. It does not start with a digit.
+//  - A word is made of letters, digits, "_" and "$".
+//    A word can start with "$" when no heredoc starts there.
+//    The server refuses a non-ASCII letter in a bare name.
+//    The lexer keeps such bytes in the word. So a position stays where the user wrote it.
 //
-// Positions are byte offsets in the text. utf16_offset() converts one to a UTF-16 unit, which is what the editor of
-// the page counts.
+// Positions are byte offsets in the text.
+// utf16_offset() converts one to a UTF-16 unit, which is what the editor of the page counts.
 //
-// The same rules are in src/wasm/highlight.c and src/wasm/sqlscan.c, which read UTF-16 and follow the JavaScript of
-// the page. tests/native/sql_test.cpp runs the highlighter kernel and this lexer on one corpus and compares what
-// they call a string, a comment and a number.
+// The same rules are in src/wasm/highlight.c and src/wasm/sqlscan.c.
+// These files read UTF-16 and follow the JavaScript of the page.
+// tests/native/sql_test.cpp runs the highlighter kernel and this lexer on one corpus.
+// The test compares what they call a string, a comment and a number.
 
 #include <cstddef>
 #include <cstdint>
@@ -51,15 +56,15 @@ struct Token {
   TokenKind kind = TokenKind::Unknown;
   size_t begin = 0;
   size_t end = 0;
-  // false for a comment, a quoted name, a string or a heredoc that the text ends before it closes.
+  // This value is false when the text ends before a comment, a quoted name, a string or a heredoc closes.
   bool closed = true;
   std::string_view text(std::string_view source) const { return source.substr(begin, end - begin); }
 };
 
-// ---- the pieces. Each one takes the position of the first byte of the piece and returns the position after it. ----
+// ---- The pieces. Each piece takes the position of its first byte and returns the position after it. ----
 
-// The length in bytes of the Unicode space at `pos` (U+0085, U+00A0, U+180E, U+2000..U+200D, U+2028, U+2029, U+202F,
-// U+205F, U+2060, U+3000, U+FEFF), or 0.
+// Return the length in bytes of the Unicode space at `pos`, or 0.
+// The Unicode spaces are U+0085, U+00A0, U+180E, U+2000..U+200D, U+2028, U+2029, U+202F, U+205F, U+2060, U+3000 and U+FEFF.
 inline size_t unicode_space_length(std::string_view s, size_t pos) {
   const auto at = [&](size_t i) { return pos + i < s.size() ? static_cast<unsigned char>(s[pos + i]) : 0u; };
   const unsigned c0 = at(0), c1 = at(1), c2 = at(2);
@@ -72,14 +77,15 @@ inline size_t unicode_space_length(std::string_view s, size_t pos) {
   return 0;
 }
 
-// The length of the ASCII blank at `pos` (1), or of the Unicode space there, or 0.
+// Return 1 for an ASCII blank at `pos`, or the length of a Unicode space there.
+// Otherwise return 0.
 inline size_t blank_length(std::string_view s, size_t pos) {
   const char c = s[pos];
   if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') return 1;
   return static_cast<unsigned char>(c) >= 0x80 ? unicode_space_length(s, pos) : 0;
 }
 
-// True when a line comment starts at `pos`.
+// Return true when a line comment starts at `pos`.
 inline bool starts_line_comment(std::string_view s, size_t pos) {
   if (pos >= s.size()) return false;
   if (s[pos] == '-') return pos + 1 < s.size() && s[pos + 1] == '-';
@@ -91,13 +97,15 @@ inline bool starts_block_comment(std::string_view s, size_t pos) {
   return pos + 1 < s.size() && s[pos] == '/' && s[pos + 1] == '*';
 }
 
-// The end of the line comment at `pos`: the position of the line break, or the end of the text.
+// Return the end of the line comment at `pos`.
+// This is the position of the line break, or the end of the text.
 inline size_t line_comment_end(std::string_view s, size_t pos) {
   while (pos < s.size() && s[pos] != '\n' && s[pos] != '\r') ++pos;
   return pos;
 }
 
-// The end of the block comment at `pos` (nested). `*closed` tells whether its last "*/" was found.
+// Return the end of the block comment at `pos`. The comment can nest.
+// Set `*closed` to tell whether the last "*/" was found.
 inline size_t block_comment_end(std::string_view s, size_t pos, bool* closed = nullptr) {
   size_t depth = 0;
   while (pos < s.size()) {
@@ -118,7 +126,8 @@ inline size_t block_comment_end(std::string_view s, size_t pos, bool* closed = n
   return s.size();
 }
 
-// The end of the quoted text at `pos`, which holds the opening quote mark (' " or `).
+// Return the end of the quoted text at `pos`.
+// The text at `pos` starts with the opening quote mark: ', " or `.
 inline size_t quoted_end(std::string_view s, size_t pos, bool* closed = nullptr) {
   const char quote = s[pos++];
   while (pos < s.size()) {
@@ -148,7 +157,7 @@ inline bool is_word_char(char c) { return is_word_start(c) || (c >= '0' && c <= 
 
 inline bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
-// The length of the heredoc tag ($$ or $tag$) that starts at `pos`, or 0.
+// Return the length of the heredoc tag ($$ or $tag$) that starts at `pos`, or 0.
 inline size_t heredoc_tag_length(std::string_view s, size_t pos) {
   if (pos >= s.size() || s[pos] != '$') return 0;
   size_t i = pos + 1;
@@ -157,8 +166,10 @@ inline size_t heredoc_tag_length(std::string_view s, size_t pos) {
   return i < s.size() && s[i] == '$' ? i - pos + 1 : 0;
 }
 
-// The end of the heredoc at `pos`: 0 when no heredoc starts there; otherwise the position after the closing tag (the
-// end of the text when it is missing; `*closed` says which).
+// Return the end of the heredoc at `pos`. Return 0 when no heredoc starts there.
+// Otherwise return the position after the closing tag.
+// When the closing tag is missing, return the end of the text.
+// Set `*closed` to tell which case applies.
 inline size_t heredoc_end(std::string_view s, size_t pos, bool* closed = nullptr) {
   const size_t tag = heredoc_tag_length(s, pos);
   if (tag == 0) return 0;
@@ -171,8 +182,10 @@ inline size_t heredoc_end(std::string_view s, size_t pos, bool* closed = nullptr
   return found + tag;
 }
 
-// The end of the number at `pos`. A number is a run of letters, digits, "_" and "."; a sign belongs to it after an
-// exponent mark (1e-5), which a hexadecimal number does not have.
+// Return the end of the number at `pos`.
+// A number is a run of letters, digits, "_" and ".".
+// A sign belongs to the number after an exponent mark (1e-5).
+// A hexadecimal number does not have this exponent mark.
 inline size_t number_end(std::string_view s, size_t pos) {
   const bool hex = pos + 1 < s.size() && s[pos] == '0' && (s[pos + 1] == 'x' || s[pos + 1] == 'X');
   while (pos < s.size()) {
@@ -188,7 +201,8 @@ inline size_t number_end(std::string_view s, size_t pos) {
   return pos;
 }
 
-// The end of the word at `pos`: a Unicode space ends it (it separates tokens for ClickHouse).
+// Return the end of the word at `pos`.
+// A Unicode space ends the word. ClickHouse uses it to separate tokens.
 inline size_t word_end(std::string_view s, size_t pos) {
   while (pos < s.size() && is_word_char(s[pos])) {
     if (static_cast<unsigned char>(s[pos]) >= 0x80 && unicode_space_length(s, pos)) break;
@@ -197,9 +211,9 @@ inline size_t word_end(std::string_view s, size_t pos) {
   return pos;
 }
 
-// ---- the tokens ----
+// ---- The tokens ----
 
-// The token that starts at `pos` (pos < s.size()).
+// Return the token that starts at `pos`. The position `pos` must be less than s.size().
 inline Token next_token(std::string_view s, size_t pos) {
   Token t;
   t.begin = pos;
@@ -248,7 +262,8 @@ inline Token next_token(std::string_view s, size_t pos) {
   return t;
 }
 
-// Every token of `s`, in order and without a gap: the tokens put back to back are the text.
+// Return every token of `s`, in order and without a gap.
+// Put the tokens back to back to get the text.
 inline std::vector<Token> lex(std::string_view s) {
   std::vector<Token> out;
   for (size_t pos = 0; pos < s.size();) {
@@ -260,10 +275,11 @@ inline std::vector<Token> lex(std::string_view s) {
 
 inline bool is_comment(TokenKind kind) { return kind == TokenKind::LineComment || kind == TokenKind::BlockComment; }
 
-// A token that carries no meaning of its own: a blank or a comment.
+// Return true for a token with no meaning of its own: a blank or a comment.
 inline bool is_trivia(TokenKind kind) { return kind == TokenKind::Blank || is_comment(kind); }
 
-// The UTF-16 unit (a JavaScript string index) of the byte offset `byte` of the UTF-8 text `s`.
+// Return the UTF-16 unit of the byte offset `byte` in the UTF-8 text `s`.
+// A UTF-16 unit is a JavaScript string index.
 inline size_t utf16_offset(std::string_view s, size_t byte) {
   size_t units = 0;
   for (size_t i = 0; i < byte && i < s.size(); ++i) {
@@ -274,11 +290,12 @@ inline size_t utf16_offset(std::string_view s, size_t byte) {
   return units;
 }
 
-// ---- the same rules, one byte at a time ----
+// ---- The same rules, one byte at a time ----
 //
-// For a pass that walks the text byte by byte and needs to know whether it is in code, and how deep in brackets it is
-// (the SQL formatter). step() reads s[i] and moves `i` to the last byte of what it read, so the loop's ++i goes on.
-// The state is what a token carries across bytes: the open quote, the depth of a comment, the tag of a heredoc.
+// Use this scan in a pass that walks the text byte by byte. The SQL formatter is one such pass.
+// The pass needs to know whether it is in code, and how deep it is in brackets.
+// The method step() reads s[i]. It moves `i` to the last byte of what it read, so the loop's ++i goes on.
+// The state holds what a token carries across bytes: the open quote, the depth of a comment and the tag of a heredoc.
 struct Scan {
   enum class Region : uint8_t { Code, String, DoubleQuoted, Backtick, LineComment, BlockComment, HereDoc };
   Region region = Region::Code;
@@ -288,12 +305,12 @@ struct Scan {
   int par = 0;   // ( )
   int br = 0;    // [ ]
   int brc = 0;   // { }
-  // The end of the word or the number that the scan is in (the bytes before it start nothing: a "$" inside a word
-  // opens no heredoc).
+  // The end of the word or the number that the scan is in.
+  // The bytes before this end start nothing. For example, a "$" inside a word opens no heredoc.
   size_t token_end = 0;
 
   bool in_code() const { return region == Region::Code; }
-  // Inside a 'text', a "name", a `name` or a heredoc.
+  // Return true inside a 'text', a "name", a `name` or a heredoc.
   bool in_quoted() const {
     return region == Region::String || region == Region::DoubleQuoted || region == Region::Backtick || region == Region::HereDoc;
   }

@@ -24,7 +24,7 @@ std::string lower_word(std::string_view word) {
   return out;
 }
 
-// A word of the code at the top level (outside every bracket), in order, in lower case.
+// A word of the code at the top level, outside every bracket. The words are in order and in lower case.
 struct TopWord {
   std::string lower;
   size_t token = 0;  // the index of its token
@@ -46,8 +46,8 @@ std::vector<TopWord> top_level_words(const std::vector<sql::Token>& tokens, std:
   return out;
 }
 
-// The key is a digest of the text; the cache compares the text itself on a hit (FormatCache), so two texts with
-// the same digest never share a layout.
+// The key is a digest of the text. The cache compares the text itself on a hit (FormatCache).
+// So two texts with the same digest never share a layout.
 std::string format_cache_key(std::string_view scope, int line_width, std::string_view sql) {
   std::string key;
   key.reserve(scope.size() + 96);
@@ -86,7 +86,7 @@ size_t insert_format_name_end(std::string_view sql) {
     const std::string& word = words[w].lower;
     if (word == "values" || word == "select" || word == "with") return std::string_view::npos;
     if (word != "format") continue;
-    // The name of the format follows FORMAT after blanks, and is a word.
+    // The name of the format follows FORMAT after blanks. The name is a word.
     size_t next = words[w].token + 1;
     while (next < tokens.size() && tokens[next].kind == sql::TokenKind::Blank) ++next;
     if (next >= tokens.size() || tokens[next].kind != sql::TokenKind::Word || !sql_is_ident_start(sql[tokens[next].begin])) {
@@ -122,9 +122,9 @@ std::string quote_reserved_aliases_for_format_query(std::string_view sql, std::v
   for (size_t k = 0; k < significant.size() && leading_keywords.size() < 5; ++k) {
     if (const sql::Token* word = word_at(k)) leading_keywords.push_back(lower_word(word->text(sql)));
   }
-  // CREATE/REPLACE/ATTACH statements with a query body ([MATERIALIZED] VIEW,
-  // TABLE ... AS SELECT, REFRESH ... AS SELECT) introduce that body with a
-  // top-level `AS SELECT` / `AS WITH`; that keyword is not an alias.
+  // CREATE, REPLACE, and ATTACH statements can have a query body ([MATERIALIZED] VIEW,
+  // TABLE ... AS SELECT, REFRESH ... AS SELECT). The body starts with a top-level `AS SELECT` or `AS WITH`.
+  // That keyword is not an alias.
   const bool create_query_statement = !leading_keywords.empty() &&
       (leading_keywords[0] == "create" || leading_keywords[0] == "replace" || leading_keywords[0] == "attach");
 
@@ -134,16 +134,15 @@ std::string quote_reserved_aliases_for_format_query(std::string_view sql, std::v
   for (size_t k = 0; k + 1 < significant.size(); ++k) {
     const sql::Token* as = word_at(k);
     if (!as || lower_word(as->text(sql)) != "as") continue;
-    // The token after AS is read on the original text: a name between quote marks is an alias already.
+    // The token after AS is read on the original text. A name between quote marks is already an alias.
     const sql::Token* alias = word_at(k + 1);
     if (!alias) continue;
     const std::string candidate = lower_word(alias->text(sql));
     if (reserved_aliases.find(candidate) == reserved_aliases.end()) continue;
 
-    // In CREATE [MATERIALIZED] VIEW / CREATE TABLE ... AS SELECT, the first
-    // `AS SELECT` / `AS WITH` introduces the stored query; SELECT/WITH is not
-    // an alias. The formatter compatibility pass still has to quote reserved
-    // aliases *inside* that SELECT, e.g. `SELECT 1 AS FROM`.
+    // In CREATE [MATERIALIZED] VIEW or CREATE TABLE ... AS SELECT, the first `AS SELECT` or `AS WITH` introduces the stored query.
+    // SELECT and WITH are not aliases in that case.
+    // The formatter compatibility pass must still quote reserved aliases *inside* that SELECT, for example `SELECT 1 AS FROM`.
     if (create_query_statement && !view_query_boundary_consumed && (candidate == "select" || candidate == "with")) {
       view_query_boundary_consumed = true;
       continue;
@@ -172,7 +171,7 @@ std::string quote_reserved_aliases_for_format_query(std::string_view sql, std::v
 
 size_t offset_in_user_text(size_t sent_offset, const std::vector<std::pair<size_t, size_t>>& quoted, const SqlHeredocMask& masks,
                            std::string_view masked) {
-  // The words written between backticks: each added two bytes, one before the word and one after it.
+  // The words written between backticks. Each word adds two bytes, one before the word and one after it.
   size_t added = 0;
   for (size_t i = 0; i < quoted.size(); ++i) {
     const size_t open = quoted[i].first + 2 * i;
@@ -182,9 +181,9 @@ size_t offset_in_user_text(size_t sent_offset, const std::vector<std::pair<size_
   }
   size_t pos = sent_offset >= added ? sent_offset - added : 0;
   if (masks.heredocs.empty()) return pos;
-  // The placeholders are undone in the reverse order of their making, each where it stands in the text. A placeholder that ends before
-  // `pos` moves it by the difference of the two spellings; a `pos` inside one goes to its start. A text with very many placeholders is
-  // not worth this work: its offset stays as it is.
+  // The placeholders are undone in the reverse order of their making, each where it stands in the text.
+  // A placeholder that ends before `pos` moves `pos` by the difference of the two spellings. A `pos` inside a placeholder goes to its start.
+  // A text with very many placeholders is not worth this work, so its offset stays as it is.
   if (masks.heredocs.size() * masked.size() > 64u * 1024 * 1024) return pos;
   std::string text(masked);
   for (size_t i = masks.heredocs.size(); i-- > 0;) {
@@ -220,7 +219,7 @@ std::string rebase_error_position(std::string message, std::string_view text, si
 }
 
 bool values_rows_unchanged(std::string_view before, std::string_view after) {
-  // The significant tokens (no blank, no comment) after the VALUES of the top level.
+  // Take the significant tokens (no blank, no comment) after the VALUES of the top level.
   const auto rows = [](std::string_view sql) {
     std::vector<std::string> out;
     const auto tokens = sql::lex(sql);
@@ -232,7 +231,7 @@ bool values_rows_unchanged(std::string_view before, std::string_view after) {
         break;
       }
     }
-    // The rows may follow each other with a comma or without one (`(1, 2)(3, 4)`): a comma between two rows is no part of the data.
+    // The rows can follow each other with a comma, or without one (`(1, 2)(3, 4)`). A comma between two rows is not part of the data.
     int depth = 0;
     for (size_t i = from; i < tokens.size(); ++i) {
       if (sql::is_trivia(tokens[i].kind)) continue;
@@ -254,7 +253,7 @@ FormatBatch::FormatBatch(FormatCache* cache, FormatSettings settings, FormatQuer
 
 namespace {
 
-// The work on one text: what it is made of, step by step.
+// The work on one text, step by step. Each field is one form of the text.
 struct Work {
   std::string text;     // the text of the user, without the blanks around it
   size_t leading = 0;   // the bytes of blank that were taken off its start (the offsets of an error count from the start of the user's text)
@@ -263,8 +262,8 @@ struct Work {
   SqlHeredocMask masks; // `head` with its heredocs and its literals on many lines swapped for placeholders
 };
 
-// Inline INSERT payloads are data, not SQL: keep them byte-for-byte after the formatted statement, on their own line when they started on
-// one.
+// Inline INSERT payloads are data, not SQL. The payload is kept byte-for-byte after the formatted statement.
+// It goes on its own line when it started on one.
 void split_insert_payload(Work& work) {
   work.head = work.text;
   if (const size_t name_end = insert_format_name_end(work.head); name_end != std::string::npos) {
@@ -280,16 +279,16 @@ void split_insert_payload(Work& work) {
   }
 }
 
-// Heredoc literals ($$...$$) are swapped for same-width placeholders so neither formatQuery (which re-quotes them) nor the local scanners
-// see their bodies; the exact spelling is put back at the end, like other literal spellings.
+// Heredoc literals ($$...$$) are swapped for same-width placeholders. So neither formatQuery nor the local scanners see their bodies.
+// formatQuery re-quotes the literals. The exact spelling is put back at the end, like other literal spellings.
 void mask_literals(Work& work) {
   work.masks = mask_sql_heredocs(work.head);
-  // Placeholders use private-use code points: never mask SQL that already contains them (same guard as mask_sql_heredocs).
+  // Placeholders use private-use code points. Never mask SQL that already contains them (same guard as mask_sql_heredocs).
   if (work.head.find('\xEE') == std::string::npos) mask_sql_multiline_literals(work.masks);
 }
 
-// formatQuery and the local post-processor intentionally normalize many identifiers to backticks. Keep formatting deterministic while
-// restoring the exact spelling of identifiers that the user explicitly quoted, as well as the original spelling of string literals.
+// formatQuery and the local post-processor normalize many identifiers to backticks on purpose. The formatting stays deterministic.
+// The exact spelling of identifiers that the user explicitly quoted is restored. The original spelling of string literals is restored too.
 std::string restore_spelling(std::string pretty, const Work& work) {
   const std::string& source = work.masks.sql;
   pretty = restore_sql_quoted_identifiers(std::move(pretty), source);
@@ -300,11 +299,13 @@ std::string restore_spelling(std::string pretty, const Work& work) {
 
 } // namespace
 
-// Does ClickHouse read the formatted statement as it reads the one that was written? It compares the trees (EXPLAIN AST), which are the same
-// for two layouts of one statement and for a text with and without its comments: formatQuery is not used for this, because it prints the
-// parentheses that the text had. The rows of an INSERT ... VALUES are data that ClickHouse does not parse, so their tokens are compared.
-// A statement that ClickHouse cannot parse, a text that it will not read (too long), or a connection that fails cannot be judged: the layout
-// stays, as before this check existed.
+// Does ClickHouse read the formatted statement as it reads the one that was written? This function compares the trees (EXPLAIN AST).
+// The trees are the same for two layouts of one statement, and for a text with and without its comments.
+// formatQuery is not used for this check, because it prints the parentheses that the text had.
+//
+// The rows of an INSERT ... VALUES are data that ClickHouse does not parse. So their tokens are compared.
+// A statement that ClickHouse cannot parse cannot be judged. The same holds for a text that it will not read (too long), and for a connection that fails.
+// In these cases, the layout stays, as before this check existed.
 std::optional<FormatWarning> FormatBatch::check_meaning(const std::string& before, const std::string& after) {
   const auto changed = [] {
     return FormatWarning{"format_meaning_changed",
@@ -320,8 +321,8 @@ std::optional<FormatWarning> FormatBatch::check_meaning(const std::string& befor
   if (!tree_before) return std::nullopt;
   const FormatQueryResult tree_after = port_.explain_ast(sent_after, limit);
   if (!tree_after) {
-    // The statement that was written is understood and the formatted one is not: that is a change. A connection that failed is not, and
-    // neither is a text that grew past what ClickHouse reads (the message names max_query_size).
+    // The statement that was written is understood, but the formatted one is not. That is a change.
+    // A connection that failed is not a change. A text that grew past what ClickHouse reads is not a change either (the message names max_query_size).
     if (tree_after.failure != FormatQueryFailureKind::server || tree_after.message.find("max_query_size") != std::string::npos) return std::nullopt;
     return changed();
   }
@@ -342,7 +343,7 @@ FormatOutcome FormatBatch::format(std::string sql_raw) {
                                            sql_raw[work.leading] == '\t')) {
     ++work.leading;
   }
-  // What an error is counted in: the blanks that the text starts with, then the text.
+  // Error offsets count the blanks that the text starts with, and then the text.
   const std::string leading_blanks = sql_raw.substr(0, work.leading);
   std::string sql = trim_sql(std::move(sql_raw));
   if (sql.empty()) return fail(FormatQueryFailureKind::input, "Missing SQL text.");
@@ -374,14 +375,13 @@ FormatOutcome FormatBatch::format(std::string sql_raw) {
   bool local_layout = false;
   const auto masked = mask_sql_surface(source_sql);
   if (masked.has_comments || has_top_level_values_insert(source_sql)) {
-    // ClickHouse formatQuery removes or restructures these surfaces. The local post-processor preserves comments and VALUES payloads
-    // byte-for-byte.
+    // formatQuery removes or restructures these surfaces. The local post-processor keeps comments and VALUES payloads byte-for-byte.
     local_layout = true;
     pretty = unwrap_alter_table_commands(postprocess_format_query(source_sql, static_cast<size_t>(settings_.line_width)));
   } else {
     std::vector<std::pair<size_t, size_t>> quoted;
     const std::string parseable_sql = quote_reserved_aliases_for_format_query(source_sql, &quoted);
-    // ClickHouse reads at most max_query_size bytes of the text that it is given (the text with its quoted words).
+    // ClickHouse reads at most max_query_size bytes of the text that it receives, including the quoted words.
     if (settings_.clickhouse_max_query_size && parseable_sql.size() > settings_.clickhouse_max_query_size) {
       return fail(FormatQueryFailureKind::input, "SQL text is too large to format: ClickHouse reads at most " +
                                                      std::to_string(settings_.clickhouse_max_query_size) +
@@ -393,7 +393,7 @@ FormatOutcome FormatBatch::format(std::string sql_raw) {
       const FormatQueryFailureKind kind = format_result.failure == FormatQueryFailureKind::none ? FormatQueryFailureKind::client : format_result.failure;
       std::string message = format_result.message.empty() ? "Failed to format query." : format_result.message;
       if (kind == FormatQueryFailureKind::server) {
-        // ClickHouse counts from the start of the text that it was sent: say where it stopped in the text that the user wrote.
+        // ClickHouse counts from the start of the text that it was sent. The code gives the position in the text that the user wrote.
         if (const size_t at = message.find("position "); at != std::string::npos) {
           size_t end = at + 9;
           size_t number = 0;
@@ -407,8 +407,7 @@ FormatOutcome FormatBatch::format(std::string sql_raw) {
       }
       return fail(kind, std::move(message));
     }
-    // formatQuery may normalize literal escaping. Restore the user's exact literal spelling, including doubled SQL quotes, before line
-    // wrapping.
+    // formatQuery can normalize literal escaping. The code restores the user's exact literal spelling, including doubled SQL quotes, before the line wrapping.
     pretty = unwrap_alter_table_commands(postprocess_format_query(
         restore_sql_single_quoted_literals(*format_result.formatted_sql, source_sql), static_cast<size_t>(settings_.line_width)));
   }
@@ -416,7 +415,7 @@ FormatOutcome FormatBatch::format(std::string sql_raw) {
   pretty = restore_spelling(std::move(pretty), work);
   if (local_layout) outcome.warning = check_meaning(work.head, pretty);
   if (outcome.warning) {
-    // The statement as it was written. It is not kept in the cache: the next request checks it again.
+    // The statement is returned as it was written. It is not kept in the cache, so the next request checks it again.
     outcome.formatted = std::make_shared<const std::string>(work.text);
     request_results_.emplace(key, outcome);
     return outcome;
@@ -426,8 +425,8 @@ FormatOutcome FormatBatch::format(std::string sql_raw) {
   auto value = std::make_shared<const std::string>(std::move(pretty));
   outcome.formatted = value;
   request_results_.emplace(key, outcome);
-  // Only the text that was formatted is a key: the output is not stored as a key of its own, so formatting a formatted text runs
-  // the formatter again and a layout that is not idempotent shows.
+  // Only the text that was formatted is a key. The output is not stored as a key of its own.
+  // So formatting a formatted text runs the formatter again. A layout that is not idempotent shows in this way.
   if (cached) cache_->put(key, work.text, std::move(value));
   return outcome;
 }
@@ -437,7 +436,7 @@ std::vector<FormatItem> format_texts(FormatBatch& batch, const std::vector<std::
   bool stopped = false;
   for (size_t i = 0; i < texts.size(); ++i) {
     FormatItem& item = items[i];
-    // Once the caller is gone or the server stops, nothing else is asked (the answer reaches nobody, or the process ends).
+    // Once the caller is gone or the server stops, nothing else is asked. The answer reaches nobody, or the process ends.
     if (!stopped && limits.stop && limits.stop()) stopped = true;
     if (stopped) {
       item.skipped_for_stop = true;

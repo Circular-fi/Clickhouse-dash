@@ -52,7 +52,7 @@ KindTables MetricsService::kind_tables(ChExecutor& db, const HostSpec& host) con
       if (tables.count(metrics.table_prefix + "_" + kind)) tables_of.kinds.insert(kind);
     }
     if (tables_of.kinds.empty()) return true;
-    // A source that cannot say which columns its tables have is read as before: its series are told apart by their attributes only.
+    // A source that cannot say which columns its tables have is read as before. Its series are told apart by their attributes only.
     std::set<std::string> scoped;
     try {
       db.select(scope_columns_sql(metrics), [&](const clickhouse::Block& block) {
@@ -94,7 +94,7 @@ Result<CatalogAnswer> MetricsService::catalog(const RequestContext&, const HostS
   // The answer names the host (source_host_id): hosts that share an identity do not share it.
   const std::string key = source_host_id + '\x1f' + host.system_uri + '\x1f' + metrics.database + '\x1f' + metrics.table_prefix + '\x1f' +
                           visibility + '\x1f' + std::to_string(window.start_ms / 60000) + '\x1f' + std::to_string(window.end_ms / 60000);
-  // One read per key at a time: a second viewer of the same window waits for it (the scan covers the whole window).
+  // Only one read of a key runs at a time. A second viewer of the same window waits for the first read. The scan covers the whole window.
   const auto result = catalog_.get(
       key,
       [&](CatalogSnapshot& snapshot, std::string& code, std::string& message) {
@@ -115,7 +115,7 @@ Result<CatalogAnswer> MetricsService::catalog(const RequestContext&, const HostS
         const std::string sql = catalog_sql(metrics, snapshot.kinds, visibility, window);
         if (!sql.empty()) {
           const auto query_started = Clock::now();
-          // The catalog groups every point of its window: past this many rows read, the scan stops and the counts are estimates.
+          // The catalog groups every point of its window. Past this many rows read, the scan stops. The counts are then estimates.
           ChQueryLimits catalog_limits = ChQueryScope::current_copy();
           catalog_limits.max_rows_to_read = kCatalogReadRowsCap;
           catalog_limits.read_overflow_mode = "break";
@@ -243,7 +243,7 @@ Result<SeriesAnswer> MetricsService::series(const RequestContext&, const HostSpe
     SeriesAnswer answer;
     answer.source_host_id = source_host_id;
     answer.request = request;
-    // The series are told apart by their scope as well when the table has the scope columns (kind_tables was read by the check above).
+    // The series are also told apart by their scope, when the table has the scope columns. The check above read kind_tables.
     const bool with_scope = kind_tables(*db, host).with_scope.count(request.kind) != 0;
     SeriesStatements statements(answer.request, table, visibility, with_scope);
     int64_t query_ms = 0;
@@ -259,8 +259,8 @@ Result<SeriesAnswer> MetricsService::series(const RequestContext&, const HostSpe
     const std::string quantile = plan.mode == Mode::SummaryQuantile ? summary_quantile_literal(answer.info, plan.agg) : std::string();
     const double bucket_seconds = static_cast<double>(request.grid.size_ms) / 1000.0;
 
-    // A request that groups by attributes (or reads the series of a summary) ranks its groups in ClickHouse first: the cells of every group would
-    // be more rows than a read keeps, and the groups past the cap would be the ones that come last in the alphabet, not the smallest ones.
+    // A request that groups by attributes, or that reads the series of a summary, ranks its groups in ClickHouse first.
+    // Otherwise, the cells of every group give more rows than a read keeps. The groups past the cap are the ones that come last in the alphabet, not the smallest ones.
     const bool ranked = !request.group_by.empty() || plan.mode == Mode::SummaryQuantile;
     std::vector<std::string> kept_keys;
     size_t group_total = 0;
@@ -295,7 +295,7 @@ Result<SeriesAnswer> MetricsService::series(const RequestContext&, const HostSpe
     });
     query_ms += elapsed_ms(query_started);
 
-    // The group of the groups that were not ranked among the best ones came folded from ClickHouse.
+    // The groups that were not ranked among the best ones come folded from ClickHouse.
     Group folded;
     if (ranked) {
       const auto it = groups.find(kOtherGroupKey);

@@ -1,8 +1,6 @@
-// Metrics browser (the Metrics view of /observability): a catalog of the OpenTelemetry metrics stored
-// by the ClickHouse exporter (service -> metric), and chart panels drawn from
-// the server-side aggregations of /api/metrics/series, with exemplar dots
-// linking to the trace and span that produced them. Everything the user
-// picks (range, panels, aggregation, group-by, filters) lives in the URL.
+// This is the metrics browser, the Metrics view of /observability. It has a catalog of the OpenTelemetry metrics that the ClickHouse exporter stores (service -> metric).
+// It draws chart panels from the server-side aggregations of /api/metrics/series. Exemplar dots link to the trace and span that produced them.
+// Everything that the user picks (range, panels, aggregation, group-by, filters) lives in the URL.
 
 import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
@@ -34,8 +32,8 @@ const KIND_LABEL = {
   gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exponential histogram", summary: "Summary",
 };
 const KIND_BADGE = { gauge: "Gauge", sum: "Sum", histogram: "Histogram", exponential_histogram: "Exp. histogram", summary: "Summary" };
-// A metric's kind and unit are muted text, no fill: the catalog
-// lists them on every row, and colour stays for signal.
+// The kind and the unit of a metric are muted text, without fill. The catalog lists them on every row.
+// Colour is kept for signal.
 const metaText = (text, title, className) => `<span class="metricsMeta ${className}" title="${esc(title)}">${esc(text)}</span>`;
 const kindText = (kind, text, title = "") => metaText(text, title || KIND_LABEL[kind] || kind, `metricsBadge metricsBadge--${kind}`);
 const AGG_LABEL = {
@@ -44,16 +42,15 @@ const AGG_LABEL = {
 };
 const EXEMPLAR_KINDS = new Set(["gauge", "sum", "histogram", "exponential_histogram"]);
 
-// The catalog's grouping, remembered: "metric" (default) or "service".
+// The catalog grouping is remembered. It is either "metric" (default) or "service".
 const catalogByPref = () => storage.pref(storage.KEYS.metricsCatalogBy, "metric", { allowed: ["metric", "service"] });
 
-// util.escapeHtml is the one escaper; null prints as "".
+// util.escapeHtml is the only escaper. null prints as "".
 const esc = (value) => util.escapeHtml(value == null ? "" : value);
-// The Metrics view's address (ns.router): /observability/metrics and its
-// panels, written only while the view shows (the "metrics" lifecycle scope).
+// This is the address of the Metrics view (ns.router): /observability/metrics and its panels.
+// The router writes it only while the view shows (the "metrics" lifecycle scope).
 const address = router.owner("metrics", { path: "/observability/metrics", params: () => urlQuery() });
-// Formats and colours (docs/ui-foundations.md): a series grouped by
-// service keeps the service's colour of Traces and Logs.
+// Formats and colours follow docs/ui-foundations.md. A series grouped by service keeps the service colour of Traces and Logs.
 const fmt = format;
 
 const isPercentileAgg = (agg) => /^p\d+(?:\.\d+)?$/.test(String(agg || ""));
@@ -66,14 +63,13 @@ function aggLabel(agg) {
 }
 
 // --- Units ----------------------------------------------------------------
-// OpenTelemetry (UCUM) units: s/ms/us/ns durations, By bytes, {thing}
-// annotations for counts, "1" dimensionless. A trailing "/s" is a rate.
+// OpenTelemetry (UCUM) units: s/ms/us/ns are durations, By is bytes, {thing} is an annotation for counts, and "1" is dimensionless.
+// A trailing "/s" is a rate.
 
 const DURATION_SCALE = { ns: 1e-9, us: 1e-6, "µs": 1e-6, ms: 1e-3, s: 1, min: 60, h: 3600, d: 86400 };
 
-// A unit as the catalog and the panel head say it: "seconds", "bytes",
-// "ratio" for the dimensionless "1", "calls" for "{call}"; the UCUM unit
-// itself stays in the tooltip.
+// This is how the catalog and the panel head show a unit: "seconds", "bytes", "ratio" for the dimensionless "1", and "calls" for "{call}".
+// The UCUM unit itself appears only in the tooltip.
 const UNIT_WORDS = {
   "1": "ratio", "%": "percent", s: "seconds", ms: "milliseconds", us: "microseconds", "µs": "microseconds", ns: "nanoseconds",
   min: "minutes", h: "hours", d: "days", By: "bytes", KiBy: "KiB", MiBy: "MiB", GiBy: "GiB", bit: "bits", Hz: "hertz",
@@ -93,7 +89,7 @@ const unitText = (unit) => metaText(unitWords(unit), `Unit: ${unit}`, "metricsBa
 const BYTE_SCALE = { By: 1, B: 1, bit: 1 / 8, kBy: 1e3, KBy: 1e3, MBy: 1e6, GBy: 1e9, TBy: 1e12, KiBy: 1024, MiBy: 1024 ** 2, GiBy: 1024 ** 3, TiBy: 1024 ** 4 };
 const DURATION_STEPS = [[1e-9, "ns"], [1e-6, "µs"], [1e-3, "ms"], [1, "s"], [60, "min"], [3600, "h"], [86400, "d"]];
 const BYTE_STEPS = [[1, "B"], [1024, "KB"], [1024 ** 2, "MB"], [1024 ** 3, "GB"], [1024 ** 4, "TB"]];
-// Group keys that name the service: such a series takes palette.service.
+// Group keys that name the service. A series with such a key takes palette.service.
 const SERVICE_KEYS = new Set(["service.name", "ServiceName", "service_name"]);
 
 function parseUnit(unitText) {
@@ -138,7 +134,7 @@ function formatValue(value, info) {
   return `${fmt.number(value)}${label}${rate}`;
 }
 
-// Axis scale: every tick shares one display unit and one decimal count.
+// Axis scale: every tick uses one display unit and one decimal count.
 function axisFormatter(info, maxAbs) {
   const rate = info.perSecond ? "/s" : "";
   if (info.kind === "duration") {
@@ -184,7 +180,7 @@ function newPanel(fields = {}) {
     exemplarError: "",
     keys: null,
     keysPromise: null,
-    // Raised when the metric changes: an attribute read that was asked for the old metric is not applied.
+    // This flag is raised when the metric changes. An attribute read that asked for the old metric is not applied.
     gen: 0,
     values: new Map(),
     hidden: new Set(),
@@ -201,14 +197,14 @@ const model = {
   catalogLoading: false,
   meta: null,
   search: "",
-  // The filter bar's Service picker: the catalog lists only its metrics.
+  // The filter bar's Service picker. The catalog lists only its metrics.
   service: "",
   collapsed: new Set(),
-  // The catalog's grouping: "metric" (each metric once, its services under
-  // it) or "service"; the metric groups the viewer opened.
+  // The catalog grouping is "metric" (each metric once, with its services under it) or "service".
+  // The viewer's open metric groups are kept too.
   catalogBy: catalogByPref().get(),
   openMetrics: new Set(),
-  // Metrics the viewer folded although a panel charts them (their services stay open until then).
+  // A metric that the viewer folded stays folded, even when a panel charts it. Its services stay open until then.
   foldedMetrics: new Set(),
   focusService: "",
   panels: [newPanel()],
@@ -254,7 +250,7 @@ function readUrl() {
   const range = timeRange.url.read(params);
   if (range) model.range = range;
   const panels = [panelFromParams(params)];
-  // At most MAX_PANELS panels, whatever the address says (the Add button stops there too).
+  // At most MAX_PANELS panels, whatever the address says. The Add button stops there too.
   for (const encoded of params.getAll("panel").slice(0, MAX_PANELS - 1)) panels.push(panelFromParams(new URLSearchParams(encoded)));
   model.panels = panels;
   const active = Number(params.get("active"));
@@ -282,8 +278,7 @@ function hostParams(extra = {}) {
   return params;
 }
 
-// Relative ranges ("now-1h") are resolved once per load, so the catalog and
-// every panel describe the same window.
+// Relative ranges ("now-1h") resolve once per load. The catalog and every panel then describe the same window.
 function resolveRange() {
   const { startMs, endMs } = timeRange.resolveBounded(model.range, MAX_RANGE_MINUTES);
   model.resolved = { start_ms: Math.round(startMs), end_ms: Math.round(endMs) };
@@ -320,7 +315,7 @@ function showError(message, retry = null) {
 
 // --- Catalog --------------------------------------------------------------
 
-// false when a newer read took its place (another host): the answer of the old host is never applied.
+// The read returns false when a newer read took its place (another host). The answer of the old host is never applied.
 async function loadMeta() {
   const req = obsView.read("metrics.meta");
   try {
@@ -334,8 +329,8 @@ async function loadMeta() {
   return true;
 }
 
-// The Service picker lists the catalog's services (its choice kept while
-// the catalog still holds it).
+// The Service picker lists the services of the catalog. Its choice is kept while
+// the catalog still holds it.
 function syncServicePicker() {
   const select = byId("metricsService");
   if (!select) return;
@@ -375,14 +370,14 @@ async function loadCatalog() {
   model.catalogLoading = false;
   uiState.busy(byId("metricsSearchButton"), false);
   syncServicePicker();
-  // Panels opened from the URL may omit the kind: take it from the catalog.
+  // For a panel that is opened from the URL, the kind can be omitted. Take the kind from the catalog.
   for (const panel of model.panels) {
     if (panel.metric && !panel.kind) {
       const entry = catalogEntry(panel.service, panel.metric, "");
       if (entry) panel.kind = entry.kind;
     }
   }
-  // A panel with a metric and no service (a shared link) takes the service when only one sends the metric.
+  // A panel with a metric and no service (a shared link) takes the service when only one service sends the metric.
   const alone = [];
   for (const panel of model.panels) {
     if (!panel.metric || panel.service || !model.catalog) continue;
@@ -393,14 +388,14 @@ async function loadCatalog() {
   }
   if (alone.length) address.replace();
   renderCatalog();
-  // The result of the load is said once (the summary line changes with every filter typed, and is not a live region).
+  // The result of the load is announced once. The summary line changes with every filter that is typed, so it is not a live region.
   const summary = dom.metricsCatalogSummary?.textContent;
   if (summary) uiState.announce(summary);
   renderPanels();
   for (const panel of alone) loadPanel(panel);
 }
 
-// The catalog's entry of a metric of one service (of any service when none is named).
+// The catalog entry of a metric for one service. Any service is used when none is named.
 function catalogEntry(service, metric, kind) {
   for (const svc of model.catalog?.services || []) {
     if (service && svc.name !== service) continue;
@@ -426,13 +421,13 @@ function temporalityLabel(entry) {
   return parts.join(" · ");
 }
 
-// The catalog is a tree while it lists metrics; a state block (loading, an error, nothing found, with its
-// button) is not a tree item, so the container is a plain group then.
+// The catalog is a tree while it lists metrics. A state block (loading, an error, nothing found, with its
+// button) is not a tree item. Then the container is a plain group.
 function syncCatalogRole(root) {
   root.setAttribute("role", $('[role="treeitem"]', root) ? "tree" : "group");
 }
 
-// The catalog's disclosure: the sprite's chevron (ns.icon), turned down
+// The disclosure of the catalog uses the chevron of the sprite (ns.icon). It turns down
 // while its head is expanded (.icon--disclosure), as in every tree.
 const CHEVRON = icon("chevron-right", { size: "sm", className: "metricsCatalog__chevron icon--disclosure" });
 
@@ -453,8 +448,8 @@ function renderCatalog() {
     return;
   }
   const services = (model.catalog?.services || []).filter((svc) => !model.service || svc.name === model.service);
-  // A service picked in another Observability view (applyContext): its
-  // group opens and scrolls into view, the others fold.
+  // A service that is picked in another Observability view (applyContext) opens its
+  // group and scrolls into view. The other groups fold.
   const focus = model.catalog && services.some((svc) => svc.name === model.focusService) ? model.focusService : "";
   if (model.catalog) model.focusService = "";
   if (focus) model.collapsed = new Set(services.map((svc) => svc.name).filter((name) => name !== focus));
@@ -503,7 +498,7 @@ function renderCatalog() {
   }
   syncCatalogRole(root);
   if (summary) {
-    // By metric, a metric counts once whatever sends it.
+    // By metric, a metric counts once, whatever sends it.
     const total = model.catalogBy === "service"
       ? Number(model.catalog?.metric_count || 0)
       : new Set(services.flatMap((svc) => (svc.metrics || []).map((m) => `${m.name}\u0000${m.kind}`))).size;
@@ -515,8 +510,8 @@ function renderCatalog() {
   }
 }
 
-// When the range holds no point but the tables do, offer their latest day
-// (a secondary action: the search itself stays the primary one).
+// When the range holds no point but the tables do, offer their latest day.
+// This is a secondary action. The search itself stays the primary one.
 function jumpToDataAction() {
   const bounds = model.meta?.time_bounds;
   const max = Number(bounds?.max_ms);
@@ -527,8 +522,8 @@ function jumpToDataAction() {
 }
 
 // The catalog by metric (default): each metric once, with its kind and
-// unit and the number of services sending it; open, the services. A
-// metric sent by one service is one row.
+// unit and the number of services that send it. When open, it shows the services.
+// A metric that one service sends is one row.
 function metricGroups(services, needle, active) {
   const byMetric = new Map();
   for (const svc of services) {
@@ -555,7 +550,7 @@ function metricGroups(services, needle, active) {
     if (!rows.length) continue;
     shown += 1;
     if (group.rows.length === 1) { groups.push(metricRow(group, rows[0], true)); continue; }
-    // "kind:name" (an attribute value cannot hold a NUL).
+    // "kind:name". An attribute value cannot hold a NUL.
     const key = `${group.kind}:${group.name}`;
     const holdsActive = !!active && active.metric === group.name && active.kind === group.kind;
     const open = !!needle || (holdsActive ? !model.foldedMetrics.has(key) : model.openMetrics.has(key));
@@ -603,8 +598,8 @@ function onCatalogClick(event) {
   const metricToggle = event.target.closest("[data-metric-toggle]");
   if (metricToggle) {
     const key = metricToggle.dataset.metricToggle;
-    // The chevron folds and unfolds the services of a metric; the name charts the metric (the panel then asks
-    // for the service) and leaves the services open.
+    // The chevron folds and unfolds the services of a metric. The name charts the metric. Then the panel asks
+    // for the service and leaves the services open.
     if (onChevron(event, metricToggle)) setMetricOpen(key, metricToggle.getAttribute("aria-expanded") !== "true");
     else {
       model.openMetrics.add(key);
@@ -628,8 +623,8 @@ function onCatalogClick(event) {
   selectMetric(item.dataset.service, item.dataset.metric, item.dataset.kind);
 }
 
-// A pointer click on the chevron side of a head (the icon takes no pointer events: the click lands on the head).
-// A key press that clicks the button (Enter, Space) has no position: it charts the metric.
+// A pointer click on the chevron side of a head. The icon takes no pointer events, so the click lands on the head.
+// A key press that clicks the button (Enter, Space) has no position. It charts the metric.
 function onChevron(event, head) {
   const chevron = $(".metricsCatalog__chevron", head);
   if (!chevron || !event.detail) return false;
@@ -639,11 +634,11 @@ function onChevron(event, head) {
 function setMetricOpen(key, open) {
   if (open) { model.openMetrics.add(key); model.foldedMetrics.delete(key); } else { model.openMetrics.delete(key); model.foldedMetrics.add(key); }
   renderCatalog();
-  // The list is drawn again: the focus goes back to the head of the metric.
+  // The list is drawn again. The focus goes back to the head of the metric.
   if (document.activeElement === document.body) $(`[data-metric-toggle="${CSS.escape(key)}"]`, dom.metricsCatalog)?.focus({ preventScroll: true });
 }
 
-// The tree's keys on a metric head: Right unfolds its services, Left folds them (Enter charts it, as a click).
+// The keys of the tree on a metric head: Right unfolds its services, Left folds them. Enter charts the metric, as a click does.
 function onCatalogKeydown(event) {
   const head = event.target instanceof Element ? event.target.closest("[data-metric-toggle]") : null;
   if (!head || (event.key !== "ArrowRight" && event.key !== "ArrowLeft")) return;
@@ -662,7 +657,7 @@ function selectMetric(service, metric, kind) {
   if (!same) {
     Object.assign(panel, { service, metric, kind, agg: "", groupBy: [], filters: [], data: null, error: "", exemplarData: null, keys: null, keysPromise: null });
     panel.gen += 1;
-    // Every read of the previous metric stops (with no service, nothing starts in its place to supersede it).
+    // Each read of the previous metric stops. With no service, nothing starts in its place to supersede it.
     cancelPanelReads(panel);
     panel.loading = false;
     panel.values = new Map();
@@ -698,7 +693,7 @@ function addPanel() {
   panel.el?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
 }
 
-// Every read of a panel stops: its series, its exemplars and its attribute keys and values.
+// Each read of a panel stops: its series, its exemplars, and its attribute keys and values.
 function cancelPanelReads(panel) {
   util.latest.cancel(`metrics.panel.${panel.id}`);
   util.latest.cancel(`metrics.exemplars.${panel.id}`);
@@ -722,7 +717,7 @@ function removePanel(panel) {
 
 async function loadPanel(panel) {
   if (!panel.metric || !panel.kind || !panel.service) return;
-  // A new load supersedes the panel's series and exemplar requests.
+  // A new load supersedes the series and exemplar requests of the panel.
   const req = obsView.read(`metrics.panel.${panel.id}`);
   util.latest.cancel(`metrics.exemplars.${panel.id}`);
   panel.loading = true;
@@ -748,7 +743,7 @@ async function loadPanel(panel) {
   else { panel.exemplarData = null; drawChart(panel); }
 }
 
-// The exemplars of the panel's current series (a new series load cancels them).
+// The exemplars of the current series of the panel. A new series load cancels them.
 async function loadExemplars(panel) {
   const req = obsView.read(`metrics.exemplars.${panel.id}`);
   try {
@@ -766,8 +761,8 @@ async function loadExemplars(panel) {
   drawChart(panel);
 }
 
-// The attribute keys of the panel's metric. An answer for a metric that is no longer the panel's (panel.gen moved) is
-// not kept, and the read itself was cut when the metric changed.
+// The attribute keys of the metric of the panel. An answer for a metric that is no longer the metric of the panel (panel.gen moved) is
+// not kept. The read itself was cut when the metric changed.
 async function ensureKeys(panel) {
   if (panel.keys) return panel.keys;
   if (!panel.keysPromise) {
@@ -887,8 +882,8 @@ function buildPanel(panel) {
   return el;
 }
 
-// Pickers reuse the connected tracePicker surface; ns.menu (app_ui_menu.js)
-// owns their motion, keys, focus and the outside click / Escape layer.
+// Pickers reuse the connected tracePicker surface. ns.menu (app_ui_menu.js)
+// owns their motion, keys, focus and the outside click and Escape layer.
 const pickerParts = (root) => [$(":scope > .tracePicker__button", root), $(":scope > .tracePicker__menu", root)];
 
 function bindPanel(panel, el) {
@@ -950,14 +945,14 @@ function bindPanel(panel, el) {
   const addButton = $(".metricsFilters__add", el);
   const keyInput = $(".metricsFilterForm__key", form);
   const valueInput = $(".metricsFilterForm__value", form);
-  // = | !=: the shared segmented control (app_ui_segmented.js).
+  // = and !=: the shared segmented control (app_ui_segmented.js).
   const ops = segmented?.bind($(".metricsFilterForm__ops", form), { attr: "op", onChange: (op) => { form.dataset.op = op; } });
   const setOp = (op) => {
     form.dataset.op = op;
     ops?.set(op);
   };
   setOp("=");
-  // The open form is an ns.layers layer: Escape closes it, the focus goes
+  // The open form is an ns.layers layer. Escape closes it. The focus goes
   // back to the add button.
   let formLayer = null;
   const closeForm = () => {
@@ -1023,8 +1018,8 @@ function renderPanel(panel) {
   el.classList.toggle("is-empty", !hasMetric);
   $(".metricsPanel__remove", el).hidden = model.panels.length <= 1;
   $(".metricsPanel__header", el).hidden = !hasMetric && model.panels.length <= 1;
-  // An empty panel shows its controls disabled (what it will offer) and
-  // the way to fill it: Pick a metric.
+  // An empty panel shows its controls disabled. They show what the panel will offer.
+  // The way to fill it is: Pick a metric.
   for (const control of $$(".metricsPanel__controls button, .metricsPanel__controls input", el)) {
     if (!hasMetric || needsService) control.disabled = true;
     else if (control.matches(".metricsFilters__add, .metricsExemplarToggle")) control.disabled = false;
@@ -1067,7 +1062,7 @@ function renderPanel(panel) {
     return;
   }
 
-  // Aggregation picker: the server lists what fits the metric type.
+  // The aggregation picker. The server lists what fits the metric type.
   const aggs = Array.isArray(data?.aggs) ? data.aggs : panel.agg ? [panel.agg] : [];
   const aggPicker = $(".metricsPicker--agg", el);
   const aggButton = $(".tracePicker__button", aggPicker);
@@ -1109,7 +1104,7 @@ function renderPanel(panel) {
   drawChart(panel);
 }
 
-// The services of the catalog that send the panel's metric, the busiest first.
+// The services of the catalog that send the metric of the panel. The busiest service comes first.
 function metricServices(panel) {
   const out = [];
   for (const svc of model.catalog?.services || []) {
@@ -1121,7 +1116,7 @@ function metricServices(panel) {
 
 const SERVICE_CHOICES = 12;
 
-// The chart area of a panel that has a metric and no service: one button per service that sends it.
+// The chart area of a panel that has a metric and no service. It has one button for each service that sends the metric.
 function renderServiceChoice(panel) {
   const stateEl = $(".metricsChart__state", panel.el);
   uiState.busy($(".metricsChart", panel.el), false);
@@ -1193,10 +1188,10 @@ function renderFilters(panel) {
 }
 
 // --- Chart ----------------------------------------------------------------
-// One canvas chart per panel (app_chart_core.js): lines with the slot
-// colours and dashes, the shared crosshair across panels, the engine's
-// tooltip and legend (click shows / hides, Alt+click isolates), exemplars as
-// links over the plot, and a drag that sets the time range of every panel.
+// One canvas chart is drawn for each panel (app_chart_core.js). Lines use the slot
+// colours and dashes. The crosshair is shared across panels. The tooltip and legend come from the engine.
+// A click on the legend shows or hides a series. Alt+click isolates a series. Exemplars are
+// links over the plot. A drag sets the time range of every panel.
 
 const SYNC_KEY = "metrics-panels";
 
@@ -1212,14 +1207,14 @@ function seriesName(panel, series) {
   return labels.map(([k, v]) => `${k}=${v === "" ? "(none)" : v}`).join(", ");
 }
 
-// The service a series stands for: its only label is the service name.
+// The service that a series stands for. Its only label is the service name.
 function seriesService(series) {
   const labels = series.labels && typeof series.labels === "object" ? Object.entries(series.labels) : [];
   return labels.length === 1 && SERVICE_KEYS.has(labels[0][0]) && labels[0][1] !== "" ? String(labels[0][1]) : null;
 }
 
-// A service series takes the service's colour (Traces, Logs); the others
-// the chart slots (the 18 categorical colours), dashed past the last.
+// A service series takes the colour of the service (Traces, Logs). The other series take
+// the chart slots (the 18 categorical colours). Dashes start after the last slot.
 function slotStyle(index, other, service = null) {
   if (other) return { color: palette.categorical(-1), dash: [4, 3] };
   if (service) return { color: palette.service(service), dash: null };
@@ -1227,8 +1222,8 @@ function slotStyle(index, other, service = null) {
   return { color: palette.categorical(index), dash: cycle === 0 ? null : cycle === 1 ? [6, 3] : [2, 3] };
 }
 
-// Exemplar values share the metric unit: they sit on the value axis when the
-// plotted aggregation has that unit (durations, gauge values), otherwise on a
+// Exemplar values share the metric unit. They sit on the value axis when the
+// plotted aggregation has that unit (durations, gauge values). Otherwise, they sit on a
 // strip along the bottom of the plot.
 function exemplarsOnAxis(data) {
   if (!data || String(data.value_unit ?? "") !== String(data.unit ?? "")) return false;
@@ -1246,8 +1241,8 @@ function exemplarTip(ex, metricInfo) {
     `<div class="metricsTip__hint">Click to open the span</div>`;
 }
 
-// Exemplar links, largest values first (the engine skips a dot that would
-// overlap one already placed, so every drawn dot stays clickable).
+// Exemplar links, largest values first. The engine skips a dot that would
+// overlap a dot already placed. So every drawn dot stays clickable.
 function exemplarMarkers(panel, data, x0, x1) {
   const list = panel.exemplars && Array.isArray(panel.exemplarData?.exemplars) ? panel.exemplarData.exemplars : [];
   const onAxis = exemplarsOnAxis(data);
@@ -1271,7 +1266,7 @@ function exemplarMarkers(panel, data, x0, x1) {
   return { markers, values: onAxis ? markers.map((m) => m.y).filter((v) => v != null) : [] };
 }
 
-// A drag over a panel sets the time range of every panel (whole seconds).
+// A drag over a panel sets the time range of every panel, in whole seconds.
 function onChartZoom(range, fromUser) {
   if (!fromUser || !range) return;
   const startMs = Math.floor(range[0] / 1000) * 1000;
@@ -1303,8 +1298,8 @@ function drawChart(panel) {
   const bucketMs = Number(data.bucket_ms) || 60000;
   const x0 = Number(data.range?.[0] ?? xs[0]);
   const x1 = Math.max(Number(data.range?.[1] ?? xs[n - 1] + bucketMs), x0 + 1);
-  // A series exported less often than the bucket has regular empty buckets:
-  // bridgeGaps joins those, longer gaps break the line, a lone point is a dot.
+  // A series that is exported less often than the bucket has regular empty buckets.
+  // bridgeGaps joins those. Longer gaps break the line. A lone point is a dot.
   palette.registerServices(series.map(seriesService).filter(Boolean));
   const lines = series.map((s, index) => {
     const style = slotStyle(index, !!s.other, s.other ? null : seriesService(s));
@@ -1319,8 +1314,8 @@ function drawChart(panel) {
   const { markers, values: exemplarValues } = exemplarMarkers(panel, data, x0, x1);
   const showLegend = !(series.length <= 1 && !series[0]?.other && !data.group_by?.length && !data.per_series);
   const options = {
-    // A percentile is a level, not an amount piled up from zero: its line
-    // has no wash under it (a flat P99 would read as a filled block).
+    // A percentile is a level, not an amount that piles up from zero. Its line
+    // has no wash under it. A flat P99 would read as a filled block.
     fill: !isPercentileAgg(data.agg),
     xs,
     xDomain: [x0, x1],
@@ -1332,7 +1327,7 @@ function drawChart(panel) {
     yUnit: (maxAbs) => axisFormatter(valueInfo, maxAbs),
     formatValue: (v) => formatValue(v, valueInfo),
     formatY: (v) => formatValue(v, valueInfo),
-    // The bucket a cursor position stands for, like the Traces charts.
+    // The bucket that a cursor position stands for, as in the Traces charts.
     bucketMs,
     tooltipFooter: () => `${fmt.duration.fromMs(bucketMs)} bucket`,
   };
@@ -1392,8 +1387,8 @@ function renderRangeInfo() {
   const info = byId("metricsRangeInfo");
   if (!info) return;
   const r = model.resolved;
-  // A relative range ("Last 6 hours") shows what it resolved to; an
-  // absolute one already reads as dates on the picker.
+  // A relative range ("Last 6 hours") shows what it resolved to. An
+  // absolute range already reads as dates on the picker.
   info.textContent = r && timeRange?.isRelative?.(model.range) ? fmt.range(r.start_ms, r.end_ms) : "";
 }
 
@@ -1416,8 +1411,8 @@ function reloadAll() {
   for (const panel of model.panels) loadPanel(panel);
 }
 
-// The cycle of the view with its host (app_obs_view.js): the catalog of the old host goes, everything of it stops, the
-// new host's catalog loads and every panel reads again.
+// The cycle of the view with its host (app_obs_view.js). The catalog of the old host is removed, and all its work stops.
+// The catalog of the new host loads. Every panel reads again.
 const hostCycle = obsView.hostCycle({
   feature: "metrics",
   cancel: ["metrics."],
@@ -1425,7 +1420,7 @@ const hostCycle = obsView.hostCycle({
   load: async () => { if (await loadMeta()) reloadAll(); },
 });
 
-// Back / Forward, or the Observability page showing this view again: a URL
+// Back / Forward, or the Observability page that shows this view again: a URL
 // that changed while the view was away (or another entry) reloads.
 function onLocation() {
   const before = urlQuery();
@@ -1433,12 +1428,12 @@ function onLocation() {
   readUrl();
   timePicker?.refresh?.();
   if (urlQuery() === before && model.catalog) {
-    // Same state: the panels (and their charts) stay.
+    // Same state. The panels and their charts stay.
     model.panels = previous;
     if (model.focusService) renderCatalog();
     return;
   }
-  // The panels that leave stop their reads: an answer that came after would draw a chart on a node that is gone.
+  // The panels that leave stop their reads. An answer that came later would draw a chart on a node that is gone.
   for (const panel of previous) {
     cancelPanelReads(panel);
     destroyChart(panel);
@@ -1449,14 +1444,14 @@ function onLocation() {
   reloadAll();
 }
 
-// Shared with the other Observability views: the time range, and the
-// service of the active panel.
+// The view shares the time range and the
+// service of the active panel with the other Observability views.
 function getContext() {
   const service = model.panels[model.active]?.service || "";
   return { range: { ...model.range }, service: service || null };
 }
 
-// The range goes to the URL; a service opens its group of the catalog.
+// The range goes to the URL. A service opens its group of the catalog.
 function applyContext(params, context) {
   if (context.range) timeRange.url.write(params, context.range);
   if (context.service) model.focusService = context.service;
@@ -1474,8 +1469,8 @@ function init() {
   address.replace();
   renderPanels();
 
-  // The catalog's shell (ns.sidePanel): folded to a 32 px rail on wide
-  // windows (remembered), a drawer on phones opened from the charts' top.
+  // The catalog shell (ns.sidePanel) folds to a 32 px rail on wide
+  // windows (remembered). On phones, it is a drawer that opens from the top of the charts.
   const catalogPanel = sidePanel.mount(byId("metricsSidebar"), {
     label: "Metrics",
     collapse: { button: byId("metricsSidebarToggle"), storeKey: storage.KEYS.metricsCatalogCollapsed, rootClass: "chdash-metrics-catalog-collapsed" },
@@ -1493,17 +1488,17 @@ function init() {
     },
   });
   syncCatalogBy();
-  // An empty panel's "Pick a metric": the catalog (its drawer on a phone,
-  // its rail unfolded) and, on a wide window, the bar's search.
+  // The "Pick a metric" of an empty panel opens the catalog (its drawer on a phone,
+  // its rail unfolded). On a wide window, it also focuses the search of the bar.
   dom.metricsPanels?.addEventListener("click", (event) => {
     if (!event.target.closest("[data-metrics-pick]")) return;
     if (shell?.isAtMost?.("md")) { catalogPanel?.setDrawerOpen(true); return; }
     if (catalogPanel?.collapsed()) catalogPanel.setCollapsed(false);
     byId("metricsSearch")?.focus();
   });
-  // The filter bar's Service picker and search narrow the catalog (the
-  // same slots as on Traces and Logs); on a phone typing opens the
-  // catalog's drawer, where the matches are.
+  // The Service picker and the search of the filter bar narrow the catalog. The
+  // slots are the same as on Traces and Logs. On a phone, typing opens the
+  // catalog drawer, where the matches are.
   menu?.select(byId("metricsService"), {
     onChange: (value) => {
       model.service = String(value || "");
@@ -1513,7 +1508,7 @@ function init() {
     },
   });
   const search = byId("metricsSearch");
-  // ns.search flushes on Enter first: the catalog is filtered when the handler below opens its first metric.
+  // ns.search flushes on Enter first. The catalog is filtered when the handler below opens its first metric.
   searchMod.bind(search, (value) => {
     model.search = value;
     if (value && shell?.isAtMost?.("md")) catalogPanel?.setDrawerOpen(true);

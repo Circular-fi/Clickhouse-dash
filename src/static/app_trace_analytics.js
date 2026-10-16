@@ -1,5 +1,6 @@
-// The two charts above the result list: the traces per bucket by service and the duration of the traces (a scatter and its
-// percentiles, or the heatmap).
+// Two charts are above the result list.
+// The first chart shows the traces per bucket by service. The second chart shows the duration of the traces.
+// The second chart is a scatter with its percentiles, or the heatmap.
 
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -22,9 +23,8 @@ function renderServiceChart() {
   const range = a?.range || [0, 1];
   const bucketMs = Math.max(1000, Number(a?.bucket_ms || 60000));
   const start = Number(range[0] || 0), end = Math.max(start + 1000, Number(range[1] || start + bucketMs));
-  // Buckets are keyed by their start on the server's grid (anchored at the
-  // local midnight sent as bucket_origin_ms) and placed by time, so a range
-  // that does not start on the grid still shows every bucket.
+  // Each bucket has a key that is its start on the server grid. The grid is anchored at the local midnight sent as bucket_origin_ms.
+  // The buckets are placed by time. A range that does not start on the grid still shows every bucket.
   const buckets = points
     .map((point) => [Number(point?.[0] || 0), Number(point?.[1] || 0)])
     .filter(([bucket, count]) => count > 0 && bucket + bucketMs > start && bucket <= end)
@@ -53,10 +53,10 @@ function renderServiceChart() {
   }
 }
 
-// Legend choices (shown / hidden percentiles) survive new answers: P50
-// and P99 show by default, P90 and P95 one legend click away.
+// The legend choices (shown or hidden percentiles) are kept across new answers.
+// P50 and P99 show by default. P90 and P95 are one legend click away.
 let durationHidden = ["p90", "p95"];
-// The listed traces of the scatter, in the order of its x column (start).
+// The listed traces of the scatter are in the order of its x column (start).
 let scatterTraces = [];
 
 function renderDurationChart() {
@@ -76,8 +76,8 @@ function renderDurationChart() {
   const range = a?.range || [qs[0][0], qs[qs.length - 1][0]];
   const xMin = Number(range[0] || 0), xMax = Math.max(xMin + 1000, Number(range[1] || xMin + 1000));
   const qBucketMs = Math.max(1000, Number(a.quantile_bucket_ms || a.bucket_ms || 60000));
-  // Percentiles on the bucket grid: lines break over buckets without
-  // traces (NULL), and a lone bucket shows as a dot.
+  // The percentiles use the bucket grid. Lines break over buckets without traces (NULL).
+  // A lone bucket shows as a dot.
   const grid = bucketGrid(qs, qBucketMs);
   const n = grid.starts.length;
   const xs = new Float64Array(n);
@@ -89,8 +89,9 @@ function renderDurationChart() {
     nulls[i] = 0;
     for (let c = 0; c < 4; c += 1) columns[c][i] = Number.isFinite(q[c + 1]) ? q[c + 1] : NaN;
   });
-  // Jaeger's scatter plot: one dot per listed trace (x = start, y =
-  // duration, radius by span count, red with errors), over the percentiles.
+  // This follows Jaeger's scatter plot. It draws one dot per listed trace.
+  // The x value is the start, and the y value is the duration. The radius depends on the span count. Errors make the dot red.
+  // The dots are drawn over the percentiles.
   scatterTraces = (model.traces || [])
     .filter((trace) => Number(trace.start_ms) > 0 && Number.isFinite(Number(trace.duration_ns)))
     .sort((p, q) => Number(p.start_ms) - Number(q.start_ms));
@@ -111,7 +112,7 @@ function renderDurationChart() {
     xKind: "time", xs, xDomain: [xMin, xMax], zoom: null, series, type: "line", fill: false,
     hidden: durationHidden, onHiddenChange: (hidden) => { durationHidden = [...hidden]; },
     legend: true, syncKey: CHART_SYNC_KEY, tooltipNulls: false,
-    // Jaeger's ['auto', 'auto'] domain, whole duration steps.
+    // This code uses Jaeger's ['auto', 'auto'] domain with whole duration steps.
     yAxis: (yMin, yMax) => {
       const durationScaleAxis = durationAxis(yMin, yMax, 7);
       return { min: durationScaleAxis.axisMin, max: durationScaleAxis.axisMax, ticks: durationScaleAxis.values.map((tick) => ({ v: tick.value, label: tick.label })) };
@@ -139,7 +140,7 @@ function renderDurationChart() {
   if (dom.traceDurationChartMeta) dom.traceDurationChartMeta.textContent = `${scatterTraces.length ? `${fmt.count(scatterTraces.length)} listed trace${scatterTraces.length === 1 ? "" : "s"} + ` : ""}P50 / P90 / P95 / P99 · ${fmt.duration.fromMs(qBucketMs)} buckets`;
 }
 
-// The scatter dots as drawn (test and debugging hook): client coordinates.
+// This hook gives the scatter dots as drawn, in client coordinates. Tests and debugging use it.
 function scatterDots() {
   const held = dom.traceDurationChart && mountedCharts.get(dom.traceDurationChart);
   if (!held || held.kind !== "percentiles") return [];
@@ -150,8 +151,8 @@ function scatterDots() {
   });
 }
 
-// Remembers whether meta enables analytics for the head script of the next
-// page load (see observability.html), and drops the early class once meta is known.
+// This code remembers whether meta enables analytics for the head script of the next page load (see observability.html).
+// It drops the early class when meta is known.
 function rememberAnalyticsEnabled(enabled) {
   storage.pref(storage.KEYS.traceAnalytics, false).set(enabled);
   document.documentElement.classList.remove("chdash-trace-analytics");
@@ -161,10 +162,10 @@ function renderAnalytics() {
   const enabled = model.meta?.analytics_enabled === true;
   if (model.meta) rememberAnalyticsEnabled(enabled);
   if (dom.traceAnalyticsGrid) dom.traceAnalyticsGrid.hidden = !enabled;
-  // Busy from the search's first chart request to its last answer.
+  // The state is busy from the first chart request of the search to its last answer.
   uiState.busy(dom.traceAnalyticsGrid, enabled && model.analyticsLoading);
   if (!enabled) return;
-  // The heatmap loads on its own: the count chart states do not apply to it.
+  // The heatmap loads on its own. The states of the count chart do not apply to it.
   const heatmap = traceHeatmap.active() === true;
   if (model.analyticsLoading && !model.analytics) {
     chartMessage(dom.traceServiceChart, "Loading trace activity\u2026");

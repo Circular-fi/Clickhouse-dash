@@ -1,8 +1,8 @@
-/* fuzz_input.h: turns the bytes of a fuzz input into the values a kernel gets from the page (tests/fuzz).
+/* fuzz_input.h: turns the bytes of a fuzz input into the values that a kernel gets from the page (tests/fuzz).
  *
- * The page hands a kernel UTF-16 code units (a JavaScript string), int32 rows and doubles. These helpers read
- * them from the input in the order the target asks for them; an input that runs out gives zeros.
- * C and C++ (the WebAssembly kernels are C files).
+ * The page gives a kernel UTF-16 code units (a JavaScript string), int32 rows and doubles. These helpers read
+ * them from the input in the order that the target asks for them. An input that runs out gives zeros.
+ * The helpers work in C and in C++. The WebAssembly kernels are C files.
  */
 #ifndef CHDASH_FUZZ_INPUT_H
 #define CHDASH_FUZZ_INPUT_H
@@ -40,7 +40,7 @@ static inline int32_t fuzz_range(FuzzInput *in, int32_t lo, int32_t hi) {
   return lo + (int32_t)(v % span);
 }
 
-/* A double: often a small number or a special value (the cases a layout meets), else 8 raw bytes. */
+/* A double. It is often a small number or a special value, such as the cases a layout meets. Otherwise it is 8 raw bytes. */
 static inline double fuzz_f64(FuzzInput *in) {
   uint8_t kind = fuzz_u8(in);
   switch (kind % 8) {
@@ -62,9 +62,9 @@ static inline double fuzz_f64(FuzzInput *in) {
   }
 }
 
-/* The rest of the input (or `limit` bytes of it) read as UTF-8 and written as UTF-16 code units, like a JavaScript
- * string: a byte that does not start a valid sequence becomes the lone surrogate 0xDC00 + byte, which a JavaScript
- * string can hold too. `out` holds at least `limit` units. Returns the number of units. */
+/* Read the rest of the input, or `limit` bytes of it, as UTF-8. Write it as UTF-16 code units, like a JavaScript
+ * string. A byte that does not start a valid sequence becomes the lone surrogate 0xDC00 + byte. A JavaScript
+ * string can hold such a surrogate too. `out` holds at least `limit` units. Returns the number of units. */
 static inline int32_t fuzz_utf16(FuzzInput *in, uint16_t *out, size_t limit) {
   int32_t n = 0;
   size_t end = in->at + (limit < fuzz_left(in) ? limit : fuzz_left(in));

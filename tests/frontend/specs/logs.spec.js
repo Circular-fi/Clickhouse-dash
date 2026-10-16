@@ -1,9 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { roundTrip } from '../helpers/app.js';
 
-// Logs explorer (/logs) against the otel_fixture logs. Ranges come from
-// /api/logs/meta time_bounds; the Playwright browser runs in UTC, so the
-// absolute range strings in the URL are UTC too.
+// Logs explorer (/logs) against the otel_fixture logs. The ranges come from time_bounds in /api/logs/meta.
+// The Playwright browser runs in UTC. The absolute range strings in the URL are UTC too.
 
 const fmt = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
 
@@ -30,8 +29,8 @@ function param(page, name) {
   return new URL(page.url()).searchParams.getAll(name);
 }
 
-// The histogram draws on the shared canvas engine: its data attributes say
-// what each severity drew (seriesStats: { Error: { points } ... }).
+// The histogram draws on the shared canvas engine. Its data attributes state what each severity drew.
+// See seriesStats: { Error: { points } ... }.
 const histogram = (page) => page.locator('#logsHistogram .chartCore');
 async function barsOf(page) {
   const stats = JSON.parse((await histogram(page).getAttribute('data-series-stats')) || '{}');
@@ -95,16 +94,16 @@ test('logs: service, level and severity class filters', async ({ page, request }
   // A severity class from the histogram legend.
   await page.goto(logsUrl(win));
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
-  // The histogram's totals legend (the chart engine's): a click filters.
+  // The totals legend of the histogram belongs to the chart engine. A click on an entry filters the logs.
   await page.locator('#logsHistogram .chartCore__legendItem[data-series="warn"]').click();
   await expect.poll(() => param(page, 'sev')).toEqual(['warn']);
   await expect(page.locator('#logsChips')).toContainText('Level: Warn');
   await expect(rows(page).first()).toBeVisible();
   for (const badge of await page.locator('#logsTableRows .badge--sev').allInnerTexts()) expect(badge).toBe('WARN');
-  // The histogram refetches with the filter: only Warn bars are left.
+  // The histogram requests its data again with the filter. Only Warn bars are left.
   await expect.poll(async () => (await barsOf(page)).Info).toBe(0);
   expect((await barsOf(page)).Warn).toBeGreaterThan(0);
-  // Removing the chip removes the filter.
+  // Remove the chip to remove the filter.
   await page.locator('#logsChips .chip__remove').first().click();
   await expect.poll(() => param(page, 'sev')).toEqual([]);
 });
@@ -179,7 +178,7 @@ test('logs: dragging over the histogram zooms the time range', async ({ page, re
   const total = async () => Number((await page.locator('#logsTotal').innerText()).replace(/[^\d]/g, ''));
   const before = await total();
   const hit = await plotBox(page);
-  // Hovering reads one bucket: its range, a row per severity and the total.
+  // A hover reads one bucket. The tip shows its range, a row for each severity and the total.
   await page.mouse.move(hit.x + hit.width * 0.45, hit.y + hit.height / 2);
   const tip = histogram(page).locator('.chartCore__tooltip');
   await expect(tip).toBeVisible();
@@ -206,10 +205,9 @@ test('logs: dragging over the histogram zooms the time range', async ({ page, re
   expect(ms).toBeLessThanOrEqual(to);
 });
 
-// The record panel keeps Body readable: below 1600 px the Fields panel folds
-// to its rail while the record is open (and unfolds after), and the
-// lowest-priority columns go before Body would shrink under 320 px. The Time
-// header lines up with its values (left).
+// The record panel keeps Body readable. Below 1600 px, the Fields panel folds to its rail while the record is open.
+// It unfolds after the record closes. The lowest-priority columns are removed before Body shrinks under 320 px.
+// The Time header is aligned with its values, on the left.
 test('logs: the record panel folds Fields, drops low-priority columns before Body shrinks; Time header aligns with its values', async ({ page, request }) => {
   const win = await logsWindow(request, 10);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -226,7 +224,7 @@ test('logs: the record panel folds Fields, drops low-priority columns before Bod
   await rows(page).first().click();
   await expect(page.locator('#logsSidePanel')).toBeVisible();
   await expect.poll(async () => Math.round((await fields.boundingBox()).width)).toBe(32);
-  // Body keeps its room: the scope, span and trace columns went first.
+  // Body keeps its room. The scope, span and trace columns are removed first.
   await expect.poll(async () => Math.round((await rows(page).first().locator('.logsCell--body').boundingBox()).width)).toBeGreaterThanOrEqual(300);
   const shown = await head.locator('.logsTable__th').allInnerTexts();
   expect(shown.slice(0, 2)).toEqual(['Time', 'Level']);
@@ -235,7 +233,7 @@ test('logs: the record panel folds Fields, drops low-priority columns before Bod
   const cells = await rows(page).first().locator('.logsCell').count();
   expect(cells).toBe(shown.length);
 
-  // Closed: the Fields panel and every column come back.
+  // When the record closes, the Fields panel and every column return.
   await page.locator('#logsSidePanel .uiDetail__close').click();
   await expect(page.locator('#logsSidePanel')).toBeHidden();
   await expect.poll(async () => Math.round((await fields.boundingBox()).width)).toBe(288);
@@ -259,8 +257,8 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   await expect.poll(() => param(page, 'attr')).toEqual([`ResourceAttributes.host.name=${host}`]);
   await expect(page.locator('#logsChips')).toContainText(`host.name = ${host}`);
   await expect(page.locator('#logsQuery')).toHaveValue('inserted');
-  // Every row now comes from that host (host column added from the picker;
-  // the record panel closed, so no column gives way to Body).
+  // Every row now comes from that host. Add the host column from the picker.
+  // The record panel is closed, so no column is removed for Body.
   await page.locator('#logsSidePanel .uiDetail__close').click();
   await expect(panel).toBeHidden();
   await page.locator('#logsColumnsButton').click();
@@ -281,15 +279,14 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   await fnRow.locator('[data-kv-action="exclude"]').click();
   await expect.poll(() => param(page, 'attr')).toContain(`LogAttributes.code.function!=${fn}`);
   await expect(page.locator('#logsChips .logsChip.is-negated')).toContainText(`code.function ≠ ${fn}`);
-  // No record of the answer has that function. When every record of the
-  // host's "inserted" template has it (the SQL-generated bulk fixture: one
-  // operation per service) the exclusion empties the table; the Python one
-  // (a fresh stack) logs it from several operations, whose records remain.
+  // No record of the answer has that function. When every record of the host's "inserted" template has it, the exclusion empties the table.
+  // The SQL-generated bulk fixture has one operation per service.
+  // The Python one, on a fresh stack, logs it from several operations. The records of those other operations remain.
   const left = (await (await excludedSearch).json()).rows;
   expect(left.every((row) => row.log_attributes['code.function'] !== fn)).toBe(true);
   if (left.length) await expect(rows(page).first()).toBeVisible();
   else await expect(page.locator('#logsTableMessage')).toContainText('No logs match these filters');
-  // Removing its chip restores it.
+  // Remove its chip to restore it.
   await page.locator('#logsChips .logsChip.is-negated .chip__remove').click();
   await expect.poll(() => param(page, 'attr')).toEqual([`ResourceAttributes.host.name=${host}`]);
   await expect(rows(page).first()).toBeVisible();
@@ -304,7 +301,7 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   await expect.poll(() => param(page, 'q')).toEqual([]);
   await expect(page.locator('#logsQuery')).toHaveValue('');
 
-  // Open trace links to the Traces view with the span focused.
+  // Open trace links to the Traces view. The span is focused there.
   await rows(page).first().click();
   const traceId = (await panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^TraceId$/ }) }).locator('.kvList__value').innerText()).trim();
   const spanId = (await panel.locator('.kvList__row').filter({ has: page.locator('.kvList__key', { hasText: /^SpanId$/ }) }).locator('.kvList__value').innerText()).trim();
@@ -315,8 +312,8 @@ test('logs: side panel fields filter, exclude, search only this and open trace',
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await rows(page).first().click();
-  // The trace opens as a page of its own (a navigation); the logs' time range goes with the tab
-  // (sessionStorage), not in the address.
+  // The trace opens as a page of its own. This is a navigation.
+  // The time range of the logs goes with the tab, in sessionStorage. It is not in the address.
   const logsRange = { from: new URL(page.url()).searchParams.get('from'), to: new URL(page.url()).searchParams.get('to') };
   expect(logsRange.from).toBeTruthy();
   await page.evaluate(() => { window.__sameDocument = true; });
@@ -346,7 +343,7 @@ test('logs: surrounding context presets', async ({ page, request }) => {
   await page.locator('#logsSideTabContext').click();
   const context = page.locator('#logsContextRows');
   await expect(context.locator('.logsContextRow.is-anchor')).toHaveAttribute('data-context-id', anchorId);
-  // Anything: other services around the record (the text search is not applied).
+  // The default shows any service: other services around the record. The text search does not apply here.
   await expect.poll(async () => new Set(await context.locator('.logsContextRow__service').allInnerTexts()).size).toBeGreaterThan(1);
   await page.locator('[data-context-preset="service"]').click();
   await expect(page.locator('[data-context-preset="service"]')).toHaveAttribute('aria-pressed', 'true');
@@ -371,10 +368,10 @@ test('logs: surrounding context presets', async ({ page, request }) => {
 });
 
 test('logs: patterns tab, denoise and filter by pattern', async ({ page }) => {
-  // Three hours of the rich day (2026-09-12 09:00-12:00, tests/README.md
-  // "Rich OTel dataset"), on every stack: ~29 k records, request logs above
-  // 10 % of them (noise) and dozens of quieter templates. (The bulk
-  // fixture's newest records have no template above 10 % on a fresh stack.)
+  // This test uses three hours of the rich day, 2026-09-12 09:00-12:00. See tests/README.md, "Rich OTel dataset".
+  // The window is on every stack, with about 29 k records.
+  // Request logs make more than 10 % of them (noise). Dozens of quieter templates also exist.
+  // The newest records of the bulk fixture have no template above 10 % on a fresh stack.
   const start = Date.UTC(2026, 8, 12, 9);
   const win = { start, end: start + 3 * 3_600_000, from: fmt(start), to: fmt(start + 3 * 3_600_000) };
   await openLogs(page, logsUrl(win));
@@ -383,16 +380,15 @@ test('logs: patterns tab, denoise and filter by pattern', async ({ page }) => {
   await expect.poll(() => param(page, 'tab')).toEqual(['patterns']);
   const patternRows = page.locator('#logsPatterns .logsPatternRow');
   await expect(patternRows.first()).toBeVisible({ timeout: 30_000 });
-  // The pattern clicked at the end: a quiet one, three constant words or
-  // more around a variable.
+  // The test clicks a quiet pattern at the end. It has three constant words or more around a variable.
   const quiet = ((await (await mined).json()).patterns || []).find((p) => !p.noisy && p.share < 0.07 && p.search
     && p.pattern.includes('<*>') && p.pattern.split(' ').filter((word) => word !== '<*>').length >= 3);
   expect(quiet, 'a quiet pattern with constant words').toBeTruthy();
-  // The status line speaks for the Patterns tab: the sample and how the
-  // counts were extrapolated from it (Results has its own line).
+  // The status line describes the Patterns tab. It gives the sample and how the counts were extrapolated from it.
+  // The Results tab has its own line.
   const status = page.locator('#logsStatus');
-  // The sample picks whole blocks of rows by hash: up to 10,000 records,
-  // a little fewer when the hashes fall short of the target rate.
+  // The sample takes whole blocks of rows, chosen by hash. It has up to 10,000 records.
+  // It can have a few records fewer when the hashes fall short of the target rate.
   await expect(status).toContainText(/patterns? in a sample of [\d,]+ of [\d,]+ logs/);
   const [sampled, total] = (await status.innerText()).match(/a sample of ([\d,]+) of ([\d,]+) logs/).slice(1).map((n) => Number(n.replace(/,/g, '')));
   expect(sampled).toBeLessThanOrEqual(10_000);
@@ -400,7 +396,7 @@ test('logs: patterns tab, denoise and filter by pattern', async ({ page }) => {
   expect(total).toBeGreaterThan(sampled);
   await expect(status).toContainText(/counts extrapolated ×[\d.]+[KMB]? from the sample/);
   await expect(status).not.toContainText('logs shown');
-  // A share is its figure beside its own bar, never a bar under the figure.
+  // A share shows its figure beside its own bar. The bar is never under the figure.
   const share = patternRows.first().locator('.shareBar');
   const text = await share.locator('.shareBar__text').boundingBox();
   const track = await share.locator('.shareBar__track').boundingBox();
@@ -419,7 +415,7 @@ test('logs: patterns tab, denoise and filter by pattern', async ({ page }) => {
   await page.reload();
   await expect(patternRows.first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#logsDenoise')).toBeChecked();
-  // Clicking a pattern filters the results by its constant words.
+  // A click on a pattern filters the results by its constant words.
   const target = page.locator(`#logsPatterns .logsPatternRow[title="Filter by this pattern: ${quiet.search.replace(/["\\]/g, '\\$&')}"]`);
   await target.click();
   await expect.poll(() => param(page, 'tab')).toEqual([]);
@@ -461,7 +457,7 @@ test('logs: no live tail: no Live control, and no request fires on a timer after
     if (url.includes('/api/logs/histogram')) calls.histogram += 1;
     else if (/\/api\/logs\/(services|patterns|context)/.test(url)) calls.other += 1;
   });
-  // A former link's live=1 is tolerated: the search runs, the parameter is dropped.
+  // An old link with live=1 is accepted. The search runs, and the parameter is removed.
   await page.goto('/observability/logs?from=now-15m&to=now&live=1');
   await expect(rows(page)).toHaveCount(3, { timeout: 30_000 });
   await expect(page).not.toHaveURL(/[?&]live=/);
@@ -487,8 +483,8 @@ test('logs: no live tail: no Live control, and no request fires on a timer after
 test('logs: an empty range offers the newest data, errors are shown', async ({ page, request }) => {
   const meta = await (await request.get('/api/logs/meta')).json();
   test.skip(!meta.time_bounds, 'no logs');
-  // An hour after the newest record (the default range holds a fresh
-  // stack's newest records, not a long-lived one's).
+  // The range starts one hour after the newest record.
+  // The default range holds the newest records of a fresh stack, not those of a long-lived one.
   const after = Number(meta.time_bounds.max_ms) + 3_600_000;
   await page.goto(logsUrl({ from: fmt(after), to: fmt(after + 3_600_000) }));
   await expect(page.locator('#logsTableMessage')).toContainText('No logs match', { timeout: 30_000 });
@@ -516,7 +512,7 @@ test('logs: on a phone the record panel is a solid bottom sheet; Escape closes i
   expect(Math.round(sheet.width)).toBe(390);
   expect(sheet.y).toBeGreaterThanOrEqual(nav.y + nav.height - 1);
   expect(Math.round(sheet.y + sheet.height)).toBe(844);
-  // Opaque, and on top: the table header under it does not show through.
+  // The panel is opaque and on top. The table header under it is not visible.
   const background = await side.evaluate((el) => getComputedStyle(el).backgroundColor);
   expect(background).toMatch(/^rgb\(/);
   for (const selector of ['#logsSideTitle', '#logsSideClose', '#logsSideTabContext']) {
@@ -532,7 +528,7 @@ test('logs: on a phone the record panel is a solid bottom sheet; Escape closes i
   await page.route('**/api/logs/search**', (route) => (fail
     ? route.fulfill({ status: 503, json: { error_code: 'logs_source_unavailable', message: 'The logs table could not be read.' } })
     : route.fallback()));
-  // (The form scrolls sideways on a phone: submit it rather than aim at its button.)
+  // The form scrolls sideways on a phone. Submit the form, and do not aim at its button.
   await page.locator('#logsForm').evaluate((form) => form.requestSubmit());
   await expect(page.locator('#logsError')).toContainText('The logs table could not be read.');
   await expect(page.locator('#logsError')).not.toContainText('logs_source_unavailable');
@@ -542,9 +538,9 @@ test('logs: on a phone the record panel is a solid bottom sheet; Escape closes i
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
 });
 
-// Audit round 2: the record's head on a phone: the title (severity and
-// service, then the time on its own line, whole), the close cross beside it,
-// the actions (Open trace, Copy JSON on one line) on a row of their own.
+// Audit round 2: the head of the record on a phone.
+// The title shows the severity and the service. The time is on its own line, and it is whole.
+// The close cross is beside the title. The actions (Open trace, Copy JSON) are on a row of their own. Copy JSON is on one line.
 test('logs: on a phone the record head keeps the time whole and Copy JSON on one line', async ({ page, request }) => {
   const win = await logsWindow(request);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -585,7 +581,7 @@ test('logs: the page switcher reaches the Observability page, whose Logs tab ope
   await expect(page.locator('#pageSelectMenu a:visible')).toHaveText(['Query', 'Explorer', 'Observability', 'System']);
   await page.locator('#navQueryLink').click();
   await expect(page).toHaveURL(/\/query$/);
-  // The availability is cached for the next first paint.
+  // The cache stores the availability for the next first paint.
   const nav = await page.evaluate(() => JSON.parse(localStorage.getItem('chdash.pageNav.v1')));
   expect(nav.logs).toBe(true);
 });
@@ -600,7 +596,7 @@ test('logs: no page overflow and keyboard row navigation', async ({ page, reques
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('#logsTableRows .logsRow.is-selected')).not.toHaveAttribute('data-row-id', first);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  // Scrolling to the bottom loads older pages through the cursor.
+  // Scroll to the bottom. This loads older pages through the cursor.
   const before = await page.evaluate(() => window.ChDash.logs.model.rows.length);
   await page.locator('#logsTableViewport').evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await expect.poll(() => page.evaluate(() => window.ChDash.logs.model.rows.length), { timeout: 20_000 }).toBeGreaterThan(before);
@@ -608,8 +604,8 @@ test('logs: no page overflow and keyboard row navigation', async ({ page, reques
   expect(new Set(ids).size).toBe(ids.length);
 });
 
-// --- Fields panel: the Traces Attributes facets (app_facet_panel.js) over
-// /api/logs/facets and /api/logs/facet_values.
+// --- Fields panel: the Traces Attributes facets (app_facet_panel.js).
+// It uses /api/logs/facets and /api/logs/facet_values.
 
 const fieldsPanel = (page) => page.locator('#logsFacets');
 const field = (page, key) => fieldsPanel(page).locator(`.traceFacet[data-facet-key="${key}"]`);
@@ -635,24 +631,24 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   await openLogs(page, logsUrl(win));
   const panel = fieldsPanel(page);
   await expect(panel).toBeVisible();
-  // Left of the histogram and the results: the side panel shell (ns.sidePanel,
-  // --side-w), as the Traces Attributes.
+  // The panel is left of the histogram and of the results.
+  // It uses the side panel shell (ns.sidePanel, --side-w), as the Traces Attributes do.
   const box = await panel.boundingBox();
   const histogramBox = await page.locator('#logsHistogramCard').boundingBox();
   const tableBox = await page.locator('#logsTable').boundingBox();
   expect(Math.round(box.width)).toBe(288);
   expect(box.x + box.width).toBeLessThanOrEqual(histogramBox.x);
   expect(box.x + box.width).toBeLessThanOrEqual(tableBox.x);
-  // A full-height column of the view body (the shell's full-bleed side panel).
+  // The panel is a full-height column of the view body. It is the full-bleed side panel of the shell.
   const body = await page.locator('.logsSearchBody').boundingBox();
   expect(Math.abs(box.y - body.y)).toBeLessThanOrEqual(1);
   expect(Math.abs(box.y + box.height - (body.y + body.height))).toBeLessThanOrEqual(1);
   await expect(page.locator('#logsFacetsToggle')).toContainText('Fields');
-  // The sample the counts come from, named: "from a 3M sample" (or every
-  // matching record counted: "120K logs").
+  // The name of the sample is shown with the counts: "from a 3M sample".
+  // Or, every record that matches is counted, and the text is "120K logs".
   await expect(page.locator('#logsFacetsMeta')).toHaveText(/^(?:from a [\d.]+[KMB]? sample|[\d.]+[KMB]? logs)$/);
-  // The keys under their scope's name, the record columns first, then the
-  // attribute maps; no letter badges.
+  // The keys are under the name of their scope. The record columns come first, then the attribute maps.
+  // There are no letter badges.
   await expect(panel.locator('.traceFacet__scope')).toHaveCount(0);
   const groups = panel.locator('.traceFacets__group:not(.traceFacets__group--pinned) > .traceFacets__groupTitle');
   await expect(groups.first()).toHaveText('Record');
@@ -663,7 +659,7 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   expect(await group('host.name')).toBe('resource');
   await expect(field(page, 'code.function').locator('[data-facet-expand]')).toHaveAttribute('title', /code\.function · Log attribute/);
   await expect(panel.locator('.traceFacet[data-facet-key="TraceId"]')).toHaveCount(0);
-  // The request carries the search's own filters and range.
+  // The request holds the filters and the range of the search.
   const keysRequest = facetRequests.find((url) => url.pathname.endsWith('/api/logs/facets'));
   expect(Number(keysRequest.searchParams.get('end_ms')) - Number(keysRequest.searchParams.get('start_ms'))).toBeGreaterThan(9 * 60000);
 
@@ -672,8 +668,8 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   await expect(panel.locator('.traceFacet')).toHaveCount(1);
   await page.locator('#logsFacetsSearch').fill('');
 
-  // Top values of SeverityText; include WARN, then ERROR as well (one key's
-  // values match any of them).
+  // Show the top values of SeverityText. Include WARN, then include ERROR too.
+  // The values of one key match any of them.
   await field(page, 'SeverityText').locator('[data-facet-expand]').click();
   await expect(fieldValue(page, 'SeverityText', 'WARN')).toBeVisible();
   await expect(fieldValue(page, 'SeverityText', 'WARN').locator('.traceFacetValue__count')).toHaveText(/^[\d.]+[KMB]?$/);
@@ -684,7 +680,7 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   for (const badge of await page.locator('#logsTableRows .badge--sev').allInnerTexts()) expect(badge).toBe('WARN');
   await expect(fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]')).toBeChecked();
   await expect(field(page, 'SeverityText')).toHaveClass(/is-active/);
-  // Its own filter is left out of its values: the other levels stay listed.
+  // The filter of this key is left out of its values. The other levels stay listed.
   await expect(fieldValue(page, 'SeverityText', 'ERROR')).toBeVisible();
   await fieldValue(page, 'SeverityText', 'ERROR').locator('[data-facet-include]').check();
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=WARN', 'SeverityText=ERROR']);
@@ -703,7 +699,7 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   expect(await field(page, 'ServiceName').locator('.traceFacetValue').count()).toBeGreaterThan(1);
   for (const name of await page.locator('#logsTableRows .logsCell--service').allInnerTexts()) expect(name.trim()).toBe(service);
 
-  // Exclude a resource value: a negated map-qualified filter.
+  // Exclude a resource value. This makes a negated filter with a map-qualified key.
   await field(page, 'host.name').locator('[data-facet-expand]').click();
   const host = await field(page, 'host.name').locator('.traceFacetValue').first().getAttribute('data-facet-value');
   await fieldValue(page, 'host.name', host).locator('[data-facet-exclude]').click();
@@ -712,21 +708,21 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   await expect(fieldValue(page, 'host.name', host)).toHaveClass(/is-excluded/);
   await expect(fieldValue(page, 'host.name', host).locator('[data-facet-exclude]')).toHaveAttribute('aria-pressed', 'true');
 
-  // Unchecking WARN drops its filter; a removed chip unchecks its value.
+  // Uncheck WARN to remove its filter. Remove a chip to uncheck its value.
   await fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]').uncheck();
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR', `ResourceAttributes.host.name!=${host}`]);
   await page.locator('#logsChips .logsChip.is-negated .chip__remove').click();
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR']);
   await expect(fieldValue(page, 'host.name', host)).not.toHaveClass(/is-excluded/);
 
-  // A filter typed in the Filter input shows in the panel too.
+  // A filter that you type in the Filter input also shows in the panel.
   await page.locator('#logsFilterInput').fill('SeverityText=WARN');
   await page.locator('#logsFilterInput').press('Enter');
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR', 'SeverityText=WARN']);
   await expect(fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]')).toBeChecked();
 
-  // Pin a key: it moves to the pinned group and stays pinned after a reload,
-  // where the URL brings the filters (and the checked values) back.
+  // Pin a key. It moves to the pinned group, and it stays pinned after a reload.
+  // The URL restores the filters and the checked values.
   await field(page, 'code.lineno').locator('[data-facet-pin]').click();
   await expect(panel.locator('.traceFacets__group--pinned .traceFacet__key')).toHaveText(['code.lineno']);
   await page.reload();
@@ -740,7 +736,8 @@ test('logs: the Fields panel lists fields and top values; include, exclude, pin 
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=ERROR']);
   await expect(fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]')).not.toBeChecked();
 
-  // Folding: a 32 px rail, remembered across reloads; unfolding reloads the keys.
+  // Fold the panel to a 32 px rail. The fold state is kept across reloads.
+  // Unfold the panel to load the keys again.
   await page.locator('#logsFacetsToggle').click();
   await expect(page.locator('#logsFacetsToggle')).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#logsFacetsList')).toBeHidden();
@@ -798,7 +795,7 @@ test('logs: on a phone the Fields panel is a drawer, opened from the top of the 
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(panel.locator('.traceFacet').first()).toBeVisible({ timeout: 30_000 });
-  // Over the records from the left edge, under the page chrome.
+  // The panel lies over the records from the left edge, under the page chrome.
   await expect.poll(async () => Math.round((await panel.boundingBox()).x)).toBe(0);
   const box = await panel.boundingBox();
   const nav = await page.locator('#obsNav').boundingBox();
@@ -809,11 +806,11 @@ test('logs: on a phone the Fields panel is a drawer, opened from the top of the 
   await fieldValue(page, 'SeverityText', 'WARN').locator('[data-facet-include]').check();
   await expect.poll(() => param(page, 'attr')).toEqual(['SeverityText=WARN']);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  // Escape closes it (ns.layers) and gives the focus back to its toggle.
+  // Escape closes it (ns.layers). The focus returns to its toggle.
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
   await expect(toggle).toBeFocused();
-  // A press on the scrim closes it too.
+  // A press on the scrim also closes the panel.
   await toggle.click();
   await expect(panel).toBeVisible();
   await page.mouse.click(380, 600);
@@ -845,7 +842,7 @@ test.describe('logs on a touch phone', () => {
     expect(card.height).toBe(52);
     expect(Math.max(...card.middle) - Math.min(...card.middle), 'Time, Level and Service on one line').toBeLessThanOrEqual(2);
     expect(card).toMatchObject({ bodyBelow: true, bodyWide: true, bodyText: true, overflows: false });
-    // The cards are the virtual rows: scrolled, the list stays aligned.
+    // The cards are the virtual rows. When the list is scrolled, it stays aligned.
     const viewport = page.locator('#logsTableViewport');
     await viewport.evaluate((el) => { el.scrollTop = 52 * 30; });
     await expect.poll(() => rows(page).first().getAttribute('data-row-index')).not.toBe('0');
@@ -863,7 +860,7 @@ test.describe('logs on a touch phone', () => {
     await expect(side).toBeVisible();
     const row = side.locator('.kvList__row', { has: page.locator('[data-kv-more]') }).first();
     await expect(row).toBeVisible();
-    // The single actions give way to the "..." button, --hit square.
+    // The "..." button replaces the single actions. It is a --hit square.
     await expect(row.locator('[data-kv-action]').first()).toBeHidden();
     const more = row.locator('[data-kv-more]');
     const box = await more.boundingBox();

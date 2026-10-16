@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test';
 import { IS_RUN, installObservers } from '../helpers/observability.js';
 
-// The Observability filter bar (.obsFilterBar): Traces, Logs and Metrics lay
-// their bar out the same way at every width. Left to right: the time range
-// (first, one width), the field pickers, the free-text inputs, the view
-// options, the secondary actions, then the primary submit at the right end;
-// one range label format; the Metrics bar spans the catalog and the panels.
+// The Observability filter bar (.obsFilterBar) lays out Traces, Logs and Metrics the same way at every width.
+// From left to right, the bar has these parts. The time range comes first, at one width.
+// Then come the field pickers, the free-text inputs and the view options.
+// Then come the secondary actions. The primary submit is at the right end.
+//
+// All views use one range label format. The Metrics bar spans the catalog and the panels.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -19,9 +20,9 @@ test.afterEach(async ({ page }, testInfo) => {
 const VIEWS = ['traces', 'logs', 'metrics'];
 const BAR = { traces: '#tracesForm', logs: '#logsForm', metrics: '#metricsToolbar' };
 const PRIMARY = { traces: 'Search', logs: 'Search', metrics: 'Search' };
-// An absolute hour of the rich fixture day (tests/README.md, "Rich OTel
-// dataset"): traces, logs and metrics on every view, ~22 k spans
-// rather than the bulk fixture's millions.
+// The tests use an absolute hour of the rich fixture day (tests/README.md, "Rich OTel dataset").
+// Traces, logs and metrics appear on every view. The day has ~22 k spans.
+// The bulk fixture has millions of spans. This fixture does not.
 const HOUR = '?from=2026-09-12%2012:30:00&to=2026-09-12%2013:30:00';
 
 async function features(request) {
@@ -35,9 +36,9 @@ async function openView(page, view, query = HOUR) {
   await expect(page.locator('html')).toHaveAttribute('data-obs-view', view);
   const bar = page.locator(BAR[view]);
   await expect(bar).toBeVisible();
-  // The view module has mounted the range picker (it builds the panel).
+  // The view module mounts the range picker. It builds the panel.
   await expect(bar.locator('.tracePicker--range > .timeRangePanel')).toHaveCount(1);
-  // The first run is over: the primary is back to its idle look.
+  // The first run ends. The primary button returns to its idle look.
   await firstRun;
   await expect(bar.locator('.obsFilterBar__submit')).toBeAttached();
   await unfold(bar);
@@ -46,14 +47,14 @@ async function openView(page, view, query = HOUR) {
   return bar;
 }
 
-// On a phone (600 px and below) the bar starts folded into its summary line:
-// unfold it.
+// On a phone (600 px and below), the bar starts folded into its summary line.
+// Unfold it first.
 async function unfold(bar) {
   const summary = bar.locator('.obsFilterSummary');
   if (await summary.isVisible() && (await summary.getAttribute('aria-expanded')) === 'false') await summary.click();
 }
 
-// Boxes of the bar and of its parts, in DOM order, relative to the bar.
+// The boxes of the bar and of its parts are in DOM order. They are relative to the bar.
 function measure(bar) {
   return bar.evaluate((el) => {
     const origin = el.getBoundingClientRect();
@@ -74,7 +75,7 @@ function measure(bar) {
     return {
       width: Math.round(origin.width), height: Math.round(origin.height), left: Math.round(origin.left),
       position: cs.position, padding: cs.padding, gap: cs.columnGap,
-      // The phone summary line, above the bar's parts when it shows.
+      // The phone summary line is above the parts of the bar, when it is shown.
       top: summary && summary.getClientRects().length ? box(summary).y + box(summary).h + parseFloat(cs.rowGap) : 8,
       parts,
       range: { ...box(range), text: range.textContent, truncated: range.scrollWidth > range.clientWidth + 1, font: `${rs.fontWeight} ${rs.fontSize} ${rs.fontFamily}` },
@@ -85,7 +86,7 @@ function measure(bar) {
   });
 }
 
-// Reading order (rows top to bottom, then left to right) is the DOM order.
+// The reading order is the DOM order. Rows go from top to bottom, and then left to right.
 function expectReadingOrder(parts, label) {
   for (let i = 1; i < parts.length; i += 1) {
     const [a, b] = [parts[i - 1], parts[i]];
@@ -110,7 +111,7 @@ for (const width of [1440, 1280, 900, 768, 390]) {
       const label = `${view} @ ${width}`;
       expect(m.overflow, label).toBeLessThanOrEqual(0);
       expect(m.barOverflow, label).toBeLessThanOrEqual(1);
-      // The range comes first, at the bar's top-left padding corner, untruncated.
+      // The range comes first, at the top-left padding corner of the bar. It is not truncated.
       expect(m.parts[0].kind, label).toBe('range');
       expect([m.range.x, m.range.y], label).toEqual([12, m.top]);
       if (width > 600) expect(m.top, label).toBe(8);
@@ -129,21 +130,22 @@ for (const width of [1440, 1280, 900, 768, 390]) {
     const [first, ...others] = VIEWS.map((view) => bars[view]);
     for (const [index, m] of others.entries()) {
       const label = `${VIEWS[index + 1]} vs traces @ ${width}`;
-      // Same padding, gap and sticky behaviour; same range width; same primary.
+      // The padding, gap and sticky behaviour are the same. The range width and the primary are the same.
       expect([m.position, m.padding, m.gap], label).toEqual([first.position, first.padding, first.gap]);
-      // (Phones: the full bar width; the Traces view keeps a scrollbar gutter.)
+      // On phones, the bar has the full width. The Traces view keeps a scrollbar gutter.
       if (width > 760) expect(m.range.w, label).toBe(first.range.w);
       else expect(m.width - m.range.w, label).toBe(first.width - first.range.w);
       expect(m.range.font, label).toBe(first.range.font);
       expect([m.submit.w, m.submit.h], label).toEqual([first.submit.w, first.submit.h]);
       expect(m.submit.style, label).toEqual(first.submit.style);
-      // The bars have as many rows (Traces holds more pickers than the
-      // others, so phones stack it higher).
+// The bars have as many rows as needed. Traces holds more pickers than the others.
+// So on phones, the Traces bar stacks higher.
       if (width > 760) expect(m.height, label).toBe(first.height);
     }
 
-    // Widths: one row above 1100 px, the lead and the tail a row each down
-    // to 761 px, the range alone on its row (full width) on phones.
+// Widths: above 1100 px, the bar has one row.
+// Down to 761 px, the lead and the tail have a row each.
+// On phones, the range is alone on its row at full width.
     const rows = (m) => new Set(m.parts.map((part) => part.y)).size;
     for (const view of VIEWS) {
       const m = bars[view];
@@ -162,14 +164,14 @@ for (const width of [1440, 1280, 900, 768, 390]) {
 test('filter bar: one range label format on every view', async ({ page, request }) => {
   await features(request);
   const cases = [
-    // 24 h, the date once when the day does not change.
+    // Use 24 h. Show the date once, when the day does not change.
     [HOUR, 'Sep 12 12:30 → 13:30'],
-    // Seconds only under 10 minutes.
+    // Show seconds only under 10 minutes.
     ['?from=2026-09-12%2012:30:05&to=2026-09-12%2012:35:10', 'Sep 12 12:30:05 → 12:35:10'],
     ['?from=2026-09-12%2000:52:55&to=2026-09-12%2001:22:56', 'Sep 12 00:52 → 01:22'],
-    // The date again when the day changes.
+    // Show the date again when the day changes.
     ['?from=2026-09-11%2023:00:00&to=2026-09-12%2001:00:00', 'Sep 11 23:00 → Sep 12 01:00'],
-    // Relative presets by name.
+    // Relative presets are shown by name.
     ['?from=now-1h&to=now', 'Time range · Last 1 hour'],
   ];
   for (const view of VIEWS) {
@@ -195,18 +197,18 @@ test('filter bar: the range panel is built per view with its own ids, inputs use
       await expect(panel.locator(`#${view}${suffix}`), `${view}${suffix}`).toHaveCount(1);
     }
     await expect(panel.locator(`#${view}QuickRangesHeading`)).toHaveText('Quick ranges');
-    // The panel hangs from its button, inside the window.
+    // The panel hangs from its button. It stays inside the window.
     const [panelBox, buttonBox] = await Promise.all([panel.boundingBox(), button.boundingBox()]);
     expect(Math.abs(panelBox.x - buttonBox.x)).toBeLessThanOrEqual(1);
     expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(page.viewportSize().width);
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
     await expect(button).toBeFocused();
-    // Free-text inputs use the pickers' sans font, never monospace.
+    // Free-text inputs use the sans font of the pickers. They never use monospace.
     const fonts = await bar.locator('.obsFilterBar__input').evaluateAll((inputs) => inputs.map((input) => getComputedStyle(input).fontFamily));
     for (const font of fonts) expect(font, view).not.toMatch(/mono/i);
   }
-  // Only one copy of each id in the document, with all three views shown.
+  // Each id appears once in the document, with all three views shown.
   const duplicates = await page.evaluate(() => {
     const seen = new Map();
     for (const node of document.querySelectorAll('[id]')) seen.set(node.id, (seen.get(node.id) || 0) + 1);
@@ -224,12 +226,12 @@ test('filter bar: Metrics spans the catalog and the panels; secondary actions si
   expect(barBox.width).toBe(1440);
   expect(sidebar.y).toBeGreaterThanOrEqual(barBox.y + barBox.height - 0.5);
   expect(main.y).toBeGreaterThanOrEqual(barBox.y + barBox.height - 0.5);
-  // The range sits above the catalog, not to its right.
+  // The range is above the catalog. It is not to the right of the catalog.
   const range = await bar.locator('.tracePicker--range > .tracePicker__button').boundingBox();
   expect(range.x).toBeLessThan(sidebar.x + sidebar.width);
 
-  // Add panel (Metrics): the secondary style, right before the primary; Logs
-  // has no secondary action (no Live: nothing refreshes on a timer).
+  // Add panel (Metrics) uses the secondary style. It is right before the primary.
+  // Logs has no secondary action. There is no Live option, because nothing refreshes on a timer.
   const secondary = {};
   for (const view of ['metrics', 'logs']) {
     const b = await openView(page, view);
@@ -282,9 +284,10 @@ test('the quick and recently used ranges fit the time range panel without scroll
   }
 });
 
-// Phones (600 px and below): content first. The bar folds into one summary
-// line (range, filter count), a search folds it again; the overview charts
-// start folded to their head.
+// Phones (600 px and below) show content first.
+// The bar folds into one summary line with the range and the filter count.
+// A search folds the bar again.
+// The overview charts start folded to their head.
 test.describe('filter bar on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
@@ -301,7 +304,7 @@ test.describe('filter bar on a phone', () => {
       await expect(summary).toContainText('Sep 12 12:30 → 13:30');
       if (view === 'logs') await expect(summary).toContainText(/· [2-9] filters/);
       else await expect(summary).not.toContainText('filter');
-      // Folded: the summary is the bar, one line, the content right under it.
+      // Folded: the summary is the bar. It is one line, and the content is right under it.
       await expect(bar.locator('.tracePicker--range .tracePicker__button')).toBeHidden();
       const box = await bar.boundingBox();
       expect(box.height, view).toBeLessThanOrEqual(60);
@@ -309,11 +312,11 @@ test.describe('filter bar on a phone', () => {
       await expect(summary).toHaveAttribute('aria-expanded', 'true');
       await expect(bar.locator('.tracePicker--range .tracePicker__button')).toBeVisible();
       await expect(bar.locator('.obsFilterBar__submit')).toBeVisible();
-      // A search folds it again.
+      // A search folds the bar again.
       await bar.locator('.obsFilterBar__submit').click();
       await expect(summary).toHaveAttribute('aria-expanded', 'false');
     }
-    // The overview charts start folded to their head; the chevron unfolds one.
+    // The overview charts start folded to their head. The chevron unfolds one chart.
     await page.goto(`/observability/traces${HOUR}`);
     await expect(page.locator('#tracesResults .traceResultItem').first()).toBeVisible({ timeout: 30_000 });
     const cards = page.locator('#traceAnalyticsGrid .chartCard');
@@ -339,9 +342,9 @@ test.describe('filter bar on a phone', () => {
   });
 });
 
-// Audit round 2: the same slots on the three bars (a Service picker and a
-// search field on Metrics too); the pickers keep their place between the
-// Traces tabs; on a phone the selected tab of the nav row shows whole.
+// Audit round 2: the three bars use the same slots. Metrics also has a Service picker and a search field.
+// The pickers keep their place between the Traces tabs.
+// On a phone, the selected tab of the nav row shows in full.
 test('filter bar: Metrics holds the slots of Logs (Service picker, search field), "Search" as its primary', async ({ page, request }) => {
   await features(request);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -352,7 +355,7 @@ test('filter bar: Metrics holds the slots of Logs (Service picker, search field)
     await expect(bar.locator('.obsFilterBar__field .tracePicker__button').first()).toHaveText(/^Service · /);
     await expect(bar.locator('.obsFilterBar__search .obsFilterBar__searchIcon')).toHaveCount(1);
   }
-  // Metrics' Add panel (a secondary action) sits right before Search; Logs has none (no Live).
+  // The Add panel of Metrics is a secondary action. It is right before Search. Logs has no Add panel, because it has no Live option.
   expect(kinds.logs).not.toContain('secondary');
   expect(kinds.metrics.slice(-2)).toEqual(['secondary', 'submit']);
   expect(kinds.metrics.filter((kind) => kind !== 'secondary')).toEqual(kinds.logs.filter((kind, index, all) => !(kind === 'field' && all.indexOf('field') !== index) && !(kind === 'text' && all.indexOf('text') !== index)));
@@ -395,19 +398,20 @@ test.describe('the Observability nav row on a phone', () => {
         return sel.left >= box.left - 0.5 && sel.right <= box.right + 0.5 && clearEnd && clearStart;
       }), tab).toBe(true);
     }
-    // The last tab: the row scrolled to its very end, no fade left on it.
+    // The last tab. The row scrolls to its very end. No fade is left on it.
     await expect(page.locator('#obsNav')).not.toHaveClass(/has-edge-end/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// One filter bar for Observability and System (user, 2026-10-04 evening):
-// the System sections (Overview, Queries, Disks) carry the same bar
-// (ns.filterBar, app_ui_filterbar.js) under their tab row: the time range
-// first on the left (the same picker), the section's filters as the same
-// "Label · Value" pickers (Queries: Kind, Errors, User, Order by; Hide
-// ChDash a toggle chip), then at the right end the action: Observability's "Search", System's refresh icon button
-// (a change applies at once). Same height, padding, gaps and phone fold.
+// One filter bar serves Observability and System (user, 2026-10-04 evening).
+// The System sections (Overview, Queries, Disks) have the same bar (ns.filterBar, app_ui_filterbar.js).
+// The bar is under their tab row. The time range is first, on the left, with the same picker.
+// The section filters are the same "Label · Value" pickers.
+//
+// Queries has Kind, Errors, User and Order by. Queries also has Hide ChDash, a toggle chip.
+// At the right end is the action. Observability has the "Search" button. System has a refresh icon button.
+// A change applies at once. The height, padding, gaps and phone fold are the same.
 
 const SYSTEM = { overview: '#systemBar-overview', queries: '#systemBar-queries', disks: '#systemBar-disks' };
 const SYSTEM_RANGE = { overview: '#systemPerfRangeButton', queries: '#systemQueriesRangeButton', disks: '#systemDisksRangeButton' };
@@ -441,8 +445,8 @@ for (const width of [1440, 1280, 900, 768]) {
       const label = `${name} @ ${width}`;
       expect(m.overflow, label).toBeLessThanOrEqual(0);
       expect(m.barOverflow, label).toBeLessThanOrEqual(1);
-      // The time range first, at the top-left padding corner; the action
-      // last, at the bottom-right one; every control one height.
+      // The time range is first, at the top-left padding corner.
+      // The action is last, at the bottom-right corner. Every control has one height.
       expect(m.parts[0].kind, label).toBe('range');
       expect([m.range.x, m.range.y], label).toEqual([12, 8]);
       expect(m.range.truncated, label).toBe(false);
@@ -450,7 +454,7 @@ for (const width of [1440, 1280, 900, 768]) {
       expect([m.submit.right, m.submit.bottom], label).toEqual([12, 9]);
       expectReadingOrder(m.parts, label);
       for (const part of m.parts) expect(part.h, `${label} ${part.kind}`).toBe(31);
-      // Same padding, gap, height (rows) and range width as Traces.
+      // The padding, gap, height (rows) and range width are the same as Traces.
       expect([m.padding, m.gap], label).toEqual([first.padding, first.gap]);
       expect(m.height, label).toBe(first.height);
       expect(m.range.w, label).toBe(first.range.w);
@@ -459,8 +463,8 @@ for (const width of [1440, 1280, 900, 768]) {
       // One bar row under the tab row, full width.
       expect(m.left, label).toBe(0);
     }
-    // The action: Search on Observability (the queries run on demand), a
-    // square refresh icon button on System (a change applies at once).
+    // The action is Search on Observability. The queries run on demand.
+    // On System, the action is a square refresh icon button. A change applies at once.
     for (const section of Object.keys(SYSTEM)) {
       const m = bars[section];
       expect(m.submit.text, section).toBe('');
@@ -485,7 +489,7 @@ test('one filter bar: the time range leaves the System tab row; the bar sits und
     expect(Math.abs(box.y - (nav.y + nav.height)), section).toBeLessThanOrEqual(1);
     await expect(bar.locator(`.obsFilterBar__range ${SYSTEM_RANGE[section]}`)).toBeVisible();
   }
-  // The same place as Observability's bar.
+  // The place is the same as the place of the Observability bar.
   const system = await page.locator(SYSTEM.disks).boundingBox();
   await openView(page, 'logs');
   const logs = await page.locator(BAR.logs).boundingBox();
@@ -505,9 +509,9 @@ test('one filter bar: the System Queries filters live in the bar and round-trip 
   await expect(button('systemQueries__userPicker')).toHaveText(/^User · chdash_runner/);
   await expect(button('systemQueries__orderPicker')).toHaveText('Order by · Calls');
   await expect(bar.locator('#systemQueriesHide')).toHaveAttribute('aria-pressed', 'false');
-  // Nothing of them stays in the section's body.
+  // None of them stays in the body of the section.
   await expect(page.locator('#systemPanel-queries .systemQueries > .tracePicker, #systemPanel-queries #systemQueriesFilters')).toHaveCount(0);
-  // A change applies at once and writes the address; Back restores it.
+  // A change applies at once and writes the address. Back restores it.
   const asked = page.waitForRequest((r) => r.url().includes('/api/system/queries?') && new URL(r.url()).searchParams.get('kind') === 'Select');
   await button('systemQueries__kindPicker').click();
   await bar.locator('.systemQueries__kindPicker .tracePicker__option[data-value="Select"]').click();
@@ -548,7 +552,7 @@ test.describe('one filter bar on a phone', () => {
     const cases = [
       ['overview', '', 'Last 1 hour', ''],
       ['disks', '?from=now-24h&to=now', 'Last 24 hours', ''],
-      // Kind, User and Hide internal reads off are filters; Order by is not.
+      // Kind, User and Hide internal reads off are filters. Order by is not a filter.
       ['queries', '?kind=Select&user=chdash_runner&hide=0&sort=calls', 'Last 1 hour', ' · 3 filters'],
     ];
     for (const [section, query, range, count] of cases) {
@@ -559,25 +563,25 @@ test.describe('one filter bar on a phone', () => {
       await expect(summary).toHaveAttribute('aria-expanded', 'false');
       await expect(summary.locator('.foldSummary__text')).toHaveText(range);
       await expect(summary.locator('.foldSummary__meta')).toHaveText(count);
-      // Folded: one line, the section right under it.
+      // Folded: the bar is one line, and the section is right under it.
       await expect(bar.locator(SYSTEM_RANGE[section])).toBeHidden();
       expect((await bar.boundingBox()).height, section).toBeLessThanOrEqual(60);
       const style = await summary.evaluate((el) => { const s = getComputedStyle(el); return [s.height, s.fontSize, s.borderRadius, s.paddingLeft]; });
       await summary.click();
       await expect(summary).toHaveAttribute('aria-expanded', 'true');
-      // Open, the line says what a click does, not the range again.
+      // Open: the line says what a click does. It does not repeat the range.
       await expect(summary.locator('.foldSummary__text')).toHaveText('Hide the filters');
       await expect(summary.locator('.foldSummary__meta')).toHaveText('');
       await expect(bar.locator(SYSTEM_RANGE[section])).toBeVisible();
       const refresh = bar.locator('.obsFilterBar__submit');
       await expect(refresh).toBeVisible();
-      // Unfolded: the range alone on its row, full width; the action ends the bar.
+      // Unfolded: the range is alone on its row, at full width. The action ends the bar.
       const [rangeBox, barBox, actionBox] = await Promise.all([bar.locator(SYSTEM_RANGE[section]).boundingBox(), bar.boundingBox(), refresh.boundingBox()]);
       expect(Math.round(rangeBox.width), section).toBe(Math.round(barBox.width) - 24);
       expect(Math.round(barBox.x + barBox.width - actionBox.x - actionBox.width), section).toBe(12);
       await refresh.click();
       await expect(summary).toHaveAttribute('aria-expanded', 'false');
-      // The same summary line as Observability's.
+      // The summary line is the same as the summary line of Observability.
       await page.goto(`/observability/logs${HOUR}`);
       const logs = page.locator('#logsForm .obsFilterSummary');
       await expect(logs).toBeVisible({ timeout: 20_000 });

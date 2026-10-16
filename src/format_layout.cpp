@@ -1,4 +1,4 @@
-// The layout of the lines that are too long: the CASE expressions, the binary operators and the explosion of the calls.
+// The layout of the lines that are too long. The unit splits CASE expressions, binary operators and calls.
 // The declarations that the units share are in format_internal.hpp.
 
 #include "format_internal.hpp"
@@ -8,11 +8,11 @@ namespace fmt {
 
 namespace {
 // `CASE [operand] WHEN c THEN v ... [ELSE e] END` written on one line (the
-// local path; formatQuery turns CASE into multiIf): like multiIf, vertical
-// with two or more WHEN branches or when the line is too long, one branch per
-// line one level deeper and END back at the line's indentation followed by
-// the rest of the line (`END AS kind,`, `END = 1`). Returns {} when the line
-// has no complete top-level CASE to lay out.
+// local path; formatQuery turns CASE into multiIf).
+// Like multiIf, the CASE goes on several lines when it has two or more WHEN branches, or when the line is too long.
+// The function puts each branch on its own line, one level deeper.
+// It puts END back at the indentation of the line, followed by the rest of the line (`END AS kind,`, `END = 1`).
+// Returns {} when the line has no complete top-level CASE to lay out.
 vector<string> explode_case_expression(const string& line, size_t threshold) {
   const CallScan scan = scan_call_brackets(line);
   for (const unsigned char k : scan.kind) if (k == kCallComment) return {};
@@ -38,7 +38,7 @@ vector<string> explode_case_expression(const string& line, size_t threshold) {
     if (words[k].depth == 0 && is(k, "CASE")) { case_k = k; break; }
   }
   if (case_k == string::npos) return {};
-  // Branch keywords of this CASE (nested CASE ... END skipped).
+  // Find the branch keywords of this CASE. Skip the nested CASE ... END blocks.
   vector<size_t> marks;
   size_t end_k = string::npos;
   int nested = 0;
@@ -76,9 +76,9 @@ vector<string> explode_case_expression(const string& line, size_t threshold) {
 }
 }  // namespace
 
-// Width rule on the final text (see collapse_fitting_calls): join what fits,
-// then explode one-line calls that overflow. Exploding is limited to query
-// statements; DDL keeps its column, index and type lines.
+// Apply the width rule to the final text (see collapse_fitting_calls). Join the calls that fit.
+// Then split the one-line calls that overflow, but only in query statements.
+// DDL keeps its column, index, and type lines.
 string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   const FormatDepthGuard guard(depth);
   vector<size_t> joined_rows;
@@ -87,7 +87,7 @@ string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
   if (!allow_explode) return attach_operators_to_closers(out, threshold);
   vector<string> result;
   bool exploded = false;
-  // CASE branches first (they may nest), then calls on the resulting lines.
+  // Split the CASE branches first, because they may nest. Then split the calls on the resulting lines.
   vector<string> pending = split_lines_keep(out);
   std::reverse(pending.begin(), pending.end());
   while (!pending.empty()) {
@@ -102,25 +102,24 @@ string Formatter::layout_calls_by_width(string_view text, bool allow_explode) {
     exploded = exploded || pieces.size() > 1;
     for (string& piece : pieces) result.push_back(std::move(piece));
   }
-  // Splitting a line can leave the rest of its call on later lines with room
-  // to join (`name(\n    params\n)(` followed by the argument lines).
+  // A split can leave the rest of a call on later lines, with room
+  // to join them (`name(\n    params\n)(` followed by the argument lines).
   const string settled = exploded ? join_fitting_arguments(collapse_fitting_calls(join_lines(result), threshold), threshold) : join_lines(result);
   return attach_operators_to_closers(settled, threshold);
 }
 
 namespace {
-// An item line made only of operands joined by binary operators
-// with a call or bracket before the first break
-// (`hmac(...) = HMAC(...) AS same,`) breaks before its lowest-precedence
-// operators first, each one leading its own line at the item's indentation
-// like an arithmetic chain; the operands are then decided like any other
-// line. Exploding the first operand's call instead left `) = HMAC(...)`
-// lines that the next pass laid out differently. Returns {} when the line is
-// anything else (keywords, lambdas, CASE, IN, BETWEEN, a clause head, ...).
+// This function handles an item line that has only operands, joined by binary operators.
+// The line has a call or a bracket before the first break, for example `hmac(...) = HMAC(...) AS same,`.
+// The line breaks before its lowest-precedence operators first.
+// Each operator leads its own line at the item's indentation, as in an arithmetic chain.
+// The operands are then decided like any other line.
+// A split of the first operand's call instead left `) = HMAC(...)` lines that the next pass laid out differently.
+// Returns {} when the line is anything else (keywords, lambdas, CASE, IN, BETWEEN, a clause head, ...).
 vector<string> split_item_at_binary_operators(const string& line, const CallScan& scan) {
   auto equals_ci = [](string_view a, string_view b) { return a.size() == b.size() && starts_with_ci(a, b); };
   const size_t indent = leading_space_count(line);
-  // Tokens separated by single spaces outside brackets, quotes and comments.
+  // The tokens are separated by single spaces that lie outside brackets, quotes and comments.
   vector<std::pair<size_t, size_t>> tokens;
   int depth = 0;
   size_t start = indent;
@@ -149,7 +148,7 @@ vector<string> split_item_at_binary_operators(const string& line, const CallScan
   auto operand = [&](size_t k) {
     const string_view t = text(k);
     if (tier(t) != 0 || equals_ci(t, "AS")) return false;
-    // A bare word operand must not be a keyword (`NOT`, `CASE`, `INTERVAL`).
+    // A bare word operand must not be a keyword, for example `NOT`, `CASE` or `INTERVAL`.
     bool word = true;
     for (const char ch : t) word = word && sql_is_ident_continue(ch);
     if (!word) return true;
@@ -170,13 +169,13 @@ vector<string> split_item_at_binary_operators(const string& line, const CallScan
   }
   if (ops.empty()) return {};
   if (k + 1 < tokens.size()) {
-    // Only ` AS alias` (and its comma) may follow the last operand.
+    // Only ` AS alias` (and its comma) can follow the last operand.
     if (k + 3 != tokens.size() || !equals_ci(text(k + 1), "AS")) return {};
   }
   int lowest = 3;
   for (const size_t op : ops) lowest = std::min(lowest, tier(text(op)));
-  // A bare first operand (`timestamp >= toStartOfInterval(...)`) reads better
-  // with the call exploded after it than alone on its line.
+  // A bare first operand (`timestamp >= toStartOfInterval(...)`) reads better with the call split after it.
+  // Do not leave the operand alone on its line.
   size_t first_cut = 0;
   for (const size_t op : ops) if (tier(text(op)) == lowest) { first_cut = tokens[op].first; break; }
   if (line.find_first_of("([", indent) >= first_cut) return {};
@@ -193,12 +192,12 @@ vector<string> split_item_at_binary_operators(const string& line, const CallScan
 }
 }  // namespace
 
-// Explodes the widest call, array or IN list that starts on an overflowing
-// line: `name(` stays on the line, one argument per line one level deeper,
-// `)` back at the line's indentation followed by the rest of the line
-// (`) AS alias,`). A single condition on the WHERE line hangs one more level,
-// like the other single multi-line conditions. The new lines get the same
-// treatment until they fit or nothing is left to split.
+// Split the widest call, array or IN list that starts on a line that is too long.
+// The `name(` part stays on the line. Each argument gets its own line, one level deeper.
+// The `)` goes back to the indentation of the line, followed by the rest of the line (`) AS alias,`).
+//
+// A single condition on the WHERE line is indented one more level, like the other single multi-line conditions.
+// The new lines get the same treatment until they fit, or until nothing is left to split.
 vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
   const FormatDepthGuard guard(this->depth);
   if (depth > 16 || utf8_width(line) <= threshold) return {line};
@@ -208,8 +207,8 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
   const string trimmed = line.substr(indent);
   if (starts_with_ci(trimmed, "CREATE ") && !is_create_function(trimmed)) return {line};
   if (const int fill = find_top_level_keyword(trimmed, "WITH FILL"); fill >= 0) {
-    // `x WITH FILL FROM a TO b STEP s STALENESS t` breaks before each of its
-    // modifiers, one level deeper; the calls inside them are not split.
+    // In `x WITH FILL FROM a TO b STEP s STALENESS t`, the line breaks before each modifier.
+    // Each modifier goes one level deeper. The calls inside the modifiers are not split.
     const string tail = trimmed.substr(static_cast<size_t>(fill));
     vector<size_t> cuts;
     for (const char* kw : {"FROM", "TO", "STEP", "STALENESS"}) {
@@ -227,15 +226,15 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
   for (const char* kw : {"SELECT DISTINCT ", "SELECT ALL ", "SELECT ", "ORDER BY ", "GROUP BY "}) {
     if (!starts_with_ci(trimmed, kw) || starts_with_ci(trimmed, "SELECT DISTINCT ON")) continue;
     if (string_view(kw) == "SELECT " && (starts_with_ci(trimmed, "SELECT DISTINCT ") || starts_with_ci(trimmed, "SELECT ALL "))) continue;
-    // A single item too long for the clause line goes into the block.
+    // A single item that is too long for the clause line goes into the block.
     vector<string> out{string(indent, ' ') + rtrim_spaces(kw)};
     for (string& piece : explode_overlong_line(string(indent + 4, ' ') + trimmed.substr(std::char_traits<char>::length(kw)), depth + 1)) {
       out.push_back(std::move(piece));
     }
     return out;
   }
-  // A long `x BETWEEN a AND b` condition breaks before BETWEEN (one level
-  // deeper) rather than inside one of its bounds.
+  // A long `x BETWEEN a AND b` condition breaks before BETWEEN, one level deeper.
+  // The line does not break inside one of its bounds.
   if (!starts_with_ci(trimmed, "WHERE ") && !starts_with_ci(trimmed, "PREWHERE ") && !starts_with_ci(trimmed, "HAVING ")) {
     int at = find_top_level_keyword(trimmed, "NOT BETWEEN");
     if (at < 0) at = find_top_level_keyword(trimmed, "BETWEEN");
@@ -245,12 +244,11 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
       vector<string> out;
       vector<string> pieces{rtrim_spaces(line.substr(0, indent + static_cast<size_t>(at))),
                             string(indent + 4, ' ') + trimmed.substr(static_cast<size_t>(at))};
-      // Still too long: the upper bound goes on its own `AND` line under
-      // BETWEEN.
+      // The line is still too long. The upper bound goes on its own `AND` line under BETWEEN.
       if (utf8_width(pieces.back()) > threshold) {
         const string range = pieces.back().substr(indent + 4);
         const size_t skip = starts_with_ci(range, "NOT BETWEEN") ? 11 : 7;
-        // Searched after the BETWEEN word, whose own AND would be skipped.
+        // Search after the BETWEEN word. The AND of BETWEEN is skipped.
         if (const int and_at = find_top_level_keyword(string_view(range).substr(skip), "AND"); and_at > 0) {
           const size_t cut = skip + static_cast<size_t>(and_at);
           pieces.back() = rtrim_spaces(string(indent + 4, ' ') + range.substr(0, cut));
@@ -270,8 +268,8 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
     }
     return out;
   }
-  // The widest candidate at the shallowest nesting level: the outermost call
-  // on an item line, or the call inside a tuple row `('k', encrypt(...)),`.
+  // Find the widest candidate at the shallowest nesting level.
+  // The candidate is the outermost call on an item line, or the call inside a tuple row `('k', encrypt(...)),`.
   size_t best_begin = string::npos;
   size_t best_open = string::npos;
   size_t best_end = string::npos;
@@ -307,8 +305,8 @@ vector<string> Formatter::explode_overlong_line(const string& line, int depth) {
   string rendered;
   if (best_kind == CallOpener::Call) rendered = format_function_call(call, true);
   if (rendered.empty()) {
-    // Arrays, IN lists and calls the expression formatter does not take
-    // (a quoted name): one item per line.
+    // Arrays, IN lists, and calls that the expression formatter does not take, for example a quoted name,
+    // get one item per line.
     const size_t open_rel = best_open - best_begin;
     const size_t close_rel = best_kind == CallOpener::Call ? scan.match[best_open] - best_begin : call.size() - 1;
     const auto items = split_top_level(string_view(call).substr(open_rel + 1, close_rel - open_rel - 1), ',');

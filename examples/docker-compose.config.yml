@@ -86,6 +86,12 @@ configs:
         }
       }
 
+      # Required (docs/access.md). "open": no check; use it only on a closed network. Behind an
+      # access gateway, use mode = "authzen" with the identity and pdp blocks.
+      access {
+        mode = "open"
+      }
+
 secrets:
   chdash_runner_password:
     file: ./secrets/chdash_runner_password.txt

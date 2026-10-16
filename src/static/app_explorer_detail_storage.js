@@ -1,5 +1,6 @@
-// The Storage tab of the table card: how the bytes split (Wide, Compact, projections, indexes), the disks, the partitions (a treemap and the
-// share list), the parts, the skipping indexes and the projections.
+// The Storage tab of the table card.
+// It shows how the bytes split (Wide, Compact, projections, indexes).
+// It also shows the disks, the partitions (a treemap and the share list), the parts, the skipping indexes and the projections.
 
 import { h } from "./app_dom.js";
 import { cardMaps, emptyNote, exprEl, gaugeCell, numericCell, renderSections, staticTable } from "./app_explorer_detail_cells.js";
@@ -68,7 +69,7 @@ function renderStorageCompositionCard(container, detail) {
 function renderDisks(body, detail) {
   const disks = detail.storage || [];
   const max = columnMax(disks, (disk) => disk.bytes);
-  // Log-family engines own no parts: no Parts column for them.
+  // Log-family engines have no parts. Do not add a Parts column for them.
   const parts = isMergeTreeSummary(detail.summary);
   body.appendChild(staticTable({
     className: "explorerTable--disks",
@@ -118,8 +119,8 @@ function renderParts(body, detail) {
       },
       {
         label: "State", value: (part) => (part.active ? "active" : "inactive"),
-        // A chip only for the exception: an active part (the norm) is a
-        // muted word, an inactive one (outdated, waiting for cleanup) a chip.
+        // Use a chip only for the exception. An active part (the norm) is a muted word.
+        // An inactive part (outdated, that waits for cleanup) is a chip.
         render: (td, part) => {
           if (part.active) td.appendChild(h("span", { class: "explorerPartState" }, "active"));
           else td.appendChild(badgeMod.el("inactive", { tone: "neutral", className: "explorerBadge explorerBadge--inactive" }));
@@ -213,10 +214,10 @@ function renderStorageTab(container, detail) {
   const projections = structureItems(detail, "projection:");
   const mergeTree = isMergeTreeSummary(s);
   const activeParts = parts.filter((part) => part.active).length;
-  // The table's storage in one tab: how its bytes split (composition),
-  // where they are (disks), how they spread over partitions (the treemap
-  // and the share list of the former Storage mode), then the parts,
-  // skipping indexes and projections.
+  // The table storage in one tab.
+  // It shows how the bytes split (composition) and where they are (disks).
+  // It shows how they spread over partitions (the treemap and the share list of the former Storage mode).
+  // Then it shows the parts, the skipping indexes and the projections.
   renderSections(container, [
     {
       id: "disks", title: isLogFamilySummary(s) ? "Disks (storage medium)" : "Disks", count: disks.length, hasData: disks.length > 0,

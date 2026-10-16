@@ -1,21 +1,22 @@
-// The query History (docs/query-library.md, "History"): the runs of this browser, one list for each host. It is
-// kept in IndexedDB, not in localStorage: a run costs one small write of its own record (never a read and a
-// write of the whole list), and a full browser quota shows as a visible warning instead of a history that stops
-// without a word.
+// The query History (docs/query-library.md, "History") holds the runs of this browser. It has one list for each host.
+// The History is kept in IndexedDB, not in localStorage. A run costs one small write of its own record.
+// The module never reads and writes the whole list. A full browser quota shows as a visible warning.
+// The warning replaces a history that stops without a word.
 //
 //   ns.history.list(hostId)                  Promise<entry[]>   the runs of a host, the newest first
 //   ns.history.add(entry)                    Promise<boolean>   the record of a run that starts (false: not kept)
 //   ns.history.complete(tsMs, sqlRaw, outcome, hostId)
 //                                            Promise<boolean>   its outcome (status, elapsed_ms, rows, error),
 //                                                               or its formatted text, once it is known
-//   ns.history.ready                         Promise            the store is open and the older list is moved in
+//   ns.history.ready                         Promise            the store is open and the older list is moved into it
 //   ns.history.status()                      { stored, error }  stored: false when the runs stay in this page only
 //
-// `chdash:query-history-changed` ({ detail: { hostId } }) fires on window when ANOTHER tab changed the History: the
-// library then reads its list again. A change of this page needs no event: the page that made it already knows.
-// The list of a host is read once for each page (then kept here, bounded) and again only when another tab wrote.
+// The `chdash:query-history-changed` event ({ detail: { hostId } }) fires on window when ANOTHER tab changes the History.
+// The library then reads its list again. A change in this page needs no event. The page that made the change already knows it.
+// The list of a host is read once for each page. The module keeps it here, bounded.
+// It reads the list again only when another tab wrote.
 // An entry is { ts_ms, host_id, sql_raw, sql_formatted, formatted?, status?, elapsed_ms?, rows?, error?, truncated? }.
-// The History is the browser's: it is never sent to the server.
+// The History stays in the browser. It is never sent to the server.
 
 import { dom } from "./app_dom.js";
 import { storage } from "./app_state.js";
@@ -26,7 +27,7 @@ const DB_NAME = "chdash";
 const DB_VERSION = 1;
 const STORE = "queryHistory";
 const LEGACY_KEY = storage.KEYS.queryHistory;
-// The caps apply to each host: a host that runs a lot does not push the runs of the others out.
+// The caps apply to each host. A host that runs many queries does not remove the runs of the other hosts.
 const HISTORY_MAX_ENTRIES = 50;
 const HISTORY_MAX_BYTES = 2 * 1024 * 1024;
 const HISTORY_MAX_SQL_BYTES = 256 * 1024;
@@ -34,8 +35,8 @@ const HISTORY_MAX_ERROR_CHARS = 2048;
 const HISTORY_STATUSES = ["ok", "error", "cancelled"];
 const NOTICE_MS = 12000;
 
-// A History entry belongs to the host it ran on: an entry without one is dropped (docs/query-library.md, "Entries
-// without a host"). A text longer than the cap is cut, and the entry says so (`truncated`).
+// A History entry belongs to the host where it ran. An entry without a host is dropped (docs/query-library.md, "Entries
+// without a host"). A text that is longer than the cap is cut. The entry marks this with `truncated`.
 function normalize(entry) {
   if (!entry || typeof entry !== "object") return null;
   if (typeof entry.ts_ms !== "number" || typeof entry.sql_raw !== "string") return null;
@@ -48,9 +49,9 @@ function normalize(entry) {
     host_id: String(entry.host_id),
   };
   if (entry.sql_raw.length > HISTORY_MAX_SQL_BYTES || formattedSource.length > HISTORY_MAX_SQL_BYTES || entry.truncated === true) out.truncated = true;
-  // sql_formatted was written by the formatter (older entries and runs of a query typed unformatted have none).
+  // The formatter writes sql_formatted. Older entries, and runs of a query typed without formatting, have none.
   if (entry.formatted === true) out.formatted = true;
-  // Outcome of the run, once it ended (older entries have none).
+  // The outcome of the run, after it ends (older entries have none).
   if (HISTORY_STATUSES.includes(entry.status)) out.status = entry.status;
   if (Number.isFinite(entry.elapsed_ms) && entry.elapsed_ms >= 0) out.elapsed_ms = entry.elapsed_ms;
   if (Number.isFinite(entry.rows) && entry.rows >= 0) out.rows = Math.trunc(entry.rows);
@@ -60,8 +61,8 @@ function normalize(entry) {
 
 const sizeOf = (item) => String(item.sql_raw || "").length * 2 + String(item.sql_formatted || "").length * 2 + String(item.error || "").length * 2 + 160;
 
-// The entries of a host that stay, newest first: at most HISTORY_MAX_ENTRIES and HISTORY_MAX_BYTES (the newest is
-// always kept). `dropped` are the older ones that go.
+// The entries of a host that stay, newest first: at most HISTORY_MAX_ENTRIES and HISTORY_MAX_BYTES. The newest entry is always kept.
+// `dropped` are the older entries that are removed.
 function bound(items) {
   const kept = [];
   const dropped = [];
@@ -100,7 +101,7 @@ function openDb() {
     };
     request.onsuccess = () => {
       const db = request.result;
-      // Another tab upgrades the database: this connection steps aside, and the next write opens it again.
+      // Another tab upgrades the database. This connection closes. The next write opens it again.
       db.onversionchange = () => { db.close(); dbPromise = null; };
       resolve(db);
     };
@@ -110,7 +111,7 @@ function openDb() {
   return dbPromise;
 }
 
-// One transaction: `work(store)` queues its requests; resolves when it commits, rejects with its error.
+// One transaction. `work(store)` queues its requests. The promise resolves when the transaction commits, and rejects with its error if it fails.
 function transact(db, mode, work) {
   return new Promise((resolve, reject) => {
     let tx;
@@ -136,12 +137,12 @@ function request(req) {
 
 // ---- the lists -----------------------------------------------------------------------------------------------------
 
-// host -> entries, newest first, each with its `id` once stored. Bounded: HISTORY_MAX_ENTRIES for each host, and
-// only the hosts this page used.
+// host -> entries, newest first. Each entry has its `id` when it is stored.
+// The lists are bounded: HISTORY_MAX_ENTRIES for each host. It keeps only the hosts that this page used.
 const lists = new Map();
 let stored = true;
 let lastError = "";
-// Writes go one after the other: a run's two records never overtake each other.
+// Writes run one after the other. The two records of a run never overtake each other.
 let queue = Promise.resolve();
 const enqueue = (job) => {
   const next = queue.then(job, job);
@@ -156,7 +157,7 @@ try {
   channel = null;
 }
 
-// Tells the other tabs that the History of a host changed.
+// This function tells the other tabs that the History of a host changed.
 function changed(hostId) {
   try { channel?.postMessage({ hostId }); } catch { /* the other tabs read it at their next list() */ }
 }
@@ -172,7 +173,7 @@ if (channel) {
   };
 }
 
-// A visible warning when a write fails or nothing can be stored: a toast above the page, for a few seconds.
+// The module shows a visible warning when a write fails or when nothing can be stored. The warning is a toast above the page, for a few seconds.
 let noticeTimer = 0;
 function notice(message) {
   lastError = message;
@@ -181,7 +182,9 @@ function notice(message) {
     el = document.createElement("div");
     el.id = "historyToast";
     el.className = "historyToast";
-    // Dismissed by a click; in the dialog on top, when one is open (the page behind a modal dialog is inert).
+    // A click dismisses the toast.
+    // If a dialog is open, the toast is shown in the dialog on top.
+    // The page behind a modal dialog is inert.
     el.dataset.dialogFloat = "";
     el.addEventListener("click", () => { el.hidden = true; });
   }
@@ -200,7 +203,7 @@ function failureText(error) {
     : "History could not be saved: the browser storage is unavailable.";
 }
 
-// The older list, localStorage["chdash.queryHistory.v1"]: moved into the database once, then removed.
+// The older list is in localStorage["chdash.queryHistory.v1"]. It is moved into the database once, and then removed.
 async function migrate(db) {
   const legacy = storage.pref(LEGACY_KEY, null, { json: true });
   const parsed = legacy.get();
@@ -243,7 +246,7 @@ const ready = (async () => {
   try {
     await migrate(db);
   } catch (error) {
-    // The older list stays where it is; the next page tries again.
+    // The older list stays where it is. The next page tries again.
     notice(failureText(error).replace("could not be saved", "could not be moved"));
   }
 })();
@@ -261,7 +264,7 @@ async function hostList(hostId) {
       items = [];
     }
   }
-  // A list read while another one was in flight keeps the first answer.
+  // A list that is read while another read is in flight keeps the first answer.
   if (!lists.has(key)) lists.set(key, items);
   return lists.get(key);
 }
@@ -272,7 +275,7 @@ async function list(hostId) {
   return (await hostList(hostId)).map(copy);
 }
 
-// Writes the records of one host that changed (`put`) and removes the ones that dropped out (`drop`).
+// This function writes the records of one host that changed (`put`). It removes the records that the trim removed (`drop`).
 async function persist(put, drop) {
   if (!stored) return true;
   const db = await openDb();
@@ -295,7 +298,7 @@ async function persist(put, drop) {
   }
 }
 
-// The record of a run when it starts. The same SQL on the same host moves to the top instead of repeating.
+// The record of a run, at its start. The same SQL on the same host moves to the top and is not added again.
 function add(entry) {
   const item = normalize(entry);
   if (!item) return Promise.resolve(false);
@@ -313,7 +316,7 @@ function add(entry) {
   });
 }
 
-// The outcome of a run (or its formatted text) once it is known: the record is changed in place.
+// The outcome of a run (or its formatted text), when it is known. The record changes in place.
 function complete(tsMs, sqlRaw, outcome, hostId = "") {
   if (!outcome || typeof outcome !== "object") return Promise.resolve(false);
   return enqueue(async () => {

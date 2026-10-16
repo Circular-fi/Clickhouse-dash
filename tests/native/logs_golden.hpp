@@ -1,6 +1,8 @@
-// Generated from the SQL that the code before the split of src/api_logs.cpp sent for the requests of the differential battery
-// (the statements as they were sent, with each query parameter {pN:String} written in place as a quoted text): what the builders of
-// src/logs_sql.cpp and src/logs_filters.cpp must still write. The numbering of the parameters is not part of the text.
+// The SQL of this file was generated from the code before the split of src/api_logs.cpp.
+// That code sent these statements for the requests of the differential battery.
+// Each query parameter {pN:String} is written in place as a quoted text.
+// The builders of src/logs_sql.cpp and src/logs_filters.cpp must still write this text.
+// The numbering of the parameters is not part of the text.
 #pragma once
 
 namespace golden {

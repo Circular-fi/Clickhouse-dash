@@ -1,4 +1,4 @@
-// What the formatter reads in a text without laying it out: the matching bracket, the top level of a text, its keywords, operators and clauses.
+// This unit reads a text without laying it out. It finds the matching bracket, the top level of a text, its keywords, operators, and clauses.
 // The declarations that the units share are in format_internal.hpp.
 
 #include "format_internal.hpp"
@@ -24,14 +24,14 @@ size_t find_matching_paren(string_view s, size_t open_pos) {
 }
 
 namespace {
-// `AND` / `OR` inside `CASE ... END` and the `AND` of `BETWEEN a AND b` are
-// not boolean connectives of the enclosing expression: splitting a condition
-// chain there turned `x BETWEEN a AND b` into two conditions on the page.
+// The AND and OR words inside `CASE ... END` are not boolean connectives of the enclosing expression.
+// The AND of `BETWEEN a AND b` is not a connective either.
+// A split of a condition chain there turned `x BETWEEN a AND b` into two conditions on the page.
 struct BoolWordTracker {
   int case_depth = 0;
   bool between_pending = false;
 
-  // Called at every top-level position; returns true when a top-level `kw`
+  // The skip function runs at every top-level position. It returns true when a top-level `kw`
   // starting at `i` must not be treated as a boolean connective.
   bool skip(string_view s, size_t i, string_view kw) {
     const bool bool_kw = iequals_ascii(kw, "AND") || iequals_ascii(kw, "OR");
@@ -76,9 +76,9 @@ bool is_create_function(string_view text) {
   return starts_with_ci(text, "CREATE FUNCTION ") || starts_with_ci(text, "CREATE OR REPLACE FUNCTION ");
 }
 
-// Top-level INTERSECT / EXCEPT set operators, with or without DISTINCT / ALL.
-// Only an operator followed by a query counts: `* EXCEPT (col)` is the
-// column modifier. parts[i].second is the operator before part i.
+// Top-level INTERSECT and EXCEPT set operators, with or without DISTINCT or ALL.
+// Only an operator that is followed by a query counts. `* EXCEPT (col)` is the column modifier.
+// parts[i].second is the operator before part i.
 vector<std::pair<string, string>> split_intersect_except(string_view s) {
   static const char* ops[] = {"INTERSECT DISTINCT", "INTERSECT ALL", "EXCEPT DISTINCT", "EXCEPT ALL", "INTERSECT", "EXCEPT"};
   auto starts_word = [&](size_t at, string_view word) {
@@ -139,12 +139,11 @@ vector<std::pair<int, string>> find_select_clauses(
             (next != '\0' && is_ident_char(next))) {
           continue;
         }
-        // `AS FROM`, `AS WHERE`, and similar constructs are aliases. Treating
-        // the alias token as a clause truncates the SELECT projection before
-        // the formatter gets a chance to quote the reserved identifier.
+        // `AS FROM`, `AS WHERE`, and similar constructs are aliases. If the alias token is read as a clause, it truncates the SELECT projection.
+        // The truncation happens before the formatter can quote the reserved identifier.
         if (previous_word_is_as(text, i)) continue;
-        // `format('{} {}', a, b)` is the string function, not the FORMAT
-        // clause: a FORMAT clause is followed by a format name, never `(`.
+        // `format('{} {}', a, b)` is the string function, not the FORMAT clause.
+        // A FORMAT clause is followed by a format name, never by `(`.
         if (iequals_ascii(clause, "FORMAT")) {
           size_t after = i + clause.size();
           while (after < text.size() && (text[after] == ' ' || text[after] == '\n' || text[after] == '\t')) ++after;
@@ -279,8 +278,8 @@ bool contains_top_level_comment(string_view s) {
   return false;
 }
 
-// A subquery anywhere in the expression (`SELECT` as a keyword, not
-// `selected_rows`, and not inside literals or comments).
+// A subquery can be anywhere in the expression. Only `SELECT` as a keyword counts, not `selected_rows`.
+// Literals and comments do not count.
 bool contains_select_keyword(string_view s) {
   const string text = trim_ascii_spaces(s);
   if (looks_like_query(text)) return true;
@@ -296,10 +295,9 @@ bool contains_select_keyword(string_view s) {
 bool contains_heavy_structure(string_view s) {
   const string text = trim_ascii_spaces(s);
   if (looks_like_query(text)) return true;
-  // Layout decisions must not depend on literal or comment contents: a format
-  // string such as '{} {}', a '[...]' in text or '-> SELECT' inside a string is
-  // not structure. Search the lower-cased code surface (literals and comments
-  // blanked) with lower-cased needles.
+  // Layout decisions must not depend on the contents of literals or comments.
+  // A format string such as '{} {}', a '[...]' in text, or '-> SELECT' inside a string is not structure.
+  // Search the lower-cased code surface, with literals and comments blanked. Use lower-cased needles.
   const string code = mask_sql_surface(text).code_lower;
   static const char* needles[] = {
       "->", "exists(", "over (", "arrayzip(", "map(", "dictget(",
@@ -308,7 +306,7 @@ bool contains_heavy_structure(string_view s) {
   for (const char* needle : needles) {
     if (code.find(needle) != string::npos) return true;
   }
-  // SELECT as a keyword only (not `selected_rows`).
+  // Count only SELECT as a keyword, not `selected_rows`.
   for (size_t at = code.find("select"); at != string::npos; at = code.find("select", at + 1)) {
     const bool left = at == 0 || !is_ident_char(code[at - 1]);
     const bool right = at + 6 >= code.size() || !is_ident_char(code[at + 6]);
@@ -318,7 +316,7 @@ bool contains_heavy_structure(string_view s) {
 }
 
 int find_top_level_comparator(string_view s, string* op) {
-  // Longest spellings first: `<=>` and `==` are single operators.
+  // Put the longest spellings first. `<=>` and `==` are single operators.
   static const char* ops[] = {"<=>", "==", ">=", "<=", "!=", "<>", "=", ">", "<"};
   ScanState st;
   for (size_t i = 0; i < s.size(); ++i) {
@@ -354,9 +352,9 @@ std::pair<string, string> split_inline_comment(string_view s) {
   return {rtrim_spaces(s), {}};
 }
 
-// Appends the comma that separates a rendered item from the next one. A `--` or `#` comment runs
-// to the end of its line, so the comma goes after the code of the last line that has code, before
-// its comment ("a, -- note"), never into the comment ("a -- note,": `a b`, an alias, to the parser).
+// Appends the comma that separates a rendered item from the next one. A `--` or `#` comment runs to the end of its line.
+// So the comma goes after the code of the last line that has code, before its comment ("a, -- note").
+// The comma never goes into the comment. Text such as "a -- note," would make the parser read `a b` as an alias.
 void append_item_comma(string& item) {
   size_t end = item.size();
   while (true) {
@@ -373,7 +371,7 @@ void append_item_comma(string& item) {
       item.replace(start, end - start, code + ", " + comment);
       return;
     }
-    // A line that is only a comment: the comma goes on the code line above it.
+    // If a line has only a comment, the comma goes on the code line above it.
     if (nl == string::npos) {
       item += ',';
       return;
@@ -382,9 +380,9 @@ void append_item_comma(string& item) {
   }
 }
 
-// The text of every `--` and `#` comment of `s`, in order, its spaces collapsed. Formatting may move
-// a comment and respace it, but must keep each one whole: a comma pulled into a comment, or comment
-// text pulled out into code, changes the query.
+// Returns the text of every `--` and `#` comment of `s`, in order, with the spaces collapsed.
+// The formatter can move a comment and change its spacing. The formatter must keep each comment whole.
+// A comma pulled into a comment, or comment text pulled out into code, changes the query.
 vector<string> line_comment_texts(string_view s) {
   vector<string> out;
   ScanState st;
@@ -440,9 +438,8 @@ std::pair<string, string> split_top_level_as(string_view s) {
       const char prev = (i == 0) ? '\0' : s[i - 1];
       const char next = (i + 2 < s.size()) ? s[i + 2] : '\0';
       const bool prev_ok = prev == '\0' || std::isspace(static_cast<unsigned char>(prev)) || prev == ')' || prev == ']' || prev == '`';
-      // `AS` must be a whole word: the `as` prefix of an alias such as
-      // `ascii_label` is not the keyword (it used to split `x AS ascii_label`
-      // into `x AS` / `cii_label`).
+      // `AS` must be a whole word. The `as` prefix of an alias, such as `ascii_label`, is not the keyword.
+      // An earlier version split `x AS ascii_label` into `x AS` / `cii_label`.
       const bool next_ok = next == '\0' || std::isspace(static_cast<unsigned char>(next)) || next == '`' || next == '"';
       const bool prev_word = prev != '\0' && is_ident_char(prev);
       if (prev_ok && next_ok && !prev_word) last = static_cast<int>(i);
@@ -456,12 +453,12 @@ std::pair<string, string> split_top_level_as(string_view s) {
 string format_alias_identifier(string_view alias) {
   const string trimmed = trim_ascii_spaces(alias);
   if (trimmed.empty()) return {};
-  // `AS z -- note` at the end of a projection: the comment follows the alias,
-  // it must never be quoted into the identifier.
+  // In `AS z -- note` at the end of a projection, the comment follows the alias.
+  // The comment must never be quoted into the identifier.
   if (auto [code, comment] = split_inline_comment(trimmed); !comment.empty() && !trim_ascii_spaces(code).empty()) {
     return format_alias_identifier(code) + " " + comment;
   }
-  // The same for a trailing block comment: `AS traces /* distinct */`.
+  // The same rule applies to a trailing block comment, for example `AS traces /* distinct */`.
   {
     ScanState st;
     for (size_t i = 0; i + 1 < trimmed.size(); ++i) {

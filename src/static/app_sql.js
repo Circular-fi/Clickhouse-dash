@@ -8,8 +8,10 @@ function normalizeStatementText(sql) {
   return s;
 }
 
-// The statements of a script cut at its ";" by the one SQL lexer (app_sql_lex.js: a ";" in a string, a name or a comment
-// cuts nothing). Each is trimmed, with the place of its text in the script: { text, start, end }. Empty ones are dropped.
+// The statements of a script. The one SQL lexer (app_sql_lex.js) cuts the script at each ";".
+// A ";" in a string, a name or a comment cuts nothing.
+// Each statement is trimmed. It has the place of its text in the script: { text, start, end }.
+// Empty statements are dropped.
 // `ranges`: the [start, end) pieces of the script between its ";".
 function statementSpans(s, ranges) {
   const out = [];
@@ -37,8 +39,8 @@ function splitSqlStatementsJs(sqlText) {
   return splitStatementSpansJs(sqlText).map((span) => span.text);
 }
 
-// A long script is cut by src/wasm/sqlscan.c (the same pieces: tests/frontend/specs/wasm-sql.spec.js); a short one by the
-// loop above, which is instant. Without the kernel the loop answers. The kernel loads with the editor's checks.
+// The kernel in src/wasm/sqlscan.c cuts a long script. It gives the same pieces as tests/frontend/specs/wasm-sql.spec.js.
+// The loop above cuts a short script. The loop is quick. Without the kernel, the loop gives the answer. The editor checks load the kernel.
 const SPLIT_WASM_MIN_CHARS = 20000;
 
 // [start, end) pairs of the pieces between the ";" of the script, or null.
@@ -53,7 +55,9 @@ function splitRangesWasm(text, minChars = SPLIT_WASM_MIN_CHARS) {
   }
 }
 
-// The statements of the script with their places, from the kernel, or null (no kernel yet, or the script is shorter than minChars).
+// The statements of the script, with their places, from the kernel.
+// The result is null when the kernel is not loaded yet.
+// The result is also null when the script is shorter than minChars.
 function splitStatementSpansWasm(s, minChars = SPLIT_WASM_MIN_CHARS) {
   const rows = splitRangesWasm(s, minChars);
   if (!rows) return null;
@@ -84,7 +88,7 @@ function joinSqlStatements(statements) {
   return parts.join(";\n\n");
 }
 
-// Leading spaces to tabs, as the editor shows a formatted query.
+// Convert leading spaces to tabs. The editor shows a formatted query this way.
 function tabifyLeadingIndent(text, tabWidth = 4) {
   const lines = String(text ?? "").split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -96,10 +100,10 @@ function tabifyLeadingIndent(text, tabWidth = 4) {
   return lines.join("\n");
 }
 
-// The text as the server's formatter writes it (POST /api/format, one statement at a time), in the
-// editor's layout. The History and the Save dialog use it for a query that was not formatted when
-// it was typed. It rejects when the formatter does (a script that does not parse): the caller
-// keeps the raw text.
+// The server formatter writes the text in the editor layout. The formatter gets one statement at a time (POST /api/format).
+// The History and the Save dialog use this text for a query that was not formatted when it was typed.
+// The function rejects when the formatter does, for example for a script that does not parse.
+// The caller then keeps the raw text.
 async function formatText(hostId, text) {
   const statements = splitSqlStatements(String(text || "").trim());
   if (!statements.length) return "";

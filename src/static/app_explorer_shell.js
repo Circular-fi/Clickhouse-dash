@@ -1,5 +1,5 @@
-// The frame of the Explorer: the view tabs, the Browse | Graph tabs, the lifecycle scope of the mode on screen, the side panels (the
-// tree, the function list) and their drawer on a phone, and the first row of a list.
+// This module builds the frame of the Explorer. The frame has the view tabs and the Browse | Graph tabs.
+// It also has the lifecycle scope of the mode on screen, the side panels (the tree and the function list), and their drawer on a phone. It also has the first row of a list.
 
 import { dom, h, shell } from "./app_dom.js";
 import { explorerFeatures, model, selectionScope, shellEl } from "./app_explorer_store.js";
@@ -15,19 +15,18 @@ const { byId, $, $$ } = dom;
 // ---------------------------------------------------------------------------
 // Explorer shell: top-level view tabs, Catalog modes, mobile tree drawer.
 //
-// Views (top tabs) and their containers (other Explorer modules render into
-// these):
-//   catalog    #explorerListView: the object tree + #explorerCatalogMain,
-//              whose mode bar switches between two modes of one scope,
+// Views (top tabs) and their containers. The other Explorer modules render into these containers:
+//   catalog    #explorerListView: the object tree and #explorerCatalogMain.
+//              The mode bar switches between two modes of one scope,
 //              the tree selection (nothing, a database or an object):
 //                browse   #explorerCatalogView (#explorerDetailPane): the
 //                         databases overview, the database page or the
-//                         table card (their storage draws through
+//                         table card. Their storage uses
 //                         ns.explorerStorage)
 //                graph    #explorerGraphPane, focused on the selection
 //   functions  #explorerFunctionsPane
 // Routes: the Catalog is /explorer/catalog[/<db>[/<table>[/<tab>]]][?tab=<tab>|?mode=graph]
-// (parseExplorerRoute), functions /explorer/functions[/<name>]. The server
+// (parseExplorerRoute). The Functions view uses /explorer/functions[/<name>]. The server
 // itself is the System page (/system, app_system.js).
 const VIEWS = ["catalog", "functions"];
 
@@ -45,10 +44,9 @@ function modeAvailability() {
   };
 }
 
-// The Explorer view or Catalog mode on screen is an ns.lifecycle scope
-// ("explorer:browse", "explorer:graph", "explorer:functions"): what a mode
-// binds while it
-// shows (ns.lifecycle.bind) goes when another one shows.
+// The Explorer view or Catalog mode on screen is an ns.lifecycle scope.
+// The scope names are "explorer:browse", "explorer:graph" and "explorer:functions".
+// A mode removes the bindings that it creates with ns.lifecycle.bind when another mode shows.
 let lifecycleName = "";
 function syncLifecycle() {
   const next = model.section === "functions" ? "explorer:functions" : `explorer:${model.mode}`;
@@ -61,7 +59,7 @@ function syncLifecycle() {
 function syncViewTabs() {
   syncLifecycle();
   const view = currentView();
-  // Browse | Graph belong to the Catalog view only.
+  // The Browse and Graph tabs belong to the Catalog view only.
   syncModeTabs();
   const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
   if (shell) {
@@ -80,17 +78,16 @@ function syncViewTabs() {
       if (text) text.textContent = pane.label;
     }
   }
-  // Every Catalog mode shares the one tree; another panel starts closed.
+  // Every Catalog mode shares one tree. When the panel changes, the drawer closes.
   const paneId = pane?.id || "";
   if (paneId !== model.drawerPaneId) setTreeDrawerOpen(false);
   model.drawerPaneId = paneId;
 }
 
-// The Catalog's Browse | Graph: second-level tabs on the nav row, after
-// Catalog | Functions and a divider (as Observability's Search / Services /
-// Service map after Traces / Logs / Metrics), on the Catalog only. The way
-// up to the parent scope is an icon tool of the graph toolbar (Browse has
-// the tree and the card header).
+// The Browse and Graph tabs are second-level tabs on the nav row. They follow Catalog and Functions and a divider.
+// This matches Observability: Search, Services and Service map follow Traces, Logs and Metrics.
+// The tabs show on the Catalog only. To move to the parent scope, use the icon tool of the graph toolbar.
+// Browse has the tree and the card header instead.
 function syncModeTabs() {
   const available = modeAvailability();
   const tabs = shellEl("explorerModeTabs");
@@ -104,8 +101,7 @@ function syncModeTabs() {
   if (tabs) tabs.hidden = hidden;
   const sep = shellEl("explorerModeSep");
   if (sep) sep.hidden = hidden;
-  // A narrow window scrolls the row sideways: the selected tab shows clear
-  // of the faded edges.
+  // A narrow window scrolls the row sideways. The selected tab shows clear of the faded edges.
   const row = shellEl("explorerNavTabs");
   const active = hidden ? $(".is-active", shellEl("explorerViewTabs")) : $(".is-active", tabs);
   if (row && active) shell?.revealInRow?.(row, active);
@@ -124,7 +120,7 @@ function syncScopeUp() {
   button.setAttribute("aria-label", label);
 }
 
-// The side panel a view slides in as a drawer on a phone (null: none).
+// The side panel that a view shows as a drawer on a phone. The value is null when there is no such panel.
 function drawerPane(view = currentView()) {
   if (view === "catalog") return { id: "explorerListPane", label: "Objects" };
   if (view === "functions") return { id: "explorerFunctionListPane", label: "Functions" };
@@ -136,11 +132,10 @@ function isMobileShell() {
   return !!shell?.isAtMost("md");
 }
 
-// The tree and the Functions list: ns.sidePanel shells, always open on
-// wide windows (no rail and no head bar: the search, with its refresh
-// button on its line, leads the panel); a drawer over the content on
-// phones, which #explorerTreeToggle on the nav row opens for the view's
-// pane (an ns.layers layer, so Escape and a press outside close it).
+// The tree and the Functions list use ns.sidePanel shells. On wide windows, they are always open.
+// They have no rail and no head bar. The search leads the panel, and its refresh button is on the same line.
+// On phones, they are drawers over the content. The #explorerTreeToggle button on the nav row opens the drawer for the pane of the view.
+// The drawer is an ns.layers layer. So Escape, and a press outside the drawer, close it.
 const sidePanels = {};
 function sidePanel(id) {
   if (sidePanels[id] || !byId(id)) return sidePanels[id] || null;
@@ -151,7 +146,7 @@ function sidePanel(id) {
     drawer: {
       toggle: shellEl("explorerTreeToggle"),
       backdrop: pane.nextElementSibling?.classList.contains("explorerTreeBackdrop") ? pane.nextElementSibling : null,
-      // The toggle is shared by both panes: the Explorer names it (syncViewTabs).
+      // The toggle is shared by both panes. The Explorer names it (syncViewTabs).
       bind: false,
       manageToggle: false,
       onChange: (open) => { if (!open && model.treeOpen && drawerPane()?.id === id) setTreeDrawerOpen(false); },
@@ -160,7 +155,7 @@ function sidePanel(id) {
   return sidePanels[id];
 }
 
-// Mobile: the tree is an off-canvas drawer over the content.
+// On a phone, the tree is an off-canvas drawer over the content.
 function setTreeDrawerOpen(open) {
   const shell = shellEl("explorerTopBar")?.closest?.(".explorerShell");
   const value = !!open && isMobileShell();
@@ -176,17 +171,16 @@ function setTreeDrawerOpen(open) {
   }
 }
 
-// The loading, empty or failed state of a tree or list (ns.uiState, compact).
-// `clear`: the search field whose search found nothing (a "Clear the search" way out).
+// The loading, empty or failed state of a tree or a list (ns.uiState, compact).
+// `clear` is the search field. When the search finds nothing, the field gives a "Clear the search" action.
 function listState(kind, text, retry, clear) {
   const action = clear?.handle && clear.input?.value ? { label: "Clear the search", onClick: () => { clear.handle.clear(); clear.input.focus(); } } : null;
   return uiState.block(kind, kind === "loading" ? { label: text, compact: true } : { body: text, compact: true, retry, action });
 }
 
-// A list's first row, its root: "All databases (8)" in the tree, "All
-// functions (1,949)" in the Functions list. The count is what the list
-// shows (its filters and search applied); current while nothing is
-// selected; a click opens the overview (and closes a phone's drawer).
+// The first row of a list is its root. Examples: "All databases (8)" in the tree and "All functions (1,949)" in the Functions list.
+// The count is the count of what the list shows, with its filters and search applied. The row is current while nothing is selected.
+// A click opens the overview and closes the drawer of a phone.
 function rootRow({ id, icon, label, count, title, current, open }) {
   const button = h("button", {
     class: `explorerTreeDatabase explorerTreeRoot${current ? " is-selected" : ""}`,

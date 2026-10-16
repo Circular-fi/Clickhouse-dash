@@ -4,19 +4,16 @@
 
 namespace chdash {
 
-// The System page (docs/system.md): the selected server, not a database
-// or a table. Overview (server tiles, databases, topology, Keeper,
-// replication, the performance history and the background activity),
-// Queries (system.query_log) and Disks. Every read is a fixed, bounded
-// system-table SELECT.
+// This is the System page (docs/system.md) of the selected server. It is not a database or a table.
+// The page has these parts: Overview (server tiles, databases, topology, Keeper, replication, the performance history, and the background activity), Queries (system.query_log), and Disks.
+// Every read is a fixed, bounded system-table SELECT.
 struct SystemSettings {
   bool enabled = true;
-  // The Activity part of the Overview (merges, mutations, replication and
-  // Distributed queues: /api/system/activity). v2.14.0's
-  // explorer.operations.enabled sets it too.
+  // The Activity part of the Overview (merges, mutations, replication and Distributed queues: /api/system/activity).
+  // The setting explorer.operations.enabled in v2.14.0 also sets it.
   bool activity = true;
-  // The Keeper / ZooKeeper session (/api/system/keeper); v2.14.0's
-  // explorer.operations.keeper sets it too.
+  // The Keeper / ZooKeeper session (/api/system/keeper).
+  // The setting explorer.operations.keeper in v2.14.0 also sets it.
   bool keeper = true;
   // The Queries section (top queries of system.query_log, runner context).
   bool top_queries = true;

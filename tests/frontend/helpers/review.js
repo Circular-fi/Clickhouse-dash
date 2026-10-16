@@ -24,19 +24,19 @@ export async function stabilizePage(page) {
       html { scroll-behavior: auto !important; }
     `,
   });
-  // Fonts loaded, then two frames: the styles above are applied and painted.
+  // Wait until the fonts load, then wait for two frames. After that, the styles above are applied and painted.
   await page.evaluate(async () => {
     if (document.fonts) await document.fonts.ready;
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   }).catch(() => undefined);
 }
 
-// One screenshot and one audit of the page as it is. The audit has two kinds of fields:
-// - rules: horizontalOverflow and outsideViewport fail the capture below (a control that escapes the viewport is a bug);
-// - signals: clippedText, smallControls, overlappingControls and the style token counts are counted per state in the
-//   design report (scripts/build-report.mjs) for a person to read. They are heuristics, not rules: a calendar open over
-//   the facets overlaps by design, a text with an ellipsis is clipped by design. Rules of the same ideas that can fail
-//   have their own specs (touch targets: ui-foundations.spec.js, labels and names: a11y-contract.spec.js).
+// A capture takes one screenshot and one audit of the page as it is. The audit has two kinds of fields.
+// - rules: horizontalOverflow and outsideViewport fail the capture below. A control that leaves the viewport is a bug.
+// - signals: clippedText, smallControls, overlappingControls and the style token counts are counted per state.
+//   The design report (scripts/build-report.mjs) shows them for a person to read. They are heuristics, not rules.
+//   A calendar that opens over the facets overlaps by design. A text with an ellipsis is clipped by design.
+//   Rules of the same ideas that can fail have their own specs. Touch targets are in ui-foundations.spec.js. Labels and names are in a11y-contract.spec.js.
 export async function captureState(page, testInfo, state) {
   await stabilizePage(page);
   const project = safeName(testInfo.project.name);
@@ -94,7 +94,7 @@ export async function captureState(page, testInfo, state) {
       }
     }
 
-    // Sorted by left edge: a control is compared with the ones that start before its right edge only.
+    // The list is sorted by left edge. A control is compared only with the controls that start before its right edge.
     const overlapPairs = [];
     const byLeft = controls.slice().sort((a, b) => a.x - b.x);
     for (let i = 0; i < byLeft.length && overlapPairs.length < 80; i += 1) {
@@ -140,9 +140,9 @@ export async function captureState(page, testInfo, state) {
   await fs.writeFile(path.join(audits, `${name}.json`), JSON.stringify(audit, null, 2));
   await testInfo.attach(`design-${name}`, { path: screenshotPath, contentType: 'image/png' });
 
-  // Horizontal layout correctness is a product contract, not a report-only
-  // heuristic. Intentional wide tables must scroll inside their own container;
-  // the page itself and non-scrollable controls may never escape the viewport.
+  // Horizontal layout correctness is a product contract. It is not a heuristic for the report only.
+  // Wide tables that are intentional must scroll inside their own container.
+  // The page itself and the controls that cannot scroll must never leave the viewport.
   if (audit.horizontalOverflow || audit.outsideViewport.length > 0) {
     throw new Error(
       `Design overflow in ${state}: documentOverflow=${audit.horizontalOverflow}, `

@@ -1,13 +1,13 @@
 #pragma once
 
-// The Traces service: what the routes of the Traces page do, without HTTP. A route (api_traces.cpp) is an adapter: it finds the
-// host, parses the request (trace_request.hpp), calls the service with the context of the request, and writes the JSON of the
-// answer (trace_json.hpp).
+// This header defines the Traces service. The service does what the routes of the Traces page do, without HTTP. A route
+// (api_traces.cpp) is an adapter. It finds the host, parses the request (trace_request.hpp), calls the service with the context
+// of the request, and writes the JSON of the answer (trace_json.hpp).
 //
-// The service owns the order of a read: it takes a connection (a ChExecutor, ch_executor.hpp), finds out which attribute
-// columns are Maps, writes the filters as SQL, and runs the strategy of the route (trace_search.hpp) with the SQL builders
-// of trace_sql.hpp. It returns the answer as data, or the ApiError that the route sends. The caches that it uses belong to the
-// server and arrive at the construction: a test builds the service with a fake executor and its own caches.
+// The service owns the order of a read. It takes a connection (a ChExecutor, ch_executor.hpp). It checks which attribute columns
+// are Maps. It writes the filters as SQL. It runs the strategy of the route (trace_search.hpp) with the SQL builders of
+// trace_sql.hpp. It returns the answer as data, or the ApiError that the route sends. The caches that it uses belong to the
+// server and arrive at the construction. A test builds the service with a fake executor and its own caches.
 
 #include "ch_executor.hpp"
 #include "health_runner.hpp"
@@ -36,7 +36,8 @@ namespace trace {
 struct SearchAnswer {
   std::string source_host_id;
   SearchOutcome outcome;
-  // With a restricted allowlist a parent may be absent because it is hidden: the count of missing parents would reveal it.
+  // With a restricted allowlist, a parent can be absent because it is hidden. The count of missing parents can reveal the
+  // hidden parent.
   bool all_services = true;
   uint64_t total_ms = 0;
 };
@@ -90,7 +91,7 @@ struct ServicesDbAnswer {
   DbOutcome outcome;
 };
 
-// The caches that the service uses. They belong to the server (a TtlCache is single-flight and bounded); a test builds its own.
+// The service uses these caches. The server owns them. A TtlCache is single-flight and bounded. A test builds its own caches.
 struct TraceCaches {
   AttributeMapCache& attribute_maps;
   PrefillCache& prefill;
@@ -167,57 +168,59 @@ struct SpansAnswer {
 
 class TraceService {
  public:
-  // A connection to the trace source of a host (the system account); null with the reason in *error when there is none.
+  // A connection to the trace source of a host, which uses the system account. It is null, and the reason is in *error, when
+  // there is none.
   using OpenFn = std::function<std::unique_ptr<ChExecutor>(const HostSpec& host, std::string* error)>;
 
   TraceService(OpenFn open, TraceCaches caches)
       : open_(std::move(open)), attribute_maps_(caches.attribute_maps), prefill_(caches.prefill), facet_keys_(caches.facet_keys),
         facet_values_(caches.facet_values) {}
 
-  // The newest traces of the window that match the filters, with their summaries.
-  // `candidate_cap` lowers the most traces that the filtered index scan tests (the tests of the backend use it to reach the cap).
+  // This function returns the newest traces of the window that match the filters, with their summaries. The argument
+  // `candidate_cap` lowers the most traces that the filtered index scan tests. The backend tests use it to reach the cap.
   Result<SearchAnswer> search(const RequestContext& context, const HostSpec& host, const WindowRequest& request, size_t limit,
                               size_t candidate_cap = kCandidateScanCap) const;
 
-  // The charts: the count of traces and the quantiles of their duration, by bucket.
+  // The charts show the count of traces and the quantiles of their duration, by bucket.
   Result<AnalyticsAnswer> analytics(const RequestContext& context, const HostSpec& host, const AnalyticsRequest& request) const;
   // The services and the calls between them.
   Result<ServiceMapAnswer> service_map(const RequestContext& context, const HostSpec& host, const ServiceMapRequest& request) const;
-  // The traces counted by time bucket and log-scaled duration row.
+  // The traces, counted by time bucket and by log-scaled duration row.
   Result<HeatmapAnswer> heatmap(const RequestContext& context, const HostSpec& host, const HeatmapRequest& request) const;
-  // Which attribute values set the traces of a heatmap box apart.
+  // The attribute values that set the traces of a heatmap box apart.
   Result<DeltasAnswer> deltas(const RequestContext& context, const HostSpec& host, const DeltasRequest& request) const;
-  // The RED metrics of the entry spans of each service; with a detail, of each endpoint of that service.
+  // The RED metrics of the entry spans of each service. With a detail, the metrics are given for each endpoint of that service.
   Result<ServicesAnswer> services(const RequestContext& context, const HostSpec& host, const ServicesRequest& request) const;
   // The database statements that the spans carry.
   Result<ServicesDbAnswer> services_db(const RequestContext& context, const HostSpec& host, const ServicesRequest& request) const;
 
-  // The schema of the source: the columns, the trace index, the attribute maps. Always read fresh; its answer replaces the cached
-  // attribute maps.
+  // The schema of the source has these parts: the columns, the trace index and the attribute maps. The schema is always read
+  // again. The answer replaces the cached attribute maps.
   Result<MetaAnswer> meta(const RequestContext& context, const HostSpec& host, const std::string& source_host_id) const;
-  // The (service, operation) pairs of the pickers, from a cache of minute-aligned windows.
+  // The (service, operation) pairs of the pickers. They come from a cache of minute-aligned windows.
   Result<PrefillAnswer> prefill(const RequestContext& context, const HostSpec& host, const PrefillRequest& request) const;
   // The attribute keys of the spans that match the filters, and the values of one key.
   Result<FacetKeysAnswer> facet_keys(const RequestContext& context, const HostSpec& host, const FacetRequest& request) const;
   Result<FacetValuesAnswer> facet_values(const RequestContext& context, const HostSpec& host, const FacetRequest& request) const;
 
-  // The spans of a trace (the trace index gives its window), one span by its row key, the spans of other traces that link to a trace, and the
-  // spans around a time.
+  // The spans of a trace. The trace index gives the window of the trace. The other reads are: one span by its row key, the spans
+  // of other traces that link to a trace, and the spans around a time.
   Result<TraceDetailAnswer> trace_detail(const RequestContext& context, const HostSpec& host, const TraceDetailRequest& request) const;
   Result<SpanAnswer> span(const RequestContext& context, const HostSpec& host, const SpanRequest& request) const;
   Result<LinkedFromAnswer> linked_from(const RequestContext& context, const HostSpec& host, const LinkedFromRequest& request) const;
   Result<ContextAnswer> context(const RequestContext& context, const HostSpec& host, const ContextRequest& request) const;
-  // The span search: keyset pages over newest-first time slices (trace_spans.hpp).
+  // The span search uses keyset pages over time slices, newest first (trace_spans.hpp).
   Result<SpansAnswer> spans(const RequestContext& context, const HostSpec& host, const SpansRequest& request) const;
 
  private:
-  // A connection, the attribute columns of the table, and the statements' common parts of one request.
+  // The parts of one request are a connection, the attribute columns of the table, and the common parts of the statements.
   struct OpenedScope {
     std::unique_ptr<ChExecutor> db;
     TraceScope scope;
   };
   Result<OpenedScope> open_scope(const HostSpec& host, const WindowRequest& request) const;
-  // The part of the services routes that the two share: a connection, the span filters, the attribute columns, the query.
+  // This is the part of the services routes that the two routes share. It holds a connection, the span filters, the attribute
+  // columns and the query.
   struct OpenedServices {
     std::unique_ptr<ChExecutor> db;
     ServicesQuery query;

@@ -16,19 +16,19 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(unexpectedFailures(obs.failedRequests)).toEqual([]);
 });
 
-// Regression: the client closed the result stream as soon as "done" arrived, before
-// the server ended the response, so the finished stream read as a failed request
-// (net::ERR_ABORTED). A run now reads its stream with fetch (ns.api.openEventStream), to
-// its end, and never reconnects (no second request for the same run).
-// Lets `count` animation frames render (what a scroll, a press or a
-// synchronous handler scheduled has been drawn).
+// Regression: the client closed the result stream when "done" arrived.
+// The server had not ended the response yet.
+// The finished stream then read as a failed request (net::ERR_ABORTED).
+// A run now reads its stream with fetch (ns.api.openEventStream), to its end. It never reconnects: no second request is made for the same run.
+// The helper lets `count` animation frames render.
+// The frames draw what a scroll, a press or a synchronous handler scheduled.
 const frames = (page, count = 2) => page.evaluate((n) => new Promise((resolve) => {
   const step = (left) => (left ? requestAnimationFrame(() => step(left - 1)) : resolve());
   step(n);
 }), count);
 
 test('queries in a row: every result stream ends cleanly, none aborted or reopened', async ({ page }) => {
-  // The streams are fetch requests: no EventSource is made for a run (the hosts stream is the only one).
+  // The streams use fetch requests. No EventSource is made for a run. The hosts stream is the only one.
   await page.addInitScript(() => {
     const Native = window.EventSource;
     window.__queryEventSources = 0;
@@ -47,7 +47,7 @@ test('queries in a row: every result stream ends cleanly, none aborted or reopen
   page.on('requestfailed', (request) => { if (/\/api\/query\/stream\b/.test(request.url())) aborted.push(request.failure()?.errorText); });
   await openApp(page);
   for (const n of [1, 2, 3]) await runSuccessfulQuery(page, `SELECT number FROM numbers(${n})`);
-  // Each stream ended by the server (finished), none cut by the page (failed) and none asked again.
+  // Each stream that the server ends counts as finished. No stream that the page cuts counts as failed, and none is asked again.
   await expect.poll(() => finished.length).toBe(3);
   expect(aborted).toEqual([]);
   expect(streams).toHaveLength(3);
@@ -113,7 +113,7 @@ test('the editor never traps the keyboard: Tab indents, Escape then Tab leaves i
   await editor.press('Escape');
   await page.keyboard.press('Tab');
   await expect(editor).not.toBeFocused();
-  // Back in, Tab indents again.
+  // In the editor again, Tab indents text.
   await editor.focus();
   const before = await editor.inputValue();
   await editor.press('Tab');
@@ -133,9 +133,9 @@ test('the address bar links to the query: ?sql= after a run, read back by a new 
   await expect(other.locator('#runButton')).toBeEnabled();
   await expect(other.locator('#queryTextArea')).toHaveValue(/SELECT\s+7 AS `?seven`?/);
   await other.close();
-  // A reload keeps the tab's own draft over the link.
+  // A reload keeps the tab's own draft, which takes precedence over the link.
   await page.locator('#queryTextArea').fill('SELECT 8 AS draft');
-  // The tab's draft is saved (debounced) in sessionStorage.
+  // The tab's draft is saved in sessionStorage after a short delay (debounced).
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('chdash.editor.draft.v2') || '')).toContain('SELECT 8 AS draft');
   await page.reload();
   await expect(page.locator('#queryTextArea')).toHaveValue('SELECT 8 AS draft');
@@ -150,7 +150,7 @@ test('the header on narrow windows: two rows (the brand, then host, page and the
       return { brand: r('.appBrand'), host: r('#hostPickerButton'), pages: r('#pageSelectButton'), theme: r('#themeSelectButton'), vw: window.innerWidth, scroll: document.documentElement.scrollWidth };
     });
     expect(boxes.scroll).toBeLessThanOrEqual(width);
-    // Over a phone the host has the row under the brand; on a phone (600 px and below) the chrome is one row.
+    // On a phone, the host has the row under the brand. A phone is 600 px wide or less. There, the chrome is one row.
     if (width > 600) expect(boxes.host.top, `${width}`).toBeGreaterThanOrEqual(boxes.brand.bottom - 1);
     else expect(Math.abs(boxes.host.top - boxes.pages.top), `${width}`).toBeLessThanOrEqual(1);
     for (const key of ['host', 'pages', 'theme']) {
@@ -188,8 +188,8 @@ test('format and clear buttons follow actual editor and result state', async ({ 
 
   await expect(format).toBeDisabled();
   await expect(clear).toBeDisabled();
-  // Format is an icon button (the sprite's indent-increase) after Run, then the
-  // query library (book icon) and the run settings cog, on the same line.
+  // Format is an icon button after Run. It uses the sprite's indent-increase icon.
+  // The query library (book icon) and the run settings cog come next, on the same line.
   await expect(format).toHaveAttribute('aria-label', 'Format SQL');
   await expect(format).toHaveText('');
   await expect(format.locator('.formatButton__icon')).toBeVisible();
@@ -209,7 +209,7 @@ test('format and clear buttons follow actual editor and result state', async ({ 
 
   await runSuccessfulQuery(page, await editor.inputValue());
   await expect(clear).toBeEnabled();
-  // Clear is the same frameless cross (the sprite's x) as the row details close button.
+  // Clear uses the same frameless cross (the sprite's x) as the row details close button.
   await expect(clear).toHaveText('');
   await expect(clear.locator('svg.icon use')).toHaveAttribute('href', /#i-x$/);
   await expect(clear).toHaveAttribute('aria-label', 'Clear results');
@@ -224,20 +224,20 @@ test('format and clear buttons follow actual editor and result state', async ({ 
   await expect(clear).toBeDisabled();
 });
 
-// Query results (user, 2026-10-04): every numeric value has an in-cell bar,
-// identifiers and signed columns included, from the column's lowest value:
-// (v - min) / (max - min), the lowest empty. The bars are drawn once, when the
-// stream has ended (min / max over the final rows); the Explorer and Traces
-// tables keep their own rule (ui-data.spec.js, Explorer preview).
+// Query results (user, 2026-10-04): every numeric value has an in-cell bar.
+// Identifiers and signed columns are included. The bar starts at the column's lowest value:
+// The formula is (v - min) / (max - min). The lowest value is empty.
+// The bars are drawn once, when the stream ends. Min and max come from the final rows.
+// The Explorer and Traces tables keep their own rule (ui-data.spec.js, Explorer preview).
 const USER_BAR_QUERY = 'SELECT number, now() + number, [number, 1], number - 10, number + 2 FROM numbers(200000) LIMIT 1000';
-// Each mounted row's bar fills (null: no bar), keyed by its row number.
+// Each mounted row has a bar fill, keyed by its row number. A null value means no bar.
 const barFills = (body) => body.locator('tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)').evaluateAll((trs) => trs.map((tr) => ({
   n: Number(tr.cells[0].textContent),
   fills: [...tr.cells].slice(1).map((td) => (td.classList.contains('cellBar') ? parseFloat(td.style.getPropertyValue('--cellBar')) : null)),
 })));
-// The user's query: number, number - 10 and number + 2 all span 999 from
-// their lowest value, so row r (number r - 1) fills (r - 1) / 999; the
-// DateTime and the Array have none.
+// In the user's query, number, number - 10 and number + 2 all span 999 from their lowest value.
+// Row r (number r - 1) fills (r - 1) / 999.
+// The DateTime and Array columns have no bar.
 function expectUserQueryBars(rows) {
   expect(rows.length).toBeGreaterThan(0);
   for (const { n, fills } of rows) {
@@ -253,15 +253,15 @@ test('in-cell bars: every numeric Query value, from the column minimum; signed a
   await runSuccessfulQuery(page, 'SELECT arrayJoin([-10, -3, 0, 5, 12]) AS v, v + 20 AS p, toUInt32(v + 100) AS id, 7 AS same ORDER BY v');
   const fills = (col) => page.locator('#resultTableBody tr:not(.resultTable__spacerRow)').evaluateAll((trs, c) =>
     trs.map((tr) => (tr.cells[c].classList.contains('cellBar') ? parseFloat(tr.cells[c].style.getPropertyValue('--cellBar')) : null)), col);
-  // v holds negatives: its lowest value (-10) is the empty base, 12 the full bar.
+  // The column v holds negatives. Its lowest value (-10) is the empty base. 12 gives the full bar.
   const range = [0, 7 / 22, 10 / 22, 15 / 22, 1].map((f) => f * 100);
   for (const col of [1, 2, 3]) {
     const got = await fills(col);
     got.forEach((value, i) => expect(value, `column ${col} row ${i + 1}`).toBeCloseTo(range[i], 1));
   }
-  // A constant column: every cell has a bar, none filled.
+  // A constant column has a bar in every cell. No bar is filled.
   expect(await fills(4)).toEqual([0, 0, 0, 0, 0]);
-  // Numbers are right-aligned tabular figures in the table font, not mono.
+  // Numbers are right-aligned tabular figures. They use the table font, not the mono font.
   const look = await page.locator('#resultTableBody tr:not(.resultTable__spacerRow)').first().locator('td').nth(2).evaluate((td) => {
     const cs = getComputedStyle(td);
     return { align: cs.textAlign, numeric: cs.fontVariantNumeric, mono: /mono/i.test(cs.fontFamily) };
@@ -274,13 +274,13 @@ test('in-cell bars: the user query has bars on number, number - 10 and number + 
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'table'));
   await runSuccessfulQuery(page, USER_BAR_QUERY);
   const body = page.locator('#resultTableBody');
-  // 1,000 rows: a virtualised table.
+  // 1,000 rows make a virtualised table.
   await expect(body.locator('tr.resultTable__spacerRow').first()).toBeAttached();
   await expect(page.locator('#resultTableHead th').nth(4)).toContainText('minus(number, 10)');
   const top = await barFills(body);
   expect(top[0]).toEqual({ n: 1, fills: [0, null, null, 0, 0] });
   expectUserQueryBars(top);
-  // Rows rendered later, when scrolled to, get the same bars.
+  // Rows that render later, after the user scrolls to them, get the same bars.
   await page.evaluate(() => document.getElementById('resultTableBody').lastElementChild.scrollIntoView({ block: 'end' }));
   await expect.poll(async () => (await barFills(body)).some((row) => row.n === 1000), { timeout: 10_000 }).toBe(true);
   const bottom = await barFills(body);
@@ -291,7 +291,7 @@ test('in-cell bars: the user query has bars on number, number - 10 and number + 
 test('in-cell bars: drawn once the stream has ended, in single and multiquery results', async ({ page }) => {
   await openApp(page);
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'table'));
-  // While the rows stream in: rows, no bars.
+  // While the rows stream in, the rows have no bars.
   await runQuery(page, 'SELECT number AS n, number - 50 AS d FROM numbers(4000) WHERE sleepEachRow(0.0005) = 0 SETTINGS max_block_size = 100');
   const body = page.locator('#resultTableBody');
   await expect(body.locator('tr:not(.resultTable__spacerRow)').first()).toBeVisible({ timeout: 15_000 });
@@ -299,7 +299,7 @@ test('in-cell bars: drawn once the stream has ended, in single and multiquery re
   expect(await body.locator('td.cellBar').count()).toBe(0);
   await waitForTerminal(page);
   await expect(body.locator('td.cellBar').first()).toBeAttached();
-  // Bars over the final rows: row 1 (n = 0, d = -50) is the lowest of both.
+  // Bars use the final rows. Row 1 (n = 0, d = -50) is the lowest of both columns.
   const first = (await barFills(body)).find((row) => row.n === 1);
   expect(first.fills).toEqual([0, 0]);
 
@@ -317,7 +317,7 @@ test('in-cell bars: drawn once the stream has ended, in single and multiquery re
   const panelBody = (i) => blocks.nth(i).locator('tbody');
   expectUserQueryBars(await barFills(panelBody(0)));
   expect((await barFills(panelBody(1))).map((row) => row.fills[0])).toEqual([0, 50, 100]);
-  // The panel's virtualised rows, scrolled to.
+  // The panel's virtualised rows, after the test scrolls to them.
   await panelBody(0).evaluate((tbody) => tbody.lastElementChild.scrollIntoView({ block: 'end' }));
   await expect.poll(async () => (await barFills(panelBody(0))).some((row) => row.n === 1000), { timeout: 10_000 }).toBe(true);
   expectUserQueryBars(await barFills(panelBody(0)));
@@ -346,17 +346,17 @@ test('query execution renders rows and terminal status', async ({ page }) => {
 
 test('result values stay raw, a SQL NULL is the shared NULL token, and the metric rail uses the shared formats', async ({ page }) => {
   await openApp(page);
-  // Decision 45: no grouping, no reformatting of result values in the table
-  // or its copies; timestamps stay as ClickHouse returned them.
-  // Two rows: a single row would open the vertical one-row view.
+  // Decision 45: the table does not group or reformat result values.
+  // The copies do the same. Timestamps stay as ClickHouse returned them.
+  // The test uses two rows. A single row opens the vertical one-row view.
   await runSuccessfulQuery(page, "SELECT toUInt64(1234567) + number AS n, toFloat64(1234.5) AS f, toDateTime('2026-09-12 16:29:57', 'UTC') AS t, CAST(NULL AS Nullable(UInt8)) AS z, 'null' AS s FROM numbers(2) ORDER BY n");
   const cells = page.locator('#resultTableBody tr').first().locator('td');
   await expect(cells.nth(1)).toHaveText('1234567');
   await expect(cells.nth(2)).toHaveText('1234.5');
-  // The API sends DateTime as ISO 8601 UTC; the table shows it as sent.
+  // The API sends DateTime as ISO 8601 UTC. The table shows it as sent.
   await expect(cells.nth(3)).toHaveText('2026-09-12T16:29:57Z');
-  // A data NULL reads "NULL" in the --json-null italic token, as in the chart
-  // tooltips; the string 'null' stays plain text.
+  // A data NULL reads "NULL" in the --json-null italic token. The chart
+  // tooltips do the same. The string 'null' stays plain text.
   await expect(cells.nth(4).locator('.nullToken')).toHaveText('NULL');
   const token = await cells.nth(4).locator('.nullToken').evaluate((el) => ({
     style: getComputedStyle(el).fontStyle, color: getComputedStyle(el).color, expected: window.ChDash.palette.resolve('--json-null'),
@@ -365,7 +365,7 @@ test('result values stay raw, a SQL NULL is the shared NULL token, and the metri
   expect(token.color).toBe(token.expected);
   await expect(cells.nth(5)).toHaveText('null');
   await expect(cells.nth(5).locator('.nullToken')).toHaveCount(0);
-  // Copy cell keeps the raw value too.
+  // Copy cell also keeps the raw value.
   const readClipboard = await captureCopies(page, { clipboard: true });
   for (const [index, expected] of [[1, '1234567'], [3, '2026-09-12T16:29:57Z']]) {
     await cells.nth(index).click({ button: 'right' });
@@ -379,23 +379,23 @@ test('result values stay raw, a SQL NULL is the shared NULL token, and the metri
   await expect(values.nth(2)).toHaveText('2026-09-12T16:29:57Z');
   await expect(values.nth(3).locator('.nullToken')).toHaveText('NULL');
   await page.keyboard.press('Escape');
-  // The rail: grouped totals, ns.format bytes / durations / percentages,
-  // never the old "KiB", "1.00ms" or two-decimal counts (the unit keeps its
-  // space, a no-break one in the split number / unit layout).
+  // The rail shows grouped totals, and ns.format bytes, durations and percentages.
+  // It never shows the old "KiB", "1.00ms" or two-decimal counts. The unit keeps its
+  // space: a no-break space in the split number / unit layout.
   await expect(page.locator('#readRowsTotalText')).toHaveText(/^\d{1,3}(,\d{3})*$/);
   await expect(page.locator('#readBytesTotalText')).toHaveText(/^\d+(\.\d)?\s(B|KB|MB)$/);
   await expect(page.locator('#elapsedSecondsText')).toHaveText(/^\d+(\.\d+)?\s(ns|\u00b5s|ms|s)$/);
   await expect(page.locator('#memoryMaxText')).not.toHaveText(/iB|\.\d\d/);
   for (const id of ['#cpuText', '#cpuMaxText', '#progressPercentText']) {
-    // ns.format.percent: up to three significant digits, no trailing zeros
-    // ("100%", "3.72%", "12.3%"), the em dash when unknown.
+    // ns.format.percent: up to three significant digits. It has no trailing zeros
+    // ("100%", "3.72%", "12.3%"). It shows the em dash when unknown.
     await expect(page.locator(id)).toHaveText(/^(?:<0\.1%|\d+(?:\.\d*[1-9])?%|\u2014)$/);
   }
 });
 
-// After a run the rail's large values are what the run amounts to (rows and
-// bytes read, the CPU and memory peaks), never an em dash; each sub-line is
-// labelled: "Now" while it runs, "Avg" with the run's average once it ended.
+// After a run, the rail's large values show the run totals (rows and
+// bytes read, the CPU and memory peaks). They never show an em dash. Each sub-line is
+// labelled: "Now" during the run, "Avg" with the run's average after it ends.
 test('the metric rail promotes the totals after a run, with labelled sub-lines', async ({ page }) => {
   await openApp(page);
   const tile = (id) => page.locator('.metricCompact').filter({ has: page.locator(`#${id}`) });
@@ -419,11 +419,11 @@ test('the metric rail promotes the totals after a run, with labelled sub-lines',
   }
 });
 
-// "Format on run" never blocks Run: when the formatter fails, the text runs
-// as typed. A query the formatter rejects but the server runs gives rows; a
-// broken one gives the server's error, cleaned up: no code prefix, no
-// formatQuery wrapper, "Syntax error, line L col C near X", and the parser's
-// "Expected one of" list behind a closed toggle.
+// "Format on run" never blocks Run. When the formatter fails, the text runs
+// as typed. A query that the formatter rejects, but the server runs, gives rows. A
+// broken query gives the server's error, cleaned up. The error has no code prefix and no
+// formatQuery wrapper. It reads "Syntax error, line L col C near X", and the parser's
+// "Expected one of" list sits behind a closed toggle.
 test('a formatter failure does not block Run: the typed text runs, the server error reads cleanly', async ({ page }) => {
   await openApp(page);
   await page.locator('#runSettingsButton').click();
@@ -454,7 +454,7 @@ test('a formatter failure does not block Run: the typed text runs, the server er
   await expect(banner).not.toContainText('DB::Exception');
   const toggle = banner.locator('details.uiBanner__details');
   await expect(toggle.locator('summary')).toHaveText('Expected one of\u2026');
-  // Its disclosure is the sprite's chevron (a mask), never the filled triangle.
+  // Its disclosure uses the sprite's chevron (a mask). It never uses the filled triangle.
   const marker = await toggle.locator('summary').evaluate((el) => ({ display: getComputedStyle(el).display, listStyle: getComputedStyle(el).listStyleType, mask: getComputedStyle(el, '::before').maskImage || getComputedStyle(el, '::before').webkitMaskImage }));
   expect(marker.display).not.toBe('list-item');
   expect(marker.listStyle).toBe('none');
@@ -465,16 +465,16 @@ test('a formatter failure does not block Run: the typed text runs, the server er
   await expect(toggle.locator('.uiBanner__more')).toBeVisible();
   await expect(toggle.locator('.uiBanner__more')).toContainText('SELECT query');
 
-  // The Format button alone reports its own failure, cleaned the same way.
+  // Only the Format button reports its own failure. The message is cleaned the same way.
   await page.locator('#queryTextArea').fill('SELEC broken FROM nowhere');
   await page.locator('#formatButton').click();
   await expect(banner.locator('.uiBanner__text')).toHaveText('Syntax error, line 1 col 1 near SELEC');
   await expect(banner).not.toContainText('formatQuery');
 });
 
-// A batch of three statements or fewer shows every result; a longer one
-// opens the first (and any that failed). Panel stats are secondary sans text,
-// and the rail ends on the batch's totals.
+// A batch of three statements or fewer shows every result. A longer batch
+// opens the first result and any result that failed. Panel stats use secondary sans text,
+// and the rail ends with the batch totals.
 test('multiquery opens every panel of a short batch, the first of a long one; stats are secondary text and the rail sums the batch', async ({ page }) => {
   await openApp(page);
   await page.locator('#runSettingsButton').click();
@@ -491,7 +491,7 @@ test('multiquery opens every panel of a short batch, the first of a long one; st
   expect(style.family).toMatch(/IBM Plex Sans/);
   expect(style.family).not.toMatch(/Mono/);
   expect(style.weight).toBe('400');
-  // The rail: 10 + 1 + 1000 rows read over the batch, labelled averages.
+  // The rail shows 10 + 1 + 1000 rows read over the batch, with labelled averages.
   await expect(page.locator('#readRowsTotalText')).toHaveText('1,011');
   await expect(page.locator('#readRowsRateText')).not.toHaveText('\u2014');
   await expect(page.locator('#elapsedSecondsText')).not.toHaveText('\u2014');
@@ -504,9 +504,9 @@ test('multiquery opens every panel of a short batch, the first of a long one; st
   for (let i = 1; i < 4; i++) await expect(blocks.nth(i).locator('.resultsStack__body')).toBeHidden();
 });
 
-// The Table / Chart switch: two icon options of the shared segmented control
-// (ns.segmented), each named (aria-label), with a tooltip (title) and
-// aria-pressed; the same in every multiquery panel; the choice persists.
+// The Table / Chart switch has two icon options in the shared segmented control
+// (ns.segmented). Each option has a name (aria-label) and a tooltip (title), and
+// aria-pressed. Every multiquery panel has the same switch. The choice persists.
 test('the Table / Chart switch is an icon segmented control, in the results header and every multiquery panel', async ({ page }) => {
   await openApp(page);
   await page.evaluate(() => localStorage.setItem('chdash.results.view', 'table'));
@@ -521,7 +521,7 @@ test('the Table / Chart switch is an icon segmented control, in the results head
     await expect(chart).toHaveAttribute('title', 'Chart the received rows');
     await expect(table).toHaveAttribute('aria-pressed', String(pressed === 'table'));
     await expect(chart).toHaveAttribute('aria-pressed', String(pressed === 'chart'));
-    // Icons only: an inline SVG stroked in currentColor, no text.
+    // Icons only: an inline SVG with a currentColor stroke. It has no text.
     await expect(toggle).toHaveText('');
     for (const option of [table, chart]) {
       const look = await option.evaluate((el) => {
@@ -540,7 +540,7 @@ test('the Table / Chart switch is an icon segmented control, in the results head
   };
   const main = page.locator('#resultsPanel .resultsViewToggle--main');
   const { chart } = await check(main, 'table');
-  // The pressed option follows the view; the choice persists across results.
+  // The pressed option follows the view. The choice persists across results.
   await chart.click();
   await check(main, 'chart');
   await expect(page.locator('#resultsPanel > .queryChart')).toBeVisible();
@@ -548,7 +548,7 @@ test('the Table / Chart switch is an icon segmented control, in the results head
   await chart.focus();
   await expect(chart).toBeFocused();
 
-  // Multiquery panels: the same control, the stored view applied.
+  // Multiquery panels: the same control, with the stored view applied.
   await page.locator('#runSettingsButton').click();
   await page.locator('#runOptMultiQuery').click();
   await page.locator('#runSettingsButton').click();
@@ -564,15 +564,15 @@ test('the Table / Chart switch is an icon segmented control, in the results head
   await first.table.click();
   await check(panels.nth(0).locator('.resultsViewToggle'), 'table');
   expect(await page.evaluate(() => localStorage.getItem('chdash.results.view'))).toBe('table');
-  // A text-only result cannot be charted: the chart option says why.
+  // A text-only result cannot be charted. The chart option states why.
   const textOnly = panels.nth(1).locator('.resultsViewToggle').getByRole('button', { name: 'Chart view', exact: true });
   await expect(textOnly).toBeDisabled();
   await expect(textOnly).toHaveAttribute('title', /no numeric column/);
 });
 
-// The rail's sparklines span their tile edge to edge: the whole inner width,
-// the lower part of the tile down to its bottom edge, and the series from the
-// first sample at the left edge to the last at the right one.
+// The rail's sparklines span their tile from edge to edge: the whole inner width,
+// the lower part of the tile down to its bottom edge. The series runs from the
+// first sample at the left edge to the last sample at the right edge.
 test('the metric rail sparklines span their tiles edge to edge, on a phone too', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, 'SELECT number AS n, sleepEachRow(0.001) AS s FROM numbers(1500) SETTINGS max_block_size = 50');
@@ -602,12 +602,12 @@ test('the metric rail sparklines span their tiles edge to edge, on a phone too',
       expect(Math.abs(m.box.left - m.inner.left), where).toBeLessThanOrEqual(0.5);
       expect(Math.abs(m.box.right - m.inner.right), where).toBeLessThanOrEqual(0.5);
       expect(Math.abs(m.box.bottom - m.inner.bottom), where).toBeLessThanOrEqual(0.5);
-      // A band along the foot of the tile, under the figures (UI-011: the line never crosses the value).
+      // A band runs along the foot of the tile, under the figures (UI-011: the line never crosses the value).
       const height = m.box.bottom - m.box.top;
       const tileHeight = m.inner.bottom - m.inner.top;
       expect(height / tileHeight, where).toBeGreaterThan(0.25);
       expect(height / tileHeight, where).toBeLessThan(0.4);
-      // The x domain maps edge to edge of the viewBox; a 1.5 px stroke at any DPR.
+      // The x domain maps from edge to edge of the viewBox. The stroke is 1.5 px at any DPR.
       expect(m.viewBox).toBe('0 0 100 24');
       expect(m.firstX, where).toBe(0);
       expect(m.lastX, where).toBe(100);
@@ -643,9 +643,9 @@ test('profiling auto-opens Pipeline and lazily mounts Tracing', async ({ page })
   await expect(page.locator('#deepAnalyzeButton')).toHaveCount(0);
 });
 
-// The profiling dialog reads at 11 px or more everywhere, keeps its reading
-// guide under "How to read this", names every zoom control, and its Tracing
-// tab draws like the trace waterfall (row height, .traceSpanBar).
+// The profiling dialog uses 11 px or more everywhere. It keeps its reading
+// guide under "How to read this". It names every zoom control. Its Tracing
+// tab draws the same as the trace waterfall (row height, .traceSpanBar).
 test('profiling dialog: text of 11 px or more, a folded reading guide, labelled zoom controls, a Tracing tab drawn like the waterfall', async ({ page }) => {
   await openApp(page);
   await runSuccessfulQuery(page, 'SELECT city, count(), avg(temperature_c) FROM chdash_ui.weather_observations GROUP BY city ORDER BY city', { profiling: true });
@@ -658,11 +658,11 @@ test('profiling dialog: text of 11 px or more, a folded reading guide, labelled 
     return parseFloat(getComputedStyle(el).fontSize) < 11 - 0.01;
   }).map((el) => `${el.className}: ${el.textContent.trim().slice(0, 30)} (${getComputedStyle(el).fontSize})`));
   expect(await tinyText()).toEqual([]);
-  // The subtitle: the query id in mono, the measures in sans, never "0 ns".
+  // The subtitle shows the query id in mono and the measures in sans. It never shows "0 ns".
   await expect(modal.locator('.analysisModal__queryId')).toHaveText(/^[0-9a-f-]{36}$/);
   await expect(modal.locator('.analysisModal__measures')).toContainText(/ClickHouse (?:<1 ms|[\d.]+ (?:ms|s))/);
   await expect(modal.locator('#analysisSummary')).not.toContainText(/ClickHouse 0 ns/);
-  // The reading guide folds away.
+  // The reading guide collapses.
   const help = modal.locator('details.pipelineViewer__help');
   await expect(help.locator('summary')).toHaveText('How to read this');
   await expect(help).not.toHaveAttribute('open', '');
@@ -673,10 +673,10 @@ test('profiling dialog: text of 11 px or more, a folded reading guide, labelled 
   expect(await tinyText()).toEqual([]);
   await help.locator('summary').click();
   // Every zoom control says what it does.
-  // (The zoom buttons: the stage order is a segmented control after them.)
+  // (The zoom buttons come first. The stage order is a segmented control after them.)
   const controls = modal.locator('.pipelineViewer__controls > button');
   await expect(controls).toHaveText(['Full query', 'Earlier', 'Zoom out', 'Zoom in', 'Later', 'Last 1%']);
-  // ... and its icon: the sprite's chevrons and magnifiers; a stage's focus button is a magnifier too.
+  // ... and its icon. It uses the sprite's chevrons and magnifiers. A stage's focus button is a magnifier too.
   expect(await controls.evaluateAll((els) => els.map((el) => (el.querySelector('use')?.getAttribute('href') || '').replace(/^.*#i-/, ''))))
     .toEqual(['', 'chevron-left', 'zoom-out', 'zoom-in', 'chevron-right', '']);
   const focus = modal.locator('.pipelineViewer__focus').first();
@@ -705,7 +705,7 @@ test('the profiling dialog is the shared modal: focus moves in and stays, Escape
   const modal = page.locator('#analysisModal');
   await runSuccessfulQuery(page, 'SELECT count() FROM numbers(1000)', { profiling: true });
   await expect(modal).toBeVisible({ timeout: 15_000 });
-  // A native modal <dialog> in the shared shell; the focus is inside it.
+  // This is a native modal <dialog> in the shared shell. The focus stays inside it.
   expect(await modal.evaluate((el) => [el.tagName, el.matches(':modal'), el.classList.contains('uiDialog'), el.classList.contains('uiDialog--lg')])).toEqual(['DIALOG', true, true, true]);
   const inside = () => page.evaluate(() => {
     const el = document.activeElement;
@@ -717,17 +717,17 @@ test('the profiling dialog is the shared modal: focus moves in and stays, Escape
     await page.keyboard.press(i % 3 === 2 ? 'Shift+Tab' : 'Tab');
     expect(await inside()).toBe(true);
   }
-  // The page behind is inert: a click on it lands on the backdrop.
+  // The page behind is inert. A click on it lands on the backdrop.
   expect(await page.evaluate(() => document.elementFromPoint(4, 4)?.id)).toBe('analysisModal');
-  // Escape closes; the focus returns where it was when the dialog opened (the
-  // run gave it back to the editor).
+  // Escape closes the dialog. The focus returns to where it was when the dialog opened (the
+  // a run sends it to the editor).
   await page.keyboard.press('Escape');
   await expect(modal).toBeHidden();
   await expect(page.locator('#queryTextArea')).toBeFocused();
   await expect(page.locator('#analysisContent')).toBeEmpty();
 
-  // Reopened from the results Analyze button: the backdrop closes it, and the
-  // focus goes back to that button.
+  // Reopened from the results Analyze button, the backdrop closes it. The
+  // focus returns to that button.
   const analyze = page.locator('#analyzeQueryButton');
   if (await analyze.isVisible()) {
     await analyze.click();
@@ -737,8 +737,8 @@ test('the profiling dialog is the shared modal: focus moves in and stays, Escape
     await expect(analyze).toBeFocused();
   }
 
-  // The close button too; a click inside the dialog does not. Opened from
-  // the editor, the focus goes back to it.
+  // The close button also closes it. A click inside the dialog does not. Opened from
+  // the editor, the focus returns to the editor.
   await page.locator('#queryTextArea').focus();
   await page.evaluate(() => window.ChDash.analysis.open());
   await expect(modal).toBeVisible();
@@ -747,25 +747,25 @@ test('the profiling dialog is the shared modal: focus moves in and stays, Escape
   await page.locator('#analysisCloseButton').click();
   await expect(modal).toBeHidden();
   await expect(page.locator('#queryTextArea')).toBeFocused();
-  // Opened with the focus nowhere (on <body>), it falls back to Analyze.
+  // Opened with no focus (on <body>), it uses Analyze as the fallback.
   await page.evaluate(() => document.activeElement?.blur());
   await page.evaluate(() => window.ChDash.analysis.open());
   await expect(modal).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(modal).toBeHidden();
-  // (the results Profiling button, else Run).
+  // (the results Profiling button, or else Run).
   const fallback = (await analyze.isVisible()) ? analyze : page.locator('#runButton');
   await expect(fallback).toBeFocused();
 });
 
 test('no Ctrl+Enter hint beside Run: the shortcut is in its tooltip and still runs the query', async ({ page }) => {
   await openApp(page);
-  // Nothing next to Run but the Run split, Format, the library and the cog.
+  // Only the Run split, Format, the library and the cog stand next to Run.
   await expect(page.locator('#runShortcutHint')).toHaveCount(0);
   await expect(page.locator('.queryActions kbd')).toHaveCount(0);
   await expect(page.locator('.queryActions')).not.toContainText(/Ctrl|⌘|Enter/);
   await expect(page.locator('#runButton')).toHaveAttribute('title', /^Run \((Ctrl|⌘)\+Enter\)$/);
-  // The shortcut itself runs the editor content.
+  // The shortcut runs the editor content.
   await page.locator('#queryTextArea').fill('SELECT 4242 AS shortcut_answer');
   await page.locator('#queryTextArea').press('ControlOrMeta+Enter');
   await waitForTerminal(page);
@@ -792,16 +792,16 @@ FROM chdash_ui.weather_daily_summary
 LIMIT 100`;
   const editor = page.locator('#queryTextArea');
   await editor.fill(sql);
-  // data-diagnostics: "checked" once the marks show the current text with the
+  // data-diagnostics becomes "checked" when the marks show the current text with the
   // host's metadata (app_autocomplete.js).
   await expect(editor).toHaveAttribute('data-diagnostics', 'checked', { timeout: 10_000 });
   await expect(page.locator('.editorDiagnostic--unknown_table')).toHaveCount(0);
-  // The reload restores the tab's draft: wait until it is saved (debounced).
+  // The reload restores the tab's draft. Wait until the draft is saved (debounced).
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('chdash.editor.draft.v2') || '')).toContain('weather_daily_summary');
   await page.reload();
   await expect(page.locator('#queryWorkspace')).toBeVisible();
   await expect(editor).toHaveValue(sql, { timeout: 10_000 });
-  // The first check of the restored text, with the metadata hydrated so far.
+  // The first check runs on the restored text, with the metadata hydrated so far.
   await expect(editor).toHaveAttribute('data-diagnostics', 'checked', { timeout: 10_000 });
   await expect(page.locator('.editorDiagnostic--unknown_table')).toHaveCount(0);
 });
@@ -820,7 +820,7 @@ FROM chdash_ui.weather_daily_summary
 LIMIT 100`);
   await expect(editor).toHaveAttribute('data-diagnostics', 'checked', { timeout: 10_000 });
   await expect(page.locator('.editorDiagnostic--unknown_column')).toHaveCount(0);
-  // The check itself stays on: a misspelt column is still reported.
+  // The check stays on. A misspelt column is still reported.
   await editor.fill('SELECT 1e6, citty FROM chdash_ui.weather_daily_summary LIMIT 100');
   await expect(page.locator('.editorDiagnostic--unknown_column')).toHaveCount(1, { timeout: 10_000 });
 });
@@ -837,10 +837,10 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await databaseRow.click();
   await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui$/);
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui');
-  // Database detail meta is "<n> tables · <database bytes>"; the per-database
-  // disk list was replaced by a per-object list with rows/footprint stats.
+  // The database detail meta is "<n> tables · <database bytes>". The per-database
+  // disk list is replaced by a per-object list with rows and footprint stats.
   await expect(page.locator('#explorerDetailMeta')).toContainText(/^\d[\d,]* objects · \d+(?:\.\d)? [KMGTP]?B$/);
-  // The database page has no tabs: its size band, its objects, then its disks.
+  // The database page has no tabs. It shows its size band, its objects, then its disks.
   await expect(page.locator('#explorerDetailTabs')).toBeHidden();
   await expect(page.locator('#explorerDatabaseStorage')).toBeAttached();
   await expect(page.locator('#explorerDatabaseObjects tbody tr').first()).toBeVisible();
@@ -855,8 +855,8 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('unknown engine');
   await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/weather_observations$/);
 
-  // Header: chips for what the object is (engine, health), then its figures
-  // (rows, size, parts) as one muted text line, never chips; no ingress rate.
+  // The header has chips for the object type (engine, health). Its figures
+  // (rows, size, parts) form one muted text line, never chips. No ingress rate appears.
   const chips = page.locator('#explorerDetailMeta .explorerMetaChip');
   await expect(chips.first()).toHaveText('MergeTree');
   await expect(chips).toHaveCount(2);
@@ -869,16 +869,16 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   expect(factStyle).toEqual({ border: '0px', bg: 'rgba(0, 0, 0, 0)' });
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('rows/s');
 
-  // Columns first; tabs without content are hidden. Operations appears only
-  // when merges, mutations or writes exist, otherwise About says "Idle".
+  // Columns come first. Tabs without content are hidden. The Operations tab appears only
+  // when merges, mutations or writes exist. Otherwise About says "Idle".
   const detailTabs = page.locator('#explorerDetailTabs').getByRole('tab');
   const tabNames = await detailTabs.allTextContents();
   expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Storage', 'Lineage', 'DDL']);
   if (!tabNames.includes('Operations')) await expect(page.locator('.explorerAboutTile[data-tile="activity"]')).toContainText('Idle');
   const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
   await expect(columns).toBeVisible();
-  // The uncompressed size sits next to the compressed one; the ratio, which
-  // does not fit beside them, is the uncompressed cell's tooltip.
+  // The uncompressed size sits next to the compressed one. The ratio,
+  // which does not fit beside them, is the tooltip of the uncompressed cell.
   for (const header of ['Column', 'Type', 'Keys', 'Compressed', 'Uncompressed', '% table']) {
     await expect(columns.locator('thead th', { hasText: header }).first()).toBeVisible();
   }
@@ -909,7 +909,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/weather_observations\?tab=lineage$/);
   const lineage = page.locator('#explorerDetailContent .explorerDependencyMatrix');
   await expect(lineage).toBeVisible();
-  // Same-database objects use their short name; the tooltip keeps the full one.
+  // Same-database objects use their short name. The tooltip keeps the full name.
   const upstream = lineage.locator('.explorerDependencyGroup[data-relation="upstream"] .explorerLineageChip').first();
   await expect(upstream.locator('.explorerLineageChip__name')).toHaveText('weather_buffer');
   await expect(upstream).toHaveAttribute('title', /^chdash_ui\.weather_buffer/);
@@ -933,7 +933,7 @@ test('explorer opens fixture database and six table views', async ({ page }) => 
   // Row count + limit, column type sub-header, raw timestamps.
   await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText('100 rows (LIMIT 100)');
   await expect(explorerResults.locator('thead th[data-type="DateTime64(3)"]')).toHaveText('observed_at');
-  // Preview cells are result data: the DateTime64 stays as the API sent it (decision 45).
+  // Preview cells are result data. The DateTime64 stays as the API sent it (decision 45).
   await expect(explorerResults.locator('tbody tr').first().locator('td').nth(1)).toHaveText(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/);
   await page.locator('.explorerPreviewLimits [data-limit="50"]').click();
   await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText('50 rows (LIMIT 50)', { timeout: 12_000 });
@@ -1058,7 +1058,7 @@ test('explorer renders MV lineage, engine-specific tables, TTL and separate DDL'
   await page.locator('#explorerDetailTabs').getByRole('tab', { name: 'Lineage', exact: true }).click();
   await expect(page.locator('#explorerDetailContent .explorerDependencyGroup[data-relation="downstream"]')).toContainText('weather_observations');
 
-  // Log-family tables are disk-backed: a Storage tab with their disks only
+  // Log-family tables are disk-backed. Their Storage tab shows their disks only
   // (no parts, partitions, merges or composition bar).
   await page.getByText('station_dictionary_source', { exact: true }).first().click();
   await expect(page.locator('#explorerDetailMeta')).toContainText('TinyLog');
@@ -1102,7 +1102,7 @@ test('replicated and Distributed tables show replication first and their local t
   await page.goto('/explorer/catalog/chdash_repl/replicated_events_all/columns');
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_repl.replicated_events_all', { timeout: 15_000 });
   await expect(page.locator('#explorerSummaryCards')).toBeHidden();
-  // No meaningless 0 B size for a Distributed table, no byte columns.
+  // A Distributed table shows no meaningless 0 B size and no byte columns.
   await expect(page.locator('#explorerDetailMeta .explorerMetaFact--size')).toHaveCount(0);
   await expect(page.locator('#explorerDetailContent .explorerColumnsTable thead')).not.toContainText('Compressed');
   const local = page.locator('.explorerAboutTile[data-tile="local_table"]');
@@ -1128,8 +1128,8 @@ for (const scheme of ['dark', 'light']) {
     const about = page.locator('#explorerDetailContent .explorerAbout');
     const columns = page.locator('#explorerDetailContent .explorerColumnsTable');
     await expect(columns).toBeVisible();
-    // Narrow pane: the tab body first (what the tab was opened for), About
-    // under it, collapsed to its first tiles.
+    // In a narrow pane, the tab body comes first (the content the tab was opened for). About
+    // comes under it, collapsed to its first tiles.
     const columnsBox = await columns.boundingBox();
     expect((await about.boundingBox()).y).toBeGreaterThanOrEqual(columnsBox.y + columnsBox.height - 1);
     await expect(about).toHaveClass(/is-collapsed/);
@@ -1153,8 +1153,8 @@ test('graph table click keeps graph focus, browser selection and URL on the same
   await page.getByText('weather_observations', { exact: true }).first().click();
   await page.locator('#explorerModeGraph').click();
   await expect(page.locator('#explorerGraphPane')).toBeVisible();
-  // The graph is a canvas, so use the exported selection bridge to exercise the
-  // same path as a logical-node click without relying on fragile pixel positions.
+  // The graph is a canvas. Use the exported selection bridge to test the
+  // same path as a logical-node click. Do not rely on fragile pixel positions.
   await page.evaluate(() => window.ChDash.explorer.selectTable('chdash_ui', 'wide_types'));
   await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui\/wide_types\?mode=graph&graph=lineage&depth=1$/);
   await page.locator('#explorerModeBrowse').click();
@@ -1162,8 +1162,8 @@ test('graph table click keeps graph focus, browser selection and URL on the same
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.wide_types');
 });
 
-// Database detail object table (under the storage band): display-order snapshot of
-// every row, numeric cells carry their raw value in data-value.
+// Database detail object table (under the storage band): a display-order snapshot of
+// every row. Numeric cells hold their raw value in data-value.
 const DATABASE_OBJECT_HEADERS = ['#', 'Name', 'Engine', 'Rows', 'Size', 'Compressed', 'Ratio', '% database', 'Parts', 'Modified'];
 const DATABASE_OBJECT_NUMERIC = (column) => column >= 2 && column <= 7;
 
@@ -1176,8 +1176,8 @@ async function databaseObjectRows(page) {
 
 function textSortKey(value) { return String(value).toLowerCase(); }
 
-// Clicks a header and checks the displayed order: present values monotonic in
-// the header's direction (numbers compared as numbers), missing values last.
+// Click a header and check the displayed order. Present values are monotonic in
+// the header's direction. Numbers compare as numbers. Missing values come last.
 async function expectObjectColumnSorted(page, column, direction) {
   const header = page.locator('#explorerDatabaseObjects thead th').nth(column + 1);
   await header.click();
@@ -1210,8 +1210,8 @@ test('database detail lists every object on its page, sorts each column and open
   await expect(objects).toBeVisible();
   await expect(objects.locator('.resultTable thead th')).toHaveText(DATABASE_OBJECT_HEADERS);
   await expect(objects.locator('thead th.is-sortable')).toHaveCount(DATABASE_OBJECT_HEADERS.length);
-  // One page without tabs: the storage distribution (the size band) first,
-  // the objects table under it (user, 2026-10-04 evening).
+  // One page has no tabs. The storage distribution (the size band) comes first,
+  // the objects table comes under it (user, 2026-10-04 evening).
   await expect(page.locator('#explorerDetailTabs')).toBeHidden();
   await expect(page.locator('#explorerDetailContent .explorerDatabaseCard > *').first()).toHaveClass(/explorerDatabaseStorage/);
   await expect(page.locator('#explorerDetailContent .explorerDatabaseCard > *').nth(1)).toHaveClass(/explorerDatabaseObjects/);
@@ -1228,21 +1228,21 @@ test('database detail lists every object on its page, sorts each column and open
   expect(weather[1].text).toBe('MergeTree');
   expect(Number(weather[2].value)).toBe(weatherSummary.rows);
   expect(Number(weather[3].value)).toBe(weatherSummary.bytes);
-  // One byte format: one decimal and a unit (10.3 MB); rows are grouped.
+  // Use one byte format: one decimal and a unit (10.3 MB). Rows are grouped.
   expect(weather[2].text).toBe(Number(weatherSummary.rows).toLocaleString('en-US'));
   expect(weather[3].text).toMatch(/^\d+\.\d [KMG]B$/);
   expect(weather[4].text).toMatch(/^\d+\.\d [KMG]B$/);
-  // Uncompressed bytes moved into the Ratio tooltip (the table fits 1280 px).
+  // Uncompressed bytes are in the Ratio tooltip. The table fits 1280 px.
   expect(weather[5].text).toMatch(/^\d+\.\d\d×$/);
   await expect(objects.locator('tbody tr[data-table="weather_observations"] td').nth(6)).toHaveAttribute('title', /uncompressed .* compressed/);
   expect(Number(weather[6].value)).toBeGreaterThan(50);
   expect(weather[6].text).toMatch(/^\d+(?:\.\d)?%$/);
   expect(Number(weather[7].value)).toBe(weatherSummary.active_parts);
-  // Modified: the server's DateTime in the browser's zone, 24 h (decision
-  // 48); the tooltip carries ISO, local, UTC and the server's zone.
+  // Modified: the server's DateTime in the browser's zone, in 24 h format (decision
+  // 48). The tooltip shows ISO, local, UTC and the server's zone.
   expect(weather[8].text).toMatch(/^[A-Z][a-z]{2} \d{1,2}(?:, \d{4})? \d\d:\d\d:\d\d$/);
   await expect(objects.locator('tbody tr[data-table="weather_observations"] td').nth(9)).toHaveAttribute('title', /^\d{4}-\d\d-\d\dT[\d:.]+Z\n.* local \(.*\n.* UTC\n.* server \(/);
-  // Resident memory is labelled and never takes a share of the on-disk total.
+  // Resident memory has a label. It never takes a share of the on-disk total.
   const memory = rows.find((row) => row.name === 'memory_weather').cells;
   expect(memory[3].text).toMatch(/RAM$/);
   expect(memory[6].text).toBe('—');
@@ -1250,7 +1250,7 @@ test('database detail lists every object on its page, sorts each column and open
   const view = rows.find((row) => row.name === 'valid_weather_observations').cells;
   expect(view[1].text).toBe('View');
   expect(view[3].text).toBe('—');
-  // Rows / bytes / share columns use the shared Explorer in-cell bar,
+  // Rows, bytes and share columns use the shared Explorer in-cell bar,
   // normalised to the column maximum (the largest object fills the cell).
   const weatherSize = objects.locator('tbody tr[data-table="weather_observations"] td').nth(4);
   await expect(weatherSize).toHaveClass(/cellBar/);
@@ -1273,8 +1273,8 @@ test('database detail lists every object on its page, sorts each column and open
 });
 
 test('database object table handles hundreds of tables and empty databases', async ({ page }) => {
-  // Synthetic catalogs through the real endpoint: 300 tables whose sizes sort
-  // differently as text and as numbers, and a database without objects.
+  // Synthetic catalogs go through the real endpoint: 300 tables whose sizes sort
+  // differently as text and as numbers. One database has no objects.
   const count = 300;
   const synthetic = Array.from({ length: count }, (_, index) => {
     const bytes = (index % 7 + 1) * 10 ** (index % 6);
@@ -1326,7 +1326,7 @@ test('database object table handles hundreds of tables and empty databases', asy
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'otel' }).first().click();
   await expect(page.locator('#explorerDetailName')).toHaveText('otel');
   await expect(page.locator('#explorerDetailMeta')).toContainText(/^0 objects/);
-  // One empty state: no empty storage section above an empty object table.
+  // One empty state. No empty storage section appears above an empty object table.
   await expect(page.locator('#explorerDetailContent')).toHaveText('No objects in this database.');
   await expect(page.locator('#explorerDetailContent .explorerSectionTitle')).toHaveCount(0);
   await expect(page.locator('#explorerDatabaseObjects')).toHaveCount(0);
@@ -1431,7 +1431,7 @@ ORDER BY id`;
 const dataRowsSelector = 'tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)';
 
 async function openRowDetailsFromRow(page, row) {
-  // The menu closes on scroll: let a scroll-into-view settle before the click.
+  // The menu closes on scroll. Let a scroll-into-view settle before the click.
   await row.scrollIntoViewIfNeeded();
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await row.locator('td').nth(2).click({ button: 'right' });
@@ -1479,11 +1479,11 @@ test('right-click Details expands a result row inline, under the row, and closes
   await expect(rows).toHaveCount(6);
   const row3 = rows.nth(2);
 
-  // Shift+right-click keeps the browser menu (no custom menu).
+  // Shift+right-click opens the browser menu. No custom menu appears.
   await row3.locator('td').nth(2).click({ button: 'right', modifiers: ['Shift'] });
   await expect(page.locator('.rowDetailsMenu')).toHaveCount(0);
 
-  // Escape closes the custom menu without opening details.
+  // Escape closes the custom menu. It does not open details.
   await row3.locator('td').nth(2).click({ button: 'right' });
   await expect(page.locator('.rowDetailsMenu')).toBeVisible();
   await page.keyboard.press('Escape');
@@ -1494,12 +1494,12 @@ test('right-click Details expands a result row inline, under the row, and closes
   const view = await openRowDetailsFromRow(page, row3);
   await expectDetailRightAfter(row3);
   await expect(view).toHaveAttribute('data-row', '3');
-  // Same presentation as a one-row (LIMIT 1) result: column names only, no type line.
+  // The presentation is the same as a one-row (LIMIT 1) result: column names only, no type line.
   const names = await view.locator('.rowDetails__name').allTextContents();
   expect(names).toEqual(['id', 'name', 'arr', 'm', 'tup.code', 'tup.label', 'maybe', 'long_text']);
   await expect(view.locator('.rowDetails__type')).toHaveCount(0);
-  // The expanded row is the selected look (the fill, a 1 px edge above and below), and its details go on in it: the same
-  // fill and edge colour, the detail right under the row, at the same left edge.
+  // The expanded row uses the selected look (the fill, a 1 px edge above and below). Its details appear in it, with the same
+  // fill and edge colour. The detail sits right under the row, at the same left edge.
   const look = await page.evaluate(() => {
     const index = document.querySelector('#resultTableBody tr.is-rowExpanded td.dataTable__rowNum');
     const detail = document.querySelector('.rowDetails');
@@ -1532,7 +1532,7 @@ test('right-click Details expands a result row inline, under the row, and closes
   await expect(values.nth(6).locator('.nullToken')).toHaveText('NULL');
   await expect(values.nth(7)).toContainText(`long-${'abcdefghij'.repeat(40)}-end`);
 
-  // Row 4 is pushed below the detail; the detail is exactly the visible
+  // Row 4 moves below the detail. The detail is exactly the visible
   // table width, sticks to its left edge and never widens the page.
   const geometry = await page.evaluate(() => {
     const detail = document.querySelector('#resultTableBody tr.resultTable__detailRow');
@@ -1560,7 +1560,7 @@ test('right-click Details expands a result row inline, under the row, and closes
   expect(geometry.contentOverflowX).toBeLessThanOrEqual(1);
   expect(geometry.docOverflowX).toBeLessThanOrEqual(1);
   if (geometry.wrapScrollable > 40) {
-    // Scrolling a wide table horizontally keeps the detail in view.
+    // When a wide table scrolls horizontally, the detail stays in view.
     const stuck = await page.evaluate(() => {
       const wrap = document.querySelector('#resultTableBody').closest('.tableWrap');
       wrap.scrollLeft = 200;
@@ -1572,7 +1572,7 @@ test('right-click Details expands a result row inline, under the row, and closes
     expect(stuck).toBeLessThanOrEqual(1);
   }
 
-  // Clicking / selecting inside keeps it open.
+  // A click or a selection inside keeps it open.
   await values.nth(1).click();
   await values.nth(7).dblclick();
   await expect(view).toBeVisible();
@@ -1604,7 +1604,7 @@ test('right-click Details expands a result row inline, under the row, and closes
   await page.locator('.rowDetails__close').click();
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
 
-  // The close button and Escape dismiss it; the keyboard path (Enter on the
+  // The close button and Escape dismiss it. The keyboard path (Enter on the
   // focused item) works.
   await openRowDetailsFromRow(page, rows.nth(0));
   await page.locator('.rowDetails__close').click();
@@ -1616,7 +1616,7 @@ test('right-click Details expands a result row inline, under the row, and closes
   await page.keyboard.press('Escape');
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
 
-  // Sorting keeps the detail attached to the same data row.
+  // The sort keeps the detail attached to the same data row.
   await openRowDetailsFromRow(page, rows.nth(2));
   await page.locator('#resultTableHead th[data-sort-key="0"]').click();
   await page.locator('#resultTableHead th[data-sort-key="0"]').click();
@@ -1625,7 +1625,7 @@ test('right-click Details expands a result row inline, under the row, and closes
   await expect(expanded.locator('td.dataTable__rowNum')).toHaveText('3');
   await expectDetailRightAfter(expanded);
 
-  // Starting a new query dismisses it too.
+  // A new query also dismisses it.
   await page.locator('#queryTextArea').focus();
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(1);
   await page.keyboard.press('Control+Enter');
@@ -1639,12 +1639,12 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   await runSuccessfulQuery(page, rowDetailsQuery.replace('numbers(6)', 'numbers(60)'));
   const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
   await expect(rows.nth(5)).toBeVisible();
-  // Outside a secure context the app copies through a hidden textarea:
-  // capture what that copy selects (or read the clipboard when available).
+  // Outside a secure context, the app copies through a hidden textarea.
+  // Capture what that copy selects, or read the clipboard when it is available.
   const readClipboard = await captureCopies(page, { clipboard: true });
 
-  // The menu offers Details, Copy cell, Copy row and Copy column, with no
-  // hint line, in compact items; the row shows its accent bar meanwhile.
+  // The menu offers Details, Copy cell, Copy row and Copy column. It has no
+  // hint line, and it uses compact items. Meanwhile, the row shows its accent bar.
   await rows.nth(2).locator('td').nth(2).click({ button: 'right' });
   const menu = page.locator('.rowDetailsMenu');
   await expect(menu).toBeVisible();
@@ -1653,7 +1653,7 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   expect((await menu.getByRole('menuitem').first().boundingBox()).height).toBeLessThanOrEqual(28);
   await expect(rows.nth(2)).toHaveClass(/is-rowMenuTarget/);
   expect(await rows.nth(2).locator('td.dataTable__rowNum').evaluate((td) => getComputedStyle(td).boxShadow)).toContain('rgb(53, 111, 230)');
-  // Hovering an action lights exactly what it copies.
+  // A hover on an action lights exactly what it copies.
   const lit = () => page.evaluate(() => [...document.querySelectorAll('.is-copyTarget')].map((el) => {
     const tr = el.parentElement;
     return `${tr.parentElement.tagName}:${[...tr.parentElement.children].indexOf(tr)}:${el.cellIndex}`;
@@ -1698,9 +1698,9 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   expect(Object.keys(copiedRow)).toEqual(['id', 'name', 'arr', 'm', 'tup.code', 'tup.label', 'maybe', 'long_text']);
   expect(copiedRow.arr).toEqual([0, 1, 2]);
 
-  // Details on row 1, then scroll so its top is above the viewport: picking
-  // Details on another row closes the old detail (which scrolls to keep the
-  // rows in place) and must still open the new one.
+  // Open Details on row 1, then scroll so its top is above the viewport. Pick
+  // Details on another row closes the old detail. That closing scrolls to keep the
+  // rows in place. It must still open the new one.
   await openRowDetailsFromRow(page, rows.nth(0));
   await page.evaluate(() => {
     const detail = document.querySelector('#resultTableBody tr.resultTable__detailRow');
@@ -1712,8 +1712,8 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   const next = rows.nth(1);
   await next.locator('td').nth(2).click({ button: 'right' });
   await expect(menu).toBeVisible();
-  // A human press keeps the button down long enough for the scroll that
-  // compensates the closing detail to land before the click.
+  // A human press holds the button down long enough for the scroll that
+  // compensates the closing detail to finish before the click.
   const box = await menu.getByRole('menuitem', { name: 'Details' }).boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
@@ -1725,7 +1725,7 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   await expect(rows.nth(0)).not.toHaveClass(/is-rowExpanded/);
   await expectDetailRightAfter(next);
 
-  // The expanded row's highlight fills its numeric gauge cells edge to edge
+  // The expanded row's highlight fills its numeric gauge cells from edge to edge
   // (the gauge bar is clipped to the content box, the row colour is not).
   const gaugeClip = await next.locator('td.cellBar').first().evaluate((td) => getComputedStyle(td).backgroundClip);
   expect(gaugeClip).toBe('content-box, content-box, padding-box');
@@ -1739,7 +1739,7 @@ test('row menu Details on another row replaces the open detail, and copies a cel
   expect(frame.border).toBe('0px');
   expect(frame.shadow).toBe('none');
   expect(frame.bg).toBe('rgba(0, 0, 0, 0)');
-  // Hover highlights the cross itself: its colour changes, no shape appears.
+  // A hover highlights the cross itself. Its colour changes, and no shape appears.
   const idleColor = await close.evaluate((el) => getComputedStyle(el).color);
   const copyBtn = page.locator('.rowDetails__copy');
   const copyIdle = await copyBtn.evaluate((el) => {
@@ -1753,7 +1753,7 @@ test('row menu Details on another row replaces the open detail, and copies a cel
     return { bg: cs.backgroundColor, border: cs.borderTopWidth, shadow: cs.boxShadow };
   });
   expect(hovered).toEqual({ bg: 'rgba(0, 0, 0, 0)', border: '0px', shadow: 'none' });
-  // …and leaves Copy JSON next to it untouched.
+  // It leaves Copy JSON next to it untouched.
   expect(await copyBtn.evaluate((el) => {
     const cs = getComputedStyle(el);
     return [cs.opacity, cs.backgroundColor, cs.color, cs.borderTopColor].join('|');
@@ -1783,7 +1783,7 @@ test('inline row details stay attached to their virtualized row and are counted 
     return e.rowH > 0 ? Math.round(e.body / e.rowH) : 0;
   }, { timeout: 15_000 }).toBe(total);
 
-  // Scrolls, then lets the scroll event and the table's render frame pass.
+  // Scroll, then let the scroll event and the table's render frame pass.
   const scrollBy = async (dy) => {
     await page.evaluate((delta) => {
       const ws = document.getElementById('queryWorkspace');
@@ -1797,8 +1797,8 @@ test('inline row details stay attached to their virtualized row and are counted 
     const tr = el && el.closest('#resultTableBody tr:not(.resultTable__spacerRow):not(.resultTable__detailRow)');
     return tr ? Number(tr.querySelector('.dataTable__rowNum').textContent) : 0;
   });
-  // Every mounted data row sits at (index - 1) * rowH, plus the detail height
-  // for rows after the expanded one: no jump anywhere in the window.
+  // Every mounted data row sits at (index - 1) * rowH. It adds the detail height
+  // for rows after the expanded one. No jump appears anywhere in the window.
   const layoutError = (expandedIndex, detailH, rowH) => page.evaluate(({ expandedIndex, detailH, rowH }) => {
     const tbody = document.getElementById('resultTableBody');
     const top = tbody.getBoundingClientRect().top;
@@ -1825,7 +1825,7 @@ test('inline row details stay attached to their virtualized row and are counted 
   expect(Math.abs(open.body - (total * closed.rowH + open.detail))).toBeLessThanOrEqual(2);
   expect(await layoutError(index, open.detail, closed.rowH)).toBeLessThanOrEqual(2);
 
-  // Scroll far away (both directions, detail unmounted into a spacer) and back.
+  // Scroll far away in both directions, so the detail unmounts into a spacer, then scroll back.
   const probe = await page.evaluate(() => {
     const el = document.querySelector('#resultTableBody tr.resultTable__detailRow');
     el.__rowDetailsProbe = true;
@@ -1847,8 +1847,8 @@ test('inline row details stay attached to their virtualized row and are counted 
   // The same detail content is re-inserted (not rebuilt) after the new <tr>.
   expect(await page.evaluate(() => document.querySelector('#resultTableBody tr.resultTable__detailRow').__rowDetailsProbe === true)).toBe(true);
 
-  // Small scrolls across the expanded row: exactly one detail, always right
-  // after its data row, rows never jump.
+  // Make small scrolls across the expanded row. There is exactly one detail, always right
+  // after its data row. Rows never jump.
   for (let i = 0; i < 6; i++) {
     await scrollBy(i % 2 ? -180 : 260);
     await expect(body.locator('tr.resultTable__detailRow')).toHaveCount(1);
@@ -1858,7 +1858,7 @@ test('inline row details stay attached to their virtualized row and are counted 
   const back = await extent();
   expect(Math.abs(back.body - (total * closed.rowH + open.detail))).toBeLessThanOrEqual(2);
 
-  // Opening another row's Details while this one is above the viewport
+  // Open the Details of another row while this one is above the viewport.
   // closes it without moving the rows the user is looking at.
   await scrollBy(Math.round(open.detail) + 40 * 32);
   const before = await visibleRowIndex();
@@ -1885,7 +1885,7 @@ test('inline row details work in multiquery result panels', async ({ page }) => 
   await waitForTerminal(page);
   await waitForBatch(page, 4);
   const second = page.locator('.resultsStack__block').nth(1);
-  // The panel's final line (the live one only counts rows): its fold is settled.
+  // The panel's final line settles its fold. The live line counts rows only.
   await expect(second.locator('.resultsStack__meta')).toContainText('finished', { timeout: 30_000 });
   if (await second.locator('.resultsStack__body').isHidden()) await second.locator('.resultsStack__toggle').click();
   const rows = second.locator(`tbody ${dataRowsSelector}`);
@@ -1902,7 +1902,7 @@ test('inline row details work in multiquery result panels', async ({ page }) => 
   await view.locator('.rowDetails__close').click();
   await expect(page.locator('tr.resultTable__detailRow')).toHaveCount(0);
 
-  // The single-row panel is vertical: no custom menu there.
+  // The single-row panel is vertical. It has no custom menu.
   const third = page.locator('.resultsStack__block').nth(2);
   if (await third.locator('.resultsStack__body').isHidden()) await third.locator('.resultsStack__toggle').click();
   await third.locator('tbody td').first().click({ button: 'right' });
@@ -1955,7 +1955,7 @@ test('Explorer Preview cells stay raw like Query results: no grouping, no compac
     if (note === null) await expect(cells(row, 'notes').locator('.nullToken')).toHaveText('NULL');
     else await expect(cells(row, 'notes')).toHaveText(String(note));
   }
-  // The chrome around the data may group: the row count of the toolbar.
+  // The chrome around the data may group values. Here, this is the row count of the toolbar.
   await expect(page.locator('.explorerPreviewToolbar__count')).toHaveText(/^\d{1,3}(,\d{3})* rows? \(LIMIT \d+\)$/);
 });
 
@@ -1976,11 +1976,11 @@ test('Explorer Parts: part ages follow the duration rule and the table fits besi
 });
 
 // --- Trace links in the row menu ---------------------------------------------
-// A row holding an OpenTelemetry trace id (32 hex digits, not all zeros, in a
-// String / FixedString cell or array element, read raw) offers "Open trace"
-// (a new tab on /observability/traces/<id>, ?span= when a span column pairs
-// with it by name) and "Copy trace link"; several distinct ids make both
-// submenus. Only when the traces feature is enabled.
+// A row that holds an OpenTelemetry trace id (32 hex digits, not all zeros, in a
+// String or FixedString cell, or array element, read raw, offers "Open trace"
+// (a new tab on /observability/traces/<id>, with ?span= when a span column pairs
+// with it by name) and "Copy trace link". Several distinct ids make both
+// submenus. These entries appear only when the traces feature is enabled.
 
 const TRACE_A = '0af7651916cd43dd8448eb211c80319c';
 const TRACE_B = '4bf92f3577b34da6a3ce929d0e0e4736';
@@ -2009,8 +2009,8 @@ async function closeTraceRowMenu(page) {
   await expect(traceRowMenu(page)).toHaveCount(0);
 }
 
-// Outside a secure context the app copies through a hidden textarea:
-// capture what that copy selects (or read the clipboard when available).
+// Outside a secure context, the app copies through a hidden textarea.
+// Capture what that copy selects, or read the clipboard when it is available.
 async function setTracesFeature(page, enabled) {
   await page.route('**/api/version', async (route) => {
     const response = await route.fetch();
@@ -2035,17 +2035,17 @@ test('row menu: Open trace for a raw trace id cell (any case, trimmed, String or
   toUInt128('12345678901234567890123456789012') AS numeric_id
 FROM numbers(3)`);
   await expect(rows).toHaveCount(3);
-  // The cells stay raw (as ClickHouse sent them): upper case.
+  // The cells stay raw, as ClickHouse sent them. They are in upper case.
   await expect(rows.nth(1).locator('td').nth(2)).toHaveText(TRACE_A.toUpperCase());
   let menu = await openTraceRowMenu(page, rows.nth(1), 4);
   // One trace id: flat entries, after Details.
   expect(await menuLabels(menu)).toEqual(['Details', 'Open trace', 'Copy trace link', ...ROW_COPIES]);
-  // A link to the lower-cased id, on its span (TraceId pairs with SpanId),
-  // in a new tab.
+  // A link to the lower-cased id uses its span (TraceId pairs with SpanId).
+  // The link opens in a new tab.
   const open = menu.getByRole('menuitem', { name: 'Open trace', exact: true });
   await expect(open).toHaveAttribute('href', tracePath(TRACE_A, SPAN_A));
   await expect(open).toHaveAttribute('target', '_blank');
-  // Hovering it lights the trace id cell.
+  // A hover on it lights the trace id cell.
   await open.hover();
   await expect.poll(() => page.evaluate(() => [...document.querySelectorAll('td.is-copyTarget')].map((td) => td.cellIndex))).toEqual([2]);
   await closeTraceRowMenu(page);
@@ -2060,7 +2060,7 @@ FROM numbers(3)`);
   expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_C)]);
   await closeTraceRowMenu(page);
 
-  // Nothing that is not a whole trace id.
+  // A value that is not a whole trace id gets no entry.
   await runSuccessfulQuery(page, `SELECT number AS n, '00000000000000000000000000000000' AS TraceId, 'x ${TRACE_A}' AS trace_note, '${TRACE_A.slice(0, 16)}' AS half FROM numbers(2)`);
   menu = await openTraceRowMenu(page, rows.nth(1));
   expect(await menuLabels(menu)).toEqual(['Details', ...ROW_COPIES]);
@@ -2072,8 +2072,8 @@ test('row menu: one entry for a trace id found in several columns; the span pair
   await openApp(page);
   const rows = page.locator(`#resultTableBody ${dataRowsSelector}`);
 
-  // The same id twice (case aside): one entry naming the first column, the
-  // other one in its tooltip.
+  // The same id twice (case aside) gives one entry. It names the first column, and the
+  // other column appears in its tooltip.
   await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS TraceId, '${TRACE_A.toUpperCase()}' AS trace_id_copy, '${SPAN_A}' AS SpanId FROM numbers(2)`);
   let menu = await openTraceRowMenu(page, rows.nth(0));
   await expect(traceSubMenu(page)).toHaveCount(0);
@@ -2083,14 +2083,14 @@ test('row menu: one entry for a trace id found in several columns; the span pair
   await expect(open).toHaveAttribute('href', tracePath(TRACE_A, SPAN_A));
   await closeTraceRowMenu(page);
 
-  // Two span columns of the trace (SpanId and span_id) that disagree: the
+  // Two span columns of the trace (SpanId and span_id) disagree. The
   // trace opens without ?span=.
   await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS TraceId, '${SPAN_A}' AS SpanId, '${SPAN_B}' AS span_id FROM numbers(2)`);
   menu = await openTraceRowMenu(page, rows.nth(0));
   expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_A)]);
   await closeTraceRowMenu(page);
 
-  // A trace column whose name pairs with no span column: no ?span= either.
+  // A trace column whose name pairs with no span column gets no ?span= either.
   await runSuccessfulQuery(page, `SELECT number AS n, '${TRACE_A}' AS trace, '${SPAN_A}' AS SpanId FROM numbers(2)`);
   menu = await openTraceRowMenu(page, rows.nth(0));
   expect(await menuHrefs(menu)).toEqual([tracePath(TRACE_A)]);
@@ -2127,8 +2127,8 @@ test('row menu: several distinct trace ids make Open trace and Copy trace link s
   await expect(openTrigger).toHaveAttribute('aria-expanded', 'false');
   await expect(menu.locator('a[role=menuitem]')).toHaveCount(0);
 
-  // Keyboard: ArrowRight opens the submenu on its first item; arrows, Home
-  // and End move in it; ArrowLeft and Escape close it, back on its item.
+  // Keyboard: ArrowRight opens the submenu on its first item. Arrows, Home
+  // and End move in it. ArrowLeft and Escape close it and return to its item.
   await expect(menu.getByRole('menuitem', { name: 'Details' })).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(openTrigger).toBeFocused();
@@ -2162,7 +2162,7 @@ test('row menu: several distinct trace ids make Open trace and Copy trace link s
   await expect(sub).toHaveCount(0);
   await expect(menu).toBeVisible();
   await expect(openTrigger).toBeFocused();
-  // Enter opens it too; moving on in the menu closes it.
+  // Enter also opens it. Moving to another item in the menu closes it.
   await page.keyboard.press('ArrowDown');
   await expect(copyTrigger).toBeFocused();
   await page.keyboard.press('Enter');
@@ -2189,8 +2189,8 @@ test('row menu: several distinct trace ids make Open trace and Copy trace link s
   await expect(page).toHaveURL(/\/query/);
   await expect(rows).toHaveCount(3);
 
-  // A pointer: hovering the item opens its submenu, a click on a trace opens
-  // the new tab.
+  // With a pointer, a hover on the item opens its submenu. A click on a trace opens
+  // a new tab.
   await openTraceRowMenu(page, rows.nth(2));
   await openTrigger.hover();
   await expect(sub).toBeVisible();
@@ -2221,7 +2221,7 @@ FROM numbers(2)`);
   await menu.getByRole('menuitem', { name: 'Open trace', exact: true }).click();
   const sub = traceSubMenu(page);
   await expect(sub).toBeVisible();
-  // Links.TraceId[2] is TraceId again: one entry, the element in its tooltip.
+  // Links.TraceId[2] is TraceId again. It makes one entry, with the element in its tooltip.
   expect(await menuLabels(sub)).toEqual([`TraceId · ${TRACE_A.slice(0, 8)}…`, `Links.TraceId[1] · ${TRACE_B.slice(0, 8)}…`, `Links.TraceId[4] · ${TRACE_C.slice(0, 8)}…`]);
   await expect(sub.getByRole('menuitem').first()).toHaveAttribute('title', `${TRACE_A}\nAlso in Links.TraceId[2]`);
   expect(await menuHrefs(sub)).toEqual([tracePath(TRACE_A, SPAN_A), tracePath(TRACE_B, '1111111111111111'), tracePath(TRACE_C, '3333333333333333')]);
@@ -2275,7 +2275,7 @@ test('row menu: no trace entries when the traces feature is off; multiquery pane
   await waitForTerminal(page);
   await waitForBatch(page, 2);
   const second = page.locator('.resultsStack__block').nth(1);
-  // The panel's final line (the live one only counts rows): its fold is settled.
+  // The panel's final line settles its fold. The live line counts rows only.
   await expect(second.locator('.resultsStack__meta')).toContainText('finished', { timeout: 30_000 });
   if (await second.locator('.resultsStack__body').isHidden()) await second.locator('.resultsStack__toggle').click();
   const panelRows = second.locator(`tbody ${dataRowsSelector}`);
@@ -2389,7 +2389,7 @@ FROM numbers(${n})`;
   });
 }
 
-// Parks every request matching `pattern` until release(), so a test can look
+// Park every request that matches `pattern` until release(). A test can then look
 // at the page exactly as it is painted before that resource answers.
 async function holdRequests(page, pattern) {
   const parked = [];
@@ -2409,9 +2409,9 @@ async function holdRequests(page, pattern) {
 
 for (const path of ['/query', '/explorer/catalog', '/observability/traces', '/observability/logs', '/observability/metrics', '/system']) {
   test(`${path}: the Query / Explorer / Observability / System links are painted with the shell, before any API answer`, async ({ page }) => {
-    // A first visit has nothing to show of the server yet: the version and the host keep their words ("--" and "Host") until
-    // the API answers. The header's script keeps what it learns (the pages the server has on, the version, the selected
-    // host), and the next visit paints all of it with the shell, so nothing moves or blinks when the API answers.
+    // A first visit has nothing to show from the server yet. The version and the host keep their words ("--" and "Host") until
+    // the API answers. The header's script keeps what it learns: the pages the server has on, the version, the selected
+    // host. The next visit paints all of it with the shell. Nothing moves or blinks when the API answers.
     const first = await holdRequests(page, '**/api/**');
     try {
       await page.goto(path, { waitUntil: 'domcontentloaded' });
@@ -2438,7 +2438,7 @@ for (const path of ['/query', '/explorer/catalog', '/observability/traces', '/ob
       });
       await page.goto(path, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('#navQueryLink')).toBeVisible();
-      // Scripts have started and their /api calls (version, hosts) are parked: the shell shows the last visit's version and
+      // Scripts have started, and their /api calls (version, hosts) are parked. The shell shows the last visit's version and
       // host (not the words of a first visit), and the page switcher has all its links.
       await expect.poll(() => api.count()).toBeGreaterThan(0);
       await expect(page.locator('#versionBadge')).toHaveText(version);
@@ -2452,8 +2452,8 @@ for (const path of ['/query', '/explorer/catalog', '/observability/traces', '/ob
       await api.release();
       await expect(page.locator('#versionBadge')).toHaveText(version);
       await expect(page.locator('#hostPickerText')).toHaveText(hostText);
-      // Nothing moved when the API answered: the switcher and the version are where they were (the host button grows when its
-      // ping comes: the ping is not kept, and the button is at the right end of the header).
+      // Nothing moved when the API answered. The switcher and the version stay where they were. The host button grows when its
+      // ping arrives. The ping is not kept. The button sits at the right end of the header.
       expect(await headerBoxes()).toEqual(early);
       // Every page is a link; this page's own is the current one.
       const current = path.startsWith('/observability') ? 'observability' : path.slice(1).split('/')[0];
@@ -2492,7 +2492,7 @@ test('traces: time range, status and result pickers have their final style at fi
 
     await page.goto('/observability/traces', { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => [...document.styleSheets].some((sheet) => /style(\.[a-z]+)*\.css/.test(sheet.href || '') && sheet.cssRules.length > 0));
-    // No application script has run yet: this is the page as first painted.
+    // No application script has run yet. This is the page as first painted.
     expect(await page.evaluate(() => Boolean(window.ChDash && window.ChDash.traces))).toBe(false);
     const firstPaint = await snapshot(pickers);
     expect(firstPaint.tracesRangeUnit.text).toBe('Time range · Last 1 hour');
@@ -2505,12 +2505,12 @@ test('traces: time range, status and result pickers have their final style at fi
       && ids.every((id) => document.getElementById(id).dataset.tracePickerReady === '1'), pickers);
     await expect.poll(() => api.count()).toBeGreaterThan(0);
     expect(await snapshot(pickers)).toEqual(firstPaint);
-    // One picker per select: the shipped markup is adopted, never doubled.
+    // One picker per select. The shipped markup is adopted and never doubled.
     await expect(page.locator('#tracesForm .tracePicker')).toHaveCount(5);
     await expect(page.locator('.traceResultsSort .tracePicker')).toHaveCount(1);
 
-    // The search bar pickers do not depend on the answers either (the results
-    // toolbar below them moves down once analytics render, which is expected).
+    // The search bar pickers do not depend on the answers either. The results
+    // toolbar below them moves down once analytics render. This move is expected.
     const settled = ['tracesRangeUnit', 'tracesStatus', 'tracesLimit'];
     await api.release();
     await expect(page.locator('#versionBadge')).not.toHaveText('--');
@@ -2540,7 +2540,7 @@ test('traces: the trace header copies or downloads the whole trace as JSON with 
   await expect(page.locator('#copyJsonButton')).toHaveCSS('opacity', '1');
   const resultsLook = await splitLook('#copyJsonButton', '#copyMenuButton');
 
-  // The OTel fixture is seeded days back: find the newest week holding traces.
+  // The OTel fixture is seeded days back. Find the newest week that holds traces.
   let rows = [];
   for (let week = 0; week < 6 && !rows.length; week += 1) {
     const endMs = Date.now() - week * 7 * 86_400_000;
@@ -2586,8 +2586,8 @@ test('traces: the trace header copies or downloads the whole trace as JSON with 
   await expect(button).toHaveCSS('opacity', '1');
   expect(await splitLook('#traceCopyJsonButton', '#traceCopyMenuButton')).toEqual(resultsLook);
 
-  // Outside a secure context the app copies through a hidden textarea:
-  // capture what that copy selects (or read the clipboard when available).
+  // Outside a secure context, the app copies through a hidden textarea.
+  // Capture what that copy selects, or read the clipboard when it is available.
   const readCopied = await captureCopies(page, { clipboard: true });
   await button.click();
   // Same feedback as the results control.
@@ -2649,10 +2649,10 @@ test('traces: the trace header copies or downloads the whole trace as JSON with 
 const byCodePoint = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 test('traces: each listed trace shows its services in the order of their first span start', async ({ page, request }) => {
-  // The fixture's services join a trace 1 ms apart in name order, so a window
-  // that starts a few ms into a trace cuts its first services off and the
-  // earliest remaining span belongs to a service late in the alphabet: the
-  // order by first span then differs from both name and span-count order.
+  // In the fixture, the services of a trace join 1 ms apart, in name order. A window
+  // that starts a few ms into a trace cuts off its first services. The
+  // earliest remaining span belongs to a service late in the alphabet.
+  // The order by first span then differs from both name order and span-count order.
   const [[endText]] = await otelRows(request, 'SELECT toUnixTimestamp64Milli(max(Start)) FROM otel.otel_traces_trace_id_ts');
   test.skip(!(Number(endText) > 0), 'OTEL fixture is empty');
   const [[traceStartText]] = await otelRows(request,
@@ -2660,9 +2660,9 @@ test('traces: each listed trace shows its services in the order of their first s
     + ` AND Timestamp < fromUnixTimestamp64Milli(${Number(endText) - 1_790_000}) GROUP BY TraceId ORDER BY 1 LIMIT 1`);
   const startMs = Number(traceStartText) + 7;
   const endMs = startMs + 400;
-  // The page asks for "last hour"; pin its trace searches to the cut window
-  // (min_duration_ms makes the search rank traces by their window spans, so
-  // traces whose first spans fall before the window are listed too).
+  // The page asks for "last hour". Pin its trace searches to the cut window
+  // (min_duration_ms makes the search rank traces by their window spans. As a result,
+  // traces whose first spans fall before the window are listed too.
   await page.route((url) => url.pathname.endsWith('/api/traces/search'), (route) => {
     const url = new URL(route.request().url());
     url.searchParams.set('start_ms', String(startMs));
@@ -2691,10 +2691,10 @@ test('traces: each listed trace shows its services in the order of their first s
     const bySpans = stats.map((stat) => services[stat[0]]);
     if (JSON.stringify(expected) !== JSON.stringify(byName) && JSON.stringify(expected) !== JSON.stringify(bySpans)) reordered.push(traceId);
   }
-  // The window does cut traces, so the check discriminates the ordering.
+  // The window does cut traces. So the check tells the orderings apart.
   expect(reordered.length).toBeGreaterThan(0);
 
-  // Ground truth straight from the span table for a few traces.
+  // Take the ground truth straight from the span table for a few traces.
   const sample = [...reordered.slice(0, 2), ...payload.rows.map((row) => row[0]).filter((id) => !reordered.includes(id)).slice(0, 1)];
   const truth = {};
   for (const [traceId, service] of await otelRows(request,
@@ -2710,7 +2710,7 @@ test('traces: each listed trace shows its services in the order of their first s
 // Playwright runs the browser in UTC, so browser-local dates equal UTC dates.
 const DAY_MS = 86_400_000;
 const utcDay = (ms) => new Date(ms).toISOString().slice(0, 10);
-// The day as the range button reads it (ns.format.range: "Sep 12", the year
+// The day as the range button shows it (ns.format.range: "Sep 12", the year
 // only when it is not the current one).
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const shortDay = (ms) => {
@@ -2720,7 +2720,7 @@ const shortDay = (ms) => {
 const utcMidnight = (ms) => Date.UTC(new Date(ms).getUTCFullYear(), new Date(ms).getUTCMonth(), new Date(ms).getUTCDate());
 const searchParams = (request) => Object.fromEntries(new URL(request.url()).searchParams);
 const isSearch = (request) => new URL(request.url()).pathname.endsWith('/api/traces/search');
-// A YYYY-MM-DD day moved by whole months, the day clamped to the month's
+// A YYYY-MM-DD day is moved by whole months. The day is clamped to the month's
 // length, as the calendar's PageUp / PageDown do.
 function addMonthsKey(key, months) {
   const [y, m, d] = key.split('-').map(Number);
@@ -2728,9 +2728,9 @@ function addMonthsKey(key, months) {
   return utcDay(Date.UTC(y, m - 1 + months, Math.min(d, last)));
 }
 
-// The search and its charts have answered: the analytics grid is busy from
-// the search request to the charts' last answer. Call it once a search has
-// been sent (before that, nothing is busy yet).
+// The search and its charts have answered. The analytics grid is busy from
+// the search request to the charts' last answer. Call it once a search is sent.
+// Before that, the grid is not busy yet.
 async function tracesSettled(page) {
   await expect(page.locator('#traceAnalyticsGrid')).not.toHaveAttribute('aria-busy', 'true', { timeout: 60_000 });
   await expect(page.locator('#tracesSearchButton')).toBeEnabled();
@@ -2751,7 +2751,7 @@ async function openTimeRange(page) {
   return panel;
 }
 
-// Moves the calendar back month by month until the day is in the shown month.
+// Move the calendar back month by month until the day is in the shown month.
 async function showCalendarDay(page, key) {
   const day = page.locator(`#tracesTimeCalendar .timeCalendar__day:not(.is-outside)[data-day="${key}"]`);
   for (let i = 0; i < 36 && !(await day.count()); i += 1) await page.locator('#tracesTimeCalendar [data-cal-nav="-1"]').click();
@@ -2762,8 +2762,8 @@ async function showCalendarDay(page, key) {
 test('traces: the calendar takes a start older than the max range, moves on to the end by itself, and Apply searches that window', async ({ page, request }) => {
   test.setTimeout(120_000);
   // Three days ending on the rich fixture day (2026-09-12, tests/README.md):
-  // older than the 7-day max range, and ~41 k traces rather
-  // than the bulk fixture's hundreds of millions of spans a day.
+  // older than the 7-day max range. They hold about 41 k traces, not
+  // the hundreds of millions of spans a day in the bulk fixture.
   const RICH_DAY = Date.UTC(2026, 8, 12);
   const [[richText]] = await otelRows(request, `SELECT count() FROM otel.otel_traces_trace_id_ts WHERE Start >= fromUnixTimestamp64Milli(${RICH_DAY}) AND Start < fromUnixTimestamp64Milli(${RICH_DAY + DAY_MS})`);
   const fixtureIsOld = Number(richText) > 0;
@@ -2777,18 +2777,18 @@ test('traces: the calendar takes a start older than the max range, moves on to t
   await expect(page.locator('#tracesTimeCalendarHint')).toHaveText('Pick the start date');
   const start = await showCalendarDay(page, utcDay(startDay));
   await start.click();
-  // The start is taken as is (no "End − 7 days" floor) and the end selection opens.
+  // The start is taken as is, with no "End − 7 days" floor. The end selection opens.
   await expect(page.locator('#tracesRangeStart')).toHaveValue(`${utcDay(startDay)} 00:00:00`);
   await expect(page.locator('#tracesRangeEnd')).toBeFocused();
   await expect(page.locator('#tracesRangeEnd').locator('xpath=ancestor::label[1]')).toHaveClass(/is-active/);
   await expect(page.locator('#tracesTimeCalendarHint')).toHaveText('Pick the end date · max 7 days');
   await expect(start).toHaveClass(/is-start/);
-  // Days whose start is 7 days or more after the start cannot end the range.
+  // Days that start 7 days or more after the start cannot end the range.
   const lastEnd = page.locator(`#tracesTimeCalendar [data-day="${utcDay(startDay + 6 * DAY_MS)}"]`).first();
   const tooFar = page.locator(`#tracesTimeCalendar [data-day="${utcDay(startDay + 7 * DAY_MS)}"]`).first();
   if (await tooFar.count()) await expect(tooFar).toHaveAttribute('aria-disabled', 'true');
   if (await lastEnd.count()) await expect(lastEnd).toHaveAttribute('aria-disabled', 'false');
-  // Hovering previews the range.
+  // A hover previews the range.
   const end = page.locator(`#tracesTimeCalendar [data-day="${utcDay(endDay)}"]`).first();
   await end.hover();
   await expect(end).toHaveClass(/is-end/);
@@ -2847,7 +2847,7 @@ test('traces: From / To take relative expressions, and invalid or too wide range
   await to.fill('2026-01-09');
   await to.press('Enter');
   await expect(page.locator('#tracesRangeError')).toHaveText('Max range is 7 days (server setting traces.max_lookback_minutes).');
-  // Applying runs synchronously up to its request: frames later, none left.
+  // The range is applied synchronously up to its request. Frames later, none are left.
   await frames(page, 3);
   expect(searches).toBe(0);
   await expect(panel).toBeVisible();
@@ -2865,7 +2865,7 @@ test('traces: From / To take relative expressions, and invalid or too wide range
   await expect(panel).toBeHidden();
   await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('Time range · Last 6 hours');
 
-  // Rounding: "now/d" From / To covers today.
+  // Rounding: "now/d" in From or To covers today.
   await openTimeRange(page);
   await expect(from).toHaveValue('now-6h');
   await from.fill('now/d');
@@ -2965,7 +2965,7 @@ test('traces: the time range panel works from the keyboard (Escape, calendar arr
   await expect(button).toBeFocused();
   await expect(button).toHaveAttribute('aria-expanded', 'false');
 
-  // Tabbing out of the panel closes it. The panel focuses From one frame
+  // A Tab out of the panel closes it. The panel focuses From one frame
   // after it shows: wait for it, or that focus lands after the test's own.
   await page.keyboard.press('Enter');
   await expect(panel).toBeVisible();
@@ -2991,7 +2991,7 @@ test('traces: the time range panel works from the keyboard (Escape, calendar arr
   await page.keyboard.press('ArrowLeft');
   const startKey = utcDay(base - 7 * DAY_MS);
   expect(await focusedDay()).toBe(startKey);
-  // PageUp / PageDown move a month and keep the focus on a day of the grid,
+  // PageUp and PageDown move a month and keep the focus on a day of the grid,
   // the day of the month clamped to the month's length (Mar 31 -> Feb 28),
   // so the round trip ends on another day when the start is a 29th-31st.
   await page.keyboard.press('PageUp');
@@ -3001,7 +3001,7 @@ test('traces: the time range panel works from the keyboard (Escape, calendar arr
   const pickedKey = addMonthsKey(monthBack, 1);
   expect(await focusedDay()).toBe(pickedKey);
   const picked = Date.parse(`${pickedKey}T00:00:00Z`);
-  // Enter picks the start; the grid keeps the focus and now picks the end.
+  // Enter picks the start. The grid keeps the focus and now picks the end.
   await page.keyboard.press('Enter');
   await expect(page.locator('#tracesRangeStart')).toHaveValue(`${pickedKey} 00:00:00`);
   await expect(page.locator('#tracesTimeCalendarHint')).toHaveText('Pick the end date · max 7 days');
@@ -3053,8 +3053,8 @@ test('traces: shift and zoom out move the applied window like Grafana, within th
   expect([Number(params.start_ms), Number(params.end_ms)]).toEqual([Date.UTC(2026, 8, 12, 6), Date.UTC(2026, 8, 12, 14)]);
   await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toHaveText('Sep 12 06:00 → 14:00');
   await tracesSettled(page);
-  // Zooming out stops at the max range: seven days before the fixtures
-  // (nothing to read; the button state is what is checked).
+  // The zoom-out stops at the max range: seven days before the fixtures
+  // (no data to read; the test checks the button state).
   await page.locator('#tracesRangeStart').fill('2026-09-01 00:00:00');
   await page.locator('#tracesRangeEnd').fill('2026-09-08 00:00:00');
   searched = page.waitForRequest(isSearch, { timeout: 60_000 });
@@ -3080,12 +3080,12 @@ test.describe('traces analytics in a UTC+2 browser', () => {
     const dataEnd = Number(endText);
     test.skip(!(dataEnd > 0), 'OTEL fixture is empty');
     await openTracesIdle(page);
-    // The search and the count chart are the server's (the trace index: well
+    // The search and the count chart come from the server (the trace index: well
     // under a second for 7 days). The percentiles answer is built from the
     // count answer: its buckets, quantiles from 1.5 s to 9 min 21 s. The real
-    // 7-day span aggregation reads ~2 billion rows for nothing this test
-    // checks (backend-functional checks that answer on a bounded window).
-    // The pickers' service / operation pairs are not checked either: their
+    // 7-day span aggregation reads ~2 billion rows and gives no value to this test
+    // checks. Backend-functional checks answer on a bounded window.
+    // The pickers' service and operation pairs are not checked either. Their
     // 7-day prefill groups the same ~2 billion spans.
     await page.route('**/api/traces/prefill?**', (route) => route.fulfill({ json: {
       v: 1, source_host_id: 'local', truncated: false, tag_filtered: false, pairs: [],
@@ -3136,8 +3136,8 @@ test.describe('traces analytics in a UTC+2 browser', () => {
     const durationsPayload = await durationsResponse.json();
     expect(durationsPayload.duration_quantiles.length).toBeGreaterThan(0);
     const durationChart = chartCore(page.locator('#traceDurationChart'));
-    // One line per percentile (a lone bucket is a dot), over the listed
-    // traces: P50 and P99 by default, P90 and P95 one legend click away.
+    // One line per percentile (a lone bucket is a dot) covers the listed
+    // traces. P50 and P99 show by default. P90 and P95 are one legend click away.
     await expect(durationChart).toHaveAttribute('data-series-stats', /"P99"/);
     const stats = await chartJson(durationChart, 'data-series-stats');
     for (const q of ['P50', 'P99']) expect(stats[q].points).toBeGreaterThan(0);
@@ -3147,7 +3147,7 @@ test.describe('traces analytics in a UTC+2 browser', () => {
       .toMatchObject({ P50: 'true', P90: 'false', P95: 'false', P99: 'true' });
     await legendItems.filter({ hasText: 'P95' }).click({ modifiers: ['Control'] });
     await expect.poll(async () => (await chartJson(durationChart, 'data-series-stats')).P95?.points || 0).toBeGreaterThan(0);
-    // One bar per bucket holding traces (the exact counts of the second answer).
+    // One bar per bucket holds traces. These are the exact counts of the second answer.
     const [rangeStart, rangeEnd] = durationsPayload.range.map(Number);
     const bucketMs = Number(durationsPayload.bucket_ms);
     const nonEmpty = durationsPayload.trace_count_chart.filter(([bucket, count]) => Number(count) > 0 && Number(bucket) + bucketMs > rangeStart && Number(bucket) <= rangeEnd).length;
@@ -3157,8 +3157,8 @@ test.describe('traces analytics in a UTC+2 browser', () => {
       // [label, date line, left, right, date left, date right] of every x label drawn.
       const ticks = await chartJson(root, 'data-x-ticks');
       expect(ticks.length).toBeGreaterThanOrEqual(4);
-      // A multi-day axis reads days ("Sep 13") or clock times dated where the
-      // day changes ("00:00" over "Sep 14"), the first date with its year.
+      // A multi-day axis shows days ("Sep 13") or clock times. The clock times are dated where the
+      // day changes ("00:00" over "Sep 14"). The first date carries its year.
       for (const [label, context] of ticks) {
         expect(label).toMatch(/^([A-Z][a-z]{2} \d{1,2}|\d\d:\d\d)$/);
         if (label === '00:00') expect(context).toMatch(/^[A-Z][a-z]{2} \d{1,2}( \d{4})?$/);
@@ -3172,8 +3172,8 @@ test.describe('traces analytics in a UTC+2 browser', () => {
     for (const label of await chartJson(durationChart, 'data-y-ticks')) expect(label).not.toMatch(decimalUnits);
     for (const label of await page.locator('#tracesResults .traceResult__right > b').allTextContents()) expect(label).not.toMatch(decimalUnits);
 
-    // Every x position over a chart snaps to a bucket: a tooltip with the
-    // bucket's date and time, and exactly one cursor (a bucket or a picked dot).
+    // Every x position over a chart snaps to a bucket. The tooltip shows the
+    // bucket's date and time. Exactly one cursor shows (a bucket or a picked dot).
     for (const root of [countChart, durationChart]) {
       const box = await plotBox(root);
       const tooltip = root.locator('.chartCore__tooltip');
@@ -3288,7 +3288,7 @@ test('traces: result items carry a duration bar, Jaeger tags, the full trace id 
     } else {
       await expect(incomplete).toHaveCount(0);
     }
-    // Service pills in first-span order, "name (count)", the service's left
+    // Service pills follow first-span order, as "name (count)". The service's left
     // bar (.serviceSwatch--bar), (!) before services with error spans.
     const pills = item.locator('.traceSvcPills > .traceSvcPill');
     const expected = [...trace.services].sort((a, b) => a[3] - b[3]);
@@ -3311,7 +3311,7 @@ test('traces: result items carry a duration bar, Jaeger tags, the full trace id 
   const mesh = page.locator('#tracesResults .traceResultItem[data-trace-id="c1d2e3f4a5b60718293a4b5c6d7e8f90"]');
   const visible = mesh.locator('.traceSvcPills > .traceSvcPill:visible');
   const shown = await visible.count();
-  // The three most costly services, at any width the line holds them.
+  // The three most costly services stay on the line at any width the line holds them.
   expect(shown).toBe(3);
   const more = mesh.locator('.traceSvcMore');
   await expect(more).toBeVisible();
@@ -3352,7 +3352,7 @@ test('traces: the table view sorts every column both ways, opens a row, and is r
   const rows = table.locator('tbody tr[data-trace-id]');
   await expect(rows).toHaveCount(SYNTHETIC_TRACES.length);
   const order = () => rows.evaluateAll((nodes) => nodes.map((node) => node.dataset.traceId));
-  // The picker's order (Most recent) carries over: Start, newest first.
+  // The picker's order (Most recent) carries over to Start, newest first.
   await expect(table.locator('th[data-table-sort="start"]')).toHaveAttribute('aria-sort', 'descending');
   const byKey = {
     name: (t) => syntheticName(t).toLowerCase(),
@@ -3398,7 +3398,7 @@ test('traces: the table view sorts every column both ways, opens a row, and is r
   await table.locator('[data-start-toggle]').click();
   await expect(start).toHaveText(/^\d+ minutes? ago$/);
   await expect(start).toHaveAttribute('title', /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z\n[A-Z][a-z]{2} \d{1,2}, \d{4} \d\d:\d\d:\d\d\.\d{3} local/);
-  // Sorting by Start is numeric, not by the displayed text.
+  // The sort by Start is numeric, not by the displayed text.
   await table.locator('th[data-table-sort="start"]').click();
   expect(await order()).toEqual(expectedOrder('start', 'desc'));
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -3463,7 +3463,7 @@ test('traces: the duration chart plots the listed traces as dots over a padded d
   expect(stats.P50.points).toBeGreaterThan(0);
   expect(stats.P99.points).toBeGreaterThan(0);
 
-  // Hovering a dot picks it over the percentile snap; clicking opens the trace.
+  // A hover on a dot picks it over the percentile snap. A click opens the trace.
   const target = SYNTHETIC_TRACES[3];
   const dot = dots.find((d) => d.trace_id === target.trace_id);
   const box = { x: dot.x - dot.r, y: dot.y - dot.r, width: 2 * dot.r, height: 2 * dot.r };
@@ -3499,7 +3499,7 @@ test('traces: a drag across a chart searches that time range, and the charts sha
   await expect(counts).toHaveAttribute('data-points-drawn', /^[1-9]/);
   await expect(durations).toHaveAttribute('data-points-drawn', /^[1-9]/);
   const box = await plotBox(counts);
-  // Hovering one chart shows the same instant on the other.
+  // A hover on one chart shows the same instant on the other.
   await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
   await expect(counts).toHaveAttribute('data-cursor-index', /^\d+$/);
   await expect(durations).toHaveAttribute('data-sync-x', /^\d+(\.\d+)?$/);
@@ -3544,15 +3544,15 @@ test('traces: an empty result names the searched range and zooms out from there'
 });
 
 // Query on a phone (docs/ui-foundations.md, "Touch and phones"): content
-// first, the editor reset to its left edge after Format, meta lines that never
-// break a value from its unit.
+// first. The editor resets to its left edge after Format. Meta lines never
+// separate a value from its unit.
 test.describe('query on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   const SQL = 'SELECT city, count() AS n, round(avg(temperature_c), 2) AS avg_t, min(observed_at) AS first_seen FROM chdash_ui.weather_observations GROUP BY city ORDER BY n DESC';
 
   test('query on a phone: the run stats are on the page, in three columns under the editor, and the results are in reach', async ({ page }) => {
     await openApp(page);
-    // Before a run the tiles are there with dashes; a run fills them. They are never folded into a summary line.
+    // Before a run, the tiles show dashes. A run fills them. They are never folded into a summary line.
     const tiles = page.locator('#runStatsTiles');
     await expect(tiles).toBeVisible();
     await expect(page.locator('#runStatsSummary')).toHaveCount(0);
@@ -3564,7 +3564,7 @@ test.describe('query on a phone', () => {
     const boxes = await tiles.locator('.metricCompact:visible').evaluateAll((els) => els.map((el) => { const b = el.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top }; }));
     expect(new Set(boxes.map((b) => Math.round(b.top))).size, 'two rows of tiles').toBe(2);
     for (const b of boxes) { expect(b.left).toBeGreaterThanOrEqual(0); expect(b.right).toBeLessThanOrEqual(390); }
-    // The results start under the tiles and the first row can be reached by scrolling the workspace.
+    // The results start under the tiles. The user reaches the first row by scrolling the workspace.
     const firstRow = page.locator('#resultTableBody tr').first();
     await firstRow.scrollIntoViewIfNeeded();
     await expect(firstRow).toBeVisible();
@@ -3610,15 +3610,15 @@ test.describe('query on a phone', () => {
     })));
     expect(parts.length).toBe(3);
     for (const part of parts) expect(part, part.text).toMatchObject({ nowrap: 'nowrap', lines: 1 });
-    // The parts join back to the summary text.
+    // The parts form the summary text again.
     expect(parts.map((part) => part.text).join(' · ')).toBe(await meta.textContent());
   });
 });
 
 // ---------------------------------------------------------------------------
-// Audit round 2, Query (docs/query.md): one Copy JSON per result, a batch that
-// ends like one query, menu checkboxes, the byte format, the keyboard hints
-// on touch, the profiling's stage order and its Tracing tab on a phone.
+// Audit round 2, Query (docs/query.md): one Copy JSON per result. A batch
+// ends like one query. It has menu checkboxes, the byte format, the keyboard hints
+// on touch, the profiling's stage order, and its Tracing tab on a phone.
 
 test.describe('audit round 2: Query', () => {
   test('multiquery: the header copy reads "Copy all" (each statement keeps its Copy JSON); the batch ends "finished" at 100%', async ({ page }) => {
@@ -3636,7 +3636,7 @@ test.describe('audit round 2: Query', () => {
     // One "Copy JSON" per statement, none on the header.
     await expect(page.locator('.resultsStack__block .runSplit__main')).toHaveText(['Copy JSON', 'Copy JSON']);
     await expect(page.locator('#resultsPanel > .panel__header').getByRole('button', { name: 'Copy JSON', exact: true })).toHaveCount(0);
-    // Back to one query: the header says Copy JSON again.
+    // With one query, the header says Copy JSON again.
     await page.locator('#runSettingsButton').click();
     await page.locator('#runOptMultiQuery').click();
     await page.keyboard.press('Escape');
@@ -3670,7 +3670,7 @@ test.describe('audit round 2: Query', () => {
       // No pseudo-element dot inside the box.
       expect(await box.evaluate((el) => getComputedStyle(el, '::after').content)).toMatch(/^(none|normal)$/);
     }
-    // Checking one fills the box with the accent and shows the check.
+    // A checked box fills with the accent and shows the check.
     const multi = page.locator('#runOptMultiQuery');
     const before = await multi.getAttribute('aria-checked');
     await multi.click();
@@ -3705,7 +3705,7 @@ test.describe('audit round 2: Query', () => {
       await page.locator('#analysisTraceTab').click();
       const row = modal.locator('.traceViewer__row').first();
       await expect(row).toBeVisible({ timeout: 15_000 });
-      // The operation over its bar, both the dialog's width.
+      // The operation name sits over its bar, across the dialog's width.
       const geometry = await row.evaluate((el) => {
         const identity = el.querySelector('.traceViewer__identity').getBoundingClientRect();
         const timeline = el.querySelector('.traceViewer__timeline').getBoundingClientRect();
@@ -3713,10 +3713,10 @@ test.describe('audit round 2: Query', () => {
       });
       expect(geometry.timelineTop).toBeGreaterThanOrEqual(geometry.identityBottom - 1);
       expect(geometry.timelineWidth).toBeGreaterThan(geometry.rowWidth * 0.9);
-      // Operation names are not cut to a few letters: the root's fits.
+      // Operation names are not cut to a few letters. The root's name fits.
       const operation = row.locator('.traceViewer__operation');
       expect(await operation.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-      // The axis: 0, the middle and the end labelled, apart.
+      // The axis shows 0, the middle and the end, labelled and apart.
       const labels = await modal.locator('.traceViewer__timeline--head .traceViewer__tick > b').evaluateAll((els) => els
         .filter((el) => getComputedStyle(el).display !== 'none')
         .map((el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right }; }));
@@ -3780,7 +3780,7 @@ test.describe('audit round 2: Query', () => {
 });
 
 // The icons of the editor's corner and toolbar (copy, the editor options gear, Format, the library
-// book, the run settings cog) rest in one colour, --muted at full strength: the gear used to sit at
+// book, the run settings cog) use one colour: --muted at full strength. The gear used to sit at
 // 82 % x 78 %, so it read fainter than the copy button beside it.
 for (const theme of ['light', 'dark']) {
   test(`${theme} theme: the editor and toolbar icons rest in the same colour`, async ({ page }) => {
@@ -3815,9 +3815,9 @@ for (const theme of ['light', 'dark']) {
   });
 }
 
-// The Format button on an ALTER TABLE: ClickHouse's formatQuery wraps every command in parentheses,
-// the editor must show the statement as it is written: commands plain, at the left edge like the
-// clauses of a SELECT (no blank line, no indent between ALTER and MODIFY COLUMN). And a type with
+// The Format button on an ALTER TABLE: ClickHouse's formatQuery wraps every command in parentheses.
+// The editor must show the statement as written. Commands are plain, at the left edge like the
+// clauses of a SELECT. There is no blank line and no indent between ALTER and MODIFY COLUMN. A type with
 // parameters (LowCardinality, Nullable, Decimal) is a type, never an "unknown function".
 test('Format writes the commands of an ALTER TABLE without parentheses or indent, and its types are not unknown functions', async ({ page }) => {
   await openApp(page);
@@ -3841,25 +3841,25 @@ test('Format writes the commands of an ALTER TABLE without parentheses or indent
     ');',
   ].join('\n'));
   const unknownFunctions = () => page.locator('.editorDiagnostic--unknown_function').allTextContents();
-  // The pass of the editor checks has run on this text (data-diagnostics): only then does "no mark" mean something.
+  // The editor checks have run on this text (data-diagnostics). Only then does "no mark" mean something.
   await expect(editor).toHaveAttribute('data-diagnostics', 'checked');
   expect(await unknownFunctions()).toEqual([]);
   await page.locator('#formatButton').click();
   await expect.poll(() => editor.inputValue()).toContain('\tactive UInt8,'); // the input is indented with spaces: this is the formatted text
   const formatted = await editor.inputValue();
-  // The editor indents with tabs; the command sits at the left edge, its type's lines one level in.
+  // The editor indents with tabs. The command sits at the left edge, and its type's lines sit one level in.
   expect(formatted.startsWith('ALTER TABLE analytics.transactions\nMODIFY COLUMN `bundle` Tuple(\n\tactive UInt8,\n')).toBe(true);
   expect(formatted).not.toMatch(/^\s*\($/m);
   expect(formatted.trimEnd().endsWith('\n)')).toBe(true);
-  // The pass of the editor checks has run on this text (data-diagnostics): only then does "no mark" mean something.
+  // The editor checks have run on this text (data-diagnostics). Only then does "no mark" mean something.
   await expect(editor).toHaveAttribute('data-diagnostics', 'checked');
   expect(await unknownFunctions()).toEqual([]);
-  // The formatted text is a fixed point: the button has nothing left to do.
+  // The formatted text is a fixed point. The button has no work left to do.
   await expect(page.locator('#formatButton')).toBeDisabled();
   expect(await editor.inputValue()).toBe(formatted);
   // An ALTER is still checked: a misspelt function or type is reported, a right one is not.
   await editor.fill('ALTER TABLE t ADD COLUMN types Array(LowCardinality(String)) DEFAULT toString(1)');
-  // The pass of the editor checks has run on this text (data-diagnostics): only then does "no mark" mean something.
+  // The editor checks have run on this text (data-diagnostics). Only then does "no mark" mean something.
   await expect(editor).toHaveAttribute('data-diagnostics', 'checked');
   expect(await unknownFunctions()).toEqual([]);
   await editor.fill('ALTER TABLE t ADD COLUMN types Array(LowCardinality(String)) DEFAULT toStrin(1)');
@@ -3868,8 +3868,8 @@ test('Format writes the commands of an ALTER TABLE without parentheses or indent
   await expect.poll(unknownFunctions).toEqual(['LowCardinalty']);
 });
 
-// The chevron of the Run button's menu toggle sits on the accent fill: it is the fill's light ink in
-// both themes (it was the dark theme-select arrow in the light theme), and a disabled toggle, which is
+// The chevron of the Run button's menu toggle sits on the accent fill. It is the fill's light ink in
+// both themes. It was the dark theme-select arrow in the light theme. A disabled toggle, which is
 // a plain button, keeps the arrow.
 for (const theme of ['light', 'dark']) {
   test(`${theme} theme: the Run menu chevron is light on the blue fill`, async ({ page }) => {
@@ -3892,19 +3892,19 @@ for (const theme of ['light', 'dark']) {
     expect(enabled.disabled).toBe(false);
     const [light, dark] = [luminance(rgb(enabled.chevron)), luminance(rgb(enabled.fill))];
     expect(light).toBeGreaterThan(dark);
-    // WCAG contrast of the chevron on the fill: above the 3:1 an icon needs.
+    // WCAG contrast of the chevron on the fill is above 3:1, the minimum an icon needs.
     expect((light + 0.05) / (dark + 0.05)).toBeGreaterThan(3);
   });
 }
 
-// The System line of the Elapsed tile is its sub row: in the flow under the value, one line, never
-// over the value (it used to sit at the tile's bottom and rise over the figure once "896 ms" wrapped
-// onto a second line); the tile keeps its footprint when System arrives.
+// The System line of the Elapsed tile is its sub row. It sits in the flow under the value, on one line, never
+// over the value. It used to sit at the tile's bottom and rose over the figure once "896 ms" wrapped
+// onto a second line. The tile keeps its footprint when System appears.
 for (const [width, height] of [[1440, 900], [1000, 800]]) {
   test(`${width}px: the System line of the Elapsed tile stays under its value, on one line, however long the figure`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await openApp(page);
-    // The tiles are there at every width, filled once a run has given their figures.
+    // The tiles show at every width. A run fills them with their figures.
     await runSuccessfulQuery(page, 'SELECT 1 AS one');
     const tile = page.locator('.metricCompact--elapsed');
     const geometry = () => page.evaluate(() => {
@@ -3937,23 +3937,23 @@ for (const [width, height] of [[1440, 900], [1000, 800]]) {
       // The row sits where the other tiles' sub rows sit.
       expect(Math.abs(g.lineTop - g.siblingTop), figure).toBeLessThanOrEqual(1);
     }
-    // Nothing of any tile (the sub rows \"Avg ...\", \"Now ...\", the System line) reaches the tile's bottom edge:
-    // a descender (the g of \"Avg\") needs room under the last line.
+    // No part of any tile (the sub rows \"Avg ...\", \"Now ...\", the System line) reaches the tile's bottom edge.
+    // A descender (the g of \"Avg\") needs room under the last line.
     const room = await page.evaluate(() => [...document.querySelectorAll('.metricColumn > .metricCompact:not(.is-hidden)')].map((tile) => {
       const rect = tile.getBoundingClientRect();
       const lines = [...tile.querySelectorAll('.statTile__sub, .metricCompact__systemLine:not([hidden])')];
       return { tile: tile.className, room: lines.length ? Math.min(...lines.map((el) => rect.bottom - el.getBoundingClientRect().bottom)) : null };
     }));
     for (const { tile, room: below } of room) if (below !== null) expect(below, tile).toBeGreaterThanOrEqual(4);
-    // The tile's footprint is the one it had before System arrived.
+    // The tile's footprint is the same as before System appeared.
     expect(Math.round((await geometry()).tile.height)).toBe(Math.round(before.tile.height));
     await expect(tile).toBeVisible();
   });
 }
 
-// Format does not touch the last run: after a run that failed, its error, status and query id stay
-// together (the error used to vanish while the status and the id stayed). A failed Format puts its own
-// error up and a Format that works takes that one back, with the status it had set.
+// Format does not change the last run. After a run that failed, its error, status and query id stay
+// together. The error used to vanish while the status and the id stayed. A failed Format shows its own
+// error. A Format that works removes that error again, with the status it had set.
 test('Format keeps the error of the last failed run with its status and query id; it only takes back its own failure', async ({ page }) => {
   await openApp(page);
   const editor = page.locator('#queryTextArea');
@@ -3976,7 +3976,7 @@ test('Format keeps the error of the last failed run with its status and query id
   await expect(page.locator('#queryStatusText')).toHaveText(/error/i);
   await expect(page.locator('#queryIdentifierText')).toHaveText(queryId);
 
-  // A Format that fails shows its own error; the next Format that works takes it back and the status with it.
+  // A Format that fails shows its own error. The next Format that works removes it, with the status.
   await editor.fill('SELEC broken FROM nowhere');
   await page.locator('#formatButton').click();
   await expect(banner.locator('.uiBanner__text')).toHaveText('Syntax error, line 1 col 1 near SELEC');

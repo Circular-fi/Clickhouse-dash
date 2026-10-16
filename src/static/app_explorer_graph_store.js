@@ -1,6 +1,7 @@
-// The state of the Explorer graph and what every module of it shares: the model (the payload, the focus, the layout, the camera, the panel), the
-// canvas helpers (the size, the colour tokens, the world <-> screen mapping) and `actions`, what the modules above provide to the ones below.
-// It holds no view of its own. The graph is app_explorer_graph.js (the entry that the Catalog hands over) over these modules:
+// This module holds the state of the Explorer graph. The state is the model: the payload, the focus, the layout, the camera and the panel.
+// The module also has the canvas helpers: the size, the colour tokens and the world <-> screen conversion.
+// It also has `actions`. The modules above this module give `actions` to the modules below.
+// This module has no view of its own. The graph is app_explorer_graph.js (the entry that the Catalog hands over). That entry uses these modules:
 //   model, text, geometry, layout   pure (the projections, the labels, the shapes, the positions)
 //   store, scene, viewport          the state, the visible set and the layout, the camera
 //   nodes, edges, frame, hit        the canvas: the cards, the edges, a frame, what is under the pointer
@@ -16,8 +17,8 @@ function currentFocusScope() {
   return focusScopeOf(model.graph, model.pendingFocusId || model.focusedId);
 }
 
-// What the modules above this one provide to the modules below, which cannot import them (a module cannot import the one that imports it).
-// Each is set once, when its module loads; a call before that is a bug that shows at once (a TypeError).
+// The modules above this one give these functions to the modules below. The modules below cannot import the modules above.
+// A module cannot import the module that imports it. Set each action one time, when its module loads. A call before that point is a bug. The bug shows at once as a TypeError.
 const actions = {
   setFocus: null, setShowIsolated: null, syncFocusControls: null, toggleExpansion: null, updateStatus: null,
 };
@@ -47,37 +48,37 @@ const model = {
   pendingFocusId: null,
   pendingEnsureVisible: false,
   openTable: null,
-  // The kit controller (pan / zoom / keyboard / redraws), set by init().
+  // The kit controller (pan, zoom, keyboard, redraws). The init() function sets it.
   view: null,
-  // Edge label placement of the current routed layout (edgeLabelLayout()).
+  // The label placement of the edges in the current routed layout (edgeLabelLayout()).
   edgeLabelCache: null,
   flowMarkerState: new Map(),
   storageProjectionCache: null,
   logicalProjectionCache: null,
   visibleSetCache: null,
   lineageRouteCache: null,
-  // The routing of a large layout runs in a Worker (kit.routeEdgesJob): its job, while it runs (the status says so).
+  // The routing of a large layout runs in a Worker (kit.routeEdgesJob). This is the job while it runs. The status shows this state.
   routeJob: null,
   includeSystem: false,
   includeNonStoring: true,
   onStateChange: null,
   openCard: null,
-  // Unfocused Lineage groups objects per database: a collapsed database is
-  // one card; objects without any dependency stay hidden unless asked for.
+  // Without focus, Lineage groups the objects of each database. A collapsed database is one card.
+  // Objects without any dependency stay hidden, unless the user asks for them.
   expandedGroups: new Set(),
   groupsVersion: 0,
   showIsolated: false,
-  // Per-node one-hop expansions on top of the global depth ("up|down\0id").
+  // One-hop expansions for each node, on top of the global depth. The key has the form "up|down\0id".
   expansions: new Set(),
   hoveredEdgeId: null,
   hoveredControl: null,
-  // Side panel: { type: "node", id } | { type: "edge", id } | null.
+  // Side panel. The value is { type: "node", id } or { type: "edge", id }, or null.
   panel: null,
   panelSerial: 0,
   definitionCache: new Map(),
   columnsCache: new Map(),
-  // What the scene and the frames leave for the modules that read them (null until the first one):
-  // the request key of the payload, the databases' counts of the overview, the geometry and the label and control boxes of the last frame.
+  // The scene and the frames store values for the modules that read them. Each value is null until the first write.
+  // The request key of the payload, the counts of the databases in the overview, the geometry, and the label and control boxes of the last frame.
   graphRequestKey: "",
   groupStats: null,
   edgeGeometry: null,
@@ -86,10 +87,9 @@ const model = {
   lastError: "",
 };
 
-// Smallest canvas font is 12px in Lineage and 11px in Storage: the readable
-// scale keeps it at 11px on screen. Fit opens there or above unless the
-// graph is far larger than the view (kit.fitView); further zoom-out stays
-// possible and turns the cards compact (kit.isCompact).
+// The smallest canvas font is 12px in Lineage and 11px in Storage. The readable scale keeps it at 11px on screen.
+// Fit opens at this scale or above, unless the graph is far larger than the view (kit.fitView).
+// Zoom out further is still possible. The cards then become compact (kit.isCompact).
 const LINEAGE_FONT_MIN = 12;
 
 const STORAGE_FONT_MIN = 11;
@@ -122,9 +122,8 @@ function canvasEllipsis(ctx, value, maxWidth) {
   return kit.ellipsis(ctx, value, maxWidth);
 }
 
-// Graph colour tokens (--graph-*, css/00-tokens.css). The shared
-// --accent is a translucent tint in the light theme, so canvas text, halos
-// and edges use dedicated tokens with readable values in both themes.
+// Graph colour tokens (--graph-*, css/00-tokens.css). The shared --accent is a translucent tint in the light theme.
+// So canvas text, halos and edges use dedicated tokens. These tokens have readable values in both themes.
 function graphColor(role) {
   return kit.color(role);
 }

@@ -3,13 +3,13 @@ import { installObservers, unexpectedFailures } from '../helpers/observability.j
 import { mockTraceFacets, mockTraceResults, syntheticAnalytics } from '../helpers/traces.js';
 import { canvasPixel, chartCore } from '../helpers/charts.js';
 
-// Duration heatmap + box-select comparison (app_trace_heatmap.js) after
-// HyperDX's DBSearchHeatmapChart / DBDeltaChart: the Percentiles / Heatmap
-// toggle (remembered, in the URL), cells / colours / tooltip, dragging a box
-// (or the keyboard) opens the comparison panel, a value click becomes a
-// filter chip and "Search traces in this box" sets the range and the trace
-// duration filter. The OTel fixture has almost no attributes, so the
-// heatmap and deltas answers are mocked and the requests are checked.
+// Duration heatmap and box-select comparison (app_trace_heatmap.js). It is modelled on HyperDX's DBSearchHeatmapChart and DBDeltaChart.
+// The Percentiles / Heatmap toggle is remembered and kept in the URL.
+// Cells, colours and the tooltip are tested. Dragging a box, or using the keyboard, opens the comparison panel.
+// A value click makes a filter chip. "Search traces in this box" sets the range and the trace duration filter.
+// The OTel fixture has almost no attributes.
+// The heatmap and deltas answers are mocked.
+// The tests check the requests that the page sends.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -73,7 +73,7 @@ function syntheticDeltas(params, keys = DELTA_KEYS) {
   };
 }
 
-// Serves heatmap + deltas (deltas answer overridable); returns the requests.
+// This helper serves the heatmap and deltas answers. The deltas answer can be overridden. It returns the requests.
 async function mockHeatmap(page, { deltas = (params) => ({ json: syntheticDeltas(params) }) } = {}) {
   const seen = { heatmap: [], deltas: [], searches: [], analytics: [] };
   await mockTraceFacets(page);
@@ -96,13 +96,13 @@ async function mockHeatmap(page, { deltas = (params) => ({ json: syntheticDeltas
   return seen;
 }
 
-// The heatmap draws on a canvas: its grid as drawn comes from the module's
-// test hook (cells in client coordinates, counts, colour levels).
+// The heatmap draws on a canvas.
+// Its grid, as drawn, comes from the module test hook: cells in client coordinates, counts and colour levels.
 const heatRoot = (page) => chartCore(page.locator('#traceDurationChart'));
 const inspect = (page) => page.evaluate(() => window.ChDash.traceHeatmap.inspect());
-// Drawn, and drawn at the chart's current width: the first draw can be
-// followed by a resize redraw (the legend below it brings the page scrollbar),
-// which moves every cell.
+// The grid is read at the chart's current width, after the final draw.
+// The first draw can be followed by a resize redraw.
+// The legend below the chart can bring the page scrollbar. The scrollbar moves every cell.
 async function heatReady(page) {
   await expect(heatRoot(page)).toHaveAttribute('data-cells-drawn', /^[1-9]/, { timeout: 30_000 });
   await expect.poll(async () => (await inspect(page))?.settled).toBe(true);
@@ -117,7 +117,7 @@ async function openHeatmap(page, query = 'duration_view=heatmap') {
 }
 
 async function cellCenter(page, col, row) {
-  // A new search reloads the grid: wait until it is drawn where it stays.
+  // A new search reloads the grid. Wait until the grid is drawn where it stays.
   await expect.poll(async () => { const grid = await inspect(page); return !!grid?.settled && grid.cells.length > 0; }).toBe(true);
   const cell = (await inspect(page)).cells.find((c) => c.col === col && c.row === row);
   expect(cell).toBeTruthy();
@@ -140,8 +140,8 @@ async function lastCol(page) {
 
 test('the Percentiles / Heatmap toggle lives in the URL and is remembered', async ({ page }) => {
   const seen = await mockHeatmap(page);
-  // Unfiltered counts come first (charts=counts, index counts), the
-  // percentiles in a second request, as on the server.
+  // Unfiltered counts come first (charts=counts, index counts).
+  // The percentiles come in a second request, as on the server.
   await page.route('**/api/traces/analytics?**', (route) => {
     const params = new URL(route.request().url()).searchParams;
     const json = syntheticAnalytics(Number(params.get('start_ms')), Number(params.get('end_ms')));
@@ -156,13 +156,13 @@ test('the Percentiles / Heatmap toggle lives in the URL and is remembered', asyn
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await heatReady(page);
   await expect.poll(() => new URL(page.url()).searchParams.get('duration_view')).toBe('heatmap');
-  // A view toggle is not a new search: the heatmap loads for the same filters.
+  // A view toggle is not a new search. The heatmap loads for the same filters.
   expect(seen.searches.length).toBe(searchesBefore);
   expect(seen.heatmap.length).toBe(1);
   expect(Number(last(seen.heatmap).get('bucket_origin_ms'))).toBeGreaterThanOrEqual(0);
   await expect(page.locator('#traceDurationChartMeta')).toContainText('× log duration');
 
-  // Reload keeps it; a plain /traces opens the remembered mode.
+  // Reload keeps it. A plain /traces opens the remembered mode.
   const durations = () => seen.analytics.filter((params) => params.get('charts') === 'durations').length;
   const durationsBefore = durations();
   expect(durationsBefore).toBe(1);
@@ -175,7 +175,7 @@ test('the Percentiles / Heatmap toggle lives in the URL and is remembered', asyn
   expect(seen.heatmap.length).toBe(3);
   expect(durations()).toBe(durationsBefore);
 
-  // Back to the percentiles: requested again, URL parameter dropped.
+  // Back to the percentiles. The request is sent again, and the URL parameter is dropped.
   await page.locator('[data-duration-view="percentiles"]').click();
   await expect(page.locator('#traceDurationChart .chartCore__legendItem', { hasText: 'P99' })).toBeVisible();
   await expect.poll(() => new URL(page.url()).searchParams.has('duration_view')).toBe(false);
@@ -196,14 +196,14 @@ test('heatmap cells: log rows, count colours, axes and tooltip', async ({ page }
   expect(grid.cells.length).toBeGreaterThan(40);
   await expect(heatRoot(page)).toHaveAttribute('data-cells-drawn', String(grid.cells.length));
   await expect(heatRoot(page)).toHaveAttribute('data-y-scale', 'log');
-  // Colours: the busiest cell is the darkest step (dark theme: lightest), a
-  // single trace the faintest; both differ on the canvas.
+  // Colours: the busiest cell is the darkest step (dark theme: lightest).
+  // A single trace is the faintest. Both differ on the canvas.
   const busiest = grid.cells.find((c) => c.count === 400);
   const single = grid.cells.find((c) => c.count === 1);
   expect(busiest.level).toBe(8);
   expect(single.level).toBe(1);
-  // (Polled: the canvas may still show the previous frame; each sample reads
-  // the cell positions of the frame drawn then.)
+  // (The test polls. The canvas can still show the previous frame;
+  // each sample reads the cell positions of the frame drawn then.)
   const pixels = async () => {
     const cells = (await inspect(page))?.cells || [];
     const at = (count) => cells.find((c) => c.count === count);
@@ -219,7 +219,7 @@ test('heatmap cells: log rows, count colours, axes and tooltip', async ({ page }
   expect(Math.abs(heights[1][2] - heights[2][2])).toBeLessThan(0.5);
   expect(grid.ticks).toContain('10 ms');
   expect(grid.ticks).toContain('1 s');
-  // Tooltip on hover: count, start bucket and the row's duration range.
+  // The tooltip on hover shows the count, the start bucket and the row duration range.
   const at = await cellCenter(page, 0, 6);
   await page.mouse.move(at.x, at.y);
   const tip = page.locator('#traceDurationChart .chartCore__tooltip');
@@ -289,7 +289,7 @@ test('a compared value becomes a filter chip (include and exclude)', async ({ pa
   await expect(chips(page)).toHaveCount(1);
   await expect(chips(page).first()).toHaveAttribute('title', 'span:http.route = /checkout');
   expect(new URL(page.url()).searchParams.getAll('tag')).toEqual(['span:http.route=/checkout']);
-  // A new search reloads the heatmap with the filter and drops the box.
+  // A new search reloads the heatmap with the filter. It drops the box.
   await expect.poll(() => last(seen.heatmap).getAll('tag')).toEqual(['span:http.route=/checkout']);
   await expect(panel(page)).toBeHidden();
 
@@ -361,7 +361,7 @@ test('keyboard: arrows move, Shift extends, Enter compares, Escape clears', asyn
   expect(Number(params.get('t1')) - Number(params.get('t0'))).toBeGreaterThanOrEqual(BUCKET);
   expect(Number(params.get('d1'))).toBeGreaterThan(Number(params.get('d0')));
   await expect(panel(page).locator('.traceDeltaRow__value').first()).toBeVisible();
-  // Value buttons are reachable with Tab.
+  // Value buttons can be reached with Tab.
   await panel(page).locator('.traceDeltaRow__value').first().focus();
   await expect(panel(page).locator('.traceDeltaRow__value').first()).toBeFocused();
   await chart.focus();
@@ -385,7 +385,7 @@ test('comparison states: loading, error with retry, nothing to compare', async (
   await dragBox(page, [col, 15], [col, 15]);
   await expect(panel(page).locator('[role="alert"]')).toContainText('Timeout exceeded');
   mode = 'ok';
-  // Loading state while the retry is pending.
+  // The state is shown while the retry is pending.
   await page.route('**/api/traces/deltas?**', async (route) => {
     await new Promise((resolve) => { release = resolve; });
     await route.fulfill({ json: syntheticDeltas(new URL(route.request().url()).searchParams) });
@@ -407,7 +407,7 @@ test('comparison states: loading, error with retry, nothing to compare', async (
   mode = 'nothing';
   await dragBox(page, [col - 1, 6], [col, 6]);
   await expect(panel(page)).toContainText('No traces in this box');
-  // Heatmap errors offer a retry too.
+  // Heatmap errors also offer a retry.
   let failHeatmap = true;
   await page.unroute('**/api/traces/heatmap?**');
   await page.route('**/api/traces/heatmap?**', (route) => {

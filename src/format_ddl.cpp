@@ -1,5 +1,5 @@
-// The DDL of the formatter: CREATE TABLE, VIEW and DICTIONARY, ALTER TABLE, TTL, the access control statements.
-// The declarations that the units share are in format_internal.hpp.
+// This unit formats the DDL: CREATE TABLE, VIEW and DICTIONARY, ALTER TABLE, TTL, and the access control statements.
+// format_internal.hpp contains the declarations that the units share.
 
 #include "format_internal.hpp"
 
@@ -49,13 +49,12 @@ string format_comma_clause_body(string_view body, bool align_equals) {
 }  // namespace
 
 namespace {
-// One TTL element (`expr [action] [WHERE cond]`). A conditional element that
-// does not fit is split like a WHERE clause, one condition per line, so a long
-// retention rule reads the same way as the filters used everywhere else.
+// One TTL element has the form `expr [action] [WHERE cond]`. A conditional element that does not fit is split like a WHERE clause, with one condition per line.
+// A long retention rule then reads like the other filters.
 string format_ttl_element(string_view raw, size_t width) {
   string element = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(raw)));
-  // `expr GROUP BY keys SET a = f(a), ...` that does not fit: the keys and
-  // the assignments start their own lines, the assignments one per line.
+  // `expr GROUP BY keys SET a = f(a), ...` does not fit. The keys and the assignments start their own lines.
+  // Each assignment has one line.
   if (const int group_pos = find_top_level_keyword(element, "GROUP BY");
       group_pos > 0 && utf8_width(element) > width && find_top_level_keyword(element, "WHERE") < 0) {
     const int set_pos = find_top_level_keyword(element, "SET", static_cast<size_t>(group_pos));
@@ -89,8 +88,7 @@ string format_ttl_element(string_view raw, size_t width) {
   string out = head + "\nWHERE";
   for (size_t i = 0; i < parts.size(); ++i) {
     string part = trim_ascii_spaces(parts[i]);
-    // formatQuery wraps every AND operand in parentheses; they are redundant
-    // unless the operand is itself a boolean chain.
+    // formatQuery puts parentheses around every AND operand. They are redundant, unless the operand is itself a boolean chain.
     if (const string inner = unwrap_outer_parens(part); !inner.empty() &&
         find_top_level_keyword(inner, "AND") < 0 && find_top_level_keyword(inner, "OR") < 0) {
       part = trim_ascii_spaces(inner);
@@ -102,14 +100,12 @@ string format_ttl_element(string_view raw, size_t width) {
 }  // namespace
 
 namespace {
-// TTL lists: one element per line when there are several, or when the single
-// element does not fit on the `TTL` line (DDL lines follow the line width like
-// every other statement).
+// TTL lists put one element on each line when there are several elements. They also do so when the single element does not fit on the `TTL` line.
+// DDL lines follow the line width, as every other statement does.
 string format_ttl_list(string_view head_kw, string_view body, size_t threshold) {
   vector<string> elements;
-  // `expr GROUP BY k1, k2 SET a = f(a), b = g(b)` is one element although its
-  // keys and assignments are comma lists: after GROUP BY every piece is a key
-  // until SET, after SET every `name = expr` piece is an assignment.
+  // `expr GROUP BY k1, k2 SET a = f(a), b = g(b)` is one element. Its keys and assignments are comma lists.
+  // After GROUP BY, every piece is a key until SET. After SET, every `name = expr` piece is an assignment.
   auto is_assignment = [](const string& piece) {
     size_t i = 0;
     while (i < piece.size() && (is_ident_char(piece[i]) || piece[i] == '`' || piece[i] == '.')) ++i;
@@ -180,22 +176,20 @@ string format_table_tail_clauses(string_view tail, size_t threshold) {
 }  // namespace
 
 namespace {
-// `CREATE MATERIALIZED VIEW name REFRESH ... DEPENDS ON ... APPEND TO target`
-// easily exceeds the line width on one line. When it does, every head clause
-// starts its own line, like the clauses of the query that follows.
+// `CREATE MATERIALIZED VIEW name REFRESH ... DEPENDS ON ... APPEND TO target` can easily exceed the line width on one line. When it does, every head clause starts its own line.
+// This is like the clauses of the query that follows.
 string split_view_head_clauses(string_view raw, size_t threshold) {
   string head = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(raw)));
   if (utf8_width(head) + 3 <= threshold) return head;
   vector<int> starts;
   for (const char* kw : {"REFRESH", "DEPENDS ON", "SETTINGS", "APPEND", "TO", "DEFINER", "SQL SECURITY"}) {
     int pos = find_top_level_keyword(head, kw);
-    // `APPEND TO target` is one clause: the TO belongs to APPEND.
+    // `APPEND TO target` is one clause. The TO belongs to APPEND.
     if (pos > 0 && string_view(kw) == "TO") {
       const string before = rtrim_spaces(head.substr(0, static_cast<size_t>(pos)));
       if (ends_with_ci(before, " APPEND")) pos = -1;
     }
-    // `DEFINER = user` heads a clause; the DEFINER of `SQL SECURITY DEFINER`
-    // is that clause's value.
+    // `DEFINER = user` starts a clause. The DEFINER of `SQL SECURITY DEFINER` is the value of that clause.
     if (pos > 0 && string_view(kw) == "DEFINER") {
       size_t next = static_cast<size_t>(pos) + 7;
       while (next < head.size() && head[next] == ' ') ++next;
@@ -216,7 +210,7 @@ string split_view_head_clauses(string_view raw, size_t threshold) {
 }  // namespace
 
 namespace {
-// A multi-line view head ends with `AS` on its own line, like CREATE TABLE AS.
+// A multi-line view head ends with `AS` on its own line. This is the same as CREATE TABLE AS.
 string attach_view_as(const string& head) {
   return head + (head.find('\n') == string::npos ? " AS" : "\nAS");
 }
@@ -235,9 +229,8 @@ string format_create_view_head_clauses(string_view raw_head, size_t threshold) {
     head = rtrim_spaces(head.substr(0, head.size() - 2));
   }
 
-  // CREATE VIEW/MATERIALIZED VIEW may contain an explicit result schema before
-  // AS SELECT. Format it with the same readable one-column-per-line layout used
-  // for CREATE TABLE instead of collapsing the complete declaration on one line.
+  // CREATE VIEW and MATERIALIZED VIEW can contain an explicit result schema before AS SELECT. Format this schema with the same one-column-per-line layout as CREATE TABLE.
+  // Do not collapse the complete declaration onto one line.
   const size_t par = head.find('(');
   const int engine_pos = find_top_level_keyword(head, "ENGINE");
   if (par != string::npos && (engine_pos < 0 || par < static_cast<size_t>(engine_pos))) {
@@ -293,9 +286,8 @@ string format_create_view_head_clauses(string_view raw_head, size_t threshold) {
 }  // namespace
 
 namespace {
-// `name` -> `` `name` `` for a plain identifier column name; structural heads
-// (INDEX, PROJECTION, CONSTRAINT, PRIMARY KEY), quoted and non-plain names
-// are returned unchanged.
+// `name` -> `` `name` `` for a plain identifier column name. Structural heads (INDEX, PROJECTION, CONSTRAINT, PRIMARY KEY) are returned unchanged.
+// Quoted and non-plain names are returned unchanged too.
 string backquote_plain_column_name(const string& name) {
   if (name.empty() || name.front() == '`' || name.front() == '"') return name;
   for (const char* kw : {"INDEX", "PROJECTION", "CONSTRAINT", "PRIMARY", "TTL"}) {
@@ -308,9 +300,8 @@ string backquote_plain_column_name(const string& name) {
 }  // namespace
 
 namespace {
-// `String default 'x'` → `String DEFAULT 'x'`: the column clause keyword
-// right after the type, as formatQuery prints it. Only that position: these
-// words are also common column names inside the clause expressions.
+// `String default 'x'` → `String DEFAULT 'x'`. The formatter upper-cases the column clause keyword that stands right after the type, as formatQuery prints it.
+// Only that position is changed. These words are also common column names inside the clause expressions.
 string uppercase_column_clause_keyword(string rhs) {
   const CallScan scan = scan_call_brackets(rhs);
   int depth = 0;
@@ -330,8 +321,7 @@ string uppercase_column_clause_keyword(string rhs) {
     for (size_t k = i; k < e; ++k) rhs[k] = static_cast<char>(std::toupper(static_cast<unsigned char>(rhs[k])));
     break;
   }
-  // Dictionary attribute flags are not expressions: upper-case them where
-  // they stand at the top level of the definition.
+  // Dictionary attribute flags are not expressions. Upper-case them where they stand at the top level of the definition.
   const SqlMaskResult masked = mask_sql_surface(rhs);
   int level = 0;
   string_view previous_word;
@@ -343,7 +333,7 @@ string uppercase_column_clause_keyword(string rhs) {
     size_t w = k;
     while (w < rhs.size() && is_ident_char(masked.code_lower[w])) ++w;
     const string_view flag = string_view(masked.code_lower).substr(k, w - k);
-    // `DEFAULT 0 EXPRESSION expr`: EXPRESSION after a value, never as one.
+    // `DEFAULT 0 EXPRESSION expr`. EXPRESSION follows a value. It is never a value.
     const bool value_position = previous_word == "default" || previous_word == "expression";
     if (flag == "hierarchical" || flag == "injective" || flag == "is_object_id" || flag == "bidirectional" ||
         (flag == "expression" && !value_position)) {
@@ -357,11 +347,9 @@ string uppercase_column_clause_keyword(string rhs) {
 }  // namespace
 
 namespace {
-// formatQuery prints a column type's Tuple with two or more elements one
-// element per line (4 spaces per Tuple level below the column) and its closer
-// hugging the last element; the schema pass after it puts each Tuple closer on
-// its own line. A one-line type from the local (comment-preserving) path gets
-// the same text so both paths agree.
+// formatQuery prints a Tuple in a column type with two or more elements. It prints one element per line, with 4 spaces for each Tuple level below the column.
+// Its closer is attached to the last element. The schema pass that follows puts each Tuple closer on its own line.
+// A one-line type from the local (comment-preserving) path gets the same text, so both paths agree.
 string explode_tuple_types_like_format_query(const string& rhs, size_t column_indent) {
   if (rhs.find('\n') != string::npos || rhs.find("Tuple(") == string::npos) return rhs;
   const CallScan scan = scan_call_brackets(rhs);
@@ -409,13 +397,11 @@ string explode_tuple_types_like_format_query(const string& rhs, size_t column_in
 }
 }  // namespace
 
-// Column lists written with comments (usually one per column) take the local
-// formatter path, where formatQuery neither quotes nor aligns the columns and
-// the comments must survive. A comment right after a column's comma belongs
-// to that column (kept at the end of its line); a comment on its own line
-// stays on its own line before the next column. Column names are back-quoted
-// and aligned like formatQuery output. A comment inside a definition falls
-// back to the generic rendering.
+// A column list with comments (usually one comment per column) uses the local formatter path. On that path, formatQuery does not quote or align the columns, and the comments must stay.
+// A comment right after a column's comma belongs to that column, and the formatter keeps it at the end of its line.
+// A comment on its own line stays on its own line before the next column.
+// The formatter back-quotes the column names and aligns them, as formatQuery output does.
+// A comment inside a definition uses the generic rendering.
 string Formatter::format_commented_column_list(const string& head, const string& cols, const string& tail) {
   const FormatDepthGuard guard(depth);
   struct Column {
@@ -456,8 +442,7 @@ string Formatter::format_commented_column_list(const string& head, const string&
       }
     }
     string code = item.substr(i);
-    // Only the last column can carry a comment after its code (others have
-    // theirs after the comma, i.e. in the next item).
+    // Only the last column can have a comment after its code. The other columns have their comments after the comma, in the next item.
     {
       const size_t last_nl = code.rfind('\n');
       const size_t line_start = last_nl == string::npos ? 0 : last_nl + 1;
@@ -469,9 +454,8 @@ string Formatter::format_commented_column_list(const string& head, const string&
     }
     code = trim_ascii_spaces(code);
     if (code.empty()) return {};
-    // A `--` comment inside a definition (`Map(String, -- note\n String)`)
-    // keeps its line break; the continuation lines are re-indented below.
-    // Block comments and comments elsewhere fall back to the generic layout.
+    // A `--` comment inside a definition (`Map(String, -- note\n String)`) keeps its line break. The continuation lines are indented again below.
+    // Block comments and other comments use the generic layout.
     if (const auto masked = mask_sql_surface(code); masked.has_comments &&
         (code.find("/*") != string::npos || code.find('#') != string::npos)) return {};
     column.code = std::move(code);
@@ -493,8 +477,7 @@ string Formatter::format_commented_column_list(const string& head, const string&
       lhs = render_name(lhs);
       name_widths.push_back(utf8_width(lhs));
     }
-    // A definition with a comment inside keeps its words: the comment text is
-    // the author's, never upper-cased.
+    // A definition with a comment inside keeps its words. The comment text belongs to the author, and the formatter never upper-cases it.
     const bool commented = mask_sql_surface(rhs).has_comments;
     parsed.emplace_back(structural ? "" : lhs,
                         structural || commented ? (structural ? col : rhs) : explode_tuple_types_like_format_query(uppercase_column_clause_keyword(rhs), 4));
@@ -508,8 +491,7 @@ string Formatter::format_commented_column_list(const string& head, const string&
     else line += parsed[i].first + string(utf8_width(parsed[i].first) >= width ? 1 : width - utf8_width(parsed[i].first) + 1, ' ') + parsed[i].second;
     if (i + 1 < parsed.size()) append_item_comma(line);
     if (!columns[i].trailing.empty()) line += " " + columns[i].trailing;
-    // Continuation lines of a definition with a comment inside: one level
-    // under the column, whatever their input indentation.
+    // The continuation lines of a definition with a comment inside are one level under the column. Their input indentation does not matter.
     if (line.find('\n') != string::npos) {
       vector<string> parts = split_lines_keep(line);
       for (size_t k = 1; k < parts.size(); ++k) parts[k] = "        " + trim_ascii_spaces(parts[k]);
@@ -523,9 +505,8 @@ string Formatter::format_commented_column_list(const string& head, const string&
 }
 
 namespace {
-// `create or replace table if not exists db.t on cluster c` (or a VIEW /
-// MATERIALIZED VIEW head) → keywords in
-// upper case, as formatQuery prints them; names keep their spelling.
+// For `create or replace table if not exists db.t on cluster c` (or a VIEW / MATERIALIZED VIEW head), the formatter writes the keywords in upper case, as formatQuery prints them.
+// Names keep their spelling.
 string normalize_create_head(const string& head) {
   vector<string> words;
   for (const auto& w : split_top_level(collapse_whitespace(head), ' ')) {
@@ -562,9 +543,7 @@ string normalize_create_head(const string& head) {
 string Formatter::format_create_table(string_view s) {
   const FormatDepthGuard guard(depth);
   const string text = trim_ascii_spaces(s);
-  // CREATE TABLE ... [ENGINE ...] AS SELECT: the stored query is a statement of
-  // its own. Without this split, the first `(` of the query (e.g. `sum(`) is
-  // mistaken for the column list.
+  // CREATE TABLE ... [ENGINE ...] AS SELECT: the stored query is a statement of its own. Without this split, the first `(` of the query (such as `sum(`) is taken for the column list.
   for (int as_pos = find_top_level_keyword(text, "AS"); as_pos >= 0;
        as_pos = find_top_level_keyword(text, "AS", static_cast<size_t>(as_pos) + 2)) {
     const string query = trim_ascii_spaces(text.substr(static_cast<size_t>(as_pos) + 2));
@@ -577,7 +556,7 @@ string Formatter::format_create_table(string_view s) {
     string ddl = trim_ascii_spaces(text.substr(0, static_cast<size_t>(as_pos)));
     string body = format_statement(candidate);
     if (starts_with_ci(body, "SELECT ") && body.find('\n') != string::npos) body = expand_nested_select_head(std::move(body));
-    // `... EMPTY AS SELECT`: EMPTY qualifies the AS, not the last DDL clause.
+    // `... EMPTY AS SELECT`. EMPTY qualifies the AS. It does not qualify the last DDL clause.
     string as_kw = "AS";
     if (ddl.size() > 6 && ends_with_ci(ddl, "EMPTY") && std::isspace(static_cast<unsigned char>(ddl[ddl.size() - 6]))) {
       ddl = trim_ascii_spaces(ddl.substr(0, ddl.size() - 5));
@@ -587,9 +566,8 @@ string Formatter::format_create_table(string_view s) {
   }
   const size_t par = text.find('(');
   const int engine_pos = find_top_level_keyword(text, "ENGINE");
-  // No column list (`CREATE TABLE t ENGINE = Memory`, the DDL part of
-  // `CREATE TABLE t ENGINE = ... AS SELECT`): the engine clauses one per line,
-  // also on the comment path, which does not get formatQuery's line breaks.
+  // A statement without a column list (`CREATE TABLE t ENGINE = Memory`, or the DDL part of `CREATE TABLE t ENGINE = ... AS SELECT`) puts each engine clause on its own line.
+  // This also applies on the comment path, which gets no line breaks from formatQuery.
   if (par == string::npos && engine_pos > 0) {
     return cleanup_surface(trim_ascii_spaces(text.substr(0, static_cast<size_t>(engine_pos)))) + "\n" +
            format_table_tail_clauses(text.substr(static_cast<size_t>(engine_pos)), threshold);
@@ -615,8 +593,7 @@ string Formatter::format_create_table(string_view s) {
       if (!tail.empty()) out += tail == ";" ? ";" : "\n" + format_table_tail_clauses(tail, threshold);
       return out;
     }
-    // `CREATE TABLE t AS source ENGINE = Distributed(...)`: no column list,
-    // the first `(` opens the engine arguments, which stay on the ENGINE line.
+    // `CREATE TABLE t AS source ENGINE = Distributed(...)` has no column list. The first `(` opens the engine arguments. These arguments stay on the ENGINE line.
     return before_engine + "\n" + format_table_tail_clauses(text.substr(static_cast<size_t>(engine_pos)), threshold);
   }
 
@@ -631,13 +608,12 @@ string Formatter::format_create_table(string_view s) {
   vector<std::pair<string, string>> parsed;
   for (const auto& item : items) {
     const string col = trim_ascii_spaces(item);
-    // A trailing comma (`a UInt8,\n)`) leaves an empty item: ClickHouse takes the list without it.
+    // A trailing comma (`a UInt8,\n)`) makes an empty item. ClickHouse reads the list without that item.
     if (col.empty()) continue;
     const size_t sp = col.find_first_of(" \t\n");
     string lhs = (sp == string::npos) ? col : trim_ascii_spaces(col.substr(0, sp));
     const string rhs = (sp == string::npos) ? string() : trim_ascii_spaces(col.substr(sp + 1));
-    // Column names are back-quoted like formatQuery output, so a statement
-    // that took the local (comment-preserving) path looks the same.
+    // The formatter back-quotes the column names, as formatQuery output does. A statement that uses the local (comment-preserving) path then looks the same.
     lhs = backquote_plain_column_name(lhs);
     width = std::max(width, utf8_width(lhs));
     const bool structural = lhs.front() != '`' && lhs.front() != '"';
@@ -655,9 +631,8 @@ string Formatter::format_create_table(string_view s) {
 }
 
 namespace {
-// `name(KEY value KEY value ...)` as in dictionary SOURCE / LAYOUT / RANGE /
-// LIFETIME: the name and keys in upper case, values kept. Returns the pairs
-// (key, value) of the inner list, or {} when the list is not key/value pairs.
+// `name(KEY value KEY value ...)` as in dictionary SOURCE / LAYOUT / RANGE / LIFETIME. The name and the keys are in upper case. The values stay as written.
+// The function returns the pairs (key, value) of the inner list, or {} when the list is not key/value pairs.
 vector<std::pair<string, string>> dictionary_key_values(string_view inner) {
   vector<string> tokens;
   const CallScan scan = scan_call_brackets(inner);
@@ -678,8 +653,7 @@ vector<std::pair<string, string>> dictionary_key_values(string_view inner) {
     }
   }
   vector<std::pair<string, string>> pairs;
-  // `CLICKHOUSE(... STRUCTURE (a UInt8))`: a value may be separated from its
-  // key by a space before `(`; keys are bare words.
+  // `CLICKHOUSE(... STRUCTURE (a UInt8))`. A value can be separated from its key by a space before `(`. Keys are bare words.
   for (size_t i = 0; i < tokens.size();) {
     const string& key = tokens[i];
     bool word = !key.empty();
@@ -700,9 +674,8 @@ string upper_ascii(string s) {
 }  // namespace
 
 namespace {
-// `source(clickhouse(table 'x' db 'y'))` → `SOURCE(CLICKHOUSE(TABLE 'x' DB 'y'))`;
-// `lifetime(300)` → `LIFETIME(MIN 0 MAX 300)` like formatQuery. A call that
-// does not fit the width puts one `KEY value` pair per line.
+// `source(clickhouse(table 'x' db 'y'))` → `SOURCE(CLICKHOUSE(TABLE 'x' DB 'y'))`. `lifetime(300)` → `LIFETIME(MIN 0 MAX 300)`, as formatQuery does.
+// A call that does not fit the width puts one `KEY value` pair on each line.
 string format_dictionary_clause(const string& clause, size_t threshold) {
   const size_t open = clause.find('(');
   const size_t close = open == string::npos ? string::npos : find_matching_paren(clause, open);
@@ -722,7 +695,7 @@ string format_dictionary_clause(const string& clause, size_t threshold) {
     for (size_t i = 0; i < pairs.size(); ++i) out += (i ? sep : "") + upper_ascii(pairs[i].first) + " " + collapse_whitespace(pairs[i].second);
     return out;
   };
-  // SOURCE(TYPE(pairs)) / LAYOUT(TYPE(pairs)): one nested call.
+  // SOURCE(TYPE(pairs)) and LAYOUT(TYPE(pairs)) each have one nested call.
   const size_t inner_open = inner.find('(');
   if (inner_open != string::npos && find_matching_paren(inner, inner_open) == inner.size() - 1) {
     string type = trim_ascii_spaces(inner.substr(0, inner_open));
@@ -750,7 +723,7 @@ string Formatter::format_create_dictionary(string_view s) {
   const size_t par = text.find('(');
   const size_t close = par == string::npos ? string::npos : find_matching_paren(text, par);
   if (close == string::npos) return cleanup_surface(text);
-  // The attribute list is laid out like table columns.
+  // The attribute list uses the same layout as table columns.
   string out = format_create_table(text.substr(0, close + 1));
   const string tail = trim_ascii_spaces(text.substr(close + 1));
   static const vector<string_view> clauses = {"PRIMARY KEY", "SOURCE", "LIFETIME", "LAYOUT", "RANGE", "SETTINGS", "COMMENT"};
@@ -777,17 +750,16 @@ string Formatter::format_create_view(string_view s, bool) {
   if (pos < 0) return cleanup_surface(text);
   string head = format_create_view_head_clauses(text.substr(0, static_cast<size_t>(pos)), threshold);
   string body = format_statement(text.substr(static_cast<size_t>(pos)));
-  // CREATE VIEW/MV DDL is easier to scan when the projection is visually
-  // separated from SELECT, even for a single `*`. Force the same representation
-  // on every pass so formatter output is idempotent.
+  // CREATE VIEW and MV DDL is easier to read when the projection is visually separated from SELECT, even for a single `*`.
+  // Use the same representation on every pass. The formatter output is then idempotent.
   if (starts_with_ci(body, "SELECT ") && body.find('\n') != string::npos) body = expand_nested_select_head(std::move(body));
   return head + "\n" + body;
 }
 
 namespace {
 
-// The first word of a command of ALTER TABLE: after a comma at the top level, one of these starts the next command (a comma inside a
-// command, as in `UPDATE a = 1, b = 2`, is followed by a name).
+// The first word of an ALTER TABLE command. After a comma at the top level, one of these words starts the next command.
+// A comma inside a command, as in `UPDATE a = 1, b = 2`, is followed by a name.
 bool is_alter_command_word(string_view lower) {
   static const char* const kWords[] = {"add",    "drop",   "modify",   "rename", "clear",  "comment", "update", "delete", "materialize",
                                        "replace", "attach", "detach",   "fetch",  "move",   "freeze",  "unfreeze", "reset", "apply",
@@ -798,12 +770,11 @@ bool is_alter_command_word(string_view lower) {
   return false;
 }
 
-// ClickHouse writes ALTER TABLE as its commands between parentheses ("ALTER TABLE t\n(\n    ADD COLUMN ...\n)", "(cmd),\n(cmd)"), and the layout below
-// reads that shape. A text that was written with the commands bare (`ALTER TABLE t ADD COLUMN a UInt8, DROP COLUMN b`) is put in that shape
-// first, so that a statement with comments (which does not go through formatQuery) has the layout of the same statement without them.
-// The commands are split at a comma that a command word follows; a SETTINGS clause at the end stays outside. The name that ADD COLUMN and
-// MODIFY COLUMN declare is written between backticks, as formatQuery does. Empty when the text is not of this form (it is left to
-// the layout as it is).
+// ClickHouse writes ALTER TABLE as its commands between parentheses. For example: "ALTER TABLE t\n(\n    ADD COLUMN ...\n)" and "(cmd),\n(cmd)". The layout below reads that shape.
+//
+// A text with bare commands, such as `ALTER TABLE t ADD COLUMN a UInt8, DROP COLUMN b`, is put in that shape first. A statement with comments does not go through formatQuery. So this step gives it the same layout as the same statement without comments.
+//
+// The commands are split at a comma that a command word follows. A SETTINGS clause at the end stays outside. The name that ADD COLUMN and MODIFY COLUMN declare is in backticks, as formatQuery writes it. The result is empty when the text is not of this form. The layout then keeps the text as it is.
 string alter_commands_in_groups(string_view s) {
   const auto tokens = sql::lex(s);
   vector<size_t> sig;
@@ -830,7 +801,7 @@ string alter_commands_in_groups(string_view s) {
     while (text_of(k) == "." && is_name(k + 1)) k += 2;
     return true;
   };
-  // The words of the head are written as formatQuery writes them; the names keep their spelling.
+  // The head words are written as formatQuery writes them. The names keep their spelling.
   const size_t name_first = k;
   if (!take_name()) return {};
   string head = "ALTER TABLE ";
@@ -843,7 +814,7 @@ string alter_commands_in_groups(string_view s) {
     head += " ON CLUSTER " + string(s.substr(tokens[sig[cluster_first]].begin, tokens[sig[k - 1]].end - tokens[sig[cluster_first]].begin));
   }
   if (k >= sig.size() || !is_alter_command_word(word_of(k))) return {};
-  // A comment between the table and its first command: leave the statement to the layout as it is.
+  // A comment between the table and its first command. The layout keeps the statement as it is.
   for (size_t i = sig[0]; i < sig[k]; ++i) {
     if (sql::is_comment(tokens[i].kind)) return {};
   }
@@ -870,7 +841,7 @@ string alter_commands_in_groups(string_view s) {
         commands.push_back(current);
         current = Command();
         current.begin = tokens[sig[j + 1]].begin;
-        // The comments between the comma and the next command: the ones on the line of the comma belong to the command before.
+        // The comments between the comma and the next command. A comment on the line of the comma belongs to the command before.
         bool same_line = true;
         for (size_t t = sig[j] + 1; t < sig[j + 1]; ++t) {
           const sql::Token& gap = tokens[t];
@@ -909,7 +880,7 @@ string alter_commands_in_groups(string_view s) {
       }
       return out;
     };
-    // The words of the command, as formatQuery writes them: ADD COLUMN IF NOT EXISTS, DROP PARTITION, MODIFY TTL.
+    // The command words, as formatQuery writes them: ADD COLUMN IF NOT EXISTS, DROP PARTITION, MODIFY TTL.
     {
       static const char* const kObjects[] = {"column", "index", "projection", "partition", "part", "ttl", "setting", "statistics", "constraint", "where"};
       size_t n = 1;
@@ -948,9 +919,8 @@ string alter_commands_in_groups(string_view s) {
     command = declared_name_quoted(std::move(command));
     string group = commands[i].leading + command;
     if (!commands[i].trailing.empty()) group += " " + commands[i].trailing;
-    // The block shape of formatQuery ("(\n    COMMAND\n)"), the lines of the command one level in: the layout of the command takes them back out, so
-    // the continuation lines of a command that was laid out before keep their indentation. A comment that runs to the end of its line
-    // does not take the closing parenthesis with it: the parenthesis is on a line of its own.
+    // The block shape of formatQuery is "(\n    COMMAND\n)". The lines of the command are one level in. The layout of the command takes them out again. So the continuation lines of a command that was formatted before keep their indentation.
+    // A comment that runs to the end of its line does not take the closing parenthesis with it. The parenthesis is on a line of its own.
     out += (i == 0 ? "\n(\n" : ",\n(\n") + indent_block(group, 4) + "\n)";
   }
   if (tail_begin != string_view::npos) out += "\n" + trim_ascii_spaces(s.substr(tail_begin));
@@ -969,10 +939,8 @@ string Formatter::format_alter_table(string_view s) {
   if (close == string::npos) return cleanup_surface(text);
   const string head = trim_ascii_spaces(text.substr(0, par));
   string inner = trim_ascii_spaces(text.substr(par + 1, close - par - 1));
-  // formatQuery prints every command as `(command)`, comma-separated, followed
-  // by an optional statement-level SETTINGS. The block layouts below describe a
-  // single command; a multi-command ALTER keeps the formatQuery layout, and the
-  // SETTINGS tail must always survive (dropping it changes the statement).
+  // formatQuery prints every command as `(command)`, with commas between the commands. An optional statement-level SETTINGS follows. The block layouts below describe one command.
+  // A multi-command ALTER keeps the formatQuery layout. The SETTINGS tail must always stay, because a removal of it changes the statement.
   string tail = trim_ascii_spaces(text.substr(close + 1));
   if (!tail.empty() && tail.front() == ',') return cleanup_surface(text);
   if (!tail.empty() && !starts_with_ci(tail, "SETTINGS")) return cleanup_surface(text);
@@ -1001,8 +969,7 @@ string Formatter::format_alter_table(string_view s) {
     if (where_pos > 0) {
       string assigns = trim_ascii_spaces(inner.substr(6, static_cast<size_t>(where_pos) - 6));
       const string cond = trim_ascii_spaces(inner.substr(static_cast<size_t>(where_pos) + 5));
-      // `UPDATE a = x IN PARTITION p WHERE ...`: the partition qualifies the
-      // command, not the last assignment (`'ms' IN PARTITION` read as IN).
+      // `UPDATE a = x IN PARTITION p WHERE ...`. The partition qualifies the command, not the last assignment. A wrong reading takes `'ms' IN PARTITION` as IN.
       string partition;
       if (const int part_pos = find_top_level_keyword(assigns, "IN PARTITION"); part_pos > 0) {
         partition = "\n    " + collapse_whitespace(trim_ascii_spaces(assigns.substr(static_cast<size_t>(part_pos))));
@@ -1017,14 +984,13 @@ string Formatter::format_alter_table(string_view s) {
     if (rendered.find('\n') == string::npos) return head + "\n(\n    DELETE WHERE " + rendered + "\n)" + tail;
     return head + "\n(\n    DELETE\n    WHERE\n" + indent_block(rendered, 8) + "\n)" + tail;
   }
-  // Any other single command uses the same block layout. formatQuery already
-  // indents continuation lines by 4 relative to the command start.
+  // Any other single command uses the same block layout. formatQuery already indents continuation lines by 4, relative to the start of the command.
   return head + "\n(\n    " + cleanup_surface(inner) + "\n)" + tail;
 }
 
 namespace {
-// Top-level `TO` of an access-control statement (the role list), searched after
-// `from` so that `RENAME TO new_name` of an ALTER is never taken for it.
+// The top-level `TO` of an access-control statement (the role list). The search starts after `from`.
+// So `RENAME TO new_name` of an ALTER is never taken for it.
 int find_access_to_clause(string_view text, size_t from) {
   int found = -1;
   for (int pos = find_top_level_keyword(text, "TO", from); pos >= 0;
@@ -1035,9 +1001,8 @@ int find_access_to_clause(string_view text, size_t from) {
 }
 }  // namespace
 
-// formatQuery prints access-control DDL on one line. A statement that fits
-// stays compact; a longer one puts every clause on its own line and formats
-// USING like a WHERE clause, so a row filter reads like any other filter.
+// formatQuery prints access-control DDL on one line. A statement that fits stays compact. A longer statement puts every clause on its own line.
+// It formats USING like a WHERE clause, so a row filter reads like any other filter.
 string Formatter::format_row_policy(string_view s) {
   const FormatDepthGuard guard(depth);
   if (contains_top_level_comment(s)) return cleanup_surface(s);
@@ -1046,7 +1011,7 @@ string Formatter::format_row_policy(string_view s) {
   const int using_pos = find_top_level_keyword(text, "USING");
   const size_t head_limit = using_pos >= 0 ? static_cast<size_t>(using_pos) : text.size();
   vector<std::pair<int, string>> poses;
-  // `RENAME TO`, `AS PERMISSIVE|RESTRICTIVE` and `FOR SELECT` precede USING.
+  // `RENAME TO`, `AS PERMISSIVE|RESTRICTIVE` and `FOR SELECT` come before USING.
   for (const char* kw : {"RENAME", "AS", "FOR"}) {
     const int pos = find_top_level_keyword(text, kw);
     if (pos > 0 && static_cast<size_t>(pos) < head_limit) poses.push_back({pos, kw});
@@ -1071,14 +1036,14 @@ string Formatter::format_row_policy(string_view s) {
   return out;
 }
 
-// Same layout for settings profiles: the SETTINGS list is formatted like the
-// statement-level SETTINGS clause, one setting per line with aligned `=`.
+// Settings profiles use the same layout. The SETTINGS list is formatted like the statement-level SETTINGS clause.
+// Each setting is on its own line, with aligned `=`.
 string Formatter::format_settings_profile(string_view s) {
   const FormatDepthGuard guard(depth);
   if (contains_top_level_comment(s)) return cleanup_surface(s);
   string text = normalize_code_spacing(collapse_whitespace(trim_ascii_spaces(s)));
   if (utf8_width(text) <= threshold) return text;
-  // Skip the `SETTINGS` of the statement name itself (`CREATE SETTINGS PROFILE`).
+  // Skip the `SETTINGS` that belongs to the statement name (`CREATE SETTINGS PROFILE`).
   const size_t name_start = text.find(' ', text.find(' ') + 1) + 1;
   const int settings_pos = find_top_level_keyword(text, "SETTINGS", name_start);
   const int to_pos = find_access_to_clause(text, settings_pos >= 0 ? static_cast<size_t>(settings_pos) : 0);

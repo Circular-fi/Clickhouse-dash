@@ -46,8 +46,8 @@ FAKE_SERVER = textwrap.dedent('''\
             self.rfile.read(int(self.headers.get("Content-Length", "0")))
             if self.path != "/mcp":
                 return self.send(404, b"not found", "text/plain")
-            if self.headers.get("Authorization", "") != "Bearer 5a0c0000-0000-4000-8000-000000000012":
-                return self.send(401, b'{{"error":"unauthorized"}}', "application/json")
+            if self.headers.get("Authorization", "") != "Bearer mcp_5a0c0000SmokeKey000000000000000000000000012":
+                return self.send(401, b'{{"jsonrpc":"2.0","id":null,"error":{{"code":-32001,"message":"unauthorized"}}}}', "application/json")
             return self.send(200, b'{{"jsonrpc":"2.0","id":1,"result":{{"tools":[{{"name":"list_hosts"}}]}}}}', "application/json")
 
         def do_GET(self):

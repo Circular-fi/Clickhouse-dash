@@ -1,11 +1,11 @@
-// The address of a static file of this server (src/static/<file>): the one place that builds it.
+// The address of a static file of this server (src/static/<file>). One place builds this address.
 //
-//   assetUrl(file)   the absolute URL, under the page's own base path (a reverse-proxy prefix included): the
-//                    directory of this very module. A staged build (tools/stage_static.py) gives every script, sheet
-//                    and kernel its content hash in window.__chdashAssetVersions; the address then carries ?v=<hash>
-//                    and never changes content, so the browser keeps the file without asking again.
+//   assetUrl(file)   The absolute URL, under the base path of the page (a reverse-proxy prefix included).
+//                    The base is the directory of this module. A staged build (tools/stage_static.py) gives every script, sheet
+//                    and kernel its content hash in window.__chdashAssetVersions. The address then carries ?v=<hash>.
+//                    The content behind such an address never changes, so the browser keeps the file without a new request.
 //
-// It runs in a page and in a Worker (a Worker has no version map: the page hands it the addresses it needs).
+// The code runs in a page and in a Worker. A Worker has no version map, so the page gives it the addresses that it needs.
 const base = new URL("./", import.meta.url);
 const versions = globalThis.__chdashAssetVersions || {};
 

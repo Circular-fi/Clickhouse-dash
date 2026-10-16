@@ -1,21 +1,31 @@
 #pragma once
 
-// The usage of the MCP keys (docs/mcp.md, "Usage of a key"): what ChDash saw of the requests of each key, counted where a
-// call writes its audit line (Server::handle_mcp_post). One entry for each key that was used:
-// - its requests in six tiers of buckets, one for the step of each window: by the minute (the last hour), by 5 minutes (6 hours), by
-//   15 minutes (24 hours), by 3 hours (7 days), by 12 hours (30 days) and by the UTC day (mcp.usage.retention_days). A tier is kept
-//   only when the retention reaches its window, and a window reads its own tier: nothing is summed to a larger step. A bucket holds
-//   cells: the requests that share a type (a tool call, a protocol request, a 429, a refusal), a client (the name that it gave), a
-//   method (the tool, or the JSON-RPC method) and a result, with their count, time, rows and bytes. Everything that is shown is summed
-//   from the cells;
-// - its clients: the clientInfo of `initialize` and the User-Agent of the requests, kept for their life apart from the cells.
-// A deleted key keeps its entry until its last day is older than the retention. Never SQL, never data, never a secret, never an address.
+// The usage of the MCP keys (docs/mcp.md, "Usage of a key"). It shows what ChDash saw of the requests of each key.
+// ChDash counts a request where the call writes its audit line (Server::handle_mcp_post).
+// ChDash makes one entry for each key that was used:
+// - Its requests are in six tiers of buckets, one tier for each window step:
+//   by the minute (the last hour), by 5 minutes (6 hours), by 15 minutes (24 hours),
+//   by 3 hours (7 days), by 12 hours (30 days) and by the UTC day (mcp.usage.retention_days).
+//   A tier is kept only when the retention reaches its window.
+//   A window reads its own tier. ChDash never sums a tier to a larger step.
+//   A bucket holds cells.
+//   A cell holds the requests that share one type, one client, one method and one result.
+//   The types are a tool call, a protocol request, a 429 and a refusal.
+//   A cell has its count, time, rows and bytes.
+//   Everything that is shown is summed from the cells.
+// - Its clients: the clientInfo of `initialize` and the User-Agent of the requests.
+//   ChDash keeps them for their life, apart from the cells.
+// A deleted key keeps its entry until its last day is older than the retention.
+// An entry never holds SQL, data, a secret or an address.
 //
-// Each ChDash (an instance) counts its own state, and a store (mcp_usage_store.hpp) keeps it: the files mode writes it every minute when
-// something changed and at the stop, in a directory that several instances can share, one file for each instance. The other instances'
-// files are read again in the background, never in a request, and their states are swapped in whole: an answer sums this instance and the
-// others, by cell, and the instance that a cell comes from is a dimension of the overview. A file of this instance that is not valid
-// stops the start and is never rewritten; a file of another instance that is not valid is skipped and listed with its reason.
+// Each ChDash instance counts its own state. A store (mcp_usage_store.hpp) keeps that state.
+// In the files mode, the store writes the state every minute when something changed, and at the stop.
+// The store uses a directory that several instances can share. Each instance has one file in it.
+// The store reads the files of the other instances again in the background. It never reads them in a request.
+// ChDash swaps in each state as a whole. An answer sums this instance and the others, by cell.
+// The instance of a cell is a dimension of the overview.
+// A file of this instance that is not valid stops the start. ChDash never rewrites that file.
+// A file of another instance that is not valid is skipped. The answer lists it with its reason.
 
 #include "mcp_keys.hpp"
 
@@ -37,7 +47,7 @@ class McpUsageStore;
 
 inline constexpr int kMcpUsageFileVersion = 1;
 inline constexpr int64_t kMcpUsageMaxRetentionDays = 365;
-// The tiers of an entry: m1, m5, m15, h3, h12 and d1 (the steps of 1 minute, 5 minutes, 15 minutes, 3 hours, 12 hours and 1 day).
+// The tiers of an entry: m1, m5, m15, h3, h12 and d1. They are the steps of 1 minute, 5 minutes, 15 minutes, 3 hours, 12 hours and 1 day.
 inline constexpr size_t kMcpUsageTiers = 6;
 // The values of each filter of the overview.
 inline constexpr size_t kMcpUsageOverviewMaxValues = 20;
@@ -60,8 +70,9 @@ struct McpUsageEvent {
   std::string_view key_source;  // config or ui
   int64_t at = 0;               // Unix seconds
   McpUsageKind kind = McpUsageKind::Request;
-  // Request: the JSON-RPC method of the message, empty when it could not be read. It is counted when it is one of the methods
-  // of the protocol (mcp_usage_state.cpp) and as "other" otherwise: a text that a client chose is never kept.
+  // Request: the JSON-RPC method of the message. It is empty when ChDash cannot read it.
+  // ChDash counts the method when it is one of the methods of the protocol (mcp_usage_state.cpp).
+  // Otherwise, it counts the method as "other". ChDash never keeps a text that a client chose.
   std::string_view method;
   std::string_view tool;        // ToolCall: the name of the tool
   std::string_view status;      // ok, the error code of the tool, rpc_error_<n>, or <http status>_<reason>
@@ -86,8 +97,8 @@ McpUsageKeyRef mcp_usage_key_ref(const McpKey& key);
 bool mcp_valid_key_id(std::string_view id);
 
 struct McpUsageOptions {
-  // Where the state of this instance is kept and the states of the others are read. Null: nothing outlives the process and no other
-  // instance is read (the unit tests; the server always has one when the usage is on).
+  // The store that keeps the state of this instance and reads the states of the others.
+  // Null: nothing outlives the process, and no other instance is read. Null is for the unit tests.
   std::shared_ptr<McpUsageStore> store;
   // The name of this instance when there is no store; with a store, the name of the store.
   std::string instance = "local";
@@ -97,9 +108,10 @@ struct McpUsageOptions {
   size_t max_clients = 8;       // clients of a key; the one seen least recently goes first
 };
 
-// A window of the answers, read from the tier of its step. Its last point is the one that holds `now`, and its steps are aligned on
-// UTC: 1h is 60 points by the minute, 6h 72 points by 5 minutes, 24h 96 points by 15 minutes, 7d 56 points by 3 hours, 30d 60 points by
-// 12 hours, and 90d and 365d are the last days, today included, by the UTC day.
+// A window of the answers reads the tier of its step. Its last point holds `now`. Its steps are aligned on UTC.
+// 1h is 60 points by the minute. 6h is 72 points by 5 minutes. 24h is 96 points by 15 minutes.
+// 7d is 56 points by 3 hours. 30d is 60 points by 12 hours.
+// 90d and 365d are the last days, today included, by the UTC day.
 struct McpUsageWindow {
   std::string name;
   int64_t from = 0;  // the start of its first bucket
@@ -113,15 +125,16 @@ std::vector<std::string> mcp_usage_windows(int64_t retention_days);
 std::string mcp_usage_default_window(int64_t retention_days);
 std::optional<McpUsageWindow> mcp_usage_window(std::string_view name, int64_t retention_days, int64_t now);
 
-// Printable ASCII (another byte is "?"), the spaces at both ends removed, at most `max_bytes`.
+// Keep printable ASCII only. Another byte becomes "?". Remove the spaces at both ends. The result has at most `max_bytes` bytes.
 std::string mcp_usage_clean(std::string_view text, size_t max_bytes);
 
-// The rule of the name of an instance, and of the value of the filter `instance`: [A-Za-z0-9._-], 1 to 64 bytes.
+// The rule for the name of an instance, and for the value of the filter `instance`: [A-Za-z0-9._-], 1 to 64 bytes.
 bool mcp_valid_usage_instance(std::string_view instance);
 
-// An instance that an answer reads, and how it went. `ok`: its state is read (this instance: its own); `skipped`: its file was not valid (the
-// reason says why: it is never read); `conflict`: this instance cannot write its file because another process writes the same name (its
-// counts stay in memory).
+// An instance that an answer reads, and the result of the read.
+// `ok`: ChDash reads its state. For this instance, the state is its own.
+// `skipped`: its file is not valid. The reason says why. ChDash never reads the file.
+// `conflict`: this instance cannot write its file. Another process writes the same name. The counts stay in memory.
 struct McpUsageInstance {
   std::string instance;
   int64_t written_at = 0;  // Unix seconds, when its file was last written (0: not yet)
@@ -129,16 +142,16 @@ struct McpUsageInstance {
   std::string reason;
 };
 
-// The parameters of GET /api/mcp/usage/overview (its window apart): what the series is grouped by, the metric that ranks its groups, and the
-// filters. A value of a filter keeps the requests that have it; the values of a dimension are OR, the dimensions are AND.
+// The parameters of GET /api/mcp/usage/overview, apart from its window. They set the groups of the series, the metric that ranks the groups and the filters.
+// A value of a filter keeps the requests that have it. The values of one dimension combine with OR. The dimensions combine with AND.
 struct McpUsageOverviewQuery {
   std::string group = "method";  // key, method, client, result, type or instance
-  // The metric whose total over the window ranks the groups of the series when its dimension is not filtered (the 8 largest are shown, the others
-  // are summed in `rest`): requests, errors, refused (the 429 and the refusals before the reading), calls or bytes.
+  // The metric ranks the groups of the series. Its total is over the window. It ranks only when its dimension is not filtered.
+  // The 8 largest groups are shown. The others are summed in `rest`. The metrics are: requests, errors, refused (the 429 and the refusals before the read), calls or bytes.
   std::string order = "requests";
-  // More metrics to rank by, in the same read: the series then has `rankings`, one member for each of them (in this order), made as `groups` and
-  // `rest` are for `order`. A page that draws a chart for each metric asks for all of them at once. A value that is repeated counts once, at most
-  // 5 (the orders that there are). Empty: no `rankings`, and the answer is the one of `order` alone.
+  // More metrics to rank by, from the same read. The series then has `rankings`, with one member for each metric, in this order.
+  // Each member has `groups` and `rest`, as `order` has. A page that draws a chart for each metric asks for all of them at once.
+  // A repeated value counts once. There are 5 orders at most. An empty list gives no `rankings`, and the answer is the one of `order` alone.
   std::vector<std::string> orders;
   std::vector<std::string> keys;       // the ids of keys
   std::vector<std::string> methods;    // a tool or a method of the protocol: [A-Za-z0-9_/]{1,64}
@@ -146,27 +159,26 @@ struct McpUsageOverviewQuery {
   std::vector<std::string> instances;  // an instance: [A-Za-z0-9._-]{1,64}
   std::vector<std::string> results;    // [a-z0-9_]{1,64}
   std::vector<std::string> types;      // call, request, limited or rejected
-  // For a caller that is not a page (the tools of MCP): the rows of each list (0: kMcpUsageFacetRows; the values that were chosen are always
-  // kept), and whether the series is made (it is the largest part of an answer).
+  // For a caller that is not a page, such as the MCP tools: the rows of each list. 0 means kMcpUsageFacetRows. The chosen values are always kept.
+  // Also set whether the series is made. The series is the largest part of an answer.
   size_t limit = 0;
   bool series = true;
 };
 
-// What the details of one key read besides its window: the instances that it sums (none: all of them), the rows of each list (0: all), and
-// whether the series is made.
+// The details of one key read, apart from its window. They set: the instances that it sums (none: all of them), the rows of each list (0: all), and whether the series is made.
 struct McpUsageDetailQuery {
   std::vector<std::string> instances;
   size_t limit = 0;
   bool series = true;
 };
 
-// The rules of the parameters of the overview: a value that is repeated counts once, then each one is checked. Nullopt when
-// they hold; else the field and the reason (`invalid`, or `too_many` past 20 values, 5 for `orders`) of the 400.
+// The rules for the parameters of the overview. A repeated value counts once. Then ChDash checks each value.
+// The result is nullopt when the rules hold. Otherwise, it gives the field and the reason of the 400: `invalid`, or `too_many` past 20 values (5 for `orders`).
 std::optional<McpValidationError> mcp_usage_overview_check(McpUsageOverviewQuery* query);
 
 class McpUsage {
 public:
-  // Reads the state of this instance from the store (nothing stored yet is no usage yet). Throws std::runtime_error when it is not valid.
+  // Reads the state of this instance from the store. Nothing stored yet means no usage yet. Throws std::runtime_error when the state is not valid.
   McpUsage(McpUsageOptions options, int64_t now);
   McpUsage(const McpUsage&) = delete;
   McpUsage& operator=(const McpUsage&) = delete;
@@ -174,58 +186,58 @@ public:
   // The name of this instance.
   const std::string& instance() const { return instance_; }
   int64_t retention_days() const { return options_.retention_days; }
-  // Since when the usage is counted: the earliest start of counting of the instances that are read (the first start of each one with its
-  // file, or the start of the process without one).
+  // The start of the count: the earliest start of the count of the instances that are read.
+  // For each instance, that is the first start with its file. Without a file, it is the start of the process.
   int64_t since() const;
 
-  // At the start: the entry of a key that is gone is deleted from now on; a key of the configuration that is back takes
-  // its entry again. Only the state of this instance changes.
+  // At the start, the entry of a key that is gone is deleted. A key of the configuration that is back gets its entry again. Only the state of this instance changes.
   void sync_live_keys(const std::vector<McpUsageKeyRef>& live, int64_t now);
   void record(const McpUsageEvent& event);
-  // The key is deleted: its entry stays until its last day is older than the retention. A key that was never used gets an
-  // empty entry for 2 hours, so a call that was running when it was deleted is counted as deleted.
+  // When the key is deleted, its entry stays until its last day is older than the retention.
+  // A key that was never used gets an empty entry for 2 hours. So, a call that is in progress when the key is deleted counts as deleted.
   void mark_deleted(const McpUsageKeyRef& key, int64_t now);
 
-  // When each key was last used, on any instance that is read.
+  // The last use of each key, on any instance that is read.
   std::unordered_map<std::string, int64_t> last_used_all() const;
-  // The key as an entry names it (a deleted key too, a key that only another instance saw too); nullopt when none has it.
+  // The key as an entry names it. A deleted key counts too, and so does a key that only another instance saw. The result is nullopt when no entry has the key.
   std::optional<McpUsageKeyRef> entry_key(const std::string& id) const;
 
-  // The instances that the answers read: this one first, then the others by name.
+  // The instances that the answers read. This instance comes first, then the others by name.
   std::vector<McpUsageInstance> instances() const;
 
-  // GET /api/mcp/usage: the live keys in this order (zeros for a key that was not used), then the keys that are not live here and that still
-  // have usage: the deleted ones, the last deletion first, then the ones that only another instance knows, the last use first. Every
-  // instance is summed.
+  // GET /api/mcp/usage. The list has the live keys first, in this order. A key that was not used has zeros.
+  // Then come the keys that are not live here, but that still have usage.
+  // The deleted keys come first, the last deletion first. Then come the keys that only another instance knows, the last use first.
+  // The answer sums every instance.
   void write_list(McpJsonWriter& w, const std::vector<McpUsageKeyRef>& live, const McpUsageWindow& window, int64_t now) const;
-  // GET /api/mcp/keys/<id>/usage. `live` is the key when it exists. False when the key exists nowhere (404).
+  // GET /api/mcp/keys/<id>/usage. `live` is the key when it exists. The result is false when the key exists nowhere (404).
   bool write_detail(McpJsonWriter& w, const std::string& id, const McpUsageKeyRef* live, const McpUsageWindow& window, int64_t now,
                     const McpUsageDetailQuery& query = {}) const;
-  // GET /api/mcp/usage/overview: the requests of every key in a window, cut by the filters of `query` (checked by
-  // mcp_usage_overview_check): the totals and the series with all of them, and each facet (the keys, the methods, the clients, the
-  // instances, the results, the types) with all of them but its own. The series ranks its groups by `query.order`, and once more by each of
-  // `query.orders` (`rankings`) from the same counts: the cells are walked once. The clients are those of the cells of the window; their versions
-  // and their last sight come from the clients that the keys of the filter saw. `live` names the keys that exist. One entry at a time under the
-  // lock, as save() does.
+  // GET /api/mcp/usage/overview. It gives the requests of every key in a window. The filters of `query` cut them. mcp_usage_overview_check checks the filters.
+  // The answer has the totals and the series with all of them. It has each facet too: the keys, the methods, the clients, the instances, the results and the types.
+  // Each facet has all the values except its own. The series ranks its groups by `query.order`.
+  // It ranks them once more by each of `query.orders` (`rankings`), from the same counts. The cells are walked once.
+  // The clients are those of the cells of the window. Their versions and their last sight are taken from the clients that the keys of the filter saw.
+  // `live` names the keys that exist. The function takes one entry at a time under the lock, as save() does.
   void write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& query, const std::vector<McpUsageKeyRef>& live,
                       const McpUsageWindow& window, int64_t now) const;
 
-  // Drops what is older than the retention, then writes the state of this instance when something changed. False when the write failed
-  // or when another process writes the same instance: the next save tries again.
+  // Removes what is older than the retention. Then writes the state of this instance when something changed.
+  // The result is false when the write failed, or when another process writes the same instance. The next save tries again.
   bool save(int64_t now);
-  // save() when the last one is a minute old (5 minutes when the state is larger than 8 MiB).
+  // Calls save() when the last save is a minute old. The limit is 5 minutes when the state is larger than 8 MiB.
   bool save_if_due(int64_t now);
-  // Reads again the files of the other instances that changed, and removes the file of an instance that is gone. Never in a request.
+  // Reads again the files of the other instances that changed. It removes the file of an instance that is gone. Never call it in a request.
   void refresh_others(int64_t now);
-  // refresh_others() when the last one is a minute old.
+  // Calls refresh_others() when the last refresh is a minute old.
   void refresh_if_due(int64_t now);
-  // What the background loop calls: save_if_due() and refresh_if_due().
+  // The background loop calls save_if_due() and refresh_if_due().
   void tick(int64_t now);
-  // Stops a refresh that is running and the next ones (the stop of the server): the file that it reads is left as it was.
+  // Stops a refresh that is in progress, and the next ones, at the stop of the server. The file that the refresh reads stays as it was.
   void cancel() { cancel_.store(true, std::memory_order_relaxed); }
 
-  // The requests of one type, one client, one method and one result, in one bucket. `key` is kind << 36 | client << 24 | method << 12 |
-  // result: the client is an id of the ClientNames, the method and the result are ids of the Names.
+  // The requests of one type, one client, one method and one result, in one bucket.
+  // `key` is kind << 36 | client << 24 | method << 12 | result. The client is an id of the ClientNames. The method and the result are ids of the Names.
   struct Cell {
     uint64_t key = 0;
     uint64_t count = 0;
@@ -234,7 +246,7 @@ public:
     uint64_t rows = 0;
     uint64_t bytes = 0;
   };
-  // The nine totals of some cells (add_to_counters in mcp_usage_state.cpp is the one place that says what each one counts).
+  // The nine totals of some cells. The function add_to_counters in mcp_usage_state.cpp is the only place that defines what each total counts.
   struct Counters {
     uint64_t requests = 0;
     uint64_t calls = 0;
@@ -264,33 +276,36 @@ public:
     int64_t last_used = 0;
     int64_t deleted_at = 0;  // 0: the key exists
     std::vector<Client> clients;
-    // By start, one array for each tier: m1 the last 60 minutes, m5 the last 72 steps of 5 minutes, m15 the last 96 steps of 15
-    // minutes, h3 the last 56 steps of 3 hours (kept when the retention is 7 days or more), h12 the last 60 steps of 12 hours (30
-    // days or more) and d1 the last retention_days days.
+    // Ordered by start. There is one array for each tier.
+    // m1 has the last 60 minutes. m5 has the last 72 steps of 5 minutes. m15 has the last 96 steps of 15 minutes.
+    // h3 has the last 56 steps of 3 hours. ChDash keeps h3 when the retention is 7 days or more.
+    // h12 has the last 60 steps of 12 hours, when the retention is 30 days or more. d1 has the last retention_days days.
     std::array<std::vector<Bucket>, kMcpUsageTiers> tiers;
-    // The ids of the clients that its cells use (not other and unknown), at most 16: a key does not use more over its retention.
-    // Made again from the cells when the state is read and when a day of d1 goes.
+    // The ids of the clients that its cells use. The ids are not other and not unknown. There are at most 16, because a key does not use more over its retention.
+    // ChDash makes the list again from the cells when the state is read, and when a day of d1 is removed.
     std::vector<uint16_t> client_ids;
   };
-  // The names of the methods and of the results: an id of 12 bits in the cells. The fixed names come first (0 other, 1 ok, the
-  // methods of the protocol, invalid, unread), then the tools and the results that were counted. `by_id` grows: it is never
-  // read outside the lock.
+  // The names of the methods and of the results. Each id has 12 bits in the cells.
+  // The fixed names come first: 0 other, 1 ok, the methods of the protocol, invalid and unread.
+  // Then come the tools and the results that were counted. `by_id` grows. Nothing reads it outside the lock.
   struct Names {
     std::vector<std::string> by_id;
     std::unordered_map<std::string, uint16_t> ids;
     Names();
     uint16_t intern(std::string_view name);
   };
-  // The names of the clients, apart from the Names (a tool is no client): an id of 12 bits in the cells. 0 is other (what a key counts
-  // under past its 16 names, and when the table is full), 1 is unknown (no name and no User-Agent), then the names that were counted.
-  // It grows like Names, and is made again from the cells at the start.
+  // The names of the clients, apart from the Names. A tool is no client. Each id has 12 bits in the cells.
+  // 0 is other. A key counts a client as other past its 16 names, and when the table is full.
+  // 1 is unknown: there is no name and no User-Agent. Then come the names that were counted.
+  // It grows like Names. ChDash makes it again from the cells at the start.
   struct ClientNames {
     std::vector<std::string> by_id;
     std::unordered_map<std::string, uint16_t> ids;
     ClientNames();
     uint16_t intern(std::string_view name);
   };
-  // The state of one instance: its own while it counts, or one that a store read (then it never changes: it is swapped in whole).
+  // The state of one instance. While this instance counts, the state is its own. Otherwise, the state is one that a store read.
+  // A read state never changes. ChDash swaps it in as a whole.
   struct State {
     int64_t since = 0;
     int64_t written_at = 0;  // the header of the file that it was read from (0: it was not)
@@ -299,7 +314,7 @@ public:
     std::unordered_map<std::string, Entry> entries;
     size_t cells = 0;
   };
-  // What a store says of another instance: its state, or why that was not read.
+  // What a store says about another instance: its state, or the reason that it was not read.
   struct Other {
     std::string instance;
     int64_t written_at = 0;
@@ -318,7 +333,7 @@ private:
   std::shared_ptr<McpUsageStore> store_;
   std::string instance_;
   int64_t since_ = 0;
-  // write_mu_ makes the saves one at a time; mu_ guards state_ and is never held while the file is written.
+  // write_mu_ lets one save run at a time. mu_ guards state_. ChDash never holds mu_ while it writes the file.
   std::mutex write_mu_;
   mutable std::mutex mu_;
   State state_;
@@ -328,7 +343,7 @@ private:
   int64_t written_at_ = 0;   // the last time that the state of this instance was written, or read
   bool conflict_ = false;    // the last save found another process that writes this instance
   std::string conflict_reason_;
-  // The other instances: read by the background loop, swapped in whole under others_mu_, never changed after.
+  // The other instances. The background loop reads them. ChDash swaps them in as a whole under others_mu_. They never change after the swap.
   std::mutex refresh_mu_;
   int64_t last_refresh_ = 0;
   mutable std::mutex others_mu_;

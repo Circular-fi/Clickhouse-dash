@@ -1,12 +1,12 @@
 import { writeJson } from './review.js';
 
-// A request that the page's own code aborts on purpose is not a failure: a read that a newer one superseded (a range,
-// filter, table or panel changed while it still ran), one that a closed view or a host change made useless
-// (util.latest, app_util.js). installObservers() watches fetch() in the page: when a signal given to a fetch aborts
-// while the fetch is still waiting for its answer, the URL goes to failedRequests.voluntaryAborts. A failed request is
-// excused only when it is an abort of such a URL, once per abort. Every other failed request is still a failure: an
-// abort that came from a navigation, from a timeout, from a request that nobody superseded, and an abort of the Query
-// result stream (which is read after its answer began).
+// A request that the page code aborts on purpose is not a failure. There are two kinds of such a request.
+// The first kind is a read that a newer read superseded (a range, filter, table or panel changed while it ran).
+// The second kind is a read that a closed view or a host change made useless (util.latest, app_util.js).
+// installObservers() watches fetch() in the page. When a signal given to a fetch aborts while the fetch still waits for its answer, the URL goes to failedRequests.voluntaryAborts.
+// A failed request is excused only when it is an abort of such a URL, once per abort. Every other failed request is still a failure.
+// Examples of failures are an abort from a navigation, an abort from a timeout, and an abort of a request that nobody superseded.
+// An abort of the Query result stream is also a failure, because the stream is read after its answer began.
 export function unexpectedFailures(failedRequests) {
   const voluntary = [...(failedRequests.voluntaryAborts || [])];
   return failedRequests.filter((request) => {
@@ -18,8 +18,8 @@ export function unexpectedFailures(failedRequests) {
   });
 }
 
-// The request each Observability view runs as its search: its first run
-// when it shows, and its primary button's.
+// Each Observability view runs one request as its search. The view runs it when the view shows,
+// and again when its primary button runs.
 export const IS_RUN = {
   traces: (url) => /\/api\/traces\/search/.test(url),
   logs: (url) => /\/api\/logs\/(search|histogram)/.test(url),
@@ -30,9 +30,9 @@ export function installObservers(page) {
   const consoleErrors = [];
   const pageErrors = [];
   const failedRequests = [];
-  // Not enumerable: a spec that compares failedRequests with [] does not see it.
+  // This property is not enumerable. A spec that compares failedRequests with [] does not see it.
   Object.defineProperty(failedRequests, 'voluntaryAborts', { value: [], enumerable: false });
-  // Quiet when the page is already closed: the binding only matters while the test runs.
+  // The binding does nothing when the page is already closed. The binding matters only while the test runs.
   page.exposeFunction('__chdashVoluntaryAbort', (url) => failedRequests.voluntaryAborts.push(url)).catch(() => {});
   page.addInitScript(() => {
     if (window.__chdashFetchWatched) return;

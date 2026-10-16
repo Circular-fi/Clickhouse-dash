@@ -65,7 +65,11 @@ std::string tool_list_databases(Ctx& ctx, const rapidjson::Value& args) {
     w.StartObject();
     w.Key("name"); put(w, name);
     w.Key("engine"); put(w, cell_text(row[1]));
+    // A comment is text of the users of the database (contract 5.2).
+    w.Key("untrusted");
+    w.StartObject();
     w.Key("comment"); put(w, cell_text(row[2]));
+    w.EndObject();
     w.EndObject();
     ++count;
   }
@@ -82,9 +86,8 @@ std::string tool_list_tables(Ctx& ctx, const rapidjson::Value& args) {
   resolve_host(ctx, args);
   const auto database = opt_string(args, "database", 256);
   const std::string filter = opt_string(args, "filter", 256).value_or("");
-  if (database && !database->empty() && !mcp_scope_database_visible(ctx.key.databases, *database)) {
-    fail("database_not_allowed", "this key cannot see the database " + *database);
-  }
+  // A database out of the scope of the key looks like a database that does not exist: an empty list (contract 3.7).
+  const bool out_of_scope = database && !database->empty() && !mcp_scope_database_visible(ctx.key.databases, *database);
   std::string sql = "SELECT database, name, engine, total_rows, total_bytes, comment FROM system.tables WHERE NOT is_temporary";
   if (database && !database->empty()) {
     sql += " AND database = " + sql::quote_string(*database);
@@ -94,7 +97,7 @@ std::string tool_list_tables(Ctx& ctx, const rapidjson::Value& args) {
   }
   if (!filter.empty()) sql += " AND name LIKE " + sql::quote_string(mcp_glob_to_like(filter));
   sql += " ORDER BY database, name";
-  const McpDbResult res = run(ctx, sql, ctx.schema_limits);
+  const McpDbResult res = out_of_scope ? McpDbResult{} : run(ctx, sql, ctx.schema_limits);
 
   rapidjson::StringBuffer sb;
   Writer w(sb);
@@ -120,7 +123,10 @@ std::string tool_list_tables(Ctx& ctx, const rapidjson::Value& args) {
     w.Key("engine"); put(w, cell_text(row[2]));
     w.Key("total_rows"); put_cell(w, row[3]);
     w.Key("total_bytes"); put_cell(w, row[4]);
+    w.Key("untrusted");
+    w.StartObject();
     w.Key("comment"); put(w, cell_text(row[5]));
+    w.EndObject();
     w.EndObject();
     ++count;
   }
@@ -147,7 +153,7 @@ std::string tool_describe_table(Ctx& ctx, const rapidjson::Value& args) {
       "SELECT engine, create_table_query, partition_key, sorting_key, primary_key, sampling_key, total_rows, total_bytes, comment "
       "FROM system.tables WHERE " + describe_table_filter(database, table, "name") + " AND NOT is_temporary LIMIT 1",
       ctx.schema_limits);
-  if (info.rows.empty() || info.rows[0].size() < 9) fail("table_not_found", "the table " + database + "." + table + " does not exist or is not visible");
+  if (info.rows.empty() || info.rows[0].size() < 9) fail("not_found", "the table " + database + "." + table + " does not exist or is not visible");
   const McpDbResult columns = run(ctx,
       "SELECT name, type, default_kind, default_expression, comment, is_in_partition_key, is_in_sorting_key, "
       "is_in_primary_key, is_in_sampling_key FROM system.columns WHERE " + describe_table_filter(database, table, "table") +
@@ -165,17 +171,21 @@ std::string tool_describe_table(Ctx& ctx, const rapidjson::Value& args) {
   std::string create = cell_text(row[1]);
   const bool create_cut = create.size() > kMcpCreateQueryMaxBytes;
   if (create_cut) create.resize(kMcpCreateQueryMaxBytes);
-  w.Key("create_table_query"); put(w, create);
   if (create_cut) {
     w.Key("create_table_query_truncated"); w.Bool(true);
   }
+  // The CREATE statement and the comment hold text of the users of the database (contract 5.2).
+  w.Key("untrusted");
+  w.StartObject();
+  w.Key("create_table_query"); put(w, create);
+  w.Key("comment"); put(w, cell_text(row[8]));
+  w.EndObject();
   w.Key("partition_key"); put(w, cell_text(row[2]));
   w.Key("sorting_key"); put(w, cell_text(row[3]));
   w.Key("primary_key"); put(w, cell_text(row[4]));
   w.Key("sampling_key"); put(w, cell_text(row[5]));
   w.Key("total_rows"); put_cell(w, row[6]);
   w.Key("total_bytes"); put_cell(w, row[7]);
-  w.Key("comment"); put(w, cell_text(row[8]));
   w.Key("columns");
   w.StartArray();
   for (const auto& column : columns.rows) {
@@ -184,8 +194,11 @@ std::string tool_describe_table(Ctx& ctx, const rapidjson::Value& args) {
     w.Key("name"); put(w, cell_text(column[0]));
     w.Key("type"); put(w, cell_text(column[1]));
     w.Key("default_kind"); put(w, cell_text(column[2]));
+    w.Key("untrusted");
+    w.StartObject();
     w.Key("default_expression"); put(w, cell_text(column[3]));
     w.Key("comment"); put(w, cell_text(column[4]));
+    w.EndObject();
     w.Key("in_partition_key"); w.Bool(cell_u64(column[5]) != 0);
     w.Key("in_sorting_key"); w.Bool(cell_u64(column[6]) != 0);
     w.Key("in_primary_key"); w.Bool(cell_u64(column[7]) != 0);

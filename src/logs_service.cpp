@@ -60,7 +60,7 @@ TextSearchInfo text_search_of(const LogsQuery& q) {
   return info;
 }
 
-// Substring search of Body scans it, so a wide range is refused.
+// A substring search of Body scans the whole column. So the service refuses a wide range.
 std::optional<ApiError> substring_range_rejected(const LogsQuery& q) {
   if (q.text_search && q.body_mode == "substring" && q.end_ms - q.start_ms > kSubstringMaxRangeMs) {
     return make_error(400, "logs_substring_range",
@@ -128,7 +128,7 @@ std::optional<ApiError> LogsService::open(const HostSpec& host, Opened* out) con
     return error_from_clickhouse(e, "logs", "logs_schema_failed");
   }
   if (!out->schema.exists) {
-    // A table that the system user may not read is absent from system.columns: say why, not "missing".
+    // A table that the system user cannot read is absent from system.columns. Give the reason, not "missing".
     if (const auto grant = missing_select_grant(*out->db, logs.database, logs.table)) {
       const auto user = parse_clickhouse_uri(host.system_uri, nullptr);
       return not_granted_error(503, "logs_table_not_granted", user ? user->user : std::string(), *grant,
@@ -164,7 +164,7 @@ Result<SearchAnswer> LogsService::search(const RequestContext&, const HostSpec& 
   if (has_cursor && !parse_cursor(request.cursor, &cursor)) {
     return Out::fail(make_error(400, "invalid_logs_cursor", "cursor must be <timestamp_ns>-<tiebreak>."));
   }
-  // No live tail: a former client's after=<row id> is ignored (a page).
+  // There is no live tail. The service ignores the after=<row id> of a former client (a page).
 
   SearchAnswer answer;
   answer.source_host_id = source_host_id;
@@ -195,9 +195,10 @@ Result<SearchAnswer> LogsService::search(const RequestContext&, const HostSpec& 
       const int64_t lo_ns = std::max<int64_t>(range_lo_ns, hi_ns - size_s * int64_t{1000000000} + 1);
       const int64_t window_started = clock_.steady_ms();
       const size_t before = rows.size();
-      // The first window may use the whole limit of a query; the next ones what is left of the search budget (at least 1 s): a search never
-      // runs past its budget by more than one second. A window that runs out of time ends the search with the rows that it has
-      // (budget_exhausted and a cursor), and fails only when there are none.
+      // The first window can use the whole limit of a query. The next windows use what is left of the search budget (at least 1 s).
+      // A search never runs past its budget by more than one second.
+      // A window that runs out of time ends the search. The search returns the rows that it has, with budget_exhausted and a cursor.
+      // The search fails only when there are no rows.
       const int window_seconds =
           first ? kMaxExecutionSeconds : static_cast<int>(std::max<int64_t>(1, (kSearchBudgetMs - elapsed(started) + 999) / 1000));
       const SqlStatement statement =
@@ -207,7 +208,8 @@ Result<SearchAnswer> LogsService::search(const RequestContext&, const HostSpec& 
         read_rows(*o.db, statement, &rows);
       } catch (const std::exception& e) {
         if (first || rows.empty() || classify_clickhouse_error(e).kind != ChErrorKind::Timeout) throw;
-        // A partial window is dropped (a keyset page never skips a row): the cursor continues from the end of the last whole one.
+        // The service drops a partial window. A keyset page never skips a row.
+        // The cursor continues from the end of the last whole window.
         rows.resize(before);
         budget_hit = true;
         break;
@@ -224,8 +226,8 @@ Result<SearchAnswer> LogsService::search(const RequestContext&, const HostSpec& 
     return Out::fail(error_from_clickhouse(e, "logs", "logs_search_failed"));
   }
 
-  // Next page: after the last row when the page is full, else from where the windows stopped (rows at scanned_lo_ns were read: continue
-  // strictly below).
+  // The next page starts after the last row when the page is full. Otherwise, it starts where the windows stopped.
+  // Rows at scanned_lo_ns were read, so continue strictly below.
   if (!exhausted) {
     answer.next_cursor = rows.size() >= limit ? cursor_text(Cursor{rows.back().ts_ns, rows.back().tie}) : cursor_text(Cursor{scanned_lo_ns, 0});
   }
@@ -252,8 +254,8 @@ Result<HistogramAnswer> LogsService::histogram(const RequestContext&, const Host
   if (auto problem = substring_range_rejected(q)) return Out::fail(std::move(*problem));
   const int target = clamp_or(request.buckets, 80, 10, 300);
   const int64_t bucket_ms = choose_bucket_ms(q.end_ms - q.start_ms, target);
-  // Buckets lie on a grid anchored at bucket_origin_ms (the browser's local midnight), as in the Traces analytics; only origin mod size
-  // matters.
+  // The buckets lie on a grid that starts at bucket_origin_ms (the local midnight of the browser).
+  // It is the same grid as in the Traces analytics. Only origin mod size matters.
   int64_t origin = request.bucket_origin_ms.value_or(0);
   origin = ((origin % bucket_ms) + bucket_ms) % bucket_ms;
 
@@ -380,7 +382,8 @@ Result<PatternsAnswer> LogsService::patterns(const RequestContext&, const HostSp
     size_t fetch_limit = sample_target;
     uint64_t block_rate = 0;
     if (total > sample_target) {
-      // A deterministic block sample: only the filter columns are read for every row, and Body for the granules that hold a picked block.
+      // This is a deterministic block sample. Only the filter columns are read for every row.
+      // Body is read for the granules that hold a picked block.
       answer.sample_method = "block_hash";
       rate_ppm = sample_rate_ppm(total, sample_target);
       block_rate = rate_ppm;
@@ -403,7 +406,7 @@ Result<PatternsAnswer> LogsService::patterns(const RequestContext&, const HostSp
     o.db->invalidate();
     return Out::fail(error_from_clickhouse(e, "logs", "logs_patterns_failed"));
   }
-  // An overshooting block sample is thinned evenly to the target size.
+  // A block sample that is too large is thinned evenly to the target size.
   if (sample.size() > sample_target) {
     std::vector<SampleRow> thinned;
     thinned.reserve(sample_target);
@@ -414,7 +417,8 @@ Result<PatternsAnswer> LogsService::patterns(const RequestContext&, const HostSp
 
   const int64_t mine_started = clock_.steady_ms();
   const int64_t span_ms = std::max<int64_t>(1, q.end_ms - q.start_ms);
-  // The mining is CPU on a thread of the server: it stops at its budget and says so (partial).
+  // The pattern extraction uses the CPU on a thread of the server.
+  // It stops at its budget and reports this (partial).
   answer.mined = mine_patterns(sample, q.start_ms, span_ms, sparkline_buckets, max_patterns, total, [&] { return elapsed(mine_started) > kMiningBudgetMs; });
   answer.mine_ms = elapsed(mine_started);
 
@@ -486,7 +490,7 @@ Result<FacetKeysAnswer> LogsService::facets(const RequestContext&, const HostSpe
   std::string shape;
   for (const auto& scope : answer.scopes) shape += scope + ",";
   for (const auto& column : answer.columns) shape += column + ",";
-  // The client's text (the filters) enters the key as a digest.
+  // The text of the client (the filters) enters the key as a digest.
   const std::string cache_key = source_host_id + '\0' + o.table + '\0' + std::to_string(window.start_ms) + '\0' + std::to_string(window.end_ms) +
                                 '\0' + shape + '\0' + sha256_hex(q.where + '\0' + q.params.key());
   auto cached = caches_.facet_keys.get(cache_key, [&](LogFacetKeys& value, std::string& code, std::string& message) {
@@ -498,14 +502,14 @@ Result<FacetKeysAnswer> LogsService::facets(const RequestContext&, const HostSpe
             for (size_t row = 0; row < block.GetRowCount(); ++row) {
               value.sampled = to_u64(ch_block_text_at(block, 0, row));
               LogFacetKeys::Key key{ch_block_text_at(block, 1, row), ch_block_text_at(block, 2, row), to_u64(ch_block_text_at(block, 3, row))};
-              // A column empty on every sampled record is not a field.
+              // A column that is empty in every sampled record is not a field.
               if (key.scope.empty() || key.count == 0) continue;
               value.keys.push_back(std::move(key));
             }
           },
           statement.params.list());
       value.timed_out = timed_out(read);
-      // The sample LIMIT, the read cap or the time budget stopped it.
+      // The sample LIMIT, the read cap or the time budget stopped the scan.
       value.estimated = value.sampled >= kFacetSampleRows || read.capped(kFacetReadRowsCap) || value.timed_out;
       value.query_ms = read.elapsed_ms;
     } catch (const std::exception& e) {
@@ -514,7 +518,7 @@ Result<FacetKeysAnswer> LogsService::facets(const RequestContext&, const HostSpe
       message = e.what();
       return false;
     }
-    // Most frequent first; ties: the record columns, then the maps, by key.
+    // The most frequent key comes first. For ties, the record columns come first, then the maps, sorted by key.
     std::sort(value.keys.begin(), value.keys.end(), [](const LogFacetKeys::Key& a, const LogFacetKeys::Key& b) {
       if (a.count != b.count) return a.count > b.count;
       if (a.scope != b.scope) return facet_scope_rank(a.scope) < facet_scope_rank(b.scope);
@@ -551,7 +555,7 @@ Result<FacetValuesAnswer> LogsService::facet_values(const RequestContext&, const
                                                   : std::string(facet_map_column(scope)) + " is not stored as a Map column."));
   }
   const FacetWindow window = facet_window(q);
-  // The client's text (the field key and the filters) enters the key as a digest.
+  // The text of the client (the field key and the filters) enters the key as a digest.
   const std::string cache_key = source_host_id + '\0' + o.table + '\0' + std::to_string(window.start_ms) + '\0' + std::to_string(window.end_ms) +
                                 '\0' + scope + '\0' + std::to_string(limit) + '\0' + sha256_hex(key + '\0' + q.where + '\0' + q.params.key());
   auto cached = caches_.facet_values.get(cache_key, [&](LogFacetValues& value, std::string& code, std::string& message) {

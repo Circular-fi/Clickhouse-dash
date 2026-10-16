@@ -92,15 +92,14 @@ const char* meta_credential_scope_name(MetaCredentialScope scope) {
 }
 
 bool metadata_uses_runner_credentials(std::string_view type) {
-  // Visibility of databases, tables, and columns must match the account that
-  // executes the user's query. The remaining catalogs describe the ClickHouse
-  // server/dialect and are fetched with the system account.
+    // The visibility of databases, tables, and columns must match the account that runs the query of the user.
+    // The other catalogs describe the ClickHouse server and its dialect. They use the system account.
   return type == "databases" || type == "tables" || type == "columns";
 }
 
 void load_builtin_keywords(std::vector<std::string>& out) {
-  // system.keywords was added in ClickHouse 24.3. Older servers still need a
-  // useful syntax/highlighting catalog, so retain a conservative built-in set.
+    // ClickHouse 24.3 added system.keywords. Older servers still need a useful syntax and highlighting catalog.
+    // Keep a conservative built-in set for them.
   static constexpr std::string_view keywords[] = {
     "ADD", "ADD COLUMN", "AFTER", "ALIAS", "ALL", "ALTER", "AND",
     "ANTI", "ANY", "ARRAY", "ARRAY JOIN", "AS", "ASC", "ASOF",
@@ -229,9 +228,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     return runner_slot;
   };
 
-  // A multi-type metadata request is sequential. Reuse at most one exclusive
-  // pooled client for each credential scope. Global dialect catalogs use the
-  // system account; visibility-sensitive catalogs use the query runner account.
+    // A metadata request with several types runs in sequence. It reuses at most one exclusive pooled client for each credential scope.
+    // Global dialect catalogs use the system account. Catalogs that depend on visibility use the query runner account.
   auto make_client = [&](MetaCredentialScope scope) {
     RequestClientSlot& slot = slot_for_scope(scope);
     if (slot.client) return std::pair{slot.client, std::string{}};
@@ -273,10 +271,9 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     auto client_result = make_client(scope);
     auto client = std::move(client_result.first);
     if (!client) {
-      // Keywords are part of the SQL dialect rather than user-visible data.
-      // Keep highlighting and parsing available even when the system account
-      // is temporarily unreachable; other global catalogs still report their
-      // connection error independently.
+            // Keywords are part of the SQL dialect. They are not user-visible data.
+            // Keep highlighting and parsing available. Do this even when the system account is temporarily unreachable.
+            // The other global catalogs report their connection error independently.
       load_builtin_keywords(out.items);
       out.source = "builtin";
       return true;
@@ -298,10 +295,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
         load_builtin_keywords(out.items);
         out.source = "builtin";
       } else {
-        // system.keywords is useful but does not consistently expose every
-        // contextual ClickHouse DDL token across server versions. Merge the
-        // conservative built-in dialect set so INDEX / PROJECTION / TYPE /
-        // GRANULARITY and similar CREATE TABLE grammar are always highlighted.
+                // system.keywords is useful. But it does not expose every contextual ClickHouse DDL token in all server versions.
+                // Merge the conservative built-in dialect set. Then INDEX, PROJECTION, TYPE, GRANULARITY, and similar CREATE TABLE grammar are always highlighted.
         std::vector<std::string> builtin;
         load_builtin_keywords(builtin);
         std::unordered_set<std::string> seen;
@@ -317,8 +312,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
         out.source = "clickhouse+builtin";
       }
     } catch (const clickhouse::ServerException&) {
-      // ClickHouse versions before 24.3 do not provide system.keywords. The
-      // fallback is deterministic and independent of user permissions.
+            // ClickHouse versions before 24.3 do not provide system.keywords.
+            // The fallback is deterministic. It does not depend on user permissions.
       load_builtin_keywords(out.items);
       out.source = "builtin";
     } catch (const std::system_error& e) {
@@ -426,17 +421,17 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
 
     try {
       try {
-        // `origin` is the most precise source for user-defined functions.
-        // It can be System, SQLUserDefined, ExecutableUserDefined, or WasmUserDefined on recent ClickHouse versions.
+                // `origin` is the most precise source for user-defined functions.
+                // On recent ClickHouse versions, it can be System, SQLUserDefined, ExecutableUserDefined, or WasmUserDefined.
         load_functions_from_system("SELECT name, is_aggregate, case_insensitive, toString(origin) AS origin FROM system.functions", true, false);
       } catch (const std::exception&) {
         reset_loaded_functions();
         try {
-          // Older versions exposed create_query before origin was available/reliable.
+                    // Older versions exposed create_query before origin was available and reliable.
           load_functions_from_system("SELECT name, is_aggregate, case_insensitive, toString(create_query) AS create_query FROM system.functions", false, true);
         } catch (const std::exception&) {
           reset_loaded_functions();
-          // Last-resort ACL-friendly fallback. SHOW FUNCTIONS does not expose aggregate/case/origin metadata.
+                    // This is the last-resort fallback. It is friendly to ACL. SHOW FUNCTIONS does not expose aggregate, case, or origin metadata.
           load_functions_from_show();
         }
       }
@@ -455,7 +450,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
           }
         });
       } catch (const std::exception&) {
-        // Fallback only for old/restricted servers. Keep it conservative.
+                // Use this fallback only for old or restricted servers. Keep it conservative.
         combinators = {"If", "Array", "Map", "ForEach", "Distinct", "State", "Merge", "MergeState", "SimpleState", "OrNull", "OrDefault", "Resample"};
       }
 
@@ -581,7 +576,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
           auto db_tables = fetch_tables_for_database(db);
           tables.insert(tables.end(), std::make_move_iterator(db_tables.begin()), std::make_move_iterator(db_tables.end()));
         } catch (const std::exception&) {
-          // Ignore databases the current ClickHouse user cannot inspect.
+                    // Ignore the databases that the current ClickHouse user cannot inspect.
         }
       }
       std::sort(tables.begin(), tables.end(), [](const MetaCatalogItem& a, const MetaCatalogItem& b) {
@@ -747,7 +742,7 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
               auto cols = describe_table_acl(table);
               out.items.insert(out.items.end(), std::make_move_iterator(cols.begin()), std::make_move_iterator(cols.end()));
             } catch (const std::exception&) {
-              // Table can be visible through SHOW but not DESCRIBE-able for this user; skip it.
+                            // A table can be visible through SHOW but not through DESCRIBE for this user. Skip it.
             }
           }
         }
@@ -993,8 +988,8 @@ void Server::handle_api_meta(const httplib::Request& req, httplib::Response& res
     });
     res.status = request_error ? 400 : 503;
   } else {
-    // A metadata request is allowed to succeed partially. The frontend applies
-    // every returned catalog independently and retries only missing types later.
+        // A metadata request can succeed partially. The frontend applies every returned catalog independently.
+        // It retries only the missing types later.
     res.status = 200;
   }
   res.set_content(sb.GetString(), sb.GetSize(), "application/json");

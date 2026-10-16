@@ -1,6 +1,6 @@
 // Shared pieces of the layout equivalence and profile specs (docs/wasm.md).
 
-// The Explorer catalog of the fixture plus a 2k-object database "chdash_scale" (852 cards visible, 550 edges).
+// The Explorer catalog of the fixture, and the 2k-object database "chdash_scale". The database has 852 cards visible and 550 edges.
 export function scaleCatalog(base, { tables = 1500, views = 300, aggregates = 100, buffers = 50 } = {}) {
   const template = base.nodes.find((node) => node.layer === 'logical');
   const nodes = [];
@@ -20,9 +20,9 @@ export function scaleCatalog(base, { tables = 1500, views = 300, aggregates = 10
   return { ...base, nodes: [...base.nodes, ...nodes], edges: [...base.edges, ...edges] };
 }
 
-// A seeded random graph laid out like the Explorer and the service map lay theirs out (kit.layered), run in the page:
-// returns { items: Map, edges, options } for kit.routeEdges(). `shape` tunes it (nodes, edges, rows, secondary share,
-// budget, cycles, odd edges); `seed` fixes it.
+// Lays out a seeded random graph in the page. The layout is the one that the Explorer and the service map use (kit.layered).
+// It returns { items: Map, edges, options } for kit.routeEdges(). The `shape` argument tunes the graph: nodes, edges, rows, secondary share, budget, cycles and odd edges.
+// The `seed` argument fixes the random numbers.
 export function buildRoutingCase() {
   return function build({ seed, nodes, edges, secondary = 0, budget = null, cycles = false, odd = false, rowGrid = true, wide = false }) {
     const kit = window.ChDash.graphKit;
@@ -53,8 +53,8 @@ export function buildRoutingCase() {
   };
 }
 
-// The dense service map of tests/frontend/specs/trace-service-map.spec.js (every service calling most others), laid out
-// like app_trace_map.js lays it out; run in the page. Returns { items, edges, options } for kit.routeEdges*().
+// The dense service map of tests/frontend/specs/trace-service-map.spec.js. Every service calls most other services.
+// The map is laid out like app_trace_map.js lays it out. It runs in the page and returns { items, edges, options } for kit.routeEdges*().
 export function buildDenseCase() {
   return function build({ services, paths, seed = 1 }) {
     const kit = window.ChDash.graphKit;
@@ -75,7 +75,7 @@ export function buildDenseCase() {
   };
 }
 
-// Options for kit.layered() on a seeded random graph (cycles, self loops, edges to missing cards, repeated edges), run in the page.
+// These are the options for kit.layered() on a seeded random graph. The graph has cycles, self loops, edges to missing cards and repeated edges. It runs in the page.
 export function buildLayeredCase() {
   return function build({ seed, nodes, edges, rowGrid = true, breakCycles = false, names = false, odd = false, weighted = false }) {
     let state = seed >>> 0;

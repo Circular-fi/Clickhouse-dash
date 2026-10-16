@@ -1,9 +1,9 @@
 // libFuzzer target: the SQL guard rails of the MCP tools (src/mcp_sql.cpp).
 //
 //   - mcp_scan_single_statement on any text, with the word lists of run_query and explain_query. A statement
-//     it accepts is accepted again, alone, with the same first word (it has no second statement in it).
-//   - mcp_quote_string / mcp_quote_identifier: a quoted value never ends the statement or opens a second one.
-//   - mcp_build_table_query on fuzzed arguments and columns: the SELECT it builds passes the scan.
+//     that it accepts is accepted again, alone, with the same first word. The statement has no second statement in it.
+//   - mcp_quote_string and mcp_quote_identifier: a quoted value never ends the statement. It never opens a second one.
+//   - mcp_build_table_query on fuzzed arguments and columns: the SELECT that it builds passes the scan.
 #include "mcp_sql.hpp"
 #include "sql_literal.hpp"
 
@@ -42,7 +42,7 @@ chdash::McpScalar scalar(FuzzedDataProvider& in) {
       value.text = in.ConsumeBool() ? std::to_string(in.ConsumeIntegral<int64_t>()) : std::to_string(in.ConsumeIntegral<uint64_t>());
       break;
     case 3: {
-      // A JSON number: finite, written the way the tool writes it.
+      // A JSON number is finite. It is written the way the tool writes it.
       value.kind = chdash::McpScalar::Kind::Float;
       const double d = static_cast<double>(in.ConsumeIntegral<int32_t>()) / 1024.0;
       char buf[64];

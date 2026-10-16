@@ -162,12 +162,12 @@ QueryExecutionStats collect_query_execution(
   }
 
   try {
-    // Read first; flush only as a last resort (flush_logs = true and the row
+    // Read first. Flush only as a last resort (flush_logs = true and the row
     // is still missing). SystemLogFlushGate shares one flush between the
-    // statements of a multiquery run / concurrent export collectors.
+    // statements of a multiquery run, or between concurrent export collectors.
     const auto requested_at = std::chrono::steady_clock::now();
-    // Rows exist server-side once the query ended; any flush that started
-    // after that (by another lookup, too) makes them visible.
+    // Rows exist on the server once the query ended. Any flush that started
+    // after that, by another lookup too, makes them visible.
     const auto needed_after = record.updated_at.time_since_epoch().count() != 0
         ? std::min(record.updated_at, requested_at) : requested_at;
     bool flushed = false;

@@ -1,6 +1,6 @@
 #pragma once
 
-// Hands the blocks of a result to one thread that encodes them (src/query_session.cpp).
+// The blocks of a result go to one thread (src/query_session.cpp). That thread encodes them.
 
 #include <clickhouse/block.h>
 
@@ -17,12 +17,16 @@
 
 namespace chdash {
 
-// Encodes the blocks of a result on a thread of its own. The native client decodes
-// the next block of columns while this thread turns the previous one into JSON, so
-// the two steps overlap instead of adding up (for 120 000 rows with nested columns:
-// 190 ms of decoding and 150 ms of encoding, 340 ms in a row, about 200 ms overlapped).
-// At most `depth` decoded blocks wait, which bounds the memory. A failure of the
-// encoder (the cell limit, the result limit, a cancel) stops the next submit().
+// Encodes the blocks of a result on a thread of its own.
+// The native client decodes the next block of columns.
+// This thread turns the previous block into JSON at the same time.
+// The two steps overlap. They do not add up.
+//
+// For 120 000 rows with nested columns: 190 ms for the decode step and 150 ms for the encode step, 340 ms in a row.
+// About 200 ms of this time overlaps.
+//
+// At most `depth` decoded blocks wait. This bound limits the memory.
+// A failure of the encoder (the cell limit, the result limit, a cancel) stops the next submit().
 class BlockEncoder {
  public:
   BlockEncoder(std::function<void(const clickhouse::Block&)> encode, size_t depth)
@@ -35,7 +39,7 @@ class BlockEncoder {
 
   ~BlockEncoder() { stop(false); }
 
-  // Hands one block over; blocks while `depth` blocks wait. Throws what the encoder threw.
+  // Passes one block to the encoder. This call blocks while `depth` blocks wait. It throws what the encoder threw.
   void submit(const clickhouse::Block& block, const std::atomic<bool>& canceled) {
     std::unique_lock<std::mutex> lk(mu_);
     not_full_.wait(lk, [&] { return queue_.size() < depth_ || error_ || canceled.load(std::memory_order_relaxed); });
@@ -45,7 +49,7 @@ class BlockEncoder {
     not_empty_.notify_one();
   }
 
-  // The end of the result: encodes what waits, joins the thread, throws what the encoder threw.
+  // Marks the end of the result. The call encodes what waits, joins the thread and throws what the encoder threw.
   void finish() {
     stop(true);
     std::lock_guard<std::mutex> lk(mu_);

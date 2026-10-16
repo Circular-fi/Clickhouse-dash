@@ -20,7 +20,7 @@ test.afterEach(async ({ page }, testInfo) => {
 
 const FIRST = SYNTHETIC_TRACES[0];
 
-// The first synthetic trace with attributes to click on.
+// The first synthetic trace that has attributes to click.
 function richTrace() {
   const trace = syntheticTrace(FIRST);
   trace.spans[0].span_attributes = JSON.stringify({ 'http.method': 'GET', 'http.route': '/checkout' });
@@ -67,7 +67,7 @@ test('the whole search lives in the URL: shared links, reload and Back / Forward
   await expect(page.locator('#tracesStatus')).toHaveValue('Error');
   await expect(page.locator('#tracesSort')).toHaveValue('longest');
   await expect(page.locator('#tracesWorkspace .tracePicker--range .tracePicker__button')).toContainText('Last 2 hours');
-  // The page-load search keeps its URL (no extra history entry).
+  // The page-load search keeps its URL. No extra history entry is added.
   expect(new URL(page.url()).searchParams.getAll('tag')).toEqual(['span:http.method=GET']);
 
   // A shared link opens the same search in a new page.
@@ -288,8 +288,8 @@ test('the back arrow returns to the very search entry a trace was opened from: n
   const searchUrl = page.url();
   const length = () => page.evaluate(() => window.history.length);
   const start = await length();
-  // Open a trace from the results, then pick a span in its spans table (a
-  // second entry of the trace).
+  // Open a trace from the results. Then pick a span in its spans table.
+  // The span pick is a second entry of the trace.
   await page.locator(`#tracesResults [data-trace-id="${FIRST.trace_id}"]`).first().click();
   await expect(page.locator('#traceWaterfall .traceSpanRow').first()).toBeVisible({ timeout: 30_000 });
   await expect.poll(length).toBe(start + 1);
@@ -315,8 +315,8 @@ test('the back arrow returns to the very search entry a trace was opened from: n
   await page.goBack();
   await expect(page.locator('#tracesSearchView')).toBeVisible();
   await expect.poll(() => page.url()).toBe(searchUrl);
-  // A trace opened on its own (a link, a new tab) has no search entry
-  // behind it: the arrow adds one, and Back returns to the trace.
+  // A trace opened on its own (a link or a new tab) has no search entry.
+  // The arrow adds one. Back then returns to the trace.
   await page.goto(`/observability/traces/${FIRST.trace_id}?${query}`);
   await expect(page.locator('#traceCopyJsonButton')).toBeEnabled({ timeout: 30_000 });
   const direct = await length();
@@ -352,8 +352,8 @@ test('a trace that does not exist: a not-found state with Back to search and a w
   await expect(state).toBeVisible();
   await state.getByRole('button', { name: 'Back to search' }).click();
   await waitResults(page);
-  // The results of the wider search may still be on screen when the restored
-  // search goes out: wait for the request itself.
+  // The results of the wider search can still be on screen when the restored
+  // search is sent. Wait for the request itself.
   await expect.poll(() => Number(lastSearch(searches).get('end_ms')) - Number(lastSearch(searches).get('start_ms'))).toBe(2 * 3600_000);
 });
 

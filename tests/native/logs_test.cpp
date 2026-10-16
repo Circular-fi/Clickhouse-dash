@@ -1,12 +1,15 @@
-// Unit tests of the Logs page below its routes: the text search and the patterns (src/logs_text.cpp, src/logs_drain.cpp, src/logs_patterns.cpp),
-// the parsing of a request (src/logs_request.cpp), the filters (src/logs_filters.cpp), the statements (src/logs_sql.cpp), and the service on a
-// fake executor with its JSON (src/logs_service.cpp, src/logs_json.cpp). No ClickHouse server.
+// These are unit tests of the Logs page below its routes.
+// The tests cover the text search and the patterns (src/logs_text.cpp, src/logs_drain.cpp, src/logs_patterns.cpp).
+// They also cover the parsing of a request (src/logs_request.cpp), the filters (src/logs_filters.cpp), and the statements (src/logs_sql.cpp).
+// They cover the service on a fake executor with its JSON (src/logs_service.cpp, src/logs_json.cpp).
+// The tests do not use a ClickHouse server.
 //
-// The statements are compared with the ones that the code before the split of src/api_logs.cpp sent for the requests of a differential
-// battery (logs_golden.hpp, the text with each query parameter written in place). A statement that changes its text fails here; a change on
-// purpose changes the expected text in the same commit. The first tests were checked against the code that api_logs.cpp held before the
-// text search and the patterns were split out: a differential run on 20,000 generated messages gave the same tokens, terms, SQL, masks,
-// templates and cluster ids.
+// The tests compare the statements with the statements that the code before the split of src/api_logs.cpp sent.
+// That code sent them for the requests of a differential battery (logs_golden.hpp, the text with each query parameter written in place).
+// A statement that changes its text fails here.
+// Make sure that a change on purpose also changes the expected text in the same commit.
+// The first tests were checked against the code of api_logs.cpp before the text search and the patterns were separated into other files.
+// A differential run on 20,000 generated messages gave the same tokens, terms, SQL, masks, templates and cluster ids.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_LOGS_TESTS=ON
 //        cmake --build build --target chdash_logs_test
@@ -132,7 +135,7 @@ void test_mask() {
   CHECK_EQ(mask_body("name \"alice\" and 'bob'"), "name <*> and <*>");
   // A quote glued to a word is not a string.
   CHECK_EQ(mask_body("don't panic"), "don't panic");
-  // Two params in a row become one.
+  // Two parameters next to each other become one.
   CHECK_EQ(mask_body("1 2 3"), "<*> <*> <*>");
   CHECK_EQ(mask_body("\"a\"\"b\""), "<*>");
   // The text is cut at 2,048 bytes.
@@ -153,7 +156,7 @@ void test_pattern_search_text() {
   CHECK_EQ(pattern_search_text({"key=user:<*>"}), "key=user:");
   CHECK_EQ(pattern_search_text({kParam, kParam}), "");
   CHECK_EQ(pattern_search_text({"a<*>b"}), "a b");
-  // A piece that starts with a dash would read as a negation: it is quoted.
+  // A piece that starts with a dash is read as a negation, so it is quoted.
   CHECK_EQ(pattern_search_text({"-flag"}), "\"-flag\"");
   Strings many;
   for (int i = 0; i < 40; ++i) many.push_back("w" + std::to_string(i));
@@ -171,19 +174,21 @@ void test_drain() {
   CHECK_EQ(drain.clusters().size(), size_t(1));
   CHECK_EQ(join(drain.clusters()[a].tokens), "user|<*>|logged|in|from|<*>");
   CHECK_EQ(drain.clusters()[a].size, size_t(2));
-  // Another length is another cluster, and so is a message with other words.
+  // A message with another length belongs to another cluster.
+  // So does a message with other words.
   const size_t c = add("disk full");
   CHECK(c != a);
   const size_t d = add("completely different words here and there");
   CHECK(d != a && d != c);
   CHECK_EQ(drain.clusters().size(), size_t(3));
-  // The same message again joins its cluster.
+  // The same message joins its cluster again.
   CHECK_EQ(add("disk full"), c);
   CHECK_EQ(drain.clusters()[c].size, size_t(2));
 }
 
 void test_drain_bounds() {
-  // Messages of one length that start alike share a leaf: past 50 clusters a message joins the nearest one.
+  // Messages of one length that start alike share a leaf.
+  // Past 50 clusters, a message joins the nearest one.
   Drain drain;
   for (int i = 0; i < 400; ++i) {
     Strings tokens = {"same", "start"};
@@ -194,7 +199,8 @@ void test_drain_bounds() {
   size_t total = 0;
   for (const auto& c : drain.clusters()) total += c.size;
   CHECK_EQ(total, size_t(400));
-  // Many different first words: a node keeps 100 children at most (the rest go to the wildcard child).
+  // A node keeps at most 100 children, even when there are many different first words.
+  // The other words go to the wildcard child.
   Drain wide;
   for (int i = 0; i < 300; ++i) wide.add({"first" + std::string(1, static_cast<char>('a' + i % 26)) + std::to_string(i / 26), "second", "third", "fourth"});
   size_t sum = 0;
@@ -224,7 +230,7 @@ httplib::Request request(Params params) {
   return req;
 }
 
-// The window of the battery of the differential check: the newest day of the fixture.
+// The window of the battery of the differential check is the newest day of the fixture.
 constexpr int64_t kEnd = 1789867360999LL;
 constexpr int64_t kMinute = 60000LL;
 constexpr int64_t kHour = 3600000LL;
@@ -235,7 +241,8 @@ constexpr int64_t kAnchorTs = 1789867360999943310LL;
 constexpr uint64_t kAnchorTie = 7456462416301115329ULL;
 const std::string kTrace = "000000000000000000000000017d7650";
 
-// A statement with every {pN:String} written in place as a quoted text (the numbering of the parameters is not part of the text).
+// A statement with every {pN:String} written in place as a quoted text.
+// The numbering of the parameters is not part of the text.
 std::string inlined(const SqlStatement& statement) {
   std::string out = statement.sql;
   for (const auto& [name, value] : statement.params.list()) {
@@ -251,7 +258,7 @@ std::string inlined(const SqlStatement& statement) {
   return out;
 }
 
-// The table of the fixture: every optional column, the three attribute maps, a tokenbf_v1 index on Body.
+// The table of the fixture has every optional column, the three attribute maps, and a tokenbf_v1 index on Body.
 LogsSchema fixture_schema() {
   LogsSchema schema;
   schema.exists = schema.timestamp_time = schema.trace_id = schema.span_id = schema.trace_flags = true;
@@ -279,7 +286,8 @@ LogsQuery query_from(const httplib::Request& req, bool need_range = true, int64_
 
 LogsQuery query_of(Params params, bool need_range = true, int64_t now = 1791701739757LL) { return query_from(request(params), need_range, now); }
 
-// The range of the battery with other parameters: a request that the tests build from strings that outlive it.
+// The range of the battery has other parameters.
+// The tests build this request from strings that outlive it.
 httplib::Request ranged(const std::string& start, std::vector<std::pair<std::string, std::string>> extra = {}) {
   httplib::Request req;
   req.method = "GET";
@@ -296,7 +304,8 @@ ApiError filter_error(Params params, bool need_range = true, const LogsSchema& s
   return error;
 }
 
-// The first window of a search, as the service asks for it: the newest 15 minutes of the range, after the cursor when there is one.
+// The service asks for this first window of a search: the newest 15 minutes of the range.
+// The window starts after the cursor when there is one.
 SqlStatement first_window(const LogsQuery& q, size_t limit, const std::string& cursor_value = "") {
   const int64_t range_lo = q.start_ms * 1000000, range_hi = q.end_ms * 1000000 + 999999;
   Cursor cursor;
@@ -313,7 +322,8 @@ void test_the_filters_of_a_request() {
   CHECK(input.start_ms && *input.start_ms == 10);
   CHECK(input.end_ms && *input.end_ms == 20);
   CHECK(!input.lookback_minutes);
-  // The repeated parameters are sorted, without duplicates and without the empty ones.
+  // The repeated parameters are sorted.
+  // Duplicates and empty values are removed.
   CHECK_EQ(join(input.services), "a|b");
   CHECK_EQ(join(input.attrs), "j!=w|k=v");
   CHECK_EQ(input.severity_min, "13");
@@ -344,7 +354,8 @@ void test_the_filters_of_a_request() {
 void test_the_filters_of_a_field_leave_out_the_field_itself() {
   ApiError error;
   FacetValuesRequest out;
-  // A bare key is the filter of either map, a prefixed key the filter of its map only.
+  // A bare key is the filter of either map.
+  // A prefixed key is the filter of its own map only.
   CHECK(parse_facet_values(request({{"scope", "log"}, {"key", "http.route"}, {"attr", "http.route=/a"}, {"attr", "host.name=h"},
                                     {"attr", "LogAttributes.http.route!=/b"}, {"attr", "ResourceAttributes.http.route=/c"}}), &out, &error));
   CHECK_EQ(join(out.filter.attrs), "ResourceAttributes.http.route=/c|host.name=h");
@@ -352,7 +363,8 @@ void test_the_filters_of_a_field_leave_out_the_field_itself() {
   CHECK_EQ(join(out.filter.attrs), "x=1");
   CHECK(parse_facet_values(request({{"scope", "resource"}, {"key", "host.name"}, {"attr", "host.name=h"}, {"attr", "ResourceAttributes.host.name=i"}}), &out, &error));
   CHECK(out.filter.attrs.empty());
-  // A column: its own filter, and the service filter for ServiceName.
+  // A column has its own filter.
+  // ServiceName also has the service filter.
   CHECK(parse_facet_values(request({{"scope", "column"}, {"key", "ServiceName"}, {"service", "a"}, {"attr", "ServiceName=b"}, {"attr", "ScopeName=c"}}), &out, &error));
   CHECK(out.filter.services.empty());
   CHECK_EQ(join(out.filter.attrs), "ScopeName=c");
@@ -409,7 +421,7 @@ void test_a_request_that_the_schema_or_the_limits_refuse() {
   CHECK_EQ(filter_error({{"attr", "TraceId=ab"}}, false, bare).message, std::string("Column TraceId is not in the logs table."));
   CHECK_EQ(filter_error({{"attr", "ScopeName=ab"}}, false, bare).message, std::string("Column ScopeName is not in the logs table."));
   CHECK_EQ(filter_error({{"attr", "k=v"}}, false, bare).message, std::string("Attribute maps are not available for k."));
-  // A search of the text may be off.
+  // A search of the text can be off.
   OtelSettings off = otel_settings();
   off.logs.body_search = "off";
   const ApiError disabled = filter_error({{"q", "slow"}}, false, fixture_schema(), off);
@@ -425,7 +437,7 @@ void test_the_lookback_is_the_range_when_there_is_no_range() {
   CHECK_EQ(q.start_ms, now - 5 * kMinute);
   q = query_of({}, true, now);
   CHECK_EQ(q.start_ms, now - 15 * kMinute);
-  // A lookback is kept within logs.max_lookback_minutes.
+  // A lookback stays within logs.max_lookback_minutes.
   q = query_of({{"lookback_minutes", "100000000"}}, true, now);
   CHECK_EQ(q.start_ms, now - int64_t{7 * 24 * 60} * kMinute);
   q = query_of({{"lookback_minutes", "0"}}, true, now);
@@ -444,7 +456,8 @@ void test_the_schema_of_the_table() {
   columns["ScopeAttributes"] = "String";
   schema = schema_from_columns(columns);
   CHECK(schema.timestamp_time && schema.trace_id && !schema.span_id);
-  // A JSON column filters but is not faceted; a String is neither.
+  // A JSON column can filter, but it is not faceted.
+  // A String is neither.
   CHECK(schema.log_attributes && schema.log_attributes_map);
   CHECK(schema.resource_attributes && !schema.resource_attributes_map);
   CHECK(!schema.scope_attributes && !schema.scope_attributes_map);
@@ -457,7 +470,7 @@ void test_the_schema_of_the_table() {
   CHECK(!indexed.body_token_index && !indexed.body_lower_index);
   apply_skipping_indexes(&indexed, {{"tokenbf_v1", "lower(`Body`)"}});
   CHECK(!indexed.body_token_index && indexed.body_lower_index);
-  // A lower(Body) index is only preferred when there is no exact-case one.
+  // A lower(Body) index is preferred only when there is no exact-case index.
   apply_skipping_indexes(&indexed, {{"tokenbf_v1", "lower(Body)"}, {"text", "`Body`"}});
   CHECK(indexed.body_token_index && !indexed.body_lower_index);
 }
@@ -490,7 +503,8 @@ void test_the_search_statements_are_unchanged() {
            std::string(golden::kSearchAttrMulti));
   CHECK_EQ(sql_of({{"attr", "k'e\\y=v'a\\l"}}, 20), std::string(golden::kSearchAttrQuote));
 
-  // The 15 minutes of the newest slice, and the wider windows of the same range.
+  // The first window is the newest slice of 15 minutes.
+  // The other windows are wider and cover the same range.
   CHECK_EQ(inlined(first_window(query_from(ranged(kStart15m, {{"trace_id", kTrace}})), 50)), std::string(golden::kSearchTrace));
   CHECK_EQ(inlined(first_window(query_from(ranged(kStart15m, {{"span_id", "00000000bebb281c"}})), 50)), std::string(golden::kSearchSpan));
   const LogsQuery plain15 = query_from(ranged(kStart15m));
@@ -499,7 +513,8 @@ void test_the_search_statements_are_unchanged() {
   CHECK_EQ(inlined(first_window(plain15, 10, "1789867000000000000-0")), std::string(golden::kSearchCursorZero));
   CHECK_EQ(inlined(first_window(query_from(ranged(kStart2h, {{"q", "\"slow operation\" cache"}})), 20)), std::string(golden::kSearchPhrase));
 
-  // The next windows: what is left of the budget, and the rows that the first one filled.
+  // The next windows get the budget that is left.
+  // They also get the rows that the first window filled.
   const LogsQuery all = query_from(ranged(kStart2h, {{"q", "slow"}, {"severity_min", "9"}, {"service", "cache_service"}, {"trace_id", kTrace}, {"attr", "log.origin=span"}}));
   CHECK_EQ(inlined(first_window(all, 30)), std::string(golden::kSearchAllFirst));
   CHECK_EQ(inlined(search_statement(fixture_schema(), kTable, all, 1789862861000000000LL, 1789866460999999999LL, std::nullopt, 29, 12)),
@@ -530,7 +545,7 @@ void test_the_cursor_and_the_keyset() {
            std::string("(Timestamp < fromUnixTimestamp64Nano(toInt64(5)) OR (Timestamp = fromUnixTimestamp64Nano(toInt64(5)) AND T < 7))"));
   CHECK_EQ(keyset_predicate("T", Cursor{5, 7}, false),
            std::string("(Timestamp > fromUnixTimestamp64Nano(toInt64(5)) OR (Timestamp = fromUnixTimestamp64Nano(toInt64(5)) AND T > 7))"));
-  // A table without TraceId and SpanId ties on what it has.
+  // A table without TraceId and SpanId decides ties with the columns that it has.
   LogsSchema old = fixture_schema();
   old.trace_id = old.span_id = false;
   CHECK_EQ(tiebreak_expr(old), std::string("cityHash64(ServiceName, SeverityNumber, Body)"));
@@ -558,7 +573,7 @@ void test_the_histogram_statements_are_unchanged() {
   // A negative origin is brought into [0, size).
   CHECK_EQ(bucket(h2, 80, -1234567).second, int64_t{85433});
 
-  // The sizes: 1 s at least, the first candidate that is not smaller than the range over the target, and the grid.
+  // The sizes are: at least 1 s, the first candidate that is not smaller than the range over the target, and the grid.
   CHECK_EQ(choose_bucket_ms(1000, 80), int64_t{1000});
   CHECK_EQ(choose_bucket_ms(2 * kHour, 80), int64_t{120000});
   CHECK_EQ(choose_bucket_ms(kHour, 1), int64_t{3600000});
@@ -566,7 +581,8 @@ void test_the_histogram_statements_are_unchanged() {
   CHECK_EQ(grid_floor(1000, 300, 0), int64_t{900});
   CHECK_EQ(grid_floor(-1, 300, 0), int64_t{-300});
   CHECK_EQ(grid_floor(1000, 300, 50), int64_t{950});
-  // A grid on whole seconds buckets TimestampTime; another one buckets the precise column.
+  // A grid on whole seconds buckets TimestampTime.
+  // Another grid buckets the precise column.
   CHECK(bucket_sql(fixture_schema(), 60000, 0).find("TimestampTime") != std::string::npos);
   CHECK(bucket_sql(fixture_schema(), 60000, 500).find("toUnixTimestamp64Milli(Timestamp)") != std::string::npos);
   CHECK(bucket_sql(fixture_schema(), 1500, 0).find("toUnixTimestamp64Milli(Timestamp)") != std::string::npos);
@@ -662,7 +678,7 @@ void test_the_other_statements_are_unchanged() {
   CHECK(build_filters(otel_settings(), schema, ignored.filter, 0, true, &picker, &error));
   CHECK_EQ(inlined(services_statement(schema, kTable, picker)), std::string(golden::kServicesIgnoresFilters));
 
-  // The facets: the keys of a minute-aligned window, and the values of one field.
+  // The facets are the keys of a window aligned to the minute, and the values of one field.
   const std::vector<std::string> scopes = {"log", "resource", "scope"};
   const std::vector<std::string> columns = {"ServiceName", "SeverityText", "ScopeName", "ScopeVersion"};
   const auto keys = [&](const LogsQuery& q) { return inlined(facet_keys_statement(schema, kTable, q, facet_window(q), scopes, columns)); };
@@ -749,11 +765,13 @@ void test_the_patterns_of_a_sample() {
   CHECK_EQ(mined.patterns[2].severity, std::string("warn"));
   CHECK(!mined.patterns[2].noisy);
 
-  // The patterns are cut at the maximum, and the count says what was cut.
+  // The patterns are cut at the maximum.
+  // The count shows what was cut.
   const MinedPatterns cut = mine_patterns(sample, 1000, 1000, 4, 1, 10, [] { return false; });
   CHECK_EQ(cut.patterns.size(), size_t(1));
   CHECK_EQ(cut.pattern_count, size_t(3));
-  // The time may run out: the mining stops at the next check, every 256 messages, and says so.
+  // The time can run out.
+  // The mining stops at the next check, every 256 messages, and reports it.
   std::vector<SampleRow> many;
   for (int i = 0; i < 600; ++i) many.push_back({1000, 9, "api", "request " + std::to_string(i) + " done"});
   const MinedPatterns partial = mine_patterns(many, 1000, 1000, 4, 10, 600, [] { return true; });
@@ -787,7 +805,8 @@ struct TestCaches {
   LogsCaches refs() { return LogsCaches{schema, keys, values}; }
 };
 
-// A clock that a test sets: the budgets of a search are read from it.
+// A clock that a test sets.
+// The budgets of a search are read from this clock.
 struct TestClock {
   int64_t steady = 0;
   int64_t wall = 1791701739757LL;
@@ -803,7 +822,7 @@ LogsService service_over(FakeDb& db, TestCaches& caches, LogsClock clock = LogsC
   return LogsService([&db](const HostSpec&, std::string*) { return std::unique_ptr<ChExecutor>(new ForwardDb(db)); }, caches.refs(), std::move(clock));
 }
 
-// The columns of the fixture table, as system.columns says them.
+// The columns of the fixture table, as system.columns reports them.
 const Rows kColumns = {{"Timestamp", "DateTime64(9)"}, {"TimestampTime", "DateTime"}, {"ServiceName", "LowCardinality(String)"}, {"Body", "String"},
                        {"SeverityNumber", "UInt8"}, {"SeverityText", "LowCardinality(String)"}, {"TraceId", "String"}, {"SpanId", "String"},
                        {"TraceFlags", "UInt32"}, {"ScopeName", "String"}, {"ScopeVersion", "String"},
@@ -815,7 +834,8 @@ void with_table(FakeDb& db) {
   db.on("FROM system.data_skipping_indices WHERE database", {{"tokenbf_v1", "Body"}});
 }
 
-// A row as the statements of a record return it (row_columns): timestamp, tiebreak, service, severity text and number, body, length, trace,
+// A row is what the statements of a record return (row_columns).
+// The columns are: timestamp, tiebreak, service, severity text and number, body, length, trace,
 // span, flags, scope name and version, and the three attribute objects.
 Row log_row(int64_t ts_ns, uint64_t tie, const std::string& body, const std::string& service = "api") {
   return {std::to_string(ts_ns), std::to_string(tie), service, "INFO", "9", body, std::to_string(body.size()), "ab", "cd", "1", "scope", "1.0", "{\"k\":\"v\"}", "{}", "{}"};
@@ -864,7 +884,7 @@ void test_the_schema_is_read_once_and_a_missing_table_is_said() {
   CHECK_EQ(db.params[0][0].second, std::string("otel"));
   CHECK_EQ(db.params[0][1].second, std::string("otel_logs"));
 
-  // A table that the user may read and that has not the columns: it is missing.
+  // A table that the user can read, but that does not have the columns, is missing.
   FakeDb missing;
   TestCaches missing_caches;
   missing.on("FROM system.columns WHERE database", {{"x", "String"}});
@@ -873,10 +893,11 @@ void test_the_schema_is_read_once_and_a_missing_table_is_said() {
   CHECK_EQ(absent.error.status, 404);
   CHECK_EQ(absent.error.code, std::string("logs_table_missing"));
   CHECK_EQ(absent.error.message, std::string("Table otel.otel_logs is missing or is not an OpenTelemetry exporter logs table."));
-  // The indexes are not read of a table that is not one.
+  // The indexes are not read for a table that is not one.
   CHECK_EQ(missing.count("data_skipping_indices"), size_t(0));
 
-  // A table that the user may not read is absent from system.columns: say why.
+  // A table that the user cannot read is absent from system.columns.
+  // The error gives the reason.
   FakeDb denied;
   TestCaches denied_caches;
   denied.on("FROM system.columns WHERE database", {});
@@ -888,7 +909,8 @@ void test_the_schema_is_read_once_and_a_missing_table_is_said() {
   CHECK(refused.error.message.find("system: Not enough privileges") != std::string::npos);
   CHECK(refused.error.message.find("SELECT ON otel.otel_logs") != std::string::npos);
 
-  // A failure of the probe is the error of the route and the connection is not lent again.
+  // A failure of the probe is the error of the route.
+  // The connection is not lent again.
   FakeDb broken;
   TestCaches broken_caches;
   broken.fail_on("FROM system.columns WHERE database", [] { throw server_error(159, "Timeout exceeded"); });
@@ -917,7 +939,8 @@ void test_a_search_widens_its_windows_until_the_limit_is_filled() {
   CHECK_EQ(a.rows.size(), size_t(3));
   CHECK_EQ(a.rows[0].body, std::string("newest"));
   CHECK_EQ(a.windows.size(), size_t(3));
-  // The windows are contiguous, newest first, and widen: 15 minutes, 1 hour, then the rest of the range.
+  // The windows are contiguous and newest first.
+  // They widen: 15 minutes, 1 hour, then the rest of the range.
   CHECK_EQ(a.windows[0].hi_ns / 1000000, kEnd);
   CHECK_EQ((a.windows[0].hi_ns - a.windows[0].lo_ns + 1) / 1000000000, int64_t{900});
   CHECK_EQ(a.windows[1].hi_ns, a.windows[0].lo_ns - 1);
@@ -929,7 +952,7 @@ void test_a_search_widens_its_windows_until_the_limit_is_filled() {
   CHECK(!a.budget_exhausted);
   CHECK_EQ(a.scanned_from_ms, kEnd - 2 * kHour);
   CHECK_EQ(a.limit, size_t(5));
-  // Each window asks for what is still missing.
+  // Each window asks for what is still needed.
   CHECK(db.sqls[2].find("LIMIT 5 SETTINGS max_execution_time = 30") != std::string::npos);
   CHECK(db.sqls[3].find("LIMIT 3 SETTINGS") != std::string::npos);
   CHECK(db.sqls[4].find("LIMIT 2 SETTINGS") != std::string::npos);
@@ -1033,7 +1056,8 @@ void test_a_window_that_times_out_ends_the_search_with_its_rows() {
   CHECK_EQ(answer.value->windows.size(), size_t(1));
   CHECK(!answer.value->next_cursor.empty());
 
-  // The first window has no rows to keep: its timeout is the error of the route.
+  // The first window has no rows to keep.
+  // Its timeout is the error of the route.
   FakeDb first;
   TestCaches first_caches;
   with_table(first);
@@ -1073,7 +1097,7 @@ void test_a_search_refuses_what_it_cannot_run() {
   CHECK_EQ(db.count("FROM system.columns"), size_t(1));
   // Nothing was asked of the table.
   CHECK_EQ(db.count("FROM `otel`.`otel_logs`"), size_t(0));
-  // The limit of a search is kept within logs.search_limit.
+  // The limit of a search stays within logs.search_limit.
   FakeDb limited;
   TestCaches limited_caches;
   with_table(limited);
@@ -1105,7 +1129,8 @@ void test_the_histogram_and_its_json() {
   CHECK_EQ(doc["buckets"][1][3].GetUint64(), uint64_t(5));
   CHECK_EQ(doc["totals"]["total"].GetUint64(), uint64_t(21));
   CHECK_EQ(doc["totals"]["debug"].GetUint64(), uint64_t(10));
-  // The buckets: 80 when the request says nothing, kept within 10 and 300.
+  // The buckets are 80 when the request says nothing.
+  // They stay within 10 and 300.
   FakeDb few;
   TestCaches few_caches;
   with_table(few);
@@ -1140,14 +1165,16 @@ void test_a_substring_search_refuses_a_wide_range() {
   CHECK_EQ(wide.error.message, std::string("Substring Body search is limited to 6 hours for histograms and patterns (logs.body_search = \"substring\")."));
   CHECK_EQ(service.patterns(context, host, "local", parse_patterns(ranged(kStart24h, {{"q", "slow"}}))).error.code, std::string("logs_substring_range"));
   CHECK_EQ(service.facets(context, host, "local", parse_facets(ranged(kStart24h, {{"q", "slow"}}))).error.code, std::string("logs_substring_range"));
-  // Without a text there is no limit, and a short range is allowed.
+  // Without a text there is no limit.
+  // A short range is allowed.
   CHECK(service.histogram(context, host, "local", parse_histogram(ranged(kStart24h))));
   const auto narrow = service.histogram(context, host, "local", parse_histogram(ranged(kStart2h, {{"q", "slow"}})));
   CHECK(narrow);
   const rapidjson::Document doc = parse(histogram_json(*narrow.value));
   CHECK_EQ(std::string(doc["text_search"]["mode"].GetString()), std::string("substring"));
   CHECK(doc["text_search"]["active"].GetBool() && !doc["text_search"]["index_backed"].GetBool());
-  // A search of a substring reads windows of 15 minutes: 96 of them and the millisecond that the range ends with.
+  // A search of a substring reads windows of 15 minutes.
+  // There are 96 of them, and the millisecond that the range ends with.
   FakeDb search;
   TestCaches search_caches;
   with_table(search);
@@ -1160,7 +1187,9 @@ void test_the_context_of_a_record_and_its_json() {
   FakeDb db;
   TestCaches caches;
   with_table(db);
-  // The older records, newest first: 3 of the 2 asked for (one more says that there are more). The newer ones, oldest first, from the anchor.
+  // The older records come newest first: 3 of the 2 asked for.
+  // One more record shows that there are more.
+  // The newer records come oldest first, from the anchor.
   db.on("ORDER BY Timestamp DESC", {log_row(1789867000000000090LL, 1, "o1"), log_row(1789867000000000080LL, 2, "o2"), log_row(1789867000000000070LL, 3, "o3")});
   db.on("ORDER BY Timestamp ASC", {log_row(1789867000000000100LL, 9, "anchor"), log_row(1789867000000000110LL, 4, "n1"), log_row(1789867000000000120LL, 5, "n2")});
   RequestContext context;
@@ -1174,7 +1203,8 @@ void test_the_context_of_a_record_and_its_json() {
   CHECK(!a.more_after);
   CHECK_EQ(a.before_count, size_t(2));
   CHECK_EQ(a.after_count, size_t(2));
-  // Newer records first (the newest on top), then the anchor, then the older ones.
+  // Newer records come first, the newest on top.
+  // The anchor comes next, then the older records.
   CHECK_EQ(a.rows.size(), size_t(5));
   CHECK_EQ(a.rows[0].body, std::string("n2"));
   CHECK_EQ(a.rows[2].body, std::string("anchor"));
@@ -1237,7 +1267,8 @@ void test_the_patterns_and_their_json() {
   CHECK_EQ(a.mined.pattern_count, size_t(2));
   CHECK_EQ(a.mined.scale, 1.0);
   CHECK_EQ(a.sparkline_buckets, 4);
-  // A total that fits the target is read whole: no block sample in the statement.
+  // A total that fits the target is read whole.
+  // The statement has no block sample.
   CHECK(db.sqls[3].find("_part") == std::string::npos);
   const rapidjson::Document doc = parse(patterns_json(a));
   CHECK(!doc["sampled"].GetBool());
@@ -1250,7 +1281,8 @@ void test_the_patterns_and_their_json() {
   CHECK(doc["timing_ms"].HasMember("mine") && doc["timing_ms"].HasMember("count"));
   CHECK(!doc["mining_partial"].GetBool());
 
-  // A range with more records than the sample is read as a block sample, and thinned to the target.
+  // A range with more records than the sample is read as a block sample.
+  // The sample is thinned to the target.
   FakeDb big;
   TestCaches big_caches;
   with_table(big);
@@ -1267,7 +1299,9 @@ void test_the_patterns_and_their_json() {
   CHECK_EQ(sampled.value->mined.scale, 10000.0);
   CHECK(parse(patterns_json(*sampled.value))["sampled"].GetBool());
 
-  // The mining has a budget of its own: the clock moves on at each reading, and the mining finds its budget spent at the first check.
+  // The mining has a budget of its own.
+  // The clock advances at each reading.
+  // The mining finds its budget spent at the first check.
   FakeDb slow;
   TestCaches slow_caches;
   with_table(slow);
@@ -1330,7 +1364,8 @@ void test_the_facets_are_cached_and_capped() {
   CHECK(!first.value->common.cached);
   CHECK_EQ(first.value->scopes.size(), size_t(3));
   CHECK_EQ(first.value->columns.size(), size_t(4));
-  // A column empty on every record is not a field, and a key with no scope is no key.
+  // A column that is empty on every record is not a field.
+  // A key with no scope is not a key.
   CHECK_EQ(first.value->value->keys.size(), size_t(2));
   CHECK_EQ(first.value->value->keys[0].key, std::string("ServiceName"));
   CHECK_EQ(first.value->value->keys[1].key, std::string("http.route"));
@@ -1369,7 +1404,7 @@ void test_the_facets_are_cached_and_capped() {
   CHECK(fewer.value->scopes.empty());
   CHECK_EQ(fewer.value->columns.size(), size_t(2));
 
-  // The keys are cut at the maximum and say so.
+  // The keys are cut at the maximum, and the answer reports it.
   FakeDb wide;
   TestCaches wide_caches;
   with_table(wide);
@@ -1396,7 +1431,8 @@ void test_the_facets_are_cached_and_capped() {
   capped.on("LEFT ARRAY JOIN arrayConcat", {{"5", "column", "ServiceName", "5"}});
   CHECK(service_over(capped, capped_caches).facets(context, logs_host(), "local", parse_facets(ranged(kStart15m))).value->value->estimated);
 
-  // A failure is a 503 with the message of the server, and it is not kept.
+  // A failure is a 503 with the message of the server.
+  // The failure is not kept.
   FakeDb failed;
   TestCaches failed_caches;
   with_table(failed);
@@ -1443,7 +1479,8 @@ void test_the_values_of_a_field() {
   CHECK(service.facet_values(context, logs_host(), "local", values_in));
   CHECK_EQ(db.count("SELECT toString(v)"), size_t(2));
 
-  // A column of the record is not a map; a map the table does not have is not one either.
+  // A column of the record is not a map.
+  // A map that the table does not have is not a map either.
   FacetValuesRequest column;
   column.scope = "column";
   column.key = "ScopeName";
@@ -1472,7 +1509,7 @@ void test_the_values_of_a_field() {
   CHECK_EQ(error_answer.error.status, 503);
   CHECK_EQ(error_answer.error.code, std::string("logs_facet_values_failed"));
   CHECK_EQ(failed.invalidated, 1);
-  // The estimate: the group limit of the scan reached.
+  // The estimate is used when the group limit of the scan is reached.
   FakeDb grouped;
   TestCaches grouped_caches;
   with_table(grouped);

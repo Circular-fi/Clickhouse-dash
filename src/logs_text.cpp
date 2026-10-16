@@ -9,8 +9,8 @@ namespace chdash::logs {
 
 using sql::like_escape;
 
-// tokenbf_v1 / hasToken() split on every ASCII non-alphanumeric byte; bytes
-// >= 0x80 (UTF-8) belong to tokens.
+// tokenbf_v1 and hasToken() split on every ASCII non-alphanumeric byte.
+// Bytes >= 0x80 (UTF-8) belong to tokens.
 bool token_byte(unsigned char ch) {
   return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch >= 0x80;
 }
@@ -30,7 +30,8 @@ std::vector<std::string> split_tokens(std::string_view text) {
   return out;
 }
 
-// Whitespace-separated terms, "quoted phrases" and -negated terms.
+// Terms are separated by whitespace. A term in double quotes is a phrase.
+// A term with a leading minus sign is negated.
 std::vector<TextTerm> parse_terms(std::string_view q) {
   std::vector<TextTerm> terms;
   size_t i = 0;
@@ -65,10 +66,9 @@ std::string to_lower_ascii(std::string text) {
   return text;
 }
 
-// Token mode: every token of a term must be present (hasToken, served by the
-// tokenbf index); a term with separators ("analytics.events_buffer",
-// "key=user:12") must also appear verbatim, which position() checks on the
-// granules the index kept.
+// In token mode, every token of a term must be present. The tokenbf index serves this check through hasToken.
+// A term with separators ("analytics.events_buffer", "key=user:12") must also appear verbatim.
+// The position() function checks this on the granules that the index kept.
 std::string token_term_sql(const TextTerm& term, bool lower_index, SqlParams& params) {
   const std::string body = lower_index ? "lower(Body)" : "Body";
   const std::string text = lower_index ? to_lower_ascii(term.text) : term.text;

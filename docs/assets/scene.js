@@ -1,17 +1,18 @@
-// The page background: one fixed WebGL2 field of columns for the whole page (no library, one instanced draw call). ClickHouse is
-// columnar, so the columns change shape with the section on screen, each shape being a real thing a ClickHouse server does with big
-// data:
-//   hero      a stream of inserts (a wave of rows landing)
-//   features  the sparse primary index: sorted runs of columns, one bright mark per granule, runs merging into longer runs (MergeTree)
-//   otel      a latency heatmap: time on one axis, latency on the other, a distribution that drifts and spikes like real traces
-//   run       a scan: a crest sweeping across the table, lighting the columns it crosses
-// It follows the scroll and the clock, not the pointer.
+// The page background: one fixed WebGL2 field of columns for the whole page. It uses no library and one instanced draw call.
+// ClickHouse is columnar. The columns change shape with the section on screen.
+// Each shape shows a real action of a ClickHouse server on big data:
+//   hero      a stream of inserts (a wave of rows that arrive)
+//   features  the sparse primary index: sorted runs of columns, one bright mark per granule. Runs merge into longer runs (MergeTree)
+//   otel      a latency heatmap: time on one axis, latency on the other. A distribution drifts and spikes, like real traces
+//   run       a scan: a crest moves across the table and lights the columns it crosses
+// It follows the scroll and the clock. It does not follow the pointer.
 //
-// It is built to cost little: the heights are computed on the CPU for the two shapes that are mixed (a few thousand sums per frame) and
-// sent as one small instance buffer, so the vertex shader does almost nothing; it renders at 24 frames per second (10 once the page has
-// been left alone for a while), at no more than 1.25 device pixels per pixel, without multisampling, on the low-power GPU; it measures
-// its own frame time and lowers its resolution, then stops animating, on a machine that cannot keep up; it stops in hidden tabs. Under
-// prefers-reduced-motion or Save-Data it draws still frames while you scroll; without WebGL2 the canvas is hidden.
+// The design keeps the cost low. The CPU computes the heights for the two mixed shapes (a few thousand sums for each frame).
+// It sends them as one small instance buffer. The vertex shader does very little work.
+// The field renders at 24 frames per second. After a long idle time, it renders at 10 frames per second.
+// It uses at most 1.25 device pixels for each pixel. It uses no multisampling, and it targets the low-power GPU.
+// The field measures its own frame time. On a slow machine, it lowers its resolution. If the machine still cannot keep up, it stops the animation. It also stops in hidden tabs.
+// With prefers-reduced-motion or Save-Data, the field draws still frames while you scroll. Without WebGL2, the canvas is hidden.
 (() => {
   "use strict";
   const canvas = document.getElementById("columns");
@@ -22,7 +23,7 @@
   const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, powerPreference: "low-power", depth: true, stencil: false, preserveDrawingBuffer: false });
   if (!gl) { canvas.hidden = true; return; }
 
-  // Fewer columns on small machines (the field keeps its size)
+  // Use fewer columns on small machines. The field keeps its size.
   const weak = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
   const COLS = weak ? 48 : 64, ROWS = weak ? 30 : 40;
   const SPACING = 0.62 * (64 / COLS), WIDTH = 0.46 * (64 / COLS);
@@ -98,7 +99,7 @@
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) { console.warn(gl.getProgramInfoLog(program)); canvas.hidden = true; return; }
   gl.useProgram(program);
 
-  // A unit column (five faces, no bottom): positions and normals, indexed so each corner is shaded once
+  // A unit column has five faces and no bottom. It holds positions and normals. The index shades each corner once.
   const faces = [
     [[0, 0, 1], [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]]],
     [[0, 0, -1], [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]]],
@@ -128,7 +129,7 @@
 
   const uVP = gl.getUniformLocation(program, "uVP"), uDim = gl.getUniformLocation(program, "uDim");
 
-  // The four shapes, on the CPU. A table of hashes keeps them stable.
+  // The CPU computes the four shapes. A table of hashes keeps them stable.
   const hash = new Float32Array(COUNT * 2);
   for (let i = 0; i < hash.length; i++) { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; hash[i] = s - Math.floor(s); }
   const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -143,7 +144,7 @@
       const v = 0.5 + 0.5 * (0.55 * a + 0.3 * b + 0.15 * c);
       out[0] = 0.12 + 2.9 * Math.pow(v, 1.7); out[1] = 0; out[2] = 0;
     },
-    // 1 sorted runs with a mark per granule, merging
+    // 1 sorted runs with a mark per granule. Runs merge.
     (gx, gz, t, i, out) => {
       const merge = 0.5 + 0.5 * Math.sin(t * 0.35);
       const local = (gx % 8) / 7 * (1 - merge) + (gx % 16) / 15 * merge;
@@ -190,7 +191,7 @@
   };
   const mixv = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 
-  // Camera per stage: [eye, target]. The heatmap is seen from higher up so it reads as a chart.
+  // Camera per stage: [eye, target]. The camera looks at the heatmap from higher up. This view reads as a chart.
   const CAMERAS = [
     [[4, 9.5, 18], [3.2, 0.8, -1.5]],
     [[4, 10, 19], [3.2, 0.8, -1.5]],
@@ -205,7 +206,7 @@
   gl.enable(gl.CULL_FACE);
   gl.clearColor(0.027, 0.067, 0.122, 1);
 
-  // Resolution: at most 1.25 device pixels per pixel, lowered by the frame-time monitor below
+  // Resolution: at most 1.25 device pixels per pixel. The frame-time monitor below lowers it.
   let quality = 1;
   let width = 0, height = 0;
   const resize = () => {
@@ -214,8 +215,8 @@
     if (w !== width || h !== height) { width = w; height = h; canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
   };
 
-  // The stage follows the section at the middle of the screen: hero 0, features 2, OpenTelemetry 3, run and footer 4 (stage 1 is the
-  // stream dimmed, passed through between the hero and the features).
+  // The stage follows the section at the middle of the screen. Stage numbers: hero 0, features 2, OpenTelemetry 3, run and footer 4.
+  // Stage 1 is the stream, dimmed. It passes between the hero and the features.
   const sections = ["#top .hero", "#inside", "#opentelemetry", "#run"].map((s) => document.querySelector(s));
   const ANCHOR_STAGES = [0, 2, 3, 4];
   let centers = [];
@@ -280,7 +281,7 @@
     gl.drawElementsInstanced(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0, COUNT);
   };
 
-  // Re-measure the page when its size changes (images and fonts move the sections after the first paint)
+  // Measure the page again when its size changes. Images and fonts move the sections after the first paint.
   const remeasure = () => { measure(); if (still) draw(0, true); };
   window.addEventListener("resize", remeasure, { passive: true });
   if ("ResizeObserver" in window) new ResizeObserver(remeasure).observe(document.body);
@@ -294,7 +295,7 @@
   };
   if (still) { stillOnScroll(); return; }
 
-  // The loop: 24 frames per second, 10 after 40 s without a scroll, and a frame-time monitor that backs off
+  // The loop: 24 frames per second. After 40 s without a scroll, the rate is 10 frames per second. A frame-time monitor lowers the rate when the machine is slow.
   let running = false, frame = 0, last = 0, lastScrollAt = performance.now(), slow = 0, gaveUp = false;
   window.addEventListener("scroll", () => { lastScrollAt = performance.now(); }, { passive: true });
   const stop = () => { running = false; cancelAnimationFrame(frame); };
@@ -316,6 +317,6 @@
   };
   const run = () => { if (running || gaveUp) return; running = true; frame = requestAnimationFrame(loop); };
   document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); else run(); });
-  // Start after the first paint, not in the middle of it
+  // Start after the first paint. Do not start in the middle of it.
   requestAnimationFrame(() => requestAnimationFrame(run));
 })();

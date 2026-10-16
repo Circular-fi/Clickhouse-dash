@@ -1,6 +1,6 @@
-// The Explorer page, Catalog (explorer.html, /explorer/catalog[/<db>[/<table>]]): the tree of databases and tables, the
-// table card, the lineage graph and the size treemaps. The Functions page (app_page_functions.js) has none of these
-// parts, so they are handed to the controller here and never load there.
+// This is the Explorer page, Catalog (explorer.html, /explorer/catalog[/<db>[/<table>]]). It has the tree of databases and tables, the
+// table card, the lineage graph and the size treemaps. The Functions page (app_page_functions.js) has none of these parts.
+// This module passes them to the controller. They never load on the Functions page.
 import "./app_common.js";
 import { boot } from "./app_boot.js";
 import { explorer } from "./app_explorer.js";

@@ -1,5 +1,6 @@
-// The chrome of the Explorer graph inside its pane ("objects without dependencies" toggle) and the side panel of a node or an edge (a bottom sheet
-// on phones): the definition, the columns, the neighbours and the TTL rules of a node, the object that defines an edge.
+// This module builds the chrome of the Explorer graph. The chrome is the "objects without dependencies" toggle inside the pane.
+// It also builds the side panel for a node or an edge. On phones, the side panel is a bottom sheet.
+// For a node, the panel shows the definition, the columns, the neighbours and the TTL rules. For an edge, it shows the object that defines the edge.
 
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
@@ -46,8 +47,8 @@ function buildGraphChrome() {
   panel.append(chrome.panelBody);
   chrome.panel = panel;
   pane.append(panel);
-  // The floating detail panel shell (kit.panelShell): Escape through
-  // ns.layers, the focus back to the canvas.
+  // The detail panel shell (kit.panelShell) handles Escape through ns.layers.
+  // It sends the focus back to the canvas.
   chrome.panelShell = kit.panelShell(panel, { opener: () => dom.explorerGraphCanvas, onClose: () => { if (model.panel) closePanel(); } });
 }
 
@@ -60,9 +61,9 @@ function renderGraphChrome() {
   if (chrome.isolatedInput) chrome.isolatedInput.checked = model.showIsolated;
 }
 
-// Same path as a canvas click on a logical node: focus, tree/URL sync, the
-// side panel, and the camera recentred on the node in the area the panel
-// leaves free (above the bottom sheet on phones).
+// Use the same path as a canvas click on a logical node. Focus the node, sync the tree and the URL, and open the side panel.
+// Then, centre the camera on the node. The camera uses only the area that the panel leaves free.
+// On phones, that area is above the bottom sheet.
 function selectGraphNode(id) {
   const node = (model.graph?.nodes || []).find((candidate) => candidate.id === id && candidate.layer === "logical");
   if (!node) return;
@@ -112,8 +113,7 @@ function objectButton(id, fallback) {
   return button;
 }
 
-// The shared read-only SQL block (sqlBlock): copy, the first 16 lines
-// and "Show all".
+// The shared read-only SQL block (sqlBlock). It has a copy button, shows the first 16 lines and a "Show all" button.
 function sqlBlock(sql, truncated) {
   const wrap = h("div", { class: "explorerGraphPanel__sqlWrap" });
   wrap.append(sqlBlockMod({ sql, copy: true, maxLines: 16, wrap: true, label: "SELECT", className: "explorerGraphPanel__sql" }));
@@ -125,7 +125,7 @@ async function loadDefinition(node) {
   const hostId = String(state.selectedHostId || "");
   const key = `${hostId}\u0000${node.id}`;
   if (!model.definitionCache.has(key)) {
-    // One read for each object, cut when the host changes (the slots of the Explorer start with "explorer.").
+    // Read each object one time. Cancel the read when the host changes. The Explorer slots start with "explorer.".
     const req = util.latest(`explorer.graphdef.${key}`);
     model.definitionCache.set(key, api.getExplorerGraphDefinition(hostId, node.database, node.name, { signal: req.signal }).catch((error) => {
       model.definitionCache.delete(key);
@@ -150,8 +150,8 @@ async function loadColumns(node) {
   return model.columnsCache.get(key);
 }
 
-// Fills `container` with what the object definition says about it; used by
-// node panels and by edge panels for the object that defines the edge.
+// Fill `container` with the facts that the object definition gives about the object.
+// Node panels use this function. Edge panels use it for the object that defines the edge.
 function renderDefinitionInto(container, node, { compact = false } = {}) {
   const serial = model.panelSerial;
   const status = h("p", { class: "graphKitPanel__note" }, "Loading definition\u2026");
@@ -200,7 +200,7 @@ function renderColumnsInto(container, node) {
     if (serial !== model.panelSerial) return;
     status.remove();
     if (!columns.length) { container.append(h("p", { class: "graphKitPanel__note" }, "No columns.")); return; }
-    // The shared key / value list (kv.list): name, type (mono), copy.
+    // The shared key and value list (kv.list): name, type (mono), and copy.
     const limit = 40;
     container.append(kv.list(columns.slice(0, limit).map((column) => ({
       key: column.name, value: column.type, json: false, text: true, mono: true, actions: ["copy"],
@@ -276,9 +276,9 @@ function renderNodePanel(body, node) {
   body.append(columns);
 }
 
-// The object whose definition explains an edge: the MV for MV trigger and
-// output edges, the View it feeds, the Buffer / Distributed table that
-// forwards, the dictionary that loads.
+// Find the object that explains an edge. For MV trigger and output edges, this is the materialized view.
+// For a view edge, this is the View that the edge feeds. For a Buffer or Distributed edge, this is the table that forwards the data.
+// For a dictionary edge, this is the dictionary that loads the data.
 function edgeDefiningObjectIds(edge) {
   if (edge.collapsed) return (edge.collapsed_path || []).slice();
   if (["materialized_view", "refreshable_mv", "view", "dictionary_source"].includes(edge.kind)) return [edge.to];

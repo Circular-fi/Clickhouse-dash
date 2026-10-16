@@ -1,10 +1,9 @@
-// The adapter of src/wasm/labels.c (src/static/wasm/labels.wasm): the edge label placement of app_graph_kit.js (placeLabels).
-//
+// The adapter of src/wasm/labels.c (src/static/wasm/labels.wasm). It gives the edge label placement of app_graph_kit.js (placeLabels).
 //   ops.labels.run(kernel, input)   input: { count, widths, heights, start, points, obstacleCount, obstacles } (typed arrays, see
 //                                   pack()); returns { status, placed: Uint8Array(count), xy: Float64Array(count * 2) }
 //
-// ns.wasm.labels.pack(requests, obstacles) turns the arguments of kit.placeLabels() into that input;
-// ns.wasm.labels.unpack(requests, result) gives its answer: { placed: Map(key -> rect), dropped: [key] }.
+// ns.wasm.labels.pack(requests, obstacles) turns the arguments of kit.placeLabels() into that input.
+// ns.wasm.labels.unpack(requests, result) gives the answer: { placed: Map(key -> rect), dropped: [key] }.
 import { wasm } from "./app_wasm.js";
 
 wasm.ops.labels = {

@@ -15,7 +15,7 @@ using namespace monitor_internal;
 
 namespace monitor_internal {
 
-// The optional columns of system.disks and system.storage_policies (the Disks section), in the order their SELECT reads them.
+// The optional columns of system.disks and system.storage_policies (the Disks section). They are listed in the order that their SELECT reads them.
 const std::vector<std::string>& disk_columns() {
   static const std::vector<std::string> names{
     "unreserved_space", "keep_free_space", "type", "object_storage_type", "cache_path",
@@ -34,9 +34,9 @@ const std::vector<std::string>& storage_policy_columns() {
 }  // namespace monitor_internal
 
 // ---------------------------------------------------------------------------
-// Disks: system.disks, system.storage_policies and the active parts of the
-// runner-visible databases by disk (system context, metadata only), then the
-// growth of each disk (asynchronous_metric_log) and what was written and
+// Disks: system.disks, system.storage_policies, and the active parts of the
+// runner-visible databases by disk (system context, metadata only). Then the
+// growth of each disk (asynchronous_metric_log), and what was written and
 // moved (part_log).
 
 namespace {
@@ -57,8 +57,8 @@ std::optional<bool> optional_flag(const std::string& value, bool present) {
   return flag(value);
 }
 
-// "toString(<column>)" when this server has it, "''" otherwise: the SELECT
-// keeps its column positions whatever the version.
+// "toString(<column>)" when this server has the column, "''" otherwise. The SELECT
+// keeps its column positions for every version.
 std::string optional_column_sql(const MonitorCapabilities& caps, const std::string& table, const std::string& column) {
   return caps.has_column(table, column) ? ", toString(`" + column + "`)" : ", ''";
 }
@@ -109,8 +109,8 @@ ChParams monitor_databases_params(const std::vector<std::string>& databases) {
 }
 
 std::string monitor_disk_usage_sql(const std::string& databases_list) {
-  // The disk's totals over every listed database are window functions: they
-  // run after the GROUP BY and before the LIMIT, so a cut list still knows
+  // The disk's totals over every listed database are window functions. They
+  // run after the GROUP BY and before the LIMIT. So a cut list still knows
   // what it leaves out.
   return "SELECT toString(disk_name), toString(database), toString(sum(bytes_on_disk)), toString(sum(rows)), "
          "toString(count()), toString(countIf(part_type = 'Compact')), "
@@ -170,7 +170,7 @@ bool load_system_monitor_disks(ChExecutor& system, AclView& runner_acl, const Mo
     ++failed;
   }
 
-  // Storage policies: one row per volume, in priority order.
+  // Storage policies: one row for each volume, in priority order.
   try {
     const bool max_part = caps.has_column("storage_policies", "max_data_part_size");
     const bool move_factor = caps.has_column("storage_policies", "move_factor");
@@ -206,8 +206,8 @@ bool load_system_monitor_disks(ChExecutor& system, AclView& runner_acl, const Mo
     ++failed;
   }
 
-  // Bytes by disk and database: active parts of the databases the runner can
-  // SHOW (inside the SQL), each row re-checked against that list.
+  // Bytes by disk and database: active parts of the databases that the runner can
+  // SHOW (inside the SQL). Each row is checked again against that list.
   try {
     const std::vector<std::string> databases = runner_acl.databases();
     if (!databases.empty()) {
@@ -264,7 +264,7 @@ MonitorDiskTrend monitor_disk_trend(const std::vector<uint64_t>& times_s, const 
     out.status = "not_enough_history";
     return out;
   }
-  // Least squares over the buckets (time centred, so the sums stay small).
+  // Least squares over the buckets. The time is centred, so the sums stay small.
   double mean_t = 0;
   double mean_v = 0;
   for (const auto& [t, v] : points) {
@@ -281,8 +281,8 @@ MonitorDiskTrend monitor_disk_trend(const std::vector<uint64_t>& times_s, const 
   }
   const double slope = den > 0 ? num / den : 0.0;  // bytes per second
   out.slope_bytes_per_day = slope * 86400.0;
-  // Flat: what the trend adds over the window is under 1 part in 10,000 of
-  // the capacity (or under 1 MiB). Falling or flat: no forecast.
+  // Flat: the trend adds under 1 part in 10,000 of the capacity over the window
+  // (or under 1 MiB). Falling or flat: no forecast.
   const double grown = slope * static_cast<double>(out.span_s);
   if (!(slope > 0) || grown < std::max(static_cast<double>(total_space) * 1e-4, 1048576.0)) {
     out.status = "not_growing";
@@ -298,12 +298,12 @@ std::string monitor_disk_growth_sql(const MonitorSeriesWindow& window, const std
   metrics.reserve(disks.size());
   for (const auto& disk : disks) metrics.push_back("DiskUsed_" + disk);
   const std::string total = "'TotalBytesOfMergeTreeTables'";
-  // metric IN (...) first: the table's key starts with metric.
+  // Filter on metric IN (...) first. The table's key starts with metric.
   std::string predicate;
   std::string disk_expr;
   if (with_key) {
-    // 26.8+: DiskUsed with key = '<disk>' (the default), DiskUsed_<disk>
-    // with asynchronous_metrics_key_values_mode = legacy_names or both.
+    // 26.8 and later: DiskUsed with key = '<disk>' (the default). DiskUsed_<disk>
+    // applies when asynchronous_metrics_key_values_mode = legacy_names or both.
     predicate = "(metric = " + total + (metrics.empty() ? "" : " OR metric IN " + in_list(metrics)) +
                 (disks.empty() ? "" : " OR (metric = 'DiskUsed' AND key IN " + in_list(disks) + ")") + ")";
     disk_expr = "if(metric = " + total + ", '', if(metric = 'DiskUsed', toString(key), substring(toString(metric), 10)))";
@@ -314,8 +314,8 @@ std::string monitor_disk_growth_sql(const MonitorSeriesWindow& window, const std
     disk_expr = "if(metric = " + total + ", '', substring(toString(metric), 10))";
   }
   const uint64_t rows = (series_bucket_count(window) + 2) * (disks.size() + 1);
-  // `both` mode logs a disk twice per sample (DiskUsed_<d> and DiskUsed with
-  // its key): the maximum of a bucket is the same either way.
+  // In `both` mode, the server logs a disk twice for each sample (DiskUsed_<d> and DiskUsed with
+  // its key). The maximum of a bucket is the same in both cases.
   return "SELECT " + growth_bucket_sql(window) + ", " + disk_expr + " AS disk, toString(metric = " + total +
          ") AS merge_tree, toFloat64(max(value)) AS v FROM system.asynchronous_metric_log WHERE " + predicate + " AND " +
          series_time_predicate(window) + " GROUP BY t, disk, merge_tree ORDER BY t" +
@@ -325,7 +325,7 @@ std::string monitor_disk_growth_sql(const MonitorSeriesWindow& window, const std
 std::string monitor_disk_written_sql(const MonitorSeriesWindow& window, const std::string& databases_list) {
   const uint64_t rows = series_bucket_count(window) + 2;
   // New parts (inserts) and part moves (TTL and policy moves) of the
-  // runner-visible databases, summed over them: no database is named.
+  // runner-visible databases. The values are summed over them. No database is named.
   return "SELECT " + growth_bucket_sql(window) +
          ", toFloat64(sumIf(size_in_bytes, event_type = 'NewPart')), toFloat64(sumIf(size_in_bytes, event_type = 'MovePart')), "
          "toFloat64(countIf(event_type = 'MovePart')) FROM system.part_log WHERE " + series_time_predicate(window) +
@@ -335,8 +335,8 @@ std::string monitor_disk_written_sql(const MonitorSeriesWindow& window, const st
 
 namespace {
 
-// One growth SELECT, its rows read and time kept in `source`; each row's
-// bucket lands at its index of the window.
+// One growth SELECT. Its rows are read, and its time is kept in `source`. The bucket of each row
+// is placed at its index in the window.
 void read_growth(ChExecutor& client, const std::string& sql, const MonitorSeriesWindow& window, size_t count,
                  MonitorSeriesSource& source, const std::function<void(const clickhouse::Block&, size_t, size_t)>& on_row,
                  const ChParams& params = {}) {
@@ -364,7 +364,7 @@ void load_system_monitor_disk_growth(ChExecutor& system, AclView& runner_acl, co
   out.buckets.reserve(count);
   for (size_t index = 0; index < count; ++index) out.buckets.push_back(window.from_s + index * window.step_s);
 
-  // 1. The disks to follow, with their free space now (the forecast).
+  // 1. The disks to follow, with their free space now. This is the forecast.
   {
     MonitorSeriesSource& source = out.sources["disks"];
     source.table = "disks";

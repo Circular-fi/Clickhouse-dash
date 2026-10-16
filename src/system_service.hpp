@@ -1,14 +1,21 @@
 #pragma once
 
-// The System page without HTTP: what the routes of /api/system/* do once the request is parsed (system_request.hpp). A route (api_system.cpp,
-// api_system_activity.cpp) is an adapter: it parses the request, finds the host and checks that it is up, calls the service with the context of
-// the request, and writes the JSON of the answer (system_json.hpp).
+// This is the service of the System page, without HTTP. It shows what the routes of /api/system/* do after the request is parsed (system_request.hpp).
+// A route (api_system.cpp, api_system_activity.cpp) is an adapter. It parses the request.
 //
-// The service takes its connections from two ports (a ChExecutor, ch_executor.hpp): the system account, for everything that is server-level,
-// and the runner account, for the Queries (ClickHouse grants decide there, as in the Query page). Each answer is kept by a cache that the server
-// owns, one read at a time for a key: the capabilities of a server (10 minutes), the Overview and the Activity (served at once past their
-// TTL while one read refreshes them), and the others. A failure of a read is the ApiError that the route sends, and a connection that failed
-// is not lent again. A test builds the service with a fake executor, a fake ACL source and caches of its own.
+// It finds the host and checks that the host is up. It calls the service with the context of the request.
+// It writes the JSON of the answer (system_json.hpp).
+//
+// The service takes its connections from two ports (a ChExecutor, ch_executor.hpp).
+// The system account serves everything that is server-level.
+// The runner account serves the Queries. ClickHouse grants decide there, as in the Query page.
+//
+// A cache that the server owns keeps each answer. The cache lets one read run at a time for each key.
+// The capabilities of a server are kept for 10 minutes. The Overview and the Activity are served at once past their TTL, while one read refreshes them.
+// The other answers use the same cache.
+//
+// A failure of a read is the ApiError that the route sends. A connection that failed is not given again.
+// A test builds the service with a fake executor, a fake ACL source, and caches of its own.
 
 #include "acl_service.hpp"
 #include "ch_executor.hpp"
@@ -33,21 +40,23 @@
 namespace chdash {
 namespace system_page {
 
-// What a read gave and whether it is older than its TTL (served while one read refreshes it).
+// This holds what a read gave. It shows whether the value is older than its TTL.
+// The value is served while one read refreshes it.
 template <typename T>
 struct Cached {
   std::shared_ptr<const T> value;
   bool stale = false;
 };
 
-// The caches of the server (server.hpp owns them: a test makes its own).
+// The caches of the server. server.hpp owns them. A test makes its own caches.
 struct SystemCaches {
   TtlCache<std::string, MonitorCapabilities>& capabilities;
   TtlCache<std::string, SystemMonitorOverview>& overview;
   TtlCache<std::string, SystemMonitorSeries>& series;
   TtlCache<std::string, SystemMonitorQueries>& queries;
   TtlCache<std::string, SystemMonitorQuery>& query;
-  // The formatted text of a shape, by host and text (not by window: every window of a shape has the same text).
+  // The formatted text of a shape, keyed by host and text. The key does not use the window.
+  // Every window of a shape has the same text.
   TtlCache<std::string, ShapeFormatted>& shape_format;
   TtlCache<std::string, SystemMonitorDisks>& disks;
   TtlCache<std::string, SystemMonitorDiskGrowth>& growth;
@@ -57,27 +66,28 @@ struct SystemCaches {
 
 class SystemService {
  public:
-  // A connection to a host; null with the reason in *error when there is none.
+  // This gives a connection to a host. It returns null, with the reason in *error, when there is no connection.
   using OpenFn = std::function<std::unique_ptr<ChExecutor>(const HostSpec& host, std::string* error)>;
 
   struct Ports {
-    // The system account of the host (its runner account when it has no system account).
+    // The system account of the host. When the host has no system account, this is the runner account.
     OpenFn system;
-    // The runner account, with a receive timeout that outlasts the time budgets of the Queries.
+    // The runner account. Its receive timeout is longer than the time budgets of the Queries.
     OpenFn runner;
-    // The identity of the runner of a host, for the boundary of what it may see (acl_service.hpp).
+    // The identity of the runner of a host. It sets the boundary of what the runner may see (acl_service.hpp).
     std::function<AclAccess(const HostSpec&)> runner_access;
-    // The total and active replicas of tables (one Keeper request for each, kept by the Explorer).
+    // The total and active replicas of tables. Each table takes one Keeper request. The Explorer keeps the result.
     ReplicaCountsFn replica_counts;
-    // The formatter of a host (the runner account of the host, inside the scope of the request): the masked text of a shape in, its formatted
-    // text out. Not set: a shape has no formatted text.
+    // The formatter of a host. It uses the runner account of the host, inside the scope of the request.
+    // It takes the masked text of a shape, and it gives the formatted text. When it is not set, a shape has no formatted text.
     std::function<ShapeFormatReply(const HostSpec& host, const std::string& masked_sql)> format;
   };
 
   SystemService(Ports ports, SystemCaches caches, AclService& acl) : ports_(std::move(ports)), caches_(caches), acl_(acl) {}
 
-  // What a server exposes (its optional system logs and versioned columns): kept 10 minutes, 1 minute while an optional log table is missing
-  // (ClickHouse creates it at its first flush). A failed detection is not kept: the panels then read their base columns and let ClickHouse answer.
+  // This is what a server exposes: its optional system logs and its versioned columns. It is kept for 10 minutes.
+  // It is kept for 1 minute while an optional log table is absent, because ClickHouse creates the table at its first flush.
+  // A failed detection is not kept. The panels then read their base columns, and ClickHouse gives the answer.
   std::shared_ptr<const MonitorCapabilities> capabilities(const HostSpec& host) const;
 
   Result<Cached<SystemMonitorOverview>> overview(const RequestContext& context, const HostSpec& host, const HostRequest& request) const;
@@ -86,9 +96,10 @@ class SystemService {
   Result<Cached<SystemMonitorDisks>> disks(const RequestContext& context, const HostSpec& host, const HostRequest& request) const;
   Result<Cached<SystemMonitorQueries>> queries(const RequestContext& context, const HostSpec& host, const QueriesRequest& request) const;
   Result<Cached<SystemMonitorQuery>> query(const RequestContext& context, const HostSpec& host, const QueryRequest& request) const;
-  // The normalized text of a shape, formatted (system_query_format.hpp), or null when it cannot be: a text that the formatter refuses, too
-  // large a text, a host that is down. Kept by host and text, so a second request of the shape (another window, another order) does not ask
-  // ClickHouse again. It never fails the route: the answer is the raw text.
+  // The normalized text of a shape, formatted (system_query_format.hpp). It is null when the text cannot be formatted.
+  // Examples are a text that the formatter refuses, a text that is too large, and a host that is down.
+  // The key holds the host and the text. So a second request of the shape does not ask ClickHouse again.
+  // This never fails the route. The answer is then the raw text.
   std::shared_ptr<const std::string> shape_text_formatted(const RequestContext& context, const HostSpec& host, const std::string& normalized) const;
   Result<Cached<SystemActivity>> activity(const RequestContext& context, const HostSpec& host, const HostRequest& request) const;
   Result<Cached<SystemKeeperStatus>> keeper(const RequestContext& context, const HostSpec& host, const HostRequest& request) const;

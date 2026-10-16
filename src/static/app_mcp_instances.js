@@ -1,25 +1,26 @@
-// The instances that the usage of the keys sums (docs/mcp-integration-page.md, "Instances"). ChDash instances that share the directory of
-// mcp.usage each write the file of their own and read the files of the others, so every answer of the usage is the sum of all of them. This
-// module says so where a figure is a sum (the usage of a key and the column Used of the keys page; the Usage tab has its Instance list in the
-// bar instead, app_mcp_bar.js), and warns when a file is left out of it (the Usage tab, the usage of a key, the keys page).
+// The instances that the usage of the keys sums. The docs are in docs/mcp-integration-page.md, "Instances".
+// ChDash instances that share the directory of mcp.usage each write their own file. They read the files of the others.
+// So every answer of the usage is the sum of all of them. This module says where a figure is a sum.
+// Such figures are the usage of a key and the column Used of the keys page. The Usage tab has its Instance list in the bar instead (app_mcp_bar.js).
+// This module also warns when a file is left out of a sum. The warnings show on the Usage tab, in the usage of a key, and on the keys page.
 //
 //   ns.mcpInstances.create({ prefix })              -> note
-//       note.el                                     "3 instances" (`prefix` goes before it: "Summed over ") as a button that opens the list in a
-//                                                   popover: for each instance its name, a badge when its file is not read, and when it wrote last.
-//                                                   It is hidden for fewer than two instances: nothing is summed.
-//       note.update(instances, { me, now })         the list that the answer holds (the answer's `instances`, this instance first);
-//                                                   `me` is the name of this instance and `now` the time of the answer (the times read "2 min ago"
-//                                                   from it)
+//       note.el                                     "3 instances" (`prefix` goes before it: "Summed over ") is a button. The button opens a popover with the list.
+//                                                   The popover lists each instance by name. It has a badge when its file is not read. It shows the time of its last write.
+//                                                   It is hidden for fewer than two instances. Nothing is summed in that case.
+//       note.update(instances, { me, now })         The list that the answer holds. It is the answer's `instances`, with this instance first;
+//                                                   `me` is the name of this instance. `now` is the time of the answer. The times read "2 min ago"
+//                                                   from it.
 //       note.destroy()                              closes the popover
-//   ns.mcpInstances.warn(container, instances)      fills `container` with the warnings of the list, or hides it: a banner (uiState.banner,
-//                                                   level warn) for the instance whose name another ChDash writes under, and one for the files that
+//   ns.mcpInstances.warn(container, instances)      It fills `container` with the warnings of the list, or hides it when there are none. A warning is a banner (uiState.banner,
+//                                                   level warn). It has one banner for the instance whose name another ChDash writes under. It has one more for the files that
 //                                                   were skipped. The container is drawn again only when the warnings change.
-//   ns.mcpInstances.problem(item)                   the sentence about an instance whose file is not read, "" when it is
-//   ns.mcpInstances.wrote(item, now)                { text, title }: when the instance wrote last, "wrote 2 min ago" (or "no write yet"), and the
-//                                                   exact time for a tooltip (the list of the popover and the Instance list of the bar say it alike)
+//   ns.mcpInstances.problem(item)                   The sentence about an instance whose file is not read. It is "" when the file is read.
+//   ns.mcpInstances.wrote(item, now)                { text, title }. The text tells when the instance wrote last, for example "wrote 2 min ago" or "no write yet".
+//                                                   The title is the exact time, for a tooltip. The popover and the Instance list of the bar show the same text.
 //
-// The popover is a click-opened ns.popover (Escape and a press outside close it, the focus goes back to the button). Nothing here runs on a
-// timer: the note follows the answers that the page reads.
+// The popover is a click-opened ns.popover. Escape and a press outside close it. The focus goes back to the button.
+// Nothing here runs on a timer. The note follows the answers that the page reads.
 
 import { h } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -27,13 +28,13 @@ import { badge } from "./app_ui_badge.js";
 import { popover } from "./app_ui_popover.js";
 import { uiState } from "./app_ui_state.js";
 
-// The names of the skipped files that a warning lists before it says "and N more".
+// The names of the skipped files that a warning lists. After these names, it says "and N more".
 const NAMED = 3;
 
 const plural = (n, one, many) => `${format.count(n)} ${n === 1 ? one : many}`;
 const sayReason = (reason) => String(reason || "").replace(/_/g, " ").trim();
 
-// What is wrong with the file of an instance, as a sentence ("" when nothing is).
+// The problem with the file of an instance, as a sentence. It is "" when nothing is wrong.
 function problem(item) {
   if (item.status === "conflict") return `Another ChDash writes as ${item.instance}: this instance does not save its counts.`;
   if (item.status === "skipped") {
@@ -43,15 +44,15 @@ function problem(item) {
   return "";
 }
 
-// When an instance wrote its file last, from the time of the answer: { text: "wrote 2 min ago", title: the time in full }. An instance that
-// has not written yet has no time.
+// The time when an instance wrote its file last, from the time of the answer. It is { text: "wrote 2 min ago", title: the time in full }.
+// An instance that has not written yet has no time.
 function wrote(item, now) {
   if (item.writtenAt == null) return { text: "no write yet", title: "" };
   return { text: `wrote ${format.ago(item.writtenAt, { now, short: true })}`, title: format.timeTitle(item.writtenAt) };
 }
 
-// The warnings of a list of instances: { message, details }, a conflict first, then the skipped files in one sentence (a rolling upgrade can
-// leave dozens of them: the popover of the note has each).
+// The warnings of a list of instances have the form { message, details }. A conflict comes first. Then the skipped files come in one sentence.
+// A rolling upgrade can leave dozens of skipped files. The popover of the note shows each one.
 function warnings(instances) {
   const out = [];
   for (const item of instances) {
@@ -82,7 +83,7 @@ function warn(container, instances) {
     { message: spec.message, details: spec.details, detailsLabel: "Why", level: "warn", inset: true })));
 }
 
-// The instances in the order of the list: this one first, the others by name (a name with a number sorts by it: chdash-2 before chdash-10).
+// The instances come in the order of the list. This instance comes first. The others come by name. A name with a number sorts by that number: chdash-2 comes before chdash-10.
 function ordered(instances, me) {
   return [...instances].sort((a, b) => (b.instance === me) - (a.instance === me) || a.instance.localeCompare(b.instance, undefined, { numeric: true }));
 }
@@ -95,7 +96,7 @@ function listOf(instances, { me, now }) {
     return h("li", { class: "mcpInstancesList__row", dataset: { instance: item.instance, status: item.status } },
       h("span", { class: "mcpInstancesList__name" }, h("code", null, item.instance), item.instance === me ? h("span", { class: "mcpMuted" }, "this instance") : null,
         item.status === "ok" ? null : badge.el(item.status === "conflict" ? "conflict" : "skipped", { tone: "warn", size: "sm", title: said }),
-        // A skipped file says why in a word ("invalid", "too large"); the reason of a conflict is a sentence: it is in the title and the warning.
+        // A skipped file gives its reason in one word, such as "invalid" or "too large". The reason of a conflict is a sentence. It is in the title and in the warning.
         item.status === "skipped" && item.reason ? h("span", { class: "mcpMuted" }, sayReason(item.reason)) : null),
       h("span", { class: "mcpMuted mcpInstancesList__meta", title: last.title }, last.text));
   });
@@ -131,7 +132,7 @@ function create({ prefix = "" } = {}) {
       const text = `${prefix}${plural(instances.length, "instance", "instances")}`;
       if (button.textContent !== text) button.textContent = text;
       button.title = `The usage is summed over ${plural(instances.length, "instance", "instances")}. Open the list.`;
-      // The answer of a new read changes the list that is open: its times follow, the focus stays where it is.
+      // A new answer changes the list that is open. Its times follow it, and the focus stays where it is.
       if (shown?.isOpen()) shown.update(content());
     },
     destroy() {

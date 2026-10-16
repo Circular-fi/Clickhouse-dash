@@ -1,24 +1,24 @@
-// Badges, chips and service swatches, one component for every page
+// Badges, chips and service swatches. One component serves every page
 // (css/10-components/badge.css).
 //
 //   <span class="badge badge--<tone> [badge--md] [badge--pill]">
 //     sizes   sm (18 px, the default) and md (22 px)
 //     shapes  r4 (the default) and pill
-//     tones   neutral, accent, ok, warn, error, category (--badge-color set
-//             by the caller: a kind, a severity, a series), estimate (an
+//     tones   neutral, accent, ok, warn, error, category (the caller sets
+//             --badge-color: a kind, a severity, a series), estimate (an
 //             approximate answer: "sampled x4", "Estimated", "Partial") and
 //             key (ORDER BY, PARTITION, SAMPLE, MATERIALIZED)
 //     solid   .badge--solid: the tone as a fill, the glyph in --panel (error
 //             counts)
-//   Filter chips: .chips holding .chip badges (key, operator, value and a
-//   remove button) and an optional "Clear filters" link.
-//   Service colour: .serviceSwatch, a dot beside inline text, or
-//   .serviceSwatch--bar, a left bar in rows and chips; the colour comes from
-//   --trace-service-color (palette.service) or --swatch.
+//   Filter chips: .chips holds .chip badges (key, operator, value and a
+//   remove button). An optional "Clear filters" link follows them.
+//   Service colour: .serviceSwatch draws a dot beside inline text.
+//   .serviceSwatch--bar draws a left bar in rows and chips. The colour comes
+//   from --trace-service-color (palette.service) or --swatch.
 //
-// Span status reads one way everywhere: statusLabel() gives "OK", "Error"
-// or "Unset" for StatusCode values, STATUS_CODE_* spellings and the OTLP
-// numbers (0 unset, 1 ok, 2 error); statusHtml() draws Error as a red
+// The span status reads one way everywhere. statusLabel() gives "OK", "Error"
+// or "Unset". It reads StatusCode values, STATUS_CODE_* spellings and the OTLP
+// numbers (0 unset, 1 ok, 2 error). statusHtml() draws Error as a red
 // chip, OK as muted text and Unset as nothing.
 
 import { palette } from "./app_palette.js";
@@ -46,9 +46,9 @@ function styleOf(color, style) {
 }
 
 // badge.html(text, { tone, size, shape, solid, color, title, className,
-// attrs, tag, swatch }) -> HTML. text is escaped; options.html, when given,
-// is trusted markup used instead. swatch: a service name (palette.service)
-// drawing a left bar.
+// attrs, tag, swatch }) -> HTML. The function escapes text. When options.html is given,
+// the function uses that trusted markup instead. swatch: a service name (palette.service).
+// The swatch draws a left bar.
 function html(text, options = {}) {
   const { color = "", title = "", attrs = {}, tag = "span", swatch = null, style = "" } = options;
   let css = styleOf(color, style);
@@ -63,7 +63,7 @@ function html(text, options = {}) {
   return `<${tag}${type} class="${esc(classes(options))}"${css ? ` style="${esc(css)}"` : ""}${title ? ` title="${esc(title)}"` : ""}${attrsHtml(attrs)}>${lead}${body}</${tag}>`;
 }
 
-// The same badge as an element.
+// Return the same badge as an element.
 function el(text, options = {}) {
   const holder = document.createElement("div");
   holder.innerHTML = html(text, options);
@@ -86,9 +86,9 @@ const STATUS_TONE = { ok: "ok", error: "error", unset: "neutral" };
 
 const statusLabel = (code) => STATUS_LABEL[statusKey(code)];
 const statusTone = (code) => STATUS_TONE[statusKey(code)];
-// Only an error is a chip: Error is a red chip, OK discreet muted text
-// (.statusText), Unset nothing (options.empty, "" by default: a key / value
-// pair passes format.EMPTY).
+// Only an error is a chip. Error is a red chip. OK is discreet muted text
+// (.statusText). Unset is nothing. options.empty sets the text for an empty value.
+// Its default is "". A key / value pair passes format.EMPTY.
 function statusHtml(code, options = {}) {
   const key = statusKey(code);
   if (key === "unset") return options.empty ?? "";
@@ -102,13 +102,14 @@ function statusHtml(code, options = {}) {
 
 // ------------------------------------------------------------ severity
 
-// A log severity: the palette level (fatal, error, warn, info, debug,
-// trace) colours it through [data-sev] (--sev-color); the text is what the
-// record says (SeverityText), the level name otherwise, in capitals on
-// every page (Logs, trace logs, patterns). Only ERROR and FATAL are chips
-// (FATAL solid); WARN is amber text, INFO muted text, DEBUG and TRACE
-// dimmed text (.badge--sevText). A severity button (a filter toggle)
-// stays a chip.
+// A log severity. The palette level (fatal, error, warn, info, debug,
+// trace) colours it through [data-sev] (--sev-color). The text is the
+// SeverityText of the record. If the record has none, the text is the level
+// name in capitals on every page (Logs, trace logs, patterns).
+//
+// Only ERROR and FATAL are chips, and FATAL is solid. WARN is amber text.
+// INFO is muted text. DEBUG and TRACE are dimmed text (.badge--sevText).
+// A severity button (a filter toggle) remains a chip.
 const SEVERITY_CHIPS = new Set(["error", "fatal"]);
 function severityHtml(level, text = "", options = {}) {
   const name = String(level || "trace");
@@ -124,7 +125,7 @@ function severityHtml(level, text = "", options = {}) {
 
 // ------------------------------------------------------------ service
 
-// swatchHtml(name, { bar }) -> the swatch of a service (palette.service).
+// swatchHtml(name, { bar }) returns the swatch of a service (palette.service).
 function swatchHtml(name, { bar = false, color = "" } = {}) {
   const value = color || (palette?.service ? palette.service(String(name ?? "")) : "");
   return `<i class="serviceSwatch${bar ? " serviceSwatch--bar" : ""}" style="--swatch:${esc(value)}" aria-hidden="true"></i>`;

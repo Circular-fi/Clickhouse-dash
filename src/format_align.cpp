@@ -1,4 +1,5 @@
-// The passes of the formatter that work on the lines of a finished layout: the alignment of aliases, columns and index definitions, enum types and the final layout.
+// The formatter passes that work on the lines of a finished layout.
+// They align aliases, columns and index definitions. They also format enum types and the final layout.
 // The declarations that the units share are in format_internal.hpp.
 
 #include "format_internal.hpp"
@@ -54,8 +55,8 @@ string align_alias_line(string_view line, size_t target_as) {
 namespace {
 bool line_is_alignable_alias(string_view line) {
   const string t = trim_ascii_spaces(line);
-  // A closer line ends a multi-line item: `) AS x`, `] AS x` and a CASE's
-  // `END AS x` keep one space.
+  // A line that closes a multi-line item, such as `) AS x`, `] AS x` or a CASE's
+  // `END AS x`. Such a line keeps one space.
   if (t.empty() || starts_with_ci(t, ")") || starts_with_ci(t, "]") || starts_with_ci(t, "END AS ") || starts_with_ci(t, "FROM ") ||
       starts_with_ci(t, "JOIN ") || starts_with_ci(t, "ARRAY JOIN ") ||
       starts_with_ci(t, "GLOBAL ARRAY JOIN ")) return false;
@@ -120,8 +121,8 @@ namespace {
 bool looks_like_create_column_line(string_view line) {
   const string t = trim_ascii_spaces(line);
   if (t.size() <= 2 || t.front() != '`') return false;
-  // `name` Type ...: a type follows the quoted name. A projection that is only
-  // a quoted name with a space in it (`entity key`,) is not a column.
+  // `name` Type ...: a type follows the quoted name.
+  // A projection that is only a quoted name with a space in it (`entity key`,) is not a column.
   const size_t close = t.find('`', 1);
   if (close == string::npos || close + 1 >= t.size() || t[close + 1] != ' ') return false;
   string rest = trim_ascii_spaces(string_view(t).substr(close + 1));
@@ -162,11 +163,12 @@ size_t column_name_align_width(const vector<size_t>& name_widths) {
 }
 
 namespace {
-// The padding between a name and its type in a column of names `width` wide (one space for a name wider than the column).
+// The padding between a name and its type. The column of names is `width` wide. A name wider than the column gets one space.
 size_t column_name_padding(size_t width, size_t name_width) { return name_width >= width ? 1 : width - name_width + 1; }
 
-// The column lines of a CREATE schema that one alignment covers: from line `first`, the lines at `indent` that look like a
-// column, up to the first INDEX / PROJECTION / CONSTRAINT / PRIMARY KEY / TTL line or a line less indented; `end` is where it stops.
+// The column lines of a CREATE schema that one alignment covers.
+// Start at line `first`. Take the lines at `indent` that look like a column.
+// Stop at the first INDEX / PROJECTION / CONSTRAINT / PRIMARY KEY / TTL line, or at a line less indented. `end` is where it stops.
 struct SchemaGroup {
   vector<size_t> indexes;
   size_t end = 0;
@@ -199,11 +201,16 @@ size_t column_line_name_width(const string& line) {
   return close == string::npos ? 0 : utf8_width(t.substr(0, close + 1));
 }
 
-// A `Tuple(` that formatQuery spread over lines goes back on one line when it fits: a column of the schema when the whole
-// column fits the line width beside its aligned name, so a short `Tuple(code UInt16, name String)` is not four lines; a
-// Tuple inside an exploded one when its own line fits. A longer one stays as it is. A comment after the closing line stays
-// at the end of the joined line; a comment inside the block keeps it as it is. Only a block that ends its first line with
-// `Tuple(` is joined (an Enum is split by its own rule). Inner blocks are tried before the one around them.
+// Join a `Tuple(` that formatQuery spread over lines back onto one line when it fits.
+// A column of the schema is joined when the whole column fits the line width beside its aligned name.
+// So a short `Tuple(code UInt16, name String)` stays on one line and is not four lines.
+//
+// A Tuple inside an exploded block is joined when its own line fits. A longer one stays as it is.
+// A comment after the line that closes the block stays at the end of the joined line.
+// A comment inside the block keeps the block as it is.
+//
+// Only a block that ends its first line with `Tuple(` is joined. An Enum is split by its own rule.
+// Try the inner blocks before the block around them.
 void join_short_nested_types(vector<string>& lines, size_t first, size_t indent, size_t max_width) {
   const SchemaGroup group = collect_schema_group(lines, first, indent);
   if (group.indexes.empty()) return;
@@ -238,7 +245,7 @@ void join_short_nested_types(vector<string>& lines, size_t first, size_t indent,
       const string part = trim_ascii_spaces(next_code);
       if (part.empty()) { if (!next_comment.empty()) { ok = false; break; } continue; }
       scan_depth(part);
-      // A comment may close the block (`), -- note`); one inside it keeps the block as it is.
+      // A comment can close the block (`), -- note`). A comment inside the block keeps the block as it is.
       if (!next_comment.empty()) {
         if (depth != 0) { ok = false; break; }
         closing_comment = next_comment;
@@ -271,10 +278,9 @@ void align_create_columns(vector<string>& lines, size_t max_width) {
     if (!looks_like_create_column_line(lines[i])) { ++i; continue; }
     const size_t indent = leading_space_count(lines[i]);
 
-    // In CREATE TABLE / VIEW schemas, a multiline Tuple may place several
-    // deeper lines between top-level column declarations. Treat the whole
-    // schema column run as one alignment group rather than resetting after
-    // every nested type block.
+    // In CREATE TABLE and VIEW schemas, a multiline Tuple can place several deeper lines between top-level column declarations.
+    // Treat the whole schema column run as one alignment group.
+    // Do not reset the alignment after every nested type block.
     if (in_create_schema_block(lines, i, indent)) {
       join_short_nested_types(lines, i, indent, max_width);
       const SchemaGroup group = collect_schema_group(lines, i, indent);
@@ -422,9 +428,9 @@ void align_create_index_groups(vector<string>& lines, size_t width) {
       group.push_back(std::move(*parsed));
       ++j;
     }
-    // An index that does not fit the width (aligned or alone) is stacked:
-    // `INDEX name expr` then `TYPE …` and `GRANULARITY …` as continuation
-    // lines. Alignment only applies when every aligned row fits.
+    // An index that does not fit the width, aligned or alone, is stacked.
+    // The stacked form is `INDEX name expr`, then `TYPE …` and `GRANULARITY …` as continuation lines.
+    // Alignment applies only when every aligned row fits.
     auto stacked = [&](const IndexAlignmentLine& row) {
       const string pad(indent, ' ');
       string rendered = pad + row.head + " " + row.name + " " + row.expression;
@@ -549,7 +555,7 @@ string align_multiline_tuple_closers(string_view source) {
       continue;
     }
 
-    // Everything else is copied as it is, a comment or a text included; a line break moves the line counters.
+    // Everything else is copied as it is. This includes a comment or a text. A line break moves the line counters.
     const size_t from = i;
     step_scan(st, source, i);
     for (size_t k = from; k <= i; ++k) {
@@ -638,8 +644,8 @@ string format_long_enum_type_lines(string_view source) {
       continue;
     }
     const auto enum_items = split_top_level(line.substr(enum_open + 1, enum_close - enum_open - 1), ',');
-    // Short enums are more readable inline. Long ClickHouse system enums can
-    // contain dozens of values and must be one value per line.
+    // Short enums are more readable inline.
+    // Long ClickHouse system enums can contain dozens of values. Each value must be on its own line.
     if (enum_items.size() < 5 && line.size() <= 100) {
       rendered.push_back(line);
       continue;
@@ -648,9 +654,9 @@ string format_long_enum_type_lines(string_view source) {
     const size_t indent = leading_space_count(line);
     const string enum_name = string(line.substr(enum_pos, enum_open - enum_pos));
 
-    // Special-case Map(Enum*, ValueType): once the enum becomes multiline the
-    // containing Map must also become a structured block. Otherwise the output
-    // degenerates into `Map(Enum8( ... ), UInt32)` with mismatched closers.
+    // Special-case Map(Enum*, ValueType).
+    // When the enum becomes multiline, the enclosing Map must also become a structured block.
+    // Otherwise the output degenerates into `Map(Enum8( ... ), UInt32)` with mismatched closers.
     size_t map_pos = string::npos;
     for (size_t search = 0;;) {
       const size_t candidate = line.find("Map(", search);

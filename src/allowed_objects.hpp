@@ -22,8 +22,8 @@ struct AllowedTable {
   std::string table;
   // SELECT on the whole table (CHECK GRANT).
   bool all_columns = false;
-  // The identity reads some columns only. `columns` lists them when the column-level inspection ran (one table:
-  // discover_allowed_table); a table-level discovery leaves it empty, so allows_column() stays false for them.
+  // The identity reads some columns only. `columns` lists them when the column-level inspection ran for one table.
+  // That inspection is discover_allowed_table. A table-level discovery leaves `columns` empty. Then allows_column() stays false for them.
   bool partial = false;
   std::unordered_set<std::string> columns;
 };
@@ -52,21 +52,21 @@ private:
   std::unordered_map<std::string, size_t> table_index_;
 };
 
-// ClickHouse refused the statement: ACCESS_DENIED (code 497). Only this answer means "not readable".
+// ClickHouse refused the statement with ACCESS_DENIED (code 497). Only this answer means "not readable".
 struct AclDenied : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
-// ClickHouse answered another error about one object (a parameterized view, a Distributed table without its cluster,
-// a database dropped meanwhile): that object is left out and reported, the others are still checked.
+// ClickHouse answered with another error about one object. Examples: a parameterized view, a Distributed table without its cluster, or a database dropped meanwhile.
+// That object is left out and reported. The other objects are still checked.
 struct AclObjectError : std::runtime_error {
   AclObjectError(int code, const std::string& message) : std::runtime_error(message), code(code) {}
   int code = 0;
 };
 
-// What one ClickHouse identity answers about its own privileges: the runner connection (make_acl_source), or a fake in
-// the tests. CHECK GRANT and zero-row probes only: the grant list of the user (SHOW GRANTS, system.grants) is never read.
-// A transport error (connection, timeout, protocol) is thrown as it is: it is not an answer.
+// The answers of one ClickHouse identity about its own privileges. The source is the runner connection (make_acl_source), or a fake in the tests.
+// The source uses only CHECK GRANT and zero-row probes. It never reads the grant list of the user (SHOW GRANTS, system.grants).
+// A transport error (connection, timeout, protocol) is thrown as it is. It is not an answer.
 class AclSource {
 public:
   virtual ~AclSource() = default;
@@ -84,9 +84,9 @@ public:
 // The runner connection as an AclSource. A transport error makes the pool drop the connection.
 std::unique_ptr<AclSource> make_acl_source(std::shared_ptr<clickhouse::Client> client, std::shared_ptr<ClickHouseClientPool> pool);
 
-// The bounds of one discovery: at most `max_objects` objects checked in all, `max_objects_per_database` objects probed
-// to decide whether one database is readable, and nothing after `deadline`. Past a bound the answer says `truncated`;
-// nothing that was not checked is allowed.
+// The bounds of one discovery. At most `max_objects` objects are checked in all. At most `max_objects_per_database` objects are probed
+// to decide whether one database is readable. Nothing is checked after `deadline`. Past a bound, the answer says `truncated`.
+// Nothing that was not checked is allowed.
 struct AclBudget {
   size_t max_objects = 4000;
   size_t max_objects_per_database = 400;
@@ -96,7 +96,7 @@ struct AclBudget {
   bool spent() const { return used >= max_objects || std::chrono::steady_clock::now() >= deadline; }
 };
 
-// An object that ClickHouse could not answer about (left out of the answer).
+// An object that ClickHouse could not answer. It is left out of the answer.
 struct AclIssue {
   std::string database;
   std::string object;
@@ -105,7 +105,7 @@ struct AclIssue {
 };
 
 // The databases of the identity: those it reads all of, or at least one object of (sorted). The names come from SHOW
-// DATABASES and the decision from SELECT: a runner may SHOW every database and read two of them.
+// DATABASES. The decision comes from SELECT. A runner may SHOW every database and read two of them.
 struct AclDatabases {
   std::vector<std::string> databases;
   // Listed by SHOW, but the budget ended before an answer. They are never in `databases`.
@@ -118,32 +118,32 @@ struct AclDatabases {
 // The objects of one database that the identity reads, at table level (sorted by name).
 struct AclObjects {
   std::vector<AllowedTable> objects;
-  // The budget ended: the objects not checked are left out.
+  // The budget ended. The objects that were not checked are left out.
   bool truncated = false;
   std::vector<AclIssue> issues;
   bool contains(const std::string& table) const;
   size_t approx_bytes() const;
 };
 
-// Whether the identity reads `database`.`table` and how: CHECK GRANT SELECT on the table, else a zero-row SELECT (it is
-// refused without a column grant). Returns nullopt when it reads nothing. Throws AclObjectError for another server error.
+// Whether the identity reads `database`.`table`, and how. The check uses CHECK GRANT SELECT on the table. If that fails, it uses a zero-row SELECT.
+// The zero-row SELECT is refused without a column grant. Returns nullopt when it reads nothing. Throws AclObjectError for another server error.
 std::optional<AllowedTable> check_table_access(AclSource& source, const std::string& database, const std::string& table);
 
 AclDatabases discover_databases(AclSource& source, AclBudget& budget);
 AclObjects discover_objects(AclSource& source, const std::string& database, AclBudget& budget);
 
-// The exact SELECT/column boundary of one object, for the lazy table detail and data endpoints: opening one table never
-// checks the other ones. Returns nullopt when the object is not listed or no column is readable.
+// The exact SELECT and column boundary of one object. The lazy table detail and data endpoints use it.
+// Opening one table never checks the other tables. Returns nullopt when the object is not listed or no column is readable.
 std::optional<AllowedTable> discover_allowed_table(AclSource& source, const std::string& database, const std::string& table);
 std::optional<AllowedTable> discover_allowed_table(clickhouse::Client& runner, const std::string& database, const std::string& table);
 
-// "SELECT ON `db`.`table`" when the user of the client has no SELECT on the table (CHECK GRANT), else nullopt.
-// A server that does not answer in a readable way says nothing: nullopt.
+// Return "SELECT ON `db`.`table`" when the client user has no SELECT on the table (CHECK GRANT). Else return nullopt.
+// A server that does not answer in a readable way gives no answer. Return nullopt.
 std::optional<std::string> missing_select_grant(clickhouse::Client& client, const std::string& database, const std::string& table);
 std::optional<std::string> missing_select_grant(ChExecutor& db, const std::string& database, const std::string& table);
 
-// Run `CHECK GRANT <expression>` on `client`. `decoded` reports whether the
-// result could be read (some protocol/result variants cannot be decoded).
+// Run `CHECK GRANT <expression>` on `client`. `decoded` reports whether the result could be read.
+// Some protocol and result variants cannot be decoded.
 bool check_grant_expression(clickhouse::Client& client, const std::string& expression, bool* decoded = nullptr);
 
 bool explorer_schema_visible(const std::string& database);

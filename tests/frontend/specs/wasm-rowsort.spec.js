@@ -2,10 +2,10 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp } from '../helpers/app.js';
 
-// The sort of a result column (the numeric one on WebAssembly: src/wasm/rowsort.c, docs/wasm.md): the keys of the column are read
-// once and the kernel orders the rows. The order must equal the one of the comparator the page used before (every
-// comparison normalised both values), for every kind of value, ties and direction; without the kernel the keyed
-// JavaScript order answers.
+// The sort of a result column on WebAssembly (the numeric one: src/wasm/rowsort.c, docs/wasm.md).
+// The keys of the column are read once, and the kernel orders the rows. The order must equal the
+// order of the comparator that the page used before. The old comparator normalised both values in every comparison.
+// This holds for every kind of value, ties and direction. Without the kernel, the keyed JavaScript order gives the answer.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -42,7 +42,7 @@ async function compare(page, shapes) {
       ints: (rand) => String(Math.floor(rand() * 9007199254740991)),
       // 'inf', '-inf' and 'nan' are how the API sends the infinities and NaN of a Float column.
       odd: (rand) => [' 12 ', '', '  ', '1e3', '.5', '-.5', '+7', Infinity, -Infinity, NaN, '0', '-0', 0, -0, '00012', '1E-2', 'inf', '-inf', 'nan'][Math.floor(rand() * 19)],
-      // The strings of a Decimal(38, 9): too many digits for a double, so the comparator path.
+      // These are the strings of a Decimal(38, 9). They have too many digits for a double, so they use the comparator path.
       decimals: (rand) => (rand() < 0.05 ? null : `${rand() < 0.3 ? '-' : ''}${Math.floor(rand() * 1e9)}${String(Math.floor(rand() * 1e9)).padStart(9, '0')}.${String(Math.floor(rand() * 1e9)).padStart(9, '0')}`),
       huge: (rand) => (rand() < 0.001 ? '123456789012345678901234567890' : Math.floor(rand() * 100)),
       text: (rand) => (rand() < 0.001 ? 'n/a' : Math.floor(rand() * 100)),

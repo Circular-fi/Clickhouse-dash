@@ -6,17 +6,17 @@
 
 #include "http_guard.hpp"
 
-// This header expects that CMake generated:
+// This header needs the files that CMake generates:
 //   - embedded_static.hpp
 //   - embedded_static.cpp
-// with namespace "chdash_embedded".
+// The namespace of these files is "chdash_embedded".
 #ifdef CHDASH_EMBED_STATIC
   #include "embedded_static.hpp"
 #endif
 
 namespace chdash {
 
-// Very small mime mapper (extend if you need more)
+// A small MIME type mapper. Add an entry when you need another type.
 inline const char* mime_from_path(std::string_view p) {
   auto dot = p.find_last_of('.');
   if (dot == std::string_view::npos) return "application/octet-stream";
@@ -37,15 +37,15 @@ inline const char* mime_from_path(std::string_view p) {
   return "application/octet-stream";
 }
 
-// Cache-Control of a static asset. Two regimes:
-// - a versioned address (?v=<content hash>: the scripts, stylesheets and kernels of the staged shells,
-//   tools/stage_static.py, and the icon sprite, tools/icons.py) whose ?v= is the hash of the bytes that
-//   are served never changes content, so browsers keep it for a year (`versioned`, asset_version_matches);
-// - every other address (a shell, an asset without ?v=) revalidates, so a new binary is never paired
-//   with stale JavaScript. A web font never changes under its file name (a new face ships under a new
-//   name), so browsers keep fonts for a week without asking.
-// An address whose ?v= is not the hash of the bytes (a tab that a deploy left behind asks for the old
-// version) gets the new bytes with `no-store`: never kept, so the old address is never bound to new code.
+// Cache-Control of a static asset. There are two regimes.
+// - A versioned address has ?v=<content hash>. It names the scripts, stylesheets and kernels of the staged shells,
+//   tools/stage_static.py, and the icon sprite, tools/icons.py. Its ?v= is the hash of the bytes that
+//   are served, so the content never changes. Browsers keep it for a year (`versioned`, asset_version_matches).
+// - Every other address, such as a shell or an asset without ?v=, revalidates. A new binary is never paired
+//   with stale JavaScript. A web font never changes under its file name. A new face ships under a new
+//   name. So browsers keep fonts for a week without asking.
+// An address whose ?v= is not the hash of the bytes gets the new bytes with `no-store`. A tab that was open during a deploy asks for the old
+// version. The response is never kept, so the old address is never bound to new code.
 inline const char* cache_control_for(std::string_view p, bool versioned = false) {
   if (versioned) return "public, max-age=31536000, immutable";
   auto dot = p.find_last_of('.');
@@ -63,10 +63,10 @@ inline bool accepts_gzip(const httplib::Request& req) {
   return coding.find("q=0") == std::string_view::npos || coding.find("q=0.") != std::string_view::npos;
 }
 
-// Serve embedded assets.
+// This function serves embedded assets.
 // URL mapping:
 //   GET /            -> query.html (the Query page shell)
-//   GET /static/...  -> (strip "/static/") and look up in embedded files
+//   GET /static/...  -> (strip "/static/") and find the path in embedded files
 //   GET /<anything>  -> tries "<anything>" as embedded path (useful if your frontend uses root paths)
 inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& res) {
 #ifndef CHDASH_EMBED_STATIC
@@ -75,7 +75,7 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
 #else
   std::string path = req.path;
 
-  // normalize
+  // Normalize the path.
   if (path.empty() || path == "/") path = "/query.html";
 
   std::string rel;
@@ -87,7 +87,7 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
     rel = path;
   }
 
-  // prevent traversal (shouldn't happen, but cheap)
+  // Block path traversal. This case does not occur, but the check is cheap.
   if (rel.find("..") != std::string::npos) return false;
 
   // The compressed copies (tools/stage_static.py) are answers, never addresses of their own.
@@ -99,7 +99,7 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
   // A client that accepts gzip gets the pre-compressed copy when the stage made one.
   const auto* packed = accepts_gzip(req) ? chdash_embedded::find(rel + ".gz") : nullptr;
   const auto* sent = packed ? packed : a;
-  // A shell is served for many paths and may be asked for with a ?v= of the page's own, so only scripts
+  // A shell is served for many paths. A client can ask for it with a ?v= of the page. So only scripts
   // and stylesheets are ever immutable.
   const bool html = rel.size() > 5 && rel.compare(rel.size() - 5, 5, ".html") == 0;
 
@@ -115,7 +115,7 @@ inline bool try_serve_embedded(const httplib::Request& req, httplib::Response& r
   } else {
     res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v") && !html));
   }
-  // A shell runs its inline scripts: the policy of the page lists their hashes (http_guard.hpp).
+  // A shell runs its inline scripts. The policy of the page lists their hashes (http_guard.hpp).
   if (html) set_page_security_policy(res, std::string_view(reinterpret_cast<const char*>(a->data), a->size));
   if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == etag) {
     res.status = 304;

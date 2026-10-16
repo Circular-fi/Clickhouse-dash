@@ -32,17 +32,17 @@ struct FormatQueryResult {
   }
 };
 
-// formatQuery is read-only, so one reconnect-and-retry is safe when the native
-// TCP connection was closed while idle or failed during protocol I/O.
+// formatQuery is read-only. A single reconnect-and-retry is safe when the native
+// TCP connection was closed while idle, or failed during protocol I/O.
 FormatQueryResult format_query_with_client(
     clickhouse::Client& client,
     const std::string& sql,
     size_t max_bytes
 );
 
-// EXPLAIN AST of a text: the tree that ClickHouse reads from it, the same for two layouts of one statement and for a text with and without
-// its comments. The answer is the text of the tree (in `formatted_sql`). ClickHouse parses the text and does not run it. Same reconnect
-// rule as formatQuery.
+// EXPLAIN AST of a text gives the tree that ClickHouse reads from it. The tree is the same for two layouts of one statement, and for a text with and without its comments.
+// The answer is the text of the tree, in `formatted_sql`. ClickHouse parses the text. It does not run the text.
+// The reconnect rule is the same as for formatQuery.
 FormatQueryResult explain_ast_with_client(
     clickhouse::Client& client,
     const std::string& sql,

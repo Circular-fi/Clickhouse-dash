@@ -1,13 +1,13 @@
 #pragma once
 
-// The Metrics service: what the routes of the Metrics page do, without HTTP. A route (api_metrics.cpp) is an adapter: it parses the
-// request (metrics_request.hpp), finds the host, calls the service with the context of the request, and writes the JSON of the answer
-// (metrics_json.hpp).
+// The Metrics service does the work of the routes of the Metrics page, without HTTP.
+// A route (api_metrics.cpp) is an adapter. It parses the request (metrics_request.hpp), finds the host, and calls the service with the context of the request.
+// Then the route writes the JSON of the answer (metrics_json.hpp).
 //
-// The service takes a connection (a ChExecutor, ch_executor.hpp), checks that the table of the kind exists and may be read, sends the
-// statements of metrics_sql.hpp, folds the rows with metrics_aggregate.hpp, and returns the answer as data, or the ApiError that the route
-// sends. The caches that it uses belong to the server and arrive at the construction: a test builds the service with a fake executor and
-// its own caches.
+// The service takes a connection (a ChExecutor, ch_executor.hpp). It checks that the table of the kind exists and may be read.
+// It sends the statements of metrics_sql.hpp, and it folds the rows with metrics_aggregate.hpp.
+// It returns the answer as data, or the ApiError that the route sends.
+// The caches belong to the server. The service gets them at the construction. A test builds the service with a fake executor and its own caches.
 
 #include "ch_executor.hpp"
 #include "health_runner.hpp"
@@ -112,12 +112,12 @@ struct MetricsCaches {
 
 class MetricsService {
  public:
-  // A connection to the metrics source of a host (the system account); null with the reason in *error when there is none.
+  // A connection to the metrics source of a host, for the system account. The result is null when there is none. The reason is in *error.
   using OpenFn = std::function<std::unique_ptr<ChExecutor>(const HostSpec& host, std::string* error)>;
 
   MetricsService(OpenFn open, MetricsCaches caches) : open_(std::move(open)), catalog_(caches.catalog), kinds_(caches.kinds) {}
 
-  // The metrics of the window, by service. One read of a key at a time: a second viewer of the same window waits for it.
+  // The metrics of the window, by service. Only one read of a key runs at a time. A second viewer of the same window waits for the first read.
   Result<CatalogAnswer> catalog(const RequestContext& context, const HostSpec& host, const std::string& source_host_id,
                                 const CatalogRequest& request) const;
   // The attribute keys of a metric, or the values of one key.
@@ -130,7 +130,7 @@ class MetricsService {
                                     const ExemplarsRequest& request) const;
 
  private:
-  // The kind tables of the source that exist, and the columns that tell their series apart: two reads, kept like the catalog.
+  // The kind tables of the source that exist, and the columns that tell their series apart. There are two reads. They are kept like the catalog.
   KindTables kind_tables(ChExecutor& db, const HostSpec& host) const;
   // An error when the table of `kind` does not exist or the system user may not read it.
   std::optional<ApiError> check_kind_table(ChExecutor& db, const HostSpec& host, const std::string& kind) const;

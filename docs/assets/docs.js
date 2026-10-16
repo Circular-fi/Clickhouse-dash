@@ -1,6 +1,7 @@
-// The documentation page: it fetches the Markdown files of docs/ (the same files that GitHub shows) and renders them in the browser with
-// marked. Nothing is generated or copied: edit a .md file and the page changes with it. tests/harness/test_docs_site.py checks that
-// every docs/*.md file is listed below, and that every listed file exists.
+// The documentation page. It fetches the Markdown files of docs/ (the same files that GitHub shows).
+// It uses marked to render them in the browser. Nothing is generated or copied.
+// Edit a .md file and the page changes with it. The test tests/harness/test_docs_site.py checks two things.
+// It checks that every docs/*.md file is listed below. It checks that every listed file exists.
 (() => {
   "use strict";
   const REPO = "https://github.com/Circular-fi/Clickhouse-dash";
@@ -10,6 +11,7 @@
       ["configuration", "Configuration"],
       ["configuration-reference", "Configuration keys"],
       ["operations", "Operations"],
+      ["access", "Access of humans"],
     ]],
     ["Query", [
       ["query-analysis", "Profiling and analysis"],
@@ -28,6 +30,7 @@
     ["AI assistants", [
       ["mcp", "MCP integration"],
       ["mcp-integration-page", "MCP keys page"],
+      ["server-telemetry", "Server telemetry (OTLP)"],
     ]],
     ["Reference", [
       ["telemetry", "Native TCP telemetry"],
@@ -89,7 +92,7 @@
     return text;
   };
 
-  // Links and images of a Markdown file written for GitHub, rewritten for this page
+  // Rewrite the links and images of a Markdown file written for GitHub, for this page
   const fixLinks = (root, name) => {
     for (const a of root.querySelectorAll("a[href]")) {
       const href = a.getAttribute("href");
@@ -99,7 +102,7 @@
       const file = path.replace(/^\.\//, "");
       const base = file.replace(/\.md$/, "");
       if (/^[a-z0-9-]+\.md$/.test(file) && NAMES.has(base)) { a.setAttribute("href", `#/${base}${hash ? "/" + encodeURIComponent(hash) : ""}`); continue; }
-      // Anything else lives in the repository: the page of the file on GitHub
+      // Other links point to the repository. They open the file page on GitHub
       const repoPath = path.startsWith("../") ? path.slice(3) : `docs/${file}`;
       a.setAttribute("href", `${REPO}/blob/main/${repoPath}${hash ? "#" + hash : ""}`);
       a.rel = "noopener";

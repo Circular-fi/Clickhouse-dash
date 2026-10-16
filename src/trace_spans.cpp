@@ -141,13 +141,13 @@ SpanSearchOutcome run_span_search(ChExecutor& db, const SpanSearchPlan& plan) {
     } catch (const clickhouse::ServerException& e) {
       if (!slice_guard_error(e)) throw;
       if (out.slices.empty() && width > kSpanMinSliceNs && !retried) {
-        // The page's first slice is too heavy: retry once, narrower.
+        // The first slice of the page is too heavy. Retry once, with a narrower width.
         retried = true;
         width = std::max(kSpanMinSliceNs, width / 8);
         continue;
       }
       if (out.slices.empty()) throw;
-      // A guard stop after answered slices is a resume point.
+      // After answered slices, a guard stop is a resume point.
       out.incomplete = true;
       out.stop_reason = classify_clickhouse_error(e).kind == ChErrorKind::ScanLimit ? "read_rows_limit" : "slice_timeout";
       out.next = position;
@@ -160,13 +160,14 @@ SpanSearchOutcome run_span_search(ChExecutor& db, const SpanSearchPlan& plan) {
     out.slices.push_back(SpanSlice{lo, upper, std::min(got.size(), need), ms});
 
     if (got.size() > need) {
-      // The page fills inside this slice: it ends after its last row.
+      // The page is full inside this slice. The page ends after its last row.
       got.resize(need + 1);
       const SpanSearchRow boundary = got[need - 1];
       const bool tie = got[need].same_key(boundary);
       got.resize(need);
       if (tie) {
-        // Exact copies of the boundary key straddle the seam: the page takes all of them, so the strict keyset after it skips none.
+        // Exact copies of the boundary key straddle the seam. The page takes all of them. Therefore the strict keyset after the
+        // page skips no span.
         got.erase(std::remove_if(got.begin(), got.end(), [&](const SpanSearchRow& row) { return row.same_key(boundary); }), got.end());
         auto copies = select_span_search_rows(db, span_ties_sql(plan.sql, std::stoll(boundary.start_ns), boundary.span_id, boundary.trace_id),
                                               plan.attribute_count);
@@ -178,13 +179,14 @@ SpanSearchOutcome run_span_search(ChExecutor& db, const SpanSearchPlan& plan) {
       out.next.after_key = true;
       out.next.span_id = boundary.span_id;
       out.next.trace_id = boundary.trace_id;
-      // The next page starts with a slice about 4x the time this page covered (dense ranges then read far fewer rows per page).
+      // The next page starts with a slice that is about 4x the time that this page covered. Dense ranges then read far fewer rows
+      // for each page.
       out.next.slice_ns = std::max(kSpanMinSliceNs, std::min(width, 4 * (page_upper_ns - out.next.ts_ns + 1)));
       break;
     }
     for (auto& row : got) out.rows.push_back(std::move(row));
     if (lo <= start_ns) { out.exhausted = true; break; }
-    // The slice is exhausted: continue strictly before it.
+    // The slice is exhausted. Continue strictly before this slice.
     position = SpanCursor{};
     position.present = true;
     position.ts_ns = lo - 1;
@@ -194,7 +196,7 @@ SpanSearchOutcome run_span_search(ChExecutor& db, const SpanSearchPlan& plan) {
       out.next.slice_ns = width;
       break;
     }
-    // Widen, within the page budget at the cost rate seen so far.
+    // Widen the slice, within the page budget and at the cost rate seen so far.
     const double spent = elapsed_ms_since(loop_started);
     const double remaining = budget_ms - spent;
     if (remaining <= 0) {

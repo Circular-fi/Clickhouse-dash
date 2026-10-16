@@ -14,28 +14,33 @@ using namespace monitor_internal;
 
 namespace {
 
-// One series of the metric_log pass: its name, the expression over a bucket
-// ("{span}" is the seconds the bucket covers) and the columns it needs.
+// One series of the metric_log pass. It has a name, an expression over a bucket, and the columns that it needs.
+// In the expression, "{span}" is the number of seconds that the bucket covers.
 struct MetricLogSeries {
   const char* name;
   const char* expression;
   std::vector<const char*> columns;
 };
 
-// ProfileEvent_* columns are per-sample deltas: a rate is their sum over the
-// seconds the bucket covers, whatever collect_interval_milliseconds is.
-// CurrentMetric_* columns are gauges: avg, or max for a peak.
+// The ProfileEvent_* columns hold per-sample deltas. A rate is their sum over the seconds that the bucket covers.
+// This applies whatever collect_interval_milliseconds is.
+// The CurrentMetric_* columns are gauges. Use avg, or max for a peak.
 const std::vector<MetricLogSeries>& metric_log_series() {
   static const std::vector<MetricLogSeries> series{
     {"qps", "sum(ProfileEvent_Query) / {span}", {"ProfileEvent_Query"}},
     {"select_qps", "sum(ProfileEvent_SelectQuery) / {span}", {"ProfileEvent_SelectQuery"}},
     {"insert_qps", "sum(ProfileEvent_InsertQuery) / {span}", {"ProfileEvent_InsertQuery"}},
     {"failed_qps", "sum(ProfileEvent_FailedQuery) / {span}", {"ProfileEvent_FailedQuery"}},
-    // The time of a query is added when it ends and the counter Query when it starts, so a bucket that ends with queries still running (or begins
-    // with queries that started before it) has the time of some queries over the count of others. The queries that ended in the bucket are the
-    // ones that started in it, less the growth of the running ones (CurrentMetric_Query at the end of the bucket and at the end of the one
-    // before: the first bucket has no earlier one and counts the started ones). Against the avg of query_log on a load of 20 s queries across a
-    // bucket edge, the old ratio was 36 % high and this one 0.01 %.
+    // The time of a query is added when the query ends. The counter Query is added when the query starts.
+    // So a bucket can hold the time of some queries over the count of others. This happens when it ends with queries in progress.
+    //
+    // It also happens when it begins with queries that started before it.
+    //
+    // The queries that ended in the bucket are the ones that started in it, less the growth of the queries in progress.
+    // CurrentMetric_Query at the end of the bucket and at the end of the bucket before gives that growth. The first bucket has no earlier one, so it counts the started queries.
+    //
+    // Against the avg of query_log on a load of 20 s queries across a bucket edge, the old ratio was 36 % high.
+    // This ratio is 0.01 % high.
     {"avg_query_ms",
      "sum(ProfileEvent_QueryTimeMicroseconds) / greatest(sum(ProfileEvent_Query) + "
      "lagInFrame(argMax(CurrentMetric_Query, event_time), 1, argMax(CurrentMetric_Query, event_time)) OVER (ORDER BY t) - "
@@ -69,8 +74,8 @@ const std::vector<MetricLogSeries>& metric_log_series() {
   return series;
 }
 
-// A wide (or bucketed) metric_log has this column; the transposed layout
-// (metric, value rows) has none and is treated as no metric_log in v1.
+// A wide (or bucketed) metric_log has this column. The transposed layout (metric, value rows) has none.
+// In v1, it is treated as no metric_log.
 constexpr const char* kMetricLogWideMarker = "ProfileEvent_Query";
 
 }  // namespace
@@ -87,9 +92,9 @@ std::vector<std::string> metric_log_columns() {
 
 namespace {
 
-// asynchronous_metric_log names and the series they give. OSUserTime,
-// OSSystemTime and OSIOWaitTime are summed over the cores (in cores, like
-// metric_log's CPU); OSUserTimeNormalized only gives the core count.
+// The asynchronous_metric_log names, and the series that they give.
+// OSUserTime, OSSystemTime and OSIOWaitTime are summed over the cores. They are in cores, like the CPU of metric_log.
+// OSUserTimeNormalized only gives the core count.
 const std::vector<std::pair<std::string, std::string>>& async_series() {
   static const std::vector<std::pair<std::string, std::string>> names{
     {"OSUserTime", "os_user_cores"},
@@ -107,7 +112,7 @@ const std::vector<std::pair<std::string, std::string>>& async_series() {
   return names;
 }
 
-// Peaks rather than averages for these.
+// Use peaks, not averages, for these series.
 const std::vector<std::string>& async_max_metrics() {
   static const std::vector<std::string> names{"MaxPartCountForPartition", "LoadAverage1", "ReplicasMaxAbsoluteDelay"};
   return names;
@@ -129,9 +134,8 @@ std::string replace_all(std::string text, const std::string& from, const std::st
   return text;
 }
 
-// The bucket key, the seconds it covers and the time predicate (the primary
-// key of every *_log table: event_date, event_time). Every number here is an
-// integer the handler validated.
+// The bucket key, the seconds that it covers, and the time predicate.
+// The time predicate uses the primary key of every *_log table: event_date, event_time. Every number here is an integer that the handler validated.
 std::string series_bucket_sql(const MonitorSeriesWindow& w) {
   const std::string step = std::to_string(w.step_s);
   // The bucket still in progress covers up to its last sample, not the whole step.
@@ -185,8 +189,8 @@ std::string monitor_series_metric_log_sql(const MonitorCapabilities& caps, const
                                           std::vector<std::string>* names, std::vector<std::string>* missing) {
   std::string sql = "SELECT " + series_bucket_sql(window);
   for (const auto& item : metric_log_series()) {
-    // The column list is intersected with the detected columns (all of them
-    // when the detection failed: ClickHouse then answers).
+    // The column list is intersected with the detected columns.
+    // If the detection failed, the list keeps all of them. ClickHouse then gives the answer.
     const bool present = !caps.detected || std::all_of(item.columns.begin(), item.columns.end(), [&](const char* column) {
       return caps.has_column("metric_log", column);
     });
@@ -204,7 +208,7 @@ std::string monitor_series_metric_log_sql(const MonitorCapabilities& caps, const
 
 std::string monitor_series_async_sql(const MonitorSeriesWindow& window) {
   const uint64_t rows = (series_bucket_count(window) + 2) * async_series().size();
-  // metric IN (...) first: the table's key is (metric, event_date, event_time).
+  // Put metric IN (...) first. The key of the table is (metric, event_date, event_time).
   return "SELECT toUInt64(toUnixTimestamp(toStartOfInterval(event_time, INTERVAL " + std::to_string(window.step_s) +
          " SECOND))) AS t, toString(metric) AS name, toFloat64(if(metric IN " + in_list(async_max_metrics()) +
          ", max(value), avg(value))) AS v FROM system.asynchronous_metric_log WHERE metric IN " +
@@ -244,8 +248,8 @@ void source_failed(MonitorSeriesSource& source, const MonitorCapabilities& caps,
 
 namespace {
 
-// Runs one series SELECT (bounded_select: its rows read and time are
-// reported); each row's bucket lands at its index of out.buckets.
+// This runs one series SELECT. bounded_select reports its rows read and its time.
+// The bucket of each row goes to its index in out.buckets.
 void read_series(ChExecutor& system, const std::string& sql, SystemMonitorSeries& out, MonitorSeriesSource& source,
                  const std::function<void(const clickhouse::Block&, size_t, size_t)>& on_row) {
   const uint64_t from = out.window.from_s;
@@ -283,8 +287,8 @@ void load_system_monitor_series(
     return values;
   };
 
-  // 1. metric_log: one pass for the counters and gauges. The transposed
-  // layout has no ProfileEvent_* column: v1 reads it as no metric_log.
+  // 1. metric_log: one pass for the counters and gauges. The transposed layout has no ProfileEvent_* column.
+  // In v1, the code reads it as no metric_log.
   {
     MonitorSeriesSource& source = out.sources["metric_log"];
     source.table = "metric_log";
@@ -331,8 +335,8 @@ void load_system_monitor_series(
     }
   }
 
-  // 3. query_log: latency percentiles and the error rate, narrow columns,
-  // only while the window is within its lookback.
+  // 3. query_log: latency percentiles and the error rate, with narrow columns.
+  // This source is read only while the window is within its lookback.
   {
     MonitorSeriesSource& source = out.sources["query_log"];
     source.table = "query_log";

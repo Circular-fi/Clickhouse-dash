@@ -1,8 +1,9 @@
 #pragma once
 
-// What the routes of the Metrics page (/api/metrics/catalog, attributes, series, exemplars) read from a request: the kind, the window, the
-// attribute filters, the grouping and the bucket grid. Parsing only: nothing here reads ClickHouse and nothing writes an answer. A parser
-// returns false with the 400 answer in *error (the code is invalid_metrics_request, and invalid_metrics_range for the window of the catalog).
+// The routes of the Metrics page (/api/metrics/catalog, attributes, series, exemplars) read these values from a request.
+// The values are the kind, the window, the attribute filters, the group setting and the bucket grid. This file only parses them.
+// Nothing here reads ClickHouse, and nothing writes an answer.
+// A parser returns false with the 400 answer in *error. The code is invalid_metrics_request. For the window of the catalog, the code is invalid_metrics_range.
 
 #include "error_envelope.hpp"
 
@@ -20,7 +21,7 @@ constexpr size_t kKindCount = 5;
 extern const char* const kKinds[kKindCount];
 
 constexpr int64_t kMaxRangeMs = 90LL * 24 * 60 * 60 * 1000;
-// The window of the catalog when the request names none: the catalog groups every point of its window, so the default is a day.
+// The window of the catalog, when the request names none. The catalog groups every point of its window. So, the default is a day.
 constexpr int64_t kCatalogDefaultRangeMs = 24LL * 60 * 60 * 1000;
 constexpr size_t kMaxGroupBy = 5;
 constexpr int kDefaultTopK = 20;

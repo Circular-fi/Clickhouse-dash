@@ -1,16 +1,20 @@
-// Unit tests of the SQL formatter as a service (src/format_service.cpp) with the layout units under it (src/format_*.cpp), on a fake
-// ClickHouse: no server. The fake answers formatQuery with the text it got and EXPLAIN AST with the tokens of the text (no comment, no
-// parenthesis, no case, no backtick), so two layouts of one statement have one tree and a statement that was corrupted has another.
+// Unit tests of the SQL formatter as a service (src/format_service.cpp) and of the layout units under it (src/format_*.cpp).
+// They use a fake ClickHouse. No server is used.
+// The fake returns the text that formatQuery gets. For EXPLAIN AST, it returns the tokens of the text (no comment, no
+// parenthesis, no case, no backtick). So two layouts of one statement have one tree. A corrupted statement has another tree.
 //
-// What is checked: a text with comments never reaches formatQuery and is laid out locally; the check of the meaning (ARCH-B-120) returns the
-// text as written, with a warning, when the layout reads as another statement, and stays out of the way when ClickHouse cannot judge; an
-// error of ClickHouse is placed in the text that the user wrote, not in the text that was sent (ARCH-B-125); the size limits; and, for
-// every fixture of tests/api/format/input and a list of statements with comments, the properties of the layout: no crash, the same text
-// again gives itself (idempotence), the tokens do not change, the comments do not change.
+// What is checked: a text with comments never reaches formatQuery. It is laid out locally.
+// The check of the meaning (ARCH-B-120) returns the text as written, with a warning, when the layout reads as another statement.
+// That check stays out of the way when ClickHouse cannot judge.
+// An error of ClickHouse is placed in the text that the user wrote, not in the text that was sent (ARCH-B-125).
+// The tests also check the size limits.
+// For every fixture of tests/api/format/input, and for a list of statements with comments, the tests check the properties of the layout.
+// The properties are: no crash, idempotence (a second layout of the same text gives the same text), no change of the tokens,
+// and no change of the comments.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_FORMAT_TESTS=ON
 //        cmake --build build --target chdash_format_test
-// Run:   ./build/chdash_format_test [fixtures directory]   (exit code 0 = every check passed)
+// Run:   ./build/chdash_format_test [fixtures directory]   (exit code 0 means that every check passed)
 
 #include "format_cache.hpp"
 #include "format_fake_port.hpp"
@@ -42,13 +46,14 @@ FormatSettings scratch_settings() {
   return settings;
 }
 
-// One text through the service, from scratch.
+// Sends one text through the service. The service starts with no earlier state.
 FormatOutcome format_once(FakePort& port, const std::string& sql, FormatSettings settings = scratch_settings()) {
   FormatBatch batch(nullptr, settings, port);
   return batch.format(sql);
 }
 
-// The comments of a text, each one without its marks and its blanks: the layout may move the marks of a comment and re-wrap a block comment.
+// The comments of a text. Each comment is shown without its marks and its blanks. The layout can move the marks of a comment,
+// and it can wrap a block comment again.
 std::string line_comments(const std::string& sql) {
   std::string out;
   for (const sql::Token& token : sql::lex(sql)) {
@@ -74,7 +79,7 @@ void test_a_column_list_with_a_trailing_comma_is_laid_out() {
   CHECK(out.ok());
   CHECK(!out.warning);
   CHECK(out.formatted->find("`a` UInt8\n)") != std::string::npos);
-  // With a comment inside the list, the same.
+  // The same applies with a comment inside the list.
   const FormatOutcome inner = format_once(port, "CREATE TABLE t\n(\n    a UInt8, -- the key\n    b String,\n)\nENGINE = Log");
   CHECK(inner.ok());
   CHECK(inner.formatted->find("-- the key") != std::string::npos);
@@ -84,7 +89,7 @@ void test_a_column_list_with_a_trailing_comma_is_laid_out() {
 
 void test_a_layout_that_changes_the_statement_is_not_returned() {
   FakePort port;
-  // The local layout reads `(SELECT 1) INSERT INTO t2` as the name of an alias: another statement.
+  // The local layout reads `(SELECT 1) INSERT INTO t2` as the name of an alias. This is another statement.
   const std::string text = "WITH t AS (SELECT 1) INSERT INTO t2 SELECT * FROM t -- c";
   const FormatOutcome out = format_once(port, text);
   CHECK(out.ok());
@@ -93,7 +98,7 @@ void test_a_layout_that_changes_the_statement_is_not_returned() {
   CHECK(out.warning && out.warning->code == "format_meaning_changed");
   CHECK_EQ(port.ast_calls.size(), size_t(2));
   CHECK_EQ(port.format_calls.size(), size_t(0));
-  // A warning is not kept in the cache: the answer of the next request is checked again.
+  // The cache does not keep a warning. The next request checks the answer again.
   FormatCache cache(16, 1 << 20, std::chrono::minutes(1));
   FormatSettings settings = scratch_settings();
   settings.use_cache = true;
@@ -102,7 +107,7 @@ void test_a_layout_that_changes_the_statement_is_not_returned() {
   FormatBatch second(&cache, settings, port);
   CHECK(second.format(text).warning.has_value());
   CHECK_EQ(second.stats().cache_hits, size_t(0));
-  // The same text twice in a request: one check, and the second answer has the warning too.
+  // The same text is sent twice in one request. There is one check. The second answer has the warning too.
   FakePort port2;
   FormatBatch batch(nullptr, settings, port2);
   CHECK(batch.format(text).warning.has_value());
@@ -119,7 +124,7 @@ void test_a_layout_that_keeps_the_statement_has_no_warning() {
   CHECK(out.formatted->find("-- keep me") != std::string::npos);
   CHECK(out.formatted->find("\nFROM t\n") != std::string::npos);
   CHECK_EQ(port.ast_calls.size(), size_t(2));
-  // A statement that does not go local is not checked: formatQuery is the layout.
+  // A statement that is not laid out locally is not checked. formatQuery is the layout.
   FakePort plain;
   CHECK(format_once(plain, "select a,b from t").ok());
   CHECK_EQ(plain.ast_calls.size(), size_t(0));
@@ -195,7 +200,7 @@ void test_the_rows_of_an_insert_are_compared_as_tokens() {
 // ---- The place of an error (ARCH-B-125) ----
 
 void test_an_error_is_placed_in_the_text_of_the_user() {
-  // A reserved word used as an alias is written between backticks before ClickHouse reads it: two bytes more.
+  // A reserved word used as an alias is written between backticks before ClickHouse reads it. This adds two bytes.
   FakePort port;
   port.error_marker = "@@";
   const std::string text = "select 1 as from, 2 as `to`, @@ from t";
@@ -205,18 +210,18 @@ void test_an_error_is_placed_in_the_text_of_the_user() {
   CHECK(out.error_offset.has_value());
   CHECK_EQ(*out.error_offset, text.find("@@"));
   CHECK(port.format_calls.size() == 1 && port.format_calls[0].find("`from`") != std::string::npos);
-  // The message says the place in the user's text, on its line.
+  // The message gives the place in the user's text, on its line.
   CHECK(out.error.find("position " + std::to_string(text.find("@@") + 1) + " ") != std::string::npos);
   CHECK(out.error.find("(line 1, col " + std::to_string(text.find("@@") + 1) + ")") != std::string::npos);
 
-  // The blanks that the text starts with and a line break before the place.
+  // The text starts with blanks, and there is a line break before the place.
   const std::string multi = "\n\n  select 1 as from,\n   @@";
   const FormatOutcome second = format_once(port, multi);
   CHECK(second.error_offset.has_value());
   CHECK_EQ(*second.error_offset, multi.find("@@"));
   CHECK(second.error.find("(line 4, col 4)") != std::string::npos);
 
-  // A heredoc that holds more bytes than its placeholder, and a literal on many lines.
+  // A heredoc holds more bytes than its placeholder. A literal is on many lines.
   const std::string heredoc = "select $$a long body of the heredoc 'x'$$ as h, 'one\ntwo' as m, @@";
   const FormatOutcome third = format_once(port, heredoc);
   CHECK(third.error_offset.has_value());
@@ -225,7 +230,7 @@ void test_an_error_is_placed_in_the_text_of_the_user() {
 }
 
 void test_offsets_of_the_text_that_was_sent() {
-  // Two aliases between backticks: 2 bytes each.
+  // Two aliases are between backticks. Each one adds 2 bytes.
   const std::vector<std::pair<size_t, size_t>> quoted = {{5, 9}, {20, 22}};
   SqlHeredocMask none;
   CHECK_EQ(offset_in_user_text(3, quoted, none, ""), size_t(3));
@@ -234,7 +239,7 @@ void test_offsets_of_the_text_that_was_sent() {
   CHECK_EQ(offset_in_user_text(12, quoted, none, ""), size_t(10)); // after the word
   CHECK_EQ(offset_in_user_text(28, quoted, none, ""), size_t(24)); // after both
   CHECK_EQ(offset_in_user_text(500, {}, none, ""), size_t(500));
-  // The message of ClickHouse is rewritten for the place in the user's text.
+  // The service rewrites the message of ClickHouse for the place in the user's text.
   const std::string text = "select 1,\n  2 @";
   CHECK_EQ(rebase_error_position("Syntax error: failed at position 99 ('@') (line 7, col 3): @.", text, text.find('@')),
            std::string("Syntax error: failed at position 15 ('@') (line 2, col 5): @."));
@@ -252,7 +257,7 @@ void test_a_text_that_is_too_long_is_refused_with_its_limit() {
   CHECK(big.error.find("limit is 40 bytes") != std::string::npos);
   CHECK_EQ(port.format_calls.size(), size_t(0));
 
-  // ClickHouse reads max_query_size bytes: the text counts with its quoted words, and the answer says it.
+  // ClickHouse reads max_query_size bytes. The count includes the quoted words. The answer states this.
   FormatSettings server = scratch_settings();
   server.clickhouse_max_query_size = 30;
   const FormatOutcome refused = format_once(port, "select 1 as from, 2 as to, 3 as end, 4 from t", server);
@@ -260,7 +265,7 @@ void test_a_text_that_is_too_long_is_refused_with_its_limit() {
   CHECK(refused.error.find("max_query_size") != std::string::npos);
   CHECK(refused.error.find("once its reserved words are quoted") != std::string::npos);
   CHECK_EQ(port.format_calls.size(), size_t(0));
-  // A text under the limit goes through. The words that are quoted do not make it too long for the first check of the service.
+  // A text under the limit passes. The quoted words do not make the text too long for the first check of the service.
   FormatSettings wide = scratch_settings();
   wide.clickhouse_max_query_size = 1000;
   CHECK(format_once(port, "select 1 as from, 2 as end from t", wide).ok());
@@ -268,8 +273,9 @@ void test_a_text_that_is_too_long_is_refused_with_its_limit() {
 
 // ---- One layout for an ALTER with or without a comment (ARCH-B-121) ----
 
-// The statement as it is laid out without a comment (the way of formatQuery, here faked by the identity) and with one at the end of its first
-// line and one at the end: the lines are the same lines, and each comment is where it was written.
+// The statement is laid out without a comment. This is the way of formatQuery, which the identity function fakes here.
+// The statement is also laid out with one comment at the end of its first line, and with one at the end.
+// The lines are the same lines. Each comment is where it was written.
 void test_an_alter_has_one_layout_with_and_without_comments() {
   const char* const kAlters[] = {
       "ALTER TABLE db.t ADD COLUMN a UInt8",
@@ -297,18 +303,18 @@ void test_an_alter_has_one_layout_with_and_without_comments() {
     const size_t note = without.find(" -- note");
     CHECK(note != std::string::npos);
     if (note != std::string::npos) without.erase(note, 8);
-    // The text of the layout may have ended its last line with the comment: without it, the same lines.
+    // The layout text can end its last line with the comment. Without the comment, the lines are the same.
     if (without != *plain.formatted) {
       std::cerr << alter << ": the layout changes with a comment\n--- without\n" << *plain.formatted << "\n--- with\n" << *commented.formatted << "\n";
       CHECK_EQ(without, *plain.formatted);
     }
-    // A comment before the statement, and one after the first command.
+    // One comment is before the statement. One comment is after the first command.
     FakePort lead_port;
     const FormatOutcome lead = format_once(lead_port, std::string("-- lead\n") + alter);
     CHECK(lead.ok() && !lead.warning);
     CHECK_EQ(lead.formatted ? *lead.formatted : std::string(), "-- lead\n" + *plain.formatted);
   }
-  // A comment after the comma between two commands stays on the line of the command before it.
+  // A comment after the comma between two commands remains on the line of the command before it.
   FakePort port;
   const FormatOutcome between = format_once(port, "ALTER TABLE db.t ADD COLUMN a UInt8, -- first\nDROP COLUMN b, -- second\nMODIFY COLUMN c String");
   CHECK(between.ok() && !between.warning);
@@ -322,13 +328,13 @@ void test_an_alter_has_one_layout_with_and_without_comments() {
 // ---- The restoration of the spelling (ARCH-B-122) ----
 
 void test_a_name_that_formatquery_drops_does_not_stop_the_restoration() {
-  // formatQuery writes `x::T` as CAST(x, 'T'): the name T has no name of its own in its text. The names after it are still given back.
+  // formatQuery writes `x::T` as CAST(x, 'T'). The name T has no name of its own in its text. The names after it are still returned.
   const std::string original = "select \"a\", x::Foo, \"b\", \"c\" from t";
   const std::string formatted = "SELECT `a`, CAST(x, 'Foo'), `b`, `c` FROM t";
   CHECK_EQ(restore_sql_quoted_identifiers(formatted, original), std::string("SELECT \"a\", CAST(x, 'Foo'), \"b\", \"c\" FROM t"));
   // The same names in the same order: the same as before.
   CHECK_EQ(restore_sql_quoted_identifiers("SELECT `a`, `b` FROM t", "select \"a\", \"b\" from t"), std::string("SELECT \"a\", \"b\" FROM t"));
-  // A quoted name is matched to a name of its value, not to an earlier one that is written without quotes.
+  // A quoted name is matched to a name in its value. It is not matched to an earlier name that is written without quotes.
   CHECK_EQ(restore_sql_quoted_identifiers("SELECT a AS `a`, `b`", "select a as a, \"b\""), std::string("SELECT a AS `a`, \"b\""));
 }
 
@@ -337,21 +343,21 @@ void test_the_restoration_of_literals_is_not_quadratic() {
   std::string original = "SELECT ", formatted = "SELECT ";
   for (size_t i = 0; i < count; ++i) {
     original += (i ? ", 'a" : "'a") + std::to_string(i) + "'";
-    // Literals that the source does not have, then the ones that it has.
+    // The first literals are not in the source. The next literals are in the source.
     formatted += (i ? ", 'z" : "'z") + std::to_string(i) + "'";
   }
   const auto started = std::chrono::steady_clock::now();
   const std::string restored = restore_sql_single_quoted_literals(formatted, original);
   CHECK_EQ(restored, formatted);
   CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(3));
-  // The literals that are in the source come back with their own spelling, in order.
+  // The literals that are in the source are returned with their own spelling, in order.
   CHECK_EQ(restore_sql_single_quoted_literals("SELECT 'it\\'s', 'x', 'y'", "select 'it''s', 'y'"), std::string("SELECT 'it''s', 'x', 'y'"));
 }
 
 // ---- The budget ----
 
-// A statement that is quadratic in its nesting gives up after the budget of the formatter (2 s) and comes back as written: the call
-// returns, and the text is the user's text (it keeps its meaning).
+// A statement that is quadratic in its nesting stops after the budget of the formatter (2 s). The statement is returned as written.
+// The call returns, and the text is the user's text. It keeps its meaning.
 void test_a_statement_that_is_too_deep_comes_back_as_written() {
   std::string text = "SELECT ";
   const int depth = 3000;
@@ -371,7 +377,8 @@ void test_a_statement_that_is_too_deep_comes_back_as_written() {
 
 // ---- The properties of the layout ----
 
-// The statements of the properties: comments in every place that the layout reads, and the shapes that broke the layout.
+// These statements test the properties. They have comments in every place that the layout reads.
+// They also have shapes that broke the layout.
 const char* const kStatements[] = {
     "-- a\nSELECT 1",
     "SELECT a, b -- x\nFROM t -- y\nWHERE a = 1 -- z\n  AND b = 2",
@@ -408,19 +415,20 @@ const char* const kStatements[] = {
     "SELECT 1 -- columns: a, b",
 };
 
-// The tokens of a text that the layout must keep: the words, the numbers and the strings, in their order, in lower case, without the parentheses and the
-// backticks. Redundant parentheses are the only thing that the layout removes from the code.
+// The tokens of a text are the words, the numbers and the strings, in their order and in lower case.
+// The tokens have no parentheses and no backticks. The layout must keep these tokens.
+// Redundant parentheses are the only thing that the layout removes from the code.
 std::string kept_tokens(const std::string& sql) { return fake_tree(sql); }
 
-// What the fake cannot tell: ClickHouse reads `(t.1).2` as `t.1.2`, and `LIFETIME(3600)` as `LIFETIME(MIN 0 MAX 3600)`. The meaning of these
-// is checked by the AST suite on a real server (tests/api/format).
-// The fixture 596 is a statement that the local layout would change: it must come back as written, with the warning.
+// The fake cannot judge these cases. ClickHouse reads `(t.1).2` as `t.1.2`, and `LIFETIME(3600)` as `LIFETIME(MIN 0 MAX 3600)`.
+// The AST suite on a real server checks the meaning of these cases (tests/api/format).
+// The local layout changes the fixture 596. The statement must be returned as written, with the warning.
 bool fake_cannot_judge(const std::string& name) {
   return name.rfind("197_", 0) == 0 || name.rfind("424_", 0) == 0 || name.rfind("596_", 0) == 0;
 }
 
-// Known: a statement with a hundred levels of redundant parentheses is laid out on the width of its text with them, and the second pass, on the
-// text without them, puts its only item on the SELECT line.
+// Known: a statement with a hundred levels of redundant parentheses is laid out for the width of its text with the parentheses.
+// The second pass works on the text without them. It puts its only item on the SELECT line.
 bool known_not_idempotent(const std::string& name) { return name.rfind("582_", 0) == 0; }
 
 void check_properties(const std::string& name, const std::string& text, int* checked) {
@@ -432,7 +440,7 @@ void check_properties(const std::string& name, const std::string& text, int* che
     return;
   }
   ++*checked;
-  // The meaning: the fake judges the tokens, so a layout that changed them came back as written with a warning.
+  // The meaning: the fake judges the tokens. A layout that changed them is returned as written, with a warning.
   if (first.warning && fake_cannot_judge(name)) return;
   if (first.warning) {
     std::cerr << name << ": warning: " << first.warning->message << "\n";
@@ -440,9 +448,9 @@ void check_properties(const std::string& name, const std::string& text, int* che
     return;
   }
   const std::string& once = *first.formatted;
-  // The comments come out as they went in.
+  // The comments are the same after the layout as before it.
   CHECK_EQ(line_comments(once), line_comments(text));
-  // The service takes the blanks and the `;` off the end of the text.
+  // The service removes the blanks and the `;` from the end of the text.
   const std::string written = trim_sql(text);
   if (kept_tokens(once) != kept_tokens(written)) {
     const std::string a = kept_tokens(once), b = kept_tokens(written);
@@ -488,7 +496,7 @@ void test_properties_of_statements_with_comments() {
   }
 }
 
-// A comment that holds code never becomes code (ARCH-B-117): the comment keeps its text and its line.
+// A comment that holds code never changes to code (ARCH-B-117). The comment keeps its text and its line.
 void test_a_comment_stays_a_comment() {
   FakePort port;
   const FormatOutcome out = format_once(port, "DELETE FROM db.t WHERE id = 5 -- old version: or 1 = 1");
@@ -500,7 +508,7 @@ void test_a_comment_stays_a_comment() {
   CHECK_EQ(columns.formatted->find("\n"), std::string::npos);
 }
 
-// The `in` of a name is not the operator IN (ARCH-B-125): `admin(SELECT 1)` is a call and stays one.
+// The `in` of a name is not the operator IN (ARCH-B-125). `admin(SELECT 1)` is a call and remains one.
 void test_the_in_inside_a_name_is_not_an_operator() {
   FakePort port;
   const FormatOutcome out = format_once(port, "SELECT * FROM t WHERE x = admin(SELECT 1) AND y > 1 -- c");
@@ -526,7 +534,7 @@ void test_properties_of_the_fixtures(const std::filesystem::path& dir) {
   for (const auto& path : files) {
     std::ifstream in(path, std::ios::binary);
     const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    // A comment on the first line sends the statement to the local layout, so the layout of every construct of the fixtures is run.
+    // A comment on the first line sends the statement to the local layout. So the layout of every construct of the fixtures is tested.
     check_properties(path.filename().string(), "-- fixture\n" + text, &checked);
     (void)skipped;
   }

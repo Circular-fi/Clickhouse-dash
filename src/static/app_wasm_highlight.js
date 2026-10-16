@@ -1,5 +1,5 @@
-// The adapter of src/wasm/highlight.c (src/static/wasm/highlight.wasm): the SQL lexer of app_highlight.js.
-// It runs in the page and in a Worker, on a kernel that ns.wasm.load("highlight") or the Worker gives it.
+// The adapter of src/wasm/highlight.c (src/static/wasm/highlight.wasm). It is the SQL lexer of app_highlight.js.
+// It runs in the page and in a Worker. Each run uses a kernel from ns.wasm.load("highlight") or from the Worker.
 //
 //   ops.highlight.meta(kernel, { kw, cs, ci, aggCs, aggCi })   upload the host's keyword and function name sets (arrays of
 //                                                              strings; null for a set the host does not have)
@@ -7,12 +7,13 @@
 //                                                              status 0: done; -2: a name only JavaScript can judge (use the
 //                                                              reference); -1: no memory
 //
-// A token is five numbers: start, end, kind (0 plain, 1 kw, 2 fn, 3 num, 4 null, 5 type, 6 str, 7 com), then the start and the end of
-// the token's HTML inside the one HTML string.
+// A token is five numbers: start, end, kind, the start of its HTML and the end of its HTML.
+// The kind is one of: 0 plain, 1 kw, 2 fn, 3 num, 4 null, 5 type, 6 str, 7 com.
+// The HTML of each token is in the one HTML string.
 import { wasm } from "./app_wasm.js";
 
-// Names the kernel can match are ASCII: a name with another character cannot equal a word of the lexer. (A quoted name
-// can; the kernel answers "use the reference" then.)
+// The kernel matches only ASCII names. A name with another character cannot equal a word of the lexer.
+// A quoted name can contain such a character. The kernel then answers "use the reference".
 const pack = (names) => {
   const list = [];
   let units = 0;
@@ -45,7 +46,7 @@ wasm.ops.highlight = {
     for (let which = 0; which < SETS.length; which += 1) {
       const names = sets[SETS[which]];
       const packed = pack(names || []);
-      // The tables stay in the memory of the instance: allocated outside any scope.
+      // The tables stay in the memory of the instance. They are allocated outside any scope.
       const ptr = kernel.alloc(packed.data.length * 2);
       new Uint16Array(kernel.memory.buffer, ptr, packed.data.length).set(packed.data);
       kernel.exports.hl_set_names(which, ptr, packed.data.length, packed.count);

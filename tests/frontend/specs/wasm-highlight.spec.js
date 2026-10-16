@@ -3,9 +3,9 @@ import { installObservers } from '../helpers/observability.js';
 import { openApp } from '../helpers/app.js';
 import { sqlCorpus, fuzzSql, loadKernel as loadKernelOf } from '../helpers/wasm.js';
 
-// The SQL syntax colouring on WebAssembly (src/wasm/highlight.c, docs/wasm.md): the kernel gives the tokens of the
-// JavaScript lexer (app_highlight.js, lexAllJs) byte for byte, on the repository's SQL files and on seeded
-// awkward input; without the kernel the page keeps its JavaScript path.
+// The SQL syntax colouring on WebAssembly (src/wasm/highlight.c, docs/wasm.md). The kernel gives
+// the tokens of the JavaScript lexer (app_highlight.js, lexAllJs) byte for byte. This holds on the
+// repository's SQL files and on seeded awkward input. Without the kernel, the page keeps its JavaScript path.
 
 // WASM_FUZZ_SCALE=20 runs twenty times more seeded texts (a deeper check before a release).
 const SCALE = Math.max(1, Number(process.env.WASM_FUZZ_SCALE) || 1);
@@ -21,7 +21,7 @@ test.afterEach(async ({ page }, testInfo) => {
 
 const loadKernel = (page) => loadKernelOf(page, 'wasm-highlight', "window.ChDash.highlight.ready()");
 
-// The host's keyword and function sets the highlighter reads, replaced for the call.
+// The highlighter reads the keyword and function sets of the host. These sets are replaced for the call.
 const META_VARIANTS = ['none', 'keywords', 'functions', 'both'];
 const installMeta = (variant) => {
   const ns = window.ChDash;
@@ -54,7 +54,7 @@ const installMeta = (variant) => {
   }
 };
 
-// Compares both lexers on `texts`; returns the first differences (at most 3).
+// Compare both lexers on `texts`. Return the first differences, at most 3.
 async function compare(page, texts, variant) {
   return page.evaluate(({ texts, variant, installSource }) => {
     // eslint-disable-next-line no-new-func
@@ -93,7 +93,7 @@ test('the kernel lexes the SQL files of the repository like the JavaScript lexer
   await openApp(page);
   expect((await loadKernel(page)).loaded).toBe(true);
   const corpus = sqlCorpus().map((file) => file.sql);
-  // The files alone, and their concatenation (long text: statements, comments, strings).
+  // Test the files alone, and then their concatenation. The long text has statements, comments and strings.
   const texts = [...corpus, corpus.join('\n;\n'), corpus.slice(0, 40).join('\n'), corpus.join('\n').repeat(3)];
   for (const variant of META_VARIANTS) {
     const result = await compare(page, texts, variant);
@@ -109,8 +109,8 @@ test('the kernel lexes seeded awkward SQL like the JavaScript lexer (quotes, com
   for (const variant of META_VARIANTS) {
     for (const [seed, count, parts] of [[1, 1500, 24], [2, 600, 90], [3, 60, 700]]) {
       const result = await compare(page, fuzzSql(seed * 31 + META_VARIANTS.indexOf(variant), count * SCALE, parts), variant);
-      // A text the kernel hands back to the reference (a quoted name with a non-ASCII letter before "(", which a stray
-      // backtick of the generator makes likely in the longest texts) is not compared.
+      // A text that the kernel hands back to the reference is not compared. This case is a quoted name
+      // with a non-ASCII letter before "(". A stray backtick of the generator makes it likely in the longest texts.
       if (seed < 3) expect(result.skipped, `variant ${variant}, seed ${seed}`).toBeLessThan(result.total * 0.3);
       expect(result.bad, `variant ${variant}, seed ${seed}`).toEqual([]);
     }

@@ -1,5 +1,6 @@
-// Between the search and a trace (the trace page opened from the search, its way back, a search of a wider range) and the
-// pane of a trace that could not be loaded.
+// This module handles the moves between the search and a trace.
+// The moves cover the trace page that the search opens, the way back and a search of a wider range.
+// It also gives the pane for a trace that could not be loaded.
 
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -13,12 +14,13 @@ import { uiState } from "./app_ui_state.js";
 const { byId, $, $$ } = dom;
 const fmt = format;
 
-// The detail pane of a trace that could not be loaded: what happened in a
-// sentence and what to do next, instead of an empty trace header.
+// The detail pane for a trace that could not be loaded.
+// It states what happened in one sentence and what to do next.
+// It replaces an empty trace header.
 function unavailableHtml(failed) {
   const missing = failed.code === "trace_not_found";
   const invalid = failed.code === "invalid_trace_id" || failed.code === "missing_trace_id";
-  // The trace page has no time range picker: it widens the search it came from.
+  // The trace page has no time range picker. It widens the search it came from.
   const canWiden = DETAIL_PAGE ? !!widerRange() : !!dom.tracesRangeZoomOut && !dom.tracesRangeZoomOut.disabled;
   const options = {
     title: missing ? "Trace not found" : invalid ? "Not a trace ID" : "The trace could not be loaded",
@@ -32,7 +34,7 @@ function unavailableHtml(failed) {
       !missing && !invalid ? { label: "Retry", attrs: { "data-trace-unavailable": "retry" } } : null,
     ],
   };
-  // A missing or malformed ID is a state of the data (status); a failed load is an error (alert).
+  // A missing or malformed ID is a data state (status). A failed load is an error (alert).
   return missing || invalid ? uiState.emptyHtml({ ...options, role: "status" }) : uiState.errorHtml(options);
 }
 
@@ -43,15 +45,15 @@ function onUnavailableClick(event) {
   if (action === "back") returnToSearch();
   else if (action === "retry") void actions.loadTrace(id, { push: false });
   else if (action === "wider") {
-    // The search of this trace's context, its range zoomed out (a new entry).
+    // The search of this trace context, with its range zoomed out. This is a new entry.
     const range = widerRange();
     if (range) window.location.assign(searchHref(range));
   }
 }
 
-// The trace page was navigated to from the search page of this app: that
-// page is the entry right before this one. Marked on the entry itself, so a
-// reload keeps it (the referrer and the entry state both survive one).
+// The trace page was opened from the search page of this app. That page is the entry right before this one.
+// The mark sits on the entry itself, so a reload keeps it.
+// The referrer and the entry state both survive one reload.
 function markOpenedFromSearch() {
   if (Number(router.state().searchBack) > 0 || !document.referrer) return;
   let from;
@@ -61,10 +63,10 @@ function markOpenedFromSearch() {
   router.replace(null, { href: router.href(), state: { searchBack: 1 } });
 }
 
-// The back arrow (#traceBackButton) and "Back to search": back to the very
-// search entry the trace came from (the page is restored as it was left,
-// from the browser's cache when it keeps it), so Back / Forward stay one
-// list of pages; else a new entry for the trace's search context.
+// The back arrow (#traceBackButton) and "Back to search" go back to the search entry that the trace came from.
+// The browser restores that page as it was left, from its cache when the cache keeps it.
+// So Back and Forward stay one list of pages.
+// If that entry is not present, the code makes a new entry for the trace search context.
 function returnToSearch() {
   const steps = Number(router.state().searchBack) || 0;
   if (steps > 0) {
@@ -74,8 +76,9 @@ function returnToSearch() {
   backToSearch();
 }
 
-// The search the trace was opened from, from the search context its own
-// address carries (range, filters, tab); `range` replaces its time range.
+// This function builds the search that the trace was opened from.
+// It takes the search context from the address of the trace: range, filters and tab.
+// The value of `range` replaces the time range of that search.
 function searchHref(range = null) {
   const params = new URLSearchParams(traceSearch.contextQuery() || "");
   if (range) timeRange.url.write(params, range);
@@ -87,9 +90,9 @@ function backToSearch() {
   window.location.assign(searchHref());
 }
 
-// The time range of the trace's search context, twice as wide around the
-// same centre (what the search's zoom-out button does), or null when it
-// cannot widen: already the longest range the server allows.
+// This function gives the time range of the trace search context, twice as wide around the same centre.
+// It does what the zoom-out button of the search does.
+// It returns null when the range cannot widen, because the range is already the longest range that the server allows.
 function widerRange() {
   const tr = timeRange;
   if (!tr) return null;

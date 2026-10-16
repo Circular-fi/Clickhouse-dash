@@ -1,33 +1,26 @@
-// The System page's Queries section (docs/system.md "Queries"): the top
-// query shapes of a window on the selected server, modelled on Query
-// Insights. /api/system/queries reads system.query_log with the
-// RUNNER account (ClickHouse grants decide: the Query page can read the
-// same rows) in two phases: the narrow numbers grouped by
-// normalized_query_hash, then the text of the top 50 only. The filters
-// (kind, errors, user, database, table) and the order are the server's
-// allowlists (the user, the database and the table bound query
-// parameters; a shape is kept whole when one of its runs involved the
-// database or the table); the System page's own reads are never listed,
-// and "Hide internal reads" (on by default) drops the system account's queries.
-// "Order by" and the sortable column headers are one setting: either
-// changes the other. No Auto-refresh: a window is read once, cached a
-// minute by the server.
+// The System page's Queries section (docs/system.md "Queries") lists the top query shapes of a window on the selected
+// server. The section is modelled on Query Insights. /api/system/queries reads system.query_log with the RUNNER account.
+// ClickHouse grants decide what the runner can read. The Query page can read the same rows.
+// The read has two phases. First, the narrow numbers are grouped by normalized_query_hash. Then the text of the top 50
+// is read. The filters (kind, errors, user, database, table) and the order are the server's allowlists.
+// The user, the database and the table bind query parameters. A shape is kept whole when one of its runs involved the
+// database or the table. The System page's own reads are never listed.
+// "Hide internal reads" (on by default) drops the queries of the system account.
+// "Order by" and the sortable column headers are one setting. Either one changes the other.
+// No Auto-refresh. A window is read once. The server caches it for a minute.
 //
-// A row opens the shape as a page of its own (shape.html,
-// /system/queries/<hash>, app_page_shape.js; ctx.shape is its hash and the
-// section shows nothing else): its timeline (runs, latency, CPU) and its 20
-// slowest, latest or largest runs, from /api/system/queries/<hash>. "All
-// queries" returns to the list; the former /system/queries?q=<hash> opens
-// the shape's page. "Open example in Query"
-// puts the latest run's text in the Query editor; "Open history in Query"
-// a ready-made query_log SELECT of that shape. Neither runs.
+// A row opens the shape as a page of its own (shape.html, /system/queries/<hash>, app_page_shape.js).
+// ctx.shape is its hash, and the section shows nothing else. The page shows the timeline (runs, latency, CPU) and
+// the 20 slowest, latest or largest runs, from /api/system/queries/<hash>. "All queries" returns to the list.
+// The former /system/queries?q=<hash> opens the shape's page. "Open example in Query" puts the latest run's text in
+// the Query editor. "Open history in Query" puts a ready-made query_log SELECT of that shape in the editor.
+// Neither action runs the query.
 //
-// Address: from / to (the Observability range format; the default hour
-// writes neither), sort, kind, errors, user, database, table
-// ("database.table", as query_log names it), hide=0 and, on a shape's page,
-// runs=<order>; the list's parameters stay on the shape's address, so the
-// way back is the same list. Query text is drawn by sqlBlock (the highlighter
-// escapes), never as markup.
+// Address: from / to (the Observability range format; the default hour writes neither).
+// The address also has sort, kind, errors, user, database, table ("database.table", as query_log names it),
+// hide=0 and, on a shape's page, runs=<order>.
+// The list's parameters stay on the shape's address, so the way back is the same list. The highlighter escapes
+// the query text that sqlBlock draws, so the text is never markup.
 
 import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
@@ -113,16 +106,15 @@ const maxMinutes = () => Math.max(1, Number(settings().query_log_max_lookback_ho
 const defaultRange = () => ({ from: `now-${timeRange.minutesToSpan(Math.min(maxMinutes(), Number(settings().default_lookback_minutes) || 60))}`, to: "now" });
 const allowed = (list, value, fallback) => (list.some((item) => item.value === value) ? value : fallback);
 const oneLine = (sql) => String(sql || "").replace(/\s+/g, " ").trim();
-// A statement kind as SQL writes it ("SELECT", "INSERT"), the casing of the
-// kind filter: query_log's query_kind says "Select".
+// A statement kind as SQL writes it ("SELECT", "INSERT"). This is the casing of the kind filter.
+// query_log's query_kind says "Select".
 const kindLabel = (kind) => String(kind || "").toUpperCase();
 // CPU time in seconds, in the one duration format ("107 ms", "1.2 s").
 const cpuText = (value) => (Number(value) > 0 ? format.duration.fromSeconds(Number(value)) : "0 s");
 const ms = (value) => (Number.isFinite(Number(value)) ? format.duration.fromMs(Number(value)) : DASH);
 
 
-// The count and the share ("12, 4.1%") in the tone of the share; plain "0"
-// without errors.
+// The count and the share ("12, 4.1%") have the tone of the share. Without errors, the cell shows plain "0".
 function errorCell(errors, calls) {
   const count = Number(errors) || 0;
   if (!count) return h("span", { class: "systemQueries__zero" }, "0");
@@ -134,9 +126,9 @@ function errorCell(errors, calls) {
   });
 }
 
-// The history of a shape as a query_log SELECT for the Query page (opened,
-// not run): the window as the picker shows it ("now() - INTERVAL 1 HOUR"
-// for "now-1h" .. "now", the instants otherwise).
+// The history of a shape is a query_log SELECT for the Query page. The page opens it and does not run it.
+// The window appears as the picker shows it. For "now-1h" .. "now", the text is "now() - INTERVAL 1 HOUR".
+// Otherwise the text is the instants.
 const UNITS = { m: "MINUTE", h: "HOUR", d: "DAY", w: "WEEK" };
 function historySql(hash, range, resolved) {
   if (!HASH_RE.test(String(hash))) return "";
@@ -201,11 +193,11 @@ function createQueries(ctx) {
     kind: DEFAULTS.kind,
     errors: DEFAULTS.errors,
     user: "",
-    // The user filter's choices: the users of the last list read for
-    // every user (a list filtered by one user names only that one).
+  // The choices of the user filter: the users of the last list read for every user.
+  // A list filtered by one user names only that user.
     users: [],
-    // One database and / or one table ("database.table") the shapes
-    // involve; their choices, from the last list read without that filter.
+  // The choices for one database and / or one table ("database.table") that the shapes involve.
+  // They come from the last list read without that filter.
     database: "",
     table: "",
     databases: [],
@@ -229,11 +221,10 @@ function createQueries(ctx) {
   };
 
   // --- Chrome: the filter bar ----------------------------------------------
-  // The time range, then Kind, Errors, User, Database, Table and Order by
-  // as the bar's "Label \u00b7 Value" pickers (ns.menu.select over native
-  // selects), Hide internal reads as a toggle chip, then the refresh button. A change
-  // applies at once. No Auto-refresh: a window is read once, cached a
-  // minute by the server.
+  // The filter bar has these controls, in this order: the time range, six pickers, a toggle chip, and the refresh button.
+  // The six pickers are Kind, Errors, User, Database, Table and Order by. The toggle chip is Hide internal reads.
+  // Each picker shows "Label \u00b7 Value". The pickers use ns.menu.select over native selects.
+  // A change applies at once. No Auto-refresh. A window is read once. The server caches it for a minute.
   const option = (item) => h("option", { value: item.value, title: item.title || null }, item.label);
   const kindSelect = h("select", { id: "systemQueriesKind", aria: { label: "Statement kind" }, dataset: { fieldLabel: "Kind" } }, KINDS.map(option));
   const errorsSelect = h("select", { id: "systemQueriesErrors", aria: { label: "Errors" }, dataset: { fieldLabel: "Errors" } }, ERRORS.map(option));
@@ -252,7 +243,7 @@ function createQueries(ctx) {
       { select: kindSelect, pickerClass: "systemQueries__kindPicker" },
       { select: errorsSelect, pickerClass: "systemQueries__errorsPicker" },
       { select: userSelect, pickerClass: "systemQueries__userPicker" },
-      // The tail, so the lead keeps one row down to 761 px.
+      // The tail. The lead keeps one row down to 761 px.
       { select: databaseSelect, pickerClass: "systemQueries__databasePicker", tail: true },
       { select: tableSelect, pickerClass: "systemQueries__tablePicker", tail: true },
       // An order, not a filter: the phone summary does not count it.
@@ -267,24 +258,24 @@ function createQueries(ctx) {
     }],
   });
   const pickerRoot = controls.rangeRoot;
-  // A shape's page: the section's bar is not in the page; its time range and
-  // refresh button live in the shape's head (shapeTools, systemQuery__head).
-  // A bar's own classes style them (the pickers' look is the bar's), so the
-  // tools are a bar of their own, bare of the bar's chrome (CSS).
+  // A shape's page has no section bar. Its time range and refresh button are in the shape's head
+  // (shapeTools, systemQuery__head).
+  // The bar's own classes style the pickers. The tools therefore form a bar of their own,
+  // without the bar's chrome (CSS).
   const shapeTools = shapeMode ? h("div", { class: "systemQuery__tools traceSearchBar obsFilterBar" }, pickerRoot.parentElement, controls.button) : null;
   if (shapeMode) {
     controls.button.type = "button";
     controls.button.addEventListener("click", () => void refresh(true));
   }
   const [kindMenu, errorsMenu, userMenu, databaseMenu, tableMenu, orderMenu] = controls.pickers;
-  // Six pickers and a chip: the bar takes its two rows from 1279 px down.
+  // Six pickers and a chip. The bar takes two rows from 1279 px down.
   controls.bar.classList.add("obsFilterBar--wide");
   const [hideChip] = controls.chips;
-  // A pick fires the select's change event (syncFilters sets them quietly).
+  // A pick fires the change event of the select. syncFilters sets the values quietly.
   kindSelect.addEventListener("change", () => setFilter({ kind: allowed(KINDS, kindSelect.value, DEFAULTS.kind) }));
   errorsSelect.addEventListener("change", () => setFilter({ errors: allowed(ERRORS, errorsSelect.value, DEFAULTS.errors) }));
   userSelect.addEventListener("change", () => setFilter({ user: validUser(userSelect.value) ? userSelect.value : "" }));
-  // A database narrows the tables: a table of another database goes.
+  // A database narrows the tables. A table of another database is removed.
   databaseSelect.addEventListener("change", () => {
     const database = validDatabase(databaseSelect.value) ? databaseSelect.value : "";
     setFilter({ database, table: database && state.table && !state.table.startsWith(`${database}.`) ? "" : state.table });
@@ -351,9 +342,8 @@ function createQueries(ctx) {
     void loadVisible(false);
   }
 
-  // The user picker's options: every user, then the window's users (their
-  // query counts in the label), the chosen one kept when the last list did
-  // not name it.
+  // The options of the user picker: every user, then the window's users. Their query counts appear in the label.
+  // The chosen user stays in the list when the last list did not name it.
   function renderUserOptions() {
     const users = state.users.slice();
     if (state.user && !users.some((item) => item.name === state.user)) users.unshift({ name: state.user, calls: null });
@@ -363,10 +353,10 @@ function createQueries(ctx) {
     userSelect.value = state.user;
   }
 
-  // The database and table pickers' options: All, then the window's
-  // databases / tables ("database.table", narrowed to the chosen
-  // database), most involved first, with their run counts; the chosen one
-  // kept when the last list did not name it.
+  // The options of the database and table pickers: All, then the window's databases or tables.
+  // A table appears as "database.table". The tables are narrowed to the chosen database.
+  // The list shows the most involved items first, with their run counts.
+  // The chosen item stays in the list when the last list did not name it.
   function renderObjectOptions() {
     const label = (item) => (item.calls == null ? item.name : `${item.name} (${format.count(item.calls)})`);
     const databases = state.databases.slice();
@@ -389,9 +379,8 @@ function createQueries(ctx) {
     tableMenu?.refresh?.();
     orderMenu?.set?.(state.sort);
     hideChip.set(state.hide);
-    // The filters and the order are the list's (a shape has one kind); they
-    // change nothing a missing log or grant would allow. The range and the
-    // refresh button stay.
+    // The filters and the order belong to the list. A shape has one kind.
+    // They never unlock a log or grant that the server lacks. The range and the refresh button stay.
     const off = !!state.q || ["disabled", "not_granted", "unsupported", "readonly_account"].includes(state.list?.status);
     for (const part of filterParts()) if (part) part.hidden = off;
   }
@@ -430,7 +419,7 @@ function createQueries(ctx) {
     if (!host) return;
     const { resolved, error } = resolveWindow();
     if (error) {
-      // A list in flight was asked for another window: it stops, so its answer never replaces this message.
+      // A list in flight asked for another window. It stops, so its answer never replaces this message.
       util.latest.cancel("system.queries");
       state.listLoading = false;
       state.list = null;
@@ -464,8 +453,8 @@ function createQueries(ctx) {
     if (data?.status === "ok" && !data.user && Array.isArray(data.users)) {
       state.users = data.users.filter((item) => validUser(item?.name)).map((item) => ({ name: String(item.name), calls: Number(item.calls) || 0 }));
     }
-    // A list for every database names the database choices; one for every
-    // table the table choices (narrowed to the chosen database on show).
+    // A list for every database names the database choices. A list for every table names the table choices,
+    // narrowed to the chosen database on show.
     if (data?.status === "ok" && !data.database && Array.isArray(data.databases)) state.databases = counted(data.databases, validDatabase);
     if (data?.status === "ok" && !data.table && Array.isArray(data.tables)) state.tables = counted(data.tables, validTable);
     if (failure) state.listKey = "";
@@ -558,8 +547,8 @@ function createQueries(ctx) {
     return button;
   }
 
-  // The degraded states of an answer (or of a refused window), as issue
-  // blocks: why, the GRANT to run, and a narrower window when one fits.
+  // The degraded states of an answer, or of a refused window, appear as issue blocks. Each block says why,
+  // names the GRANT to run, and offers a narrower window when one fits.
   function issueOf(data, error) {
     if (error) {
       if (error.code === "range_too_large") {
@@ -629,9 +618,9 @@ function createQueries(ctx) {
     return h("div", { class: "statTiles statTiles--boxed systemQueries__tiles", role: "group", aria: { label: "Window" } }, tiles.map((item) => stat.tile(item)));
   }
 
-  // Column priority: "low" columns go under 1280 px, "mid" ones under
-  // 900 px; on a phone the query, its calls and total time stay, and the
-  // query cell's meta line names the kind, the users and the errors.
+  // Column priority: "low" columns are hidden under 1280 px, and "mid" columns under 900 px.
+  // On a phone, the query, its calls and the total time stay visible.
+  // The meta line of the query cell names the kind, the users and the errors.
   const COLUMNS = [
     { key: "rank", label: "#", num: true, className: "systemQueries__rank" },
     { key: "query", label: "Query", className: "systemQueries__query" },
@@ -696,8 +685,8 @@ function createQueries(ctx) {
     return wrap;
   }
 
-  // The normalized text, one line wrapped to two (CSS), its whole text in
-  // the title; the shape's hash when the text could not be read.
+  // The normalized text. It takes one line, wrapped to two by CSS. The title holds the whole text.
+  // The title shows the shape's hash when the text could not be read.
   function queryCell(item, users) {
     const text = item.has_text ? oneLine(item.normalized || item.example) : "";
     const parts = [];
@@ -721,18 +710,18 @@ function createQueries(ctx) {
   function renderDrill() {
     const data = state.drill && state.drill.hash === state.q ? state.drill : null;
     const listed = (state.list?.queries || []).find((item) => item.hash === state.q) || null;
-    // The trace page's arrow (.pageBack): back to the list the shape was opened from.
+    // The arrow of the trace page (.pageBack) returns to the list that opened the shape.
     const back = h("button", { type: "button", class: "pageBack", id: "systemQueryBack", aria: { label: "Back to the list of queries" }, title: "Back to the queries" },
       icon.el("arrow-left", { size: "lg" }));
     back.addEventListener("click", closeShape);
     const text = data?.normalized || listed?.normalized || "";
-    // The tab names the shape (its first words) among the others of the browser.
+    // The browser tab names the shape by its first words, among the other tabs.
     if (shapeMode && text) {
       const line = oneLine(text);
       document.title = `${line.length > 70 ? `${line.slice(0, 69)}\u2026` : line} \u00b7 Query shape`;
     }
-    // The query is drawn right under the head: no title of its own. Its hash
-    // names the shape only when its text could not be read.
+    // The query is drawn right under the head. It has no title of its own.
+    // The hash names the shape only when the text could not be read.
     const head = h("header", { class: "systemQuery__head" },
       back,
       !text && (data || state.drillError) ? h("span", { class: "mono systemQuery__hash", title: "normalized_query_hash" }, state.q) : null,
@@ -765,21 +754,23 @@ function createQueries(ctx) {
       h.replace(drillView, children);
       return;
     }
-    // The query, its figures and its charts: on a wide screen (CSS) the figures take the right
-    // side, beside the query and the charts; otherwise one under the other.
-    // The charts and the runs are h3: their h2 (the page's h1 is "Query shape") is for the screen reader only.
+    // The query, its figures and its charts. On a wide screen (CSS), the figures take the right side,
+    // beside the query and the charts. Otherwise, the figures appear under the query and the charts.
+    // The charts and the runs are h3 elements. Their h2 element is for the screen reader only.
+    // The page h1 is "Query shape".
     children.push(h("h2", { class: "srOnly" }, "Runs of this shape"), h("div", { class: "systemQuery__top" }, sql, drillTiles(data), drillCharts()), drillRuns(data));
     h.replace(drillView, children);
     drawCharts(data);
   }
 
-  // The shape's SQL: the text that the server formatted (normalized_formatted of
-  // /api/system/queries/<hash>, laid out as the Query page's Format button
-  // would, its placeholders kept), or the raw text when the server could not
-  // format it (null) and in the Raw view. Its copy button gives the text shown.
+  // The shape's SQL is the text that the server formatted. This is normalized_formatted of /api/system/queries/<hash>.
+  // It has the layout that the Format button of the Query page gives, and its placeholders stay.
+  // The raw text is used when the server could not format it (null), and in the Raw view.
+  // The copy button copies the text shown.
   function shapeSql(text, formatted) {
-    // Line numbers, like the Query editor's (so no wrapping: a wrapped line would shift them). A
-    // long query scrolls inside its block; Raw shows the normalized text as query_log has it.
+    // The block shows line numbers, as the Query editor does. Lines do not wrap, because a wrapped line
+    // shifts the numbers.
+    // A long query scrolls inside its block. Raw shows the normalized text as query_log has it.
     const shown = state.rawSql ? text : formatted || text;
     const block = sqlBlock({ sql: shown, gutter: true, copy: true, maxLines: 14, expand: false, label: state.rawSql ? "Normalized query (raw)" : "Normalized query", className: "systemQuery__sql" });
     const isFormatted = !state.rawSql && !!formatted;
@@ -798,7 +789,7 @@ function createQueries(ctx) {
       try {
         await ctx.openSql(example, { formatted: true });
       } catch {
-        // The formatter could not parse it (an INSERT with its data): as is.
+        // The formatter could not parse the text (an INSERT with its data). The text stays as it is.
         try { await ctx.openSql(example, { formatted: false }); } catch (error) { state.drillError = error; render(); }
       }
       openExample.disabled = false;
@@ -810,8 +801,8 @@ function createQueries(ctx) {
       if (!resolved) return;
       try { await ctx.openSql(historySql(state.q, range.value, resolved), { formatted: false }); } catch (error) { state.drillError = error; render(); }
     });
-    // Formatted | Raw: the shared segmented control. Formatted is the default; Raw shows the
-    // normalized text unchanged (its literals are ?).
+    // Formatted | Raw: the shared segmented control. Formatted is the default. Raw shows the normalized text unchanged.
+    // Its literals are ?.
     const view = h("div", { id: "systemQueryView", class: "systemQuery__view" });
     segmented.render(view, [
       { value: "formatted", label: "Formatted", title: "Show the normalized query formatted, as the Query page's Format button does" },
@@ -853,8 +844,9 @@ function createQueries(ctx) {
     state.chartsEl = null;
   }
 
-  // The grid of the drill-down's charts. The view is rebuilt at each render, the charts are not: they are built once for a
-  // shape and drawn again with each answer (setData), so a series that the reader hid in a legend stays hidden.
+  // The grid of the drill-down's charts. The view is rebuilt at each render. The charts are not rebuilt.
+  // They are built once for a shape and drawn again with each answer (setData).
+  // A series that the reader hid in a legend stays hidden.
   function drillCharts() {
     if (state.charts && state.chartsEl) return state.chartsEl;
     destroyCharts();
@@ -869,8 +861,9 @@ function createQueries(ctx) {
 
   const column = (data, name) => systemCharts.column(data.series?.[name]);
 
-  // Bars closer than 3 px read as a comb, not as volume: runs of consecutive buckets are summed into one (a bucket of 1
-  // minute, a window of a day, a plot of 700 px had 1,440 bars). Returns { xs, step, columns } with the sums.
+  // Bars closer than 3 px look like a comb, not like volume. So runs of consecutive buckets are summed into one bar.
+  // For example, a bucket of 1 minute, a window of a day and a plot of 700 px have 1,440 bars.
+  // The function returns { xs, step, columns }, with the sums.
   const BAR_MIN_PX = 3;
   function regroup(xs, step, columns, plotWidth) {
     const group = Math.max(1, Math.ceil((xs.length * BAR_MIN_PX) / Math.max(200, plotWidth)));
@@ -923,7 +916,7 @@ function createQueries(ctx) {
         type: "line",
         series: [{ id: "cpu", label: "CPU time", color: "var(--qchart-2)", values: column(data, "cpu_seconds"), nulls: null }],
         value: (v) => cpuText(v),
-        // Milliseconds under a second ("10 ms" rather than "0.010 s").
+        // Show milliseconds under one second ("10 ms", not "0.010 s").
         axis: (max) => (max >= 1 ? { factor: 1, suffix: " s" } : { factor: 0.001, suffix: " ms" }),
         meta: `${cpuText(data.summary?.cpu_seconds)} in all`,
         footer: (i) => [rows[i] === rows[i] ? `Read ${format.countLabel(rows[i], "row")}` : "", memory[i] === memory[i] ? `memory ${format.bytes(memory[i])}` : ""].filter(Boolean).join(SEP),
@@ -932,7 +925,7 @@ function createQueries(ctx) {
     for (const [id, entry] of state.charts.entries) {
       const spec = specs[id];
       util.setMetaLine(entry.meta, spec.meta || "");
-      // The bars of the runs, summed where they would be closer than 3 px.
+      // The bars of the runs. Runs are summed where the bars are closer than 3 px.
       const bars = id === "calls" ? regroup(xs, step, spec.series.map((item) => item.values), (entry.plot.clientWidth || 700) - 60) : null;
       state.charts.draw(entry, {
         xs: bars ? bars.xs : xs,
@@ -940,7 +933,7 @@ function createQueries(ctx) {
         series: bars ? spec.series.map((item, k) => ({ ...item, values: bars.columns[k] })) : spec.series,
         type: spec.type,
         stack: !!spec.stack,
-        // A few runs are dots: room above the largest one.
+        // A few runs are drawn as dots. Leave room above the largest one.
         yHeadroom: 0.15,
         yUnit: (maxAbs) => spec.axis(maxAbs),
         formatValue: spec.value,
@@ -1004,10 +997,9 @@ function createQueries(ctx) {
     return section;
   }
 
-  // The highlighter colours function names and keywords from the host's lists
-  // (ns.meta, as on the Query page): a shape's page asks for them (the cached
-  // copy at once, the server's when missing) and repaints its SQL when they
-  // arrive (chdash:meta-changed).
+  // The highlighter colours function names and keywords from the lists of the host (ns.meta, as on the Query page).
+  // The shape's page asks for these lists. It uses the cached copy at once, or the server's copy when the cache is missing.
+  // It repaints its SQL when the lists arrive (chdash:meta-changed).
   function ensureHighlighterMeta() {
     const hostId = kit.hostId();
     if (!hostId || !meta) return;

@@ -64,7 +64,7 @@ test('the Services tab lists services, sorts them and keeps the sort in the URL'
   await page.locator('[data-svc-sort="name"]').click();
   expect(await names(page)).toEqual(['auth', 'checkout', 'frontend', 'orders']);
 
-  // Reload keeps the tab and the sort; the scope toggle searches again.
+  // Reload keeps the tab and the sort. The scope toggle searches again.
   await page.reload();
   await expect(rows(page).first()).toBeVisible({ timeout: 30_000 });
   expect(await names(page)).toEqual(['auth', 'checkout', 'frontend', 'orders']);
@@ -91,7 +91,7 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
     await expect(drawer(page).locator(`[data-svc-chart="${chart}"] .chartCore__annotation.traceSvcRelease:not([hidden])`)).toHaveCount(2);
   }
   await expect(drawer(page).locator('[data-svc-chart="rate"] .traceSvcRelease').first()).toHaveAttribute('data-label', 'release 1.4.0');
-  // The marker's label sits in a gutter above the plot, never over the data.
+  // The marker label sits in a gutter above the plot, never over the data.
   for (const chart of ['rate', 'errors', 'latency']) {
     const gutter = await drawer(page).locator(`[data-svc-chart="${chart}"] .chartCore__annotation.traceSvcRelease:not([hidden])`).first().evaluate((el) => ({
       label: el.firstElementChild.getBoundingClientRect().bottom,
@@ -105,7 +105,7 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
     return { items: items.map((item) => [item.textContent.trim(), getComputedStyle(item.querySelector('i')).backgroundColor]), muted: resolve('var(--muted)'), danger: resolve('var(--danger)') };
   });
   expect(swatches.items).toEqual([['Successful', swatches.muted], ['Errors', swatches.danger]]);
-  // Rate: successful + error bars stacked; latency: P50 / P95 / P99 lines.
+  // Rate: successful and error bars stacked. Latency: P50, P95 and P99 lines.
   await expect(drawer(page).locator('[data-svc-chart="rate"] .chartCore')).toHaveAttribute('data-type', 'bar');
   await expect(drawer(page).locator('[data-svc-chart="latency"] .chartCore')).toHaveAttribute('data-series-stats', /"P99":\{"points":[1-9]/);
   await expect(drawer(page).locator('.traceSvcReleases li')).toHaveCount(2);
@@ -116,8 +116,8 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
   await expect(drawer(page).locator('.traceSvcDb')).toContainText('SELECT * FROM carts');
   await expect(drawer(page).locator('.traceSvcDb')).toContainText('postgresql');
 
-  // Hover on a chart shows the bucket tooltip. The latency chart is the last
-  // one: below the fold of an 800 px window, where the mouse cannot reach it
+  // Hover on a chart shows the bucket tooltip. The latency chart is the last one.
+  // It is below the fold of an 800 px window. The mouse cannot reach it
   // until the drawer scrolls it into view.
   const latency = drawer(page).locator('[data-svc-chart="latency"]');
   await latency.locator('.chartCore__overlay').scrollIntoViewIfNeeded();
@@ -126,7 +126,7 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
   await expect(latency.locator('.chartCore__tooltip')).toBeVisible();
   await expect(latency.locator('.chartCore__tooltip')).toContainText('P99');
 
-  // Back closes the drawer, Forward reopens it; Escape closes it.
+  // Back closes the drawer, Forward reopens it, and Escape closes it.
   await page.goBack();
   await expect(drawer(page)).toBeHidden();
   await page.goForward();
@@ -134,7 +134,7 @@ test('a service row opens its detail: RED charts, release markers, endpoints, sl
   await page.keyboard.press('Escape');
   await expect(drawer(page)).toBeHidden();
 
-  // A slowest span opens its trace; Back returns to the Services view.
+  // A slowest span opens its trace. Back returns to the Services view.
   await rows(page).filter({ hasText: 'checkout' }).locator('.traceSvcRow__label').click();
   await drawer(page).locator('.traceSvcSlowest__link').first().click();
   await expect(page.locator('#traceDetail')).toBeVisible();
@@ -160,7 +160,7 @@ test('an endpoint opens the search with its service and operation, a P99 with th
   expect(url.searchParams.get('service')).toBe('checkout');
   expect(url.searchParams.get('operation')).toBe('GET /cart');
 
-  // Back to the Services tab; the P99 of a row searches slower traces.
+  // Back to the Services tab. The P99 of a row searches slower traces.
   await page.goBack();
   await expect(rows(page).first()).toBeVisible();
   await page.keyboard.press('Escape');
@@ -334,8 +334,8 @@ test('error rates take the shared thresholds: 0.5 % neutral, 2 % amber, 7 % red,
   expect(await colorOf('checkout')).toBe('danger');
   expect(await colorOf('frontend')).toBe('warning');
   expect(await colorOf('orders')).toBe('text');
-  // Sparklines: a neutral line bound to the data (no grey area behind it), the peak printed
-  // beside it; a dot only where a bucket crosses a threshold (or a P95 spike).
+  // Sparklines use a neutral line, bound to the data, with no grey area behind it.
+  // The peak is printed beside the line. A dot marks only a bucket that crosses a threshold or a P95 spike.
   const rate = (name) => row(name).locator('.traceSvcSpark--rate');
   await expect(rate('checkout').locator('.sparkline__mark--danger')).toHaveCount(1);
   await expect(rate('frontend').locator('.sparkline__mark--warn')).toHaveCount(1);
@@ -386,16 +386,16 @@ test('the service drawer opens under the search bar, a bottom sheet on a phone; 
   const checkout = rows(page).filter({ hasText: 'checkout' });
   await checkout.locator('.traceSvcRow__label').click();
   await expect(drawer(page)).toBeVisible();
-  // Desktop: the drawer starts where the (sticky) search bar ends, below
-  // #obsNav, and leaves both usable.
+  // Desktop: the drawer starts where the sticky search bar ends, below
+  // #obsNav. Both stay usable.
   const form = await page.locator('#tracesForm').boundingBox();
   const side = await drawer(page).boundingBox();
   expect(Math.abs(side.y - (form.y + form.height))).toBeLessThanOrEqual(1);
   await page.keyboard.press('Escape');
   await expect(drawer(page)).toBeHidden();
   await expect(checkout).toBeFocused();
-  // Phone: the header wraps; the drawer is a bottom sheet under it, the
-  // full width (no strip of the list beside it), its close button on top.
+  // Phone: the header wraps. The drawer is a bottom sheet under it, at full width.
+  // No strip of the list stays beside it. Its close button is on top.
   await page.setViewportSize({ width: 390, height: 844 });
   await checkout.locator('.traceSvcRow__label').click();
   await expect(drawer(page)).toBeVisible();

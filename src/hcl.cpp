@@ -61,7 +61,7 @@ struct Lexer {
   void skip_ws_and_comments() {
     while (i < s.size()) {
       char c = s[i];
-      // whitespace
+      // Whitespace.
       if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
         ++i;
         continue;
@@ -281,7 +281,7 @@ struct Parser {
       return v;
     }
     if (cur.kind == TokKind::Ident) {
-      // bools
+      // Booleans.
       std::string id = cur.text;
       for (auto& c : id) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
       if (id == "true" || id == "false") {
@@ -293,7 +293,7 @@ struct Parser {
     lex.fail("expected value");
   }
 
-  // Blocks inside blocks: the file of the application nests 4 levels at most (observability, traces, features).
+  // The blocks can nest inside blocks. The application file nests 4 levels at most: observability, traces and features.
   static constexpr int kMaxDepth = 16;
   int depth = 0;
 
@@ -303,12 +303,21 @@ struct Parser {
     }
     std::string name = cur.text;
     cur = lex.next();
+    // One label at most: ident "label" { ... }.
+    bool labeled = false;
+    std::string label;
     if (cur.kind == TokKind::String) {
-      lex.fail("block labels are not supported: " + name + " \"" + cur.text + "\" { ... }; put the name in an attribute (name = \"" + cur.text + "\")");
+      labeled = true;
+      label = cur.text;
+      cur = lex.next();
+      if (cur.kind == TokKind::String) lex.fail("a block has one label at most: " + name + " \"" + label + "\" \"" + cur.text + "\" { ... }");
+      if (cur.kind != TokKind::LBrace) lex.fail("expected '{' after the label of the block " + name);
     }
     if (accept(TokKind::LBrace)) {
       if (++depth > kMaxDepth) lex.fail("blocks are nested more than " + std::to_string(kMaxDepth) + " levels deep");
       HclObject child;
+      child.labeled = labeled;
+      child.label = std::move(label);
       while (cur.kind != TokKind::RBrace) {
         if (cur.kind == TokKind::End) lex.fail("unexpected EOF in block");
         parse_stmt_into(child);
@@ -339,6 +348,58 @@ struct Parser {
 HclObject parse_hcl(std::string_view src) {
   Parser p(src);
   return p.parse_root();
+}
+
+namespace {
+
+std::string quote_for_message(const std::string& text) {
+  constexpr size_t kLimit = 80;
+  std::string out = "\"";
+  size_t used = 0;
+  for (const unsigned char c : text) {
+    if (used >= kLimit) {
+      out += "...";
+      break;
+    }
+    ++used;
+    if (c == '"' || c == '\\') {
+      out.push_back('\\');
+      out.push_back(static_cast<char>(c));
+    } else if (c == '\n') {
+      out += "\\n";
+    } else if (c == '\r') {
+      out += "\\r";
+    } else if (c == '\t') {
+      out += "\\t";
+    } else if (c < 0x20 || c == 0x7f) {
+      static constexpr char kHex[] = "0123456789abcdef";
+      out += "\\u00";
+      out.push_back(kHex[c >> 4]);
+      out.push_back(kHex[c & 0x0f]);
+    } else {
+      out.push_back(static_cast<char>(c));
+    }
+  }
+  out.push_back('"');
+  return out;
+}
+
+} // namespace
+
+std::string hcl_value_text(const HclValue& value) {
+  if (value.is_string()) return quote_for_message(value.as_string());
+  if (value.is_int()) return std::to_string(value.as_int());
+  if (value.is_bool()) return value.as_bool() ? "true" : "false";
+  std::string out = "[";
+  const auto& items = value.as_string_list();
+  for (size_t i = 0; i < items.size(); ++i) {
+    if (i == 3 && items.size() > 4) {
+      out += ", ... (" + std::to_string(items.size()) + " items)";
+      break;
+    }
+    out += (i ? ", " : "") + quote_for_message(items[i]);
+  }
+  return out + "]";
 }
 
 } // namespace chdash

@@ -1,34 +1,33 @@
-// What the three Observability views (Traces, Logs, Metrics) and the trace page share, once (ARCH-F-158): the selected
-// host, and the cycle of a view with its host. A view gives hostCycle() what is specific to it (the model to empty, the
-// slots of util.latest to cancel, the loading) and gets the rest the same way in each page:
+// This module holds what the three Observability views (Traces, Logs, Metrics) and the trace page share (ARCH-F-158).
+// It holds the selected host and the cycle of a view with its host. A view gives hostCycle() its specific parts: the model to empty, the slots of util.latest to cancel, and the loading.
+// Each page gets the rest in the same way:
 //
-//   - a change of host stops everything of the old host at once (util.latest.cancelPrefix of the view's slots), empties
-//     the model, and loads for the new host; an answer of the old host never reaches the screen (load() gets stale());
-//   - the host change and the feature flags often arrive together (the first load): both ask for a reload, which runs
-//     once per host;
-//   - the first load runs when the host is known, and when the feature flags turn the view on after the page started.
+//   - A change of host stops all work of the old host at once (util.latest.cancelPrefix of the view's slots). It empties the model and loads the data of the new host.
+//     An answer of the old host never reaches the screen, because load() gets stale().
+//   - The host change and the feature flags often arrive together at the first load. Both ask for a reload. The reload runs once per host.
+//   - The first load runs when the host is known. It also runs when the feature flags turn the view on after the page starts.
 //
 //   const cycle = obsView.hostCycle({ feature: "logs", cancel: ["logs.", "facets."], reset, load, loaded });
-//   cycle.start();     // in init(): binds chdash:host-changed and the feature flags, and loads when a host is selected
-//   cycle.reload();    // Retry: the same cycle (a reload of the same host that is loading joins it)
+//   cycle.start();     // in init(): bind chdash:host-changed and the feature flags, and load when a host is selected
+//   cycle.reload();    // Retry: the same cycle. A reload of the same host joins the load that runs
 //
-// Every read of a view goes through read(slot), the one guard of a stale answer (ARCH-F-158):
+// Each read of a view goes through read(slot). This is the only guard against a stale answer (ARCH-F-158):
 //
 //   const req = obsView.read("logs.search");
 //   const payload = await api.getLogs("search", params, { signal: req.signal });
-//   if (!req.isCurrent()) return;     // a newer read of the slot, a cancel, or another host: the answer is dropped
+//   if (!req.isCurrent()) return;     // A newer read of the slot, a cancel, or another host drops the answer
 //
-// reset() runs first, synchronously: it empties the model of the old host. load(stale) is async: stale() is true once the
-// host differs from the one of this load. loaded() tells whether the view has data of a host (default: a load started);
-// the feature flags start a load only when it is false.
+// reset() runs first and synchronously. It empties the model of the old host. load(stale) is async.
+// stale() is true when the host differs from the host of this load. loaded() tells whether the view has data of a host (default: a load started).
+// The feature flags start a load only when loaded() is false.
 
 import { features, state } from "./app_state.js";
 import { util } from "./app_util.js";
 
 const currentHost = () => String(state.selectedHostId || "");
 
-// The read of a slot of util.latest (a newer read of the slot, or a cancel of it, aborts this one and makes it stale) that is also stale once
-// the selected host is not the host it began with, whatever slot prefixes the view's host cycle cancels.
+// A read of a slot of util.latest is also stale when the selected host differs from the host it began with.
+// A newer read of the slot, or a cancel of it, aborts this read and makes it stale. This applies to every slot prefix that the host cycle of the view cancels.
 function read(slot) {
   const host = currentHost();
   const req = util.latest(slot);
@@ -44,7 +43,7 @@ function hostCycle({ feature, cancel = [], reset = null, load, loaded = null }) 
     const host = currentHost();
     if (running && running.host === host) return running.promise;
     started = true;
-    // Everything of the old host stops now; a second change replaces this reload instead of racing it.
+    // Stop all work of the old host now. A second change replaces this reload. It does not race it.
     for (const prefix of cancel) util.latest.cancelPrefix(prefix);
     reset?.();
     const promise = Promise.resolve(load(() => currentHost() !== host)).finally(() => {

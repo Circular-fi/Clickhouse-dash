@@ -1,8 +1,14 @@
-// The statements of the Metrics routes as they were sent for the requests of a differential battery (each query parameter {pN:String} written in
-// place as a quoted text): what the builders of src/metrics_sql.cpp must write. The numbering of the parameters is not part of the text.
-// The first ones are from the code before the split of src/api_metrics.cpp; the statements of the series are from the code that ranks the
-// groups in ClickHouse (ARCH-B-025): a column of the outer SELECT has an alias that the ranking reads, a series has memory settings, and a request that
-// groups by attributes asks for the ranking first (kRanking*) and then for the series of the groups that it kept (kSeriesKeep*).
+// The statements of the Metrics routes, as the requests of a differential battery send them.
+// Each query parameter {pN:String} is written in place as a quoted text.
+// The builders of src/metrics_sql.cpp must write these statements.
+// The numbering of the parameters is not part of the text.
+//
+// The first statements come from the code before the split of src/api_metrics.cpp.
+// The statements of the series come from the code that ranks the groups in ClickHouse (ARCH-B-025).
+// A column of the outer SELECT has an alias. The ranking reads this alias.
+// A series has memory settings.
+// A request that groups by attributes asks for the ranking first (kRanking*).
+// Then it asks for the series of the groups that it kept (kSeriesKeep*).
 #pragma once
 
 namespace golden {

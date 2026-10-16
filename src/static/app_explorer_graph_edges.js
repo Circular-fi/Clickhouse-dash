@@ -1,5 +1,6 @@
-// The edges of the Explorer graph on the canvas: the style by kind, the curves and the Storage routes, the flow markers, the selected halo and the
-// labels (placed once per routed layout, in a fixed priority order).
+// The edges of the Explorer graph on the canvas.
+// They cover the style by kind, the curves and the Storage routes, the flow markers, the selected halo and the labels.
+// The labels are placed once per routed layout, in a fixed priority order.
 
 import { bezierPoint, bezierRoutePoints, isInsertFlowEdge, isRefreshFlowEdge, storageRouteGeometry } from "./app_explorer_graph_geometry.js";
 import { isLogicalDependencyEdge } from "./app_explorer_graph_model.js";
@@ -11,8 +12,8 @@ import { graphKit } from "./app_graph_kit.js";
 
 const kit = graphKit;
 
-// Dash pattern (kit.DASH) and width by edge kind: solid data flow, dashed
-// query-time dependencies, dotted routing / containment.
+// Dash pattern (kit.DASH) and width by edge kind.
+// Solid is data flow. Dashed is query-time dependencies. Dotted is routing or containment.
 function edgeDashPattern(edge) {
   const { DASH } = kit;
   if (edge.kind === "view" || edge.kind === "dependency") return { dash: DASH.dashed, width: 1 };
@@ -56,10 +57,11 @@ function drawStorageRoute(ctx, points) {
   kit.tracePolyline(ctx, points);
 }
 
-// Shared by Storage and Lineage. The marker lives in graph/world space, not
-// screen space. Canvas zoom therefore scales both its radius and its apparent
-// speed naturally: at zoom 0.5 a 72 world-unit/s marker moves at 36 px/s and
-// is half as large on screen. This keeps motion visually attached to edges.
+// Storage and Lineage share this code.
+// The marker lives in graph (world) space, not in screen space.
+// Canvas zoom therefore scales both its radius and its apparent speed naturally.
+// At zoom 0.5, a 72 world-unit/s marker moves at 36 px/s and is half as large on screen.
+// This keeps the motion visually attached to the edges.
 const FLOW_SPEED_WORLD_PER_SECOND = 72;
 
 const FLOW_EMISSION_INTERVAL_MS = 900;
@@ -78,9 +80,9 @@ function drawNormalizedFlowMarker(ctx, edge, now, points) {
     model.flowMarkerState.set(key, state);
   }
 
-  // Emission is clock-based rather than edge-length-based. A long route can
-  // therefore contain several in-flight markers while a short route can be
-  // empty between emissions, but every edge emits at the same cadence.
+  // Emission is based on a clock, not on the edge length.
+  // A long route can therefore contain several in-flight markers. A short route can be empty between emissions.
+  // Every edge emits at the same cadence.
   const travelMs = metric.total / FLOW_SPEED_WORLD_PER_SECOND * 1000;
   if (!(travelMs > 0)) return;
   const newestAgeMs = (now + state.phaseOffsetMs) % FLOW_EMISSION_INTERVAL_MS;
@@ -152,7 +154,7 @@ function drawEdge(ctx, edge, now, focused) {
   const p2 = straightStorage ? b : { x: b.x - dx, y: b.y };
   const routePoints = straightStorage ? storageRoute.points : (lineageRoute?.points || null);
   const selected = !focused || (focused.has(edge.from) && focused.has(edge.to));
-  // Hit testing and labels reuse the exact drawn geometry of this frame.
+  // Hit testing and labels use the exact drawn geometry of this frame.
   if (model.edgeGeometry) model.edgeGeometry.set(edge.id, routePoints || bezierRoutePoints(a, p1, p2, b, 24));
   const highlighted = edgeIsHighlighted(edge);
   ctx.save();
@@ -161,12 +163,12 @@ function drawEdge(ctx, edge, now, focused) {
   ctx.strokeStyle = highlighted ? graphColor("halo") : isLogicalDependencyEdge(edge) ? graphColor("edgeMuted") : graphColor("edge");
   edgeStyle(edge, ctx);
   if (highlighted) ctx.lineWidth += 1.2;
-  // Dash patterns encode edge semantics but never move. Motion is reserved
-  // for the one normalized round marker on actual insert-time data flow.
+  // Dash patterns encode edge meaning. They never move.
+  // Motion is reserved for the one normalized round marker on actual insert-time data flow.
   strokeEdgePath(ctx, routePoints, a, p1, p2, b);
 
-  // Arrow head follows the final segment for routed polylines and the Bezier
-  // tangent otherwise.
+  // The arrow head follows the final segment of a routed polyline.
+  // Otherwise, it follows the Bezier tangent.
   const routed = Array.isArray(routePoints) && routePoints.length >= 2;
   const near = routed ? storageRoutePoint(routePoints, 0.985) : bezierPoint(a, p1, p2, b, 0.97);
   const tip = b;
@@ -201,14 +203,14 @@ function drawLifecycleEdgeLabel(ctx, edge, a, p1, p2, b, selected, explicitPoint
   const height = lines.length * lineHeight + 8;
   const x = point.x - width / 2;
   const y = point.y - height / 2;
-  // Lifecycle labels are semantic data, not decorative overlays. Keep them
-  // fully opaque even when another node is focused so MOVE/DELETE rules stay
-  // readable against the animated storage route.
+  // Lifecycle labels are semantic data, not decorative overlays.
+  // Keep them fully opaque, even when another node is focused.
+  // The MOVE and DELETE rules then stay readable against the animated storage route.
   ctx.globalAlpha = 1;
   roundedRectPath(ctx, x, y, width, height, 6);
-  // --table-bg is intentionally translucent in the general UI theme. TTL
-  // labels sit on top of moving routes, so they must use the fully opaque
-  // panel background or the arrow remains visible through the label.
+  // --table-bg is intentionally translucent in the general UI theme.
+  // TTL labels sit on top of moving routes. They must use the fully opaque panel background.
+  // Otherwise the arrow stays visible through the label.
   ctx.fillStyle = graphColor("labelBg");
   ctx.fill();
   ctx.strokeStyle = graphColor("border");
@@ -232,13 +234,11 @@ function edgeIsHighlighted(edge) {
   return !!hover && (edge.from === hover || edge.to === hover);
 }
 
-// Every Lineage edge carries its label (kind, "x N" between databases). The
-// placement is computed once per routed layout, in a fixed priority order
-// (edges of the focused object, then data flow, then dependencies), at the
-// first anchor along the route that covers neither a card, a per-node
-// expand control nor another label (kit.placeLabels). Hover and selection
-// only restyle a label where it was placed: they never move it on top of
-// another one.
+// Every Lineage edge has its label (kind, "x N" between databases).
+// The code places each label once per routed layout, in a fixed priority order.
+// The order is: edges of the focused object, then data flow, then dependencies.
+// The label goes at the first anchor along the route. That anchor covers no card, no per-node expand control and no other label (kit.placeLabels).
+// Hover and selection only restyle a label where it was placed. They never move it on top of another one.
 function edgeLabelLayout(ctx) {
   const routes = ensureLineageRouteCache();
   const edges = visibleEdges();
@@ -275,7 +275,7 @@ function edgeLabelLayout(ctx) {
 function drawEdgeLabels(ctx, edges, focused, frame) {
   if (model.detailMode !== "logical") return;
   const layout = edgeLabelLayout(ctx);
-  // Labels outside the viewport are skipped (world-space culling).
+  // The code skips labels outside the viewport (world-space culling).
   const left = -model.offsetX / model.scale;
   const top = -model.offsetY / model.scale;
   const right = left + frame.width / model.scale;

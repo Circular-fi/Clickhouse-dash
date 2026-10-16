@@ -40,7 +40,7 @@ int folder_depth(const QueryLibraryState& s, const std::optional<std::string>& i
   return depth;
 }
 
-// `id` and every folder below it, breadth first, with their level (1 = id).
+// `id` and every folder below it, in breadth-first order, with their level. The level of `id` is 1.
 std::vector<std::pair<std::string, int>> folder_subtree(const QueryLibraryState& s, const std::string& id) {
   std::unordered_map<std::string, std::vector<std::string>> children;
   for (const auto& f : s.folders) {
@@ -79,8 +79,8 @@ bool query_name_taken(const QueryLibraryState& s, const std::string& host, const
   return false;
 }
 
-// A folder reference of an item of `host`: null (the top level) or a folder
-// of the same host (400 host_mismatch for a folder of another host).
+// A folder reference of an item of `host` is null, for the top level, or a folder
+// of the same host. A folder of another host gives 400 host_mismatch.
 std::optional<std::string> existing_folder_ref(const QueryLibraryState& s, const rapidjson::Value* v,
                                                const std::string& field, const std::string& host) {
   auto ref = read_ref(v, field);
@@ -110,8 +110,9 @@ std::string unique_query_name(const QueryLibraryState& s, const std::string& hos
   throw validation("name", "duplicate", "no free name for an imported query");
 }
 
-// De-duplication key of an imported query: name + SQL, ignoring a " (n)"
-// suffix added by an earlier import's rename, so re-importing is a no-op.
+// The de-duplication key of an imported query is name and SQL.
+// It ignores a " (n)" suffix, which an earlier import added by a rename.
+// So a re-import is a no-op.
 std::string import_key(const std::string& name, const std::string& sql) {
   std::string base = name;
   if (base.size() > 4 && base.back() == ')') {

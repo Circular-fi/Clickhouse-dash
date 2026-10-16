@@ -1,9 +1,9 @@
-// Unit checks of the Explorer card's SQL expression helpers
+// This file has unit checks of the Explorer card's SQL expression helpers
 // (app_explorer_detail_model.js: splitTopLevel, keyElements, expressionIdentifiers,
-// keyColumnPositions) and of the shared highlighter on key expressions
-// (app_highlight.js), run by test_frontend_unit_scripts.py:
+// keyColumnPositions). The checks also cover the shared highlighter on key expressions
+// (app_highlight.js). The script test_frontend_unit_scripts.py runs this file as follows:
 //   node --experimental-vm-modules explorer_card_unit.js <repo root>
-// Prints {"checks": n, "failures": [...]}.
+// The script prints {"checks": n, "failures": [...]}.
 "use strict";
 
 const path = require("path");
@@ -12,8 +12,8 @@ const esm = require("./esm_vm");
 const root = process.argv[2] || path.resolve(__dirname, "..", "..");
 
 (async () => {
-// The card and the highlighter with the page around them stubbed (the DOM lookups, the API, the graph, the results ...):
-// what is under test is pure text work.
+// The card and the highlighter run with the page around them stubbed.
+// The stubs replace the DOM lookups, the API, the graph, the results, and so on. The code under test does only pure text work.
 const run = await esm.load({ root, stubs: {
   "app_dom.js": { dom: { $: () => null, $$: () => [], byId: () => null } },
   "app_api.js": {}, "app_header.js": {}, "app_results.js": {},
@@ -78,8 +78,8 @@ eq("column stays plain", /tok-\w+">ts</.test(html), false);
 eq("numbers", /<span class="tok-num">1000<\/span>/.test(highlight.toHtml("intDiv(id, 1000)")), true);
 
 // ---------------------------------------------- one token for every type
-// DDL types take the one type token, whatever the keyword and function
-// lists say (Date and Array are keywords, DateTime64 and Float64 are not).
+// DDL types take the one type token. This applies whatever the keyword and function lists say.
+// Date and Array are keywords, and DateTime64 and Float64 are not.
 state.meta.hosts.local.keywords = { set: new Set(["date", "array", "float32"]) };
 const ddl = highlight.toHtml("CREATE TABLE t (a DateTime64(3), b Float64, c Nullable(String), d LowCardinality(String), e Date, f Array(Float32), g UInt64, date Date) ENGINE = MergeTree");
 for (const type of ["DateTime64", "Float64", "Nullable", "LowCardinality", "String", "Date", "Array", "Float32", "UInt64"]) {

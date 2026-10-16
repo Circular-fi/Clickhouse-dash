@@ -5,13 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cctype>
-#include <fstream>
-#include <iterator>
-#include <mutex>
-#include <sstream>
 #include <unordered_map>
-
-#include <sys/stat.h>
 
 namespace chdash {
 namespace {
@@ -81,62 +75,6 @@ static void parse_query(std::string_view qs, std::unordered_map<std::string, std
   }
 }
 
-// The content of a password file. The file is read again only when its size or its modification time changes (a rotated
-// secret is read at the next connection; a connection costs a stat, not a read).
-static std::optional<std::string> read_password_file(const std::string& path, std::string* err) {
-  struct Cached {
-    int64_t mtime_ns = 0;
-    int64_t size = -1;
-    std::string password;
-  };
-  static std::mutex mu;
-  static std::unordered_map<std::string, Cached> cache;
-
-  struct stat info{};
-  if (::stat(path.c_str(), &info) != 0) {
-    if (err) *err = "cannot open password_file: " + path;
-    return std::nullopt;
-  }
-#if defined(__APPLE__)
-  const int64_t mtime_ns = static_cast<int64_t>(info.st_mtimespec.tv_sec) * 1000000000 + info.st_mtimespec.tv_nsec;
-#else
-  const int64_t mtime_ns = static_cast<int64_t>(info.st_mtim.tv_sec) * 1000000000 + info.st_mtim.tv_nsec;
-#endif
-  {
-    std::lock_guard<std::mutex> lock(mu);
-    const auto it = cache.find(path);
-    if (it != cache.end() && it->second.mtime_ns == mtime_ns && it->second.size == static_cast<int64_t>(info.st_size)) {
-      return it->second.password;
-    }
-  }
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    if (err) *err = "cannot open password_file: " + path;
-    return std::nullopt;
-  }
-  std::string password((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-  if (input.bad()) {
-    if (err) *err = "cannot read password_file: " + path;
-    return std::nullopt;
-  }
-  if (password.find('\0') != std::string::npos) {
-    if (err) *err = "password_file contains a NUL byte: " + path;
-    return std::nullopt;
-  }
-  // Secret files produced by Docker do not add a newline, while files created
-  // by common shell tools usually do. Remove one conventional line ending but
-  // preserve every other byte, including intentional leading/trailing spaces.
-  if (!password.empty() && password.back() == '\n') {
-    password.pop_back();
-    if (!password.empty() && password.back() == '\r') password.pop_back();
-  }
-  {
-    std::lock_guard<std::mutex> lock(mu);
-    cache[path] = Cached{mtime_ns, static_cast<int64_t>(info.st_size), password};
-  }
-  return password;
-}
-
 static bool parse_host_port(std::string_view hp, std::string& host, uint16_t& port, bool& explicit_port, std::string* err) {
   host.clear();
   port = 9000;
@@ -146,7 +84,7 @@ static bool parse_host_port(std::string_view hp, std::string& host, uint16_t& po
     return false;
   }
 
-  // IPv6 in []
+  // IPv6 address in []
   if (hp.front() == '[') {
     size_t end = hp.find(']');
     if (end == std::string_view::npos) {
@@ -181,7 +119,7 @@ static bool parse_host_port(std::string_view hp, std::string& host, uint16_t& po
     host = std::string(hp);
     return true;
   }
-  // If there are multiple ':' without [], treat as host (unlikely)
+  // If there are several ':' without [], treat the text as a host. This case is unlikely.
   if (hp.find(':') != colon) {
     host = std::string(hp);
     return true;
@@ -253,6 +191,36 @@ std::string redact_clickhouse_uri(const std::string& uri) {
   }
 }
 
+std::string clickhouse_uri_with_password(const std::string& uri, const std::string& password) {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  std::string encoded;
+  for (const unsigned char ch : password) {
+    const bool unreserved = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
+                            ch == '.' || ch == '~';
+    if (unreserved) {
+      encoded.push_back(static_cast<char>(ch));
+    } else {
+      encoded.push_back('%');
+      encoded.push_back(kHex[ch >> 4]);
+      encoded.push_back(kHex[ch & 0x0f]);
+    }
+  }
+  const size_t scheme = uri.find("://");
+  if (scheme == std::string::npos) return uri;
+  const size_t begin = scheme + 3;
+  const size_t authority_end = uri.find_first_of("/?#", begin);
+  const size_t end = authority_end == std::string::npos ? uri.size() : authority_end;
+  const size_t at = uri.rfind('@', end);
+  std::string user;
+  size_t host_begin = begin;
+  if (at != std::string::npos && at >= begin && at < end) {
+    const size_t colon = uri.find(':', begin);
+    user = uri.substr(begin, (colon != std::string::npos && colon < at ? colon : at) - begin);
+    host_begin = at + 1;
+  }
+  return uri.substr(0, begin) + user + ":" + encoded + "@" + uri.substr(host_begin);
+}
+
 bool query_param_truthy(const std::unordered_map<std::string, std::string>& q, const std::string& key, bool def) {
   auto it = q.find(key);
   if (it == q.end()) return def;
@@ -274,7 +242,7 @@ std::optional<ParsedUri> parse_clickhouse_uri(const std::string& uri, std::strin
   p.scheme = "clickhouse";
   s.remove_prefix(scheme_pfx.size());
 
-  // Split query
+  // Split the query string.
   std::string_view authority = s;
   std::string_view qs;
   size_t qpos = s.find('?');
@@ -282,7 +250,7 @@ std::optional<ParsedUri> parse_clickhouse_uri(const std::string& uri, std::strin
     authority = s.substr(0, qpos);
     qs = s.substr(qpos + 1);
   }
-  // Strip path if any
+  // Remove the path, if any.
   size_t slash = authority.find('/');
   if (slash != std::string_view::npos) {
     authority = authority.substr(0, slash);
@@ -323,10 +291,11 @@ std::optional<ParsedUri> parse_clickhouse_uri(const std::string& uri, std::strin
 
 namespace {
 
-// The parameters that a URI may carry. A name that is not here is a mistake (`verfy=0` would leave the certificate
-// verified or not, silently): the start stops, and a connection refuses it.
+// The parameters that a URI may carry.
+// A name that is not in this list is a mistake. For example, `verfy=0` can leave the certificate verified or not, silently.
+// The start stops, and a connection refuses the URI.
 bool known_uri_parameter(const std::string& name) {
-  static const char* const kNames[] = {"password_file", "compression", "secure", "verify", "ca", "ca_dir", "sni"};
+  static const char* const kNames[] = {"compression", "secure", "verify", "ca", "ca_dir", "sni"};
   for (const char* known : kNames) {
     if (name == known) return true;
   }
@@ -352,14 +321,8 @@ std::string validate_clickhouse_uri(const std::string& uri) {
   for (const auto& [name, value] : parsed->query) {
     (void)value;
     if (!known_uri_parameter(name)) {
-      return "unknown parameter " + name + " (known: password_file, compression, secure, verify, ca, ca_dir, sni)";
+      return "unknown parameter " + name + " (known: compression, secure, verify, ca, ca_dir, sni)";
     }
-  }
-  const auto password_file = parsed->query.find("password_file");
-  if (!parsed->password.empty() && password_file != parsed->query.end()) return "URI password and password_file are mutually exclusive";
-  if (password_file != parsed->query.end()) {
-    if (password_file->second.empty()) return "password_file query parameter cannot be empty";
-    if (!read_password_file(password_file->second, &err)) return err;
   }
   if (const auto compression = parsed->query.find("compression"); compression != parsed->query.end()) {
     if (!parse_compression(compression->second, &err)) return err;
@@ -390,23 +353,8 @@ std::optional<clickhouse::ClientOptions> client_options_from_uri(
   opt.SetHost(pu->host);
   opt.SetPort(pu->port);
   if (!pu->user.empty()) opt.SetUser(pu->user);
-  auto password_file = pu->query.find("password_file");
-  if (!pu->password.empty() && password_file != pu->query.end()) {
-    if (err) *err = "URI password and password_file are mutually exclusive";
-    return std::nullopt;
-  }
-  if (password_file != pu->query.end()) {
-    if (password_file->second.empty()) {
-      if (err) *err = "password_file query parameter cannot be empty";
-      return std::nullopt;
-    }
-    auto password = read_password_file(password_file->second, err);
-    if (!password) return std::nullopt;
-    opt.SetPassword(*password);
-  } else if (!pu->password.empty()) {
-    opt.SetPassword(pu->password);
-  }
-  // Default database is intentionally "default". Users can always query db.table.
+  if (!pu->password.empty()) opt.SetPassword(pu->password);
+  // The default database is intentionally "default". Users can always query db.table.
   opt.SetDefaultDatabase("default");
 
   // Timeouts
@@ -414,14 +362,14 @@ std::optional<clickhouse::ClientOptions> client_options_from_uri(
   opt.SetConnectionRecvTimeout(recv_timeout);
   opt.SetConnectionSendTimeout(send_timeout);
 
-  // Kernel keepalive detects dead peers during long-running native queries
-  // without adding an application-level Ping before every query. Idle pooled
-  // clients are still closed proactively by ClickHouseClientPool.
+  // The kernel keepalive detects dead peers during long native queries.
+  // It does not add an application-level ping before every query.
+  // Idle pooled clients are still closed in advance by ClickHouseClientPool.
   opt.TcpKeepAlive(true);
 
-  // Native block compression, negotiated per connection. LZ4 is the default:
-  // result blocks and multi-GB exports typically shrink 3-10x on the wire for
-  // negligible CPU. compression=zstd trades CPU for ratio on slow links;
+  // Native block compression is negotiated per connection. LZ4 is the default.
+  // Result blocks and multi-GB exports typically shrink 3-10x on the wire for negligible CPU.
+  // compression=zstd trades CPU for ratio on slow links.
   // compression=none restores uncompressed transport.
   {
     auto it = pu->query.find("compression");
@@ -430,18 +378,18 @@ std::optional<clickhouse::ClientOptions> client_options_from_uri(
     opt.SetCompressionMethod(*method);
   }
 
-  // TLS via query params
+  // TLS through query parameters.
   const bool secure = query_param_truthy(pu->query, "secure", false);
   if (secure) {
     clickhouse::ClientOptions::SSLOptions ssl;
 
-    // verify=0 => skip verification
+    // verify=0 skips the verification.
     const bool verify = query_param_truthy(pu->query, "verify", true);
     ssl.SetSkipVerification(!verify);
 
     auto it_ca = pu->query.find("ca");
     if (it_ca != pu->query.end() && !it_ca->second.empty()) {
-      // Use provided CA file(s).
+      // Use the CA file or files that the URI gives.
       ssl.SetUseDefaultCALocations(false);
       ssl.SetPathToCAFiles(std::vector<std::string>{it_ca->second});
     }
@@ -477,7 +425,7 @@ std::shared_ptr<clickhouse::Client> make_client_from_uri(
   auto opt = client_options_from_uri(uri, connect_timeout, recv_timeout, send_timeout, err);
   if (!opt) return nullptr;
   try {
-    // Opened by ch_open_client, as every connection: its state (ch_query.hpp) lives as long as it.
+    // ch_open_client opens this connection, as every connection. Its state (ch_query.hpp) lasts as long as the connection.
     return std::shared_ptr<clickhouse::Client>(ch_open_client(*opt));
   } catch (const std::exception& e) {
     if (err) *err = e.what();

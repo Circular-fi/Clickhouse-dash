@@ -1,17 +1,18 @@
 import { test, expect } from '@playwright/test';
 import { nestedTrace, largeTrace, routeTrace, routeSearch } from '../helpers/trace-mocks.js';
 
-// Trace detail page with Jaeger's behaviour (header, overview, waterfall).
-// The OTel fixture traces are flat, so these run on mocked traces (see
-// helpers/trace-mocks.js for the shape of the nested one).
+// This file tests the trace detail page, as in Jaeger: the header, the overview
+// and the waterfall. The OTel fixture traces are flat. So these tests run on
+// mocked traces. See helpers/trace-mocks.js for the shape of the nested trace.
 
 const spanId = (n) => n.toString(16).padStart(16, '0');
 const rows = '#traceWaterfall .traceSpanRow';
 const row = (page, n) => page.locator(`${rows}[data-span-id="${spanId(n)}"]`);
 const rowIds = (page) => page.locator(rows).evaluateAll((els) => els.map((el) => el.getAttribute('data-span-id')));
 
-// The one categorical palette (--qchart-1..18), dark theme: services and
-// chart series. No red: red is for errors.
+// The categorical palette (--qchart-1..18) uses the dark theme here. It colours
+// the services and the chart series. The palette has no red, because red is for
+// errors.
 const SERVICE_DARK = [
   '#4296fb', '#e86a34', '#29ae81', '#d28f09', '#de669a', '#4ba435', '#9e8cf4', '#49c1ea', '#febad9',
   '#ddd674', '#7572ae', '#a86751', '#9fb83c', '#0695b5', '#cf95c1', '#bdbcfd', '#8e8945', '#85e2ed',
@@ -28,14 +29,15 @@ async function openTrace(page, trace) {
   await page.goto(`/observability/traces/${trace.trace_id}`);
   await expect(page.locator('#traceDetail')).toBeVisible();
   if (trace.spans.length > 1000) {
-    // Virtualised: the body holds every row's place, the DOM a window.
+    // Virtual rows: the body holds the place of every row. The DOM holds only a
+    // window of rows.
     await expect(page.locator(`#traceWaterfall .traceWaterfallBody[data-virtual-rows="${trace.spans.length}"]`)).toHaveCount(1, { timeout: 30_000 });
   } else {
     await expect(page.locator(rows)).toHaveCount(trace.spans.length, { timeout: 20_000 });
   }
 }
 
-// Colour of the service marker of a row, resolved.
+// The colour of the service marker of a row, as resolved.
 const rowColor = (locator) => locator.locator('.traceSpanRow__serviceDot').evaluate((el) => getComputedStyle(el).backgroundColor);
 
 test('trace detail: services take the categorical palette in first-seen order, the same in the result list and the trace', async ({ page }) => {
@@ -51,8 +53,8 @@ test('trace detail: services take the categorical palette in first-seen order, t
     getComputedStyle(el).getPropertyValue('--trace-service-color').trim(),
   ])));
   const palette = SERVICE_DARK;
-  // The search registers its services in name order: the n-th name takes
-  // the n-th slot.
+  // The search registers its services in name order. The nth name takes the nth
+  // slot.
   expect(Object.keys(listColors).sort()).toEqual(services);
   for (const [index, service] of services.entries()) expect(listColors[service]).toBe(palette[index]);
 
@@ -62,12 +64,12 @@ test('trace detail: services take the categorical palette in first-seen order, t
     const serviceIndex = services.indexOf(span.service);
     expect(await rowColor(page.locator(`${rows}[data-span-id="${span.span_id}"]`))).toBe(rgb(palette[serviceIndex]));
   }
-  // The assignment lasts for the session: a reload keeps every colour.
+  // The assignment lasts for the session. A reload keeps every colour.
   await page.reload();
   await expect(page.locator(rows)).toHaveCount(trace.spans.length, { timeout: 20_000 });
   expect(await rowColor(row(page, 13))).toBe(rgb(palette[services.indexOf('mailer')]));
 
-  // Light theme: the light values of the same slots.
+  // The light theme uses the light values of the same slots.
   await page.emulateMedia({ colorScheme: 'light' });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
   expect(await rowColor(row(page, 1))).toBe(rgb(SERVICE_LIGHT[services.indexOf('frontend')]));
@@ -75,7 +77,7 @@ test('trace detail: services take the categorical palette in first-seen order, t
 
 test('trace detail: error bars keep their service colour with a (!) badge, a collapsed branch hiding errors gets a hollow (!)', async ({ page }) => {
   await openTrace(page, nestedTrace());
-  // lock rows (span 7) is an error span, deep in the checkout branch.
+  // Span 7 (lock rows) is an error span, deep in the checkout branch.
   const lock = row(page, 7);
   await expect(lock.locator('.traceSpanRow__errorBadge:not(.traceSpanRow__errorBadge--hollow)')).toHaveCount(1);
   const [barColor, serviceColor] = await Promise.all([
@@ -84,20 +86,21 @@ test('trace detail: error bars keep their service colour with a (!) badge, a col
   ]);
   expect(barColor).toBe(serviceColor);
   expect(barColor).not.toBe('rgb(228, 87, 86)');
-  // Expanded, ancestors carry no marker.
+  // When expanded, the ancestors carry no marker.
   await expect(page.locator(`${rows} .traceSpanRow__errorBadge--hollow`)).toHaveCount(0);
 
-  // Collapse "handle checkout" (4): its row hides both error spans (7, 10).
+  // Collapse "handle checkout" (4). That hides both error spans (7, 10).
   await row(page, 4).locator('[data-toggle-span]').click();
   await expect(row(page, 7)).toHaveCount(0);
   await expect(row(page, 10)).toHaveCount(0);
   await expect(row(page, 4).locator('.traceSpanRow__errorBadge--hollow')).toHaveCount(1);
   await expect(row(page, 4).locator('.traceSpanRow__errorBadge--hollow')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  // A collapsed branch without errors (the queue publish, 11) gets none.
+  // A collapsed branch without errors, such as the queue publish (11), gets no
+  // marker.
   await row(page, 11).locator('[data-toggle-span]').click();
   await expect(row(page, 12)).toHaveCount(0);
   await expect(row(page, 11).locator('.traceSpanRow__errorBadge')).toHaveCount(0);
-  // Collapsing the root moves the marker up.
+  // When the root collapses, the marker moves to a higher row.
   await row(page, 1).locator('[data-toggle-span]').click();
   await expect(page.locator(rows)).toHaveCount(2);
   await expect(row(page, 1).locator('.traceSpanRow__errorBadge--hollow')).toHaveCount(1);
@@ -109,10 +112,11 @@ test('trace detail: header items like Jaeger\'s, with Errors and an Incomplete t
   const trace = nestedTrace();
   await openTrace(page, trace);
   const item = (label) => page.locator(`#traceDetailStats [data-trace-header-item="${label}"] .statTile__value`);
-  // Then the trace's logs (app_trace_logs.js, when logs are enabled).
+  // The trace logs come next (app_trace_logs.js, when logs are enabled).
   await expect(page.locator('#traceDetailStats [data-trace-header-item] > .statTile__label')).toHaveText(['Trace start', 'Duration', 'Services', 'Depth', 'Total spans', 'Errors', 'Logs']);
-  // Browser-local (UTC here), 24 h, the year only when it is not this one,
-  // seconds and muted milliseconds.
+  // The time uses the browser local time zone (UTC here) and a 24 h clock. The
+  // year shows only when it is not the current year. The seconds show, and the
+  // milliseconds are muted.
   await expect(item('Trace start')).toHaveText(`Sep 20${new Date().getFullYear() === 2026 ? '' : ', 2026'} 01:22:52.000`);
   await expect(item('Trace start').locator('small')).toHaveText('.000');
   await expect(item('Duration')).toHaveText('100 ms');
@@ -121,16 +125,16 @@ test('trace detail: header items like Jaeger\'s, with Errors and an Incomplete t
   await expect(item('Total spans')).toHaveText('13');
   await expect(item('Errors')).toHaveText('2');
   await expect(page.locator('#traceDetailStats [data-trace-header-item="Errors"]')).toHaveClass(/is-error/);
-  // One span (the mailer) points at a parent missing from the trace.
+  // One span, the mailer, points at a parent that is missing from the trace.
   const incomplete = page.locator('#traceDetailStats [data-trace-incomplete]');
   await expect(incomplete).toHaveText('Incomplete');
   await expect(incomplete).toHaveAttribute('title', /1 span references a parent span missing/);
   await expect(page).toHaveTitle('a1b2c3d: frontend GET /checkout');
-  // The copy control stays last in the title row, the full id copies.
+  // The copy control stays last in the title row. It copies the full id.
   const [statsBox, splitBox] = await Promise.all([page.locator('#traceDetailStats').boundingBox(), page.locator('#traceCopySplit').boundingBox()]);
   expect(splitBox.x).toBeGreaterThanOrEqual(statsBox.x + statsBox.width - 1);
   await expect(page.locator('#traceDetailTitle [data-copy-active-trace]')).toHaveAttribute('data-copy-active-trace', trace.trace_id);
-  // Without orphans or errors: no tag, a plain 0.
+  // Without orphans or errors, there is no tag and a plain 0 shows.
   const flat = nestedTrace('0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f');
   flat.spans = flat.spans.filter((span) => span.service !== 'mailer').map((span) => ({ ...span, error: false }));
   await openTrace(page, flat);
@@ -148,14 +152,15 @@ test('trace detail: the overview draws one row per span in waterfall order, 1..6
   await expect(graph).toHaveAttribute('data-overview-rows', '13');
   const bars = graph.locator('i[data-span-id]');
   expect(await bars.evaluateAll((els) => els.map((el) => el.getAttribute('data-span-id')))).toEqual(await rowIds(page));
-  // 13 rows in Jaeger's 60 px minimum: 60 / 13 px apart and tall.
+  // 13 rows, with Jaeger's 60 px minimum: 60 / 13 px apart and tall.
   const geometry = await bars.evaluateAll((els) => els.map((el) => [parseFloat(el.style.top), parseFloat(el.style.height)]));
   geometry.forEach(([top, height], index) => {
     expect(top).toBeCloseTo((index * 60) / 13, 1);
     expect(height).toBeCloseTo(60 / 13, 1);
   });
   expect(await graph.evaluate((el) => el.clientHeight)).toBe(60);
-  // The waterfall order ignores collapsing (the overview shows every span).
+  // The waterfall order does not depend on the collapse state. The overview
+  // shows every span.
   await page.keyboard.press(']');
   await expect(page.locator(rows)).toHaveCount(2);
   await expect(bars).toHaveCount(13);
@@ -185,37 +190,42 @@ test('trace detail: the tree shows guides in ancestor colours, child-count boxes
   await expect(box(8)).toHaveText('2');
   await expect(row(page, 2).locator('.traceTreeOffset__box')).toHaveCount(0);
   await expect(row(page, 2).locator('.traceTreeOffset__dot')).toHaveCount(1);
-  // lock rows (level 5): one guide per ancestor, coloured like it.
+  // The lock rows (level 5) have one guide per ancestor. Each guide has the
+  // colour of its ancestor.
   const guides = row(page, 7).locator('.traceTreeOffset__guide');
   await expect(guides).toHaveCount(5);
   expect(await guides.evaluateAll((els) => els.map((el) => el.getAttribute('data-ancestor-id')))).toEqual([1, 3, 4, 5, 6].map(spanId));
   const guideColors = await guides.evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
   const ancestorColors = await Promise.all([1, 3, 4, 5, 6].map((n) => rowColor(row(page, n))));
   expect(guideColors).toEqual(ancestorColors);
-  // Only the parent's guide has the elbow; lock rows is its parent's last
-  // child, so that guide stops halfway. The root's guide runs on (3 is not
-  // its last child), so does 4's (5 is followed by 8), 5's ends (6 is its
-  // last child).
+  // Only the parent's guide has the elbow. The lock rows are the last child of
+  // their parent, so that guide stops halfway.
+  //
+  // The guide of the root runs on, because 3 is not its last child. The guide
+  // of 4 also runs on, because 5 is followed by 8. The guide of 5 ends, because
+  // 6 is its last child.
   await expect(guides.locator('.traceTreeOffset__elbow')).toHaveCount(1);
   await expect(guides.nth(4)).toHaveClass(/is-last/);
   await expect(guides.nth(0)).not.toHaveClass(/is-terminated/);
   await expect(guides.nth(2)).not.toHaveClass(/is-terminated/);
   await expect(guides.nth(3)).toHaveClass(/is-terminated/);
   const fraudGuides = row(page, 10).locator('.traceTreeOffset__guide');
-  // In fraud's row (last child of 8, itself last child of 4): 4's guide ends.
+  // In the row of fraud (last child of 8, and 8 is the last child of 4), the
+  // guide of 4 ends.
   await expect(fraudGuides.nth(2)).toHaveClass(/is-terminated/);
 
-  // Hovering a guide highlights that span's guides in every row.
+  // When the viewer hovers a guide, the guides of that span are highlighted in
+  // every row.
   await guides.nth(2).hover();
   const hovered = page.locator('#traceWaterfall .is-guide-hovered');
   expect(await hovered.evaluateAll((els) => [...new Set(els.map((el) => el.getAttribute('data-ancestor-id')))])).toEqual([spanId(4)]);
-  // 4's box and a guide in each of its 6 descendants' rows.
+  // The box of 4 and a guide in each of the rows of its 6 descendants.
   await expect(hovered).toHaveCount(7);
   await page.mouse.move(5, 5);
   await expect(hovered).toHaveCount(0);
 
-  // Collapsed: the count reads +N in the service's colour (no box) and the
-  // service name is bold italic.
+  // When collapsed, the count reads +N in the colour of the service, with no
+  // box. The service name is bold italic.
   const before = await box(4).evaluate((el) => getComputedStyle(el).color);
   await box(4).click();
   await expect(box(4)).toHaveClass(/is-collapsed/);
@@ -226,7 +236,7 @@ test('trace detail: the tree shows guides in ancestor colours, child-count boxes
   await expect(row(page, 4).locator('.traceSpanRow__service')).toHaveCSS('font-style', 'italic');
   await expect(row(page, 4).locator('.traceSpanRow__service')).toHaveCSS('font-weight', '600');
   await expect(row(page, 3).locator('.traceSpanRow__service')).toHaveCSS('font-style', 'normal');
-  // Keyboard on the box folds it too, without opening the span.
+  // The keyboard also folds the box. The span does not open.
   await box(4).focus();
   await page.keyboard.press('Enter');
   await expect(page.locator(rows)).toHaveCount(13);
@@ -242,21 +252,21 @@ test('trace detail: Expand +1 / Collapse +1 / Expand all / Collapse all buttons 
   await expect(head.locator('[data-trace-expand-all]')).toHaveAttribute('title', 'Expand all ([)');
   await expect(head.locator('[data-trace-collapse-all]')).toHaveAttribute('title', 'Collapse all (])');
 
-  // Collapse +1 (Jaeger): the deepest open parent of each branch.
+  // Collapse +1 (Jaeger) collapses the deepest open parent of each branch.
   await page.keyboard.press('p');
   expect(await rowIds(page)).toEqual([1, 2, 3, 4, 5, 6, 8, 11, 13].map(spanId));
   await page.keyboard.press('p');
   expect(await rowIds(page)).toEqual([1, 2, 3, 4, 5, 8, 11, 13].map(spanId));
   await page.keyboard.press(']');
   expect(await rowIds(page)).toEqual([1, 13].map(spanId));
-  // Expand +1: the shallowest collapsed span of each branch.
+  // Expand +1 expands the shallowest collapsed span of each branch.
   await page.keyboard.press('o');
   expect(await rowIds(page)).toEqual([1, 2, 3, 11, 13].map(spanId));
   await page.keyboard.press('o');
   expect(await rowIds(page)).toEqual([1, 2, 3, 4, 11, 12, 13].map(spanId));
   await page.keyboard.press('[');
   await expect(page.locator(rows)).toHaveCount(13);
-  // The same through the buttons.
+  // The buttons do the same.
   await head.locator('[data-trace-collapse-all]').click();
   await expect(page.locator(rows)).toHaveCount(2);
   await head.locator('[data-trace-expand-one]').click();
@@ -273,26 +283,29 @@ test('trace detail: zoomed ticks read offsets from the trace start with the wall
   const clocks = page.locator('#traceWaterfall [data-trace-tick] small');
   await expect(labels).toHaveText(['0 ns', '25 ms', '50 ms', '75 ms', '100 ms']);
   await expect(clocks).toHaveText(['01:22:52.000', '01:22:52.025', '01:22:52.050', '01:22:52.075', '01:22:52.100']);
-  // Shift+Up zooms in by 5 % a side (Jaeger's large zoom step), Shift+D pans.
+  // Shift+Up zooms in by 5 % on each side (Jaeger's large zoom step). Shift+D
+  // pans.
   for (let i = 0; i < 5; i += 1) await page.keyboard.press('Shift+ArrowUp');
   await expect(labels).toHaveText(['25 ms', '37.5 ms', '50 ms', '62.5 ms', '75 ms']);
   for (let i = 0; i < 5; i += 1) await page.keyboard.press('Shift+D');
   await expect(labels).toHaveText(['50 ms', '62.5 ms', '75 ms', '87.5 ms', '100 ms']);
   await expect(clocks).toHaveText(['01:22:52.050', '01:22:52.062', '01:22:52.075', '01:22:52.087', '01:22:52.100']);
   await expect(page.locator('#traceWaterfall [data-trace-tick]').first()).toHaveAttribute('title', '50 ms after the trace start · 01:22:52.050');
-  // Labels keep Jaeger's 130 px minimum spacing.
+  // Labels keep Jaeger's minimum distance of 130 px.
   const lefts = await page.locator('#traceWaterfall [data-trace-tick]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().left));
   for (let i = 1; i < lefts.length; i += 1) expect(lefts[i] - lefts[i - 1]).toBeGreaterThanOrEqual(130);
-  // a / Left pan left by 0.5 % (5 % with Shift), keeping the width.
+  // The a key and Left pan left by 0.5 %, or 5 % with Shift, and keep the
+  // width.
   await page.keyboard.press('a');
   await expect(labels).toHaveText(['49.5 ms', '62 ms', '74.5 ms', '87 ms', '99.5 ms']);
   await page.keyboard.press('Shift+ArrowLeft');
   await expect(labels.first()).toHaveText('44.5 ms');
-  // A deep zoom (to Jaeger's 1 % minimum) adds decimals instead of repeating labels.
+  // A deep zoom, down to Jaeger's 1 % minimum, adds decimals. The labels do not
+  // repeat.
   for (let i = 0; i < 9; i += 1) await page.keyboard.press('Shift+ArrowUp');
   await expect(labels).toHaveText(['69.00 ms', '69.25 ms', '69.50 ms', '69.75 ms', '70.00 ms']);
   await expect(clocks).toHaveText(['01:22:52.069000', '01:22:52.069250', '01:22:52.069500', '01:22:52.069750', '01:22:52.070000']);
-  // Down zooms back out.
+  // The down key zooms back out.
   for (let i = 0; i < 30; i += 1) await page.keyboard.press('Shift+ArrowDown');
   await expect(labels.first()).toHaveText('0 ns');
   await expect(page.locator('#traceWaterfall [data-trace-reset-zoom]')).toBeHidden();
@@ -318,7 +331,7 @@ test('trace detail: dragging across the timeline header zooms in, the reset cont
   const selection = page.locator('[data-trace-overview-selection]');
   expect(parseFloat(await selection.evaluate((el) => el.style.left))).toBeCloseTo(25, 0);
   expect(parseFloat(await selection.evaluate((el) => el.style.width))).toBeCloseTo(50, 0);
-  // render (2..12 ms) is outside the view now.
+  // The render span (2..12 ms) is now outside the view.
   await expect(row(page, 2)).toHaveCount(0);
   await expect(reset).toBeVisible();
   await reset.click();
@@ -333,8 +346,9 @@ test('trace detail: dragging across the timeline header zooms in, the reset cont
 test('trace detail: zoomed spans cut by the view edge show a clipping shade on that edge', async ({ page }) => {
   await openTrace(page, nestedTrace());
   for (let i = 0; i < 5; i += 1) await page.keyboard.press('Shift+ArrowUp');
-  // View 25..75 ms: checkout (10..90) is cut on both sides, render (2..12)
-  // is gone, the queue publish (91..93) too, reserve items (14..40) left only.
+  // The view is 25..75 ms. The checkout span (10..90) is cut on both sides. The
+  // render span (2..12) is gone, and so is the queue publish (91..93). Only the
+  // reserve items (14..40) remain.
   await expect(row(page, 3)).toHaveClass(/clipping-left/);
   await expect(row(page, 3)).toHaveClass(/clipping-right/);
   await expect(row(page, 5)).toHaveClass(/clipping-left/);
@@ -344,7 +358,8 @@ test('trace detail: zoomed spans cut by the view edge show a clipping shade on t
     const cs = getComputedStyle(el, p);
     return { image: cs.backgroundImage, width: cs.width };
   }, pseudo);
-  // Polled: the row can be redrawn between the class check and the read.
+  // The test polls. The row can be redrawn between the class check and the
+  // read.
   await expect.poll(() => shade(3, '::before')).toEqual({ image: expect.stringContaining('linear-gradient'), width: '6px' });
   await expect.poll(() => shade(3, '::after')).toEqual({ image: expect.stringContaining('linear-gradient'), width: '6px' });
   expect((await shade(9, '::before')).image).toBe('none');
@@ -353,9 +368,10 @@ test('trace detail: zoomed spans cut by the view edge show a clipping shade on t
 test('trace detail: the critical path marks the blocking chain of the mocked trace and can be hidden', async ({ page }) => {
   await openTrace(page, nestedTrace());
   const marked = async () => (await page.locator(`${rows}:has(.traceSpanBar__critical)`).evaluateAll((els) => els.map((el) => el.getAttribute('data-span-id')))).sort();
-  // Jaeger's algorithm: the root's last finishing child, back to earlier
-  // children; the consumer of a producer does not block it, the render span
-  // finishes before checkout's work, the orphan mailer has no path.
+  // Jaeger's algorithm: it starts at the last child of the root to finish and
+  // goes back to earlier children. The consumer of a producer does not block
+  // it. The render span finishes before the work of checkout. The orphan mailer
+  // has no path.
   expect(await marked()).toEqual([1, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(spanId).sort());
   const segments = async (n) => (await row(page, n).locator('.traceSpanBar__critical').evaluateAll((els) => els.map((el) => [parseFloat(el.style.left), parseFloat(el.style.width)]))).sort((a, b) => a[0] - b[0]);
   const close = (actual, expected) => {
@@ -365,11 +381,11 @@ test('trace detail: the critical path marks the blocking chain of the mocked tra
       expect(width).toBeCloseTo(expected[index][1], 2);
     });
   };
-  // Root: 0..10, 90..91, 93..100 ms of the 100 ms trace.
+  // The root covers 0..10, 90..91 and 93..100 ms of the 100 ms trace.
   close(await segments(1), [[0, 10], [90, 1], [93, 7]]);
   close(await segments(8), [[42, 2], [50, 2], [84, 2]]);
   close(await segments(10), [[52, 32]]);
-  // A collapsed span shows its hidden subtree's segments, merged.
+  // A collapsed span shows the merged segments of its hidden subtree.
   await row(page, 8).locator('[data-toggle-span]').click();
   close(await segments(8), [[42, 44]]);
   // The toggle hides and shows the strips.
@@ -407,7 +423,7 @@ test('trace detail: well-known attributes show as muted text and icons in the na
   await expect(icon(5)).toHaveAttribute('data-span-decoration', 'rpc');
   await expect(icon(11)).toHaveAttribute('data-span-decoration', 'messaging');
   await expect(icon(2)).toHaveCount(0);
-  // Red is the error colour, shared with the (!) badge.
+  // Red is the error colour. It is shared with the (!) badge.
   const [pillColor, badgeColor] = await Promise.all([
     pills(10).last().evaluate((el) => getComputedStyle(el).color),
     row(page, 10).locator('.traceSpanRow__errorBadge').evaluate((el) => getComputedStyle(el).backgroundColor),
@@ -417,7 +433,8 @@ test('trace detail: well-known attributes show as muted text and icons in the na
 
 test('trace detail: method and a status under 400 are muted mono text with no chip; 4xx an amber chip, 5xx a red one; child counts have no box', async ({ page }) => {
   const trace = nestedTrace();
-  // A 404 on the checkout call (4xx), the 503 of the fraud score stays (5xx).
+  // A 404 on the checkout call (4xx) becomes an amber badge. The 503 of the
+  // fraud score stays a red badge (5xx).
   trace.spans[2].attributes = { 'http.request.method': 'POST', 'http.response.status_code': 404 };
   await openTrace(page, trace);
   const pills = (n) => row(page, n).locator('.traceSpanPill');
@@ -432,27 +449,30 @@ test('trace detail: method and a status under 400 are muted mono text with no ch
       fill: cs.backgroundColor !== 'rgba(0, 0, 0, 0)',
       mono: /Plex Mono|monospace/i.test(cs.fontFamily),
       muted: cs.color === resolve('--muted'),
-      // The amber text is mixed with a fifth of the text colour: 4.5:1 on its tint in the light theme too.
+      // The amber text is mixed with a fifth of the text colour. It has a
+      // contrast of 4.5:1 on its tint, in the light theme too.
       warn: cs.color === (() => { probe.style.color = 'color-mix(in srgb, var(--warning) 80%, var(--text))'; return getComputedStyle(probe).color; })(),
       danger: cs.color === resolve('--danger'),
     };
     probe.remove();
     return out;
   });
-  // GET 200: two muted mono texts, no chip.
+  // GET 200 shows two muted mono texts, with no chip.
   for (const pill of [pills(1).first(), pills(1).last()]) {
     expect(await look(pill)).toMatchObject({ chip: false, border: false, fill: false, mono: true, muted: true });
   }
-  // db / rpc / messaging systems: text too.
+  // The db, rpc and messaging systems also use text.
   for (const n of [5, 6, 11]) expect(await look(pills(n).first())).toMatchObject({ chip: false, mono: true, muted: true });
-  // 404: an amber chip; 503: a red chip; their methods stay text.
+  // A 404 is an amber chip. A 503 is a red chip. Their methods stay text.
   await expect(pills(3)).toHaveText(['POST', '404']);
   expect(await look(pills(3).last())).toMatchObject({ chip: true, border: true, warn: true });
   expect(await look(pills(3).first())).toMatchObject({ chip: false, muted: true });
   expect(await look(pills(10).last())).toMatchObject({ chip: true, border: true, danger: true });
-  // One chip per span at most here: only the >= 400 statuses are badges.
+  // Here, a span has one chip at most. Only the statuses of 400 or more are
+  // badges.
   expect(await page.locator('#traceWaterfall .traceSpanPill.badge').count()).toBe(2);
-  // The child count is plain text: no border, no fill; a collapsed span reads +N.
+  // The child count is plain text, with no border and no fill. A collapsed span
+  // reads +N.
   const count = row(page, 1).locator('.traceTreeOffset__box');
   await expect(count).toHaveText('3');
   expect(await count.evaluate((el) => {
@@ -488,18 +508,19 @@ test('trace detail: a 10,000-span trace is virtualised: a window of rows, scroll
   // The body keeps the height of every row (24 px each).
   expect(await waterfall.locator('.traceWaterfallBody').evaluate((el) => el.offsetHeight)).toBe(10_000 * 24);
   await expect(page.locator(rows).first().locator('.traceTreeOffset__box')).toHaveText(String(big.spans.filter((span) => span.parent_span_id === spanId(1)).length));
-  // Scrolled to the end: the last rows are drawn, the first ones are gone.
+  // After a scroll to the end, the last rows are drawn. The first rows are
+  // gone.
   await waterfall.evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await expect(row(page, 1)).toHaveCount(0);
   await expect.poll(() => waterfall.locator('[data-virtual-after]').evaluate((el) => el.offsetHeight)).toBe(0);
   const lastRow = page.locator(rows).last();
   await expect(lastRow).toBeVisible();
-  // Opening a span there keeps the place and draws its inspector.
+  // A span that opens there keeps the place. Its inspector is also drawn.
   const scrolled = await waterfall.evaluate((el) => el.scrollTop);
   await lastRow.click();
   await expect(waterfall.locator('.traceSpanInspectorRow')).toHaveCount(1);
   expect(Math.abs(await waterfall.evaluate((el) => el.scrollTop) - scrolled)).toBeLessThan(2);
-  // Folding everything leaves the virtual mode, unfolding goes back.
+  // Fold all, and the virtual mode ends. Unfold all, and it returns.
   const folded = Date.now();
   await page.keyboard.press(']');
   await expect(page.locator(rows)).toHaveCount(1);
@@ -527,11 +548,13 @@ test.describe('trace detail on a touch phone', () => {
     });
     expect(geometry.nameWidth).toBeGreaterThan(120);
     expect(geometry).toMatchObject({ sameLine: true, statsBelow: true });
-    // The method / status chips and log counts leave the name column.
+    // The method and status chips, and the log counts, are not in the name
+    // column.
     const pills = page.locator(`${rows} .traceSpanPill`);
     expect(await pills.count()).toBeGreaterThan(0);
     for (const pill of await pills.all()) await expect(pill).toBeHidden();
-    // Rows and their bars: --hit (40 px) rows on a touch screen, 14 px bars.
+    // On a touch screen, the rows have a --hit height of 40 px. The bars are 14
+    // px.
     const row = page.locator(rows).first();
     expect(Math.round((await row.boundingBox()).height)).toBe(40);
     expect(Math.round((await row.locator('.traceSpanBar').first().boundingBox()).height)).toBe(14);

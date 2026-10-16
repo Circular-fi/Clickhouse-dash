@@ -1,11 +1,11 @@
-// Logs explorer (the Logs view of /observability), modelled on HyperDX's
-// search page: a search bar (time range, services, level, Body text,
-// attribute filters), a Fields sidebar (the Traces attribute facets), the volume
-// histogram stacked by severity (drag to zoom), a virtualised newest-first
-// table paged by keyset cursors, a side panel with click-to-filter actions
-// and the surrounding context, a Patterns tab. All search state lives in
-// the URL. No live tail: the logs read on load, on a filter or range change
-// and with Search, never on a timer.
+// Logs explorer (the Logs view of /observability), modelled on the search page of HyperDX.
+// The page has these parts: a search bar (time range, services, level, Body text, attribute filters).
+// It also has a Fields sidebar (the Traces attribute facets) and the volume histogram.
+// The histogram is stacked by severity (drag to zoom).
+// It has a virtualised newest-first table, paged by keyset cursors.
+// A side panel gives click-to-filter actions and the surrounding context. It also has a Patterns tab.
+// All search state is kept in the URL.
+// There is no live tail. The logs are read on load, on a filter or range change, and with Search. They are never read on a timer.
 
 import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
@@ -29,23 +29,23 @@ import { table } from "./app_ui_table.js";
 import { tabs } from "./app_ui_tabs.js";
 import { util } from "./app_util.js";
 
-// Formats and colours (docs/ui-foundations.md): a service keeps the colour
-// it has on Traces and Metrics (palette.service), severities are --sev-*.
+// The formats and colors follow docs/ui-foundations.md. A service keeps the color that it has on Traces and Metrics (palette.service).
+// Severities use --sev-*.
 const fmt = format;
 
 const { byId, $, $$ } = dom;
 const esc = (value) => util.escapeHtml(String(value == null ? "" : value));
-// The Logs view's address (ns.router): /observability/logs and its search
-// parameters, written only while the view shows (the "logs" lifecycle
+// The address of the Logs view (ns.router) is /observability/logs. It has the search parameters.
+// The module writes these parameters only while the view is shown (the "logs" lifecycle
 // scope of app_obs_page.js).
 const address = router.owner("logs", { path: "/observability/logs", params: () => urlParams() });
 
 const SEV_CLASSES = ["error", "warn", "info", "debug"];
 const SEV_LABELS = { error: "Error", warn: "Warn", info: "Info", debug: "Debug" };
-// Rows are --row-compact tall (ns.table.rowHeight); on a phone (600 px and
-// below, ns.shell) each record is a two-line card, --row-card tall: Time,
-// Level and Service, then the Body. rowMetrics() reads them at init and
-// whenever the window crosses 600 px.
+// Rows are --row-compact tall (ns.table.rowHeight).
+// On a phone (600 px and below, ns.shell), each record is a two-line card, --row-card tall.
+// The card shows Time, Level and Service, then the Body.
+// rowMetrics() reads these heights at init, and again whenever the window crosses 600 px.
 let ROW_HEIGHT = 26;
 let CARDS = false;
 const CARD_COLUMNS = ["time", "severity", "service", "body"];
@@ -103,8 +103,8 @@ const model = {
 
 const currentHost = obsView.currentHost;
 
-// The displayed severity: the palette's level (fatal, error, warn, info,
-// debug, trace), coloured by [data-sev] (--sev-*).
+// The displayed severity is the level of the palette (fatal, error, warn, info, debug, trace).
+// The color is set by [data-sev] (--sev-*).
 function severityLevel(row) {
   const n = Number(row.severity_number) || 0;
   return palette.severityLevel(n > 0 ? n : row.severity_text);
@@ -114,8 +114,8 @@ function sevBadgeHtml(row, title = "") {
   return badge.severityHtml(severityLevel(row), row.severity_text || "", { title });
 }
 
-// A log time: to the millisecond in the table and the head of the detail (the nanoseconds were cut off there), every
-// nanosecond in the Timestamp field of the detail and the tooltip (fmt.time / fmt.timeTitle, browser-local).
+// A log time is shown to the millisecond in the table and in the head of the detail. The nanoseconds are cut off there.
+// Every nanosecond is shown in the Timestamp field of the detail and in the tooltip (fmt.time / fmt.timeTitle, browser-local).
 function timeLabel(row) {
   return fmt.time(Number(row.ts_ms), { precision: "ms" });
 }
@@ -128,8 +128,7 @@ function timeTitle(row) {
   return fmt.timeTitle(Number(row.ts_ms), { precision: "ns", ns: row.ts_ns });
 }
 
-// The shared copy (copy.text): the secure-context check, the textarea
-// fallback and the one "Copied" feedback.
+// The shared copy (copy.text) has a secure-context check, a textarea fallback and one "Copied" feedback.
 function copyText(text, button) {
   return copy.text(String(text), button);
 }
@@ -151,7 +150,7 @@ function readUrl() {
   model.denoise = params.get("denoise") === "1";
 }
 
-// withRecord: the open record's log= too (every address write keeps it).
+// withRecord: the log= of the open record too. Every address write keeps it.
 function urlParams({ withRecord = true } = {}) {
   const params = timeRange.url.write(new URLSearchParams(), model.timeRange);
   for (const service of model.services) params.append("service", service);
@@ -194,8 +193,8 @@ function filterParams(range, { withRange = true } = {}) {
 }
 
 // --- Pickers: ns.menu (app_ui_menu.js) on the Traces search bar look -----
-// Each picker is an ns.menu menu (motion, keys, focus, the one outside
-// click / Escape layer); a search closes them all.
+// Each picker is an ns.menu menu (motion, keys, focus, and the one layer for outside clicks and Escape).
+// A search closes all of them.
 const closePickers = () => menuMod?.closeAll();
 const pickerParts = (root) => [$(":scope > .tracePicker__button", root), $(":scope > .tracePicker__menu", root)];
 
@@ -270,7 +269,7 @@ function initServicePicker() {
   });
 }
 
-// Picker changes (service checkboxes) search once the clicks pause: the one search delay.
+// Picker changes (service checkboxes) start a search when the clicks pause. This is the only search delay.
 const scheduleFilterSearch = util.debounce(() => { void search({ push: true }); });
 
 async function loadServiceChoices(range) {
@@ -346,22 +345,21 @@ function addFilterText(text) {
 }
 
 // --- Fields panel ------------------------------------------------------------------
-// The Traces Attributes sidebar (app_facet_panel.js) over /api/logs/facets
-// and facet_values: the attribute map keys and the record columns of the
-// matching records. Its filters are the search's: a checked value is a
-// key=value filter (the service picker for ServiceName), an excluded one
-// key!=value; several checked values of one key match any of them.
+// The Traces Attributes sidebar (app_facet_panel.js) uses /api/logs/facets and facet_values.
+// It shows the attribute map keys and the record columns of the matching records.
+// Its filters are the filters of the search. A checked value is a key=value filter (the service picker for ServiceName).
+// An excluded value gives a key!=value filter.
+// Several checked values of one key match any of them.
 
 const FIELD_MAPS = { log: "LogAttributes", resource: "ResourceAttributes", scope: "ScopeAttributes" };
 const FIELD_COLUMNS = ["ServiceName", "SeverityText", "TraceId", "SpanId", "ScopeName", "ScopeVersion"];
 let fields = null;
 
-// The key a field's filters are written with: LogAttributes.<key> (one map)
-// or the column name.
+// The key of a field filter is written as LogAttributes.<key> (one map) or as the column name.
 const fieldFilterKey = (scope, key) => (scope === "column" ? key : `${FIELD_MAPS[scope]}.${key}`);
 
-// Whether a filter on `filterKey` filters the field (scope, key): a bare
-// key filters both LogAttributes and ResourceAttributes.
+// This function checks whether a filter on `filterKey` filters the field (scope, key).
+// A bare key filters both LogAttributes and ResourceAttributes.
 function filtersField(filterKey, scope, key) {
   if (scope === "column") return filterKey === key;
   return filterKey === `${FIELD_MAPS[scope]}.${key}` || (filterKey === key && scope !== "scope" && !FIELD_COLUMNS.includes(filterKey));
@@ -376,7 +374,7 @@ function fieldFiltered(scope, key) {
   return out;
 }
 
-// The attr filters on the field (scope, key) for `value`, = or !=.
+// The attribute filters of the field (scope, key) for `value`. The operator is = or !=.
 const isFieldAttr = (attr, scope, key, value, negate) => {
   const parsed = parseAttr(attr);
   return parsed.negate === negate && parsed.value === value && filtersField(parsed.key, scope, key);
@@ -405,7 +403,7 @@ function onFieldExclude(scope, key, value) {
   void search({ push: true });
 }
 
-// The panel's filters: the search's parameters over its range.
+// The filters of the panel are the parameters of the search, over its range.
 function fieldFilters(range) {
   return { range, params: filterParams(range).toString() };
 }
@@ -414,7 +412,7 @@ function fieldFilterKeyOf(filters) {
   const params = new URLSearchParams(filters.params);
   params.delete("start_ms");
   params.delete("end_ms");
-  // Minute-aligned like the server's cache: a re-search within the minute does not refetch.
+  // The range is aligned to the minute, as the server cache is. A new search within the same minute does not fetch again.
   return `${timeRange.minuteKey(filters.range.start_ms, filters.range.end_ms)}|${params.toString()}`;
 }
 
@@ -423,7 +421,7 @@ function initFields() {
   fields = facetPanel.create({
     ids: { panel: "logsFacets", toggle: "logsFacetsToggle", meta: "logsFacetsMeta", search: "logsFacetsSearch", list: "logsFacetsList" },
     collapsedClass: "chdash-logs-facets-collapsed",
-    // A phone: the panel is a drawer, toggled from the top of the records.
+    // On a phone, the panel is a drawer that is toggled from the top of the records.
     drawerHost: $(".logsSearchMain"),
     collapsedStoreKey: storage.KEYS.logsFacetsCollapsed,
     pinStoreKey: storage.KEYS.logsFacetPins,
@@ -466,12 +464,12 @@ function initFields() {
 
 // --- Errors and status -----------------------------------------------------------
 
-// A failed step's state block (ns.uiState) with Retry (onRetryClick):
-// "search", "histogram", "patterns" or "context".
+// A failed step shows a state block (ns.uiState) with a Retry button (onRetryClick).
+// The step can be "search", "histogram", "patterns" or "context".
 const failedHtml = (title, text, what, options = {}) => uiState.errorHtml({ title, body: text, retry: { attrs: { "data-logs-retry": what } }, ...options });
 
-// The error strip (ns.uiState.banner): a sentence (app_obs_page.js
-// strips the API's error codes) and, for a step that can run again, Retry.
+// The error strip (ns.uiState.banner) shows a sentence. app_obs_page.js removes the API error codes from it.
+// For a step that can run again, the strip shows Retry.
 function showError(message, retry = null) {
   uiState.banner(byId("logsError"), { message, retry });
 }
@@ -485,7 +483,7 @@ function onRetryClick(event) {
   else if (what === "context") void loadContext();
 }
 
-// "Clear filters" of an empty result: the range, columns and tab stay.
+// The "Clear filters" link of an empty result keeps the range, the columns and the tab.
 function clearFilters() {
   model.services = [];
   model.level = "";
@@ -523,7 +521,7 @@ async function search({ push = false } = {}) {
   address.write(push ? "push" : "replace");
   renderChips();
   syncLegend();
-  // A new search supersedes the previous one and its next page.
+  // A new search replaces the previous search and its next page.
   const req = obsView.read("logs.search");
   util.latest.cancel("logs.more");
   model.loadingMore = false;
@@ -552,7 +550,7 @@ async function search({ push = false } = {}) {
     model.lastPayload = payload;
     renderTable();
     renderStatus();
-    // The result of the search is said once through the page's live region (the status line is not one: it changes as rows load).
+    // The page announces the result of the search once, through its live region. The status line is not a live region, because it changes as rows load.
     if (model.status) uiState.announce(model.status);
     if (model.selectedId && !model.rowIds.has(model.selectedId)) closeSidePanel({ url: pendingLogId ? "none" : "clear" });
     openPendingSidePanel();
@@ -604,8 +602,8 @@ async function loadMore() {
   }
 }
 
-// The status line beside the tabs speaks for the tab shown: the listed
-// records on Results, the mined patterns on Patterns.
+// The status line beside the tabs shows the status of the visible tab.
+// On Results it shows the listed records. On Patterns it shows the mined patterns.
 function renderStatus() {
   if (model.tab === "patterns") {
     setStatus(patternsStatus());
@@ -617,8 +615,7 @@ function renderStatus() {
     setStatus(model.lastSearch ? "No matching logs" : "");
     return;
   }
-  // One separator at most: what is shown (and its search time), where the
-  // scan is.
+  // The status line has one separator at most. It shows the records (and the search time), and where the scan is.
   parts.push(`${fmt.count(n)} log${n === 1 ? "" : "s"} shown${Number.isFinite(model.searchMs) ? ` in ${fmt.duration.fromMs(model.searchMs)}` : ""}`);
   if (model.nextCursor && model.lastPayload?.budget_exhausted) {
     parts.push(`scan paused at ${fmt.time(model.lastPayload.scanned_from_ms)}, scroll to continue`);
@@ -631,12 +628,11 @@ function renderStatus() {
 
 // --- Table (virtualised) -----------------------------------------------------------
 
-// The columns drawn. Beside the record panel the table can be narrower
-// than its columns: the lowest-priority ones go first (attributes, scope,
-// span, trace, host, then service) so Body keeps BODY_MIN_PX; Time, Level
-// and Body always stay (the span table does the same beside its panel).
+// The columns that are drawn. Beside the record panel, the table can be narrower than its columns.
+// The lowest-priority columns go first: attributes, scope, span, trace, host, and then service. So Body keeps BODY_MIN_PX.
+// Time, Level and Body always stay. The span table does the same beside its panel.
 const BODY_MIN_PX = 320;
-// The widths the columns take (their grid maximum): what Body competes with.
+// The widths of the columns (their grid maximum). Body competes with these widths.
 const COLUMN_MIN_PX = { time: 176, severity: 64, service: 150, host: 150, trace: 150, span: 128, scope: 140 };
 const DROP_ORDER = ["scope", "span", "trace", "host", "service"];
 function shownCols() {
@@ -699,7 +695,7 @@ function renderHead() {
   h.replace(head, cols.map((col) => h("span", { class: ["logsTable__th", `logsTable__th--${col.startsWith("attr:") ? "attr" : col}`], role: "columnheader" }, columnLabel(col))));
 }
 
-// No logs: where the data is (a jump to it) and no filters, the ways out.
+// No logs: the block shows where the data is (a jump to it). It also shows the ways out when no filters are set.
 function emptyHtml() {
   const bounds = model.meta?.time_bounds;
   const outside = !!bounds && !!model.lastSearch && (model.lastSearch.start_ms > bounds.max_ms || model.lastSearch.end_ms < bounds.min_ms);
@@ -744,7 +740,7 @@ function renderTable({ message = null, error = "" } = {}) {
   messageBox.hidden = true;
   const footer = model.nextCursor || model.loadingMore ? 1 : 0;
   spacer.style.height = `${(model.rows.length + footer) * ROW_HEIGHT}px`;
-  // Only a window of the rows is in the DOM: the grid says how many there are (-1: older logs may follow).
+  // Only a window of the rows is in the DOM. The grid gives the number of rows (-1: older logs may follow).
   byId("logsTable")?.setAttribute("aria-rowcount", String(footer ? -1 : model.rows.length + 1));
   renderWindow(true);
 }
@@ -819,7 +815,7 @@ function initTable() {
     timePicker?.refresh();
     void search({ push: true });
   });
-  // Row keys (ns.table.rovingRows, index mode: the grid keeps focus): Up / Down,
+  // Row keys (ns.table.rovingRows, index mode: the grid keeps the focus): Up / Down,
   // Page Up / Down, Home / End open the record in the side panel.
   const selectedIndex = () => model.rows.findIndex((row) => row.id === model.selectedId);
   const openAt = (index) => {
@@ -893,10 +889,9 @@ function initColumnsPicker() {
 }
 
 // --- Histogram ------------------------------------------------------------------------
-// Drawn by the shared canvas engine (app_chart_core.js): bars stacked by
-// severity over the requested range, the engine's cursor and tooltip, and a
-// drag that searches the dragged time range (onZoom). Resizes and refetches
-// update the one chart instance; the severity legend above it filters.
+// The shared canvas engine (app_chart_core.js) draws the chart. The bars are stacked by severity over the requested range.
+// The engine gives the cursor and the tooltip. A drag searches the dragged time range (onZoom).
+// Resizes and fetches again update the one chart instance. The severity legend above the chart works as a filter.
 
 const SEV_STACK = ["debug", "info", "warn", "error"];
 const SEV_COLUMN = { error: 1, warn: 2, info: 3, debug: 4 };
@@ -906,7 +901,7 @@ const SEV_COLORS = {
   info: `color-mix(in srgb, ${palette.severity("info")} 78%, transparent)`,
   debug: `color-mix(in srgb, ${palette.severity("debug")} 60%, transparent)`,
 };
-// Tall enough for three y graduations (a bar chart of 120 px had 0 and the top).
+// It is tall enough for three y graduations. A bar chart of 120 px had only 0 and the top.
 const HISTOGRAM_HEIGHT = 150;
 let histogramChart = null;
 
@@ -935,7 +930,7 @@ async function loadHistogram(range) {
   }
 }
 
-// A message in place of the bars (the chart keeps its instance, hidden).
+// A message is shown in place of the bars. The chart keeps its instance, but it is hidden.
 function histogramMessage(box, text, isError = false, isEmpty = false) {
   if (histogramChart) histogramChart.root.hidden = true;
   let note = $(":scope > .logsHistogram__placeholder", box);
@@ -1002,12 +997,12 @@ function renderHistogram() {
   const count = Number(hist.totals?.total || 0);
   if (total) total.textContent = `${fmt.count(count)} log${count === 1 ? "" : "s"}`;
   if (meta) meta.textContent = `${timeRange.describeRange(model.timeRange).text} · ${fmt.duration.fromMs(hist.bucket_ms)} buckets${model.histogramLoading ? " · updating\u2026" : ""}`;
-  // No log in the range: a sentence, not axes from 0 to 1 over bars that are not there.
+  // No log is in the range. The chart shows a sentence, and not axes from 0 to 1 over bars that do not exist.
   if (!model.histogramLoading && count === 0) {
     histogramMessage(box, "No logs in this range.", false, true);
     return;
   }
-  // While a refetch runs, the previous bars stay (dimmed) until it answers.
+  // While a new fetch runs, the previous bars stay dimmed until it answers.
   if (model.histogramLoading || !chartCore) return;
   for (const note of $$(":scope > .logsHistogram__placeholder, :scope > .uiState", box)) note.hidden = true;
   const data = histogramData(hist);
@@ -1019,8 +1014,8 @@ function renderHistogram() {
       stack: true,
       height: HISTOGRAM_HEIGHT,
       xFractionDigits: 0,
-      // The engine's totals legend: each severity with its count over the
-      // range; a click filters by it (a server search), pressed when on.
+      // The totals legend of the engine shows each severity with its count over the range.
+      // A click on a severity filters by it (a server search). The button is pressed when the filter is on.
       legend: "totals",
       legendOrder: "reverse",
       legendTotal: (s) => fmt.compact(Number(model.histogram?.totals?.[s.id] || 0)),
@@ -1049,7 +1044,7 @@ function toggleSeverity(sev) {
 }
 
 
-// The legend's pressed severities follow the filter (a redraw rebuilds it).
+// The pressed severities of the legend follow the filter. A redraw builds the legend again.
 function syncLegend() {
   histogramChart?.redraw?.();
 }
@@ -1084,7 +1079,7 @@ async function loadPatterns() {
   }
 }
 
-// The shared sparkline (chartUi.sparkline), in the pattern's severity colour.
+// The shared sparkline (chartUi.sparkline) has the severity color of the pattern.
 function sparklineHtml(values, sev) {
   return `<span class="logsSparkline" data-sev="${esc(sev)}">${chartUi.sparkline.html(values, { min: 0 })}</span>`;
 }
@@ -1093,8 +1088,8 @@ function patternHtml(text) {
   return esc(text).replace(/&lt;\*&gt;/g, '<span class="logsPattern__var">&lt;*&gt;</span>');
 }
 
-// "21 patterns in a sample of 9,472 of 6,544,139 logs · counts
-// extrapolated ×691 from the sample", the Patterns tab's status line.
+// The Patterns status line has this text: "21 patterns in a sample of 9,472 of 6,544,139 logs · counts
+// extrapolated ×691 from the sample".
 function patternsStatus() {
   const p = model.patterns;
   if (model.patternsLoading && !p) return "Mining patterns\u2026";
@@ -1131,7 +1126,7 @@ function renderPatterns() {
     box.innerHTML = uiState.emptyHtml({ title: "No logs to mine in this range", body: "Widen the time range or remove filters on the Results tab." });
     return;
   }
-  // A heading row for the eye (aria-hidden) over a list of buttons: each button names its pattern, its count and its share.
+  // A heading row is shown for the eye (aria-hidden) over a list of buttons. Each button names its pattern, its count and its share.
   box.innerHTML = `<div class="logsPatterns__table">
         <div class="logsPatterns__head dataList__head" aria-hidden="true"><span>Count</span><span>Share</span><span>Trend</span><span>Pattern</span></div>
         <ul class="logsPatterns__list" aria-label="Log patterns">
@@ -1190,14 +1185,12 @@ function setTab(tab, { push = false } = {}) {
 
 // --- Side panel --------------------------------------------------------------------------
 
-// The record panel: a docked ns.detailPanel. Its log= URL parameter (the
-// record's id) is pushed when it opens, replaced when another record shows
-// in it, and Back closes it. Escape (ns.layers) and the close button give
-// the focus back to the record table, whose arrow keys move through the
-// records.
+// The record panel is a docked ns.detailPanel. Its log= URL parameter (the record id) is pushed when it opens.
+// The parameter is replaced when another record is shown in the panel. Back closes the panel.
+// Escape (ns.layers) and the close button give the focus back to the record table. Its arrow keys move through the records.
 let sidePanel = null;
 const logParam = address.panel("log");
-// A log= of a reload or a link: opened when its record is listed.
+// A log= from a reload or a link opens the panel when its record is listed.
 let pendingLogId = "";
 
 function detailPanel() {
@@ -1230,7 +1223,7 @@ function openSidePanel(row, { tab = null, url = null } = {}) {
   else if (mode === "replace") logParam.move(row.id);
 }
 
-// url: "clear" (drop log=, Back when the entry is the panel's own) or
+// url: "clear" (remove log=, with Back when the entry is the panel's own) or
 // "none" (the URL already has no log=: Back, a new search).
 function closeSidePanel({ url = "clear" } = {}) {
   const wasOpen = !!model.side.row;
@@ -1263,8 +1256,7 @@ function openPendingSidePanel() {
   else if (logParam.get()) logParam.close();
 }
 
-// Record fields: the shared key / value list (kv.html) with the
-// include / exclude / only / copy actions (applyFieldAction).
+// Record fields use the shared key / value list (kv.html), with the include / exclude / only / copy actions (applyFieldAction).
 const FIELD_ACTIONS = ["include", "exclude", "only", "copy"];
 
 function fieldRow(label, key, value, { mono = false, actions = true } = {}) {
@@ -1427,8 +1419,8 @@ function renderContext() {
 
 function initSidePanel() {
   detailPanel();
-  // Copy JSON / Copy body / Download JSON: the shared split (copy.split),
-  // like a trace's and a query's.
+  // Copy JSON, Copy body and Download JSON use the shared split (copy.split).
+  // Traces and queries use it too.
   const recordJson = () => (model.side.row ? JSON.stringify(model.side.row, null, 2) : "");
   if (byId("logsCopySplit")) {
     copy.split({
@@ -1440,14 +1432,14 @@ function initSidePanel() {
       ],
     });
   }
-  // The record fields' actions (kv.bind): include is the field filter.
+  // The actions of the record fields (kv.bind): include is the field filter.
   kv.bind(byId("logsSideDetails"), {
     onAction: (action, { key, text, button }) => {
       applyFieldAction(action === "include" ? "filter" : action, key, text, button);
       return true;
     },
   });
-  // Details | Surrounding context: the shared tab behaviour (app_ui_tabs.js).
+  // Details | Surrounding context use the shared tab behavior (app_ui_tabs.js).
   sideTabs = tabs?.bind($(".logsSideTabs"), {
     attr: "sideTab",
     onSelect: (tab) => {
@@ -1456,7 +1448,7 @@ function initSidePanel() {
       if (model.side.tab === "context" && !model.side.context) void loadContext();
     },
   }) || null;
-  // Context scope and window: shared segmented controls (app_ui_segmented.js).
+  // The context scope and window use shared segmented controls (app_ui_segmented.js).
   segmented?.bind(contextScope(), { attr: "contextPreset", onChange: (preset) => { model.side.preset = preset; void loadContext(); return false; } });
   segmented?.bind(contextWindow(), { attr: "contextWindow", onChange: (ms) => { model.side.windowMs = Number(ms); void loadContext(); return false; } });
   byId("logsContextRows")?.addEventListener("click", (event) => {
@@ -1464,7 +1456,7 @@ function initSidePanel() {
     if (!item) return;
     const row = (model.side.context?.rows || []).find((r) => r.id === item.dataset.contextId);
     if (!row) return;
-    // Keep the context list; show the clicked record's details.
+    // The context list stays. The details of the clicked record are shown.
     const context = model.side.context;
     model.selectedId = row.id;
     model.side.row = row;
@@ -1477,7 +1469,7 @@ function initSidePanel() {
 
 // --- Meta and boot ------------------------------------------------------------------------
 
-// false when a newer read took its place (another host): the answer of the old host is never applied.
+// The value is false when a newer read took its place (another host). The answer of the old host is never applied.
 async function loadMeta() {
   const params = new URLSearchParams();
   if (currentHost()) params.set("host_id", currentHost());
@@ -1523,8 +1515,8 @@ function syncControls() {
 
 let levelPicker = null;
 
-// The cycle of the view with its host (app_obs_view.js): everything of the old host stops at a change (its search,
-// histogram, patterns, services, record context), then the view loads for the new one.
+// The cycle of the view with its host (app_obs_view.js). When the host changes, everything of the old host stops:
+// the search, histogram, patterns, services and record context. Then the view loads for the new host.
 const hostCycle = obsView.hostCycle({ feature: "logs", cancel: ["logs.", "facets."], load: loadForHost });
 const reloadForHost = () => hostCycle.reload();
 
@@ -1538,11 +1530,10 @@ async function loadForHost(stale) {
   await search({ push: false });
 }
 
-// Back / Forward, or the Observability page showing this view again. The
-// view shown again on the URL it left keeps its results, scroll and side
-// panel.
+// Back / Forward, or the Observability page shows this view again.
+// A view that is shown again on the URL that it left keeps its results, scroll position and side panel.
 function onLocation() {
-  // log= first: the URL writes below keep the open record's log=.
+  // Write log= first. The URL writes below keep the log= of the open record.
   const logId = logParam.get();
   const before = urlParams({ withRecord: false }).toString();
   readUrl();
@@ -1557,8 +1548,8 @@ function onLocation() {
   if (!same) void search({ push: false });
 }
 
-// Shared with the other Observability views: the time range, and the
-// service when one is picked (several picked: nothing to share).
+// The other Observability views share the time range, and the service when one is picked.
+// When several services are picked, nothing is shared.
 function getContext() {
   const service = model.services.length === 1 ? model.services[0] : model.services.length ? null : "";
   return { range: { ...model.timeRange }, service };

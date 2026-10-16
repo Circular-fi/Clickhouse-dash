@@ -1,5 +1,5 @@
-// The result table of a static answer (the Explorer's previews and tables of the cards, the System tables): the same cells, sort
-// and row details as the Query result, for rows that are already complete.
+// The result table of a static answer. The Explorer previews, the tables of the cards, and the System tables use it. It has the same cells, sort,
+// and row details as the Query result. The rows must already be complete.
 
 import { renderSingleValueCell, setCellTextFlat, setDisplayCell, setGaugeCell } from "./app_results_cells.js";
 import { bindKeyboardRows, bindRowDetails, markKeyboardRow, refreshRowDetailsAfterRender, registerRowDetailsSource } from "./app_results_rowdetails.js";
@@ -26,8 +26,8 @@ function createStaticResultTable({
   const safeColumns = Array.isArray(columns) ? columns.map((value) => String(value ?? "")) : [];
   const safeTypes = Array.isArray(types) ? types.map((value) => String(value ?? "")) : [];
   const typeAsts = safeColumns.map((_, index) => parseChType(safeTypes[index] || ""));
-  // A structured column sent as JSON text is read like a Query result (decodeStructuredText); a row
-  // without such text stays the caller's row.
+  // A structured column that holds JSON text is read like a Query result (decodeStructuredText). A row
+  // without such text stays the row of the caller.
   const decodeIndexes = typeAsts.map((ast, index) => (isStructuredType(ast) ? index : -1)).filter((index) => index >= 0);
   const safeRows = (Array.isArray(rows) ? rows : []).map((row) => {
     if (!decodeIndexes.length || !Array.isArray(row) || !decodeIndexes.some((index) => typeof row[index] === "string")) return row;
@@ -54,8 +54,9 @@ function createStaticResultTable({
     }
   }
 
-  // A column of lower priority leaves the table when its box is narrower than the columns need (table.css: .is-low from 1279 px
-  // down, .is-mid from 820, .is-xs from 600); the box scrolls sideways for what is left (tableMod.scrollCues).
+  // A column of lower priority leaves the table when its box is narrower than the columns need.
+  // The classes are set by table.css: .is-low from 1279 px down, .is-mid from 820, .is-xs from 600.
+  // The box scrolls sideways for the columns that remain (tableMod.scrollCues).
   const markPriority = (cell, index) => {
     const tier = priorities[index];
     if (tier === "low" || tier === "mid" || tier === "xs") cell.classList.add(`is-${tier}`);
@@ -85,7 +86,7 @@ function createStaticResultTable({
     if (key === -1) return a.index - b.index;
     const ast = typeAsts[key] || null;
     if (isScalarNumericType(ast)) {
-      // Exact for the digits of a UInt64 or a Decimal (compareNumericForSort); NULL last.
+      // Exact for the digits of a UInt64 or a Decimal (compareNumericForSort). NULL is last.
       return compareNumericForSort(Array.isArray(a.row) ? a.row[key] : null, Array.isArray(b.row) ? b.row[key] : null);
     }
     const av = Array.isArray(a.row) ? formatCellForDisplayWithTypes(a.row[key], key, typeAsts) : String(a.row ?? "");
@@ -150,7 +151,7 @@ function createStaticResultTable({
       const th = document.createElement("th");
       th.textContent = column;
       if (safeTypes[index]) th.title = safeTypes[index];
-      // A number's header is over its figures, on the right with them (the cells are .num).
+      // The header of a number sits over its figures, on the right with them (the cells are .num).
       if (staticNumericCols[index]) th.classList.add("num");
       tableMod.sortHeader(th, {
         key: index, dir: sortKey === index ? sortDir : "",
@@ -176,9 +177,9 @@ function createStaticResultTable({
     let display = safeRows.map((row, index) => ({ row, index: index + 1 }));
     if (sortKey !== null && sortDir) {
       const key = sortKey;
-      // nullsLast: missing values (null / undefined / "") stay below every
-      // present value in both directions, like ClickHouse's default
-      // NULLS LAST, instead of rising to the top of a descending sort.
+      // nullsLast: missing values (null, undefined, or "") stay below every
+      // present value in both directions. This is like the NULLS LAST default of ClickHouse.
+      // They do not rise to the top of a descending sort.
       const missing = (entry) => {
         if (key === -1 || !Array.isArray(entry.row)) return false;
         const value = entry.row[key];

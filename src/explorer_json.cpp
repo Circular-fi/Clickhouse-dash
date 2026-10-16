@@ -14,7 +14,7 @@ namespace {
 
 using JsonWriter = rapidjson::Writer<rapidjson::StringBuffer>;
 
-// The sections that a missing grant left out: their names, and for each the user and the grant to give.
+// The sections that a missing grant removes from the answer. The answer gives their names, and for each section the user and the grant to give.
 void write_unavailable(JsonWriter& w, const std::vector<std::string>& sections,
                        const std::vector<ExplorerUnavailableIssue>& issues) {
   w.Key("unavailable_sections"); w.StartArray();
@@ -136,7 +136,7 @@ std::string catalog_json(const std::string& host_id, const std::string& database
   w.Key("host_id"); write_json_text(w, host_id);
   w.Key("generated_at_ms"); w.Uint64(catalog.generated_at_ms);
   w.Key("stale"); w.Bool(stale);
-  // A bound of the privilege discovery stopped it: objects that were not checked are not listed.
+  // A bound of the privilege discovery stopped the discovery. Objects that were not checked are not listed.
   w.Key("acl_truncated"); w.Bool(catalog.acl_truncated);
   w.Key("database"); write_json_text(w, database_filter);
   w.Key("databases");
@@ -154,9 +154,9 @@ std::string catalog_json(const std::string& host_id, const std::string& database
     w.EndObject();
   }
   w.EndArray();
-  // A database branch (database=<name>) also names the local disks its
-  // active parts are on (the database card's Storage tab): the database's
-  // bytes on each and the disk's free / total space.
+  // A database branch (database=<name>) also names the local disks that its
+  // active parts use (the database card's Storage tab). The answer gives the
+  // bytes on each disk and the free and total space of the disk.
   if (!database_filter.empty()) {
     w.Key("disks");
     w.StartArray();
@@ -186,14 +186,14 @@ std::string catalog_json(const std::string& host_id, const std::string& database
     if (table.resident_bytes) w.Uint64(*table.resident_bytes);
     else write_optional_u64(w, table.logical_bytes);
     // Database detail object table: filled by the per-database parts
-    // aggregation (MergeTree); null / 0 / "" for other engines.
+    // aggregation (MergeTree). The value is null, 0 or an empty string for other engines.
     w.Key("compressed_bytes"); write_optional_u64(w, table.compressed_bytes);
     w.Key("uncompressed_bytes"); write_optional_u64(w, table.uncompressed_bytes);
     w.Key("active_parts"); w.Uint64(table.active_parts);
     w.Key("last_part_time"); write_json_text(w, table.last_part_time);
     if (table.replication.available) {
-      // Local replica state only (no Keeper read): read-only / expired session
-      // is an error, a long queue or delay a warning.
+      // Local replica state only, with no Keeper read. A read-only state or an expired session
+      // is an error. A long queue or a delay is a warning.
       w.Key("replicated"); w.Bool(true);
       w.Key("health"); write_json_text(w, table.health);
     }
@@ -569,7 +569,7 @@ std::string graph_json(const std::string& host_id, const ExplorerGraph& graph, c
   w.Key("stale"); w.Bool(stale);
   w.Key("metric_scope"); write_json_text(w, graph.metric_scope);
   w.Key("refreshable_views_available"); w.Bool(scoped.refreshable_views_available);
-  // A bound of the graph left out the topology of some Distributed tables (kMaxGraphNodes, kMaxGraphEdges).
+  // A bound of the graph removes the topology of some Distributed tables (kMaxGraphNodes, kMaxGraphEdges).
   w.Key("truncated"); w.Bool(graph.truncated);
   write_unavailable(w, scoped.unavailable_sections, scoped.unavailable_issues);
   w.Key("live_refresh_ms"); w.Int(live_refresh_ms);

@@ -1,13 +1,13 @@
 #pragma once
 
-// Server-side query library (folders, saved queries) kept in one versioned
-// JSON file. The history of the runs is never kept here: it stays in the
-// browser. See docs/query-library.md for the file format
-// and the REST contract.
+// Server-side query library (folders, saved queries), kept in one versioned JSON file.
+// The history of the runs is never kept here. It stays in the browser.
+// See docs/query-library.md for the file format.
+// The REST contract is in the same document.
 //
-// The store never executes SQL and never derives a filesystem path from a
-// request: the only file it touches is QueryLibraryOptions::file (plus a
-// temporary sibling used for atomic replacement). Saved SQL is never logged.
+// The store never runs SQL. It never derives a filesystem path from a request.
+// The only file that it touches is QueryLibraryOptions::file, and a temporary sibling of that file for atomic replacement.
+// Saved SQL is never logged.
 
 #include "query_library_file.hpp"
 #include "query_library_state.hpp"
@@ -26,8 +26,8 @@ struct QueryLibraryOptions {
   // The id of the library in the API (?library=), and its name in the UI.
   std::string name;
   std::string file;
-  // The configured ClickHouse host ids: every request names one of them
-  // (host_id), and the library and its folders are per host.
+  // The configured ClickHouse host ids. Every request names one of them
+  // (host_id). The library and its folders are kept per host.
   std::vector<std::string> host_ids;
   bool writable = false;
   size_t max_file_bytes = 8 * 1024 * 1024;
@@ -46,23 +46,24 @@ public:
   QueryLibraryStore(const QueryLibraryStore&) = delete;
   QueryLibraryStore& operator=(const QueryLibraryStore&) = delete;
 
-  // Effective editability: configured writable and the file loaded cleanly.
+  // Effective editability. The library is configured as writable, and the file loaded without errors.
   bool writable();
   std::string load_error();
   const QueryLibraryOptions& options() const { return options_; }
 
   // `if_match` is the raw If-Match header value, or nullptr when absent.
-  // `host_id` is the request's host_id parameter, or nullptr when absent
-  // (400: it is required and must name a configured host).
-  // The reads (docs/query-library.md, "REST API"). The page is what the Query page loads: at most kLibraryPageMax items under `parent_id`
-  // (null: the top level of the host), as many levels deep as fit, with the minimal data of each (no SQL) and, for each folder, whether its
-  // children came with it. `cursor` is the offset in the first level when that level alone is larger than a page.
+  // `host_id` is the host_id parameter of the request, or nullptr when it is absent.
+  // A missing host_id gives error 400. The host_id must name a configured host.
+  // The reads (docs/query-library.md, "REST API"). The page is what the Query page loads.
+  // It holds at most kLibraryPageMax items under `parent_id`. A null `parent_id` means the top level of the host.
+  // The page has as many levels as fit. Each item has the minimal data and no SQL. Each folder tells whether its children came with it.
+  // `cursor` is the offset in the first level, when that level alone is larger than a page.
   Response get_page(const std::string* host_id, const std::string* parent_id, size_t cursor, size_t limit);
   // One query, whole, with the folders above it.
   Response get_query(const std::string* host_id, const std::string& id);
-  // The queries whose name, description, SQL or folder path hold every word of `text`: at most `limit`, minimal data and their path.
+  // The queries whose name, description, SQL or folder path hold every word of `text`. The result has at most `limit` queries, with minimal data and their path.
   Response search(const std::string* host_id, const std::string& text, size_t limit);
-  // The host's whole library, or one folder with everything under it, with the SQL: a backup, and what a move to another storage copies.
+  // The whole library of the host, or one folder with everything under it. The export has the SQL. Use it as a backup, or to move data to another storage.
   Response export_library(const std::string* host_id, const std::string* folder_id);
   Response create_folder(std::string_view body, const std::string* if_match);
   Response update_folder(const std::string& id, std::string_view body, const std::string* if_match);

@@ -1,12 +1,16 @@
 #pragma once
 
-// The bounds of the reads of one route of the Traces page. The page has bounds already: the deadline of the request, a memory cap and a
-// read cap (generated_queries, docs/configuration.md, "The bounds of the queries"). A route that knows its own work adds a narrower one:
-// the time that all its statements share, and a read cap for each of them. The statements of the route run inside a BudgetScope, which
-// narrows the scope of the request; it never raises a bound (a deadline that is sooner, a cap that is lower, stays).
+// This header defines the bounds of the reads of one route of the Traces page. The page has bounds already: the deadline of the
+// request, a memory cap and a read cap (generated_queries, docs/configuration.md, "The bounds of the queries"). A route that
+// knows its own work adds a narrower bound. This bound is the time that all its statements share, and a read cap for each
+// statement.
 //
-// A statement then gets max_execution_time = what remains of the time of the route, and fails at once, without reaching ClickHouse, when
-// there is nothing left (ch_query.hpp). A route that can answer with what it has before the time is out asks the scope (`remaining_ms`).
+// The statements of the route run inside a BudgetScope. The scope narrows the bounds of the request. It never raises a bound. A
+// deadline that is sooner, or a cap that is lower, remains in effect.
+//
+// A statement gets max_execution_time = the time that remains for the route. When no time remains, the statement fails at once.
+// It does not reach ClickHouse (ch_query.hpp). A route that can answer with its partial result asks the scope for `remaining_ms`
+// before the time runs out.
 
 #include "ch_query.hpp"
 #include "request_context.hpp"
@@ -23,14 +27,16 @@ struct RouteBudget {
   uint64_t max_rows_to_read = 0;  // what each statement may read; 0: the one of the request
 };
 
-// The search: the pages of the index, the span aggregation that gives way to them, and the summary of the traces.
+// This budget applies to the search: the pages of the index, the span aggregation (used when the index cannot answer), and the
+// summary of the traces.
 constexpr RouteBudget kSearchBudget{45 * 1000, 0};
-// The charts: one aggregation of the spans of the window.
+// This budget applies to the charts: one aggregation of the spans of the window.
 constexpr RouteBudget kAnalyticsBudget{45 * 1000, 0};
-// One trace: its window is the one that the trace index gives, so its statements read a few granules.
+// This budget applies to one trace. The trace index gives the window of the trace. Therefore its statements read a few granules.
 constexpr RouteBudget kTraceDetailBudget{20 * 1000, 2'000'000'000ULL};
 
-// `limits` with the bounds of `budget` where they are narrower; `now` is the start of the route.
+// This function returns `limits` with the bounds of `budget` where they are narrower. The argument `now` is the start of the
+// route.
 inline ChQueryLimits narrowed_limits(ChQueryLimits limits, const RouteBudget& budget, std::chrono::steady_clock::time_point now) {
   if (budget.time_ms > 0) {
     const auto deadline = now + std::chrono::milliseconds(budget.time_ms);
@@ -50,7 +56,7 @@ class BudgetScope {
   BudgetScope(const BudgetScope&) = delete;
   BudgetScope& operator=(const BudgetScope&) = delete;
 
-  // The time that remains before the deadline of the route; the largest number when it has none.
+  // The time that remains before the deadline of the route. The largest number applies when the route has no deadline.
   int64_t remaining_ms() const {
     if (limits_.deadline == std::chrono::steady_clock::time_point{}) return std::numeric_limits<int64_t>::max();
     const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(limits_.deadline - std::chrono::steady_clock::now()).count();

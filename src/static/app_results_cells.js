@@ -1,13 +1,13 @@
-// The cells of a result table: a value as the table writes it (text, the NULL token, indented coloured JSON), and the gauge
-// of a numeric column.
+// The cells of a result table. The module writes each value as the table shows it. A value can be text, the NULL token, or indented, coloured JSON.
+// The gauge of a numeric column is also here.
 
 import { format } from "./app_format.js";
 import { JsonNumber, computeGaugeScale, extractFiniteNumber, isScalarNumericType, isScalarValue, jsonText, queryBarPercent, scalarText } from "./app_results_values.js";
 import { sqlBlock } from "./app_ui_sql.js";
 import { table } from "./app_ui_table.js";
 
-// The server's formatter, given by the page (results.use({ formatSql }), kept as sqlLayout): text -> Promise of the formatted text. Without it
-// a statement shows as it came.
+// The server formatter is given by the page with results.use({ formatSql }). The module keeps it as sqlLayout. It takes text and returns a Promise of the formatted text.
+// Without the formatter, a statement shows as it came.
 let sqlLayout = null;
 const formattedStatements = new Map();
 
@@ -15,8 +15,8 @@ function useSqlFormatter(fn) {
   sqlLayout = typeof fn === "function" ? fn : null;
 }
 
-// The statement as the formatter lays it out replaces the text as returned once it is there (a failure, or the same text,
-// leaves it); a button beside the copy button goes back to the text as returned and forth. Copy copies what is shown.
+// When the formatter finishes, its layout replaces the text as returned. A failure, or the same text, keeps the text as returned.
+// A button beside the copy button switches between the text as returned and the formatted layout. Copy copies what is shown.
 function showFormatted(block, raw) {
   if (!sqlLayout) return;
   if (!formattedStatements.has(raw)) {
@@ -36,8 +36,8 @@ function showFormatted(block, raw) {
 // A string that starts like a statement and has more than one line.
 const MULTILINE_SQL = /^\s*(?:CREATE|ATTACH|ALTER|DROP|RENAME|SELECT|WITH|INSERT|EXPLAIN|SHOW|SYSTEM|GRANT|REVOKE|OPTIMIZE)\b[^\n]*\n/i;
 
-// A value in full, for the one-row view, a single value and the row details: a scalar as it is
-// (a string keeps its backslashes and line breaks), a structure as indented, coloured JSON.
+// A value in full, for the one-row view, a single value, and the row details. A scalar is shown as it is:
+// a string keeps its backslashes and line breaks. A structure is shown as indented, coloured JSON.
 function renderValueInto(td, raw, ast) {
   if (raw === null || raw === undefined) {
     setNullCell(td);
@@ -48,7 +48,7 @@ function renderValueInto(td, raw, ast) {
     td.removeAttribute("title");
     return;
   }
-  // A statement on several lines (SHOW CREATE TABLE, a view's query) is shown as SQL: highlighted, its lines kept.
+  // A statement on several lines (SHOW CREATE TABLE, the query of a view) is shown as SQL. It is highlighted, and its lines are kept.
   if (typeof raw === "string" && MULTILINE_SQL.test(raw)) {
     const block = sqlBlock({ sql: raw, copy: true, wrap: true, maxLines: 40 });
     td.replaceChildren(block);
@@ -176,8 +176,7 @@ function setCellTextFlat(td, text) {
   else td.removeAttribute("title");
 }
 
-// A SQL NULL cell shows the shared NULL token (ns.format.nullToken(), the
-// chart tooltips' "NULL"); every other value stays as ClickHouse sent it.
+// A SQL NULL cell shows the shared NULL token (ns.format.nullToken(), the chart tooltips "NULL"). Every other value stays as ClickHouse sent it.
 let nullTemplate = null;
 
 function setNullCell(td) {
@@ -201,9 +200,8 @@ function setQueryGaugeCell(td, raw, colIndex, text, maxArr, minArr) {
   setDisplayCell(td, raw, text);
 }
 
-// In-cell bar of a numeric cell of the other tables (createStaticResultTable:
-// the Explorer, Traces): measures only, never on an identifier-like column
-// or one holding a negative value (barEligible).
+// The in-cell bar of a numeric cell is used by the other tables (createStaticResultTable: the Explorer and Traces).
+// The bar only measures. It never shows on an identifier-like column, or on a column with a negative value (barEligible).
 function setGaugeCell(td, raw, colIndex, text, maxArr, minArr, name = "") {
   td.classList.add("num");
   const min = minArr[colIndex] || 0;

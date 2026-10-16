@@ -3,9 +3,9 @@ import { palette } from "./app_palette.js";
 import { icon } from "./app_ui_icon.js";
 import { uiState } from "./app_ui_state.js";
 
-// ns.format and ns.palette (docs/ui-foundations.md): durations from
-// microseconds ("2.6 ms", "350 \u00b5s"), and one categorical series slot
-// (--qchart-N) per query attempt.
+// ns.format and ns.palette (docs/ui-foundations.md) format the durations from
+// microseconds, for example "2.6 ms" and "350 µs".
+// Each query attempt has one categorical series slot (--qchart-N).
 const durationUs = format.duration.fromUs;
 
 function normalizeOperationName(value) {
@@ -147,9 +147,9 @@ function buildModel(rawSpans, nativeAttemptIds = []) {
   for (const span of sourceSpans) span.children.sort(stableCompare);
   roots.sort(stableCompare);
 
-  // Spans occasionally reference a parent outside the retained/truncated set.
-  // Keep every disconnected component, then merge sibling instance suffixes
-  // recursively so Foo_0/Foo_1 under the same logical parent become one Foo.
+  // A span can refer to a parent that is not in the kept or truncated set.
+  // Keep every disconnected component. Then merge the sibling instance suffixes
+  // recursively, so that Foo_0 and Foo_1 under the same logical parent become one Foo.
   const orderedRoots = [];
   const seenRoots = new Set();
   for (const root of roots) {
@@ -192,9 +192,9 @@ function buildModel(rawSpans, nativeAttemptIds = []) {
   }
 
   const attemptIds = Array.from(new Set((Array.isArray(nativeAttemptIds) ? nativeAttemptIds : []).map(String).filter(Boolean)));
-  // Compact trace transport deliberately omits query/thread attributes. Map
-  // attempts by trace order instead: one ClickHouse attempt normally owns one
-  // trace, and this keeps coloring stable without bloating every span row.
+  // The compact trace transport does not send the query and thread attributes.
+  // Map the attempts by trace order instead. One ClickHouse attempt usually owns one
+  // trace. This keeps the colors stable without a larger span row.
   const orderedTraceIds = Array.from(byTrace.entries())
     .sort((a, b) => {
       const aa = Math.min(...a[1].map((span) => span.start));
@@ -248,10 +248,9 @@ function visibleRows(model, collapsed) {
     if (collapsed.has(span.key)) return;
     for (const child of span.children) visit(child);
   };
-  // buildModel already promotes every genuinely disconnected component to a
-  // root. Do not revisit descendants that were intentionally hidden by a
-  // collapsed ancestor, otherwise every folded child is incorrectly counted
-  // as a standalone visible row.
+  // buildModel already promotes every disconnected component to a root.
+  // Do not visit descendants that a collapsed ancestor hid on purpose.
+  // Otherwise, every folded child is counted as a standalone visible row, which is wrong.
   for (const root of model.roots) visit(root);
   return rows;
 }
@@ -263,9 +262,9 @@ function initialCollapsedForSpanLimit(model, limit = INITIAL_VISIBLE_SPAN_LIMIT)
   const collapsed = new Set(branchKeys(model));
   const maxDepth = Math.max(0, ...model.spans.map((span) => Number(span.depth) || 0));
 
-  // Commit complete breadth levels only. This is calculated before any DOM
-  // rows are mounted so the first paint already reflects the intended open
-  // depths instead of briefly rendering everything folded.
+  // Commit only the complete breadth levels. Calculate this before any DOM
+  // rows are mounted. The first paint then shows the intended open
+  // depths, and not a brief render of everything folded.
   for (let depth = 0; depth <= maxDepth; depth += 1) {
     const candidates = model.spans
       .filter((span) => span.children.length && span.depth === depth)
@@ -291,9 +290,9 @@ function initialCollapsedForSpanLimit(model, limit = INITIAL_VISIBLE_SPAN_LIMIT)
   return collapsed;
 }
 
-// Five ticks; a narrow timeline (CSS, <= 600 px) labels the outer and the
-// middle ones only (data-ratio).
-// A bar that ends past this share of the timeline (%) holds its label.
+// Five ticks. A narrow timeline (CSS, <= 600 px) labels only the outer and the
+// middle ticks (data-ratio).
+// A bar that ends past this share of the timeline (%) keeps its label.
 const INSIDE_LABEL_FROM = 88;
 
 function addTicks(parent, windowUs, withLabels) {
@@ -314,17 +313,17 @@ function addTicks(parent, windowUs, withLabels) {
 function render(container, options = {}) {
   if (!container) return null;
   const model = buildModel(options.spans, options.attemptIds);
-  // Compute the initial fold state before rendering. Complete depths are
-  // opened breadth-first while the visible span count remains <= 50.
+  // Calculate the initial fold state before the first render. Open the complete depths
+  // breadth-first while the visible span count stays <= 50.
   const collapsed = initialCollapsedForSpanLimit(model);
   const maxRows = Math.max(100, Math.min(10000, Number(options.maxRows) || 3000));
   let columnWidthPx = null;
   const rowByKey = new Map();
   const toggleByKey = new Map();
   const foldedByKey = new Map();
-  // The first maxRows spans in tree order may be shown. Rows are mounted
-  // lazily: the initial fold usually shows <= 50 of them, so building DOM
-  // for every folded descendant up front only slowed the first paint.
+  // The first maxRows spans in tree order may be shown. Rows are mounted lazily.
+  // The initial fold usually shows 50 rows or fewer. The DOM of every folded descendant,
+  // when made at the start, only slowed the first paint.
   // A branch mounts its children the first time it is expanded.
   const mountable = new Set(visibleRows(model, new Set()).slice(0, maxRows).map((span) => span.key));
 
@@ -370,9 +369,8 @@ function render(container, options = {}) {
   const spanByKey = new Map(model.spans.map((span) => [span.key, span]));
   let buildRow = null;
 
-  // Mounts the rows of span's subtree that are visible under the current fold
-  // and not yet in the DOM, keeping tree (DFS) order: each new row goes right
-  // after the previous mounted row of the walk.
+  // Mount the rows of the span's subtree that are visible under the current fold and are not yet in the DOM.
+  // Keep the tree (DFS) order. Each new row goes right after the previous mounted row of the walk.
   const revealSubtree = (span) => {
     let cursor = rowByKey.get(span.key);
     if (!cursor) return;
@@ -474,7 +472,7 @@ function render(container, options = {}) {
     const min = Math.min(220, Math.max(150, tableRect.width * 0.22));
     return { min, max: Math.max(min, tableRect.width - Math.max(180, tableRect.width * 0.22)) };
   };
-  // The separator's value (px) and bounds, for the assistive technology: read from the layout once it exists.
+  // The value (px) and the bounds of the separator are for assistive technology. They are read from the layout when the layout exists.
   const syncColumnAria = () => {
     const { min, max } = columnBounds();
     columnResize.setAttribute("aria-valuemin", String(Math.round(min)));
@@ -513,7 +511,7 @@ function render(container, options = {}) {
     syncColumnAria();
   });
   columnResize.addEventListener("focus", syncColumnAria);
-  // A separator that can take the focus has a value (aria-required-attr): the first layout gives it.
+  // A separator that can take the focus needs a value (aria-required-attr). The first layout gives this value.
   requestAnimationFrame(syncColumnAria);
   columnResize.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -596,7 +594,7 @@ function render(container, options = {}) {
     const spanOffset = span.start - model.start;
     const spanWidth = span.duration / model.window;
     if (renderSegments.length > 96) {
-      // Dense compact leaf rows stay a single DOM element even when they
+      // Dense compact leaf rows stay one DOM element. This is true even when they
       // contain thousands of disjoint time intervals.
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       svg.setAttribute("class", "traceViewer__segmentSvg");
@@ -613,9 +611,8 @@ function render(container, options = {}) {
         const x1 = Math.max(0, Math.min(1000, (segment.start - model.start) / model.window * 1000));
         const x2 = Math.max(x1, Math.min(1000, (segment.finish - model.start) / model.window * 1000));
         commands.push(`M${x1.toFixed(2)} 6H${x2.toFixed(2)}V14H${x1.toFixed(2)}Z`);
-        // The filled interval can become sub-pixel after the 4K LOD timeline is
-        // projected into a narrower viewport. Keep one non-scaling 1px marker
-        // at its start so every event remains visible on the actual screen.
+        // After the 4K LOD timeline is projected into a narrower viewport, the filled interval can be smaller than one pixel.
+        // Keep one non-scaling 1px marker at its start. Then every event stays visible on the screen.
         minWidthCommands.push(`M${x1.toFixed(2)} 6V14`);
       }
       path.setAttribute("d", commands.join(""));
@@ -627,7 +624,7 @@ function render(container, options = {}) {
     } else {
       for (const segment of renderSegments) {
         const bar = document.createElement("span");
-        // The waterfall's bar (.traceSpanBar), in the attempt's colour.
+        // The bar of the waterfall (.traceSpanBar) has the colour of the attempt.
         bar.className = "traceViewer__bar traceSpanBar";
         const left = Math.max(0, Math.min(100, (segment.start - model.start) / model.window * 100));
         const width = Math.max(0.12, Math.min(100 - left, segment.duration / model.window * 100));
@@ -635,8 +632,8 @@ function render(container, options = {}) {
         bar.style.width = `${width}%`;
         bar.title = `${span.operation} · ${durationUs(segment.duration)} · +${durationUs(segment.start - model.start)}`;
         if (renderSegments.length === 1) {
-          // After the bar, before it from the middle on, inside it when
-          // the bar reaches the right edge (the root's label, never cut).
+          // The label goes after the bar. From the middle on, it goes before the bar.
+          // It goes inside the bar when the bar reaches the right edge. This is the label of the root, which is never cut.
           const label = document.createElement("span");
           const side = left >= 50 ? "is-before" : left + width > INSIDE_LABEL_FROM ? "is-inside" : "is-after";
           label.className = `traceViewer__barLabel ${side}`;

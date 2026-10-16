@@ -15,7 +15,8 @@ namespace trace {
 
 namespace {
 
-// Thrown inside search_traces to leave the index path when the scan reached its cap with nothing to keep. Not an error.
+// This exception is thrown inside search_traces. It makes the search leave the index path when the scan reaches its cap and no
+// trace is kept. It is not an error.
 struct IndexScanCapReached {};
 
 uint64_t elapsed_ms_since(std::chrono::steady_clock::time_point since) {
@@ -64,7 +65,7 @@ void TraceIndexCursor::fill(size_t wanted) {
       }
     });
     if (rows.size() > kSliceRowCap && slice_ns_ > 1) {
-      // Too dense to read in one piece: re-read a narrower slice.
+      // The slice is too dense to read in one piece. Read a narrower slice again.
       slice_ns_ = std::max<int64_t>(1, slice_ns_ / 4);
       continue;
     }
@@ -82,7 +83,8 @@ void TraceIndexCursor::fill(size_t wanted) {
       exhausted_ = true;
     } else {
       hi_ns_ = lo - 1;
-      // Aim the next slice at roughly the traces still wanted (x2 headroom), growing at most 8x per step; empty slices grow 4x.
+      // The next slice aims at about the traces that are still wanted (x2 headroom). The slice grows at most 8x for each step. An
+      // empty slice grows 4x.
       double factor = 4.0;
       if (fresh > 0) {
         factor = std::min(8.0, std::max(0.5, 2.0 * static_cast<double>(std::max<size_t>(wanted, 1)) / static_cast<double>(fresh)));
@@ -98,13 +100,15 @@ void TraceIndexCursor::fill(size_t wanted) {
 
 bool filters_are_broad(ChExecutor& db, const TraceScope& scope) {
   if (scope.span_filters.empty() || scope.index_table.empty()) return false;
-  // Only a performance hint: any failure (e.g. a missing index table) keeps the narrow form, which needs no index.
+  // This is a performance hint only. Any failure keeps the narrow form, for example when the index table is missing. The narrow
+  // form needs no index.
   try {
     uint64_t index_rows = 0;
     db.select(index_count_sql(scope.index_table, scope.start_ms, scope.end_ms), [&](const clickhouse::Block& block) {
       if (block.GetRowCount()) index_rows = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 0, 0)));
     });
-    // Index rows >= traces (one row per insert batch), so the share is conservative.
+    // The index has at least as many rows as traces, because it has one row for each insert batch. The share is therefore
+    // conservative.
     const uint64_t threshold =
         std::max<uint64_t>(1000, static_cast<uint64_t>(static_cast<double>(index_rows) * kBroadFilterShare));
     uint64_t matching = 0;
@@ -113,7 +117,7 @@ bool filters_are_broad(ChExecutor& db, const TraceScope& scope) {
     });
     return matching >= threshold;
   } catch (const std::exception& e) {
-    // The cheap path for broad filters is not taken; the exact one answers.
+    // The cheap path for broad filters is not used. The exact path gives the answer.
     log_event(LogLevel::Warn, "traces.filters_are_broad_failed", {{"error", std::string(e.what()).substr(0, 300)}});
     return false;
   }
@@ -175,11 +179,12 @@ std::vector<RankedTrace> rank_traces_by_start(ChExecutor& db, const TraceScope& 
       return kept;
     }
     if (rows.size() >= fetch && pad < 1024) {
-      // Straddlers took result slots and the slice holds more traces.
+      // Straddlers took result slots, and the slice holds more traces.
       pad *= 4;
       continue;
     }
-    // Widen from the observed density; an empty slice goes straight to the whole window so sparse results cost at most one extra slice.
+    // Widen the slice from the observed density. An empty slice goes straight to the whole window. Sparse results then cost at
+    // most one extra slice.
     fraction = kept.empty()
         ? fraction * 8.0
         : fraction * std::max(2.0, 1.5 * static_cast<double>(limit) / static_cast<double>(kept.size()));
@@ -203,7 +208,7 @@ void read_summary(ChExecutor& db, const std::string& sql, const std::vector<std:
       out.duration_ns = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 4, row)));
       out.spans = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 5, row)));
       out.errors = static_cast<uint64_t>(std::stoull(ch_block_text_at(block, 6, row)));
-      // One "service RS spans RS errors RS first_span_ns" item per service (see summary_sql).
+      // Each service gives one item of the form "service RS spans RS errors RS first_span_ns". See summary_sql.
       for (const auto& item : split_char(ch_block_text_at(block, 7, row), '\x1f')) {
         const size_t first_sep = item.rfind('\x1e');
         if (first_sep == std::string::npos || first_sep == 0) continue;
@@ -228,10 +233,11 @@ void read_summary(ChExecutor& db, const std::string& sql, const std::vector<std:
   });
 }
 
-// What the scan of the trace index found, and where it stopped.
+// The scan of the trace index shows what it found and where it stopped.
 struct IndexSelection {
   std::vector<std::string> ids;  // the traces that match, newest first
-  // Start (ns) of the oldest trace that was tested: the traces that were not tested have their newest index row at or before it.
+  // The Start (ns) of the oldest trace that was tested. The traces that were not tested have their newest index row at or before
+  // this Start.
   int64_t oldest_tested_ns = 0;
   std::string stop;  // "": found `limit` or reached the start of the window; "scan_cap": tested `candidate_cap` traces; "time_budget"
 };
@@ -244,9 +250,11 @@ void select_by_index(ChExecutor& db, const TraceScope& scope, bool needs_span_ma
     for (auto& hit : cursor.next(limit)) selected_ids.push_back(std::move(hit.trace_id));
     return;
   }
-  // Traces are tested in index rank order until `limit` match, over at most the newest `candidate_cap` traces (then the span ranking
-  // completes the answer). Pages start at kCandidateBatch traces and grow when matches are rare, so a rare filter reaches the cap in a
-  // handful of pages instead of 64 fixed ones; the traces tested and their order are unchanged.
+  // The traces are tested in index rank order until `limit` traces match. The test covers at most the newest `candidate_cap`
+  // traces. Then the span ranking completes the answer.
+  //
+  // A page starts at kCandidateBatch traces. The page size grows when matches are rare. A rare filter therefore reaches the cap
+  // in a few pages, not in 64 fixed pages. The traces tested, and their order, do not change.
   size_t considered = 0;
   size_t batch_size = std::min(kCandidateBatch, candidate_cap);
   bool exhausted = false;
@@ -264,9 +272,9 @@ void select_by_index(ChExecutor& db, const TraceScope& scope, bool needs_span_ma
     considered += batch.size();
     selection->oldest_tested_ns = batch.back().start_ns;
 
-    // The page is every trace whose newest index row lies in [newest, oldest] Start of the page (plus older rows of already
-    // tested traces, discarded below). Its spans lie inside the page's index bounds, so matching reads only that time range
-    // rather than probing the whole window.
+    // The page holds every trace whose newest index row lies in the Start range [newest, oldest] of the page. The page also holds
+    // older rows of traces that were already tested. These older rows are discarded below. The spans of the page lie inside the
+    // index bounds of the page. Therefore the matching reads only that time range. It does not probe the whole window.
     const std::string batch_ids = batch_ids_sql(scope.index_table, cursor.window(), batch.back().start_ns, batch.front().start_ns);
     std::unordered_set<std::string> matching_ids;
     db.select(batch_match_sql(scope, batch_ids), [&](const clickhouse::Block& block) {
@@ -294,7 +302,8 @@ void select_by_index(ChExecutor& db, const TraceScope& scope, bool needs_span_ma
   if (selected_ids.size() < limit && !exhausted && considered >= candidate_cap) selection->stop = "scan_cap";
 }
 
-// The other traces of an answer that the index began: the traces that it did not test, which match, newest first by their first span.
+// The other traces of an answer that the index began. These are the traces that the index did not test and that match. They are
+// sorted newest first, by their first span.
 std::vector<std::string> complete_by_spans(ChExecutor& db, const TraceScope& scope, const IndexSelection& selection, size_t limit) {
   RankBounds bounds;
   bounds.upper_ns = selection.oldest_tested_ns;
@@ -349,8 +358,8 @@ SearchOutcome search_traces_unranked(ChExecutor& db, const TraceScope& scope, bo
         out.partial = true;
         out.partial_reason = "time_budget";
       } else if (selection.stop == "scan_cap" && !selection.ids.empty()) {
-        // The traces that were found are kept; the span ranking completes the answer from the older part of the window, unless the time
-        // of the route is short.
+        // The traces that were found are kept. The span ranking completes the answer from the older part of the window. It does
+        // this unless the time of the route is short.
         out.fallback_reason = "index_scan_cap";
         if (budget.short_of_time()) {
           out.partial = true;
@@ -361,7 +370,7 @@ SearchOutcome search_traces_unranked(ChExecutor& db, const TraceScope& scope, bo
           out.search_path = "trace_index_then_spans";
         }
       } else if (selection.stop == "scan_cap") {
-        // Nothing to keep: the span aggregation answers the whole window.
+        // No trace is kept. The span aggregation answers the whole window.
         out.fallback_reason = "index_scan_cap";
         out.search_path = "span_aggregation";
         throw IndexScanCapReached();
@@ -376,13 +385,14 @@ SearchOutcome search_traces_unranked(ChExecutor& db, const TraceScope& scope, bo
 
       used_trace_index_fast_path = true;
     } catch (const IndexScanCapReached&) {
-      // Not a failure: the cap was reached with nothing to keep (fallback_reason is set).
+      // This is not a failure. The cap was reached, and no trace is kept. The field fallback_reason is set.
       out.rows.clear();
       out.candidate_ms = 0;
       out.summary_ms = 0;
     } catch (const std::exception& e) {
-      // The index path gives way to the span aggregation. The caller is told why (`fallback_reason`), and an error is in
-      // the log: a failure of the index is no longer a silent change of path. A caller that went away stops here.
+      // The index path is replaced by the span aggregation. The caller learns the reason from `fallback_reason`. An error is also
+      // written to the log. A failure of the index is therefore never a silent change of path. A caller that disconnected stops
+      // here.
       if (classify_clickhouse_error(e).kind == ChErrorKind::Canceled) throw;
       out.fallback_reason = "index_error";
       log_event(LogLevel::Warn, "traces.index_fallback", {{"table", scope.index_table}, {"error", std::string(e.what()).substr(0, 300)}});
@@ -396,11 +406,13 @@ SearchOutcome search_traces_unranked(ChExecutor& db, const TraceScope& scope, bo
   }
 
   if (!used_trace_index_fast_path) {
-    // Span-based search: duration filters (a trace-level HAVING the index cannot answer -- the OTel exporter's trace_id_ts MV
-    // stores End = max(Timestamp), the last span *start*), no trace index, or the filtered index scan reached its cap with nothing to
-    // keep. Rank the TraceIds with only the cheap min/max aggregates (newest slice first, see rank_traces_by_start), then compute the
-    // expensive summary (argMin*, per-service stats) for those <= limit traces only. Same spans, same HAVING, same ORDER BY as a
-    // single whole-window aggregation.
+    // This is the span-based search. It runs for duration filters. The index cannot answer a trace-level HAVING. The OTel
+    // exporter's trace_id_ts MV stores End = max(Timestamp), which is the start of the last span *start*. It also runs when there
+    // is no trace index, or when the filtered index scan reaches its cap and no trace is kept.
+    //
+    // The search ranks the TraceIds with only the cheap min and max aggregates. It uses newest slice first (see
+    // rank_traces_by_start). Then it computes the expensive summary (argMin*, per-service stats) for those <= limit traces only.
+    // The spans, the HAVING and the ORDER BY are the same as in a single whole-window aggregation.
     const auto candidate_started = std::chrono::steady_clock::now();
     const bool broad = key_only_filters && filters_are_broad(db, scope);
     const auto ranked = rank_traces_by_start(db, scope, broad, limit);

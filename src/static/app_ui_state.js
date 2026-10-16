@@ -1,39 +1,39 @@
 // ns.uiState: the empty, error and loading states of every page (Query,
-// Explorer, Observability). One look (css/10-components/state.css), one
-// type scale, the roles and live behaviour built in. (ns.state is the app
-// state of app_state.js, hence the name.)
+// Explorer, Observability). All states have one look (css/10-components/state.css),
+// one type scale, and built-in roles and live behaviour. The name differs from ns.state,
+// which is the app state of app_state.js.
 //
 //   empty(container, { title, body, action, actions, compact })   -> element
-//       A centred message in place of content that is not there, always
-//       with a way out when there is one (zoom out, jump to data, clear the
-//       filters). An action is { label, onClick, primary, icon, attrs }.
+//       A centred message in place of missing content. It always gives a way out,
+//       when there is one (zoom out, jump to data, clear the filters). An action is
+//       { label, onClick, primary, icon, attrs }.
 //   error(container, { title, body, retry, compact })              -> element
-//       The same block for content that failed to load: role=alert, and
-//       Retry when `retry` (a function, or an action) is given.
+//       The same block for content that failed to load. It has role=alert.
+//       It shows Retry when `retry` (a function, or an action) is given.
 //   loading(container, { label, compact })                         -> element
-//       An inline spinner and a sentence; the container is aria-busy.
+//       An inline spinner and one sentence. The container gets aria-busy.
 //   block(kind, options)                                            -> element
-//       The same block detached, for views that build nodes.
+//       The same block, not attached to the page. Use it for views that build nodes.
 //   emptyHtml / errorHtml / loadingHtml(options)                     -> string
-//       The same markup for views that build HTML strings; actions then
-//       carry `attrs` for the view's delegated click handler (no onClick).
+//       The same markup for views that build HTML strings. Actions then use
+//       `attrs` for the delegated click handler of the view (no onClick).
 //   banner(container, { message, retry, verbatim, level, inset, details, detailsLabel })
-//       The error strip above a view or a result: a human message and
-//       Retry; role=alert. An empty message hides it. `verbatim` is the
+//       The error strip above a view or a result. It has a human message and
+//       Retry, and role=alert. An empty message hides the strip. `verbatim` is the
 //       Query result error (a server sentence, util.queryErrorParts);
-//       `details` puts long server text (the parser's expected tokens)
+//       `details` shows long server text (the parser's expected tokens)
 //       behind a closed <details> toggle named `detailsLabel`; level
-//       "info" is a neutral notice and "warn" a warning (something is wrong
+//       "info" is a neutral notice. "warn" is a warning (something is wrong
 //       and the view still works: amber, the MCP Usage instance whose file
-//       was left out), both role=status; `inset` boxes it inside a padded
+//       was left out). Both have role=status. `inset` puts the strip in a padded
 //       view.
 //   busy(el, on, { label })
-//       The one loading convention: is-loading and aria-busy on the
-//       element; a button is also disabled and shows its spinner.
+//       The one loading convention. It sets is-loading and aria-busy on the
+//       element. A button is also disabled and shows its spinner.
 //   spinnerHtml(extra)                                                -> string
 //   announce(text)
-//       Says a short status sentence through the page's one polite live
-//       region (pages never mark whole panes live).
+//       It announces a short status sentence through the one polite live region of the page.
+//       Pages never mark whole panes as live.
 
 import { dom } from "./app_dom.js";
 import { icon } from "./app_ui_icon.js";
@@ -72,8 +72,8 @@ function actionsOf(options) {
   return list.filter((action) => action && action.label);
 }
 
-// A loading block is a spinner and one sentence: its `label` ("Loading\u2026"
-// when none is given), never a title.
+// A loading block has a spinner and one sentence. Its `label` is "Loading\u2026"
+// when none is given. It is never a title.
 const loadingOptions = (options = {}) => ({ ...options, title: "", body: options.label || "Loading\u2026" });
 
 function blockHtml(kind, options = {}) {
@@ -83,7 +83,7 @@ function blockHtml(kind, options = {}) {
   const actions = actionsOf(options);
   const buttons = actions.length ? `<div class="uiState__actions">${actions.map(actionHtml).join("")}</div>` : "";
   const cls = `uiState uiState--${kind}${options.compact ? " uiState--compact" : ""}${options.className ? ` ${esc(options.className)}` : ""}`;
-  // An empty block is part of the content; options.role "status" announces one that replaces a load.
+  // An empty block is part of the content. Use options.role "status" to announce a block that replaces a load.
   const role = kind === "error" ? ' role="alert"' : kind === "loading" ? ' role="status" aria-busy="true"' : options.role === "status" ? ' role="status"' : "";
   const lead = kind === "loading" ? SPINNER : "";
   return `<div class="${cls}"${role}${attrsHtml(options.attrs)}>${lead}${title}${body}${buttons}</div>`;
@@ -93,7 +93,7 @@ const emptyHtml = (options) => blockHtml("empty", options);
 const errorHtml = (options) => blockHtml("error", options);
 const loadingHtml = (options) => blockHtml("loading", options);
 
-// Renders into `container` (its content replaced) and wires onClick actions.
+// Renders into `container`. The content of `container` is replaced. Then it wires the onClick actions.
 function render(kind, container, options = {}) {
   if (!container) return null;
   container.innerHTML = blockHtml(kind, options);
@@ -112,7 +112,7 @@ const empty = (container, options) => render("empty", container, options);
 const error = (container, options) => render("error", container, options);
 const loading = (container, options) => render("loading", container, options);
 
-// A detached block, for views that build nodes ("empty", "error" or "loading").
+// A detached block for views that build nodes. The kind is "empty", "error" or "loading".
 function block(kind, options = {}) {
   const host = document.createElement("div");
   const el = render(kind, host, options);
@@ -137,14 +137,14 @@ function onBannerClick(event) {
 
 function banner(container, { message = "", retry = null, verbatim = false, level = "error", inset = false, details = "", detailsLabel = "Details" } = {}) {
   if (!container) return null;
-  // An Error reads as util.errorText; a verbatim banner keeps it as sent.
+  // An Error is read with util.errorText. A verbatim banner keeps the text as sent.
   const text = message instanceof Error ? (verbatim ? message.message : util.errorText(message)) : String(message || "");
   container.classList.add("uiBanner");
   container.classList.toggle("uiBanner--verbatim", !!verbatim);
   container.classList.toggle("uiBanner--inset", !!inset);
   container.classList.toggle("uiBanner--info", level === "info");
   container.classList.toggle("uiBanner--warn", level === "warn");
-  // An error interrupts (alert); a notice (level "info") or a warning (level "warn") waits its turn (status).
+  // An error interrupts with role=alert. A notice (level "info") or a warning (level "warn") waits its turn (status).
   container.setAttribute("role", level === "info" || level === "warn" ? "status" : "alert");
   if (!container.dataset.uiBanner) {
     container.dataset.uiBanner = "1";
@@ -192,7 +192,7 @@ function announce(text) {
     live.setAttribute("aria-live", "polite");
     document.body.appendChild(live);
   }
-  // A repeated sentence is announced again: clear, then write on the next frame.
+  // Announce a repeated sentence again. First clear the region, then write the sentence on the next frame.
   live.textContent = "";
   clearTimeout(liveTimer);
   liveTimer = setTimeout(() => { if (live) live.textContent = message; }, 60);

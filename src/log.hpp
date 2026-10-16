@@ -44,11 +44,10 @@ private:
   double double_ = 0.0;
 };
 
-// The log of the server (docs/operations.md, "Logs"): one JSON object per line on stderr,
+// The log of the server (docs/operations.md, "Logs"). It writes one JSON object per line on stderr, for example:
 //   {"ts":"2026-10-10T12:00:00.123Z","level":"info","event":"http.request", <fields>}
-// written whole under a lock, so lines of two threads never mix. `event` names what happened
-// (area.what); the fields never carry row data, secrets or capabilities (query_id, tokens), and
-// the text of an unexpected exception (it may quote SQL) is cut to 300 bytes.
+// Each line is written whole under a lock, so lines of two threads never mix. `event` names what happened
+// (area.what). The fields never carry row data, secrets or capabilities (query_id, tokens). The text of an unexpected exception (it may quote SQL) is truncated to 300 bytes.
 void log_event(LogLevel level, std::string_view event, std::initializer_list<LogField> fields = {});
 
 // The same, with the fields in a vector (a line whose fields are not known when the code is written).

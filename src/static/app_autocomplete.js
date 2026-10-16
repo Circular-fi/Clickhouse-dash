@@ -10,7 +10,7 @@ import { popover } from "./app_ui_popover.js";
 import { util } from "./app_util.js";
 import { wasm } from "./app_wasm.js";
 
-// The lookups of app_dom.js; absent when a test loads the module without a page.
+// The lookups of app_dom.js. The value is absent when a test loads the module without a page.
 const { byId, $, $$ } = dom || {};
 
 const maxSuggestions = 20;
@@ -40,8 +40,8 @@ let lastExplicit = false;
 let lastUpdateKey = "";
 let ghostFrame = 0;
 let ghostKey = "";
-// The editor switches: "true" / "false" in storage (ns.storage.KEYS), the
-// older names read once and moved.
+// The editor switches are stored as "true" or "false" in storage (ns.storage.KEYS).
+// The older key names are read once, and the value moves to the new key.
 const KEYS = storage.KEYS;
 const autocompleteStorageKey = KEYS.autocomplete;
 const autocompletePartialStorageKey = KEYS.autocompletePartial;
@@ -141,8 +141,8 @@ function applyEditorOptionClasses() {
   const hideCopy = !isCopyButtonEnabled();
   const hideLines = !isLineNumbersEnabled();
 
-  // Keep the early pre-paint classes from the page head script in sync after the app is running.
-  // Those root classes prevent a flash of the copy button / line numbers during reload.
+  // Keep the early pre-paint classes of the page head script in sync after the app starts.
+  // These root classes prevent a flash of the copy button and the line numbers on reload.
   if (root && root.classList) {
     root.classList.toggle("chdash-copy-button-hidden", hideCopy);
     root.classList.toggle("chdash-line-numbers-hidden", hideLines);
@@ -196,8 +196,8 @@ function updateAutocompleteControlUi() {
   applyEditorOptionClasses();
 }
 
-// The editor options menu: an ns.menu menu (app_ui_menu.js); its
-// checkbox items keep it open.
+// The editor options menu is an ns.menu menu (app_ui_menu.js).
+// Its checkbox items keep the menu open.
 let autocompleteControlHandle = null;
 
 function closeAutocompleteControlMenu() {
@@ -245,7 +245,7 @@ function setWarningsEnabled(value) {
   scheduleDiagnostics(true);
 }
 
-// Backward-compatible alias for older callers / return objects.
+// This alias supports older callers and return objects.
 function setReferenceDiagnosticsEnabled(value) {
   setWarningsEnabled(value);
 }
@@ -449,8 +449,8 @@ function bindAutocompleteControlEvents() {
     } else if (btn.hasAttribute("data-reference-diagnostics-toggle")) {
       setWarningsEnabled(!isWarningsEnabled());
     }
-    // Keep the editor options menu open when toggling options.
-    // This menu is meant to host several settings, so changing one should not close it.
+    // Keep the editor options menu open after a change to an option.
+    // This menu holds several settings. A change to one setting must not close the menu.
   });
 
 }
@@ -593,15 +593,15 @@ function splitQualified(token) {
   return { parts, prefix, qualifier };
 }
 
-// [A-Za-z0-9_.$`"]: the characters of the token before the cursor.
+// The characters of the token before the cursor: [A-Za-z0-9_.$`"].
 function isCursorTokenChar(code) {
   return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
     || code === 95 || code === 46 || code === 36 || code === 96 || code === 34;
 }
 
-// The token that ends at the cursor, read backward from the cursor: its length, not the length of
-// the text before it (a regular expression anchored at the end tried every start: a 40 KB literal
-// before the cursor took seconds on each key).
+// The token that ends at the cursor. The function reads backward from the cursor and counts the length of the token.
+// It does not count the length of the text before the cursor. A regular expression anchored at the end tried every start.
+// A 40 KB literal before the cursor took seconds on each key stroke.
 function getTokenAtCursor(ta) {
   const value = String(ta.value || "");
   const pos = ta.selectionStart == null ? value.length : ta.selectionStart;
@@ -628,7 +628,7 @@ function getTokenAtCursor(ta) {
   };
 }
 
-// The text with its comments and its strings blanked, names kept (app_sql_lex.js, the one SQL lexer).
+// The text with its comments and strings blanked, and the names kept. The lexer is app_sql_lex.js, the one SQL lexer.
 function maskSql(sql) {
   return sqlLex.mask(sql);
 }
@@ -637,15 +637,15 @@ function sanitizeLight(sql) {
   return maskSql(sql).replace(/`[^`]*`/g, " ").replace(/"[^"]*"/g, " ");
 }
 
-// The statement that ends at the end of the text (what is before the cursor): its start is after the last ";" that is code
-// at depth 0.
+// The statement that ends at the end of the text, that is, the text before the cursor.
+// Its start is after the last ";" that is code at depth 0.
 function currentStatementBeforeJs(sql) {
   const text = String(sql || "");
   return text.slice(sqlLex.statementStart(text));
 }
 
-// The statement around the cursor: from the last ";" before it to the first one at or after it, the ";" of a string, a name, a
-// comment or a parenthesis being no cut.
+// The statement around the cursor runs from the last ";" before the cursor to the first ";" at or after the cursor.
+// A ";" in a string, a name, a comment or a parenthesis is no cut point.
 function currentStatementAtJs(sql, pos) {
   const text = String(sql || "");
   const { start, end } = sqlLex.statementAt(text, pos);
@@ -659,9 +659,10 @@ function currentStatementInfoAtJs(sql, pos) {
   return { statement: text.slice(start, end), start, cursor: cursor - start };
 }
 
-// The statement around the cursor is asked for several times per key stroke, each time by a scan of the whole script
-// before and after the cursor. A long script goes to src/wasm/sqlscan.c (the same answers: wasm-sql.spec.js); a short one
-// stays on the JavaScript path, which is instant. Without the kernel the JavaScript path answers.
+// The statement around the cursor is requested several times per key stroke.
+// Each request scans the whole script before and after the cursor.
+// A long script goes to src/wasm/sqlscan.c. The answers are the same as in wasm-sql.spec.js.
+// A short script stays on the JavaScript path, which is instant. Without the kernel, the JavaScript path gives the answer.
 const STATEMENT_WASM_MIN_CHARS = 16000;
 
 function statementKernel(text) {
@@ -678,7 +679,7 @@ function clampCursor(text, pos) {
   return Math.max(0, Math.min(text.length, pos == null ? text.length : pos));
 }
 
-// { start, end } of the statement around pos, or null (no kernel, or it failed).
+// This function returns { start, end } of the statement around pos. It returns null when there is no kernel or when the kernel fails.
 function statementRangeWasm(text, pos) {
   const kernel = wasm && wasm.get("sqlscan");
   if (!kernel || !wasm.ops.sqlscan) return null;
@@ -760,7 +761,7 @@ function isRelationCommandTail(tailText) {
   const t = String(tailText || "").replace(/\s+/g, " ").trim().toUpperCase();
   if (!t) return false;
 
-  // DDL / metadata commands where the next token is usually a database/table/view/dictionary.
+    // DDL and metadata commands. The next token is usually a database/table/view/dictionary.
   if (/\bSHOW CREATE FUNCTION$/.test(t)) return "function";
   if (/\bSHOW CREATE(?: (?:TABLE|VIEW|DICTIONARY|DATABASE))?$/.test(t)) return true;
   if (/\b(?:DESC|DESCRIBE)(?: TABLE)?$/.test(t)) return true;
@@ -768,7 +769,7 @@ function isRelationCommandTail(tailText) {
   if (/\bALTER (?:TABLE|VIEW|DICTIONARY|DATABASE)$/.test(t)) return true;
   if (/\bINSERT INTO$/.test(t)) return true;
 
-  // RENAME TABLE old TO new, old2 TO new2. Suggest existing relations for the left side.
+    // RENAME TABLE old TO new, old2 TO new2. The code suggests the existing relations for the left side.
   if (/\bRENAME(?: TABLE| DATABASE)?$/.test(t)) return true;
   if (/\bRENAME TABLE(?: [^,;]+ TO [^,;]+,)*$/.test(t) && !/\bTO\s+$/.test(t)) return true;
 
@@ -844,9 +845,9 @@ function findTopLevelKeyword(text, keyword, startIndex = 0) {
   return -1;
 }
 
-// The parenthesis depth before every index of one masked text, built once: the scans below ask for the depth of
-// every character of the text, and counting from the start each time cost O(n^2) (a 2000-line query took 14 s).
-// One entry is enough: the callers of one pass all hold the same string.
+// This table holds the parenthesis depth before every index of one masked text. It is built once.
+// The scans below ask for the depth of every character. A count from the start for each index costs O(n^2).
+// A 2000-line query took 14 s. One entry is enough. The callers of one pass all hold the same string.
 let depthPrefixText = null;
 let depthPrefix = null;
 
@@ -878,7 +879,7 @@ function findKeywordAtDepth(maskedText, keyword, startIndex, targetDepth, limitI
   const limit = limitIndex == null ? masked.length : Math.min(masked.length, Math.max(0, limitIndex));
   const first = kw.charCodeAt(0);
   for (let i = Math.max(0, startIndex || 0); i < limit; i += 1) {
-    // The first letter decides almost every position: no slice and no upper-casing for the others.
+        // The first letter decides almost every position. The other positions need no slice and no upper-case conversion.
     if ((masked.charCodeAt(i) & 0xdf) !== first) continue;
     if (topLevelDepthAt(masked, i) !== targetDepth) continue;
     if (masked.slice(i, i + kw.length).toUpperCase() !== kw) continue;
@@ -1011,8 +1012,8 @@ function columnsFor(meta, database, table) {
     : null;
   if (Array.isArray(cached)) return cached;
   if (metaMod && typeof metaMod.ensureTableColumns === "function") {
-    // The request is de-duplicated by app_meta. Suggestions are refreshed
-    // when the scoped column list arrives.
+        // app_meta de-duplicates the request. The suggestions are refreshed
+        // when the scoped column list arrives.
     metaMod.ensureTableColumns(normalizedDatabase, normalizedTable);
   }
   return [];
@@ -1164,11 +1165,10 @@ function parseSources(sql, meta, depth = 0, externalCtes = null) {
         previousWordBefore(masked, m.index).toUpperCase() === "ARRAY") {
       continue;
     }
-    // Only parse relation sources for the query level we are currently
-    // analyzing. WITH bodies and nested subqueries are parsed recursively
-    // when they become the current source, otherwise their columns leak into
-    // the outer SELECT (for example `number` leaking from a CTE renamed as
-    // `test`).
+        // Parse relation sources only for the query level under analysis.
+        // WITH bodies and nested subqueries are parsed recursively when they become the current source.
+        // Otherwise their columns leak into the outer SELECT.
+        // For example, `number` leaks from a CTE that is renamed as `test`.
     if (topLevelDepthAt(masked, m.index) !== 0) continue;
 
     let i = re.lastIndex;
@@ -1373,8 +1373,8 @@ function isAfterAliasKeywordContext(ta, token) {
   const tail = sanitizeLight(currentStatementBefore(beforeToken)).slice(-320).toUpperCase();
   if (/\bCAST\s*\([\s\S]*\bAS\s*$/.test(tail)) return false;
 
-  // After a real alias marker in SELECT/WITH/CTE definitions, the next token is
-  // a new alias name, not an existing function/column/table.
+    // After a real alias marker in SELECT, WITH or CTE definitions, the next token is
+    // a new alias name. It is not an existing function, column or table.
   return true;
 }
 
@@ -1449,7 +1449,7 @@ function isNoopSuggestionForToken(s, token, value) {
   if (!current.trim()) return false;
 
   // Function suggestions can still be useful when the function name is already
-  // fully typed because accepting it adds parentheses, e.g. `sum` -> `sum()`.
+  // fully typed. The accept action adds parentheses, e.g. `sum` -> `sum()`.
   if (s.kind === "function") {
     const after = String(value || "").slice(end);
     if (!/^\s*\(/.test(after)) return false;
@@ -1462,7 +1462,7 @@ function isNoopSuggestionForToken(s, token, value) {
 }
 
 function sortAndLimit(list, prefix) {
-  // Score every candidate exactly once. Scoring inside the comparator ran
+  // Score every candidate exactly once. A score inside the comparator ran
   // scoreSuggestion (including a RegExp construction) ~2·n·log(n) times per
   // keystroke over thousands of candidates.
   const p = norm(prefix);
@@ -1742,13 +1742,13 @@ function buildSuggestions(ta, explicit = false) {
         if (table) addColumns(topLevelColumns(columnsFor(meta, table.database, table.name)), false, "", { sourceLabel: table.database ? `${table.database}.${table.name}` : table.name });
       }
       if (!matchedColumnPath && (ctx.kind === "expression" || ctx.kind === "generic")) {
-        // Dotted UDF names such as custom.func: after `custom.` suggest matching functions.
+                // Dotted UDF names, such as custom.func. After `custom.`, the code suggests matching functions.
         addFunctions(token.raw);
       }
     }
   } else if (ctx.kind === "select_blank_slot") {
-    // The only implicit empty-prefix completion: projection slot before FROM.
-    // Suggest only columns from the following relation/CTE and scalar WITH aliases.
+        // The only implicit completion with an empty prefix is the projection slot before FROM.
+        // The code suggests only columns from the following relation or CTE, and scalar WITH aliases.
     addScalarCtes();
     addColumnsFromSources(false);
   } else if (ctx.kind === "relation") {
@@ -1909,10 +1909,9 @@ function expressionSpanBeforeAlias(item) {
 }
 
 function relationReferenceIsKnown(refName, meta, ctes, memo = null) {
-  // Missing catalog data is an unknown state, not an unknown relation. On a
-  // page reload the editor can be restored before the host metadata request
-  // completes; emitting a warning in that window creates a false red squiggle
-  // for perfectly valid database.table references.
+    // Missing catalog data is an unknown state, not an unknown relation.
+    // On a page reload, the editor can be restored before the host metadata request completes.
+    // A warning in that window creates a false red squiggle for valid database.table references.
   if (!Array.isArray(meta?.tables?.items)) return { ok: true, pending: true };
   const name = normalizeQualifiedName(refName);
   const parts = name.split(".").filter(Boolean);
@@ -1996,7 +1995,7 @@ function collectIdentifierRefs(exprText, exprStart, meta) {
     const afterIndex = m.index + rawMasked.length;
     const after = masked.slice(afterIndex).match(/^\s*([A-Za-z0-9_$.(]|->)/);
     if (before === ".") continue;
-    // The tail of a numeric literal is not an identifier: the `e6` of 1e6, the `e` of 1.5e-3, the `x1F` of 0x1F.
+          // The tail of a numeric literal is not an identifier. Examples: the `e6` of 1e6, the `e` of 1.5e-3, the `x1F` of 0x1F.
     if (/[0-9]/.test(before)) continue;
     if (after && after[1] === "(") continue; // function call
     if (keywords.has(norm(name)) || aliasStopWords.has(name.toUpperCase())) continue;
@@ -2074,10 +2073,9 @@ function collectSelectReferenceDiagnostics(text, meta) {
         }
       }
 
-      // ClickHouse lets aliases defined earlier in the same SELECT be reused
-      // later in the projection. But a plain identifier (`SELECT foo`) must
-      // not be treated as a self-defined alias, otherwise unknown columns like
-      // `anchor_valu` silently validate themselves.
+            // ClickHouse lets a later part of the projection reuse an alias that is defined earlier in the same SELECT.
+            // A plain identifier, such as `SELECT foo`, is not a self-defined alias.
+            // Otherwise, unknown columns, such as `anchor_valu`, silently validate themselves.
       const alias = aliasDefinedBySelectItem(item);
       if (alias) aliasesBefore.add(norm(alias));
     }
@@ -2095,9 +2093,10 @@ function isKnownFunctionName(meta, name) {
   return false;
 }
 
-// The type families that take parameters (`LowCardinality(String)`, `Decimal(38, 18)`): a type, not a
-// function, wherever it stands (a column definition, an ALTER ... MODIFY COLUMN, a CAST's second
-// argument). The host's own list (meta.data_types) adds to these once it is loaded.
+// A type family that takes parameters is a type, not a function, wherever it appears.
+// Examples: `LowCardinality(String)` and `Decimal(38, 18)`.
+// Such a family appears in a column definition, in an ALTER ... MODIFY COLUMN, or as the second argument of a CAST.
+// The host list (meta.data_types) adds to these families after the host loads it.
 const PARAMETRIC_TYPE_FAMILIES = new Set([
   "nullable", "lowcardinality", "array", "tuple", "map", "nested", "decimal", "decimal32", "decimal64", "decimal128", "decimal256",
   "fixedstring", "datetime", "datetime64", "enum", "enum8", "enum16", "aggregatefunction", "simpleaggregatefunction",
@@ -2176,7 +2175,7 @@ function collectRelationDiagnostics(text, meta) {
   return issues;
 }
 
-// The order, the duplicates and the limit of the marks: shared by both implementations.
+// The order, the duplicates and the limit of the marks. Both implementations share these rules.
 function finishIssues(issues) {
   issues.sort((a, b) => a.start - b.start || a.end - b.end);
   const dedup = [];
@@ -2204,15 +2203,18 @@ function computeDiagnosticsJs(text, meta) {
 }
 
 // ----------------------------------------------------------- WebAssembly scan
-// computeDiagnosticsJs scans the whole script again and again: a long script takes seconds. src/wasm/sqlscan.c does
-// every text scan once and answers with rows (where each SELECT, FROM / JOIN, select item, alias, lambda parameter,
-// identifier and function call is). The functions below read the rows and decide with the host's metadata, as the
-// reference does, and give the same marks (tests/frontend/specs/wasm-sql.spec.js). The kernel loads on the first
-// check (that check uses the reference); without it, or when it fails, the reference answers.
+// computeDiagnosticsJs scans the whole script again and again. A long script takes seconds.
+// src/wasm/sqlscan.c scans the text once for each kind of scan.
+// It answers with rows. Each row gives the position of a SELECT, FROM / JOIN, select item, alias, lambda parameter, identifier or function call.
+//
+// The functions below read the rows and decide with the host metadata, as the reference does.
+// They give the same marks as the reference (tests/frontend/specs/wasm-sql.spec.js).
+// The kernel loads on the first check. That check uses the reference.
+// Without the kernel, or when it fails, the reference answers.
 const DIAGNOSTICS_WASM_MIN_CHARS = 0;
-// The JavaScript reference is quadratic (docs/wasm.md: 5 s for 30,000 characters). The live check
-// of a longer script never starts with it: it waits for the kernel, at most DIAGNOSTICS_KERNEL_WAIT_MS,
-// and without the kernel (blocked, failed) the script gets no marks.
+// The JavaScript reference is quadratic (docs/wasm.md: 5 s for 30,000 characters).
+// The live check of a longer script never starts with the reference. It waits for the kernel, at most DIAGNOSTICS_KERNEL_WAIT_MS.
+// Without the kernel (blocked or failed), the script gets no marks.
 const DIAGNOSTICS_JS_MAX_CHARS = 5000;
 const DIAGNOSTICS_KERNEL_WAIT_MS = 1500;
 let diagnosticsWasmAsked = false;
@@ -2231,7 +2233,7 @@ function requestDiagnosticsWasm() {
     .catch(() => null)
     .then((kernel) => {
       diagnosticsKernelSettled = true;
-      // A kernel that came after the wait gave up: the long script gets its marks now.
+            // The kernel answered after the wait ended. The long script gets its marks now.
       if (kernel && diagnosticsKernelTimedOut && textarea) scheduleDiagnostics(true);
       return kernel;
     });
@@ -2259,7 +2261,7 @@ function waitForDiagnosticsKernel() {
   promise.then(() => rerun(false), () => rerun(false));
 }
 
-// The lower-case names the kernel looks up: the host's keywords, functions, table functions and data types.
+// The lower-case names that the kernel looks up. They are the host keywords, functions, table functions and data types.
 function diagnosticsNameSets(meta) {
   const lowered = (items) => (Array.isArray(items) ? items : []).map((item) => norm(item && item.name)).filter(Boolean);
   const set = meta?.functions?.set;
@@ -2362,7 +2364,8 @@ function wasmFunctionIssues(value, meta, fn) {
     const end = fn[f + 1];
     const name = normalizeQualifiedName(value.slice(start, end));
     if (fn[f + 2] === 2) {
-      // A name the kernel cannot judge (a character beyond ASCII, a comment inside): the reference rules.
+            // The kernel cannot judge some names, such as a name with a character beyond ASCII or a name with a comment inside.
+            // The reference rules for these names.
       masked = masked || maskSql(value);
       keywords = keywords || autocompleteKeywordSet(meta);
       if (!name || /^\d/.test(name)) continue;
@@ -2378,7 +2381,7 @@ function wasmFunctionIssues(value, meta, fn) {
   return issues;
 }
 
-// The marks of a script from the kernel's rows, or null (no kernel yet, or it cannot answer).
+// This function returns the marks of a script from the kernel rows. It returns null when there is no kernel yet, or when the kernel cannot answer.
 function computeDiagnosticsWasm(text, meta) {
   if (!isReferenceDiagnosticsEnabled() || !meta) return [];
   const kernel = wasm && wasm.get("sqlscan");
@@ -2464,10 +2467,8 @@ function renderDiagnosticsLayer(issues = currentDiagnostics) {
       top = domRect.top - wrapRect.top;
       width = Math.max(charWidth, domRect.width);
     }
-    // Never paint diagnostics into the line-number gutter. Horizontal
-    // scrolling can move highlighted text underneath the gutter, while the
-    // textarea itself clips text at the content boundary. Mirror that clip
-    // explicitly for the absolutely-positioned diagnostic marks.
+        // Never paint diagnostics into the line-number gutter. A horizontal scroll can move highlighted text under the gutter.
+        // The textarea itself clips text at the content boundary. Mirror that clip explicitly for the absolutely positioned diagnostic marks.
     const contentLeft = Math.max(0, padLeft);
     const originalRight = left + width;
     left = Math.max(contentLeft, left);
@@ -2488,9 +2489,9 @@ function renderDiagnosticsLayer(issues = currentDiagnostics) {
   }
 }
 
-// textarea[data-diagnostics]: "pending" while a check is scheduled,
-// "waiting" without the host's metadata, "checked" once the marks show the
-// current text (a test and debugging hook).
+// The textarea[data-diagnostics] attribute has three values.
+// "pending" while a check is scheduled. "waiting" without the host metadata. "checked" when the marks show the current text.
+// The values are a hook for tests and for debug tasks.
 function runDiagnostics() {
   if (!textarea || !isReferenceDiagnosticsEnabled()) {
     clearDiagnostics();
@@ -2509,7 +2510,7 @@ function runDiagnostics() {
       waitForDiagnosticsKernel();
       return;
     }
-    // No kernel: no marks rather than seconds of the reference on each key stroke.
+        // Without the kernel, show no marks. The reference takes seconds on each key stroke.
     clearDiagnostics();
     textarea.dataset.diagnostics = "unavailable";
     return;
@@ -2554,7 +2555,7 @@ function visualColumn(line) {
 }
 
 let cachedMeasure = null;
-// A width measured before the editor's web font arrived is the fallback face's.
+// A width measured before the editor web font arrives is the width of the fallback face.
 if (typeof document !== "undefined") document.fonts?.addEventListener?.("loadingdone", () => { cachedMeasure = null; });
 function measureCharWidth(ta) {
   const cs = getComputedStyle(ta);
@@ -2589,9 +2590,8 @@ function measureRenderedTextWidth(ref, text) {
   probe.style.fontFeatureSettings = '"liga" 0, "calt" 0';
   probe.style.tabSize = cs.tabSize || "4";
   probe.style.MozTabSize = cs.MozTabSize || "4";
-  // Use the same highlighter HTML as the visible layer. This avoids a one
-  // character drift when token spans later get a slightly different visual
-  // style than plain textarea text.
+    // Use the same highlighter HTML as the visible layer. This avoids a one character drift.
+    // A token span can later get a slightly different visual style than the plain textarea text.
   probe.innerHTML = highlightedSegment(String(text || "")) || "";
   return probe.getBoundingClientRect().width || 0;
 }
@@ -2683,13 +2683,11 @@ function highlightedRectForRange(highlight, startIndex, endIndex) {
 
 function highlightedEndPointForIndex(highlight, absoluteIndex) {
   if (!highlight || !Number.isFinite(absoluteIndex) || absoluteIndex <= 0) return null;
-  // Measure the previous rendered character in the highlight layer and use
-  // its right edge. This is more accurate than textarea char-width math and
-  // removes the one-character gap on suffix-only ghost completions.
+    // Measure the previous rendered character in the highlight layer. Use its right edge.
+    // This is more accurate than textarea char-width math. It removes the one-character gap on suffix-only ghost completions.
   let idx = Math.min(absoluteIndex - 1, Math.max(0, (highlight.textContent || "").length - 1));
   let rect = textNodeRangeRectForChar(highlight, idx);
-  // If the previous character is a newline or produces no rect, walk back to
-  // the nearest visible character on the same rendered line.
+    // If the previous character is a newline or produces no rect, walk back to the nearest visible character on the same line.
   while ((!rect || !rect.width) && idx > 0) {
     idx -= 1;
     rect = textNodeRangeRectForChar(highlight, idx);
@@ -2704,11 +2702,10 @@ function highlightedStartPointForIndex(highlight, absoluteIndex) {
   if (!textLen) return null;
   let idx = Math.min(absoluteIndex, textLen - 1);
   let rect = textNodeRangeRectForChar(highlight, idx);
-  // If the token starts on a non-rendered position, walk forward to the next
-  // visible character first, then backward as a last fallback. The important
-  // part is that we anchor the preview on the rendered token start, never on
-  // the preview prefix width. Otherwise long missing prefixes visually pull
-  // the ghost to the left by their own length.
+    // If the token starts on a position that is not rendered, walk forward to the next visible character first.
+    // Then walk backward as a last fallback.
+    // The important rule is to anchor the preview on the rendered token start. Never anchor it on the preview prefix width.
+    // Otherwise, long missing prefixes pull the ghost to the left by their own length.
   let fwd = idx;
   while ((!rect || !rect.width) && fwd < textLen - 1) {
     fwd += 1;
@@ -2795,10 +2792,9 @@ function renderMenu(ta, items, token, totalAvailable = 0) {
   activeIndex = Math.max(0, Math.min(activeIndex, suggestions.length - 1));
   selectionArmed = armNextRender;
   armNextRender = false;
-  // Suggestions are about to be rebuilt. Any ghost preview from the previous
-  // menu is now stale until the current pointer position is reconciled against
-  // the new rows. This prevents an old hovered suggestion from staying painted
-  // while the user types a non-matching character.
+    // The suggestions are about to be rebuilt. A ghost preview from the previous menu is stale.
+    // It stays stale until the current pointer position is compared with the new rows.
+    // This prevents an old hovered suggestion from appearing when the user types a non-matching character.
   hideGhost();
 
   if (!suggestions.length) {
@@ -2981,12 +2977,11 @@ function showGhostForSuggestion(s) {
   const lineAfter = originalLine.slice(localEnd);
   const preview = splitReplacementPreview(s, start, end, insert);
 
-  // Hybrid ghost mode:
-  // - prefix match, e.g. `num` -> `numeric...`: keep the already typed token
-  //   rendered by the normal highlighter and only ghost the suffix from the
-  //   cursor. This avoids tiny baseline/left drifts on duplicated text.
-  // - partial match, e.g. `number` -> `row_number`: start at the token
-  //   beginning so the missing prefix (`row_`) is visible.
+    // Hybrid ghost mode has two cases.
+    // - Prefix match, e.g. `num` -> `numeric...`: keep the typed token rendered by the normal highlighter.
+    //   Show a ghost only for the suffix from the cursor. This avoids tiny baseline or left drifts on duplicated text.
+    // - Partial match, e.g. `number` -> `row_number`: start at the start of the token.
+    //   The missing prefix (`row_`) is visible this way.
   const suffixOnlyFromTokenEnd = preview.before.length === 0 && preview.match.length > 0;
   const ghostAnchorLocal = suffixOnlyFromTokenEnd ? localEnd : localStart;
   const ghostTailText = suffixOnlyFromTokenEnd
@@ -3026,26 +3021,23 @@ function showGhostForSuggestion(s) {
     const layerTop = visualRect.top - wrapRect.top;
     const lineIndex = value.slice(0, bounds.lineStart).split("\n").length - 1;
     const charWidth = measureCharWidth(visualEl || textarea);
-    // The ghost text must sit on the same line box as .editorHighlight, not
-    // on the glyph rect returned by Range.getClientRects(). Glyph rects are
-    // lower than the line box in Chromium and created the small downward
-    // drift, especially for suffix-only previews. Keep X from the DOM when
-    // needed, but always use this common line-top for Y.
+        // The ghost text must sit on the same line box as .editorHighlight. It must not sit on the glyph rect that Range.getClientRects() returns.
+        // In Chromium, glyph rects are lower than the line box. They cause a small downward drift, especially for suffix-only previews.
+        // Take X from the DOM when needed. Always use this common line top for Y.
     const baseLineTop = layerTop + padTop + lineIndex * lineHeight - scrollTop;
     const ghostTop = Math.round(baseLineTop) - 1;
 
-    // Anchor the ghost exactly where the visual replacement starts. For a
-    // normal prefix completion this is the end of the already typed token;
-    // for a partial-match completion this is the beginning of the token so
-    // a missing prefix can be shown.
+        // Anchor the ghost exactly where the visual replacement starts.
+        // For a normal prefix completion, this is the end of the typed token.
+        // For a partial-match completion, this is the start of the token, so that a missing prefix can be shown.
     let tokenPrefixWidth;
     let tokenLeft;
     let top;
     if (suffixOnlyFromTokenEnd) {
-      // For pure prefix completions (`num` -> `numeric...`) the ghost starts
-      // immediately after the real token. Use the rendered highlight DOM
-      // instead of textarea/canvas metrics so the suffix has no 1ch gap and
-      // shares the exact same baseline as the visible text.
+            // For pure prefix completions (`num` -> `numeric...`), the ghost starts immediately after the real token.
+            // Use the rendered highlight DOM, not textarea or canvas metrics.
+            // Then the suffix has no 1ch gap.
+            // It shares the exact same baseline as the visible text.
       const renderedPoint = highlightedEndPointForIndex(highlight, end);
       tokenPrefixWidth = measureRenderedTextWidth(visualEl || textarea, originalLine.slice(0, localEnd));
       if (renderedPoint) {
@@ -3060,19 +3052,16 @@ function showGhostForSuggestion(s) {
       tokenPrefixWidth = measureRenderedTextWidth(visualEl || textarea, tokenPrefix);
 
       if (start === end) {
-        // Empty-token previews are used for the special blank SELECT slot:
-        //   SELECT |
-        //   FROM t
-        // The preview should start exactly at the caret. This keeps the first
-        // letter of a long completion aligned with the cursor instead of
-        // erasing/covering characters before it.
+                // Empty-token previews are used for the special blank SELECT slot:
+                //   SELECT |
+                //   FROM t
+                // The preview starts exactly at the caret. The first letter of a long completion stays aligned with the cursor.
+                // It does not erase or cover characters before the caret.
         const caretPoint = caretPointForPosition(textarea, start);
-        // Empty projection-slot previews are visually inserted before the
-        // caret position. The native caret is drawn after the previous
-        // whitespace cell, so anchoring exactly on caretPoint.left makes the
-        // first ghost character look one column too far to the right. Shift
-        // one rendered character left, but never before the editable text
-        // area.
+                // Empty projection-slot previews are visually inserted before the caret position.
+                // The native caret is drawn after the previous whitespace cell.
+                // If the anchor is exactly on caretPoint.left, the first ghost character looks one column too far to the right.
+                // Shift the preview one rendered character to the left. Never shift it before the editable text area.
         const minTextLeft = layerLeft + padLeft - scrollLeft;
         tokenLeft = Math.max(minTextLeft, caretPoint.left - wrapRect.left - charWidth);
       } else {
@@ -3084,8 +3073,8 @@ function showGhostForSuggestion(s) {
         }
       }
 
-      // Keep available width based on the actual visual anchor. This prevents
-      // a long missing prefix from influencing the left position of the ghost.
+            // Set the available width from the actual visual anchor.
+            // A long missing prefix must not change the left position of the ghost.
       tokenPrefixWidth = Math.max(0, tokenLeft - layerLeft - padLeft + scrollLeft);
       top = ghostTop;
     }
@@ -3096,10 +3085,9 @@ function showGhostForSuggestion(s) {
     );
     const tailText = ghostTailText;
     const tailWidth = Math.ceil(measureRenderedTextWidth(visualEl || textarea, `${tailText}  `)) + 16 || Math.ceil((tailText.length + 2) * charWidth) + 16;
-    // The ghost background must never cover the native scrollbar area. If it
-    // reaches the scrollbar gutter, Chromium paints the scrollbar in chunks
-    // above and below the ghost line. Clamp to the visible content box; long
-    // tails can still be read through the completion menu itself.
+        // The ghost background must never cover the native scrollbar area.
+        // If it reaches the scrollbar gutter, Chromium paints the scrollbar in chunks above and below the ghost line.
+        // Clamp the ghost to the visible content box. Long tails can still be read in the completion menu.
     const visualClientWidth = visualEl.clientWidth || textarea.clientWidth || wrap?.clientWidth || 0;
     const safeRight = layerLeft + visualClientWidth - 3;
     const maxVisibleWidth = Math.max(24, safeRight - tokenLeft);
@@ -3233,9 +3221,8 @@ function insertionForSuggestion(s, rangeStart, rangeEnd) {
     }
   }
 
-  // If completion is inserted just before another identifier (`SELECT |FROM`,
-  // `SELECT a,|FROM`, etc.), keep the resulting SQL tokenized. Without this,
-  // completing `number` immediately before `from` produced `numberfrom`.
+    // If a completion is inserted just before another identifier (`SELECT |FROM`, `SELECT a,|FROM`, etc.), keep the resulting SQL tokenized.
+    // Without this rule, the completion of `number` immediately before `from` produced `numberfrom`.
   const nextChar = value[rangeEnd] || "";
   const prevChar = value[Math.max(0, rangeStart - 1)] || "";
   const needsSpaceAfter = /[A-Za-z0-9_$`]/.test(nextChar) && insert && !/\s$/.test(insert) && !/[.(]$/.test(insert);
@@ -3310,9 +3297,9 @@ function commit(index = activeIndex) {
   }
   dispatchInputEvent(textarea);
 
-  // setSelectionRange()/insertText can make the native textarea auto-scroll
-  // horizontally to the replacement/caret. The visible layer is a separate
-  // highlighted <pre>, so keep both layers on the same scroll position.
+    // setSelectionRange() or insertText() can make the native textarea scroll horizontally to the replacement or caret.
+    // The visible layer is a separate highlighted <pre>.
+    // Keep both layers on the same scroll position.
   restoreEditorScroll(keepScrollLeft, keepScrollTop);
   requestAnimationFrame(() => {
     restoreEditorScroll(keepScrollLeft, keepScrollTop);
@@ -3357,8 +3344,8 @@ function attach(ta) {
   textarea = ta;
   ensureMenu();
   ensureAutocompleteControl();
-  // The diagnostics kernel loads with the editor, before the first check: a long script restored
-  // in the editor is never checked by the quadratic reference.
+    // The diagnostics kernel loads with the editor, before the first check.
+    // A long script that is restored in the editor is never checked by the quadratic reference.
   if (isReferenceDiagnosticsEnabled()) requestDiagnosticsWasm();
 
   ta.addEventListener("keydown", (ev) => {
@@ -3384,10 +3371,9 @@ function attach(ta) {
       return;
     }
     if (ev.key === "Enter") {
-      // An automatically opened menu must never steal a normal newline.
-      // Enter accepts only after the user has explicitly navigated/hovered
-      // a choice (or opened completion with Ctrl/Cmd+Space). Tab remains an
-      // explicit completion key.
+            // An automatically opened menu must never take a normal newline.
+            // Enter accepts a choice only after the user explicitly navigates to it, hovers over it, or opens completion with Ctrl/Cmd+Space.
+            // Tab remains an explicit completion key.
       if (!selectionArmed) {
         close();
         return;
@@ -3417,8 +3403,8 @@ function attach(ta) {
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(ev.key)) scheduleUpdate(false);
   });
   ta.addEventListener("scroll", () => {
-    // Scrolling inside the SQL editor means the anchor can move out of view or change line metrics.
-    // Close instead of trying to chase it; global page scroll still repositions the menu.
+        // A scroll inside the SQL editor can move the anchor out of view or change the line metrics.
+        // Close the menu. Do not follow the anchor. Global page scroll still repositions the menu.
     if (isOpen()) close();
     else hideGhost();
     renderDiagnosticsLayer();
@@ -3430,11 +3416,10 @@ function attach(ta) {
   });
   window.addEventListener("scroll", (ev) => {
     if (isOpen()) positionMenu(ta);
-    // Diagnostic marks are positioned relative to the editor wrap, so page
-    // or results-table scrolling cannot move them. Rebuilding the layer (a
-    // forced layout per mark) on every capture-phase scroll anywhere in the
-    // document was pure overhead, and on textarea scroll it ran before the
-    // overlay synced. The textarea's own scroll listener handles that case.
+        // Diagnostic marks are positioned relative to the editor wrap. A scroll of the page or the results table cannot move them.
+        // A rebuild of the layer on each capture-phase scroll anywhere in the document was pure overhead. Each mark forced a layout.
+        // On textarea scroll, the rebuild ran before the overlay synced.
+        // The textarea's own scroll listener handles that case.
     const target = ev.target instanceof Node ? ev.target : null;
     if (!target || target === ta) return;
     const editorWrap = ta.closest ? ta.closest(".editorWrap") : null;
@@ -3444,8 +3429,7 @@ function attach(ta) {
     const target = ev.target instanceof Node ? ev.target : null;
     if (!menu || menu.hidden) return;
     if (target && (menu.contains(target) || ta.contains(target))) return;
-    // Capture-phase close prevents the floating suggestion layer from
-    // swallowing Run / Run with profiling clicks at narrower viewports.
+        // The capture-phase close stops the floating suggestion layer. Without it, the layer takes clicks that are meant for Run / Run with profiling at narrow viewports.
     close();
   }, true);
 
@@ -3479,7 +3463,8 @@ export const autocomplete = {
   setFunctionWarningsEnabled,
   setColumnWarningsEnabled,
   diagnose: computeDiagnostics,
-  // The two implementations, for the tests: diagnoseWasm answers null until the kernel is loaded.
+    // These are the two implementations, for the tests. diagnoseWasm answers null until the kernel is loaded.
+
   diagnoseJs: computeDiagnosticsJs,
   diagnoseWasm: computeDiagnosticsWasm,
   statementAtJs: currentStatementAtJs,

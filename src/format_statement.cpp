@@ -1,4 +1,4 @@
-// The statements and the clauses of a query: SELECT, WITH, FROM, JOIN, WHERE and the lists of items.
+// This unit lays out the statements and the clauses of a query: SELECT, WITH, FROM, JOIN, WHERE, and the lists of items.
 // The declarations that the units share are in format_internal.hpp.
 
 #include "format_internal.hpp"
@@ -19,8 +19,7 @@ string Formatter::cleanup_surface(string_view s) const {
     string prefix = code.substr(0, lead);
     code = prefix + normalize_code_spacing(string_view(code).substr(lead));
     if (trim_ascii_spaces(code).empty() && !comment.empty()) {
-      // A comment-only line keeps its indentation (it was lost when the code
-      // part, and thus the measured indent, was empty).
+      // A comment-only line keeps its indentation. Earlier, the indentation was lost, because the code part was empty.
       size_t indent = 0;
       while (indent < raw_line.size() && (raw_line[indent] == ' ' || raw_line[indent] == '\t')) ++indent;
       lines.push_back(string(raw_line.substr(0, indent)) + comment);
@@ -134,13 +133,11 @@ string take_trailing_line_comments(string* text);
 }  // namespace
 
 namespace {
-// formatQuery prints operator keywords in upper case; on the local
-// (comment-preserving) path the user's spelling reached the output
+// formatQuery prints operator keywords in upper case. On the local path, which keeps comments, the user's spelling reaches the output.
 // (`x -> not isNull(x)`, `[1, null]`, `tuple(1 as a)`, `case when ... end`).
-// Only words that cannot be identifiers in their position are changed:
-// never after `.` or `AS`, never a call name (`and(a, b)`), CASE words only
-// between CASE and its END, and nothing inside literals, quoted names or
-// comments. Same length, so no layout decision depends on it.
+// This function changes only words that cannot be identifiers in their position.
+// It never changes a word after `.` or `AS`, or a call name (`and(a, b)`). It changes CASE words only between CASE and its END.
+// It changes nothing inside literals, quoted names, or comments. The length stays the same, so no layout decision depends on it.
 string uppercase_expression_keywords(string s) {
   const SqlMaskResult masked = mask_sql_surface(s);
   const string& code = masked.code_lower;
@@ -172,8 +169,8 @@ string uppercase_expression_keywords(string s) {
     const char before = prev_char(b);
     const char after = next_char(e);
     if (before == '.' || after == '.' || (b > 0 && (s[b - 1] == '`' || s[b - 1] == '"')) || std::isdigit(static_cast<unsigned char>(code[b]))) continue;
-    // An alias name, and format / engine names (`FORMAT Null`, `ENGINE =
-    // Null` are case-sensitive names, not the NULL literal).
+    // An alias name is not changed. Format and engine names are case-sensitive, for example `FORMAT Null` and `ENGINE =
+    // Null`. They are not the NULL literal.
     if (k > 0 && (text(k - 1) == "as" || text(k - 1) == "format" || text(k - 1) == "engine")) continue;
     bool upper = false;
     auto next_word_is = [&](std::initializer_list<const char*> options) {
@@ -184,7 +181,7 @@ string uppercase_expression_keywords(string s) {
     const bool after_expression = is_ident_char(before) || before == ')' || before == ']' || before == '\'' || before == '`';
     const bool prev_is_by = k > 0 && (text(k - 1) == "by" || text(k - 1) == "select");
     if ((w == "asc" || w == "desc") && after_expression && !prev_is_by) {
-      // ORDER BY direction: followed by the end of the item or its modifiers.
+      // ORDER BY direction. The direction is followed by the end of the item, or by its modifiers.
       upper = after == '\0' || after == ',' || after == ')' || after == ';' ||
               next_word_is({"nulls", "limit", "offset", "settings", "format", "with", "collate", "union", "into"});
     } else if (w == "nulls" && after_expression && !prev_is_by && next_word_is({"first", "last"})) {
@@ -200,9 +197,8 @@ string uppercase_expression_keywords(string s) {
     } else if (case_depth > 0 && std::any_of(std::begin(case_words), std::end(case_words), [&](const char* cw) { return w == cw; })) {
       upper = true;
     } else if (std::any_of(std::begin(operators), std::end(operators), [&](const char* op) { return w == op; })) {
-      // An operator sits before an operand: a call name (`and(a, b)`), a
-      // list entry or an assignment target is left alone. `NOT (x)`,
-      // `IN (1, 2)` and `AS (SELECT ...)` take a parenthesized operand.
+      // An operator sits before an operand. A call name (`and(a, b)`), a list entry, or an assignment target is not changed.
+      // `NOT (x)`, `IN (1, 2)`, and `AS (SELECT ...)` take a parenthesized operand.
       if (w == "null") upper = after != '(';
       else if (after == '(') upper = w == "not" || w == "in" || w == "as";
       else upper = after != '\0' && after != ',' && after != ')' && after != '=' && after != ']' && after != ';';
@@ -215,9 +211,9 @@ string uppercase_expression_keywords(string s) {
 }  // namespace
 
 string Formatter::format(string_view s) {
-  // A `--` or `#` comment always runs to the end of its line, as ClickHouse reads it, even when the
-  // whole query is one line and the comment swallows the clauses after it: the formatter never turns
-  // the text of a comment into code (`WHERE id = 5 -- old: or 1 = 1` must not become a condition).
+  // ClickHouse reads a `--` or `#` comment to the end of its line. This is true even when the
+  // whole query is one line, and the comment swallows the clauses after it. The formatter never turns
+  // the text of a comment into code. For example, `WHERE id = 5 -- old: or 1 = 1` must not become a condition.
   string text = trim_ascii_spaces(repair_split_clause_keywords(trim_ascii_spaces(normalize_newlines(s))));
   if (text.empty()) return text;
   string leading;
@@ -230,7 +226,7 @@ string Formatter::format(string_view s) {
   };
   if (auto values = try_format_insert_values(text); !values.empty()) return with_comments(values);
   text = uppercase_expression_keywords(strip_redundant_arith_parentheses(text));
-  // Calls are exploded by width only inside queries; DDL lines (columns,
+  // The width rule splits calls only inside queries. DDL lines (columns,
   // indexes, types, grants) keep the layout of their own formatters.
   bool query = false;
   for (const char* head : {"SELECT", "WITH", "INSERT", "EXPLAIN", "CREATE VIEW", "CREATE MATERIALIZED VIEW", "CREATE OR REPLACE VIEW",
@@ -245,9 +241,8 @@ string Formatter::format(string_view s) {
 }
 
 namespace {
-// Whole-line `--` comments after the last statement line stay on their own
-// lines after the formatted statement. Left inside the statement they were
-// absorbed into the last clause body and re-attached to its line
+// Whole-line `--` comments after the last statement line stay on their own lines, after the formatted statement.
+// If they stayed inside the statement, the last clause body would absorb them and attach them to its line
 // (`FROM t -- end of report`).
 string take_trailing_line_comments(string* text) {
   const SqlMaskResult masked = mask_sql_surface(*text);
@@ -299,15 +294,13 @@ string Formatter::format_statement(string_view s) {
   else if (starts_with_ci(text, "DELETE FROM")) out = format_delete(text);
   else if (starts_with_ci(text, "OPTIMIZE TABLE")) out = format_optimize_table(text);
   else if (starts_with_ci(text, "CREATE ROW POLICY") || starts_with_ci(text, "ALTER ROW POLICY")) out = format_row_policy(text);
-  // ALTER SETTINGS PROFILE is excluded: its ADD/MODIFY/DROP SETTINGS list
-  // grammar is not a plain `name = value` list and keeps the formatQuery line.
+  // ALTER SETTINGS PROFILE is excluded. Its ADD, MODIFY, and DROP SETTINGS list
+  // grammar is not a plain `name = value` list. That statement keeps the formatQuery line.
   else if (starts_with_ci(text, "CREATE SETTINGS PROFILE")) out = format_settings_profile(text);
   else if (starts_with_ci(text, "KILL QUERY") || starts_with_ci(text, "KILL MUTATION")) out = format_kill(text);
   else if (const int as_pos = is_create_function(text) ? find_top_level_keyword(text, "AS") : -1; as_pos > 0) {
-    // `CREATE FUNCTION name AS (x, y) -> body`: the lambda is an expression and
-    // follows the lambda rules (no parentheses around a plain body, width).
-    // A statement too long for one line puts the lambda on its own line one
-    // level deeper, where the width rule lays it out.
+    // In `CREATE FUNCTION name AS (x, y) -> body`, the lambda is an expression. It follows the lambda rules: no parentheses around a plain body, and the width rule.
+    // A statement that is too long for one line puts the lambda on its own line, one level deeper. The width rule lays it out there.
     const string head = cleanup_surface(text.substr(0, static_cast<size_t>(as_pos) + 2));
     const string lambda = format_expression(text.substr(static_cast<size_t>(as_pos) + 2));
     if (utf8_width(head) + 1 + utf8_width(string_view(lambda).substr(0, lambda.find('\n'))) > threshold) {
@@ -355,10 +348,9 @@ string Formatter::format_select_like(string_view s) {
       return join_with_keyword(rendered, set_operator);
     }
   }
-  // `a INTERSECT DISTINCT (b) EXCEPT ALL (c)`: the operator on its own line
-  // between the operands, as formatQuery lays them out; a parenthesized
-  // operand (formatQuery adds them to show precedence) is a block. Left in
-  // the FROM clause body the chain was joined onto one overlong line.
+  // In `a INTERSECT DISTINCT (b) EXCEPT ALL (c)`, the operator is on its own line between the operands, as formatQuery lays them out.
+  // A parenthesized operand is a block. formatQuery adds the parentheses to show precedence.
+  // If the chain stayed in the FROM clause body, it was joined onto one overlong line.
   if (auto set_parts = split_intersect_except(text); !set_parts.empty()) {
     string out;
     for (size_t i = 0; i < set_parts.size(); ++i) {
@@ -386,8 +378,9 @@ string Formatter::format_select_like(string_view s) {
       text = trim_ascii_spaces(text.substr(static_cast<size_t>(pos)));
     }
   }
-  // What is left must be a SELECT: a WITH without one ("WITH", "WITHIN x"), or an operand of UNION that is not a
-  // SELECT ("SELECT 1 UNION ALL x"), keeps its words (the clause scan below reads past the six letters of SELECT).
+  // What is left must be a SELECT. A WITH without a SELECT ("WITH", "WITHIN x") keeps its words.
+  // An operand of UNION that is not a SELECT ("SELECT 1 UNION ALL x") keeps its words too.
+  // The clause scan below reads past the six letters of SELECT.
   if (!starts_with_ci(text, "SELECT") || (text.size() > 6 && is_ident_char(text[6]))) return out + cleanup_surface(text);
 
   static const vector<string_view> clauses = {
@@ -411,11 +404,11 @@ string Formatter::format_select_like(string_view s) {
       "INTO OUTFILE",
       "FORMAT",
   };
-  // Find every top-level occurrence. Repeated ARRAY JOIN clauses are legal and
-  // must remain distinct instead of being absorbed into the first clause body.
+  // Find every top-level occurrence. Repeated ARRAY JOIN clauses are legal.
+  // They must stay distinct, and must not be absorbed into the first clause body.
   vector<std::pair<int, string>> poses = find_select_clauses(text, 6, clauses);
-  // Keywords that are clause heads elsewhere are ordinary tokens inside some
-  // clauses: `ORDER BY x WITH FILL FROM a TO b`, `SAMPLE 1/10 OFFSET 1/2`.
+  // Some keywords are clause heads in other places. Inside some clauses, they are ordinary tokens.
+  // Examples are `ORDER BY x WITH FILL FROM a TO b` and `SAMPLE 1/10 OFFSET 1/2`.
   for (size_t i = 1; i < poses.size();) {
     const string& previous = poses[i - 1].second;
     const string& current = poses[i].second;
@@ -429,8 +422,8 @@ string Formatter::format_select_like(string_view s) {
 
   const size_t select_end = poses.empty() ? text.size() : static_cast<size_t>(poses.front().first);
   string select_body = trim_ascii_spaces(text.substr(6, select_end - 6));
-  // `DISTINCT [ON (...)]` and `ALL` qualify the whole projection list: they
-  // stay on the SELECT line instead of heading the first item.
+  // `DISTINCT [ON (...)]` and `ALL` qualify the whole projection list.
+  // They stay on the SELECT line, and do not head the first item.
   string select_head = "SELECT";
   auto take_word = [&](string_view word) {
     if (!starts_with_ci(select_body, word) ||
@@ -451,9 +444,8 @@ string Formatter::format_select_like(string_view s) {
     take_word("ALL");
   }
   auto items = split_top_level(select_body, ',');
-  // On the local (comment-preserving) path the user's own line breaks reach
-  // this point (formatQuery would have joined them): a single projection
-  // written over several lines without comments is judged on one line.
+  // On the local path, which keeps comments, the user's own line breaks reach this point. formatQuery would have joined them.
+  // A single projection that is written over several lines, without comments, is judged on one line.
   if (items.size() == 1 && select_body.find('\n') != string::npos && !mask_sql_surface(select_body).has_comments) {
     select_body = collapse_whitespace(select_body);
     items = split_top_level(select_body, ',');
@@ -462,11 +454,10 @@ string Formatter::format_select_like(string_view s) {
   const bool single_simple_alias = items.size() == 1 && !single_alias_for_alias.empty() &&
                                    single_expr_for_alias.find('\n') == string::npos &&
                                    single_expr_for_alias.size() + single_alias_for_alias.size() + 8 <= threshold;
-  // The compact form is measured as the exact line it produces ("SELECT ",
-  // the rendered expression and the quoted alias), not the raw body: a body
-  // that fits the width on its own could still overflow once prefixed.
+  // The compact form is measured as the exact line that it produces: "SELECT ", the rendered expression, and the quoted alias.
+  // The raw body is not measured. A body that fits the width on its own can still overflow after the prefix is added.
   string compact_select;
-  // Width decides, as for calls: only a subquery keeps the block form.
+  // The width decides, as for calls. Only a subquery keeps the block form.
   if (items.size() == 1 && select_body.find('\n') == string::npos && select_body.size() <= threshold &&
       !contains_select_keyword(items.front())) {
     compact_select = single_simple_alias
@@ -520,14 +511,14 @@ string Formatter::format_clause(string_view kw, string_view body) {
   const FormatDepthGuard guard(depth);
   if (iequals_ascii(kw, "FROM")) return format_from_clause(body);
   if (iequals_ascii(kw, "ARRAY JOIN") || iequals_ascii(kw, "GLOBAL ARRAY JOIN") || iequals_ascii(kw, "LEFT ARRAY JOIN")) {
-    // A table join after ARRAY JOIN (`ARRAY JOIN arr AS x INNER JOIN d ON ...`)
-    // is not one of the array-join items: it starts its own line, as after FROM.
+    // A table join after ARRAY JOIN is not one of the array-join items. An example is `ARRAY JOIN arr AS x INNER JOIN d ON ...`.
+    // The table join starts its own line, as it does after FROM.
     if (auto joins = split_joins(body); !joins.empty()) {
       return format_clause(kw, joins.front().first) + format_join_segments(joins);
     }
     const auto items = split_top_level(body, ',');
-    // Without comments, a single item's line breaks are an earlier layout of
-    // it (the comment path keeps them): it is judged on one line again.
+    // Without comments, the line breaks of a single item come from an earlier layout.
+    // The comment path keeps these line breaks. The item is judged on one line again.
     if (items.size() == 1 && (trim_ascii_spaces(body).find('\n') == string::npos || !mask_sql_surface(body).has_comments)) {
       auto [expr, alias] = split_top_level_as(collapse_whitespace(items.front()));
       if (!alias.empty()) return string(kw) + " " + format_expression(expr) + " AS " + format_alias_identifier(alias);
@@ -550,26 +541,26 @@ string Formatter::format_clause(string_view kw, string_view body) {
       const string inner = unwrap_outer_parens(rendered);
       if (!inner.empty() && inner.find('\n') != string::npos) rendered = "(\n" + indent_block(normalize_boolean_lines(inner), 4) + "\n)";
     }
-    // A wrapped arithmetic term hangs under its own condition line.
+    // A wrapped arithmetic term is indented under its own condition line.
     return string(kw) + "\n" + indent_block(hang_operator_continuations(rendered), 4);
   }
   if (iequals_ascii(kw, "LIMIT") || iequals_ascii(kw, "OFFSET") || iequals_ascii(kw, "SAMPLE")) {
-    // formatQuery prints `LIMIT n\n WITH TIES`; keep these clauses on one line.
+    // formatQuery prints the LIMIT and WITH TIES words on two lines. Keep these clauses on one line.
     return string(kw) + " " + collapse_whitespace(cleanup_surface(body));
   }
   if (iequals_ascii(kw, "WINDOW")) return format_window_clause(body);
   if (iequals_ascii(kw, "GROUP BY") || iequals_ascii(kw, "ORDER BY")) {
     string base = trim_ascii_spaces(body);
-    // `x WITH FILL FROM a TO b` broken over lines by an earlier pass (the
-    // comment-preserving path keeps line breaks) is judged on one line again.
+    // An earlier pass can break `x WITH FILL FROM a TO b` over several lines. The comment-preserving path keeps these line breaks.
+    // The clause is judged on one line again.
     if (base.find('\n') != string::npos && find_top_level_keyword(base, "WITH FILL") >= 0 &&
         !mask_sql_surface(base).has_comments) {
       base = collapse_whitespace(base);
     }
     string suffix;
     if (iequals_ascii(kw, "GROUP BY")) {
-      // Modifiers can be combined (`WITH ROLLUP WITH TOTALS`): strip them all,
-      // formatQuery may print each on its own line.
+      // Modifiers can be combined, for example `WITH ROLLUP WITH TOTALS`. Strip them all.
+      // formatQuery can print each modifier on its own line.
       static const char* suffixes[] = {"WITH ROLLUP", "WITH CUBE", "WITH TOTALS"};
       for (bool stripped = true; stripped;) {
         stripped = false;
@@ -603,8 +594,8 @@ string Formatter::format_clause(string_view kw, string_view body) {
     const auto items = split_top_level(base, ',');
     if (items.size() == 1 && trim_ascii_spaces(base).find('\n') == string::npos) {
       const string item = format_expression(items.front());
-      // Like a single projection: only a one-line item shares the keyword
-      // line, a multi-line one goes into the block.
+      // As with a single projection, only a one-line item shares the keyword line.
+      // A multi-line item goes into the block.
       if (item.find('\n') == string::npos) {
         string line = string(kw) + " " + item;
         if (!suffix.empty()) line += " " + suffix;
@@ -641,10 +632,9 @@ vector<std::pair<string, string>> Formatter::split_joins(string_view s) const {
           const char prev = (i == 0) ? '\0' : s[i - 1];
           const char next = (i + kw.size() < s.size()) ? s[i + kw.size()] : '\0';
           if ((prev == '\0' || std::isspace(static_cast<unsigned char>(prev))) && (next == '\0' || std::isspace(static_cast<unsigned char>(next)))) {
-            // formatQuery prints locality/strictness/kind modifiers before the
-            // matched keyword (`GLOBAL ANY LEFT JOIN`, `SEMI LEFT JOIN`,
-            // `ASOF LEFT JOIN`, `FULL OUTER JOIN`, `PASTE JOIN`). They belong
-            // to the join keyword, not to the preceding table expression.
+            // formatQuery prints locality, strictness, and kind modifiers before the matched keyword.
+            // Examples are `GLOBAL ANY LEFT JOIN`, `SEMI LEFT JOIN`, `ASOF LEFT JOIN`, `FULL OUTER JOIN`, and `PASTE JOIN`.
+            // These modifiers belong to the join keyword, not to the preceding table expression.
             size_t kw_begin = i;
             for (;;) {
               size_t end = kw_begin;
@@ -684,7 +674,7 @@ string Formatter::format_from_clause(string_view body) {
   const FormatDepthGuard guard(depth);
   const string s = trim_ascii_spaces(body);
   if (auto joins = split_joins(s); !joins.empty()) {
-    // Same layout as a join-free FROM: a multiline (subquery) source opens on
+    // Same layout as a join-free FROM. A multiline (subquery) source opens on
     // its own line, `FROM\n(`.
     const string first_source = format_table_source(joins.front().first);
     string out = first_source.find('\n') == string::npos ? "FROM " + first_source : "FROM\n" + first_source;
@@ -694,8 +684,8 @@ string Formatter::format_from_clause(string_view body) {
   return src.find('\n') == string::npos ? string("FROM ") + src : string("FROM\n") + src;
 }
 
-// The joins after the first element of split_joins(), each starting on a new
-// line: `JOIN target`, then `ON` conditions or ` USING ...`.
+// The joins after the first element of split_joins() each start on a new line.
+// For example: `JOIN target`, then `ON` conditions or ` USING ...`.
 string Formatter::format_join_segments(const vector<std::pair<string, string>>& joins) {
   const FormatDepthGuard guard(depth);
   string out;
@@ -760,9 +750,8 @@ string Formatter::format_with_item_block(const vector<string>& items) {
   size_t min_width = static_cast<size_t>(-1);
   size_t aliased_count = 0;
   bool can_align = true;
-  // `--` comments heading an item were written after the previous item's
-  // comma: they go back there (kept with the item, they took its input
-  // indentation and drifted on every pass).
+  // `--` comments that head an item were written after the comma of the previous item.
+  // They go back there, so they stay with the item. Otherwise they would take the input indentation and drift on every pass.
   vector<vector<string>> lead_comments;
 
   for (const auto& source_item : items) {
@@ -889,10 +878,9 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
     auto [expr, alias] = split_top_level_as(raw);
     const string source = trim_ascii_spaces(expr);
     expr = format_expression(expr);
-    // A boolean item too long for its line wraps before AND / OR like a
-    // condition, the continuation lines one level deeper (as a boolean
-    // argument or lambda body does); the call explosion would otherwise split
-    // one operand's call and leave the rest of the chain over the width.
+    // A boolean item that is too long for its line wraps before AND or OR, like a condition.
+    // The continuation lines are one level deeper, as in a boolean argument or a lambda body.
+    // Otherwise the call split would divide one operand's call, and the rest of the chain would stay over the width.
     if (expr.find('\n') == string::npos && !mask_sql_surface(source).has_comments &&
         utf8_width(expr) + (alias.empty() ? 0 : utf8_width(format_alias_identifier(alias)) + 4) + 5 > threshold &&
         (!split_top_level_keyword(source, "AND").empty() || !split_top_level_keyword(source, "OR").empty())) {
@@ -929,7 +917,7 @@ string Formatter::format_item_block(const vector<string>& items, bool align_alia
     const size_t nl = item.find('\n');
     if (!lines.empty() && starts_with_ci(trim_ascii_spaces(item), "--") && !lines.back().empty() && lines.back().back() == ',') {
       if (nl == string::npos) {
-        // Only a comment (`a, -- note` that ends the list): it stays on the line of the comma.
+        // A comment that ends the list, for example `a, -- note`, stays on the line of the comma.
         lines.back() += " " + trim_ascii_spaces(item);
         continue;
       }

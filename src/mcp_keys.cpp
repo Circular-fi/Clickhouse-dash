@@ -54,7 +54,7 @@ bool has_duplicates(const std::vector<std::string>& values) {
   return false;
 }
 
-// A list of strings of the request body, or the error to answer.
+// Return the list of strings from the request body, or the error to answer.
 std::optional<McpValidationError> read_string_list(const rapidjson::Value& value, const char* field,
                                                    std::vector<std::string>* out) {
   if (!value.IsArray()) return verr(field, "type", std::string(field) + " must be an array of strings");
@@ -133,20 +133,75 @@ bool mcp_parse_iso_utc(std::string_view text, int64_t* seconds) {
   tm_utc.tm_min = minute;
   tm_utc.tm_sec = second;
   const time_t t = timegm(&tm_utc);
-  // timegm normalizes 31 February to 3 March: reject what it moved.
+  // timegm normalizes 31 February to 3 March. Reject any date that it moved.
   if (tm_utc.tm_mon != month - 1 || tm_utc.tm_mday != day) return false;
   *seconds = static_cast<int64_t>(t);
+  return true;
+}
+
+bool mcp_parse_rfc3339(std::string_view text, int64_t* seconds) {
+  // The date comes first, then the time, then the zone.
+  // The zone is Z, or +HH:MM or -HH:MM.
+  // A fraction of a second is accepted and ignored.
+  if (text.size() < 20 || text[10] != 'T') return false;
+  size_t at = 19;
+  if (at < text.size() && text[at] == '.') {
+    ++at;
+    const size_t start = at;
+    while (at < text.size() && text[at] >= '0' && text[at] <= '9') ++at;
+    if (at == start || at - start > 9) return false;
+  }
+  const std::string_view zone = text.substr(at);
+  int64_t offset = 0;
+  if (zone != "Z") {
+    if (zone.size() != 6 || (zone[0] != '+' && zone[0] != '-') || zone[3] != ':' || !all_digits(zone.substr(1, 2)) || !all_digits(zone.substr(4, 2))) {
+      return false;
+    }
+    const int hours = (zone[1] - '0') * 10 + (zone[2] - '0');
+    const int minutes = (zone[4] - '0') * 10 + (zone[5] - '0');
+    if (hours > 23 || minutes > 59) return false;
+    offset = (hours * 60 + minutes) * 60;
+    if (zone[0] == '-') offset = -offset;
+  }
+  int64_t local = 0;
+  if (!mcp_parse_iso_utc(std::string(text.substr(0, 19)) + "Z", &local)) return false;
+  *seconds = local - offset;
   return true;
 }
 
 // ---- secrets ------------------------------------------------------------------
 
 std::string mcp_generate_secret() {
-  // secure_random.hpp: the system CSPRNG (getrandom, else /dev/urandom), version 4 and variant 10 set.
-  return random_uuid_v4();
+  // secure_random.hpp uses the system CSPRNG: getrandom, or /dev/urandom as the fallback.
+  // 32 bytes give 43 base64url characters.
+  static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  uint8_t bytes[32];
+  secure_random_bytes(bytes, sizeof(bytes));
+  std::string out = "mcp_";
+  uint32_t buffer = 0;
+  int bits = 0;
+  for (const uint8_t b : bytes) {
+    buffer = (buffer << 8) | b;
+    bits += 8;
+    while (bits >= 6) {
+      bits -= 6;
+      out.push_back(alphabet[(buffer >> bits) & 63]);
+    }
+  }
+  if (bits > 0) out.push_back(alphabet[(buffer << (6 - bits)) & 63]);
+  return out;
 }
 
-bool mcp_valid_secret(std::string_view secret) {
+bool mcp_valid_token(std::string_view token) {
+  if (token.size() != kMcpTokenBytes || token.substr(0, 4) != "mcp_") return false;
+  return std::all_of(token.begin() + 4, token.end(), [](char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+  });
+}
+
+bool mcp_valid_secret(std::string_view secret) { return mcp_valid_token(secret) || mcp_legacy_secret(secret); }
+
+bool mcp_legacy_secret(std::string_view secret) {
   if (secret.size() != kMcpSecretBytes) return false;
   const auto hex = [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); };
   for (size_t i = 0; i < secret.size(); ++i) {
@@ -196,11 +251,20 @@ bool mcp_parse_hash_hex(std::string_view text, McpHash* hash) {
 }
 
 std::string mcp_secret_hint(std::string_view secret) {
-  return std::string(secret.substr(0, kMcpSecretHintChars));
+  const bool token = secret.substr(0, 4) == "mcp_";
+  return std::string(secret.substr(0, token ? kMcpTokenHintChars : kMcpSecretHintChars));
 }
 
 std::string mcp_secret_mask(std::string_view hint) {
-  // The hint of a secret is its first characters, all hexadecimal; anything else (an empty hint) is not shown.
+  // The hint of an mcp_ token is `mcp_` and 8 characters.
+  // Then comes a bullet for each of the 35 other characters.
+  if (hint.size() == kMcpTokenHintChars && mcp_valid_token(std::string(hint) + std::string(kMcpTokenBytes - kMcpTokenHintChars, 'A'))) {
+    std::string out(hint);
+    for (size_t i = kMcpTokenHintChars; i < kMcpTokenBytes; ++i) out.append("\xE2\x80\xA2");
+    return out;
+  }
+  // The hint of an older key is its first characters, and they are all hexadecimal.
+  // Anything else, such as an empty hint, is not shown.
   const bool shown = hint.size() == kMcpSecretHintChars &&
                      std::all_of(hint.begin(), hint.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); });
   std::string out;
@@ -232,9 +296,13 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
                 "name must use a-z, 0-9, - and _, start with a letter or digit, and not start with ui_");
   }
 
-  // A key reads one host at most, and names it: no list, no wildcard (a client that asks for another host
-  // would otherwise have to guess which one a key reads, and which MCP user answers for it).
-  // A key reads a host: without one it could do nothing, and the page could not say which MCP user answers for it.
+  // A key reads one host at most, and it names that host.
+  // A key cannot use a list or a wildcard.
+  // Without this rule, a client that asks for another host must guess which host the key reads.
+  //
+  // The client must also guess which MCP user answers for it.
+  // A key must read a host. Without a host, the key does nothing.
+  // The page cannot say which MCP user answers for the key.
   if (key.hosts.empty()) return verr("hosts", "required", "a key needs a host: name one that has an mcp_uri");
   if (has_duplicates(key.hosts)) return verr("hosts", "duplicate", "hosts lists a name twice");
   if (key.hosts.size() > 1) return verr("hosts", "too_many", "a key reads one host at most: create one key for each host");
@@ -246,8 +314,11 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
     }
   }
 
-  // The tools of the analysis of the keys (mcp_analysis_*) are names like the others: they read no table, so any data scope will do, and a key may
-  // name one that every key has (it is harmless) or one that the configuration does not offer yet (tools/list and tools/call decide, at run time).
+  // The tools of the analysis of the keys (mcp_analysis_*) are names like the others.
+  // They read no table, so any data scope is valid.
+  // A key can name a tool that every key has. This is harmless.
+  // A key can also name a tool that the configuration does not offer yet.
+  // tools/list and tools/call decide at run time.
   if (has_duplicates(key.tools)) return verr("tools", "duplicate", "tools lists a name twice");
   const bool all_data = mcp_scope_all_data(key.databases);
   for (const auto& tool : key.tools) {
@@ -274,6 +345,11 @@ std::optional<McpValidationError> mcp_validate_key(const McpKey& key, const McpK
   if (key.timeout_seconds && (*key.timeout_seconds < 1 || *key.timeout_seconds > context.timeout_cap)) {
     return verr("timeout_seconds", "range", "timeout_seconds must be between 1 and " + std::to_string(context.timeout_cap));
   }
+  // A key can only decrease the global rate limit. With no global limit (0), a key can set any limit.
+  const int64_t rate_cap = context.rate_limit_cap > 0 ? context.rate_limit_cap : 1000000;
+  if (key.rate_limit_per_minute && (*key.rate_limit_per_minute < 1 || *key.rate_limit_per_minute > rate_cap)) {
+    return verr("rate_limit_per_minute", "range", "rate_limit_per_minute must be between 1 and " + std::to_string(rate_cap));
+  }
   return std::nullopt;
 }
 
@@ -287,7 +363,8 @@ std::optional<McpValidationError> mcp_parse_key_input(std::string_view body, Mcp
   for (const auto& m : doc.GetObject()) {
     const std::string_view name(m.name.GetString(), m.name.GetStringLength());
     if (std::none_of(std::begin(kFields), std::end(kFields), [&](const char* field) { return name == field; })) {
-      // The field names the member, cut to a length that an error message can carry.
+      // The field name names the member.
+      // The name is cut to a length that an error message can carry.
       const std::string shown(name.substr(0, 64));
       return McpValidationError{shown, "unknown_field", "unknown field " + shown + ": a key has name, hosts, tools, databases, max_rows and timeout_seconds"};
     }
@@ -358,14 +435,20 @@ void mcp_write_key(McpJsonWriter& w, const McpKey& key, std::optional<int64_t> l
   w.Key("name"); write_string(w, key.name);
   w.Key("source"); write_string(w, key.source);
   w.Key("secret_hint"); write_string(w, key.secret_hint);
-  // The secret as the page shows it: the shape of a UUID, the hint in clear (mcp_secret_mask). The secret itself is
-  // never here: the store does not have it.
+  // The secret as the page shows it: the shape of a UUID, and the hint in clear (mcp_secret_mask).
+  // The secret itself is never here. The store does not have it.
   w.Key("secret_mask"); write_string(w, mcp_secret_mask(key.secret_hint));
   write_string_list(w, "hosts", key.hosts);
   write_string_list(w, "tools", key.tools);
   write_string_list(w, "databases", key.databases);
   write_optional_int(w, "max_rows", key.max_rows);
   write_optional_int(w, "timeout_seconds", key.timeout_seconds);
+  // The subject and the expiry of a key of the configuration (mcp_key).
+  // The value is null for a key without them.
+  w.Key("subject");
+  if (key.subject.empty()) w.Null();
+  else write_string(w, key.subject);
+  write_optional_time(w, "expires_at", key.expires_at);
   write_optional_time(w, "created_at", key.created_at);
   write_optional_time(w, "last_used_at", last_used);
   w.EndObject();
@@ -469,7 +552,7 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     key.source = "ui";
     key.id = file_string(item, "id", index, true);
     key.name = file_string(item, "name", index, true);
-    // The store keeps the hash and the hint only: a key with its secret in clear is a file that ChDash does not write.
+    // The store keeps only the hash and the hint. ChDash does not write a file with a key that has its secret in clear.
     if (item.HasMember("secret")) {
       file_error("keys[" + std::to_string(index) + "] holds a secret in clear: ChDash stores only its hash. Delete the file and make the keys again");
     }
@@ -482,7 +565,11 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     if (!mcp_parse_hash_hex(file_string(item, "secret_sha256", index, true), &key.secret_hash)) {
       file_error("keys[" + std::to_string(index) + "].secret_sha256 must be 64 hex characters");
     }
-    if (key.secret_hint.size() > kMcpSecretHintChars) key.secret_hint.resize(kMcpSecretHintChars);
+    // The hint of an mcp_ token has 12 characters.
+    // The hint of an older key has 8 characters.
+    const size_t hint_chars = key.secret_hint.substr(0, 4) == "mcp_" ? kMcpTokenHintChars : kMcpSecretHintChars;
+    if (key.secret_hint.size() > hint_chars) key.secret_hint.resize(hint_chars);
+    key.legacy_token = key.secret_hint.substr(0, 4) != "mcp_";
     key.hosts = file_string_list(item, "hosts", index);
     key.tools = file_string_list(item, "tools", index);
     key.databases = file_string_list(item, "databases", index);
@@ -493,8 +580,9 @@ std::vector<McpKey> mcp_parse_key_file(std::string_view text) {
     key.timeout_seconds = file_optional_int(item, "timeout_seconds", index);
     key.created_at = file_optional_time(item, "created_at", index);
     key.updated_at = file_optional_time(item, "updated_at", index);
-    // A key that an older ChDash had switched off is a key that nobody wants: it is not loaded, so it
-    // cannot become active by the removal of the switch.
+    // A key that an older ChDash had switched off is not loaded.
+    // Nobody wants such a key.
+    // Because it is not loaded, the removal of the switch cannot make it active.
     const auto enabled = item.FindMember("enabled");
     if (enabled != item.MemberEnd() && enabled->value.IsBool() && !enabled->value.GetBool()) {
       ++index;
@@ -541,7 +629,9 @@ McpKeyStore::McpKeyStore(McpStoreOptions options) : options_(std::move(options))
     key.id = key.name;
     keys_.push_back(std::move(key));
   }
-  if (!options_.storage_file.empty()) {
+  // In the static mode, the keys of the file do not apply.
+  // config.cpp writes a warning when the file has keys.
+  if (!options_.storage_file.empty() && options_.mode != McpKeysMode::Static) {
     for (auto& key : mcp_load_key_file(options_.storage_file)) keys_.push_back(std::move(key));
   }
   for (size_t i = 0; i < keys_.size(); ++i) {
@@ -639,7 +729,7 @@ std::vector<McpKey> McpKeyStore::list() {
 McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
   std::lock_guard<std::mutex> writing(write_mu_);
   std::unique_lock<std::mutex> lock(mu_);
-  if (!options_.manage_from_ui) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
+  if (!manage_from_ui()) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.keys.mode = \"static\")");
   if (options_.storage_file.empty()) return fail(409, "storage_not_configured", "mcp.storage_file is not set, so keys cannot be created here");
   if (ui_keys_locked().size() >= kMcpMaxUiKeys) return invalid(verr("name", "range", "too many keys"));
 
@@ -647,7 +737,8 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
   key.source = "ui";
   apply_input(input, &key);
   if (auto err = mcp_validate_key(key, options_.context)) return invalid(*err);
-  // What only the running server knows: is the MCP user of the host there, may it serve the tools.
+  // Only the running server knows this.
+  // It checks that the MCP user of the host is there, and that this MCP user can serve the tools.
   if (options_.context.live_check) {
     if (auto err = options_.context.live_check(key)) return invalid(*err);
   }
@@ -668,8 +759,9 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
   key.created_at = now;
   key.updated_at = now;
 
-  // The file is written without mu_: authenticate() goes on meanwhile. write_mu_ keeps every other change out, so
-  // keys_ is still what the candidate was made from when it is swapped in.
+  // The file is written without mu_. authenticate() continues during the write.
+  // write_mu_ keeps every other change out.
+  // So keys_ is still the source of the candidate when the candidate replaces it.
   std::vector<McpKey> candidate = keys_;
   candidate.push_back(key);
   lock.unlock();
@@ -687,12 +779,13 @@ McpKeyStore::Result McpKeyStore::create(const McpKeyInput& input, int64_t now) {
 McpKeyStore::Result McpKeyStore::remove(const std::string& id) {
   std::lock_guard<std::mutex> writing(write_mu_);
   std::unique_lock<std::mutex> lock(mu_);
-  if (!options_.manage_from_ui) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.manage_from_ui = false)");
+  if (!manage_from_ui()) return fail(403, "manage_disabled", "keys are managed in the configuration (mcp.keys.mode = \"static\")");
   const auto it = std::find_if(keys_.begin(), keys_.end(), [&](const McpKey& k) { return k.id == id; });
   if (it == keys_.end()) return fail(404, "not_found", "no key has the id " + id);
   if (it->source == "config") return fail(409, "config_key", "a key of the configuration cannot be deleted here");
 
-  // A copy on purpose: keys_ is replaced below, which ends the life of *it.
+  // This is a copy on purpose.
+  // keys_ is replaced below. That ends the life of *it.
   const McpKey removed = *it;  // NOLINT(performance-unnecessary-copy-initialization)
   std::vector<McpKey> candidate = keys_;
   candidate.erase(candidate.begin() + (it - keys_.begin()));
@@ -706,19 +799,34 @@ McpKeyStore::Result McpKeyStore::remove(const std::string& id) {
   return r;
 }
 
-McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token) {
+const char* mcp_keys_mode_name(McpKeysMode mode) {
+  switch (mode) {
+    case McpKeysMode::Static: return "static";
+    case McpKeysMode::Dynamic: return "dynamic";
+    case McpKeysMode::Hybrid: return "hybrid";
+  }
+  return "hybrid";
+}
+
+McpKeyStore::AuthResult McpKeyStore::authenticate(std::string_view token, int64_t now) {
   AuthResult result;
   if (token.empty()) return result;
   result.status = AuthStatus::Unknown;
   if (token.size() > 512) return result;
   const McpHash hash = mcp_hash_secret(token);
   std::lock_guard<std::mutex> lock(mu_);
-  // Compare against every key, without an early exit.
+  // Compare against every key. Do not stop early.
   const McpKey* found = nullptr;
   for (const auto& key : keys_) {
     if (constant_time_equal(hash.data(), key.secret_hash.data(), hash.size())) found = &key;
   }
   if (!found) return result;
+  // An expired key gets the same answer as an unknown key.
+  // The caller cannot tell the two apart.
+  if (found->expires_at && *found->expires_at <= now) {
+    result.status = AuthStatus::Expired;
+    return result;
+  }
   result.key = *found;
   result.status = AuthStatus::Ok;
   return result;
@@ -754,7 +862,8 @@ McpRateStatus McpRateLimiter::peek(const std::string& key_id, int64_t now_ms, in
   status.per_minute = per_minute;
   const double capacity = static_cast<double>(per_minute);
   const double rate = capacity / 60000.0;  // tokens per millisecond
-  // The same arithmetic as allow(), on a copy: a key that has no bucket yet has a full one.
+  // The same arithmetic as allow() applies, on a copy.
+  // A key that has no bucket yet has a full bucket.
   double tokens = capacity;
   {
     std::lock_guard<std::mutex> lock(mu_);

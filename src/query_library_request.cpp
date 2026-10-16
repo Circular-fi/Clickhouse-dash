@@ -48,7 +48,7 @@ LibraryError host_mismatch(const std::string& field, const std::string& message)
 }
 
 QueryLibraryStore::Response render_error(const LibraryError& e) {
-  // The one error answer of the API (error_envelope.hpp). The library adds what a client reads to fix the call.
+  // The error answer of the API (error_envelope.hpp). The library adds what a client reads to fix the call.
   ApiError out;
   out.status = e.status;
   out.code = e.code;
@@ -123,7 +123,7 @@ std::string read_description(const rapidjson::Value* v, const std::string& field
   return s;
 }
 
-// null -> root; string -> id (existence checked by the caller).
+// null means root. A string is an id. The caller checks that the id exists.
 std::optional<std::string> read_ref(const rapidjson::Value* v, const std::string& field) {
   if (!v || v->IsNull()) return std::nullopt;
   if (!v->IsString()) throw validation(field, "type", field + " must be a string or null");
@@ -144,8 +144,8 @@ std::string read_sql(const rapidjson::Value* v, const std::string& field, size_t
   return s;
 }
 
-// A body field holding a host id: absent / null -> nullopt (the store then
-// answers "required"); anything but a string is a type error.
+// A body field that holds a host id: absent or null gives nullopt. The store then
+// answers "required". A value other than a string is a type error.
 std::optional<std::string> read_host_field(const rapidjson::Value* v, const std::string& field) {
   if (!v || v->IsNull()) return std::nullopt;
   if (!v->IsString()) throw validation(field, "type", field + " must be a string");

@@ -1,9 +1,9 @@
-// Synthetic Traces search / analytics answers for cases the OTel fixture
-// lacks (error spans, missing parents, many services, close percentiles).
+// Synthetic answers for the Traces search and analytics. They cover cases that the OTel fixture lacks.
+// These cases are error spans, missing parents, many services, and close percentiles.
 
 const MS = 1e6;
 
-// Spans are in ms of the trace; start offsets are minutes before the range end.
+// Span times are in milliseconds of the trace. Start offsets are in minutes before the end of the range.
 export const SYNTHETIC_TRACES = [
   {
     trace_id: '0af7651916cd43dd8448eb211c80319c', minutesAgo: 5, service: 'frontend', operation: 'GET /checkout',
@@ -18,8 +18,8 @@ export const SYNTHETIC_TRACES = [
   {
     trace_id: 'c1d2e3f4a5b60718293a4b5c6d7e8f90', minutesAgo: 15, service: 'mesh', operation: 'fanout',
     duration_ms: 350, spans: 20, errors: 0, missing: 0,
-    // 20 services: the one-line pills overflow into "+N". The first span
-    // order (offsets) differs from name order.
+    // There are 20 services. The one-line pills overflow into "+N".
+    // The first span order (offsets) differs from the name order.
     services: Array.from({ length: 20 }, (_, i) => [`mesh-service-${String(19 - i).padStart(2, '0')}`, 1, 0, i]),
   },
   {
@@ -61,7 +61,7 @@ export function syntheticSearch(endMs, traces = SYNTHETIC_TRACES) {
   };
 }
 
-// Close percentiles (400 / 420 / 430 / 440 ms) in 5-minute buckets.
+// These are close percentiles (400 / 420 / 430 / 440 ms) in 5-minute buckets.
 export function syntheticAnalytics(startMs, endMs) {
   const bucket = 300_000;
   const first = Math.floor(startMs / bucket) * bucket;
@@ -77,7 +77,7 @@ export function syntheticAnalytics(startMs, endMs) {
   };
 }
 
-// A trace detail answer: one span per service, children of the root span.
+// A trace detail answer has one span for each service. Each span is a child of the root span.
 export function syntheticTrace(trace, endMs = Date.now()) {
   const startNs = Math.round(endMs - trace.minutesAgo * 60_000) * MS;
   const spans = trace.services.map(([name, , errors, firstMs], i) => {
@@ -103,8 +103,8 @@ export function syntheticTrace(trace, endMs = Date.now()) {
   return { source_host_id: 'local', trace_id: trace.trace_id, range_source: 'synthetic', truncated: false, spans };
 }
 
-// Answers every search / analytics / trace request of the page with the
-// synthetic payloads for the requested window; returns the searches seen.
+// Answers every search, analytics and trace request of the page. It answers with the synthetic payloads for the requested window.
+// It returns the searches that it saw.
 export async function mockTraceResults(page, { traces = SYNTHETIC_TRACES } = {}) {
   const searches = [];
   await page.route('**/api/traces/trace?**', (route) => {
@@ -124,15 +124,15 @@ export async function mockTraceResults(page, { traces = SYNTHETIC_TRACES } = {})
   return searches;
 }
 
-// Attribute facets: 25 keys (span + resource), sampled (estimated) counts.
+// Attribute facets: 25 keys (span and resource), with sampled (estimated) counts.
 export const FACET_KEYS = [
   ['span', 'http.method', 1200],
   ['resource', 'deployment.environment', 1100],
   ...Array.from({ length: 23 }, (_, i) => ['span', `app.key${String(i).padStart(2, '0')}`, 900 - i]),
 ];
 
-// Serves /api/traces/facets and /api/traces/facet_values (25 keys, values
-// for http.method and deployment.environment); returns the requests seen.
+// Serves /api/traces/facets and /api/traces/facet_values. The answers have 25 keys, and values
+// for http.method and deployment.environment. It returns the requests that it saw.
 export async function mockTraceFacets(page) {
   const seen = { keys: [], values: [] };
   await page.route('**/api/traces/facets?**', (route) => {
@@ -151,10 +151,10 @@ export async function mockTraceFacets(page) {
   return seen;
 }
 
-// Services view (/api/traces/services and /services/db): four services with
-// per-minute series; the drill-down adds endpoints, slowest spans (synthetic
-// traces, so opening one loads its mocked detail) and two releases. The OTel
-// fixture has no service.version nor db.* attributes, hence the mocks.
+// Services view (/api/traces/services and /services/db). The view has four services with per-minute series.
+// The drill-down adds endpoints, the slowest spans and two releases. The spans are synthetic traces,
+// so a click on one loads its mocked detail. The OTel fixture has no service.version and no db.* attributes.
+// That is why these mocks exist.
 export const SYNTHETIC_SERVICES = [
   // name, spans, errors, p50 ms, p95 ms, p99 ms, total time weight
   ['checkout', 36000, 720, 40, 180, 420, 9],
@@ -214,7 +214,7 @@ export const SYNTHETIC_DB_STATEMENTS = [
   ['checkout', 'INSERT INTO orders (id, total) VALUES (?, ?)', 'postgresql', 900, 0, 95 * 1e9, 210 * MS],
 ];
 
-// Mocks both services endpoints; returns the requests seen (URLSearchParams).
+// Mocks both services endpoints. It returns the requests that it saw, as URLSearchParams.
 export async function mockTraceServices(page, { estimated = false, releases = true, statements = SYNTHETIC_DB_STATEMENTS, dbSupported = true } = {}) {
   const seen = { services: [], db: [] };
   // The service / operation pickers list the synthetic pairs.

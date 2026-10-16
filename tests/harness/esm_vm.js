@@ -1,13 +1,13 @@
-// Loads the ES modules of src/static in a bare vm context, for the Node unit checks of the harness and the model tests.
+// This file loads the ES modules of src/static in a bare vm context, for the Node unit checks of the harness and the model tests.
 //
 //   const { load } = require("./esm_vm");
 //   const run = await load({ root, globals: { Intl, Date, ... }, stubs: { "app_dom.js": { dom: {...} } }, real: [...] });
 //   const { format, palette } = await run.import("app_palette.js") ...
 //
-// Every call of load() is a fresh context with fresh module instances: a check that needs another window.sessionStorage
-// loads again. A stub replaces a module by name; the names that its importers ask for and the stub does not give are
-// deep stubs (callable, any property is one too), so the module under test links without the page behind it. Run it
-// with `node --experimental-vm-modules`.
+// Each call of load() creates a fresh context with fresh module instances. A check that needs another window.sessionStorage must call load() again.
+// A stub replaces a module by name. The names that the importers ask for, and that the stub does not give, become deep stubs.
+// A deep stub is callable, and every property of it is a deep stub too. This lets the module under test link without the page behind it.
+// Run it with `node --experimental-vm-modules`.
 "use strict";
 
 const fs = require("fs");
@@ -18,7 +18,7 @@ function memoryStorage(data = new Map()) {
   return { getItem: (key) => (data.has(key) ? data.get(key) : null), setItem: (key, value) => data.set(key, String(value)), removeItem: (key) => data.delete(key) };
 }
 
-// Callable, and every property is one more such function.
+// A deep stub is callable. Every property of a deep stub is another deep stub.
 function deepStub() {
   const target = function () {};
   return new Proxy(target, {
@@ -28,7 +28,7 @@ function deepStub() {
   });
 }
 
-// The names any module of src/static imports from `file`: a stub gives all of them.
+// The function gives the names that any module of src/static imports from `file`. A stub gives all of them.
 function namesImported(staticDir, file) {
   const names = new Set();
   const pattern = /^import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["'];/gm;
@@ -81,10 +81,10 @@ async function load({ root, globals = {}, stubs = {}, window = null } = {}) {
   return {
     context,
     window: sandbox.window,
-    // The namespace of a module (its exports), evaluated with everything it imports.
+    // The namespace of a module, which holds its exports. This evaluates the module with everything it imports.
     async import(file) {
       const module = await get(file);
-      // Node links the dependencies the linker hands back, recursively, and evaluates them before the module.
+      // Node links the dependencies that the linker returns, recursively. Node evaluates them before the module.
       if (module.status === "unlinked") await module.link(async (specifier) => get(specifier.replace(/^\.\//, "").replace(/\?.*$/, "")));
       if (module.status === "linked") await module.evaluate();
       return module.namespace;

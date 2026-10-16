@@ -74,7 +74,7 @@ std::string search_json(const SearchAnswer& answer) {
       w.EndArray();
     }
     w.EndArray();
-    // With a restricted allowlist a parent may be absent because it is hidden: the count would reveal it.
+    // With a restricted allowlist, a parent can be absent because it is hidden. The count can reveal the hidden parent.
     w.Uint64(answer.all_services ? row.missing_parents : 0);
     w.EndArray();
   }
@@ -395,7 +395,8 @@ std::string services_db_json(const ServicesDbAnswer& answer) {
   w.Key("supported"); w.Bool(out.supported);
   w.Key("detail"); write_json_text(w, answer.detail);
   w.Key("range"); w.StartArray(); w.Int64(answer.start_ms); w.Int64(answer.end_ms); w.EndArray();
-  // Estimated only when a cap stopped the read (the bloom filter index makes read_rows fall short of total_rows without one).
+  // The answer is estimated only when a cap stopped the read. The bloom filter index can make read_rows smaller than total_rows
+  // when no cap is set.
   w.Key("estimated"); w.Bool(out.read.read_rows >= kServicesDbReadRowsCap || timed_out(out.read));
   w.Key("timing_ms"); w.StartObject(); w.Key("query"); w.Uint64(out.read.elapsed_ms); w.EndObject();
   w.Key("columns"); w.StartArray();
@@ -462,7 +463,7 @@ std::string prefill_json(const PrefillAnswer& answer) {
   w.Key("truncated"); w.Bool(value.truncated);
   w.Key("tag_filtered"); w.Bool(answer.tag_filtered);
   w.Key("estimated"); w.Bool(value.estimated);
-  // The scan that filled the cache entry: passes run and rows read.
+  // The scan that filled the cache entry. It gives the number of passes and the rows read.
   w.Key("scan"); w.StartObject();
   w.Key("passes"); w.Int(value.passes);
   w.Key("read_rows"); w.Uint64(value.read_rows);
@@ -470,7 +471,7 @@ std::string prefill_json(const PrefillAnswer& answer) {
   w.EndObject();
   w.Key("pairs"); w.StartArray();
   for (const auto& [service, operation] : value.pairs) {
-    // The count column is kept for payload compatibility (existence only).
+    // The count column is kept for compatibility of the payload. It shows existence only.
     w.StartArray(); write_json_text(w, service); write_json_text(w, operation); w.Uint64(1); w.EndArray();
   }
   w.EndArray();
@@ -621,7 +622,7 @@ std::string span_json(const SpanAnswer& answer) {
 
 namespace {
 
-// start_ns is also sent as text: epoch nanoseconds pass 2^53, and the context keyset cursor must be exact.
+// start_ns is also sent as text. Epoch nanoseconds are larger than 2^53. The context keyset cursor must be exact.
 void write_span_row(Writer& w, const SpanRow& row, bool with_links, bool all_services) {
   w.StartObject();
   w.Key("timestamp"); write_json_text(w, row.timestamp);

@@ -176,8 +176,8 @@ test('explorer captures file tree, all table views, graphs and function document
   await expect(page.locator('#explorerDetailName')).toContainText('weather_observations');
   await expect(page.locator('#explorerDetailMeta')).not.toContainText('unknown engine');
 
-  // MergeTree tables open on Columns; Preview, Storage, Lineage and DDL are
-  // their own tabs, and the About panel sits beside (or above) every tab.
+  // MergeTree tables open on Columns. Preview, Storage, Lineage and DDL are
+  // their own tabs. The About panel sits beside, or above, every tab.
   const tabNames = await page.locator('#explorerDetailTabs').getByRole('tab').allTextContents();
   expect(tabNames.filter((name) => name !== 'Operations')).toEqual(['Columns', 'Preview', 'Storage', 'Lineage', 'DDL']);
   for (const [name, capture] of [
@@ -199,7 +199,7 @@ test('explorer captures file tree, all table views, graphs and function document
     await captureState(page, testInfo, capture);
   }
 
-  // Replicated table: replication banner first, Operations tab with sections.
+  // A replicated table shows the replication banner first, then the Operations tab with sections.
   await page.goto('/explorer/catalog/chdash_repl/replicated_events/operations');
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_repl.replicated_events', { timeout: 15_000 });
   await expect(page.locator('#explorerSummaryCards .explorerReplicaBanner')).toBeVisible();
@@ -238,8 +238,8 @@ test('explorer captures file tree, all table views, graphs and function document
   await captureState(page, testInfo, 'explorer-function-markdown');
 
   await page.locator('#explorerCatalogTab').click();
-  // The Catalog is a page of its own: it opens in Browse, the surface of the database detail (in
-  // Graph a database click focuses the graph).
+  // The Catalog is a page of its own. It opens in Browse, the surface of the database detail. In
+  // Graph, a click on a database focuses the graph.
   await expect(page).toHaveURL(/\/explorer\/catalog$/);
   await expect(page.locator('#explorerModeBrowse')).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('#explorerGraphPane')).toBeHidden();
@@ -257,13 +257,13 @@ test('explorer captures the database storage and a table Storage tab', async ({ 
   await openExplorerDatabase(page);
   await page.locator('.explorerTreeDatabase').filter({ hasText: 'chdash_ui' }).first().click();
   await expect(page.locator('#explorerDatabaseObjects')).toBeVisible({ timeout: 15_000 });
-  // The database page: its size band, its objects, then its disks (no tabs).
+  // The database page shows its size band, its objects, and then its disks. It has no tabs.
   await page.locator('#explorerDatabaseStorage').scrollIntoViewIfNeeded();
   await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#explorerDatabaseDisks tbody tr').first()).toBeVisible();
   await captureState(page, testInfo, 'explorer-database-storage');
 
-  // The system database: many tables, a treemap with a tooltip.
+  // The system database has many tables and a treemap with a tooltip.
   await page.goto('/explorer/catalog/system?tab=storage');
   await expect(page.locator('#explorerDetailName')).toHaveText('system', { timeout: 15_000 });
   await expect(page.locator('#explorerDatabaseStorageStrip, #explorerDatabaseTreemap').first()).toBeVisible({ timeout: 15_000 });
@@ -283,7 +283,7 @@ test('system captures the Overview top to bottom, Queries, a query shape, Disks 
   await expect(page.locator('#systemChart-cpu .chartCore canvas')).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.systemActivitySection').first()).toBeVisible({ timeout: 20_000 });
   await captureState(page, testInfo, 'system-overview');
-  // The Overview scrolls: its performance and activity parts in view.
+  // The Overview scrolls. Its performance and activity parts are in view.
   await page.locator('#systemPart-performance').scrollIntoViewIfNeeded();
   await captureState(page, testInfo, 'system-overview-performance');
   await page.locator('#systemPart-activity').scrollIntoViewIfNeeded();
@@ -294,7 +294,7 @@ test('system captures the Overview top to bottom, Queries, a query shape, Disks 
   await page.locator('#systemQueriesTable tbody tr').first().click();
   await expect(page.locator('#systemQueryCharts .chartCore canvas').first()).toBeVisible({ timeout: 30_000 });
   await captureState(page, testInfo, 'system-query-shape');
-  // The shape is a page of its own (no section tabs): Disks is another address.
+  // The shape is a page of its own, with no section tabs. Disks has another address.
   await page.goto('/system/disks');
   await expect(page.locator('#systemDiskChart-used .chartCore canvas')).toBeVisible({ timeout: 30_000 });
   await captureState(page, testInfo, 'system-disks');
@@ -326,7 +326,7 @@ test('captures the query library panel: saved queries, preview and history', asy
   await page.locator('#queryLibraryViewSaved li.qlNode[data-kind=folder]').first().locator(':scope > .qlRow').click();
   await expect(page.locator('#queryLibraryViewSaved li.qlNode[data-id=q_parts]')).toBeVisible();
   await captureState(page, testInfo, 'query-library');
-  // A click selects the query: the pane shows it (it does not load it).
+  // A click selects the query. The pane shows the query but does not load it.
   await page.locator('#queryLibraryViewSaved li.qlNode[data-id=q_parts] > .qlRow').click();
   await expect(page.locator('#queryLibraryPreview .qlPreview__title')).toHaveText('Active parts');
   await captureState(page, testInfo, 'query-library-preview');
@@ -370,7 +370,7 @@ async function openRowDetailsForDesign(page, testInfo, suffix) {
   await page.locator('.rowDetailsMenu').getByRole('menuitem', { name: 'Details' }).click();
   const detail = page.locator('#resultTableBody tr.resultTable__detailRow');
   await expect(detail).toBeVisible();
-  // Keep the header, the expanded row and the rows pushed below it in view.
+  // Keep the header, the expanded row, and the rows below the expanded row, in view.
   await detail.evaluate((tr) => tr.closest('table').scrollIntoView({ block: 'start' }));
   await page.mouse.move(2, 2);
   await captureState(page, testInfo, `row-details${suffix}`);
@@ -411,7 +411,7 @@ for (const theme of ['dark', 'light']) {
     expect(Math.abs(panelBox.x - buttonBox.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(panelBox.y - (buttonBox.y + buttonBox.height))).toBeLessThanOrEqual(2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    // Mid-selection: a start picked, the end previewed, then a too wide range.
+    // This is the mid-selection state. A start is picked, the end is previewed, and then the range is too wide.
     const days = page.locator('#tracesTimeCalendar .timeCalendar__day:not(.is-outside)');
     await days.nth(9).click();
     await days.nth(12).hover();
@@ -443,7 +443,7 @@ for (const theme of ['dark', 'light']) {
       await captureState(page, testInfo, `${view}-filter-bar-range-${theme}`);
       await page.keyboard.press('Escape');
     }
-    // One bar height on the three views.
+    // The bars have one height on the three views.
     expect(new Set(heights).size).toBe(1);
   });
 }

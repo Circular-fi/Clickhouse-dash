@@ -1,4 +1,4 @@
-// The storage distribution of the Explorer: the bytes of every object that the runner reads, for the treemap of the System section.
+// The storage distribution of the Explorer. It gives the bytes of every object that the runner reads, for the treemap of the System section.
 #include "explorer_catalog.hpp"
 
 #include "acl_service.hpp"
@@ -24,7 +24,8 @@ bool load_explorer_storage_map(
   out.generated_at_ms = static_cast<uint64_t>(now_ms());
   out.table_limit_per_database = kStorageTablesPerDatabase;
 
-  // Visibility boundary: exactly the lazy sidebar discovery (the runner's ACL). No name reaches the response unless the runner reads it.
+  // Visibility boundary: the lazy sidebar discovery, which uses the runner ACL.
+  // No name reaches the response unless the runner reads it.
   const auto databases = acl.databases();
   if (databases.empty()) return true;
   for (const auto& database : databases) acl.objects(database);
@@ -32,8 +33,8 @@ bool load_explorer_storage_map(
     return acl.visible(database, table);
   };
 
-  // One aggregated active-parts read for every visible database. This is pure part metadata: huge tables cost the same as small ones and no
-  // data is read.
+  // Run one aggregated active-parts read for every visible database.
+  // This read uses only part metadata. Huge tables cost the same as small ones, and no data is read.
   std::unordered_map<std::string, StoragePartTotals> parts_by_table;
   auto consume_parts = [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -60,8 +61,7 @@ bool load_explorer_storage_map(
     }
   }
 
-  // Engine identity for every visible object plus lightweight totals for engines that do not own MergeTree parts (Log family, Join/Set,
-  // ...).
+  // Engine identity for every visible object. It also gives lightweight totals for engines that do not own MergeTree parts (Log family, Join/Set, ...).
   std::unordered_map<std::string, StorageTableMeta> meta_by_table;
   auto consume_tables = [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {

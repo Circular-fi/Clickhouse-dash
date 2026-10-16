@@ -11,8 +11,11 @@ namespace chdash {
 namespace sql {
 namespace {
 
-// The tokens of a text that carry meaning (no blank, no comment), with the depth of the brackets at each one. The
-// depth of an opening bracket is the one outside it; the depth of a closing bracket is the one outside it too.
+// The result holds the tokens of a text that carry meaning.
+// The tokens have no blank and no comment.
+// Each token has the depth of the brackets at that token.
+// The depth of an opening bracket is the depth outside it.
+// The depth of a closing bracket is also the depth outside it.
 struct View {
   std::string_view text;
   std::vector<Token> tokens;  // every token
@@ -69,7 +72,7 @@ std::vector<std::string_view> words_of(std::string_view keyword) {
   return words;
 }
 
-// The name that a Word or a quoted name stands for.
+// The name that a Word or a quoted name represents.
 std::string name_of(const View& v, size_t k) {
   const Token& t = v.at(k);
   if (t.kind != TokenKind::QuotedIdent) return std::string(t.text(v.text));
@@ -89,8 +92,8 @@ std::string name_of(const View& v, size_t k) {
   return out;
 }
 
-// The words that end the name of a table and start the next part of a SELECT: a bare word after the table is an alias
-// unless it is one of these.
+// These words end the name of a table. They start the next part of a SELECT.
+// A bare word after the table is an alias. It is not an alias when it is one of these words.
 bool clause_word(std::string_view word) {
   static const char* const kWords[] = {
       "WHERE", "PREWHERE", "GROUP", "ORDER", "LIMIT", "HAVING", "UNION", "JOIN", "INNER", "LEFT", "RIGHT", "FULL",
@@ -106,8 +109,8 @@ bool clause_word(std::string_view word) {
   return false;
 }
 
-// FROM that is a part of a function call, not the clause of a SELECT: EXTRACT(YEAR FROM t), TRIM(BOTH ' ' FROM s),
-// SUBSTRING(s FROM 2), and IS DISTINCT FROM.
+// FROM can be a part of a function call. It is not the clause of a SELECT.
+// Examples: EXTRACT(YEAR FROM t), TRIM(BOTH ' ' FROM s), SUBSTRING(s FROM 2), and IS DISTINCT FROM.
 bool from_of_a_function(const View& v, size_t k) {
   if (k > 0 && v.is_word(k - 1, "DISTINCT")) return true;
   // The bracket that is open at k, and the word before it.
@@ -251,7 +254,7 @@ std::vector<std::string> engine_arguments(std::string_view engine_full, std::str
     current.clear();
   };
   int level = 0;
-  // Walk every token (the blanks too: an argument keeps the spaces inside it).
+  // Read every token, the blanks too: an argument keeps the spaces inside it.
   for (size_t i = v.sig[1] + 1; i < v.tokens.size(); ++i) {
     const Token& t = v.tokens[i];
     if (t.kind == TokenKind::Punct) {
@@ -270,7 +273,7 @@ std::vector<std::string> engine_arguments(std::string_view engine_full, std::str
       }
     }
     if ((t.kind == TokenKind::String || t.kind == TokenKind::QuotedIdent) && t.closed) {
-      // 'db' is db: the marks go, a doubled mark and an escaped byte are one byte.
+      // 'db' gives db. Remove the marks. A doubled mark and an escaped byte are one byte.
       const char quote = engine_full[t.begin];
       for (size_t k = t.begin + 1; k + 1 < t.end;) {
         if (engine_full[k] == quote && engine_full[k + 1] == quote) {
@@ -287,13 +290,13 @@ std::vector<std::string> engine_arguments(std::string_view engine_full, std::str
     }
     current.append(t.text(engine_full));
   }
-  // The bracket is not closed: the arguments read so far.
+  // The bracket is not closed. The result holds the arguments that are read so far.
   return args;
 }
 
 std::vector<QualifiedName> relation_sources(std::string_view select_sql, const std::string& default_database) {
   const View v(select_sql);
-  // The names of the CTEs: `WITH a AS (...), b AS (...)`. A reference to one is not a table.
+  // The names of the CTEs, for example `WITH a AS (...), b AS (...)`. A reference to a CTE is not a table.
   std::set<std::string> ctes;
   for (size_t k = 1; k + 2 < v.size(); ++k) {
     if (!v.is_name(k) || !v.is_word(k + 1, "AS") || !v.is_punct(k + 2, '(')) continue;
@@ -302,7 +305,7 @@ std::vector<QualifiedName> relation_sources(std::string_view select_sql, const s
   std::vector<QualifiedName> result;
   std::set<std::pair<std::string, std::string>> seen;
   const auto relation_at = [&](size_t& k) -> bool {
-    // k is the first token of the name. Moves k past the name (and its alias) when it names a table.
+    // k is the first token of the name. Move k past the name and its alias when the name is a table.
     if (!v.is_name(k)) return false;
     QualifiedName name;
     std::string first = name_of(v, k);
@@ -329,7 +332,7 @@ std::vector<QualifiedName> relation_sources(std::string_view select_sql, const s
     if (from && from_of_a_function(v, k)) continue;
     size_t at = k + 1;
     if (!relation_at(at)) continue;
-    // FROM a, b: the tables of a comma join (past the alias and FINAL of each one).
+    // FROM a, b: these are the tables of a comma join. Skip the alias and FINAL of each table.
     while (from) {
       if (v.is_word(at, "AS") && v.is_name(at + 1)) at += 2;
       else if (v.is_name(at) && v.at(at).kind == TokenKind::Word && !clause_word(v.text_of(at))) at += 1;

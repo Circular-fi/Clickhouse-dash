@@ -13,12 +13,11 @@
 
 namespace chdash {
 
-// The System Overview's Activity (docs/system.md): background activity of the selected
-// server (merges, mutations, replication, Distributed send queues) plus the
-// Keeper/ZooKeeper session state. Every row that names an object is read
-// through the system context and serialized only when the runner context can
-// SHOW that object (same boundary as the storage map). Every query is a
-// fixed, allowlisted, bounded read of in-memory system tables.
+// The Activity of the System Overview (docs/system.md). It shows the background activity of the selected
+// server: merges, mutations, replication and Distributed send queues. It also shows the
+// Keeper/ZooKeeper session state. Each row that names an object is read through the system context.
+// The row is serialized only when the runner context can SHOW that object. This is the same boundary as the storage map.
+// Each query is a fixed, allowlisted and bounded read of in-memory system tables.
 
 struct SystemActivityMerge {
   std::string database;
@@ -105,12 +104,12 @@ struct SystemActivity {
   std::vector<SystemActivityReplicationQueue> replication_queue;
   std::vector<SystemActivityReplica> replicas;
   std::vector<SystemActivityDistributionQueue> distribution_queue;
-  // Sections whose system table could not be read (older server, missing
-  // grant). The section is reported unavailable instead of empty.
+  // Sections whose system table cannot be read. This happens on an older server or when a grant is missing.
+  // The section is reported as unavailable, not as empty.
   std::vector<std::string> unavailable_sections;
-  // The error of the first section that could not be read (the cause when none can).
+  // The error of the first section that cannot be read. When no section can be read, it is the cause.
   std::string unavailable_detail;
-  // Sections whose bounded read hit the row limit.
+  // Sections whose bounded read reached the row limit.
   std::vector<std::string> truncated_sections;
 };
 
@@ -128,8 +127,8 @@ struct SystemKeeperConnection {
 
 struct SystemKeeperStatus {
   uint64_t generated_at_ms = 0;
-  // false when the server has no Keeper/ZooKeeper configured (no connection
-  // row and no session metric).
+  // false when the server has no Keeper/ZooKeeper configured. In that case there is no connection
+  // row and no session metric.
   bool configured = false;
   std::vector<SystemKeeperConnection> connections;
   // Allowlisted system.metrics (current values) and system.events
@@ -142,18 +141,18 @@ struct SystemKeeperStatus {
 class AclView;
 class ChExecutor;
 
-// The total and the active replicas of a replicated table, read from Keeper (one request for each table), and what the Explorer keeps of
-// them (explorer_catalog.hpp, load_cached_replica_counts). The Activity asks for the counts of the tables of its replicas.
+// The total and the active replicas of a replicated table. They are read from Keeper, with one request for each table.
+// This also covers what the Explorer keeps of them (explorer_catalog.hpp, load_cached_replica_counts).
 struct SystemReplicaCounts {
   uint64_t total = 0;
   uint64_t active = 0;
 };
-// By "database" NUL "table"; a table whose lookup failed is absent.
+// The key is "database" NUL "table". A table whose lookup failed is absent.
 using ReplicaCountsFn = std::function<std::unordered_map<std::string, SystemReplicaCounts>(
     ChExecutor& system, const std::vector<std::pair<std::string, std::string>>& tables)>;
 
 // Activity rows are kept only when the runner reads the object (`runner_acl`).
-// At most `row_limit` rows are returned per section.
+// At most `row_limit` rows are returned for each section.
 bool load_system_activity(
     ChExecutor& system,
     const ReplicaCountsFn& replica_counts,
@@ -162,7 +161,7 @@ bool load_system_activity(
     SystemActivity& out,
     std::string* error);
 
-// Server-level Keeper session state; contains no object names.
+// Server-level Keeper session state. It contains no object names.
 bool load_system_keeper_status(
     ChExecutor& system,
     SystemKeeperStatus& out,

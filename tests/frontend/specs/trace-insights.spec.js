@@ -3,12 +3,12 @@ import { installObservers, unexpectedFailures } from '../helpers/observability.j
 import { captureCopies, copiedText as lastCopy } from '../helpers/clipboard.js';
 import { stampNs } from '../helpers/time.js';
 
-// Span insights on the trace page (app_trace_insights.js): exceptions with
-// parsed stack traces, highlighted attributes in the trace header, spans of
-// other traces linking here (/api/traces/linked_from) and the surrounding
-// context panel (/api/traces/context). The OTel fixture has no exceptions,
-// links, hosts or pods: traces and the two lookups are mocked, except for
-// one context check on a real fixture trace.
+// Span insights on the trace page (app_trace_insights.js). They cover exceptions with parsed stack traces,
+// highlighted attributes in the trace header, spans of other traces that link here (/api/traces/linked_from),
+// and the surrounding context panel (/api/traces/context).
+// The OTel fixture has no exceptions, links, hosts or pods.
+// The traces and the two lookups are mocked.
+// One context check uses a real fixture trace.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -214,7 +214,7 @@ test('exceptions: section on top of the span inspector, frames, show all, raw, c
   await expect(row(page, ID.R).locator('[data-span-exception]')).toHaveCount(0);
   await expect(row(page, ID.S).locator('[data-span-exception]')).toHaveCount(0);
 
-  // Trace header: 3 exceptions in 2 spans; the button opens the first one.
+  // Trace header: 3 exceptions in 2 spans. The button opens the first one.
   const tag = page.locator('#traceDetailStats [data-trace-exceptions]');
   await expect(tag).toContainText('3 exceptions');
   await expect(tag).toHaveAttribute('title', /3 exceptions in 2 spans: java\.lang\.IllegalStateException, KeyError, TypeError/);
@@ -245,7 +245,7 @@ test('exceptions: section on top of the span inspector, frames, show all, raw, c
   });
   expect(typeColor).toBe(errorColor);
 
-  // First 5 of 10 frames, the exception and cause lines always shown.
+  // First 5 of 10 frames. The exception and cause lines are always shown.
   await expect(java.locator('.traceStack__meta')).toHaveText('10 frames · Java · most recent call first');
   await expect(java.locator('.traceStack__frame:visible')).toHaveCount(5);
   await expect(java.locator('.traceStack__frame:visible .traceStack__fn').first()).toHaveText('com.acme.orders.OrderService.lock');
@@ -256,7 +256,7 @@ test('exceptions: section on top of the span inspector, frames, show all, raw, c
   await java.getByRole('button', { name: 'Show all 10 frames' }).click();
   await expect(java.locator('.traceStack__frame:visible')).toHaveCount(10);
   await expect(java.getByRole('button', { name: 'Show fewer frames' })).toBeFocused();
-  // Raw text and back.
+  // Switch to the raw text, and back.
   await java.getByRole('button', { name: 'Raw' }).click();
   await expect(java.locator('.traceStack__raw')).toHaveText(JAVA_STACK.replace(/\t/g, '\t'));
   await java.getByRole('button', { name: 'Frames' }).click();
@@ -265,7 +265,7 @@ test('exceptions: section on top of the span inspector, frames, show all, raw, c
   await java.getByRole('button', { name: 'Copy stack' }).click();
   await expect.poll(() => lastCopy(page)).toBe(JAVA_STACK);
 
-  // Python: the last 5 frames nearest the throw (here all 3), innermost last.
+  // Python: the last 5 frames nearest the throw (here all 3). The innermost frame is last.
   const python = items.nth(1);
   await expect(python.locator('.traceException__type')).toHaveText('KeyError');
   await expect(python.locator('.traceStack__meta')).toHaveText('3 frames · Python · most recent call last');
@@ -278,7 +278,7 @@ test('exceptions: section on top of the span inspector, frames, show all, raw, c
   await page.locator('#traceWaterfall [data-trace-expand-all]').click();
   await expect(inspector(page, ID.P).locator('.traceException__item').nth(0).locator('.traceStack__frame:visible')).toHaveCount(10);
 
-  // Span attributes: one exception, labelled as such; copy prefixes the header.
+  // Span attributes: one exception, labelled as such. Copy prefixes the header.
   await openSpan(page, ID.Q);
   const q = inspector(page, ID.Q).locator('[data-span-section="exception"]');
   await expect(q.locator('.traceException__head')).toHaveText('Exception');
@@ -353,7 +353,7 @@ test('linked from other traces: loaded when References opens, open linked trace 
   await openTrace(page);
   await openSpan(page, ID.R);
   const refs = inspector(page, ID.R).locator('[data-span-section="references"]');
-  // A root span without links still has the section (the lookup is its only content).
+  // A root span without links still has the section. The lookup is its only content.
   await expect(refs.locator(':scope > summary')).toHaveText('References');
   expect(requests).toEqual([]);
   await refs.locator(':scope > summary').click();
@@ -368,13 +368,13 @@ test('linked from other traces: loaded when References opens, open linked trace 
   // The local references keep their own list and count.
   await expect(refs.locator('.traceSpanRefs__item')).toHaveCount(0);
 
-  // Re-rendering keeps the loaded answer (no second request).
+  // A re-render keeps the loaded answer. No second request is sent.
   await page.locator('#traceWaterfall [data-trace-collapse-all]').click();
   await page.locator('#traceWaterfall [data-trace-expand-all]').click();
   await expect(inspector(page, ID.R).locator('.traceLinkedFrom__item')).toHaveCount(1);
   expect(requests).toHaveLength(1);
 
-  // Another span: its own lookup, an empty answer.
+  // Another span has its own lookup, with an empty answer.
   await openSpan(page, ID.S);
   const sRefs = inspector(page, ID.S).locator('[data-span-section="references"]');
   await expect(sRefs.locator(':scope > summary')).toHaveText('References(1)');
@@ -461,7 +461,7 @@ test('surrounding context: presets, filters, keyset paging and opening a span', 
   await expect(rows.nth(1)).toHaveClass(/is-error/);
   await expect(panel.locator('thead th')).toHaveText(['Offset', 'Time', 'Service', 'Operation', 'Duration', 'Status']);
 
-  // Host and pod need the resource attributes: P has none.
+  // Host and pod need the resource attributes. P has none.
   await expect(panel.getByRole('button', { name: 'Same host' })).toBeDisabled();
   await expect(panel.getByRole('button', { name: 'Same pod' })).toBeDisabled();
   await panel.getByRole('button', { name: 'Anything' }).click();
@@ -477,7 +477,7 @@ test('surrounding context: presets, filters, keyset paging and opening a span', 
   await expect.poll(() => requests.at(-1)?.attr_scope).toBe('resource');
   expect(requests.at(-1)).toMatchObject({ attr_key: 'service.name', attr_value: 'orders' });
 
-  // Keyset: older from the last row, newer from the first row.
+  // Keyset: older rows come from the last row, newer rows from the first row.
   await panel.getByRole('button', { name: 'Load older' }).click();
   await expect(rows).toHaveCount(8);
   const older = requests.at(-1);
@@ -489,7 +489,7 @@ test('surrounding context: presets, filters, keyset paging and opening a span', 
   await expect(rows.locator('.traceContextRow__offset').first()).toHaveText('+500 ms');
   await expect(panel.getByRole('button', { name: 'Load newer' })).toHaveCount(0);
 
-  // A row of another trace opens it on that span; the panel stays open.
+  // A row of another trace opens that trace on its span. The panel stays open.
   const target = rows.nth(0);
   const spanId = await target.getAttribute('data-context-span');
   await target.click();
@@ -497,7 +497,7 @@ test('surrounding context: presets, filters, keyset paging and opening a span', 
   await expect(panel).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/observability/traces/${TRACE_ID}`));
-  // Escape closes it and gives the focus back.
+  // Escape closes the panel and gives the focus back.
   await panel.focus();
   await page.keyboard.press('Escape');
   await expect(panel).toBeHidden();
@@ -517,7 +517,7 @@ test('surrounding context: same host / same pod send the span resource values', 
   await panel.getByRole('button', { name: 'Same pod' }).click();
   await expect.poll(() => requests.at(-1)?.filter).toBe('pod');
   expect(requests.at(-1).value).toBe('billing-7f9c');
-  // The anchor row of this trace focuses it without a reload.
+  // The anchor row of this trace takes the focus without a reload.
   await panel.getByRole('button', { name: 'Same service' }).click();
   await expect.poll(() => requests.at(-1)?.filter).toBe('service');
   await panel.getByRole('button', { name: 'Close surrounding context' }).click();

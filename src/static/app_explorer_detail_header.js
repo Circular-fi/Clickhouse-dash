@@ -1,5 +1,5 @@
-// The header of the table card: the name, the chips of what the object is (engine, health), its figures as one muted line, the warnings and the
-// replication banner.
+// The header of the table card shows the name. It shows chips for what the object is (engine and health).
+// It shows the figures as one muted line, and the warnings and the replication banner.
 
 import { dom, h } from "./app_dom.js";
 import { availableTabs } from "./app_explorer_detail_model.js";
@@ -8,7 +8,7 @@ import { healthLabel, humanEngine, isResidentMemorySummary, isViewLikeSummary, s
 import { format } from "./app_format.js";
 import { badge as badgeMod } from "./app_ui_badge.js";
 
-// A header chip: the shared badge (md, pill); the health in its status tone.
+// A header chip uses the shared badge (md, pill). The health chip uses its status tone.
 const HEALTH_TONES = { healthy: "ok", warning: "warn", error: "error" };
 
 function metaChip(text, { kind = "", title = "", dot = "" } = {}) {
@@ -29,12 +29,11 @@ function healthState(summary) {
   return health === "error" ? "error" : health === "warning" ? "warning" : "healthy";
 }
 
-// The header: chips for what the object IS (engine, health), then its
-// figures (rows, size, parts) as one muted line of text, not chips.
+// The header has chips for what the object IS (engine and health). Then it has the figures (rows, size and parts) as one muted line of text, not as chips.
 function headerChips(detail) {
   const s = detail.summary || {};
   const viewLike = isViewLikeSummary(s);
-  // The engine is a neutral chip (a chip in the accent colour reads as a link); only the health has a tone.
+  // The engine chip is neutral. A chip in the accent colour reads as a link. Only the health has a tone.
   const chips = [metaChip(humanEngine(s.engine), { kind: "engine", title: s.engine_full || s.engine || "" })];
   if (!detail._loading && !viewLike && s.health) {
     const warnings = Array.isArray(s.warnings) ? s.warnings : [];
@@ -66,7 +65,7 @@ function headerFacts(detail) {
 
 function replicationStatus(r) {
   if (!r?.available) return null;
-  // Same thresholds as the backend health classification.
+  // These thresholds are the same as the backend health classification.
   if (r.readonly || r.session_expired || Number(r.active_replicas) === 0) return "error";
   if (Number(r.active_replicas) < Number(r.total_replicas) || Number(r.queue_size) > 1000 || Number(r.absolute_delay_seconds) > 60) return "warning";
   return "healthy";
@@ -139,7 +138,7 @@ function renderDetailHeader() {
   renderReplicationBanner(detail);
 }
 
-// Tree hook: health dot of a replicated table (catalog "replicated" / "health").
+// This is a tree hook. It draws the health dot of a replicated table (catalog "replicated" / "health").
 function replicaHealthDot(table) {
   if (!table?.replicated) return null;
   const state = healthState(table);

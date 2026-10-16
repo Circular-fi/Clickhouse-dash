@@ -2,8 +2,8 @@
 
 // Text in JSON. A ClickHouse String holds bytes: a NUL byte, or bytes that are not UTF-8. JSON text is
 // UTF-8, and rapidjson's String(const char*) stops at the first NUL byte. write_json_text() writes the
-// whole length of the text and replaces each byte that does not start a valid UTF-8 sequence with U+FFFD,
-// so every JSON document of the API is valid UTF-8 and a value is never cut short.
+// whole length of the text. It replaces each byte that does not start a valid UTF-8 sequence with U+FFFD,
+// so every JSON document of the API is valid UTF-8, and a value is never truncated.
 
 #include <rapidjson/rapidjson.h>
 
@@ -13,8 +13,8 @@
 
 namespace chdash {
 
-// The length (1 to 4) of the valid UTF-8 sequence that starts at s[i], or 0 when s[i] does not start one
-// (a continuation byte, an overlong form, a surrogate, a code point above U+10FFFF, a cut sequence).
+// The length (1 to 4) of the valid UTF-8 sequence that starts at s[i]. The result is 0 when s[i] does not start one
+// (a continuation byte, an overlong form, a surrogate, a code point above U+10FFFF, or a truncated sequence).
 inline size_t utf8_sequence_length(std::string_view s, size_t i) {
   const auto at = [&](size_t k) { return static_cast<unsigned char>(s[k]); };
   const unsigned char c = at(i);
@@ -62,7 +62,7 @@ inline std::string utf8_with_replacement(std::string_view s) {
   return out;
 }
 
-// `s` without the UTF-8 sequence that a cut by bytes left incomplete at its end (the text of a
+// `s` without the incomplete UTF-8 sequence at its end. Truncation by bytes can leave such a sequence (the text of a
 // byte-bounded substring of ClickHouse, for example).
 inline std::string_view utf8_without_cut_tail(std::string_view s) {
   size_t lead = s.size();
@@ -90,7 +90,7 @@ inline void write_json_text(Writer& w, std::string_view s) {
   w.String(fixed.data(), static_cast<rapidjson::SizeType>(fixed.size()), true);
 }
 
-// The same for the name of a member (a name can come from the data: the key of an attribute, the name of a column).
+// The same rule applies to the name of a member. A name can come from the data, for example the key of an attribute or the name of a column.
 template <typename Writer>
 inline void write_json_key(Writer& w, std::string_view s) {
   if (is_valid_utf8(s)) {

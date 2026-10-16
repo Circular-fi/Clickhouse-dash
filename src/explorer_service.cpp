@@ -13,7 +13,8 @@ namespace explorer {
 
 namespace {
 
-// The keys of the caches: the host, then what the entry holds. A key has NUL bytes, so a name that holds any other byte never makes two keys one.
+// A cache key holds the host, then the content of the entry.
+// A key has NUL bytes. So a name with any other byte never merges two keys into one.
 std::string key_of(const std::string& host_id, const char* kind, size_t kind_size) { return host_id + std::string(kind, kind_size); }
 
 std::string catalog_key(const std::string& host_id) { return key_of(host_id, "\0catalog", 8); }
@@ -22,7 +23,7 @@ std::string functions_key(const std::string& host_id) { return key_of(host_id, "
 std::string storage_key(const std::string& host_id) { return key_of(host_id, "\0storage", 8); }
 std::string list_prefix(const std::string& host_id) { return key_of(host_id, "\0catalog-list", 13); }
 
-// The account of the system context of a host: the technical account, else the runner.
+// The account of the system context of a host is the technical account. If there is none, it is the runner.
 const std::string& system_uri_of(const HostSpec& host) { return host.system_uri.empty() ? host.runner_uri : host.system_uri; }
 
 std::string reason_or(const std::string& reason, const char* fallback) { return reason.empty() ? std::string(fallback) : reason; }
@@ -40,9 +41,9 @@ Result<Cached<ExplorerCatalog>> ExplorerService::catalog(const RequestContext&, 
   list_key += database_filter.empty() ? std::string("@databases") : database_filter;
   const AclAccess access = access_of_(host);
   if (refresh) {
-    // A global refresh reads the privileges of the runner and the rich graph metadata again too. A scoped database refresh touches that sidebar
-    // branch and the privileges of that database only. Nothing is removed: a read in progress is waited for, and every request that asked meanwhile
-    // shares the next one.
+    // A global refresh reads the privileges of the runner again. It also reads the rich graph metadata again.
+    // A scoped database refresh touches only that sidebar branch and the privileges of that database.
+    // Nothing is removed. A read in progress is waited for. Every request that arrives meanwhile shares the next read.
     if (database_filter.empty()) {
       acl_.invalidate(access);
       stores_.catalog.invalidate(catalog_key(host_id));
@@ -54,7 +55,7 @@ Result<Cached<ExplorerCatalog>> ExplorerService::catalog(const RequestContext&, 
     }
   }
 
-  // Served at once past its TTL while one refresh runs: the fetch owns what it uses.
+  // After its TTL, the cached answer is served at once while one refresh runs. The fetch owns the data that it uses.
   auto result = stores_.list.get_revalidating(
       list_key,
       [this, host_spec = host, access, database_filter](ExplorerCatalog& value, std::string& code, std::string& message) {
@@ -68,9 +69,9 @@ Result<Cached<ExplorerCatalog>> ExplorerService::catalog(const RequestContext&, 
 
         try {
           if (database_filter.empty()) {
-            // First paint is database names only. Do not enumerate, DESCRIBE or permission-probe every table in every database just to build the
-            // collapsed navigation tree. A database whose answer the discovery budget did not reach is listed too (its name is what SHOW gives
-            // the runner): its objects are checked when it is opened.
+            // The first paint shows only database names. Do not enumerate, DESCRIBE or permission-probe every table in every database.
+            // That work is not needed to build the collapsed navigation tree.
+            // A database that the discovery budget did not reach is listed too. Its name is what SHOW gives the runner. Its objects are checked when it is opened.
             const auto listed = acl_.databases(access);
             value = ExplorerCatalog{};
             value.generated_at_ms = static_cast<uint64_t>(now_ms());
@@ -83,9 +84,10 @@ Result<Cached<ExplorerCatalog>> ExplorerService::catalog(const RequestContext&, 
             return true;
           }
 
-          // The expanded branch needs only this database. Its objects come from the runner's ACL (SHOW TABLES and the checks as the runner), so
-          // the technical account never decides which object names are allowed to reach the browser. A branch is asked by name: its own answer
-          // decides, whether or not the kept database list names it yet (a database created since).
+          // The expanded branch needs only this database.
+          // Its objects come from the runner ACL, from SHOW TABLES and the checks as the runner.
+          // So the technical account never decides which object names reach the browser.
+          // A branch is asked by its name. Its own answer decides, even when the kept database list does not name it yet (a database created since).
           const auto objects = acl_.objects(access, database_filter);
           if (objects->objects.empty()) {
             value = ExplorerCatalog{};
@@ -266,8 +268,9 @@ Result<Cached<ExplorerTableDetail>> ExplorerService::table(const RequestContext&
 Result<Cached<ExplorerFunctionsCatalog>> ExplorerService::functions(const RequestContext&, const HostSpec& host, const std::string& host_id,
                                                                     bool refresh) const {
   using Out = Result<Cached<ExplorerFunctionsCatalog>>;
-  // Function discovery is intentionally executed with runner_uri. Unlike table observability, there is no reason to elevate this metadata query
-  // through the technical metadata account; the runner remains ClickHouse's own visibility boundary.
+  // Function discovery runs with runner_uri on purpose.
+  // Unlike table observability, there is no reason to raise this metadata query through the technical metadata account.
+  // The runner remains the visibility boundary of ClickHouse.
   auto result = stores_.functions.get(
       functions_key(host_id),
       [&](ExplorerFunctionsCatalog& value, std::string& code, std::string& message) {
@@ -325,8 +328,9 @@ Result<ExplorerPreview> ExplorerService::preview(const RequestContext&, const Ho
 // ---------------------------------------------------------------------------
 // The graph
 
-// The authorized graph of one host: runner ACL discovery, then system-context catalog and graph enrichment of only those objects. Shared by the graph
-// and definition routes so both stand on the same AllowedObjectSet boundary.
+// The authorized graph of one host. It first runs the ACL discovery of the runner.
+// Then it adds the system-context catalog and the graph data, for those objects only.
+// The graph and definition routes share it. Both routes use the same AllowedObjectSet boundary.
 Result<ExplorerService::Snapshot> ExplorerService::graph_snapshot(const HostSpec& host, const std::string& host_id, bool refresh) const {
   using Out = Result<Snapshot>;
   const AclAccess access = access_of_(host);
@@ -337,7 +341,7 @@ Result<ExplorerService::Snapshot> ExplorerService::graph_snapshot(const HostSpec
     stores_.functions.invalidate(functions_key(host_id));
   }
 
-  // Every object the runner reads, at table level (CHECK GRANT and zero-row probes as the runner, kept per identity).
+  // Every object that the runner reads, at table level. The checks are CHECK GRANT and zero-row probes, run as the runner. The result is kept per identity.
   std::shared_ptr<const AclTableSet> allowed;
   try {
     allowed = acl_.table_set(access);
@@ -347,7 +351,7 @@ Result<ExplorerService::Snapshot> ExplorerService::graph_snapshot(const HostSpec
 
   const std::string system_uri = system_uri_of(host);
   const ExplorerIdentities identities{acl_identity_key(system_uri), access.key};
-  // Both are served at once past their TTL while one refresh runs: the fetches own what they use.
+  // After their TTL, both cached answers are served at once while one refresh runs. The fetches own the data that they use.
   auto catalog_result = stores_.catalog.get_revalidating(
       catalog_key(host_id),
       [this, host_spec = host, system_uri, allowed, identities](ExplorerCatalog& value, std::string& code, std::string& message) {
@@ -411,8 +415,8 @@ Result<GraphScopeAnswer> ExplorerService::graph(const RequestContext&, const Hos
   return Out::ok(std::move(answer));
 }
 
-// What an edge/node panel explains about one logical object: its SELECT, its destination or source, and Distributed routing. Served from the cached
-// authorized graph only: an object outside AllowedObjectSet is simply absent (404), and no SQL is executed for the caller.
+// The edge or node panel explains one logical object. It shows its SELECT, its destination or source, and its Distributed routing.
+// This answer uses only the cached authorized graph. An object outside AllowedObjectSet is absent (404). No SQL runs for the caller.
 Result<DefinitionAnswer> ExplorerService::definition(const RequestContext&, const HostSpec& host, const std::string& host_id, const std::string& database,
                                                     const std::string& table, bool refresh) const {
   using Out = Result<DefinitionAnswer>;
@@ -421,7 +425,7 @@ Result<DefinitionAnswer> ExplorerService::definition(const RequestContext&, cons
   DefinitionAnswer answer;
   answer.graph = snapshot.value->graph;
   answer.stale = snapshot.value->stale;
-  // The node is found by the names of the object, not by an id that two objects could share.
+  // Find the node by the names of the object. Do not use an id, because two objects can share one id.
   for (const auto& candidate : answer.graph->nodes) {
     if (candidate.layer == "logical" && candidate.database == database && candidate.name == table) {
       answer.node = &candidate;

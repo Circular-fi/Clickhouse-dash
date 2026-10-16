@@ -1,6 +1,6 @@
-// The Traces page (traces.html, /observability/traces): the trace search with its Services and Service map tabs, the
-// duration heatmap and the Spans mode. The trace page (app_page_trace.js) runs the same search module in detail mode,
-// without these parts.
+// This is the Traces page (traces.html, /observability/traces). It has the trace search with its Services and Service map tabs, the
+// duration heatmap and the Spans mode. The trace page (app_page_trace.js) runs the same search module in detail mode.
+// It does not have these parts.
 import "./app_common.js";
 import { boot } from "./app_boot.js";
 import { facetPanel } from "./app_facet_panel.js";

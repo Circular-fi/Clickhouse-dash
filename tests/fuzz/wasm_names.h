@@ -1,5 +1,5 @@
-/* wasm_names.h: the keyword and function name sets that the page uploads to the highlight and sqlscan kernels, a small
- * fixed sample of them (tests/fuzz). Packed like pack() of the adapters: [length, code units...] per name. */
+/* wasm_names.h: the keyword and function name sets that the page uploads to the highlight and sqlscan kernels.
+ * This is a small fixed sample of them (tests/fuzz). They are packed like pack() of the adapters: [length, code units...] per name. */
 #ifndef CHDASH_FUZZ_WASM_NAMES_H
 #define CHDASH_FUZZ_WASM_NAMES_H
 
@@ -19,7 +19,7 @@ static const char *const WASM_NAME_SETS[][24] = {
   {"count", "sum", "avg", 0},
 };
 
-/* Uploads the first `sets` sets with set_names(which, data, units, count). */
+/* Upload the first `sets` sets with set_names(which, data, units, count). */
 static inline void wasm_names_upload_n(i32 (*set_names)(i32, const u16 *, i32, i32), i32 sets) {
   for (i32 which = 0; which < sets; which++) {
     i32 units = 0, count = 0;

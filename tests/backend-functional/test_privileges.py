@@ -291,21 +291,21 @@ def test_the_tools_see_what_the_mcp_user_reads_not_what_the_runner_reads():
     assert "otel" in page and "chdash_repl" in page, page
     as_tool = tool("toolmin", "explorer_catalog")
     assert as_tool["isError"] is False
-    names = set(as_tool["structuredContent"]["databases"])
+    names = set(as_tool["structuredContent"]["untrusted"]["databases"])
     assert "chdash_ui" in names and "otel" not in names and "chdash_repl" not in names, names
-    assert as_tool["structuredContent"]["host_id"] == "toolmin"
+    assert as_tool["structuredContent"]["untrusted"]["host_id"] == "toolmin"
     # A user that reads nothing sees nothing.
-    assert tool("toolnone", "explorer_catalog")["structuredContent"]["databases"] == []
+    assert tool("toolnone", "explorer_catalog")["structuredContent"]["untrusted"]["databases"] == []
     denied = tool("toolnone", "explorer_table", params={"database": "chdash_ui", "table": "weather_observations"})
-    assert denied["isError"] is True and denied["structuredContent"]["error"] == "object_not_found"
+    assert denied["isError"] is True and denied["structuredContent"]["error"]["code"] == "not_found"
 
 
 def test_a_tool_whose_grant_the_mcp_user_lacks_says_permission_denied_with_the_grant():
     # The Functions page of the Explorer: system.documentation, read by the MCP user.
     functions = tool("toolmin", "explorer_functions")
-    assert functions["isError"] is True and functions["structuredContent"]["error"] == "permission_denied"
-    assert "system.documentation" in functions["structuredContent"]["message"]
-    assert "chdash_tool_min" in functions["structuredContent"]["message"]
+    assert functions["isError"] is True and functions["structuredContent"]["error"]["code"] == "permission_denied"
+    assert "system.documentation" in functions["structuredContent"]["error"]["message"]
+    assert "chdash_tool_min" in functions["structuredContent"]["error"]["message"]
 
 
 def test_the_tools_of_traces_logs_and_metrics_read_with_the_system_user_as_the_pages_do():
@@ -322,10 +322,10 @@ def test_the_same_tool_with_a_good_mcp_user_answers():
     for name, args in (("explorer_catalog", {}), ("traces_meta", {}), ("logs_meta", {}), ("metrics_meta", {})):
         result = tool("ok", name, **args)
         assert result["isError"] is False, (name, result)
-        assert result["structuredContent"].get("source_host_id", result["structuredContent"].get("host_id")) in ("ok", None), name
+        assert result["structuredContent"]["untrusted"].get("source_host_id", result["structuredContent"]["untrusted"].get("host_id")) in ("ok", None), name
     # The list of the functions of the server is large: too large for the cap of a tool is the answer, a grant is not.
     functions = tool("ok", "explorer_functions")
-    assert functions["isError"] is False or functions["structuredContent"]["error"] == "result_too_large", functions
+    assert functions["isError"] is False or functions["structuredContent"]["error"]["code"] == "result_too_large", functions
 
 
 # ---- a runner limited to two databases (the report of the field) --------------------------------------------------------------------

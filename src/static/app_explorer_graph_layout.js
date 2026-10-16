@@ -1,6 +1,8 @@
-// The layout of the Explorer graph: where each card goes. The layered kit gives the columns and rows; the rules here keep a focus change from
-// moving what stays (stabilizeLayoutPositions), wrap a mostly disconnected graph into lanes, give Lineage one band per database and line up the
-// Storage tiers. A function takes the cards and the mode and returns positions: no DOM, no state (tests/frontend/model/explorer-graph-model.test.cjs).
+// The layout of the Explorer graph. It sets where each card goes.
+// The layered kit gives the columns and rows.
+// The rules here keep a focus change from moving what stays (stabilizeLayoutPositions).
+// They wrap a mostly disconnected graph into lanes, give Lineage one band per database and align the Storage tiers.
+// A function takes the cards and the mode. It returns positions. It uses no DOM and no state (tests/frontend/model/explorer-graph-model.test.cjs).
 
 import { NODE_HEIGHT, NODE_WIDTH, PHYSICAL_HEIGHT, X_GAP, Y_GAP, isLogicalDependencyEdge, nodeSize } from "./app_explorer_graph_model.js";
 import { graphKit } from "./app_graph_kit.js";
@@ -31,10 +33,10 @@ function stabilizeLayoutPositions(positions, idealPositions, previousLayout, edg
   }
   if (!retained.size) return;
 
-  // Existing nodes are immutable during a focus/depth transition. New nodes
-  // are placed relative to already-visible neighbours, then nudged only when
-  // necessary to avoid covering an immutable node. This deliberately trades
-  // global crossing minimisation for a stable spatial mental model.
+  // Existing nodes are immutable during a focus or depth transition.
+  // New nodes are placed relative to already-visible neighbours.
+  // The code nudges them only when it is necessary, to avoid covering an immutable node.
+  // This deliberately trades global crossing minimisation for a stable spatial mental model.
   const connectedRetained = new Map();
   for (const edge of edges || []) {
     if (retained.has(edge.from) && positions.has(edge.to) && !retained.has(edge.to)) {
@@ -152,10 +154,9 @@ function alignPhysicalStorageRows(positions, nodes, edges, level, detailMode) {
   }
 
   const rowGap = 28;
-  // Storage tiers need enough vertical runway for both the moving marker and
-  // the TTL transition label. Keep this separate from generic row spacing so
-  // tables in the same database remain compact while hot -> warm arrows stay
-  // visually obvious.
+  // Storage tiers need enough vertical runway for both the moving marker and the TTL transition label.
+  // Keep this separate from generic row spacing. Then tables in the same database stay compact.
+  // The hot -> warm arrows stay visually obvious.
   const storageTierGap = 82;
   const componentGap = 78;
   const columnGap = 150;
@@ -199,9 +200,9 @@ function alignPhysicalStorageRows(positions, nodes, edges, level, detailMode) {
         }
       }
 
-      // Buffer is always a stage above the table(s) it flushes into in the
-      // Storage view. Repeat the constraint because Buffer -> Buffer -> table
-      // chains are legal and a single pass would only align the last hop.
+      // In the Storage view, a Buffer is always a stage above the table or tables that it flushes into.
+      // Repeat the constraint. Buffer -> Buffer -> table chains are legal.
+      // A single pass would align only the last hop.
       const componentSet = new Set(component);
       const bufferEdges = edges.filter((edge) => edge.kind === "buffer"
         && componentSet.has(edge.from) && componentSet.has(edge.to)
@@ -236,17 +237,17 @@ function alignPhysicalStorageRows(positions, nodes, edges, level, detailMode) {
       continue;
     }
 
-    // Storage has a deliberately stricter visual grammar than lineage:
-    // the logical table starts the row, all volumes of its policy are stacked
-    // in one column, and the terminal sits to the right of the last tier.
-    // This prevents a ClickHouse policy from looking like an extra storage
-    // hop and keeps connected card tops aligned by row.
+    // Storage has a deliberately stricter visual grammar than lineage.
+    // The logical table starts the row. All volumes of its policy are stacked in one column.
+    // The terminal sits to the right of the last tier.
+    // This prevents a ClickHouse policy from looking like an extra storage hop.
+    // It also keeps connected card tops aligned by row.
     const bufferIds = logicalIds.filter((id) => itemById.get(id)?.kind === "buffer");
     const storedLogicalIds = logicalIds.filter((id) => itemById.get(id)?.kind !== "buffer");
 
-    // Logical cards stacked vertically belong to one storage lane. Keep the
-    // cards the same width so their centres line up and vertical Buffer ->
-    // target edges can be drawn as one straight segment.
+    // Logical cards stacked vertically belong to one storage lane.
+    // Keep the cards the same width. Then their centres align.
+    // Vertical Buffer -> target edges can be drawn as one straight segment.
     const logicalStackWidth = Math.max(0, ...logicalIds.map((id) => positions.get(id)?.width || 0));
     if (logicalStackWidth > 0) {
       for (const id of logicalIds) {
@@ -259,10 +260,9 @@ function alignPhysicalStorageRows(positions, nodes, edges, level, detailMode) {
     let logicalRight = 70;
 
     if (bufferIds.length && storedLogicalIds.length) {
-      // Storage reads top-to-bottom for Buffer routing: every Buffer card must
-      // appear above every direct downstream target. Topologically order only
-      // Buffer edges, then stack the logical cards in one column before their
-      // storage policy/volume lifecycle starts to the right.
+      // Storage reads top to bottom for Buffer routing. Every Buffer card has to
+      // appear above every direct downstream target. The code orders only the Buffer edges topologically.
+      // Then it stacks the logical cards in one column. The storage policy and volume lifecycle start to the right.
       const logicalSet = new Set(logicalIds);
       const bufferRoutingEdges = edges.filter((edge) => edge.kind === "buffer"
         && logicalSet.has(edge.from) && logicalSet.has(edge.to)
@@ -392,12 +392,11 @@ function alignPhysicalHorizontalPeers(positions, edges, detailMode) {
       if (!from || !to || Math.abs(from.x - to.x) < 24) continue;
       const storageEntry = from.node?.layer === "logical" && to.node?.layer === "physical"
         && ["storage_policy", "policy_volume", "volume_tier"].includes(String(edge?.kind || ""));
-      // Logical table -> first storage card is a single horizontal lifecycle
-      // step and should share one top row. Other physical tiers keep their
-      // ordered vertical layout.
+      // The step from logical table to first storage card is one horizontal lifecycle step.
+      // Both cards share one top row. Other physical tiers keep their ordered vertical layout.
       if (!storageEntry && (from.node?.layer !== "logical" || to.node?.layer !== "logical")) continue;
-      // Horizontal relationships read best when card tops share a row. Only
-      // apply the alignment when it cannot overlap another card in that lane.
+      // Horizontal relationships read best when card tops share a row.
+      // Apply the alignment only when it cannot overlap another card in that lane.
       if (!overlapsAt(to, from.y)) to.y = from.y;
     }
   }
@@ -422,11 +421,12 @@ function groupLogicalPositionsByDatabase(positions, detailMode, focus) {
     return ax - bx || adb.localeCompare(bdb);
   });
 
-  // A high fan-out source can have many direct consumers
-  // consumers in the same database. A single tall DB lane made Fit content
-  // shrink the whole topology until only database LOD blocks were readable.
-  // Keep each DB as one visual group, but wrap dense same-level columns into
-  // short sub-columns. This bounds group height without losing DB locality.
+  // A high fan-out source can have many direct consumers.
+  // Many of them can sit in the same database.
+  // A single tall DB lane made Fit shrink the whole topology.
+  // Then only the database LOD blocks were readable.
+  // Keep each DB as one visual group. Wrap dense same-level columns into short sub-columns.
+  // This bounds the group height without losing DB locality.
   const maxRowsPerSubcolumn = 6;
   const subcolumnGap = 28;
   const databaseGap = 58;
@@ -434,8 +434,8 @@ function groupLogicalPositionsByDatabase(positions, detailMode, focus) {
   const innerPad = 14;
   let cursorY = 64;
 
-  // Collapsed database cards form a compact grid above the expanded bands:
-  // a 20-database server overview stays a few rows of cards, not one column.
+  // Collapsed database cards form a compact grid above the expanded bands.
+  // A 20-database server overview stays a few rows of cards, not one column.
   const cardOnly = order.filter(([, items]) => items.length === 1 && items[0].node?.kind === "database_group");
   if (cardOnly.length) {
     const columnsCount = Math.max(1, Math.min(6, Math.ceil(Math.sqrt(cardOnly.length * 1.6))));
@@ -495,8 +495,9 @@ function groupLogicalPositionsByDatabase(positions, detailMode, focus) {
   }
 }
 
-// The positions of the visible cards, from the layered kit and the Lineage / Storage rules: a card per node with its box, and the box that
-// holds them. `previousLayout` (a Map) keeps the cards that stay where they were (a focus or depth change only places the new ones).
+// The positions of the visible cards come from the layered kit and the Lineage / Storage rules.
+// The result has a card per node with its box, and the box that holds them.
+// `previousLayout` (a Map) keeps the cards that stay where they were. A focus or depth change only places the new cards.
 function layoutNodes({ nodes, edges, detailMode, focus = null, focusedId = null, previousLayout = null, preserveIds = null }) {
   const xGap = detailMode === "physical" ? 138 : X_GAP;
   const stableNodeCompare = (a, b) => {
@@ -504,9 +505,9 @@ function layoutNodes({ nodes, edges, detailMode, focus = null, focusedId = null,
     if (a.layer !== b.layer) return a.layer === "logical" ? -1 : 1;
     return String(a.name).localeCompare(String(b.name));
   };
-  // Lineage is assigned to a *global* row grid (kit.layered rowGrid): a node
-  // in column N can stay on the exact row of its parent/child even when
-  // another column has a different number of nodes. Storage packs columns.
+  // Lineage uses a *global* row grid (kit.layered rowGrid).
+  // A node in column N can stay on the exact row of its parent or child.
+  // This holds even when another column has a different number of nodes. Storage packs columns.
   const lineageRowPitch = detailMode === "logical"
     ? Math.max(NODE_HEIGHT, ...nodes.filter((node) => node.layer === "logical").map((node) => nodeSize(node, detailMode).height)) + Y_GAP
     : null;
@@ -531,12 +532,12 @@ function layoutNodes({ nodes, edges, detailMode, focus = null, focusedId = null,
   });
   const levels = [...new Set(level.values())];
 
-  // If the graph is mostly disconnected, the topological algorithm puts all
-  // nodes in one very tall column. Wrap those nodes into deterministic lanes.
+  // If the graph is mostly disconnected, the topological algorithm puts all nodes in one very tall column.
+  // Wrap those nodes into deterministic lanes.
   if (levels.length <= 1 && nodes.length > 18) {
     positions.clear();
     const rowsPerColumn = Math.max(8, Math.ceil(Math.sqrt(nodes.length * 1.7)));
-    // The tallest card, once: the rows of a lane are as high as it (ARCH-F-114).
+    // The tallest card, once. The rows of a lane are as high as this card (ARCH-F-114).
     const rowHeight = (detailMode === "logical" ? Math.max(NODE_HEIGHT, ...nodes.map((candidate) => nodeSize(candidate, detailMode).height)) : NODE_HEIGHT) + Y_GAP;
     nodes.slice().sort((a, b) => `${a.database}.${a.name}`.localeCompare(`${b.database}.${b.name}`)).forEach((node, index) => {
       const col = Math.floor(index / rowsPerColumn);

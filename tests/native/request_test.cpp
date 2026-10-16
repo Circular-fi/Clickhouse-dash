@@ -1,6 +1,7 @@
-// Unit tests of the way a request is served: the admission of the heavy work (src/admission.hpp), the context of a request
-// (src/request_context.cpp), the routes that are also callable in the process (src/routed_server.hpp), and the jobs of Deep
-// Analyze (src/deep_analysis_jobs.hpp). No ClickHouse is needed.
+// Unit tests of the way that a request is served. They test these parts:
+// the admission of the heavy work (src/admission.hpp), the context of a request (src/request_context.cpp),
+// the routes that the process can also call (src/routed_server.hpp), and the jobs of Deep Analyze (src/deep_analysis_jobs.hpp).
+// No ClickHouse is needed.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_REQUEST_TESTS=ON
 //        cmake --build build --target chdash_request_test
@@ -62,7 +63,7 @@ void test_admission_limits_each_key() {
   auto a = admission.acquire("heavy|a", 2, 0ms);
   auto b = admission.acquire("heavy|a", 2, 0ms);
   CHECK(a && b);
-  // The third has to wait, and with no wait it is refused at once.
+  // The third request must wait. With no wait, the code refuses it at once.
   CHECK(!admission.acquire("heavy|a", 2, 0ms));
   CHECK_EQ(stat_of(admission, "heavy|a").in_use, uint64_t(2));
   CHECK_EQ(stat_of(admission, "heavy|a").refused, uint64_t(1));
@@ -70,7 +71,7 @@ void test_admission_limits_each_key() {
   // Another host and another class have their own places.
   CHECK(admission.acquire("heavy|b", 2, 0ms));
   CHECK(admission.acquire("analysis|a", 1, 0ms));
-  // A place that is given back is free again.
+  // A released place is free again.
   a.reset();
   CHECK_EQ(stat_of(admission, "heavy|a").in_use, uint64_t(1));
   CHECK(admission.acquire("heavy|a", 2, 0ms));
@@ -152,7 +153,7 @@ void test_admission_many_threads_never_pass_the_limit() {
 // ---- the context of a request ----
 
 void test_the_context_of_a_thread() {
-  // Outside of every scope: a browser, with no bounds.
+  // Outside of every scope, a browser has no bounds.
   CHECK(!current_request_context().is_mcp());
   CHECK(current_request_context().route.empty());
   CHECK(ChQueryScope::current() == nullptr);
@@ -177,7 +178,7 @@ void test_the_context_of_a_thread() {
       CHECK_EQ(current_request_context().caller_id, std::string("key-1"));
       CHECK_EQ(ChQueryScope::current()->log_comment, std::string("chdash-mcp key=key-1"));
     }
-    // The inner scope ended: the outer one is back.
+    // The inner scope ends. The outer scope is active again.
     CHECK(!current_request_context().is_mcp());
     CHECK_EQ(ChQueryScope::current()->log_comment, std::string("chdash-logs"));
   }
@@ -194,7 +195,7 @@ void test_the_context_does_not_cross_threads() {
   bool other_thread_is_mcp = true;
   std::thread other([&] { other_thread_is_mcp = current_request_context().is_mcp(); });
   other.join();
-  // A request of a browser that another worker serves never sees the context of a call of MCP.
+  // A browser request that another worker serves never sees the context of an MCP call.
   CHECK(!other_thread_is_mcp);
 }
 
@@ -245,7 +246,7 @@ void test_a_route_runs_in_the_process() {
   CHECK_EQ(created.body, std::string("{\"a\":1}"));
   CHECK_EQ(calls, 1);
 
-  // A path that no route matches is not run, and the answer is not touched.
+  // The code does not run a path that no route matches. It does not change the answer.
   httplib::Request missing;
   missing.method = "GET";
   missing.path = "/api/other";
@@ -297,7 +298,7 @@ void test_deep_jobs_run_end_and_are_read_by_their_host() {
   DeepAnalysisJobs jobs(4, 1024, std::chrono::minutes(10));
   const auto a = jobs.start("h1", "q1", "job-a");
   CHECK(a.created && a.control);
-  // The same query while its job runs is the same job: nothing new starts.
+  // The same query, while its job runs, is the same job. Nothing new starts.
   const auto again = jobs.start("h1", "q1", "job-other");
   CHECK(!again.created && again.job_id == "job-a" && !again.control);
   CHECK(jobs.start("h2", "q1", "job-b").created);  // another host: another job
@@ -312,7 +313,7 @@ void test_deep_jobs_run_end_and_are_read_by_their_host() {
   CHECK(jobs.snapshot("job-a", "h1", &job));
   CHECK(job.state == DeepJobState::Finished && job.result_json && *job.result_json == "{\"plan\":1}");
   CHECK_EQ(jobs.retained_bytes(), size_t(10));
-  // A job that ended is not a running job any more: the query can start another one.
+  // A job that ends is no longer a running job. The query can start another job.
   CHECK(jobs.start("h1", "q1", "job-c").created);
   jobs.fail("job-c", "deep_analysis_failed", "boom", 502);
   CHECK(jobs.snapshot("job-c", "h1", &job));
@@ -338,7 +339,7 @@ void test_deep_jobs_cancel() {
   DeepJobSnapshot job;
   CHECK(jobs.snapshot("job-a", "h1", &job) && job.state == DeepJobState::Canceled);
   CHECK(jobs.running_controls().empty());
-  // Canceling a job that ended is accepted and does nothing.
+  // A cancel of a job that already ended is accepted, and it does nothing.
   std::shared_ptr<DeepJobControl> none;
   CHECK(jobs.request_cancel("job-a", "h1", &none) && !none);
   // A job that never started leaves no trace.
@@ -348,7 +349,7 @@ void test_deep_jobs_cancel() {
 }
 
 void test_deep_jobs_are_bounded() {
-  // At most 3 jobs: the oldest that ended goes first, a job that runs never goes.
+  // At most 3 jobs. The oldest job that ended goes first. A job that runs never goes.
   DeepAnalysisJobs jobs(3, 1 << 20, std::chrono::minutes(10));
   jobs.start("h", "q0", "running");
   for (int i = 1; i <= 5; ++i) {
@@ -375,7 +376,7 @@ void test_deep_jobs_are_bounded() {
   CHECK(!bytes.snapshot("r0", "h", &job) && !bytes.snapshot("r1", "h", &job));
   CHECK(bytes.snapshot("r3", "h", &job));
 
-  // A result is kept for the retention, then it is gone.
+  // A result is kept for the retention period. Then the result is removed.
   DeepAnalysisJobs brief(10, 1 << 20, 20ms);
   brief.start("h", "q", "j");
   brief.finish("j", "{}");
@@ -428,13 +429,13 @@ void test_export_store_counts_the_bytes_of_the_entries_it_holds() {
   };
   CHECK(store.put(job("a", std::string(100, 'x'))));
   CHECK_EQ(store.retained_sql_bytes(), size_t(100));
-  // An id that is already pending is refused, and its bytes are not counted (the counter followed the emplace before).
+  // The code refuses an id that is already pending. Its bytes are not counted. The counter followed the emplace before.
   std::string error;
   CHECK(!store.put(job("a", std::string(50, 'y')), &error));
   CHECK(!error.empty());
   CHECK_EQ(store.retained_sql_bytes(), size_t(100));
   CHECK_EQ(store.size(), size_t(1));
-  // The one-time capability: a second consume finds nothing, and the bytes go with the job.
+  // The one-time capability: a second consume finds nothing. The bytes go with the job.
   CHECK(store.consume("a", "h").has_value());
   CHECK(!store.consume("a", "h").has_value());
   CHECK_EQ(store.retained_sql_bytes(), size_t(0));

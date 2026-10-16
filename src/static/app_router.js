@@ -1,6 +1,6 @@
-// ns.router: the one owner of the address bar and the session history.
-// No other module calls history.pushState / replaceState / back / go or
-// listens to popstate (tests/harness/test_ui_router_contract.py).
+// ns.router: the only owner of the address bar and the session history.
+// No other module calls history.pushState / replaceState / back / go.
+// No other module listens to popstate (tests/harness/test_ui_router_contract.py).
 //
 //   router.base() -> "" or the app's base path ("/chdash")
 //   router.url(path) -> base + app path ("/explorer" -> "/chdash/explorer")
@@ -10,51 +10,52 @@
 //   router.state() -> the entry's state ({ chdash: 1, view, ...owner state })
 //
 //   router.push(update, opts) / router.replace(update, opts) -> written?
-//     update: { name: value | [values] | null } merged into the params
-//             (null, "" and [] drop the parameter), a URLSearchParams or a
-//             query string (the whole query), or fn(params) mutating a copy
+//     update: { name: value | [values] | null } merged into the params.
+//             null, "" and [] drop the parameter. The update can also be a URLSearchParams or a
+//             query string (the whole query), or fn(params) that changes a copy.
 //     opts:   path  the app path to write (default: the current one)
 //             params the params the update applies to (default: current)
 //             href  a whole address (pathname?search#hash) instead
-//             hash  the hash (kept while the path stays)
+//             hash  the hash (the hash stays while the path stays the same)
 //             view  the view the entry belongs to (state.view)
 //             state the owner's own entry state (a key set to undefined
-//                   is dropped on replace)
-//     A push of the current address replaces the entry; a write that
-//     changes neither the address nor the state is a no-op.
+//                   is removed on replace)
+//     A push to the current address replaces the entry. A write that
+//     changes neither the address nor the state does nothing.
 //   router.write(mode, update, opts): mode "push" | "replace" | "none"
 //   router.back(steps = 1)
 //
 //   router.on(match, handler(route, event)) -> off()
-//     Back / Forward: every handler whose match accepts the new entry runs,
-//     in registration order. match: an app path prefix ("/observability"
-//     matches it and what is under it; "" every path), a RegExp tested on
-//     the path, or fn(route). One popstate listener serves them all.
+//     Back / Forward: every handler whose match accepts the new entry runs.
+//     The handlers run in registration order. The match is one of three kinds:
+//     an app path prefix ("/observability" matches it and what is under it; "" matches every path),
+//     a RegExp tested on the path, or fn(route). One popstate listener serves all handlers.
 //
 //   router.owner(name, { view, path, params }) -> handle (one per name)
-//     view: the ns.lifecycle scope that must be shown for the owner to
-//       write (default: name), a predicate, or null (always);
-//     path / params: the owner's address and its full params (fn), the
+//     view: the ns.lifecycle scope that must be visible for the owner to write.
+//       The default is name. The value can also be a predicate, or null (always).
+//     path / params: the owner's address and its full params (fn). They are the
 //       base of every write.
 //     handle.active(), handle.push(update?, opts), handle.replace(...),
 //     handle.write(mode, update?, opts), handle.panel(param)
-//     A hidden owner never writes (the calls return false).
+//     A hidden owner does not write. The calls return false.
 //
 //   router.panel(name, { owner }) -> the URL parameter of a detail panel
-//     get()        the value in the address ("" when none)
-//     open(value)  pushes an entry (replaces when another value is open)
-//     move(value)  replaces (next / previous inside the open panel)
-//     close()      Back when the entry is the panel's own (pushed by open
-//                  over the same address), else replaces without it;
-//                  returns true when it went Back
+//     get()        the value in the address ("" when there is none)
+//     open(value)  pushes an entry. It replaces the entry when another value is open.
+//     move(value)  replaces the entry. Use it for next and previous inside the open panel.
+//     close()      goes Back when the entry is the panel's own (pushed by open
+//                  over the same address). Otherwise it replaces the entry without the parameter;
+//                  it returns true when it goes Back
 //     owned()      whether the entry is the panel's own
 //
 //   router.debug() -> { popstateListeners, routes, owners } (tests)
 //
-// Route vocabulary (docs/ui-foundations.md, "Routes"): the path names the
-// page, the view and the entity; ?tab= the sub-view of what the path shows;
-// ?mode= the presentation of the same scope; detail panels one parameter
-// each. Former names are read-only aliases rewritten with replace on load.
+// Route vocabulary (docs/ui-foundations.md, "Routes"). The path names the page, the view and the entity.
+// The ?tab= parameter names the sub-view of what the path shows.
+// The ?mode= parameter names the presentation of the same scope.
+// Each detail panel uses one parameter.
+// Former names are read-only aliases. The router rewrites them with replace on load.
 
 import { lifecycle } from "./app_ui_layers.js";
 
@@ -121,7 +122,7 @@ function clean(value) {
   return value;
 }
 
-// The address a write produces: [pathname, search, hash].
+// The address that a write produces: [pathname, search, hash].
 function target(update, opts) {
   const l = loc();
   let pathname = l.pathname;
@@ -268,8 +269,8 @@ function panel(name, { owner: own = null } = {}) {
   const marker = `detail:${param}`;
   const writable = () => !own || own.active();
   const view = () => (own ? { view: own.name } : {});
-  // The address without the panel's parameter: open() records it, close()
-  // goes Back only when the entry still shows it (nothing else changed).
+  // The address without the panel's parameter. open() records this address.
+  // close() goes Back only when the entry still has this address. Nothing else must have changed.
   const under = () => {
     const params = new URLSearchParams(loc().search);
     params.delete(param);

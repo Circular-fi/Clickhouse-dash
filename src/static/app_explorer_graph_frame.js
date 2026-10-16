@@ -1,4 +1,6 @@
-// One frame of the Explorer graph: the cards, the edges and the labels under the camera, and the minimap of a graph that does not fit.
+// One frame of the Explorer graph.
+// It draws the cards, the edges and the labels under the camera.
+// It also draws the minimap of a graph that does not fit.
 
 import { dom } from "./app_dom.js";
 import { drawEdge, drawEdgeLabels, edgeDashPattern, lineageEdgeShouldAnimate } from "./app_explorer_graph_edges.js";
@@ -16,9 +18,9 @@ function graphHasClippedElements() {
   return kit.anyClipped(model.layout.values(), model, main.width, main.height);
 }
 
-// The whole graph in the corner as soon as any card is clipped (never at
-// Fit, which shows them all). It mirrors the active projection with the
-// same routed geometry as the main canvas.
+// The minimap shows the whole graph in the corner as soon as any card is clipped.
+// It never appears at Fit, which shows all cards.
+// It mirrors the active projection with the same routed geometry as the main canvas.
 function drawMinimap(frame) {
   const canvas = dom.explorerGraphMinimap;
   const bounds = model.worldBounds;
@@ -51,15 +53,15 @@ function drawMinimap(frame) {
   }
   const nodes = [...model.layout.values()].map((item) => ({
     x: item.x, y: item.y, width: item.width, height: item.height,
-    // Storage tiers / TTL terminals are represented too: the minimap can
-    // appear because a physical card is clipped.
+    // Storage tiers and TTL terminals are represented too.
+    // The minimap can appear because a physical card is clipped.
     alpha: model.focusedId === item.node.id ? 1 : item.node.layer === "logical" ? 0.62 : 0.42,
   }));
   kit.drawMinimap(canvas, { bounds, nodes, edges, view: model, width: frame.width, height: frame.height });
 }
 
-// One frame (kit.mount calls it after painting the dot-grid background);
-// returns true while an activity / flow animation needs further frames.
+// One frame. The kit.mount call runs it after the dot-grid background is painted.
+// It returns true while an activity or flow animation needs more frames.
 function draw(ctx, frame) {
   const now = frame.now;
   if (!model.graph || !model.layout.size) {
@@ -99,13 +101,12 @@ function draw(ctx, frame) {
 }
 
 function redrawThemeNow() {
-  // Called synchronously by the theme switch, before MutationObserver
-  // callbacks run: drop resolved colours so this redraw uses the new theme.
+  // The theme switch calls this function synchronously, before MutationObserver callbacks run.
+  // It drops the resolved colours. This redraw then uses the new theme.
   kit.theme.invalidate();
   if (!model.active || !dom.explorerGraphCanvas) return;
-  // Theme changes update CSS variables synchronously, while the canvas keeps
-  // its previous pixels until it is painted again. Redraw immediately in the
-  // same event turn so the graph/minimap cannot visibly lag behind the DOM.
+  // Theme changes update CSS variables synchronously. The canvas keeps its previous pixels until it paints again.
+  // Redraw at once, in the same event turn. Then the graph and the minimap cannot visibly lag behind the DOM.
   model.view?.drawNow();
 }
 

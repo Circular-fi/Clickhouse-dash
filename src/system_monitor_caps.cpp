@@ -13,8 +13,8 @@ using namespace monitor_internal;
 
 namespace {
 
-// Columns of system tables that changed across ClickHouse versions, read only
-// when detected. asynchronous_metric_log.key is ClickHouse 26.8's: per-disk
+// Columns of system tables that changed across ClickHouse versions. They are read only
+// when detected. asynchronous_metric_log.key is a column of ClickHouse 26.8. Per-disk
 // metrics become metric = 'DiskUsed', key = '<disk>'.
 const std::map<std::string, std::vector<std::string>>& detected_columns() {
   static const std::map<std::string, std::vector<std::string>> columns{
@@ -122,9 +122,9 @@ bool detect_monitor_capabilities(ChExecutor& system, MonitorCapabilities& out, s
             out.columns.insert(table + "." + column);
           }
         });
-    // Whether any replicated table exists (a count, no name): the
-    // Performance section's Replication chart shows only then. Not readable:
-    // the chart stays hidden, the rest is detected.
+    // Whether any replicated table exists. This is a count, not a name. The
+    // Performance section's Replication chart shows only in that case. When it cannot be read,
+    // the chart stays hidden. The other values are still detected.
     try {
       system.select("SELECT toString(count() > 0) FROM system.replicas" + monitor_settings_sql(5, 1000000, 1),
                     [&](const clickhouse::Block& block) {

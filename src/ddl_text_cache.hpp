@@ -18,22 +18,23 @@
 
 namespace chdash {
 
-// system.tables formats engine_full / create_table_query / as_select from the
-// stored DDL of every object it returns: each of those columns costs ~120 ms
-// per 2k objects, while identity columns cost ~15 ms. The Explorer graph and
-// its catalog re-read them on every refresh (the graph live-refreshes while
-// open), so the formatted texts are cached per identity and reused as long as
-// the object's metadata_modification_time is unchanged.
+// system.tables formats engine_full, create_table_query and as_select from the stored DDL of every object it returns.
+// Each of those columns costs ~120 ms per 2k objects.
+// Identity columns cost ~15 ms.
+// The Explorer graph and its catalog re-read these columns on every refresh.
+// The graph refreshes live while it is open.
 //
-// The identity (`account`) is the digest of the URI of the connection
-// (acl_identity_key): ClickHouse masks the secrets of engine_full and
-// create_table_query by user (display_secrets_in_show_and_select), so two users
-// never share a text, even on the same server.
+// The formatted texts are cached per identity. A cached text is reused while the object's metadata_modification_time is unchanged.
 //
-// Staleness guards: an object modified in the last kRecentSeconds is always
-// re-read (the timestamp has one-second granularity, so two DDL changes in the
-// same second would otherwise be indistinguishable), and entries are re-read
-// after kMaxAge regardless. Memory: an LRU bounded in entries and bytes.
+// The identity (`account`) is the digest of the URI of the connection (acl_identity_key).
+// ClickHouse masks the secrets of engine_full and create_table_query by user (display_secrets_in_show_and_select).
+// Therefore two users never share a text, even on the same server.
+//
+// Staleness guards: an object modified in the last kRecentSeconds is always re-read.
+// The timestamp has one-second granularity. Two DDL changes in the same second cannot be told apart.
+// Entries are re-read after kMaxAge regardless.
+//
+// Memory: the cache is an LRU, bounded in entries and in bytes.
 struct DdlTexts {
   std::string engine_full;
   std::string create_table_query;
@@ -49,20 +50,20 @@ struct DdlObjectVersion {
 
 class DdlTextCache {
 public:
-  // Reads the texts of some objects of one database: (object_key, texts) pairs.
+  // Reads the texts of some objects of one database. The result is (object_key, texts) pairs.
   using Fetch = std::function<std::vector<std::pair<std::string, DdlTexts>>(
       const std::string& database, const std::vector<std::string>& names)>;
 
   DdlTextCache(size_t max_entries = 200000, size_t max_bytes = 128u << 20)
       : max_entries_(max_entries), max_bytes_(max_bytes) {}
 
-  // SQL fragment for the cheap identity query: it must be selected next to
-  // database/name so callers can build DdlObjectVersion rows.
+  // SQL fragment for the cheap identity query.
+  // It must be selected next to database/name. Callers then build DdlObjectVersion rows.
   static constexpr const char* kVersionColumns =
       "toString(metadata_modification_time), toString(toUInt8(metadata_modification_time >= now() - 2))";
 
-  // Return the DDL texts of `objects` (keyed "database\0name"), reading only
-  // missing/changed ones from `db`, as `account`.
+  // Returns the DDL texts of `objects` (keyed "database\0name").
+  // It reads only the missing or changed objects from `db`, as `account`.
   std::unordered_map<std::string, DdlTexts> get(
       ChExecutor& db,
       const std::string& account,
@@ -99,9 +100,9 @@ public:
     }
     if (missing_by_database.empty()) return out;
 
-    // database / name predicates are applied by system.tables before the DDL
-    // columns are formatted. A cold cache reads kMaxNamesPerQuery names per
-    // query: never a whole database.
+    // system.tables applies the database and name predicates before it formats the DDL columns.
+    // A cold cache reads kMaxNamesPerQuery names per query.
+    // Never read a whole database.
     for (const auto& [database, names] : missing_by_database) {
       std::vector<std::string> batch;
       batch.reserve(std::min(names.size(), kMaxNamesPerQuery));
@@ -164,7 +165,7 @@ private:
     return out;
   }
 
-  // The database and the names are query parameters of the statement, one each: a name may hold any byte.
+  // The database and the names are query parameters of the statement, one parameter each. A name may hold any byte.
   static std::vector<std::pair<std::string, DdlTexts>> read_texts(
       ChExecutor& db, const std::string& database, const std::vector<std::string>& names) {
     SqlParams params;

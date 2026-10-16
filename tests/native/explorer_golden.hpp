@@ -1,6 +1,6 @@
-// Generated from the SQL that the code before the split of src/explorer_catalog.cpp, src/explorer_graph.cpp and src/api_explorer.cpp sent for the
-// requests of the differential battery (the statements as they were sent, with each query parameter written in place as a quoted text): what the
-// builders of src/explorer_sql.cpp must still write. @LIST@ stands for the list of names that a test chooses.
+// This file is generated from the SQL that the code before the split of src/explorer_catalog.cpp, src/explorer_graph.cpp and src/api_explorer.cpp sent for the
+// requests of the differential battery. The statements are as they were sent, with each query parameter written in place as a quoted text.
+// The builders of src/explorer_sql.cpp must still write the same statements. @LIST@ stands for the list of names that a test chooses.
 #pragma once
 
 namespace golden {

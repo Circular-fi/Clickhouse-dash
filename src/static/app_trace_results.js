@@ -1,5 +1,5 @@
-// The result list of the Traces search: the traces as cards or as a table, their service pills, the sort and the display of the
-// start, the empty and the no-result states, the count.
+// The result list of the Traces search. It shows the traces as cards or as a table.
+// It also shows their service pills, the sort, the start display, the empty and no-result states and the count.
 
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -62,17 +62,17 @@ function incompleteTagHtml(missing) {
 function servicePillHtml(stat, minor = false) {
   const errors = Number(stat.errors || 0);
   const errorTitle = errors ? ` · ${fmt.count(errors)} error span${errors === 1 ? "" : "s"}` : "";
-  // A service chip: the shared badge with the service's left bar.
+  // A service chip. It is the shared badge with the left bar of the service.
   return `<span class="badge badge--md badge--neutral traceSvcPill${errors ? " has-errors" : ""}${minor ? " is-minor" : ""}" data-service="${esc(stat.service)}" data-spans="${esc(stat.spans)}" data-errors="${errors}" style="--trace-service-color:${palette.service(stat.service)}" title="${esc(stat.service)} \u00b7 ${fmt.count(stat.spans)} span${stat.spans === 1 ? "" : "s"}${errorTitle}"><i class="serviceSwatch serviceSwatch--bar" aria-hidden="true"></i>${errors ? badge.html("!", { tone: "error", solid: true, className: "badge--count traceSvcPill__error", attrs: { "aria-label": "has errors" } }) : ""}<b>${esc(stat.service)}</b> <span class="traceSvcPill__count">(${fmt.count(stat.spans)})</span></span>`;
 }
 
-// A row names its three most costly services (still in the order of their first span), the others are behind a "+N"
-// chip, in the list and in the table at any width: a wall of chips repeated down the page says nothing. Costly: the
-// services with errors first, then the most spans.
+// A row names its three most costly services. It keeps these services in the order of their first span.
+// The other services are behind a "+N" chip, in the list and in the table, at any width.
+// A wall of chips repeated down the page says nothing. Costly means: the services with errors first, then the most spans.
 const SERVICE_PILLS_SHOWN = 3;
 
-// One line of service pills; layoutServicePills hides the ones that do not fit, and the minor ones always, and shows them
-// behind a "+N" chip.
+// This is one line of service pills. The layoutServicePills function hides the pills that do not fit.
+// It always hides the minor pills. It shows them behind a "+N" chip.
 function servicePillsHtml(stats) {
   if (!stats.length) return `<div class="traceSvcPills is-empty">${fmt.EMPTY}</div>`;
   const costly = [...stats].sort((a, b) => (Number(b.errors || 0) > 0) - (Number(a.errors || 0) > 0) || Number(b.spans || 0) - Number(a.spans || 0) || String(a.service).localeCompare(String(b.service)));
@@ -83,14 +83,14 @@ function servicePillsHtml(stats) {
 function layoutServicePills(scope) {
   const groups = [...($$(".traceSvcPills:not(.is-empty)", scope) || [])];
   if (!groups.length) return;
-  // Write, read, then write again: one layout pass for the whole list. The minor pills (past the three most costly
-  // services) are never shown: only the major ones are measured and fitted.
+  // Write, read, then write again: one layout pass for the whole list.
+  // The minor pills (past the three most costly services) are never shown. Only the major pills are measured and fitted.
   const prepared = groups.map((group) => {
     const pills = [...$$(":scope > .traceSvcPill", group)];
     const more = $(":scope > .traceSvcMore", group);
     for (const pill of pills) pill.hidden = pill.classList.contains("is-minor");
     if (more) { more.hidden = false; more.textContent = `+${pills.length}`; }
-    // Natural widths: no pill shrinks while measuring.
+    // Use natural widths. No pill shrinks during the measurement.
     group.classList.add("is-measuring");
     return { group, pills, major: pills.filter((pill) => !pill.hidden), more };
   });
@@ -116,7 +116,7 @@ function layoutServicePills(scope) {
         used = next;
         shown = i + 1;
       }
-      // The first pill always shows (ellipsized when it alone is too wide).
+      // The first pill always shows. It is cut with an ellipsis when it is too wide by itself.
       shown = Math.max(1, shown);
     }
     major.forEach((pill, index) => { pill.hidden = index >= shown; });
@@ -130,8 +130,8 @@ function layoutServicePills(scope) {
   }
 }
 
-// The hidden pills of a row, in a tooltip under its "+N" chip (hover,
-// focus or a click: ns.popover.tip).
+// The hidden pills of a row appear in a tooltip under the "+N" chip.
+// The tooltip opens on hover, on focus or on a click. It uses ns.popover.tip.
 let serviceTip = null;
 function hiddenPills(more) {
   if (!more || more.hidden) return null;
@@ -145,8 +145,8 @@ function hideServicePopover() {
   serviceTip?.hide();
 }
 
-// A trace start: the shown time, how long ago, and the tooltip of both
-// (fmt.timeTitle: ISO, local and UTC).
+// The start of a trace: the shown time, how long ago it was, and the tooltip of both.
+// The tooltip uses fmt.timeTitle, which gives the ISO, local and UTC time.
 function startTexts(trace) {
   const ms = parseStartMs(trace.start_ms);
   if (!Number.isFinite(ms)) return { absolute: String(trace.start_ms || fmt.EMPTY), ago: "", title: "", timeTitle: "" };
@@ -162,7 +162,7 @@ function resultItemHtml(trace, maxDurationNs) {
   const services = Array.isArray(trace.service_stats) ? trace.service_stats : [];
   const percent = maxDurationNs > 0 ? Math.max(0, Math.min(100, (Number(trace.duration_ns || 0) / maxDurationNs) * 100)) : 0;
   const start = startTexts(trace);
-  // The trace is a link (its page, the search context in the address): the only stop of the row besides its own buttons.
+  // The trace is a link to its page, with the search context in the address. It is the only stop of the row, besides its own buttons.
   return `<li class="traceResult traceResult--wide traceResultItem" data-trace-id="${esc(trace.trace_id)}">
         <div class="traceResult__line traceResult__line--main traceResultItem__title">
           <span class="traceResultItem__durationBar" style="width:${percent.toFixed(2)}%" data-duration-percent="${percent.toFixed(2)}" aria-hidden="true"></span>
@@ -213,14 +213,13 @@ function resultTableHtml(rows, maxDurationNs) {
 function syncResultsViewControls() {
   const table = model.resultsView === "table";
   segmented?.set($(".traceResultsViewToggle"), model.resultsView, "resultsView");
-  // Like Jaeger, the sort picker drives the list; the table sorts by its headers.
+  // Like Jaeger, the sort picker drives the list. The table sorts by its headers.
   const sortLabel = $(".traceResultsSort");
   if (sortLabel) sortLabel.hidden = table;
   dom.tracesResults?.classList.toggle("tracesResults--table", table);
 }
 
-// persist: false for a view restored from the URL (the stored preference
-// is the user's own last choice).
+// Use persist: false for a view that the URL restores. The stored preference is the user's own last choice.
 function setResultsView(view, { persist = true } = {}) {
   const next = view === "table" ? "table" : "list";
   if (next === model.resultsView) return;
@@ -242,8 +241,8 @@ function sortTableBy(key) {
   $(`[data-table-sort="${key}"] .dataTable__sort`, dom.tracesResults)?.focus({ preventScroll: true });
 }
 
-// "No traces / spans found" (the result list and the span table): the
-// range searched and the ways out, a wider range and no filters.
+// "No traces / spans found" (the result list and the span table): the range searched and the ways out.
+// The ways out are a wider range and no filters.
 function noResultsHtml(noun, range, attrs = {}) {
   const when = range ? `between ${fmt.time(range.start)} and ${fmt.time(range.end)}` : "in this range";
   const zoom = dom.tracesRangeZoomOut;
@@ -300,7 +299,7 @@ function bindResultEvents() {
   if (resultEventsBound || !root) return;
   resultEventsBound = true;
   const openRow = (row) => {
-    // A list card: its link (the address was built with the search); a table row has none.
+    // A list card has a link. The address was built with the search. A table row has no link.
     const link = $("a.traceResult__wideTitle", row);
     if (link) { link.click(); return; }
     const id = row?.getAttribute("data-trace-id");
@@ -327,14 +326,14 @@ function bindResultEvents() {
       return;
     }
     const th = target.closest("[data-table-sort]");
-    // Anywhere on a header sorts (the start toggle returned above).
+    // A click anywhere on a header sorts. The start toggle returns before this line.
     if (th) { sortTableBy(th.getAttribute("data-table-sort")); return; }
-    // The title link navigates by itself; a click elsewhere on a card or a row opens the trace too.
+    // The title link navigates by itself. A click elsewhere on a card or a row opens the trace too.
     if (target.closest("a[href]")) return;
     const row = target.closest("[data-trace-id]");
     if (row && root.contains(row)) openRow(row);
   });
-  // The table rows rove (ns.table.rovingRows); a list card is its title link, so it needs no key handler.
+  // The table rows rove (ns.table.rovingRows). A list card is its title link, so it needs no key handler.
   serviceTip = popover.tip(root, hiddenPills, { selector: ".traceSvcMore", side: "bottom", className: "traceSvcPopover" });
   table.rovingRows(root, { rows: "tr.traceTable__row", onOpen: (row) => openRow(row) });
   table.bindCopy(root);

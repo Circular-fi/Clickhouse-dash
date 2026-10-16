@@ -10,7 +10,7 @@
 
 namespace chdash {
 
-// The Overview of the System page (docs/system.md): the server's identity, its tiles, the topology and the replication summary.
+// The Overview of the System page (docs/system.md). It holds the server's identity, its tiles, the topology and the replication summary.
 
 class AclView;
 class ChExecutor;
@@ -30,8 +30,8 @@ struct MonitorClusterNode {
   std::optional<uint64_t> estimated_recovery_time;
 };
 
-// Replicated tables the runner can see, summarised (in-memory columns of
-// system.replicas only; the thresholds are Altinity's replica alerts).
+// Replicated tables that the runner can see, in a summary. This uses the in-memory columns of
+// system.replicas only. The thresholds are the replica alerts of Altinity.
 struct MonitorReplicationSummary {
   uint64_t tables = 0;
   uint64_t readonly = 0;
@@ -58,19 +58,19 @@ struct SystemMonitorOverview {
   std::vector<MonitorClusterNode> topology;
   bool topology_truncated = false;
   std::optional<MonitorReplicationSummary> replication;
-  // Optional system logs, as detected (the Performance, Queries and Disks
-  // sections read them).
+  // Optional system logs, as detected. The Performance, Queries and Disks
+  // sections read them.
   std::map<std::string, bool> logs;
   std::vector<MonitorPanelIssue> unavailable_panels;
 };
 
-// Rows of system.clusters kept per response.
+// Rows of system.clusters that are kept in each response.
 constexpr size_t kMonitorTopologyRowLimit = 1000;
 // Replicated tables read for the replication summary.
 constexpr size_t kMonitorReplicaRowLimit = 10000;
 
 // Server tiles, topology and the replication summary of the runner-visible
-// replicated tables. Returns false only when nothing at all could be read.
+// replicated tables. Returns false only when no data can be read.
 bool load_system_monitor_overview(
     ChExecutor& system,
     AclView& runner_acl,
@@ -78,7 +78,7 @@ bool load_system_monitor_overview(
     SystemMonitorOverview& out,
     std::string* error);
 
-// The allowlists, exposed for the contract tests and the docs.
+// The allowlists. The contract tests and the docs use them.
 const std::vector<std::string>& monitor_overview_async_metrics();
 const std::vector<std::string>& monitor_overview_metrics();
 

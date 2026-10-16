@@ -1,11 +1,11 @@
-// The System Overview (docs/system.md "Overview"): the selected server on
-// one page, top to bottom:
+// The System Overview (docs/system.md "Overview") shows the selected server on one page, from top to bottom.
+// It has these parts:
 //   the server tiles   /api/system/overview (system.asynchronous_metrics
 //                      and system.metrics, refreshed by the server every
 //                      second);
-//   Databases          a treemap of the databases the runner can see, by
+//   Databases          a treemap of the databases that the runner can see, by
 //                      bytes on disk (the disks answer's usage,
-//                      /api/system/disks); a database opens its Explorer
+//                      /api/system/disks). A database opens its Explorer
 //                      card;
 //   Cluster            the topology (system.clusters), Keeper (the
 //                      overview's Keeper metrics and /api/system/keeper)
@@ -14,16 +14,14 @@
 //                      (app_system_perf.js);
 //   Activity           replicas, mutations, replication queues, merges and
 //                      Distributed send queues (app_system_activity.js).
-// Each part degrades on its own: an answer or a panel that fails says why
-// in place of that part only.
+// Each part works on its own. An answer or a panel that fails shows the reason in its own part only.
 //
-// No live refresh: the parts read on show (the databases at most once a
-// minute, the charts again once their relative range is 30 s old), on a
-// range change, a new host and the refresh button; never on a timer.
+// The page does not refresh live. The parts read their data when the page shows.
+// The charts read again when their relative range is 30 s old.
+// The parts also read on a range change, on a new host, and on the refresh button. They never read on a timer.
 //
-// Address: the time range of the charts (from / to, absent for the
-// default); #performance and #activity (the former Monitoring sections and
-// /explorer/_operations) scroll to their part once.
+// Address: the time range of the charts (from / to). The default applies when they are absent.
+// #performance and #activity (the former Monitoring sections and /explorer/_operations) scroll to their part once.
 
 import { api } from "./app_api.js";
 import { h } from "./app_dom.js";
@@ -45,8 +43,8 @@ const DASH = format.EMPTY;
 
 // The databases (bytes on disk) read again on show after this long.
 const DATABASES_TTL_MS = 60000;
-// Altinity's thresholds and ClickHouse's own defaults: parts_to_delay_insert
-// (1000) slows inserts down, 300 parts in one partition is the usual alert.
+// Thresholds from Altinity and the default values of ClickHouse.
+// parts_to_delay_insert (1000) makes inserts slower. 300 parts in one partition is the usual alert.
 const PARTS_WARN = 300;
 const PARTS_ERROR = 1000;
 const TREEMAP_LABEL = "Databases by bytes on disk";
@@ -113,8 +111,8 @@ function createOverview(ctx) {
     scrolled: false,
   };
 
-  // The filter bar: the charts' time range first (as on Queries and
-  // Disks), then the refresh button.
+  // The filter bar. The charts' time range comes first, as on Queries and Disks.
+  // The refresh button comes next.
   const controls = kit.sectionBar(ctx, {
     id: "overview",
     label: "the overview",
@@ -131,9 +129,9 @@ function createOverview(ctx) {
   const databases = kit.part("databases", "Databases");
   const databasesCount = h("span", { class: "pagePart__count", id: "systemDatabasesCount" });
   databases.head.appendChild(databasesCount);
-  // The size band of the databases (ns.explorerTreemap.band, as on the
-  // Explorer's All databases): always the treemap #systemDatabaseMap
-  // (strip: "never"), whatever the distribution; #systemDatabasesFoot.
+  // The size band of the databases (ns.explorerTreemap.band, as on the Explorer's All databases).
+  // It always draws the treemap #systemDatabaseMap (strip: "never"), whatever the distribution.
+  // The footer is #systemDatabasesFoot.
   const treemapHost = h("div", { class: "systemDatabases__map" });
   const databasesNotes = h("div", { class: "systemDatabases__notes", id: "systemDatabasesNotes" });
   databases.body.append(databasesNotes, treemapHost);
@@ -147,9 +145,10 @@ function createOverview(ctx) {
 
   // --- Loading -------------------------------------------------------------
 
-  // The tiles, the cluster cards and the activity: one round.
-  // Every read is cancelable (util.latest): a newer read of the same kind, a forced Refresh or another host aborts
-  // the one in flight, and an answer that is no longer the newest leaves the shared flags (loading, busy) alone.
+  // The tiles, the cluster cards and the activity form one round.
+  // Every read can be canceled (util.latest). A newer read of the same kind cancels the older one.
+  // A forced Refresh or another host also cancels the read in flight.
+  // An answer that is no longer the newest leaves the shared flags (loading, busy) alone.
   async function loadLive(force = false) {
     const host = kit.hostId();
     if (!host) return;
@@ -242,8 +241,8 @@ function createOverview(ctx) {
     const issues = issuesOf("server").map((issue) => kit.issueBlock(issue));
     h.replace(tilesHost, banner, issues, serverTiles(data));
     cluster.el.hidden = false;
-    // Two balanced columns: the topology and the replication summary under
-    // it, Keeper (the tallest card) beside them.
+    // Two balanced columns. The topology and the replication summary are stacked in one column.
+    // Keeper, the tallest card, is in the other column.
     const keeper = renderKeeper(data);
     h.replace(cluster.body, h("div", { class: "systemGrid" },
       h("div", { class: "systemGrid__main" }, renderTopology(data), renderReplication(data)),
@@ -251,8 +250,8 @@ function createOverview(ctx) {
     scrollToHash();
   }
 
-  // Topology: the local system.clusters (no fan-out). A cluster of one
-  // local replica (the built-in "default") is this server alone.
+  // Topology: the local system.clusters table. The page does not fan out to other hosts.
+  // A cluster with one local replica (the built-in "default") is this server alone.
   function renderTopology(data) {
     const nodes = data.topology?.nodes || [];
     const clusters = new Map();
@@ -309,16 +308,15 @@ function createOverview(ctx) {
         ], rows)));
     }
     const notes = [];
-    // Said in words: "default": this server only was a note that only its writer could read.
+    // In words: "default": this server only. That note is clear only to its writer.
     if (single.length) notes.push(`The ${single.length === 1 ? "cluster" : "clusters"} ${single.map((name) => `"${name}"`).join(", ")} ${single.length === 1 ? "has" : "have"} only this server`);
     if (data.topology?.truncated) notes.push(`first ${format.count(data.topology.row_limit)} nodes shown`);
     if (notes.length) el.appendChild(h("p", { class: "systemCard__note" }, `${notes.join(SEP)}.`));
     return el;
   }
 
-  // Keeper: the session (/api/system/keeper: connection, latency, requests,
-  // watches, exceptions) and, for a Keeper embedded in this server, its
-  // role, znodes and followers (the overview's Keeper* metrics).
+  // Keeper: the session (/api/system/keeper: connection, latency, requests, watches, exceptions).
+  // For a Keeper embedded in this server, it also shows its role, znodes and followers (the overview's Keeper* metrics).
   function renderKeeper(data) {
     if (!keeperEnabled()) return null;
     const m = data.metrics || {};
@@ -379,9 +377,9 @@ function createOverview(ctx) {
     return el;
   }
 
-  // Replication: the replicated tables the runner can see, with Altinity's
-  // alert thresholds. Hidden when there are none; their tables are the
-  // Activity's Replicas, further down (no link to them: the page scrolls).
+  // Replication: the replicated tables that the runner can see, with the alert thresholds of Altinity.
+  // The part is hidden when there are none. Their tables are in the Activity's Replicas, further down.
+  // There is no link to them. The page scrolls instead.
   function renderReplication(data) {
     const issues = issuesOf("replication");
     const r = data.replication;
@@ -413,9 +411,9 @@ function createOverview(ctx) {
     return el;
   }
 
-  // Databases: the usage rows of the disks answer (bytes of active parts by
-  // disk and database, the runner-visible databases only), summed by
-  // database. The map's tooltip names the size and the share.
+  // Databases: the usage rows of the disks answer. These rows hold the bytes of active parts by disk and database.
+  // Only the databases that the runner can see are included. The values are summed by database.
+  // The tooltip of the map names the size and the share.
   function databaseTree(data) {
     const byName = new Map();
     for (const row of data.usage?.rows || []) {
@@ -431,8 +429,7 @@ function createOverview(ctx) {
       path: name,
       database: name,
       bytes: entry.bytes,
-      // Parts, not tables: the map names them (countLabel) and counts no
-      // tables for a group of small databases.
+      // Parts, not tables: the map names them (countLabel). It counts no tables for a group of small databases.
       count: 0,
       parts: entry.parts,
       countLabel: format.countLabel(entry.parts, "part"),
@@ -490,10 +487,9 @@ function createOverview(ctx) {
     state.treemap?.element.classList.toggle("is-static", !explorerEnabled());
   }
 
-  // #performance / #activity (the former Monitoring sections): their part,
-  // when the page opened on it. The parts above it grow as their answers
-  // land (the tiles, the treemap, the cluster), so the part stays at the
-  // top while they do: until the reader scrolls, or for 8 s at most.
+  // #performance and #activity (the former Monitoring sections): their part, when the page opened on it.
+  // The parts above it grow as their answers arrive (the tiles, the treemap, the cluster).
+  // The part stays at the top while they grow. It stops when the reader scrolls, or after 8 s at most.
   const ANCHOR_MS = 8000;
   function scrollToHash() {
     if (state.scrolled) return;

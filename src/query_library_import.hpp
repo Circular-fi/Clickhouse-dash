@@ -1,14 +1,16 @@
 #pragma once
 
-// The import of the query library (docs/query-library.md, "Import"): the payload of the browser's own library, or a copy of one folder,
-// merged into the library of one host. The rules are the ones of the tree (query_library_rules.hpp); the function changes the candidate
-// state that it is given and writes nothing else, so the store commits it or drops it as a whole.
+// The import of the query library (docs/query-library.md, "Import"). It merges the payload of the browser's own library, or a copy of one folder,
+// into the library of one host. The rules are the rules of the tree (query_library_rules.hpp). The function changes only the candidate
+// state that it is given. It writes nothing else, so the store commits the state as a whole or drops it.
 //
-// Every imported folder and query belongs to the host of the request, whatever the payload says. Folders are merged by name under the same
-// parent; queries are de-duplicated by name + SQL against the host's library and within the payload; a remaining name clash in the target
-// folder gets a " (n)" suffix. "copy": true is a copy, not an import (the browser moving a folder from its own storage into the server
-// library): nothing is merged, skipped or renamed; a folder whose name its target parent already holds is a 400 duplicate and nothing is
-// written.
+// Every imported folder and query belongs to the host of the request. The payload cannot change this host.
+// Folders are merged by name under the same parent. Queries are de-duplicated by name and SQL against the library of the host and within the payload.
+// A name clash that remains in the target folder gets a " (n)" suffix.
+//
+// "copy": true makes a copy, not an import. The browser uses it to move a folder from its own storage into the server library.
+// Nothing is merged, skipped or renamed. A folder whose name its target parent already holds is a 400 duplicate.
+// Then nothing is written.
 
 #include "query_library_state.hpp"
 
@@ -28,8 +30,8 @@ struct ImportOutcome {
   size_t merged_folders = 0;
   size_t imported_queries = 0;
   size_t skipped_queries = 0;
-  // The id that the payload gave to a folder and the id that it has in the library, in the order of the payload (a folder that the
-  // payload gave no id is not listed).
+  // The id that the payload gave to a folder, and the id that the folder has in the library. The list follows the order of the payload.
+  // A folder that the payload gave no id is not listed.
   std::vector<std::pair<std::string, std::string>> folder_ids;
   bool changed() const { return imported_folders > 0 || imported_queries > 0; }
 };

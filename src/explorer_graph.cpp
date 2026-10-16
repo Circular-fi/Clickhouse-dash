@@ -1,6 +1,7 @@
-// The reads of the Explorer graph, as the system account, restricted to the objects of the AllowedObjectSet: the disks, the storage policies,
-// the tables with their DDL texts (a cache that re-reads only what changed), the dependencies, the sources of the dictionaries, the clusters that
-// Distributed tables name, and whether system.view_refreshes exists. The graph itself is made by build_explorer_graph (explorer_graph_build.hpp).
+// The reads of the Explorer graph, as the system account. The reads cover only the objects of the AllowedObjectSet.
+// They cover the disks, the storage policies, the tables with their DDL texts (a cache that re-reads only what changed), the dependencies,
+// the sources of the dictionaries, the clusters that Distributed tables name, and whether system.view_refreshes exists.
+// The graph itself is made by build_explorer_graph (explorer_graph_build.hpp).
 #include "explorer_graph.hpp"
 
 #include "ddl_text_cache.hpp"
@@ -35,8 +36,8 @@ bool load_explorer_graph(
 
   ExplorerGraphInputs inputs;
 
-  // Storage policies may reference cold disks which currently hold no parts for the selected database. Load system.disks directly so those
-  // SSD/HDD/S3 destinations still have host/path/type/capacity metadata in topology.
+  // Storage policies may reference cold disks. These disks hold no parts for the selected database now. Load system.disks directly, so that
+  // the SSD, HDD and S3 destinations still have the host, path, type and capacity metadata in topology.
   std::string disks_error;
   const bool disks_loaded = try_select(system, graph_disks_sql(),
     [&](const clickhouse::Block& block) {
@@ -87,7 +88,7 @@ bool load_explorer_graph(
   }
 
   std::string last_error;
-  // Identity/version columns only: the formatted DDL texts come from DdlTextCache, which re-reads them just for objects whose
+  // Identity and version columns only. The formatted DDL texts come from DdlTextCache. The cache re-reads them only for objects whose
   // metadata_modification_time changed since the previous graph build.
   std::vector<DdlObjectVersion> versions;
   const bool tables_loaded = try_select(system, graph_tables_sql(),
@@ -125,10 +126,10 @@ bool load_explorer_graph(
     return false;
   }
 
-  // Buffer runtime rows/bytes are already available through the catalog's system.tables baseline (`total_rows` / `total_bytes`). ClickHouse
-  // 26.7 does not expose a `system.buffers` table, so do not make graph rendering depend on that version-specific system table.
+  // Buffer runtime rows and bytes are already in the catalog baseline of system.tables (`total_rows` and `total_bytes`). ClickHouse
+  // 26.7 has no `system.buffers` table. Do not make the graph rendering depend on this version-specific system table.
 
-  // system.tables exposes the materialized views which depend on each current table. The builder filters both ends before it serializes, so
+  // system.tables gives the materialized views that depend on each current table. The builder filters both ends before it serializes them, so
   // a hidden MV cannot leak.
   std::string section_error;
   const bool dependencies_loaded = try_select(system, graph_dependencies_sql(),
@@ -143,8 +144,8 @@ bool load_explorer_graph(
     return false;
   }
 
-  // A dictionary's source table is structured metadata as well (loading_dependencies_*). Best-effort: a server without these columns only
-  // loses the dictionary source edges, the rest of the topology stays exact.
+  // A dictionary's source table is structured metadata too (loading_dependencies_*). This is best effort. A server without these columns loses
+  // only the dictionary source edges. The rest of the topology stays exact.
   (void)try_select(system, graph_dictionary_sources_sql(),
       [&](const clickhouse::Block& block) {
         for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -153,8 +154,8 @@ bool load_explorer_graph(
         }
       });
 
-  // Expand Distributed cluster topology once in bulk. The cluster rows do not reveal table names; the builder attaches them only to
-  // already-authorized Distributed nodes which reference that cluster.
+  // Expand the Distributed cluster topology once, in bulk. The cluster rows do not reveal table names. The builder attaches them only to
+  // Distributed nodes that are already authorized and that reference this cluster.
   const auto clusters = referenced_clusters(inputs.tables);
   if (!clusters.empty()) {
     const std::set<std::string> referenced(clusters.begin(), clusters.end());
@@ -176,7 +177,7 @@ bool load_explorer_graph(
     }
   }
 
-  // A missing optional source is structural and valid; failure to determine whether it exists is not. Never turn a ClickHouse exception
+  // A missing optional source is a valid structure. A failure to check whether the source exists is an error. Never turn a ClickHouse exception
   // into a fake "unavailable" state.
   section_error.clear();
   bool refresh_table_exists = false;

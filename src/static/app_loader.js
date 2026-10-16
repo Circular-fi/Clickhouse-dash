@@ -1,22 +1,24 @@
 // loader: the modules a page loads when it needs them, and the page's own description.
 //
-// A page's modules are the ES modules its entry (app_page_<page>.js) imports: the browser loads them, in dependency
-// order. The shell (tools/page_shells.py) adds the entry as a module script and inlines the page's description as
+// The modules of a page are the ES modules that its entry (app_page_<page>.js) imports.
+// The browser loads them in dependency order.
+// The shell (tools/page_shells.py) adds the entry as a module script. It inlines the page description as
 // <script type="application/json" id="chdashModules"> (src/static/modules.json, tools/build_page_css.py):
 //
-//   { name, entry, files, lazy }   files: every module the entry imports (the shell preloads them);
-//                                  lazy: the groups of modules that load on first use
+//   { name, entry, files, lazy }   files: every module that the entry imports. The shell preloads them.
+//                                  lazy: the groups of modules. Each group loads at first use.
 //
-//   loader.page                    that description
+//   loader.page                    the page description
 //   loader.url(file)               the address of a static file (assetUrl)
-//   loader.loadGroup(name)         Promise of the exports of the group's modules, one object ({} for a group the page
-//                                  does not have): import() of each file, once. A page that has no highlighter, no
-//                                  library or no kernel gets {}, and its code keeps the path without them.
-//   loader.expose(namespaces)      hands the exports of the modules to window.ChDash (below); the generated region of each entry
-//                                  calls it with every module of the page
+//   loader.loadGroup(name)         Promise of the exports of the modules of the group, in one object.
+//                                  The object is {} for a group that the page does not have.
+//                                  The function calls import() for each file, once.
+//                                  A page without a highlighter, a library or a kernel gets {}. Its code keeps the path without them.
+//   loader.expose(namespaces)      gives the exports of the modules to window.ChDash (below).
+//                                  The generated region of each entry calls it with every module of the page.
 //
-// window.ChDash is the handle of the browser tests and of the console: every export of every module of the page, by
-// name (ChDash.format, ChDash.header, ...). It is written here and read by no module.
+// window.ChDash is the handle for the browser tests and for the console. It holds every export of every module of the page,
+// by name (ChDash.format, ChDash.header, ...). This file writes it. No module reads it.
 import { assetUrl } from "./app_assets.js";
 
 const page = (() => {
@@ -35,9 +37,9 @@ function expose(exports) {
   for (const [name, value] of Object.entries(exports)) handle[name] = value;
 }
 
-// A lazy module loads once. The browser keeps a module that failed to load as failed for the life of the page, whatever
-// the file does later, so a new try asks for the file under another address (?retry=<n>): the next use, when the person
-// presses Retry, gets the module the first one could not.
+// A lazy module loads only once. The browser keeps a module that failed to load as failed for the life of the page.
+// This is true even when the file changes later. So a new try asks for the file under another address (?retry=<n>).
+// The next use, when the person presses Retry, gets the module that the first try could not load.
 const modules = new Map(); // file -> { loading, failures }
 
 function importFile(file) {
@@ -64,8 +66,8 @@ function loadGroup(name) {
   });
 }
 
-// Hands the namespaces of the modules of a page to window.ChDash. The entry calls it with the namespace of every module it
-// imports (a generated region of the entry), while it runs: the handle is complete before the load event of the page.
+// Gives the namespaces of the modules of a page to window.ChDash. The entry calls this function with the namespace of every module that it imports.
+// The generated region of the entry makes this call while the entry runs. So the handle is complete before the load event of the page.
 function exposeNamespaces(namespaces) {
   for (const exports of namespaces) expose(exports);
 }

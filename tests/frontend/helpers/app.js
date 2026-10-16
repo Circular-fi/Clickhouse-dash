@@ -9,20 +9,23 @@ export async function openApp(page) {
   await expect(page.locator('#runButton')).toBeEnabled();
 }
 
-// Every CSS transition and animation of the page has ended (the colours of a theme switch). getAnimations() makes the
-// style recalculation that starts them, so none begins after this has looked.
+// Every CSS transition and animation of the page has ended. This includes the colours of a theme switch.
+// getAnimations() makes the style recalculation that starts them.
+// So no animation begins after this check looks at the page.
 export function settleAnimations(page) {
   return page.evaluate(() => Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => null))).then(() => document.getAnimations().length));
 }
 
-// Two frames have rendered what the page was doing (not usable under page.clock: its animation frames are fake).
+// Two frames render the state that the page has now.
+// This check does not work under page.clock, because its animation frames are fake.
 export function nextFrames(page) {
   return page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
-// A round trip to the page: every request its code issued before this call, in the microtasks that already ran, has
-// been reported to the test (the page and the test speak through one ordered channel). The check of "nothing was
-// sent" needs it, and needs no waiting time.
+// A round trip to the page makes sure that the test has every report.
+// The page issued each request before this call, in the microtasks that already ran.
+// The page and the test speak through one ordered channel.
+// The check of "nothing was sent" needs this round trip, and it needs no delay.
 export function roundTrip(page) {
   return page.evaluate(() => 0);
 }
@@ -44,8 +47,8 @@ export async function waitForTerminal(page) {
   await expect(page.locator('#queryStatusText')).toHaveText(/done|finished|limit reached|error|canceled/i, { timeout: 30_000 });
 }
 
-// A multiquery batch has ended: `count` panels, each with its final stats
-// line (the status may read "finished" after the first statement already).
+// A multiquery batch has ended. It has `count` panels, each with its final stats line.
+// The status can read "finished" after the first statement already.
 export async function waitForBatch(page, count) {
   const blocks = page.locator('.resultsStack__block');
   await expect(blocks).toHaveCount(count, { timeout: 30_000 });
@@ -64,14 +67,15 @@ export async function openExplorer(page) {
   await expect(page.locator('#explorerWorkspace')).toBeVisible();
   await expect(page).toHaveURL(/\/explorer(?:\/|$)/);
   await expect(page.locator('#explorerTableList')).toBeVisible({ timeout: 15_000 });
-  // The shell (view tabs included) is painted before app.js runs; the tree's
-  // first rendered row means the Explorer is initialised and its tabs bound.
+    // The shell is painted before app.js runs. This includes the view tabs.
+    // The first rendered row of the tree means the Explorer is initialised and its tabs are bound.
   await expect(page.locator('#explorerTableList > *').first()).toBeAttached({ timeout: 15_000 });
 }
 
-// The Explorer sidebar is lazy: the first paint lists database names only and
-// each branch loads its objects when expanded. Tests which need table rows must
-// therefore expand the owning database explicitly.
+// The Explorer sidebar is lazy.
+// The first paint lists database names only.
+// Each branch loads its objects when the branch is expanded.
+// Tests that need table rows must therefore expand the owning database explicitly.
 export async function expandExplorerDatabase(page, database = 'chdash_ui') {
   const toggle = page.locator(
     `#explorerTableList .explorerTreeDatabaseToggle[aria-label="Expand ${database}"], ` +
@@ -89,8 +93,8 @@ export async function openExplorerDatabase(page, database = 'chdash_ui') {
   await expandExplorerDatabase(page, database);
 }
 
-// ClickHouse-side elapsed time needs an extra /api/query/execution lookup, so
-// it is an opt-in option of the Run settings (gear) menu, next to multiquery.
+// ClickHouse-side elapsed time needs an extra /api/query/execution lookup.
+// So it is an opt-in option of the Run settings (gear) menu, next to multiquery.
 export async function enableExecutionStats(page) {
   await page.locator('#runSettingsButton').click();
   await expect(page.locator('#runSettingsMenu')).toBeVisible();
@@ -118,13 +122,15 @@ export async function openAnalysis(page) {
   await expect(page.locator('#analysisSummary')).toContainText(/Session|ClickHouse|query/i, { timeout: 12_000 });
 }
 
-// Touch targets (docs/ui-foundations.md, "Touch and phones"): every visible
-// control whose hit area, probed with elementFromPoint along its two centre
-// lines (pseudo-element bands count, a neighbour drawn over it does not), is
-// under `min` px on either axis. A control whose centre something else covers
-// (under a sheet) is not a target now and is skipped; so are the selectors in
-// `skip`; `only` (a selector) measures those controls alone. 38.5 px: a 40 px
-// box at a half-pixel position probes a quarter pixel short at each edge.
+// Touch targets (docs/ui-foundations.md, "Touch and phones"): the check tests every visible control.
+// The check probes the hit area of a control with elementFromPoint along its two centre lines.
+// Pseudo-element bands count. A neighbour drawn over the control does not.
+// The check reports a control whose hit area is under `min` px on either axis.
+//
+// A control whose centre another element covers (under a sheet) is not a target now. The check skips it.
+// The check also skips the selectors in `skip`.
+// `only` (a selector) measures those controls alone.
+// 38.5 px: a 40 px box at a half-pixel position probes a quarter pixel short at each edge.
 export async function smallTouchTargets(page, { min = 38.5, skip = [], only = '' } = {}) {
   return page.evaluate(({ min, skip, only }) => {
     const SEL = only || 'button, a[href], [role=tab], [role=button], input:not([type=hidden]), select, textarea, summary, [role=menuitem], [role=option], [role=checkbox], [role=switch], [tabindex="0"]';
@@ -139,15 +145,17 @@ export async function smallTouchTargets(page, { min = 38.5, skip = [], only = ''
       let scroller = el.parentElement;
       while (scroller && scroller !== document.body && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
       const scrolls = scroller && scroller !== document.body;
-      // A control a few pixels from the top or the bottom of the window has its hit area cut by the window, which this measure
-      // reads as a small one: a control of a scroller is brought to its middle (the window's edge is no part of the control).
+            // A control a few pixels from the top or the bottom of the window has its hit area cut by the window.
+            // This measure reads the cut area as a small one.
+            // So the code brings a control of a scroller to its middle.
+            // The window's edge is no part of the control.
       if (scrolls && (r.top < 24 || r.bottom > innerHeight - 24)) {
         el.scrollIntoView({ block: 'center', inline: 'nearest' });
         r = el.getBoundingClientRect();
         if (r.top < 0 || r.bottom > innerHeight) continue;
       }
-      // Partly scrolled out of its scroller (a long page's content region),
-      // as one partly out of the viewport: not measurable where it is.
+            // The control is partly scrolled out of its scroller (a long page's content region).
+            // This case is the same as a control partly out of the viewport. The check cannot measure it there.
       if (scrolls) {
         const box = scroller.getBoundingClientRect();
         if (r.top < box.top - 0.5 || r.bottom > box.bottom + 0.5) continue;

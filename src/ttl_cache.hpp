@@ -20,8 +20,10 @@
 
 namespace chdash {
 
-// The threads that refresh TtlCache values in the background (stale-while-revalidate). The queue is bounded: a
-// refresh that does not fit is not started; the stale value is served again and the next request asks again.
+// These threads refresh TtlCache values in the background (stale-while-revalidate).
+// The queue is bounded.
+// A refresh that does not fit does not start.
+// The stale value is served again, and the next request asks again.
 class CacheRefresher {
 public:
   explicit CacheRefresher(size_t threads = 2, size_t max_queued = 64) : max_queued_(std::max<size_t>(1, max_queued)) {
@@ -39,7 +41,7 @@ public:
     return true;
   }
 
-  // Drops the queued refreshes and waits for the running ones.
+    // This function drops the queued refreshes and waits for the active ones.
   void stop() {
     std::deque<std::function<void()>> dropped;
     {
@@ -85,24 +87,37 @@ size_t cache_key_bytes(const Key&) { return sizeof(Key); }
 
 // The cache of the values that the server reads from ClickHouse (metadata, ACL, System and OTEL reads).
 //
-//   - A value is fresh for `ttl` after its fetch ENDED (monotonic clock; the wall clock never ages a value).
-//   - One fetch per key at a time. A request that needs the value while it is being read waits for that fetch, up to
-//     `wait`, then gets its answer: a second identical request never fails because the first one is still reading.
-//   - get_revalidating(): past its TTL, and for `stale_for` more, the value is served at once with stale = true and ONE
-//     refresh runs in the background. Its fetch then runs after the request has returned: it must own what it uses
-//     (capture by value, never a reference to the request). get() never runs a fetch in the background.
-//   - force (refresh=1) and invalidate() never remove an entry: they ask for a fetch that starts after them. A fetch
-//     already running is waited for first; all the requests that asked meanwhile share the next fetch, so a loop of
-//     refresh=1 never runs two reads of one key at a time.
-//   - A failed fetch is never stored as a value. Its error is answered for `failure_backoff` (a down host is not asked
-//     again on every request); with serve_stale_on_error the previous value is answered instead (stale = true), unless
-//     an invalidation asked for a newer one.
-//   - Bounded: `max_entries` and `max_bytes` (LRU), and no value older than `max_age` is served or kept.
+//   - A value is fresh for `ttl` after its fetch ENDED.
+//     The code uses a monotonic clock, so the wall clock never ages a value.
+//
+//   - One fetch per key runs at a time.
+//     A request that needs the value while a fetch runs waits for that fetch, up to `wait`.
+//     Then it gets its answer.
+//     A second identical request never fails because the first request still reads the key.
+//
+//   - get_revalidating(): past its TTL, and for `stale_for` more, the value is served at once with stale = true.
+//     ONE refresh runs in the background.
+//     Its fetch runs after the request has returned.
+//     The fetch must own what it uses (capture by value, never a reference to the request).
+//     get() never runs a fetch in the background.
+//
+//   - force (refresh=1) and invalidate() never remove an entry.
+//     They ask for a fetch that starts after them.
+//     The code first waits for a fetch that already runs.
+//     All requests that ask in the meantime share the next fetch.
+//     So a loop of refresh=1 never runs two reads of one key at a time.
+//
+//   - A failed fetch is never stored as a value.
+//     Its error is answered for `failure_backoff`, so a down host is not asked again on every request.
+//     With serve_stale_on_error, the previous value is answered instead (stale = true).
+//     This does not apply when an invalidation asked for a newer one.
+//
+//   - Bounded by `max_entries` and `max_bytes` (LRU). No value older than `max_age` is served or kept.
 template <typename Key, typename Value, typename Clock = std::chrono::steady_clock>
 class TtlCache {
 public:
   using Duration = std::chrono::milliseconds;
-  // Fills `value` and returns true, or fills the error code and message and returns false. It may throw.
+    // The function fills `value` and returns true. Or it fills the error code and message and returns false. It can throw.
   using Fetch = std::function<bool(Value& value, std::string& error_code, std::string& error_message)>;
 
   struct Options {
@@ -114,11 +129,11 @@ public:
     bool serve_stale_on_error = true;
     size_t max_entries = 1024;
     size_t max_bytes = 64u << 20;
-    // The size of a value in memory (an estimate); sizeof(Value) when not set.
+        // The size of a value in memory (an estimate). It is sizeof(Value) when not set.
     std::function<size_t(const Value&)> value_bytes;
-    // A TTL per value (for example shorter for an incomplete answer); `ttl` when not set.
+        // A TTL for each value (for example, a shorter TTL for an incomplete answer). It is `ttl` when not set.
     std::function<Duration(const Value&)> ttl_of;
-    // Starts a background refresh; false when it cannot. No background refresh when not set.
+        // The function starts a background refresh. It returns false when it cannot. No background refresh runs when not set.
     std::function<bool(std::function<void()>)> submit;
   };
 
@@ -153,7 +168,7 @@ public:
 
   Result get(const Key& key, const Fetch& fetch, bool force = false) { return lookup(key, fetch, force, false); }
 
-  // The value of a result, or what its fetch threw (a std::runtime_error with the message when it returned false).
+    // The value of a result. Or it is what its fetch threw (a std::runtime_error with the message when the fetch returned false).
   static std::shared_ptr<const Value> value_or_throw(const Result& result) {
     if (result.has_value && result.value) return result.value;
     if (result.exception) std::rethrow_exception(result.exception);
@@ -161,14 +176,14 @@ public:
   }
   Result get_revalidating(const Key& key, const Fetch& fetch, bool force = false) { return lookup(key, fetch, force, true); }
 
-  // The next request of `key` gets a value read after this call.
+    // The next request for `key` gets a value that the code reads after this call.
   void invalidate(const Key& key) {
     std::lock_guard<std::mutex> lk(mu_);
     const auto it = map_.find(key);
     if (it != map_.end()) invalidate_locked(*it->second);
   }
 
-  // Every key that starts with `prefix` (string keys).
+    // Every key that starts with `prefix` (string keys only).
   void invalidate_prefix(const Key& prefix) {
     std::lock_guard<std::mutex> lk(mu_);
     for (auto& [key, entry] : map_) {
@@ -231,15 +246,15 @@ private:
     }
 
     ++stats_.misses;
-    // The fetch that answers this request: the one that runs now, or one that starts after an invalidation.
+        // The fetch that answers this request. It runs now, or it starts after an invalidation.
     const uint64_t target = std::max(e.min_valid, e.done + 1);
     const bool asked = e.min_valid > e.done;
     const auto deadline = std::chrono::steady_clock::now() + options_.wait;
     for (;;) {
       if (e.done >= target) return outcome_locked(e, Clock::now());
       if (e.refreshing && e.queued) {
-        // A background refresh that has not started yet: this request runs it now. It starts now, so it answers
-        // every invalidation made before it.
+                // A background refresh has not started yet. This request runs it now.
+                // The refresh starts now, so it answers every invalidation made before it.
         e.queued = false;
         e.min_valid = std::min(e.min_valid, e.started);
         run_fetch_locked(lk, key, entry, fetch, e.started);
@@ -253,7 +268,7 @@ private:
         }
         continue;
       }
-      // A recent failure is answered again, unless a newer value was asked for.
+            // A recent failure is answered again. This does not apply when a newer value was asked for.
       if (!asked && e.done > 0 && !e.last_ok && Clock::now() < e.retry_after) return outcome_locked(e, Clock::now());
       run_fetch_locked(lk, key, entry, fetch, begin_fetch_locked(e));
       Result out = outcome_locked(e, Clock::now());
@@ -291,7 +306,7 @@ private:
     return out;
   }
 
-  // The answer of the last fetch: its value, or its error (the previous value when serve_stale_on_error).
+    // The answer of the last fetch. It is its value, or its error (the previous value when serve_stale_on_error).
   Result outcome_locked(const Entry& e, TimePoint now) const {
     if (e.last_ok && e.value) return value_result(e, now);
     if (options_.serve_stale_on_error && servable(e, now, options_.max_age)) {
@@ -324,7 +339,7 @@ private:
 
   void invalidate_locked(Entry& e) { e.min_valid = e.started + 1; }
 
-  // Runs fetch number `gen` (the lock is released meanwhile) and stores its outcome.
+    // This function runs fetch number `gen`. It releases the lock first and stores the outcome.
   void run_fetch_locked(std::unique_lock<std::mutex>& lk, const Key& key, const std::shared_ptr<Entry>& entry, const Fetch& fetch,
                         uint64_t gen) {
     lk.unlock();
@@ -362,12 +377,14 @@ private:
     return ++e.started;
   }
 
-  // The refresh waits in the queue of the refresher (`queued`). A request that needs it before it starts runs it
-  // itself (lookup), and the queued task then does nothing: no request ever waits for a refresh that has not started.
+    // The refresh waits in the queue of the refresher (`queued`).
+    // A request that needs the refresh before it starts runs it itself (lookup).
+    // The queued task then does nothing.
+    // No request ever waits for a refresh that has not started.
   void start_background_locked(const Key& key, const std::shared_ptr<Entry>& entry, const Fetch& fetch) {
     const uint64_t gen = begin_fetch_locked(*entry);
     entry->queued = true;
-    // The analyzer reports a leak that is not one: the lambda (and what it captures) is owned by the std::function that submit() takes.
+        // The analyzer reports a false positive here. The std::function that submit() takes owns the lambda and what it captures.
     auto task = [this, key, entry, fetch, gen]() {  // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
       std::unique_lock<std::mutex> lk(mu_);
       if (!entry->queued || entry->started != gen) return;
@@ -432,7 +449,7 @@ private:
     return entry;
   }
 
-  // Entries past max_age, and errors past their back-off, are removed (at most once per sweep interval).
+    // The code removes entries past max_age and errors past their back-off (at most once per sweep interval).
   void sweep_locked(TimePoint now) {
     const auto interval = std::min<Duration>(std::max<Duration>(options_.ttl, Duration(1000)), Duration(30000));
     if (swept_ != TimePoint{} && now - swept_ < interval) return;

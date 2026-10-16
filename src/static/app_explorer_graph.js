@@ -1,7 +1,10 @@
-// Explorer Lineage / Storage graph on the shared canvas graph kit (app_graph_kit.js): projections, layout, database groups, per-node expansion,
-// side panel (a bottom sheet on phones) and the TTL overlays. The canvas is the only view, on phones too: the kit's keyboard access (arrows,
-// Enter, the live region) is the accessible path. The Catalog's entry hands this module to the controller (explorer.use()); the parts are
-// app_explorer_graph_*.js (see app_explorer_graph_store.js).
+// The Explorer Lineage and Storage graph.
+// It runs on the shared canvas graph kit (app_graph_kit.js).
+// It covers projections, layout, database groups, per-node expansion, the side panel and the TTL overlays.
+// The side panel is a bottom sheet on phones.
+// The canvas is the only view, also on phones. The kit's keyboard access (arrows, Enter, the live region) is the accessible path.
+// The Catalog entry hands this module to the controller (explorer.use()).
+// The parts are app_explorer_graph_*.js (see app_explorer_graph_store.js).
 
 import { dom } from "./app_dom.js";
 import { activate, applyRouteState, clickTarget, contractNeighborhood, deactivate, describeNode, expandNeighborhood, focusDatabase, focusTable, getRouteState, hoverTarget, isStorageMode, onHostChanged, onScopeChanged, refresh, searchFocus, setDetailMode, setVisibilityOptions, syncFocusControls, visibilityRequirements } from "./app_explorer_graph_focus.js";
@@ -22,8 +25,8 @@ function init(options = {}) {
   model.openTable = typeof options.openTable === "function" ? options.openTable : null;
   model.openCard = typeof options.openCard === "function" ? options.openCard : null;
   model.onStateChange = typeof options.onStateChange === "function" ? options.onStateChange : null;
-  // Canvas pixels are not CSS-reactive: the graph draws again in the same visual transaction as the theme switch
-  // (app_header.js).
+  // Canvas pixels do not react to CSS.
+  // The graph draws again in the same visual transaction as the theme switch (app_header.js).
   window.addEventListener("chdash:theme-applied", () => redrawThemeNow());
   const canvas = dom.explorerGraphCanvas;
   if (!canvas) return;
@@ -58,7 +61,7 @@ function init(options = {}) {
     panel: () => chrome.panel,
     toolbar: { zoomIn: dom.explorerGraphZoomInButton, zoomOut: dom.explorerGraphZoomOutButton, fit: dom.explorerGraphFitButton },
   });
-  // Lineage | Tiers: the shared segmented control (app_ui_segmented.js).
+  // Lineage | Tiers uses the shared segmented control (app_ui_segmented.js).
   segmented?.bind(dom.explorerGraphTypeSelect, { onChange: (mode) => { setDetailMode(mode); return false; } });
   dom.explorerGraphContractButton?.addEventListener("click", contractNeighborhood);
   dom.explorerGraphExpandButton?.addEventListener("click", expandNeighborhood);
@@ -67,9 +70,9 @@ function init(options = {}) {
   renderGraphChrome();
 }
 
-// Read-only geometry of the last drawn frame in client (CSS pixel)
-// coordinates: lets browser tests click real nodes, edge labels and
-// expand controls on the canvas instead of guessing pixels.
+// Read-only geometry of the last drawn frame, in client (CSS pixel) coordinates.
+// Browser tests can click real nodes, edge labels and expand controls on the canvas.
+// The tests do not guess pixels.
 function inspect() {
   const rect = dom.explorerGraphCanvas?.getBoundingClientRect();
   const toClient = (box) => {
@@ -103,7 +106,7 @@ function inspect() {
     nodes: [...model.layout.values()].map((item) => ({
       id: item.node.id, kind: item.node.kind, database: item.node.database, name: item.node.name,
       hiddenUpstream: Number(item.node.hidden_upstream) || 0, hiddenDownstream: Number(item.node.hidden_downstream) || 0,
-      // The box drawn on screen (a compact card's is its title row).
+      // The box drawn on screen. For a compact card, the box is its title row.
       ...toClient(drawnBox(item, compact)),
     })),
     edges: visibleEdges().map((edge) => ({
@@ -115,7 +118,7 @@ function inspect() {
   };
 }
 
-// What the Catalog's controller calls (app_explorer.js, through explorer.use()).
+// The calls that the Catalog controller makes (app_explorer.js, through explorer.use()).
 const explorerGraph = {
   inspect,
   init,

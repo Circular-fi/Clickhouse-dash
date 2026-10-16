@@ -36,8 +36,8 @@ Result<TraceService::OpenedScope> TraceService::open_scope(const HostSpec& host,
   opened.db = open_(host, &error);
   if (!opened.db) return Out::fail(make_error(503, "trace_source_unavailable", connect_error(error)));
 
-  // The span filter SQL of the request (" AND ..." or empty), or the error when a tag filter needs an unusable attribute map. The
-  // attribute schema is looked up (cached) only when tag filters are present.
+  // The span filter SQL of the request is " AND ..." or empty. The error is returned when a tag filter needs an attribute map
+  // that is not usable. The attribute schema is looked up, from the cache, only when tag filters are present.
   std::string tags;
   if (!request.filters.tags.empty()) {
     const AttributeColumns columns = attribute_columns(*opened.db, attribute_maps_, host, traces);
@@ -61,14 +61,15 @@ Result<SearchAnswer> TraceService::search(const RequestContext& context, const H
                                           size_t candidate_cap) const {
   using Out = Result<SearchAnswer>;
   const auto started = std::chrono::steady_clock::now();
-  // The statements of the search share the time of its budget; the scan of the index stops before it runs out (SearchBudget).
+  // The statements of the search share the time of its budget. The scan of the index stops before the time runs out
+  // (SearchBudget).
   const BudgetScope bounds(context, kSearchBudget);
   auto opened = open_scope(host, request);
   if (!opened.value) return Out::fail(std::move(opened.error));
   const TraceScope& scope = opened.value->scope;
   SearchAnswer answer;
   answer.source_host_id = request.source_host_id;
-  // Only service / operation filters (primary-key columns) may use the broad form.
+  // Only service and operation filters (primary-key columns) may use the broad form.
   const bool key_only_filters = !scope.span_filters.empty() && request.filters.key_only();
   SearchBudget budget;
   budget.remaining_ms = [&bounds] { return bounds.remaining_ms(); };
@@ -94,7 +95,7 @@ Result<AnalyticsAnswer> TraceService::analytics(const RequestContext& context, c
     return Out::fail(make_error(400, "invalid_trace_charts", "charts must list counts and/or durations."));
   }
   const AnalyticsGrid grid = analytics_grid(scope.start_ms, scope.end_ms, request.bucket_origin_ms, request.align_buckets);
-  // Only service / operation filters (primary-key columns) may use the broad form.
+  // Only service and operation filters (primary-key columns) may use the broad form.
   const bool key_only_filters = !scope.span_filters.empty() && request.window.filters.key_only();
   AnalyticsAnswer answer;
   answer.source_host_id = request.window.source_host_id;
@@ -298,8 +299,9 @@ Result<MetaAnswer> TraceService::meta(const RequestContext&, const HostSpec& hos
 Result<PrefillAnswer> TraceService::prefill(const RequestContext&, const HostSpec& host, const PrefillRequest& request) const {
   using Out = Result<PrefillAnswer>;
   const TraceSettings& traces = host.otel.traces;
-  // Only the tag filters narrow the picker lists. The scans are bounded (passes of kPrefillPassRows, kPrefillReadRows in all;
-  // read_rows_limit lowers both) and the list is reported as an estimate when a bound stopped them.
+  // Only the tag filters narrow the picker lists. The scans are bounded: each pass reads at most kPrefillPassRows rows, and all
+  // passes read at most kPrefillReadRows rows. The parameter read_rows_limit lowers both bounds. The list is reported as an
+  // estimate when a bound stops the scans.
   std::string tag_filters;
   if (!request.filters.tags.empty()) {
     std::string error;
@@ -310,7 +312,8 @@ Result<PrefillAnswer> TraceService::prefill(const RequestContext&, const HostSpe
       return Out::fail(make_error(filter_error_status(code), code, message));
     }
   }
-  // The filter part of the key is a digest: up to 32 filters of 4 KiB each are not kept as a key.
+  // The filter part of the key is a digest. The key does not keep the filters themselves, which can be up to 32 filters of 4 KiB
+  // each.
   const std::string cache_key = request.source_host_id + '\0' + std::to_string(request.aligned_start_ms) + '\0' +
       std::to_string(request.aligned_end_ms) + '\0' + std::to_string(request.read_budget) + '\0' + sha256_hex(tag_filters);
   const auto cached = prefill_.get(cache_key, [&](Prefill& value, std::string& code, std::string& message) {
@@ -405,15 +408,15 @@ Result<FacetValuesAnswer> TraceService::facet_values(const RequestContext&, cons
     set_attribute_scope_error(columns, disabled, "filters", &code, &message);
     return Out::fail(make_error(filter_error_status(code), code, message));
   }
-  // The values of a key ignore the filters of that key, so its other values stay visible (and can be added: several values of one key
-  // match any of them).
+  // The values of a key ignore the filters of that key. Therefore the other values stay visible. A user can add more values,
+  // because several values of one key match any of them.
   std::string tags, code, message;
   if (!request.filters.tags.empty() &&
       !tag_filters_sql(request.filters.tags, columns, &tags, &code, &message, &request.key_scope, &request.key)) {
     return Out::fail(make_error(filter_error_status(code), code, message));
   }
   const std::string span_filters = span_filters_sql(request.filters, tags);
-  // The client's text (the attribute key and the filters) enters the key as a digest.
+  // The text from the client, which is the attribute key and the filters, enters the key as a digest.
   const std::string cache_key = request.source_host_id + '\0' + std::to_string(request.aligned_start_ms) + '\0' +
       std::to_string(request.aligned_end_ms) + '\0' + request.key_scope + '\0' + std::to_string(request.limit) + '\0' +
       std::to_string(request.read_cap) + '\0' + sha256_hex(request.key + '\0' + span_filters);
@@ -466,7 +469,8 @@ Result<TraceDetailAnswer> TraceService::trace_detail(const RequestContext& conte
   if (answer.truncated) answer.spans.resize(traces.max_spans_per_trace);
   if (answer.spans.empty()) return Out::fail(make_error(404, "trace_not_found", "Trace was not found in the configured time scope."));
 
-  // Do not leak the SpanId of a parent that was hidden by the service allowlist. Treat the first visible descendant as a visible root instead.
+  // Do not reveal the SpanId of a parent that the service allowlist hid. Instead, treat the first visible descendant as a visible
+  // root.
   std::unordered_set<std::string> visible_span_ids;
   visible_span_ids.reserve(answer.spans.size());
   for (const auto& span : answer.spans) visible_span_ids.insert(span.span_id);
@@ -512,7 +516,7 @@ Result<LinkedFromAnswer> TraceService::linked_from(const RequestContext&, const 
   answer.range_source = "request";
   int64_t start_ms = request.start_ms, end_ms = request.end_ms;
   if (!request.has_range) {
-    // No window from the caller: the trace index gives the trace's bounds.
+    // The caller gives no window. The trace index gives the bounds of the trace.
     if (traces.trace_index_table.empty()) {
       return Out::fail(make_error(503, "trace_index_unavailable", "Linked-from lookups without start_ms/end_ms require traces.trace_index_table."));
     }
@@ -632,8 +636,9 @@ Result<SpansAnswer> TraceService::spans(const RequestContext&, const HostSpec& h
   auto db = open_(host, &error);
   if (!db) return Out::fail(make_error(503, "trace_source_unavailable", connect_error(error)));
 
-  // Column predicates (primary key ServiceName / SpanName, status, kind, duration) and the allowlist go to PREWHERE; attribute map predicates,
-  // which read the large map columns, stay in WHERE for the rows left.
+  // Column predicates go to PREWHERE. These are the primary-key predicates on ServiceName and SpanName, the status, the kind, the
+  // duration, and the allowlist. Attribute map predicates stay in WHERE. They read the large map columns, so they run only on the
+  // rows that are left.
   std::string tag_sql, columns_sql;
   if (!request.filters.tags.empty() || !request.columns.empty()) {
     const AttributeColumns cols = attribute_columns(*db, attribute_maps_, host, traces);
@@ -660,7 +665,8 @@ Result<SpansAnswer> TraceService::spans(const RequestContext&, const HostSpec& h
   SpansAnswer answer;
   answer.source_host_id = request.source_host_id;
   answer.request = request;
-  // A parent hidden by the service allowlist must not leak its SpanId (as in trace detail): with a restricted allowlist parent ids are not reported.
+  // A parent that the service allowlist hides must not reveal its SpanId, as in the trace detail. With a restricted allowlist,
+  // the parent ids are not reported.
   answer.all_services = visibility == "1";
   try {
     answer.outcome = run_span_search(*db, plan);

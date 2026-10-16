@@ -1,7 +1,7 @@
-// The routes of the Metrics browser (/api/metrics/catalog, attributes, series, exemplars) over the ClickHouse exporter tables
-// <database>.<table_prefix>_{gauge,sum,histogram,exponential_histogram,summary}. A route is an adapter: it parses the request
-// (metrics_request.hpp), finds the host, calls the service (metrics_service.hpp) with the context of the request, and writes the JSON of
-// its answer (metrics_json.hpp). What a route reads from ClickHouse, and the rules of each read, are in the units that the service calls:
+// These are the routes of the Metrics browser: /api/metrics/catalog, attributes, series, and exemplars. They read the ClickHouse exporter tables
+// <database>.<table_prefix>_{gauge,sum,histogram,exponential_histogram,summary}. A route is an adapter. It parses the request
+// (metrics_request.hpp), finds the host, and calls the service (metrics_service.hpp) with the context of the request. Then it writes the JSON of
+// its answer (metrics_json.hpp). The rules of each read are in the units that the service calls:
 //
 //   metrics_request    the parameters of a request: kind, window, attribute filters, grouping, bucket grid
 //   metrics_sql        every statement, as a pure function
@@ -9,8 +9,8 @@
 //   metrics_service    the connection, the kind tables, the read of each route, the error of a failed statement
 //   metrics_json       the JSON of each answer
 //
-// Counter increases, histogram bucket differences, quantile interpolation, exponential bucket merging and the top-K + "other" folding are
-// documented in docs/metrics.md ("Metrics browser API").
+// docs/metrics.md ("Metrics browser API") describes the counter increases, the histogram bucket differences, the quantile interpolation,
+// the exponential bucket merging, and the top-K and "other" folding.
 #include "server.hpp"
 
 #include "api_error.hpp"
@@ -29,7 +29,7 @@
 namespace chdash {
 namespace {
 
-// The two answers that every route gives before it reads anything: the host is unknown, or the page is off for it.
+// Every route gives one of two answers before it reads anything. The host is unknown, or the page is off for the host.
 struct MetricsRoute {
   std::string source_host_id;
   const HostSpec* host = nullptr;
@@ -49,7 +49,7 @@ bool open_metrics_route(const AppConfig& cfg, const httplib::Request& req, httpl
   return true;
 }
 
-// The answer of a service: its error, or its JSON.
+// This is the answer of a service. It is either its error or its JSON.
 template <typename Answer, typename Json>
 void send_metrics_result(httplib::Response& res, const Result<Answer>& result, Json json) {
   if (!result.value) return send_error(res, result.error);
@@ -60,7 +60,7 @@ void send_metrics_result(httplib::Response& res, const Result<Answer>& result, J
 
 } // namespace
 
-// Aggregations over wide windows may stay silent for a while before the first block: the receive timeout is 60 s.
+// Aggregations over wide windows can stay silent for some time before the first block. The receive timeout is 60 s.
 std::unique_ptr<ChExecutor> Server::open_metrics_executor(const HostSpec& host, std::string* error) {
   const HostSpec* spec = &host;
   return ClientExecutor::open(

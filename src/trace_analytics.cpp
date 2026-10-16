@@ -56,8 +56,8 @@ Result<AnalyticsOutcome> run_analytics(ChExecutor& db, const TraceScope& scope, 
       out.have_counts = true;
     } catch (const std::exception& e) {
       log_event(LogLevel::Warn, "traces.index_fallback", {{"route", "analytics"}, {"reason", "index_error"}, {"error", std::string(e.what()).substr(0, 300)}});
-      // A missing or unreadable index falls back to the span aggregation, on a fresh connection (a failed query may leave this
-      // one unusable).
+      // An index that is absent or unreadable uses the span aggregation instead. This runs on a fresh connection.
+      // A failed query may leave the old connection unusable.
       out.trace_counts.clear();
       std::string error;
       if (!db.renew(&error)) {
@@ -104,7 +104,7 @@ HeatmapBins bin_heatmap(const std::map<std::pair<int64_t, int>, uint64_t>& fine_
   HeatmapBins out;
   for (const auto& [bin, count] : fine_totals) out.total += count;
   if (out.total > 0) {
-    // The fine bin holding the 1 % quantile, and the slowest bin.
+    // The fine bin that holds the 1 % quantile, and the slowest bin.
     const uint64_t cut = std::max<uint64_t>(1, static_cast<uint64_t>(std::ceil(static_cast<double>(out.total) * 0.01)));
     uint64_t seen = 0;
     int lo_bin = fine_totals.begin()->first;
@@ -134,7 +134,7 @@ HeatmapBins bin_heatmap(const std::map<std::pair<int64_t, int>, uint64_t>& fine_
 HeatmapOutcome run_heatmap(ChExecutor& db, const TraceScope& scope, bool key_only_filters, int64_t bucket_ms, int64_t origin_ms) {
   HeatmapOutcome out;
   const auto started = std::chrono::steady_clock::now();
-  // The analytics' own cheap path for broad service / operation filters.
+  // The analytics have their own cheap path for broad service / operation filters.
   out.broad = key_only_filters && filters_are_broad(db, scope);
   db.select(heatmap_sql(scope, out.broad, bucket_ms, origin_ms), [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -165,8 +165,8 @@ bool ends_with(std::string_view text, std::string_view suffix) {
 
 }  // namespace
 
-// Identifier and timestamp keys: every value is (nearly) unique, so they never explain a difference and would crowd the ranking.
-// The high-cardinality rule below catches most of them anyway; the names catch small samples.
+// Identifier and timestamp keys are not useful. Every value is (nearly) unique, so these keys never explain a difference.
+// They also crowd the list of ranked keys. The high-cardinality rule below catches most of them anyway. The names catch the small samples.
 bool id_or_time_key(std::string_view key) {
   const std::string k = lower_ascii(key);
   for (std::string_view suffix : {"trace_id", "traceid", "span_id", "spanid", "parent_id", "parentid",
@@ -204,8 +204,8 @@ bool semconv_key(std::string_view key) {
 DeltaRanking rank_deltas(std::vector<DeltaKey> keys, uint64_t n_in, uint64_t n_out, uint64_t total_in, uint64_t total_out,
                          bool baseline_all) {
   DeltaRanking out;
-  // Baseline shares: the outside sample, or all traces of the sampled time range (both samples weighted by the traces they
-  // stand for).
+  // Baseline shares come from the outside sample. They can also come from all traces of the sampled time range.
+  // Both samples are weighted by the traces that they stand for.
   const double all_total = static_cast<double>(total_in + total_out);
   const auto baseline_pct = [&](const DeltaValue& v) {
     const double out_share = n_out ? static_cast<double>(v.n_out) / static_cast<double>(n_out) : 0.0;
@@ -281,7 +281,7 @@ std::vector<DeltaKey> read_delta_keys(ChExecutor& db, const TraceScope& scope, c
   all_ids.insert(all_ids.end(), samples.ids_out.begin(), samples.ids_out.end());
   const std::string sql = deltas_attribute_sql(scope, windows, columns.span(), columns.resource(), samples.ids_in.size(), samples.ids_out.size());
   std::map<std::pair<std::string, std::string>, size_t> index;
-  // The ids go as parameters: two lists of up to 2,500 ids would pass max_query_size as text.
+  // The ids go as parameters. Two lists of up to 2,500 ids, passed as text, exceed max_query_size.
   const ChParams id_params = {{"ids_in", sql::quote_array(samples.ids_in)}, {"all_ids", sql::quote_array(all_ids)}};
   db.select(sql, id_params, [&](const clickhouse::Block& block) {
     for (size_t row = 0; row < block.GetRowCount(); ++row) {
@@ -324,8 +324,8 @@ Result<ServiceMapOutcome> run_service_map(ChExecutor& db, const TraceScope& scop
   ServiceMapOutcome out;
   const int64_t window_ms = scope.end_ms - scope.start_ms;
 
-  // Spans in the window, from the primary index alone (EXPLAIN ESTIMATE rows: database, table, parts, rows, marks). Selecting
-  // FROM (EXPLAIN ...) would need CREATE TEMPORARY TABLE, so the rows are summed here.
+  // The code counts the spans in the window from the primary index alone. It uses the EXPLAIN ESTIMATE rows: database, table, parts, rows, marks.
+  // The FROM (EXPLAIN ...) form needs CREATE TEMPORARY TABLE. So the code sums the rows here.
   const auto estimate_started = std::chrono::steady_clock::now();
   try {
     db.select(service_map_estimate_sql(scope.table, scope.start_ms, scope.end_ms), [&](const clickhouse::Block& block) {
@@ -336,8 +336,8 @@ Result<ServiceMapOutcome> run_service_map(ChExecutor& db, const TraceScope& scop
     });
   } catch (const std::exception& e) {
     log_event(LogLevel::Warn, "traces.estimate_failed", {{"route", "service_map"}, {"error", std::string(e.what()).substr(0, 300)}});
-    // Without an estimate the window size decides: the read budget is assumed to cover ten minutes (on a fresh connection, see
-    // analytics).
+    // Without an estimate, the window size decides. The read budget is assumed to cover ten minutes.
+    // This runs on a fresh connection; see analytics.
     out.estimate_source = "window";
     out.estimated_spans = kServiceMapReadRows * static_cast<uint64_t>(std::max<int64_t>(1, window_ms / kServiceMapFallbackWindowMs));
     std::string error;
@@ -365,7 +365,7 @@ Result<ServiceMapOutcome> run_service_map(ChExecutor& db, const TraceScope& scop
   });
   out.query_ms = elapsed_ms_double(query_started);
 
-  // Busiest first; a map beyond these sizes is unreadable anyway.
+  // The busiest come first. A map beyond these sizes is unreadable anyway.
   std::sort(out.nodes.begin(), out.nodes.end(), [](const ServiceMapNode& a, const ServiceMapNode& b) {
     return a.stats.count != b.stats.count ? a.stats.count > b.stats.count : a.service < b.service;
   });

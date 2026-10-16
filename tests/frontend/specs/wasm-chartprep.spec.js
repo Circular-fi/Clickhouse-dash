@@ -2,9 +2,10 @@ import { test, expect } from '@playwright/test';
 import { installObservers } from '../helpers/observability.js';
 import { openApp } from '../helpers/app.js';
 
-// The general path of the Query chart model on WebAssembly (src/wasm/chartprep.c, docs/wasm.md): rows that are not one
-// per x in ascending order are sorted, merged and summed by the kernel. The model must equal the JavaScript one, double
-// for double, on seeded results of every shape; without the kernel the JavaScript path answers.
+// The general path of the Query chart model on WebAssembly (src/wasm/chartprep.c, docs/wasm.md).
+// Rows that are not one per x in ascending order are sorted, merged and summed by the kernel.
+// The model must equal the JavaScript model, double for double, on seeded results of every shape.
+// Without the kernel, the JavaScript path gives the answer.
 
 const observers = new WeakMap();
 test.beforeEach(async ({ page }) => { observers.set(page, installObservers(page)); });
@@ -30,7 +31,7 @@ const SHAPES = [
   { name: 'a large result', kind: 'times', rows: 250000, seed: 12, types: ['DateTime', 'Float64', 'UInt32'], columns: ['t', 'a', 'b'] },
 ];
 
-// Runs in the page: builds the model of each seeded result with the kernel and with JavaScript and lists the differences.
+// Run in the page. It builds the model of each seeded result with the kernel and with JavaScript. It lists the differences.
 async function compare(page, shapes) {
   return page.evaluate(async (shapes) => {
     const ns = window.ChDash;
@@ -109,7 +110,7 @@ test('performance budget: the kernel builds the model of 1,000,000 unsorted rows
     const meta = { kinds: ['number', 'number', 'number'], columns: ['x', 'a', 'b'] };
     const cfg = t.normalizeConfig({ ...t.defaultConfig(meta) }, meta);
     const store = t.createStore();
-    // Parse once (shared): both paths time the general path on parsed columns, as buildModel does after parsing.
+    // Parse once, for both paths. Both paths time the general path on parsed columns, as buildModel does after it parses.
     t.buildModel(JSON.parse(JSON.stringify(cfg)), meta, rows, store);
     const time = (on) => { t.setWasm(on); const a = performance.now(); t.buildModel(JSON.parse(JSON.stringify(cfg)), meta, rows, store); return performance.now() - a; };
     const median = (on) => { const v = [time(on), time(on), time(on)].sort((p, q) => p - q); return v[1]; };

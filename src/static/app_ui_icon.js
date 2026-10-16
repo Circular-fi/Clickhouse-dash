@@ -1,5 +1,5 @@
-// Icons: one sprite (static/icons.svg, Tabler outline drawings), one helper
-// (css/10-components/icon.css, docs/ui-foundations.md "Icons").
+// Icons. One sprite (static/icons.svg, Tabler outline drawings) holds every icon.
+// One helper draws them (css/10-components/icon.css). See docs/ui-foundations.md, "Icons".
 //
 //   ns.icon(name, { size, label, className })   -> markup
 //   ns.icon.el(name, { size, label, className }) -> an <svg> element
@@ -9,12 +9,12 @@
 //     <use href="<sprite>#i-<name>"/></svg>
 //   size   "sm" 14 px, "md" 16 px (the default), "lg" 18 px
 //   label  an icon that says something on its own (no text beside it, not
-//          inside a labelled button) gets role="img" and aria-label
-//          instead of aria-hidden. An icon-only button keeps its own
-//          aria-label and title and its icon stays aria-hidden.
+//          inside a labelled button) gets role="img" and aria-label.
+//          It does not get aria-hidden. An icon-only button keeps its own
+//          aria-label and title. Its icon stays aria-hidden.
 //
-// The sprite address comes from the page shell (window.__chdashIconSprite,
-// static/icons.svg?v=<content hash>, under the page's base path).
+// The page shell sets the sprite address in window.__chdashIconSprite. The address is
+// static/icons.svg?v=<content hash> under the page's base path.
 
 import { util } from "./app_util.js";
 

@@ -1,16 +1,20 @@
-// Shared canvas graph kit (ns.graphKit): one look and one interaction model
-// for every node / edge graph (Explorer lineage and storage graph, Traces
-// service map, trace detail Trace Graph). It owns the view transform (pan,
-// zoom, fit into the area the chrome leaves free, one wheel factor
-// and zoom range), the DPR-correct canvas and its rAF-coalesced redraws, the
-// dot-grid background, card / halo / edge / label drawing, the orthogonal
-// edge router and the layered layout it routes, collision-free edge labels,
-// the minimap, keyboard access (focusable canvas, arrows between nodes,
-// Enter, + - 0, Escape, a live region naming the focused node), touch pan
-// and pinch zoom, and the DOM helpers of the shared chrome (foldable
-// legend, side-panel shell). The canvas is the only view of every graph,
-// on phones too. Colours come from the --graph-* tokens of
-// css/00-tokens.css, never from literals.
+// The shared canvas graph kit (ns.graphKit) gives one look and one interaction model.
+// It serves every node and edge graph: the Explorer lineage and storage graph, the Traces
+// service map, and the trace detail Trace Graph.
+//
+// The kit owns the view transform. It handles pan, zoom, and fit into the area that the
+// chrome leaves free. It sets one wheel factor and one zoom range. It owns the DPR-correct
+// canvas and its rAF-coalesced redraws. It draws the dot-grid background, the cards, the
+// halos, the edges, and the labels.
+//
+// It owns the orthogonal edge router and the layered layout that the router uses. It places
+// collision-free edge labels and the minimap. It gives keyboard access: a focusable canvas,
+// arrows between nodes, Enter, + - 0, and Escape. A live region names the focused node.
+// It gives touch pan and pinch zoom. It owns the DOM helpers of the shared chrome: the
+// foldable legend and the side-panel shell.
+//
+// The canvas is the only view of every graph, also on phones.
+// Colours come from the --graph-* tokens of css/00-tokens.css. Do not use literals.
 
 import { dom, h } from "./app_dom.js";
 import { loader } from "./app_loader.js";
@@ -23,11 +27,11 @@ import { wasm } from "./app_wasm.js";
 
 const { $ } = dom;
 
-// The canvas font: the --font-sans stack of 00-tokens.css, which a canvas cannot read as var()
-// (tests/harness/test_type_scale_contract.py keeps the two equal). Canvas weights are 400 / 500 /
-// 600, the faces the page ships.
+// The canvas font is the --font-sans stack of 00-tokens.css. A canvas cannot read var().
+// The test tests/harness/test_type_scale_contract.py keeps the two stacks equal.
+// Canvas weights are 400, 500, and 600. These are the faces that the page ships.
 const FONT = '"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
-// Card corners: --r-lg.
+// Card corners use --r-lg.
 const CARD_RADIUS = 8;
 const ZOOM_STEP = 1.22;
 const WHEEL_SPEED = 0.0012;
@@ -38,10 +42,10 @@ const MOBILE_QUERY = "(max-width: 760px)";
 
 // ------------------------------------------------------------------ theme
 
-// Canvas colours are resolved from CSS custom properties. getComputedStyle()
-// per node / edge made every frame pay hundreds of style lookups, so values
-// are cached until the theme can have changed: any attribute change on the
-// root element (data-theme, class) or an OS colour-scheme switch.
+// The canvas reads colours from CSS custom properties. A getComputedStyle() call for each
+// node or edge makes every frame read hundreds of styles. Therefore the kit caches the values.
+// It clears the cache when the theme can change. This happens on any attribute change of the
+// root element (data-theme, class) and on an OS colour-scheme switch.
 const themeCache = { colors: new Map(), light: null, signature: "" };
 const themeListeners = new Set();
 const colorSchemeQuery = window.matchMedia?.("(prefers-color-scheme: light)") || null;
@@ -63,9 +67,9 @@ function themeChanged() {
 }
 
 colorSchemeQuery?.addEventListener?.("change", themeChanged);
-// Text measured before a web font arrived used the fallback face: drop the cached truncations
-// and redraw every view, as a theme change does.
-// A view that measured text for its layout or its fit (card widths, the legend's box) measures
+// Text measured before a web font arrived uses the fallback face. Remove the cached truncations.
+// Then redraw every view. A theme change does the same.
+// A view that measures text for its layout or its fit (card widths, the legend box) measures
 // again through fonts.onLoad.
 const fontListeners = new Set();
 document.fonts?.addEventListener?.("loadingdone", () => {
@@ -100,8 +104,7 @@ function isLight() {
   return light;
 }
 
-// Roles read by the renderers; the tokens are defined for both themes in
-// the --graph-* tokens of css/00-tokens.css.
+// The renderers read these roles. The --graph-* tokens of css/00-tokens.css define them for both themes.
 const ROLE_TOKENS = {
   bg: "--graph-bg",
   grid: "--graph-grid",
@@ -128,17 +131,16 @@ function color(role) {
   return cssVar(ROLE_TOKENS[role] || ROLE_TOKENS.text);
 }
 
-// A CSS var() reference to a custom property (the Traces service colours),
-// resolved for canvas.
+// A CSS var() reference to a custom property (the Traces service colours). The canvas resolves it.
 function resolveColor(value) {
   const text = String(value || "");
   const match = /^var\((--[A-Za-z0-9_-]+)\)$/.exec(text);
   return match ? cssVar(match[1]) : text;
 }
 
-// Any CSS colour as [r, g, b, a] (0..255, alpha 0..1): a 1x1 canvas
-// normalises the syntax ("#abc", "rgba(...)", names) to "#rrggbb" or
-// "rgba(r, g, b, a)". Cached per text.
+// This function converts any CSS colour to [r, g, b, a] (0..255, alpha 0..1). A 1x1 canvas
+// normalises the syntax ("#abc", "rgba(...)", names) to "#rrggbb" or "rgba(r, g, b, a)".
+// The result is cached per text.
 const parsedColors = new Map();
 let colorProbe = null;
 function parseColor(value) {
@@ -165,7 +167,7 @@ function parseColor(value) {
   return rgba;
 }
 
-// Canvas twin of color-mix(in srgb, b t, a): `t` of colour `b` over `a`.
+// The canvas version of color-mix(in srgb, b t, a). It mixes `t` of colour `b` over `a`.
 function mixColor(a, b, t) {
   const x = parseColor(a);
   const y = parseColor(b);
@@ -174,9 +176,10 @@ function mixColor(a, b, t) {
   return `rgb(${channel(0)}, ${channel(1)}, ${channel(2)})`;
 }
 
-// mixColor(a, b, t) for many weights t of the same two colours: the strings of the weights, in order. The page runs the loop of
-// mixColor: it is faster than the kernel at every size (docs/wasm.md). The tests force src/wasm/color.c through
-// ns.palette.batch.colorKernel and compare; an item the kernel hands back uses mixColor.
+// mixColor(a, b, t) takes many weights t of the same two colours. It returns their strings, in order.
+// The page runs the loop of mixColor. It is faster than the kernel at every size (docs/wasm.md).
+// The tests force src/wasm/color.c through ns.palette.batch.colorKernel and compare the results.
+// An item that the kernel returns uses mixColor.
 function mixColorBatch(a, b, weights, force) {
   const list = Array.from(weights);
   const out = force && palette && palette.batch
@@ -186,13 +189,13 @@ function mixColorBatch(a, b, weights, force) {
   return list.map((t, i) => (out.status[i] === 0 ? out.texts[i] : mixColor(a, b, t)));
 }
 
-// Alpha of objects outside the focused neighbourhood: faint but legible.
+// The alpha of objects outside the focused neighbourhood is low, but still legible.
 function dimAlpha() {
   return isLight() ? 0.34 : 0.26;
 }
 
-// Media queries are created once: matchMedia() per call (per edge and per
-// frame for the reduced-motion check) showed up in frame profiles.
+// Create the media queries once. A matchMedia() call for each edge, or for each frame
+// (for the reduced-motion check), appeared in the frame profiles.
 const reducedMotionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)") || null;
 const mobileQuery = window.matchMedia?.(MOBILE_QUERY) || null;
 
@@ -225,9 +228,9 @@ function roundRect(ctx, x, y, width, height, radius) {
   else ctx.rect(x, y, width, height);
 }
 
-// Truncated texts per font, text and width: cards redraw on every hover and
-// pan frame, and the binary search measures the text up to log2(n) times.
-// Callers that set the font pass it (reading ctx.font back serializes it).
+// The kit stores the truncated texts for each font, text, and width. Cards redraw on every hover
+// and pan frame. The binary search measures the text up to log2(n) times.
+// Callers that set the font pass it. Read ctx.font back only with care, because it serializes the font.
 const ellipsisCache = new Map();
 function ellipsis(ctx, value, maxWidth, font = ctx.font) {
   const text = String(value || "");
@@ -252,9 +255,10 @@ function ellipsis(ctx, value, maxWidth, font = ctx.font) {
   return result;
 }
 
-// A title on up to `lines` lines: when it does not fit one it breaks after the last separator (_ . - / : a space) that
-// leaves the first line within `maxWidth` ("weather_alert_" / "target_mv"), else where the line is full; the last line
-// ends in an ellipsis. Cached like ellipsis(): a compact card draws it on every frame.
+// A title can take up to `lines` lines. If it does not fit on one line, the kit breaks it after the
+// last separator (_ . - / : or a space). The first line must stay within `maxWidth`
+// ("weather_alert_" / "target_mv"). If no separator fits, the kit breaks the title where the line is full.
+// The last line ends in an ellipsis. The result is cached like ellipsis(). A compact card draws it on every frame.
 const wrapCache = new Map();
 function wrapLines(ctx, value, maxWidth, lines, font = ctx.font) {
   const text = String(value || "");
@@ -279,8 +283,8 @@ function wrapLines(ctx, value, maxWidth, lines, font = ctx.font) {
   return result;
 }
 
-// The dot grid of the graph background: one dot per GRID_SPACING CSS pixels,
-// a pattern tile in device pixels moved with the pan offset.
+// The dot grid is the graph background. It draws one dot for each GRID_SPACING CSS pixels.
+// It uses a pattern tile in device pixels. The kit moves the tile with the pan offset.
 const gridPatternCache = { key: "", pattern: null };
 function gridPattern(ctx, dpr) {
   const key = `${dpr}\u0000${color("grid")}`;
@@ -325,15 +329,16 @@ function fontOf(weight, size) {
   return font;
 }
 
-// One card: rounded rectangle, optional left colour strip, status dot and
-// right-aligned badge on the title row, then text rows at fixed offsets.
+// One card is a rounded rectangle. It can have a left colour strip, a status dot, and a
+// right-aligned badge on the title row. Text rows follow at fixed offsets.
 //   card = { radius, fill, border, borderWidth, dashed, alpha, focused,
 //            strip, status: "warn" | "error", statusAlpha, badge,
 //            badgeSize, badgeY, statusY, rows: [{ text, size, weight, color, y, fit, lines, lineHeight }] }
-// A row with lines > 1 (a compact card's title, see compactBox) wraps over up to that many lines, lineHeight apart. With
-// badgeApart the badge sits on its own line (badgeY): the title keeps its width, and a row with avoidBadge stops before it.
-// A focused card has a 2 px --graph-halo (accent) border and no ring around it.
-// The first row is the title: it stops before the status dot and badge.
+// A row with lines > 1 (the title of a compact card, see compactBox) wraps over up to that many lines.
+// The lines are lineHeight apart. With badgeApart, the badge sits on its own line (badgeY). The title keeps
+// its width. A row with avoidBadge stops before the badge.
+// A focused card has a 2 px --graph-halo (accent) border. It has no ring.
+// The first row is the title. It stops before the status dot and the badge.
 function drawCard(ctx, item, card) {
   const radius = card.radius ?? CARD_RADIUS;
   ctx.save();
@@ -375,7 +380,7 @@ function drawCard(ctx, item, card) {
     ctx.fillText(card.badge, rightEdge, item.y + (card.badgeY ?? 22));
     ctx.textAlign = "left";
     badgeWidth = ctx.measureText(card.badge).width + 8;
-    // A badge on a line of its own (badgeApart) leaves the title its width; the rows that avoid it give it theirs.
+    // A badge on its own line (badgeApart) leaves the title its width. The rows that avoid the badge give their width to the title.
     if (!card.badgeApart) rightEdge -= badgeWidth;
   }
   const rows = card.rows || [];
@@ -388,7 +393,7 @@ function drawCard(ctx, item, card) {
     const limit = (index === 0 && row.fit !== "full" ? rightEdge - item.x - pad : item.width - pad - 12) - (row.avoidBadge ? badgeWidth : 0);
     if (row.lines > 1) {
       const wrapped = wrapLines(ctx, row.text, limit, row.lines, font);
-      // A title that fits one line is centred in a box made for several.
+      // A title that fits on one line is centred in a box made for several lines.
       const shift = (row.lines - wrapped.length) * row.lineHeight / 2;
       wrapped.forEach((line, at) => ctx.fillText(line, item.x + pad, item.y + row.y + shift + at * row.lineHeight));
       continue;
@@ -398,20 +403,19 @@ function drawCard(ctx, item, card) {
   ctx.restore();
 }
 
-// A compact card keeps only its title, drawn larger so it stays legible
-// while zooming out (8 px on screen at FIT_FLOOR, the smallest scale a Fit
-// opens at); below that, cards are plain blocks.
+// A compact card keeps only its title. The kit draws the title larger, so it stays legible at a small scale.
+// On screen, the title is 8 px at FIT_FLOOR. This is the smallest scale that a Fit opens at.
+// Below that scale, cards are plain blocks.
 function compactTitleSize(scale) {
   const value = Math.max(0.01, Number(scale) || 1);
   const size = Math.min(32, Math.max(14, 12 / value));
   return size * value >= 8 - 1e-9 ? size : 0;
 }
 
-// Level of detail, from what the card is on screen, not from the zoom: a
-// card draws all its rows while it is at least COMPACT_CARD_PX tall on
-// screen and its smallest text (minFont, world px) at least MIN_TEXT_PX;
-// below either it is compact. A graph decides once per frame, from the
-// height of its ordinary card, so every card shows the same detail.
+// The level of detail depends on the size of the card on screen, not on the zoom.
+// A card draws all its rows when two conditions hold. Its height on screen is at least COMPACT_CARD_PX.
+// Its smallest text (minFont, world px) is at least MIN_TEXT_PX. If either condition fails, the card is compact.
+// The graph decides once for each frame. It uses the height of an ordinary card. So every card shows the same detail.
 const COMPACT_CARD_PX = 40;
 const MIN_TEXT_PX = 7.5;
 function isCompact(cardHeight, scale, minFont = 12) {
@@ -419,14 +423,15 @@ function isCompact(cardHeight, scale, minFont = 12) {
   return cardHeight * value < COMPACT_CARD_PX - 1e-6 || minFont * value < MIN_TEXT_PX - 1e-6;
 }
 
-// The box a compact card draws in: the card shrunk to the height of its
-// title row (7 px above and below it on screen), centred on its edge ports
-// so the edges still meet its sides, and never taller than the card. No
-// compact card is an empty frame around a title. With `lines` > 1 the box has
-// room for a title on that many lines (a long name wraps rather than ends in
-// an ellipsis: wrapLines through drawCard's row.lines); a one-line title in it
-// stays centred. Returns { x, y, width, height, titleSize, baseline, lineHeight }
-// (baseline: of the first line, from the box's top).
+// The box is the area where a compact card draws. It is the card, shrunk to the height of its
+// title row. The kit adds 7 px above and below the title on screen. The box is centred on its edge
+// ports, so the edges still meet its sides. It is never taller than the card. A compact card is not an
+// empty frame around a title.
+//
+// With `lines` > 1, the box has room for a title on that many lines. A long name wraps. It does not end
+// in an ellipsis (wrapLines through drawCard's row.lines). A one-line title in the box stays centred.
+// It returns { x, y, width, height, titleSize, baseline, lineHeight }.
+// The baseline is the baseline of the first line, from the top of the box.
 function compactBox(item, scale, lines = 1) {
   const value = Math.max(0.01, Number(scale) || 1);
   const titleSize = compactTitleSize(value);
@@ -440,7 +445,7 @@ function compactBox(item, scale, lines = 1) {
 
 // ------------------------------------------------------------------ edges
 
-// Dash patterns by edge kind (world units, scaled with the zoom).
+// The dash patterns depend on the edge kind. The units are world units, scaled with the zoom.
 const DASH = {
   solid: [],
   dashed: [7, 7],
@@ -465,7 +470,7 @@ function polylineMetric(points) {
   return { segments, total: Math.max(total, 0.0001) };
 }
 
-// Point (and direction) at fraction t of a polyline's length.
+// This function gives the point, and the direction, at fraction t of a polyline's length.
 function routePoint(points, t) {
   const metric = polylineMetric(points);
   const distance = Math.max(0, Math.min(1, t)) * metric.total;
@@ -494,7 +499,7 @@ function strokePolyline(ctx, points) {
   ctx.stroke();
 }
 
-// Filled arrow head at the end of a polyline, along its last segment.
+// The filled arrow head is at the end of a polyline, along its last segment.
 function drawArrowHead(ctx, points, size = 8) {
   if (!Array.isArray(points) || points.length < 2) return;
   const tip = points[points.length - 1];
@@ -540,16 +545,16 @@ function rectsOverlap(a, b, padding = 14) {
 
 // --------------------------------------------------------- layered layout
 
-// Layered (Sugiyama-style) left-to-right layout: longest-path levels from
-// the sources, barycentre sweeps and adjacent transpositions against edge
-// crossings, then (rowGrid) one global row grid: a node can stay on the
-// exact row of its parent / child even when another column has a different
-// number of nodes, which keeps orthogonal routes straight.
+// The layered layout is a left-to-right layout in the Sugiyama style. It sets the levels to the
+// longest paths from the sources. It uses barycentre sweeps and adjacent transpositions to reduce edge
+// crossings. Then it uses (rowGrid) one global row grid. A node can stay on the exact row of its
+// parent or child, even when another column has a different number of nodes. Orthogonal routes stay straight.
 //   options = { nodes, edges, size(node) -> { width, height }, compare(a, b),
 //               queueCompare(a, b), weight(edge), rowGrid, rowPitch, xGap,
 //               yGap, minColumnWidth, origin, breakCycles, maxPerColumn }
-// maxPerColumn: a column of more cards than that is drawn as side-by-side columns of at most that many (a service that
-// calls eleven others is a block of two columns, not a tower eleven cards high that a fit would have to shrink).
+// maxPerColumn: a column with more cards than this value is drawn as side-by-side columns.
+// Each column holds at most that many cards. A service that calls eleven others is a block of two columns.
+// It is not a tower of eleven cards that a fit must shrink.
 // Returns { positions: Map(id -> { x, y, width, height, node, lineageRow }),
 // level: Map(id -> column), backEdges: Set(edge id) }.
 const WASM_LAYERED_MIN_NODES = 24;
@@ -560,7 +565,7 @@ function requestLayeredWasm() {
   loader.loadGroup("wasm-layered").then(() => (wasm && wasm.ops.layered ? wasm.load("layered") : null)).catch(() => {});
 }
 
-// { columns, levels, level, backEdges, lineageRows } like layeredOrderJs(), or null.
+// It returns { columns, levels, level, backEdges, lineageRows }, like layeredOrderJs(), or null.
 function layeredOrderWasm(options) {
   if ((options.nodes || []).length < WASM_LAYERED_MIN_NODES) return null;
   const kernel = wasm && wasm.get("layered");
@@ -579,13 +584,13 @@ function layeredOrderWasm(options) {
 }
 
 function layered(options) {
-  // The WebAssembly layout (src/wasm/layered.c) gives the order and the rows of the reference below, step for step; it hands
-  // the run back (null) when it is not loaded or cannot take it.
+  // The WebAssembly layout (src/wasm/layered.c) gives the order and the rows of the reference below.
+  // It runs step for step like the reference. It returns null when it is not loaded, or when it cannot take the run.
   const order = layeredOrderWasm(options) || layeredOrderJs(options);
   return layeredPositions(options, order);
 }
 
-// The reference: the columns, their order and the rows, as plain JavaScript.
+// The reference gives the columns, their order, and the rows. It is plain JavaScript.
 function layeredOrderJs(options) {
   const nodes = options.nodes || [];
   const compare = options.compare || ((a, b) => String(a.id).localeCompare(String(b.id)));
@@ -617,8 +622,8 @@ function layeredOrderJs(options) {
     }
   }
 
-  // Cycles are valid for some view/topology combinations. Keep them visible
-  // by placing remaining nodes after their strongest known predecessor.
+    // Cycles are valid for some combinations of view and topology. Keep them visible.
+    // Place each remaining node after its strongest known predecessor.
   for (const node of nodes) {
     if (processed.has(node.id)) continue;
     let best = 0;
@@ -636,10 +641,9 @@ function layeredOrderJs(options) {
   }
   for (const group of columns.values()) group.sort(compare);
 
-  // Crossing minimization: perform a few Sugiyama-style barycentric sweeps
-  // after topological layering. This keeps the deterministic layout while
-  // placing nodes close to their connected neighbours instead of purely
-  // alphabetically, which dramatically reduces crossing edges.
+  // Crossing minimization: perform a few Sugiyama-style barycentric sweeps after topological layering.
+  // This keeps the layout deterministic. It places nodes close to their connected neighbours.
+  // It does not place them only in alphabetical order. This reduces the number of crossing edges.
   const levels = [...columns.keys()].sort((a, b) => a - b);
   const predecessors = new Map(nodes.map((node) => [node.id, []]));
   const successors = new Map(nodes.map((node) => [node.id, []]));
@@ -677,11 +681,10 @@ function layeredOrderJs(options) {
     }
   }
 
-  // Adjacent transposition after barycentric sweeps. Re-scoring every
-  // crossing twice per adjacent swap is O(swaps x E^2) and froze the tab for
-  // a minute on a 2k-node catalog. Swapping neighbours u,v of one layer only
-  // flips the crossing state of edge pairs (u-edge, v-edge) that share the
-  // same adjacent layer, so after - before is exactly
+  // Adjacent transposition runs after the barycentric sweeps. A full rescore of every crossing,
+  // for each adjacent swap, costs O(swaps x E^2). That froze the tab for a minute on a 2k-node catalog.
+  // A swap of neighbours u,v in one layer changes the crossing state only of edge pairs (u-edge, v-edge).
+  // These pairs share the same adjacent layer. So after - before is exactly
   //   #(p_u < p_v) - #(p_u > p_v)
   // over those pairs (p = far endpoint position).
   const swapLevelById = new Map();
@@ -734,8 +737,8 @@ function layeredOrderJs(options) {
   const lineageRows = new Map();
   if (rowGrid && levels.length) {
     const maxColumnSize = Math.max(1, ...levels.map((l) => (columns.get(l) || []).length));
-    // One spare lane gives fan-in/fan-out branches room to remain separated
-    // without making small graphs excessively tall.
+    // One spare lane gives the fan-in and fan-out branches room to stay separate.
+    // Small graphs stay short.
     const rowCount = Math.max(1, maxColumnSize + (maxColumnSize >= 3 ? 1 : 0));
     for (const l of levels) {
       const group = columns.get(l) || [];
@@ -762,16 +765,15 @@ function layeredOrderJs(options) {
       return total > 0 ? weighted / total : lineageRows.get(nodeId) ?? 0;
     };
 
-    // Minimum-cost monotone assignment of a column to unique row slots. The
-    // group order is preserved, so row optimization cannot re-introduce the
-    // crossings already removed by the Sugiyama ordering pass.
+    // This is the minimum-cost monotone assignment of a column to unique row slots.
+    // It keeps the group order. Row optimization cannot add back the crossings that the Sugiyama ordering pass removed.
     const assignRows = (group) => {
       const n = group.length;
       if (!n) return;
       const slots = Math.max(rowCount, n);
       const ideals = group.map((node) => weightedIdeal(node.id));
       const inf = 1e18;
-      // Typed rows: a 2k-node column allocates n x slots cells per sweep.
+      // Typed rows: a column of 2k nodes allocates n x slots cells for each sweep.
       const dp = Array.from({ length: n }, () => new Float64Array(slots).fill(inf));
       const prev = Array.from({ length: n }, () => new Int32Array(slots).fill(-1));
       for (let row = 0; row < slots; row += 1) {
@@ -779,8 +781,7 @@ function layeredOrderJs(options) {
         dp[0][row] = (row - ideals[0]) ** 2;
       }
       for (let i = 1; i < n; i += 1) {
-        // Running prefix minimum of dp[i - 1][i - 1 .. row - 1]: a strict <
-        // keeps the lowest predecessor on ties.
+        // The running prefix minimum of dp[i - 1][i - 1 .. row - 1] is kept. A strict < keeps the lowest predecessor on ties.
         let bestCost = inf;
         let bestPrev = -1;
         for (let row = i; row < slots; row += 1) {
@@ -814,8 +815,8 @@ function layeredOrderJs(options) {
   return { columns, levels, level, backEdges, lineageRows };
 }
 
-// The cards of the columns, in the order the layout chose, as positions (x by the widest card of a column, y by the global
-// row grid or packed).
+// This function gives the positions of the cards of the columns, in the order that the layout chose.
+// The x value comes from the widest card of a column. The y value comes from the global row grid, or from packed rows.
 function layeredPositions(options, { columns, levels, level, backEdges, lineageRows }) {
   const size = options.size;
   const xGap = options.xGap ?? 92;
@@ -829,7 +830,7 @@ function layeredPositions(options, { columns, levels, level, backEdges, lineageR
   let x = origin;
   for (const l of levels) {
     const whole = columns.get(l) || [];
-    // The column's cards in as many equal runs as the limit asks, side by side from the column's first row.
+      // Split the column's cards into equal runs, as many as the limit asks for. Place the runs side by side from the first row.
     const runs = Math.max(1, Math.ceil(whole.length / maxPerColumn));
     const runSize = Math.ceil(whole.length / runs);
     const firstRow = rowGrid && runs > 1 ? Math.min(...whole.map((node, row) => lineageRows.get(node.id) ?? row)) : 0;
@@ -855,8 +856,8 @@ function layeredPositions(options, { columns, levels, level, backEdges, lineageR
   return { positions, level, backEdges };
 }
 
-// Back edges of an iterative DFS from the sources (input order): removing
-// them leaves a DAG whose longest paths give the columns.
+// The back edges come from an iterative DFS that starts at the sources (input order).
+// Their removal leaves a DAG. The longest paths of this DAG give the columns.
 function cycleBackEdges(nodes, edges) {
   const index = new Map(nodes.map((node, i) => [node.id, i]));
   const out = nodes.map(() => []);
@@ -894,23 +895,21 @@ function cycleBackEdges(nodes, edges) {
 
 // ------------------------------------------------------ orthogonal router
 
-// Every node exposes one output port (right edge, at a stable offset from
-// the top of the card) and one input port (left edge, same offset). Using a
-// top-based anchor keeps sibling rows literally horizontal when the cards
-// share a row. A very small fan zone is allowed immediately outside those
-// ports because several orthogonal edges cannot leave one point without
-// sharing a few pixels. After that fan zone, every route owns its lane:
-// overlaps are forbidden and crossings are expensive.
+// Every node has one output port on its right edge. The port is at a stable offset from the top of the card.
+// Every node also has one input port on its left edge, at the same offset. A top-based anchor keeps
+// sibling rows horizontal when the cards share a row. The router lets a very small fan zone sit just outside
+// those ports. Several orthogonal edges cannot leave one point without sharing a few pixels.
+// After that fan zone, every route owns its lane. Overlaps are forbidden. Crossings are expensive.
 const LINEAGE_NODE_PORT_TOP_OFFSET = 36;
-// Every route owns its lane: two parallel segments of two routes closer
-// than LANE_GAP (and side by side over more than half a pixel) read as one
-// doubled line, or with the dashes as a closed frame, so the router pays
-// NEAR_BASE + NEAR_PER_PX per pixel they run along each other: more than a
-// couple of crossings, far less than an overlap. Fans step by LANE_GAP.
+// Every route owns its lane. Two parallel segments of two routes that are closer than LANE_GAP,
+// and that run side by side for more than half a pixel, read as one doubled line. A closed frame reads the
+// same way when the dashes are used. The router therefore pays NEAR_BASE + NEAR_PER_PX for each pixel that
+// they run along each other. This cost is more than a couple of crossings. It is far less than an overlap.
+// Fans step by LANE_GAP.
 const LANE_GAP = 12;
 const NEAR_BASE = 30_000;
 const NEAR_PER_PX = 200;
-// A crossing in the middle of two routes (not at a fan).
+// A crossing in the middle of two routes, not at a fan.
 const CROSSING_COST = 28_000;
 const ROUTE_GRID_POINT_BUDGET = 40000;
 
@@ -973,16 +972,16 @@ function orthogonalSegmentConflict(a, b, c, d) {
     const horizontalB = aVertical ? d : b;
     const x = verticalA.x;
     const y = horizontalA.y;
-    // Crossings at a route endpoint are normal fan-in/fan-out, not a visual
-    // crossing in the middle of the graph.
+    // A crossing at a route endpoint is a normal fan-in or fan-out.
+    // It is not a visual crossing in the middle of the graph.
     if (between(x, horizontalA.x, horizontalB.x, true) && between(y, verticalA.y, verticalB.y, true)) {
       return { crossings: 1, overlap: 0 };
     }
     return { crossings: 0, overlap: 0 };
   }
 
-  // Parallel: the length they share along their axis is an overlap on the
-  // same line, a near run (`near`) on a line closer than LANE_GAP.
+  // Parallel: the length that they share along their axis is an overlap on the same line.
+  // A near run (`near`) is on a line that is closer than LANE_GAP.
   const gap = aVertical ? Math.abs(a.x - c.x) : Math.abs(a.y - c.y);
   if (gap >= LANE_GAP - 0.001) return { crossings: 0, overlap: 0 };
   const shared = aVertical
@@ -1003,9 +1002,8 @@ function routeSegmentMeta(points, edge) {
       to: edge.to,
       index: i,
       count,
-      // Only the first/last segment belongs to the unavoidable shared port
-      // fan, so long pieces of unrelated routes can never lie on top of
-      // each other.
+      // Only the first and last segment belong to the shared port fan. This fan cannot be avoided.
+      // So long pieces of unrelated routes never lie on top of each other.
       sourceFan: i === 0,
       targetFan: i === count - 1,
     });
@@ -1013,8 +1011,8 @@ function routeSegmentMeta(points, edge) {
   return segments;
 }
 
-// Scratch arrays of the indexed router grid, reused across edges (a grid
-// has at most ROUTE_GRID_POINT_BUDGET points) and reset over the used part.
+// These are the scratch arrays of the indexed router grid. The kit reuses them across edges.
+// A grid has at most ROUTE_GRID_POINT_BUDGET points. The kit resets the part that was used.
 const gridScratch = { size: 0 };
 function gridBuffers(total) {
   if (gridScratch.size < total) {
@@ -1053,29 +1051,28 @@ function routeBendCount(points) {
   return bends;
 }
 
-// Spatial index of routed segments for the conflict scoring of
-// orthogonalSegmentConflict(): a step can only overlap a parallel segment
-// on its own line (the x of a vertical segment, the y of any other, within
-// 0.001) and only cross a perpendicular one strictly inside both. Segments
-// are kept per line (the coordinate rounded to 0.01) and, along it, per
-// cell of SEGMENT_CELL px; each cell also lists the segments covering it
-// sorted by line. near(a, b) reads the parallel lines within LANE_GAP of
-// the step's own (near runs) over the cells it covers, and the
-// perpendicular lines strictly inside the step at the step's cell (one
-// binary search in that cell's list, not a lookup per line: a long cheap
-// route crosses hundreds of lines), keeping the parallel segments that
-// share more than a quarter pixel of the step and the perpendicular ones
-// reaching past its line on both sides. It returns a superset of the
-// segments with a non-zero conflict, in their original order, so a sum
-// over it adds the same non-zero terms in the same order as over every
-// segment (a y-band index made a dense 12-service map examine thousands
-// of segments per A* step). penalty(ax, ay, bx, by, edge, term) is that
-// sum of term(ax, ay, bx, by, segment, edge) without building the list:
-// its non-zero terms (most steps have none, few more than two) are put in
-// segment order before they are added, so it equals the sum over near()
-// to the last bit.
-// { dynamic: true }: segments may be appended to `segments` later; sync()
-// indexes the new ones.
+// This is the spatial index of routed segments. It scores the conflicts of orthogonalSegmentConflict().
+// A step can overlap only a parallel segment on its own line. The x of a vertical segment, or the y of any
+// other, must match within 0.001. A step can cross only a perpendicular segment that is strictly inside both.
+//
+// The index keeps segments per line. The coordinate is rounded to 0.01. Along the line, the index keeps
+// segments per cell of SEGMENT_CELL px. Each cell also lists the segments that cover it, sorted by line.
+// near(a, b) reads the parallel lines within LANE_GAP of the step, over the cells that the step covers.
+// It also reads the perpendicular lines strictly inside the step, at the cell of the step. It uses one
+// binary search in the list of that cell. It does not look up each line, because a long cheap route can
+// cross hundreds of lines.
+//
+// It keeps the parallel segments that share more than a quarter pixel of the step. It keeps the
+// perpendicular segments that reach past the line of the step on both sides. The result is a superset of
+// the segments with a non-zero conflict. The segments keep their original order. So a sum over the result
+// adds the same non-zero terms in the same order as a sum over every segment. A y-band index made a dense
+// 12-service map examine thousands of segments for each A* step.
+//
+// penalty(ax, ay, bx, by, edge, term) is the sum of term(ax, ay, bx, by, segment, edge). It makes no list.
+// It puts the non-zero terms in segment order before it adds them. Most steps have no such term. Few steps
+// have more than two. So penalty() equals the sum over near() to the last bit.
+//
+// { dynamic: true }: the kit may append segments to `segments` later. sync() indexes the new segments.
 const SEGMENT_CELL = 48;
 function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {}) {
   if (!dynamic && segments.length <= 24) {
@@ -1092,18 +1089,17 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
       },
     };
   }
-  // The parallel lines a query reads: those within LANE_GAP (near runs),
-  // or only its own (nearRuns false: the overlaps alone).
+  // The parallel lines that a query reads are those within LANE_GAP (near runs).
+  // If nearRuns is false, the query reads only its own line (the overlaps alone).
   const lanes = nearRuns ? LANE_GAP : 0.0011;
   const lineKey = (value) => Math.round(value * 100);
   const cellOf = (value) => Math.floor(value / SEGMENT_CELL);
-  // Side 0: vertical segments by x; side 1: the others by a.y (as
-  // orthogonalSegmentConflict() reads them). lineKeys[side]: the sorted
-  // keys of the lines; lines[side]: their lines in the same order, each a
-  // Map(cell -> indexes) plus .all (every index of the line, scanned
-  // instead of the cells while the line holds few segments).
-  // across[side]: Map(cell -> { keys, indexes }), the segments of that side
-  // covering the cell, sorted by line key: the perpendicular reads.
+  // Side 0 holds the vertical segments, by x. Side 1 holds the others, by a.y, as orthogonalSegmentConflict() reads them.
+  // lineKeys[side] holds the sorted keys of the lines.
+  // lines[side] holds the lines in the same order. Each line is a Map(cell -> indexes) with an .all property.
+  // The .all property holds every index of the line. The kit scans .all, not the cells, while the line holds few segments.
+  // across[side] is a Map(cell -> { keys, indexes }). It holds the segments of that side that cover the cell,
+  // sorted by line key. The perpendicular reads use across[side].
   const lines = [[], []];
   const lineKeys = [[], []];
   const across = [new Map(), new Map()];
@@ -1118,9 +1114,9 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
     return lo;
   };
   let indexed = 0;
-  // Per segment: its extent along its line (spanLo, spanHi), a query stamp
-  // (no segment twice in one answer), and the term penalty() found for it;
-  // found[0, count): a query's answer (each segment at most once).
+  // For each segment, the index keeps its extent along its line (spanLo, spanHi).
+  // It also keeps a query stamp, so that no segment appears twice in one answer. It keeps the term that penalty() found.
+  // found[0, count) holds the answer of a query. Each segment appears at most once.
   let capacity = Math.max(16, segments.length);
   let found = new Int32Array(capacity);
   let count = 0;
@@ -1130,8 +1126,8 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
   let lineAt = new Float64Array(capacity);
   let termOf = new Float64Array(capacity);
   let hits = new Int32Array(capacity);
-  // The lines within `lanes` of the last query of each side (A* steps
-  // come in pairs on one line): [first, last] positions in lineKeys.
+  // The index keeps the lines within `lanes` of the last query of each side. A* steps come in pairs on one line.
+  // The positions are [first, last] in lineKeys.
   const lastAlong = [NaN, NaN];
   const lastRange = [[0, -1], [0, -1]];
   const sync = () => {
@@ -1183,14 +1179,14 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
   };
   sync();
   let query = 0;
-  // A parallel segment conflicts only where it shares more than 0.5 px of
-  // the step's extent [lo, hi]; the bounds leave a margin. found[0, split):
-  // the parallel segments, found[split, count) the perpendicular ones.
+  // A parallel segment conflicts only where it shares more than 0.5 px of the extent [lo, hi] of the step.
+  // The bounds leave a margin. found[0, split) holds the parallel segments.
+  // found[split, count) holds the perpendicular ones.
   let lo = 0;
   let hi = 0;
   let along = 0;
   let split = 0;
-  // found[split, count) are all crossings (a cached line), not candidates.
+  // Every item in found[split, count) is a crossing from a cached line. These items are not candidates.
   let crossings = false;
   const collect = (list) => {
     if (!list) return;
@@ -1201,13 +1197,12 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
       if (spanHi[index] > lo + 0.25 && spanLo[index] < hi - 0.25) found[count++] = index;
     }
   };
-  // A static index answers the steps of one query line (the caller's
-  // `line` number: an A* grid row or column, many steps each) from what it
-  // keeps of that line at its first query: the segments of the lines
-  // within `lanes` (while they are at most LINE_CACHE_SEGMENTS) by start,
-  // and those of the other side whose extent strictly contains the line
-  // (by more than 0.001, as the crossing test) by their own line: a step
-  // crosses exactly those whose line is strictly inside it.
+  // A static index answers the steps of one query line. The `line` number is the caller's: an A* grid row
+  // or column, with many steps each. The index uses what it keeps of that line at its first query.
+  // It keeps the segments of the lines within `lanes`, sorted by start. This applies only while they are at
+  // most LINE_CACHE_SEGMENTS. It also keeps the segments of the other side. Their extent strictly contains the
+  // line, by more than 0.001 as in the crossing test. It keeps them by their own line.
+  // A step crosses exactly those segments whose line is strictly inside the step.
   const LINE_CACHE_SEGMENTS = 32;
   const lineCache = dynamic ? null : [];
   const cacheLine = (side, along) => {
@@ -1230,8 +1225,7 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
     const crossAt = [];
     for (let i = 0; i < cross.length; i += 1) crossAt.push(lineAt[cross[i]]);
     if (parallel.length > LINE_CACHE_SEGMENTS) return { parallel: null, crossAt, crossIndexes: cross };
-    // By start along the line: the scan of a step stops at the first one
-    // starting past it.
+    // The segments are sorted by start along the line. The scan of a step stops at the first segment that starts past it.
     if (parallel.length > 1) parallel.sort((x, y) => spanLo[x] - spanLo[y] || x - y);
     const starts = [];
     const ends = [];
@@ -1241,7 +1235,7 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
     }
     return { parallel, starts, ends, crossAt, crossIndexes: cross };
   };
-  // The indexes near() returns, unsorted, into `found`.
+  // near() puts the indexes that it returns, unsorted, into `found`.
   const gather = (ax, ay, bx, by, line = -1) => {
     query += 1;
     count = 0;
@@ -1256,7 +1250,7 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
       if (cached === undefined) cached = lineCache[line] = cacheLine(side, along);
     }
     if (cached && cached.parallel) {
-      // The lines' segments, each once.
+      // Take the segments of the lines, each one once.
       const { parallel, starts, ends } = cached;
       const before = hi - 0.25;
       const after = lo + 0.25;
@@ -1270,7 +1264,7 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
     crossings = cached !== null;
     if (hi - lo > 0.002) {
       if (cached) {
-        // The crossings: the lines strictly inside (lo, hi), by 0.001.
+        // The crossings are the lines strictly inside (lo, hi), by 0.001.
         const { crossAt, crossIndexes } = cached;
         const from = lo + 0.001;
         const to = hi - 0.001;
@@ -1288,8 +1282,7 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
     }
   };
   const parallelLines = (side, along) => {
-    // Parallel segments on the step's line and the lines closer than
-    // LANE_GAP (near runs).
+    // The parallel segments on the line of the step are read. So are the lines closer than LANE_GAP (near runs).
     const keys = lineKeys[side];
     const range = lastRange[side];
     if (along !== lastAlong[side]) {
@@ -1309,9 +1302,9 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
       else for (let cell = first; cell <= last; cell += 1) collect(cells.get(cell));
     }
   };
-  // Perpendicular lines strictly inside the step, at its cell: a slice of
-  // the cell's list, the segments reaching past the step's line on both
-  // sides (a crossing is strictly inside both).
+  // The perpendicular lines strictly inside the step are read at its cell. The kit takes a slice of the cell's list.
+  // It keeps the segments that reach past the line of the step on both sides.
+  // A crossing is strictly inside both.
   const perpendicularLines = (side, along) => {
     const crossing = across[1 - side].get(cellOf(along));
     if (!crossing) return;
@@ -1331,14 +1324,12 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
       for (let i = 0; i < count; i += 1) out[i] = segments[order[i]];
       return out;
     },
-    // The term of a perpendicular segment is segmentConflictTerm()'s
-    // crossing test, made here on the indexed extents: CROSSING_COST when
-    // each is strictly inside the other (the other line within the step,
-    // the step's line within the segment). Integral terms (crossings) add
-    // up exactly in any order: their sum is returned as it is.
-    // `limit` (cheap routes): once the terms found so far exceed it
-    // clearly, their partial sum is returned instead (the caller only
-    // learns that the step costs more than it can afford).
+    // The term of a perpendicular segment uses the crossing test of segmentConflictTerm(), on the indexed extents here.
+    // The term is CROSSING_COST when each one is strictly inside the other. The other line must be within the step.
+    // The line of the step must be within the segment. Integral terms (crossings) add up exactly in any order.
+    // So their sum is returned as it is.
+    // `limit` (cheap routes): when the terms found so far clearly exceed the limit, the kit returns their partial sum.
+    // The caller then learns only that the step costs more than it can afford.
     penalty(ax, ay, bx, by, edge, term, limit = Infinity, line = -1) {
       gather(ax, ay, bx, by, line);
       const stop = limit + Math.abs(limit) * 1e-9 + 1;
@@ -1383,8 +1374,8 @@ function createSegmentIndex(segments, { dynamic = false, nearRuns = true } = {})
   };
 }
 
-// Min-heap on (f = cost + heuristic, insertion order): pops exactly the
-// element a stable sort of the whole queue would put first, in O(log n).
+// This is a min-heap on (f = cost + heuristic, insertion order). It pops the same element that a stable sort
+// of the whole queue puts first. The cost is O(log n).
 function createRouteQueue() {
   const heap = [];
   let serial = 0;
@@ -1423,18 +1414,17 @@ function createRouteQueue() {
   };
 }
 
-// createRouteQueue() for the indexed A*, without an object per entry:
-// entry n (the n-th push) is its f, state and cost in typed arrays
-// shared by every search, the heap holds entry numbers, and (f, n) orders
-// them as (f, seq) orders createRouteQueue()'s, so both pop the same
-// states in the same order.
+// This is the createRouteQueue() version for the indexed A*. It makes no object for each entry.
+// Entry n (the n-th push) holds its f, state, and cost in typed arrays. Every search shares these arrays.
+// The heap holds entry numbers. The pair (f, n) orders them as (f, seq) orders the entries of createRouteQueue().
+// So both queues pop the same states in the same order.
 const stateQueue = { f: new Float64Array(1024), state: new Int32Array(1024), cost: new Float64Array(1024), heap: new Int32Array(1024) };
 function createStateQueue() {
   const q = stateQueue;
   let { f, state, cost, heap } = q;
   let size = 0;
   let serial = 0;
-  // a before b: (f, entry number) order, written out in the loops.
+  // a before b: (f, entry number) order. The loops write this order out.
   return {
     size: () => size,
     push(s, c, value) {
@@ -1459,7 +1449,7 @@ function createStateQueue() {
       }
       heap[i] = n;
     },
-    // Pops the first entry: returns its number (state[n], cost[n]).
+    // Pop the first entry. Return its number (state[n], cost[n]).
     pop() {
       const top = heap[0];
       const last = heap[--size];
@@ -1489,9 +1479,8 @@ function createStateQueue() {
 }
 
 function assembleOrthogonalRoute(sourcePort, sourceFan, body, targetFan, targetPort) {
-  // Preserve sourceFan/targetFan as explicit anchors even when collinear.
-  // Conflict detection can then exempt only the tiny shared port fan instead
-  // of accidentally exempting a long merged segment.
+  // Keep sourceFan and targetFan as explicit anchors, even when they are collinear.
+  // Conflict detection can then exempt only the small shared port fan. It must not exempt a long merged segment by mistake.
   const route = [sourcePort, sourceFan];
   for (const point of body.slice(1, -1)) {
     const previousPoint = route[route.length - 1];
@@ -1503,10 +1492,9 @@ function assembleOrthogonalRoute(sourcePort, sourceFan, body, targetFan, targetP
   return route;
 }
 
-// Bounding boxes of routed polylines, keyed by the (immutable) points array.
-// orthogonalSegmentConflict() can only report a crossing or an overlap when
-// two segments touch within its 0.001 tolerance, so pairs of routes whose
-// boxes are further apart contribute exactly 0 and can be skipped.
+// These are the bounding boxes of routed polylines. The key is the points array, which is immutable.
+// orthogonalSegmentConflict() reports a crossing or an overlap only when two segments touch within its 0.001 tolerance.
+// So a pair of routes whose boxes are further apart contributes exactly 0. The kit can skip that pair.
 const routeBoxCache = new WeakMap();
 function routeBox(points) {
   let box = routeBoxCache.get(points);
@@ -1527,19 +1515,18 @@ function routeBoxesApart(a, b) {
   return a.maxX + margin < b.minX || b.maxX + margin < a.minX || a.maxY + margin < b.minY || b.maxY + margin < a.minY;
 }
 
-// Further apart than `margin` on either axis: no crossing, overlap or (with
-// margin LANE_GAP) near run is possible.
+// Two boxes that are further apart than `margin` on either axis cannot give a crossing, an overlap, or a near run.
+// A near run needs the margin LANE_GAP.
 function segmentsApart(a, b, c, d, margin = 0.01) {
   return Math.max(a.x, b.x) + margin < Math.min(c.x, d.x) || Math.max(c.x, d.x) + margin < Math.min(a.x, b.x)
     || Math.max(a.y, b.y) + margin < Math.min(c.y, d.y) || Math.max(c.y, d.y) + margin < Math.min(a.y, b.y);
 }
 
-// A search stopped by the step budget (searchIndexedGrid()).
+// A search stops when it reaches the step budget (searchIndexedGrid()).
 const SEARCH_STOPPED = { stopped: true };
 
-// routeEdges() as a generator that yields after each routed edge (and each
-// rerouting attempt), so a caller can spread a large run over several
-// frames (runSliced()); its return value is routeEdges()'s.
+// routeEdges() is a generator. It yields after each routed edge and after each reroute attempt.
+// A caller can spread a large run over several frames with runSliced(). Its return value is the return value of routeEdges().
 function* routeEdgesSteps(items, edges, options = {}) {
   const isSecondary = options.isSecondary || (() => false);
   const itemList = [...items.entries()];
@@ -1551,7 +1538,7 @@ function* routeEdgesSteps(items, edges, options = {}) {
     exhausted: false,
   };
 
-  // Global row lanes, shared by every edge of this run.
+  // Global row lanes. Every edge of this run shares them.
   const rowYByIndex = new Map();
   for (const [, item] of itemList) {
     if (!Number.isFinite(item.lineageRow)) continue;
@@ -1581,10 +1568,9 @@ function* routeEdgesSteps(items, edges, options = {}) {
       return item ? nodePort(item, side).y : 0;
     };
 
-    // Farthest destinations on the same vertical side turn first (closest to
-    // the source). Their vertical lane therefore sits inside shorter routes
-    // instead of cutting across them. Above/below branches may reuse the same
-    // rank because they immediately travel in opposite directions.
+    // Destinations that are farthest on the same vertical side turn first. They turn closest to the source.
+    // Their vertical lane therefore sits inside shorter routes. It does not cut across them.
+    // Above and below branches may reuse the same rank. They travel in opposite directions at once.
     const fanRanks = (group, anchorY, otherId, otherSide) => {
       const buckets = { up: [], flat: [], down: [] };
       for (const edge of group) {
@@ -1669,18 +1655,16 @@ function* routeEdgesSteps(items, edges, options = {}) {
     return false;
   }
 
-  // The penalty of a step (ax, ay)-(bx, by) of `currentEdge` against one
-  // routed segment: orthogonalSegmentConflict() and its scoring, without
-  // result objects (it runs for the candidates of every A* step). A near
-  // run, an overlap or a crossing, at most one of them; each implies that
-  // the two are not segmentsApart(..., LANE_GAP), so that test is left to
-  // the callers that scan every segment.
+  // This is the penalty of a step (ax, ay)-(bx, by) of `currentEdge` against one routed segment.
+  // It has the scoring of orthogonalSegmentConflict(). It makes no result objects, because it runs for the candidates of every A* step.
+  // The step has at most one of these: a near run, an overlap, or a crossing.
+  // Each one implies that the two are not segmentsApart(..., LANE_GAP). The callers that scan every segment make that test.
   function segmentConflictTerm(ax, ay, bx, by, segment, currentEdge) {
     const c = segment.a;
     const d = segment.b;
     const aVertical = Math.abs(ax - bx) < 0.001;
     if (aVertical !== (Math.abs(c.x - d.x) < 0.001)) {
-      // A crossing strictly inside both (not at a route's end: fans).
+      // A crossing is strictly inside both segments. It is not at the end of a route, where the fans are.
       const x = aVertical ? ax : c.x;
       const y = aVertical ? c.y : ay;
       const hx0 = aVertical ? c.x : ax;
@@ -1697,16 +1681,16 @@ function* routeEdgesSteps(items, edges, options = {}) {
       : Math.max(0, Math.min(Math.max(ax, bx), Math.max(c.x, d.x)) - Math.max(Math.min(ax, bx), Math.min(c.x, d.x)));
     if (!(shared > 0.5)) return 0;
     if (gap > 0.001) return NEAR_BASE + shared * NEAR_PER_PX;
-    // Outside the tiny source/target fan, two routes must never share a
-    // visible segment. Make overlap several orders of magnitude more
-    // expensive than either a crossing or one extra bend.
+      // Outside the small source and target fan, two routes must never share a visible segment.
+      // Make an overlap several orders of magnitude more expensive than a crossing.
+      // Also make it more expensive than one extra bend.
     return sharedPortOverlapAllowed({ x: ax, y: ay }, { x: bx, y: by }, currentEdge, segment) ? 0 : 1_000_000_000 + shared * 100_000;
   }
 
   function routeConflictPenalty(a, b, usedSegments, currentEdge = null) {
     let penalty = 0;
     for (const segment of usedSegments) {
-      // Disjoint segments cannot cross, overlap or run near (see routeBox()).
+      // Disjoint segments cannot cross, overlap, or run near. See routeBox().
       if (segmentsApart(a, b, segment.a, segment.b, LANE_GAP)) continue;
       const value = segmentConflictTerm(a.x, a.y, b.x, b.y, segment, currentEdge);
       if (value !== 0) penalty += value;
@@ -1721,9 +1705,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
     const targetFan = port.bFan || { x: targetPort.x - 18, y: targetPort.y };
     const direction = targetFan.x >= sourceFan.x ? 1 : -1;
 
-    // Keep routing local to the two endpoints: only obstacles intersecting
-    // this edge's corridor participate in its sparse grid, so a route never
-    // takes a giant detour around unrelated rows.
+    // Keep the route local to the two endpoints. Only obstacles that cross the corridor of this edge enter its sparse grid.
+    // A route never takes a giant detour around unrelated rows.
     const horizontalPad = 48;
     const verticalPad = Math.max(78, Math.min(138, 72 + Math.abs(targetFan.y - sourceFan.y) * 0.12));
     const localLeft = Math.min(sourceFan.x, targetFan.x) - horizontalPad;
@@ -1741,8 +1724,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
     }
 
     const padding = 14;
-    // Past the step budget (options.maxSteps) every remaining edge gets a
-    // cheap route: a few candidate lanes, no grid search.
+    // When the run passes the step budget (options.maxSteps), each remaining edge gets a cheap route.
+    // The cheap route uses a few candidate lanes and no grid search.
     if (budget.exhausted) {
       budget.cheap += 1;
       return assembleOrthogonalRoute(sourcePort, sourceFan, cheapRouteBody(edge, sourceFan, targetFan, direction, usedSegments), targetFan, targetPort);
@@ -1750,17 +1733,16 @@ function* routeEdgesSteps(items, edges, options = {}) {
     const xs = [sourceFan.x, targetFan.x, sourceFan.x + direction * 18, targetFan.x - direction * 18, localLeft, localRight];
     const ys = [sourceFan.y, targetFan.y, localTop, localBottom];
 
-    // Route on the same global row grid used by the node layout. Horizontal
-    // segments may occupy a node-row lane or a dedicated lane exactly between
-    // rows. Secondary (dependency) edges prefer inter-row lanes so their
-    // dashed paths do not weave through the data-flow corridors.
+    // The route uses the same global row grid as the node layout. A horizontal segment can use a node-row lane.
+    // It can also use a dedicated lane between two rows.
+    // Secondary (dependency) edges prefer lanes between rows. Their dashed paths do not weave through the data-flow corridors.
     for (const y of [...rowYs, ...betweenRowYs]) {
       if (y >= localTop - 0.001 && y <= localBottom + 0.001) ys.push(y);
     }
     const secondary = isSecondary(edge);
     const preferredHorizontalYs = secondary && betweenRowYs.length ? betweenRowYs : rowYs;
-    // Distance to the nearest preferred lane, by binary search over the sorted
-    // lanes and memoized per y. It is evaluated on every horizontal A* step.
+    // The distance to the nearest preferred lane comes from a binary search over the sorted lanes. The kit memoizes it per y.
+    // It is evaluated on every horizontal A* step.
     const sortedLaneYs = preferredHorizontalYs.slice().sort((a, b) => a - b);
     const lanePenaltyFactor = secondary ? 1.35 : 0.55;
     const lanePenaltyByY = new Map();
@@ -1787,8 +1769,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
       xs.push(item.x - padding, item.x + item.width + padding);
       ys.push(item.y - padding, item.y + item.height + padding);
     }
-    // Existing routes expose neighbouring lanes only when they intersect this
-    // local corridor. This prevents far-away edges from distorting the path.
+    // Existing routes expose neighbouring lanes only when they cross this local corridor.
+    // This rule stops far-away edges from changing the path.
     for (const segment of usedSegments) {
       const minSegX = Math.min(segment.a.x, segment.b.x);
       const maxSegX = Math.max(segment.a.x, segment.b.x);
@@ -1803,10 +1785,9 @@ function* routeEdgesSteps(items, edges, options = {}) {
       .filter((value, index, arr) => index === 0 || Math.abs(value - arr[index - 1]) > 0.01);
     const gridX = uniqueSorted(xs);
     const gridY = uniqueSorted(ys);
-    // The sparse grid is |xs| x |ys| points. On very large lineage graphs a
-    // single corridor can span thousands of rows (millions of points) and
-    // freeze the tab for minutes. Past this budget the edge gets a plain
-    // orthogonal H-V-H route; ordinary graphs stay far below it.
+    // The sparse grid has |xs| x |ys| points. On very large lineage graphs, one corridor can span thousands of rows.
+    // That means millions of points, and the tab can freeze for minutes. Above this budget, the edge gets a plain
+    // orthogonal H-V-H route. Ordinary graphs stay far below this budget.
     if (gridX.length * gridY.length > ROUTE_GRID_POINT_BUDGET) {
       const midX = sourceFan.x + (targetFan.x - sourceFan.x) / 2;
       return assembleOrthogonalRoute(sourcePort, sourceFan, compressOrthogonalRoute([
@@ -1816,9 +1797,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
         targetFan,
       ]), targetFan, targetPort);
     }
-    // Every grid point lies inside [gridX] x [gridY], so a routed segment whose
-    // box is apart from that rectangle is apart from every candidate step and
-    // contributes exactly 0 in routeConflictPenalty(). Filter once per edge.
+    // Every grid point lies inside [gridX] x [gridY]. So a routed segment whose box is apart from that rectangle is apart from every candidate step.
+    // Such a segment contributes exactly 0 in routeConflictPenalty(). Filter the segments once for each edge.
     const gridCornerA = { x: gridX[0], y: gridY[0] };
     const gridCornerB = { x: gridX[gridX.length - 1], y: gridY[gridY.length - 1] };
     const corridorSegments = usedSegments.filter((segment) => !segmentsApart(gridCornerA, gridCornerB, segment.a, segment.b, LANE_GAP));
@@ -1827,24 +1807,20 @@ function* routeEdgesSteps(items, edges, options = {}) {
     const clearSegment = (a, b) => !obstacles.some((item) => segmentHitsItem(a, b, item, padding));
     const verticalDelta = targetFan.y - sourceFan.y;
     const verticalDirection = verticalDelta < -0.001 ? -1 : (verticalDelta > 0.001 ? 1 : 0);
-    // Same-row links are the only case allowed to move away from the target row
-    // and then come back: that detour is necessary when a card blocks the
-    // straight horizontal channel. For up/down links the vertical coordinate
-    // is strictly monotone from source row to destination row.
+    // Same-row links are the only case that may leave the target row and then return.
+    // That detour is necessary when a card blocks the straight horizontal channel.
+    // For up and down links, the vertical coordinate is strictly monotone from the source row to the destination row.
     const sameRowNeedsDetour = verticalDirection === 0 && !clearSegment(sourceFan, targetFan);
 
-    // One A* relaxation: the cost of moving from `currentPoint` to
-    // `nextPoint` in direction `dir` ("H" / "V"), or null when the move is
-    // not allowed.
-    // `memo` (optional): a Float64Array slot per grid link holding its
-    // conflict penalty, which depends only on the link and this edge; the
-    // A* relaxes one link from up to three states.
+    // One A* relaxation gives the cost of a move from `currentPoint` to `nextPoint` in direction `dir` ("H" / "V").
+    // It gives null when the move is not allowed.
+    // `memo` (optional) is a Float64Array with one slot for each grid link. The slot holds the conflict penalty of that link.
+    // The penalty depends only on the link and this edge. The A* relaxes one link from up to three states.
     const stepCost = (currentCost, currentDir, currentPoint, nextPoint, dir, length, memo = null, slot = 0) => {
       const dx = nextPoint.x - currentPoint.x;
       const dy = nextPoint.y - currentPoint.y;
-      // Left-to-right DAG links never backtrack horizontally. Backward graph
-      // edges use the mirrored rule. This removes rectangular loops that can
-      // only make a route longer and harder to read.
+      // Left-to-right DAG links never go back horizontally. Backward graph edges use the mirrored rule.
+      // This rule removes rectangular loops. Such loops only make a route longer and harder to read.
       if (direction > 0 && dx < -0.001) return null;
       if (direction < 0 && dx > 0.001) return null;
       if (dir === "V") {
@@ -1856,8 +1832,7 @@ function* routeEdgesSteps(items, edges, options = {}) {
           return null;
         }
       }
-      // Angles are deliberately expensive: for a clean DAG a short route
-      // with 2 bends is preferable to a maze of small detours.
+      // Angles are expensive on purpose. For a clean DAG, a short route with 2 bends is better than a maze of small detours.
       const bend = currentDir !== "N" && currentDir !== dir ? 220 : 0;
       let conflict = memo ? memo[slot] : NaN;
       if (conflict !== conflict) {
@@ -1882,18 +1857,17 @@ function* routeEdgesSteps(items, edges, options = {}) {
     } else {
       found = searchKeyedGrid();
     }
-    // A search stopped by the step budget: the cheap route instead.
+    // When a search reaches the step budget, the kit uses the cheap route instead.
     if (found === SEARCH_STOPPED) {
       budget.cheap += 1;
       return assembleOrthogonalRoute(sourcePort, sourceFan, cheapRouteBody(edge, sourceFan, targetFan, direction, usedSegments), targetFan, targetPort);
     }
 
-    // The sparse grid as typed arrays: point id = ix * |gridY| + iy, the
-    // obstacles marked per covered cell, each lane's consecutive free points
-    // linked when no card cuts the segment between them. Same points, the
-    // same neighbour order (left, right, up, down) and the same A* as
-    // searchKeyedGrid(), without string keys, per-point obstacle scans or
-    // per-lane sorts (they made the router take seconds on 500-edge graphs).
+    // The sparse grid uses typed arrays. The point id is ix * |gridY| + iy. The kit marks the obstacles for each covered cell.
+    // It links the consecutive free points of each lane when no card cuts the segment between them.
+    // The points, the neighbour order (left, right, up, down), and the A* are the same as in searchKeyedGrid().
+    // This version has no string keys, no scan of obstacles for each point, and no sort for each lane.
+    // Those steps made the router take seconds on 500-edge graphs.
     function searchIndexedGrid() {
       const NX = gridX.length;
       const NY = gridY.length;
@@ -1922,7 +1896,7 @@ function* routeEdgesSteps(items, edges, options = {}) {
         return lo;
       };
       for (const item of obstacles) {
-        // pointInsideItem(point, item, padding - 0.5): strict inequalities.
+        // pointInsideItem(point, item, padding - 0.5) uses strict inequalities.
         const x0 = firstAbove(gridX, item.x - inner);
         const x1 = firstAtLeast(gridX, item.x + item.width + inner) - 1;
         const y0 = firstAbove(gridY, item.y - inner);
@@ -1938,7 +1912,7 @@ function* routeEdgesSteps(items, edges, options = {}) {
       blocked[end] = 0;
 
       const { left, right, up, down } = buffers;
-      // segmentHitsItem(a, b, item, padding) for a horizontal segment.
+        // segmentHitsItem(a, b, item, padding) checks a horizontal segment.
       for (let iy = 0; iy < NY; iy += 1) {
         const y = gridY[iy];
         const cutting = obstacles.filter((item) => !(y <= item.y - padding || y >= item.y + item.height + padding));
@@ -1963,7 +1937,7 @@ function* routeEdgesSteps(items, edges, options = {}) {
           previousIx = ix;
         }
       }
-      // ... and for a vertical one.
+      // The same check applies to a vertical segment.
       for (let ix = 0; ix < NX; ix += 1) {
         const x = gridX[ix];
         const cutting = obstacles.filter((item) => !(x <= item.x - padding || x >= item.x + item.width + padding));
@@ -1990,21 +1964,20 @@ function* routeEdgesSteps(items, edges, options = {}) {
       }
 
       const pointOf = (id) => ({ x: gridX[(id / NY) | 0], y: gridY[id % NY] });
-      // States: id * 3 + direction (0 = none yet, 1 = H, 2 = V).
+      // The state is id * 3 + direction. Direction 0 means none yet, 1 means H, and 2 means V.
       const { best, previous, conflict: conflictMemo } = buffers;
       best[start * 3] = 0;
       const queue = createStateQueue();
       queue.push(start * 3, 0, 0 + heuristic(pointOf(start)));
       let finalState = -1;
-      // Relaxations of this search, against the run's step budget: a search
-      // past options.searchSteps, or past what is left of options.maxSteps,
-      // stops (and the edge gets the cheap route).
+      // The relaxations of this search count against the step budget of the run.
+      // A search that passes options.searchSteps, or what is left of options.maxSteps, stops.
+      // The edge then gets the cheap route.
       let relaxations = 0;
       const stepCap = Math.min(budget.searchSteps, budget.maxSteps - budget.used);
-      // stepCost() inlined on grid indexes, term for term and in the same
-      // order (the same costs to the last bit), without a point object per
-      // step: horizontalLanePenalty() per grid row, the conflict through
-      // the link's memo slot.
+      // This is stepCost() inlined on grid indexes. It has the same terms, in the same order, with the same costs to the last bit.
+      // It makes no point object for each step. It uses horizontalLanePenalty() for each grid row.
+      // The conflict comes through the memo slot of the link.
       const laneAt = new Float64Array(NY).fill(NaN);
       const targetX = targetFan.x;
       const targetY = targetFan.y;
@@ -2061,11 +2034,11 @@ function* routeEdgesSteps(items, edges, options = {}) {
           const slot = id * 4 + k;
           let conflict = conflictMemo[slot];
           if (conflict !== conflict) {
-            // The conflict is >= 0 and a float sum never decreases when a
-            // term grows: a move that cannot improve the next state without
-            // its conflict cannot with it, which is then not needed.
+            // The conflict is zero or more. A float sum never decreases when a term grows.
+            // So a move that cannot improve the next state without its conflict cannot improve it with the conflict.
+            // The kit then does not need that conflict.
             if (currentCost + length + bend + reverse + boundary + lane + 0.001 >= best[nextState]) continue;
-            // The link's grid row (H) or column (V): its query line.
+            // The grid row (H) or column (V) of the link is its query line.
             conflict = corridorSegmentIndex.penalty(cx, cy, nx, ny, edge, segmentConflictTerm, Infinity, dir === 1 ? id % NY : NY + ((id / NY) | 0));
             conflictMemo[slot] = conflict;
           }
@@ -2085,8 +2058,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
       return compressOrthogonalRoute(body);
     }
 
-    // The reference implementation (string-keyed points), used when a fan
-    // point is not exactly on the deduplicated grid.
+    // This is the reference implementation with string-keyed points.
+    // The kit uses it when a fan point is not exactly on the deduplicated grid.
     function searchKeyedGrid() {
     const pointKey = (x, y) => `${x}\u0000${y}`;
     const points = new Map();
@@ -2118,8 +2091,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
         adjacency.get(bKey).push({ key: aKey, length, dir });
       }
     };
-    // Bucket the grid once per axis; connectLine() sorts each lane by
-    // coordinate, so bucket order cannot change the result.
+    // Put the grid into buckets once for each axis. connectLine() sorts each lane by coordinate.
+    // So the bucket order cannot change the result.
     const keysByY = new Map();
     const keysByX = new Map();
     for (const [key, point] of points) {
@@ -2176,9 +2149,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
         + routeBendCount(route) * 220
         + route.slice(0, -1).reduce((sum, point, index) => sum + routeConflictPenalty(point, route[index + 1], usedSegments, edge), 0);
       if (verticalDirection !== 0) {
-        // Preserve the source->destination vertical direction even in the
-        // fallback. Try simple H-V-H lanes on the existing sparse grid; a link
-        // going upward can therefore never dip down and vice versa.
+        // Keep the vertical direction from source to destination, even in the fallback.
+        // Try simple H-V-H lanes on the existing sparse grid. A link that goes upward can never dip down, and the reverse.
         const minX = Math.min(sourceFan.x, targetFan.x) - 0.001;
         const maxX = Math.max(sourceFan.x, targetFan.x) + 0.001;
         const candidateXs = gridX.filter((x) => x >= minX && x <= maxX)
@@ -2197,8 +2169,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
           targetFan,
         ]);
       } else {
-        // Same-row obstacle exception: a short top/bottom detour is allowed,
-        // because remaining on the row would pass through another node.
+        // Same-row obstacle exception: a short detour above or below the row is allowed.
+        // A route on the row passes through another node.
         const fallbackTop = Math.min(localTop, ...obstacles.map((item) => item.y - padding - 24));
         const fallbackBottom = Math.max(localBottom, ...obstacles.map((item) => item.y + item.height + padding + 24));
         const candidates = [fallbackTop, fallbackBottom].map((channelY) => compressOrthogonalRoute([
@@ -2226,21 +2198,20 @@ function* routeEdgesSteps(items, edges, options = {}) {
 
   // ------------------------------------------------ cheap (budget) routes
 
-  // The route of an edge past the step budget: the cheapest clear one of a
-  // few candidates, scored like A* steps (length, 220 per bend, the
-  // conflict penalties against the routes already placed): one vertical
-  // lane between the two fans (H-V-H), or a horizontal channel between card
-  // rows or just above / below the cards in the way, reached in the gaps
-  // next to the two cards (H-V-H-V-H). Every candidate is checked against
-  // the cards of the columns it passes, in any row. A few hundred segment
-  // tests instead of a grid search per edge.
+  // When an edge passes the step budget, the kit gives it the cheapest clear route. It tests a few candidates.
+  // The kit scores each candidate like an A* step. The score uses the length, 220 for each bend,
+  // and the conflict penalties against the routes already placed.
+  // A candidate is one vertical lane between the two fans (H-V-H). Another is a horizontal channel between card rows.
+  // A channel can also lie just above or below the cards in the way. The kit reaches it in the gaps
+  // next to the two cards (H-V-H-V-H). Every candidate is checked against the cards of the columns that it passes,
+  // in any row. The kit makes a few hundred segment tests. It does not make a grid search for each edge.
   const cheapIndexes = new WeakMap();
   function cheapRouteBody(edge, sourceFan, targetFan, direction, usedSegments) {
     const padding = 14;
     let index = cheapIndexes.get(usedSegments);
     if (!index) {
-      // Past the step budget speed comes first: cheap routes avoid overlaps
-      // and crossings, not near runs (the dense maps' 40 / 600 budget).
+      // Past the step budget, speed comes first. Cheap routes avoid overlaps and crossings, but not near runs.
+      // The budget of the dense maps is 40 / 600.
       index = createSegmentIndex(usedSegments, { dynamic: true, nearRuns: false });
       cheapIndexes.set(usedSegments, index);
     }
@@ -2264,11 +2235,10 @@ function* routeEdgesSteps(items, edges, options = {}) {
     const targetY = targetFan.y;
     const lowY = Math.min(sourceY, targetY);
     const highY = Math.max(sourceY, targetY);
-    // Candidates: a dense map has hundreds per call, of which the loop
-    // below takes a few, so each is kept as numbers (its bends: none, a
-    // lane x, or x1, a channel y and x2) with its base, the length of its
-    // compressOrthogonalRoute() as polylineMetric() sums it + 220 per bend,
-    // computed on reused points; routeOf() builds the route of one taken.
+    // A dense map has hundreds of candidates for each call. The loop below takes only a few.
+    // So the kit keeps each candidate as numbers. These are its bends (none, a lane x, or x1, a channel y and x2) and its base.
+    // The base is the length of its compressOrthogonalRoute(), as polylineMetric() sums it, plus 220 for each bend.
+    // The kit computes the base on reused points. routeOf() builds the route of each taken candidate.
     const lanes = [];
     const bases = [];
     const direct = [sourceFan, targetFan];
@@ -2293,7 +2263,7 @@ function* routeEdgesSteps(items, edges, options = {}) {
     const kept = [];
     const add = (...bends) => {
       lanes.push(bends);
-      // compressOrthogonalRoute() into `kept`, then the base.
+      // Compress the route into `kept` with compressOrthogonalRoute(). Then compute the base.
       const points = pointsOf(lanes.length - 1);
       let n = 0;
       kept[n++] = points[0];
@@ -2342,9 +2312,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
         add(x1, channelY, x2);
       }
     }
-    // In the order of a stable sort by base (base, then position), taken
-    // from a heap as needed: the loop stops after a few of the hundreds of
-    // candidates of a dense map.
+    // The candidates come in the order of a stable sort by base (base, then position). The kit takes them from a heap as needed.
+    // The loop stops after a few of the hundreds of candidates of a dense map.
     const heap = new Int32Array(bases.length);
     for (let i = 0; i < heap.length; i += 1) heap[i] = i;
     const before = (i, j) => bases[i] < bases[j] || (bases[i] === bases[j] && i < j);
@@ -2379,7 +2348,7 @@ function* routeEdgesSteps(items, edges, options = {}) {
       for (let i = 0; i + 1 < route.length && cost < bestCost; i += 1) {
         const a = route[i];
         const b = route[i + 1];
-        // Past bestCost - cost the candidate loses whatever the rest adds.
+        // When the cost passes bestCost - cost, the candidate loses. The rest of the cost cannot change this.
         cost += index.penalty(a.x, a.y, b.x, b.y, edge, segmentConflictTerm, bestCost - cost);
       }
       if (cost < bestCost) { bestCost = cost; best = route; }
@@ -2394,13 +2363,11 @@ function* routeEdgesSteps(items, edges, options = {}) {
 
   // --------------------------------------------------- route set scoring
 
-  // score(routes) adds, over the routes in order, length * 0.02 and
-  // 180 per bend, then the pair conflict (crossings and overlaps of their
-  // segments) with every later route. Only conflicting pairs add anything:
-  // they are found through the segment index (O(segments x neighbours))
-  // instead of comparing every pair of routes (O(E^2): 14.6 s over 1,100
-  // edges), and every sum is made in the order of the pairwise loops, so
-  // scores, and the routes they choose, are the same to the last bit.
+  // score(routes) goes over the routes in order. It adds length * 0.02 and 180 for each bend.
+  // Then it adds the pair conflict. This is the crossings and overlaps of the segments, with every later route.
+  // Only pairs with a conflict add a value. The kit finds them through the segment index (O(segments x neighbours)).
+  // It does not compare every pair of routes. That comparison is O(E^2) and took 14.6 s over 1,100 edges.
+  // Every sum follows the order of the pairwise loops. So the scores, and the routes that they choose, are the same to the last bit.
   const ownScoreCache = new WeakMap();
   function ownScore(points) {
     let own = ownScoreCache.get(points);
@@ -2411,8 +2378,7 @@ function* routeEdgesSteps(items, edges, options = {}) {
     return own;
   }
 
-  // The conflict of two segments of two routes (routePairConflictScore's
-  // inner loop), 0 for most.
+  // The conflict of two segments of two routes. This is the inner loop of routePairConflictScore(). Most conflicts are 0.
   function segmentPairConflict(a, edgeA, b, edgeB) {
     if (segmentsApart(a.a, a.b, b.a, b.b, LANE_GAP)) return 0;
     const conflict = orthogonalSegmentConflict(a.a, a.b, b.a, b.b);
@@ -2424,8 +2390,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
     return 0;
   }
 
-  // A scored route set: list[i] = { id, edge, points, a, b, segments },
-  // pairs[i] = Map(j > i -> conflict of routes i and j), non-zero only.
+  // This is a scored route set. list[i] = { id, edge, points, a, b, segments }.
+  // pairs[i] = Map(j > i -> conflict of routes i and j). The Map holds non-zero values only.
   function scoredRouteSet(routes, edgesById) {
     const list = [];
     for (const [id, route] of routes) {
@@ -2456,8 +2422,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
     return row.size > 1 ? [...row.keys()].sort((x, y) => x - y) : [...row.keys()];
   }
 
-  // routeSetScore() of the set, with route `swap.at` replaced by
-  // swap.points and its pair conflicts by swap.pairs (Map(other -> value)).
+  // This is routeSetScore() of the set. Route `swap.at` is replaced by swap.points.
+  // Its pair conflicts are replaced by swap.pairs (Map(other -> value)).
   function setScore(set, swap = null) {
     let score = 0;
     for (let i = 0; i < set.list.length; i += 1) {
@@ -2481,10 +2447,9 @@ function* routeEdgesSteps(items, edges, options = {}) {
     return score;
   }
 
-  // Pair conflicts of a new route for entry `at` with every other route
-  // (indexed by `index` over `segments`, the other routes' segments in
-  // order, `owner` their route), each summed in the order the pairwise
-  // loop would (the earlier route's segments outer).
+  // These are the pair conflicts of a new route for entry `at` with every other route.
+  // `index` indexes the other routes' segments over `segments`, in order. `owner` gives their route.
+  // Each conflict is summed in the order of the pairwise loop. The segments of the earlier route are the outer loop.
   function swapPairs(set, at, points, segments, owner, index) {
     const edge = set.list[at].edge;
     const mine = routeSegmentMeta(points, edge);
@@ -2534,9 +2499,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
     const set = scoredRouteSet(initialRoutes, edgesById);
     let score = setScore(set);
     const positionById = new Map(set.list.map((entry, i) => [entry.id, i]));
-    // Rip-up/reroute the most conflicted edge against the rest of the already
-    // accepted graph. Four bounded passes are enough to resolve most local
-    // order artefacts while keeping graphs deterministic and cheap.
+    // Rip up and reroute the most conflicted edge against the rest of the accepted graph.
+    // Four bounded passes are enough to remove most local order artefacts. The graphs stay deterministic and cheap.
     for (let pass = 0; pass < 4 && !budget.exhausted; pass += 1) {
       const conflictByEdge = new Map(list.map((edge) => [edge.id, 0]));
       for (let i = 0; i < set.list.length; i += 1) {
@@ -2599,8 +2563,8 @@ function* routeEdgesSteps(items, edges, options = {}) {
     const bt = items.get(b.to);
     return (af?.x ?? 0) - (bf?.x ?? 0)
       || (af?.y ?? 0) - (bf?.y ?? 0)
-      // Fan-out follows target vertical order: low destinations are routed
-      // after high destinations and leave through the lower fan lane.
+      // The fan-out follows the vertical order of the targets. Low destinations are routed after high destinations.
+      // They leave through the lower fan lane.
       || ((at?.y ?? 0) + (at?.height ?? 0) / 2) - ((bt?.y ?? 0) + (bt?.height ?? 0) / 2)
       || String(a.id).localeCompare(String(b.id));
   };
@@ -2615,9 +2579,9 @@ function* routeEdgesSteps(items, edges, options = {}) {
     return bSpan - aSpan || baseCompare(a, b);
   });
 
-  // Routing is path-dependent because every accepted edge reserves channels.
-  // Evaluate two deterministic orders (normal fan order and long-span first)
-  // and keep the globally cleaner result, then rip up and reroute.
+  // Each route depends on the path, because every accepted edge reserves channels.
+  // Evaluate two deterministic orders: the normal fan order, and the long-span first order.
+  // Keep the cleaner global result. Then rip up and reroute.
   let bestRoutes = yield* buildRouteCandidate(base, ports);
   if (edges.length > 1 && edges.length <= 90 && !budget.exhausted) {
     const other = yield* buildRouteCandidate(verticalFirst, ports);
@@ -2628,14 +2592,14 @@ function* routeEdgesSteps(items, edges, options = {}) {
   return routes;
 }
 
-// Orthogonal routes for `edges` between the cards of `items`
-// (Map id -> { x, y, width, height, lineageRow }), each from the source's
-// right port to the target's left port. options.isSecondary(edge) marks
-// dependency-like edges: routed after the data-flow edges and preferring the
-// lanes between card rows. options.maxSteps bounds the A* relaxations of
-// the whole run and options.searchSteps those of one edge: past them the
-// remaining edges get cheap routes (routes.stats says how many). Returns
-// Map(edge id -> { points, a, b }) with `stats` { steps, cheap, exhausted }.
+// This function gives the orthogonal routes for `edges` between the cards of `items`.
+// `items` is a Map (id -> { x, y, width, height, lineageRow }). Each route goes from the right port of
+// the source to the left port of the target.
+// options.isSecondary(edge) marks the dependency-like edges. The kit routes them after the data-flow edges.
+// These edges prefer the lanes between card rows.
+// options.maxSteps limits the A* relaxations of the whole run. options.searchSteps limits those of one edge.
+// When a limit is reached, the remaining edges get cheap routes. routes.stats says how many.
+// The function returns Map(edge id -> { points, a, b }) with `stats` { steps, cheap, exhausted }.
 function routeEdgesJs(items, edges, options = {}) {
   const steps = routeEdgesSteps(items, edges, options);
   for (;;) {
@@ -2644,8 +2608,8 @@ function routeEdgesJs(items, edges, options = {}) {
   }
 }
 
-// routeEdgesJs() is the reference. When the WebAssembly router (src/wasm/router.c) is loaded it answers instead, with the
-// same routes point for point; it hands the run back (null) when it cannot take it, and the reference runs.
+// routeEdgesJs() is the reference. When the WebAssembly router (src/wasm/router.c) is loaded, it gives the answer instead.
+// The routes are the same, point for point. It returns null when it cannot take the run. Then the reference runs.
 const WASM_ROUTER_MIN_EDGES = 8;
 let routerAsked = false;
 function requestRouterWasm() {
@@ -2654,7 +2618,7 @@ function requestRouterWasm() {
   loader.loadGroup("wasm-router").then(() => (wasm && wasm.ops.router ? wasm.load("router") : null)).catch(() => {});
 }
 
-// Map like routeEdgesJs()'s, or null.
+// It returns a Map like routeEdgesJs(), or null.
 function routeEdgesWasm(items, edges, options = {}) {
   const kernel = wasm && wasm.get("router");
   if (!kernel || !wasm.ops.router || !wasm.router) return null;
@@ -2677,10 +2641,10 @@ function routeEdges(items, edges, options = {}) {
   return routeEdgesJs(items, edges, options);
 }
 
-// The same router in a Worker, for a run that would hold the page for more than a few frames. Returns { promise, cancel }
-// (the promise resolves with routeEdgesJs()'s Map, or null when the Worker or the kernel is not there or cannot take
-// the run: the caller then runs the reference), or null when the run is too small for the round trip. cancel() drops
-// the answer and stops the Worker.
+// This is the same router in a Worker. Use it for a run that holds the page for more than a few frames.
+// It returns { promise, cancel }. The promise resolves with the Map of routeEdgesJs(). It resolves with null
+// when the Worker or the kernel is missing, or when it cannot take the run. Then the caller runs the reference.
+// It returns null when the run is too small for the round trip. cancel() drops the answer and stops the Worker.
 const WORKER_ROUTER_MIN_EDGES = 24;
 const routeEdgesJobWanted = (count) => count >= WORKER_ROUTER_MIN_EDGES && typeof WebAssembly === "object" && typeof Worker === "function" && !!loader;
 function routeEdgesJob(items, edges, options = {}) {
@@ -2708,8 +2672,8 @@ function routeEdgesJob(items, edges, options = {}) {
   };
 }
 
-// The Worker and the kernels get ready while the page idles after a graph mounts, so the first large layout does not wait for
-// them (the Worker stops by itself after a while without work).
+// The kit prepares the Worker and the kernels while the page is idle after a graph mounts.
+// So the first large layout does not wait for them. The Worker stops by itself after a while without work.
 let routerWarm = false;
 function prewarmRouter() {
   if (routerWarm || typeof WebAssembly !== "object" || typeof Worker !== "function" || !loader) return;
@@ -2723,8 +2687,8 @@ function prewarmRouter() {
   else setTimeout(start, 200);
 }
 
-// routeEdgesSteps() for a generator driven by runSliced(): the Worker answers when it can (the generator waits for it), else
-// the reference runs in slices.
+// This is routeEdgesSteps() for a generator that runSliced() drives. The Worker answers when it can.
+// The generator waits for the answer. Otherwise the reference runs in slices.
 function* routeEdgesAuto(items, edges, options = {}) {
   const job = routeEdgesJob(items, edges, options);
   if (job) {
@@ -2738,13 +2702,13 @@ function* routeEdgesAuto(items, edges, options = {}) {
   return yield* routeEdgesSteps(items, edges, options);
 }
 
-// Runs a generator (such as routeEdgesSteps()) in slices of about
-// `sliceMs` of the main thread, the first one at once: returns
-// { done, value } when it finished inside that slice, else
-// { done: false, promise, cancel } (the promise resolves with its value,
-// or with undefined once cancelled).
+// This function runs a generator (such as routeEdgesSteps()) in slices of about `sliceMs` of the main thread.
+// The first slice starts at once. It returns { done, value } when the generator finishes inside that slice.
+// Otherwise it returns { done: false, promise, cancel }. The promise resolves with the value of the generator.
+// If the run is cancelled, the promise resolves with undefined.
 function runSliced(steps, { sliceMs = 12 } = {}) {
-  // A step may be a promise (a Worker's answer): the run waits for it and hands its value back to the generator.
+  // A step may be a promise, such as the answer of a Worker. The run waits for the promise.
+  // It then gives the value back to the generator.
   let resume;
   const slice = () => {
     const until = performance.now() + sliceMs;
@@ -2793,7 +2757,7 @@ function runSliced(steps, { sliceMs = 12 } = {}) {
 
 // ------------------------------------------------------------ edge labels
 
-// Label positions to try, best first:
+// These are the label positions to try, best first:
 //   1. on the line: the middle of each horizontal run (the gaps between
 //      columns), longest first, with its thirds on long runs; then the
 //      middle (and thirds) of each vertical run;
@@ -2801,12 +2765,12 @@ function runSliced(steps, { sliceMs = 12 } = {}) {
 //   3. beside the line: those points shifted just above / below a
 //      horizontal segment, or left / right of a vertical one;
 //   4. the middle of the route.
-// Dense layouts (sub-columns 28 px apart) still find a free spot for most
-// labels without covering a card or another label.
-// visitLabelAnchors() calls visit(x, y) on each position in that order
-// until it returns true (then returns true): most labels fit on one of the
-// first, the dropped ones of a dense map try hundreds, so they are made one
-// at a time, without a list or a box per position.
+// Dense layouts (sub-columns 28 px apart) still find a free spot for most labels.
+// A free spot does not cover a card or another label.
+// visitLabelAnchors() calls visit(x, y) on each position in that order. It stops when visit returns true,
+// and then it returns true. Most labels fit on one of the first positions.
+// The dropped labels of a dense map try hundreds of positions. The kit makes these positions one at a time.
+// It does not use a list or a box for each position.
 function visitLabelAnchors(points, labelHeight, labelWidth, visit) {
   if (!Array.isArray(points) || points.length < 2) return false;
   const runs = [];
@@ -2820,8 +2784,7 @@ function visitLabelAnchors(points, labelHeight, labelWidth, visit) {
     const length = Math.hypot(b.x - a.x, b.y - a.y);
     if (horizontal && length >= 36) {
       runs.push({ length, x: (a.x + b.x) / 2, y: a.y });
-      // Long runs also offer their thirds, so siblings sharing the first
-      // part of a fan do not all compete for the same middle.
+      // Long runs also offer their thirds. So sibling labels that share the first part of a fan do not all compete for the same middle.
       if (length >= 150) {
         runs.push({ length: length - 1, x: a.x + (b.x - a.x) * 0.72, y: a.y });
         runs.push({ length: length - 2, x: a.x + (b.x - a.x) * 0.28, y: a.y });
@@ -2856,22 +2819,20 @@ function visitLabelAnchors(points, labelHeight, labelWidth, visit) {
   return visit(middle.x, middle.y);
 }
 
-// The positions of visitLabelAnchors() as a list of { x, y }.
+// This function gives the positions of visitLabelAnchors() as a list of { x, y }.
 function labelAnchors(points, labelHeight = 18, labelWidth = 40) {
   const anchors = [];
   visitLabelAnchors(points, labelHeight, labelWidth, (x, y) => { anchors.push({ x, y }); return false; });
   return anchors;
 }
 
-// Cells are keyed by a number (column * 2^21 + row, distinct while rows
-// stay within 2^20 cells; two cells sharing a key would only be tested
-// together), not a string per probe: a dense map tries thousands of
-// anchors.
+// The kit keys the cells by a number: column * 2^21 + row. The keys are distinct while rows stay within 2^20 cells.
+// Two cells that share a key are tested together. The kit does not use a string for each probe.
+// A dense map tries thousands of anchors.
 function createRectIndex(cell = 160) {
   const cells = new Map();
   const ROW = 2 ** 21;
-  // rectsOverlap({ x, y, width, height }, other, padding) for each rectangle
-  // of the cell.
+  // This applies rectsOverlap({ x, y, width, height }, other, padding) to each rectangle of the cell.
   const hitsCell = (key, x, y, width, height, padding) => {
     const list = cells.get(key);
     if (!list) return false;
@@ -2895,10 +2856,9 @@ function createRectIndex(cell = 160) {
         }
       }
     },
-    // Whether the rectangle (x, y, width, height) comes closer than
-    // `padding` to one of the index (rectsOverlap()).
+    // This checks whether the rectangle (x, y, width, height) comes closer than `padding` to one rectangle of the index (rectsOverlap()).
     hits(x, y, width, height, padding) {
-      // The cells of the rectangle grown by `padding`.
+      // These are the cells of the rectangle, grown by `padding`.
       const x0 = Math.floor((x - padding) / cell);
       const x1 = Math.floor((x - padding + (width + padding * 2)) / cell);
       const y0 = Math.floor((y - padding) / cell);
@@ -2911,12 +2871,12 @@ function createRectIndex(cell = 160) {
   };
 }
 
-// Places every label once per layout, in priority order, at the first
-// anchor that covers neither a card nor another label. The placement never
-// depends on hover or selection (a highlighted label is only drawn in its
-// highlight style where it was placed), so labels never jump nor overlap.
+// This places every label once for each layout, in priority order. Each label goes at the first anchor
+// that covers no card and no other label.
+// The placement does not depend on hover or selection. A highlighted label is drawn in its highlight style
+// at the place where it was placed. So labels never jump, and they never overlap.
 //   requests = [{ key, text, width, height = 18, points }]
-// Returns { placed: Map(key -> rect), dropped: [key] }.
+// It returns { placed: Map(key -> rect), dropped: [key] }.
 const WASM_LABELS_MIN_REQUESTS = 30;
 let labelsAsked = false;
 function requestLabelsWasm() {
@@ -2925,8 +2885,8 @@ function requestLabelsWasm() {
   loader.loadGroup("wasm-labels").then(() => (wasm && wasm.ops.labels ? wasm.load("labels") : null)).catch(() => {});
 }
 
-// placeLabelsJs() is the reference; a long list goes to the WebAssembly placement (src/wasm/labels.c) once it is loaded: the
-// same rectangles, the same dropped labels.
+// placeLabelsJs() is the reference. When the WebAssembly placement (src/wasm/labels.c) is loaded, a long list goes to it.
+// It gives the same rectangles and the same dropped labels.
 function placeLabels(requests, obstacles) {
   if (requests.length >= WASM_LABELS_MIN_REQUESTS) {
     const kernel = wasm && wasm.get("labels");
@@ -2936,7 +2896,7 @@ function placeLabels(requests, obstacles) {
         const result = wasm.ops.labels.run(kernel, wasm.labels.pack(requests, obstacles));
         if (result.status === 0) return wasm.labels.unpack(requests, result);
       } catch (error) {
-        // the reference answers
+        // The reference gives the answer.
       }
     }
   }
@@ -2985,8 +2945,7 @@ function drawLabel(ctx, rect, text, { highlighted = false, alpha = 1, textColor 
 
 // ---------------------------------------------------------------- minimap
 
-// Is any part of a card outside the viewport? One pixel is enough to make
-// the minimap useful.
+// This checks whether any part of a card is outside the viewport. One pixel is enough to make the minimap useful.
 function anyClipped(rects, view, width, height) {
   if (!width || !height || !(view.scale > 0)) return false;
   const epsilon = 0.5;
@@ -3000,8 +2959,8 @@ function anyClipped(rects, view, width, height) {
   return false;
 }
 
-// The whole graph in the corner: routed edges with their dash pattern,
-// cards, and the viewport rectangle.
+// The minimap shows the whole graph in a corner. It draws the routed edges with their dash pattern,
+// the cards, and the viewport rectangle.
 //   options = { bounds, nodes: [{ x, y, width, height, alpha }],
 //               edges: [{ points, dash, width, color }], view, width, height }
 function drawMinimap(canvas, options) {
@@ -3063,14 +3022,13 @@ function drawMinimap(canvas, options) {
 
 // ------------------------------------------------------------- the view
 
-// The part of a graph canvas its own chrome leaves free, in CSS pixels from
-// the canvas' top-left corner: below the toolbar groups, above the legend /
-// status dock, and beside an open side panel (left of it on desktop, above
-// the bottom sheet on phones). Fit and recentring aim at this area, so
-// cards and edge labels do not land under the chrome. The bands span the
-// whole width: the dock sits in a corner, where a centred graph would
-// otherwise reach it, and its band also clears the minimap's corner (the
-// minimap only shows once the graph is clipped, so a fit never needs it).
+// This is the part of a graph canvas that the chrome leaves free. The values are in CSS pixels from the top-left corner of the canvas.
+// The free part is below the toolbar groups and above the legend or status dock.
+// It is beside an open side panel: left of the panel on desktop, and above the bottom sheet on phones.
+// Fit and recentre actions aim at this area. So cards and edge labels do not land under the chrome.
+// The bands span the whole width. The dock sits in a corner. A graph in the centre can otherwise reach the dock.
+// The band of the dock also clears the corner of the minimap. The minimap only shows when the graph is clipped.
+// So a fit never needs it.
 const SAFE_GAP = 8;
 function safeArea(canvas, { panel = null } = {}) {
   const rect = canvas?.getBoundingClientRect?.();
@@ -3093,17 +3051,16 @@ function safeArea(canvas, { panel = null } = {}) {
     if (mobileLayout()) bottom = Math.min(bottom, panel.top - rect.top);
     else right = Math.min(right, panel.left - rect.left);
   }
-  // A tiny canvas keeps a usable area (the chrome then overlaps).
+  // A tiny canvas keeps a usable area. The chrome then overlaps.
   top = Math.min(Math.max(0, top), rect.height * 0.4);
   bottom = Math.max(bottom, top + Math.min(80, rect.height - top));
   right = Math.max(right, Math.min(rect.width, 120));
   return { x: 0, y: top, width: right, height: bottom - top };
 }
 
-// The visible canvas a recentring aims at: the safe area, also clear of
-// the minimap when it shows (bottom-right, left of an open panel). Its
-// band spans the width, like the dock's. A fit keeps safeArea(): the
-// minimap only shows once the graph is clipped.
+// This is the visible canvas that a recentre action aims at. It is the safe area, and it is also clear of the minimap
+// when the minimap shows. The minimap is at the bottom right, left of an open panel.
+// The band spans the width, like the band of the dock. A fit keeps safeArea(). The minimap only shows when the graph is clipped.
 function visibleArea(canvas, { panel = null } = {}) {
   const area = safeArea(canvas, { panel });
   const minimap = $(":scope > .graphKitMinimap", canvas?.parentElement);
@@ -3115,20 +3072,18 @@ function visibleArea(canvas, { panel = null } = {}) {
   return { ...area, height: bottom - area.y };
 }
 
-// The scale a Fit opens at. `overview` is the scale of the whole graph in
-// the free area (the bounds into safeArea()), `readable` the one keeping
-// the card text at 11 px.
-// - A graph readable as a whole opens whole: nothing clipped, no minimap.
-// - One that would need only a little less (overview >= FIT_READABLE_SHARE of
-//   readable: a few clipped pixels) opens at the readable scale on its root or
-//   focus, the minimap giving the rest. A larger one opens whole, its text a
-//   little smaller: a graph that opens with a column cut at its edge reads as
-//   complete, and the operator does not see what is out of view.
-// - A much larger one opens whole with compact cards (a map of titles),
-//   down to FIT_FLOOR; past it, at the readable scale on its anchor.
-// - On a phone (`phone`): the whole graph when it stays at PHONE_MIN_SCALE
-//   or more, else the anchor and its neighbours (`local`, their own fit
-//   scale) between PHONE_MIN_SCALE and the readable scale; the rest pans.
+// This is the scale that a Fit opens at. `overview` is the scale of the whole graph in the free area
+// (the bounds into safeArea()). `readable` is the scale that keeps the card text at 11 px.
+// - A graph that is readable as a whole opens whole. Nothing is clipped, and there is no minimap.
+// - A graph that needs only a little less than readable opens at the readable scale. Its overview is at least
+//   FIT_READABLE_SHARE of readable. A few pixels are clipped. It opens on its root or focus, and the minimap
+//   shows the rest. A larger graph opens whole, with its text a little smaller. A column cut at the edge
+//   reads as complete. The operator then does not see what is out of view.
+// - A much larger graph opens whole, with compact cards (a map of titles), down to FIT_FLOOR. Past FIT_FLOOR,
+//   it opens at the readable scale on its anchor.
+// - On a phone (`phone`), the whole graph shows when it stays at PHONE_MIN_SCALE or more. Otherwise the anchor
+//   and its neighbours show (`local`, with their own fit scale). This applies between PHONE_MIN_SCALE and the
+//   readable scale. The rest pans.
 const FIT_FLOOR = 0.25;
 const FIT_READABLE_SHARE = 0.9;
 const PHONE_MIN_SCALE = 0.7;
@@ -3144,16 +3099,13 @@ function fitScale(overview, readable, { phone = false, local = null } = {}) {
   return overview >= FIT_FLOOR - 1e-9 ? overview : readable;
 }
 
-// The view a Fit opens at, in the free area of `canvas` (safeArea()):
+// This gives the view that a Fit opens at. It fits into the free area of `canvas` (safeArea()).
 //   bounds: the world box of the whole graph; overview: its scale there
 //   (the caller's cap applied); readable: see fitScale();
-//   anchor: the world box of the root / focus card, or null (the graph's
-//   top-left corner); corner: put the anchor's top-left corner at the top-
-//   left of the free area instead of centring it;
-//   neighbourhood: the world box of the anchor and its neighbours (what a
-//   phone fits).
-// Returns { scale, offsetX, offsetY, overview, whole } (whole: the whole
-// graph is in view).
+//   anchor: the world box of the root or focus card, or null (the top-left corner of the graph);
+//   corner: put the top-left corner of the anchor at the top-left of the free area, instead of centre it;
+//   neighbourhood: the world box of the anchor and its neighbours. A phone fits this box.
+// It returns { scale, offsetX, offsetY, overview, whole }. `whole` is true when the whole graph is in view.
 function fitView(canvas, { bounds, overview, readable, anchor = null, corner = false, neighbourhood = null, maxScale = 1.35, margin = 0.92 } = {}) {
   const area = safeArea(canvas);
   if (!bounds || !(area.width > 0) || !(area.height > 0)) return null;
@@ -3164,12 +3116,11 @@ function fitView(canvas, { bounds, overview, readable, anchor = null, corner = f
     : null;
   const scale = fitScale(overview, readable, { phone, local });
   const whole = scale <= overview + 1e-9;
-  // Per axis: a graph smaller than the free area is centred. A larger one
-  // is centred too, then moved just enough to keep the first box of
-  // `keep` that fits wholly in view (a phone's neighbourhood, else the
-  // anchor; the anchor centred when neither fits), and its own edges never
-  // come inside the area (no empty canvas past the graph). Without an
-  // anchor (or with `corner`) it starts at the area's top-left corner.
+  // On each axis, a graph smaller than the free area is centred. A larger graph is centred too.
+  // Then the kit moves it just enough to keep the first box of `keep` in view. That box fits wholly in view.
+  // It is the neighbourhood of a phone, else the anchor. The anchor is centred when neither box fits.
+  // The edges of the graph never come inside the area, so no empty canvas shows past the graph.
+  // Without an anchor, or with `corner`, the graph starts at the top-left corner of the area.
   const keep = [phone ? neighbourhood : null, anchor].filter(Boolean);
   const axis = (start, length, from, size, pick) => {
     const centred = start + length / 2 - (from + size / 2) * scale;
@@ -3198,8 +3149,8 @@ function fitView(canvas, { bounds, overview, readable, anchor = null, corner = f
   return { scale, offsetX, offsetY, overview, whole };
 }
 
-// Fit transform of a world box into a width x height viewport, or into
-// `area` (a safeArea() rectangle) when given.
+// This is the fit transform of a world box into a width x height viewport. Give `area` (a safeArea() rectangle)
+// to fit into that area instead.
 function fitTransform(bounds, width, height, { maxScale = 1.35, minScale = MIN_SCALE, margin = 0.92, area = null } = {}) {
   if (!bounds || !width || !height) return null;
   const box = area && area.width > 0 && area.height > 0 ? area : { x: 0, y: 0, width, height };
@@ -3211,7 +3162,7 @@ function fitTransform(bounds, width, height, { maxScale = 1.35, minScale = MIN_S
   };
 }
 
-// Keeps at least a margin of the graph inside the viewport.
+// This keeps at least a margin of the graph inside the viewport.
 function clampView(view, bounds, width, height) {
   if (!bounds || !width || !height || !(view.scale > 0)) return;
   const marginX = Math.min(72, Math.max(24, width * 0.18));
@@ -3226,7 +3177,7 @@ function clampView(view, bounds, width, height) {
 
 const KEY_DIRECTIONS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
-// Pan / zoom / keyboard / hover / click controller of one graph canvas.
+// This controller handles pan, zoom, keyboard, hover, and click for one graph canvas. Its options are:
 //   options = {
 //     canvas, view: { scale, offsetX, offsetY } (mutated in place),
 //     active() -> bool, draw(ctx, frame) -> keep animating?,
@@ -3240,21 +3191,20 @@ const KEY_DIRECTIONS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1
 //     panel() -> the side panel element (follow() watches its size),
 //     toolbar: { zoomIn, zoomOut, fit }, onResize(), clamp: bool }
 //
-// follow(id) centres node `id` in the visible canvas (visibleArea: clear
-// of the toolbar, the legend / status dock, the minimap and an open
-// panel) once the panel's size has settled, and again each time that
-// area changes: the panel opening, growing as its content arrives or
-// closing, the canvas resizing. "Settled" is event driven: a
-// ResizeObserver on the canvas and the panel, and the end of the panel's
-// running transitions or animations (getAnimations().finished), never a
-// timer. A pan, a zoom, a fit, a keyboard move or unfollow() ends it.
+// follow(id) centres node `id` in the visible canvas. The visible canvas is clear of the toolbar,
+// the legend or status dock, the minimap, and an open panel.
+// follow waits until the size of the panel has settled. It then centres the node again each time that area changes.
+// This happens when the panel opens, grows as its content arrives, or closes, and when the canvas resizes.
+// "Settled" is event driven. The kit uses a ResizeObserver on the canvas and the panel. It also waits for the end
+// of the running transitions or animations of the panel (getAnimations().finished).
+// The kit never uses a timer. A pan, a zoom, a fit, a keyboard move, or unfollow() ends follow.
 function mount(options) {
   prewarmRouter();
   const canvas = options.canvas;
   const view = options.view;
   const control = { frame: 0, drag: null, pinch: null, hovered: null, keyboardId: null, animation: 0, follow: null, settleFrame: 0, watched: null };
   canvas.classList.add("graphKit__canvas");
-  // What mount() installs (the listeners of the canvas and the toolbar, the observers) goes with destroy().
+  // mount() installs the listeners of the canvas and the toolbar, and the observers. destroy() removes all of them.
   const lifetime = new AbortController();
   const { signal } = lifetime;
 
@@ -3299,7 +3249,7 @@ function mount(options) {
   }
 
   function changed(kind) {
-    // The viewer moved the camera: the followed node stays where it is.
+    // The viewer moved the camera. The followed node stays where it is.
     if (kind === "pan" || kind === "zoom") unfollow();
     options.onViewChange?.(kind);
     scheduleDraw();
@@ -3331,10 +3281,10 @@ function mount(options) {
     return panel && !panel.hidden ? panel.getBoundingClientRect() : null;
   };
 
-  // Pans so that a world box sits in the middle of the visible canvas: the
-  // canvas minus its chrome (toolbar, legend / status dock, minimap; see
-  // visibleArea) and an open side panel (on the right on desktop, a bottom
-  // sheet on phones). Eased over 220 ms unless reduced motion is preferred.
+  // This pans the view so that a world box sits in the middle of the visible canvas.
+  // The visible canvas is the canvas without its chrome (toolbar, legend or status dock, minimap; see visibleArea),
+  // and without an open side panel. The side panel is on the right on desktop. On phones it is a bottom sheet.
+  // The pan eases over 220 ms, unless reduced motion is preferred.
   function centerOn(box, { animate = true } = {}) {
     if (!box) return;
     const rect = canvas.getBoundingClientRect();
@@ -3365,14 +3315,13 @@ function mount(options) {
       view.offsetY = saved.offsetY + (target.offsetY - saved.offsetY) * eased;
       control.animation = t < 1 ? requestAnimationFrame(step) : 0;
       changed("center");
-      // The camera came to rest: a follow checks its area again (the
-      // minimap may have shown or hidden on the way).
+      // The camera stops. A follow then checks its area again, because the minimap may have shown or hidden on the way.
       if (!control.animation) requestSettle();
     };
     control.animation = requestAnimationFrame(step);
   }
 
-  // ---- follow: the selected node centred once the panel has settled.
+  // ---- follow: the selected node is centred after the panel settles.
   const settleObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => requestSettle()) : null;
   settleObserver?.observe(canvas);
 
@@ -3389,12 +3338,10 @@ function mount(options) {
     control.settleFrame = 0;
   }
 
-  // The panel element can be created after mount (or replaced): observe
-  // the current one. The toolbar and the legend / status dock bound the
-  // visible area too (a legend folding or unfolding moves its centre), and
-  // so does the minimap, which shows or hides with the camera itself: a
-  // follow re-centres for it at most twice (settle), so the two cannot
-  // chase each other.
+  // The panel element can be created after mount, or it can be replaced. Observe the current element.
+  // The toolbar and the legend or status dock also limit the visible area. A legend that folds or unfolds moves its centre.
+  // The minimap also limits the visible area. It shows or hides with the camera. A follow re-centres for the minimap
+  // at most twice (settle). So the two cannot chase each other.
   const chrome = new Set();
   const minimapObserver = typeof MutationObserver === "function" ? new MutationObserver(() => requestSettle()) : null;
   function watchPanel() {
@@ -3415,8 +3362,8 @@ function mount(options) {
     if (panel) settleObserver.observe(panel);
   }
 
-  // A frame after a change (the panel's layout is then known), unless the
-  // panel is still moving: then once its transitions / animations end.
+  // Wait one frame after a change. The panel layout is then known. If the panel still moves,
+  // wait until its transitions or animations end.
   function requestSettle() {
     if (!control.follow || control.settleFrame) return;
     control.settleFrame = requestAnimationFrame(settle);
@@ -3425,7 +3372,7 @@ function mount(options) {
   function settle() {
     control.settleFrame = 0;
     const follow = control.follow;
-    // The camera is easing: the end of its move asks again.
+    // The camera is still moving. When its move ends, the request runs again.
     if (!follow || !active() || control.animation) return;
     const panel = options.panel?.() || null;
     const moving = panel && !panel.hidden && typeof panel.getAnimations === "function"
@@ -3443,7 +3390,7 @@ function mount(options) {
     const key = keyOf(visibleArea(canvas, { panel: panelBox }));
     if (key === follow.key) return;
     const safeKey = keyOf(safeArea(canvas, { panel: panelBox }));
-    // Only the minimap changed (it follows the camera): twice at most.
+    // Only the minimap changed. It follows the camera. Re-centre at most twice.
     if (follow.key && safeKey === follow.safeKey) {
       follow.flips += 1;
       if (follow.flips > 2) return;
@@ -3479,15 +3426,15 @@ function mount(options) {
     scheduleDraw();
   }
 
-  // Arrow keys: the nearest node in that direction (angle-weighted), or the
-  // node nearest to the viewport centre when none has the keyboard yet.
+  // The arrow keys move to the nearest node in that direction. The kit weights the angle.
+  // If no node has the keyboard yet, the kit uses the node nearest to the viewport centre.
   function moveKeyboard(dx, dy) {
     const nodes = options.nodes?.() || [];
     if (!nodes.length) return;
     const centre = (node) => ({ x: node.x + node.width / 2, y: node.y + node.height / 2 });
     const current = nodes.find((node) => node.id === control.keyboardId) || null;
-    // The first arrow lands on the selected node (or the one nearest to the
-    // viewport centre); the next ones move.
+    // The first arrow goes to the selected node, or to the node nearest to the viewport centre.
+    // The next arrows move the focus.
     let next = current ? null : nodes.find((node) => node.id === options.selectedId?.()) || null;
     if (next) {
       focusNode(next.id);
@@ -3527,7 +3474,7 @@ function mount(options) {
     if (control.follow && control.follow.id !== id) unfollow();
     setHover(options.target?.(id) || null);
     if (!boxOnScreen(node)) centerOn(node);
-    // The node that the keyboard reached is said through the page's one live region (uiState.announce).
+    // The page announces the node that the keyboard reached. It uses its one live region (uiState.announce).
     const described = options.describe?.(id);
     if (described) uiState.announce(described);
     scheduleDraw();
@@ -3540,9 +3487,9 @@ function mount(options) {
     zoomAt(Math.exp(-event.deltaY * WHEEL_SPEED), event.clientX - rect.left, event.clientY - rect.top);
   }, { passive: false, signal });
 
-  // One pointer pans (a mouse drag or a finger), two fingers pinch-zoom
-  // around their midpoint and pan with it; a tap or click that did not move
-  // selects. A finger may wander a few pixels during a tap.
+  // One pointer pans the view, with a mouse drag or a finger. Two fingers pinch-zoom around their midpoint,
+  // and they pan with it. A tap or click that does not move selects the target.
+  // A finger can move a few pixels during a tap.
   const pointers = new Map();
   const pinchOf = () => {
     const [a, b] = [...pointers.values()];
@@ -3595,7 +3542,7 @@ function mount(options) {
     if (control.pinch) {
       if (pointers.size >= 2) { control.pinch = pinchOf(); return; }
       control.pinch = null;
-      // The finger left on the canvas goes on panning from where it is.
+      // The finger that stays on the canvas keeps the pan from where it is.
       const [rest] = [...pointers.values()];
       if (rest && control.drag) { control.drag.x = rest.x; control.drag.y = rest.y; }
       if (rest) return;
@@ -3624,9 +3571,9 @@ function mount(options) {
     else if (event.key === "0") { unfollow(); options.fit?.(); }
     else if ((event.key === "Enter" || event.key === " ") && control.keyboardId) options.onActivate?.(control.keyboardId);
     else if (event.key === "Escape") {
-      // Escape closes the panel first, then leaves the keyboard focus.
+      // Escape closes the panel first. Then it removes the keyboard focus.
       if (options.onEscape?.()) {
-        // handled
+        // The key is handled here.
       } else if (control.keyboardId) {
         control.keyboardId = null;
         setHover(null);
@@ -3640,8 +3587,7 @@ function mount(options) {
     setHover(null);
   }, { signal });
 
-  // The legend folds away from its button in the status line: the fit and
-  // the recentring then reclaim its corner.
+  // The legend folds from its button in the status line. The fit and the recentre action then use its corner again.
   legendToggle(canvas.parentElement, () => {
     options.onResize?.();
     scheduleDraw();
@@ -3658,11 +3604,11 @@ function mount(options) {
     options.onResize?.();
     scheduleDraw();
   }) : null;
-  // ResizeObserver already runs once per frame; the redraw itself waits for
-  // the next animation frame so resizes coalesce with other changes.
+  // The ResizeObserver already runs once for each frame. The redraw waits for the next animation frame.
+  // So the resizes combine with other changes.
   resizeObserver?.observe(canvas);
 
-  // The view is unmounted: nothing of this mount stays on the canvas, the toolbar or the document.
+  // The view is unmounted. Nothing of this mount stays on the canvas, the toolbar, or the document.
   function destroy() {
     lifetime.abort();
     settleObserver?.disconnect();
@@ -3699,12 +3645,11 @@ function mount(options) {
 
 // ------------------------------------------------------------ DOM chrome
 
-// Show / hide button of a pane's legend, at the start of its status line.
-// One preference for every graph, kept per viewer (storage is optional):
-// "hidden" folds every legend, "shown" keeps them open; without one, a fit
-// folds the legend when the graph does not fit beside it (see
-// foldLegendToFit) and opens it again once the room is back.
-// "hidden" / "shown" once the user chose; "" until then.
+// This is the show or hide button of a pane's legend. It sits at the start of its status line.
+// One preference applies to every graph. The preference is kept for each viewer. Storage is optional.
+// "hidden" folds every legend. "shown" keeps every legend open. Without a stored choice, a fit folds the legend
+// when the graph does not fit beside it (see foldLegendToFit). The fit opens the legend again when there is room.
+// The value is "hidden" or "shown" after the user chooses. It is "" until then.
 const legendPref = () => storage.pref(storage.KEYS.graphLegend, "", { allowed: ["hidden", "shown"] });
 let legendSerial = 0;
 const legendControls = new WeakMap();
@@ -3723,7 +3668,7 @@ function legendToggle(pane, onToggle) {
   h.replace(button, icon.el("list", { size: "sm" }));
   const preference = legendPreference();
   const control = {
-    // The viewer chose (this session or a stored preference): no auto fold.
+    // The viewer chose a value, in this session or in a stored preference. The kit does not fold it automatically.
     chosen: !!preference,
     auto: false,
     collapsed: () => dock.classList.contains("is-legend-collapsed"),
@@ -3749,11 +3694,10 @@ function legendToggle(pane, onToggle) {
   return button;
 }
 
-// Called by a fit before it measures safeArea(): without a viewer's
-// choice, the legend stays open while the whole graph fits the free area
-// at `readableScale` with it, and folds otherwise (the graph needs the
-// room, or is larger than the view and the minimap takes over); it opens
-// again once the graph fits with it. Returns whether the legend is folded.
+// A fit calls this function before it measures safeArea(). Without a choice from the viewer, the legend stays open
+// while the whole graph fits the free area at `readableScale` with the legend open. Otherwise the legend folds.
+// The graph needs the room, or it is larger than the view and the minimap takes over.
+// The legend opens again when the graph fits with it. The function returns whether the legend is folded.
 function foldLegendToFit(canvas, bounds, { readableScale = 1, margin = 0.92 } = {}) {
   const dock = $(":scope > .graphKitDock", canvas?.parentElement);
   const control = dock ? legendControls.get(dock) : null;
@@ -3769,18 +3713,17 @@ function foldLegendToFit(canvas, bounds, { readableScale = 1, margin = 0.92 } = 
   return control.auto;
 }
 
-// Side-panel header: the detail panel shell's head (ns.detailPanel.head:
-// eyebrow, title, subtitle, the one close button), with the graphKitPanel__*
-// names the panel content styles use.
+// This is the header of the side panel. It is the head of the detail panel shell (ns.detailPanel.head).
+// It holds the eyebrow, the title, the subtitle, and the one close button.
+// It uses the graphKitPanel__* names that the panel content styles use.
 function panelHeader({ eyebrow, title, subtitle, dot, onClose, closeLabel = "Close details" }) {
   return detailPanel.head({ eyebrow, title, subtitle, dot, onClose, closeLabel, graphKit: true });
 }
 
-// The floating detail panel over a canvas (ns.detailPanel, layout
-// "floating"): show(body) puts the body's head above it (the head stays
-// while the body scrolls) and opens the panel as an ns.layers layer
-// (Escape closes it, the focus goes back to the canvas); hide() closes it.
-// onClose(reason) runs however it closed.
+// This is the floating detail panel over a canvas (ns.detailPanel, layout "floating").
+// show(body) puts the head of the body above the panel. The head stays while the body scrolls.
+// It then opens the panel as an ns.layers layer. Escape closes the panel, and the focus goes back to the canvas.
+// hide() closes the panel. onClose(reason) runs however the panel closed.
 function panelShell(panel, { onClose = null, opener = null } = {}) {
   const shell = detailPanel.create({ el: panel, layout: "floating", onClose, returnFocus: opener });
   return {

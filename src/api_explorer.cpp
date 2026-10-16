@@ -1,6 +1,7 @@
-// The routes of the Explorer (/api/explorer/...). A route is an adapter: it finds the host, reads the parameters, calls the service
-// (explorer_service.hpp) with the context of the request, and writes the JSON of its answer (explorer_json.hpp). What a route reads from ClickHouse, the
-// privileges of the runner that bound every name, the caches and the error of each failure are in the units that the service calls:
+// The routes of the Explorer (/api/explorer/...). A route is an adapter.
+// A route finds the host, reads the parameters and calls the service (explorer_service.hpp). It passes the context of the request.
+// A route writes the JSON of its answer (explorer_json.hpp). The units that the service calls hold the reads from ClickHouse.
+// They also hold the privileges of the runner that bound every name, the caches and the error of each failure. The list below names the units:
 //
 //   explorer_service      the order of a read, the caches, the two connections, the error of a failed read
 //   explorer_catalog      the catalog of the graph; explorer_index (the sidebar), explorer_storage, explorer_table and explorer_detail (a table),
@@ -31,7 +32,7 @@
 namespace chdash {
 namespace {
 
-// What every route answers before it reads anything: the host is not named, unknown, or down.
+// Every route answers this way before it reads anything. The host is not named, unknown, or down.
 struct ExplorerRoute {
   std::string host_id;
   const HostSpec* host = nullptr;
@@ -61,7 +62,7 @@ void send_json(httplib::Response& res, const std::string& body) {
 
 }  // namespace
 
-// A connection with the account of `uri`: five seconds to connect, fifteen to read and to write.
+// A connection with the account of `uri`. It has five seconds to connect, and fifteen to read and to write.
 std::unique_ptr<ChExecutor> Server::open_explorer_executor(const std::string& uri, std::string* error) {
   return ClientExecutor::open(
       client_pool_,
@@ -122,6 +123,8 @@ void Server::handle_explorer_table_data(const httplib::Request& req, httplib::Re
   const std::string host_id = doc["host_id"].GetString();
   const std::string database = doc["database"].GetString();
   const std::string table = doc["table"].GetString();
+  // The database is in the body. This code asks for the decision of explorer.read for it (docs/access.md).
+  if (!access_allows(res, "explorer.read", database)) return;
   size_t limit = 100;
   if (doc.HasMember("limit") && doc["limit"].IsUint64()) limit = static_cast<size_t>(doc["limit"].GetUint64());
   limit = std::max<size_t>(1, std::min<size_t>(limit, 500));
@@ -147,8 +150,8 @@ void Server::handle_explorer_graph(const httplib::Request& req, httplib::Respons
                                       cfg_.explorer.live_refresh_ms));
 }
 
-// What an edge/node panel explains about one logical object: its SELECT, its destination or source, and Distributed routing. Served from the cached
-// authorized graph only: an object outside AllowedObjectSet is simply absent (404), and no SQL is executed for the caller.
+// This route explains one logical object for an edge or node panel. The explanation covers its SELECT, its destination or source, and its Distributed routing.
+// It is served from the cached authorized graph only. An object outside AllowedObjectSet is simply absent (404). No SQL is executed for the caller.
 void Server::handle_explorer_graph_definition(const httplib::Request& req, httplib::Response& res) {
   const std::string database = param_of(req, "database");
   const std::string table = param_of(req, "table");

@@ -1,11 +1,14 @@
-// GET /api/mcp/keys/<id>/cost: what the statements of an MCP key cost ClickHouse (docs/mcp.md, "The ClickHouse cost of a key"). Each
-// statement of a call of the key is named for it (its query_id, mcp_cost.hpp); this route reads system.query_log of the host of the key
-// with the RUNNER account and the bounds of System > Queries, as that page does (the MCP user never reads query_log), and keeps the answer
-// 60 s. A read of the page: handle_api_mcp checked its guard. Never SQL, never data: counts, users, tools and the names of the tables.
+// This is the GET /api/mcp/keys/<id>/cost route. It shows what the statements of an MCP key cost ClickHouse (docs/mcp.md, "The ClickHouse cost of a key").
+// Each statement of a call of the key is named for the key (its query_id, mcp_cost.hpp). This route reads system.query_log of the host of the key.
+// It uses the RUNNER account and the bounds of System > Queries, as that page does. The MCP user never reads query_log.
 //
-// The tool mcp_analysis_my_usage reads the same cost for its own key (Server::mcp_tool_cost): the same cache and the same read (answer_mcp_cost),
-// written for a client that is no administrator. The tool runs on the thread of POST /mcp, whose scope is no scope of MCP (it has no query_id
-// of a key): the read of system.query_log is not a statement of the key, so it is never counted in the cost that it reads.
+// The route keeps the answer for 60 s. This is a read of the page. handle_api_mcp checked its guard.
+// The answer never holds SQL or data. It holds counts, users, tools and the names of the tables.
+//
+// The tool mcp_analysis_my_usage reads the same cost for its own key (Server::mcp_tool_cost). It uses the same cache and the same read (answer_mcp_cost).
+// This is written for a client that is no administrator. The tool runs on the thread of POST /mcp.
+// The scope of POST /mcp is not an MCP scope. It has no query_id of a key.
+// The read of system.query_log is not a statement of the key. So it is never counted in the cost that it reads.
 
 #include "server.hpp"
 
@@ -59,7 +62,7 @@ std::string user_of(const std::string& uri) {
   return parsed ? parsed->user : std::string();
 }
 
-// The figures of several rows of the cost.
+// These are the figures of several rows of the cost.
 struct Sum {
   uint64_t statements = 0;
   uint64_t failed = 0;
@@ -101,7 +104,7 @@ void put_sum(Writer& w, const Sum& sum, bool with_results) {
   w.Key("memory_peak_bytes"); w.Uint64(sum.memory_peak_bytes);
 }
 
-// What the answer says when the cost cannot be read.
+// This is what the answer says when the cost cannot be read.
 struct Unavailable {
   std::string reason;  // no_host, runner_unavailable, not_granted, disabled, window_too_large, readonly_account, unsupported, failed
   std::string error;
@@ -109,9 +112,9 @@ struct Unavailable {
   std::string suggested_window;
 };
 
-// The answer of the page (`for_page`): the id of the key, why there is no cost, and the text of the error and the GRANT statement for the
-// administrator. The answer of the tool has none of these: the id is the caller's own, and a cost that cannot be read has its own object
-// (write_tool_unavailable).
+// The answer of the page (`for_page`) has the id of the key, the reason why there is no cost, and the text of the error.
+// It also has the GRANT statement for the administrator.
+// The answer of the tool has none of these. The id is the caller's own id. A cost that cannot be read has its own object (write_tool_unavailable).
 void write_answer(Writer& w, const std::string& id, const std::string& host, const McpCostWindow& window, int64_t max_lookback_hours,
                   const McpCost* cost, const Unavailable& unavailable, const std::string& mcp_user, const std::string& system_user, bool for_page) {
   w.StartObject();
@@ -136,8 +139,9 @@ void write_answer(Writer& w, const std::string& id, const std::string& host, con
     w.Key("suggested_window"); put(w, unavailable.suggested_window);
   }
 
-  // The rows by user and tool, summed by user (the identities) and by tool. A tool that is not of the catalog (a query_id that another
-  // user of ClickHouse made up) is "other"; a user that is neither of the host's MCP identities is "other" too.
+    // The rows are summed by user (the identities) and by tool.
+    // A tool that is not in the catalog (a query_id that another user of ClickHouse made up) is "other".
+    // A user that is neither of the host's MCP identities is "other" too.
   Sum totals;
   std::map<std::string, Sum> by_user;
   std::map<std::string, Sum> by_tool;
@@ -193,8 +197,8 @@ void write_answer(Writer& w, const std::string& id, const std::string& host, con
   w.EndObject();
 }
 
-// What a client reads when the cost cannot be read, in ChDash's own words: a ClickHouse error can name a server, and the GRANT statement names the
-// account of the runner, which the administrator reads on the page.
+// This is what a client reads when the cost cannot be read. The text is in ChDash's own words. A ClickHouse error can name a server.
+// The GRANT statement names the account of the runner. The administrator reads this statement on the page.
 std::string tool_reason_text(const std::string& reason, const std::string& suggested_window) {
   if (reason == "no_host") return "the host of the key is not configured";
   if (reason == "runner_unavailable") return "ChDash cannot connect to the account that reads system.query_log on the host of the key";
@@ -213,7 +217,8 @@ std::string tool_reason_text(const std::string& reason, const std::string& sugge
   return "the read of system.query_log failed: the administrator finds why on the page of the key (the cost of a key)";
 }
 
-// The answer of the tool for a cost that cannot be read: no figures (zeros would read as "no cost"), the reason and a sentence.
+// This is the answer of the tool for a cost that cannot be read. It has no figures, because zeros would read as "no cost".
+// It has the reason and a sentence.
 void write_tool_unavailable(Writer& w, const std::string& host, const McpCostWindow& window, const Unavailable& unavailable) {
   w.StartObject();
   w.Key("host"); put(w, host);
@@ -235,7 +240,8 @@ void Server::handle_mcp_key_cost(const httplib::Request& req, httplib::Response&
   if (!cfg_.system.top_queries_enabled()) {
     return fail(res, 404, "not_enabled", "the cost of a key reads system.query_log as System > Queries does, and system.top_queries is off");
   }
-  // The host of the key; a key of an older file that names several takes ?host= (one of them); a deleted key, the host its usage kept.
+    // This is the host of the key. A key of an older file that names several hosts takes ?host= (one of them).
+    // A deleted key takes the host that its usage kept.
   std::string host_id;
   bool known = false;
   for (const auto& key : mcp_keys_->list()) {
@@ -259,7 +265,7 @@ void Server::handle_mcp_key_cost(const httplib::Request& req, httplib::Response&
   if (!window) return fail(res, 400, "validation", "window must be 1h, 6h, 24h or 7d", "window", "invalid");
 
   const bool refresh = req.has_param("refresh") && req.get_param_value("refresh") == "1";
-  // A read that the browser abandons stops, and so does the wait for a place of heavy work.
+    // A read stops when the browser abandons it. The wait for a place of heavy work also stops.
   const std::function<bool()> stop = [this, &req] { return stopping() || (req.is_connection_closed && req.is_connection_closed()); };
   const McpCostAnswer answer = answer_mcp_cost(id, host_id, *window, refresh, true, stop, now);
   if (answer.busy || answer.stopping) {
@@ -267,9 +273,10 @@ void Server::handle_mcp_key_cost(const httplib::Request& req, httplib::Response&
     no_store(res);
     return;
   }
-  // The audit line of the page's reads of a key (api_mcp.cpp writes the others).
+    // This is the line for the reads of a key on the page. api_mcp.cpp writes the other lines.
+    // The line uses mcp.page, not the call log of the endpoint (mcp.call).
   const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-  log_event(LogLevel::Info, "mcp.call",
+  log_event(LogLevel::Info, "mcp.page",
             {{"key", "-"}, {"call", "keys/cost"}, {"host", host_id.empty() ? std::string("-") : host_id}, {"status", answer.status + ":" + id},
              {"duration_ms", static_cast<int64_t>(duration_ms)}, {"rows", static_cast<uint64_t>(0)}});
   res.status = 200;
@@ -277,7 +284,8 @@ void Server::handle_mcp_key_cost(const httplib::Request& req, httplib::Response&
   res.set_content(answer.json.data(), answer.json.size(), "application/json");
 }
 
-// The read that the page and the tool share: the cache, the runner account, the heavy work of a host. `host_id` is the host of the key.
+// This read is shared by the page and the tool. It uses the cache, the runner account, and the heavy work of a host.
+// `host_id` is the host of the key.
 Server::McpCostAnswer Server::answer_mcp_cost(const std::string& key_id, const std::string& host_id, const McpCostWindow& window, bool refresh,
                                               bool for_page, const std::function<bool()>& stop, int64_t now) {
   McpCostAnswer out;
@@ -292,7 +300,7 @@ Server::McpCostAnswer Server::answer_mcp_cost(const std::string& key_id, const s
     else write_tool_unavailable(w, host_id, window, unavailable);
     out.status = "no_host";
   } else {
-    // A scan of query_log is heavy work for the host, as System > Queries is.
+        // A scan of query_log is heavy work for the host, in the same way as System > Queries.
     const auto ticket = acquire_ticket(WorkClass::Heavy, host->id, stop);
     if (!ticket) {
       out.stopping = stopping();
@@ -341,9 +349,10 @@ Server::McpCostAnswer Server::answer_mcp_cost(const std::string& key_id, const s
   return out;
 }
 
-// The cost of the key that the tool mcp_analysis_my_usage asks for, a JSON object. The window of the usage is the one of the cost when the cost
-// has it (1h, 6h, 24h, 7d), else 7d, the longest (the object says the window that it read). A cost that cannot be read says why, in its status:
-// the tool still gives the usage.
+// This is the cost of the key that the tool mcp_analysis_my_usage asks for. It is a JSON object.
+// The window of the usage is the window of the cost when the cost has it (1h, 6h, 24h, 7d).
+// Otherwise the window is 7d, the longest window. The object says which window it read.
+// A cost that cannot be read says why, in its status. The tool still gives the usage.
 std::string Server::mcp_tool_cost(const McpKey& key, const std::string& usage_window, int64_t now) {
   rapidjson::StringBuffer sb;
   Writer w(sb);
@@ -356,7 +365,7 @@ std::string Server::mcp_tool_cost(const McpKey& key, const std::string& usage_wi
   }
   const bool as_asked = usage_window == "1h" || usage_window == "6h" || usage_window == "24h" || usage_window == "7d";
   const auto window = mcp_cost_window(as_asked ? usage_window : "7d", cfg_.system.query_log_max_lookback_hours, now);
-  // The stop of the call: the client of MCP went away, or the server stops (the scope of POST /mcp says so).
+    // This stops the call. The client of MCP disconnected, or the server stops. The scope of POST /mcp shows which case applies.
   std::function<bool()> stop = [this] { return stopping(); };
   if (const ChQueryLimits* scope = ChQueryScope::current(); scope && scope->canceled) stop = scope->canceled;
   const McpCostAnswer answer = answer_mcp_cost(key.id, key.hosts.empty() ? std::string() : key.hosts.front(), *window, false, false, stop, now);

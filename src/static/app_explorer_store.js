@@ -1,6 +1,7 @@
-// What the modules of the Explorer share: the model (the selection, the catalog, the caches), the address, the parts of the Catalog page
-// that the entry hands over, and the error strip. It holds no view. The functions that the controller provides to the modules under it
-// are in `actions`: they cannot be imported, the controller imports the modules (ARCH-F-155).
+// This module holds the state that the modules of the Explorer share. The state has the model, the address, the parts of the Catalog page, and the error strip.
+// The model has the selection, the catalog and the caches. This module has no view.
+// The functions that the controller gives to the modules below it are in `actions`. These modules cannot import the controller.
+// The controller imports them, so the functions cannot be imported (ARCH-F-155).
 
 import { dom } from "./app_dom.js";
 import { FUNCTIONS_ROUTE_SEGMENT, appRoute, catalogPath, encodeRouteSegment } from "./app_explorer_route.js";
@@ -12,12 +13,13 @@ import { util } from "./app_util.js";
 
 const { byId } = dom;
 
-// The Catalog page is made of more than this controller: the graph, the size views of the databases and tables, the
-// table card and the static result tables. The Functions page has none of them, so the page's entry
-// (app_page_explorer.js) hands them over with explorer.use() before init(), and they never load on the Functions page.
+// The Catalog page has more parts than this controller: the graph, the size views of the databases and tables, the table card, and the static result tables.
+// The Functions page has none of these parts. The entry of the page, app_page_explorer.js, gives the parts to this module with explorer.use() before init().
+// So the parts never load on the Functions page.
 const parts = { graph: null, storage: null, detail: null, results: null };
 
-// What a module provides to the modules that cannot import it, because it imports them. Each is set once, when its module loads. A call before that is a bug that shows at once (a TypeError).
+// A module gives these functions to the modules that cannot import it. A module cannot import a module that imports it.
+// Each function is set one time, when its module loads. A call before that is a bug. The bug shows at once as a TypeError.
 //   openCatalogRoot(options)  refreshCatalog(force)  applyRouteFromLocation()  setMode(mode)       the controller
 //   renderTableList()                                                                              the tree
 //   selectDatabase(name, options)  renderDatabaseDetail(name)  renderBrowseRoot()                  the database page
@@ -31,8 +33,7 @@ const actions = {
 const model = {
   active: false,
   section: "tables",
-  // Catalog mode: "browse" (the card) or "graph". The tree selection
-  // (selectedKey / selectedDatabase) is the scope of both.
+  // Catalog mode: "browse" (the card) or "graph". The tree selection (selectedKey / selectedDatabase) is the scope of both modes.
   mode: "browse",
   loadingCatalog: false,
   catalog: null,
@@ -41,16 +42,15 @@ const model = {
   detail: null,
   detailLoading: false,
   detailSerial: 0,
-  // The newest address being applied: a slower, older one stops at its next await (applyRouteFromLocation).
+  // The newest address that is applied. A slower, older address stops at its next await (applyRouteFromLocation).
   routeSerial: 0,
   tab: "Columns",
-  // The table card: the About panel's tiles past the first four show (narrow panes), the preview's row limit and the measure of the
-  // column size treemap, kept for the session.
+  // The table card keeps these values for the session. They are the About panel tiles after the first four (narrow panes),
+  // the row limit of the preview, and the measure of the column size treemap.
   aboutExpanded: false,
   previewLimit: 0,
   columnSizeMeasure: "",
-  // The database page shows its storage below its objects; "storage"
-  // scrolls it into view once (a former ?tab=storage address).
+  // The database page shows its storage below its objects. The value "storage" scrolls the storage into view one time (a former ?tab=storage address).
   databaseFocus: "",
   preview: null,
   loadingFunctions: false,
@@ -64,20 +64,19 @@ const model = {
   databaseLoadErrors: new Map(),
   detailCache: new Map(),
   routeIntent: null,
-  // An address that names no visible database or table: { database, table }
-  // ("Database not found" / "Table not found" in Browse; never a tree row).
+  // An address that names no visible database or table: { database, table }.
+  // The page shows "Database not found" or "Table not found" in Browse. It is never a tree row.
   notFound: null,
   includeSystem: false,
-  // Derived from the Views / MV chips (plus the selected object): the graph
-  // projection hides or contracts non-storing objects when it is false.
+  // The graph projection derives this value from the Views and MV chips, and from the selected object.
+  // When this value is false, the projection hides or contracts non-storing objects.
   includeNonStoring: true,
-  // Tree object-type chips (Tables / Views / MV / Dict); System is includeSystem.
+  // Tree object-type chips (Tables / Views / MV / Dict). The System chip uses includeSystem.
   filters: { tables: true, views: true, mv: true, dict: true },
   treeOpen: false,
-  // Side panel the mobile drawer toggle controls (drawerPane()).
+  // The side panel that the mobile drawer toggle controls (drawerPane()).
   drawerPaneId: "",
-  // The treemap of the database page or of the databases overview
-  // (destroyed on re-render).
+  // The treemap of the database page or of the databases overview. The treemap is destroyed on each re-render.
   databaseStorage: null,
   // The local disks of each loaded database branch (catalog "disks").
   databaseDisks: new Map(),
@@ -90,7 +89,7 @@ function currentExplorerPath() {
     const selected = (model.functionsCatalog?.functions || []).find((candidate) => functionKey(candidate) === model.selectedFunctionKey) || null;
     return selected?.name ? `/explorer/${FUNCTIONS_ROUTE_SEGMENT}/${encodeRouteSegment(selected.name)}` : `/explorer/${FUNCTIONS_ROUTE_SEGMENT}`;
   }
-  // A not-found page keeps the address it was opened with.
+  // A not-found page keeps the address that it was opened with.
   return catalogPath({
     ...(model.notFound || selectionScope()),
     tab: model.tab,
@@ -103,8 +102,7 @@ function currentExplorerUrl() {
   return appRoute(currentExplorerPath());
 }
 
-// history: "push" | "replace" | "none" (the option of every Explorer
-// navigation function).
+// The history mode is "push", "replace" or "none". This is the option of every Explorer navigation function.
 function syncExplorerUrl(history = "push") {
   address.write(history, null, { href: currentExplorerUrl() });
 }
@@ -119,8 +117,7 @@ function setError(error) {
   uiState.banner(dom.explorerError, { message });
 }
 
-// The detail pane's state when no object is shown: empty, loading or
-// error (ns.uiState), in #explorerEmptyState.
+// The state of the detail pane when no object is shown. The state is empty, loading or error (ns.uiState), in #explorerEmptyState.
 function showDetailState(kind, options) {
   const box = dom.explorerEmptyState;
   if (!box) return;
@@ -137,8 +134,7 @@ function shellEl(id) {
   return dom[id] || byId(id);
 }
 
-// The scope every Catalog mode shows: the tree selection, or the route
-// still being resolved while the catalog loads.
+// The scope that every Catalog mode shows. It is the tree selection, or the route that is still resolved while the catalog loads.
 function selectionScope() {
   if (model.selectedKey) {
     const [database, table] = String(model.selectedKey).split("\0");
@@ -162,7 +158,7 @@ function clearSelection() {
   model.preview = null;
 }
 
-// Is the Browse pane showing the Catalog root (the databases overview)?
+// Does the Browse pane show the Catalog root (the databases overview)?
 function browseRootShown() {
   return model.active && model.section === "tables" && model.mode === "browse" && !model.notFound && !model.selectedKey && !model.selectedDatabase && !selectionScope().database;
 }

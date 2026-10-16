@@ -1,6 +1,7 @@
-// The focus of the Explorer graph and everything that changes it: a card clicked, a table or a database chosen in the tree, the depth, the
-// expansions, the groups, the mode (Lineage | Storage), the visibility switches and the refresh from the server. It provides to the modules
-// below what they call back (`actions`).
+// The focus of the Explorer graph, and everything that changes it.
+// The focus changes when a user clicks a card, or chooses a table or a database in the tree.
+// It also changes with the depth, the expansions, the groups, the mode (Lineage | Storage), the visibility switches and the refresh from the server.
+// It gives the modules below the callbacks that they call (`actions`).
 
 import { api } from "./app_api.js";
 import { dom } from "./app_dom.js";
@@ -57,8 +58,8 @@ function setShowIsolated(value) {
   renderGraphChrome();
 }
 
-// Hover outlines the card (or edge / control) under the pointer and
-// highlights the edges of a hovered card; it never dims or moves anything.
+// Hover outlines the card (or edge or control) under the pointer.
+// It also highlights the edges of a hovered card. It never dims or moves anything.
 function hoverTarget(target) {
   model.hoveredId = target?.type === "node" && !target.disabled ? target.node.id : null;
   model.hoveredEdgeId = target?.type === "edge" ? target.edge.id : null;
@@ -66,9 +67,9 @@ function hoverTarget(target) {
     ? { type: target.type, key: target.expandKey, database: target.database } : null;
 }
 
-// A click selects: a card recentres on itself, takes the focus (tree and
-// URL follow) and opens the side panel; an edge opens its definition; the
-// background closes the panel.
+// A click selects an object.
+// A card recentres on itself, takes the focus, and opens the side panel. The tree and the URL follow the focus.
+// An edge opens its definition. The background closes the panel.
 function clickTarget(target) {
   if (target?.type === "expand") { toggleExpansion(target.expandKey); return; }
   if (target?.type === "band") { setGroupExpanded(target.database, false); return; }
@@ -106,7 +107,7 @@ function syncFocusControls() {
     dom.explorerGraphExpandButton.hidden = model.detailMode !== "logical";
     dom.explorerGraphExpandButton.disabled = !model.focusedId || model.detailMode !== "logical" || !canGrow;
   }
-  // Storage needs an object that stores data (a view has no storage).
+  // Storage needs an object that stores data. A view has no storage.
   const storageAllowed = !model.focusedId || canUseStorageForId(model.focusedId);
   if (dom.explorerGraphPhysicalButton) {
     dom.explorerGraphPhysicalButton.disabled = !storageAllowed;
@@ -116,8 +117,8 @@ function syncFocusControls() {
 }
 
 function recomputePreservingFocus() {
-  // Keep the viewport and every retained node fixed. Only newly visible nodes
-  // receive coordinates; nodes outside the new neighbourhood simply vanish.
+  // Keep the viewport and every retained node fixed.
+  // Only newly visible nodes receive coordinates. Nodes outside the new neighbourhood vanish.
   computeLayout({ preserveExisting: true });
   model.isFitted = false;
   syncFocusControls();
@@ -125,10 +126,10 @@ function recomputePreservingFocus() {
 }
 
 function recomputePreservingFocusAnchorOnly(anchor = captureViewportAnchor()) {
-  // Visibility changes alter the projected DAG itself. Reusing old node
-  // coordinates after Sugiyama crossing minimisation creates a hybrid layout
-  // and is the source of the OFF -> ON arrow disorder. Recompute the canonical
-  // layout from scratch, then preserve only the camera anchor.
+  // Visibility changes alter the projected DAG itself.
+  // Reuse of old node coordinates after Sugiyama crossing minimisation creates a hybrid layout.
+  // This hybrid layout causes the OFF -> ON arrow disorder.
+  // Recompute the canonical layout from scratch. Then preserve only the camera anchor.
   computeLayout();
   restoreViewportAnchor(anchor);
   model.isFitted = false;
@@ -138,8 +139,8 @@ function recomputePreservingFocusAnchorOnly(anchor = captureViewportAnchor()) {
 
 function setFocus(id, center = false, { preserveDepth = true } = {}) {
   // Storage-topology nodes are implementation details of a logical object.
-  // Keep the logical table/view as the neighbourhood anchor so selecting a
-  // disk/replica/shard cannot accidentally expand back to the whole graph.
+  // Keep the logical table or view as the neighbourhood anchor.
+  // This prevents an accidental expansion back to the whole graph when a disk, replica or shard is selected.
   const nextId = logicalFocusId(model.graph, model.focusedId, id);
   const changed = model.focusedId !== nextId;
   model.focusedId = nextId;
@@ -158,9 +159,9 @@ function setFocus(id, center = false, { preserveDepth = true } = {}) {
     return;
   }
 
-  // A focus change is not a camera operation. Preserve the canvas transform
-  // byte-for-byte and freeze every node that survives the neighbourhood
-  // change. The layout engine may only position newly introduced nodes.
+  // A focus change is not a camera operation.
+  // Preserve the canvas transform byte for byte. Freeze every node that survives the neighbourhood change.
+  // The layout engine can only position newly introduced nodes.
   computeLayout({ preserveExisting: true });
   model.isFitted = false;
   syncFocusControls();
@@ -171,9 +172,9 @@ function setFocus(id, center = false, { preserveDepth = true } = {}) {
 function focusTable(database, table, { ensureVisible = false } = {}) {
   const db = String(database || "");
   const id = `table:${db}.${String(table || "")}`;
-  // A table focus is a cross-database neighbourhood scope, not a database
-  // filter. Clearing the database scope is what lets upstream/downstream
-  // objects in other databases remain visible while keeping the payload local.
+  // A table focus is a cross-database neighbourhood scope, not a database filter.
+  // The code clears the database scope. Then upstream and downstream objects in other databases stay visible.
+  // The payload stays local.
   model.database = "";
   model.pendingFocusId = id;
   model.pendingEnsureVisible = !!ensureVisible;
@@ -185,20 +186,19 @@ function focusTable(database, table, { ensureVisible = false } = {}) {
     return false;
   }
   if (!exists) {
-    // The catalog may be fresher than the graph cache (for example directly
-    // after a CREATE). Never leave the previously focused node selected when
-    // the sidebar asks for a real table that is missing from this payload.
-    // Force one graph refresh; pendingFocusId will be resolved by refresh().
+    // The catalog can be fresher than the graph cache (for example, directly after a CREATE).
+    // Do not leave the previously focused node selected when the sidebar asks for a real table that is missing from this payload.
+    // Force one graph refresh. The refresh() call resolves pendingFocusId.
     if (model.active) refresh(false, { reflow: !!ensureVisible });
     return true;
   }
   model.pendingFocusId = null;
   const shouldEnsure = model.pendingEnsureVisible;
   model.pendingEnsureVisible = false;
-  // Canvas-originated clicks never move the camera. A table selected from
-  // outside the canvas that is currently off-screen is different: make it
-  // the neighbourhood anchor, recompute that scope and perform a real Fit so
-  // the newly selected table is centered in a useful complete view.
+  // Clicks that start on the canvas never move the camera.
+  // A table selected from outside the canvas can be off-screen. This case is different.
+  // Make that table the neighbourhood anchor. Recompute that scope. Then perform a real Fit.
+  // The new table is then centered in a useful, complete view.
   const needsFit = shouldEnsure && !nodeIsOnScreen(id);
   setFocus(id, needsFit, { preserveDepth: true });
   return true;
@@ -207,8 +207,8 @@ function focusTable(database, table, { ensureVisible = false } = {}) {
 function focusDatabase(database) {
   const next = String(database || "");
   if (model.database === next && model.graph) {
-    // Selecting the database is an explicit scope action and intentionally
-    // restores the complete database topology.
+    // Selecting the database is an explicit scope action.
+    // It intentionally restores the complete database topology.
     model.focusedId = null;
     model.pendingFocusId = null;
     model.pendingEnsureVisible = false;
@@ -219,8 +219,8 @@ function focusDatabase(database) {
     return;
   }
   model.database = next;
-  // Database selection is a new graph scope. Old world coordinates are not
-  // meaningful here; clearing them lets the fresh scope fit exactly once.
+  // Database selection is a new graph scope. Old world coordinates have no meaning here.
+  // Clearing them lets the fresh scope fit exactly once.
   model.layout.clear();
   model.worldBounds = null;
   model.focusedId = null;
@@ -241,8 +241,8 @@ function contractNeighborhood() {
 function expandNeighborhood() {
   if (!model.focusedId || model.focusDepth >= 8 || model.graph?.scope_has_more !== true) { syncFocusControls(); return; }
   model.focusDepth = Math.min(8, model.focusDepth + 1);
-  // The next ring is intentionally not prefetched. Keep the current camera and
-  // request the newly visible depth only when the user asks for it.
+  // The next ring is intentionally not prefetched.
+  // Keep the current camera. Request the newly visible depth only when the user asks for it.
   if (model.active) refresh(false);
   else recomputePreservingFocus();
   model.onStateChange?.();
@@ -252,7 +252,7 @@ function searchFocus() {
   if (!model.active || !model.graph) return;
   const query = String(dom.explorerSearchInput?.value || "").trim().toLowerCase();
   if (!query) return;
-  // Search every shown object, including those inside collapsed databases.
+  // Search every shown object. This includes objects inside collapsed databases.
   const candidates = model.detailMode === "logical" ? logicalProjection().nodes : visibleNodes();
   const match = candidates.find((node) => node.layer === "logical" && !node.synthetic && `${node.database}.${node.name} ${node.engine || ""}`.toLowerCase().includes(query));
   if (match) setFocus(match.id, true);
@@ -280,7 +280,7 @@ function updateStatus() {
   const scope = focusedScope ? `${focusedScope.database}.${focusedScope.table}` : (model.database || "all databases");
   const focus = model.focusedId && model.detailMode === "logical"
     ? `, neighborhood depth ${model.focusDepth}${model.expansions.size ? ` + ${model.expansions.size} expanded` : ""}` : "";
-  // Two separators at most: the counts, the scope, what is hidden.
+  // The text has two separators at most: the counts, the scope and what is hidden.
   const counts = [];
   if (groups) counts.push(`${groups} collapsed database${groups === 1 ? "" : "s"}`);
   if (nodes || !groups) counts.push(`${nodes} nodes`);
@@ -297,13 +297,12 @@ function updateStatus() {
 async function refresh(force = false, { reflow = false } = {}) {
   if (!model.active) return;
 
-  // Every requested refresh receives a generation, including requests made
-  // while another graph fetch is in flight. That immediately makes the
-  // older response stale. The latest request is then replayed after the
-  // current transport finishes instead of being silently discarded.
+  // Every requested refresh receives a generation. This includes requests made while another graph fetch is in flight.
+  // The new generation makes the older response stale at once.
+  // The code replays the latest request after the current transport finishes. It does not discard the request silently.
   const serial = ++model.refreshSerial;
   if (model.loading) {
-    // The request in flight is already out of date: it stops, and the queued one runs when it ends.
+    // The request in flight is already out of date. It stops. The queued request runs when it ends.
     util.latest.cancel("explorer.graph");
     model.refreshQueued = true;
     model.refreshQueuedForce = model.refreshQueuedForce || !!force;
@@ -327,9 +326,9 @@ async function refresh(force = false, { reflow = false } = {}) {
       || String(state.selectedHostId || "") !== hostId
       || graphRequestKey(scopeRequest(false)) !== requestKey;
     if (stale) {
-      // The scope changed while this request was in flight (for example the
-      // route's table was resolved after an unscoped request started).
-      // Fetch the current scope instead of dropping both answers.
+      // The scope changed while this request was in flight.
+      // For example, the route's table was resolved after an unscoped request started.
+      // Fetch the current scope. Do not drop both answers.
       if (model.active && String(state.selectedHostId || "") === hostId) model.refreshQueued = true;
       return;
     }
@@ -349,9 +348,9 @@ async function refresh(force = false, { reflow = false } = {}) {
       ensurePendingFocus = model.pendingEnsureVisible;
       model.pendingEnsureVisible = false;
     } else if (model.pendingFocusId && !force) {
-      // Scoped payloads intentionally omit unrelated tables. If the requested
-      // table is still absent from a payload scoped directly to it, retry once
-      // with cache invalidation to cover a just-created object.
+      // Scoped payloads intentionally omit unrelated tables.
+      // If the requested table is still absent from a payload scoped directly to it, retry once.
+      // The retry invalidates the cache. This covers a just-created object.
       model.refreshQueued = true;
       model.refreshQueuedForce = true;
       model.refreshQueuedReflow = model.refreshQueuedReflow || reflow || model.pendingEnsureVisible;
@@ -360,15 +359,14 @@ async function refresh(force = false, { reflow = false } = {}) {
     }
     computeLayout({ preserveExisting: hadLayout && !reflow });
     if (ensurePendingFocus && model.focusedId) {
-      // The selected table was not present in the previous graph payload. Once
-      // the refresh exposes it, treat that as an off-screen selection and fit
-      // the new focused neighbourhood instead of doing a blind pan.
+      // The selected table was not present in the previous graph payload.
+      // After the refresh exposes it, treat it as an off-screen selection.
+      // Fit the new focused neighbourhood. Do not do a blind pan.
       fitToScreen();
     } else if (reflow) {
-      // Manual graph refresh means "re-layout what I am looking at now".
-      // visibleNodes()/visibleEdges() already encode the current database,
-      // focus depth and visibility toggles, so recompute from that projection
-      // instead of preserving stale coordinates from a previous arrangement.
+      // A manual graph refresh means "re-layout what I am looking at now".
+      // visibleNodes() and visibleEdges() already encode the current database, focus depth and visibility toggles.
+      // Recompute from that projection. Do not keep stale coordinates from a previous arrangement.
       fitToScreen();
     } else if (hadLayout && model.layout.size) {
       model.isFitted = false;
@@ -378,8 +376,8 @@ async function refresh(force = false, { reflow = false } = {}) {
       fitToScreen();
     }
   } catch (e) {
-    // A stale transport error belongs to the old scope and must not erase a
-    // newer graph selection that is waiting in the queue.
+    // A stale transport error belongs to the old scope.
+    // It must not erase a newer graph selection that waits in the queue.
     const stale = serial !== model.refreshSerial
       || String(state.selectedHostId || "") !== hostId
       || graphRequestKey(scopeRequest(false)) !== requestKey;
@@ -412,17 +410,17 @@ function setDetailMode(mode, { notify = true } = {}) {
   const changed = model.detailMode !== next;
   model.detailMode = next;
   segmented?.set(dom.explorerGraphTypeSelect, next);
-  // TTL lifecycle only exists in the Storage projection. Keep the legend
-  // contextual so Lineage does not advertise an edge type it never renders.
+  // TTL lifecycle exists only in the Storage projection.
+  // Keep the legend contextual. Then Lineage does not advertise an edge type that it never renders.
   const ttlLegend = byId("explorerGraphLegendTtl");
   if (ttlLegend) ttlLegend.hidden = next !== "physical";
   if (!changed) return;
   if (model.panel?.type === "edge") closePanel();
   renderGraphChrome();
   syncFocusControls();
-  // The backend now serves only the active layer. Switching Lineage/Storage
-  // therefore changes the transport scope and must fetch that projection
-  // instead of expecting the hidden layer to already be in browser memory.
+  // The backend now serves only the active layer.
+  // Switching Lineage/Storage therefore changes the transport scope.
+  // The code fetches that projection. It does not expect the hidden layer to be in browser memory already.
   if (model.active) refresh(false, { reflow: true });
   else if (model.focusedId) recomputePreservingFocus();
   else { computeLayout(); fitToScreen(); }
@@ -456,9 +454,9 @@ function setVisibilityOptions(options = {}) {
     if (node && !logicalNodeAllowed(node, model)) model.focusedId = null;
   }
   if ((systemScopeChanged || projectionChanged) && model.active) {
-    // Both system visibility and non-storing visibility change the server-side
-    // scoped neighborhood. In particular, hidden View/MV/Buffer nodes have
-    // zero semantic depth cost and therefore require a fresh scope.
+    // System visibility and non-storing visibility both change the server-side scoped neighborhood.
+    // In particular, hidden View, MV and Buffer nodes have zero semantic depth cost.
+    // Therefore, they need a fresh scope.
     refresh(false, { reflow: true });
   } else if (projectionChanged) recomputePreservingFocusAnchorOnly(anchor);
   else {

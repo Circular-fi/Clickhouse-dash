@@ -19,8 +19,8 @@ test('large streamed results stay virtualized and reach the last row', async ({ 
   const mounted = await body.locator('tr:not(.resultTable__spacerRow)').count();
   expect(mounted).toBeGreaterThan(0);
   expect(mounted).toBeLessThan(2000);
-  // Streaming appends grow the bottom spacer; once the last render frame has
-  // run, mounted rows + spacers must account for the full result height.
+  // Each append from the stream grows the bottom spacer.
+  // After the last render frame runs, the mounted rows and spacers must cover the full result height.
   await expect.poll(async () => page.evaluate(() => {
     const tbody = document.getElementById('resultTableBody');
     let spacer = 0;
@@ -49,8 +49,8 @@ test('tuple columns are flattened into leaf columns', async ({ page }) => {
   await expect(page.locator('#resultTableBody')).toContainText('n2');
 });
 
-// The result stream is read with fetch (ns.api.openEventStream), with the surface of an EventSource.
-// A fake response in the page, cut at awkward places, checks the parsing without the server.
+// The test reads the result stream with fetch (ns.api.openEventStream). The function has the surface of an EventSource.
+// The test cuts a fake response in the page at awkward places. The check tests the parsing without the server.
 test('the event stream reader cuts events like EventSource: split chunks, comments, several data lines, a failing listener', async ({ page }) => {
   await openApp(page);
   const result = await page.evaluate(async () => {
@@ -72,7 +72,7 @@ test('the event stream reader cuts events like EventSource: split chunks, commen
     }
     stream.addEventListener('error', (event) => { errors.push(event.data === undefined ? 'end' : event.data); });
     const reported = [];
-    // The report reaches the page's error handler; it is handled here, so it is no failure of the page.
+    // The report reaches the page's error handler. The test handles it here, so it is not a failure of the page.
     window.addEventListener('error', (event) => { reported.push(event.message); event.preventDefault(); });
     await new Promise((resolve) => { stream.onerror = resolve; });
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -82,9 +82,9 @@ test('the event stream reader cuts events like EventSource: split chunks, commen
   expect(result.seen).toEqual([
     ['result_meta', '{"a":1}'], ['result_rows', '[1,2]'], ['message', 'plain'], ['multi', 'x\ny'],
   ]);
-  // A last event without its blank line is not an event; the end of the stream is an "error" without data, like EventSource.
+  // A last event without its blank line does not count as an event. The end of the stream is an "error" without data, like EventSource.
   expect(result.errors).toEqual(['end']);
-  // A failing listener is reported (as EventSource reports it) and the stream goes on.
+  // The stream reports a failing listener, as EventSource does. The stream continues.
   expect(result.reported.join(' ')).toContain('a listener that fails');
   expect(result.readyState).toBe(2);
 });
@@ -112,8 +112,8 @@ test('a stream that the server refuses or that fails reports an error without da
 });
 
 test('performance budget: the fetch reader takes a 120k-row result in less time than EventSource', async ({ page }) => {
-  // The two readers take the same stream (one run each), the best of three: the load of the machine
-  // slows both, so the budget is a ratio. 700 ms against 350 ms on the development machine.
+  // The two readers take the same stream, one run each. The test keeps the best of three runs.
+  // The load of the machine slows both readers, so the budget is a ratio. The budget is 700 ms against 350 ms on the development machine.
   test.setTimeout(120_000);
   await openApp(page);
   const timings = await page.evaluate(async () => {
@@ -142,19 +142,19 @@ test('performance budget: the fetch reader takes a 120k-row result in less time 
   expect(timings.fetch, JSON.stringify(timings)).toBeLessThan(timings.eventSource * 0.85);
 });
 
-// What the Elapsed figure measures is said where it is shown (docs/telemetry.md).
+// The text that shows the Elapsed figure states what it measures (docs/telemetry.md).
 test('the Elapsed tile says what it measures, and the run ends before the System figure arrives', async ({ page }) => {
   let executionCalls = 0;
   await page.route('**/api/query/execution**', async (route) => {
     executionCalls += 1;
-    // The lookup of the query log can take seconds on a busy server (it flushes the log).
+    // A lookup of the query log can take seconds on a busy server. The lookup flushes the log.
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.continue();
   });
   await openApp(page);
   await enableExecutionStats(page);
   await runSuccessfulQuery(page, 'SELECT number AS id, toString(number) AS label FROM numbers(30000)');
-  // The run is over (Run is back, the status is final) while the System figure is still on its way.
+  // The run is over: Run is back and the status is final. The System figure is still on its way.
   await expect(page.locator('#runButton')).toHaveText(/^Run$/);
   await expect(page.locator('#clickhouseElapsedWrap')).toBeHidden();
   const tile = page.locator('.metricCompact--elapsed .metricCompact__content');
@@ -195,7 +195,7 @@ test('the System figure of an earlier run never lands on the tile of the next ru
   await runSuccessfulQuery(page, 'SELECT 2');
   await expect(page.locator('#clickhouseElapsedWrap')).toBeVisible({ timeout: 10_000 });
   await expect.poll(() => calls).toBe(2);
-  // The first (late) answer arrives: it is dropped. The page has had it (the request ended) and two frames to show it.
+  // The first answer arrives late. The page drops it. The request has ended, and the page has had two frames to show it.
   await lateAnswer;
   await expect.poll(() => finished.has(lateRequest)).toBe(true);
   await nextFrames(page);

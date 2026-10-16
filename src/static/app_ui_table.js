@@ -402,7 +402,7 @@ function rovingRows(container, {
   function onFocusout(event) {
     if (indexMode) return;
     const left = event.target;
-    // Focus moved elsewhere (not a re-render removing the row): forget it.
+    // Focus moved elsewhere. This is not a re-render that removes the row. Forget the row.
     setTimeout(() => {
       if (left instanceof Element && left.isConnected && !container.contains(document.activeElement)) focusInside = false;
     }, 0);
@@ -444,8 +444,8 @@ function keyboardMenuTarget(event, root) {
   return { el, x: Math.round(box.left + Math.min(box.width / 2, 24)), y: Math.round(box.top + box.height / 2) };
 }
 
-// A table that is wider than its box scrolls sideways, and the columns past its edge were not told by anything: the box
-// fades the edge it hides content on (ns.shell.edgeCues). Returns the wrap.
+// A table that is wider than its box scrolls sideways. No other element shows the columns past its edge. The box
+// fades the edge that hides content (ns.shell.edgeCues). It returns the wrap.
 function scrollCues(wrap) {
   shell?.edgeCues?.(wrap);
   return wrap;

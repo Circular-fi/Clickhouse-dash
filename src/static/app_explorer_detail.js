@@ -1,10 +1,11 @@
-// The table card: the tabs of a selected object (Columns, Preview, Storage, Operations, Lineage, DDL), the body of the tab on screen, and what
-// the Catalog calls (header, tabs, body). app_explorer_table.js selects a table and asks for these three parts; the Catalog's entry hands this
-// module over with explorer.use(), so the Functions page never loads it.
+// This is the table card. It shows the tabs of a selected object: Columns, Preview, Storage, Operations, Lineage and DDL.
+// It also shows the body of the tab on screen. The Catalog calls three parts: the header, the tabs and the body.
+// app_explorer_table.js selects a table and asks for these three parts. The Catalog entry passes this module to explorer.use(). So the Functions page never loads it.
 //
-// Card layout: header (name + chips, replication banner), tabs, the tab body, and an About panel of value + context tiles beside it (above it
-// when the pane is narrow). The tabs are modules of their own: app_explorer_detail_columns.js, _storage.js, _operations.js, _preview.js;
-// the pure part is app_explorer_detail_model.js.
+// The card layout has a header (name, chips and the replication banner), the tabs and the tab body.
+// It also has an About panel of value and context tiles beside the body. On a narrow pane, the About panel appears above the body.
+// The tabs are modules of their own: app_explorer_detail_columns.js, _storage.js, _operations.js and _preview.js.
+// The pure part is app_explorer_detail_model.js.
 
 import { dom, h } from "./app_dom.js";
 import { renderAbout } from "./app_explorer_detail_about.js";
@@ -34,8 +35,8 @@ function renderTabs() {
   if (!dom.explorerDetailTabs) return;
   const tabs = availableTabs(model.detail);
   if (!tabs.includes(model.tab) && !model.detail?._loading) {
-    // A deep link to a tab this object does not have (e.g. /storage on a
-    // View) opens its first tab; keep the address bar in sync.
+    // A deep link to a tab that this object does not have opens the first tab. For example, /storage on a View does this.
+    // Keep the address bar in sync.
     model.tab = tabs[0];
     if (model.detail) syncExplorerUrl("replace");
   }
@@ -66,8 +67,7 @@ function renderLineageTab(container, detail) {
     container.appendChild(emptyNote(sectionUnavailable("dependencies") ? "Dependency metadata unavailable." : "No visible dependencies."));
     return;
   }
-  // Both directions always render so the layout keeps its shape when one
-  // side is empty.
+  // Both directions always render. So the layout keeps its shape when one side is empty.
   const matrix = h("div", { class: "explorerDependencyMatrix explorerLineage" });
   for (const relation of ["upstream", "downstream"]) {
     const items = deps
@@ -93,8 +93,8 @@ function renderDdl(container, detail) {
   const ddl = String(detail.formatted_ddl || detail.ddl);
   if (detail.ddl_format_error) container.appendChild(emptyNote(`Formatter unavailable: ${detail.ddl_format_error}`));
 
-  // The shared read-only SQL block (sqlBlock): the editor's highlighter,
-  // a line gutter and the copy button; it grows with the DDL.
+  // The shared read-only SQL block (sqlBlock) has the highlighter of the editor, a line gutter and the copy button.
+  // The block grows with the DDL.
   const wrap = sqlBlock({ sql: ddl, gutter: true, copy: true, label: "CREATE statement", className: "explorerDdlWrap" });
   $(".sqlBlock__gutter", wrap)?.classList.add("explorerDdlGutter");
   $(".sqlBlock__body", wrap)?.classList.add("explorerDdl");
@@ -131,15 +131,14 @@ function renderTabContent() {
   }
 }
 
-// The card's tab row (.contentTabs): the shared tab behaviour (click,
-// arrows, Home / End, roving tabindex; app_ui_tabs.js). The database page
-// has no tabs. Called once, when the Catalog starts.
+// The tab row of the card (.contentTabs) uses the shared tab behaviour (click, arrows, Home / End, roving tabindex; app_ui_tabs.js).
+// The database page has no tabs. This function is called one time, when the Catalog starts.
 function init() {
   watchExpressions();
   tabsMod?.bind(dom.explorerDetailTabs, { onSelect: (label) => { if (model.selectedKey) openTab(label); } });
 }
 
-// What the card's tabs ask of the card (app_explorer_store.js, `actions`).
+// These are the requests that the card tabs make to the card (app_explorer_store.js, `actions`).
 Object.assign(actions, { openTab, renderTabContent });
 
 const explorerDetail = { init, renderDetailHeader, renderTabs, renderTabContent, replicaHealthDot };

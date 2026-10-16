@@ -15,18 +15,18 @@ string postprocess_format_query(const std::string& s, size_t threshold) {
   } restore{outer};
   try {
     string out = Formatter(threshold).format(s);
-    // Every comment comes out whole, or the statement comes back as written.
+    // Every comment stays whole. Otherwise, the function returns the statement as written.
     if (line_comment_texts(out) != line_comment_texts(s)) return s;
     return out;
   } catch (const FormatGivesUp&) {
-    // Too deep, or too long, to lay out: the statement as it was written, which keeps its meaning.
+    // The statement is too deep, or too long, to lay out. The function returns it as written, which keeps its meaning.
     return s;
   }
 }
 
 string unwrap_alter_table_commands(std::string formatted) {
   const string_view s(formatted);
-  // Comments before the statement stay where they are (a statement that was laid out locally has them).
+  // Comments before the statement stay where they are. A statement that was laid out locally has such comments.
   size_t begin = 0;
   for (const sql::Token& token : sql::lex(s)) {
     if (!sql::is_trivia(token.kind)) break;
@@ -40,7 +40,7 @@ string unwrap_alter_table_commands(std::string formatted) {
   while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r')) ++pos;
   if (!word_at(pos, "TABLE")) return formatted;
 
-  // The command list starts at the first parenthesis that is not inside a literal, identifier or comment.
+  // The command list starts at the first parenthesis. That parenthesis is not inside a literal, identifier or comment.
   ScanState st;
   size_t open = string::npos;
   for (size_t i = pos; i < s.size(); ++i) {
@@ -55,7 +55,7 @@ string unwrap_alter_table_commands(std::string formatted) {
   const string header = trim_ascii_spaces(s.substr(begin, open - begin));
   if (header.empty()) return formatted;
 
-  // From there to the end: groups separated by commas, and comments after the last one.
+  // From there to the end, the text has groups separated by commas. It can also have comments after the last group.
   vector<string_view> groups;
   string suffix;
   size_t cursor = open;
@@ -66,7 +66,7 @@ string unwrap_alter_table_commands(std::string formatted) {
     cursor = close + 1;
     while (cursor < s.size() && (s[cursor] == ' ' || s[cursor] == '\t' || s[cursor] == '\n' || s[cursor] == '\r')) ++cursor;
     if (cursor >= s.size()) break;
-    // After the last group: comments only (the ones that end the statement), kept after the commands.
+    // After the last group, only comments can follow. They end the statement, and they are kept after the commands.
     if (s[cursor] != ',') {
       const string_view rest = s.substr(cursor);
       for (const sql::Token& token : sql::lex(rest)) {
@@ -88,7 +88,7 @@ string unwrap_alter_table_commands(std::string formatted) {
     const bool block = first < inner.size() && (inner[first] == '\n' || inner[first] == '\r');
     string command;
     if (block) {
-      // "(\n    COMMAND\n)": the command's own lines, back at the left edge (like the clauses of a SELECT).
+      // In "(\n    COMMAND\n)", the lines of the command move back to the left edge (like the clauses of a SELECT).
       vector<string> lines = split_lines_keep(inner);
       while (!lines.empty() && trim_ascii_spaces(lines.front()).empty()) lines.erase(lines.begin());
       while (!lines.empty() && trim_ascii_spaces(lines.back()).empty()) lines.pop_back();
@@ -105,7 +105,7 @@ string unwrap_alter_table_commands(std::string formatted) {
         if (!trim_ascii_spaces(line).empty()) command += line.substr(std::min(common, line.size()));
       }
     } else {
-      // "(COMMAND)" at four spaces: the command at the left edge, the rest of its lines moved with it.
+      // In "(COMMAND)" at four spaces, the command moves to the left edge. The rest of its lines move with it.
       const string trimmed = trim_ascii_spaces(inner.substr(first));
       if (trimmed.empty()) return formatted;
       vector<string> lines = split_lines_keep(trimmed);
@@ -115,7 +115,7 @@ string unwrap_alter_table_commands(std::string formatted) {
         command += (i ? "\n" : "") + line;
       }
     }
-    // The comma goes before a comment that ends the command's last line.
+    // The comma goes before a comment that ends the last line of the command.
     if (g + 1 < groups.size()) append_item_comma(command);
     out += "\n" + command;
   }

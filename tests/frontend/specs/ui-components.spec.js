@@ -2,17 +2,20 @@ import { test, expect } from '@playwright/test';
 import { openApp, runSuccessfulQuery } from '../helpers/app.js';
 import { nestedTrace, routeTrace } from '../helpers/trace-mocks.js';
 
-// Navigation and choice controls, one component each (docs/ui-foundations.md
-// "Components"): tabs (ns.tabs: one underline row, .contentTabs, and
-// .contentTabs--nav in a nav row),
-// segmented controls (ns.segmented) and menus (ns.menu). Every page that uses
-// them, both themes, desktop and a 390 px phone.
+// These tests cover the navigation and choice controls. Each control is one
+// component (see docs/ui-foundations.md, "Components").
+//
+// The controls are: tabs (ns.tabs, with one underline row, .contentTabs, and
+// .contentTabs--nav in a nav row), segmented controls (ns.segmented) and menus
+// (ns.menu). The tests run on every page that uses them, in both themes, on
+// desktop and on a 390 px phone.
 
 const settle = (page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 const focusedText = (page) => page.evaluate(() => document.activeElement?.textContent?.trim() || '');
 const focusedId = (page) => page.evaluate(() => document.activeElement?.id || '');
 
-// A tab row: role, one selected tab that is the only Tab stop, and the keys.
+// The tests check a tab row: its role, one selected tab that is the only Tab
+// stop, and the keys.
 async function expectTabRow(page, list, { nav = false } = {}) {
   await expect(list).toHaveAttribute('role', 'tablist');
   const tabs = list.locator('[role="tab"]:visible');
@@ -27,8 +30,10 @@ async function expectTabRow(page, list, { nav = false } = {}) {
   return tabs;
 }
 
-// A row of links to pages of their own (the Observability views): the same underline row, but links:
-// one marks the current page, and Tab / Enter are the browser's.
+// A row of links goes to pages of their own, such as the Observability views.
+// It has the same underline row, but the items are links.
+//
+// One link marks the current page. Tab and Enter are the browser's keys.
 async function expectLinkRow(page, list, { nav = false } = {}) {
   await expect(list).toHaveAttribute('role', 'group');
   const links = list.locator('a.contentTabs__tab:visible');
@@ -46,7 +51,7 @@ async function arrowThrough(page, list) {
   const start = await selected.textContent();
   await page.keyboard.press('ArrowRight');
   await expect(list.locator('[role="tab"][aria-selected="true"]')).not.toHaveText(start);
-  // The selected tab keeps the focus (even when its row rebuilds).
+  // The selected tab keeps the focus, even when its row rebuilds.
   const handle = await list.elementHandle();
   await expect.poll(() => page.evaluate((el) => el.contains(document.activeElement) && document.activeElement.getAttribute('aria-selected'), handle)).toBe('true');
   await page.keyboard.press('End');
@@ -66,16 +71,16 @@ for (const scheme of ['dark', 'light']) {
     test('tabs: the Explorer view and card rows are tier 1 / tier 2 rows with one keyboard; Browse | Graph are the Catalog\'s second-level tabs', async ({ page }) => {
       await page.goto('/explorer/catalog/chdash_ui/weather_observations/columns');
       await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui.weather_observations', { timeout: 15_000 });
-      // Catalog | Functions are two pages: links, one of them current.
+      // Catalog | Functions are two pages, as links. One of them is current.
       await expectLinkRow(page, page.locator('#explorerViewTabs'), { nav: true });
-      // Browse | Graph: a second nav tab row after Catalog | Functions (the
-      // Observability pattern); Storage is a card tab, not one of them.
+      // Browse | Graph is a second nav tab row, after Catalog | Functions (the
+      // Observability pattern). Storage is a card tab, not part of that row.
       await expectTabRow(page, page.locator('#explorerModeTabs'), { nav: true });
       await expect(page.locator('#explorerModeTabs [role="tab"]')).toHaveText(['Browse', 'Graph']);
       await expect(page.locator('#explorerModeTabs .segmented__option')).toHaveCount(0);
       const card = page.locator('#explorerDetailTabs');
       await expectTabRow(page, card, {});
-      // The card row is underlined (tier 2), not an outlined box.
+      // The card row has an underline (tier 2). It has no outlined box.
       const look = await card.locator('[aria-selected="true"]').evaluate((el) => {
         const s = getComputedStyle(el);
         return { bottom: s.borderBottomWidth, left: s.borderLeftWidth, radius: s.borderTopLeftRadius };
@@ -83,7 +88,7 @@ for (const scheme of ['dark', 'light']) {
       expect(look).toEqual({ bottom: '2px', left: '0px', radius: '0px' });
       await arrowThrough(page, card);
       await expect(page).toHaveURL(/\/weather_observations$/);
-      // Browse | Graph (tabs): Enter on Graph selects it and shows it.
+      // In Browse | Graph (tabs), Enter on Graph selects it and shows it.
       await page.locator('#explorerModeGraph').focus();
       await page.keyboard.press('Enter');
       await expect(page.locator('#explorerModeGraph')).toHaveAttribute('aria-selected', 'true');
@@ -103,7 +108,7 @@ for (const scheme of ['dark', 'light']) {
       await expect(sub.locator('[data-trace-tab="services"]')).toBeFocused();
       await page.keyboard.press('Home');
       await expect(sub.locator('[data-trace-tab="search"]')).toBeFocused();
-      // The view row is links: Enter on Logs opens its page.
+      // The view row has links. Enter on Logs opens its page.
       await page.locator('#obsTab-logs').focus();
       await page.keyboard.press('Enter');
       await expect(page).toHaveURL(/\/observability\/logs/);
@@ -154,7 +159,7 @@ for (const scheme of ['dark', 'light']) {
       await expect(page.locator('[data-results-view="list"]')).toHaveAttribute('aria-pressed', 'false');
       await page.locator('[data-results-view="list"]').click();
 
-      // Lineage | Tiers in the Explorer graph is a segmented control.
+      // Lineage | Tiers, in the Explorer graph, is a segmented control.
       await page.goto('/explorer/catalog?mode=graph&graph=lineage&depth=1');
       const type = page.locator('#explorerGraphTypeSelect');
       await expect(type).toBeVisible({ timeout: 15_000 });
@@ -170,8 +175,9 @@ for (const scheme of ['dark', 'light']) {
     test('menus: keys, type-ahead, Escape, focus return and one open at a time (header)', async ({ page }) => {
       await openApp(page);
       const theme = page.locator('#themeSelectButton');
-      // Keyboard open: the selected option takes the focus, or the first
-      // shown one (these menus leave the current choice out of the list).
+      // When the keyboard opens the menu, the selected option takes the focus.
+      // If the selected option is not in the list, the first shown option takes
+      // the focus. These menus leave the current choice out of the list.
       await theme.focus();
       await page.keyboard.press('Enter');
       await expect(page.locator('#themeSelectMenu')).toBeVisible();
@@ -188,8 +194,9 @@ for (const scheme of ['dark', 'light']) {
       await expect(theme).toBeFocused();
       await expect(theme).toHaveAttribute('aria-expanded', 'false');
 
-      // The page switcher is a nav of links from 821 px: no menu. Under it the links fold into a menu: Down on the
-      // button opens on the first link; type-ahead jumps.
+      // From 821 px, the page switcher is a nav of links, with no menu. Below
+      // 821 px, the links fold into a menu. Down on the button opens the menu
+      // on the first link. Type-ahead jumps to a link.
       await expect(page.locator('#pageSelectButton')).toBeHidden();
       await expect(page.locator('#pageSelectMenu a:visible').first()).toBeVisible();
       await page.setViewportSize({ width: 700, height: 800 });
@@ -207,20 +214,20 @@ for (const scheme of ['dark', 'light']) {
       await page.keyboard.press('Tab');
       await expect(page.locator('#pageSelectMenu')).toBeHidden();
 
-      // One menu at a time; a click outside closes the open one.
+      // Only one menu is open at a time. A click outside closes the open menu.
       await theme.click();
       await expect(page.locator('#themeSelectMenu')).toBeVisible();
       await page.locator('#runSettingsButton').click();
       await expect(page.locator('#runSettingsMenu')).toBeVisible();
       await expect(page.locator('#themeSelectMenu')).toBeHidden();
-      // A settings item keeps the menu open; a click outside closes it.
+      // A settings item keeps the menu open. A click outside closes the menu.
       await page.locator('#runOptAutoFormat').click();
       await expect(page.locator('#runSettingsMenu')).toBeVisible();
       await page.locator('#runOptAutoFormat').click();
       await page.locator('#queryTextArea').click();
       await expect(page.locator('#runSettingsMenu')).toBeHidden();
 
-      // A split button: the toggle opens the menu on its first enabled item.
+      // In a split button, the toggle opens the menu on its first enabled item.
       await page.locator('#queryTextArea').fill('SELECT 1');
       await page.locator('#runMenuButton').focus();
       await page.keyboard.press('Enter');
@@ -254,7 +261,7 @@ for (const scheme of ['dark', 'light']) {
       await expect(sort).toHaveText(/^Sort · /);
       await expect(sort).toBeFocused();
 
-      // Logs: the multi-select service picker stays open on each pick.
+      // Logs: the multi-select service picker stays open after each pick.
       await page.goto('/observability/logs');
       await expect(page.locator('#logsForm')).toBeVisible({ timeout: 15_000 });
       await page.locator('#logsServiceButton').click();
@@ -264,7 +271,7 @@ for (const scheme of ['dark', 'light']) {
       await expect(page.locator('#logsServiceMenu')).toBeHidden();
       await expect(page.locator('#logsServiceButton')).toBeFocused();
 
-      // Metrics: the time range panel opens and closes through the same layer.
+      // Metrics: the time range panel opens and closes in the same layer.
       await page.goto('/observability/metrics');
       const range = page.locator('#metricsWorkspace .tracePicker--range .tracePicker__button');
       await expect(range).toBeVisible({ timeout: 15_000 });
@@ -305,18 +312,18 @@ for (const scheme of ['dark', 'light']) {
 test.describe('ui components on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  // A picker's "Label · value" sits in its own span: a long value ends in
-  // an ellipsis before the chevron, the whole of it in the title.
+  // The "Label · value" text of a picker is in its own span. A long value ends
+  // in an ellipsis before the chevron. The whole value is in the title.
   test('picker labels end in an ellipsis and keep the whole label in the title', async ({ page }) => {
     await page.goto('/observability/traces');
     await expect(page.locator('#tracesForm')).toBeVisible({ timeout: 15_000 });
-    // A phone folds the bar into its summary line: unfold it.
+    // On a phone, the bar folds into its summary line. Unfold the bar.
     await page.locator('#tracesForm .obsFilterSummary').click();
     const button = page.locator('#tracesForm .tracePicker:has(#tracesStatus) .tracePicker__button');
     await expect(button.locator('.tracePicker__label')).toHaveText('Status · All');
     await expect(button).toHaveAttribute('title', 'Status · All');
     const cut = await button.evaluate((el) => {
-      // A value far longer than the button.
+      // This value is far longer than the button.
       const label = el.querySelector('.tracePicker__label');
       const text = label.textContent;
       label.textContent = `Status · ${'very-long-value-'.repeat(20)}`;
@@ -346,10 +353,11 @@ test.describe('ui components on a phone', () => {
       await page.keyboard.press('Escape');
       await expect(list).toBeHidden();
     }
-    // The tab rows keep one row.
+    // The tab rows stay on one row.
     const row = await page.locator('#obsNav').boundingBox();
     expect(row.height).toBeLessThanOrEqual(49);
-    // The header menus too (the page switcher folds into one under 821 px).
+    // The header menus also stay on one row. Below 821 px, the page switcher
+    // folds into a menu.
     await page.setViewportSize({ width: 700, height: 800 });
     const folded = await page.evaluate(() => document.documentElement.clientWidth);
     await page.locator('#pageSelectButton').click();

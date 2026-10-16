@@ -51,7 +51,7 @@ static int64_t ms_since(const std::chrono::steady_clock::time_point& start,
 }
 
 
-// Decoded blocks that wait for the encoder thread (QuerySession::run_query): the memory bound.
+// These are the decoded blocks that wait for the encoder thread (QuerySession::run_query). This is the memory bound.
 constexpr size_t kEncodeQueueBlocks = 4;
 
 QuerySession::QuerySession(
@@ -85,9 +85,8 @@ QuerySession::~QuerySession() {
   request_cancel();
   if (!query_thread_.joinable()) return;
 
-  // A disconnected stream may erase the server-owned reference while the
-  // worker still owns the last shared_ptr. In that case destruction happens at
-  // the end of the worker itself; joining the current thread would terminate.
+  // A disconnected stream can erase the server-owned reference. The worker still owns the last shared_ptr at that time.
+  // In that case, destruction happens at the end of the worker itself. Joining the current thread terminates the program.
   if (query_thread_.get_id() == std::this_thread::get_id()) {
     query_thread_.detach();
   } else {
@@ -116,8 +115,8 @@ void QuerySession::start() {
     return;
   }
 
-  // The thread leaves the worker group as its last step, after the session it held: the session may end in this
-  // thread (its last owner), and the server destroys what the session uses only once the group is empty.
+  // The thread leaves the worker group as its last step, after the session that it held.
+  // The session can end in this thread (its last owner). The server destroys what the session uses only when the group is empty.
   const std::shared_ptr<WorkerGroup> group = worker_group_;
   if (group && !group->enter()) {
     request_cancel();
@@ -454,9 +453,8 @@ void QuerySession::maybe_record_sample_locked(const std::chrono::steady_clock::t
   }
   last_sample_at_ = now;
 
-  // One fully busy CPU core is 100.00%. Parallel ClickHouse queries may
-  // legitimately exceed 100% because the value is based on native query-group
-  // user and system CPU counters.
+  // One fully busy CPU core is 100.00%. Parallel ClickHouse queries can exceed 100%. This is correct,
+  // because the value is based on native query-group user and system CPU counters.
   const int64_t cpu_total_us = profile_.user_time_us_total + profile_.system_time_us_total;
   int64_t cpu_centi = -1;
   if (last_sample_cpu_at_.time_since_epoch().count() != 0) {
@@ -530,13 +528,13 @@ void QuerySession::run_query() {
     last_sample_cpu_total_us_ = 0;
   };
 
-  // Every statement of the run carries its bounds and its label; a cancel stops
-  // the next one before it is sent.
+  // Every statement of the run carries its bounds and its label. A cancel stops the next statement before it is sent.
   ChQueryLimits limits;
   limits.log_comment = "chdash-run";
   limits.max_execution_time_s = options_.max_execution_time_s;
   limits.max_memory_usage = options_.max_memory_usage;
   limits.max_rows_to_read = options_.max_rows_to_read;
+  limits.read_only_strict = options_.read_only_strict;
   limits.canceled = [this] { return cancel_requested_.load(std::memory_order_relaxed); };
   ChQueryScope scope(std::move(limits));
 
@@ -546,9 +544,9 @@ void QuerySession::run_query() {
       return;
     }
 
-    // Acquire the TCP connection only when the SSE consumer is attached. This
-    // makes POST /api/query/run allocation-only, avoids holding pooled sockets
-    // for abandoned runs, and keeps connection latency in the measured stream.
+    // Acquire the TCP connection only when the SSE consumer is attached.
+    // This makes POST /api/query/run allocation-only. It avoids holding pooled sockets for abandoned runs.
+    // It also keeps the connection latency in the measured stream.
     try {
       acquire_query_connection();
     } catch (const std::exception& e) {
@@ -574,9 +572,8 @@ void QuerySession::run_query() {
       set_bool("log_profile_events");
       set_bool("log_processors_profiles");
       set_bool("log_query_views");
-      // Profiling mode is explicitly opt-in, so collect a real wall-clock
-      // processor trace only for this query instead of globally sampling all
-      // dashboard traffic.
+      // Profiling mode is explicitly opt-in. It collects a real wall-clock processor trace only for this query.
+      // It does not sample all dashboard traffic globally.
       set_bool("opentelemetry_trace_processors");
       set_bool("opentelemetry_start_trace_probability");
     };
@@ -591,10 +588,9 @@ void QuerySession::run_query() {
         throw std::runtime_error("canceled");
       }
       ch_execute(*client_query_, command);
-      // USE, SET (including SET ROLE) and temporary tables change native
-      // *session* state. Returning such a connection to the shared pool would
-      // leak the current database/settings/temporary objects into unrelated
-      // later runs (other tabs or users), so drop it instead.
+      // USE, SET (including SET ROLE) and temporary tables change native *session* state.
+      // If such a connection returns to the shared pool, it leaks the current database, settings and temporary objects.
+      // The leak reaches unrelated later runs (other tabs or users). So drop the connection instead.
       if (first_keyword == "use" || first_keyword == "set" ||
           mask_sql_surface(sql_).code_lower.find("temporary") != std::string::npos) {
         discard_query_connection();
@@ -659,9 +655,8 @@ void QuerySession::run_query() {
       if (cancel_requested_.load(std::memory_order_relaxed)) {
         throw std::runtime_error("canceled");
       }
-      // The direct path intentionally skips DESCRIBE. Auto mode pre-plans SQL
-      // that visibly produces driver-incompatible result types, and otherwise
-      // retries once only if the native decoder fails before any SSE payload.
+      // The direct path skips DESCRIBE on purpose. Auto mode pre-plans SQL that visibly produces driver-incompatible result types.
+      // Otherwise, it retries once, and only if the native decoder fails before any SSE payload.
       ResultPlan result_plan;
       bool cache_new_plan_after_success = false;
       attempt_used_cached_plan = false;
@@ -699,9 +694,8 @@ void QuerySession::run_query() {
       clickhouse::Query q(effective_sql, native_query_id);
       apply_explicit_profiling_settings(q);
 
-      // Ensure ClickHouse sends query-group ProfileEvents over native TCP.
-      // Only counters and gauges emitted by ClickHouse are exposed. Missing
-      // events remain unavailable instead of being inferred from another value.
+      // Make sure that ClickHouse sends query-group ProfileEvents over native TCP.
+      // Only counters and gauges that ClickHouse emits are exposed. Missing events stay unavailable. They are not inferred from another value.
       {
         clickhouse::QuerySettingsField f;
         f.value = "1";
@@ -726,9 +720,8 @@ void QuerySession::run_query() {
       });
 
       // ClickHouse ProfileEvents packets have a stable schema:
-      // host_name, current_time, thread_id, type, name, value. Consume only the
-      // query-group aggregate (thread_id = 0). Thread counts are deliberately
-      // not inferred or exposed.
+      // host_name, current_time, thread_id, type, name, value.
+      // Consume only the query-group aggregate (thread_id = 0). Thread counts are deliberately not inferred or exposed.
       q.OnProfileEvents([self = shared_from_this()](const clickhouse::Block& block) -> bool {
         if (self->cancel_requested_.load(std::memory_order_relaxed)) return false;
         const auto now = std::chrono::steady_clock::now();
@@ -737,8 +730,8 @@ void QuerySession::run_query() {
         return true;
       });
 
-      // The time of the callbacks, to split the time of Select() into what the
-      // native client spent (receive) and what ChDash spent (encode).
+      // This is the time of the callbacks. It splits the time of Select() into the time that the native client spent (receive)
+      // and the time that ChDash spent (encode).
       int64_t on_data_ns = 0;
       int64_t encode_busy_ns = 0;
       const auto select_started = std::chrono::steady_clock::now();
@@ -758,16 +751,13 @@ void QuerySession::run_query() {
         writer.write(block);
       };
 
-      // The first block with rows is encoded in the receiving thread: most
-      // results are one block, and they never pay for a thread. From the second
-      // block on, a thread encodes while the client decodes the next block. The
-      // encoder (and its thread) end before the state it uses.
+      // The first block with rows is encoded in the receiving thread. Most results are one block, and they never pay for a thread.
+      // From the second block on, a thread encodes while the client decodes the next block.
+      // The encoder, and its thread, end before the state that it uses.
       //
-      // The preview limit is a normal end, not an error: once the result has a
-      // row past the limit, the callback returns false once. clickhouse-cpp then
-      // sends a Cancel packet and reads the rest of the stream, so the
-      // connection goes back to the pool and no KILL QUERY is needed. The
-      // blocks that still arrive are dropped.
+      // The preview limit is a normal end, not an error. When the result has a row past the limit, the callback returns false once.
+      // clickhouse-cpp then sends a Cancel packet and reads the rest of the stream. So the connection returns to the pool, and no KILL QUERY is needed.
+      // The blocks that still arrive are dropped.
       std::optional<BlockEncoder> encoder;
       bool first_rows_block_encoded = false;
       const uint64_t row_limit = result_preview_row_limit_ > 0
@@ -803,7 +793,7 @@ void QuerySession::run_query() {
           if (block_rows > 0) first_rows_block_encoded = true;
           encode_block(block);
         }
-        // The encoder writes the rows up to the limit; a block that crosses it ends the result.
+        // The encoder writes the rows up to the limit. A block that crosses the limit ends the result.
         if (rows_received > row_limit) {
           limit_reached = true;
           return false;
@@ -817,9 +807,8 @@ void QuerySession::run_query() {
       try {
         ch_execute(*client_query_, q);
       } catch (const clickhouse::ServerError& error) {
-        // Some servers end a canceled stream with QUERY_WAS_CANCELLED (394) or
-        // QUERY_WAS_CANCELLED_BY_CLIENT (735): after the limit, it is the expected
-        // last packet.
+        // Some servers end a canceled stream with QUERY_WAS_CANCELLED (394) or QUERY_WAS_CANCELLED_BY_CLIENT (735).
+        // After the limit, this is the expected last packet.
         if (!(limit_reached && (error.GetCode() == 394 || error.GetCode() == 735))) throw;
       }
       if (encoder) encoder->finish();
@@ -828,8 +817,9 @@ void QuerySession::run_query() {
         const int64_t select_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - select_started).count();
         std::lock_guard<std::mutex> lk(mu_);
-        // receive: the time in the native client; encode: the time of the encoding
-        // (which can run beside the client); backpressure: the wait for the browser.
+        // receive is the time in the native client.
+        // encode is the time of the encoding. The encoding can run beside the client.
+        // backpressure is the wait for the browser.
         receive_ns_ = std::max<int64_t>(0, select_ns - on_data_ns);
         encode_ns_ = std::max<int64_t>(0, encode_busy_ns - backpressure_ns_);
       }
@@ -850,20 +840,17 @@ void QuerySession::run_query() {
       execute_select_attempt(initial_describe, true);
     } catch (const std::exception& e) {
       const std::string msg = e.what() ? std::string(e.what()) : std::string("error");
-      // Result metadata may already have been emitted from a native header block
-      // before clickhouse-cpp fails while decoding the first data block (notably
-      // for JSON serialization compatibility). Retrying is still safe as long as
-      // no result row has reached the client: a second result_meta simply replaces
-      // the provisional schema before any rows are appended.
+      // Result metadata can already have been sent from a native header block.
+      // This happens before clickhouse-cpp fails while it decodes the first data block (notably for JSON serialization compatibility).
+      // A retry is still safe as long as no result row has reached the client.
+      // A second result_meta replaces the provisional schema before any rows are appended.
       const bool can_retry_without_emitted_rows = writer.rows_returned() == 0 &&
           msg != "canceled" &&
           !cancel_requested_.load(std::memory_order_relaxed);
 
       if (initial_describe && attempt_used_cached_plan && can_retry_without_emitted_rows) {
-        // Schema changed while a plan was cached. The failed native attempt may
-        // remain visible in system.processes briefly after its socket closes.
-        // Stop it synchronously and use a distinct id for the retry so a slow
-        // cleanup can never trigger QUERY_WITH_SAME_ID_IS_ALREADY_RUNNING.
+        // The schema changed while a plan was cached. The failed native attempt can remain visible in system.processes for a short time after its socket closes.
+        // Stop it synchronously. Use a distinct id for the retry, so that a slow cleanup can never trigger QUERY_WITH_SAME_ID_IS_ALREADY_RUNNING.
         const std::string failed_native_id = latest_native_query_id();
         invalidate_cached_describe_plan(describe_cache_.get(), plan_cache_key);
         discard_query_connection();
@@ -875,9 +862,8 @@ void QuerySession::run_query() {
         execute_select_attempt(true, false);
       } else if (allow_describe_retry && can_retry_without_emitted_rows &&
                  should_retry_with_describe_after_direct_path_error(msg)) {
-        // A failed native decode can leave both the connection mid-packet and
-        // the server-side query alive for a short period. Discard the transport,
-        // synchronously stop the failed attempt, then retry under a unique id.
+        // A failed native decode can leave the connection in the middle of a packet. It can also leave the server-side query alive for a short period.
+        // Discard the transport. Stop the failed attempt synchronously. Then retry under a unique id.
         const std::string failed_native_id = latest_native_query_id();
         discard_query_connection();
         cancel_native_query_ids_best_effort({failed_native_id}, true);
@@ -900,11 +886,9 @@ void QuerySession::run_query() {
 
   } catch (const std::exception& e) {
     std::string msg = e.what() ? std::string(e.what()) : std::string("error");
-    // An error of the server ended the statement: the connection is clean and
-    // nothing runs any more. Anything else (a transport failure, a cancel, a
-    // limit of the encoder) left the statement in an unknown state: the pool
-    // closes the connection, and the native attempt that may still run is
-    // stopped.
+    // An error of the server ended the statement. The connection is clean, and nothing runs any more.
+    // Anything else, such as a transport failure, a cancel or a limit of the encoder, leaves the statement in an unknown state.
+    // The pool closes the connection. The native attempt that may still run is stopped.
     if (client_query_ && ch_connection_dirty(*client_query_)) {
       discard_query_connection();
       cancel_native_queries_best_effort(false);

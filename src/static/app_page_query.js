@@ -1,5 +1,5 @@
-// The Query page (query.html, /query): the header, the editor with its Run controls, the results and their chart, the
-// analysis and the downloads. It has no Explorer: the page switcher takes a person to the Explorer page (app_header.js).
+// This is the Query page (query.html, /query). It has the header, the editor with its Run controls, the results and their chart, the
+// analysis and the downloads. It has no Explorer. The page switcher takes a person to the Explorer page (app_header.js).
 import "./app_common.js";
 import { analysis } from "./app_analysis.js";
 import { boot } from "./app_boot.js";
@@ -123,13 +123,13 @@ h_loader.loader.expose([
 // handle:end
 
 boot(() => {
-  // A statement a result holds on several lines (SHOW CREATE TABLE) is shown as the formatter lays it out.
+  // A result can hold a statement on several lines (SHOW CREATE TABLE). The formatter shows the statement in its own layout.
   results.use({ queryChart, formatSql: (text) => sql.formatText(state.selectedHostId, text) });
   results.clearResultsStack();
   results.clearLiveResults();
   results.setMultiqueryMode(false);
 
-  // The order is the order of the host hooks (header.onHostSelected): the metadata, the editor, the Run buttons.
+  // The host hooks (header.onHostSelected) set the order: the metadata, the editor, the Run buttons.
   header.init();
   meta.init();
   queryUi.init({ onRun: () => run.handleRun() });

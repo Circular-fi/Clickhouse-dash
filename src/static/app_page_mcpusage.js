@@ -1,8 +1,9 @@
-// The MCP Usage page (mcpusage.html, /mcp-integration/usage, docs/mcp-integration-page.md, "The Usage tab"): what every key did, the second page
-// of the MCP section (the first is app_page_mcp.js: the keys). Like it, the page is not tied to a host. This entry reads /api/mcp/meta
-// (ns.api, app_api.js), shows the "Turn MCP on" state when MCP is off and the "Usage is off" state when the usage is (the row of the two pages
-// stays, and nothing of the usage is read), and otherwise hands the panel to the view (app_mcp_overview.js: the filter bar, the chips, the tiles
-// and the six charts). #mcpState holds the loading, the error, the "MCP is off" and the "Usage is off" states, the same block as the keys page.
+// This is the MCP Usage page (mcpusage.html, /mcp-integration/usage, docs/mcp-integration-page.md, "The Usage tab"). It shows what every key did.
+// It is the second page of the MCP section. The first page is app_page_mcp.js, which shows the keys. Like that page, this page is not tied to a host.
+// This entry reads /api/mcp/meta (ns.api, app_api.js). It shows the "Turn MCP on" state when MCP is off.
+// It shows the "Usage is off" state when the usage is off. The row of the two pages stays, and nothing of the usage is read.
+// Otherwise, this entry gives the panel to the view (app_mcp_overview.js: the filter bar, the chips, the tiles and the six charts).
+// #mcpState holds the loading, the error, the "MCP is off" and the "Usage is off" states. These states match the block of the keys page.
 
 import "./app_common.js";
 import { api } from "./app_api.js";
@@ -16,7 +17,7 @@ import { util } from "./app_util.js";
 
 const STATE_KEY = "mcp.state";
 
-// The state of MCP decides what the panel shows. A page restored from the back/forward cache is as old as the visit: it loads again.
+// The state of MCP decides what the panel shows. A page restored from the back/forward cache is as old as the visit. It loads again.
 async function load() {
   const state = dom.byId("mcpState");
   const req = util.latest(STATE_KEY);
@@ -40,7 +41,7 @@ async function load() {
     return;
   }
   state.replaceChildren();
-  // A server that says "not_enabled" to a read (the usage was turned off after the meta) ends in the same state.
+  // A server that answers "not_enabled" to a read ends in the same state. This happens when the usage was turned off after the meta was read.
   mcpOverview.show(dom.byId("mcpOverview"), { meta, onOff: () => { mcpOverview.hide(); mcpView.renderUsageOff(state); } });
 }
 

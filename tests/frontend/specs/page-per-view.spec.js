@@ -3,12 +3,14 @@ import { installObservers, unexpectedFailures } from '../helpers/observability.j
 import { fetchedModules } from '../helpers/modules.js';
 import { install, newServer } from '../helpers/mcp-fake.js';
 
-// Every view of Observability, System and the Explorer is an HTML page of its own: its own shell,
-// its own modules, its own stylesheet, one entry module. Each opens without a script error, names
-// itself (body data-page, the loader's page entry), loads only the modules of its view, and links
-// to its siblings, itself marked as the current page. The two MCP pages (Keys and Usage) are pages of
-// their own too: they need a server with MCP on, so they run against the in-memory server of
-// helpers/mcp-fake.js (`mcp: true`), which answers the shells and /api/mcp/* on any instance.
+// Each view of Observability, System and the Explorer is an HTML page of its own.
+// Each page has its own shell, its own modules, its own stylesheet and one entry module.
+// Each page opens without a script error. It names itself (body data-page, the loader's page entry).
+// It loads only the modules of its view. It links to its siblings and marks itself as the current page.
+//
+// The two MCP pages (Keys and Usage) are pages of their own too. They need a server with MCP on.
+// They run against the in-memory server of helpers/mcp-fake.js (`mcp: true`).
+// That server answers the shells and /api/mcp/* on any instance.
 
 const PAGES = [
   { path: '/observability/traces', name: 'traces', body: 'observability', row: '#obsTabs', current: '#obsTab-traces', controller: 'app_page_traces.js', own: ['app_obs_page.js', 'app_traces.js'], never: ['app_logs.js', 'app_metrics.js', 'app_system_view.js', 'app_explorer.js'] },
@@ -37,14 +39,14 @@ for (const spec of PAGES) {
     state.scripts = await fetchedModules(page);
     expect(state.page).toBe(spec.name);
     expect(state.sheets).toEqual([`style.${spec.name}.css`]);
-    // The entry and the modules of this view, none of the other views'.
+    // The entry and the modules of this view. Not the modules of the other views.
     expect(state.scripts.filter((name) => name === spec.controller)).toHaveLength(1);
     for (const name of spec.own) expect(state.scripts, name).toContain(name);
     for (const name of spec.never) expect(state.scripts, name).not.toContain(name);
-    // Each module is fetched once. (A kernel's module Worker imports its own copy of app_wasm.js and app_assets.js: a Worker is a realm of its own.)
+    // Each module is fetched once. A kernel's module Worker imports its own copy of app_wasm.js and app_assets.js. A Worker is a realm of its own.
     const once = state.scripts.filter((name) => name !== 'app_wasm.js' && name !== 'app_assets.js');
     expect(new Set(once).size).toBe(once.length);
-    // The row of links: this page current, the others plain links to their own pages.
+    // The row of links. This page is the current page. The other links go to their own pages.
     const links = page.locator(`${spec.row} a.contentTabs__tab:visible`);
     expect(await links.count()).toBeGreaterThan(1);
     await expect(page.locator(spec.current)).toHaveAttribute('aria-current', 'page');
@@ -73,7 +75,7 @@ test('the links of a row open the sibling pages', async ({ page }) => {
   ]) {
     await page.goto(from);
     await page.locator(link).click();
-    // The page may add its default range to the address (?from=&to=) as it starts: the path is what counts.
+    // The page can add its default range to the address (?from=&to=) when it starts. The path is what counts.
     await expect(page).toHaveURL(new RegExp(`${to.replace(/\//g, '\\/')}(\\?.*)?$`));
   }
 });

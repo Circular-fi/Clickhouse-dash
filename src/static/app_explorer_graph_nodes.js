@@ -1,5 +1,6 @@
-// The cards of the Explorer graph on the canvas: a table, a Storage tier, a TTL terminal, a collapsed database, the band of an expanded one,
-// the level of detail and the per-node expand controls.
+// The cards of the Explorer graph on the canvas.
+// The cards cover a table, a Storage tier, a TTL terminal, a collapsed database and the band of an expanded database.
+// They also cover the level of detail and the per-node expand controls.
 
 import { NODE_HEIGHT, PHYSICAL_HEIGHT, ttlRules } from "./app_explorer_graph_model.js";
 import { FONT, LINEAGE_FONT_MIN, STORAGE_FONT_MIN, canvasEllipsis, dimAlpha, graphColor, model, roundedRectPath } from "./app_explorer_graph_store.js";
@@ -150,20 +151,20 @@ function drawTtlExpiredNode(ctx, item, focused) {
   ctx.restore();
 }
 
-// A compact card writes the object's name over two lines (kit.compactBox) rather than end it in an ellipsis.
+// A compact card writes the object's name over two lines (kit.compactBox). It does not end the name in an ellipsis.
 const COMPACT_TITLE_LINES = 2;
 
-// Level of detail (kit.isCompact): the cards turn compact once an ordinary
-// card is under 40 px on screen or its smallest text under 7.5 px; a
-// compact card is its title row only, in kit.compactBox().
+// Level of detail (kit.isCompact). An ordinary card turns compact when it is under 40 px on screen.
+// It also turns compact when its smallest text is under 7.5 px.
+// A compact card is its title row only, in kit.compactBox().
 function compactCards(scale = model.scale) {
   return model.detailMode === "physical"
     ? kit.isCompact(PHYSICAL_HEIGHT, scale, STORAGE_FONT_MIN)
     : kit.isCompact(NODE_HEIGHT, scale, LINEAGE_FONT_MIN);
 }
 
-// The box a card is drawn in: its own, or its compact box. Storage tiers
-// and TTL terminals always draw in full.
+// The box in which a card is drawn is its own box, or its compact box.
+// Storage tiers and TTL terminals always draw in full.
 function drawnBox(item, compact) {
   const kind = item.node.kind;
   if (!compact || kind === "storage_tier" || kind === "ttl_expired") return item;
@@ -187,7 +188,7 @@ function drawNode(ctx, item, focused, compact) {
   const card = {
     radius,
     alpha: selected ? 1 : dimAlpha(),
-    // The focused card: a 2 px accent border, dashed like any View / MV outline.
+    // The focused card has a 2 px accent border. The border is dashed, like any View or MV outline.
     focused: isFocus,
     fill: storageDisabled ? graphColor("disabledBg") : graphColor("nodeBg"),
     border: isHover || inPanel ? graphColor("halo") : graphColor("border"),
@@ -208,8 +209,8 @@ function drawNode(ctx, item, focused, compact) {
     );
     if (node.kind === "disk") card.rows.push({ text: diskCapacitySummary(node), size: 11, y: 51 });
   } else {
-    // Title = the object's own name; the database is the subtitle so a long
-    // database prefix never truncates the part that tells objects apart.
+    // The title is the object's own name. The database is the subtitle.
+    // A long database prefix then never truncates the part that tells objects apart.
     const health = String(node.health || "healthy");
     if (health !== "healthy") card.status = health === "error" || health === "critical" ? "error" : "warn";
     card.badge = String(node.topology_badge || "");
@@ -247,7 +248,7 @@ function drawGroupNode(ctx, card, compact) {
   const isHover = model.hoveredId === node.id;
   const stat = groupStat(node.database) || { total: 0, connected: 0 };
   ctx.save();
-  // Two offset sheets behind the card read as "a stack of objects".
+  // Two offset sheets behind the card show "a stack of objects".
   for (const offset of [8, 4]) {
     roundedRectPath(ctx, item.x + offset, item.y - offset, item.width, item.height, 10);
     ctx.fillStyle = graphColor("nodeBg");
@@ -280,12 +281,12 @@ function drawGroupNode(ctx, card, compact) {
   const objects = format.countLabel(stat.total, "object");
   const linked = stat.connected ? `${format.count(stat.connected)} with dependencies` : "no dependencies";
   ctx.fillText(canvasEllipsis(ctx, `${objects} · ${linked}`, item.width - pad * 2), item.x + pad, item.y + 44);
-  // What a click or Enter does, in the muted text of a hint (the link colour is for links).
+  // This text says what a click or Enter does. It uses the muted text of a hint. The link colour is for links.
   ctx.fillText("Expand \u00b7 Enter", item.x + pad, item.y + 64);
   ctx.restore();
 }
 
-// Header strip of an expanded database band (click target to collapse).
+// The header strip of an expanded database band is a click target that collapses the band.
 function databaseBandHeader(box) {
   const padX = 20;
   const header = 34;
@@ -314,8 +315,7 @@ function drawDatabaseGroups(ctx) {
     const hover = collapsible && model.hoveredControl?.type === "band" && model.hoveredControl.database === database;
     ctx.fillStyle = hover ? graphColor("accentText") : graphColor("muted");
     ctx.font = `600 13px ${FONT}`;
-    // DataHub-style "N of M": the band says when objects without
-    // dependencies are filtered out of it.
+    // DataHub-style "N of M": the band shows when the code filters out objects without dependencies.
     const count = stat && stat.shown !== stat.total
       ? `${format.count(stat.shown)} of ${format.count(stat.total)} objects`
       : `${format.count(stat ? stat.total : box.count)} objects`;

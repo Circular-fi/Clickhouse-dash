@@ -1,6 +1,7 @@
-// Unit tests of the SQL text of ChDash: what is written into a statement (src/sql_literal.hpp), how a statement is read
-// (src/sql_lexer.hpp, the one lexer), and what is read from it (src/sql_structure.hpp, src/user_sql_policy.cpp,
-// src/mcp_sql.cpp, src/sql_scan.hpp). No ClickHouse is needed.
+// Unit tests of the SQL text of ChDash. They check what is written into a statement (src/sql_literal.hpp).
+// They check how a statement is read (src/sql_lexer.hpp, the one lexer).
+// They check what is read from it (src/sql_structure.hpp, src/user_sql_policy.cpp, src/mcp_sql.cpp, src/sql_scan.hpp).
+// No ClickHouse is needed.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_SQL_TESTS=ON
 //        cmake --build build --target chdash_sql_test
@@ -30,7 +31,7 @@
 
 using namespace chdash;
 
-// The kernels of the page that read SQL, built natively (tests/native/wasm_kernel_*.c).
+// The kernels of the page that read SQL. The test builds them natively (tests/native/wasm_kernel_*.c).
 extern "C" int chdash_wasm_highlight(const unsigned short* text, int len, signed char* kinds);
 extern "C" int chdash_wasm_split(const unsigned short* text, int len, int* out, int max);
 extern "C" int chdash_wasm_statement(const unsigned short* text, int len, int cursor, int* out);
@@ -61,7 +62,7 @@ int g_checks = 0;
     }                                                                                                    \
   } while (0)
 
-// The text with the bytes that are not printable written as \xHH, so a failure shows what the text holds.
+// The text with each byte that is not printable as \xHH. A failure shows what the text holds.
 std::string dump(const std::string& s) {
   std::string out = "\"";
   for (const char c : s) {
@@ -89,7 +90,7 @@ void test_params() {
   SqlParams params;
   CHECK(params.list().empty());
   CHECK_EQ(params.key(), std::string());
-  // The value stays out of the text: only the placeholder is written, and the value is kept as it is.
+  // The value stays out of the text. Only the placeholder is written. The code keeps the value as it is.
   CHECK_EQ(params.text("o'rei\\lly"), std::string("{p1:String}"));
   CHECK_EQ(params.texts({"a", "b'c"}), std::string("{p2:String}, {p3:String}"));
   CHECK_EQ(params.texts({}), std::string("''"));
@@ -98,11 +99,11 @@ void test_params() {
   CHECK_EQ(params.list()[0].second, std::string("o'rei\\lly"));
   CHECK_EQ(params.list()[1].second, std::string("a"));
   CHECK_EQ(params.list()[2].second, std::string("b'c"));
-  // A copy goes on from the same number, so a route can add to the parameters of its filters.
+  // A copy continues from the same number. A route can then add to the parameters of its filters.
   SqlParams copy = params;
   CHECK_EQ(copy.text("x"), std::string("{p4:String}"));
   CHECK_EQ(params.list().size(), static_cast<size_t>(3));
-  // The key tells two requests with the same text and other values apart.
+  // The key separates two requests that have the same text and other values.
   SqlParams one, two;
   one.text("a");
   two.text("b");
@@ -110,7 +111,7 @@ void test_params() {
   SqlParams again;
   again.text("a");
   CHECK_EQ(one.key(), again.key());
-  // A value with a separator cannot make two lists look alike.
+  // A value with a separator cannot make two lists look the same.
   SqlParams joined, split;
   joined.text(std::string("a\0p2\0b", 6));
   split.text("a");
@@ -128,7 +129,7 @@ void test_literals() {
   CHECK_EQ(sql::quote_string(std::string("a\0b", 3)), std::string("'a\\0b'"));
   CHECK_EQ(sql::quote_string("a\x01" "b"), std::string("'a\\x01b'"));
   CHECK_EQ(sql::quote_string("' OR 1=1 --"), std::string("'\\' OR 1=1 --'"));
-  // A text that ends with a backslash does not escape the closing quote mark.
+  // A text that ends with a backslash does not escape the quote mark that closes it.
   CHECK_EQ(sql::quote_string("abc\\"), std::string("'abc\\\\'"));
   CHECK_EQ(sql::quote_string("caf\xc3\xa9"), std::string("'caf\xc3\xa9'"));
 
@@ -145,7 +146,7 @@ void test_literals() {
   CHECK_EQ(sql::quote_list({"a", "b"}), std::string("'a', 'b'"));
   CHECK_EQ(sql::like_escape("50%_off\\"), std::string("50\\%\\_off\\\\"));
 
-  // What the lexer reads back is one token, whatever the text holds.
+  // The lexer returns one token, whatever the text holds.
   for (const std::string& text : {std::string("a'b"), std::string("\\"), std::string("\\'"), std::string("x\\\\'y"),
                                   std::string("--"), std::string("/*"), std::string("`"), std::string("\"")}) {
     const std::string quoted = sql::quote_string(text);
@@ -217,7 +218,7 @@ void test_lexer_rules() {
   CHECK_EQ(kinds("KILL\xe3\x80\x80QUERY"), std::string("W_W"));
   CHECK_EQ(kinds("\xef\xbb\xbfSELECT"), std::string("_W"));
 
-  // The tokens put back to back are the text, with no gap.
+  // Joined in order, the tokens are the text, with no gap.
   for (const std::string& sql : {std::string("SELECT 'a' /* c */ FROM `t` -- x\nWHERE a = $$b$$ #! y"), std::string("'"),
                                 std::string("\\"), std::string("/*"), std::string("$"), std::string("\xff\xfe")}) {
     std::string joined;
@@ -237,7 +238,7 @@ void test_lexer_rules() {
   CHECK_EQ(sql::utf16_offset("a\xf0\x9f\x98\x80" "b", 5), size_t(3));  // a, a surrogate pair | b
 }
 
-// A small generator of hostile statements: the pieces that the rules above are about.
+// A small generator of hostile statements. It makes the pieces that the rules above describe.
 std::string random_sql(uint64_t& seed, size_t length) {
   static const char* const kPieces[] = {"'", "\"", "`", "\\", "-", "--", "#", "# ", "#!", "/", "*", "/*", "*/", "$", "$$", "$a$",
                                         " ", "\n", "a", "KILL", "QUERY", "1", ".", "(", ")", ";", "\xc2\xa0", ",", "\r", "e", "x"};
@@ -249,8 +250,8 @@ std::string random_sql(uint64_t& seed, size_t length) {
   return out;
 }
 
-// sql::Scan and sql::lex read the same text the same way: a byte is code for the Scan when no quote, comment or heredoc is
-// open before and after it, and for the lexer when it is in a blank, a word, a number or a punctuation.
+// sql::Scan and sql::lex read the same text in the same way. For the Scan, a byte is code when no quote, comment or heredoc is open before it and after it.
+// For the lexer, a byte is code when it is in a blank, a word, a number or punctuation.
 void test_scan_follows_the_lexer() {
   uint64_t seed = 12345;
   for (int round = 0; round < 4000; ++round) {
@@ -432,7 +433,7 @@ void test_structure() {
 
 // ---- format_service.cpp ----
 
-// formatQuery, faked: it hands the text back, or fails the way it is told to.
+// formatQuery, faked. It returns the text, or it fails as the test sets.
 class FakePort final : public FormatQueryPort {
 public:
   std::vector<std::string> calls;
@@ -450,7 +451,7 @@ public:
     result.formatted_sql = sql;
     return result;
   }
-  // No tree: a statement that is laid out locally is not judged here (tests/native/format_test.cpp judges it).
+  // No tree: this test does not judge a statement that the local layout formats (tests/native/format_test.cpp judges it).
   FormatQueryResult explain_ast(const std::string&, size_t) override {
     FormatQueryResult result;
     result.failure = FormatQueryFailureKind::server;
@@ -486,7 +487,7 @@ void test_format_service() {
     CHECK_EQ(port.calls.size(), size_t(0));  // the cache of an earlier request
     CHECK_EQ(batch.stats().cache_hits, size_t(1));
   }
-  // `use_cache` false: from scratch. Another host or version: another key.
+  // When `use_cache` is false, the code formats from scratch. A host or version that differs gives another key.
   {
     FakePort port;
     FormatSettings scratch = settings;
@@ -510,7 +511,7 @@ void test_format_service() {
     CHECK_EQ(port.calls.size(), size_t(0));
     CHECK(out.formatted->find("-- keep me") != std::string::npos);
   }
-  // An INSERT with a payload: the payload is set aside and comes back byte for byte after the formatted statement.
+  // An INSERT with a payload. The code keeps the payload apart, and it restores the payload byte for byte after the formatted statement.
   {
     FakePort port;
     FormatBatch batch(nullptr, settings, port);
@@ -520,7 +521,7 @@ void test_format_service() {
     CHECK(port.calls[0].find("1,'x y'") == std::string::npos);
     CHECK(out.formatted->find("1,'x y'\n2,\"it's\"") != std::string::npos);
   }
-  // A heredoc reaches ClickHouse as a placeholder and comes back as written.
+  // A heredoc reaches ClickHouse as a placeholder. The code restores the heredoc as it was written.
   {
     FakePort port;
     FormatBatch batch(nullptr, settings, port);
@@ -592,7 +593,7 @@ void test_format_service() {
       CHECK(item.status == FormatItemStatus::Skipped && !item.skipped_for_stop);
     }
     CHECK_EQ(late_port.calls, 0);
-    // The caller goes away after the first text: the rest is skipped for that reason.
+    // The caller leaves after the first text. The rest is skipped for that reason.
     PickyPort stop_port;
     FormatBatch stopped(nullptr, settings, stop_port);
     FormatBatchLimits leaving = limits;
@@ -619,9 +620,9 @@ void test_format_service() {
 
 // ---- the lexer and the kernels of the page ----
 //
-// src/wasm/highlight.c and src/wasm/sqlscan.c follow the JavaScript of the page; src/sql_lexer.hpp follows ClickHouse. Both
-// must call the same text a string and a comment, and must cut a script at the same ";". The cases where they differ are
-// known and listed in test_the_kernels_differ_where_known: the page unifies them with the lexer later.
+// src/wasm/highlight.c and src/wasm/sqlscan.c follow the JavaScript of the page. src/sql_lexer.hpp follows ClickHouse.
+// Both must treat the same text as a string and a comment. Both must cut a script at the same ";".
+// The test test_the_kernels_differ_where_known lists the known cases where they differ. The page unifies them with the lexer later.
 
 std::vector<unsigned short> utf16_of(const std::string& s) {
   std::vector<unsigned short> out;
@@ -645,8 +646,8 @@ std::vector<unsigned short> utf16_of(const std::string& s) {
   return out;
 }
 
-// One character for each UTF-16 unit: 'S' in a string or a "name", 'C' in a comment, '?' for a line break (the kernel puts it in
-// the comment that it ends, the lexer does not), '.' for the rest.
+// One character for each UTF-16 unit. 'S' marks a string or a "name". 'C' marks a comment. '?' marks a line break.
+// The kernel puts the '?' in the comment that the line break ends, and the lexer does not. '.' marks the rest.
 std::string classes_of_lexer(const std::string& s, size_t units) {
   std::string out(units, '.');
   for (const sql::Token& token : sql::lex(s)) {
@@ -737,7 +738,7 @@ void test_the_kernels_and_the_lexer_agree() {
   int compared = 0;
   for (const std::string& s : fixed) compare_with_the_kernels(s, compared);
 
-  // Texts made of pieces, with the quotes and the comments open and closed in every order (a fixed seed).
+  // Texts made of pieces. The quotes and the comments open and close in every order (a fixed seed).
   const std::vector<std::string> pieces = {
       "select ", "1", " ", "\n", "'a'", "'it''s'", "'\\''", "'x\\\\'", "\"q\"", "`n`", "-- c\n", "-- c", "/* c */", "/* c\n */", ";", " ; ",
       "'", "\"", "`", "/*", "*/", "(", ")", ",", "\xC3\xA9", "\xF0\x9F\x98\x80", "'\xC3\xA9;'", "x", "0x1F", "-", "--", "*", "/", "\\", "\t"};
@@ -759,9 +760,11 @@ void test_the_kernels_and_the_lexer_agree() {
   CHECK(compared > 5000);  // most texts hold no construct of the list of differences
 }
 
-// The constructs on which the kernels of the page and the lexer differ. The lexer follows ClickHouse; the kernels follow the
-// JavaScript of the page, which takes every "#" for a comment, does not nest "/* */", has no $$ text, and reads a backslash in a
-// name in backticks as a character. When the page reads SQL as the lexer does, these checks change with it.
+// The constructs on which the kernels of the page and the lexer differ. The lexer follows ClickHouse.
+// The kernels follow the JavaScript of the page. The page takes every "#" for a comment.
+// The page does not nest "/* */", and it has no $$ text. It reads a backslash in a name in backticks as a character.
+//
+// When the page reads SQL as the lexer does, these checks change with it.
 void test_the_kernels_differ_where_known() {
   const auto differs = [](const std::string& s) {
     const std::vector<unsigned short> text = utf16_of(s);
@@ -782,12 +785,14 @@ void test_the_kernels_differ_where_known() {
 
 // ---- the vectors of the page: tests/frontend/model/sql-lex-vectors.json ----
 //
-// The file holds, for a list of texts, what the one SQL lexer of the page (src/static/app_sql_lex.js) answers: the strings
-// and the comments, the pieces of a script between its ";" and the statement around a cursor. The Node test of that module
-// and the browser test of the kernels read the same file. Here the kernels run on it, and so does the lexer of the backend:
-// it answers the same on every text, except on the texts that the file marks "differs" (the four differences from
-// ClickHouse that are on purpose, listed in app_sql_lex.js and src/sql_lexer.hpp).
-// The file is read from CHDASH_SQL_VECTORS, or from tests/frontend/model/ under the working directory.
+// The file holds the answers of the one SQL lexer of the page (src/static/app_sql_lex.js) for a list of texts.
+// The answers are the strings and the comments, the pieces of a script between its ";", and the statement around a cursor.
+// The Node test of that module and the browser test of the kernels read the same file.
+// Here the kernels run on the file, and so does the lexer of the backend.
+// The lexer gives the same answer on every text, except on the texts that the file marks "differs".
+// Those are the four differences from ClickHouse that are on purpose. They are listed in app_sql_lex.js and src/sql_lexer.hpp.
+//
+// The test takes the file from CHDASH_SQL_VECTORS, or from tests/frontend/model/ under the working directory.
 
 std::string expected_classes(const rapidjson::Value& vector, size_t units, const std::vector<unsigned short>& text) {
   std::string out(units, '.');

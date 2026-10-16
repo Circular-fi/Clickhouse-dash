@@ -1,8 +1,9 @@
-// The Traces search (traces.html, /observability/traces): the view that app_page_traces.js starts. It runs the search, applies the
-// range, loads the durations and the analytics, and starts the modules of the search page (the results, the charts, the heatmap, the
-// Spans mode, the tabs). A trace is another page (app_trace_detail.js): the search opens it by navigating. The two views share the
-// model, the address and the helpers of app_trace_store.js, and the functions that this view provides to the modules under it are
-// in its `actions` (ARCH-F-155).
+// This is the Traces search (traces.html, /observability/traces). The app_page_traces.js file starts this view.
+// The view runs the search and applies the range. It loads the durations and the analytics.
+// It also starts the modules of the search page: the results, the charts, the heatmap, the Spans mode, and the tabs.
+// A trace is another page (app_trace_detail.js). The search opens it by navigation.
+// The two views share the model, the address, and the helpers of app_trace_store.js.
+// The functions that this view gives to the modules under it are in its `actions` (ARCH-F-155).
 
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
@@ -24,13 +25,13 @@ import { util } from "./app_util.js";
 const { byId, $, $$ } = dom;
 const fmt = format;
 
-// The result list hands the Spans mode its place in the list (results and spans import each other's work: the spans are
-// handed to the results from here).
+// The result list gives the Spans mode its place in the list.
+// The results and the spans import each other's work. The spans go to the results from here.
 parts.traceSpans = traceSpans;
 
 function initTracePickers() {
   initTimeRangePicker();
-  // The Logs and Metrics views share the search bar look: only this view's selects.
+  // The Logs and Metrics views have the same look for the search bar. This view has only its own selects.
   $$("#tracesWorkspace .traceSearchBar select, #tracesWorkspace .traceResultsSort select").forEach((select) => {
     if (select !== dom.tracesRangeUnit || !timePicker) enhanceTraceSelect(select);
   });
@@ -38,10 +39,9 @@ function initTracePickers() {
 
 let timePicker = null;
 
-// The Grafana-style time range panel (built by app_timerange.js) is the
-// dropdown of the shipped range picker (same root and button, same
-// open/close motion). Its zoom button joins dom: the result views' "zoom
-// out" actions click it.
+// The Grafana-style time range panel is built by app_timerange.js.
+// The panel is the dropdown of the shipped range picker. It has the same root, the same button, and the same open and close motion.
+// Its zoom button joins the dom. The "zoom out" actions of the result views click this button.
 function initTimeRangePicker() {
   const select = dom.tracesRangeUnit;
   const root = select?.parentElement;
@@ -56,9 +56,9 @@ function initTimeRangePicker() {
   dom.tracesRangeZoomOut = timePicker.el.zoomOut;
 }
 
-// Meta decides the default window (until the user picks one) and the widest
-// one: an applied range wider than the server accepts falls back to the
-// widest quick range that fits.
+// Meta sets the default window. It stays in use until the user picks another window.
+// Meta also sets the widest window.
+// An applied range that is wider than the server accepts changes to the widest quick range that fits.
 function syncRangeControls() {
   const tr = timeRange;
   if (!tr) return;
@@ -72,7 +72,7 @@ function syncRangeControls() {
     const fitting = tr.QUICK_RANGES.filter((option) => option.to === "now" && /^now-\d+[smhdwMy]$/.test(option.from))
       .filter((option) => { const r = tr.resolveRange(option, now); return r.endMs - r.startMs <= max * 60000; });
     model.timeRange = fitting.length ? { from: fitting[fitting.length - 1].from, to: "now" } : { from: `now-${tr.minutesToSpan(fallbackMinutes)}`, to: "now" };
-    // Never silently: a link for 30 days that shows 7 would read as "no traces".
+    // Do not change the range silently. A link for 30 days that shows 7 days reads as "no traces".
     if (endMs > startMs) {
       model.rangeNotice = `The range ${fmt.range(requested.from, requested.to)} is longer than the server allows (${tr.formatMinutes(max)}, traces.max_lookback_minutes): showing ${fmt.range(model.timeRange.from, model.timeRange.to)}.`;
       showError("");
@@ -81,7 +81,7 @@ function syncRangeControls() {
   refreshCustomRangeLabel();
 }
 
-// Relative ranges ("now-1h") are resolved again for every request.
+// Resolve relative ranges ("now-1h") again for each request.
 function selectedRange() {
   const { startMs, endMs } = timeRange.resolveBounded(model.timeRange, maxRangeMinutes(), "server setting traces.max_lookback_minutes");
   return { start_ms: Math.round(startMs), end_ms: Math.round(endMs), align_buckets: timeRange.isRelative(model.timeRange) ? "1" : "0" };
@@ -90,8 +90,8 @@ function selectedRange() {
 function replaceSelectOptions(select, values, allLabel) {
   if (!select) return;
   const previous = String(select.value || "");
-  // A value applied from the URL or a filter action (app_trace_search.js)
-  // stays selectable even when the discovered pairs do not list it.
+  // A value that is applied from the URL, or by a filter action (app_trace_search.js), stays selectable.
+  // This is true even when the discovered pairs do not list it.
   const wanted = String(select.dataset.wanted || "");
   const unique = [...new Set([...(values || []), wanted].map((value) => String(value || "")).filter(Boolean))].sort();
   h.replace(select, h("option", { value: "" }, allLabel || "All"), unique.map((value) => h("option", { value }, value)));
@@ -189,7 +189,7 @@ function unpackSearch(payload) {
     span_count: Number(row?.[5] || 0),
     error_count: Number(row?.[6] || 0),
     service_stats: orderByFirstSpan((Array.isArray(row?.[7]) ? row[7] : []).map((stat) => ({ service: services[Number(stat?.[0] || 0)] || "unknown", spans: Number(stat?.[1] || 0), errors: Number(stat?.[2] || 0), first_span_ns: Number(stat?.[3] || 0) }))),
-    // Parent span ids no listed span carries (0 from older servers).
+    // These are the parent span ids that no listed span has. Older servers send 0.
     missing_parents: Number(row?.[8] || 0),
   }));
 }
@@ -215,16 +215,14 @@ function currentTag() {
   return { scope: key ? "any" : "", key, value };
 }
 
-// The Tag / Value inputs feed the filter chips (app_trace_search.js); the
-// chips become tag / tag_not / tag_exists / tag_missing and
-// service_not / operation_not / status_not parameters.
+// The Tag and Value inputs feed the filter chips (app_trace_search.js).
+// The chips become the parameters tag, tag_not, tag_exists, tag_missing, service_not, operation_not, and status_not.
 function searchFilters() {
   const range = selectedRange();
   const services = resolvedServiceValues();
   const operations = resolvedOperationValues();
-  // A tag-filtered prefill lists only the pairs seen with those attributes,
-  // and an estimated or truncated one is a subset: only a complete list
-  // can rule a pair out.
+  // A prefill with a tag filter lists only the pairs seen with those attributes.
+  // An estimated or truncated list is a subset. Only a complete list can rule out a pair.
   if (services.length && operations.length && model.prefillComplete && !serviceOperationPairExists(services[0], operations[0])) {
     throw new Error("Selected service / operation combination does not exist in this time range.");
   }
@@ -241,8 +239,8 @@ function searchFilters() {
 function invalidateDiscovery({ pairs = true } = {}) {
   if (pairs) {
     model.prefillPairs = [];
-    // The list is gone, so it is not complete any more: a failed prefill must not leave "complete" behind and make a
-    // search for a service / operation pair fail with a false "does not exist".
+    // The list is gone, so it is not complete. A failed prefill must not leave "complete" behind.
+    // Otherwise, a search for a service and operation pair fails with a false "does not exist".
     model.prefillComplete = false;
     replaceSelectOptions(dom.tracesService, [], "All");
     replaceSelectOptions(dom.tracesOperation, [], "All");
@@ -257,8 +255,7 @@ async function prefill({ force = false } = {}) {
     showError("");
     try {
       const range = selectedRange();
-      // Tag chips narrow the service / operation lists to the pairs seen
-      // with those attributes.
+      // Tag chips narrow the service and operation lists to the pairs seen with those attributes.
       const tags = traceSearch.prefillTagParams() || {};
       traceSearch.notePrefillTags(tags);
       const payload = await api.prefillTraces(currentHost(), { ...range, ...tags }, { signal: req.signal });
@@ -294,8 +291,7 @@ function formatCustomRangeLabel() {
   return timeRange ? timeRange.describeRange(model.timeRange).text : "Last 1 hour";
 }
 
-// The hidden native select mirrors the applied range for assistive tech;
-// the picker writes the button label.
+// The hidden native select shows the applied range to assistive technology. The picker writes the button label.
 function refreshCustomRangeLabel() {
   const option = dom.tracesRangeUnit?.options?.[0];
   if (option) option.textContent = formatCustomRangeLabel();
@@ -306,9 +302,8 @@ function closeCustomRangeEditor() {
   timePicker?.close();
 }
 
-// Applying a range (form, calendar, quick or recent range, shift / zoom)
-// reloads the service / operation choices, then searches that window.
-// Shift and zoom keep the panel open so they can be repeated.
+// Apply a range (form, calendar, quick or recent range, shift, or zoom). This reloads the service and operation choices.
+// Then it searches that window. Shift and zoom keep the panel open, so the user can repeat them.
 async function applyCustomRange(raw, source = "form") {
   model.rangeNotice = "";
   showError("");
@@ -333,8 +328,8 @@ async function loadAnalytics(filters) {
     renderAnalytics();
     return;
   }
-  // The charts of this search: its counts, then its durations (a new
-  // search or host cancels both, and the separate durations load).
+  // The charts of this search show the counts, then the durations.
+  // A new search or a new host cancels both charts. The separate durations load after that.
   const req = obsView.read("traces.analytics");
   util.latest.cancel("traces.durations");
   model.analytics = null;
@@ -342,17 +337,16 @@ async function loadAnalytics(filters) {
   model.analyticsError = "";
   model.durationsError = "";
   renderAnalytics();
-  // Buckets start at local midnight (3 h buckets at 00:00, 03:00... local).
+  // The buckets start at local midnight. For 3 h buckets, they start at 00:00, 03:00, and so on, in local time.
   const analyticsFilters = { ...filters, bucket_origin_ms: String(timeRange.localMidnight(Number(filters.start_ms))) };
   delete analyticsFilters.limit;
   model.analyticsFilters = analyticsFilters;
-  // The heatmap mode loads its own answer instead of the percentiles.
+  // The heatmap mode loads its own answer. It does not load the percentiles.
   traceHeatmap.onSearch(analyticsFilters);
   const message = (error) => util.errorText(error);
-  // Counts first: without filters the server reads them from the trace
-  // index (well under a second for 7 days), while the duration percentiles
-  // need the span aggregation, which takes seconds on multi-day windows.
-  // With filters the first answer already carries both charts.
+  // Load the counts first. Without filters, the server reads them from the trace index. For 7 days, this takes well under a second.
+  // The duration percentiles need the span aggregation. On windows of several days, this takes seconds.
+  // With filters, the first answer already has both charts.
   let countsError = "";
   try {
     const counted = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "counts" }, { signal: req.signal });
@@ -361,19 +355,18 @@ async function loadAnalytics(filters) {
     if (!model.analytics.has_durations) renderAnalytics();
   } catch (error) {
     if (!req.isCurrent()) return;
-    // The durations answer below carries the counts too.
+    // The durations answer below also has the counts.
     countsError = message(error);
   }
   try {
     if (model.analytics?.has_durations || traceHeatmap.active()) {
-      // The heatmap mode reads no durations: a counts chart that failed says so instead of an empty card.
+      // The heatmap mode reads no durations. A counts chart that fails says so. It does not show an empty card.
       if (!model.analytics && countsError) model.analyticsError = countsError;
       return;
     }
     const full = await api.getTraceAnalytics(currentHost(), { ...analyticsFilters, charts: "durations" }, { signal: req.signal });
     if (!req.isCurrent()) return;
-    // Span counts replace the index counts: both charts then describe
-    // exactly the same traces.
+    // Span counts replace the index counts. Then both charts describe the same traces.
     model.analytics = unpackAnalytics(full, model.analytics);
   } catch (error) {
     if (!req.isCurrent()) return;
@@ -387,8 +380,8 @@ async function loadAnalytics(filters) {
   }
 }
 
-// The percentiles of the current search, when the heatmap mode skipped
-// them and the Percentiles mode is shown again.
+// These are the percentiles of the current search. The heatmap mode skipped them.
+// Use them again when the Percentiles mode is shown.
 async function loadDurations() {
   const filters = model.analyticsFilters;
   if (!filters || model.analytics?.has_durations || model.meta?.analytics_enabled !== true) { renderAnalytics(); return; }
@@ -406,9 +399,9 @@ async function loadDurations() {
   renderAnalytics();
 }
 
-// url: "push" (a new search: its own history entry), "replace" (the
-// page-load search) or "none" (restored from history, the URL is already
-// this search).
+// url: "push" makes a new search with its own history entry.
+// url: "replace" is the search on page load.
+// url: "none" is for a search restored from history. The URL is already this search.
 async function search({ url = "push" } = {}) {
   if (!model.meta) await loadMeta().catch(() => null);
   const searchState = traceSearch;
@@ -419,12 +412,12 @@ async function search({ url = "push" } = {}) {
     return;
   }
   if (searchState?.prefillTagsChanged?.() && model.prefillPairs.length) {
-    // New tag chips narrow the pickers; the current choices stay selected.
+    // New tag chips narrow the pickers. The current choices stay selected.
     for (const select of [dom.tracesService, dom.tracesOperation]) if (select?.value) select.dataset.wanted = select.value;
     void prefill({ force: true });
   }
   await ensurePrefillForFilters();
-  // This search supersedes the previous one and its charts.
+  // This search replaces the previous search and its charts.
   const req = obsView.read("traces.search");
   util.latest.cancel("traces.analytics");
   util.latest.cancel("traces.durations");
@@ -436,8 +429,8 @@ async function search({ url = "push" } = {}) {
     return;
   }
   address.write(url);
-  // Another tab (app_trace_tabs.js, e.g. the service map) runs its own
-  // search; the result list searches again when its tab comes back.
+  // Another tab (app_trace_tabs.js, for example the service map) runs its own search.
+  // The result list searches again when its tab is shown again.
   const tabSearch = traceTabs.activeSearch();
   if (tabSearch) {
     model.lastSearchKey = "";
@@ -451,7 +444,7 @@ async function search({ url = "push" } = {}) {
   setView(false);
   uiState.busy(dom.tracesSearchButton, true);
   showError("");
-  // The charts load right after the list: say so instead of going blank.
+  // The charts load right after the list. Show a message, so the charts do not go blank.
   model.analytics = null;
   model.analyticsLoading = model.meta?.analytics_enabled === true;
   model.analyticsError = "";
@@ -459,7 +452,7 @@ async function search({ url = "push" } = {}) {
   renderAnalytics();
   try {
     if (traceSpans.active()) {
-      // One row per span; the span table reports its own errors.
+      // Each span has one row. The span table reports its own errors.
       await traceSpans.search(filters);
       if (!req.isCurrent()) return;
       model.searched = true;
@@ -476,8 +469,8 @@ async function search({ url = "push" } = {}) {
     model.lastSearchRange = { start_ms: Number(filters.start_ms), end_ms: Number(filters.end_ms) };
     unpackSearch(payload);
     renderResults();
-    // Search results are intentionally delivered first. Heavy graph analytics
-    // starts only after the trace list has rendered, on its own API route.
+    // Send the search results first, on purpose.
+    // Heavy graph analytics start only after the trace list is rendered. They use their own API route.
     void loadAnalytics(filters);
     searchState?.onSearched?.(filters);
   } catch (error) {
@@ -493,7 +486,7 @@ async function search({ url = "push" } = {}) {
   }
 }
 
-// The search opens a trace as the page of that trace; the search page stays in the history entry before it.
+// The search opens a trace as the page of that trace. The search page stays in the history entry before it.
 function openTrace(traceId) {
   const id = String(traceId || "").trim();
   if (!id) return;
@@ -502,9 +495,8 @@ function openTrace(traceId) {
   window.location.assign(spanTraceUrl(id, pendingSpanId));
 }
 
-// The search view shows again with the entry's own search state: the
-// listed results may belong to another search (a shared link, or Back /
-// Forward across searches).
+// The search view shows again with the search state of the entry.
+// The listed results can belong to another search. This happens with a shared link, or with Back and Forward across searches.
 function restoreSearch() {
   traceSearch.closeMenu();
   const key = traceSearch.searchKey() || "";
@@ -513,9 +505,10 @@ function restoreSearch() {
   else traceSpans.onShown();
 }
 
-// The cycle of the view with its host (app_obs_view.js): a change of host empties the model and stops everything of the old host
-// (the search, the spans, the services, the map, the heatmap and the facets of the Traces page all use a slot of "traces.":
-// ARCH-F-140), then loads for the new host.
+// This is the cycle of the view with its host (app_obs_view.js).
+// A change of host empties the model. It stops all work of the old host.
+// The search, the spans, the services, the map, the heatmap, and the facets of the Traces page all use a slot of "traces." (ARCH-F-140).
+// Then it loads the data for the new host.
 const hostCycle = obsView.hostCycle({
   feature: "traces",
   cancel: ["traces.", "facets."],
@@ -542,8 +535,8 @@ function resetForHost() {
 }
 
 async function loadForHost(stale) {
-  // A second host change starts its own reload: this one stops at the next step instead of searching for the new host
-  // a second time.
+  // A second host change starts its own reload. This reload stops at the next step.
+  // It does not search for the new host a second time.
   try {
     await loadMeta();
     if (stale()) return;
@@ -553,14 +546,14 @@ async function loadForHost(stale) {
   } catch (_) {}
 }
 
-// Back / Forward, or the Observability page showing this view again: the URL is the state. Every entry carries its search state:
-// restore it first.
+// Use Back or Forward, or show the Observability page again. The URL is the state of the view.
+// Every entry has its search state. Restore that state first.
 function onLocation() {
   traceSearch.applyLocation();
   restoreSearch();
 }
 
-// Shared with the other Observability views: the time range and the service.
+// The other Observability views share this state: the time range and the service.
 function getContext() {
   return { range: { ...model.timeRange }, service: String(dom.tracesService?.value || "") };
 }
@@ -568,14 +561,14 @@ function getContext() {
 function applyContext(params, context) {
   if (context.range) timeRange.url.write(params, context.range);
   if (context.service != null && context.service !== (params.get("service") || "")) {
-    // An operation belongs to the service it was picked for.
+    // An operation belongs to the service that was selected for it.
     params.delete("operation");
     if (context.service) params.set("service", context.service);
     else params.delete("service");
   }
 }
 
-// The functions that the modules under this view call: the store carries them (app_trace_store.js, `actions`).
+// The modules under this view call these functions. The store carries them (app_trace_store.js, `actions`).
 Object.assign(actions, {
   search: (options) => search(options),
   loadTrace: (id) => openTrace(id),
@@ -587,7 +580,7 @@ Object.assign(actions, {
   setResultsView: (view, options) => setResultsView(view, options),
   searchContext: () => traceSearch.contextQuery(),
   currentTag: () => currentTag(),
-  // The result list tab is shown again: search when it is stale.
+  // The result list tab is shown again. Search again if the results are stale.
   showSearch: () => {
     const key = traceSearch.searchKey() || "";
     if (!model.searched || key !== (model.lastSearchKey || "")) search({ url: "none" });
@@ -603,7 +596,7 @@ function init() {
   traceSearch.init();
   traceHeatmap.init();
   traceTabs.init();
-  // Search state from the URL (a shared link, a reload).
+  // Read the search state from the URL. This applies to a shared link or a reload.
   traceSearch.applyLocation({ initial: true });
   dom.tracesForm?.addEventListener("submit", (event) => { event.preventDefault(); search(); });
   trackSearchBarHeight();
@@ -622,5 +615,6 @@ function init() {
   hostCycle.start();
 }
 
-// renderAnalytics (redraw the charts from the model) and scatterDots (the scatter as drawn) are test and benchmark hooks.
+// renderAnalytics redraws the charts from the model. scatterDots gives the scatter as drawn.
+// These are test and benchmark hooks.
 export const traces = { init, onLocation, getContext, applyContext, search, loadTrace: openTrace, renderAnalytics, scatterDots };

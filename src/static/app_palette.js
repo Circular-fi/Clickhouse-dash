@@ -1,7 +1,7 @@
 // ns.palette: every data colour as a themed CSS token (docs/ui-foundations.md).
-// Each picker returns a var() reference, so DOM colours follow the theme by
-// themselves; resolve() turns one into the colour the current theme
-// computes, for canvas drawing.
+// Each picker returns a var() reference. The DOM colours follow the theme by themselves.
+// The resolve() function converts one reference to the colour that the current theme computes.
+// Use resolve() for canvas drawing.
 //
 //   categorical(i)  --qchart-1..18: series slots of charts
 //   service(name)   --trace-span-color-1..18 (the same 18 slots): one colour
@@ -21,15 +21,15 @@ import { wasm } from "./app_wasm.js";
 const CATEGORICAL_SLOTS = 18;
 const SERVICE_SLOTS = 18;
 const SEQUENTIAL_STEPS = 8;
-// The Traces store: the result list, its charts, every opened trace and the
-// Logs view read the same assignment.
+// The Traces store holds the result list, its charts and every opened trace.
+// The Logs view reads the same assignment.
 
 const tokenRef = (name) => `var(${name})`;
 
 // ----------------------------------------------------------- categorical
 
-// Series slot i (0-based) of a chart; a negative or non-numeric index is the
-// neutral "Other" slot.
+// Series slot i (0-based) of a chart.
+// A negative or non-numeric index gives the neutral "Other" slot.
 function categorical(i) {
   const n = Math.trunc(Number(i));
   if (!Number.isFinite(n) || n < 0) return tokenRef("--qchart-other");
@@ -38,17 +38,17 @@ function categorical(i) {
 
 // -------------------------------------------------------------- services
 
-// Like Jaeger's ColorGenerator: a service takes the next slot the first
-// time it is seen and keeps it for the browser session (sessionStorage);
-// registerServices(names) assigns a view's services in name order first, so
-// a list and its charts agree whatever order they render in.
+// Like Jaeger's ColorGenerator, a service takes the next slot when the page first sees it.
+// The service keeps its slot for the browser session (sessionStorage).
+// The registerServices(names) function assigns the services of a view in name order first.
+// A list and its charts then agree, whatever the render order.
 let serviceSlots = null;
 
 function slots() {
   if (serviceSlots) return serviceSlots;
   serviceSlots = new Map();
-  // ns.storage (app_state.js) loads after this module: read it when used.
-  // Without session storage the colours last for this page.
+  // ns.storage (app_state.js) loads after this module. Read it at the time of use.
+  // Without session storage, the colours last for this page only.
   const saved = slotsPref()?.get();
   if (saved && typeof saved === "object" && !Array.isArray(saved)) {
     for (const [service, slot] of Object.entries(saved)) {
@@ -58,22 +58,23 @@ function slots() {
   return serviceSlots;
 }
 
-// ns.storage.KEYS.serviceColors: the Traces assignment, kept for the session.
+// ns.storage.KEYS.serviceColors: the Traces assignment. The session keeps it.
 const slotsPref = () => {
   return storage ? storage.pref(storage.KEYS.serviceColors, null, { json: true, session: true }) : null;
 };
 
-// Written when a service is assigned (registerServices writes once for a whole list).
+// The code writes this value when it assigns a service. registerServices writes once for a whole list.
 function saveSlots() {
   slotsPref()?.set(Object.fromEntries(slots()));
 }
-// The table keeps this many services: a trace store with thousands of services (generated names) does not grow
-// the table, or the session storage, without bound. A service beyond it has its stable hash slot.
+// The table keeps this many services.
+// A trace store with thousands of services (generated names) does not grow the table or the session storage without bound.
+// A service beyond this limit has its stable hash slot.
 const MAX_SERVICES = 512;
 
 const serviceKey = (name) => String(name || "unknown");
 
-// FNV-1a: the same slot for a name on every page load and browser.
+// FNV-1a gives the same slot for a name on every page load and in every browser.
 function hashSlot(name) {
   const text = serviceKey(name);
   let hash = 0x811c9dc5;
@@ -84,9 +85,10 @@ function hashSlot(name) {
   return hash % SERVICE_SLOTS;
 }
 
-// The 0-based slot of `name`. assign: false looks without assigning: a name
-// not seen yet gets its stable hash slot, and the first-seen order of the
-// view is left as it is.
+// The 0-based slot of `name`.
+// With assign: false, the function looks up the slot without assigning it.
+// A name that the page has not seen yet gets its stable hash slot.
+// The first-seen order of the view does not change.
 function serviceSlot(name, { assign = true } = {}) {
   const key = serviceKey(name);
   const map = slots();
@@ -115,8 +117,8 @@ function service(name, options) {
 
 const QUANTILES = [50, 90, 95, 99];
 
-// p50 / p90 / p95 / p99, written "p95", "P95", 95 or 0.95; any other
-// quantile takes the nearest of the four.
+// The quantile accepts p50, p90, p95 and p99, written as "p95", "P95", 95 or 0.95.
+// Any other quantile takes the nearest of the four.
 function quantile(p) {
   let value = typeof p === "string" ? Number(p.trim().replace(/^p/i, "")) : Number(p);
   if (!Number.isFinite(value)) return tokenRef("--pct-p50");
@@ -130,9 +132,10 @@ function quantile(p) {
 
 const LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"];
 
-// The level of an OpenTelemetry SeverityNumber (1-4 trace, 5-8 debug, 9-12
-// info, 13-16 warn, 17-20 error, 21-24 fatal) or SeverityText ("ERROR",
-// "warning", "Critical"...). Unknown text reads as debug.
+// The function takes the level from an OpenTelemetry SeverityNumber:
+// 1-4 trace, 5-8 debug, 9-12 info, 13-16 warn, 17-20 error, 21-24 fatal.
+// It can also take the level from a SeverityText ("ERROR", "warning", "Critical"...).
+// Unknown text maps to debug.
 function severityLevel(level) {
   const n = typeof level === "number" ? level : /^\s*\d+\s*$/.test(String(level ?? "")) ? Number(level) : 0;
   if (n > 0) return n >= 21 ? "fatal" : n >= 17 ? "error" : n >= 13 ? "warn" : n >= 9 ? "info" : n >= 5 ? "debug" : "trace";
@@ -152,7 +155,7 @@ function severity(level) {
 
 // ------------------------------------------------------------ sequential
 
-// Step of the one-hue ramp for t in [0, 1] (low values recede into the surface).
+// The step of the one-hue ramp for t in [0, 1]. Low values recede into the surface.
 function sequential(t) {
   const n = Number(t);
   const clamped = Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0;
@@ -161,9 +164,11 @@ function sequential(t) {
 
 // ------------------------------------------------------------ error rate
 
-// One set of error-rate thresholds for every view (service map cards,
-// dots and edges, the Services table, panels and sparklines): below 1 % is
-// neutral, 1 % up to 5 % a warning, 5 % and more danger.
+// One set of error-rate thresholds serves every view.
+// The views are: service map cards, dots and edges, the Services table, panels and sparklines.
+// Below 1 %, the level is neutral.
+// From 1 % up to 5 %, the level is a warning.
+// From 5 % and more, the level is danger.
 const ERROR_RATE = Object.freeze({ warn: 0.01, danger: 0.05 });
 
 // The level of an error ratio (errors / requests, 1 = 100 %).
@@ -199,10 +204,11 @@ function kind(value) {
 
 // ---------------------------------------------------------------- resolve
 
-// The colour a token computes to in the current theme, as "rgb(r, g, b)" or
-// "rgba(r, g, b, a)" (canvas cannot read var()). Accepts "--qchart-1", "var(--qchart-1)"
-// or any CSS colour. Values are cached until the theme changes: the forced
-// theme (html[data-theme]) or, in System mode, the OS colour scheme.
+// The function returns the colour that a token computes in the current theme.
+// The result is "rgb(r, g, b)" or "rgba(r, g, b, a)", because canvas cannot read var().
+// The input can be "--qchart-1", "var(--qchart-1)" or any CSS colour.
+// The function caches the values until the theme changes.
+// The theme changes with the forced theme (html[data-theme]) or, in System mode, with the OS colour scheme.
 const cache = new Map();
 let cacheTheme = "";
 let probe = null;
@@ -244,7 +250,7 @@ function resolve(token) {
   if (!probe || !probe.isConnected) {
     probe = document.createElement("i");
     probe.setAttribute("aria-hidden", "true");
-    // forced-color-adjust: none: in forced colors the browser would give every token the text colour.
+    // This code sets forced-color-adjust: none. Without it, the browser gives every token the text colour in forced colors.
     probe.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;visibility:hidden;pointer-events:none;forced-color-adjust:none";
     document.documentElement.appendChild(probe);
   }
@@ -257,8 +263,8 @@ function resolve(token) {
 
 // ------------------------------------------------------------- contrast
 
-// WCAG 2 relative luminance of a resolved colour (alpha ignored: pass a
-// colour that is opaque on its surface, a color-mix() with it for one).
+// The function gives the WCAG 2 relative luminance of a resolved colour. It ignores alpha.
+// Pass a colour that is opaque on its surface. Or pass a color-mix() of the colour with that surface.
 function luminance(token) {
   const m = /^rgba?\(\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)/.exec(resolve(token));
   if (!m) return NaN;
@@ -269,16 +275,17 @@ function luminance(token) {
   return 0.2126 * channel(m[1]) + 0.7152 * channel(m[2]) + 0.0722 * channel(m[3]);
 }
 
-// The WCAG contrast ratio of two colours (tokens or CSS colours).
+// The function gives the WCAG contrast ratio of two colours (tokens or CSS colours).
 function contrast(a, b) {
   const la = luminance(a), lb = luminance(b);
   if (!Number.isFinite(la) || !Number.isFinite(lb)) return NaN;
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-// The label colour for text on `fill`: white (--on-fill) or ink
-// (--on-fill-dark), whichever contrasts more, so a label on any service
-// colour passes WCAG in both themes.
+// The function gives the label colour for text on `fill`.
+// The label colour is white (--on-fill) or ink (--on-fill-dark).
+// It takes the colour with the higher contrast.
+// A label on any service colour then passes WCAG in both themes.
 const LABELS = ["--on-fill", "--on-fill-dark"];
 function readableText(fill) {
   const [light, dark] = LABELS.map((name) => contrast(fill, name));
@@ -286,13 +293,20 @@ function readableText(fill) {
 }
 
 // ------------------------------------------------- WebAssembly batches
-// The arithmetic of the pickers above, for many items at once, on src/wasm/color.c (docs/wasm.md). Each *Batch gives what the
-// matching single function gives for each item, byte for byte (tests/frontend/specs/wasm-color.spec.js). A short batch, a
-// missing kernel (it loads on the first long batch) and the items the kernel hands back are answered by the single function.
-// The resolving of a token stays here: the browser does it.
-// The fewest items of a batch that go to the kernel, per op: about where the kernel stops costing more than the single function
-// (the measures are in docs/wasm.md); a shorter batch runs the single function. An op without an entry never runs on the kernel in
-// the page, because the single function is faster at every size (mix, hashSlots, steps, categorical): the tests still force it.
+// The pickers above have batch arithmetic in src/wasm/color.c (docs/wasm.md).
+// Each *Batch function gives, for each item, the result of the corresponding single function.
+// The result is the same byte for byte (tests/frontend/specs/wasm-color.spec.js).
+// The single function answers a short batch. It also answers a batch when the kernel is missing.
+// The kernel loads on the first long batch.
+// The single function also answers the items that the kernel hands back.
+// Token resolution stays here: the browser does it.
+// The thresholds below give the fewest items of a batch that go to the kernel, per op.
+// Each threshold is about the size where the kernel begins to cost less than the single function.
+// The measures are in docs/wasm.md.
+// A shorter batch runs the single function.
+// An op without an entry never runs on the kernel in the page.
+// The single function is faster at every size for these ops (mix, hashSlots, steps, categorical).
+// The tests still force the kernel for them.
 const COLOR_MIN_ITEMS = Object.freeze({ normalize: 500, readable: 64, parseChart: 5000, rgba: 5000, typeFamilies: 500 });
 let colorAsked = false;
 
@@ -303,8 +317,10 @@ function requestColorKernel() {
   group.then(() => (wasm && wasm.ops.color ? wasm.load("color") : null)).catch(() => {});
 }
 
-// The result of kernel op `op`, or null (a short batch, no kernel yet, or a failure): the caller then runs the single function.
-// force: use the kernel whatever the size (the tests).
+// The function gives the result of kernel op `op`, or null.
+// Null means a short batch, no kernel yet, or a failure.
+// The caller then runs the single function.
+// force: use the kernel at any size (for the tests).
 function colorKernel(op, input, count, force) {
   if (!force && count < (COLOR_MIN_ITEMS[op] || Infinity)) return null;
   const kernel = wasm && wasm.get("color");
@@ -375,6 +391,6 @@ export const palette = Object.freeze({
   sequential,
   kind,
   resolve,
-  // The batches on WebAssembly and their references (see the block above): not part of the picker list.
+  // The WebAssembly batch functions and their references are in the block above. They are not part of the picker list.
   batch: Object.freeze({ normalize, normalizeBatch, readableTextBatch, hashSlotBatch, sequentialBatch, categoricalBatch, colorKernel, minItems: COLOR_MIN_ITEMS }),
 });

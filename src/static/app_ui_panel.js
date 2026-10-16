@@ -1,61 +1,59 @@
-// Side panels (left) and detail panels (right): one shell each.
+// Side panels (left) and detail panels (right). Each panel uses one shell.
 //
 // ns.sidePanel.mount(el, options) -> { el, collapsed(), setCollapsed(v), drawerOpen(), setDrawerOpen(v) }
-//   The left list of a page (the Explorer tree, the Functions list, the
-//   Traces Attributes / Logs Fields facets, the Metrics catalog): a column
-//   --side-w wide with a header (title, count / meta, a 30 px search, an
-//   optional chip row) over a body that scrolls on its own. The content
-//   renderer stays the page's. Markup (the page writes it):
+//   The left list of a page. Examples: the Explorer tree, the Functions list, the
+//   Traces Attributes and Logs Fields facets, and the Metrics catalog. The panel is a column
+//   --side-w wide. Its header has a title, a count or meta text, a 30 px search field and an
+//   optional chip row. A body that scrolls on its own sits below the header. The content
+//   renderer stays the page's. The page writes the markup:
 //     <aside class="uiSide"> <div class="uiSide__head"> .uiSide__bar (the
 //       collapse toggle .uiSide__toggle or the title .uiSide__title, the
 //       .uiSide__meta, actions), .uiSide__search, .uiSide__chips
 //     </div> <div class="uiSide__body"> ... </div> </aside>
 //   options:
-//     label             "Attributes": the toggles' names
+//     label             "Attributes": the names of the toggles
 //     collapse          { button, storeKey, rootClass, onChange(collapsed) }:
-//                       wide windows fold the panel to a 32 px rail
-//                       (.is-collapsed, and rootClass on <html> for the
-//                       first paint, which the page's head script sets)
+//                       on wide windows, the panel folds to a 32 px rail.
+//                       It uses .is-collapsed, and rootClass on <html> for the
+//                       first paint. The head script of the page sets that class.
 //     drawer            { toggle, host, backdrop, bind = true, manageToggle = true, icon, onChange(open) }:
-//                       at --bp-md and below the panel is a drawer over the
-//                       content (fixed under --shell-top), opened by
-//                       `toggle` (or a
-//                       .uiSide__drawerToggle in a bar built at the start
-//                       of `host`); an ns.layers layer (Escape, a press
-//                       outside, focus back to the toggle)
+//                       at --bp-md and below, the panel is a drawer over the content.
+//                       The drawer is fixed under --shell-top. It opens with `toggle`, or with
+//                       a .uiSide__drawerToggle in a bar that is built at the start of `host`.
+//                       The drawer is an ns.layers layer: Escape and a press outside it close it,
+//                       and the focus returns to the toggle.
 //
 // ns.detailPanel.create(options) -> panel
-//   The right panel that shows one entity. Two layouts:
+//   The right panel that shows one entity. It has two layouts:
 //     "docked"    a column beside the content (Logs record, Spans, Services)
 //     "floating"  over a canvas (the graph-kit panel of the Explorer graph,
 //                 the service map and the trace graph)
-//   Both: one head (eyebrow, title, subtitle; actions on the right, then
-//   the one close button .closeCross.uiDetail__close), --detail-w wide, a
-//   bottom sheet at --bp-md and below, Escape through ns.layers, under
-//   --shell-top when fixed.
+//   Both layouts have one head: eyebrow, title, subtitle, and actions on the right. The one
+//   close button is .closeCross.uiDetail__close. The panel is --detail-w wide. At --bp-md and
+//   below, it is a bottom sheet. Escape works through ns.layers. A fixed panel is under --shell-top.
 //   options:
-//     el                an existing panel (its markup has the shell classes)
-//     host, id, className, label   build one (appended to host, hidden)
+//     el                an existing panel. Its markup has the shell classes.
+//     host, id, className, label   build a panel. It is appended to host, and it is hidden.
 //     layout            "docked" (default) | "floating"
 //     closeLabel        the close button's name ("Close")
-//     onClose(reason)   after it closed ("close", "escape", "back", ...)
-//     returnFocus       element (or () => element) when the opener is gone
+//     onClose(reason)   runs after the panel closes ("close", "escape", "back", ...)
+//     returnFocus       element (or () => element) that gets the focus when the opener is gone
 //   panel: { el, head, eyebrow, title, subtitle, actions, closeButton, body,
 //            setHead({ eyebrow, title, subtitle, html }), setActions(html | nodes),
 //            open({ opener }), close(reason, { restoreFocus }), isOpen() }
 //
 // ns.detailPanel.head({ eyebrow, title, subtitle, dot, closeLabel, onClose, actions })
-//   -> a head element in the shell's markup (the graph-kit panels).
+//   -> a head element in the shell's markup, for the graph-kit panels.
 //
-// Room for a docked detail panel: below FOLD_BELOW px (and above --bp-md)
-//   opening one folds the page's shown side panels to their rails, and
-//   closing it unfolds those it folded (a rail the viewer opened meanwhile
-//   stays open; neither change is remembered as the viewer's fold).
+// Room for a docked detail panel: below FOLD_BELOW px (and above --bp-md),
+//   when one opens, it folds the shown side panels of the page to their rails. When it closes,
+//   it unfolds the side panels that it folded. A rail that the viewer opened meanwhile
+//   stays open. Neither change is remembered as the viewer's fold.
 //
 // The one URL parameter of a panel that shows one entity (span=, log=,
-//   node=, svc=) is ns.router.panel(name) (app_router.js): open pushes a
-//   history entry, a move inside the panel replaces it, and closing goes
-//   Back when the entry is the panel's own, so Back closes an open panel.
+//   node=, svc=) is managed by ns.router.panel(name) (app_router.js). When the panel opens, a
+//   history entry is pushed. A move inside the panel replaces that entry. When the panel closes,
+//   the Back action goes to the previous entry if that entry is the panel's own. Therefore, Back closes an open panel.
 
 import { dom, h, shell } from "./app_dom.js";
 import { storage } from "./app_state.js";
@@ -67,13 +65,13 @@ const { $ } = dom;
 let uid = 0;
 const atMostMd = () => !!shell?.isAtMost?.("md");
 
-// The remembered fold ("1" / "0"): storage.pref (app_state.js, loaded by
-// the time a page mounts a panel).
+// The remembered fold uses the values "1" and "0". It is stored with storage.pref (app_state.js),
+// which is loaded before a page mounts a panel.
 const foldPref = (key) => storage.pref(key, false);
 
 // ------------------------------------------------------------ side panel
 
-// The side panels that fold for a docked detail panel (see create()).
+// The side panels that fold for a docked detail panel. See create().
 const FOLD_BELOW = 1600;
 const foldable = new Set();
 
@@ -106,7 +104,7 @@ function mountSide(panel, options = {}) {
     }
   }
 
-  // Folded for a detail panel (not the viewer's choice, not remembered).
+  // The panel is folded for a detail panel. This is not the choice of the viewer, and it is not remembered.
   let autoFolded = false;
 
   function applyCollapsed(next, { remember = true } = {}) {
@@ -135,7 +133,7 @@ function mountSide(panel, options = {}) {
   }
 
   if (collapse) {
-    // The remembered fold (a head script may have set the <html> class).
+    // The remembered fold. A head script may have set the <html> class.
     if (collapse.storeKey && foldPref(collapse.storeKey).get() === true) {
       if (collapse.rootClass) document.documentElement.classList.add(collapse.rootClass);
       else panel.classList.add("is-collapsed");
@@ -210,7 +208,7 @@ function mountSide(panel, options = {}) {
     syncDrawerToggle();
   }
 
-  // The head marks the list scrolled beneath it (.is-scrolled: a soft edge).
+  // The head marks the list as scrolled beneath it. The .is-scrolled class gives a soft edge.
   const sideHead = $(":scope > .uiSide__head", panel);
   const sideBody = $(":scope > .uiSide__body", panel);
   if (sideHead && sideBody) {
@@ -225,9 +223,8 @@ function mountSide(panel, options = {}) {
   return handle;
 }
 
-// A docked detail panel opened (or closed): fold the shown side panels to
-// their rails while the window is narrower than FOLD_BELOW, unfold them
-// after.
+// When a docked detail panel opens, the shown side panels fold to their rails
+// while the window is narrower than FOLD_BELOW. When the panel closes, they unfold.
 function foldSides(open) {
   for (const side of foldable) {
     if (!side.el.isConnected) { foldable.delete(side); continue; }
@@ -258,8 +255,8 @@ function closeButton(label, onClose) {
   return button;
 }
 
-// A head in the shell's markup. graphKit: true keeps the graph-kit
-// aliases (graphKitPanel__*) its content styles and tests name.
+// A head in the shell's markup. With graphKit: true, the head keeps the graph-kit
+// aliases (graphKitPanel__*). The content styles and the tests use these names.
 function head({ eyebrow = "", title = "", subtitle = "", dot = "", titleId = "", closeLabel = "Close", onClose = null, actions = null, graphKit = false } = {}) {
   const alias = (name) => (graphKit ? ` graphKitPanel__${name}` : "");
   const header = h("header", { class: `uiDetail__head${alias("head")}` });
@@ -369,8 +366,7 @@ function create(options = {}) {
       openState = false;
       const closing = layer;
       layer = null;
-      // The focus leaves with the layer before the panel hides (a hidden
-      // focused element would drop it on the body).
+      // The focus leaves with the layer before the panel hides. A hidden element that has the focus sends the focus to the body.
       closing?.close({ restoreFocus });
       panel.hidden = true;
       if (layout === "docked") foldSides(false);

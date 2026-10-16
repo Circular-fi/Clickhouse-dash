@@ -1,5 +1,5 @@
-// The About panel of the table card: value and context tiles (engine, settings, size, compression, keys, TTL, replicas, lineage ...) beside the
-// tab body, above it when the pane is narrow.
+// The About panel of the table card shows value and context tiles. The tiles cover the engine, settings, size, compression, keys, TTL, replicas, lineage ...
+// The panel appears beside the tab body. On a narrow pane, it appears above the tab body.
 
 import { h } from "./app_dom.js";
 import { dependencyChip, exprEl } from "./app_explorer_detail_cells.js";
@@ -17,9 +17,9 @@ function ttlRuleEl(rule) {
 }
 
 function aboutTile(label, value, context = null, { mono = false, title = "", id = "", wide = false, block = false } = {}) {
-  // A stat tile (stat.tile classes): label, value, context lines. The
-  // About panel shows every value whole: long ones wrap (CSS), nothing
-  // is cut, so the title only adds what the tile does not show.
+  // A stat tile uses the stat.tile classes. It has a label, a value and context lines.
+  // The About panel shows every value in full. Long values wrap in CSS, and no value is cut.
+  // So the title adds only what the tile does not show.
   const tile = h("div", { class: `statTile explorerAboutTile${wide ? " explorerAboutTile--wide" : ""}` });
   if (id) tile.dataset.tile = id;
   tile.appendChild(h("div", { class: "statTile__label explorerAboutTile__label" }, label));
@@ -35,8 +35,8 @@ function aboutTile(label, value, context = null, { mono = false, title = "", id 
   return tile;
 }
 
-// ORDER BY, PRIMARY KEY (when it differs), PARTITION BY and SAMPLE BY:
-// one element per line, after its position in the key.
+// This is the key list: ORDER BY, PRIMARY KEY (when it differs), PARTITION BY and SAMPLE BY.
+// Each element goes on its own line, in key order.
 function keysTile(summary) {
   const sorting = String(summary.sorting_key || "").trim();
   const primary = String(summary.primary_key || "").trim();
@@ -76,15 +76,14 @@ function aboutTiles(detail) {
   const mergeTree = isMergeTreeSummary(s);
   const database = s.database || "";
 
-  // Engine (+ where it routes for Buffer / Distributed / replicas), and
-  // its arguments and settings whole (engine_full without the keys and
-  // the TTL, which have tiles of their own).
+  // This is the Engine tile. It shows where the engine routes for Buffer, Distributed and replicas.
+  // It also shows the arguments and the settings in full. The engine_full value omits the keys and the TTL, because these have tiles of their own.
   const engineContext = [];
   if (detail.distributed?.cluster) engineContext.push(`cluster ${detail.distributed.cluster}`);
   if (r.available && r.replica_name) engineContext.push(`replica ${r.replica_name}`);
   if (s.engine && humanEngine(s.engine).replace(/\s+/g, "") !== s.engine) engineContext.push(s.engine);
   const engineArgs = engineArguments(s);
-  // storage_policy has its own tile (MergeTree).
+  // The storage_policy value has its own tile (MergeTree).
   const engineSettings = engineSettingsOf(s).filter((setting) => !(mergeTree && s.storage_policy && /^storage_policy\s*=/.test(setting)));
   tiles.push(aboutTile("Engine", humanEngine(s.engine), [
     engineContext.join(" \u00b7 "),
@@ -123,7 +122,7 @@ function aboutTiles(detail) {
     ], { id: "compression", title: "Uncompressed / compressed bytes of the active parts" }));
   }
 
-  // Log-family engines report ClickHouse's uncompressed total, not parts.
+  // Log-family engines report the uncompressed total of ClickHouse, not the parts.
   if (!mergeTree && isLogFamilySummary(s) && s.uncompressed_bytes != null) {
     tiles.push(aboutTile("Uncompressed", format.bytes(s.uncompressed_bytes), "data before compression", { id: "uncompressed" }));
   }
@@ -225,8 +224,8 @@ function renderAbout(detail) {
   const grid = h("div", { class: "explorerAbout__tiles" });
   grid.append(...tiles);
   aside.appendChild(grid);
-  // Narrow panes show the About tiles under the tab body: the first ones
-  // stay visible, the rest behind a toggle (hidden by CSS on wide panes).
+  // Narrow panes show the About tiles under the tab body. The first tiles stay visible.
+  // The other tiles stay behind a toggle. On wide panes, CSS hides the toggle.
   if (tiles.length > 4) {
     const collapsed = model.aboutExpanded !== true;
     aside.classList.toggle("is-collapsed", collapsed);

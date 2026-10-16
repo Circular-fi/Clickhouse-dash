@@ -1,19 +1,18 @@
-// Service map tab of the Traces page, after HyperDX's DBServiceMapPage: the
-// services of the traces matching the search (time range, filters and chips)
-// and the calls between them from /api/traces/service_map, drawn with the
-// shared canvas graph kit (app_graph_kit.js) exactly like the Explorer
-// graph: one card per service (name; spans and error rate; p95; a left strip
-// in its Traces colour; a health dot from 1 % errors and a red border from
-// 5 %, ns.palette.errorLevel),
-// orthogonal edges whose dash pattern is the call kind (solid synchronous,
-// dashed asynchronous messaging, dotted database / cache), whose colour is
-// the error severity and whose width grows mildly with the calls, and an
-// always visible "calls · p95" label on every edge. Hover outlines a service
-// and its calls; a click recentres on it and opens the side panel with the
-// metrics and the hand-off to the Search tab. The canvas is the only view,
-// on phones too (touch pans and pinches; the panel is a bottom sheet): the
-// kit's keyboard access (arrows, Enter, the live region) is the accessible
-// path.
+// This is the service map tab of the Traces page. It follows the HyperDX DBServiceMapPage.
+// The map shows the services of the traces that match the search: the time range, the filters and the chips.
+// It also shows the calls between them, from /api/traces/service_map.
+// The map uses the shared canvas graph kit (app_graph_kit.js). It works the same way as the Explorer graph.
+//
+// Each service has one card. The card shows the name, the spans, the error rate and the p95.
+// A left strip has the Traces colour. A health dot appears from 1 % errors, and a red border from 5 %. See ns.palette.errorLevel.
+//
+// The edges are orthogonal. The dash pattern shows the call kind: solid for synchronous calls, dashed for asynchronous messaging, and dotted for database or cache calls.
+// The colour of an edge shows the error severity. The width grows mildly with the calls.
+// Every edge has a "calls · p95" label, and the label is always visible.
+//
+// Hover outlines a service and its calls. A click recentres the map on the service and opens the side panel with the metrics and the hand-off to the Search tab.
+// The canvas is the only view, also on phones. Touch pans and pinches the map, and the panel is a bottom sheet.
+// The keyboard access of the kit (arrows, Enter and the live region) is the accessible path.
 
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
@@ -30,25 +29,26 @@ import { util } from "./app_util.js";
 
 const kit = graphKit;
 
-// The shared error-rate thresholds (ns.palette.errorLevel): below 1 %
-// neutral, 1-5 % warning (amber dot and edge), 5 % and more danger (red
-// dot, border and edge).
+// The shared error-rate thresholds are in ns.palette.errorLevel.
+// Below 1 %, the rate is neutral.
+// From 1 % to 5 %, the rate is a warning: an amber dot and edge.
+// At 5 % and more, the rate is danger: a red dot, border and edge.
 const { warn: ERROR_ELEVATED, danger: ERROR_HIGH } = palette.ERROR_RATE;
 const CARD_WIDTH = 216;
 const CARD_HEIGHT = 72;
 const X_GAP = 128;
-// A service calling more than this many others is a block of columns, not a tower of cards.
+// A service that calls more than this many others is a block of columns, not a tower of cards.
 const MAX_PER_COLUMN = 6;
 const Y_GAP = 40;
 const FIT_MAX = 1.35;
-// Main-thread slice of a layout spread over frames (kit.runSliced).
+// The main-thread slice of a layout that is spread over frames (kit.runSliced).
 const LAYOUT_SLICE_MS = 40;
-// The smallest card font is 12 px: the readable scale keeps it at 11 px.
+// The smallest card font is 12 px. The readable scale keeps it at 11 px.
 const READABLE_SCALE = 11 / 12;
 const MIN_FONT = 12;
 const PANEL_EDGES = 6;
 const NAME_CHARS = 22;
-// A compact card writes the service's name over two lines (kit.compactBox): the name is the datum of a map.
+// A compact card writes the name of the service over two lines (kit.compactBox). The name is the datum of a map.
 const COMPACT_LINES = 2;
 const KIND_DASH = { sync: kit.DASH.solid, async: kit.DASH.message, db: kit.DASH.dotted };
 const KIND_LABELS = { sync: "Synchronous calls", async: "Asynchronous messages", db: "Database / cache calls" };
@@ -63,13 +63,13 @@ const map = {
   error: "",
   data: null,
   layout: null,
-  // View transform, mutated by the kit controller.
+  // The view transform. The kit controller changes it.
   view: { scale: 1, offsetX: 0, offsetY: 0 },
   fitScale: 1,
   fitted: true,
   // { kind: "node" | "edge", id } | null
   selected: null,
-  // A selection was showing when the current one was made (a move, not an open).
+  // A selection was showing when the current one was made. This was a move, not an open.
   panelWasOpen: false,
   hovered: null,
   layoutTiming: null,
@@ -77,8 +77,8 @@ const map = {
 
 // ---------------------------------------------------------------- format
 
-// Calls of the range per second, per minute below 1/s (like the Services
-// table's rates).
+// Calls of the range per second. Below 1 per second, the rate is per minute.
+// This is like the rates of the Services table.
 function perSecond(count) {
   const range = map.data?.range || [0, 0];
   const seconds = Math.max(1, (Number(range[1]) - Number(range[0])) / 1000);
@@ -86,13 +86,13 @@ function perSecond(count) {
   return rate >= 1 ? `${fmt.compact(rate)}/s` : `${fmt.compact(rate * 60)}/min`;
 }
 
-// "ok", "warn" or "err": palette.errorLevel in the kit's names.
+// "ok", "warn" or "err". These are the palette.errorLevel names of the kit.
 const LEVEL_SEVERITY = { neutral: "ok", warn: "warn", danger: "err" };
 function severity(rate) {
   return LEVEL_SEVERITY[palette.errorLevel(rate)];
 }
 
-// The card's health dot: amber from 1 %, red from 5 %, none below.
+// The health dot of a card: amber from 1 %, red from 5 %, and none below 1 %.
 const HEALTH_STATUS = { ok: null, warn: "warn", err: "error" };
 
 function shortName(name) {
@@ -128,7 +128,7 @@ function normalize(payload) {
     ? payload.edges.map((edge) => ({ ...edge, source: String(edge.source || ""), target: String(edge.target || ""), kind: callKind(edge.kind) }))
     : [];
   const known = new Set(nodes.map((node) => node.service));
-  // An edge always has its two services (defensive: a truncated node list).
+  // An edge always has its two services. This is a defence against a truncated node list.
   for (const edge of edges) {
     for (const service of [edge.source, edge.target]) {
       if (known.has(service)) continue;
@@ -143,21 +143,23 @@ const edgeId = (edge) => `${edge.source}\x1f${edge.target}`;
 
 // ---------------------------------------------------------------- layout
 
-// The kit's layered layout (longest-path columns after DFS cycle breaking,
-// barycentre sweeps, one global row grid) feeds the kit's orthogonal
-// router: the row grid is what keeps routes straight. Callers sit left of
-// their callees; a call against that order (a cycle) is routed from the
-// callee's left side back into the caller's right side. Services without
-// any call are a grid under the graph.
+// The kit layered layout sets the columns. It uses longest-path columns after DFS cycle breaking, and barycentre sweeps.
+// It also sets one global row grid.
+// The kit orthogonal router uses this layout. The row grid keeps the routes straight.
 //
-// The router's A* is bounded (ROUTE_BUDGET): a dense map (every service
-// calling most others: 12 services and 132 call paths, all in one row of
-// columns) took 45 s of main thread; past the budget the remaining calls
-// get the kit's cheap routes. The layout is a generator (kit.runSliced
-// spreads a long one over frames) and its positions and routes are kept
-// while the services and calls stay the same (a new search over the same
-// topology, the web font arriving), so only the cards and labels are
-// redone.
+// Callers sit left of their callees.
+// A call against that order (a cycle) is routed from the left side of the callee back into the right side of the caller.
+// Services without any call form a grid under the graph.
+//
+// The A* of the router is bounded by ROUTE_BUDGET.
+// A dense map is a map where every service calls most others. One example has 12 services and 132 call paths, all in one row of columns.
+// Such a map took 45 s of main thread.
+// Past the budget, the other calls get the cheap routes of the kit.
+//
+// The layout is a generator. kit.runSliced spreads a long layout over frames.
+// Its positions and routes are kept while the services and calls stay the same.
+// This holds for a new search over the same topology, or when the web font arrives.
+// Then only the cards and labels are redone.
 const ROUTE_BUDGET = { maxSteps: 160_000, searchSteps: 40_000 };
 let placementCache = { key: null, positions: null, back: null, routed: null };
 
@@ -178,7 +180,7 @@ function* layoutSteps(data, measure = null) {
       nodes: connected,
       edges,
       size: () => ({ width: CARD_WIDTH, height: CARD_HEIGHT }),
-      // Busiest first (the backend sorts by spans).
+      // The busiest first. The backend sorts by spans.
       compare: (a, b) => a.order - b.order,
       rowGrid: true,
       rowPitch: CARD_HEIGHT + Y_GAP,
@@ -202,13 +204,13 @@ function* layoutSteps(data, measure = null) {
       });
     });
 
-    // Calls against the column order are routed reversed, then flipped back.
+    // Calls against the column order are routed in reverse, and then restored.
     const back = new Set(edges.filter((edge) => (level.get(edge.to) ?? 0) <= (level.get(edge.from) ?? 0)).map((edge) => edge.id));
     const routed = yield* kit.routeEdgesAuto(positions, edges.map((edge) => (back.has(edge.id) ? { ...edge, from: edge.to, to: edge.from } : edge)), ROUTE_BUDGET);
     placement = { key, positions, back, routed };
     placementCache = placement;
   }
-  // This payload's rows on the kept positions.
+  // The rows of this payload take the kept positions.
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const positions = new Map([...placement.positions].map(([id, item]) => [id, { ...item, node: nodeById.get(id) }]));
   const { back, routed } = placement;
@@ -230,7 +232,7 @@ function* layoutSteps(data, measure = null) {
     };
   });
 
-  // Every edge label, busiest calls first (they get the best spots).
+  // Every edge label. The busiest calls come first, because they get the best spots.
   const textWidth = measure || ((text) => text.length * 6.6);
   const ordered = edgeItems.slice().sort((a, b) => (Number(b.edge.calls) || 0) - (Number(a.edge.calls) || 0) || a.id.localeCompare(b.id));
   const requests = ordered.filter((item) => item.points.length >= 2).map((item) => {
@@ -257,7 +259,7 @@ function* layoutSteps(data, measure = null) {
   };
 }
 
-// The whole layout at once (tests, ns.traceMap.computeLayout).
+// The whole layout at once. This is for tests and for ns.traceMap.computeLayout.
 function computeLayout(data, measure = null) {
   const steps = layoutSteps(data, measure);
   for (;;) {
@@ -395,7 +397,7 @@ function draw(context, frame) {
   return false;
 }
 
-// Layout items: { x, y, width, height, node: { id, node: payload row, order } }.
+// The layout items have this shape: { x, y, width, height, node: { id, node: payload row, order } }.
 function layoutItems() {
   return map.layout ? [...map.layout.items.values()] : [];
 }
@@ -483,10 +485,10 @@ function measureText() {
   return (text) => context.measureText(text).width;
 }
 
-// Lays the map out: at once when that takes less than one slice of the
-// main thread, else over several frames (the previous map stays under
-// the loading state). Resolves true once map.layout is this data's,
-// false when a newer render or load replaced it.
+// Calculates the layout of the map. It does so at once when that takes less than one slice of the main thread.
+// Otherwise, the layout is calculated over several frames, and the previous map stays under the loading state.
+// It resolves true when map.layout is the layout of this data.
+// It resolves false when a newer render or load replaced it.
 let layoutRun = null;
 function renderGraph() {
   layoutRun?.cancel?.();
@@ -517,7 +519,7 @@ function renderGraph() {
 
 // ---------------------------------------------------------- view / camera
 
-// The whole map in the part of the canvas its chrome leaves free.
+// The whole map, in the part of the canvas that the chrome leaves free.
 function overviewScale() {
   const box = kit.safeArea(canvas());
   const bounds = map.layout?.bounds;
@@ -525,8 +527,8 @@ function overviewScale() {
   return Math.max(0.05, Math.min(FIT_MAX, Math.min(box.width / bounds.width, box.height / bounds.height) * 0.92));
 }
 
-// The service a Fit anchors on: the selected one, else the first entry
-// point (no incoming call; the leftmost, then the topmost).
+// The service that Fit anchors on is the selected one. Without a selection, it is the first entry point.
+// An entry point has no incoming call. The leftmost, then the topmost, is chosen.
 function anchorItem(layout) {
   const selected = map.selected?.kind === "node" ? layout.items.get(map.selected.id) : null;
   if (selected) return selected;
@@ -539,7 +541,7 @@ function anchorItem(layout) {
   return best?.item || null;
 }
 
-// The world box around a service and the services it calls or is called by.
+// The world box around a service, and the services that it calls or that call it.
 function neighbourhood(layout, item) {
   if (!item) return null;
   const id = item.node.id;
@@ -554,11 +556,11 @@ function neighbourhood(layout, item) {
   return { x: minX - 24, y: minY - 24, width: maxX - minX + 48, height: maxY - minY + 48 };
 }
 
-// Fit (kit.fitView): the whole map when it is readable as a whole; a map
-// slightly too large opens at the readable scale on the selected service,
-// else on the entry point, the minimap giving the rest; a much larger one
-// shows whole with compact cards. A phone opens on that service and its
-// neighbours, then pans.
+// Fit (kit.fitView) shows the whole map when the map is readable as a whole.
+// A map that is slightly too large opens at the readable scale on the selected service.
+// Without a selection, it opens on the entry point. The minimap shows the rest.
+// A much larger map shows whole, with compact cards.
+// A phone opens on that service and its neighbours, then pans.
 function fit() {
   const box = canvas()?.getBoundingClientRect();
   const layout = map.layout;
@@ -595,7 +597,7 @@ function hitTest(clientX, clientY) {
   const box = canvas()?.getBoundingClientRect();
   if (!layout || !box) return null;
   const point = { x: (clientX - box.left - map.view.offsetX) / map.view.scale, y: (clientY - box.top - map.view.offsetY) / map.view.scale };
-  // A compact card is hit on the box it draws.
+  // A compact card is hit on the box that it draws.
   const compact = kit.isCompact(CARD_HEIGHT, map.view.scale, MIN_FONT);
   for (const item of layout.items.values()) {
     if (kit.pointInRect(point, compact ? kit.compactBox(item, map.view.scale, COMPACT_LINES) : item)) return { type: "node", key: `node\u0000${item.node.id}`, id: item.node.id };
@@ -625,18 +627,18 @@ function describeNode(id) {
 
 // ------------------------------------------------------- hover / selection
 
-// A click on a service recentres on it and selects it (side panel); on a
-// call, selects the call; on the background, closes the panel.
-// The selected service in the URL (node=, a view parameter of the tab):
-// pushed when the panel opens on a service, replaced when the selection
-// moves, and Back closes the panel (ns.router.panel("node"): closePanel
-// goes Back when the entry is the panel's own).
+// A click on a service recentres the map on it and selects it, and the side panel opens.
+// A click on a call selects the call. A click on the background closes the panel.
+//
+// The selected service is in the URL as node=. It is a view parameter of the tab.
+// The URL gets node= when the panel opens on a service, and it is replaced when the selection moves.
+// Back closes the panel. ns.router.panel("node") handles this: closePanel goes Back when the entry is the panel own entry.
 const nodeParam = address.panel("node");
 let pendingNode = "";
 const selectedNode = () => (map.selected?.kind === "node" ? map.selected.id : "");
 
-// An edge in the open panel has no parameter: a service selected from it
-// moves the panel (replace) rather than opening it.
+// An edge in the open panel has no parameter.
+// A service that the user selects from it moves the panel with a replace. It does not open the panel.
 function writeNodeUrl(previous) {
   const next = selectedNode();
   if (next === previous) return;
@@ -651,15 +653,14 @@ function select(target, { center = true, url = true } = {}) {
   map.selected = target;
   renderPanel();
   if (url) writeNodeUrl(previous);
-  // The service is centred in the visible canvas once the panel has
-  // settled, and again when the panel closes (kit follow()).
+  // The service is centred in the visible canvas after the panel has settled.
+  // It is centred again when the panel closes (kit follow()).
   if (target?.kind === "node" && center) ctl?.follow(target.id);
   else ctl?.unfollow();
   ctl?.scheduleDraw();
 }
 
-// The panel: the floating detail panel shell (kit.panelShell: Escape
-// through ns.layers, focus back to the canvas).
+// The panel is the floating detail panel shell (kit.panelShell). Escape works through ns.layers, and focus returns to the canvas.
 let mapPanel = null;
 function panelShell() {
   const panel = byId("traceMapPanel");
@@ -667,8 +668,8 @@ function panelShell() {
   return mapPanel;
 }
 
-// url: "clear" drops node= (Back when the entry is the panel's own),
-// "none" when the URL already has none.
+// url: "clear" drops node=. It is used for Back, when the entry is the panel own entry.
+// url: "none" is used when the URL already has none.
 function closePanel({ url = "clear" } = {}) {
   const previous = selectedNode();
   map.selected = null;
@@ -687,7 +688,7 @@ function onClick(target) {
   else closePanel();
 }
 
-// The panel's stat tiles (ns.stat.html), boxed.
+// The stat tiles of the panel (ns.stat.html), in a box.
 const SEVERITY_TONES = { err: "error", warn: "warn", ok: "" };
 function statsHtml(item, countLabel, count) {
   const tile = (label, value, sub = "", tone = "") => stat.html({ label, value, sub, tone, dl: true });
@@ -760,8 +761,8 @@ function renderPanel() {
 
 // ---------------------------------------------------------------- hand-off
 
-// Search tab with the service filter (and status=Error): the search module
-// applies it and runs the search, which writes the URL (tab=search).
+// This is the Search tab with the service filter and status=Error.
+// The search module applies the filter and runs the search. The search writes the URL (tab=search).
 function searchService(service, { errors = false, stay = false } = {}) {
   if (!service || !traceSearch.applyFilter) return;
   if (!stay) traceTabs.select("search", { url: "none", activate: false });
@@ -775,7 +776,7 @@ function searchService(service, { errors = false, stay = false } = {}) {
 
 // ---------------------------------------------------------------- events
 
-// Panel and List buttons (event delegation on data attributes).
+// The Panel and List buttons. They use event delegation on data attributes.
 function onActionClick(event) {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
@@ -813,11 +814,11 @@ async function load(filters, { force = false } = {}) {
     palette.registerServices(map.data.nodes.map((node) => node.service));
     if (!(await renderGraph()) || !req.isCurrent()) return;
     map.loading = false;
-    // The legend and the status line first: the fit leaves room for them.
+    // The legend and the status line come first. The fit leaves room for them.
     renderMeta();
     renderLegend();
-    // A selection that still exists stays open; node= of a link or a
-    // reload opens its service.
+    // A selection that still exists stays open.
+    // The node= of a link or of a reload opens its service.
     map.selected = null;
     if (pendingNode && map.layout?.items.has(pendingNode)) map.selected = { kind: "node", id: pendingNode };
     else if (previous && map.layout && (previous.kind === "node" ? map.layout.items.has(previous.id) : map.layout.edgeById.has(previous.id))) {
@@ -831,7 +832,7 @@ async function load(filters, { force = false } = {}) {
   } catch (error) {
     if (!req.isCurrent()) return;
     map.error = util.errorText(error);
-    // Not the key of any search (the default search's key is ""): Retry reloads.
+    // This key is not the key of any search. The default search key is "". Retry reloads it.
     map.key = null;
   } finally {
     if (req.isCurrent()) {
@@ -843,8 +844,8 @@ async function load(filters, { force = false } = {}) {
   }
 }
 
-// Shown from a click or Back / Forward: the current search refreshes the
-// map unless it already shows it.
+// The current search refreshes the map when the map is shown from a click or from Back / Forward.
+// It does not refresh the map when the map already shows it.
 function onShow() {
   const key = traceSearch.searchKey() || "";
   if (key !== map.key || (!map.data && !map.loading)) void actions.search({ url: "none" });
@@ -885,7 +886,7 @@ function init() {
     toolbar: { zoomIn: byId("traceMapZoomIn"), zoomOut: byId("traceMapZoomOut"), fit: byId("traceMapFit") },
   });
   kit.theme.onChange(() => { if (shown()) ctl.drawNow(); });
-  // Cards and the fit were measured in the fallback face: lay out and fit again, unless the user moved.
+  // The cards and the fit were measured in the fallback face. Calculate the layout and fit the map again, unless the user moved the map.
   kit.fonts.onLoad(() => {
     if (!map.data || !map.fitted || map.loading) return;
     void renderGraph().then((applied) => { if (applied && map.fitted) fit(); });
@@ -900,8 +901,8 @@ function init() {
   renderState();
 }
 
-// Read-only geometry of the last drawn frame in client (CSS pixel)
-// coordinates: lets browser tests hover and click real services and calls.
+// Read-only geometry of the last drawn frame, in client (CSS pixel) coordinates.
+// Browser tests use it to hover and click real services and calls.
 function inspect() {
   const box = canvas()?.getBoundingClientRect();
   const view = map.view;
@@ -934,7 +935,7 @@ function inspect() {
       return {
         id: node.service, service: node.service, severity: severity(Number(node.error_rate) || 0),
         health: severity(Number(node.error_rate) || 0) !== "ok", status: HEALTH_STATUS[severity(Number(node.error_rate) || 0)],
-        // The box drawn on screen (a compact card's is its title row).
+        // The box drawn on screen. The box of a compact card is its title row.
         strip: serviceColor(node.service), ...toClient(compact ? kit.compactBox(item, view.scale, COMPACT_LINES) : item),
       };
     }) : [],
@@ -947,8 +948,8 @@ function inspect() {
     edgeLabels: (map.labelHits || []).map((hit) => ({ id: hit.id, text: layout?.labels.get(hit.id)?.text || "", ...toClient(hit) })),
     edgeLabelsPlaced: layout ? layout.labels.size : 0,
     edgeLabelsDropped: layout ? layout.dropped.slice() : [],
-    // Wall time of the last layout (sliced: spread over frames) and the
-    // router's work: A* steps, calls given a cheap route past the budget.
+    // The wall time of the last layout. A sliced layout is spread over frames.
+    // The router work: A* steps, and the calls given a cheap route past the budget.
     layoutTiming: map.layoutTiming ? { ...map.layoutTiming } : null,
     routeStats: layout?.routeStats ? { ...layout.routeStats } : null,
   };
@@ -978,6 +979,5 @@ traceTabs.register({
   },
 });
 
-// For tests and other modules: the layout of a payload (no DOM), and the
-// drawn geometry.
+// This is for tests and other modules. It gives the layout of a payload (no DOM) and the drawn geometry.
 export const traceMap = { computeLayout: (payload) => computeLayout(normalize(payload)), state: () => map, inspect };

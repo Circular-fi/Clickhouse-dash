@@ -1,29 +1,31 @@
-// Shared canvas chart engine (uPlot-style): columnar Float64Array data,
-// per-pixel min/max decimation, two stacked canvases (the plot, redrawn on
-// data / size / zoom / theme changes, and a cursor overlay redrawn on every
-// pointer move), a DOM tooltip and legend. One engine for every chart of the
-// app: the Query result chart uses it first; the other charts move onto it
-// one by one (see each consumer for its migration notes).
+// Shared canvas chart engine (uPlot-style). It uses columnar Float64Array data and per-pixel min/max decimation.
+// It has two stacked canvases. The plot canvas is redrawn on data, size, zoom and theme changes.
+// The cursor overlay canvas is redrawn on every pointer move. The engine also has a DOM tooltip and legend.
+// One engine serves every chart of the app. The Query result chart uses it first.
+// The other charts move to it one by one. See each consumer for its migration notes.
 //
 //   const chart = ns.chartCore.create(hostEl, {
 //     xKind: "time" | "number" | "index" | "category",
-//     xs: Float64Array,                 // ascending; category: 0..n-1
-//     categories: ["a", "b"],          // category axis labels
+//     xs: Float64Array,                 // ascending. A category axis uses 0..n-1.
+//     categories: ["a", "b"],          // labels of the category axis
 //     series: [{ id, label, color, values: Float64Array, nulls: Uint8Array | null, group }],
 //     type: "line" | "area" | "bar" | "points",
-//     stack: false,                     // area / bar: cumulative per group
+//     stack: false,                     // area and bar: cumulative per group
 //   });
 //   chart.setData({ ... }), chart.update({ type, stack }), chart.setZoom(lo, hi),
 //   chart.resetZoom(), chart.setHidden(ids), chart.destroy().
 //
-// values[i] is NaN when series has no value at xs[i]. nulls[i] = 1 marks a
-// NULL (the line breaks there); a NaN without the flag is a missing row and
-// the line connects across it. nulls === null means every NaN breaks.
+// values[i] is NaN when the series has no value at xs[i]. nulls[i] = 1 marks a NULL.
+// The line breaks at a NULL. A NaN without the flag is a missing row.
+// The line connects across a missing row. nulls === null means that every NaN breaks the line.
 //
-// The legend (the list of the series under the plot, "Values" for a table of Total, Min, Max, Mean and Last, the mode kept as a preference) is
-// the same on every page. A series may carry `weights` (one per point: the calls behind an average, the requests behind a rate): its Mean is then weighted, and a chart whose
-// values do not add up leaves the Total out (`legendColumns`). `legendClick: "filter"` makes a click the host's (`onLegendClick`: a filter)
-// instead of a hide. Charts that share an `alignKey` and sit side by side keep their grid lines on the same lines (see "Alignment groups" in create()).
+// The legend is the list of the series under the plot. The "Values" mode shows a table of Total, Min, Max, Mean and Last.
+// The engine keeps the mode as a preference. The legend is the same on every page.
+// A series can have `weights`, one per point: the calls behind an average, or the requests behind a rate.
+// Its Mean is then weighted. A chart whose values do not add up omits the Total (`legendColumns`).
+// Set `legendClick: "filter"` to make a click the host's job (`onLegendClick`: a filter), not a hide.
+// Charts that share an `alignKey` and sit side by side keep their grid lines on the same lines.
+// See "Alignment groups" in create().
 
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -43,8 +45,8 @@ const X_TICK_GAP = 22;
 const X_LABEL_GAP = 6;
 const X_CONTEXT_GAP = 10;
 const PAD_TOP = 10;
-// Labelled annotations (release markers) write their label in a gutter
-// above the plot, never over the data.
+// Labelled annotations (release markers) write their label in a gutter above the plot.
+// They never draw over the data.
 const ANNOTATION_GUTTER = 16;
 const PAD_RIGHT = 14;
 const TICK_LEN = 4;
@@ -53,8 +55,8 @@ const POINTS_AUTO_SPACING = 12;
 const MAX_CATEGORY_CHARS = 18;
 const LEGEND_STORE_KEY = storage.KEYS.chartLegend;
 
-// Work counters of every chart on the page (test and profiling hooks:
-// ns.chartCore.counters(), resetCounters()). Increments only.
+// Work counters of every chart on the page. They are test and profiling hooks.
+// Use ns.chartCore.counters() and resetCounters(). The counters only increase.
 const COUNTER_NAMES = ["setData", "draws", "drawMs", "layoutReads", "traces", "decimations", "tracedPoints",
   "extentScans", "stackBuilds", "legendBuilds", "legendUpdates", "allocBytes", "summarised", "textMeasures"];
 const counters = {};
@@ -70,7 +72,7 @@ function compactUnitFor(maxAbs) {
   return { factor: 1, suffix: "" };
 }
 
-// Decimals that write step exactly: 2.5 -> 1, 0.25 -> 2, 500 -> 0.
+// Decimals that write the step exactly: 2.5 -> 1, 0.25 -> 2, 500 -> 0.
 function decimalsFor(step) {
   const abs = Math.abs(step);
   if (!(abs > 0) || !Number.isFinite(abs)) return 0;
@@ -95,7 +97,7 @@ function formatTick(value, step, unit) {
   return `${/^-0(?:\.0*)?$/.test(out) ? "0" : out}${unit.suffix}`;
 }
 
-// Exact value: every digit JavaScript round-trips, grouped (12,345.678901).
+// Exact value. Every digit that JavaScript round-trips is shown, grouped (12,345.678901).
 function formatExact(value) {
   if (!Number.isFinite(value)) return "NULL";
   const abs = Math.abs(value);
@@ -106,7 +108,7 @@ function formatExact(value) {
   return `${neg ? "-" : ""}${groupThousands(whole)}${frac ? `.${frac}` : ""}`;
 }
 
-// Readable value: integers grouped, fractions to 12 significant digits.
+// Readable value. Integers are grouped. Fractions have 12 significant digits.
 function formatValue(value) {
   if (!Number.isFinite(value)) return "NULL";
   if (Number.isInteger(value)) return formatExact(value);
@@ -125,7 +127,7 @@ function niceStep(rawStep) {
   return (NICE_MULTIPLES.find((multiple) => normalized <= multiple) || 10) * magnitude;
 }
 
-// Round tick values inside [lo, hi] (the domain itself is not snapped).
+// Round the tick values inside [lo, hi]. The domain itself is not snapped.
 function linearTicks(lo, hi, targetCount, integer = false) {
   let step = niceStep((hi - lo) / Math.max(1, targetCount));
   if (integer) step = Math.max(1, Math.round(step));
@@ -165,7 +167,7 @@ function dateText(ms) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-// 2026-09-30 14:05:00.000; fractionDigits 6 adds the microseconds.
+// Example: 2026-09-30 14:05:00.000. A fractionDigits value of 6 adds the microseconds.
 function formatInstant(ms, fractionDigits = 3) {
   if (!Number.isFinite(ms)) return "\u2014";
   const whole = Math.floor(ms);
@@ -212,7 +214,7 @@ function subDayTicks(startMs, endMs, stepMs) {
     day.setDate(day.getDate() + 1);
     const next = day.getTime();
     if (stepMs >= HOUR_MS) {
-      // Wall-clock hours (00:00, 06:00, 12:00...), even on DST days.
+      // Wall-clock hours, such as 00:00, 06:00 and 12:00, even on DST days.
       const base = new Date(midnight);
       for (let hour = 0; hour < 24; hour += stepMs / HOUR_MS) {
         const t = new Date(base.getFullYear(), base.getMonth(), base.getDate(), hour).getTime();
@@ -272,10 +274,10 @@ const dayLabel = (ms) => {
   return `${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
 };
 
-// Calendar-aligned ticks, the smallest step whose labels keep apart, like
-// Grafana: { v, label, date, year }, the label and its context (date: the
-// day under clock times, year: the year under clock times, days and
-// months). layoutXLabels decides where the context line shows.
+// Calendar-aligned ticks. The function uses the smallest step whose labels stay apart, like Grafana.
+// Each tick is { v, label, date, year }: the label and its context.
+// The date is the day under clock times. The year is the year under clock times, days and months.
+// layoutXLabels decides where the context line shows.
 function timeTicks(startMs, endMs, plotWidthPx, measure) {
   const span = Math.max(1e-3, endMs - startMs);
   const width = Math.max(60, plotWidthPx);
@@ -305,16 +307,13 @@ function timeTicks(startMs, endMs, plotWidthPx, measure) {
   return [];
 }
 
-// The x labels to draw, left to right (pure: the tests run it on made-up
-// ticks). A tick label shows where it keeps X_LABEL_GAP px from the one
-// before (else it is skipped). Under it, on a second line, its context
-// ("Oct 3" under clock times, "2026" under days or months) shows on the
-// first label and where the context changes, the year only there and where
-// the year changes, like Grafana: "Oct 2 2026", then "Oct 3" at 00:00. A
-// context closer than X_CONTEXT_GAP px to the one shown before skips its
-// label too (no label reads under the previous date) and waits for the next
-// one, except that the first label's context, there only to date the axis,
-// gives way to the change.
+// The x labels to draw, from left to right. The function is pure: the tests run it on made-up ticks.
+// A tick label shows where it keeps X_LABEL_GAP px from the one before. Otherwise, the label is skipped.
+// Under each label, on a second line, its context shows: "Oct 3" under clock times, "2026" under days or months.
+// The first label shows its context. The context also shows where it changes, and the year shows only where the year changes.
+// For example: "Oct 2 2026", then "Oct 3" at 00:00.
+// A context that is closer than X_CONTEXT_GAP px to the context shown before is skipped too. No label reads under the previous date.
+// The function then waits for the next one. The exception: the first label's context only dates the axis, so it yields to the change.
 //   ticks [{ v, label, date, year }]; xOf(v) -> px; [lo, hi] the plot's px
 //   span; width the canvas width (labels stay inside it); measure(text) and
 //   measureContext(text) the widths at the label and the context fonts.
@@ -367,18 +366,17 @@ function contextText(date, year, shownYear) {
 
 // --- Aligned y axes ---------------------------------------------------------
 //
-// The y axis of a chart that has an `alignKey` (create(), "Alignment groups"): `intervals` equal steps (the plot height gives their number), a
-// domain of [0 or the minimum, that many steps] and a step from the sequence of the chart's kind. The step depends on the extent of the data and
-// on the number of intervals only, so charts of one group whose plots have one height have their grid lines at the same heights, whatever they
-// hold: only the numbers on the lines differ.
-//   number    1-2-2.5-5 x 10^n (niceStep); `whole` leaves out the steps that are not whole numbers, with 3 in place of 2.5 under 10 (a count
-//             of requests)
-//   bytes     the same, in the largest unit of 1024 that the data reaches (B, KB, MB, GB, TB); the steps of B are whole numbers
-//   duration  values in milliseconds: 1-2-2.5-5 x 10^n ms up to a second, then the clock (1, 2, 5, 10, 15, 30 s; the same in minutes; 1, 2, 3, 6, 12 h),
-//             then whole days; the unit of the ticks is the one of the step
-//   percent   values in percent: 1-2-2.5-5 x 10^n with a % suffix (0.25%, 1%, 25%...). A rate cannot pass 100: when the data does not, the domain
-//             stops at 100 (the four intervals of a plot of 156 px are 25 each; an interval count that no nice step divides 100 by gets steps of
-//             100 / intervals, written with at most one decimal)
+// The y axis of a chart that has an `alignKey` (create(), "Alignment groups") has `intervals` equal steps. The plot height gives their number.
+// The domain is [0 or the minimum, that many steps]. The step is taken from the sequence of the chart's kind.
+// The step depends on the extent of the data and on the number of intervals only.
+// Charts of one group whose plots have one height keep their grid lines at the same heights, whatever the data. Only the numbers on the lines differ.
+//   number    1-2-2.5-5 x 10^n (niceStep). `whole` omits the steps that are not whole numbers. Under 10, 3 replaces 2.5 (a count of requests).
+//   bytes     The same steps, in the largest unit of 1024 that the data reaches (B, KB, MB, GB, TB). The steps of B are whole numbers.
+//   duration  Values in milliseconds. 1-2-2.5-5 x 10^n ms up to a second. Then the clock steps (1, 2, 5, 10, 15, 30 s; the same in minutes; 1, 2, 3, 6, 12 h).
+//             Then whole days. The unit of the ticks is the unit of the step.
+//   percent   Values in percent. 1-2-2.5-5 x 10^n with a % suffix (0.25%, 1%, 25%...). A rate cannot pass 100.
+//             When the data does not pass 100, the domain stops at 100. For example, four intervals of a plot of 156 px are 25 each.
+//             When no nice step divides 100 by the interval count, the steps are 100 / intervals. They have at most one decimal.
 const CLOCK_STEPS_MS = [
   ...[1, 2, 5, 10, 15, 30].map((s) => s * SECOND_MS),
   ...[1, 2, 5, 10, 15, 30].map((m) => m * MINUTE_MS),
@@ -387,15 +385,15 @@ const CLOCK_STEPS_MS = [
 const BYTE_UNITS = [[1024 ** 4, " TB"], [1024 ** 3, " GB"], [1024 ** 2, " MB"], [1024, " KB"], [1, " B"]];
 const DURATION_UNITS = [[DAY_MS, " d"], [HOUR_MS, " h"], [MINUTE_MS, " min"], [SECOND_MS, " s"], [1, " ms"]];
 const PERCENT_UNIT = { factor: 1, suffix: "%" };
-// The most that a rate can be, in percent.
+// The highest value of a rate, in percent.
 const PERCENT_MAX = 100;
 const unitOfFactor = (list, value) => {
   const [factor, suffix] = list.find(([size]) => value >= size) || list[list.length - 1];
   return { factor, suffix };
 };
 
-// The 1-2-2.5-5 x 10^n steps that are at least `from`, smallest first. `whole`: the whole numbers among them, with 3 where the 2.5 of the units
-// is not one (a count has steps of 1, 2, 3, 5, 10, 20, 25, 50...).
+// The 1-2-2.5-5 x 10^n steps that are at least `from`, smallest first. `whole` keeps the whole numbers only.
+// It uses 3 where the 2.5 of the units is not a whole number. A count has steps of 1, 2, 3, 5, 10, 20, 25, 50...
 function* niceSteps(from, whole = false) {
   const start = from > 0 && Number.isFinite(from) ? from : 1;
   let magnitude = 10 ** Math.floor(Math.log10(start));
@@ -419,8 +417,9 @@ function* durationSteps(from, whole = false) {
   for (const days of niceSteps(Math.max(1, start / DAY_MS), true)) yield days * DAY_MS;
 }
 
-// The axis of the kind over [lo, hi] in `intervals` steps: { min, max, step, unit: { factor, suffix }, values }. The first step of the sequence for
-// which [lo rounded down to a step, + intervals steps] reaches hi; `unitOf(maxAbs)` gives the unit of a "number" axis (default: K, M, B, T).
+// The axis of the kind over [lo, hi] in `intervals` steps: { min, max, step, unit: { factor, suffix }, values }.
+// The function takes the first step of the sequence for which [lo rounded down to a step, + intervals steps] reaches hi.
+// `unitOf(maxAbs)` gives the unit of a "number" axis. The default is K, M, B, T.
 // `values` are the ticks, `min` to `max`.
 function alignedAxis(kind, lo, hi, intervals, { whole = false, unitOf = compactUnitFor } = {}) {
   const count = Math.max(1, Math.round(intervals));
@@ -444,8 +443,9 @@ function alignedAxis(kind, lo, hi, intervals, { whole = false, unitOf = compactU
   if (!found) found = { min: lo, step: (top - lo) / count };
   const { min } = found;
   let { step } = found;
-  // The ticks are `min + k * span`. A rate does not pass 100: when the data does not, the domain ends there, and the intervals are 100 / count
-  // each, which is not always a nice step (a plot of three intervals: 33.3, 66.7, 100). Such a step is rounded to three digits for the labels.
+  // The ticks are `min + k * span`. A rate does not pass 100. When the data does not pass 100, the domain ends at 100.
+  // Each interval is then 100 / count. This is not always a nice step. For example, a plot of three intervals has 33.3, 66.7 and 100.
+  // The code rounds such a step to three digits for the labels.
   let span = step;
   if (kind === "percent" && top <= PERCENT_MAX && min + count * step > PERCENT_MAX * (1 + 1e-9)) {
     span = (PERCENT_MAX - min) / count;
@@ -481,8 +481,9 @@ function parseColor(text) {
   return { r: 128, g: 128, b: 128, a: 1 };
 }
 
-// parseColor of many texts. From 5000 texts the parsing runs on src/wasm/color.c (ns.palette.batch.colorKernel, docs/wasm.md); a short
-// list, a missing kernel and the items it hands back use parseColor. force: use the kernel at any size (the tests).
+// parseColor of many texts. From 5000 texts, the parsing runs on src/wasm/color.c (ns.palette.batch.colorKernel, docs/wasm.md).
+// A short list and a missing kernel use parseColor. So does each item that the kernel hands back with a non-zero status.
+// force: use the kernel at any size (the tests).
 function parseColors(texts, force) {
   const list = Array.from(texts);
   const out = palette && palette.batch ? palette.batch.colorKernel("parseChart", { texts: list.map((text) => String(text || "")) }, list.length, force) : null;
@@ -490,7 +491,7 @@ function parseColors(texts, force) {
   return list.map((text, i) => (out.status[i] === 0 ? { r: out.nums[i * 4], g: out.nums[i * 4 + 1], b: out.nums[i * 4 + 2], a: out.nums[i * 4 + 3] } : parseColor(text)));
 }
 
-// rgba(c, alpha) of many colours (the same alpha for all), on the kernel from 5000 colours.
+// rgba(c, alpha) of many colors (the same alpha for all). The kernel does this work from 5000 colors.
 function rgbaBatch(colors, alpha = 1, force) {
   const list = Array.from(colors);
   let out = null;
@@ -515,7 +516,7 @@ const luminance = (c) => (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255;
 
 const live = new Set();
 const syncGroups = new Map();
-// Alignment groups: alignKey -> the charts that have it (each is { xScaleKey(), gutter(), settle(), setLegendMode(mode) }, see create()).
+// Alignment groups: each alignKey maps to the charts that have it. Each chart is { xScaleKey(), gutter(), settle(), setLegendMode(mode) }. See create().
 const alignGroups = new Map();
 let themeWatch = null;
 
@@ -526,7 +527,7 @@ function watchTheme() {
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   const media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   if (media && media.addEventListener) media.addEventListener("change", invalidate);
-  // Axis labels measured before a web font arrived used the fallback face.
+  // Axis labels that were measured before a web font loaded use the fallback face.
   if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener("loadingdone", invalidate);
   themeWatch = { observer, media, invalidate };
 }
@@ -556,13 +557,11 @@ function alignGutter(group, key) {
 
 // --- Block summaries of long series --------------------------------------------
 //
-// A series of BLOCK_MIN_POINTS values or more is summarised per BLOCK
-// points: min, max, sum and count of its finite values, and whether all of
-// them are finite. A summary grows with the series when rows are only
-// appended (setData({ append: true })): the blocks already summed stay.
-// Extents, decimation and the legend values read whole blocks where a
-// range covers them, so a draw costs O(n / BLOCK + columns * BLOCK)
-// instead of O(n).
+// A series with BLOCK_MIN_POINTS values or more is summarised per BLOCK points.
+// The summary holds the min, max, sum and count of the finite values. It also says whether all values are finite.
+// A summary grows with the series when rows are only appended (setData({ append: true })). The blocks already summed stay.
+// Extents, decimation and the legend values read whole blocks where a range covers them.
+// So, a draw costs O(n / BLOCK + columns * BLOCK) instead of O(n).
 const BLOCK = 64;
 const BLOCK_SHIFT = 6;
 const BLOCK_MIN_POINTS = 1 << 14;
@@ -571,7 +570,7 @@ function newSummary() {
   return { values: null, n: 0, mins: new Float64Array(0), maxs: new Float64Array(0), sums: new Float64Array(0), counts: new Uint32Array(0), clean: new Uint8Array(0) };
 }
 
-// Summarise values[from block of sum.n .. n): the last, partial block is summed again.
+// Summarise the values from block sum.n to n. The last, partial block is summed again.
 function extendSummary(sum, values, n) {
   const blocks = (n + BLOCK - 1) >> BLOCK_SHIFT;
   if (sum.mins.length < blocks) {
@@ -641,7 +640,7 @@ function summaryRange(sum, values, v0, v1) {
   return { min, max, total, count };
 }
 
-// util.escapeHtml is the one escaper; null prints as "".
+// util.escapeHtml is the only escaper. null prints as "".
 const esc = (value) => util.escapeHtml(value == null ? "" : value);
 
 const legendPref = () => storage.pref(LEGEND_STORE_KEY, "list", { allowed: ["list", "table"] });
@@ -656,9 +655,9 @@ function storeLegendMode(mode) {
 
 // --- Gap bridging (Metrics) --------------------------------------------------
 
-// A series reported less often than the bucket has regular empty buckets:
-// NaN gaps up to `factor` times its median spacing are bridged, longer ones
-// (missing data) break the line. Returns the `nulls` flags of the series.
+// A series that reports less often than the bucket has regular empty buckets.
+// NaN gaps up to `factor` times its median spacing are bridged. Longer gaps (missing data) break the line.
+// The function returns the `nulls` flags of the series.
 function bridgeGaps(values, factor = 2) {
   const n = values.length;
   const nulls = new Uint8Array(n);
@@ -684,8 +683,8 @@ function bridgeGaps(values, factor = 2) {
 
 const instances = new WeakMap(); // chart root -> api
 
-// 1-2-5 ticks per decade inside [lo, hi] (lo > 0); only the powers of ten
-// past 7 ticks, and linear ticks when the range spans less than 8x.
+// The function makes 1-2-5 ticks per decade inside [lo, hi]. lo must be above 0.
+// It keeps only the powers of ten when there are more than 7 ticks. It makes linear ticks when the range spans less than 8x.
 function logTicks(lo, hi) {
   if (!(lo > 0) || !(hi > lo)) return [];
   if (hi / lo < 8) return linearTicks(lo, hi, 4).values.filter((v) => v > 0);
@@ -701,9 +700,9 @@ function logTicks(lo, hi) {
 
 // --- Chart ------------------------------------------------------------------
 
-// The step of an ascending time axis whose points sit on one regular spacing (a row per hour): the median
-// spacing, taken when at least half of the spacings equal it (within 1 %); 0 for an irregular axis (event times,
-// months) and for fewer than 4 points.
+// The step of an ascending time axis whose points sit on one regular spacing, such as a row per hour.
+// The step is the median spacing. The function takes it when at least half of the spacings equal it, within 1 %.
+// It returns 0 for an irregular axis, such as event times or months, and for fewer than 4 points.
 function regularStep(xs) {
   const n = xs ? xs.length : 0;
   if (n < 4) return 0;
@@ -742,9 +741,9 @@ function create(host, initial = {}) {
       <div class="chartCore__legend" role="group" aria-label="Series"></div>`;
   host.appendChild(root);
   const plotEl = $(".chartCore__plot", root);
-  // The plot's width as the resize observer reports it (its content box,
-  // floored): clientWidth rounds, so a 523.5 px plot drawn at clientWidth
-  // (524) would be redrawn at 523 as soon as the observer reports it.
+  // The plot width is the width that the resize observer reports. It is the content box, floored.
+  // clientWidth rounds the width. A 523.5 px plot drawn at clientWidth (524) is redrawn at 523 px.
+  // The engine redraws it at 523 px as soon as the observer reports the width.
   const plotWidth = () => { counters.layoutReads++; return Math.floor(plotEl.getBoundingClientRect().width); };
   const baseCanvas = $("canvas", root);
   const overCanvas = $(".chartCore__overlay", root);
@@ -801,30 +800,32 @@ function create(host, initial = {}) {
   let tooltipKey = "";
   let tooltipSize = { w: 0, h: 0 };
   let stats = { points: 0, series: 0, ms: 0 };
-  // Line series of the last draw that marked each value (few values).
+  // Line series of the last draw that marked each value. This applies to few values.
   let markedSeries = 0;
-  // Series drawn with the light wash under their line (stats().washed).
+  // Series drawn with the light wash under their line. See stats().washed.
   let washedSeries = 0;
   let observedWidth = 0;
   let widthObserved = false;
   let refreshCursor = false;
-  // The alignment group of the chart (set when it is made, see "Alignment groups" below) and the y axis of its visible range, kept until the
-  // data, the zoom, the hidden series or the theme change (axisStamp): the charts of a group ask each other for it, so it is worked out once.
+  // The alignment group of the chart is set when the chart is made. See "Alignment groups" below.
+  // The y axis of the visible range is kept until the data, the zoom, the hidden series or the theme changes (axisStamp).
+  // The charts of a group ask each other for this axis. So, the engine works it out once.
   const alignKey = String(initial.alignKey || "");
   let axisStamp = 1;
   let axisCache = null;
 
   // --- Alignment groups -------------------------------------------------------
   //
-  // Charts that are made with the same `alignKey` (and are drawn side by side or one under the other) are read together:
-  //   - their y axes have the same number of intervals (it comes from the height of the plot) and end on a step of their kind, so their grid
-  //     lines sit at the same heights and only the scale differs (yKind, yInteger: alignedAxis, and yAxisOf below);
-  //   - those that share an x scale (the same kind, the same domain, the same plot width) have one gutter at the left of the plot, the widest
-  //     of their y labels, so their vertical grid lines sit at the same x;
-  //   - they share the mode of their legend (list or table).
-  // It is worked out in one pass and never fed back: the steps come from the data and the plot's height, the labels from the steps, the gutter from
-  // the labels, the x ticks from the plot that is left. Nothing reads the layout but the resize observer and the data: a chart that changes tells the
-  // others of its group, which draw again only when their gutter is not the one they drew with.
+  // Charts that have the same `alignKey` are read together. They are drawn side by side or one under the other.
+  //   - Their y axes have the same number of intervals. The plot height gives this number. The axes end on a step of their kind.
+  //     So, their grid lines sit at the same heights. Only the scale differs (yKind, yInteger: alignedAxis, and yAxisOf below).
+  //   - Charts that share an x scale have the same kind, the same domain and the same plot width.
+  //     They have one gutter at the left of the plot: the widest of their y labels. So, their vertical grid lines sit at the same x.
+  //   - They share the mode of their legend (list or table).
+  // The engine works out the layout in one pass, and it never feeds the result back.
+  // The steps are taken from the data and the plot height. The labels are taken from the steps. The gutter is taken from the labels.
+  // The x ticks are taken from the plot that is left. Only the resize observer and the data read the layout.
+  // A chart that changes tells the other charts of its group. Those charts draw again only when their gutter differs from the one they drew with.
   const member = alignKey ? {
     xScaleKey: () => xScaleKey(axisNow().view, knownWidth()),
     gutter: () => ownGutter(axisNow().axis),
@@ -836,14 +837,15 @@ function create(host, initial = {}) {
     setLegendMode: (mode) => setLegendMode(mode),
   } : null;
 
-  // The width of the plot as the chart last saw it: the resize observer's, or its own measure (each draw takes one until the observer has spoken).
-  // The other charts of a group compare it, so a chart that nobody measured yet is measured now, once.
+  // The width of the plot as the chart last saw it. This is the width of the resize observer, or the chart's own measure.
+  // Each draw takes its own measure until the observer reports a width.
+  // The other charts of a group compare this width. A chart that nobody measured yet is measured now, once.
   function knownWidth() {
     if (!widthObserved && !observedWidth) observedWidth = plotWidth();
     return observedWidth;
   }
 
-  // The charts of the group read their gutter again after this one drew or left: one whose gutter changed draws again.
+  // The charts of the group read their gutter again after this chart draws or leaves. A chart whose gutter changed draws again.
   function settleGroup() {
     const group = alignKey ? alignGroups.get(alignKey) : null;
     if (group) for (const other of group) if (other !== member) other.settle();
@@ -865,8 +867,8 @@ function create(host, initial = {}) {
 
   function readTheme() {
     const style = getComputedStyle(root);
-    // Forced colors (Windows high contrast): the axes, labels and grid take the system palette; the series
-    // keep their colours (the probe is excluded from the forcing).
+    // Forced colors (Windows high contrast): the axes, labels and grid take the system palette.
+    // The series keep their colors. The probe is excluded from the forcing.
     const forced = typeof window.matchMedia === "function" && window.matchMedia("(forced-colors: active)").matches;
     const text = color(forced ? "CanvasText" : "var(--text)");
     const muted = color(forced ? "GrayText" : "var(--muted)");
@@ -874,7 +876,7 @@ function create(host, initial = {}) {
     const dark = luminance(panel) < 0.5;
     const family = style.fontFamily || "system-ui, sans-serif";
     const seriesColors = new Map();
-    // Many series (Metrics): the colours are read from the page, then parsed in one batch.
+    // Many series (Metrics): the engine reads the colors from the page, then parses them in one batch.
     const parsed = parseColors(opts.series.map((s) => computedColor(s.color || "var(--qchart-1)")));
     opts.series.forEach((s, i) => seriesColors.set(s.id, parsed[i]));
     return {
@@ -884,8 +886,8 @@ function create(host, initial = {}) {
       panel,
       font: `500 ${FONT_SIZE}px ${family}`,
       fontBold: `600 ${FONT_SIZE}px ${family}`,
-      // Grafana: hairline grids at 9% of the text colour (the theme's
-      // tokens, no colour of its own).
+      // Grafana: hairline grids at 9% of the text color. The grid uses the theme tokens.
+      // The grid has no color of its own.
       grid: rgba(text, forced ? 0.3 : 0.09),
       axis: rgba(muted, 0.55),
       label: rgba(muted, 1),
@@ -903,8 +905,8 @@ function create(host, initial = {}) {
   const visibleSeries = () => opts.series.filter((s) => !hidden.has(s.id));
   const isStacked = () => opts.stack && (opts.type === "area" || opts.type === "bar");
 
-  // Cumulative tops / bases of the visible series (NULL counts as 0). Bars
-  // stack positive values up and negative ones down; areas just add up.
+  // Cumulative tops and bases of the visible series. NULL counts as 0.
+  // Bars stack positive values up and negative values down. Areas only add up.
   function computeStacks() {
     if (!isStacked()) { stacks = null; return; }
     counters.stackBuilds++;
@@ -983,8 +985,8 @@ function create(host, initial = {}) {
 
   // --- layout ----------------------------------------------------------------
 
-  // Label widths at the axis font (and the bold of the date line), cached:
-  // tick labels repeat on redraws, so a draw measures only new texts.
+  // Label widths at the axis font, and at the bold font of the date line. The engine caches them.
+  // Tick labels repeat on redraws. So, a draw measures only new texts.
   const widths = new Map();
   const boldWidths = new Map();
   function measureIn(cache, font, text) {
@@ -1001,9 +1003,9 @@ function create(host, initial = {}) {
   const measure = (text) => measureIn(widths, theme.font, text);
   const measureBold = (text) => measureIn(boldWidths, theme.fontBold, text);
 
-  // Block summaries of the long series, by series id (see extendSummary).
-  // setData({ append: true }) lets each one grow with its series; any
-  // other setData starts them again on their next use.
+  // Block summaries of the long series, by series id. See extendSummary.
+  // setData({ append: true }) lets each summary grow with its series.
+  // Any other setData call starts the summaries again on their next use.
   const summaries = new Map();
   function summaryOf(s) {
     const values = s.values;
@@ -1019,8 +1021,8 @@ function create(host, initial = {}) {
     return extendSummary(sum, values, n);
   }
 
-  // Min / max of a value array over [v0, v1), kept while the array and the
-  // range stay the same (redraws on hover-free changes, resizes, themes).
+  // Min and max of a value array over [v0, v1). The engine keeps them while the array and the range stay the same.
+  // Redraws on hover-free changes, resizes and theme changes use the kept values.
   const extents = new WeakMap();
   function extent(a, v0, v1) {
     const cached = extents.get(a);
@@ -1037,8 +1039,8 @@ function create(host, initial = {}) {
     return out;
   }
 
-  // The visible range: the x domain (the zoom, or the whole one) and the indexes of its points (one beyond each edge for a line, so that it
-  // leaves the plot).
+  // The visible range is the x domain: the zoom, or the whole domain. It also gives the indexes of its points.
+  // A line has one point beyond each edge, so that the line leaves the plot.
   function viewOf() {
     const xs = opts.xs;
     const n = xs.length;
@@ -1052,9 +1054,11 @@ function create(host, initial = {}) {
     return { xLo, xHi, i0, i1, v0, v1 };
   }
 
-  // The y axis of a visible range: its domain, its ticks with their labels, and the width of the widest label. It reads the data, the height of the
-  // plot and the font, never the width of the chart, so the charts of an alignment group can ask each other for it. A chart that has an `alignKey`
-  // takes its step from the sequence of its kind and ends its domain on a step (alignedAxis); the others pad their range and keep the ticks inside it.
+  // The y axis of a visible range has a domain, ticks with their labels, and the width of the widest label.
+  // It reads the data, the height of the plot and the font. It never reads the width of the chart.
+  // So, the charts of an alignment group can ask each other for this axis.
+  // A chart with an `alignKey` takes its step from the sequence of its kind. It ends its domain on a step (alignedAxis).
+  // The other charts pad their range and keep the ticks inside it.
   function yAxisOf(view) {
     const { xLo, xHi, v0, v1 } = view;
     // Y domain over the visible points.
@@ -1080,7 +1084,7 @@ function create(host, initial = {}) {
     const bottom = xTwoLines ? 34 : 22;
     const padTop = PAD_TOP + ((opts.annotations || []).some((m) => m && m.label) ? ANNOTATION_GUTTER : 0);
     const plotH = Math.max(40, opts.height - padTop - bottom);
-    // A fixed edge (yBounds), a log scale and a yAxis hook keep their own axis: they cannot end on a step.
+    // A fixed edge (yBounds), a log scale and a yAxis hook keep their own axis. They cannot end on a step.
     const aligned = !!alignKey && opts.yScale !== "log" && typeof opts.yAxis !== "function" && !Array.isArray(opts.yBounds);
     const pinned = isStacked() || opts.type === "bar";
     if (pinned) { yMin = Math.min(0, yMin); yMax = Math.max(0, yMax); }
@@ -1091,14 +1095,13 @@ function create(host, initial = {}) {
       yMin -= pad; yMax += pad;
     } else if (!aligned) {
       const pad = (yMax - yMin) * 0.06;
-      // yHeadroom: more room above the largest value (a sparse series'
-      // dots never sit on the plot's top edge).
+      // yHeadroom: more room above the largest value. Dots of a sparse series never sit on the top edge of the plot.
       const head = opts.yHeadroom > 0 ? (yMax - yMin) * opts.yHeadroom : pad;
       if (yMax !== 0 || !pinned) yMax += head;
       if (yMin !== 0) yMin -= pad;
     }
 
-    // yBounds [min, max]: a fixed edge (null: the data's own); a pair that does not leave a range is ignored.
+    // yBounds [min, max]: a fixed edge. null uses the edge of the data. A pair that leaves no range is ignored.
     if (Array.isArray(opts.yBounds)) {
       const lo = Number.isFinite(opts.yBounds[0]) ? opts.yBounds[0] : yMin;
       const hi = Number.isFinite(opts.yBounds[1]) ? opts.yBounds[1] : yMax;
@@ -1107,7 +1110,7 @@ function create(host, initial = {}) {
 
     let yAx;
     if (aligned) {
-      // The number of intervals comes from the height of the plot, so every chart of a group whose plots are as high has the same.
+      // The plot height gives the number of intervals. So, every chart of a group whose plots are as high has the same number.
       const ax = alignedAxis(opts.yKind, yMin, yMax, Math.min(Y_MAX_INTERVALS, Math.max(2, Math.floor(plotH / Y_TICK_SPACE))), { whole: opts.yInteger === true, unitOf: yUnitFor });
       yAx = { min: ax.min, max: ax.max, step: ax.step, ticks: ax.values.map((v) => ({ v, label: yTickLabel(v, ax.step, ax.unit) })) };
     } else yAx = customYAxis(dataMin, dataMax, plotH);
@@ -1120,8 +1123,8 @@ function create(host, initial = {}) {
     return { yMin, yMax, plotH, padTop, bottom, ticks: yt, labels: yLabels, labelW };
   }
 
-  // The visible range and its y axis, kept while nothing that they read has changed (axisStamp): a draw and the charts of the group that ask
-  // for the gutter share one computation.
+  // The visible range and its y axis are kept while nothing that they read changes (axisStamp).
+  // A draw and the charts of the group that ask for the gutter share one computation.
   function axisNow() {
     if (axisCache && axisCache.stamp === axisStamp) return axisCache;
     if (!theme) theme = readTheme();
@@ -1131,8 +1134,8 @@ function create(host, initial = {}) {
     return axisCache;
   }
 
-  // The gutter at the left of the plot (px): room for the widest y label, and for a chart of an alignment group the widest of the charts that
-  // share its x scale (alignGutter), so their vertical grid lines are at the same x.
+  // The gutter at the left of the plot (px) has room for the widest y label.
+  // A chart of an alignment group uses the widest of the charts that share its x scale (alignGutter). So, their vertical grid lines sit at the same x.
   const ownGutter = (axis) => Math.ceil(Math.max(24, axis.labelW) + 12);
   const xScaleKey = (view, width) => `${opts.xKind}|${view.xLo}|${view.xHi}|${width}`;
   function gutterFor(axis, view, width) {
@@ -1204,16 +1207,16 @@ function create(host, initial = {}) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  // Snap a css coordinate to the device pixel grid so 1px lines stay crisp.
+  // Snap a CSS coordinate to the device pixel grid. So, 1px lines stay crisp.
   const crisp = (v) => (Math.round(v * dpr) + 0.5) / dpr;
 
-  // measure: a draw asked for now (flush) measures the plot when the
-  // resize observer last saw it hidden (it may just have been shown).
+  // measure: a draw that is asked for now (flush) measures the plot.
+  // It does this when the resize observer last saw the plot hidden. The plot may just have been shown.
   function draw(measure = false) {
     drawRaf = 0;
     if (destroyed) return;
-    // The width the resize observer saw last: measuring would force a
-    // layout per chart (several charts redraw in one frame).
+    // The width that the resize observer saw last. A measure forces a layout for each chart.
+    // Several charts redraw in one frame.
     const width = widthObserved && !(measure && !observedWidth) ? observedWidth : (observedWidth = plotWidth());
     if (!width) { pendingDraw = true; return; } // hidden: the resize observer draws on show
     pendingDraw = false;
@@ -1279,11 +1282,11 @@ function create(host, initial = {}) {
     root.dataset.zoomed = String(!!zoom);
     root.dataset.drawMs = stats.ms.toFixed(2);
     root.dataset.type = opts.type;
-    // Test and debugging hooks: what each series drew and where the plot is.
+    // Test and debug hooks. They show what each series drew and where the plot is.
     root.dataset.seriesStats = JSON.stringify(stats.perSeries);
     root.dataset.draws = String((Number(root.dataset.draws) || 0) + 1);
     root.dataset.plot = `${L.left} ${L.top} ${L.plotW} ${L.plotH}`;
-    // The y step and the number of its intervals: the charts of an alignment group have the same number.
+    // The y step and the number of its intervals. The charts of an alignment group have the same number.
     root.dataset.yStep = String(L.yStep);
     if (alignKey) root.dataset.align = alignKey;
     if (typeof opts.onDraw === "function") opts.onDraw({ ...stats, xLo: L.xLo, xHi: L.xHi, zoomed: !!zoom });
@@ -1345,9 +1348,9 @@ function create(host, initial = {}) {
     return highlight && highlight !== s.id ? 0.18 : 1;
   }
 
-  // Vertices of the series being drawn, reused across series and draws:
-  // vx / vy the line, vb the stack base under it, runs the index where each
-  // unbroken run starts (lines break at NULLs).
+  // Vertices of the series that is drawn. The engine reuses them across series and draws:
+  // vx and vy are the line. vb is the stack base under it. runs gives the index where each
+  // unbroken run starts. Lines break at NULLs.
   let vx = new Float64Array(4096), vy = new Float64Array(4096), vb = new Float64Array(4096);
   let vCount = 0;
   let decimated = false;
@@ -1361,10 +1364,10 @@ function create(host, initial = {}) {
     vCount++;
   }
 
-  // A time axis whose points sit on one regular step (a row per hour) with rows missing: a gap wider than
-  // GAP_FACTOR steps breaks the line, so a stop of the data does not read as a trend (the same break as a NULL).
-  // Infinity (no break) for the other axes, bars, a series of few points, an irregular spacing (event times,
-  // months) and opts.connectGaps. The step is the median spacing, taken when most spacings equal it.
+  // A time axis has one regular step, such as a row per hour. Rows can be missing.
+  // A gap wider than GAP_FACTOR steps breaks the line. So, a stop of the data does not read as a trend. This is the same break as a NULL.
+  // The break is Infinity (no break) for the other axes, bars, a series of few points, and an irregular spacing (event times, months).
+  // It is also Infinity when opts.connectGaps is set. The step is the median spacing. The engine takes it when most spacings equal it.
   const GAP_FACTOR = 1.5;
   let gapCache = { xs: null, n: -1, limit: Infinity, count: 0 };
   function gapInfo() {
@@ -1382,19 +1385,17 @@ function create(host, initial = {}) {
     gapCache = { xs, n, limit, count };
     return gapCache;
   }
-  // The step times 1.5 when the line has gaps to break at, else Infinity (the block summaries stay in use).
+  // The step times 1.5 when the line has gaps to break at. Otherwise it is Infinity, and the block summaries stay in use.
   const gapLimit = () => {
     if (opts.connectGaps) return Infinity;
     const info = gapInfo();
     return info.count ? info.limit : Infinity;
   };
 
-  // One line through the visible points, as vertices. Past two points per
-  // device-pixel column, each column keeps its first, lowest, highest and
-  // last value (one vertical stroke; base: false) so every peak survives at
-  // any zoom, or its highest point and the matching base (base: an array,
-  // for stacked areas): drawing costs O(points) arithmetic but only O(width)
-  // canvas calls.
+  // One line goes through the visible points, as vertices. When there are more than two points per
+  // device-pixel column, each column keeps its first, lowest, highest and last value. This makes one vertical stroke (base: false).
+  // So every peak survives at any zoom. Otherwise, the column keeps its highest point and the matching base (base: an array, for stacked areas).
+  // A draw costs O(points) arithmetic, but only O(width) canvas calls.
   function trace(L, ys, nulls, base, sum = null) {
     const xs = opts.xs;
     const { i0, i1, left, plotW, kx, ky, xLo, yMin } = L;
@@ -1465,10 +1466,10 @@ function create(host, initial = {}) {
     flush();
   }
 
-  // A dense line: one entry per device-pixel column (colCount of them),
-  // its centre (css px), its first and last value and its extent
-  // (highest and lowest value, and the step from the previous column), in
-  // plot px; colBrk marks a column after a NULL break (or the first).
+  // A dense line has one entry per device-pixel column (colCount of them).
+  // An entry holds its centre (css px), its first and last value, and its extent.
+  // The extent is the highest and lowest value, and the step from the previous column. Values are in plot px.
+  // colBrk marks a column after a NULL break, or the first column.
   let colCount = 0;
   let colX = new Float64Array(2048), colFy = new Float64Array(2048), colLy = new Float64Array(2048);
   let colTop = new Float64Array(2048), colBot = new Float64Array(2048), colDev = new Float64Array(2048);
@@ -1488,9 +1489,9 @@ function create(host, initial = {}) {
     colBrk[k] = brk ? 1 : 0;
   }
 
-  // Per-column first / lowest / highest / last value of the visible points.
-  // With a block summary (sum), a whole block of finite values that falls in
-  // one column is read from the summary: O(n / BLOCK + columns * BLOCK).
+  // Per-column first, lowest, highest and last value of the visible points.
+  // With a block summary (sum), a whole block of finite values that falls in one column is read from the summary.
+  // The cost is O(n / BLOCK + columns * BLOCK).
   function traceColumns(L, ys, nulls, sum) {
     const xs = opts.xs;
     const { i0, i1, left, plotW, kx, ky, xLo, yMin } = L;
@@ -1499,7 +1500,7 @@ function create(host, initial = {}) {
     const breakAll = !nulls;
     const gl = category ? Infinity : gapLimit();
     const xDev = (i) => Math.floor((left + ((category ? i : xs[i]) - xLo) * kx) * dpr);
-    // A block summary knows nothing of the gaps between its points: a series with gaps is read point by point.
+    // A block summary does not know the gaps between its points. A series with gaps is read point by point.
     const useBlocks = !!sum && gl === Infinity && i1 - i0 > plotW * dpr * BLOCK * 2;
     colCount = 0;
     let col = -Infinity, fy = 0, lo = 0, hi = 0, ly = 0;
@@ -1566,17 +1567,17 @@ function create(host, initial = {}) {
     counters.tracedPoints += read;
   }
 
-  // A column taller than this (css px) is drawn as a rect, flatter ones
-  // as a stroked line through their first and last value.
+  // The engine draws a column taller than this (css px) as a rect.
+  // It draws flatter columns as a stroked line through their first and last value.
   const TALL_PX = 2;
   const isTall = (k) => colBot[k] - colTop[k] > TALL_PX || (colBrk[k] === 1 && (k + 1 === colCount || colBrk[k + 1] === 1));
 
-  // A dense line, from traceColumns(): each tall column is one filled,
-  // pixel-aligned rect from its highest to its lowest value (and the step
-  // from the previous column); runs of flat columns are one stroked line.
-  // A stroke through every column's first / low / high / last value (a
-  // zigzag of thousands of tall segments) took 100 ms and more to
-  // rasterise per frame; the rects need no antialiasing pass.
+  // A dense line is made by traceColumns(). Each tall column is one filled,
+  // pixel-aligned rect. It runs from the highest to the lowest value, and the step
+  // from the previous column. Runs of flat columns are one stroked line.
+  // A stroke through every column's first, low, high and last value makes a
+  // zigzag of thousands of tall segments. That took 100 ms and more to
+  // rasterise per frame. The rects need no antialiasing pass.
   function drawColumns(ctx, L, s, c, alpha, wash) {
     const n = colCount;
     const lw = lineW(1.5);
@@ -1603,8 +1604,8 @@ function create(host, initial = {}) {
     const color = rgba(c, alpha);
     ctx.fillStyle = color;
     let rects = 0;
-    // A rect is the line width wide (in device pixels), cut short where
-    // the next column's rect starts (no double blending when dimmed).
+    // A rect is as wide as the line width (in device pixels). It is cut short where
+    // the next column's rect starts. This stops double blending when the series is dimmed.
     const wide = Math.max(1, Math.round(lw * dpr));
     for (let k = 0; k < n; k++) {
       if (!isTall(k)) continue;
@@ -1641,15 +1642,15 @@ function create(host, initial = {}) {
 
   const runEnd = (r) => (r + 1 < runs.length ? runs[r + 1] : vCount);
 
-  // Line interpolation (opts.interpolation): "linear" (the default), "smooth" (a monotone cubic: no
-  // overshoot past the data), "stepBefore" (the value of a point holds back to the previous one) and
-  // "stepAfter" (it holds on to the next one).
+  // Line interpolation (opts.interpolation): "linear" (the default), "smooth" (a monotone cubic with no
+  // overshoot past the data), "stepBefore" (the value of a point applies back to the previous one), and
+  // "stepAfter" (the value of a point applies until the next one).
   const interpolation = () => (opts.interpolation === "smooth" || opts.interpolation === "stepBefore" || opts.interpolation === "stepAfter" ? opts.interpolation : "linear");
   let secants = new Float64Array(0);
   let tangents = new Float64Array(0);
 
-  // The vertices a..b-1 of X / Y added to the path, forward or backward (an area's base comes back). `join`: the
-  // pen is already where the first one is; otherwise it moves there.
+  // The engine adds the vertices a to b-1 of X and Y to the path, forward or backward. An area's base comes back this way.
+  // With `join`, the pen is already where the first vertex is. Otherwise, the pen moves there.
   function runTo(ctx, X, Y, a, b, back, join) {
     const first = back ? b - 1 : a;
     if (join) ctx.lineTo(X[first], Y[first]); else ctx.moveTo(X[first], Y[first]);
@@ -1667,7 +1668,7 @@ function create(host, initial = {}) {
     }
   }
 
-  // Fritsch-Butland tangents: the curve keeps the direction of the data, so it never swings past a value.
+  // Fritsch-Butland tangents keep the direction of the data. So, the curve never swings past a value.
   function smoothRun(ctx, X, Y, a, b, back) {
     const n = b - a;
     if (secants.length < n) { secants = new Float64Array(Math.max(n, 2 * secants.length)); tangents = new Float64Array(secants.length); }
@@ -1699,7 +1700,7 @@ function create(host, initial = {}) {
     for (let r = 0; r < runs.length; r++) runTo(ctx, vx, vy, runs[r], runEnd(r), false, false);
   }
 
-  // Closed shapes between the line and its base (an array, or one y).
+  // Closed shapes between the line and its base. The base is an array, or one y.
   function pathFill(ctx, baseY) {
     ctx.beginPath();
     for (let r = 0; r < runs.length; r++) {
@@ -1712,11 +1713,11 @@ function create(host, initial = {}) {
     }
   }
 
-  // The width of a line: opts.lineWidth, else the mark's own.
+  // The width of a line is opts.lineWidth. Otherwise, it is the width of the mark.
   const lineW = (own) => (opts.lineWidth > 0 ? opts.lineWidth : own);
 
-  // The fill under a line: opts.fillOpacity (0..1) on every line; unset, a light wash under a lone
-  // series ("auto"), and 0.3 under each line of an area that is not stacked.
+  // The fill under a line: opts.fillOpacity (0..1) applies to every line.
+  // When it is unset, a lone series ("auto") gets a light wash. Each line of an area that is not stacked gets 0.3.
   function washOf(unstackedArea) {
     if (Number.isFinite(opts.fillOpacity)) return opts.fillOpacity;
     if (unstackedArea) return 0.3;
@@ -1738,7 +1739,7 @@ function create(host, initial = {}) {
     const nulls = s.nulls || null;
     const st = stacks && stacks.get(s.id);
     if (type === "area" && st) {
-      // Fill between this series' top and its base, then stroke the top.
+      // Fill between the top and the base of this series. Then stroke the top.
       trace(L, st.top, null, st.base);
       pathFill(ctx, null);
       ctx.fillStyle = rgba(c, (Number.isFinite(opts.fillOpacity) ? opts.fillOpacity : 0.3) * alpha);
@@ -1753,8 +1754,8 @@ function create(host, initial = {}) {
     // An area that is not stacked: each series is a line with its own fill.
     const unstackedArea = type === "area";
     if (unstackedArea) type = "line";
-    // A line of few values (few rows, or a sparse series between gaps)
-    // marks each of them (opts.showPoints: "always" marks all, "never" none).
+    // A line with few values (few rows, or a sparse series between gaps) marks each value.
+    // opts.showPoints controls this. "always" marks all values. "never" marks none.
     const maxPoints = L.plotW / POINTS_AUTO_SPACING;
     let count = 0;
     if (type === "line") for (let i = L.v0; i < L.v1 && count <= maxPoints; i++) if (s.values[i] === s.values[i]) count++;
@@ -1779,8 +1780,8 @@ function create(host, initial = {}) {
       pathLine(ctx);
       ctx.strokeStyle = rgba(c, alpha);
       ctx.lineWidth = lineW(1.5);
-      // Round joins only where angles show: a decimated line is mostly
-      // vertical strokes, which rasterise much cheaper with bevels.
+      // Use round joins only where angles show. A decimated line is mostly
+      // vertical strokes. These rasterise much cheaper with bevels.
       ctx.lineJoin = decimated ? "bevel" : "round";
       ctx.lineCap = decimated ? "butt" : "round";
       strokeDashed(ctx, s);
@@ -1819,7 +1820,7 @@ function create(host, initial = {}) {
     return drawn;
   }
 
-  // Bars centred on x; groups side by side, a group's series stacked.
+  // Bars are centred on x. Groups are side by side, and the series of a group are stacked.
   // Past one bar per 3px, each slot keeps its tallest stack. Bars are 78 %
   // opaque, with a 1 px gap between neighbours.
   const BAR_ALPHA = 0.78;
@@ -1861,7 +1862,7 @@ function create(host, initial = {}) {
       if (best >= 0) picks.push(best);
       slotPx = Math.min(slotPx, bucketW);
     }
-    // Neighbouring bars keep a 1 px gap at least, however dense.
+    // Adjacent bars keep a 1 px gap at least, however dense.
     const barW = Math.max(1, Math.min(opts.xKind === "category" ? 64 : 56, slotPx * barRatio(), slotPx >= 2 ? slotPx - BAR_GAP_PX : slotPx));
     const clusterW = barW / groups.length;
     const drawW = groups.length > 1 ? Math.max(1, clusterW - Math.min(2, clusterW * 0.15)) : barW;
@@ -1907,9 +1908,9 @@ function create(host, initial = {}) {
     return x - xs[i - 1] <= xs[i] - x ? i - 1 : i;
   }
 
-  // The x readout (tooltip title, x badge). A time axis of buckets
-  // (bucketMs) reads the bucket's range (ns.format.range: one format for
-  // every chart); bucketAlign "center" when xs are bucket middles.
+  // The x readout is the tooltip title and the x badge. A time axis of buckets
+  // (bucketMs) reads the range of the bucket (ns.format.range). This is one format for every chart.
+  // bucketAlign "center" applies when xs are bucket middles.
   function xReadout(i) {
     if (typeof opts.xReadout === "function") return opts.xReadout(i);
     if (opts.xKind === "category") return String(opts.categories[i] ?? "");
@@ -1927,18 +1928,16 @@ function create(host, initial = {}) {
     overlayFrame();
   }
 
-  // The cursor is DOM, like uPlot's: dashed lines, series points and the
-  // axis readouts move with compositor-only transforms, so hovering never
-  // repaints (or uploads) a canvas, whatever the devicePixelRatio.
+  // The cursor is DOM, like uPlot's. Dashed lines, series points and the axis readouts move with compositor-only transforms.
+  // So, a hover never repaints or uploads a canvas, whatever the devicePixelRatio.
   const show = (el, on) => { if (el.hidden === on) el.hidden = !on; };
   const place = (el, x, y) => { el.style.transform = `translate(${Math.round(x * dpr) / dpr}px, ${Math.round(y * dpr) / dpr}px)`; };
   let lastBadgeX = "";
   let lastBadgeY = "";
 
-  // Badge and tooltip sizes come from a ResizeObserver (after the browser's
-  // own layout), so a moving cursor never forces a synchronous layout; a
-  // changed size re-places them on the next frame. Only the first sight of
-  // an element measures it directly.
+  // Badge and tooltip sizes are set by a ResizeObserver, after the browser's own layout.
+  // So, a cursor move never forces a synchronous layout.
+  // A changed size re-places them on the next frame. Only the first sight of an element measures it directly.
   const sizes = new WeakMap();
   const sizeObserver = typeof ResizeObserver === "function"
     ? new ResizeObserver((entries) => {
@@ -2171,7 +2170,7 @@ function create(host, initial = {}) {
   const moveFrame = util.rafOnce(() => {
     if (!pendingMove) return;
     moveCursor(pendingMove);
-    // Already in a frame: the crosshair and readouts move with the
+    // This frame already runs. The crosshair and readouts move with the
     // tooltip now, not one frame behind it.
     if (overlayFrame.pending()) { overlayFrame.cancel(); drawOverlay(); }
   });
@@ -2191,8 +2190,8 @@ function create(host, initial = {}) {
     pendingMove = null;
     leaveCursor();
   });
-  // A press on the plot is a zoom gesture, never a text selection or a
-  // native drag (which would cancel the pointer stream).
+  // A press on the plot starts a zoom gesture. It never selects text or starts a native drag.
+  // A native drag would cancel the pointer stream.
   overCanvas.addEventListener("mousedown", (ev) => {
     if (ev.button !== 0) return;
     ev.preventDefault();
@@ -2239,7 +2238,7 @@ function create(host, initial = {}) {
     ev.preventDefault();
     if (zoom) resetZoom(true);
   });
-  // Escape cancels a drag in progress (and is not seen by ns.layers).
+  // Escape cancels a drag in progress. ns.layers does not see the key.
   const onKey = (ev) => {
     if (ev.key === "Escape" && drag) { ev.preventDefault(); drag = null; scheduleOverlay(); }
   };
@@ -2263,7 +2262,7 @@ function create(host, initial = {}) {
     const st = s && stacks && stacks.get(s.id);
     const py = s ? L.yOf(st ? st.top[i] : s.values[i]) : L.top + L.plotH / 2;
     moveCursor({ px, py });
-    // A hover readout is not announced; the keyboard cursor's is (one polite region).
+    // A hover readout is not announced. The keyboard cursor readout is announced in one polite region.
     if (!tooltipEl.hidden) uiState?.announce?.(tooltipEl.textContent);
   });
   overCanvas.addEventListener("blur", () => { if (!drag) leaveCursor(); });
@@ -2275,19 +2274,19 @@ function create(host, initial = {}) {
   const LEGEND_HEADS = { total: "Total", min: "Min", max: "Max", mean: "Mean", last: "Last" };
   const NO_CALCS = { total: NaN, min: NaN, max: NaN, mean: NaN, last: NaN };
 
-  // The columns of the table, in their order: opts.legendColumns keeps some of them (a chart whose values do not add up leaves the Total out).
+  // The columns of the table, in their order. opts.legendColumns keeps some of them. A chart whose values do not add up omits the Total.
   function legendColumns() {
     const asked = Array.isArray(opts.legendColumns) ? LEGEND_COLUMNS.filter((name) => opts.legendColumns.includes(name)) : [];
     return asked.length ? asked : LEGEND_COLUMNS;
   }
 
-  // What the table says of a series over the visible range: the total, the min and the max, the mean and the last value. A series with `weights`
-  // (one per point: the calls behind an average, the requests behind a rate) has a weighted mean, which is the average of all the points it
-  // stands for, not of the averages.
+  // The table shows these values of a series over the visible range: the total, the min, the max, the mean and the last value.
+  // A series with `weights` (one per point: the calls behind an average, the requests behind a rate) has a weighted mean.
+  // This mean is the average of all the points that it represents. It is not the average of the averages.
   function calcs(s) {
     const L = layout;
     let min = Infinity, max = -Infinity, sum = 0, count = 0, last = NaN, weighted = 0, weight = 0;
-    // `stats`: the values to read when the plot leaves some out (a zero that a stack does not draw).
+    // `stats`: the values to read when the plot omits some. An example is a zero that a stack does not draw.
     const values = s.stats && s.stats.length >= s.values.length ? s.stats : s.values;
     const a = L && !s.xs ? L.v0 : 0, b = L && !s.xs ? L.v1 : values.length;
     const weights = s.weights && s.weights.length >= values.length ? s.weights : null;
@@ -2311,12 +2310,12 @@ function create(host, initial = {}) {
     return { total: sum, min, max, mean: weights ? (weight > 0 ? weighted / weight : NaN) : sum / count, last };
   }
 
-  // Whether an entry is on: its series is shown (a legend that hides), or the host says it is picked (legendClick "filter": legendPressed(series)).
+  // An entry is on when its series is shown (a legend that hides). It is also on when the host says it is picked (legendClick "filter": legendPressed(series)).
   const filterLegend = () => opts.legendClick === "filter";
   const legendPressedOf = (s) => (filterLegend() ? typeof opts.legendPressed === "function" && !!opts.legendPressed(s) : !hidden.has(s.id));
 
-  // An entry of the list, or of the first column of the table. A legend that filters dims the entries that the pressed ones leave out (is-off), and
-  // `legendDisabled(series)` locks an entry that is no filter (no click, no aria-pressed).
+  // An entry is a row of the list, or a cell of the first column of the table. A legend that filters dims the entries that the pressed ones omit (is-off).
+  // `legendDisabled(series)` locks an entry that is not a filter. The entry has no click and no aria-pressed.
   function legendItemHtml(s, index, anyPressed = false) {
     const filter = filterLegend();
     const pressed = legendPressedOf(s);
@@ -2327,16 +2326,16 @@ function create(host, initial = {}) {
     return `<button type="button" class="chartCore__legendItem${filter ? " chartCore__legendItem--filter" : ""}${s.dash ? " is-dashed" : ""}${off ? " is-off" : ""}" data-index="${index}" data-series="${esc(s.id)}"${locked ? " disabled" : ` aria-pressed="${pressed}"`} title="${esc(title)}"><i style="background-color:${c}"></i><span>${esc(s.label)}</span></button>`;
   }
 
-  // "totals" legend: each series with its total over the whole range; a
-  // click goes to opts.onLegendClick(series, event) (a filter, say) and
-  // opts.legendPressed(series) says which are on.
+  // The "totals" legend shows each series with its total over the whole range. A
+  // click goes to opts.onLegendClick(series, event), for example a filter.
+  // opts.legendPressed(series) says which series are on.
   function seriesTotal(s) {
     let sum = 0;
     for (let i = 0; i < s.values.length; i++) { const v = s.values[i]; if (v === v) sum += v; }
     return sum;
   }
 
-  // The legend reads at full strength; once some series are pressed (a
+  // The legend reads at full strength. When some series are pressed (a
   // filter), the others are left out and dim (is-off).
   function legendTotalItemHtml(s, index, anyPressed) {
     const pressed = typeof opts.legendPressed === "function" ? !!opts.legendPressed(s) : false;
@@ -2346,9 +2345,9 @@ function create(host, initial = {}) {
     return `<button type="button" class="chartCore__legendItem chartCore__legendItem--total${s.dash ? " is-dashed" : ""}${anyPressed && !pressed ? " is-off" : ""}" data-index="${index}" data-series="${esc(s.id)}" aria-pressed="${pressed}" title="${esc(title)}"><i style="background-color:${c}"></i><span>${esc(s.label)}</span><b>${esc(total)}</b></button>`;
   }
 
-  // The legend markup is rebuilt only when it changes (a resize, a theme
-  // change or streamed rows redraw the plot, not the legend): the values
-  // of the total / min / max / mean / last table are written into its cells.
+  // The engine rebuilds the legend markup only when it changes.
+  // A resize, a theme change or streamed rows redraw the plot, not the legend.
+  // The values of the total, min, max, mean and last table are written into its cells.
   let legendHtml = null;
   function setLegendHtml(html) {
     if (html === legendHtml) return false;
@@ -2358,8 +2357,8 @@ function create(host, initial = {}) {
     return true;
   }
 
-  // The legend shows by default as soon as there is more than one series
-  // ("always": even for one; false: never; "totals": the totals legend).
+  // The legend shows by default when there is more than one series.
+  // "always" shows it even for one series. false hides it. "totals" selects the totals legend.
   function renderLegend() {
     const totals = opts.legend === "totals";
     const shown = totals || opts.legend === "always" || (!!opts.legend && opts.series.length > 1);
@@ -2381,7 +2380,7 @@ function create(host, initial = {}) {
     const filter = filterLegend();
     const anyPressed = filter && opts.series.some(legendPressedOf);
     if (legendMode === "table") {
-      // A cell is formatted like the values of the chart (formatValue), or by legendFormat(value, column, series): a mean of counts has decimals.
+      // A cell uses the format of the chart values (formatValue). Otherwise, legendFormat(value, column, series) formats it. A mean of counts has decimals.
       const fmt = (v, column, s) => {
         if (v !== v) return "\u2014";
         if (typeof opts.legendFormat === "function") return opts.legendFormat(v, column, s);
@@ -2406,8 +2405,9 @@ function create(host, initial = {}) {
     }
   }
 
-  // The mode of the legend, list or table: a preference that the next chart starts with. The charts of an alignment group change together (they
-  // are read side by side), and onLegendMode(mode) tells the host (a page that sizes the cards for it).
+  // The mode of the legend, list or table, is a preference. The next chart starts with it.
+  // The charts of an alignment group change together, because they are read side by side.
+  // onLegendMode(mode) tells the host, for example a page that sizes the cards for it.
   function setLegendMode(mode) {
     if (mode !== "list" && mode !== "table") return;
     const changed = mode !== legendMode;
@@ -2513,12 +2513,12 @@ function create(host, initial = {}) {
   //   tooltipMaxRows             rows past it fold into "+N more"
   //   tooltipNulls: false        no "NULL" rows (gap flags from bridgeGaps are not values)
   //   legendClick: "toggle"      click shows / hides, Alt / Ctrl / Cmd+click isolates
-  //   legendClick: "filter"      the click is the host's: onLegendClick(series, event) (a filter), nothing is hidden. legendPressed(series) says
+  //   legendClick: "filter"      the host handles the click: onLegendClick(series, event) (a filter), nothing is hidden. legendPressed(series) says
   //                              which entries are on (the others dim while some are), legendDisabled(series) locks an entry (no click, no
   //                              aria-pressed) and legendTitle(series, pressed) writes its title
   //   legendColumns: ["min", ...] the columns of the Values table, among total, min, max, mean and last (all by default); series[].weights (one
   //                              number per point: the calls behind an average, the requests behind a rate) makes the Mean the mean of the values weighted by them;
-  //                              series[].stats: the values that the table reads when the plot leaves some out (the zeros of a stack);
+  //                              series[].stats: the values that the table reads when the plot omits some (the zeros of a stack);
   //                              legendFormat(value, column, series): the text of a cell (default: formatValue)
   //   onLegendMode(mode)         the legend went to "list" or "table" (by its button, or with the other charts of its alignment group)
   //   alignKey: "page"           charts that share it are aligned: the same number of intervals on the y axis, ending on a step of yKind,
@@ -2596,10 +2596,10 @@ function create(host, initial = {}) {
     return opts.legendClick === "toggle" ? !modified : modified;
   }
 
-  // Markers: diamonds drawn on the plot canvas, under a pool of transparent
-  // links (moved, never rebuilt, on redraws) that take the pointer and the
-  // keyboard. The links paint nothing until hovered or focused, and sit at
-  // left / top (no transform), so hundreds of them add no compositing work.
+  // Markers are diamonds. They are drawn on the plot canvas, under a pool of transparent links.
+  // The engine moves the links on redraws and never rebuilds them. The links take the pointer and the keyboard.
+  // A link paints nothing until it is hovered or focused. Links sit at left and top, with no transform.
+  // So, hundreds of them add no compositing work.
   let markerLayer = null;
   const markerNodes = [];
 
@@ -2625,10 +2625,10 @@ function create(host, initial = {}) {
     if (m.attrs) for (const [name, value] of Object.entries(m.attrs)) node.setAttribute(name, String(value == null ? "" : value));
   }
 
-  // Dense markers are sampled: past one per MARKER_DENSE_PX of plot width,
-  // each column of that width keeps its highest marker (the slowest
-  // exemplar), so a long range shows a readable scatter, not a row of
-  // diamonds. Every marker of a column stays reachable by zooming in.
+  // The engine samples dense markers. Past one per MARKER_DENSE_PX of plot width,
+  // each column of that width keeps its highest marker (the slowest exemplar).
+  // So, a long range shows a readable scatter, not a row of diamonds.
+  // A closer zoom keeps every marker of a column reachable.
   const MARKER_DENSE_PX = 40;
   function sampleMarkers(list, L) {
     const inView = [];
@@ -2805,12 +2805,10 @@ function create(host, initial = {}) {
     cancelBox();
   }
 
-  // Every change draws once, on the next animation frame: several setData
-  // calls in a frame (a streamed result, a zoom reset with new data) cost
-  // one draw. next.append: the arrays only grew at their end since the last
-  // setData (rows appended), so the block summaries grow instead of being
-  // computed again. Reading layout(), stats(), points() or toClient()
-  // draws a pending change first.
+  // Every change draws once, on the next animation frame. Several setData calls in a frame
+  // (a streamed result, or a zoom reset with new data) cost one draw. next.append means that the arrays only grew at their end since the last
+  // setData (rows appended). So, the block summaries grow and are not computed again.
+  // A call to layout(), stats(), points() or toClient() draws a pending change first.
   function setData(next = {}) {
     counters.setData++;
     const appended = next.append === true;
@@ -2881,7 +2879,7 @@ function create(host, initial = {}) {
 
   // --- Extensions: own-x and per-point marks, picking, heatmap cells, custom /
   // log y axes, annotation markers, regions, 2-D brush (first used by the
-  // Traces charts). Every option is optional: without them the chart behaves
+  // Traces charts). Every option is optional. Without them, the chart behaves
   // as described above.
   //
   //   series[k].type        "line" | "area" | "points" | "bar": the series' own mark
@@ -3052,8 +3050,8 @@ function create(host, initial = {}) {
     return drawn;
   }
 
-  // Series the main pass leaves out: points with their own x or per-point
-  // styling, lines over bars, every series of a log chart.
+  // Series that the main pass omits: points with their own x or per-point
+  // style settings, lines over bars, every series of a log chart.
   function drawOwnMarks(ctx, L, list, perSeries) {
     if (!list.length) return 0;
     let points = 0;
@@ -3150,9 +3148,9 @@ function create(host, initial = {}) {
     return `${content.title != null ? `<strong>${esc(content.title)}</strong>` : ""}${rows}${content.footer ? `<small>${esc(content.footer)}</small>` : ""}`;
   }
 
-  // A tooltip with the host's content beside (px, py), in plot px; its size
-  // comes from the size observer, which re-places it once the new content
-  // is laid out (no synchronous layout on a pointer move).
+  // A tooltip shows the host's content beside (px, py), in plot px. Its size
+  // is set by the size observer. The observer re-places the tooltip after the new content
+  // is positioned. A pointer move causes no synchronous layout.
   let contentTip = null;
   function showContentTooltip(content, px, py) {
     const key = `content|${JSON.stringify(content)}`;
@@ -3408,15 +3406,15 @@ function create(host, initial = {}) {
     gaps: () => gapInfo().count,
     layout: () => { flushDraw(); return layout; },
     flush: () => flushDraw(),
-    // True until the plot is drawn at its current width: a draw is
-    // scheduled, or the width changed (a scrollbar came, the window
-    // resized) and the resize observer has not drawn it yet. layout() and
-    // toClient() describe the last frame drawn until then.
+    // True until the plot is drawn at its current width. This is true when a draw is
+    // scheduled, or when the width changed (a scrollbar came, or the window
+    // was resized) and the resize observer has not drawn it yet. Until then, layout() and
+    // toClient() describe the last frame drawn.
     drawPending: () => !destroyed && (!!drawRaf || pendingDraw || (!released && plotWidth() !== sizeW)),
-    // The mode of the legend, "list" or "table" (setLegendMode does not keep it as the preference: the click on the button does).
+    // The mode of the legend, "list" or "table". setLegendMode does not keep it as the preference. The click on the button does.
     legendMode: () => legendMode,
     setLegendMode,
-    // Markers move with the plot; replacing them needs no plot redraw.
+    // Markers move with the plot. A replacement needs no plot redraw.
     setMarkers(list) { opts.markers = list; scheduleDraw(); },
   };
   Object.assign(api, extraApi);
@@ -3430,8 +3428,8 @@ function create(host, initial = {}) {
   if (member) {
     if (!alignGroups.has(alignKey)) alignGroups.set(alignKey, new Set());
     alignGroups.get(alignKey).add(member);
-    // The first draw waits for the frame, so that the charts of a group that are made one after the other are drawn with the gutter of all of
-    // them (flush() and the readers of the layout draw it at once).
+    // The first draw waits for the frame. So, the charts of a group that are made one after the other are drawn with the gutter of all of
+    // them. flush() and the readers of the layout draw at once.
     scheduleDraw();
   } else draw();
   return api;

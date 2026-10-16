@@ -1,26 +1,22 @@
-// Explorer storage drawings of the cards: where the bytes of a database
-// (its tables) and of a table (its partitions, its columns) are.
+// This module draws the storage of the Explorer cards.
+// The drawings show where the bytes of a database (its tables) and of a table (its partitions and its columns) are.
 //
 //   renderDatabase(container, { root, residentBytes, name, disks, onOpen, disksContainer })
-//     the storage of a database page, above its objects (the size band
-//     first, then the table): the size band of its tables (a treemap when
-//     at least three of them hold >= 1% of the database and none holds most
-//     of it, otherwise one share strip: the largest tables plus Others),
-//     its legend, the accounting footnote and the disks the database uses
-//     (in disksContainer when given: the page puts them under its
-//     objects). Returns { element, destroy }.
+//     Draws the storage of a database page. The storage is above the objects of the page. It has the size band first, then the table.
+//     The size band shows the tables. It is a treemap when three or more tables hold 1% or more of the database, and no table holds most of it.
+//     Otherwise, the band is one share strip. The strip shows the largest tables and Others.
+//     The storage also has a legend, an accounting footnote, and the disks that the database uses.
+//     If disksContainer is given, the disks go in that container. The page then puts the disks under its objects. Returns { element, destroy }.
 //   renderTreemap(container, { tree, name, id, stripId, ariaLabel,
 //     className, scopeLabel, onOpen, minItems, fallback, strip })
-//     a size band (ns.explorerTreemap.band) with its legend and footnote,
-//     or null when the tree has fewer than minItems (three by default)
-//     rectangles of >= 1% to draw and fallback is "none" (the table Storage
-//     tab's partitions, the Columns tab's column sizes; the databases
-//     overview asks for one).
+//     Draws a size band with its legend and footnote. The band uses ns.explorerTreemap.band.
+//     The function returns null when the tree has fewer than minItems rectangles of 1% or more, and fallback is "none". The default for minItems is three.
+//     The table Storage tab uses this for partitions, and the Columns tab uses it for column sizes. The databases overview asks for one.
 //
-// Byte accounting is the local on-disk accounting of the catalog
-// (bytes_on_disk of active parts, total_bytes of Log-family engines).
-// Memory / Buffer / Dictionary RAM is reported, never drawn as disk area.
-// The layout and grouping are app_explorer_treemap.js.
+// Byte accounting is the local on-disk accounting of the catalog.
+// It uses bytes_on_disk of the active parts and total_bytes of the Log-family engines.
+// The module reports the RAM of Memory, Buffer and Dictionary. It never draws this RAM as disk area.
+// The layout and the groups are in app_explorer_treemap.js.
 
 import { h } from "./app_dom.js";
 import { explorerTreemap } from "./app_explorer_treemap.js";
@@ -39,10 +35,9 @@ function footnoteText({ threshold = 0, scopeLabel = "", resident = 0, treemapSho
   return `${bits.join(" · ")}.`;
 }
 
-// A size band (ns.explorerTreemap.band: the treemap, or the share strip
-// when one cell dominates), its legend and its footnote; null (nothing
-// drawn) when fewer than minItems cells of >= 1% would show and the caller
-// wants no strip (fallback "none", the table tabs' partitions and columns).
+// Draw a size band. The band is a treemap, or a share strip when one cell holds most of the bytes.
+// The band has a legend and a footnote. Return null, and draw nothing, when fewer than minItems cells of 1% or more would show.
+// This applies when the caller sets fallback to "none". The table tabs use this for partitions and columns.
 function renderTreemap(container, { tree, name = "", id = "", stripId = "", ariaLabel = "", className = "", scopeLabel = "", measure, unit, resident = 0, onOpen = null, minItems = TREEMAP_MIN_ITEMS, fallback = "none", strip = "auto" } = {}) {
   const treemap = explorerTreemap;
   if (!treemap?.band || !tree || !(Number(tree.bytes) > 0)) return null;
@@ -65,7 +60,7 @@ function renderTreemap(container, { tree, name = "", id = "", stripId = "", aria
   return {
     element: band.element,
     mode: band.mode,
-    // Same drawing, new measure (the Columns tab's Compressed | Uncompressed).
+    // Draw the same tree with a new measure. The Columns tab switches between Compressed and Uncompressed.
     setTree(next, { name: nextName = name, measure: nextMeasure = measure } = {}) {
       band.setTree(next, { name: nextName, footnote: note(nextMeasure) });
     },
@@ -73,7 +68,7 @@ function renderTreemap(container, { tree, name = "", id = "", stripId = "", aria
   };
 }
 
-// The disks a database uses (the catalog's database summary).
+// The disks that a database uses. The data comes from the catalog's database summary.
 function renderDisks(container, disks) {
   const rows = (disks || []).map((disk) => {
     const row = [String(disk.name || ""), String(disk.path || ""), String(disk.type || ""), Number(disk.bytes || 0),
@@ -123,9 +118,8 @@ function sectionHead(title, meta = "") {
   return head;
 }
 
-// The storage of a database page. The page header carries the database's
-// size and the footnote its RAM: the section head only counts the tables
-// that hold data.
+// The storage of a database page. The page header shows the size of the database. The footnote shows its RAM.
+// The section head counts only the tables that hold data.
 function renderDatabase(container, { root, residentBytes = 0, name = "", disks = [], onOpen = null, disksContainer = null } = {}) {
   const treemap = explorerTreemap;
   const view = h("div", { class: "explorerDatabaseStorage", id: "explorerDatabaseStorage" });
@@ -144,8 +138,7 @@ function renderDatabase(container, { root, residentBytes = 0, name = "", disks =
         : "No on-disk data in this database.",
     }));
   } else {
-    // The treemap of its tables, or the share strip when fewer than three
-    // hold >= 1% or one holds most of the bytes.
+    // The treemap of the tables. Use the share strip when fewer than three tables hold 1% or more, or when one table holds most of the bytes.
     controller = renderTreemap(tables, {
       tree: root,
       name,

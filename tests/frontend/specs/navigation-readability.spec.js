@@ -3,11 +3,16 @@ import { openApp, runQuery, waitForTerminal, runSuccessfulQuery } from '../helpe
 import { mockTraceFacets, mockTraceResults } from '../helpers/traces.js';
 import { settle } from '../helpers/graph-kit.js';
 
-// Design lot 3 (docs/ui-foundations.md): navigation and readability. The page switcher is a nav of links (UI-001), the
-// host's name is never cut (UI-002), a menu keeps its current option (UI-003, UI-004), a number's header is over its
-// figures (UI-013), a table's head stays in the scroller (UI-091), the Query rail does not cross its own figures nor repeat
-// "no run" (UI-011, UI-014, UI-015, UI-017), a trace row names three services and one thin duration rule (UI-049, UI-060),
-// and a graph names its cards in full (UI-044, UI-053).
+// Design lot 3 (docs/ui-foundations.md) covers navigation and readability.
+// The page switcher is a nav of links (UI-001).
+// The host name is never cut (UI-002).
+// A menu keeps its current option (UI-003, UI-004).
+// The header of a number is above its figures (UI-013).
+//
+// The head of a table stays in the scroller (UI-091).
+// The Query rail does not cross its own figures. It does not repeat "no run" (UI-011, UI-014, UI-015, UI-017).
+// A trace row names three services and one thin duration rule (UI-049, UI-060).
+// A graph names its cards in full (UI-044, UI-053).
 
 // ---- the page switcher ----------------------------------------------------------------------------------------------
 
@@ -20,23 +25,23 @@ test('the page switcher is a nav of links, the current page marked, any of them 
   await expect(nav.getByRole('link', { name: 'Explorer' })).toHaveAttribute('href', '/explorer/catalog');
   await expect(nav.getByRole('link', { name: 'Query' })).toHaveAttribute('aria-current', 'page');
   await expect(nav.getByRole('link', { name: 'System' })).not.toHaveAttribute('aria-current', 'page');
-  // From 821 px the links are in the header, not behind a button.
+  // From 821 px, the links are in the header. They are not behind a button.
   await expect(page.locator('#pageSelectButton')).toBeHidden();
-  // Underlined on the header's own bottom border.
+  // The underline is on the bottom border of the header.
   const marks = await page.evaluate(() => {
     const link = document.querySelector('#navQueryLink').getBoundingClientRect();
     const header = document.querySelector('header.appHeader').getBoundingClientRect();
     return { linkBottom: link.bottom, headerBottom: header.bottom };
   });
   expect(Math.abs(marks.headerBottom - marks.linkBottom)).toBeLessThanOrEqual(2);
-  // A link is a link: Ctrl+click opens the page in a tab of its own.
+  // A link is a link. Ctrl+click opens the page in a separate tab.
   const opened = context.waitForEvent('page');
   await nav.getByRole('link', { name: 'Explorer' }).click({ modifiers: ['Control'] });
   const tab = await opened;
   await tab.waitForLoadState('domcontentloaded');
   expect(new URL(tab.url()).pathname).toBe('/explorer/catalog');
   await tab.close();
-  // The same nav, with the current page changed, on another page.
+  // The same nav on another page. The current page is changed.
   await page.goto('/system');
   await expect(page.getByRole('navigation', { name: 'Pages' }).getByRole('link', { name: 'System' })).toHaveAttribute('aria-current', 'page');
 });
@@ -60,7 +65,7 @@ test('under 821 px the links fold into a menu named for the current page, which 
 
 // ---- the host picker ------------------------------------------------------------------------------------------------
 
-// A host with a long name next to the instance's own: /api/hosts and its stream list both.
+// The fixture is a host with a long name, next to the instance's own name. Both /api/hosts and its stream list have it.
 async function twoHosts(page, label = 'Production ClickHouse') {
   const withOther = (body) => {
     const hosts = Array.isArray(body.hosts) ? body.hosts : [];
@@ -87,7 +92,7 @@ for (const width of [1440, 1280, 1024]) {
     await expect(text).toHaveText('Production ClickHouse');
     const cut = await text.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
     expect(cut.scroll, 'the name is not clipped').toBeLessThanOrEqual(cut.client);
-    // Under 1280 px the version and the ping stay in the menu: never the name.
+    // Under 1280 px, the version and the ping stay in the menu. The name stays out of the menu.
     await page.locator('#hostPickerButton').click();
     const options = page.locator('#hostPickerMenu .pickerOption');
     await expect(options).toHaveCount(2);
@@ -111,11 +116,11 @@ test('a select menu keeps its current option in the list, marked, and opens on i
   const options = picker.locator('.tracePicker__option');
   await expect(options).toHaveText(['All', 'OK', 'Error', 'Unset']);
   await expect(picker.locator('.tracePicker__option[aria-selected="true"]')).toHaveText('All');
-  // It opens on the chosen option, and the chosen option is one an assistive technology can see.
+  // The menu opens on the chosen option. An assistive technology can see the chosen option.
   await expect(picker.locator('.tracePicker__option[aria-selected="true"]')).toBeFocused();
   await expect(picker.locator('.tracePicker__option[aria-selected="true"]')).toBeVisible();
   await page.keyboard.press('Escape');
-  // The theme menu too.
+  // The theme menu is the same.
   await page.locator('#themeSelectButton').click();
   await expect(page.locator('#themeSelectMenu [role="option"]')).toHaveCount(3);
   await expect(page.locator('#themeSelectMenu [role="option"][aria-selected="true"]')).toBeVisible();
@@ -131,7 +136,7 @@ test('a number\'s column header is on the right, over its figures; a text column
   expect(heads.n).toBe('right');
   expect(heads.ratio).toBe('right');
   expect(heads.label).toBe('left');
-  // The Explorer's Catalog tables too (Rows, Size, % server).
+  // The Explorer's Catalog tables are the same (Rows, Size, % server).
   await page.goto('/explorer/catalog');
   const overview = page.locator('#explorerDatabasesOverview thead th');
   await expect(overview.first()).toBeVisible({ timeout: 30_000 });
@@ -141,7 +146,7 @@ test('a number\'s column header is on the right, over its figures; a text column
 });
 
 test('System > Queries: the table is the scroller under the tiles and its head stays over the rows', async ({ page }) => {
-  // Forty shapes, so that the table scrolls.
+  // Forty shapes make the table scroll.
   await page.route(/\/api\/system\/queries\?/, async (route) => {
     try {
       const response = await route.fetch();
@@ -150,7 +155,7 @@ test('System > Queries: the table is the scroller under the tiles and its head s
       if (rows.length) json.queries = Array.from({ length: 40 }, (_, i) => ({ ...rows[i % rows.length], hash: String(9000 + i) }));
       await route.fulfill({ response, json, headers: { 'Cache-Control': 'no-store' } });
     } catch {
-      // The page or the test is gone.
+      // The page or the test is closed.
     }
   });
   await page.goto('/system/queries');
@@ -168,7 +173,7 @@ test('System > Queries: the table is the scroller under the tiles and its head s
   });
   expect(Math.abs(head.thTop - head.boxTop), 'the header is at the top of the scroller').toBeLessThanOrEqual(2);
   expect(head.thBottom).toBeLessThan(head.boxBottom);
-  // The page itself does not scroll (a second scroller would put the head away again).
+  // The page does not scroll. A second scroller would move the head out of view again.
   expect(await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBeLessThanOrEqual(1);
 });
 
@@ -217,7 +222,7 @@ test('a failed run keeps the elapsed time and the tiles that have a figure, no r
   const visible = await page.locator('#runStatsTiles .metricCompact:visible .metricCompact__label').allTextContents();
   expect(visible).toContain('Elapsed');
   expect(visible.length).toBeLessThanOrEqual(2);
-  // A new run brings every tile back.
+  // A new run shows every tile again.
   await runSuccessfulQuery(page, 'SELECT 1 AS one');
   await expect(page.locator('#runStatsTiles .metricCompact:visible')).toHaveCount(6);
 });
@@ -231,7 +236,7 @@ test('from 1100 px down the run stats stay on the page, under the editor, and th
   await expect(tiles).toBeVisible();
   await expect(tiles.locator('.metricCompact:visible')).toHaveCount(6);
   await expect(page.locator('#readRowsTotalText')).toHaveText('30');
-  // The tiles sit under the editor, not beside it.
+  // The tiles are under the editor. They are not beside it.
   const place = await page.evaluate(() => {
     const editor = document.querySelector('.panel--query').getBoundingClientRect();
     const rail = document.querySelector('#runStatsTiles').getBoundingClientRect();
@@ -263,13 +268,13 @@ test('a trace row has one 3 px duration rule from 0, names its three most costly
   }
   expect(Math.max(...bars.map((bar) => bar.percent))).toBeCloseTo(100, 1);
   await expect(page.locator('#tracesResultCount .tracesResultCount__scale')).toContainText(/bars up to \d/);
-  // The most costly three: the many-service trace shows three chips and "+17", the table the same.
+  // The three most costly: the many-service trace shows three chips and "+17". The table shows the same.
   const mesh = page.locator('#tracesResults li[data-trace-id="c1d2e3f4a5b60718293a4b5c6d7e8f90"]');
   await expect(mesh.locator('.traceSvcPill:not([hidden])')).toHaveCount(3);
   await expect(mesh.locator('.traceSvcMore')).toHaveText('+17');
   await page.locator('[data-results-view="table"]').click();
   const row = page.locator('#tracesResults tr[data-trace-id="c1d2e3f4a5b60718293a4b5c6d7e8f90"]');
-  // As many as the column holds, three at most.
+  // Show as many as the column holds, with three at most.
   const shown = await row.locator('.traceSvcPill:not([hidden])').count();
   expect(shown).toBeGreaterThanOrEqual(2);
   expect(shown).toBeLessThanOrEqual(3);

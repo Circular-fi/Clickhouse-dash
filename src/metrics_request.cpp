@@ -15,7 +15,7 @@ const char* const kKinds[kKindCount] = {"gauge", "sum", "histogram", "exponentia
 
 namespace {
 
-// A request that the route refuses: thrown by the readers below, caught by the parsers, which turn it into the 400 answer.
+// A request that the route refuses. The readers below throw it. The parsers catch it, and turn it into the 400 answer.
 struct BadRequest : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
@@ -24,7 +24,7 @@ std::string param(const httplib::Request& req, const char* name) {
   return req.has_param(name) ? req.get_param_value(name) : std::string{};
 }
 
-// A number that is the whole text of the parameter; an absent or malformed value is no value.
+// A number that is the whole text of the parameter. An absent or malformed value is no value.
 bool parse_i64_param(const httplib::Request& req, const char* name, int64_t* out) {
   const auto value = parse_whole_i64(param(req, name));
   if (!value) return false;
@@ -32,7 +32,7 @@ bool parse_i64_param(const httplib::Request& req, const char* name, int64_t* out
   return true;
 }
 
-// start_ms and end_ms; when `default_range_ms` is set and the request names neither, the last `default_range_ms` up to `now_ms`.
+// start_ms and end_ms. When `default_range_ms` is set and the request names neither, the window is the last `default_range_ms` up to `now_ms`.
 TimeWindow parse_window(const httplib::Request& req, int64_t now_ms, int64_t default_range_ms = 0) {
   TimeWindow window;
   if (default_range_ms > 0 && !req.has_param("start_ms") && !req.has_param("end_ms")) {
@@ -85,7 +85,7 @@ std::vector<AttributeFilter> parse_filters(const httplib::Request& req) {
   return out;
 }
 
-// Splits on a delimiter, keeping empty fields.
+// Splits on a delimiter and keeps the empty fields.
 std::vector<std::string> split_commas(const std::string& text) {
   std::vector<std::string> out;
   size_t start = 0;
@@ -131,7 +131,7 @@ BucketGrid choose_grid(const httplib::Request& req, const TimeWindow& window) {
   return grid;
 }
 
-// Runs a reader; the 400 answer of a BadRequest goes to *error.
+// Runs a reader. The 400 answer of a BadRequest goes to *error.
 template <typename Fn>
 bool guarded(ApiError* error, Fn&& fn, const char* code = "invalid_metrics_request") {
   try {

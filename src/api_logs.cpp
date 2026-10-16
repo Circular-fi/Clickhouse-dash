@@ -1,4 +1,4 @@
-// The routes of the Logs explorer over the logs table of the OpenTelemetry Collector ClickHouse exporter (logs { } block, docs/logs.md):
+// The routes of the Logs explorer. They read the logs table of the OpenTelemetry Collector ClickHouse exporter (logs { } block, docs/logs.md):
 //
 //   GET /api/logs/search        newest-first rows, keyset pagination, progressive time windows (newest slice first, widened until the
 //                               limit is filled).
@@ -9,9 +9,9 @@
 //   GET /api/logs/facets        the Fields panel: field keys (attribute map keys and record columns) of the matching records.
 //   GET /api/logs/facet_values  top values of one field.
 //
-// A route is an adapter: it parses the request (logs_request.hpp), finds the host, calls the service (logs_service.hpp) with the context of
-// the request, and writes the JSON of its answer (logs_json.hpp). What a route reads from ClickHouse, and the rules of each read, are in the
-// units that the service calls:
+// A route is an adapter. It parses the request (logs_request.hpp), finds the host and calls the service (logs_service.hpp).
+// The route passes the context of the request to the service. Then it writes the JSON of its answer (logs_json.hpp).
+// The units that the service calls hold the reads from ClickHouse and the rules of each read. They are:
 //
 //   logs_request   the parameters of a request: the filters that the routes share, and what each route adds
 //   logs_filters   the filters checked against the schema of the table, as the WHERE clause (values are query parameters)
@@ -22,9 +22,9 @@
 //   logs_service   the connection, the schema, the read of each route, the error of a failed statement
 //   logs_json      the JSON of each answer
 //
-// Every query filters on the primary-key columns first (ServiceName through the allowlist and the service filter, TimestampTime and
-// Timestamp through the time range), searches Body with hasToken() so the tokenbf_v1 index idx_body of the exporter skips granules, and runs
-// with max_execution_time and a max_rows_to_read guard.
+// Every query filters on the primary-key columns first. ServiceName uses the allowlist and the service filter. TimestampTime and
+// Timestamp use the time range. The query searches Body with hasToken(). The tokenbf_v1 index idx_body of the exporter skips granules.
+// Every query runs with max_execution_time and a max_rows_to_read guard.
 #include "server.hpp"
 
 #include "api_error.hpp"
@@ -42,7 +42,7 @@
 namespace chdash {
 namespace {
 
-// The two answers that every route gives before it reads anything: the host is unknown, or the page is off for it.
+// Every route gives one of two answers before it reads anything. The host is unknown, or the page is off for the host.
 struct LogsRoute {
   std::string source_host_id;
   const HostSpec* host = nullptr;
@@ -116,7 +116,7 @@ void Server::handle_logs_patterns(const httplib::Request& req, httplib::Response
   send_logs_result(res, logs_service_.patterns(current_request_context(), *route.host, route.source_host_id, request), logs::patterns_json);
 }
 
-// GET /api/logs/services: the choices of the service picker (the allowlist applies, the other filters do not).
+// GET /api/logs/services: the choices of the service picker. The allowlist applies. The other filters do not.
 void Server::handle_logs_services(const httplib::Request& req, httplib::Response& res) {
   const logs::ServicesRequest request = logs::parse_services(req);
   LogsRoute route;
@@ -132,8 +132,8 @@ void Server::handle_logs_facets(const httplib::Request& req, httplib::Response& 
   send_logs_result(res, logs_service_.facets(current_request_context(), *route.host, route.source_host_id, request), logs::facets_json);
 }
 
-// GET /api/logs/facet_values: the top values of one field. The filters on the field itself are left out, so its other values stay visible
-// (and can be added: several values of one key match any of them).
+// GET /api/logs/facet_values: the top values of one field. The filters on the field itself are left out, so its other values stay visible.
+// A value can be added. Several values of one key match any of them.
 void Server::handle_logs_facet_values(const httplib::Request& req, httplib::Response& res) {
   logs::FacetValuesRequest request;
   ApiError error;

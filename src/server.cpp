@@ -1,11 +1,14 @@
 #include "server.hpp"
 
+#include "access_actions.hpp"
+
 #include "api_error.hpp"
 #include "host_util.hpp"
 #include "json_parse.hpp"
 #include "ch_uri.hpp"
 #include "log.hpp"
 #include "mcp_grants.hpp"
+#include "mcp_trace.hpp"
 #include "secure_random.hpp"
 #include "serve_embedded_static.hpp"
 #include "json_text.hpp"
@@ -33,13 +36,13 @@ struct FsStaticAsset {
   std::string body;
   std::string mime;
   std::string etag;
-  // The SHA-256 of the body in hexadecimal: a ?v= that starts it is the version of these bytes.
+  // The SHA-256 of the body in hexadecimal. A ?v= that starts with it is the version of these bytes.
   std::string content_hash;
   std::filesystem::file_time_type modified{};
   uintmax_t size = 0;
 };
 
-// The files that a build without embedded assets served, kept until they change on disk (Server owns it).
+// These are the files that a build without embedded assets serves. They are kept until they change on disk. Server owns this cache.
 struct FsStaticCache {
   std::mutex mu;
   std::unordered_map<std::string, std::shared_ptr<FsStaticAsset>> assets;
@@ -52,10 +55,9 @@ static int64_t steady_now_ms() {
   return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
-// The former address of a query shape, /system/queries?q=<hash>: the Location
-// of its page, relative to the request (queries/<hash>, under a reverse-proxy
-// prefix too) with the other parameters kept as they came; empty when q is not
-// a hash (digits, at most 20).
+// This is the former address of a query shape, /system/queries?q=<hash>. The Location is the address of its page,
+// relative to the request (queries/<hash>, under a reverse-proxy prefix too). The other parameters are kept as they came.
+// The Location is empty when q is not a hash (digits, at most 20).
 static std::string query_shape_location(const std::string& target, const std::string& hash) {
   if (hash.empty() || hash.size() > 20) return "";
   for (const char c : hash) {
@@ -76,8 +78,9 @@ static std::string query_shape_location(const std::string& target, const std::st
   return "queries/" + hash + rest;
 }
 
-// The query-string parameter that says a redirect was not a move but an address that has no page: the page shows a notice with the
-// address that was asked for (app_route_notice.js) and takes the parameter off the address bar. The path is cut and percent-encoded.
+// This query-string parameter says that a redirect was not a move. It says that the address has no page.
+// The page shows a notice with the address that was asked for (app_route_notice.js). It then removes the parameter from the address bar.
+// The path is cut and percent-encoded.
 static std::string redirected_from_parameter(const std::string& path) {
   static constexpr char kHex[] = "0123456789ABCDEF";
   std::string out = "redirected_from=";
@@ -94,7 +97,7 @@ static std::string redirected_from_parameter(const std::string& path) {
   return out;
 }
 
-// `location` with the query string of the request kept, and the marker added.
+// This returns `location` with the query string of the request kept, and the marker added.
 static std::string with_query_and_marker(std::string location, const httplib::Request& req) {
   if (const auto mark = req.target.find('?'); mark != std::string::npos) location += req.target.substr(mark);
   location += location.find('?') == std::string::npos ? '?' : '&';
@@ -103,7 +106,7 @@ static std::string with_query_and_marker(std::string location, const httplib::Re
 }
 
 #ifdef CHDASH_EMBED_STATIC
-// A build with embedded assets serves only them: no file of the disk is ever an answer.
+// A build with embedded assets serves only them. No file of the disk is ever an answer.
 static bool try_serve_fs(const httplib::Request&, httplib::Response&, FsStaticCache&) { return false; }
 #else
 static std::int64_t file_time_nanoseconds(std::filesystem::file_time_type value) {
@@ -112,9 +115,9 @@ static std::int64_t file_time_nanoseconds(std::filesystem::file_time_type value)
   return static_cast<std::int64_t>(nanoseconds.count());
 }
 
-// A relative asset path that stays inside the static directory: one or more segments of
-// printable characters, none empty, "." or "..", no backslash and no colon. (An absolute
-// path would replace the base: path("./static") / "/etc/passwd" is "/etc/passwd".)
+// A relative asset path must stay inside the static directory. It has one or more segments of printable characters.
+// No segment is empty, "." or "..". The path has no backslash and no colon.
+// An absolute path would replace the base. For example, path("./static") / "/etc/passwd" is "/etc/passwd".
 static bool safe_static_rel(const std::string& rel) {
   if (rel.empty() || rel.size() > 512) return false;
   size_t start = 0;
@@ -132,8 +135,8 @@ static bool safe_static_rel(const std::string& rel) {
   return true;
 }
 
-// The static directory of a build without embedded assets (./static, next to the working
-// directory), resolved once; empty when it does not exist.
+// This is the static directory of a build without embedded assets (./static, next to the working directory).
+// It is resolved once. It is empty when the directory does not exist.
 static const std::filesystem::path& fs_static_root() {
   static const std::filesystem::path root = [] {
     std::error_code ec;
@@ -156,7 +159,7 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res, Fs
   const std::filesystem::path& root = fs_static_root();
   if (root.empty()) return false;
 
-  // The resolved file must still be under the root (a symbolic link may point anywhere).
+  // The resolved file must still be under the root. A symbolic link can point anywhere.
   std::error_code ec;
   const std::filesystem::path full = std::filesystem::canonical(root / rel, ec);
   if (ec) return false;
@@ -203,7 +206,7 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res, Fs
   } else {
     res.set_header("Cache-Control", cache_control_for(rel, req.has_param("v") && !html));
   }
-  // A shell runs its inline scripts: the policy of the page lists their hashes (http_guard.hpp).
+  // A shell runs its inline scripts. The policy of the page lists their hashes (http_guard.hpp).
   if (html) set_page_security_policy(res, asset->body);
   if (req.has_header("If-None-Match") && req.get_header_value("If-None-Match") == asset->etag) {
     res.status = 304;
@@ -214,14 +217,14 @@ static bool try_serve_fs(const httplib::Request& req, httplib::Response& res, Fs
 }
 #endif
 
-// The health settings, with the tables that the system user reads for the features that the
-// configuration turns on: the access audit (health_runner.hpp, HostAccess) checks them.
+// These are the health settings. They include the tables that the system user reads for the features that the configuration enables.
+// The access audit (health_runner.hpp, HostAccess) checks these tables.
 HealthSettings health_settings_for(const AppConfig& cfg) {
-  // The OpenTelemetry tables that the system user must read are the ones of each host (audit_access reads them from the
-  // host), so the settings hold only what is the same for every host.
+  // The OpenTelemetry tables that the system user must read are the ones of each host (audit_access reads them from the host).
+  // So the settings hold only what is the same for every host.
   HealthSettings settings = cfg.health;
   if (cfg.mcp.enabled) {
-    // What each tool needs from the MCP user is in mcp_grants.hpp; the audit checks all of it.
+    // This is what each tool needs from the MCP user. It is in mcp_grants.hpp. The audit checks all of it.
     settings.mcp_audit = true;
     settings.mcp_reads = mcp_user_reads();
   }
@@ -275,13 +278,16 @@ Server::Server(AppConfig cfg, bool start_background)
     query_libraries_.push_back(std::make_unique<QueryLibraryStore>(std::move(library)));
   }
 
-  // The threads of the background cache refreshes (stale-while-revalidate): two, and a short queue.
+  // These are the threads of the background cache refreshes (stale-while-revalidate). There are two threads and a short queue.
   cache_refresher_ = std::make_unique<CacheRefresher>(2, 64);
 
   if (cfg_.mcp.enabled) init_mcp();
+  if (cfg_.telemetry.enabled) init_telemetry();
+  init_access();
 
-  // The capacity of the HTTP server (ServerLimits): a pool that grows with the streams in progress,
-  // a bounded queue, and a bounded request body, refused (413) before it is read.
+  // This is the capacity of the HTTP server (ServerLimits).
+  // It has a pool that grows with the streams in progress, a bounded queue, and a bounded request body.
+  // A request body that is too large is refused (413) before it is read.
   {
     const ServerLimits limits = cfg_.server;
     const std::shared_ptr<HttpMetrics> metrics = http_metrics_;
@@ -316,9 +322,9 @@ Server::Server(AppConfig cfg, bool start_background)
   };
 
   // Traces, Logs and Metrics are three pages (traces.html, logs.html, metrics.html):
-  // /observability/traces, /observability/logs, /observability/metrics; and
-  // /observability sends the browser to the first enabled one. One trace is a
-  // page of its own too (trace.html, /observability/traces/<trace id>).
+  // /observability/traces, /observability/logs and /observability/metrics.
+  // The /observability address sends the browser to the first enabled one.
+  // One trace is a page of its own too (trace.html, /observability/traces/<trace id>).
   const auto serve_view_shell = [&](const char* file) {
     return [&, file](const auto& req, auto& res) {
       httplib::Request shell_req = req;
@@ -329,12 +335,13 @@ Server::Server(AppConfig cfg, bool start_background)
       }
     };
   };
-  // Any other /observability address (the bare one, a view turned off, an unknown one): the first
-  // enabled view, the query string kept. The Location is relative to the request, so a reverse-proxy
-  // prefix is kept: "observability/<view>" from /observability, "<view>" from one segment below it.
+  // Any other /observability address is the bare one, a disabled view, or an unknown one.
+  // It goes to the first enabled view, and the query string is kept.
+  // The Location is relative to the request, so a reverse-proxy prefix is kept.
+  // It is "observability/<view>" from /observability, and "<view>" from one segment below it.
   const auto redirect_to_first_view = [&](const auto& req, auto& res) {
-    // The first enabled view. (No other local lambda is called from here: a handler outlives the
-    // constructor, and a reference to one of its locals dangles.)
+    // The first enabled view. No other local lambda is called from here.
+    // A handler outlives the constructor, and a reference to one of its locals dangles.
     std::string view;
     if (cfg_.traces_on()) view = "traces";
     else if (cfg_.logs_on()) view = "logs";
@@ -351,7 +358,7 @@ Server::Server(AppConfig cfg, bool start_background)
     if (at == std::string::npos) {
       location = "observability/" + view;  // the bare /observability
     } else {
-      // One "../" per directory level below /observability/ (a trailing slash is one).
+      // Add one "../" for each directory level below /observability/. A trailing slash counts as one level.
       const std::string below = req.path.substr(at + marker.size());
       for (const char c : below) {
         if (c == '/') location += "../";
@@ -359,7 +366,7 @@ Server::Server(AppConfig cfg, bool start_background)
       location += view;
       no_page = !below.empty();
     }
-    // The bare /observability is a move, not a mistake; the other addresses carry the marker (UI-008).
+    // The bare /observability is a move, not a mistake. The other addresses carry the marker (UI-008).
     if (no_page) {
       location = with_query_and_marker(location, req);
     } else if (const auto mark = req.target.find('?'); mark != std::string::npos) {
@@ -392,9 +399,9 @@ Server::Server(AppConfig cfg, bool start_background)
 
   // The System sections are three pages of their own (docs/system.md): /system
   // (system.html, the Overview), /system/queries (queries.html) and /system/disks
-  // (disks.html). Any other /system/<name> goes to the Overview, the query string kept.
+  // (disks.html). Any other /system/<name> goes to the Overview. The query string is kept.
   const auto redirect_to_system_overview = [&](const auto& req, auto& res) {
-    // One "../" per directory level below /system/ (a trailing slash is one), then "system".
+    // Add one "../" for each directory level below /system/. A trailing slash counts as one level. Then add "system".
     static const std::string marker = "/system/";
     std::string location = "../";
     if (const auto at = req.path.find(marker); at != std::string::npos) {
@@ -410,9 +417,9 @@ Server::Server(AppConfig cfg, bool start_background)
     res.set_header("Cache-Control", "no-store");
   };
 
-  // A former /explorer address answers a redirect to `target`, an address below /explorer/, the query
-  // string kept. The Location is relative to the request, so a reverse-proxy prefix is kept:
-  // "explorer/<target>" from /explorer, one "../" per directory level below /explorer/ otherwise.
+  // A former /explorer address answers a redirect to `target`. The target is an address below /explorer/.
+  // The query string is kept. The Location is relative to the request, so a reverse-proxy prefix is kept.
+  // It is "explorer/<target>" from /explorer. Otherwise, it has one "../" for each directory level below /explorer/.
   const auto redirect_in_explorer = [&](const auto& req, auto& res, const std::string& target) {
     static const std::string marker = "/explorer/";
     std::string location;
@@ -434,7 +441,7 @@ Server::Server(AppConfig cfg, bool start_background)
   http_.Get("/query", serve_query_shell);
   if (cfg_.system.enabled) {
     if (cfg_.system.top_queries_enabled()) {
-      // Registered before /system/.*, which would answer them with the System page.
+      // Register these routes before /system/.*. That route answers them with the System page.
       http_.Get(R"(/system/queries/[0-9]{1,20}/?)", serve_shape_shell);
       // A handler keeps its own copy of the lambdas it calls (it outlives this constructor).
       http_.Get(R"(/system/queries/?)", [&, serve_view_shell](const auto& req, auto& res) {
@@ -452,20 +459,20 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get(R"(/system/disks/?)", serve_view_shell("disks.html"));
     http_.Get(R"(/system/.*)", redirect_to_system_overview);
     // The Explorer's former Monitoring tab (/explorer/_monitoring[/<section>])
-    // and its v2.14.0 Server operations (/explorer/_operations) moved here:
-    // the matching System address, the query string kept. Registered before
-    // the Explorer's routes, so they win over /explorer/.*.
+    // and its v2.14.0 Server operations (/explorer/_operations) moved to the System page.
+    // The matching System address is used, and the query string is kept.
+    // Register these routes before the Explorer's routes. Then they win over /explorer/.*.
     http_.Get(R"(/explorer/_monitoring(/.*)?)", [&](const auto& req, auto& res) { redirect_to_system(req, res); });
     http_.Get("/explorer/_operations", [&](const auto& req, auto& res) { redirect_to_system(req, res); });
   }
   if (cfg_.explorer.enabled()) {
-    // The Catalog (explorer.html) is /explorer/catalog[/<db>[/<table>[/<tab>]]] and Functions its own
-    // page (functions.html) is /explorer/functions[/<name>]: two fixed prefixes, so a database named
-    // "functions" or "catalog" is only ever /explorer/catalog/<name>.
+    // The Catalog (explorer.html) is /explorer/catalog[/<db>[/<table>[/<tab>]]].
+    // Functions have their own page (functions.html), which is /explorer/functions[/<name>].
+    // These are two fixed prefixes. So a database named "functions" or "catalog" is only ever /explorer/catalog/<name>.
     http_.Get(R"(/explorer/catalog(/.*)?)", serve_explorer_shell);
     http_.Get(R"(/explorer/functions(/[^/]+)?/?)", serve_view_shell("functions.html"));
-    // /explorer/_system[?database=&table=] stays an alias of the storage views: the Catalog page
-    // rewrites it to its canonical address.
+    // /explorer/_system[?database=&table=] stays an alias of the storage views.
+    // The Catalog page rewrites it to its canonical address.
     http_.Get("/explorer/_system", serve_explorer_shell);
     // The former addresses answer a redirect: /explorer/_functions[/<name>], and
     // /explorer[/<db>[/<table>[/<tab>]]] (with /explorer/databases, the Catalog root).
@@ -492,8 +499,9 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get(R"(/observability/.*)", redirect_to_first_view);
   }
 
-  // The MCP section is two pages, always served (their "MCP disabled" state shows the HCL to turn it on): /mcp-integration, the keys
-  // (mcp.html), and /mcp-integration/usage, the usage of all the keys (mcpusage.html). 404 while the shell file is absent.
+  // The MCP section is two pages. They are always served, and their "MCP disabled" state shows the HCL that enables it.
+  // These pages are /mcp-integration, the keys (mcp.html), and /mcp-integration/usage, the usage of all the keys (mcpusage.html).
+  // The route answers 404 while the shell file is absent.
   http_.Get(R"(/mcp-integration/?)", serve_view_shell("mcp.html"));
   http_.Get(R"(/mcp-integration/usage/?)", serve_view_shell("mcpusage.html"));
 
@@ -505,8 +513,8 @@ Server::Server(AppConfig cfg, bool start_background)
   });
 
   // A route that reads ClickHouse runs its handler inside a query scope (ch_query.hpp,
-  // request_limits): its statements carry the label and the deadline of the request,
-  // and stop when the browser goes away.
+  // request_limits). Its statements carry the label and the deadline of the request.
+  // They stop when the browser goes away.
   const auto scoped = [this](auto handler) {
     return [this, handler](const httplib::Request& req, httplib::Response& res) {
       RequestScope scope(make_context(req));
@@ -514,8 +522,8 @@ Server::Server(AppConfig cfg, bool start_background)
     };
   };
 
-  // A route that does a lot of work for a host takes a place first (admission.hpp): a burst of them waits, and past the wait is
-  // refused with 503 server_busy, instead of opening as many connections to the host as there are requests.
+  // A route that does a lot of work for a host takes a place first (admission.hpp). A burst of them waits.
+  // Past the wait, the request is refused with 503 server_busy. The route does not open as many connections to the host as there are requests.
   const auto limited = [this](WorkClass work, auto handler) {
     return [this, work, handler](const httplib::Request& req, httplib::Response& res) {
       RequestScope scope(make_context(req));
@@ -525,12 +533,18 @@ Server::Server(AppConfig cfg, bool start_background)
     };
   };
 
-  // The probes (docs/operations.md, "Health probes"): the process (no ClickHouse), the hosts, and the strict form of v2.
+  // These are the probes (docs/operations.md, "Health probes"): the process (no ClickHouse), the hosts, and the strict form of v2.
   http_.Get("/livez", [&](const auto& req, auto& res) { handle_livez(req, res); });
   http_.Get("/readyz", [&](const auto& req, auto& res) { handle_readyz(req, res); });
   http_.Get("/healthz", [&](const auto& req, auto& res) { handle_healthz(req, res); });
   if (cfg_.server.metrics) http_.Get("/metrics", [&](const auto& req, auto& res) { handle_metrics(req, res); });
   http_.Get("/api/version", [&](const auto& req, auto& res) { handle_api_version(req, res); });
+  // These are the actions of the access of humans (docs/access.md, contract 11.4). They need no identity token. The access gateway reads them.
+  http_.Get("/.well-known/access-actions", [this](const httplib::Request&, httplib::Response& res) {
+    res.status = 200;
+    res.set_header("Cache-Control", "no-store");
+    res.set_content(access_actions_json(access_server_name()), "application/json");
+  });
   http_.Get("/api/meta", scoped([&](const auto& req, auto& res) { handle_api_meta(req, res); }));
   http_.Get("/api/hosts", [&](const auto& req, auto& res) { handle_api_hosts(req, res); });
   http_.Get("/api/hosts/stream", [&](const auto& req, auto& res) { handle_api_hosts_stream(req, res); });
@@ -544,8 +558,8 @@ Server::Server(AppConfig cfg, bool start_background)
   http_.Get("/api/query/stream", [&](const auto& req, auto& res) { handle_query_stream(req, res); });
   http_.Post("/api/query/cancel", scoped([&](const auto& req, auto& res) { handle_query_cancel(req, res); }));
   http_.Post("/api/query/analysis", limited(WorkClass::Analysis, [&](const auto& req, auto& res) { handle_query_analysis(req, res); }));
-  // Deep Analyze is a job (deep_analysis_jobs.hpp): POST starts it (the job takes its own place of the analysis admission), GET polls it, POST
-  // .../cancel stops it.
+  // Deep Analyze is a job (deep_analysis_jobs.hpp). POST starts it. The job takes its own place of the analysis admission.
+  // GET polls it. POST .../cancel stops it.
   http_.Post("/api/query/deep-analysis", scoped([&](const auto& req, auto& res) { handle_query_deep_analysis(req, res); }));
   http_.Get("/api/query/deep-analysis", scoped([&](const auto& req, auto& res) { handle_query_deep_analysis_status(req, res); }));
   http_.Post("/api/query/deep-analysis/cancel", scoped([&](const auto& req, auto& res) { handle_query_deep_analysis_cancel(req, res); }));
@@ -572,12 +586,12 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Get("/api/traces/context", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_context(req, res); }));
     http_.Get("/api/traces/spans", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_spans(req, res); }));
     http_.Get("/api/traces/span", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_traces_span(req, res); }));
-    // Answers {"enabled": false, ...} when logs are disabled (no 404).
+    // The route answers {"enabled": false, ...} when logs are disabled. It does not answer 404.
     http_.Get("/api/traces/logs", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_trace_logs(req, res); }));
   }
 
-  // Always registered: when logs/metrics are disabled the meta routes answer
-  // {"enabled": false, ...} so a UI can explain why instead of seeing a 404.
+  // The meta routes are always registered. When logs or metrics are disabled, they answer
+  // {"enabled": false, ...}. So a UI can explain why, instead of showing a 404.
   http_.Get("/api/logs/meta", scoped([&](const auto& req, auto& res) { handle_logs_meta(req, res); }));
   http_.Get("/api/metrics/meta", scoped([&](const auto& req, auto& res) { handle_metrics_meta(req, res); }));
   if (cfg_.logs_on()) {
@@ -597,7 +611,7 @@ Server::Server(AppConfig cfg, bool start_background)
   }
 
   // Query library: every route is absent (404) unless query_library.enabled.
-  // There is no history route: the history of the runs is the browser's.
+  // There is no history route. The history of the runs is in the browser.
   if (!cfg_.query_libraries.empty()) {
     const auto library = [this](QueryLibraryRoute route) {
       return [this, route](const httplib::Request& req, httplib::Response& res) { handle_query_library(req, res, route); };
@@ -615,8 +629,8 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Post("/api/query-library/import", library(QueryLibraryRoute::Import));
   }
 
-  // MCP (docs/mcp.md): the endpoint and its page exist only when mcp.enabled; the
-  // /api/mcp routes always answer (meta says enabled: false, the others 404 mcp_disabled).
+  // MCP (docs/mcp.md): the endpoint and its page exist only when mcp.enabled.
+  // The /api/mcp routes always answer. The meta route says enabled: false. The other routes answer 404 mcp_disabled.
   {
     const auto mcp_api = [this, scoped](McpApiRoute route) {
       return scoped([this, route](const httplib::Request& req, httplib::Response& res) { handle_api_mcp(req, res, route); });
@@ -643,8 +657,8 @@ Server::Server(AppConfig cfg, bool start_background)
     http_.Patch("/mcp", not_allowed);
   }
 
-  // The System page (docs/system.md): fixed, bounded system-table reads of
-  // the selected host. system.enabled = false removes the page and every route.
+  // The System page (docs/system.md) has fixed, bounded system-table reads of the selected host.
+  // system.enabled = false removes the page and every route.
   if (cfg_.system.enabled) {
     http_.Get("/api/system/overview", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_system_overview(req, res); }));
     http_.Get("/api/system/series", limited(WorkClass::Heavy, [&](const auto& req, auto& res) { handle_system_series(req, res); }));
@@ -684,19 +698,24 @@ Server::Server(AppConfig cfg, bool start_background)
 }
 
 Server::~Server() {
-  // The same cancellation as a stop: a server that run() left for another reason (its socket failed) stops too.
+  // This is the same cancellation as a stop. A server that run() left for another reason, because its socket failed, stops too.
   stop();
   {
-    // Under the lock of the wait: the reaper cannot miss the notification between its check and its wait.
+    // The lock belongs to the wait. The reaper cannot miss the notification between its check and its wait.
     std::lock_guard<std::mutex> lk(session_reaper_mu_);
     session_reaper_stop_.store(true, std::memory_order_relaxed);
   }
-  // A read of the files of the other instances that the loop is in ends at once: the stop does not wait for a large file.
+  // A read of the files of the other instances that the loop is in ends at once. The stop does not wait for a large file.
   if (mcp_usage_) mcp_usage_->cancel();
   session_reaper_cv_.notify_all();
   if (session_reaper_thread_.joinable()) session_reaper_thread_.join();
-  // The calls have ended (run() returned after the workers): the last counts of the MCP keys are written.
+  // The calls have ended, because run() returned after the workers. The last counts of the MCP keys are written now.
   save_mcp_usage(true);
+  // The spans and the log records that wait are sent. This happens within the export timeout and the time that remains until the deadline of the stop.
+  if (telemetry_) {
+    const int64_t left = std::max<int64_t>(0, stop_deadline_ms_.load(std::memory_order_acquire) - steady_now_ms());
+    telemetry_->shutdown(std::chrono::milliseconds(std::min<int64_t>(left, cfg_.telemetry.export_timeout_ms)));
+  }
 
   std::vector<std::shared_ptr<QuerySession>> remaining;
   {
@@ -712,13 +731,13 @@ Server::~Server() {
   }
   remaining.clear();
 
-  // A query thread may outlive its session's last owner (QuerySession::start): wait until each one has ended
-  // before anything that it uses goes (the pool, the registry, the caches), at most until the deadline of the stop.
+  // A query thread can outlive the last owner of its session (QuerySession::start). Wait until each one has ended
+  // before anything that it uses is destroyed (the pool, the registry, the caches). Wait at most until the deadline of the stop.
   const int64_t left_ms = stop_deadline_ms_.load(std::memory_order_acquire) - steady_now_ms();
   if (!query_workers_->close_and_wait(std::chrono::milliseconds(std::max<int64_t>(0, left_ms)))) {
     log_event(LogLevel::Error, "server.shutdown_timeout",
               {{"query_threads", query_workers_->active()}, {"timeout_ms", cfg_.server.shutdown_timeout_ms}});
-    // Destroying the server under a running thread is undefined behaviour: end the process instead.
+    // Destroying the server under a running thread is undefined behaviour. End the process instead.
     std::_Exit(1);
   }
 
@@ -776,8 +795,8 @@ void Server::session_reaper_loop() {
     }
     if (session_reaper_stop_.load(std::memory_order_relaxed)) break;
     reap_sessions_once();
-    // The usage of the MCP keys: the file of this instance every minute when something changed, and the files of the others when
-    // they changed (mcp_usage.hpp).
+    // The usage of the MCP keys is saved. The file of this instance is saved every minute when something changed.
+    // The files of the others are saved when they changed (mcp_usage.hpp).
     save_mcp_usage(false);
     const auto now = std::chrono::steady_clock::now();
     if (cfg_.server.stats_log_interval_ms > 0 && now - last_stats_log_ >= std::chrono::milliseconds(cfg_.server.stats_log_interval_ms)) {
@@ -800,7 +819,8 @@ int Server::run() {
     log_event(LogLevel::Error, "server.listen_failed", {{"listen", cfg_.listen}});
     return 1;
   }
-  // A stop() that came before the bind found no socket to close: close it now (one after the bind closes it itself).
+  // A stop() that came before the bind found no socket to close. So close it now.
+  // A stop() that came after the bind closes the socket itself.
   if (stopping()) http_.stop();
   log_event(LogLevel::Info, "server.listening", {{"listen", cfg_.listen}});
   const bool served = http_.listen_after_bind();
@@ -813,15 +833,15 @@ int Server::run() {
 
 ChQueryLimits Server::request_limits(const httplib::Request& req, bool with_deadline) const {
   ChQueryLimits limits;
-  // The System page labels its own reads 'chdash-system' (System > Queries never lists them); every other
-  // route 'chdash:<path>', which System > Queries leaves out with hide_chdash.
+  // The System page labels its own reads 'chdash-system'. System > Queries never lists them.
+  // Every other route is labelled 'chdash:<path>'. System > Queries leaves these out with hide_chdash.
   const bool system_page = req.path.rfind("/api/system/", 0) == 0 || req.path.rfind("/api/explorer/ops/", 0) == 0;
   limits.log_comment = system_page ? std::string("chdash-system") : "chdash:" + req.path.substr(0, 160);
   if (with_deadline) {
     limits.deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(cfg_.generated_queries.timeout_ms);
   }
   limits.max_memory_usage = cfg_.generated_queries.max_memory_usage;
-  // A read cap for every page: a statement that would read more fails (<page>_scan_limit). The System page sets its own below.
+  // Every page has a read cap. A statement that reads more fails (<page>_scan_limit). The System page sets its own cap below.
   limits.max_rows_to_read = cfg_.generated_queries.max_rows_to_read;
   limits.read_overflow_mode = "throw";
   // The System page bounds every read as its own system-table reads are (docs/system.md): read only,
@@ -834,14 +854,14 @@ ChQueryLimits Server::request_limits(const httplib::Request& req, bool with_dead
     limits.max_result_rows = 1'000'000;
     limits.result_overflow_mode = "throw";
   }
-  // The Explorer reads metadata: each statement ends in 10 s. Its data preview reads the rows of a table
-  // (a View or a Distributed table runs its whole source): 30 s, and 64 MiB of result at most (the
-  // preview then has fewer rows).
+  // The Explorer reads metadata. Each statement ends in 10 s.
+  // Its data preview reads the rows of a table. A View or a Distributed table runs its whole source.
+  // The preview takes 30 s at most, and it has 64 MiB of result at most. When a cap is reached, the preview has fewer rows.
   if (req.path == "/api/explorer/table/data") {
     limits.max_execution_time_s = 30;
     limits.max_result_bytes = 64 * 1024 * 1024;
     limits.result_overflow_mode = "break";
-    // A View or a Distributed table runs its whole source: the read stops at the cap and the preview has fewer rows.
+    // A View or a Distributed table runs its whole source. The read stops at the cap, and the preview has fewer rows.
     limits.read_overflow_mode = "break";
   } else if (!system_page && req.path.rfind("/api/explorer/", 0) == 0) {
     limits.max_execution_time_s = 10;
@@ -856,7 +876,7 @@ std::string Server::admission_host(const httplib::Request& req) const {
   if (req.has_param("host_id")) {
     id = req.get_param_value("host_id");
   } else if (req.method == "POST" && !req.body.empty() && req.body.size() <= 64 * 1024) {
-    // The body names the host (the routes that take a JSON body): a small body, parsed once more here.
+    // The body names the host. This applies to the routes that take a JSON body. A small body is parsed once more here.
     rapidjson::Document doc;
     if (parse_json_bounded(doc, req.body) && doc.IsObject()) {
       const auto it = doc.FindMember("host_id");
@@ -864,27 +884,33 @@ std::string Server::admission_host(const httplib::Request& req) const {
     }
   }
   if (id.empty() && cfg_.hosts.size() == 1) id = cfg_.hosts.front().id;
-  // An unknown host takes no place of its own: the route answers 404 for it.
+  // An unknown host takes no place of its own. The route answers 404 for it.
   return !id.empty() && find_request_host(cfg_, req, id) ? id : std::string("-");
 }
 
 RequestContext Server::make_context(const httplib::Request& req, bool with_deadline) const {
   RequestContext context;
-  // A call of MCP runs the handler inside its own scope: the caller is the one of that scope. A request that comes through the
-  // socket has no scope yet, so it is a Browser.
+  // A call of MCP runs the handler inside its own scope. The caller is the one of that scope.
+  // A request that comes through the socket has no scope yet. So it is a Browser.
   const RequestContext& outer = current_request_context();
   context.caller = outer.caller;
   context.caller_id = outer.caller_id;
   context.caller_tool = outer.caller_tool;
+  context.caller_agent = outer.caller_agent;
   context.route = req.path;
   context.request_id = req.get_header_value("X-Request-Id");
   context.limits = request_limits(req, with_deadline);
-  // The statements of a tool carry its key: System > Queries and the log of ClickHouse show who asked. Each one is named for the key
-  // and the tool too (mcp_cost.hpp): its query_id holds where a SETTINGS clause rewrites the label ('chdash-system' of the System
-  // routes), and for a user whose profile takes no setting at all.
+  // The statements of a tool carry its key. System > Queries and the log of ClickHouse show who asked.
+  // Each statement is named for the key and the tool too (mcp_cost.hpp).
+  // Its query_id holds where a SETTINGS clause rewrites the label ('chdash-system' of the System routes),
+  // and for a user whose profile takes no setting at all.
   if (context.is_mcp()) {
-    context.limits.log_comment = "chdash-mcp key=" + context.caller_id + " " + req.path.substr(0, 120);
+    // agent.caller of the call connects the cost of a statement to the agent (docs/mcp.md, "Guard rails of each query").
+    const std::string agent = context.caller_agent.empty() ? std::string() : " caller=" + context.caller_agent;
+    context.limits.log_comment = "chdash-mcp key=" + context.caller_id + agent + " " + req.path.substr(0, 120);
     context.limits.query_id = [key = context.caller_id, tool = context.caller_tool] { return mcp_query_id(key, tool); };
+    // The statements of the route are child spans of the MCP request that called it (docs/server-telemetry.md).
+    if (const ChQueryLimits* outer_limits = ChQueryScope::current()) context.limits.on_statement = outer_limits->on_statement;
   }
   return context;
 }
@@ -895,7 +921,7 @@ McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
     out.error = "the server is stopping";
     return out;
   }
-  // The caller of the tool: the statements that it already holds stop the call when the client of MCP goes away.
+  // This is the caller of the tool. The statements that it already holds stop the call when the client of MCP disconnects.
   const ChQueryLimits* outer = ChQueryScope::current();
   const std::function<bool()> canceled = outer ? outer->canceled : std::function<bool()>();
   const auto stop = [this, canceled] { return stopping() || (canceled && canceled()); };
@@ -922,12 +948,13 @@ McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
   caller.caller = RequestContext::Caller::Mcp;
   caller.caller_id = request.key_id;
   caller.caller_tool = request.tool;
+  caller.caller_agent = mcp_comment_caller(request.agent_caller);
   caller.route = request.path;
   caller.limits = ChQueryScope::current_copy();
   RequestScope scope(std::move(caller));
   try {
     if (!http_.dispatch(req, res)) {
-      // No route of this path: the part of ChDash is off in its configuration. The tool reads an empty answer with a 404 as
+      // No route matches this path. The part of ChDash is disabled in its configuration. The tool reads an empty answer with a 404 as
       // not_enabled (mcp_tools.cpp).
       out.status = 404;
       return out;
@@ -949,7 +976,7 @@ McpApiResponse Server::call_mcp_api(const McpApiRequest& request) {
 }
 
 std::optional<Admission::Ticket> Server::admit(WorkClass work, const httplib::Request& req, httplib::Response& res) {
-  // The MCP limit is global; the others are for each host.
+  // The MCP limit is global. The other limits apply to each host.
   return admit(work, work == WorkClass::Mcp ? std::string() : admission_host(req), req, res);
 }
 
@@ -988,6 +1015,8 @@ ChQueryLimits Server::user_sql_limits(const httplib::Request& req, std::string l
   limits.max_execution_time_s = cfg_.query_options.max_execution_time_s;
   limits.max_memory_usage = cfg_.query_options.max_memory_usage;
   limits.max_rows_to_read = cfg_.query_options.max_rows_to_read;
+  // Without query.run.write, the SQL of the user runs with readonly = 1 (docs/access.md).
+  limits.read_only_strict = access_read_only();
   limits.canceled = [&req] { return req.is_connection_closed && req.is_connection_closed(); };
   return limits;
 }
@@ -997,7 +1026,7 @@ void Server::stop() {
   if (!stopping_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) return;
   stop_deadline_ms_.store(steady_now_ms() + cfg_.server.shutdown_timeout_ms, std::memory_order_release);
 
-  // The running queries: cancelled, and KILL QUERY sent. Their streams see the stop and end with server_stopping.
+  // The running queries are cancelled, and KILL QUERY is sent. Their streams see the stop. They end with server_stopping.
   std::vector<std::shared_ptr<QuerySession>> sessions;
   {
     std::lock_guard<std::mutex> lk(mu_);
@@ -1022,12 +1051,34 @@ void Server::stop() {
     } catch (...) {
     }
   }
-  // The health threads end, which also wakes the host status streams (they end on the stop).
+  // The health threads end. This also wakes the host status streams, which end on the stop.
   if (health_) health_->stop();
-  // No new connection; run() returns once the connections in progress end (the streams end above).
+  // No new connection is accepted. run() returns once the connections in progress end. The streams end above.
   http_.stop();
-  // The usage of the MCP keys as it is now, in case the drain ends with the deadline (the destructor writes it again).
+  // This writes the usage of the MCP keys as it is now. It is written in case the drain ends with the deadline. The destructor writes it again.
   save_mcp_usage(true);
+}
+
+void Server::init_telemetry() {
+  const TelemetrySettings& settings = cfg_.telemetry;
+  std::string error;
+  const auto endpoint = otlp_parse_endpoint(settings.otlp_endpoint, &error);
+  // The load of the configuration checked the endpoint. This check is only a guard.
+  if (!endpoint) throw std::runtime_error("telemetry.otlp_endpoint " + error);
+  OtlpExporterOptions options;
+  options.endpoint = *endpoint;
+  options.export_interval = std::chrono::milliseconds(settings.export_interval_ms);
+  options.export_timeout = std::chrono::milliseconds(settings.export_timeout_ms);
+  options.connect_timeout = std::chrono::milliseconds(settings.connect_timeout_ms);
+  options.max_queue_size = static_cast<size_t>(settings.max_queue_size);
+  options.max_export_batch_size = static_cast<size_t>(settings.max_export_batch_size);
+  options.logs = settings.call_log;
+  OtlpResource resource;
+  resource.attributes.push_back(OtlpAttribute::string("service.name", settings.service_name));
+  resource.attributes.push_back(OtlpAttribute::string("service.version", cfg_.version_semver));
+  if (!cfg_.mcp.instance.empty()) resource.attributes.push_back(OtlpAttribute::string("service.instance.id", cfg_.mcp.instance));
+  resource.scope_version = cfg_.version_semver;
+  telemetry_ = std::make_unique<OtlpExporter>(std::move(options), std::move(resource));
 }
 
 uint64_t Server::add_stop_hook(std::function<void()> hook) {
@@ -1049,8 +1100,9 @@ void Server::remove_stop_hook(uint64_t id) {
   stop_hooks_.erase(id);
 }
 
-// The strict probe of v2 (docs/operations.md, "Health probes"): 200 only when every host answers and the server
-// does not stop. For an orchestrator, /livez and /readyz are the probes.
+// This is the strict probe of v2 (docs/operations.md, "Health probes").
+// It answers 200 only when every host answers and the server does not stop.
+// For an orchestrator, /livez and /readyz are the probes.
 void Server::handle_healthz(const httplib::Request&, httplib::Response& res) {
   res.set_header("Cache-Control", "no-store");
   if (stopping()) return json_error(res, 503, "server_stopping", "the server is stopping");
@@ -1063,12 +1115,10 @@ void Server::handle_healthz(const httplib::Request&, httplib::Response& res) {
   json_error(res, 503, "db_unhealthy", "one or more ClickHouse hosts are unhealthy");
 }
 
-// The Explorer's former Monitoring tab and Server operations live on the
-// System page: /explorer/_monitoring opens the Overview, its Performance and
-// Activity sections the Overview's part of that name (#performance,
-// #activity), Queries and Disks their sections; /explorer/_operations is
-// Activity. The query string is kept as it came. The Location is relative to
-// the request, so the address stays under a reverse-proxy prefix.
+// The Explorer's former Monitoring tab and Server operations are on the System page.
+// /explorer/_monitoring opens the Overview. Its Performance and Activity sections are the Overview's part of that name (#performance, #activity).
+// Queries and Disks are their own sections. /explorer/_operations is Activity.
+// The query string is kept as it came. The Location is relative to the request, so the address stays under a reverse-proxy prefix.
 void Server::redirect_to_system(const httplib::Request& req, httplib::Response& res) {
   static const std::string monitoring = "/explorer/_monitoring/";
   std::string section;
@@ -1114,8 +1164,8 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.Key("lineage"); w.Bool(cfg_.explorer.lineage);
   w.Key("storage_topology"); w.Bool(cfg_.explorer.storage_topology);
   w.EndObject();
-  // v2.14.0 reported its Server operations here: the System page's
-  // Activity and Keeper now.
+  // v2.14.0 reported its Server operations here.
+  // The System page now has the Activity and Keeper sections.
   w.Key("operations");
   w.StartObject();
   w.Key("enabled"); w.Bool(cfg_.system.activity_enabled());
@@ -1168,6 +1218,12 @@ void Server::handle_api_version(const httplib::Request&, httplib::Response& res)
   w.StartObject();
   w.Key("enabled"); w.Bool(cfg_.mcp.enabled);
   w.EndObject();
+  // The access of humans (docs/access.md) has a mode.
+  // In the authzen mode, it has the subject and its decisions for each action (one batch to the PDP).
+  // The pages hide the actions that are false. The routes check them again.
+  w.Key("access");
+  const std::string access = access_json();
+  w.RawValue(access.data(), access.size(), rapidjson::kObjectType);
   w.EndObject();
   w.EndObject();
   res.status = 200;

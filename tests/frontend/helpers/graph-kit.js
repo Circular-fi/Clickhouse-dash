@@ -1,10 +1,9 @@
 import { expect } from '@playwright/test';
 
-// Shared checks of the canvas graph kit (app_graph_kit.js), used by the
-// Explorer graph and the Traces service map specs: both graphs expose an
-// inspect() hook with the last drawn frame in client coordinates.
+// Shared checks of the canvas graph kit (app_graph_kit.js). The Explorer graph and the Traces service map specs use them.
+// Both graphs expose an inspect() hook. The hook returns the last drawn frame in client coordinates.
 
-// Waits until the kit camera animation (recentring, eased over 220 ms) is over.
+// The function waits until the kit camera animation ends. The camera recentres and eases over 220 ms.
 export async function cameraIdle(page, hook) {
   await expect.poll(() => page.evaluate((name) => name.split('.').reduce((o, k) => o[k], window).inspect().animating, hook), { timeout: 5000 }).toBe(false);
 }
@@ -55,8 +54,8 @@ export async function pixel(page, canvasSelector, x, y) {
 
 export const colorDistance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 
-// The dot grid: in an empty square of the canvas the background is
-// --graph-bg and the dots repeat every gridSpacing pixels.
+// The dot grid. In an empty square of the canvas, the background is --graph-bg.
+// The dots repeat every gridSpacing pixels.
 export async function expectDotGrid(page, canvasSelector, state, bgColor) {
   const canvas = await page.locator(canvasSelector).boundingBox();
   const spacing = state.gridSpacing;
@@ -100,8 +99,8 @@ export async function expectDotGrid(page, canvasSelector, state, bgColor) {
   expect(repeated.length, `dots repeat every ${spacing} px`).toBeGreaterThan(0);
 }
 
-// The shared chrome: icon toolbar (- fit +), legend and status line
-// bottom-left, the minimap bottom-right.
+// The shared chrome: icon toolbar (- fit +), legend and status line at the bottom left.
+// The minimap is at the bottom right.
 export async function expectKitChrome(page, { pane, zoomOut, fit, zoomIn, legend, status }) {
   const paneBox = await page.locator(pane).boundingBox();
   for (const [selector, label] of [[zoomOut, /zoom out/i], [fit, /fit/i], [zoomIn, /zoom in/i]]) {
@@ -115,8 +114,8 @@ export async function expectKitChrome(page, { pane, zoomOut, fit, zoomIn, legend
   expect(order[0]).toBeLessThan(order[1]);
   expect(order[1]).toBeLessThan(order[2]);
   const statusBox = await page.locator(status).boundingBox();
-  // The legend folds from a button at the start of the status line (a fit
-  // folds it when the graph is only readable without it).
+    // The legend folds from a button at the start of the status line.
+    // A fit folds the legend when the graph is readable only without it.
   const toggle = page.locator(`${status} .graphKitLegendToggle`);
   await expect(toggle).toBeVisible();
   const folded = (await toggle.getAttribute('aria-expanded')) === 'false';
@@ -134,9 +133,8 @@ export async function expectKitChrome(page, { pane, zoomOut, fit, zoomIn, legend
   expect(paneBox.y + paneBox.height - (statusBox.y + statusBox.height)).toBeLessThan(16);
 }
 
-// The kit's safe area of a graph canvas (graphKit.safeArea: below the
-// toolbar, above the legend / status dock, beside an open panel) in client
-// coordinates.
+// The safe area of a graph canvas is the free space of the kit, in client coordinates (graphKit.safeArea).
+// It lies below the toolbar, above the legend / status dock, and beside an open panel.
 export async function freeArea(page, canvasSelector, panelSelector = null) {
   return page.evaluate(({ canvasSelector, panelSelector }) => {
     const canvas = document.querySelector(canvasSelector);
@@ -147,8 +145,8 @@ export async function freeArea(page, canvasSelector, panelSelector = null) {
   }, { canvasSelector, panelSelector });
 }
 
-// The visible canvas a recentring aims at (graphKit.visibleArea: the safe
-// area, also clear of the minimap when it shows), in client coordinates.
+// The visible canvas is the target of a recentring (graphKit.visibleArea).
+// It is the safe area, and it is also clear of the minimap when the minimap shows.
 export async function visibleArea(page, canvasSelector, panelSelector = null) {
   return page.evaluate(({ canvasSelector, panelSelector }) => {
     const canvas = document.querySelector(canvasSelector);
@@ -159,11 +157,11 @@ export async function visibleArea(page, canvasSelector, panelSelector = null) {
   }, { canvasSelector, panelSelector });
 }
 
-// Node `id` ends centred in the visible canvas (beside or above the open
-// panel, clear of the toolbar, the legend / status dock and the minimap),
-// once the panel's size has settled and the camera stopped. `hook` names
-// the graph's inspect() ("ChDash.explorerGraph"); the node is drawn as a
-// full card (not compact: a compact card reports its title row).
+// The node `id` ends centred in the visible canvas. It sits beside or above the open panel.
+// It is clear of the toolbar, the legend / status dock and the minimap.
+// The node ends centred once the panel's size has settled and the camera stopped.
+// `hook` names the graph's inspect() ("ChDash.explorerGraph").
+// The node is drawn as a full card (not compact: a compact card reports its title row).
 export async function expectCentred(page, { hook, canvas, panel = null, id, label = String(id), tolerance = 3 }) {
   await expect.poll(() => page.evaluate(({ hook, canvas, panel, id, tolerance }) => {
     const state = hook.split('.').reduce((o, k) => o[k], window).inspect();
@@ -181,9 +179,10 @@ export async function expectCentred(page, { hook, canvas, panel = null, id, labe
   }, { hook, canvas, panel, id, tolerance }), { timeout: 10_000, message: `${label} centred in the visible canvas` }).toBe('centred');
 }
 
-// Fit shows the whole graph (kit.fitScale): every card inside the free area
-// (below the toolbar, above the legend / status dock, beside an open panel),
-// none clipped, so no minimap; a minimap shown anyway covers no card.
+// Fit shows the whole graph (kit.fitScale).
+// Every card is inside the free area (below the toolbar, above the legend / status dock, beside an open panel).
+// No card is clipped, so there is no minimap.
+// A minimap shown anyway covers no card.
 export async function expectFullFit(page, { canvas, minimap, panel = null }, state) {
   const free = await freeArea(page, canvas, panel);
   expect(state.nodes.length, 'cards drawn').toBeGreaterThan(0);
@@ -210,13 +209,16 @@ export async function kitRules(page) {
   });
 }
 
-// What a Fit opens at (kit.fitView): a graph readable as a whole opens
-// whole; one slightly too large (overview >= FIT_READABLE_SHARE of the
-// readable scale) at the readable scale with its anchor (root / focus) in
-// the free area and the minimap; a much larger one whole with compact
-// cards. A phone opens whole when that keeps PHONE_MIN_SCALE, else on the
-// anchor at PHONE_MIN_SCALE or more. Never compact cards at a readable
-// open. Returns "whole", "compact" or "anchored".
+// What a Fit opens at (kit.fitView) depends on the size of the graph.
+// A graph that is readable as a whole opens whole.
+// A graph that is slightly too large (overview >= FIT_READABLE_SHARE of the readable scale) opens at the readable scale.
+// Its anchor (root / focus) stays in the free area, and the minimap shows.
+// A much larger graph opens whole, with compact cards.
+//
+// A phone opens whole when that keeps PHONE_MIN_SCALE.
+// Otherwise it opens on the anchor, at PHONE_MIN_SCALE or more.
+// A readable open never uses compact cards.
+// The result is "whole", "compact" or "anchored".
 export async function expectFit(page, { canvas, minimap, panel = null }, state, anchorId) {
   const rules = await kitRules(page);
   const { scale, readableScale: readable, overviewScale: overview } = state;
@@ -240,9 +242,10 @@ export async function expectFit(page, { canvas, minimap, panel = null }, state, 
     await whole();
     return 'compact';
   }
-  // The anchor is wholly in the free area; once a card is clipped the minimap
-  // gives the rest (a graph only a few pixels too large may still show whole
-  // at the readable scale, inside Fit's margin: then no card is clipped).
+    // The anchor is wholly in the free area.
+    // Once a card is clipped, the minimap gives the rest.
+    // A graph that is only a few pixels too large may still show whole at the readable scale, inside Fit's margin.
+    // In that case no card is clipped.
   if (!state.minimapVisible) await expectFullFit(page, { canvas, minimap, panel }, state);
   const free = await freeArea(page, canvas, panel);
   const node = state.nodes.find((n) => (n.id || n.service) === anchorId);
@@ -254,10 +257,12 @@ export async function expectFit(page, { canvas, minimap, panel = null }, state, 
   return 'anchored';
 }
 
-// Level of detail from the card on screen (kit.isCompact): full cards while
-// the ordinary card (cardHeight, world px) is COMPACT_CARD_PX tall or more on
-// screen and its smallest text (minFont) MIN_TEXT_PX or more; compact
-// cards shrink to their title (a service name on two lines: kit.compactBox, lines 2), never an empty frame.
+// The level of detail comes from the card on screen (kit.isCompact).
+// Cards are full while two conditions hold.
+// The ordinary card (cardHeight, world px) is COMPACT_CARD_PX tall or more on screen.
+// Its smallest text (minFont) is MIN_TEXT_PX or more.
+// Compact cards shrink to their title (a service name on two lines: kit.compactBox, lines 2).
+// A compact card is never an empty frame.
 export async function expectLevelOfDetail(page, state, { cardHeight, minFont = 12 }) {
   const rules = await kitRules(page);
   const onScreen = cardHeight * state.scale;
@@ -275,9 +280,10 @@ export async function expectLevelOfDetail(page, state, { cardHeight, minFont = 1
   return compact;
 }
 
-// Every route owns its lane: no two edges run side by side closer than
-// `gap` client px (the kit's LANE_GAP at the current scale) over more than
-// a pixel. Lines on the very same coordinate are the shared fan at a port.
+// Every route owns its lane.
+// No two edges run side by side closer than `gap` client px over more than a pixel.
+// The gap is the kit's LANE_GAP at the current scale.
+// Lines on the very same coordinate are the shared fan at a port.
 export function expectOwnLanes(state, gap) {
   const segments = [];
   for (const edge of state.edges) {
@@ -309,8 +315,8 @@ export function expectOwnLanes(state, gap) {
   expect(near, 'parallel routes in their own lanes').toEqual([]);
 }
 
-// No card and no edge label on screen under the toolbar groups or the
-// legend / status dock (the fit and the recentring aim at the safe area).
+// No card and no edge label is on screen under the toolbar groups or the legend / status dock.
+// The fit and the recentring aim at the safe area.
 export async function expectClearOfChrome(page, pane, state) {
   const chrome = await page.evaluate((selector) => {
     const root = document.querySelector(selector);
@@ -324,9 +330,9 @@ export async function expectClearOfChrome(page, pane, state) {
   }
 }
 
-// Real touch input (Chromium's Input.dispatchTouchEvent; the context needs
-// hasTouch): a one-finger drag and a two-finger pinch around `centre` whose
-// finger gap goes from `fromGap` to `toGap` CSS pixels.
+// Real touch input uses Chromium's Input.dispatchTouchEvent. The context needs hasTouch.
+// The input is a one-finger drag and a two-finger pinch around `centre`.
+// The finger gap goes from `fromGap` to `toGap` CSS pixels.
 async function touchSequence(page, frames) {
   const cdp = await page.context().newCDPSession(page);
   const points = (list) => list.map((p, id) => ({ x: p.x, y: p.y, id }));
@@ -352,9 +358,10 @@ export async function pinch(page, centre, fromGap, toGap, steps = 8) {
   await touchSequence(page, frames);
 }
 
-// A phone shows the canvas (no Graph / List switch, no list), its icon
-// toolbar inside the pane, and the canvas follows one-finger pans and
-// two-finger pinches. `inspect` returns the graph's inspect() state.
+// A phone shows the canvas. It has no Graph / List switch and no list.
+// Its icon toolbar is inside the pane.
+// The canvas follows one-finger pans and two-finger pinches.
+// `inspect` returns the state of the graph's inspect().
 export async function expectTouchCanvas(page, { pane, canvas, zoomIn, inspect }) {
   await expect(page.locator(canvas)).toBeVisible();
   await expect(page.locator(canvas)).toHaveCSS('visibility', 'visible');
@@ -403,13 +410,13 @@ function frameProbe() {
   try { new PerformanceObserver((list) => { for (const e of list.getEntries()) { window.__graphLong += e.duration; window.__graphLongMax = Math.max(window.__graphLongMax, e.duration); } }).observe({ entryTypes: ['longtask'] }); } catch (_) {}
 }
 
-// Frame probe from the first script of every page (for budgets that include
-// a navigation): call before page.goto().
+// Frame probe from the first script of every page. Use it for budgets that include a navigation.
+// Call it before page.goto().
 export async function installFrameProbe(page) {
   await page.addInitScript(frameProbe);
 }
 
-// rAF frame costs and long tasks while running `action` (perf budgets).
+// rAF frame costs and long tasks, measured while `action` runs (perf budgets).
 export async function measureFrames(page, action, { reset = true } = {}) {
   await page.evaluate(frameProbe);
   if (reset) await page.evaluate(() => { window.__graphFrames = []; window.__graphLong = 0; window.__graphLongMax = 0; });

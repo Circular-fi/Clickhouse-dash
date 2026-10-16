@@ -1,32 +1,31 @@
-// Popovers and tooltips: one placement, one tooltip, one popover shell.
+// Popovers and tooltips. The module has one placement function, one tooltip and one popover shell.
 //
 //   place(anchor, el, { side, align, offset, margin, flip }) -> { left, top, side }
-//     Puts the fixed element `el` beside `anchor` (an element, a rect or a
-//     point { x, y }): side "bottom" (default) | "top" | "right" | "left",
-//     align "start" | "center" (default) | "end", `offset` px away (6),
-//     flipped to the other side when it does not fit, then kept `margin`
+//     Puts the fixed element `el` beside `anchor`. The anchor is an element, a rect or a
+//     point { x, y }. The side is "bottom" (default), "top", "right" or "left". The align is
+//     "start", "center" (default) or "end". `offset` sets the distance in px (6).
+//     When the element does not fit, it flips to the other side. Then it stays `margin`
 //     px (8) inside the viewport.
 //
 //   tip(el, content, { selector, side, align, offset, html, className }) -> { show(target), hide(), destroy() }
-//     A hover / focus tooltip on el (or, with `selector`, on each matching
-//     descendant of el). content: text, a Node, or (target) => text | Node
-//     | null (html: true for markup the caller escaped). One .uiTip
-//     (role=tooltip) for the page, named by the target's
-//     aria-describedby while shown; Escape hides it.
+//     A hover / focus tooltip on el. With `selector`, the tooltip applies to each descendant
+//     of el that matches it. content: text, a Node, or (target) => text | Node | null.
+//     Set html: true for markup that the caller escaped. The page has one .uiTip
+//     (role=tooltip). While it is shown, the aria-describedby of the target names it. Escape hides it.
 //
 //   follow({ className, side, align, offset, host }) -> { el, show(point | anchor, content, opts), hide(), destroy() }
-//     A tooltip that follows the pointer over a canvas or a chart (it is
-//     not announced: role=tooltip, no live region).
+//     A tooltip that follows the pointer over a canvas or a chart. It is not
+//     announced. It has role=tooltip and no live region.
 //
 //   open(anchor, content, { className, label, role, side, align, offset,
 //        onClose, focus, closeOnScroll, trapFocus, returnFocus, fallbackFocus })
 //     -> { el, close(), place(), update(content), isOpen() }
-//     A click-opened popover (.uiPopover, role=dialog by default) beside
-//     its anchor: an ns.layers layer (Escape, a press outside, focus back
-//     to the anchor), closed when the page scrolls it away or resizes.
+//     A click-opened popover (.uiPopover, role=dialog by default) beside its anchor.
+//     It is an ns.layers layer. Escape and a press outside close it, and the focus returns to the anchor.
+//     The popover also closes when the page scrolls it away or resizes.
 //
 //   flash(anchor, text = "Copied") -> a short confirmation beside a button
-//     (role=status: it is the result of the user's own action).
+//     It has role=status, because it is the result of the user's own action.
 
 import { layers, lifecycle } from "./app_ui_layers.js";
 
@@ -89,8 +88,7 @@ function fill(el, content, html) {
   else el.textContent = String(content ?? "");
 }
 
-// Inside a modal dialog, floating elements live in it (the top layer
-// covers the body).
+// Inside a modal dialog, floating elements live in that dialog. The browser top layer covers the body.
 function hostFor(anchor) {
   const node = anchor instanceof Element ? anchor : null;
   return node?.closest?.("dialog[open]") || layers.host();
@@ -158,8 +156,7 @@ function tip(el, content, options = {}) {
       owned.add(target);
       describe(target, true);
       shownScope = lifecycle.scope();
-      // Escape hides the tip (the key goes on to the layers); so does a
-      // scroll that moves the target.
+      // Escape hides the tip. The key then goes on to the layers. A scroll that moves the target also hides the tip.
       shownScope.listen(document, "keydown", (event) => { if (event.key === "Escape") hideShared(); }, true);
       shownScope.listen(window, "scroll", () => hideShared(), { capture: true, passive: true });
     }
@@ -192,8 +189,8 @@ function tip(el, content, options = {}) {
   };
 }
 
-// host: the element the tip lives in (default: the body, or the open
-// dialog); a tip in its component's own host goes away with it.
+// host: the element that holds the tip (default: the body, or the open
+// dialog). A tip in the host of its own component is removed with that host.
 function follow({ className = "", side = "right", align = "start", offset = 12, host = null } = {}) {
   const el = document.createElement("div");
   el.className = `uiTip${className ? ` ${className}` : ""}`;
@@ -202,7 +199,7 @@ function follow({ className = "", side = "right", align = "start", offset = 12, 
   if (host) host.appendChild(el);
   return {
     el,
-    // content undefined: keep what the caller wrote into el.
+    // When content is undefined, the tip keeps what the caller wrote into el.
     show(at, content, opts = {}) {
       const parent = host || hostFor(at instanceof Element ? at : null);
       if (el.parentElement !== parent) parent.appendChild(el);
@@ -268,9 +265,9 @@ function open(anchor, content, options = {}) {
   });
   if (anchorEl && anchorEl.hasAttribute("aria-haspopup")) anchorEl.setAttribute("aria-expanded", "true");
   if (closeOnScroll) {
-    // Only a scroll that moves the anchor: the scroll event of a scroll
-    // made before opening (a click bringing its button into view) arrives
-    // once the popover is open, with the anchor where it already was.
+    // Only a scroll that moves the anchor counts. A scroll that happened before
+    // the popover opened can arrive later, when a click brings its button into view.
+    // The event arrives after the popover opens, and the anchor is still where it was.
     const at = () => { const box = anchorEl?.getBoundingClientRect?.(); return box ? `${Math.round(box.left)},${Math.round(box.top)}` : ""; };
     const openedAt = at();
     scope.listen(window, "scroll", (event) => {
@@ -294,8 +291,7 @@ function flash(anchor, text = "Copied", { duration = 1200 } = {}) {
   el.setAttribute("role", "status");
   el.style.visibility = "hidden";
   hostFor(anchor).appendChild(el);
-  // The text lands in the live region after it is in the document, so it
-  // is announced.
+  // The text goes into the live region after the element is in the document. Therefore, the text is announced.
   requestAnimationFrame(() => {
     el.textContent = text;
     el.style.visibility = "";

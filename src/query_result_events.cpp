@@ -91,27 +91,27 @@ void ResultEventWriter::write(const clickhouse::Block& block) {
   const size_t max_bytes_per_event = limits_.max_bytes_per_event;
   size_t row = 0;
 
-  // Resolve column handles once per block: Block::operator[] returns a
-  // shared_ptr by value, which would otherwise cost atomic refcount
-  // traffic for every single cell.
+  // Resolve the column handles once per block. Block::operator[] returns a
+  // shared_ptr by value. Without this, every cell costs atomic refcount
+  // traffic.
   std::vector<clickhouse::ColumnRef> columns;
   columns.reserve(block.GetColumnCount());
   for (size_t c = 0; c < block.GetColumnCount(); ++c) columns.push_back(block[c]);
-  // One encoder per column of the block: the nested structure of a column
-  // (Nullable, Array, Tuple, Map) is resolved once instead of per cell.
+  // One encoder per column of the block. The nested structure of a column
+  // (Nullable, Array, Tuple, Map) is resolved once, not per cell.
   std::vector<detail::CellEncoder> encoders;
   encoders.reserve(columns.size());
   for (const auto& column : columns) encoders.emplace_back(column);
-  // The declared type of a DESCRIBE plan: an opaque aggregate state, or a Bool that clickhouse-cpp
-  // reads as UInt8 (write_cell_json_declared() writes it true or false, as ClickHouse prints it).
+  // The declared type of a DESCRIBE plan is an opaque aggregate state, or a Bool.
+  // clickhouse-cpp reads a Bool as UInt8. write_cell_json_declared() writes it as true or false, as ClickHouse prints it.
   std::vector<char> use_declared(columns.size(), 0);
   for (size_t c = 0; c < columns.size(); ++c) {
     const ResultColumnPlan* plan = column_plans_[c];
     use_declared[c] = plan && (plan->mode == ResultTransportMode::Opaque || is_bool_type_name(plan->original_type)) ? 1 : 0;
   }
 
-  // One event buffer per block, cleared (capacity kept) between events,
-  // so a multi-event block grows it once instead of once per event.
+  // One event buffer per block. It is cleared between events, and its capacity is kept.
+  // So a block with many events grows the buffer once, not once per event.
   rapidjson::StringBuffer sb(nullptr, std::min<size_t>(max_bytes_per_event, 64 * 1024));
   while (row < block.GetRowCount() && rows_returned_ < row_limit) {
     sb.Clear();
@@ -127,15 +127,13 @@ void ResultEventWriter::write(const clickhouse::Block& block) {
            rows_returned_ < row_limit) {
       w.StartArray();
       for (size_t c = 0; c < columns.size(); ++c) {
-        // Compatibility projections are already String columns: the text of
-        // toString() for a scalar (Int256, Decimal256), the JSON text of
-        // toJSONString() for a structure (JSON, Dynamic, Array(Int256), ...).
-        // Opaque aggregate states additionally get a valid-UTF8/hex safety guard.
+        // The compatibility projections are already String columns.
+        // A scalar (Int256, Decimal256) has the text of toString(). A structure (JSON, Dynamic, Array(Int256), ...) has the JSON text of toJSONString().
+        // Opaque aggregate states also get a valid-UTF8 and hex safety guard.
         //
-        // Cells are serialized straight into the event buffer: a
-        // per-cell StringBuffer+Writer costs several heap allocations and
-        // an extra copy per cell. The cell size is the buffer delta (it
-        // includes at most one separator byte).
+        // Cells are serialized straight into the event buffer. A per-cell StringBuffer and Writer
+        // cost several heap allocations and an extra copy per cell. The cell size is the buffer delta.
+        // The delta includes at most one separator byte.
         const size_t cell_start = sb.GetSize();
         if (use_declared[c]) {
           write_cell_json_declared(w, columns[c], row, column_plans_[c]->original_type);
@@ -154,8 +152,8 @@ void ResultEventWriter::write(const clickhouse::Block& block) {
       ++rows_in_event;
       ++rows_returned_;
 
-      // Batch-size target: hard safety is enforced separately by
-      // max_result_cell_bytes and max_result_event_bytes.
+      // The batch size is a target. The hard safety limits are max_result_cell_bytes
+      // and max_result_event_bytes, which are enforced separately.
       if (rows_in_event > 0 && sb.GetSize() >= max_bytes_per_event) break;
     }
 

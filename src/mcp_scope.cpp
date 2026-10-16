@@ -7,9 +7,11 @@
 namespace chdash {
 
 const std::vector<McpToolGroup>& mcp_tool_groups() {
-  // What a person thinks of: the data, the Explorer page, the System page, Observability (traces, logs and metrics), the
-  // Query page, free SQL, and the analysis of the keys themselves. A family has at least two tools, so no card is a lone
-  // check box (the analysis has one only while the usage is off: the page lists the tools that are offered).
+  // The groups follow what a person looks for. Examples are the data, the Explorer page, and the System page.
+  // Other groups are Observability (traces, logs and metrics), the Query page, free SQL, and the analysis of the keys.
+  // A family has at least two tools. So no card is a lone check box.
+  //
+  // The analysis has one tool only while the usage is off. The page lists the tools that are offered.
   static const std::vector<McpToolGroup> groups = {
       {"data", "Data", "hosts, databases, tables and columns, and the rows of a table that ClickHouse Dash selects"},
       {"explorer", "Explorer", "the Explorer page: catalog, tables, functions, storage and lineage"},
@@ -101,16 +103,19 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
        "pipeline, ast, syntax or estimate. Use it to check the cost of a query before run_query.",
        true},
     };
-    // The API tools: one row each in mcp_api_tools.cpp. The Explorer tools of one table and the catalog are cut by the
-    // patterns of the key; the others hold no data of the tables of the key (McpApiScope). None needs the scope "*".
+    // The API tools have one row each in mcp_api_tools.cpp.
+    // The patterns of the key cut the Explorer tools of one table, and the catalog.
+    // The other API tools hold no data of the tables of the key (McpApiScope). None of them needs the scope "*".
     for (const auto& api : mcp_api_tools()) {
       all.push_back({api.name, api.group, api.title, api.description, false, &api, api.section});
     }
-    // The analysis of the keys themselves (the tools of the mcp_analysis family). Every key has the first two, whatever its list of tools
-    // says: a key may always know its own limits, and its own usage once the usage is counted. The last one shows other keys (their names,
-    // hosts, clients and activity): `*` does not give it, the list of the key must name it, and the configuration must allow it
-    // (mcp.usage.all_keys).
-    // Columns after the description: needs_all_data, api, section, always, explicit_only, needs.
+    // The analysis of the keys themselves belongs to the mcp_analysis family.
+    // Every key has the first two tools, whatever its list of tools says. A key always knows its own limits.
+    // A key also knows its own usage, once the usage is counted.
+    //
+    // The last tool shows other keys, with their names, hosts, clients and activity.
+    // `*` does not give this tool. The list of the key must name it. The configuration must enable it (mcp.usage.all_keys).
+    // The columns after the description are: needs_all_data, api, section, always, explicit_only, needs.
     all.push_back({"mcp_analysis_my_limits", "mcp_analysis", "My limits",
                    "The limits of your key: calls per minute and what is left, rows, seconds, and the size caps, each with its source. The "
                    "rate limit is per ChDash instance, and the call that asks has already taken its token. `source` is `key` (your key lowers "
@@ -141,7 +146,7 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
 unsigned mcp_tool_reads(const McpToolInfo& tool) {
   const std::string name = tool.name;
   const std::string section = tool.section ? tool.section : "";
-  // list_services reads traces or logs by its `signal`: the call tells, the key cannot.
+  // list_services reads traces or logs, based on its `signal`. The call tells which one. The key cannot.
   if (name == "list_services") return kMcpReadsNone;
   if (section == "traces") return name == "traces_logs" ? (kMcpReadsTraces | kMcpReadsLogs) : kMcpReadsTraces;
   if (section == "logs") return kMcpReadsLogs;
@@ -158,7 +163,7 @@ const McpToolInfo* mcp_find_tool(std::string_view name) {
 }
 
 bool mcp_tool_available(const McpToolInfo& tool, const McpToolAvailability& availability) {
-  // Reading all the keys is a part of the usage: it never exists without it.
+  // The reading of all keys is a part of the usage. It never exists without the usage.
   if ((tool.needs & (kMcpNeedsUsage | kMcpNeedsAllKeys)) != 0 && !availability.usage) return false;
   if ((tool.needs & kMcpNeedsAllKeys) != 0 && !availability.all_keys) return false;
   return true;
@@ -319,7 +324,7 @@ std::vector<std::string> mcp_effective_tools(const std::vector<std::string>& too
   for (const auto& tool : mcp_tool_catalog()) {
     if (tool.needs_all_data && !all_data) continue;
     if (!mcp_tool_available(tool, availability)) continue;
-    // A tool that every key has needs no word of the list, one that "*" does not give needs its name, the others follow the list.
+    // A tool that every key has needs no name in the list. A tool that "*" does not give needs its name. The other tools follow the list.
     const bool named = std::find(tools.begin(), tools.end(), tool.name) != tools.end();
     if (tool.always || named || (wildcard && !tool.explicit_only)) out.emplace_back(tool.name);
   }

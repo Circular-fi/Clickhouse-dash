@@ -1,7 +1,8 @@
-// The pure part of the Explorer graph (ARCH-F-155): the request that a scope makes, the projections of a payload (Lineage with its non-storing
-// objects contracted, Storage with its tiers and TTL events), the database groups of the overview, the neighbourhood of a focus and what the
-// focus needs. A function takes the payload and the view it is asked for and returns data: no DOM, no state, the caches are the scene's
-// (app_explorer_graph_scene.js). tests/frontend/model/explorer-graph-model.test.cjs.
+// The pure part of the Explorer graph (ARCH-F-155).
+// It covers the request that a scope makes, the projections of a payload, the database groups of the overview, the neighbourhood of a focus and what the focus needs.
+// The projections are Lineage, with its non-storing objects contracted, and Storage, with its tiers and TTL events.
+// A function takes the payload and the view that it asks for. It returns data. It uses no DOM and no state.
+// The caches belong to the scene (app_explorer_graph_scene.js). The tests are in tests/frontend/model/explorer-graph-model.test.cjs.
 
 import { isSystemDatabaseName } from "./app_explorer_summary.js";
 
@@ -22,7 +23,7 @@ function parseLogicalTableId(id) {
   return { database: qualified.slice(0, dot), table: qualified.slice(dot + 1) };
 }
 
-// The table that a node id names, or the table the focus stands on in `graph`; null when none.
+// It returns the table that a node id names, or the table that the focus stands on in `graph`. It returns null when there is none.
 function focusScopeOf(graph, id) {
   if (!id) return null;
   const node = (graph?.nodes || []).find((candidate) => candidate.id === id && candidate.layer === "logical");
@@ -30,7 +31,7 @@ function focusScopeOf(graph, id) {
   return parseLogicalTableId(id);
 }
 
-// The request that shows the scope `view` names: { detailMode, includeSystem, includeNonStoring, focus: {database, table} | null, focusDepth, expansions, database }.
+// The request that shows the scope named by `view`: { detailMode, includeSystem, includeNonStoring, focus: {database, table} | null, focusDepth, expansions, database }.
 function graphRequestOptions(view, refresh = false) {
   const focus = view.focus;
   const options = {
@@ -42,8 +43,8 @@ function graphRequestOptions(view, refresh = false) {
   if (focus?.database && focus?.table) {
     options.focusDatabase = focus.database;
     options.focusTable = focus.table;
-    // Request exactly what is displayed. The backend exposes scope_has_more,
-    // so the + depth control never needs a hidden look-ahead ring.
+    // Request exactly what is displayed. The backend exposes scope_has_more.
+    // The + depth control then never needs a hidden look-ahead ring.
     options.depth = view.detailMode === "logical" ? Math.min(8, view.focusDepth) : 0;
     if (view.detailMode === "logical" && view.expansions.size) {
       options.expand = [...view.expansions].sort().map((key) => {
@@ -70,7 +71,8 @@ function graphRequestKey(options) {
   ].join("\u0000");
 }
 
-// The ids within `depthLimit` hops of the focused object in a logical projection, or null when nothing is focused or the focus is not in it.
+// It returns the ids within `depthLimit` hops of the focused object in a logical projection.
+// It returns null when nothing is focused, or when the focus is not in the projection.
 function neighborhoodIds(projection, focusedId, depthLimit) {
   if (!focusedId) return null;
   const logical = new Set(projection.nodes.map((node) => node.id));
@@ -103,7 +105,7 @@ function isNonStoringNode(node) {
   return ["view", "materialized_view", "refreshable_materialized_view", "buffer"].includes(String(node?.kind || ""));
 }
 
-// Is the node shown with these visibility switches? (The focused object always is.)
+// It returns whether the node is shown with these visibility switches. The focused object is always shown.
 function logicalNodeAllowed(node, view) {
   if (!node || node.layer !== "logical") return true;
   if (!view.includeSystem && isSystemDatabaseName(node.database)) return false;
@@ -142,9 +144,9 @@ function buildLogicalProjection(graph, view) {
   const projected = [];
   const seen = new Set();
   const add = (edge) => {
-    // Keep semantically distinct projected relations stable. De-duplicating on
-    // endpoints alone made the result depend on traversal order when two
-    // hidden paths represented different engines.
+    // Keep semantically distinct projected relations stable.
+    // De-duplication on endpoints alone made the result depend on traversal order.
+    // This happened when two hidden paths represented different engines.
     const key = `${edge.from}\u0000${edge.to}\u0000${edge.kind}`;
     if (edge.from === edge.to || seen.has(key)) return;
     seen.add(key);
@@ -170,16 +172,16 @@ function buildLogicalProjection(graph, view) {
     if (visible.has(edge.from) && visible.has(edge.to)) add(edge);
   }
 
-  // A Buffer is a non-storing ingress object with one explicit forwarding
-  // destination. When Buffer nodes are hidden, that destination is the stable
-  // representative of the Buffer. This is what turns:
+  // A Buffer is a non-storing ingress object with one explicit forwarding destination.
+  // When Buffer nodes are hidden, that destination is the stable representative of the Buffer.
+  // The code turns this graph:
   //
   //   Buffer -> table1
   //   Buffer -> MV -> table2
   //
-  // into table1 -> table2 rather than dropping the second branch entirely.
-  // Nested Buffers stop at their own representative so a chain remains a
-  // readable chain instead of becoming a transitive fan-out.
+  // into table1 -> table2. The second branch is kept, not dropped entirely.
+  // Nested Buffers stop at their own representative. A chain then stays a readable chain.
+  // It does not become a transitive fan-out.
   const bufferRepresentativeMemo = new Map();
   const resolveBufferRepresentative = (bufferId, stack = new Set()) => {
     if (bufferRepresentativeMemo.has(bufferId)) return bufferRepresentativeMemo.get(bufferId);
@@ -242,7 +244,7 @@ function buildLogicalProjection(graph, view) {
     }
   };
 
-  // Standard contraction for visible -> hidden -> visible paths.
+  // The standard contraction applies to visible -> hidden -> visible paths.
   for (const source of visible) {
     for (const edge of outgoing.get(source) || []) {
       const targetNode = nodeById.get(edge.to);
@@ -251,8 +253,8 @@ function buildLogicalProjection(graph, view) {
     }
   }
 
-  // Hidden Buffer fan-out has no incoming visible edge, so contract its other
-  // outputs from the Buffer's forwarding destination (its representative).
+  // A hidden Buffer fan-out has no incoming visible edge.
+  // The code contracts its other outputs from the forwarding destination of the Buffer (its representative).
   for (const node of nodes) {
     if (node.kind !== "buffer" || !collapseHidden(node) || systemHidden(node)) continue;
     const representative = resolveBufferRepresentative(node.id);
@@ -278,15 +280,15 @@ function canUseStorage(graph, id) {
   }
   const root = itemById.get(id);
   if (!root || root.layer !== "logical") return false;
-  // Logical-only graph responses deliberately omit the physical layer. The
-  // backend derives this flag from the complete cached topology so the UI can
-  // still offer Storage without downloading every disk/volume/shard node.
+  // Logical-only graph responses deliberately omit the physical layer.
+  // The backend derives this flag from the complete cached topology.
+  // So the UI can still offer Storage, without a download of every disk, volume and shard node.
   if (typeof root.storage_available === "boolean") return root.storage_available;
 
-  // Persistent tables own physical placement directly. Buffer tables are a
-  // special storage-mode routing object: they do not own parts themselves,
-  // but their flush destination does. Treat a Buffer as storage-capable when
-  // following Buffer forwarding edges reaches a persistently stored table.
+  // Persistent tables own physical placement directly.
+  // Buffer tables are a special storage-mode routing object. They do not own parts themselves.
+  // However, their flush destination owns the parts.
+  // Treat a Buffer as storage-capable when its Buffer forwarding edges reach a persistently stored table.
   const seen = new Set();
   const visit = (currentId) => {
     if (!currentId || seen.has(currentId)) return false;
@@ -317,9 +319,8 @@ function rawStorageProjection(graph, view) {
   const storageLogicalAllowed = (node) => {
     if (!node || node.layer !== "logical") return true;
     if (!view.includeSystem && isSystemDatabaseName(node.database)) return false;
-    // Storage is intentionally stricter than Lineage: ordinary non-storing
-    // objects stay out, while Buffer is shown because it is a real write path
-    // into a persistent destination.
+    // Storage is intentionally stricter than Lineage.
+    // Ordinary non-storing objects stay out. Buffer is shown, because it is a real write path into a persistent destination.
     return !isNonStoringNode(node) || node.kind === "buffer";
   };
 
@@ -358,10 +359,10 @@ function rawStorageProjection(graph, view) {
     if (root?.kind === "buffer") addBufferRoute(rootId);
     else if (root && storageLogicalAllowed(root) && canUseStorage(graph, rootId)) {
       keep.add(rootId);
-      // Focusing a persistent table in Storage must include every Buffer that
-      // flushes into it (including chained Buffers), not only the table's
-      // physical descendants. This makes the selected table's write ingress
-      // visible without requiring the database-wide graph.
+      // Focusing a persistent table in Storage has to include every Buffer that flushes into it.
+      // This includes chained Buffers, not only the physical descendants of the table.
+      // The selected table then shows its write ingress.
+      // The database-wide graph is not required.
       addBuffersFeeding(rootId);
     }
   } else {
@@ -375,9 +376,9 @@ function rawStorageProjection(graph, view) {
     }
   }
 
-  // If a Buffer is in scope, its destination table is part of the same
-  // storage story and must bring its physical topology with it automatically.
-  // Then expand only physical descendants of all retained logical roots.
+  // If a Buffer is in scope, its destination table is part of the same storage story.
+  // That table brings its physical topology with it, automatically.
+  // Then expand only the physical descendants of all retained logical roots.
   let changed = true;
   while (changed) {
     changed = false;
@@ -420,11 +421,10 @@ function buildStorageProjection(graph, view) {
     rawIncoming.get(edge.to).push(edge);
   }
 
-  // A storage tier is the unit users reason about: one ClickHouse volume plus
-  // the disk(s) that belong to it. Keeping volume and disk as separate DAG
-  // columns made the lifecycle read like unrelated objects. Collapse those
-  // implementation nodes into a single visual card while preserving the
-  // volume id, so existing topology/activity identity remains stable.
+  // A storage tier is the unit that users reason about. It is one ClickHouse volume plus the disk or disks that belong to it.
+  // Separate DAG columns for volume and disk made the lifecycle look like unrelated objects.
+  // Collapse those implementation nodes into one visual card. Keep the volume id.
+  // The existing topology and activity identity then stays stable.
   const diskIdsOwnedByVolume = new Set();
   const tierById = new Map();
   const projectedNodes = [];
@@ -493,8 +493,7 @@ function buildStorageProjection(graph, view) {
       continue;
     }
     // Do not draw the same disk again beside its containing storage tier.
-    // If another root addresses that disk directly (for example a Log-family
-    // data_path fallback), retain the standalone disk node as well.
+    // If another root addresses that disk directly (for example, a Log-family data_path fallback), keep the standalone disk node too.
     if (node.kind === "disk" && diskIdsOwnedByVolume.has(node.id) && !diskHasDirectPlacement.has(node.id)) continue;
     if (node.layer === "logical") {
       const policy = reachablePolicyForRoot(node.id);
@@ -508,9 +507,9 @@ function buildStorageProjection(graph, view) {
     projectedNodes.push(node);
   }
 
-  // A storage policy is configuration of the table, not a physical tier. Put
-  // its name in the table card and bypass the standalone policy node. This
-  // keeps the spatial model compact: table -> stacked volumes -> TTL terminal.
+  // A storage policy is configuration of the table, not a physical tier.
+  // Put its name in the table card. Bypass the standalone policy node.
+  // This keeps the spatial model compact: table -> stacked volumes -> TTL terminal.
   let projectedEdges = raw.edges
     .filter((edge) => edge.kind !== "volume_disk" && edge.kind !== "storage_policy" && !policyById.has(edge.from) && !policyById.has(edge.to))
     .map((edge) => ({ ...edge }));
@@ -646,9 +645,8 @@ function buildStorageProjection(graph, view) {
         continue;
       }
 
-      // RECOMPRESS and other in-place TTL actions happen while the part is
-      // still inside its current tier. Render them inside that tier card so
-      // the user can see that no storage move occurred yet.
+      // RECOMPRESS and other in-place TTL actions run while the part is still inside its current tier.
+      // Draw them inside that tier card. The user then sees that no storage move has occurred yet.
       current.ttl_events.push(event);
     }
   }
@@ -657,11 +655,11 @@ function buildStorageProjection(graph, view) {
   return { nodes: projectedNodes, edges: projectedEdges };
 }
 
-// Unfocused Lineage overview (all databases or one database): objects
-// without any dependency are hidden unless "Show objects without
-// dependencies" is on, and every database that is not expanded collapses
-// into one card. Edges between collapsed databases are aggregated with a
-// count, so the overview stays a handful of readable cards on any catalog.
+// Unfocused Lineage overview (all databases, or one database).
+// Objects without any dependency are hidden, unless "Show objects without dependencies" is on.
+// Every database that is not expanded collapses into one card.
+// Edges between collapsed databases are aggregated with a count.
+// The overview then stays a handful of readable cards on any catalog.
 function groupOverview(nodes, edges, { expandedGroups, showIsolated }) {
   const degree = new Map();
   for (const edge of edges) {
@@ -676,8 +674,8 @@ function groupOverview(nodes, edges, { expandedGroups, showIsolated }) {
     stat.total += 1;
     if (degree.get(node.id)) stat.connected += 1;
   }
-  // One database (database scope or a single-database server) is always
-  // shown expanded: there is nothing to group it against.
+  // One database (database scope, or a single-database server) is always shown expanded.
+  // There is nothing to group it against.
   const autoExpand = stats.size <= 1;
   const expanded = (database) => autoExpand || expandedGroups.has(database);
   const representative = new Map();
@@ -744,8 +742,8 @@ function nodeSize(node, detailMode) {
   const rules = detailMode === "physical" ? ttlRules(node) : [];
   const storageDisabled = detailMode === "physical" && node.layer === "logical" && node.storage_disabled === true;
   const hasStoragePolicy = detailMode === "physical" && node.layer === "logical" && !!String(node.storage_policy || "");
-  // In Storage mode the table owns the policy label and only identifies the
-  // TTL clock. Lifecycle actions themselves live on tiers/transitions.
+  // In Storage mode, the table owns the policy label. It only identifies the TTL clock.
+  // Lifecycle actions are on the tiers and transitions.
   if (storageDisabled) return { width: NODE_WIDTH, height: 96 };
   if (rules.length && hasStoragePolicy) return { width: NODE_WIDTH, height: 114 };
   if (hasStoragePolicy) return { width: NODE_WIDTH, height: 88 };
@@ -758,15 +756,15 @@ function isLogicalDependencyEdge(edge) {
   return ["view", "dependency", "dictionary_source"].includes(String(edge?.kind || ""));
 }
 
-// The logical object that a node stands for: itself, the object it belongs to (a click on a disk), or the one already focused.
+// It returns the logical object that a node stands for. This is the node itself, the object it belongs to (a click on a disk), or the object that is already focused.
 function logicalFocusId(graph, focusedId, id) {
   if (!id || !graph) return id || null;
   const itemById = new Map((graph.nodes || []).map((node) => [node.id, node]));
   const initial = itemById.get(id) || null;
   if (!initial) return null;
   if (initial.layer === "logical") return initial.id;
-  // Clicking a physical child should not jump away from an already selected
-  // logical table, especially for a shared disk with multiple parents.
+  // A click on a physical child does not jump away from an already selected logical table.
+  // This matters most for a shared disk with multiple parents.
   if (focusedId && itemById.get(focusedId)?.layer === "logical") return focusedId;
 
   const incoming = new Map();
@@ -790,13 +788,14 @@ function logicalFocusId(graph, focusedId, id) {
   return null;
 }
 
-// What the focused object needs the visibility switches to be (a system object needs System, a view needs the non-storing objects).
+// It returns the state that the visibility switches need for the focused object.
+// A system object needs System. A view needs the non-storing objects.
 function requiredVisibility(graph, focusedId) {
   const node = (graph?.nodes || []).find((candidate) => candidate.id === focusedId) || null;
   return {
     includeSystem: !!node && isSystemDatabaseName(node.database),
-    // A focused View/MV/Buffer is itself part of the non-storing projection,
-    // so the option must remain enabled until focus moves to a storing node.
+    // A focused View, MV or Buffer is itself part of the non-storing projection.
+    // The option stays enabled until the focus moves to a storing node.
     includeNonStoring: !!node && isNonStoringNode(node),
   };
 }

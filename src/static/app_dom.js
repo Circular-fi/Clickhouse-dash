@@ -28,8 +28,8 @@ const build = () => ({
   clearResultsButton: byId("clearResultsButton"),
   clearButton: byId("clearButton"),
 
-  // Query library dialog (saved queries and History), opened by its toolbar
-  // button; app_ui.js builds the dialog (and these refs) when it first opens.
+  // Query library dialog (saved queries and History). A toolbar button opens it.
+  // app_ui.js builds the dialog and these references when it first opens.
   queryLibrary: byId("queryLibrary"),
   queryLibraryButton: byId("queryLibraryButton"),
   queryLibraryMenu: byId("queryLibraryMenu"),
@@ -213,17 +213,17 @@ const dom = build();
 
 dom.liveResultsWrap = dom.resultTableBody ? dom.resultTableBody.closest(".tableWrap") : null;
 
-// Markup added after load (an Observability view shown for the first time,
-// app_obs_page.js) gets its element references too.
+// Markup added after load also gets its element references.
+// An example is the Observability view (app_obs_page.js), shown for the first time.
 dom.refresh = () => {
   for (const [key, value] of Object.entries(build())) if (value && dom[key] !== value) dom[key] = value;
 };
 
-// Element lookups, one convention on every page: dom.byId(id) for an id,
-// dom.$(selector, root) for the first match and dom.$$(selector, root) for
-// every match (an array). root defaults to the document only when it is
-// left out: an explicit null or undefined root finds nothing, so a lookup
-// inside a component never falls back to the whole page.
+// Element lookups use one convention on every page.
+// Use dom.byId(id) for an id.
+// Use dom.$(selector, root) for the first match. Use dom.$$(selector, root) for all matches. This returns an array.
+// The root defaults to the document only when the call omits it.
+// An explicit null or undefined root finds nothing. So a lookup in a component never searches the whole page.
 function $(selector, root) {
   const scope = arguments.length < 2 ? document : root;
   return scope ? scope.querySelector(selector) : null;
@@ -240,26 +240,22 @@ export { dom };
 
 // ------------------------------------------------------- element builder
 //
-// ns.h(tag, props, ...children) -> an element (docs/ui-foundations.md,
-// "Building elements"). props (null for none):
+// ns.h(tag, props, ...children) creates an element. See docs/ui-foundations.md, "Building elements".
+// Pass null as props when there are none. The props are:
 //   class      a string, an array (nested, falsy entries skipped) or an
 //              object { name: on }
-//   dataset    { key: value } -> data-* (camelCase keys, like el.dataset)
+//   dataset    { key: value } sets data-* attributes (camelCase keys, like el.dataset)
 //   style      a string, or { prop: value } (camelCase or --custom)
-//   aria       { label: "..." } -> aria-label; "aria-*" keys work too, and
-//              false prints "false" there (aria-pressed="false")
-//   on         { click: fn, ... }; signal: an AbortSignal or an
-//              ns.lifecycle scope that removes them
-//   value      the attribute, like markup; on <select> and <textarea> the
-//              property, set after the children (a select needs its options)
+//   aria       { label: "..." } sets aria-label. "aria-*" keys work too. false prints "false" there (aria-pressed="false")
+//   on         { click: fn, ... }. signal: an AbortSignal or an ns.lifecycle scope that removes the listeners.
+//   value      the attribute, like markup. On <select> and <textarea>, it sets the property after the children. A select needs its options first.
 //   indeterminate: the property
-//   anything else: an attribute (true -> present, false / null -> absent)
-// children: strings and numbers (always text, never markup), nodes, arrays
-// of children; null, undefined, false, true and "" are skipped.
-// h.frag(...children) -> a DocumentFragment. h.html(trusted) -> a fragment
-// parsed from markup the caller vouches for (the SQL highlighter output,
-// icons): the one, greppable way to insert markup next to h().
-// h.replace(container, ...children) replaces the container's children.
+//   anything else: an attribute (true sets it, false / null removes it)
+// Children are strings and numbers (always text, never markup), nodes, or arrays of children. null, undefined, false, true and "" are skipped.
+// h.frag(...children) returns a DocumentFragment.
+// h.html(trusted) returns a fragment parsed from markup. The caller must make sure that this markup is safe. Examples are the SQL highlighter output and icons.
+// h.html is the one greppable way to insert markup next to h().
+// h.replace(container, ...children) replaces the children of the container.
 const SVG_NS = "http://www.w3.org/2000/svg";
 const PROPERTIES = new Set(["indeterminate"]);
 const VALUE_PROPERTY = new Set(["SELECT", "TEXTAREA"]);
@@ -280,7 +276,7 @@ function classList(value, out) {
 function setAttribute(el, name, value) {
   if (value == null || value === false) return;
   const text = value === true ? "" : String(value);
-  // A URL attribute never takes a script URL (an API value as a link).
+  // A URL attribute never takes a script URL. An example is an API value that is used as a link.
   el.setAttribute(name, URL_ATTRIBUTES.has(name) && SCRIPT_URL.test(text) ? "about:blank" : text);
 }
 
@@ -309,7 +305,7 @@ function applyProps(el, props) {
     } else if (key === "on" || key === "signal") {
       if (key === "signal") signal = value ? (value.signal || value) : null;
     } else if (deferred(el, key)) {
-      // Set after the children: a <select> value needs its options.
+      // Set this property after the children. A <select> value needs its options first.
     } else if (key.startsWith("aria-")) {
       if (value != null) el.setAttribute(key, String(value));
     } else {
@@ -357,7 +353,7 @@ h.frag = (...children) => {
   for (const child of children) append(fragment, child);
   return fragment;
 };
-// Trusted markup only: never an API value that has not been escaped.
+// Use this for trusted markup only. Never pass an API value that is not escaped.
 h.html = (trusted) => {
   const template = document.createElement("template");
   template.innerHTML = String(trusted ?? "");
@@ -372,19 +368,18 @@ h.replace = (container, ...children) => {
 Object.freeze(h);
 export { h };
 
-// The page shell (css/20-features/shell.css), shared by every page.
-// BREAKPOINTS mirror --bp-sm / --bp-tab / --bp-md / --bp-lg / --bp-xl: media queries cannot read
-// custom properties, so CSS and scripts both name these three numbers.
+// The page shell (css/20-features/shell.css) is shared by every page.
+// BREAKPOINTS mirror --bp-sm / --bp-tab / --bp-md / --bp-lg / --bp-xl. Media queries cannot read custom properties.
+// So the CSS and the scripts both name these three numbers.
 const BREAKPOINTS = Object.freeze({ sm: 600, tab: 760, md: 820, lg: 1100, xl: 1279 });
 const mediaQuery = (name) => `(max-width: ${BREAKPOINTS[name]}px)`;
 const isAtMost = (name) => {
   try { return window.matchMedia(mediaQuery(name)).matches; } catch { return false; }
 };
 
-// The chrome above the content region (the header and the page's nav row,
-// both of which wrap on narrow windows) as --shell-top on the root element,
-// in px: drawers and bottom sheets start under it rather than under a
-// literal offset that a wrapped header outgrows.
+// This sets --shell-top on the root element, in px.
+// --shell-top holds the height of the chrome above the content region. The chrome is the header and the nav row of the page. Both wrap on narrow windows.
+// Drawers and bottom sheets start under --shell-top. They do not use a fixed offset, because a wrapped header can outgrow a fixed offset.
 const SHELL_ROWS = ["body > .appHeader", "#obsNav", "#explorerTopBar", ".systemPage__nav", ".mcpPage__nav"];
 let shellTopTracked = false;
 function trackShellTop() {
@@ -406,11 +401,10 @@ function trackShellTop() {
   window.addEventListener("resize", update);
 }
 
-// Edge cues: a row that scrolls sideways (a tab strip, a chip row, the
-// Observability nav row) carries .has-edge-start / .has-edge-end while
-// content hides past that side, and shell.css fades that edge over
-// --edge-fade. Follows scrolls, resizes and content changes; once per
-// element.
+// Edge cues show that a row scrolls sideways. Examples are a tab strip, a chip row and the Observability nav row.
+// The row carries .has-edge-start or .has-edge-end while content hides past that side.
+// shell.css fades that edge over --edge-fade.
+// The cues follow scrolls, resizes and content changes. The code attaches the cues once for each element.
 const cued = new WeakSet();
 function edgeCues(el) {
   if (!el || cued.has(el)) return;
@@ -428,10 +422,10 @@ function edgeCues(el) {
   update();
 }
 
-// Scrolls a sideways row (edgeCues) so `child` (its selected tab) shows
-// clear of the faded edges: --edge-fade of room on the side it was hidden
-// on, and the row's very end when the child is near one, so no fade is
-// left over it ("Service map" whole at a phone's right edge).
+// Scrolls a sideways row (edgeCues) so that `child` (its selected tab) shows clear of the faded edges.
+// It leaves --edge-fade of room on the side where the child was hidden.
+// If the child is near an end of the row, the row scrolls to its very end. No fade then covers the child.
+// Example: "Service map" shows whole at the right edge of a phone.
 function revealInRow(row, child) {
   if (!row || !child) return;
   const max = row.scrollWidth - row.clientWidth;
@@ -441,8 +435,8 @@ function revealInRow(row, child) {
   const rect = child.getBoundingClientRect();
   const left = rect.left - box.left + row.scrollLeft;
   const right = left + rect.width;
-  // Only a child under a faded edge moves the row (a row whose child
-  // shows clear stays where it is), towards that side.
+  // Only a child under a faded edge moves the row. A row whose child shows clear stays where it is.
+  // The row moves towards that side.
   let target = row.scrollLeft;
   if (left - fade < target) {
     target = left - fade;
@@ -455,10 +449,10 @@ function revealInRow(row, child) {
   if (Math.abs(target - row.scrollLeft) > 0.5) row.scrollLeft = target;
 }
 
-// The skip link (a.skipLink, src/shell/header.html) leads to the page's <main>. A plain fragment would write #id
-// into the address (and into the entry of the view that Observability remembers): the click focuses the main
-// instead, for as long as the focus stays there (the next Tab is the first control inside it), and the address
-// stays. Without a script the fragment still works.
+// The skip link (a.skipLink, src/shell/header.html) leads to the page's <main>.
+// A plain fragment would write #id into the address. It would also write into the entry of the view that Observability remembers.
+// So the click focuses the main instead. The focus stays there until the next Tab, which moves to the first control inside it.
+// The address does not change. Without a script, the fragment still works.
 byId("skipLink")?.addEventListener("click", (event) => {
   const main = byId(String(event.currentTarget.getAttribute("href") || "").slice(1));
   if (!main) return;

@@ -1,31 +1,30 @@
-// Key / value lists, one component for every page (css/10-components/kv.css):
-// span and resource attributes, log record fields, the
-// Query row Details, the Explorer graph panel's columns.
+// Key / value lists. One component serves every page (css/10-components/kv.css).
+// It draws span and resource attributes, log record fields, the Query row
+// Details and the columns of the Explorer graph panel.
 //
 //   kv.html(rows, { actions, className, empty, label }) -> HTML
 //   kv.bind(root, { onAction })   delegated action clicks under root
 //   kv.list(rows, options)        -> element (kvListHtml + kvBind)
 //
 // rows: [{ key, value, label, keyTitle, mono, muted, actions, attrs }]
-//   value   a scalar or an object / array (a JSON tree); a string holding a
-//           JSON object or array is shown as a tree too (json: false keeps it
-//           text). One set of value colours: --json-string / -number /
-//           -bool / -null, a ClickHouse Map(String, String) value that reads
-//           as a number or a boolean coloured as one.
+// value   a scalar, or an object or array (a JSON tree). A string that holds a
+//         JSON object or array is also shown as a tree. json: false keeps it as
+//         text. One set of value colours applies: --json-string / -number /
+//         -bool / -null. A ClickHouse Map(String, String) value gets the colour
+//         of the number or boolean that it reads as.
 //   actions per row (else options.actions): any of
 //           "include"  filter for this value      (onAction)
 //           "exclude"  filter this value out      (onAction)
 //           "only"     search only this value     (onAction)
 //           "copy"     copy the value             (built in)
 //           "json"     copy the value as JSON     (built in)
-//   attrs   extra data-* attributes of the row (handed back to onAction).
-// onAction(action, { key, value, text, row, button, event }): return true
+//   attrs   extra data-* attributes of the row. onAction receives them.
+// onAction(action, { key, value, text, row, button, event }) returns true
 // to take over a copy action.
 //
-// On a touch screen (pointer: coarse, css/10-components/kv.css) the action
-// buttons of a row that has two or more give way to one "\u22ef" button,
-// which opens them as an ns.menu context menu: the same actions, each a
-// --hit tall item.
+// On a touch screen (pointer: coarse, css/10-components/kv.css), a row with two or
+// more action buttons shows one "..." button instead. That button opens an
+// ns.menu context menu with the same actions. Each action is an item that is --hit tall.
 
 import { dom, h } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -48,7 +47,7 @@ const ACTIONS = {
   json: { label: "Copy as JSON", icon: icon("braces", { size: "sm" }) },
 };
 
-// A string that holds a JSON object or array, parsed; null otherwise.
+// Return the parsed value of a string that holds a JSON object or array. Return null for other strings.
 function jsonValue(value) {
   if (value && typeof value === "object") return value;
   if (typeof value !== "string" || !JSON_LOOKING.test(value)) return null;
@@ -75,7 +74,7 @@ function scalarHtml(value) {
   return `<span class="kv__v kv__v--${scalarKind(value)}">${esc(String(value))}</span>`;
 }
 
-// Collapsible tree: the top level open, nested levels too when the value
+// Collapsible tree. The top level is open. Nested levels are also open when the value
 // has at most 10 keys.
 function treeHtml(value, expandNested, depth = 0) {
   if (!value || typeof value !== "object") {
@@ -108,7 +107,7 @@ function valueJson(value) {
 function actionsHtml(list, key) {
   const ids = (list || []).filter((id) => ACTIONS[id]);
   if (!ids.length) return "";
-  // One action stays a button: a menu of one item is no shortcut.
+  // A row with one action keeps its button. A menu with one item is not a shortcut.
   const more = ids.length < 2 ? "" : `<button type="button" class="kvList__more" data-kv-more aria-haspopup="menu" aria-expanded="false" title="Actions" aria-label="${esc(`Actions: ${key}`)}">${icon("dots")}</button>`;
   return `<span class="kvList__actions">${ids.map((id) => {
       const { label, icon } = ACTIONS[id];
@@ -117,7 +116,7 @@ function actionsHtml(list, key) {
     }).join("")}${more}</span>`;
 }
 
-// The row's actions as a context menu under its "\u22ef" button (touch).
+// The row's actions appear as a context menu under its "..." button (touch).
 function openActionsMenu(more, row, run) {
   const items = dom.$$(":scope > .kvList__value > .kvList__actions > [data-kv-action]", row).map((action) => {
     const id = action.getAttribute("data-kv-action");
@@ -163,7 +162,7 @@ function kvListHtml(rows, options = {}) {
   return `<dl class="kvList${className ? ` ${esc(className)}` : ""}"${label ? ` aria-label="${esc(label)}"` : ""}>${list.map((row) => rowHtml(row, options)).join("")}</dl>`;
 }
 
-// Delegated action clicks; bound once per root.
+// The delegated action clicks. Each root binds them once.
 const bound = new WeakMap();
 function kvBind(root, { onAction = null } = {}) {
   if (!root) return;

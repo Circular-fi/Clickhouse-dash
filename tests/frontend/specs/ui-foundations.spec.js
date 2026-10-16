@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { fetchedModules } from '../helpers/modules.js';
 
-// Shared UI foundations in the browser (docs/ui-foundations.md): ns.format
-// and ns.palette load first on every page shell, palette.resolve follows the
-// theme, the semantic tokens hold their documented values in every theme
-// context, the aliased older tokens keep theirs, and format.time uses the
-// browser's zone. The pure unit checks run under Node
-// (tests/harness/ui_foundations_unit.js).
+// Shared UI foundations in the browser (docs/ui-foundations.md).
+// ns.format and ns.palette load first on every page shell.
+// palette.resolve follows the theme.
+// The semantic tokens hold their documented values in every theme context.
+// The aliased older tokens keep their values.
+// format.time uses the browser's zone.
+// The pure unit checks run under Node (tests/harness/ui_foundations_unit.js).
 
 const PAGES = ['/query', '/explorer/catalog', '/observability/traces'];
 
@@ -41,12 +42,12 @@ const TOKENS = {
   '--kind-dict': ['#dc913a', '#ad6720'],
   '--kind-buffer': ['#49c5b9', '#13959b'],
   '--kind-distributed': ['#5dd18b', '#1d9766'],
-  // Percentiles: one hue, p50 the quietest step.
+  // Percentiles: one hue. p50 is the quietest step.
   '--pct-p50': ['#6575a7', '#7286c6'],
   '--pct-p90': ['#7991df', '#4b63c1'],
   '--pct-p95': ['#97b0ff', '#3448a4'],
   '--pct-p99': ['#c8d6ff', '#1d2a6f'],
-  // The one categorical palette (services and series): slots 1, 8 and 18.
+  // The one categorical palette, for services and series: slots 1, 8 and 18.
   '--qchart-1': ['#4296fb', '#1a73d5'],
   '--qchart-8': ['#49c1ea', '#046480'],
   '--qchart-18': ['#85e2ed', '#03464c'],
@@ -55,7 +56,7 @@ const TOKENS = {
   '--json-number': ['#e9d8ba', '#463519'],
   '--json-bool': ['#d8d4ee', '#35314e'],
   '--json-null': ['#adb2ba', '#464c57'],
-  // Graphite surfaces and text (docs/ui-foundations.md).
+  // Graphite surfaces and text. See docs/ui-foundations.md.
   '--bg': ['#0d0f12', '#f6f7f9'],
   '--panel': ['#13161a', '#ffffff'],
   '--raised': ['#191d22', '#ffffff'],
@@ -64,7 +65,7 @@ const TOKENS = {
 };
 const computed = (value) => (value.startsWith('#') ? rgb(value) : value);
 
-// Older tokens that now alias a semantic one: the values they had before.
+// Older tokens now alias a semantic token. Their values are the values they had before.
 const ALIASES = {
   '--danger-bg': ['rgba(239, 68, 68, 0.12)', 'rgba(239, 68, 68, 0.12)'],
   '--accent-text': ['rgb(147, 180, 255)', 'rgb(29, 78, 216)'],
@@ -79,7 +80,7 @@ async function open(page, path) {
   return errors;
 }
 
-// Every token, resolved through a probe, for one theme context.
+// Each token is resolved through a probe, for one theme context.
 function readTokens(page, names, theme) {
   return page.evaluate(({ names, theme }) => {
     const html = document.documentElement;
@@ -101,7 +102,7 @@ function readTokens(page, names, theme) {
 for (const path of PAGES) {
   test(`ui foundations: ns.format and ns.palette load first on ${path}`, async ({ page }) => {
     const errors = await open(page, path);
-    // The modules are requested in dependency order (the shell preloads them so): format and palette before dom.
+    // The modules are requested in dependency order. The shell preloads them in that order: format and palette come before dom.
     const scripts = (await fetchedModules(page)).filter((name) => /^app_/.test(name));
     expect(scripts.indexOf('app_format.js')).toBeGreaterThanOrEqual(0);
     expect(scripts.indexOf('app_format.js')).toBeLessThan(scripts.indexOf('app_palette.js'));
@@ -143,7 +144,7 @@ test('ui foundations: semantic tokens hold their values; forced themes equal the
   await page.emulateMedia({ colorScheme: 'light' });
   const light = await readTokens(page, names, 'light');
   const systemLight = await readTokens(page, names, 'system');
-  // Forced Dark on a light OS, forced Light on a dark OS.
+  // Forced Dark on a light OS. Forced Light on a dark OS.
   const darkOnLight = await readTokens(page, names, 'dark');
   await page.emulateMedia({ colorScheme: 'dark' });
   const lightOnDark = await readTokens(page, names, 'light');
@@ -189,11 +190,11 @@ test('ui foundations: palette.resolve reads each theme once and follows theme ch
   expect(forcedLight.sev).toBe('rgb(220, 38, 38)');
   expect(forcedLight.json).toBe('rgb(70, 76, 87)');
   expect(forcedLight.service).not.toBe(forcedDark.service);
-  // System mode follows the OS scheme, also when it changes under the page.
+  // System mode follows the OS scheme. It also follows a change of the OS scheme while the page is open.
   expect((await step('system')).sev).toBe('rgb(248, 113, 113)');
   await page.emulateMedia({ colorScheme: 'light' });
   expect((await step('system')).sev).toBe('rgb(220, 38, 38)');
-  // One probe element, however many colours are resolved.
+  // Use one probe element for every colour that is resolved.
   expect(await page.evaluate(() => document.querySelectorAll('html > i[aria-hidden="true"]').length)).toBe(1);
 });
 
@@ -227,7 +228,7 @@ test.describe('ui foundations: browser-local time', () => {
       'Sep 12, 2026 14:29:57.123 UTC',
       'Sep 12, 2026 10:29:57.123 server (America/New_York, UTC-04:00)',
     ]);
-    // The repeated autumn hour reads the same; the tooltip tells the offsets apart.
+    // The repeated autumn hour reads the same. The tooltip shows the offsets, which differ.
     expect(out.firstHalf).toBe('Oct 25, 2026 02:30:00.000 local (Europe/Paris, UTC+02:00)');
     expect(out.secondHalf).toBe('Oct 25, 2026 02:30:00.000 local (Europe/Paris, UTC+01:00)');
     expect(out.spring).toBe('Mar 29 01:30 → 03:30');

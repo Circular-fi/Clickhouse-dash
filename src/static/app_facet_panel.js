@@ -1,11 +1,12 @@
-// The facets sidebar (after HyperDX's DBSearchPageFilters) shared by the
-// Traces search (Attributes, app_trace_search.js) and Logs (Fields,
-// app_logs.js): a key search, the top keys of the matching rows with their
-// sampled counts and a scope badge, top values per key with include
-// (checkbox) and exclude, pinned keys, load more, in the ns.sidePanel shell
-// (a collapsed 32 px rail on wide windows, a drawer on phones). The page owns the filters: it hands the panel its
-// current filters after every search and answers which values are
-// filtered; the panel calls back on include / exclude.
+// The facets sidebar (after HyperDX's DBSearchPageFilters). Two pages share it: the Traces
+// search (Attributes, app_trace_search.js) and Logs (Fields, app_logs.js).
+// The panel has a key search, the top keys of the matching rows with their sampled counts
+// and a scope badge. It also has the top values per key with include (checkbox) and exclude,
+// pinned keys and load more. The panel lives in the ns.sidePanel shell. On wide windows, it is
+// a collapsed 32 px rail. On phones, it is a drawer.
+//
+// The page owns the filters. After every search, the page gives the panel its current filters.
+// The page also answers which values are filtered. The panel calls back on include and exclude.
 
 import { dom, shell } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -54,7 +55,7 @@ function create(options) {
   const o = options;
   const part = (name) => dom.byId(o.ids[name]);
   const [one, many] = o.noun;
-  // obsView.read slots (util.latest keys): this panel's keys request, and one per expanded key.
+  // The obsView.read slots (util.latest keys) are the keys request of this panel, and one slot for each expanded key.
   const latestKey = `facets.${o.ids.panel}`;
   const state = {
     filterKey: "",
@@ -83,9 +84,9 @@ function create(options) {
     storage.pref(o.pinStoreKey, []).set(state.pins.map((id) => { const { scope, key } = splitId(id); return [scope, key]; }));
   }
 
-  // The panel shell (ns.sidePanel): the 32 px rail on wide windows (the
-  // <html> class the head script sets before the first paint), a drawer
-  // opened from the main column's toggle on narrow ones.
+  // The panel shell (ns.sidePanel) has two forms. On wide windows, it is the 32 px rail.
+  // The head script sets the <html> class before the first paint. On narrow windows, it is a drawer.
+  // The main column's toggle opens the drawer.
   const unfolded = () => {
     if (state.filters && state.filterKey !== o.filterKey(state.filters)) void load(state.filters);
     else render();
@@ -96,7 +97,7 @@ function create(options) {
     drawer: o.drawerHost ? { host: o.drawerHost, onChange: (open) => { if (open) unfolded(); } } : null,
   });
 
-  // Folded to the rail (a drawer on a phone is never folded).
+  // The panel is folded to the rail. A drawer on a phone is never folded.
   function collapsed() {
     return side.collapsed() && !shell?.isAtMost?.("md");
   }
@@ -105,8 +106,8 @@ function create(options) {
     side.setCollapsed(value);
   }
 
-  // After every search: the keys for the new filters, then the values of
-  // the expanded keys. Skipped while the sidebar is folded.
+  // After every search, load the keys for the new filters, then the values of the expanded keys.
+  // Skip this step while the sidebar is folded.
   async function load(filters) {
     state.filters = filters;
     const panel = part("panel");
@@ -148,7 +149,7 @@ function create(options) {
     const id = facetId(scope, key);
     const entry = state.expanded.get(id);
     if (!entry || !state.filters) return;
-    // The entry check stays: a key folded and opened again is a new entry.
+    // Keep the entry check. A key that is folded and opened again is a new entry.
     const req = obsView.read(`${latestKey}.values.${id}`);
     const current = () => req.isCurrent() && state.expanded.get(id) === entry;
     entry.loading = true;
@@ -188,7 +189,7 @@ function create(options) {
     if (entry.error) return `<div class="traceFacet__status is-error" role="alert">${esc(entry.error)} <button type="button" class="traceMiniButton" data-facet-retry>Retry</button></div>`;
     const { include, exclude } = filteredOf(scope, key);
     const values = [...(entry.values || [])];
-    // Values filtered on stay listed (checked / excluded) even outside the top values.
+    // Keep each filtered value in the list, checked or excluded. Do this even when the value is outside the top values.
     for (const value of [...include, ...exclude]) {
       if (!values.some((item) => item.value === value)) values.push({ value, count: null });
     }
@@ -225,8 +226,8 @@ function create(options) {
     const meta = part("meta");
     if (!list) return;
     if (meta) {
-      // "from a 3M sample" when the counts come from a sample, "120K logs"
-      // when every matching record was counted.
+      // The meta text shows "from a 3M sample" when the counts come from a sample.
+      // It shows "120K logs" when every matching record was counted.
       meta.textContent = state.loading ? "Loading\u2026" : !state.keys.length ? ""
         : state.estimated ? `from a ${compact(state.sampled)} sample` : `${compact(state.sampled)} ${state.sampled === 1 ? one : many}`;
       meta.title = state.estimated
@@ -255,8 +256,8 @@ function create(options) {
     const moreHtml = rest.length > shown.length
       ? `<button type="button" class="traceFacets__more" data-facet-more-keys>Load more (${rest.length - shown.length})</button>`
       : "";
-    // The keys under their scope's name (Record, Log attributes, ...),
-    // each group in count order; the pinned ones first, together.
+    // The keys are grouped under their scope's name (Record, Log attributes, ...).
+    // Each group is in count order. The pinned keys come first, together.
     const groupsHtml = Object.keys(o.scopes).map((scope) => {
       const items = shown.filter((item) => item.scope === scope);
       if (!items.length) return "";
@@ -339,7 +340,7 @@ function create(options) {
     render,
     collapsed,
     setCollapsed,
-    // Discovered keys (the trace span table's column picker suggests them).
+    // The discovered keys. The column picker of the trace span table suggests them.
     keys: () => state.keys.map(({ scope, key }) => ({ scope, key })),
   };
 }

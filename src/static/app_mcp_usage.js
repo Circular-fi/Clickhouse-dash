@@ -1,18 +1,20 @@
-// The usage of a key and the ClickHouse cost of its statements, in the details of the key (docs/mcp-integration-page.md, "The details
-// of a key"). app_mcp_form.js puts the two sections under the data that the key reads; a deleted key shows them alone.
+// The usage of a key and the ClickHouse cost of its statements appear in the details of the key (docs/mcp-integration-page.md, "The details of a key").
+// app_mcp_form.js puts the two sections under the data that the key reads. A deleted key shows only these two sections.
 //
-//   ns.mcpUsage.sections(key, { meta })   [usage, cost]: two sections, the second one closed; [cost] while the usage is off
-//       Usage: what the key did in a window (1 h, 6 h, 24 h, 7 d, ... as the retention keeps them): tiles, the calls of each step of the
-//       window (a minute to a day) with the errors, the tools, the results and the clients. The window that the reader picks stays for the
-//       visit of the page. "Open in Usage" leads to the Usage tab (app_mcp_overview.js), filtered by this key, in the same window. When
-//       several instances share the usage directory the head says "Summed over 3 instances" (a list of them opens from it), and a file that
-//       is left out of the sum is a warning above the tiles (app_mcp_instances.js).
-//       ClickHouse cost: what the statements of the key cost, read from system.query_log of its host when the section is opened (a
-//       scan of the log: never before it is asked), in the window of the usage when the cost has it (1 h, 6 h, 24 h, 7 d), else in 7 d.
-//       It does not depend on the usage: while the usage is off it is the one section of the details, and it has the window buttons of its own.
+//   ns.mcpUsage.sections(key, { meta })   [usage, cost]: two sections. The second section is closed. [cost] applies while the usage is off.
+//       Usage: the actions of the key in a window (1 h, 6 h, 24 h, 7 d, and so on, as far as the retention keeps them).
+//       The section shows tiles, the tools, the results and the clients.
+//       It also shows the calls of each step of the window (a minute to a day), with the errors.
+//       The window that the reader picks is kept for the visit of the page. "Open in Usage" leads to the Usage tab (app_mcp_overview.js), filtered by this key, in the same window.
+//       When several instances share the usage directory, the head says "Summed over 3 instances". A list of them opens from that text.
+//       A file that the sum omits is a warning above the tiles (app_mcp_instances.js).
+//       ClickHouse cost: the cost of the statements of the key. The program reads it from system.query_log of its host when the section opens.
+//       The read is a scan of the log. The program does not read it before the section is requested.
+//       The cost uses the window of the usage when the cost has that window (1 h, 6 h, 24 h, 7 d). Otherwise it uses 7 d.
+//       The cost does not depend on the usage. While the usage is off, the cost is the only section of the details. The cost then has its own window buttons.
 //   ns.mcpUsage.forget()                  the next read asks the server again (the Refresh button of the page)
 //   ns.mcpUsage.cancel()                  stops the reads in flight (the details close)
-// Each answer is kept 60 s for its key and window, as the server keeps the cost.
+// The program keeps each answer for 60 s for its key and window, in the same way as the server keeps the cost.
 
 import { api } from "./app_api.js";
 import { h } from "./app_dom.js";
@@ -34,11 +36,11 @@ const COST_SLOT = "mcp.cost.";
 // `${key id}|${window}` -> { at, value }
 const usageCache = new Map();
 const costCache = new Map();
-// The keys whose cost is open: a redraw of the details keeps it open.
+// The keys whose cost section is open. A redraw of the details keeps the section open.
 const openCosts = new Set();
-// The window that the reader picked: the same for every key of the visit, so two keys are compared on the same window.
+// The window that the reader picks. It is the same for every key of the visit, so two keys are compared on the same window.
 let chosenWindow = "";
-// The notes of the instances that are on screen (each opens a list): the details that close take them away.
+// The notes of the instances that are on screen. Each note opens a list. The details that close remove the notes.
 const instanceNotes = new Set();
 
 const WINDOW_LABEL = { "1h": "1 h", "6h": "6 h", "24h": "24 h", "7d": "7 d", "30d": "30 d", "90d": "90 d", "365d": "365 d" };
@@ -66,14 +68,14 @@ function cached(cache, key) {
 const note = (text, fine = false) => h("p", { class: `mcpNote${fine ? " mcpNote--fine" : ""}` }, text);
 const block = (title, ...content) => h("div", { class: "mcpUsage__block" }, h("h4", { class: "mcpUsage__title" }, title), ...content);
 
-// A value beside a bar of its share of `of` (the most called tool, all the results).
+// A value beside a bar that shows its share of `of` (the most called tool, all the results).
 function share(value, of, text = count(value)) {
   const el = h("span", { class: "mcpUsage__share" });
   tableMod.shareBar(el, of ? (value / of) * 100 : 0, text);
   return el;
 }
 
-// A compact table: columns [title, numeric], rows of cells (text or nodes); `className` is added to the table.
+// A compact table. The columns are [title, numeric]. The rows contain cells (text or nodes). The program adds `className` to the table.
 function compactTable(label, columns, rows, className = "") {
   const head = h("tr", null, columns.map(([title, numeric]) => h("th", { scope: "col", class: numeric ? "num" : null }, title)));
   const body = h("tbody", null, rows.map((cells) => h("tr", null, cells.map((cell, index) => h("td", { class: columns[index][1] ? "num" : null }, cell)))));
@@ -86,7 +88,7 @@ function compactTable(label, columns, rows, className = "") {
 function usageBody(usage) {
   const out = [];
   const t = usage.totals;
-  // A file that is left out of the sum says so before the figures (they are not the whole).
+  // The program states a file that the sum omits before the figures. The figures are then not the whole total.
   const warnings = h("div", { class: "mcpUsage__warnings", hidden: true });
   mcpInstances.warn(warnings, usage.instances);
   if (!warnings.hidden) out.push(warnings);
@@ -113,7 +115,7 @@ function usageBody(usage) {
     stat.tile({ label: "Last use", value: usage.lastUsedAt == null ? EMPTY : format.ago(usage.lastUsedAt, { now, short: true }),
       sub: usage.firstUsedAt == null ? "" : `first ${minute(usage.firstUsedAt)}`, title: usage.lastUsedAt == null ? "" : format.timeTitle(usage.lastUsedAt) })));
 
-  // The calls of each step of the window (1 minute to 1 day), and the errors as the second line.
+  // The calls of each step of the window (1 minute to 1 day). The errors are on the second line.
   const points = usage.series.points;
   const daily = usage.series.step >= 86400;
   const peak = points.reduce((best, point) => (point.calls > best.calls ? point : best), { calls: 0, t: null });
@@ -155,12 +157,12 @@ function usageSection(key, meta, onWindow) {
   const windows = meta?.usage?.windows?.length ? meta.usage.windows : ["24h"];
   if (!windows.includes(chosenWindow)) chosenWindow = windows.includes(meta?.usage?.defaultWindow) ? meta.usage.defaultWindow : windows[0];
   const range = h("span", { class: "mcpMuted mcpUsage__range" });
-  // "Summed over 3 instances": the usage of this key is the sum of the files of the instances that share the usage directory.
+  // "Summed over 3 instances": the usage of this key is the sum of the files of the instances. These instances share the usage directory.
   const instances = mcpInstances.create({ prefix: "Summed over " });
   instanceNotes.add(instances);
   const picker = h("div", { class: "mcpUsage__windows" });
   segmented.render(picker, windows.map((value) => ({ value, label: WINDOW_LABEL[value] || value })), { attr: "window", value: chosenWindow, size: "compact", label: "Window" });
-  // The Usage tab, filtered by this key, in the window that is picked here.
+  // The Usage tab, filtered by this key, in the window that the reader picks here.
   const open = h("a", { class: "mcpUsage__open", title: "The usage of this key in the Usage tab, where it can be cut by method, client, result and type" }, "Open in Usage");
   const link = () => { open.href = `${api.resolveUrl("mcp-integration/usage")}?${new URLSearchParams({ key: key.id, window: chosenWindow }).toString()}`; };
   link();
@@ -207,7 +209,7 @@ function usageSection(key, meta, onWindow) {
 
 // --- ClickHouse cost -----------------------------------------------------------------------
 
-// What the page says when the cost cannot be read (the reason of the server).
+// The text that the page shows when the cost cannot be read. The reason comes from the server.
 const COST_REASON = {
   not_granted: "The runner account of the host may not read system.query_log.",
   disabled: "This ClickHouse keeps no system.query_log.",
@@ -248,10 +250,10 @@ function costBody(cost, usageOn) {
       tables.appendChild(block("By tool", compactTable("The cost by tool", [["Tool"], ["Statements", true], ["Read", true], ["CPU", true]],
         cost.tools.map((tool) => [h("code", null, tool.tool), share(tool.statements, most), format.bytes(tool.readBytes), ms(tool.cpuMs)]))));
     }
-    // The tables beside the tools (two narrow columns), the users under them.
+    // The tables beside the tools use two narrow columns. The users appear under them.
     if (cost.tables.length) {
       const most = cost.tables[0].statements;
-      // A long name (analytics.page_views_by_country_and_day) ends in an ellipsis, and its title says all of it.
+      // A long name (analytics.page_views_by_country_and_day) ends in an ellipsis. Its title shows the full name.
       tables.appendChild(block("Tables read", compactTable("The tables that the statements read the most", [["Table"], ["Statements", true]],
         cost.tables.map((item) => [h("code", { title: item.name }, item.name), share(item.statements, most)]), "mcpCost__tablesRead"),
         cost.tablesTruncated ? note("The 10 tables read the most.", true) : null));
@@ -275,7 +277,7 @@ function costSection(key, meta) {
     icon.el("chevron-right", { size: "sm", className: "icon--disclosure mcpKeyChevron" }), h("span", null, "ClickHouse cost"));
   const refresh = h("button", { type: "button", class: "button button--small mcpCost__refresh", title: "Read system.query_log again", hidden: true }, "Check again");
   const range = h("span", { class: "mcpMuted mcpCost__range" }, "read from system.query_log when opened");
-  // The window of the cost follows the usage, which has the buttons. Without the usage the cost has its own, shown while it is open.
+  // The window of the cost follows the usage, which has the buttons. Without the usage, the cost has its own window. The program shows that window while the cost section is open.
   const picker = usageOn ? null : h("div", { class: "mcpCost__windows", hidden: true });
   const body = h("div", { class: "mcpCost__body", id: bodyId, hidden: true });
   const section = h("section", { class: "mcpCost", dataset: { cost: key.id }, "aria-label": `What the statements of ${key.name} cost ClickHouse` },
@@ -347,8 +349,8 @@ function costSection(key, meta) {
   return { section, reload: () => { if (isOpen()) void load(false); } };
 }
 
-// The two sections of a key: its usage, and the cost of its statements, which follows the window of the usage. The usage is not counted while it is
-// off: the cost is then the only section.
+// The two sections of a key are the usage and the cost of its statements. The cost follows the window of the usage.
+// The program does not count the usage while it is off. The cost is then the only section.
 function sections(key, { meta }) {
   const cost = costSection(key, meta);
   if (meta?.usage?.enabled !== true) return [cost.section];

@@ -94,7 +94,7 @@ std::vector<std::string> execute_explain(
     ch_check_canceled();
     append_explain_block(block, lines, bytes);
   });
-  // EXPLAIN ANALYZE runs the query: it stops when the browser goes away (ch_query.hpp).
+  // EXPLAIN ANALYZE runs the query. It stops when the browser goes away (ch_query.hpp).
   query.OnProgress([](const clickhouse::Progress&) { ch_check_canceled(); });
   ch_execute(client, query);
   return lines;
@@ -104,8 +104,8 @@ bool ast_is_select_family(const std::vector<std::string>& lines) {
   for (const auto& line : lines) {
     const std::string value = trim_copy(line);
     if (value.empty()) continue;
-    // SELECT, UNION, WITH ... SELECT, and SELECT-family subqueries all have a
-    // SelectWithUnionQuery root in the 26.7 AST representation.
+    // SELECT, UNION, WITH ... SELECT, and SELECT-family subqueries have a SelectWithUnionQuery root.
+    // This holds in the 26.7 AST representation.
     return starts_with(value, "SelectWithUnionQuery") || starts_with(value, "SelectQuery");
   }
   return false;
@@ -123,9 +123,9 @@ std::string strip_tree_prefix(std::string_view line, size_t* depth, bool* has_co
   }
 
   if (marker != std::string_view::npos) {
-    // ClickHouse uses three display columns per tree level. Before the branch
-    // marker the cell contains spaces and vertical tree bars; replacing each
-    // UTF-8 bar with one display column keeps the depth calculation stable.
+    // ClickHouse uses three display columns per tree level.
+    // Before the branch marker, the cell contains spaces and vertical tree bars.
+    // The code replaces each UTF-8 bar with one display column. This keeps the depth calculation stable.
     size_t display_columns = 0;
     for (size_t i = 0; i < marker;) {
       if (line.substr(i, 3) == u8"│") {
@@ -263,8 +263,8 @@ bool run_deep_analysis(
   }
 
   try {
-    // Defense in depth: let ClickHouse parse the exact original SQL and require
-    // a SELECT-family root before EXPLAIN ANALYZE is allowed to execute it.
+    // Defense in depth: ClickHouse parses the exact original SQL.
+    // The code requires a SELECT-family root before EXPLAIN ANALYZE may execute it.
     const std::string ast_query_id = make_deep_query_id(record.query_id, "ast");
     if (query_started) query_started(ast_query_id);
     const auto ast_lines = execute_explain(
@@ -291,7 +291,7 @@ bool run_deep_analysis(
     }
     return true;
   } catch (const ChQueryCanceled&) {
-    // The caller canceled: the statement may still run on the server (the job KILLs it), and the connection is not lent again.
+    // The caller canceled. The statement may still run on the server (the job KILLs it). The connection is never lent again.
     if (client_pool) client_pool->invalidate(client);
     set_error(error, 499, "canceled", "Deep Analyze was canceled.");
     return false;

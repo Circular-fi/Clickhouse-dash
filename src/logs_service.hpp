@@ -1,13 +1,16 @@
 #pragma once
 
-// The Logs service: what the routes of the Logs page do, without HTTP. A route (api_logs.cpp) is an adapter: it parses the request
-// (logs_request.hpp), finds the host, calls the service with the context of the request, and writes the JSON of the answer
-// (logs_json.hpp).
+// The Logs service: the functions of the Logs page. The service does not use HTTP.
+// A route (api_logs.cpp) is an adapter. It parses the request (logs_request.hpp). It finds the host.
 //
-// The service takes a connection (a ChExecutor, ch_executor.hpp) to the system account of the host, reads the schema of the table (cached),
-// checks the filters against it (logs_filters.hpp), sends the statements of logs_sql.hpp, and returns the answer as data, or the ApiError
-// that the route sends. The caches that it uses belong to the server and arrive at the construction; the clocks arrive there too, so a
-// test gives a search a budget that runs out without waiting for it.
+// The route calls the service with the context of the request. It writes the JSON of the answer (logs_json.hpp).
+//
+// The service takes a connection (a ChExecutor, ch_executor.hpp) to the system account of the host.
+// It reads the schema of the table (cached). It checks the filters against it (logs_filters.hpp).
+// It sends the statements of logs_sql.hpp. It returns the answer as data, or the ApiError that the route sends.
+//
+// The caches of the service belong to the server. They arrive at the construction, and so do the clocks.
+// So a test can give a search a budget that runs out without a wait.
 
 #include "ch_executor.hpp"
 #include "health_runner.hpp"
@@ -30,14 +33,14 @@
 namespace chdash {
 namespace logs {
 
-// A search stops widening its windows once this much time has been spent and answers with a cursor that continues where it stopped.
+// A search stops widening its windows when it has spent this much time. It answers with a cursor that continues where it stopped.
 constexpr int64_t kSearchBudgetMs = 12000;
-// The mining of the patterns (Drain) is CPU on a thread of the server: it stops after this time.
+// The pattern extraction (Drain) uses the CPU on a thread of the server. It stops after this time.
 constexpr int64_t kMiningBudgetMs = 2000;
-// Progressive search windows (HyperDX searchWindows): newest slice first.
+// Progressive search windows (HyperDX searchWindows). The newest slice comes first.
 constexpr int64_t kSearchWindowsSeconds[] = {15 * 60, 60 * 60, 6 * 60 * 60, 24 * 60 * 60};
-// body_search = "substring" scans Body: searches use short windows only, and histograms and patterns with a text filter are limited to this
-// range.
+// body_search = "substring" scans Body. Searches use only short windows.
+// Histograms and patterns with a text filter are limited to this range.
 constexpr int64_t kSubstringWindowSeconds = 15 * 60;
 constexpr int64_t kSubstringMaxRangeMs = 6LL * 60 * 60 * 1000;
 
@@ -53,7 +56,7 @@ struct LogRow {
   int trace_flags = 0;
 };
 
-// What a search of the text did: the same on every route that has filters.
+// The outcome of a text search. Every route that has filters reports it in the same way.
 struct TextSearchInfo {
   bool active = false;
   std::string mode;
@@ -132,8 +135,8 @@ struct ServicesAnswer {
   int64_t total_ms = 0;
 };
 
-// The facets of the Fields panel: the most frequent keys of a sample, and the top values of one key. A value keeps kFacetMaxKeys + 1 keys
-// at most. (The ones of the Traces page are in trace_facets.hpp.)
+// The facets of the Fields panel: the most frequent keys of a sample, and the top values of one key.
+// A value keeps at most kFacetMaxKeys + 1 keys. The facets of the Traces page are in trace_facets.hpp.
 struct LogFacetKeys {
   struct Key {
     std::string scope, key;
@@ -184,7 +187,8 @@ struct LogsCaches {
   FacetValuesCache& facet_values;
 };
 
-// The clocks of the service. `steady_ms` times the budgets, `wall_ms` is the end of a range that names a lookback.
+// The clocks of the service. `steady_ms` measures the budgets.
+// `wall_ms` gives the end of a range that names a lookback.
 struct LogsClock {
   std::function<int64_t()> steady_ms;
   std::function<int64_t()> wall_ms;
@@ -193,35 +197,39 @@ struct LogsClock {
 
 class LogsService {
  public:
-  // A connection to the logs source of a host (the system account); null with the reason in *error when there is none.
+  // Return a connection to the logs source of a host (the system account).
+  // Return null, with the reason in *error, when there is none.
   using OpenFn = std::function<std::unique_ptr<ChExecutor>(const HostSpec& host, std::string* error)>;
 
   LogsService(OpenFn open, LogsCaches caches, LogsClock clock = LogsClock::real())
       : open_(std::move(open)), caches_(caches), clock_(std::move(clock)) {}
 
-  // The newest rows, a window at a time (the newest slice first, widened until the limit is filled or the budget is spent).
+  // Return the newest rows, one window at a time. The newest slice comes first.
+  // The windows widen until the limit is filled or the budget is spent.
   Result<SearchAnswer> search(const RequestContext& context, const HostSpec& host, const std::string& source_host_id,
                               const SearchRequest& request) const;
-  // The volume over time, by severity class.
+  // Return the volume over time, by severity class.
   Result<HistogramAnswer> histogram(const RequestContext& context, const HostSpec& host, const std::string& source_host_id,
                                     const HistogramRequest& request) const;
-  // The records around one record.
+  // Return the records around one record.
   Result<ContextAnswer> context(const RequestContext& context, const HostSpec& host, const std::string& source_host_id,
                                 const ContextRequest& request) const;
-  // The templates that Drain mines from a bounded sample.
+  // Return the templates that Drain extracts from a bounded sample.
   Result<PatternsAnswer> patterns(const RequestContext& context, const HostSpec& host, const std::string& source_host_id,
                                   const PatternsRequest& request) const;
-  // The services with records in the range.
+  // Return the services with records in the range.
   Result<ServicesAnswer> services(const RequestContext& context, const HostSpec& host, const std::string& source_host_id,
                                   const ServicesRequest& request) const;
-  // The field keys of the matching records, and the top values of one field. One read of a key at a time (the scan is capped and sampled).
+  // Return the field keys of the matching records, and the top values of one field.
+  // Each call reads one key (the scan is capped and sampled).
   Result<FacetKeysAnswer> facets(const RequestContext& context, const HostSpec& host, const std::string& source_host_id,
                                  const FacetsRequest& request) const;
   Result<FacetValuesAnswer> facet_values(const RequestContext& context, const HostSpec& host, const std::string& source_host_id,
                                          const FacetValuesRequest& request) const;
 
  private:
-  // The connection, the schema and the name of the table; an error when there is no connection or the table is not one of the exporter.
+  // Return the connection, the schema and the name of the table.
+  // Return an error when there is no connection, or when the table is not one of the exporter tables.
   struct Opened {
     std::unique_ptr<ChExecutor> db;
     LogsSchema schema;

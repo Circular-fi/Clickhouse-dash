@@ -1,4 +1,4 @@
-// Text helpers of the formatter: characters, whitespace, the work budget, the spacing of code, comments, indentation and the width of a line.
+// Text helpers of the formatter. They handle characters, whitespace, the work budget, the spacing of code, comments, indentation and the line width.
 // The declarations that the units share are in format_internal.hpp.
 
 #include "format_internal.hpp"
@@ -50,10 +50,8 @@ string rtrim_spaces(string_view sv) {
 }
 
 // Collapse runs of whitespace to one space in code only. Quoted literals and
-// identifiers keep their exact bytes (collapsing `'a  b'` changed the value,
-// and the literal restorer, which matches decoded values, could not undo it),
-// and a `--` comment keeps the newline that ends it (joining the next line
-// would comment it out).
+// identifiers keep their exact bytes. The collapse of `'a  b'` changed the value. The literal restorer matches decoded values, so it could not undo that change.
+// A `--` comment keeps the newline that ends it. Without that newline, the next line would be commented out.
 string collapse_whitespace(string_view sv) {
   string out;
   bool pending = false;
@@ -149,7 +147,7 @@ string normalize_code_spacing(string_view s) {
 
   string out;
   out.reserve(s.size() + 16);
-  // End of the last unary sign written to `out`: `-(a + b)` stays glued.
+  // This is the end of the last unary sign written to `out`. `-(a + b)` stays glued.
   size_t unary_sign_end = string::npos;
 
   auto rstrip_out = [&]() {
@@ -178,8 +176,8 @@ string normalize_code_spacing(string_view s) {
     }
     return true;
   };
-  // `INDEX name (expr)`: the expression of a skip index is not a call of its
-  // name; a space written there stays (the stacked index layout prints one).
+  // `INDEX name (expr)`: the expression of a skip index is not a call of its name.
+  // A space written there stays. The stacked index layout prints one.
   auto index_name_before = [&]() {
     size_t e = out.size();
     size_t b = e;
@@ -195,16 +193,16 @@ string normalize_code_spacing(string_view s) {
     char c = s[i];
     char n = (i + 1 < s.size()) ? s[i + 1] : '\0';
 
-    // A comment, a text and a quoted name are copied whole: nothing in them is code to space.
+    // A comment, a text and a quoted name are copied whole. Nothing in them is code to space.
     if (sql::starts_block_comment(s, i)) {
       const size_t end = sql::block_comment_end(s, i);
       out.append(s.substr(i, end - i));
       i = end - 1;
       continue;
     }
-    // A line comment is copied verbatim to the end of its line. Spacing
-    // it as two minus operators produced `- -comment`, turning the comment
-    // into code (a trailing comment after CREATE TABLE no longer parsed).
+    // A line comment is copied verbatim to the end of its line. The spacer must not split it
+    // into two minus operators. That produced `- -comment`. This turned the comment
+    // into code. A trailing comment after CREATE TABLE no longer parsed.
     if (sql::starts_line_comment(s, i)) {
       const size_t end = sql::line_comment_end(s, i);
       if (!out.empty() && out.back() != ' ' && out.back() != '\n') out.push_back(' ');
@@ -315,12 +313,12 @@ string normalize_code_spacing(string_view s) {
       const bool operand_position =
           p == '(' || p == '[' || p == ',' || p == '=' || p == '>' || p == '<' || p == '+' ||
           p == '-' || p == '*' || p == '/' || p == '%' || p == '?' || p == ':' || after_keyword;
-      // At the start of a line a sign followed by a space is the binary
-      // continuation the formatter itself emits (`\n- rhs`); formatQuery prints
+      // At the start of a line, a sign that a space follows is a binary continuation.
+      // The formatter itself emits this form (`\n- rhs`). formatQuery prints
       // unary minus glued to its operand (`-x`, `-(a + b)`).
       const bool line_start_unary = p == '\0' && i + 1 < s.size() && s[i + 1] != ' ' && s[i + 1] != '\t';
       // `*` where an operand is expected is the asterisk (`count(*)`,
-      // `max(*)`, `t.*`), not a multiplication: no spaces inside its brackets.
+      // `max(*)`, `t.*`). It is not a multiplication. The formatter writes no spaces inside its brackets.
       if (c == '*' && (operand_position || p == '.')) {
         if (p == '(' || p == '[' || p == '.') rstrip_out();
         else append_space();
@@ -330,7 +328,7 @@ string normalize_code_spacing(string_view s) {
       const bool unary = (c == '-' || c == '+') && (operand_position || line_start_unary);
       if (unary) {
         // Print the sign glued to its operand (`-x`, not `- x`). `- -x` keeps
-        // its separating space: `--` would start a comment.
+        // its separating space. `--` would start a comment.
         rstrip_out();
         if (p != '(' && p != '[' && p != '\0') append_space();
         out.push_back(c);
@@ -443,9 +441,8 @@ string join_lines(const vector<string>& lines) {
   return out;
 }
 
-// Display width used for alignment: monospace columns, not bytes or code
-// points, so CJK (two columns), emoji (two) and combining marks (none) in a
-// literal or identifier do not shift the aligned `AS` column.
+// Alignment uses the display width. This width counts monospace columns, not bytes or code points.
+// CJK characters take two columns, emoji take two, and combining marks take none. A literal or identifier with these characters does not shift the aligned `AS` column.
 size_t utf8_width(string_view s) {
   return sql_display_width(s);
 }
@@ -469,7 +466,7 @@ string indent_after_first_line(string_view s, size_t spaces) {
 
 // Removes the indentation common to the lines after the first. A predicate
 // that follows a leading `--` comment keeps the indentation it had in the
-// input; without this, formatting the output again would indent it twice.
+// input. Without this rule, a second formatting pass would indent it twice.
 // Lines that start inside a quoted literal keep their spacing.
 string dedent_after_first_line(string_view s) {
   const size_t first_nl = s.find('\n');

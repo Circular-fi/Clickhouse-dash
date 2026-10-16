@@ -1,15 +1,14 @@
-// GET /api/traces/logs: the OpenTelemetry log records of one trace, for the
-// trace detail page (logs panel, per-span log badges, inspector group).
+// GET /api/traces/logs gives the OpenTelemetry log records of one trace. The trace detail page uses them for its logs panel,
+// per-span log badges, and inspector group.
 //
-// One query on the exporter logs table, bounded on every side:
+// This is one query on the exporter logs table. It has a bound on every side:
 //   PREWHERE <time column> BETWEEN <trace start - margin> AND <trace end + margin>
 //   WHERE ServiceName IN (<the trace's services>) AND TraceId = <id>
 //         [AND SpanId = <id>] AND <traces.service_allowlist>
 //   ORDER BY Timestamp LIMIT limit + 1
-// The time range serves the partition key and the (ServiceName, TimestampTime)
-// primary key, the TraceId bloom filter skips the other granules. A request
-// without a time range is rejected: a TraceId lookup over the whole table
-// would read every part.
+// The time range serves the partition key and the (ServiceName, TimestampTime) primary key.
+// The TraceId bloom filter skips the other granules. A request without a time range is rejected.
+// A TraceId lookup over the whole table would read every part.
 #include "server.hpp"
 #include "otel_caches.hpp"
 #include "sql_params.hpp"
@@ -51,7 +50,7 @@ constexpr size_t kMaxTraceIdBytes = 256;
 constexpr size_t kMaxSpanIdBytes = 128;
 constexpr size_t kMaxServices = 1000;
 constexpr size_t kMaxServiceBytes = 512;
-// Bodies above this are cut in the response (body_bytes keeps the full size).
+// The response cuts the bodies that are larger than this value. body_bytes keeps the full size.
 constexpr int kMaxBodyBytes = 64 * 1024;
 
 using otel::allowlist_quote_string;
@@ -60,7 +59,7 @@ bool starts_with(std::string_view text, std::string_view prefix) {
   return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
 }
 
-// Same classification as /api/logs/meta (attributes.*.kind).
+// This uses the same classification as /api/logs/meta (attributes.*.kind).
 std::string attribute_kind(const std::string& type) {
   if (type.empty()) return "missing";
   if (starts_with(type, "Map(")) return "map";
@@ -69,8 +68,8 @@ std::string attribute_kind(const std::string& type) {
   return "other";
 }
 
-// A JSON object text for Map / JSON columns; String columns are passed as is
-// (the page parses JSON text and shows anything else raw).
+// This is a JSON object text for Map and JSON columns. String columns are passed as they are.
+// The page parses the JSON text. It shows anything else raw.
 std::string attribute_expr(const std::string& column, const std::string& type) {
   const std::string kind = attribute_kind(type);
   if (kind == "map" || kind == "json") return "toJSONString(" + quote_ident(column) + ")";
@@ -128,7 +127,7 @@ void send_json(httplib::Response& res, const std::string& body) {
   res.set_content(body, "application/json");
 }
 
-// Disabled source or unusable table: a 200 answer the page can explain.
+// This is the answer for a disabled source or an unusable table. It has status 200, and the page can explain it.
 void send_unavailable(httplib::Response& res, bool enabled, bool table_exists, const char* code, const std::string& message) {
   rapidjson::StringBuffer sb;
   JsonWriter w(sb);
@@ -202,8 +201,8 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
     limit = std::min<size_t>(logs.trace_logs_limit, static_cast<size_t>(requested));
   }
 
-  // Whole seconds around the trace (TimestampTime is a DateTime), then the
-  // window is clamped to logs.max_lookback_minutes from its start.
+    // Use whole seconds around the trace (TimestampTime is a DateTime).
+    // Then clamp the window to logs.max_lookback_minutes from its start.
   const int64_t max_window_s = static_cast<int64_t>(logs.max_lookback_minutes) * 60;
   const int64_t from_s = floor_div(start_ns, 1000000000) - logs.trace_margin_before_seconds;
   int64_t to_s = floor_div(end_ns, 1000000000) + 1 + logs.trace_margin_after_seconds;
@@ -219,7 +218,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
 
   const auto started = std::chrono::steady_clock::now();
   std::string error;
-  // (connect, receive, send); the query itself stops at max_execution_time.
+    // The client timeouts apply to connect, receive, and send. The query itself stops at max_execution_time.
   auto client = client_pool_
       ? client_pool_->acquire(host->system_uri, std::chrono::seconds(5), std::chrono::seconds(kTraceLogsMaxExecutionSeconds + 10),
                               std::chrono::seconds(15), &error)
@@ -250,8 +249,8 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
         "Table " + table_name + " has no TraceId / SpanId columns: logs cannot be attached to traces.");
   }
 
-  // Older exporter layouts sort by (ServiceName, TimestampTime, Timestamp);
-  // newer ones have no TimestampTime and a Timestamp-based key.
+    // Older exporter layouts sort by (ServiceName, TimestampTime, Timestamp).
+    // Newer layouts have no TimestampTime. They use a key that is based on Timestamp.
   const std::string time_range = columns.timestamp_time
       ? "TimestampTime BETWEEN toDateTime(" + std::to_string(from_s) + ") AND toDateTime(" + std::to_string(to_s) + ")"
       : "Timestamp BETWEEN toDateTime64(" + std::to_string(from_s) + ", 9) AND toDateTime64(" + std::to_string(to_s) + ", 9)";
@@ -274,8 +273,8 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
       " PREWHERE " + time_range +
       " WHERE " + where +
       " ORDER BY Timestamp LIMIT " + std::to_string(limit + 1) +
-      // Few granules survive the indexes: read them with several threads
-      // anyway (the default needs ~20 granules per stream).
+            // Few granules survive the indexes. Read them with several threads anyway.
+            // The default needs ~20 granules per stream.
       " SETTINGS max_execution_time = " + std::to_string(kTraceLogsMaxExecutionSeconds) +
       ", merge_tree_min_rows_for_concurrent_read = 8192, merge_tree_min_bytes_for_concurrent_read = 1";
 
@@ -353,7 +352,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
   w.StartArray();
   for (const auto& r : records) {
     w.StartObject();
-    // Exact epoch nanoseconds as text: a JSON number would lose precision.
+        // Write the exact epoch nanoseconds as text. A JSON number would lose precision.
     w.Key("timestamp_ns"); write_json_text(w, r.timestamp_ns);
     w.Key("timestamp"); write_json_text(w, r.timestamp);
     w.Key("severity_text"); write_json_text(w, r.severity_text);
@@ -362,7 +361,7 @@ void Server::handle_trace_logs(const httplib::Request& req, httplib::Response& r
     w.Key("span_id"); write_json_text(w, r.span_id);
     const long long body_bytes = to_int(r.body_bytes);
     const bool body_cut = body_bytes > static_cast<long long>(r.body.size());
-    // The cut is in bytes: it must not leave half a character at the end.
+        // The cut is in bytes. It must not leave half a character at the end.
     w.Key("body"); write_json_text(w, body_cut ? utf8_without_cut_tail(r.body) : std::string_view(r.body));
     if (body_cut) {
       w.Key("body_truncated"); w.Bool(true);

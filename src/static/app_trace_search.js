@@ -1,10 +1,12 @@
-// Trace search state after HyperDX's search page: the filter chips (several
-// tag filters with =, !=, exists and missing on span or resource attributes,
-// plus excluded services / operations / statuses), the whole search in the
-// URL (shareable, Back / Forward, reload), click-to-filter menus on shown
-// values and the attribute facets sidebar (DBSearchPageFilters).
-// The search page (app_traces.js) and the trace page (app_trace_detail.js) call init() once; the trace page keeps the
-// search as the context of its address and sends a filter to the search page.
+// This file holds the trace search state. The state follows the search page of HyperDX.
+// The filter chips are several tag filters with =, !=, exists and missing on span or resource attributes.
+// The file also has excluded services, operations and statuses.
+//
+// The whole search is in the URL. The URL is shareable and works with Back / Forward and reload.
+// The file also has the click-to-filter menus on shown values, and the attribute facets sidebar (DBSearchPageFilters).
+//
+// The search page (app_traces.js) and the trace page (app_trace_detail.js) call init() once.
+// The trace page keeps the search as the context of its address. It sends a filter to the search page.
 
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
@@ -19,7 +21,8 @@ import { menu as menuMod } from "./app_ui_menu.js";
 
 const fmt = format;
 
-// The parts of the search page (the trace page has none): its entry hands them over with traceSearch.use().
+// The parts of the search page belong to the search page only. The trace page has none.
+// The entry of the search page gives them with traceSearch.use().
 let facetPanel = null;
 let traceHeatmap = null;
 let traceSpans = null;
@@ -36,8 +39,8 @@ const TAG_PARAMS = { "=": "tag", "!=": "tag_not", exists: "tag_exists", missing:
 const COLUMN_NOT_PARAMS = { service: "service_not", operation: "operation_not", status: "status_not" };
 const OP_LABELS = { "=": "=", "!=": "!=", exists: "exists", missing: "missing" };
 const OP_NAMES = { "=": "equals", "!=": "differs from", exists: "exists", missing: "is missing" };
-// Every URL parameter of the search page (the detail page keeps them as
-// its "back to search" context; span / view are the detail's own).
+// Every URL parameter of the search page is listed here. The detail page keeps them as its "back to search" context.
+// The span and view parameters belong to the detail page.
 const SEARCH_PARAMS = ["from", "to", "status", "service", "operation", "limit", "sort", "results",
   "tag", "tag_not", "tag_exists", "tag_missing", "service_not", "operation_not", "status_not", "tab",
   "min_duration_ms", "max_duration_ms", "duration_view",
@@ -49,16 +52,16 @@ const { byId, $ } = dom;
 
 const search = {
   chips: [],
-  // Tag params of the last prefill, so a chip change refreshes the pickers.
+  // Tag params of the last prefill. A chip change refreshes the pickers.
   prefillTagKey: "",
-  // Trace duration range in ms ({ min, max }, 0 = open side) or null: set
-  // by the heatmap's "Search traces in this box", shown as a chip.
+  // Trace duration range in ms ({ min, max }, 0 = open side), or null.
+  // The heatmap sets this range with "Search traces in this box". The range shows as a chip.
   duration: null,
 };
 
 // ------------------------------------------------------------------ chips
 
-// "[span:|resource:]rest" -> { scope, rest }.
+// This function reads "[span:|resource:]rest" and gives { scope, rest }.
 function splitScope(text) {
   const raw = String(text || "");
   for (const scope of ["span", "resource"]) {
@@ -83,7 +86,7 @@ function chipParam(chip) {
   return [COLUMN_NOT_PARAMS[chip.kind], chip.value];
 }
 
-// API / URL parameters of the chips.
+// API and URL parameters of the chips.
 function chipParams({ tagsOnly = false } = {}) {
   const out = {};
   if (!tagsOnly && search.duration) {
@@ -135,7 +138,7 @@ function durationLabel(duration) {
   return duration.min ? `\u2265 ${durationText(duration.min)}` : `\u2264 ${durationText(duration.max)}`;
 }
 
-// Sets (or clears, with null) the trace duration filter; the caller searches.
+// Sets the trace duration filter, or clears it with null. The caller runs the search.
 function setDuration(duration) {
   const min = Math.max(0, Number(duration?.min || 0));
   const max = Math.max(0, Number(duration?.max || 0));
@@ -144,7 +147,7 @@ function setDuration(duration) {
 }
 
 function addChip(chip) {
-  // A value is either included or excluded, never both.
+  // A value is either included or excluded. It is never both.
   const opposite = chip.op === "=" ? "!=" : chip.op === "!=" ? "=" : chip.op === "exists" ? "missing" : "exists";
   search.chips = search.chips.filter((other) => !sameChip(other, { ...chip, op: opposite }));
   if (!search.chips.some((other) => sameChip(other, chip))) search.chips.push({ scope: "any", key: "", value: "", ...chip });
@@ -167,8 +170,8 @@ function renderChips() {
   if (!root) return;
   const count = search.chips.length + (search.duration ? 1 : 0);
   root.hidden = !count;
-  // The shared filter chips (ns.badge.chipHtml): scope, key, operator (a
-  // toggle for tag filters), value and remove.
+  // The shared filter chips (ns.badge.chipHtml) show: scope, key, operator, value and remove.
+  // The operator is a toggle for tag filters.
   const durationChip = search.duration
     ? badge.chipHtml({
       key: "duration", value: durationLabel(search.duration), className: "traceFilterChip traceFilterChip--duration",
@@ -243,8 +246,7 @@ function setTagOp(op) {
 
 function tagOp() { return tagOpButton()?.dataset.op || "="; }
 
-// The Tag / Value inputs add a chip (on Search or Enter). Throws on a half
-// filled pair.
+// The Tag and Value inputs add a chip, on Search or on Enter. It throws on a half filled pair.
 function commitPendingTag() {
   const pending = actions.currentTag();
   const op = tagOp();
@@ -273,8 +275,8 @@ function setSelect(select, value) {
   select.dispatchEvent(new Event("tracepicker-refresh"));
 }
 
-// A service / operation applied from a URL or a filter action stays
-// selected even when the discovered pairs do not list it (yet).
+// A service or operation that a URL or a filter action applies stays selected.
+// It stays selected even when the discovered pairs do not list it yet.
 function wantSelect(select, value) {
   if (!select) return;
   if (value) select.dataset.wanted = value;
@@ -282,7 +284,7 @@ function wantSelect(select, value) {
 }
 
 function currentParams() {
-  // The range only once the user picked one: the default follows the meta.
+  // Set the range only when the user picks one. The default follows the meta.
   const params = timeRange.url.write(new URLSearchParams(), model.timeRangeTouched ? model.timeRange : null);
   const status = String(dom.tracesStatus?.value || "");
   if (status) params.set("status", status);
@@ -296,7 +298,7 @@ function currentParams() {
   const sort = String(dom.tracesSort?.value || "recent");
   if (sort !== "recent") params.set("sort", sort);
   if (model.resultsView === "table") params.set("results", "table");
-  // The selected tab (app_trace_tabs.js), e.g. tab=map.
+  // The selected tab (app_trace_tabs.js), for example tab=map.
   traceTabs?.writeParams?.(params);
   traceHeatmap?.writeParams?.(params);
   // Spans mode (app_trace_spans.js): mode=spans and its span filters.
@@ -304,22 +306,21 @@ function currentParams() {
   return params;
 }
 
-// The search context a trace page's address carries: its search parameters,
-// as the search wrote them, without tab= (the trace's own tab there) and
-// the trace's own span= and view=.
+// The search context of a trace page address holds the search parameters, as the search wrote them.
+// It has no tab= (that names the trace own tab there), and no span= or view= (those belong to the trace).
 function carriedParams() {
   const out = new URLSearchParams();
   for (const [name, value] of router.current().params) if (name !== "tab" && SEARCH_PARAMS.includes(name)) out.append(name, value);
-  // No time range in the address (a link from Logs or Metrics, a trace opened by its id): the
-  // one the tab's last Observability page showed.
+  // The address has no time range when it is a link from Logs or Metrics, or when a trace opens by its ID.
+  // The range is then the one that the last Observability page of the tab showed.
   const stored = storage.observabilityContext.get().range;
   if (stored && !timeRange.url.has(out)) timeRange.url.write(out, stored);
   return out;
 }
 
-// The search context carried by trace detail URLs: not the span of the
-// Spans side panel (span= names the trace's own span there), nor the search
-// page's tab and its view parameters (tab= names the trace's own tab).
+// The search context of trace detail URLs does not include the span of the Spans side panel.
+// In those URLs, span= names the trace own span.
+// The context also excludes the search page tab and its view parameters, since tab= names the trace own tab.
 function contextQuery() {
   if (DETAIL_PAGE) return carriedParams().toString();
   const params = currentParams();
@@ -342,19 +343,20 @@ function searchKey() {
   return params.toString();
 }
 
-// The search page's address (ns.router): /observability/traces and
-// currentParams(), written only while the Traces view shows. Every Traces
-// module writes it through the same owner: ns.router.owner("traces")
-// .write(mode), mode "push" (a new search), "replace" (same entry, e.g.
-// the page-load search or a view toggle) or "none" (restored from history).
+// The search page address (ns.router) is /observability/traces and currentParams().
+// The code writes it only while the Traces view shows.
+// Every Traces module writes the address through the same owner: ns.router.owner("traces").write(mode).
+// The mode is "push" for a new search.
+// The mode is "replace" for the same entry, for example the page-load search or a view toggle.
+// The mode is "none" when the state is restored from history.
 router.owner("traces", { path: SEARCH_ROUTE, params: () => (DETAIL_PAGE ? null : currentParams()) });
 
 function hasSearchParams(params) {
   return SEARCH_PARAMS.some((name) => params.has(name)) || !!traceTabs?.hasParams?.(params);
 }
 
-// Controls, range and chips from URL parameters (the search page or a
-// trace detail URL carrying its search context).
+// The controls, range and chips come from the URL parameters.
+// The URL is that of the search page, or a trace detail URL that carries its search context.
 function applyParams(params, { initial = false } = {}) {
   traceTabs?.applyParams?.(params, { initial });
   const tr = timeRange;
@@ -374,7 +376,7 @@ function applyParams(params, { initial = false } = {}) {
   wantSelect(dom.tracesService, service);
   wantSelect(dom.tracesOperation, operation);
   actions.refreshOptions();
-  // Back / Forward restore the entry's own choice (none included).
+  // Back and Forward restore the entry own choice, with none included.
   setSelect(dom.tracesService, service);
   setSelect(dom.tracesOperation, operation);
   const limit = params.get("limit") || "50";
@@ -393,15 +395,15 @@ function applyParams(params, { initial = false } = {}) {
 
 function applyLocation({ initial = false } = {}) {
   const params = router.current().params;
-  // A trace URL's tab= is the trace's tab (app_trace_views.js).
+  // The tab= of a trace URL is the tab of the trace (app_trace_views.js).
   if (onTracePath()) params.delete("tab");
   applyParams(params, { initial });
 }
 
 // --------------------------------------------------- click-to-filter menu
 
-// An ns.menu context menu under the clicked value (app_ui_menu.js: keys,
-// focus back on the value, outside click, Escape, scroll and resize).
+// This is an ns.menu context menu under the clicked value (app_ui_menu.js).
+// It handles keys, focus return to the value, outside click, Escape, scroll and resize.
 let menu = null;
 let menuTarget = null;
 let menuHandle = null;
@@ -436,8 +438,8 @@ function openMenu(anchor, field, value) {
   menuHandle = menuMod?.context(menu, { anchor, returnFocus: anchor, expanded: anchor, remove: false, onClose: () => { menuTarget = null; menuHandle = null; } }) || null;
 }
 
-// The search address for one filter action on the search context a trace
-// page carries: the parameter changes applyFilter makes to the search form.
+// The search address for one filter action is built here, on the search context that a trace page carries.
+// It holds the parameter changes that applyFilter makes to the search form.
 function filterHref(field, value, action) {
   const params = carriedParams();
   const drop = (name, match) => {
@@ -460,7 +462,7 @@ function filterHref(field, value, action) {
     chip = { kind: field.kind, op: "!=", scope: "any", key: field.kind, value };
   }
   if (chip) {
-    // A value is either included or excluded, never both.
+    // A value is either included or excluded. It is never both.
     const [opposite, oppositeValue] = chipParam({ ...chip, op: chip.op === "=" ? "!=" : "=" });
     drop(opposite, (item) => item === oppositeValue);
     const [name, text] = chipParam(chip);
@@ -470,8 +472,7 @@ function filterHref(field, value, action) {
   return `${route(SEARCH_ROUTE)}${query ? `?${query}` : ""}`;
 }
 
-// Applies one filter action and searches. On a trace page the search page
-// opens with the filter applied.
+// Applies one filter action and runs the search. On a trace page, the search page opens with the filter applied.
 function applyFilter(field, value, action) {
   if (DETAIL_PAGE) {
     window.location.assign(filterHref(field, value, action));
@@ -555,7 +556,7 @@ function onDocumentClick(event) {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
   if (menu && !menu.hidden && menu.contains(target)) return;
-  // Text being selected in a value is not a click on it.
+  // Text that the user selects in a value is not a click on it.
   const selection = window.getSelection?.();
   const trigger = filterTrigger(target);
   if (trigger && !(selection && !selection.isCollapsed && trigger.anchor.contains(selection.anchorNode))) {
@@ -580,9 +581,8 @@ function onDocumentKeydown(event) {
 
 // ---------------------------------------------------------------- facets
 
-// The Attributes sidebar: the facets panel shared with the Logs Fields
-// panel (app_facet_panel.js) over /api/traces/facets and facet_values, the
-// chips as its filters.
+// The Attributes sidebar uses the facets panel. The panel is shared with the Logs Fields panel (app_facet_panel.js).
+// It reads /api/traces/facets and facet_values. The chips act as its filters.
 let facets = null;
 
 function facetFilterParams(filters) {
@@ -593,8 +593,7 @@ function facetFilterParams(filters) {
 
 function facetFilterKey(filters) {
   const params = facetFilterParams(filters);
-  // Minute-aligned like the server's cache: a re-search within the minute
-  // does not refetch.
+  // The range is aligned to the minute, like the cache of the server. A re-search within the minute does not fetch again.
   const { start_ms: startMs, end_ms: endMs, ...rest } = params;
   return JSON.stringify({ ...rest, minutes: timeRange.minuteKey(startMs, endMs) });
 }
@@ -607,7 +606,7 @@ function createFacets() {
   return facetPanel.create({
     ids: { panel: "traceFacets", toggle: "traceFacetsToggle", meta: "traceFacetsMeta", search: "traceFacetsSearch", list: "traceFacetsList" },
     collapsedClass: "chdash-trace-facets-collapsed",
-    // A phone: the panel is a drawer, toggled from the top of the results.
+    // On a phone, the panel is a drawer. The top of the results toggles it.
     drawerHost: $(".traceSearchMain"),
     collapsedStoreKey: COLLAPSED_STORE_KEY,
     pinStoreKey: PIN_STORE_KEY,
@@ -635,8 +634,8 @@ function createFacets() {
         hasMore: payload?.has_more === true,
       };
     },
-    // The chips on the key: = values checked, != values excluded; an
-    // exists / missing chip marks the key active.
+    // The chips on the key have these meanings: = values are checked, != values are excluded.
+    // An exists or missing chip marks the key as active.
     filtered: (scope, key) => {
       const out = { include: [], exclude: [], active: false };
       for (const chip of search.chips) {
@@ -671,22 +670,22 @@ function init() {
     const next = TAG_OPS[(TAG_OPS.indexOf(tagOp()) + 1) % TAG_OPS.length];
     setTagOp(next);
   });
-  // Values anywhere in the Traces view open the menu (ns.menu closes it on
-  // a scroll or a resize). Bound while the view shows (ns.lifecycle).
+  // Values anywhere in the Traces view open the menu. ns.menu closes it on a scroll or a resize.
+  // The code binds them while the view shows (ns.lifecycle).
   lifecycle.bind("traces", (scope) => {
     scope.listen(document, "click", onDocumentClick, true);
     scope.listen(document, "keydown", onDocumentKeydown, true);
     scope.add(() => closeMenu());
   });
   if (!DETAIL_PAGE) facets = createFacets();
-  // A user's own service / operation choice replaces an applied one.
+  // A choice of service or operation by the user replaces an applied one.
   for (const select of [dom.tracesService, dom.tracesOperation]) {
     select?.addEventListener("change", () => wantSelect(select, ""));
   }
 }
 
-// Tag params of the chips for the service / operation prefill; true when
-// they changed since the last prefill.
+// Tag params of the chips for the service and operation prefill.
+// The result is true when they changed since the last prefill.
 function prefillTagParams() {
   return chipParams({ tagsOnly: true });
 }
@@ -699,9 +698,9 @@ function notePrefillTags(params) {
   search.prefillTagKey = JSON.stringify(params || {});
 }
 
-// A search for one service / operation (and optionally traces lasting at
-// least minDurationMs: the duration chip, min_duration_ms), e.g. from the
-// Services view; other filters stay.
+// A search for one service or operation. It can also take traces that last at least minDurationMs.
+// minDurationMs is the duration chip (min_duration_ms).
+// The search comes, for example, from the Services view. Other filters stay.
 function applySearch({ service = "", operation = "", minDurationMs = 0 } = {}) {
   wantSelect(dom.tracesService, service);
   wantSelect(dom.tracesOperation, operation);
@@ -717,12 +716,12 @@ function resetFacets() {
   facets?.reset();
 }
 
-// Filters beyond the time range: status, service, operation, chips, duration.
+// Filters beyond the time range: status, service, operation, chips and duration.
 function hasFilters() {
   return !!(dom.tracesStatus?.value || dom.tracesService?.value || dom.tracesOperation?.value || search.chips.length || search.duration);
 }
 
-// "Clear filters" of an empty result: the range, limit and sort stay.
+// "Clear filters" of an empty result. The range, the limit and the sort stay.
 function clearFilters() {
   setSelect(dom.tracesStatus, "");
   wantSelect(dom.tracesService, "");
@@ -754,11 +753,11 @@ export const traceSearch = {
   prefillTagsChanged,
   notePrefillTags,
   closeMenu,
-  // Click-to-filter from other modules (the heatmap comparison panel):
-  // field is { kind: "tag", scope, key } or { kind: "service" | "operation" | "status" }.
+  // Other modules use click-to-filter, for example the heatmap comparison panel.
+  // The field is { kind: "tag", scope, key } or { kind: "service" | "operation" | "status" }.
   filter: (field, value) => applyFilter(field, value, "include"),
   exclude: (field, value) => applyFilter(field, value, "exclude"),
   setDuration,
-  // Discovered attribute keys (the span table's column picker suggests them).
+  // Discovered attribute keys. The column picker of the span table suggests them.
   facetKeys: () => facets?.keys() || [],
 };

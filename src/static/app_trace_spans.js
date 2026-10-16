@@ -1,15 +1,13 @@
-// Spans mode of the trace search page, after HyperDX's row search
-// (DBSearchPage, DBRowTable, DBRowSidePanel): the same range, filters and
-// facets, one row per matching span (each span must match every filter).
-//   * /api/traces/spans pages newest-first by keyset cursor; the table is
-//     virtualised (only the rows in view are in the DOM) and loads the next
-//     page when its end scrolls into view;
-//   * attribute columns come from a column picker (remembered);
-//   * a row opens a side panel with the span (attributes with
-//     click-to-filter, events, exceptions, links) and "Open in trace";
-//   * Up / Down move through the rows, Enter opens, Escape closes.
-// app_traces.js calls init() once and hands searches over to
-// search() while the mode is "spans".
+// Spans mode of the trace search page. It follows the row search of HyperDX (DBSearchPage, DBRowTable, DBRowSidePanel).
+// It uses the same range, filters and facets. The result has one row for each span that matches. Each span must match every filter.
+//   * /api/traces/spans returns the pages from newest to oldest, by keyset cursor.
+//     The table is virtualised: only the rows in view are in the DOM.
+//     When the end of the table scrolls into view, the table loads the next page.
+//   * The attribute columns come from a column picker. The picker remembers the choice.
+//   * A row opens a side panel with the span. The panel shows the attributes (with
+//     click-to-filter), the events, the exceptions and the links. It also has "Open in trace".
+//   * Up / Down move through the rows. Enter opens a row. Escape closes the panel.
+// app_traces.js calls init() once. While the mode is "spans", app_traces.js gives each search to search().
 
 import { api } from "./app_api.js";
 import { dom, h } from "./app_dom.js";
@@ -38,16 +36,16 @@ import { util } from "./app_util.js";
 const fmt = format;
 
 const PAGE_SIZE = 100;
-// Rows are --row-regular tall (ns.table.rowHeight, read once the CSS is in).
+// The rows have the height --row-regular (ns.table.rowHeight). The value is read once the CSS is loaded.
 let ROW_HEIGHT = 32;
 const OVERSCAN = 12;
 const MAX_ROWS = 10000;
 const MAX_COLUMNS = 20;
-// Pages a sparse filter may answer empty (a time budget stop) before the
-// table asks instead of searching further on its own.
+// A sparse filter may return empty pages, because of a time budget stop.
+// The table asks the user after these pages. It does not search further on its own.
 const AUTO_EMPTY_PAGES = 3;
 const columnsPref = () => storage.pref(storage.KEYS.traceSpanColumns, []);
-// OTel span kinds; both spellings exporters write are sent.
+// OTel span kinds. The request sends both spellings that the exporters write.
 const KINDS = ["Server", "Client", "Producer", "Consumer", "Internal"];
 
 const { byId, $ } = dom;
@@ -67,7 +65,7 @@ const state = {
   searchedToNs: "",
   loading: false,
   error: "",
-  // The first page's request (util.latest): later pages share it, so a new search drops them all.
+  // The request of the first page (util.latest). Later pages share this request. A new search drops all pages.
   req: null,
   searched: false,
   latencyMs: NaN,
@@ -75,7 +73,7 @@ const state = {
   maxDurationNs: 0,
   selected: -1,
   panelOpen: false,
-  // span= of a link or a reload, opened once its row is listed.
+  // span= of a link or a reload. The span opens when its row is listed.
   pendingSpan: "",
   details: new Map(),
   detailSeq: 0,
@@ -114,18 +112,18 @@ function saveColumns() {
 
 function active() { return state.mode === "spans"; }
 
-// span= of the side panel on the search page (ns.router.panel).
+// span= is the span of the side panel on the search page (ns.router.panel).
 const spanParam = address.panel("span");
 
-// Spans mode and its own filters as search URL parameters.
+// The Spans mode and its own filters are search URL parameters.
 function urlParams(params) {
   if (!active()) return;
   params.set("mode", "spans");
   if (state.kind) params.set("kind", state.kind);
-  // span_* in the URL: min/max_duration_ms there are trace durations.
+  // In the URL, the span_* parameters are used. min/max_duration_ms there are trace durations.
   if (state.minMs) params.set("span_min_duration_ms", state.minMs);
   if (state.maxMs) params.set("span_max_duration_ms", state.maxMs);
-  // The span in the side panel (ns.detailPanel): span=<span id>.
+  // The span in the side panel (ns.detailPanel) is set with span=<span id>.
   const open = state.panelOpen ? state.rows[state.selected] : null;
   const span = open ? String(open.span_id || "") : state.pendingSpan;
   if (span) params.set("span", span);
@@ -149,7 +147,7 @@ function applyParams(params) {
     if (!active()) closePanel({ focus: false, url: "none" });
   }
   syncControls();
-  // On a trace URL span= is the trace's span, not this panel's.
+  // On a trace URL, span= gives the span of the trace. It is not the span of this panel.
   if (!onTracePath()) syncPanelFromUrl(mode === "spans" ? params.get("span") || "" : "");
 }
 
@@ -157,8 +155,8 @@ function onTracePath() {
   return /\/observability\/traces\/[^/]+/.test(window.location.pathname);
 }
 
-// span= of the URL (Back / Forward, a link, a reload): the panel shows
-// that span when it is listed and closes when there is none.
+// The span= value of the URL applies on Back / Forward, on a link and on a reload. The panel shows that span when it is listed.
+// When the span is not listed, the panel closes.
 function syncPanelFromUrl(span) {
   if (!span) {
     state.pendingSpan = "";
@@ -241,7 +239,7 @@ function message(error) {
   return util.errorText(error);
 }
 
-// A new search (app_traces.js): the first page, replacing the rows.
+// A new search (app_traces.js) loads the first page. This page replaces the rows.
 async function search(filters) {
   state.base = { ...filters };
   state.loadedColumns = state.columns.map((column) => ({ ...column }));
@@ -309,15 +307,14 @@ async function loadPage({ first = false } = {}) {
 
 // ----------------------------------------------------------- rendering
 
-// "Sep 19 12:59:59.999" in local time from the exact UTC text, and its
-// tooltip (fmt.timeTitle, to the nanosecond): computed once per row.
+// The time is shown as "Sep 19 12:59:59.999" in local time, from the exact UTC text.
+// The tooltip (fmt.timeTitle) shows the time to the nanosecond. The module computes the text once for each row.
 function localTime(row) {
   if (row._time == null) row._time = absoluteTimeText(Number(row.start_ns), row.timestamp, { withRaw: false });
   return row._time;
 }
 
-// The shown time as its date and its clock (the last word): a narrow table
-// hides the date (data-fit="clock").
+// The shown time has a date and a clock. The clock is the last word. A narrow table hides the date (data-fit="clock").
 function timeHtml(text) {
   const at = text.lastIndexOf(" ");
   if (at < 0) return esc(text);
@@ -334,11 +331,9 @@ function nsDate(nsText) {
   return Number.isFinite(ns) && ns > 0 ? new Date(Math.floor(ns / 1e6)) : null;
 }
 
-// The table fits its column (beside the docked span panel it is narrower):
-// the widest layout that fits wins. "all": every column; "compact": Kind
-// goes (the panel shows it) and the columns get tighter minimums; "clock":
-// the time column shows the clock only (the date stays in its tooltip).
-// Attribute columns stay in every layout, narrower.
+// The table fits its column. Beside the docked span panel, the table is narrower.
+// The widest layout that fits is used. "all": every column. "compact": the Kind column is removed, because the panel shows it, and the columns get smaller minimums. "clock": the time column shows the clock only. The date stays in its tooltip.
+// Attribute columns stay in every layout. They are narrower.
 const LAYOUTS = [
   { fit: "", cols: ["minmax(158px, 0.9fr)", "minmax(96px, 0.85fr)", "minmax(120px, 1.5fr)", "minmax(112px, 1fr)", "62px", "84px"], attr: "minmax(72px, 0.8fr)" },
   { fit: "compact", cols: ["minmax(150px, 0.9fr)", "minmax(72px, 0.85fr)", "minmax(88px, 1.5fr)", "minmax(84px, 1fr)", "62px"], attr: "minmax(64px, 0.8fr)" },
@@ -355,7 +350,7 @@ function gridTemplate(layout, count) {
   return layout.cols.concat(Array.from({ length: count }, () => layout.attr)).join(" ");
 }
 
-// Applies the layout that fits the table's width (on render and resize).
+// The function applies the layout that fits the width of the table, on render and on resize.
 function fitTable(table) {
   const width = table.clientWidth;
   if (!width) return;
@@ -388,8 +383,8 @@ function filterValueHtml(field, value, text, extra = "") {
   return `<span class="traceFilterable traceSpanListRow__value" data-filter-field="${field}" data-filter-value="${esc(value)}"${extra} role="button" tabindex="-1" aria-haspopup="menu" title="${esc(text)} (click to filter)">${esc(text)}</span>`;
 }
 
-// The status (ns.badge.statusHtml: an Error chip, OK as muted text, Unset
-// nothing; `empty` stands for Unset), click to filter.
+// The status (ns.badge.statusHtml) shows an Error chip. It shows OK as muted text, and it shows nothing for Unset.
+// The value `empty` stands for Unset. A click on the status filters the rows.
 function statusHtml(status, empty = "") {
   const code = String(status || "Unset");
   return badge.statusHtml(code, {
@@ -441,7 +436,7 @@ function footHtml() {
   return `<div class="traceSpanTable__foot is-end" data-span-end>End of results · ${fmt.count(state.rows.length)} span${state.rows.length === 1 ? "" : "s"}.${esc(capped)}</div>`;
 }
 
-// The result list's "nothing found" (app_trace_results.js noResultsHtml).
+// The "nothing found" message of the result list (app_trace_results.js noResultsHtml).
 function emptyHtml() {
   const range = state.base ? { start: Number(state.base.start_ms), end: Number(state.base.end_ms) } : null;
   return noResultsHtml("spans", range, { "data-span-empty": "" });
@@ -458,8 +453,7 @@ function renderCount() {
   h.replace(count, `${fmt.count(n)}${state.hasMore ? "+" : ""} Span${n === 1 ? "" : "s"}`, latency, more);
 }
 
-// The results area: the table shell (header, sized body, footer); the
-// rows in view are drawn by updateWindow().
+// The results area has the table shell: the header, the sized body and the footer. The function updateWindow() draws the rows in view.
 function render() {
   if (!active()) return;
   syncControls();
@@ -498,7 +492,7 @@ function render() {
   updateWindow(true);
 }
 
-// The sticky search bar's height: the table header sticks below it.
+// The table header sticks below the search bar. This is the height of the sticky search bar.
 function stickyTop() {
   const bar = dom.tracesForm;
   return bar ? Math.round(bar.getBoundingClientRect().height) : 0;
@@ -522,8 +516,8 @@ function updateWindow(force = false) {
   maybeLoadMore(last);
 }
 
-// Infinite scroll: the next page once the last rows are in view (a run of
-// empty, budget-stopped pages waits for "Keep searching").
+// Infinite scroll loads the next page when the last rows are in view.
+// A run of empty pages that stopped at the time budget waits for "Keep searching".
 function maybeLoadMore(last) {
   if (!state.hasMore || state.loading || state.error || state.emptyPages >= AUTO_EMPTY_PAGES) return;
   if (last >= state.rows.length - Math.floor(OVERSCAN / 2)) void loadPage();
@@ -554,8 +548,8 @@ function ensureVisible(index) {
   else if (top + ROW_HEIGHT > bottomLimit) view.scrollTop = top + ROW_HEIGHT * 2 - view.clientHeight;
 }
 
-// url: how span= follows the panel: "push" when it opens, "replace" when
-// it moves to another span (the defaults), "none" (from the URL).
+// url: how span= follows the panel.
+// "push" adds a history entry when the panel opens. "replace" changes the entry when the panel moves to another span (the defaults). "none" applies when the value comes from the URL.
 function select(index, { open = false, url = null } = {}) {
   if (!state.rows.length) return;
   const next = Math.max(0, Math.min(state.rows.length - 1, index));
@@ -576,7 +570,7 @@ function onTableClick(event) {
   if (!target) return;
   if (target.closest("[data-span-retry]")) {
     state.error = "";
-    // A failed later page resumes from its cursor; a failed first page reruns.
+    // A later page that failed resumes from its cursor. A first page that failed runs again.
     if (state.cursor) void loadPage(); else void loadPage({ first: true });
     return;
   }
@@ -585,7 +579,7 @@ function onTableClick(event) {
     void loadPage();
     return;
   }
-  // (Zoom out: the results' own click handler in app_trace_results.js.)
+  // Zoom out is handled by the click handler of the results in app_trace_results.js.
   const row = target.closest("[data-span-index]");
   if (!row) return;
   const index = Number(row.getAttribute("data-span-index"));
@@ -593,9 +587,8 @@ function onTableClick(event) {
   select(index, { open: true });
 }
 
-// Row keys (ns.table.rovingRows, index mode: the grid keeps focus, the selected
-// row is aria-activedescendant): Up / Down, Page Up / Down, Home / End
-// select, Enter / Space open the panel (Escape: ns.layers).
+// Row keys (ns.table.rovingRows, index mode). The grid keeps the focus, and aria-activedescendant names the selected row.
+// Up / Down, Page Up / Down, and Home / End select a row. Enter or Space opens the panel. Escape is handled by ns.layers.
 function bindTableKeys(table) {
   tableMod.rovingRows(table, {
     count: () => (eventOnGrid ? state.rows.length : 0),
@@ -606,7 +599,7 @@ function bindTableKeys(table) {
   });
 }
 
-// The row keys act on the grid itself, not on a value inside a row.
+// The row keys act on the grid itself. They do not act on a value inside a row.
 let eventOnGrid = false;
 function onTableKeydown(event) {
   const table = byId("traceSpanTable");
@@ -620,17 +613,15 @@ function onTableKeydown(event) {
 
 // ----------------------------------------------------------- side panel
 
-// The side panel: a docked ns.detailPanel beside the results, sticky under
-// the search bar (a bottom sheet on narrow windows). Escape (ns.layers) and
-// its close button give the focus back to the table. Its span= is
-// ns.router.panel("span"): pushed when it opens, replaced when it moves,
-// and Back closes it.
+// The side panel is a docked ns.detailPanel beside the results. It sticks under the search bar. On narrow windows, it is a bottom sheet.
+// Escape (ns.layers) and the close button return the focus to the table.
+// The span= value is ns.router.panel("span"). The panel adds an entry when it opens and replaces the entry when it moves. Back closes it.
 let detail = null;
 
 function panelApi() {
   if (detail) return detail;
   detail = detailPanel.create({
-    // Inside the Search tab's panel: another Traces tab hides it with it.
+    // The panel is inside the panel of the Search tab. Another Traces tab hides this panel together with it.
     host: $(".traceSearchBody") || dom.tracesSearchView || document.body,
     id: "traceSpanPanel",
     className: "uiDetail--sticky traceSpanPanel",
@@ -657,8 +648,7 @@ function openPanel(index) {
   if (!row) return;
   state.panelOpen = true;
   const panel = panelEl();
-  // Its place is CSS: sticky under the search bar (--trace-search-h), a
-  // bottom sheet on narrow windows.
+  // The CSS sets the place of the panel. It sticks under the search bar (--trace-search-h). On narrow windows, it is a bottom sheet.
   panelApi().open({ opener: byId("traceSpanTable") });
   panel.dataset.spanIndex = String(index);
   renderPanel(row);
@@ -668,14 +658,14 @@ function openPanel(index) {
   const entry = { status: "loading", span: null, error: "" };
   state.details.set(key, entry);
   const seq = ++state.detailSeq;
-  // The panel shows one span: opening another aborts this read (and a host change does, through "traces.").
+  // The panel shows one span. When another span opens, this read stops. A change of host also stops it, through the "traces." key.
   const req = obsView.read("traces.span");
   api.getTraceSpan(currentHost(), { traceId: row.trace_id, spanId: row.span_id, timestampNs: row.start_ns }, { signal: req.signal }).then((payload) => {
     entry.status = "ready";
     entry.span = payload?.span || null;
   }).catch((error) => {
     if (util.isAbort(error)) {
-      // Cut: the next opening of this span asks again.
+      // Cut the cache. The next time this span opens, the panel asks the server again.
       if (state.details.get(key) === entry) state.details.delete(key);
       return;
     }
@@ -688,8 +678,8 @@ function openPanel(index) {
   });
 }
 
-// url: "clear" drops span= (Back when the entry is the panel's own),
-// "none" when the URL already has none (Back, a new search).
+// url: "clear" removes span= from the URL. This happens on Back, when the entry is the entry of the panel.
+// "none" applies when the URL has no span= value already (Back, or a new search).
 function closePanel({ focus = true, url = "clear" } = {}) {
   const wasOpen = state.panelOpen;
   state.panelOpen = false;
@@ -760,11 +750,11 @@ function renderPanel(row) {
   const index = Number(panel.dataset.spanIndex);
   const entry = state.details.get(detailKey(row));
   const href = spanTraceUrl(row.trace_id, row.span_id);
-  // A re-render keeps the focus on the same panel control.
+  // A new render keeps the focus on the same panel control.
   const focusedNav = panel.contains(document.activeElement) ? document.activeElement?.getAttribute?.("data-span-panel-nav") : "";
   const api = panelApi();
   panel.style.setProperty("--trace-service-color", palette.service(row.service_name));
-  // Eyebrow: the service; title: the operation (both click-to-filter).
+  // The eyebrow shows the service. The title shows the operation. A click on either one filters the rows.
   api.setHead({
     eyebrow: `<i class="traceSpanListRow__dot" aria-hidden="true"></i>${filterValueHtml("service", row.service_name || "", row.service_name || "unknown")}`,
     title: filterValueHtml("operation", row.span_name || "", row.span_name || "span"),
@@ -819,11 +809,11 @@ function onPanelClick(event) {
     openPanel(index);
     return;
   }
-  // Attribute copy buttons, "show more" events and exception stacks.
+  // This section has the attribute copy buttons, the "show more" events and the exception stacks.
   spanDetailClick(event);
 }
 
-// The open panel when it is on screen (not under a hidden tab or view).
+// The open panel, when it is on screen. It is not under a hidden tab or view.
 function shownPanel() {
   const panel = byId("traceSpanPanel");
   return panel && !panel.hidden && !panel.parentElement?.closest("[hidden]") ? panel : null;
@@ -833,8 +823,7 @@ function editable(element) {
   return !!element?.closest?.("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role=menu], [role=listbox], [role=dialog]:not(#traceSpanPanel)");
 }
 
-// Up / Down walk the rows while the panel is open (focus in the panel or
-// on the page, not in a field or a menu).
+// Up / Down move through the rows while the panel is open. The focus can be in the panel or on the page, but not in a field or a menu.
 function onDocumentKeydown(event) {
   if (!active() || !state.panelOpen || dom.tracesSearchView?.hidden || shownPanel() === null) return;
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -849,8 +838,7 @@ function onDocumentKeydown(event) {
 
 // ------------------------------------------------------- column picker
 
-// A popover of the columns button: an ns.menu menu (app_ui_menu.js) in
-// a portal, right-aligned with the button; it opens on the key field.
+// The popover of the columns button is an ns.menu menu (app_ui_menu.js). It is in a portal, aligned to the right of the button. It opens on the key field.
 let columnsMenu = null;
 let columnsPopover = null;
 
@@ -969,8 +957,7 @@ function commitDuration(input) {
 
 // ---------------------------------------------------------------- hooks
 
-// The search view is back (Back from a trace): same rows, scroll and
-// selection as when the trace was opened.
+// The search view returns after Back from a trace. It has the same rows, scroll position and selection as when the trace was opened.
 function onShown() {
   if (!active()) return;
   const view = dom.tracesSearchView;
@@ -983,15 +970,14 @@ function onShown() {
 }
 
 function init() {
-  // Traces | Spans: the shared segmented control (app_ui_segmented.js).
+  // Traces | Spans is the shared segmented control (app_ui_segmented.js).
   segmented?.bind($(".traceModeToggle"), { attr: "resultsMode", onChange: (mode) => { setMode(mode); return false; } });
   const root = dom.tracesResults;
   root?.addEventListener("click", (event) => { if (active()) onTableClick(event); });
-  // Capture: the grid's own row keys (bindTableKeys) read eventOnGrid.
+  // The capture phase uses the row keys of the grid (bindTableKeys). These keys read eventOnGrid.
   root?.addEventListener("keydown", (event) => { if (active()) onTableKeydown(event); }, true);
   dom.tracesSearchView?.addEventListener("scroll", onScroll, { passive: true });
-  // While Traces shows (ns.lifecycle): the window resize and the panel's
-  // Up / Down keys.
+  // While Traces is shown (ns.lifecycle), the module handles the window resize and the Up / Down keys of the panel.
   lifecycle.bind("traces", (scope) => {
     scope.listen(window, "resize", onScroll, { passive: true });
     scope.listen(document, "keydown", onDocumentKeydown);
@@ -1016,7 +1002,7 @@ export const traceSpans = {
   urlParams,
   applyParams,
   onShown,
-  // The Search tab is shown again (app_trace_tabs.js): redraw the rows in view.
+  // The Search tab is shown again (app_trace_tabs.js). Draw the rows in view again.
   onTabShown: () => { if (active()) render(); else closeColumns(); },
   onTabHidden: () => closeColumns(),
   hasResults: () => state.searched && !!state.base,

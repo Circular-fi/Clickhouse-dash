@@ -13,9 +13,8 @@ health {
 }
 
 mcp {
-  enabled        = true
-  storage_file   = "/data/mcp_keys.json"
-  manage_from_ui = true
+  enabled      = true
+  storage_file = "/data/mcp_keys.json"
 
   # The usage of the keys: the file of this instance is /data/chdash-mcp-test.jsonl.zst (a name that the tests know: the host name of a
   # container changes). Other instances can share /data: the tests put the files of a few instances there.
@@ -36,63 +35,98 @@ mcp {
   rate_limit_per_minute = 120
   allowed_origins       = ["https://inspector.example.com"]
 
-  key {
-    name        = "all-data"
-    secret      = "a11da7a0-0000-4000-8000-000000000001"
-    hosts       = ["local"]
-    tools       = ["*"]
-    databases   = ["*"]
+  # The keys of the contract (mcp_key): the name is the label, the token comes from a file, the scope and the limits are blocks. The
+  # keys all-data, weather-only, otel-reader and limited keep a token of the older form (a UUID version 4): ChDash accepts it until it is
+  # replaced, with a warning at start. The other keys have an mcp_ token.
+  keys {
+    mode = "hybrid"
   }
 
-  key {
-    name        = "weather-only"
-    secret      = "3ea7be00-0000-4000-8000-000000000002"
-    hosts       = ["local"]
-    tools       = ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
-    databases   = ["chdash_ui.weather_*"]
+  mcp_key "all-data" {
+    token_file = "/run/secrets/chdash-test/mcp-key-all-data"
+    tools      = ["*"]
+    scope {
+      hosts     = ["local"]
+      databases = ["*"]
+    }
   }
 
-  key {
-    name        = "otel-reader"
-    secret      = "07e1ead0-0000-4000-8000-000000000003"
-    hosts       = ["local"]
-    tools       = ["*"]
-    databases   = ["otel"]
-    max_rows    = 10
+  mcp_key "weather-only" {
+    token_file = "/run/secrets/chdash-test/mcp-key-weather-only"
+    subject    = "weather-team"
+    tools      = ["list_hosts", "list_databases", "list_tables", "describe_table", "query_table"]
+    scope {
+      hosts     = ["local"]
+      databases = ["chdash_ui.weather_*"]
+    }
   }
 
-  key {
-    name            = "limited"
-    secret          = "11317ed0-0000-4000-8000-000000000004"
-    hosts           = ["local"]
-    tools           = ["*"]
-    databases       = ["*"]
-    max_rows        = 5
-    timeout_seconds = 1
+  mcp_key "otel-reader" {
+    token_file = "/run/secrets/chdash-test/mcp-key-otel-reader"
+    tools      = ["*"]
+    scope {
+      hosts     = ["local"]
+      databases = ["otel"]
+    }
+    limits {
+      max_rows = 10
+    }
   }
 
-  key {
-    name      = "second-host"
-    secret    = "5ec0d000-0000-4000-8000-000000000005"
-    hosts     = ["second"]
-    tools     = ["*"]
-    databases = ["*"]
+  mcp_key "limited" {
+    token_file = "/run/secrets/chdash-test/mcp-key-limited"
+    tools      = ["*"]
+    scope {
+      hosts     = ["local"]
+      databases = ["*"]
+    }
+    limits {
+      max_rows        = 5
+      timeout_seconds = 1
+    }
   }
 
-  key {
-    name      = "hosts-only"
-    secret    = "4057a000-0000-4000-8000-000000000006"
-    hosts     = ["local"]
-    tools     = ["list_hosts"]
-    databases = ["*"]
+  mcp_key "second-host" {
+    token_file = "/run/secrets/chdash-test/mcp-key-second-host"
+    tools      = ["*"]
+    scope {
+      hosts     = ["second"]
+      databases = ["*"]
+    }
   }
 
-  key {
-    name      = "rate-test"
-    secret    = "7a7e7e57-0000-4000-8000-000000000007"
-    hosts     = ["local"]
-    tools     = ["list_hosts"]
-    databases = ["*"]
+  mcp_key "hosts-only" {
+    token_file = "/run/secrets/chdash-test/mcp-key-hosts-only"
+    subject    = "alice"
+    tools      = ["list_hosts"]
+    expires    = "2099-12-31T23:59:59Z"
+    scope {
+      hosts     = ["local"]
+      databases = ["*"]
+    }
+  }
+
+  # A rate limit of its own, lower than the one of mcp: the rate limit tests reach it with few calls.
+  mcp_key "rate-test" {
+    token_file = "/run/secrets/chdash-test/mcp-key-rate-test"
+    tools      = ["list_hosts"]
+    scope {
+      hosts     = ["local"]
+      databases = ["*"]
+    }
+    limits {
+      rate_limit_per_minute = 30
+    }
+  }
+
+  # A key that expired: its requests get the 401 of an unknown key.
+  mcp_key "expired" {
+    token_file = "/run/secrets/chdash-test/mcp-key-expired"
+    tools      = ["list_hosts"]
+    expires    = "2020-01-01T00:00:00Z"
+    scope {
+      hosts = ["local"]
+    }
   }
 }
 
@@ -125,19 +159,32 @@ clickhouse {
   host {
     name       = "local"
     label      = "Local ClickHouse"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
-    mcp_uri    = "clickhouse://chdash_mcp:mcp_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_mcp@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_mcp"
   }
   host {
     name       = "second"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
-    mcp_uri    = "clickhouse://chdash_mcp:mcp_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
+    mcp_uri    = "clickhouse://chdash_mcp@clickhouse:9000"
+    mcp_password_file = "/run/secrets/chdash-test/pw-chdash_mcp"
   }
   host {
     name       = "plain"
-    runner_uri = "clickhouse://chdash_runner:runner_test@clickhouse:9000"
-    system_uri = "clickhouse://chdash_system:system_test@clickhouse:9000"
+    runner_uri = "clickhouse://chdash_runner@clickhouse:9000"
+    runner_password_file = "/run/secrets/chdash-test/pw-chdash_runner"
+    system_uri = "clickhouse://chdash_system@clickhouse:9000"
+    system_password_file = "/run/secrets/chdash-test/pw-chdash_system"
   }
+}
+
+# The access of humans (docs/access.md): no gateway in front of this server, so no check.
+access {
+  mode = "open"
 }

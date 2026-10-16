@@ -1,13 +1,15 @@
-// Duration heatmap + box-select comparison ("why is this slow"), after
-// HyperDX's DBSearchHeatmapChart / DBDeltaChart. An alternative mode of the
-// "Trace duration" card: x = trace start (the analytics' time buckets), y =
-// log-scaled trace duration, colour = traces per cell. Dragging a box (or
-// arrow keys + Enter) compares the traces inside it with the other traces of
-// that time (GET /api/traces/deltas): per attribute, the share of each side's
-// sampled traces having a span with each value. A value click applies it as
-// a filter chip (app_trace_search.js); "Search traces in this box" sets the
-// range and the trace duration filter and searches.
-// app_traces.js calls init() once.
+// This file draws the duration heatmap and the box-select comparison ("why is this slow").
+// It follows HyperDX's DBSearchHeatmapChart and DBDeltaChart. The heatmap is an alternative mode of the "Trace duration" card.
+// The x axis is the trace start (the time buckets of the analytics). The y axis is the log-scaled trace duration.
+// The colour shows the traces per cell.
+//
+// To compare traces, drag a box or use the arrow keys with Enter.
+// The comparison shows the traces inside the box against the other traces of that time (GET /api/traces/deltas).
+// For each attribute, it shows the share of each side's sampled traces that have a span with each value.
+// A value click adds a filter chip (app_trace_search.js).
+// The "Search traces in this box" button sets the range and the trace duration filter, and then searches.
+//
+// The file app_traces.js calls init() once.
 
 import { api } from "./app_api.js";
 import { chartCore } from "./app_chart_core.js";
@@ -98,8 +100,8 @@ function setMode(mode, { persist = true, url = true } = {}) {
   }
 }
 
-// Search state from a URL: duration_view=heatmap, or the remembered mode on
-// a page load without it.
+// This code reads the search state from a URL. The URL can contain duration_view=heatmap.
+// Without that parameter, a page load uses the remembered mode.
 function applyParams(params, { initial = false } = {}) {
   const value = params.get("duration_view");
   const mode = MODES.includes(value) ? value : initial ? readMode() : "percentiles";
@@ -113,7 +115,7 @@ function writeParams(params) {
 
 // ---------------------------------------------------------------- loading
 
-// Every search: the new filters (the old box no longer applies).
+// Every search uses the new filters. The old box no longer applies.
 function onSearch(filters) {
   hm.filters = { ...(filters || {}) };
   clearSelection({ render: false });
@@ -172,13 +174,13 @@ function rowRangeLabel(r0, r1) {
 
 // ---------------------------------------------------------------- render
 
-// The one-hue ramp of ns.palette, one step per level.
+// The one-hue ramp comes from ns.palette. It has one step per level.
 const PALETTE = Array.from({ length: HEAT_LEVELS }, (_, i) => palette.sequential(i / (HEAT_LEVELS - 1)));
 
-// The heatmap draws on the shared canvas engine (app_chart_core.js): one
-// canvas rect per cell, a log duration axis with the server's uneven bin
-// edges, the engine's 2-D brush for the box and DOM regions for the
-// selection and the keyboard cursor, moved without redrawing.
+// The heatmap draws on the shared canvas engine (app_chart_core.js).
+// Each cell is one canvas rect. The log duration axis uses the uneven bin edges of the server.
+// The engine's 2-D brush draws the box. DOM regions show the selection and the keyboard cursor.
+// These regions move without a redraw.
 function render() {
   const container = dom.traceDurationChart;
   if (!container || !active()) return;
@@ -232,8 +234,8 @@ function render() {
     box.y1[k] = edges[row + 1];
     box.level[k] = level(count, maxCount);
   });
-  // One x per column (the cursor snaps to columns, the crosshair is shared
-  // with the count chart).
+  // Use one x value per column. The cursor snaps to columns.
+  // The crosshair is shared with the count chart.
   const xs = new Float64Array(cols);
   for (let col = 0; col < cols; col += 1) xs[col] = colStart(col) + bucketMs / 2;
   const ticks = niceLogTicks(lo, hi).map((value) => ({ v: value, label: fmt.duration(value) }));
@@ -271,7 +273,7 @@ function render() {
 
 // ------------------------------------------------------- hit testing
 
-// The cell at a time (ms) and a duration (ns), clamped to the grid.
+// Find the cell at a time (ms) and a duration (ns). The result is clamped to the grid.
 function cellAt(ms, value) {
   const col = Math.max(0, Math.min(geo.cols - 1, Math.floor((Math.min(ms, geo.xMax - 1e-6) - geo.gridStart) / geo.bucketMs)));
   let row = 0;
@@ -283,7 +285,7 @@ function boxOf(a, b) {
   return { c0: Math.min(a.col, b.col), c1: Math.max(a.col, b.col), r0: Math.min(a.row, b.row), r1: Math.max(a.row, b.row) };
 }
 
-// A box of cells in data units (the engine's regions and brush).
+// This describes a box of cells in data units. It uses the engine's regions and brush.
 function boxRange(box) {
   return { x0: geo.colStart(box.c0), x1: geo.colStart(box.c1 + 1), y0: geo.edges[box.r0], y1: geo.edges[box.r1 + 1], box };
 }
@@ -299,7 +301,7 @@ function cellText(cell) {
   return { when: fmt.range(geo.colStart(cell.col), geo.colStart(cell.col) + geo.bucketMs), duration: rowRangeLabel(cell.row, cell.row), count };
 }
 
-// The selection, the keyboard cursor and the keyboard box.
+// This section handles the selection, the keyboard cursor and the keyboard box.
 function regions() {
   if (!geo) return [];
   const inGrid = (box) => box && box.c1 < geo.cols && box.r1 < geo.rows;
@@ -341,7 +343,7 @@ function boxTooltip(box) {
 
 // ------------------------------------------------------- keys
 
-// The cell or box that the keyboard reached, through the page's one live region.
+// The keyboard can reach a cell or a box. The page announces it through the one live region.
 function announce(text) {
   uiState.announce(text);
 }
@@ -360,7 +362,7 @@ function onKeydown(event) {
       : from;
     drawCursor();
     const box = hm.anchor ? boxOf(hm.anchor, hm.cursor) : null;
-    // The tooltip next to the cell's lower right corner.
+    // Place the tooltip next to the lower right corner of the cell.
     const L = chart.layout();
     if (L) chart.showTooltip(box ? boxTooltip(box) : cellTooltip(hm.cursor), L.xOf(geo.colStart(hm.cursor.col + 1)), L.yOf(geo.edges[hm.cursor.row]));
     const text = cellText(hm.cursor);
@@ -383,8 +385,8 @@ function onKeydown(event) {
   }
 }
 
-// Test and debugging hook: the grid as drawn, cells in client coordinates
-// (clipped to the plot, like their canvas rects).
+// This hook gives the grid as drawn, with the cells in client coordinates.
+// The cells are clipped to the plot, as their canvas rects are.
 function inspect() {
   if (!chart || !geo || !chart.layout()) return null;
   const cells = [];
@@ -396,7 +398,7 @@ function inspect() {
     const x0 = Math.max(lo, a.x), x1 = Math.min(hi, b.x);
     if (x1 > x0) cells.push({ col, row, count, level: level(count, geo.maxCount), x: x0, y: a.y, width: x1 - x0, height: b.y - a.y });
   }
-  // settled: the cells are where the canvas shows them now (no redraw due).
+  // The state is settled. The cells are where the canvas shows them now, and no redraw is due.
   return { rows: geo.rows, cols: geo.cols, maxCount: geo.maxCount, ticks: JSON.parse(chart.root.dataset.yTicks || "[]"), cells, settled: !chart.drawPending() };
 }
 
@@ -452,7 +454,7 @@ async function loadDeltas() {
   }
 }
 
-// Three significant digits, rounded outwards (the box keeps its traces).
+// Show three significant digits. Round outwards, so that the box keeps its traces.
 function roundMs(ms, up) {
   if (!(ms > 0)) return 0;
   const scale = 10 ** (Math.floor(Math.log10(ms)) - 2);
@@ -473,7 +475,7 @@ function searchInBox() {
 
 // ------------------------------------------------------- comparison panel
 
-// Shares of the selection and the baseline come in percent (0-100).
+// The shares of the selection and the baseline are in percent (0-100).
 const pct = (value) => fmt.percent(Math.max(0, Number(value || 0)) / 100);
 
 const COLUMN_LABELS = { ServiceName: "service", SpanName: "operation", StatusCode: "status" };
@@ -580,10 +582,10 @@ function onPanelChange(event) {
 // ---------------------------------------------------------------- wiring
 
 function init() {
-  // Percentiles | Heatmap: the shared segmented control (app_ui_segmented.js).
+  // Percentiles | Heatmap is the shared segmented control (app_ui_segmented.js).
   segmented?.bind($(".traceDurationViews"), { attr: "durationView", onChange: (mode) => { setMode(mode); return false; } });
   dom.traceDurationChart?.addEventListener("keydown", onKeydown);
-  // The canvas keeps the pointer: a press focuses the card for the keys.
+  // The canvas keeps the pointer. A press focuses the card for the keys.
   dom.traceDurationChart?.addEventListener("pointerdown", () => { if (active()) dom.traceDurationChart.focus({ preventScroll: true }); });
   dom.traceDurationChart?.addEventListener("blur", () => { if (hm.cursor && !hm.selection) { hm.cursor = null; hm.anchor = null; drawCursor(); } hideTooltip(); });
   byId("traceDeltaPanel")?.addEventListener("click", onPanelClick);

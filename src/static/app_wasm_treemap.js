@@ -1,4 +1,4 @@
-// The adapter of src/wasm/treemap.c (src/static/wasm/treemap.wasm): the squarified layout of app_explorer_treemap.js.
+// The adapter of src/wasm/treemap.c (src/static/wasm/treemap.wasm). It gives the squarified layout of app_explorer_treemap.js.
 //
 //   ops.treemap.layout(kernel, { bytes, other, x, y, width, height, totalBytes, otherBytes, constants })
 //     bytes: Float64Array of the group's nodes, sorted as compareNodes() sorts them, all above zero

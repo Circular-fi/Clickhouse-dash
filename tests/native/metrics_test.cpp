@@ -1,10 +1,12 @@
-// Unit tests of the Metrics page below its routes: the parsing of a request (src/metrics_request.cpp), the statements
-// (src/metrics_sql.cpp), the aggregation of the rows (src/metrics_aggregate.cpp), and the service on a fake executor with its JSON
-// (src/metrics_service.cpp, src/metrics_json.cpp). No ClickHouse server.
+// These unit tests check the parts of the Metrics page below its routes.
+// They check the parse of a request (src/metrics_request.cpp), the statements (src/metrics_sql.cpp),
+// the aggregation of the rows (src/metrics_aggregate.cpp), and the service with a fake executor and its JSON
+// (src/metrics_service.cpp, src/metrics_json.cpp). The tests do not need a ClickHouse server.
 //
-// The statements are compared with the ones that the code before the split of src/api_metrics.cpp sent for the same requests
-// (metrics_golden.hpp, the text with each query parameter written in place). A statement that changes its text fails here; a change on
-// purpose changes the expected text in the same commit.
+// The tests compare the statements with the ones that the code before the split of src/api_metrics.cpp sent for the same requests.
+// The expected text is in metrics_golden.hpp, with each query parameter written in place.
+// A statement that changes its text makes a test fail.
+// A change on purpose must change the expected text in the same commit.
 //
 // Build: cmake -S src -B build -DCHDASH_BUILD_APP=OFF -DCHDASH_EMBED_STATIC=OFF -DCHDASH_BUILD_METRICS_TESTS=ON
 //        cmake --build build --target chdash_metrics_test
@@ -49,14 +51,14 @@ httplib::Request request(Params params) {
   return req;
 }
 
-// The window of the battery of the differential check: the newest day of the fixture.
+// The window of the battery for the differential check is the newest day of the fixture.
 constexpr int64_t kEnd = 1789867360999LL;
 constexpr int64_t kHour = 3600000LL;
 const std::string kStart2h = std::to_string(kEnd - 2 * kHour), kStart24h = std::to_string(kEnd - 24 * kHour);
 const std::string kStart6h = std::to_string(kEnd - 6 * kHour);
 const std::string kEndText = std::to_string(kEnd);
 
-// A statement with every {pN:String} written in place as a quoted text (the numbering of the parameters is not part of the text).
+// A statement with every {pN:String} written in place as a quoted text. The numbering of the parameters is not part of the text.
 std::string inlined(const Statement& statement) {
   std::string out = statement.sql;
   for (const auto& [name, value] : statement.params.list()) {
@@ -72,8 +74,9 @@ std::string inlined(const Statement& statement) {
   return out;
 }
 
-// The statements of the code before the split, with the changes on purpose of ARCH-B-086: the information of a sum has the least of
-// IsMonotonic too (the other kinds a constant), and the rows of a histogram come in the order of their bounds.
+// The statements of the code before the split, with the changes on purpose of ARCH-B-086.
+// The information of a sum has the least of IsMonotonic too. The other kinds have a constant.
+// The rows of a histogram come in the order of their bounds.
 std::string changed_info(std::string golden, bool sum) {
   const size_t at = golden.find(" FROM `otel`.`otel_metrics_");
   CHECK(at != std::string::npos);
@@ -115,7 +118,7 @@ ExemplarsRequest exemplars_request(Params params) {
 
 std::string table_of(const std::string& kind) { return kind_table(settings(), kind); }
 
-// ---- the parsing of a request ----
+// ---- the parse of a request ----
 
 void test_the_window_of_the_routes() {
   ApiError error;
@@ -128,7 +131,7 @@ void test_the_window_of_the_routes() {
   CHECK(parse_catalog(request({{"refresh", "1"}}), 5, &catalog, &error) && catalog.refresh);
   CHECK(parse_catalog(request({{"refresh", "true"}}), 5, &catalog, &error) && catalog.refresh);
   CHECK(parse_catalog(request({{"refresh", "0"}}), 5, &catalog, &error) && !catalog.refresh);
-  // A window that is named is checked: the catalog says invalid_metrics_range, the other routes invalid_metrics_request.
+  // The catalog checks a window that the request names. It says invalid_metrics_range. The other routes say invalid_metrics_request.
   CHECK(!parse_catalog(request({{"start_ms", "9"}, {"end_ms", "3"}}), 5, &catalog, &error));
   CHECK_EQ(error.status, 400);
   CHECK_EQ(error.code, std::string("invalid_metrics_range"));
@@ -179,7 +182,7 @@ void test_the_fields_of_a_request() {
   CHECK(!parse_series(many, &series, &error));
   CHECK_EQ(error.message, std::string("Too many attribute filters (max 32)."));
 
-  // The filters keep their operator; the group_by keys are unique and in order; an empty key and an empty filter are nothing.
+  // The filters keep their operator. The group_by keys are unique and in order. An empty key and an empty filter are dropped.
   const auto ok = series_request({{"kind", "sum"}, {"service", "a"}, {"metric", "b"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()},
                                   {"filter", "x=1"}, {"filter", ""}, {"filter_not", "y=a=b"}, {"group_by", "b,,a,b"}, {"limit", "7"}, {"agg", "rate"}});
   CHECK_EQ(ok.filters.size(), size_t(2));
@@ -205,7 +208,7 @@ void test_the_fields_of_a_request() {
   const auto defaults = exemplars_request({{"kind", "sum"}, {"service", "a"}, {"metric", "b"}, {"start_ms", "1"}, {"end_ms", "9"}, {"limit", "x"}});
   CHECK_EQ(defaults.limit, int64_t(500));
   CHECK_EQ(defaults.per_bucket, int64_t(3));
-  // The key of the attribute route is read, not checked (the service checks its length after the table).
+  // The parser reads the key of the attribute route and does not check it. The service checks its length after the table.
   const auto attributes = attributes_request({{"kind", "sum"}, {"service", "a"}, {"metric", "b"}, {"start_ms", "1"}, {"end_ms", "9"}, {"key", "k"}});
   CHECK_EQ(attributes.key, std::string("k"));
 }
@@ -216,7 +219,7 @@ void test_the_bucket_grid() {
   CHECK_EQ(grid_of({{"kind", "gauge"}, {"service", "a"}, {"metric", "b"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}}).size_ms, int64_t(60000));
   CHECK_EQ(grid_of({{"kind", "gauge"}, {"service", "a"}, {"metric", "b"}, {"start_ms", kStart24h.c_str()}, {"end_ms", kEndText.c_str()}}).size_ms, int64_t(900000));
   CHECK_EQ(grid_of({{"kind", "gauge"}, {"service", "a"}, {"metric", "b"}, {"start_ms", "1000"}, {"end_ms", "11000"}}).size_ms, int64_t(10000));
-  // step_ms asks for a size, within [range / 1000, range]; the origin is taken modulo the size, also when negative.
+  // step_ms asks for a size within [range / 1000, range]. The code takes the origin modulo the size, also when the origin is negative.
   const auto step = grid_of({{"kind", "gauge"}, {"service", "a"}, {"metric", "b"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()},
                              {"step_ms", "90000"}, {"bucket_origin_ms", "1234567"}});
   CHECK_EQ(step.size_ms, int64_t(90000));
@@ -247,13 +250,13 @@ void test_the_catalog_statements_are_unchanged() {
   CHECK_EQ(existing_kinds_sql(settings()), std::string(golden::kExistingKinds));
   const std::set<std::string> all = {"gauge", "sum", "histogram", "exponential_histogram", "summary"};
   CHECK_EQ(catalog_sql(settings(), all, "1", TimeWindow{kEnd - 24 * kHour, kEnd}), std::string(golden::kCatalogAll));
-  // Only the kinds that exist, in the order of the kinds; none gives no statement.
+  // Only the kinds that exist appear, in the order of the kinds. When no kind exists, there is no statement.
   const std::string some = catalog_sql(settings(), {"summary", "gauge"}, "1", TimeWindow{kEnd - 2 * kHour, kEnd});
   CHECK(some.find("otel_metrics_gauge") != std::string::npos && some.find("otel_metrics_summary") != std::string::npos);
   CHECK(some.find("otel_metrics_sum`") == std::string::npos && some.find("histogram") == std::string::npos);
   CHECK(some.find("'gauge' AS kind") < some.find("'summary' AS kind"));
   CHECK_EQ(catalog_sql(settings(), {}, "1", TimeWindow{1, 2}), std::string());
-  // The visibility of the allowlist is in each branch.
+  // Each branch checks the visibility of the allowlist.
   const std::string hidden = catalog_sql(settings(), {"gauge", "sum"}, "ServiceName IN ('a')", TimeWindow{1, 2});
   size_t count = 0;
   for (size_t at = hidden.find("WHERE ServiceName IN ('a')"); at != std::string::npos; at = hidden.find("WHERE ServiceName IN ('a')", at + 1)) ++count;
@@ -273,22 +276,22 @@ void test_the_attribute_statements_are_unchanged() {
   const auto filtered = attributes_request({{"kind", "sum"}, {"service", "api_service"}, {"metric", "traces.span.metrics.calls"},
                                             {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}, {"key", "span.name"}, {"filter", "span.kind=SERVER"}});
   CHECK_EQ(inlined(attribute_values_statement(table_of("sum"), "1", filtered)), std::string(golden::kAttrValuesFiltered));
-  // The filters on the key that is listed are left out, so its other values stay visible.
+  // The code leaves out the filters on the listed key. The other values of that key stay visible.
   const auto self = attributes_request({{"kind", "sum"}, {"service", "api_service"}, {"metric", "traces.span.metrics.calls"},
                                         {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}, {"key", "span.kind"}, {"filter", "span.kind=SERVER"}});
   CHECK_EQ(inlined(attribute_values_statement(table_of("sum"), "1", self)), std::string(golden::kAttrValuesSelf));
-  // What a user writes is a parameter: a quote mark or a backslash never reaches the text of the statement.
+  // A user value is a parameter. A quote mark or a backslash never reaches the text of the statement.
   const auto quote = attributes_request({{"kind", "sum"}, {"service", "api_service"}, {"metric", "traces.span.metrics.calls"},
                                          {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}, {"key", "it's"}, {"filter", "a'b=c\\d"}});
   const Statement statement = attribute_values_statement(table_of("sum"), "1", quote);
   CHECK(statement.sql.find("it's") == std::string::npos && statement.sql.find("a'b") == std::string::npos && statement.sql.find("c\\d") == std::string::npos);
   CHECK_EQ(inlined(statement), std::string(golden::kAttrQuote));
-  // One parameter for each value: the service, the metric, the key, the filter key and its value.
+  // Each value has its own parameter: the service, the metric, the key, the filter key and its value.
   CHECK_EQ(statement.params.list().size(), size_t(5));
 }
 
 void test_the_series_statements_are_unchanged() {
-  // The groups that a ranking kept, which a grouped request reads (the others are one group, folded in the statement).
+  // The groups that a ranking kept. A grouped request reads them. The other groups form one group, folded in the statement.
   const std::vector<std::string> kept_summary = {"16723269243102733365"};
   const std::vector<std::string> kept_grouped = {"SPAN_KIND_CLIENT\x1fSTATUS_CODE_OK", "SPAN_KIND_CLIENT\x1fSTATUS_CODE_ERROR"};
   const std::vector<std::string> kept_none;
@@ -353,8 +356,8 @@ void test_the_series_statements_are_unchanged() {
   CHECK_EQ(inlined(quote_statements.series(Mode::Gauge, false, "")), std::string(golden::kSeriesQuote));
   CHECK(quote_statements.info().sql.find("a'b") == std::string::npos);
 
-  // The kinds that have no capture of their own: the statement of a delta sum is the plain sum, and a cumulative exponential histogram
-  // differences each of its arrays with the point before it.
+  // Some kinds have no capture of their own. The statement of a delta sum is the plain sum.
+  // A cumulative exponential histogram takes the difference of each of its arrays with the point before it.
   SeriesStatements plain_sum(sum, table_of("sum"), "1", true);
   const std::string delta_sum = plain_sum.series(Mode::Delta, true, "").sql;
   CHECK(delta_sum.find("lagInFrame") == std::string::npos && delta_sum.find("sum(Value)") != std::string::npos);
@@ -411,13 +414,13 @@ void test_the_ranking_statements_are_the_ones_that_were_sent() {
   SeriesStatements summary_delta_statements(summary_delta, table_of("summary"), "1", true);
   CHECK_EQ(inlined(summary_delta_statements.ranking(Mode::SummaryDelta, false, "", "avg", seconds(summary_delta), 2)), std::string(golden::kRankingSummaryDelta));
 
-  // The kept groups are parameters, and an empty list reads no group.
+  // The kept groups are parameters. An empty list reads no group.
   const std::vector<std::string> none;
   const std::string empty = gauge_avg_statements.series(Mode::Gauge, false, "", &none).sql;
   CHECK(empty.find("IN ('')") != std::string::npos);
-  // Without a list, the statement is the one that reads every group, and the others are not folded.
+  // Without a list, the statement reads every group. The other groups are not folded.
   CHECK(gauge_avg_statements.series(Mode::Gauge, false, "").sql.find("__other__") == std::string::npos);
-  // The ranking and the series carry the memory settings, the other statements only the time.
+  // The ranking and the series carry the memory settings. The other statements carry only the time.
   CHECK(gauge_avg_statements.series(Mode::Gauge, false, "").sql.find("max_memory_usage = 2000000000") != std::string::npos);
   CHECK(gauge_avg_statements.info().sql.find("max_memory_usage") == std::string::npos);
 }
@@ -440,7 +443,7 @@ void test_a_series_is_told_apart_by_its_scope_when_the_table_has_one() {
   const std::string text = scoped.series(Mode::Gauge, false, "").sql;
   CHECK(text.find("cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion) AS sid") != std::string::npos);
   CHECK_EQ(scoped.series_id(), std::string("cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion)"));
-  // A series that is differenced is partitioned by the same identity.
+  // The code partitions a differenced series by the same identity.
   const auto sum = series_request({{"kind", "sum"}, {"service", "auth_service"}, {"metric", "traces.span.metrics.calls"}, {"start_ms", kStart2h.c_str()}, {"end_ms", kEndText.c_str()}});
   SeriesStatements scoped_sum(sum, table_of("sum"), "1", true);
   CHECK(scoped_sum.series(Mode::Delta, false, "").sql.find("WINDOW w AS (PARTITION BY cityHash64(Attributes, ResourceAttributes, ScopeName, ScopeVersion) ORDER BY") != std::string::npos);
@@ -456,14 +459,14 @@ void test_a_series_is_told_apart_by_its_scope_when_the_table_has_one() {
 
 void test_explicit_quantiles() {
   const std::vector<double> bounds = {1, 2, 5};
-  // Prometheus histogram_quantile: linear inside the bucket that holds the rank; the first bucket starts at 0.
+  // Prometheus histogram_quantile interpolates linearly inside the bucket that holds the rank. The first bucket starts at 0.
   CHECK_EQ(explicit_quantile(0.5, bounds, {10, 10, 0, 0}), 1.0);
   CHECK_EQ(explicit_quantile(0.75, bounds, {10, 10, 0, 0}), 1.5);
   CHECK_EQ(explicit_quantile(1.0, bounds, {10, 10, 0, 0}), 2.0);
   CHECK_EQ(explicit_quantile(0.9, bounds, {0, 0, 10, 0}), 4.7);
   // A rank in the +Inf bucket answers the largest finite bound.
   CHECK_EQ(explicit_quantile(0.9, bounds, {1, 1, 1, 10}), 5.0);
-  // No count, or no bound: no value.
+  // Without a count or a bound, the result has no value.
   CHECK(std::isnan(explicit_quantile(0.5, bounds, {0, 0, 0, 0})));
   CHECK(std::isnan(explicit_quantile(0.5, {}, {5})));
   // A first bucket whose bound is not positive answers its bound.
@@ -482,7 +485,7 @@ void test_exponential_quantiles() {
   CHECK_EQ(exponential_quantile(0.5, state), 2.0);
   CHECK_EQ(exponential_quantile(1.0, state), 4.0);
   CHECK_EQ(exponential_quantile(0.75, state), 3.0);
-  // The zero bucket and the negative buckets are ranked below the positive ones.
+  // The zero bucket and the negative buckets rank below the positive ones.
   state.zero = 20;
   CHECK_EQ(exponential_quantile(0.25, state), 0.0);
   state.negative[0] = 20;
@@ -523,7 +526,7 @@ void test_cells_merge() {
   CHECK_EQ(h1.counts.size(), size_t(3));
   CHECK_EQ(h1.counts[0], 11.0);
   CHECK_EQ(h1.counts[2], 33.0);
-  // Other bounds: the bounds are the sorted union, and each bucket goes to the bucket that has its upper bound.
+  // With other bounds, the code uses the sorted union of the bounds. Each bucket goes to the bucket that has its upper bound.
   Cell wide;
   wide.bounds = {1, 2, 4};
   wide.counts = {1, 1, 1, 1};
@@ -533,7 +536,7 @@ void test_cells_merge() {
   merge_cell(wide, fine);
   CHECK((wide.bounds == std::vector<double>{1, 2, 3, 4}));
   CHECK((wide.counts == std::vector<double>{1, 6, 7, 1, 10}));
-  // Exponential buckets are rescaled to the coarser scale before they add up.
+  // The code rescales exponential buckets to the coarser scale before it adds them.
   Cell e1, e2;
   e1.exp.present = true;
   e1.exp.scale = 1;
@@ -563,7 +566,7 @@ void test_the_merge_of_histograms_does_not_depend_on_the_order_of_the_rows() {
     return cell;
   };
   const Cell first = merged({0, 1, 2, 3, 4});
-  // The bounds are the sorted union, and no count is lost.
+  // The bounds are the sorted union. No count is lost.
   CHECK((first.bounds == std::vector<double>{1, 2, 3, 5, 10}));
   double total = 0, expected = 0;
   for (const double c : first.counts) total += c;
@@ -577,7 +580,7 @@ void test_the_merge_of_histograms_does_not_depend_on_the_order_of_the_rows() {
     CHECK(other.bounds == first.bounds);
     CHECK(other.counts == first.counts);
   } while (std::next_permutation(order.begin(), order.end()));
-  // A row with no bounds first: its count is not put in the first bucket, and the quantile is not NaN.
+  // A row with no bounds comes first. Its count is not put in the first bucket. The quantile is not NaN.
   Cell empty_first;
   Cell no_bounds;
   no_bounds.counts = {4};
@@ -652,7 +655,7 @@ void test_the_aggregations_that_a_metric_offers() {
   CHECK(plan.mode == Mode::Gauge && !plan.per_series);
   CHECK(!plan_aggregation("gauge", info, "p50", &plan, &error));
   CHECK_EQ(error, std::string("agg must be one of: avg, min, max, last, sum."));
-  // A monotonic sum is read as increases; a cumulative gauge-like sum as a gauge; a delta sum as sums.
+  // The code reads a monotonic sum as increases. It reads a cumulative gauge-like sum as a gauge. It reads a delta sum as sums.
   info.monotonic = true;
   info.temporality_min = info.temporality_max = 2;
   CHECK(plan_aggregation("sum", info, "", &plan, &error));
@@ -675,7 +678,7 @@ void test_the_aggregations_that_a_metric_offers() {
   CHECK(plan_aggregation("exponential_histogram", info, "", &plan, &error));
   CHECK_EQ(plan.default_agg, std::string("p50"));
   CHECK(plan.mode == Mode::Exponential);
-  // A summary offers its own quantiles, then avg and count_rate; a quantile is read per series, the others as deltas.
+  // A summary offers its own quantiles, then avg and count_rate. The code reads a quantile per series. It reads the others as deltas.
   info.quantiles = {"0.5", "0.99"};
   CHECK(plan_aggregation("summary", info, "", &plan, &error));
   CHECK_EQ(plan.aggs.size(), size_t(4));
@@ -728,7 +731,7 @@ void test_rows_become_groups_and_the_best_groups_are_kept() {
   CHECK_EQ(groups["a"].cells[60000].count, 4.0);
   CHECK_EQ(groups["a"].cells[60000].min, 4.0);
   CHECK_EQ(groups["a"].cells[60000].max, 12.0);
-  // Ranked by the sum of |value| over the buckets (ties by key), the top 2 are kept and the others fold into one.
+  // The code ranks the groups by the sum of |value| over the buckets. Ties go by key. The top 2 are kept. The others fold into one.
   auto ranked = rank_groups(&groups, Mode::Gauge, "sum", 60.0, 2, false);
   CHECK_EQ(ranked.ordered.size(), size_t(4));
   CHECK_EQ(ranked.kept, size_t(2));
@@ -743,11 +746,11 @@ void test_rows_become_groups_and_the_best_groups_are_kept() {
   auto per_series = rank_groups(&groups, Mode::Gauge, "sum", 60.0, 2, true);
   CHECK_EQ(per_series.other_count, size_t(0));
   CHECK(per_series.other.cells.empty());
-  // k larger than the groups keeps all.
+  // When k is larger than the number of groups, all groups are kept.
   auto all = rank_groups(&groups, Mode::Gauge, "sum", 60.0, 50, false);
   CHECK_EQ(all.kept, size_t(4));
   CHECK_EQ(all.other_count, size_t(0));
-  // Quantiles of a histogram are ranked by their observation count, not by their value.
+  // The code ranks quantiles of a histogram by their observation count. It does not rank them by their value.
   const Rows hist_rows = {{"x", "60000", "1,2", "10,0,0", "10", "10"}, {"y", "60000", "1,2", "0,0,3", "3", "9"}};
   const auto hist_block = text_block(hist_rows);
   std::map<std::string, Group> hist_groups;
@@ -906,7 +909,7 @@ void test_the_catalog_and_its_json() {
   CHECK(!doc["cache"]["hit"].GetBool());
   CHECK_EQ(doc["cache"]["ttl_ms"].GetInt64(), int64_t(60000));
   CHECK(doc["timing_ms"].HasMember("query") && doc["timing_ms"].HasMember("total"));
-  // The second request of the window reads the cache: no statement, no query time.
+  // The second request of the window reads the cache. It sends no statement and no query time.
   const size_t statements = db.sqls.size();
   const auto second = service.catalog(context, metrics_host(), "local", request);
   CHECK(second && second.value->hit);
@@ -918,7 +921,7 @@ void test_the_catalog_and_its_json() {
   const auto third = service.catalog(context, metrics_host(), "local", request);
   CHECK(third && !third.value->hit);
   CHECK(db.sqls.size() > statements);
-  // The window is the same minute for the key, not the same millisecond.
+  // For the key, the window is the same minute and not the same millisecond.
   CatalogRequest next = request;
   next.refresh = false;
   next.window.end_ms += 1;
@@ -998,7 +1001,7 @@ void test_the_table_of_a_kind_may_be_missing_or_not_readable() {
   const auto request = [&](const char* kind) {
     return series_request({{"kind", kind}, {"service", "a"}, {"metric", "b"}, {"start_ms", "1000"}, {"end_ms", "9000"}});
   };
-  // The table exists nowhere and the user may read it: it does not exist.
+  // The table does not exist anywhere. The user may read it. The answer says it does not exist.
   const auto missing = service.series(context, metrics_host(), "local", request("histogram"));
   CHECK_EQ(missing.error.status, 404);
   CHECK_EQ(missing.error.code, std::string("metrics_table_missing"));
@@ -1012,14 +1015,14 @@ void test_the_table_of_a_kind_may_be_missing_or_not_readable() {
   CHECK(denied.error.message.find("SELECT ON otel.otel_metrics_sum") != std::string::npos);
   const std::string json = error_json(denied.error);
   CHECK(json.find("\"reason\":\"not_granted\"") != std::string::npos && json.find("\"user\":\"system\"") != std::string::npos);
-  // The list of the kinds is read once for these requests.
+  // The code reads the list of the kinds once for these requests.
   CHECK_EQ(db.count("FROM system.tables WHERE database"), size_t(1));
   // The attributes and the exemplars check the table too.
   CHECK_EQ(service.attributes(context, metrics_host(), attributes_request({{"kind", "sum"}, {"service", "a"}, {"metric", "b"}, {"start_ms", "1000"}, {"end_ms", "9000"}})).error.code,
            std::string("metrics_table_not_granted"));
   CHECK_EQ(service.exemplars(context, metrics_host(), "local", exemplars_request({{"kind", "histogram"}, {"service", "a"}, {"metric", "b"}, {"start_ms", "1000"}, {"end_ms", "9000"}})).error.code,
            std::string("metrics_table_missing"));
-  // A server that cannot answer CHECK GRANT: the table is missing.
+  // When a server cannot answer CHECK GRANT, the code treats the table as missing.
   FakeDb quiet;
   TestCaches quiet_caches;
   quiet.on("FROM system.tables WHERE database = 'otel'", {});
@@ -1045,9 +1048,9 @@ void test_the_service_tells_series_apart_by_their_scope() {
   // A table without them: the attributes only.
   CHECK(service.series(context, metrics_host(), "local", request("sum")));
   CHECK(db.sqls.back().find("ScopeName") == std::string::npos);
-  // The columns are read once with the kinds.
+  // The code reads the columns once with the kinds.
   CHECK_EQ(db.count("FROM system.columns"), size_t(1));
-  // A source that cannot say: as before.
+  // A source that cannot answer keeps the previous behavior.
   FakeDb quiet;
   TestCaches quiet_caches;
   quiet.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
@@ -1115,7 +1118,7 @@ void test_the_attributes_of_a_metric() {
   CHECK(!keys_doc.HasMember("values"));
   CHECK_EQ(db.params.back().size(), size_t(2));
   CHECK_EQ(db.params.back()[0].second, std::string("api"));
-  // One key more than the limit: the answer is cut and says so.
+  // One key more than the limit. The answer is cut, and it says so.
   FakeDb wide;
   TestCaches wide_caches;
   wide.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
@@ -1148,8 +1151,8 @@ void test_a_gauge_series_and_its_json() {
   db.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
   db.on("SELECT any(MetricUnit)", {{"%", "CPU use", "0", "0", "0", "30", ""}});
   // g, bucket, sum, count, min, max, last, series
-  // The ranking comes first: the key of the best group, the number of groups, its score, and the sum of the scores. Then the series of the best
-  // group and of "other", the group that ClickHouse folds the others into.
+  // The ranking comes first. It gives the key of the best group, the number of groups, its score, and the sum of the scores.
+  // Then it gives the series of the best group and of "other". The group "other" is the group that ClickHouse folds the others into.
   db.on("toString(count() OVER ())", {{"host-b", "2", "10", "14"}});
   db.on("SELECT g, toString(b), toString(sum(s_sum))", {
     {"__other__", "60000", "2", "2", "1", "1", "1", "1"}, {"__other__", "120000", "6", "2", "2", "4", "4", "1"},
@@ -1225,10 +1228,10 @@ void test_the_temporality_and_the_aggregation_of_a_sum() {
   CHECK(std::fabs(doc["series"][0]["values"][1].GetDouble() - 1.0) < 1e-4);   // the last bucket is cut by the window: 59.999 s
   CHECK_EQ(doc["series"][0]["total"].GetDouble(), 3.0);
   CHECK_EQ(doc["points"].GetInt64(), 40);
-  // The statement that reads the buckets takes the differences with the previous point: the scan starts a bucket (at least 15 minutes) before.
+  // The statement that reads the buckets takes the differences with the previous point. The scan starts one bucket (at least 15 minutes) before the window.
   CHECK(db.sqls.back().find("lagInFrame") != std::string::npos);
   CHECK(db.sqls.back().find("fromUnixTimestamp64Milli(0)") != std::string::npos);
-  // An aggregation that the metric does not offer is refused after its information is read.
+  // The code refuses an aggregation that the metric does not offer. It refuses it after it reads the information.
   const auto bad = service.series(context, metrics_host(), "local", series_request({{"kind", "sum"}, {"service", "api"}, {"metric", "calls"},
                                                                                      {"start_ms", "60000"}, {"end_ms", "179999"}, {"agg", "avg"}}));
   CHECK(!bad);
@@ -1279,12 +1282,12 @@ void test_a_summary_is_read_per_series() {
   const auto doc = parse(series_json(*answer.value));
   CHECK_EQ(std::string(doc["default_agg"].GetString()), std::string("p50"));
   CHECK(doc["per_series"].GetBool());
-  // A summary is not grouped: the group_by is ignored and said so.
+  // A summary is not grouped. The code ignores the group_by and says so.
   CHECK_EQ(doc["group_by"].Size(), 0u);
   CHECK(doc["note"].IsString());
   CHECK_EQ(doc["series"].Size(), 2u);
   CHECK_EQ(std::string(doc["series"][0]["key"].GetString()), std::string("22"));
-  // The labels are the attributes of the series (the members that are not texts are left out).
+  // The labels are the attributes of the series. The code leaves out the members that are not texts.
   CHECK_EQ(std::string(doc["series"][1]["labels"]["route"].GetString()), std::string("/a"));
   CHECK(!doc["series"][1]["labels"].HasMember("n"));
   CHECK_EQ(doc["other_series_count"].GetInt(), 0);
@@ -1298,7 +1301,7 @@ void test_a_grouped_request_reads_the_groups_that_ClickHouse_ranked() {
   TestCaches caches;
   db.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
   db.on("SELECT any(MetricUnit)", {{"1", "", "2", "2", "1", "10", ""}});
-  // 40,000 groups: the ranking keeps the two best and says how many there are and what the sum of their scores is.
+  // 40,000 groups: the ranking keeps the two best groups. It says how many groups there are, and what the sum of their scores is.
   db.on("toString(count() OVER ())", {{"u39999", "40000", "39999", "800000000"}, {"u39998", "40000", "39998", "800000000"}});
   // g, bucket, sum of the deltas, sum of the counts: the two groups and the others.
   db.on("SELECT g, toString(b), toString(sum(d1))", {{"u39999", "60000", "6", "0"}, {"u39998", "60000", "5", "0"}, {"__other__", "60000", "100", "0"}});
@@ -1315,7 +1318,7 @@ void test_a_grouped_request_reads_the_groups_that_ClickHouse_ranked() {
   CHECK_EQ(answer.value->other.key, std::string("__other__"));
   CHECK_EQ(answer.value->other.score, 800000000.0 - 39999.0 - 39998.0);
   CHECK(!answer.value->truncated_rows);
-  // The statements: the information, the ranking, then the series of the kept groups, whose keys are parameters.
+  // The statements are: the information, the ranking, and then the series of the kept groups. Their keys are parameters.
   CHECK_EQ(db.count("toString(count() OVER ())"), size_t(1));
   CHECK(db.sqls.back().find("'__other__'") != std::string::npos);
   CHECK_EQ(db.params.back().back().second, std::string("u39998"));
@@ -1323,7 +1326,7 @@ void test_a_grouped_request_reads_the_groups_that_ClickHouse_ranked() {
   CHECK_EQ(doc["group_count"].GetInt(), 40000);
   CHECK_EQ(doc["other_series_count"].GetInt(), 39998);
   CHECK(doc["truncated"].GetBool());
-  // A ranking that fails is the error of the route (a limit of memory).
+  // A failed ranking gives the error of the route (a memory limit).
   FakeDb memory;
   TestCaches memory_caches;
   memory.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
@@ -1339,7 +1342,7 @@ void test_the_rows_of_a_series_are_capped() {
   TestCaches caches;
   db.on("FROM system.tables WHERE database = 'otel'", kAllKinds);
   db.on("SELECT any(MetricUnit)", {{"", "", "0", "0", "0", "1", ""}});
-  // One block of more rows than the cap: the rest is counted as cut, and the answer says so.
+  // One block has more rows than the cap. The code counts the rest as cut, and the answer says so.
   Rows rows;
   rows.reserve(kMaxSeriesRows + 2);
   for (size_t i = 0; i < kMaxSeriesRows + 2; ++i) rows.push_back({"g" + std::to_string(1000000 + i), "60000", "1", "1", "1", "1", "1", "1"});
@@ -1417,7 +1420,7 @@ void test_the_exemplars_and_their_json() {
   CHECK(doc["traces_enabled"].GetBool());
   CHECK_EQ(doc["bucket_ms"].GetInt64(), int64_t(10000));
   CHECK_EQ(db.sqls.back().find("LIMIT 3 BY b LIMIT 3 SETTINGS") != std::string::npos, true);
-  // Traces turned off for the host: the exemplars say so.
+  // Traces are turned off for the host. The exemplars say so.
   HostSpec off = metrics_host();
   off.otel.traces.enabled = false;
   FakeDb quiet;
@@ -1446,7 +1449,7 @@ void test_the_allowlist_is_in_every_statement() {
   size_t with_filter = 0;
   for (const auto& sql : db.sqls) with_filter += sql.find("ServiceName IN") != std::string::npos || sql.find("ServiceName =") != std::string::npos;
   CHECK(with_filter >= 5);
-  // The catalog of a restricted source is not shared with a source that has no restriction.
+  // The code does not share the catalog of a restricted source with a source that has no restriction.
   TestCaches shared;
   FakeDb a, b;
   a.on("FROM system.tables WHERE database = 'otel'", kAllKinds);

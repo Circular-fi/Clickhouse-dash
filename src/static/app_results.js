@@ -1,6 +1,6 @@
-// The result panel of the Query page (and the Explorer's preview): the status and the error of the result, its Copy buttons, the
-// blocks of a batch of statements. The table itself is app_results_table.js: this panel has one for the result of a query and
-// each statement of a batch has its own. The values, the cells, the sort and the row details are the modules app_results_*.js.
+// The result panel of the Query page, and of the Explorer preview. It shows the status and the error of the result, its Copy buttons, and the blocks of a batch of statements.
+// The table itself is app_results_table.js. This panel has one table for the result of a query.
+// Each statement of a batch has its own table. The values, the cells, the sort and the row details are in the modules app_results_*.js.
 import { dom } from "./app_dom.js";
 import { setNullCell, useSqlFormatter } from "./app_results_cells.js";
 import { closeRowDetails, closeRowDetailsMenu } from "./app_results_rowdetails.js";
@@ -14,12 +14,12 @@ import { util } from "./app_util.js";
 
 const { $, $$ } = dom;
 
-// The Table / Chart toggle of the result (app_query_chart.js) is the Query page's: its entry hands it over with
-// results.use({ queryChart }); the Explorer's static tables have none.
+// The Query page passes the Table / Chart toggle (app_query_chart.js) with results.use({ queryChart }).
+// The static tables of the Explorer have no toggle.
 let queryChart = null;
 
 let resultsStackElement = null;
-// Table / Chart view of the main result panel (multiquery panels own theirs).
+// Table / Chart view of the main result panel. Multiquery panels have their own view.
 let mainChart = null;
 
 let lastErrorMessage = "";
@@ -88,11 +88,10 @@ function getErrorText() {
   return String(lastErrorMessage || "").trim();
 }
 
-// The Query result error: the server's sentence cleaned up
-// (util.queryErrorParts: no code prefix, no formatQuery wrapper, "Syntax
-// error, line 1 col 8 near FROM"), the parser's "Expected one of" list and the
-// expression a function failed in ("while executing ...") behind a toggle. getErrorText() keeps the message as sent (history,
-// downloads).
+// The Query result error shows the cleaned server sentence (util.queryErrorParts). The cleaned sentence has no code prefix and no formatQuery wrapper.
+// An example is "Syntax error, line 1 col 8 near FROM".
+// The parser "Expected one of" list is behind a toggle. So is the expression that a function failed in ("while executing ...").
+// getErrorText() keeps the message as sent, for the history and the downloads.
 function queryErrorBanner(el, message, where = null) {
   const parts = message ? util.queryErrorParts(message, where) : null;
   return uiState.banner(el, {
@@ -107,7 +106,7 @@ function setError(message, where = null) {
   lastErrorMessage = String(message || "").trim();
   if (!dom.errorBanner) return;
   queryErrorBanner(dom.errorBanner, lastErrorMessage, where);
-  // An error with no row to show: the header has no columns to count and no view to switch (query.css, .is-errorOnly).
+  // An error with no row to show has no columns to count and no view to switch. See query.css, .is-errorOnly.
   dom.resultsPanel?.classList.toggle("is-errorOnly", !!lastErrorMessage && !(mainTable?.rowCount() > 0));
   if (lastErrorMessage) {
     if (dom.liveResultsWrap) dom.liveResultsWrap.hidden = true;
@@ -127,9 +126,9 @@ function setStatus(status) {
   updateCopyButtonState();
 }
 
-// The table of the main result: the one live table (app_results_table.js) that the statements of a batch have as well. The
-// panel gives it what the table does not know about the page: that the results panel shows, the "N columns" of its header,
-// the Copy buttons and the height that the page holds while a result replaces another.
+// The table of the main result. This is the one live table (app_results_table.js). The statements of a batch have the same kind of table.
+// The panel gives the table the page facts that the table does not know.
+// These facts are the results panel visibility, and the "N columns" text of its header. The Copy buttons, and the height that the page keeps while a result replaces another one, are also page facts.
 const mainTable = dom.liveResultsWrap && $("table", dom.liveResultsWrap)
   ? createLiveTable({
     wrap: dom.liveResultsWrap,
@@ -162,7 +161,7 @@ function clearLiveResults() {
 
   setLiveBodyHold(preservedBodyScrollHeight);
 
-  // Empty until the result has columns (no stray "-" beside an error).
+  // Empty until the result has columns. This avoids a stray "-" beside an error.
   if (dom.resultColumnsText) util.setText(dom.resultColumnsText, "");
   setError("");
   updateCopyButtonState();
@@ -173,7 +172,7 @@ function clearLiveResults() {
   else setResultsVisible(false);
 }
 
-// The result of the query: the stream's rows go to the table, and the end of the stream makes its layout final.
+// The result of the query. The rows of the stream go to the table. The end of the stream makes the layout final.
 const renderTableMeta = (columns, types) => mainTable?.renderTableMeta(columns, types);
 const appendRows = (rows) => mainTable?.appendRows(rows);
 const finalizeAfterDone = () => (mainTable ? mainTable.whenIdle().then(() => mainTable.finalize()) : Promise.resolve());
@@ -187,10 +186,9 @@ function ensureResultsStack() {
   dom.resultsPanel.insertBefore(resultsStackElement, anchor);
 }
 
-// Per-panel teardown callbacks (document/window listeners registered by
-// multiquery panels). Without them every virtualized panel stayed reachable
-// through its scroll/resize closures after the stack was cleared, retaining
-// all of its rows and re-running layout reads on each page scroll.
+// Per-panel teardown callbacks: the document and window listeners that multiquery panels register.
+// Without them, every virtualized panel stayed reachable through its scroll and resize closures after the stack was cleared.
+// The closures kept all rows in memory. They also ran layout reads on each page scroll.
 const resultsStackDisposers = [];
 
 function clearResultsStack() {
@@ -212,10 +210,8 @@ function removeIds(root) {
   for (const n of nodes) n.removeAttribute("id");
 }
 
-// Copy JSON and Copy CSV of the result: the same text as Download JSON and Download CSV
-// (serialize, app_download.js). A failed or canceled query copies its error.
-// Copy JSON and Copy CSV of the result: the same text as Download JSON and Download CSV
-// (serialize, app_download.js). A failed or canceled query copies its error.
+// Copy JSON and Copy CSV of the result give the same text as Download JSON and Download CSV (serialize, app_download.js).
+// A failed or canceled query copies its error.
 function terminalErrorText(status, error) {
   const st = String(status || "").toLowerCase();
   const err = String(error || "").trim();
@@ -243,9 +239,8 @@ function getSnapshot() {
   return {
     columns: (mainTable?.columns() || []).slice(),
     types: (mainTable?.types() || []).slice(),
-    // Download/history consumers rebuild JSON/CSV from `rows` on demand.
-    // Pre-rendering both texts here converted every cell twice after each
-    // statement (seconds for 100k-row results) and retained the strings.
+    // Download and history consumers rebuild JSON and CSV from `rows` on demand.
+    // Pre-rendering both texts here converted every cell twice after each statement. For 100k-row results, this took seconds. It also kept the strings in memory.
     rows: (mainTable?.rows() || []).slice(),
     errorText: String(lastErrorMessage || ""),
     status: String(currentStatusValue || ""),
@@ -268,8 +263,8 @@ function updateCopyButtonState() {
   dom.copyJsonButton.disabled = disabled;
   if (dom.copyMenuButton) dom.copyMenuButton.disabled = disabled;
   if (dom.copyCsvButton) dom.copyCsvButton.disabled = disabled;
-  // A query that failed has no result to copy: no Copy JSON beside its
-  // error (multiquery keeps its "Copy all", the other statements' results).
+  // A query that failed has no result to copy, so there is no Copy JSON beside its error.
+  // Multiquery keeps its "Copy all" action for the results of the other statements.
   const multi = !!(dom.resultsPanel && dom.resultsPanel.classList.contains("is-multiquery"));
   if (dom.copySplit && !multi) dom.copySplit.hidden = hasError && !hasRows;
 }
@@ -277,7 +272,7 @@ function updateCopyButtonState() {
 const getRowCount = () => mainTable?.rowCount() || 0;
 const getColCount = () => mainTable?.columnCount() || 0;
 
-// A query block's Copy JSON split (copy.split): JSON, and CSV in the menu.
+// The Copy JSON split of a query block (copy.split): JSON is the main action, and CSV is in the menu.
 function createCopySplitSmall({ getJsonText, getCsvText }) {
   const ctrl = copy.split({
     getText: () => (typeof getJsonText === "function" ? getJsonText() : ""),
@@ -290,9 +285,8 @@ function setMultiqueryMode(enabled) {
   if (!dom.resultsPanel) return;
   const multi = !!enabled;
   dom.resultsPanel.classList.toggle("is-multiquery", multi);
-  // Keep the global split visible in multiquery mode: its main action becomes
-  // the global JSON copy ("Copy all": each statement's panel has its own
-  // Copy JSON) and its menu contains the cumulative ZIP download.
+  // Keep the global split visible in multiquery mode. Its main action becomes the global JSON copy.
+  // "Copy all" gives each statement panel its own Copy JSON. Its menu has the cumulative ZIP download.
   if (dom.copySplit) dom.copySplit.hidden = false;
   if (dom.copyCsvButton) dom.copyCsvButton.hidden = multi;
   if (dom.copyJsonButton) {
@@ -318,9 +312,8 @@ function hideLiveWrapIfStackHasBlocks() {
   }
 }
 
-// --- Multiquery streaming panels (Query x/n) ---
-// A batch shows one block for each statement: a header (title, rows and columns, Copy, Profiling, Show / Hide), the Table /
-// Chart view, and a live table (app_results_table.js: the table of the main result is the same module). app_run routes the
+// A batch shows one block for each statement. Each block has a header (title, rows and columns, Copy, Profiling, Show / Hide) and the Table / Chart view.
+// Each block also has a live table (app_results_table.js). The table of the main result is the same module. app_run sends the
 // stream of a statement into the block that beginMultiqueryPanel returns.
 
 let activeMultiqueryPanel = null;
@@ -347,8 +340,8 @@ function beginMultiqueryPanel({ index = 0, total = 1, autoToggle = true } = {}) 
   ensureResultsStack();
   if (!resultsStackElement) return null;
 
-  // The previous panel folds while the next one streams, unless it ended
-  // expanded (the first panel, a short batch, an error: app_run.js).
+  // The previous panel folds while the next one streams. It does not fold when it ended expanded.
+  // Panels that end expanded are the first panel, a short batch, or an error (app_run.js).
   if (autoToggle && activeMultiqueryPanel && !activeMultiqueryPanel.keepExpanded) {
     setBlockExpandedLocal(activeMultiqueryPanel, false);
   }
@@ -377,8 +370,8 @@ function beginMultiqueryPanel({ index = 0, total = 1, autoToggle = true } = {}) 
   let errorText = "";
   let table = null;
 
-  // The panel's Copy JSON / Copy CSV: the same serializer as the single result and the downloads; a statement that failed
-  // without rows copies its error.
+  // The Copy JSON and Copy CSV buttons of the panel use the same serializer as the single result and the downloads.
+  // A statement that failed without rows copies its error.
   const errorWithoutRows = () => (errorText && !table.rowCount() ? errorText : "");
   const copyText = (format) => errorWithoutRows()
     || (format === "csv" ? resultCsvText : resultCopyJsonText)(table.columns(), table.typeAsts(), table.rows());
@@ -410,7 +403,7 @@ function beginMultiqueryPanel({ index = 0, total = 1, autoToggle = true } = {}) 
   const blockObj = { block, body, toggleBtn };
   toggleBtn.addEventListener("click", () => {
     const expanded = body.hidden;
-    // The viewer's choice wins over the batch's default (finalize).
+    // The choice of the viewer wins over the default of the batch (finalize).
     blockObj.userToggled = true;
     setBlockExpandedLocal(blockObj, expanded);
   });
@@ -421,7 +414,7 @@ function beginMultiqueryPanel({ index = 0, total = 1, autoToggle = true } = {}) 
   removeIds(wrap);
   body.appendChild(wrap);
 
-  // The statement's rows, as many rows and columns as it has: the header says so, the Copy buttons follow.
+  // The statement rows have as many rows and columns as the statement has. The header shows this count, and the Copy buttons follow it.
   const updateMetaText = () => {
     const r = table.rowCount();
     const c = table.columnCount();
@@ -433,7 +426,7 @@ function beginMultiqueryPanel({ index = 0, total = 1, autoToggle = true } = {}) 
 
   const updateCopyEnabled = () => copyCtrl.setDisabled(!(errorText || table.rowCount() > 0));
 
-  // Each panel keeps its own Table / Chart view and chart settings.
+  // Each panel keeps its own Table / Chart view and its own chart settings.
   const panelChart = queryChart ? queryChart.createController({
     getData: () => ({ rows: table.rows() }),
     viewRoot: body,
@@ -566,8 +559,8 @@ export const results = {
   setResultsVisible,
   createStaticResultTable,
   flattenTupleTableData,
-  // The value contract (docs/telemetry.md, "Result values"): one serializer for Copy JSON / CSV,
-  // Download JSON / CSV and the Debug archive (app_download.js), and the text of one value.
+  // The value contract (docs/telemetry.md, "Result values") has one serializer. It serves Copy JSON and CSV,
+  // Download JSON and CSV, the Debug archive (app_download.js), and the text of one value.
   serialize,
   cellText: (value, type = "") => valueText(value, parseChType(type)),
 };

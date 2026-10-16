@@ -18,18 +18,19 @@
 namespace chdash {
 
 // Small exclusive-use pool for clickhouse-cpp TCP clients.
-// clickhouse::Client instances are never shared concurrently: acquire() removes
-// one idle client from the pool and the shared_ptr deleter returns it after use.
-// Idle clients are closed before ClickHouse's server-side idle/read timeout so
-// the server does not accumulate expected socket-timeout exceptions.
+// The clickhouse::Client instances are never shared at the same time.
+// acquire() removes one idle client from the pool.
+// The deleter of the shared_ptr returns the client to the pool after use.
+// Idle clients close before the server-side idle or read timeout of ClickHouse.
+// This means that the server does not store expected socket-timeout exceptions.
 //
-// A client goes back to the idle pool only when its last statement ended in a
-// known state (ch_query.hpp): a statement that a callback, a socket error or a
-// timeout interrupted leaves its connection marked, and the deleter closes it.
+// A client returns to the idle pool only when its last statement ended in a known state (ch_query.hpp).
+// A statement that a callback, a socket error or a timeout interrupted marks its connection.
+// The deleter closes that connection.
 //
-// The leases of one URI are bounded (max_leased_per_uri): past the bound,
-// acquire() waits up to lease_wait for a lease to end, then fails with
-// "pool_exhausted" instead of opening one more connection.
+// The leases of one URI have a limit (max_leased_per_uri).
+// When the limit is reached, acquire() waits up to lease_wait for a lease to end.
+// If no lease ends, acquire() fails with "pool_exhausted". It does not open one more connection.
 class ClickHouseClientPool : public std::enable_shared_from_this<ClickHouseClientPool> {
 public:
   explicit ClickHouseClientPool(
@@ -53,18 +54,18 @@ public:
     std::string* err
   );
 
-  // Mark a leased client as unsafe so its custom deleter destroys it instead
-  // of returning it to the idle pool (ch_mark_dirty).
+  // Mark a leased client as unsafe.
+  // The custom deleter then destroys the client. It does not return it to the idle pool (ch_mark_dirty).
   void invalidate(const std::shared_ptr<clickhouse::Client>& client) noexcept;
 
   void clear();
 
-  // The clients lent now for `uri` (all timeouts together).
+  // The clients leased now for `uri` (all timeouts together).
   size_t leased(const std::string& uri);
 
-  // The connections of each URI: idle in the pool, and leased to a caller; and, since the start, the connections
-  // opened and the leases that ended with a closed connection (a dirty one, GET /metrics). The URIs carry
-  // passwords: the caller maps them to its hosts.
+  // The connections of each URI are idle in the pool or leased to a caller.
+  // Since the start, the pool also counts the connections opened and the leases that ended with a closed connection (a dirty one, GET /metrics).
+  // The URIs carry passwords. The caller maps them to its hosts.
   struct Stats {
     std::unordered_map<std::string, size_t> idle_by_uri;
     std::unordered_map<std::string, size_t> leased_by_uri;

@@ -1,5 +1,5 @@
-// The summary of one table of the Explorer: its identity, keys, sizes, ingress and replica state, for the header of its card. The detail
-// (columns, parts, lineage, ...) is explorer_detail.cpp. Every read is restricted to the selected object.
+// The summary of one table of the Explorer: its identity, keys, sizes, ingress and replica state, for the header of its card.
+// The detail (columns, parts, lineage, ...) is in explorer_detail.cpp. Every read is restricted to the selected object.
 #include "explorer_catalog.hpp"
 
 #include "explorer_rules.hpp"
@@ -16,7 +16,7 @@ using namespace explorer;
 
 namespace {
 
-// The rates of the ingress statements of one table: the rows and the bytes of the last minute, five minutes and hour, and their totals.
+// The ingress rates of one table. They hold the rows and the bytes of the last minute, the last five minutes and the last hour. They also hold the totals.
 void read_rate(const clickhouse::Block& block, ExplorerRate& rate) {
   rate.rows_per_second_1m = parse_double(block_string_at(block, 0, 0));
   rate.rows_per_second_5m = parse_double(block_string_at(block, 1, 0));
@@ -28,7 +28,7 @@ void read_rate(const clickhouse::Block& block, ExplorerRate& rate) {
   rate.bytes_total_1h = parse_u64(block_string_at(block, 7, 0));
 }
 
-// The row of system.replicas of the table (the base columns, and the replica set when the server has it).
+// The row of system.replicas for the table. It holds the base columns. It also holds the replica set when the server has it.
 void read_replica(const clickhouse::Block& block, ExplorerReplication& replica) {
   if (!block.GetRowCount()) return;
   replica = ExplorerReplication{};
@@ -47,7 +47,7 @@ void read_replica(const clickhouse::Block& block, ExplorerReplication& replica) 
   replica.merges_in_queue = parse_u64(block_string_at(block, 10, 0)).value_or(0);
   replica.log_lag = parse_u64(block_string_at(block, 11, 0)).value_or(0);
   replica.last_queue_update = block_string_at(block, 12, 0);
-  // "<0|1><replica name>" per registered replica (Keeper order is arbitrary).
+  // One entry for each registered replica, in the form "<0|1><replica name>". The Keeper order is arbitrary.
   for (const auto& entry : split_unit_separator(block_string_at(block, 13, 0))) {
     if (entry.size() < 2) continue;
     replica.replicas.emplace_back(entry.substr(1), entry[0] == '1');
@@ -114,12 +114,12 @@ bool load_explorer_table_summary(
     }
   }
 
-  // Resolve exact rows / resident allocation for engines that do not own MergeTree parts. All queries are restricted to the selected
-  // object.
+  // Resolve exact rows / resident allocation for engines that do not own MergeTree parts. All queries are restricted to the selected object.
   //
-  // For Buffer, system.tables.total_rows is the readable Buffer surface and can include the destination table. Explorer must display
-  // resident buffered rows, not "buffer + destination". Subtract the destination's lightweight row count from the same system.tables
-  // source, and leave the value unknown if the two snapshots cannot be reconciled safely.
+  // For Buffer, system.tables.total_rows is the readable Buffer surface. It can include the destination table.
+  // Explorer must show the resident buffered rows. It must not show "buffer + destination".
+  // Subtract the lightweight row count of the destination, taken from the same system.tables source.
+  // Leave the value unknown if the two snapshots cannot be reconciled safely.
   if (out.engine == "Buffer") {
     const auto args = sql::engine_arguments(out.engine_full, "Buffer");
     if (out.rows && args.size() >= 2 && !args[1].empty()) {
@@ -193,8 +193,8 @@ bool load_explorer_table_summary(
       }, &section_error);
   }
 
-  // Ingress and replication are detail-only metrics. Keep them lazy and scope every system-log query to this exact table instead of
-  // scanning the server catalog whenever Explorer opens.
+  // Ingress and replication are detail-only metrics. Keep them lazy.
+  // Scope every system-log query to this exact table. Do not scan the server catalog each time Explorer opens.
   std::string ignored;
   (void)try_select(system, table_query_ingress_sql(database, table),
     [&](const clickhouse::Block& block) {
@@ -212,8 +212,8 @@ bool load_explorer_table_summary(
       out.physical_ingress.last_event_time = block_string_at(block, 9, 0);
     }, &ignored);
 
-  // The replica set (replica_is_active) costs the same Keeper reads as total/active_replicas, which the opened table already pays for.
-  // Builds without one of the extra columns fall back to the base row.
+  // The replica set (replica_is_active) costs the same Keeper reads as total/active_replicas. The opened table already pays for these reads.
+  // Builds without one of the extra columns use the base row.
   ignored.clear();
   const bool replica_detail_loaded = try_select(system, table_replica_detail_sql(database, table),
     [&](const clickhouse::Block& block) { read_replica(block, out.replication); }, &ignored);

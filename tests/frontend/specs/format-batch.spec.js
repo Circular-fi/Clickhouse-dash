@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { openApp, runQuery, waitForTerminal } from '../helpers/app.js';
 
-// A format batch answers a status for each statement (ARCH-B-124, README.md "POST /api/format"): the statements that formatted
-// replace their text in the editor, the one that did not stays as typed and is reported, and a run with Format on run goes on.
+// A format batch gives a status for each statement (ARCH-B-124, README.md "POST /api/format").
+// The statements that formatted replace their text in the editor.
+// The statement that did not format keeps its text as typed, and it is reported.
+// A run with Format on run goes on.
 
 function formatReply(items) {
   return {
@@ -34,12 +36,12 @@ test('Format puts the statements that formatted into the editor and reports the 
   });
   await page.locator('#queryTextArea').fill('select 1;\nselect (;\nselect 3 from t');
   await page.locator('#formatButton').click();
-  // One request for the three statements.
+  // Send one request for the three statements.
   await expect.poll(() => sent.length).toBe(1);
   expect(sent[0].sqls).toHaveLength(3);
-  // The statements that formatted are in the editor; the one that did not stays as typed.
+  // The statements that formatted are in the editor. The one that did not format keeps its text as typed.
   await expect(page.locator('#queryTextArea')).toHaveValue(/^SELECT 1;\s*select \(;\s*SELECT 3\s+FROM t$/);
-  // The failure is the one of that statement, and Format is not "done" for the whole text.
+  // The failure belongs to that statement. Format is not done for the whole text.
   await expect(page.locator('#errorBanner')).toBeVisible();
   await expect(page.locator('#errorBanner')).toContainText('Syntax error');
   await expect(page.locator('#queryStatusText')).toHaveText(/error/i);

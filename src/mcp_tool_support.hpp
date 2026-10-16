@@ -1,8 +1,10 @@
 #pragma once
 
-// What the tools of MCP (mcp_tools.cpp) share: the failure of a tool, the reading of its arguments, the context of one call (the key, the host
-// and the limits of each kind of statement), the run of a statement, and the writing of cells and rows. A tool is a function of the
-// context and of its arguments (mcp_tools_units.hpp) that returns the JSON of its answer, or throws ToolFailure.
+// What the tools of MCP (mcp_tools.cpp) share. This includes the failure of a tool, the reading of its arguments,
+// and the context of one call. The context holds the key, the host and the limits of each kind of statement.
+// The shared code also runs a statement, and writes cells and rows.
+// A tool is a function of the context and of its arguments (mcp_tools_units.hpp).
+// A tool returns the JSON of its answer, or it throws ToolFailure.
 
 #include "mcp_scope.hpp"
 #include "mcp_tools.hpp"
@@ -39,7 +41,7 @@ void reject_unknown(const rapidjson::Value& args, std::initializer_list<const ch
 std::optional<std::string> opt_string(const rapidjson::Value& args, const char* name, size_t max_bytes = 4096);
 std::string req_string(const rapidjson::Value& args, const char* name, size_t max_bytes = 4096);
 std::optional<bool> opt_bool(const rapidjson::Value& args, const char* name);
-// A whole number in [lo, hi], `fallback` when the argument is absent or null.
+// A whole number in [lo, hi]. The function returns `fallback` when the argument is absent or null.
 int64_t opt_int(const rapidjson::Value& args, const char* name, int64_t lo, int64_t hi, int64_t fallback);
 
 // ---- the call context ----
@@ -48,7 +50,7 @@ struct Ctx {
   const McpToolsConfig& config;
   McpDatabase& db;
   McpApiClient* api = nullptr;
-  // The analysis of the keys (mcp_tools_analysis.cpp): the rate limit, the usage and the cost. Null when the server offers none.
+  // The analysis of the keys (mcp_tools_analysis.cpp). It has the rate limit, the usage and the cost. It is null when the server offers none.
   McpAnalysis* analysis = nullptr;
   // The time of the call, in Unix seconds.
   int64_t now = 0;
@@ -56,7 +58,7 @@ struct Ctx {
   int64_t max_rows = 0;
   McpDbLimits user_limits;
   McpDbLimits schema_limits;
-  // The same limits, for the OpenTelemetry tools: they run with the system user of the host, as the pages do.
+  // The same limits apply to the OpenTelemetry tools. These tools run with the system user of the host, as the pages do.
   McpDbLimits system_limits;
   McpDbLimits system_schema_limits;
   uint64_t rows_out = 0;
@@ -64,11 +66,11 @@ struct Ctx {
 
 // The hosts that the key may use.
 std::vector<std::string> key_hosts(const McpKey& key, const McpToolsConfig& config);
-// The host of the call: the argument `host`, or the only host that the key has. Fails with host_not_allowed, no_host or host_required.
+// The host of the call is the argument `host`, or the only host that the key has. The function fails with not_found, no_host or host_required.
 void resolve_host(Ctx& ctx, const rapidjson::Value& args);
-// `tool` names the statements of the call (their query_id, mcp_cost.hpp).
+// `tool` names the statements of the call. The name gives their query_id (mcp_cost.hpp).
 Ctx make_ctx(const McpKey& key, const McpToolsConfig& config, McpDatabase& db, const std::string& tool = {});
-// One statement on the host of the call; a McpDbError is a ToolFailure with its code.
+// Runs one statement on the host of the call. A McpDbError becomes a ToolFailure with its code.
 McpDbResult run(Ctx& ctx, const std::string& sql, const McpDbLimits& limits);
 
 // ---- cells and rows ----
@@ -80,7 +82,7 @@ void write_rows(Writer& w, const McpDbResult& res);
 
 // ---- SQL shared by the schema and the query tools ----
 std::string glob_conditions(const char* column, const std::vector<std::string>& globs);
-// Fails with table_not_allowed when the data scope of the key does not allow the table.
+// The function fails with not_found when the data scope of the key does not allow the table. The error is the same as for a table that does not exist.
 void check_table_scope(const Ctx& ctx, const std::string& database, const std::string& table);
 std::string describe_table_filter(const std::string& database, const std::string& table, const char* table_column);
 

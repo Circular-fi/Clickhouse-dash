@@ -1064,8 +1064,10 @@ def test_a_read_past_query_log_max_rows_says_window_too_large():
 
 
 @needs_limits
-def test_the_v2_14_operations_keeper_key_still_turns_the_keeper_off():
-    # tests/config/system-limits.hcl: explorer { operations { keeper = false } }.
+def test_system_keeper_false_turns_the_keeper_off_and_the_v2_14_features_mirror_it():
+    # tests/config/system-limits.hcl: system { keeper = false }. The v2.14.0 block explorer.operations has the same effect, but it
+    # cannot be in the same file as a system block (the start stops: tests/native/config_test.cpp); features.explorer.operations and the
+    # aliases of its routes mirror the system block.
     features = api("/api/version", base=LIMITS_URL).json()["features"]
     assert features["system"]["keeper"] is False and features["system"]["activity"] is True, features
     assert features["explorer"]["operations"] == {"enabled": True, "keeper": False}, features

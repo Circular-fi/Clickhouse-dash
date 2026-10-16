@@ -1,12 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { openApp, openExplorer, openExplorerDatabase } from '../helpers/app.js';
 
-// The Explorer card: the Storage tabs of the database and table cards (the
-// former Storage mode), the Columns tab's sizes and size map, the keys one
-// element per line, the expressions coloured by the shared highlighter, the
-// About panel that never truncates, the tree without a reserved scrollbar
-// gutter; and the Functions overview. The server's activity is the System
-// page's (system.spec.js).
+// This file tests the Explorer card and its Storage tabs. These are the database and table
+// card Storage tabs, which replace the former Storage mode.
+// The file also tests the sizes and size map of the Columns tab.
+// It tests the keys, with one element for each line.
+// It tests the expressions, which use the colours of the shared highlighter.
+// It tests the About panel, which never truncates.
+// It tests the tree, which has no reserved scrollbar gutter.
+// It also tests the Functions overview. The server activity is in the System
+// page tests (system.spec.js).
 
 const VIEWPORTS = [
   { name: 'desktop-1440', width: 1440, height: 900 },
@@ -14,8 +17,8 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
 ];
 
-// Rewrites the byte counters of real catalog tables, so a database can be
-// given several tables of >= 1% while every click still opens a real object.
+// Rewrites the byte counters of real catalog tables. A database can then have several
+// tables of 1% or more, while every click still opens a real object.
 async function routeDatabaseSizes(page, database, sizes) {
   await page.route(new RegExp(`/api/explorer/catalog\\?.*database=${database}(?:&|$)`), async (route) => {
     const response = await route.fetch();
@@ -59,8 +62,8 @@ test('the database page shows its storage, then its objects: a share strip when 
   await expect(page.locator('#explorerDatabaseObjects')).toBeVisible();
   await expect(page.locator('#explorerDatabaseStorage')).toBeAttached();
   await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui$/);
-  // Which drawing shows depends on the data: a treemap for three tables of
-  // >= 1% of the database's on-disk bytes, otherwise one share strip.
+  // The type of drawing depends on the data. A treemap shows three tables of 1% or more of the
+  // database's on-disk bytes. Otherwise, one share strip shows the tables.
   const disk = (catalog.tables || []).filter((table) => !['Memory', 'Buffer', 'Dictionary'].includes(table.engine) && Number(table.bytes) > 0);
   const total = disk.reduce((sum, table) => sum + Number(table.bytes), 0);
   const significant = disk.filter((table) => Number(table.bytes) >= Math.floor((total + 99) / 100)).length;
@@ -73,14 +76,14 @@ test('the database page shows its storage, then its objects: a share strip when 
     await expect(page.locator('#explorerDatabaseTreemap')).toHaveCount(0);
     const weather = strip.locator('.explorerStorageStrip__segment[data-table="weather_observations"]');
     await expect(weather).toContainText('weather_observations');
-    // The small tables are grouped, resident-memory engines take no area.
+    // Small tables are grouped. Engines that use resident memory take no area.
     await expect(strip.locator('[data-table="memory_weather"]')).toHaveCount(0);
   }
-  // The header carries the size, the footnote the RAM: the section head
-  // counts the tables with data only.
+  // The header shows the size. The footnote shows the RAM.
+  // The section head counts only the tables that have data.
   await expect(page.locator('.explorerDatabaseStorage__tables .explorerSectionHead')).toHaveText(/^Tables by size\s*\d+ tables? with data$/);
   await expect(page.locator('.explorerDatabaseStorage')).toContainText(/RAM of Memory \/ Buffer \/ Dictionary not counted/);
-  // The disks the database's parts are on, with their capacity.
+  // The disks that hold the database parts are shown, with their capacity.
   const disks = page.locator('#explorerDatabaseDisks');
   await expect(disks.locator('thead th')).toHaveText(['#', 'Disk', 'Path', 'Type', 'Size', 'Free', 'Capacity']);
   await expect(disks.locator('tbody tr').filter({ hasText: 'fixture_hot' })).toBeVisible();
@@ -95,14 +98,14 @@ test('the database page shows its storage, then its objects: a share strip when 
 test('the database storage draws a treemap for three tables of 1% or more; a rectangle opens the table on its Storage tab', async ({ page }) => {
   await routeDatabaseSizes(page, 'chdash_ui', { weather_observations: 6_000_000, wide_types: 4_000_000, weather_daily_summary: 3_000_000 });
   await openApp(page);
-  // The former ?tab=storage: the database page, scrolled to its storage.
+  // The former ?tab=storage opens the database page, scrolled to its storage.
   await page.goto('/explorer/catalog/chdash_ui?tab=storage');
   await expect(page.locator('#explorerDetailName')).toHaveText('chdash_ui', { timeout: 15_000 });
   await expect(page).toHaveURL(/\/explorer\/catalog\/chdash_ui$/);
   const map = page.locator('#explorerDatabaseTreemap .explorerTreemap');
   await expect(map).not.toHaveClass(/is-layout-pending/);
   await expect(page.locator('#explorerDatabaseStorageStrip')).toHaveCount(0);
-  // One height for every size band (--sizemap-h, 180 px).
+  // Every size band uses one height (--sizemap-h, 180 px).
   const box = await page.locator('#explorerDatabaseTreemap').boundingBox();
   expect(box.height).toBeGreaterThanOrEqual(158);
   expect(box.height).toBeLessThanOrEqual(182);
@@ -113,7 +116,7 @@ test('the database storage draws a treemap for three tables of 1% or more; a rec
   }
   await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-table="memory_weather"]')).toHaveCount(0);
   await expect(page.locator('#explorerDatabaseTreemap .explorerTreemap__node.is-other')).toContainText(/Others/);
-  // Others is an item of the legend too; tables are one accent tint, no colour from a name.
+  // Others is an item of the legend too. Tables use one accent tint, with no colour from a name.
   await expect(page.locator('#explorerDatabaseStorage .explorerTreemapLegend__item--other')).toContainText(/Others\s*\d+ tables? · [\d.]+ [KMGT]?B/);
   const fills = await page.locator('#explorerDatabaseTreemap .explorerTreemap__node[data-kind="table"]').evaluateAll((els) => [...new Set(els.map((el) => getComputedStyle(el).backgroundColor))]);
   expect(fills).toHaveLength(1);
@@ -138,7 +141,7 @@ test('the database storage draws a treemap for three tables of 1% or more; a rec
 });
 
 test('the table Storage tab merges Parts & disks with the former Storage mode, without duplicates', async ({ page }) => {
-  // Four partitions of >= 1% so the partition map shows on every stack.
+  // Four partitions of 1% or more. The partition map then shows on every stack.
   await routeTableDetail(page, 'weather_observations', (json) => {
     const total = Math.max(4_000_000, Number(json.summary?.logical_bytes || 0));
     json.partitions = [
@@ -153,12 +156,13 @@ test('the table Storage tab merges Parts & disks with the former Storage mode, w
   await expect(selectedTab(page)).toHaveText('Storage');
   await expect(page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Parts & disks' })).toHaveCount(0);
   const content = page.locator('#explorerDetailContent .explorerCard__main');
-  // How the bytes split, where they are, how they spread, then the parts.
+  // The page shows how the bytes split, where they are, and how they spread.
+  // The parts come after that.
   await expect(content.locator('.explorerStorageCompositionCard')).toBeVisible();
   const order = await content.locator(':scope > .explorerSection').evaluateAll((els) => els.map((el) => el.dataset.section));
   expect(order.slice(0, 3)).toEqual(['disks', 'partitions', 'parts']);
-  // One partitions list (no second "Storage" list of the same rows): the
-  // former Storage mode's share column, largest first, and its map.
+  // One partitions list. There is no second Storage list of the same rows.
+  // It has the former Storage mode's share column, largest first, and its map.
   await expect(content.locator('.explorerTable--partitions')).toHaveCount(1);
   await expect(page.locator('#explorerStorageList')).toHaveCount(0);
   const partitions = content.locator('.explorerTable--partitions');
@@ -185,12 +189,12 @@ test('Columns: the uncompressed size next to the compressed one, and a column si
   await expect(columns).toBeVisible({ timeout: 15_000 });
   const headers = (await columns.locator('thead th').allTextContents()).map((text) => text.trim());
   expect(headers.indexOf('Uncompressed')).toBe(headers.indexOf('Compressed') + 1);
-  // Real values from system.columns data_uncompressed_bytes.
+  // Real values come from system.columns data_uncompressed_bytes.
   const row = columns.locator('tbody tr').filter({ hasText: 'random_token' }).first();
   const cell = row.locator('td.explorerColumns__uncompressed');
   await expect(cell).toHaveText(/^\d+(?:\.\d)? [KMG]?B$/);
   await expect(cell).toHaveAttribute('title', /^\d+(?:\.\d)?× compression/);
-  // Fits beside the About panel from 1440 px: nothing scrolls sideways.
+  // The layout fits beside the About panel from 1440 px. Nothing scrolls sideways.
   if ((page.viewportSize()?.width || 0) >= 1440) {
     const scroll = await columns.evaluate((el) => {
       const wrap = el.closest('.tableWrap') || el;
@@ -199,7 +203,7 @@ test('Columns: the uncompressed size next to the compressed one, and a column si
     expect(scroll).toBeLessThanOrEqual(1);
   }
 
-  // The size map: top-level columns by compressed bytes, by type family.
+  // The size map shows the top-level columns by compressed bytes, by type family.
   const map = page.locator('#explorerColumnTreemap .explorerTreemap');
   await expect(map).not.toHaveClass(/is-layout-pending/);
   const nodes = page.locator('#explorerColumnTreemap .explorerTreemap__node[data-kind="column"]');
@@ -210,7 +214,7 @@ test('Columns: the uncompressed size next to the compressed one, and a column si
   await page.locator('#explorerColumnTreemap .explorerTreemap__node[data-name="random_token"]').hover();
   await expect(page.locator('#explorerColumnTreemap [data-treemap-tooltip]')).toContainText('Column random_token');
   const compressedSize = await page.locator('#explorerColumnTreemap .explorerTreemap__node[data-name="random_token"]').getAttribute('data-size');
-  // Compressed | Uncompressed: the same map of the other measure.
+  // Compressed | Uncompressed: this is the same map for the other measure.
   const measure = page.locator('.explorerColumnSizes__measure');
   await expect(measure.locator('[data-measure="compressed"]')).toHaveAttribute('aria-pressed', 'true');
   await measure.locator('[data-measure="uncompressed"]').click();
@@ -236,10 +240,10 @@ test('Keys: every key one element per line with its position; nested commas do n
   expect(await lines('partition_by')).toEqual([['0', 'toYYYYMM(created_on)']]);
   expect(await lines('sample_by')).toEqual([['0', 'cityHash64(id, toString(id))']]);
   await expect(keys.locator('.explorerKeys__name')).toHaveText(['ORDER BY', 'PRIMARY KEY', 'PARTITION BY', 'SAMPLE BY']);
-  // One element per line: each item sits under the previous one.
+  // One element per line. Each item sits under the previous one.
   const tops = await keys.locator('[data-key="order_by"] .explorerKeys__item').evaluateAll((items) => items.map((li) => li.getBoundingClientRect().top));
   for (let i = 1; i < tops.length; i += 1) expect(tops[i]).toBeGreaterThan(tops[i - 1]);
-  // The shared highlighter's function class, the Query editor's colour.
+  // The shared highlighter's function class is the same colour as in the Query editor.
   const fn = keys.locator('[data-key="partition_by"] .tok-fn');
   await expect(fn).toHaveText('toYYYYMM', { timeout: 15_000 });
   const colours = await page.evaluate(() => {
@@ -251,7 +255,7 @@ test('Keys: every key one element per line with its position; nested commas do n
     return { shared, key: getComputedStyle(document.querySelector('[data-tile="keys"] .tok-fn')).color };
   });
   expect(colours.key).toBe(colours.shared);
-  // The Columns tab's key badges carry the column's position in the key.
+  // The key badges on the Columns tab show the column's position in the key.
   const created = page.locator('#explorerDetailContent .explorerColumnsTable tbody tr').filter({ hasText: 'created_on' }).first();
   await expect(created.locator('.explorerBadge--order-by')).toHaveText('ORDER BY · 0');
   await expect(created.locator('.explorerBadge--order-by')).toHaveAttribute('title', 'Position 0 in the sorting key (ORDER BY)');
@@ -265,16 +269,16 @@ test('expressions of the card use the shared highlighter: defaults, TTL rules, i
   // MATERIALIZED toDate(observed_at): the function is a .tok-fn token.
   const materialized = columns.locator('tbody tr').filter({ hasText: 'observation_date' }).first().locator('.explorerColumns__expr');
   await expect(materialized.locator('.tok-fn')).toHaveText('toDate', { timeout: 15_000 });
-  // TTL rules: numbers and keywords in the highlighter's classes.
+  // TTL rules use numbers and keywords in the highlighter's classes.
   const ttl = page.locator('#explorerDetailContent .explorerAboutTile[data-tile="ttl"]');
   await expect(ttl.locator('.explorerExpr .tok-num').first()).toBeVisible();
   await expect(ttl.locator('.explorerExpr .tok-str').first()).toHaveText("'warm'");
-  // No colour of its own: every token class is one of the highlighter's.
+  // No token has a colour of its own. Every token class is one of the highlighter's classes.
   const classes = await page.locator('#explorerDetailContent .explorerExpr [class]').evaluateAll((els) => [...new Set(els.map((el) => el.className))]);
   for (const name of classes) expect(name).toMatch(/^tok-(?:kw|fn|str|num|null|com|err)$/);
 });
 
-// Elements of the About panel cut with an ellipsis or wider than their box.
+// Elements of the About panel are cut with an ellipsis, or they are wider than their box.
 async function aboutTruncations(page) {
   return page.locator('#explorerDetailContent .explorerAbout').evaluate((about) => [...about.querySelectorAll('*')]
     .filter((el) => el.getClientRects().length && !el.closest('svg'))
@@ -293,9 +297,9 @@ for (const theme of ['dark', 'light']) {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await page.emulateMedia({ colorScheme: theme });
       await page.addInitScript((value) => { try { localStorage.setItem('chdash.theme', value); } catch (_) {} }, theme);
-      // Long values on every stack: engine arguments (the Keeper path of a
+      // Long values appear on every stack: engine arguments (the Keeper path of a
       // replicated table), engine settings, keys, TTL rules, a storage
-      // policy, a cluster, a Distributed local table.
+      // policy, a cluster, and a Distributed local table.
       for (const [path, name] of [
         ['/explorer/catalog/chdash_ui/weather_observations', 'chdash_ui.weather_observations'],
         ['/explorer/catalog/chdash_repl/replicated_events', 'chdash_repl.replicated_events'],
@@ -306,12 +310,12 @@ for (const theme of ['dark', 'light']) {
         const about = page.locator('#explorerDetailContent .explorerAbout');
         await expect(about).toBeVisible({ timeout: 15_000 });
         await expect(page.locator('#explorerDetailContent .explorerEmptyNote', { hasText: 'Loading detailed metadata' })).toHaveCount(0, { timeout: 20_000 });
-        // A narrow pane folds the tiles behind "Show all": open them.
+        // A narrow pane folds the tiles behind "Show all". Open them.
         const toggle = about.locator('.explorerAbout__toggle');
         if (await toggle.isVisible() && (await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click();
         expect(await aboutTruncations(page), path).toEqual([]);
       }
-      // The Keeper path and the engine arguments are shown, not hidden in a title.
+      // The Keeper path and the engine arguments are shown. They are not hidden in a title.
       await page.goto('/explorer/catalog/chdash_repl/replicated_events');
       await expect(page.locator('.explorerAboutTile[data-tile="keeper_path"]')).toContainText('/clickhouse/tables/', { timeout: 15_000 });
       await expect(page.locator('.explorerAboutTile[data-tile="engine"] .explorerAboutTile__expr')).toContainText("ReplicatedMergeTree('/clickhouse/tables/");
@@ -334,12 +338,12 @@ test('the object tree reserves no scrollbar gutter, with and without a scrollbar
     rowRight: Math.max(...[...el.querySelectorAll('.explorerTreeDatabaseRow')].map((row) => row.getBoundingClientRect().right)),
     listRight: el.getBoundingClientRect().left + el.clientWidth,
   }));
-  // Without a scrollbar: no empty strip on the right of the rows.
+  // No scrollbar is shown. There is no empty strip on the right of the rows.
   const short = await geometry();
   if (!short.scrolls) expect(short.gutter).toBe(0);
   expect(short.overflowX).toBeLessThanOrEqual(1);
   expect(short.listRight - short.rowRight).toBeLessThan(12);
-  // With one (the system database open): the rows still fit, no sideways scroll.
+  // With a scrollbar (the system database is open), the rows still fit. Nothing scrolls sideways.
   await page.locator('.explorerFilterChip[data-filter="system"]').click();
   const toggle = page.locator('#explorerTableList .explorerTreeDatabaseToggle[aria-label="Expand system"]');
   await toggle.click();
@@ -363,8 +367,8 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   await page.goto('/explorer/functions');
   await expect(page.locator('#explorerFunctionPopular button').first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#explorerFunctionEmpty .explorerFunctionOverview__title')).toHaveText(/^[\d,]+ functions in \d+ categories$/);
-  // The Categories grid (restored, user 2026-10-04): every category of the
-  // list once, with the list's count, the largest first.
+  // The Categories grid was restored (user, 2026-10-04). It shows every category of the
+  // list once, with the list's count. The largest category comes first.
   const grid = page.locator('#explorerFunctionCategories');
   await expect(grid).toBeVisible();
   await expect(page.locator('#explorerFunctionEmpty .explorerFunctionOverview__heading')).toHaveText(['Popular', 'Categories']);
@@ -381,9 +385,9 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   expect(cells.every((cell) => cell.name === cell.category)).toBe(true);
   const counts = cells.map((cell) => cell.count);
   expect(counts).toEqual([...counts].sort((a, b) => b - a));
-  // A category name is not an identifier: the sans text face.
+  // A category name is not an identifier. It uses the sans text face.
   expect(cells[0].font).toMatch(/^"?IBM Plex Sans/);
-  // Several columns on a wide pane.
+  // Several columns show on a wide pane.
   const tops = await grid.locator('.explorerFunctionOverview__category').evaluateAll((els) => els.slice(0, 4).map((el) => Math.round(el.getBoundingClientRect().top)));
   expect(new Set(tops).size).toBe(1);
   const groups = await page.locator('#explorerFunctionList .explorerFunctionGroup').evaluateAll((els) => els.map((el) => el.dataset.category));
@@ -392,11 +396,11 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   expect(new Set(groups.map((name) => name.toLowerCase())).size).toBe(groups.length);
   const listCount = Number((await page.locator('.explorerFunctionGroup[data-category="Aggregate"] .explorerFunctionGroup__count').textContent()).replace(/,/g, ''));
   expect(listCount).toBeGreaterThan(50);
-  // Function names are identifiers: mono in the chips, the list and the title.
+  // Function names are identifiers. They use mono in the chips, the list and the title.
   const mono = (locator) => locator.evaluate((el) => getComputedStyle(el).fontFamily);
   expect(await mono(page.locator('#explorerFunctionPopular button').first())).toMatch(/^"?IBM Plex Mono/);
 
-  // A category of the grid opens its group in the list, scrolled to it.
+  // A category of the grid opens its group in the list. The list scrolls to that group.
   await grid.locator('.explorerFunctionOverview__category[data-category="Arrays"]').click();
   const arrays = page.locator('.explorerFunctionGroup[data-category="Arrays"]');
   await expect(arrays.locator('.explorerTreeDatabaseToggle')).toHaveAttribute('aria-expanded', 'true');
@@ -404,7 +408,7 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   await expect(arrays.locator('.explorerTreeDatabase')).toBeInViewport();
   expect(await mono(arrays.locator('.explorerFunctionObject__name').first())).toMatch(/^"?IBM Plex Mono/);
   await expect(arrays.locator('.explorerFunctionObject').first()).toBeVisible();
-  // One line per function: no repeated "System · Function" meta.
+  // Each line shows one function. No repeated "System · Function" meta is shown.
   await expect(arrays.locator('.explorerTreeObject__meta')).toHaveCount(0);
   expect((await arrays.locator('.explorerFunctionObject').first().boundingBox()).height).toBeLessThan(32);
 
@@ -412,8 +416,8 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   await expect(page).toHaveURL(/\/explorer\/functions\/arrayMap$/);
   await expect(page.locator('#explorerFunctionDetailName')).toHaveText('arrayMap');
   expect(await mono(page.locator('#explorerFunctionDetailName'))).toMatch(/^"?IBM Plex Mono/);
-  // Inline markdown reads as code, also inside a link label
-  // ("[`Array(T)`](/sql-reference/...)"): no backtick is left in the text.
+  // Inline markdown reads as code. This also applies inside a link label
+  // ("[`Array(T)`](/sql-reference/...)"). No backtick is left in the text.
   const doc = page.locator('#explorerFunctionDescription');
   await expect(doc.locator('.functionDoc__inlineCode').filter({ hasText: /^Array\(T\)$/ }).first()).toBeVisible();
   expect(await doc.locator('.functionDoc__markdown').evaluateAll((els) => els.map((el) => el.textContent).join(' '))).not.toContain('`');
@@ -421,7 +425,7 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   await expect(page.locator('#explorerFunctionDetailMeta')).not.toContainText('System');
   await expect(page.locator('#explorerFunctionList .explorerFunctionObject.is-selected')).toHaveText('arrayMap');
   await expect(page.locator('#explorerFunctionList .explorerFunctionObject.is-selected')).toBeInViewport();
-  // The list scrolled under its head: the head marks it (a soft edge).
+  // The list scrolls under its head. The head shows this with a soft edge.
   const head = page.locator('#explorerFunctionToolbar');
   const list = page.locator('#explorerFunctionList');
   const scrolled = await list.evaluate((el) => el.scrollTop);
@@ -432,7 +436,7 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   expect(await head.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe('none');
   await list.evaluate((el, top) => { el.scrollTop = top; }, scrolled);
 
-  // The list pane mirrors the object tree: search + refresh, then kind chips.
+  // The list pane mirrors the object tree. It has search and refresh, then kind chips.
   const toolbar = page.locator('#explorerFunctionToolbar');
   await expect(toolbar.locator('#explorerFunctionSearchInput')).toBeVisible();
   await expect(toolbar.locator('#explorerFunctionRefreshButton')).toBeVisible();
@@ -440,16 +444,16 @@ test('Functions start from an overview (popular names in mono, the Categories gr
   const chips = page.locator('#explorerFunctionFilters .explorerFilterChip');
   await expect(chips).toHaveText(['Scalar', 'Aggregate', 'Table', 'UDF']);
   const width = (selector) => page.locator(selector).evaluate((el) => Math.round(el.getBoundingClientRect().width));
-  // The two pages' side panels are the same width.
+  // The side panels of the two pages have the same width.
   const functionsWidth = await width('#explorerFunctionListPane');
   await page.locator('#explorerCatalogTab').click();
   await expect(page.locator('#explorerListPane')).toBeVisible();
   expect(await width('#explorerListPane')).toBe(functionsWidth);
   await page.locator('#explorerFunctionsTab').click();
   await expect(page.locator('#explorerFunctionListPane')).toBeVisible();
-  // Filled = listed, as on the tree's type chips: every chip while nothing
-  // narrows the list. One kind at a time; the only filled chip again lists
-  // every function.
+  // Filled means listed, as on the tree's type chips. Every chip is filled while nothing
+  // narrows the list. Only one kind is active at a time. Select the one filled chip again
+  // to list every function.
   await expect(page.locator('#explorerFunctionFilters .explorerFilterChip[aria-pressed="true"]')).toHaveCount(4);
   const aggregate = chips.filter({ hasText: 'Aggregate' });
   await aggregate.click();
@@ -472,7 +476,7 @@ test.describe('the Functions overview on a phone', () => {
     await page.goto('/explorer/functions');
     const grid = page.locator('#explorerFunctionCategories');
     await expect(grid.locator('.explorerFunctionOverview__category').first()).toBeVisible({ timeout: 15_000 });
-    // One column of full-width buttons, inside the pane.
+    // One column of full-width buttons sits inside the pane.
     const pane = await page.locator('#explorerFunctionsPane .explorerDetailPane').boundingBox();
     const box = await grid.boundingBox();
     expect(box.x).toBeGreaterThanOrEqual(pane.x);
@@ -504,14 +508,14 @@ for (const theme of ['dark', 'light']) {
             : path.includes('?tab=storage') ? page.locator('.explorerTable--partitions tbody tr').first()
               : page.locator('#explorerColumnTreemap .explorerTreemap:not(.is-layout-pending)');
         await expect(ready).toBeVisible({ timeout: 15_000 });
-        // No horizontal page overflow; wide tables scroll inside the pane.
+        // Nothing scrolls sideways on the page. Wide tables scroll inside the pane.
         const overflow = await page.evaluate(() => document.scrollingElement.scrollWidth - window.innerWidth);
         expect(overflow, path).toBeLessThanOrEqual(1);
         if (!ops) {
           const contentWidth = await page.locator('#explorerDetailContent').evaluate((el) => el.scrollWidth - el.clientWidth);
           expect(contentWidth, path).toBeLessThanOrEqual(1);
         }
-        // Text stays readable against the page background.
+        // Text stays readable on the page background.
         const colors = await pane.evaluate((el) => ({ body: getComputedStyle(document.body).backgroundColor, text: getComputedStyle(el).color }));
         expect(colors.text).not.toBe(colors.body);
       }
@@ -519,12 +523,13 @@ for (const theme of ['dark', 'light']) {
   }
 }
 
-// The size views (user, 2026-10-04 evening): one order everywhere, the size
-// band (a treemap capped at --sizemap-h, 180 px, or the share strip where the
-// band's rules say so) first, then the table it sizes: All databases
-// (explorer-nav.spec.js), the database page (Tables by size, then Objects,
-// then Disks), the Columns tab (Column sizes, then the columns) and the
-// Storage tab (the partitions map, then the partitions).
+// The size views (user, 2026-10-04 evening) use one order everywhere.
+// The size band comes first. It is a treemap capped at --sizemap-h, 180 px, or the share
+// strip when the band's rules say so.
+// The table that the band sizes comes next. These are the views:
+// All databases (explorer-nav.spec.js), the database page (Tables by size, then Objects,
+// then Disks), the Columns tab (Column sizes, then the columns), and the Storage tab
+// (the partitions map, then the partitions).
 test('size views: the size band first, then its table, on a database page, the Columns tab and the Storage tab', async ({ page }) => {
   await routeDatabaseSizes(page, 'chdash_ui', { weather_observations: 6_000_000, wide_types: 4_000_000, weather_daily_summary: 3_000_000 });
   await routeTableDetail(page, 'weather_observations', (json) => {
@@ -537,7 +542,7 @@ test('size views: the size band first, then its table, on a database page, the C
     ];
   });
   await openApp(page);
-  // Above, then below: the first box ends before the second starts, and the
+  // Above, then below: the first box ends before the second box starts. The
   // document order agrees.
   const before = async (first, second, label) => {
     const [a, b] = [page.locator(first), page.locator(second)];

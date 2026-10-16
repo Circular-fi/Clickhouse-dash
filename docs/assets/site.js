@@ -1,5 +1,5 @@
-// ClickHouse Dash home page: the video theatre, the sticky story, the install panel and the small motions.
-// Everything here is progressive: without it the page is still complete (the video has controls through the buttons it adds).
+// ClickHouse Dash home page. It has the video theatre, the sticky story, the install panel and the small motions.
+// This code is progressive. The page is complete without it. The video has controls through the buttons that this code adds.
 (() => {
   "use strict";
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -7,7 +7,7 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
-  // Reveal on scroll: the class is added here, so a page without JavaScript shows everything.
+  // Reveal on scroll. This code adds the class. A page without JavaScript shows everything.
   const revealTargets = $$(".inside h2, .feature, .otel h2, .otel .sub, .flow, .run h2, .platforms, .runStep, .runFoot, .foot > *");
   if (!reduce && "IntersectionObserver" in window) {
     const seen = new IntersectionObserver((entries) => {
@@ -20,8 +20,9 @@
     revealTargets.forEach((el, i) => { el.classList.add("reveal"); el.style.transitionDelay = `${(i % 4) * 70}ms`; seen.observe(el); });
   }
 
-  // The player: it starts once the page is idle (so the text, the fonts and the poster come first), plays once (no endless loop that
-  // would keep decoding for nothing), pauses off screen and in hidden tabs, and never starts by itself with reduced motion or Save-Data.
+  // The player starts when the page is idle. The text, the fonts and the poster load first.
+  // The video plays once, without an endless loop. The player pauses off screen and in hidden tabs.
+  // It never starts by itself with reduced motion or Save-Data.
   const video = $("#tour-video");
   const frame = $("#tilt");
   const sound = $("#sound");
@@ -30,11 +31,11 @@
   const SPRITE = "assets/icons.svg#i-";
   if (video) {
     const saveData = !!(navigator.connection && navigator.connection.saveData);
-    // Full HD by default; the 720p copy (a third of the weight) for Save-Data and for phones
+    // Use Full HD by default. Use the 720p copy for Save-Data and for phones. This copy has a third of the weight.
     if (saveData || window.matchMedia("(max-width: 700px)").matches) video.src = video.getAttribute("src").replace("-1080.mp4", "-720.mp4");
     let wantsPlay = !reduce && !saveData;
     let hideTimer = 0;
-    // The bar shows on hover and focus (CSS), when the video is paused or ended, and for a few seconds after a tap or at the start.
+    // The bar shows on hover and focus (CSS). It also shows when the video is paused or ended. It shows for a few seconds after a tap or at the start.
     const showBar = (ms = 3500) => {
       frame.classList.add("ui");
       clearTimeout(hideTimer);
@@ -51,7 +52,7 @@
     };
     const play = () => { video.preload = "auto"; const p = video.play(); if (p && p.catch) p.catch(() => { wantsPlay = false; paint(); }); };
     const flip = () => { wantsPlay = video.paused || video.ended; if (wantsPlay) play(); else video.pause(); paint(); showBar(); };
-    // Full screen: the frame (so the bar stays), or the video itself where only that is allowed (iOS Safari)
+    // Full screen: use the frame, so the bar stays. Use the video itself where only that is allowed (iOS Safari).
     const full = $("#full");
     const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
     const paintFull = () => {
@@ -100,13 +101,13 @@
     if (document.readyState === "complete") whenIdle(); else window.addEventListener("load", whenIdle, { once: true });
   }
 
-  // The packets of the flow run while the section is on screen
+  // The packets of the flow move while the section is on screen.
   const flow = $(".flow");
   if (flow && "IntersectionObserver" in window) {
     new IntersectionObserver((entries) => entries.forEach((e) => flow.classList.toggle("is-live", e.isIntersecting)), { threshold: 0.1 }).observe(flow);
   } else if (flow) flow.classList.add("is-live");
 
-  // Install panel: the platform picks the archive
+  // Install panel: the platform selects the archive.
   const VERSION = "1.0.6";
   const BASE = `https://github.com/Circular-fi/Clickhouse-dash/releases/download/v${VERSION}`;
   const download = $("#cmd-download");
@@ -118,7 +119,7 @@
     tabs.forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
   };
   tabs.forEach((tab) => tab.addEventListener("click", () => setPlatform(tab)));
-  // Macs are mostly Apple silicon today; the other tabs stay one click away.
+  // Most Macs use Apple silicon today. The other tabs stay one click away.
   if (/Mac/i.test(navigator.platform || navigator.userAgent)) setPlatform(tabs.find((t) => t.dataset.os === "darwin" && t.dataset.arch === "arm64") || tabs[0]);
   else if (/aarch64|arm64/i.test(navigator.userAgent)) setPlatform(tabs.find((t) => t.dataset.os === "linux" && t.dataset.arch === "arm64") || tabs[0]);
 

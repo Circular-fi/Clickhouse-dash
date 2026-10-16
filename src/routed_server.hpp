@@ -1,9 +1,9 @@
 #pragma once
 
-// The HTTP server, with the routes that its handlers answer also callable in the process. A route is registered as it always
-// was (http_.Get("/api/traces/search", handler)); the pattern and the handler are kept as well, so that a caller that is not
-// a socket (the API tools of MCP) can run the same handler on a request that it builds, and read the answer. Nothing goes through
-// the network: no second worker thread waits for the first, no port, no address.
+// This is the HTTP server. Its routes can also run in the process.
+// A route is registered as before, for example http_.Get("/api/traces/search", handler).
+// The pattern and the handler are kept too. A caller that is not a socket, such as the API tools of MCP, can run the same handler on a request that it builds. It can read the answer as well.
+// Nothing goes through the network. No second worker thread waits for the first. There is no port and no address.
 
 #include <httplib.h>
 
@@ -29,9 +29,9 @@ public:
   RoutedServer& Patch(const std::string& pattern, Handler handler) { return keep("PATCH", pattern, std::move(handler), &httplib::Server::Patch); }
   RoutedServer& Delete(const std::string& pattern, Handler handler) { return keep("DELETE", pattern, std::move(handler), &httplib::Server::Delete); }
 
-  // Runs the handler of the first route that matches the method and the path of `req` (the order of registration, as the
-  // server routes), with the capture groups of the pattern in req.matches. False when no route matches (`res` is not touched).
-  // The handler may throw: the caller decides what that means.
+  // Runs the handler of the first route that matches the method and the path of `req`. The routes are checked in the order of registration, as the server checks them.
+  // The capture groups of the pattern are put in req.matches. It returns false when no route matches. In that case, `res` is not touched.
+  // The handler may throw. The caller decides what that means.
   bool dispatch(httplib::Request& req, httplib::Response& res) const {
     for (const Route& route : routes_) {
       if (route.method != req.method) continue;

@@ -2,12 +2,12 @@ import { test, expect } from '@playwright/test';
 import { expandExplorerDatabase } from '../helpers/app.js';
 import { appReady } from '../helpers/modules.js';
 
-// Reads that end, and answers that never overwrite a newer one (docs/ui-foundations.md, "Requests"): the one request
-// path has a timeout, an HTML answer of a proxy keeps its status, and the Explorer, System and Observability pages abort
-// what a newer read, a changed filter or another host makes useless. A read that is superseded stops in the browser
-// (and so on the server), and its answer is never drawn.
+// Reads must end. Answers must never overwrite a newer answer (docs/ui-foundations.md, "Requests").
+// The one request path has a timeout. An HTML answer of a proxy keeps its status.
+// The Explorer, System and Observability pages abort what a newer read, a changed filter or another host makes useless.
+// A read that is superseded stops in the browser, and so on the server. Its answer is never drawn.
 
-// Every fetch that gets an AbortSignal is recorded when that signal aborts: window.__aborted lists the URLs.
+// Every fetch that gets an AbortSignal is recorded when that signal aborts. window.__aborted lists the URLs.
 async function trackAborts(page) {
   await page.addInitScript(() => {
     window.__aborted = [];
@@ -31,7 +31,7 @@ test('a request that gets no answer ends with a timeout, told from an abort, and
     const api = window.ChDash.api;
     const realFetch = window.fetch;
     window.fetch = (url, init) => new Promise((resolve, reject) => {
-      // A fetch that never answers; it rejects only when its signal aborts, like a real one.
+      // This fetch never answers. It rejects only when its signal aborts, as a real fetch does.
       init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
     });
     const out = {};
@@ -64,7 +64,7 @@ test('an HTML answer of a proxy keeps its status: 404, 413 and 502 are errors wi
       window.fetch = () => Promise.resolve(html(status));
       try { await api.request('api/x'); } catch (e) { out[status] = { status: e.status, code: e.code, online: window.ChDash.state.apiOnline, body: typeof e.body }; }
     }
-    // The JSON error of the application itself, with a 503, is the application answering: online.
+    // A JSON error of the application itself, with a 503, shows that the application answers. The page is online.
     window.ChDash.state.apiOnline = true;
     window.fetch = () => Promise.resolve(new Response(JSON.stringify({ error: 'refresh_in_progress', error_code: 'refresh_in_progress', message: 'busy' }), { status: 503, headers: { 'Content-Type': 'application/json' } }));
     try { await api.request('api/x'); } catch (e) { out.app503 = { status: e.status, code: e.code, online: window.ChDash.state.apiOnline }; }
@@ -86,7 +86,7 @@ test('an HTML answer of a proxy keeps its status: 404, 413 and 502 are errors wi
 test('a stored host that is not listed: its catalog read is aborted when the page switches host, and the tree loads the real one', async ({ page }) => {
   await trackAborts(page);
   await page.addInitScript(() => { try { localStorage.setItem('chdash.selectedHost', 'ghost'); } catch (_) {} });
-  // The ghost's answer is slow: the hosts stream switches the page to the first listed host meanwhile.
+  // The answer of the ghost is slow. Meanwhile, the hosts stream switches the page to the first listed host.
   await page.route(/\/api\/explorer\/catalog\?.*host_id=ghost/, async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 4000));
     await route.fulfill({ status: 404, json: { error: 'unknown_host', message: 'Unknown host.' } }).catch(() => {});
@@ -109,7 +109,7 @@ test('a click on another table while a database loads: the newer click is the ca
   await page.evaluate(() => { void window.ChDash.explorer.selectTable('chdash_rich_scratch', 'otel_logs'); });
   await page.locator('#explorerTableList .explorerTreeObject[data-table="weather_observations"]').click();
   await expect(page.locator('#explorerDetailName')).toHaveText(/weather_observations/, { timeout: 15_000 });
-  // The late branch has answered by now: the card is still the newer click.
+  // The late branch answers now. The card still shows the newer click.
   await page.waitForTimeout(2200);
   await expect(page.locator('#explorerDetailName')).toHaveText(/weather_observations/);
   await expect(page).toHaveURL(/weather_observations/);
@@ -126,7 +126,7 @@ test('the preview of a table that was left is aborted, and the preview of the ne
   });
   await page.locator('#explorerDetailTabs [role="tab"]', { hasText: 'Preview' }).click();
   await expect(page.locator('#explorerDetailContent')).toContainText('Loading the preview');
-  // Another table, the Preview tab kept: its preview is asked for at once.
+  // This is another table, and the Preview tab is kept. Its preview is requested at once.
   await expandExplorerDatabase(page, 'chdash_ui');
   await page.locator('#explorerTableList .explorerTreeObject[data-table="weather_daily_summary"]').click();
   await expect(page.locator('#explorerDetailName')).toHaveText(/weather_daily_summary/, { timeout: 15_000 });
@@ -156,11 +156,11 @@ test('System Overview: a forced Refresh replaces the read in flight (it is abort
     }
     await route.continue().catch(() => {});
   });
-  // 'commit': the held read must not make the navigation wait for it.
+  // With 'commit', the held read must not make the navigation wait for it.
   await page.goto('/system', { waitUntil: 'commit' });
   await expect.poll(() => seen.length).toBe(1);
-  // The Refresh button is disabled while the section loads: a forced refresh in flight comes from the view's own call
-  // (a host change, or the page showing again).
+  // The Refresh button is disabled while the section loads. A forced refresh in flight comes from a call of the view itself.
+  // That call happens after a host change, or when the page shows again.
   await page.evaluate(() => window.ChDash.systemView.refresh(true));
   await expect.poll(() => seen.some((url) => url.includes('refresh=1'))).toBe(true);
   expect(await aborted(page, '/api/system/overview')).toBe(1);
@@ -205,7 +205,7 @@ for (const [name, path, search] of [
     });
     await page.goto(path, { waitUntil: 'commit' });
     await expect.poll(() => held).toBeGreaterThan(0);
-    // Another host is selected: the old host's search stops now, not when its answer comes.
+    // Another host is selected. The search of the old host stops now, not when its answer comes.
     await page.evaluate(() => {
       window.ChDash.state.selectedHostId = 'ghost-host';
       window.dispatchEvent(new CustomEvent('chdash:host-changed', { detail: { hostId: 'ghost-host' } }));

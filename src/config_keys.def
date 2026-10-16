@@ -13,7 +13,11 @@
 //
 // A block is the path of its name in the file, "server" or "observability.traces". Write one row on one line: the tools read it
 // line by line. A key that needs more than a type and bounds (a list, the address of the server, a header name, a block
-// that holds blocks) is read by code in config.cpp and is not in this table.
+// that holds blocks) is read by code in config.cpp and is listed here with CFG_CUSTOM, so that the reference has it. The
+// blocks that can appear more than once (clickhouse.host, mcp.key, query_library) have their keys in the table too.
+//
+// A secret has no key of its own in the file. Its two forms are rows: <name>_env (the name of an environment variable) and
+// <name>_file (the path of a file). Exactly one of the two applies (docs/configuration.md, "Secrets").
 
 // ---- the keys that config.cpp reads ----------------------------------------------------------------------------------
 CFG_CUSTOM("server", "listen_host", "text", "0.0.0.0", "", "The address that the server listens on.")
@@ -24,12 +28,39 @@ CFG_CUSTOM("observability.traces", "highlighted_attributes", "list of texts", "s
 CFG_CUSTOM("mcp", "auth_header", "text", "Authorization", "an HTTP header name", "The request header that carries the key. Authorization takes Bearer <key>.")
 CFG_CUSTOM("mcp", "allowed_origins", "list of texts", "[]", "https://host[:port], at most 256 bytes each", "The origins of the pages that may call from a browser. A call with no Origin is always accepted.")
 
+// ---- clickhouse.host: one block for each ClickHouse host (config.cpp reads it) -------------------------------------------
+CFG_CUSTOM("clickhouse.host", "name", "text", "", "1 or more bytes, no control character", "The id of the host. It is required and each host has a different one. The pages and the API name the host with it.")
+CFG_CUSTOM("clickhouse.host", "label", "text", "", "", "The name that the pages show. Default: the value of name.")
+CFG_CUSTOM("clickhouse.host", "runner_uri", "text", "", "clickhouse://user@host[:port][?parameters]", "The URI of the account that runs the queries of the people (the runner). It is required. It never holds a password: use runner_password_env, runner_password_file, password_env or password_file. The parameters are compression, secure, verify, ca, ca_dir and sni.")
+CFG_CUSTOM("clickhouse.host", "system_uri", "text", "", "clickhouse://user@host[:port][?parameters]", "The URI of the system account. The backend uses it for its own reads. It is required. It never holds a password: use system_password_env, system_password_file, password_env or password_file.")
+CFG_CUSTOM("clickhouse.host", "mcp_uri", "text", "", "clickhouse://user@host[:port][?parameters]", "The URI of the account of the MCP tools. A host without it is not visible to MCP. It never holds a password: use mcp_password_env or mcp_password_file.")
+CFG_CUSTOM("clickhouse.host", "password_env", "environment variable name", "", "letters, digits and _", "The variable that holds the password of runner_uri and of system_uri. It is a secret. Give only one of password_env and password_file, and none of the runner_password_* and system_password_* keys.")
+CFG_CUSTOM("clickhouse.host", "password_file", "file path", "", "", "The file that holds the password of runner_uri and of system_uri, without its last line end. It is a secret. Give only one of password_env and password_file, and none of the runner_password_* and system_password_* keys.")
+CFG_CUSTOM("clickhouse.host", "runner_password_env", "environment variable name", "", "letters, digits and _", "The variable that holds the password of runner_uri only. It is a secret. Give only one of runner_password_env and runner_password_file.")
+CFG_CUSTOM("clickhouse.host", "runner_password_file", "file path", "", "", "The file that holds the password of runner_uri only, without its last line end. It is a secret. Give only one of runner_password_env and runner_password_file.")
+CFG_CUSTOM("clickhouse.host", "system_password_env", "environment variable name", "", "letters, digits and _", "The variable that holds the password of system_uri only. It is a secret. Give only one of system_password_env and system_password_file.")
+CFG_CUSTOM("clickhouse.host", "system_password_file", "file path", "", "", "The file that holds the password of system_uri only, without its last line end. It is a secret. Give only one of system_password_env and system_password_file.")
+CFG_CUSTOM("clickhouse.host", "mcp_password_env", "environment variable name", "", "letters, digits and _", "The variable that holds the password of mcp_uri. It is a secret. It needs mcp_uri. Give only one of mcp_password_env and mcp_password_file. No other password key applies to mcp_uri.")
+CFG_CUSTOM("clickhouse.host", "mcp_password_file", "file path", "", "", "The file that holds the password of mcp_uri, without its last line end. It is a secret. It needs mcp_uri. Give only one of mcp_password_env and mcp_password_file. No other password key applies to mcp_uri.")
+
+// ---- clickhouse.host.observability: where the tables of one host are --------------------------------------------------------
+CFG_CUSTOM("clickhouse.host.observability.traces", "enabled", "boolean", "", "", "Show the Traces page for this host. Default: the value of observability.traces.enabled.")
+CFG_CUSTOM("clickhouse.host.observability.traces", "database", "text", "", "", "The database of the traces table of this host. Default: the value of observability.traces.database.")
+CFG_CUSTOM("clickhouse.host.observability.traces", "table", "text", "", "", "The traces table of this host. Default: the value of observability.traces.table.")
+CFG_CUSTOM("clickhouse.host.observability.traces", "trace_index_table", "text", "", "", "The table of this host that gives the time range of a trace. Default: the value of observability.traces.trace_index_table.")
+CFG_CUSTOM("clickhouse.host.observability.logs", "enabled", "boolean", "", "", "Show the Logs page for this host. Default: the value of observability.logs.enabled.")
+CFG_CUSTOM("clickhouse.host.observability.logs", "database", "text", "", "", "The database of the logs table of this host. Default: the value of observability.logs.database.")
+CFG_CUSTOM("clickhouse.host.observability.logs", "table", "text", "", "", "The logs table of this host. Default: the value of observability.logs.table.")
+CFG_CUSTOM("clickhouse.host.observability.metrics", "enabled", "boolean", "", "", "Show the Metrics page for this host. Default: the value of observability.metrics.enabled.")
+CFG_CUSTOM("clickhouse.host.observability.metrics", "database", "text", "", "", "The database of the metric tables of this host. Default: the value of observability.metrics.database.")
+CFG_CUSTOM("clickhouse.host.observability.metrics", "table_prefix", "text", "", "", "The prefix of the metric tables of this host. Default: the value of observability.metrics.table_prefix.")
+
 // ---- server -------------------------------------------------------------------------------------------------------------
 CFG_INT("server", "worker_threads", size_t, c.server.worker_threads, "0", 1, 1024, true, "threads", "Threads that stay ready to serve a request. 0 = the larger of 8 and the number of hardware threads.")
 CFG_INT("server", "max_worker_threads", size_t, c.server.max_worker_threads, "256", 1, 4096, false, "threads", "The most threads that the pool grows to when streams hold threads. It is at least worker_threads.")
 CFG_INT("server", "max_queued_requests", size_t, c.server.max_queued_requests, "1024", 16, 100000, false, "requests", "Requests that wait for a thread. A request past the limit is refused with 503.")
 CFG_INT("server", "max_body_bytes", size_t, c.server.max_body_bytes, "0", 65536, 2147483648, true, "bytes", "The largest request body. A larger body is refused with 413 before it is read. 0 = derived from query.max_sql_bytes and the query library.")
-CFG_INT("server", "max_host_streams", size_t, c.server.max_host_streams, "64", 0, 4096, false, "streams", "Open status streams of the pages (one for each visible page). At most half of max_worker_threads. Past the limit a page polls.")
+CFG_INT("server", "max_host_streams", size_t, c.server.max_host_streams, "64", 0, 4096, false, "streams", "Open status streams of the pages (one for each visible page). It is at most half of max_worker_threads: a higher value stops the start. Past the limit a page polls.")
 CFG_INT("server", "write_timeout_ms", int, c.server.write_timeout_ms, "120000", 1000, 3600000, false, "ms", "How long one write of a response waits for a client that does not read (a paused download). Past it the response ends.")
 CFG_INT("server", "shutdown_timeout_ms", int, c.server.shutdown_timeout_ms, "10000", 1000, 600000, false, "ms", "How long a stop (SIGTERM, SIGINT) waits for the running requests. Past it the process ends with status 1.")
 CFG_BOOL("server", "metrics", c.server.metrics, "true", "Serve GET /metrics (the Prometheus text format).")
@@ -170,7 +201,7 @@ CFG_STRING("observability.metrics", "table_prefix", c.otel_defaults.metrics.tabl
 // ---- mcp ----------------------------------------------------------------------------------------------------------------
 CFG_BOOL("mcp", "enabled", c.mcp.enabled, "false", "Serve the MCP endpoint, POST /mcp.")
 CFG_STRING("mcp", "storage_file", c.mcp.storage_file, "", "The JSON file of the keys that are made on the MCP page.")
-CFG_BOOL("mcp", "manage_from_ui", c.mcp.manage_from_ui, "true", "Allow the MCP page to make and delete keys. When false, a change is refused with 403 manage_disabled.")
+CFG_BOOL("mcp", "manage_from_ui", c.mcp.manage_from_ui, "true", "Deprecated: use keys.mode. false is the static mode, true the hybrid mode. It stops the start when keys.mode is also in the file.")
 CFG_BOOL("mcp.usage", "enabled", c.mcp.usage.enabled, "false", "Count what each key does (requests, errors, clients, time, rows, bytes) and keep it. Off: nothing is counted, the routes of the usage answer 404 not_enabled, and the Keys table has no Used column.")
 CFG_ENUM("mcp.usage", "storage", c.mcp.usage.storage, "files", "files", "Where the usage is kept. Only files exists for now: one file for each instance of ChDash, in the directory dir. A database will come later.")
 CFG_STRING("mcp.usage", "dir", c.mcp.usage.dir, "", "The directory of the usage files. Required when the usage is on. It must exist, and ChDash must be able to create files in it. Several ChDash can share it: each one writes its own file (the name of its instance and .jsonl.zst) and reads the others, so the answers add up the instances.")
@@ -184,3 +215,56 @@ CFG_INT("mcp", "max_sql_bytes", int64_t, c.mcp.max_sql_bytes, "65536", 256, 4194
 CFG_INT("mcp", "max_memory_bytes", int64_t, c.mcp.max_memory_bytes, "1073741824", 16777216, 1099511627776, false, "bytes", "max_memory_usage of a call.")
 CFG_INT("mcp", "max_rows_to_read", int64_t, c.mcp.max_rows_to_read, "0", 0, 1000000000000000, false, "rows", "max_rows_to_read of a call. 0 = no limit from ChDash.")
 CFG_INT("mcp", "rate_limit_per_minute", int64_t, c.mcp.rate_limit_per_minute, "600", 0, 1000000, false, "calls", "Calls that one key may make in one minute. 0 = no limit.")
+
+// ---- telemetry: the OTLP export of the spans and of the call log of MCP (docs/server-telemetry.md) -------------------------------
+CFG_BOOL("telemetry", "enabled", c.telemetry.enabled, "false", "Send the SERVER span of each MCP request, a child span for each ClickHouse statement of the call, the call log, and the CLIENT span of each call to the PDP of the access block to an OTLP/HTTP receiver (JSON encoding). It needs otlp_endpoint.")
+CFG_CUSTOM("telemetry", "otlp_endpoint", "text", "", "http://host[:port][/path]", "The base URL of the OTLP/HTTP receiver. The spans go to <base>/v1/traces and the call log to <base>/v1/logs. Only http: ChDash has no TLS client. It is required when enabled is true. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file.")
+CFG_CUSTOM("telemetry", "otlp_endpoint_env", "environment variable name", "", "letters, digits and _", "The variable that holds the value of otlp_endpoint. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file.")
+CFG_CUSTOM("telemetry", "otlp_endpoint_file", "file path", "", "", "The file that holds the value of otlp_endpoint, without its last line end. Give only one of otlp_endpoint, otlp_endpoint_env and otlp_endpoint_file.")
+CFG_STRING("telemetry", "service_name", c.telemetry.service_name, "chdash", "The service.name of the resource of the spans and the log records: 1 to 255 bytes, no control character.")
+CFG_CUSTOM("telemetry", "export_interval", "duration", "5s", "100ms to 1h", "The longest time that a span or a log record waits in the queue before it is sent. A full batch is sent at once.")
+CFG_CUSTOM("telemetry", "export_timeout", "duration", "10s", "100ms to 5m", "The time of one export request. A batch that fails with a connection error, 429, 502, 503 or 504 is sent again two times at most, then dropped and counted.")
+CFG_CUSTOM("telemetry", "connect_timeout", "duration", "2s", "100ms to 1m", "The time to open the connection to the receiver. It is at most export_timeout.")
+CFG_INT("telemetry", "max_queue_size", int64_t, c.telemetry.max_queue_size, "2048", 1, 1000000, false, "items", "The spans that wait for the export, at most, and the log records too. A new item past the limit is dropped and counted in chdash_telemetry_dropped_total.")
+CFG_INT("telemetry", "max_export_batch_size", int64_t, c.telemetry.max_export_batch_size, "512", 1, 100000, false, "items", "The items of one export request, at most. It is at most max_queue_size.")
+CFG_BOOL("telemetry", "call_log", c.telemetry.call_log, "true", "Send the call log (mcp.call) as OTLP log records too. The JSON line of the log is always written.")
+
+// ---- access: the access of humans, contract 11 (docs/access.md; config.cpp reads every key) ------------------------------------------
+CFG_CUSTOM("access", "mode", "one of authzen|open", "", "", "Required: a file without the access block stops the start. authzen: each request of the pages and of the API needs a valid identity token, and the PDP decides each action. open: no check; the start writes a warning. Use open only for a server alone on a closed network. open takes no identity block and no pdp block.")
+CFG_CUSTOM("access.identity", "header", "text", "X-Identity-Token", "an HTTP header name, not Cookie or Authorization", "The request header that carries the identity token. The token is never read from a cookie or from a query parameter.")
+CFG_CUSTOM("access.identity", "issuer", "text", "", "1 to 1024 bytes, no control character", "Required with authzen: the value that the iss claim of a token must have.")
+CFG_CUSTOM("access.identity", "audience", "text", "", "1 to 256 bytes, no control character", "Required with authzen: the name of this server. The aud claim of a token must contain it. It is also the id of the service resource that ChDash sends to the PDP, and the server of GET /.well-known/access-actions.")
+CFG_CUSTOM("access.identity", "public_keys", "text", "", "PEM, 1 to 16 SubjectPublicKeyInfo blocks", "The public keys of the issuer: Ed25519 (EdDSA) or P-256 with an uncompressed point (ES256). A token signed by one of them is accepted. Give exactly one of public_keys, public_keys_env and public_keys_file.")
+CFG_CUSTOM("access.identity", "public_keys_env", "environment variable name", "", "letters, digits and _", "The variable that holds the value of public_keys. Give exactly one of public_keys, public_keys_env and public_keys_file.")
+CFG_CUSTOM("access.identity", "public_keys_file", "file path", "", "", "The file that holds the value of public_keys, without its last line end. Give exactly one of public_keys, public_keys_env and public_keys_file.")
+CFG_CUSTOM("access.identity", "max_age", "duration", "5m", "1s to 24h", "The longest life of a token: exp - iat is at most this value. A token with a longer life gets 401.")
+CFG_CUSTOM("access.pdp", "url", "text", "", "http://host[:port][/path]", "Required with authzen: the base URL of the AuthZEN PDP. ChDash sends POST <url>/access/v1/evaluation and <url>/access/v1/evaluations. Only http: ChDash has no TLS client, so the network between ChDash and the PDP must be private to them. Give exactly one of url, url_env and url_file.")
+CFG_CUSTOM("access.pdp", "url_env", "environment variable name", "", "letters, digits and _", "The variable that holds the value of url. Give exactly one of url, url_env and url_file.")
+CFG_CUSTOM("access.pdp", "url_file", "file path", "", "", "The file that holds the value of url, without its last line end. Give exactly one of url, url_env and url_file.")
+CFG_CUSTOM("access.pdp", "token_env", "environment variable name", "", "letters, digits and _", "The variable that holds the token of this server at the PDP (Authorization: Bearer). It is a secret. Give exactly one of token_env and token_file.")
+CFG_CUSTOM("access.pdp", "token_file", "file path", "", "", "The file that holds the token of this server at the PDP, without its last line end. It is a secret. Give exactly one of token_env and token_file.")
+CFG_CUSTOM("access.pdp", "timeout", "duration", "500ms", "10ms to 1m", "The time of one request to the PDP. Without an answer in this time, the decision is false (fail closed).")
+CFG_CUSTOM("access.pdp", "cache_ttl", "duration", "30s", "0s to 1h", "How long ChDash keeps an answer of the PDP for one subject, action and resource. 0s: no cache. A failure is never kept.")
+
+// ---- mcp.keys and mcp.mcp_key: the keys of the configuration (config.cpp reads them) -----------------------------------------
+CFG_CUSTOM("mcp.keys", "mode", "one of static|dynamic|hybrid", "hybrid", "", "Which keys apply. static: the mcp_key blocks only (the page makes no key and the key file is not read). dynamic: the keys of the page only (an mcp_key block stops the start). hybrid: the two.")
+CFG_CUSTOM("mcp.mcp_key", "token_env", "environment variable name", "", "letters, digits and _", "The variable that holds the token of the key: mcp_ and 43 base64url characters. It is a secret. Give exactly one of token_env and token_file. The token is never written in the file.")
+CFG_CUSTOM("mcp.mcp_key", "token_file", "file path", "", "", "The file that holds the token of the key, without its last line end: mcp_ and 43 base64url characters. It is a secret. Give exactly one of token_env and token_file. The token is never written in the file.")
+CFG_CUSTOM("mcp.mcp_key", "subject", "text", "", "1 to 64 characters of A-Z a-z 0-9 . _ @ + -", "The name of the user for whom the key operates. The call log shows it.")
+CFG_CUSTOM("mcp.mcp_key", "tools", "list of texts", "[]", "names of tools, or *", "The tools that the key can call. * is every read tool but the restricted tools. An empty list means no tool.")
+CFG_CUSTOM("mcp.mcp_key", "expires", "text", "", "an RFC 3339 time", "The time when the key stops. After it, a request with the key gets 401. Empty: the key does not expire.")
+CFG_CUSTOM("mcp.mcp_key.scope", "hosts", "list of texts", "", "one name of a host that has mcp_uri", "The host that the key reads. A key reads one host. Default: the host with mcp_uri, when the configuration has one only.")
+CFG_CUSTOM("mcp.mcp_key.scope", "databases", "list of texts", "[]", "patterns of databases and tables, or *", "The data that the key reads. An empty list means no data.")
+CFG_CUSTOM("mcp.mcp_key.limits", "max_rows", "integer", "", "1 to mcp.max_rows", "The rows that a call of the key returns, at most. Default: the value of mcp.max_rows.")
+CFG_CUSTOM("mcp.mcp_key.limits", "timeout_seconds", "integer", "", "1 to mcp.query_timeout_seconds", "The time of one call of the key. Default: the value of mcp.query_timeout_seconds.")
+CFG_CUSTOM("mcp.mcp_key.limits", "rate_limit_per_minute", "integer", "", "1 to mcp.rate_limit_per_minute", "The requests that the key can send in one minute. Default: the value of mcp.rate_limit_per_minute.")
+
+// ---- mcp.key: the older form of mcp_key (deprecated: ChDash reads it for one release, with a warning) -------------------------
+CFG_CUSTOM("mcp.key", "name", "text", "", "a-z, 0-9, - and _ (at most 32 bytes), no ui_ at the start", "The name of the key. It is required and each key has a different one.")
+CFG_CUSTOM("mcp.key", "secret_env", "environment variable name", "", "letters, digits and _", "The variable that holds the token of the key: an mcp_ token, or the UUID version 4 of an older key. It is a secret. Give exactly one of secret_env and secret_file. The secret is never written in the file.")
+CFG_CUSTOM("mcp.key", "secret_file", "file path", "", "", "The file that holds the token of the key, without its last line end: an mcp_ token, or the UUID version 4 of an older key. It is a secret. Give exactly one of secret_env and secret_file. The secret is never written in the file.")
+CFG_CUSTOM("mcp.key", "hosts", "list of texts", "", "one name of a host that has mcp_uri", "The host that the key reads. It is required. A key reads one host: make one key for each host.")
+CFG_CUSTOM("mcp.key", "tools", "list of texts", "[]", "names of tools, or *", "The tools that the key can call. An empty list means no tool.")
+CFG_CUSTOM("mcp.key", "databases", "list of texts", "[]", "patterns of databases and tables, or *", "The data that the key reads. An empty list means no data.")
+CFG_CUSTOM("mcp.key", "max_rows", "integer", "", "1 to mcp.max_rows", "The rows that a call of the key returns, at most. Default: the value of mcp.max_rows.")
+CFG_CUSTOM("mcp.key", "timeout_seconds", "integer", "", "1 to mcp.query_timeout_seconds", "The time of one call of the key. Default: the value of mcp.query_timeout_seconds.")

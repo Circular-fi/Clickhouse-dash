@@ -1,5 +1,7 @@
-// The span inspector of the trace page: the card of a span (its attributes, events and links as the Jaeger UI shows them), the
-// sections that stay open when the waterfall is drawn again, the clicks inside it (copy, filter by a value, open a linked span).
+// The span inspector shows the card of a span on the trace page.
+// The card shows the attributes, events and links as the Jaeger UI shows them.
+// The inspector keeps the sections open when the waterfall is drawn again.
+// It handles the clicks inside the card: copy, filter by a value, and open a linked span.
 
 import { dom } from "./app_dom.js";
 import { format } from "./app_format.js";
@@ -14,19 +16,18 @@ import { kv } from "./app_ui_kv.js";
 const { byId, $, $$ } = dom;
 const fmt = format;
 
-// Span detail, after Jaeger's SpanDetail (AttributesTable, AccordionAttributes,
-// AccordionEvents, AccordionLinks): HTML strings, with the inspector's
-// buttons handled by delegation (initSpanDetailEvents).
+// The span detail follows Jaeger's SpanDetail (AttributesTable, AccordionAttributes,
+// AccordionEvents, AccordionLinks). It builds HTML strings.
+// Event delegation handles the buttons of the inspector (initSpanDetailEvents).
 const JSON_LOOKING = /^\s*[[{]/;
 const NUMBER_LITERAL = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 const OTEL_KEY_TITLE = "otel.* attribute: set by the OpenTelemetry SDK or exporter, not by the instrumented code";
 const EVENTS_INITIAL_COUNT = 3;
 
-// Attribute tables: the shared key / value list (kv.html). A string
-// holding a JSON object or array is a tree (Jaeger's tryParseJson); HTTP
-// header arrays a plain list; otel.* keys in italics. filterScope ("span" /
-// "resource"): include / exclude actions, and a click on the value opens
-// the filter menu (app_trace_search.js) for that attribute map.
+// The attribute tables use the shared key / value list (kv.html). A string that holds a JSON object or array is shown as a tree (Jaeger's tryParseJson).
+// HTTP header arrays are shown as a plain list. The otel.* keys are in italics.
+// The filterScope value ("span" or "resource") sets the include and exclude actions.
+// A click on the value opens the filter menu (app_trace_search.js) for that attribute map.
 function attributeRow(key, value, filterScope = "") {
   const name = String(key);
   const tree = kv.jsonValue(value);
@@ -49,8 +50,8 @@ function renderAttributeTable(raw, emptyText = "No attributes", filterScope = ""
   return kv.html(entries.map(([key, value]) => attributeRow(key, value, filterScope)), { className: "traceKv" });
 }
 
-// The include / exclude / copy actions of the attribute lists: the search
-// filters, and "JSON" copies { key, value }.
+// The include, exclude and copy actions belong to the attribute lists.
+// The include and exclude actions set the search filters. The JSON action copies { key, value }.
 function attributeAction(action, { key, value, row, button }) {
   if (action === "json") {
     void copyText(JSON.stringify({ key, value }, null, 2), button);
@@ -76,17 +77,17 @@ function attributeValueText(value) {
   try { return JSON.stringify(value); } catch (_) { return String(value); }
 }
 
-// Jaeger's AttributesSummary: the k=v preview beside a collapsed section
-// (hidden by CSS while the section is open).
+// This follows Jaeger's AttributesSummary. It shows the k=v preview beside a collapsed section.
+// CSS hides the preview while the section is open.
 function renderAttributePreview(raw, emptyText = "none") {
   const entries = attributeEntries(raw);
   if (!entries.length) return `<span class="traceJaegerSummaryPreview is-empty">${esc(emptyText)}</span>`;
   return `<span class="traceJaegerSummaryPreview">${entries.map(([key, value]) => `<span><b>${esc(key)}</b>=${esc(attributeValueText(value))}</span>`).join(" ")}</span>`;
 }
 
-// The Tags / Process preview while the section is closed: the first
-// ATTRIBUTE_PREVIEW attributes as two-line cells (key, then value) across
-// the inspector's width, and "Show all N" (the summary opens the table).
+// The Tags and Process preview shows while the section is closed.
+// It shows the first ATTRIBUTE_PREVIEW attributes as two-line cells: the key, then the value. The cells fill the width of the inspector.
+// "Show all N" opens the table from the summary.
 const ATTRIBUTE_PREVIEW = 8;
 function renderAttributeGrid(raw) {
   const entries = attributeEntries(raw);
@@ -99,17 +100,16 @@ function renderAttributeGrid(raw) {
   return `<span class="traceJaegerSummaryPreview traceAttrGrid">${cells}${more}</span>`;
 }
 
-// Jaeger's AccordionAttributes: "Label (N)" and the preview grid while
-// collapsed, the attribute table once open.
+// This follows Jaeger's AccordionAttributes.
+// The label is "Label (N)". While the section is collapsed, the preview grid shows. When the section is open, the attribute table shows.
 function renderJaegerAttributes(label, raw, { emptyText = "No attributes", open = false, filterScope = "" } = {}) {
   const count = attributeEntries(raw).length;
   return `<details class="traceJaegerGroup traceJaegerGroup--summary traceJaegerGroup--attrs" data-span-section="${esc(label.toLowerCase())}"${open ? " open" : ""}><summary><b>${esc(label)}</b>${count ? `<span class="traceJaegerGroup__count">${esc(fmt.count(count))}</span>` : ""}${renderAttributeGrid(raw)}</summary><div class="traceJaegerGroup__body">${renderAttributeTable(raw, emptyText, filterScope)}</div></details>`;
 }
 
-// A span or event instant: the stored UTC text ("2026-09-12 14:29:57.462123456",
-// exact) or epoch ns (a double, exact to ~256 ns only). withRaw: the
-// tooltip (fmt.timeTitle, to the nanosecond when the text has them), else
-// the shown text (fmt.time to the millisecond).
+// A span or event instant has one of two forms: the stored UTC text ("2026-09-12 14:29:57.462123456", exact), or epoch ns (a double, exact to ~256 ns only).
+// The withRaw option sets the tooltip (fmt.timeTitle). The tooltip shows the nanoseconds when the text has them.
+// Without withRaw, the shown text uses fmt.time, to the millisecond.
 function absoluteTimeText(ns, raw = "", { withRaw = true } = {}) {
   const text = String(raw || "");
   const parts = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?/);
@@ -172,16 +172,17 @@ function referenceItemHtml(kind, ref, cache) {
   return `<li class="traceSpanRefs__item" data-ref-kind="${esc(kindClass)}">${refKindHtml(kind)}<span class="traceSpanRefs__main">${label}${ids}</span>${action}${attrs}</li>`;
 }
 
-// The kind of a reference, a pill badge: child of (neutral), follows from /
-// linked from (accent).
+// The kind of a reference is a pill badge.
+// The badge reads child of (neutral). It reads follows from / linked from (accent).
 function refKindHtml(kind) {
   const kindClass = String(kind).replace(/\s+/g, "-");
   return badge.html(kind, { tone: kindClass === "child-of" ? "neutral" : "accent", shape: "pill", className: `traceSpanRefs__kind traceSpanRefs__kind--${kindClass}` });
 }
 
-// Jaeger's references: the parent (child of) and the span's links (follows
-// from), plus the spans of this trace that link here (linked from), and a
-// lazily loaded group of the spans of other traces that link here.
+// The references follow Jaeger's references.
+// The parent is the child of reference. The span links are the follows from references.
+// The spans of this trace that link here are the linked from references.
+// A group of spans from other traces that link here is loaded on demand.
 function renderJaegerLinks(span, cache) {
   const links = spanLinkList(span);
   const from = linkedFromList(cache, span);
@@ -235,13 +236,13 @@ function spanDeepLink(spanId) {
   return new URL(spanTraceUrl(traceId, spanId), window.location.href).toString();
 }
 
-// The inspector sits in the waterfall, whose own click handler ignores
-// clicks outside span rows; these buttons are handled here.
+// The inspector is inside the waterfall. The waterfall click handler ignores clicks outside span rows.
+// This module handles these buttons.
 function spanDetailClick(event) {
   const target = event.target instanceof Element ? event.target : null;
   if (!target) return;
   const linked = target.closest("[data-linked-span]");
-  // The waterfall handler opens the linked trace; say which span to focus.
+  // The waterfall handler opens the linked trace. Set the span to focus.
   if (linked) { model.pendingSpanId = String(linked.getAttribute("data-linked-span") || ""); return; }
   if (parts.traceInsights?.handleInspectorClick(event, target)) return;
   const kvButton = target.closest("[data-kv-action]");

@@ -87,7 +87,7 @@ bool trace_time_range(const TraceSettings& cfg, const httplib::Request& req, int
     hi = now;
     lo = hi - static_cast<int64_t>(lookback) * 60 * 1000;
   }
-  // Searches convert bounds to nanoseconds (int64 overflows after year 2262).
+  // Searches convert the bounds to nanoseconds. An int64 overflows after the year 2262.
   constexpr int64_t kMaxTraceTimeMs = INT64_MAX / 1000000 - 1;
   if (lo < 0 || hi <= lo || hi > kMaxTraceTimeMs) {
     if (error) *error = "Invalid trace time range.";
@@ -186,7 +186,8 @@ bool parse_window(const httplib::Request& req, const TraceSettings& traces, bool
 
 namespace {
 
-// The bucket grid of the charts: bucket_origin_ms (the browser's local midnight) and align_buckets=1 (whole buckets).
+// The bucket grid of the charts uses bucket_origin_ms (the local midnight of the browser). The parameter align_buckets=1 uses
+// whole buckets.
 void parse_grid(const httplib::Request& req, int64_t* bucket_origin_ms, bool* align_buckets) {
   *bucket_origin_ms = 0;
   parse_i64_param(req, "bucket_origin_ms", bucket_origin_ms);
@@ -204,7 +205,8 @@ bool parse_analytics(const httplib::Request& req, const TraceSettings& traces, A
 
 bool parse_service_map(const httplib::Request& req, const TraceSettings& traces, ServiceMapRequest* out, ApiError* error) {
   if (!parse_window(req, traces, /*analytics_required=*/false, &out->window, error)) return false;
-  // sample_factor forces the trace sampling factor (1 = every trace); the time slicing still applies above the read budget.
+  // The parameter sample_factor forces the trace sampling factor (1 = every trace). The time slicing still applies above the read
+  // budget.
   out->forced_factor = int_param(req, "sample_factor", 0, 1, kServiceMapMaxSampleFactor);
   return true;
 }
@@ -218,7 +220,7 @@ bool parse_heatmap(const httplib::Request& req, const TraceSettings& traces, Hea
 
 bool parse_deltas(const httplib::Request& req, const TraceSettings& traces, DeltasRequest* out, ApiError* error) {
   if (!parse_window(req, traces, /*analytics_required=*/true, &out->window, error)) return false;
-  // A value that is not a number is "present" with the value 0: the box check of the service refuses it (t1 <= t0) or clamps it.
+  // A value that is not a number is "present" with the value 0. The box check of the service refuses it (t1 <= t0) or clamps it.
   out->t0_present = parse_i64_param(req, "t0", &out->t0) != 0;
   out->t1_present = parse_i64_param(req, "t1", &out->t1) != 0;
   out->d0_ms = double_param(req, "d0", -1.0, 0.0, kMaxDurationMs);
@@ -254,7 +256,7 @@ bool parse_services(const httplib::Request& req, const TraceSettings& traces, Se
     return fail(400, "invalid_trace_duration", "minimum duration cannot exceed maximum duration.");
   }
   if (!parse_trace_filters(req, &out->filters, &message)) return fail(400, "invalid_trace_filter", message);
-  // The grid of the charts and the whole window: the services route only (the statements of /services/db never read them).
+  // The grid of the charts and the whole window apply to the services route only. The statements of /services/db never read them.
   parse_grid(req, &out->bucket_origin_ms, &out->align_buckets);
   out->exact = req.has_param("exact") && req.get_param_value("exact") == "1";
   return true;
@@ -268,8 +270,9 @@ bool parse_prefill(const httplib::Request& req, const TraceSettings& traces, Pre
     error->message = message;
     return false;
   }
-  // Minute-aligned superset of the requested range: the list only feeds the service/operation pickers, and alignment lets "last N
-  // minutes" requests made within the same minute (reloads, range toggles) share one scan.
+  // The range is a minute-aligned superset of the requested range. The list only feeds the service and operation pickers. The
+  // alignment lets "last N minutes" requests share one scan. These requests are made in the same minute, for example at a reload
+  // or a range toggle.
   out->aligned_start_ms = (out->start_ms / kPrefillAlignMs) * kPrefillAlignMs;
   out->aligned_end_ms = ((out->end_ms + kPrefillAlignMs - 1) / kPrefillAlignMs) * kPrefillAlignMs;
   if (!parse_trace_filters(req, &out->filters, &message)) {
@@ -400,9 +403,9 @@ bool parse_spans(const httplib::Request& req, const TraceSettings& traces, Spans
   if (feature_param_rejected(traces, req, &message)) return refuse(error, 400, "trace_filter_disabled", message);
   if (!trace_time_range(traces, req, &out->start_ms, &out->end_ms, &message)) return refuse(error, 400, "invalid_trace_range", message);
   out->limit = int_param(req, "limit", kSpanPageDefaultLimit, 1, kSpanPageMaxLimit);
-  // budget_ms may only lower the widening budget (tests use it to reach a resume point deterministically).
+  // The parameter budget_ms can only lower the widening budget. The tests use it to reach a resume point in a deterministic way.
   out->budget_ms = static_cast<double>(int_param(req, "budget_ms", static_cast<int>(kSpanPageBudgetMs), 0, static_cast<int>(kSpanPageBudgetMs)));
-  // Span-level here: the span's own Duration.
+  // This check is at span level. It uses the Duration of the span itself.
   out->min_duration_ms = double_param(req, "min_duration_ms", 0.0, 0.0, kMaxDurationMs);
   out->max_duration_ms = double_param(req, "max_duration_ms", 0.0, 0.0, kMaxDurationMs);
   if (out->max_duration_ms > 0.0 && out->min_duration_ms > out->max_duration_ms) {

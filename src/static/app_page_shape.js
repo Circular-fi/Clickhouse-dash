@@ -1,18 +1,15 @@
-// The page of one query shape (shape.html, /system/queries/<hash>): a page
-// of its own, not a view of the System page. It has the page header, but
-// not the System section tabs (Overview, Queries, Disks) nor the list of
-// shapes: the Queries section (app_system_queries.js) runs on the one
-// shape, with the time range and the refresh button of its filter bar.
+// This is the page of one query shape (shape.html, /system/queries/<hash>). It is a page of its own.
+// It is not a view of the System page. It has the page header. It does not have the System section tabs (Overview, Queries, Disks)
+// or the list of shapes. The Queries section (app_system_queries.js) runs on the one shape,
+// with the time range and the refresh button of its filter bar.
 //
 //   /system/queries/<hash>[?from=&to=&runs=<order>&<the list's parameters>]
 //
-// The address keeps the list's parameters (sort, kind, errors, user,
-// database, table, hide) from the list the shape was opened from, so "All
-// queries" returns to that list: to the very list entry (the browser
-// restores that page as it was left, or reads it again) when the shape was
-// opened from it, else to the list of those parameters. The former address
-// of a shape, /system/queries?q=<hash>, opens this page (the server
-// redirects it; the Queries section does when the server is a proxy away).
+// The address keeps the list's parameters (sort, kind, errors, user, database, table, hide) from the list where the shape was opened.
+// "All queries" returns to that list. When the shape was opened from a list entry, it returns to the very list entry.
+// The browser restores that page as it was left, or reads it again. Otherwise, it returns to the list of those parameters.
+// The former address of a shape, /system/queries?q=<hash>, opens this page. The server redirects it.
+// The Queries section does the same when the server is behind a proxy.
 
 import "./app_common.js";
 import { api } from "./app_api.js";
@@ -38,7 +35,7 @@ function href(path, params) {
   return `${router().url(path)}${query ? `?${query}` : ""}`;
 }
 
-// The list's parameters of the address: everything but the shape's own.
+// The list's parameters in the address: all parameters except the shape's own.
 function listParams() {
   const params = new URLSearchParams(router().current().params);
   params.delete("runs");
@@ -47,9 +44,8 @@ function listParams() {
 
 const listHref = () => href(LIST_ROUTE, listParams());
 
-// The list page is the entry right before this one: marked on the entry
-// itself, so a reload keeps it (the referrer and the entry state both
-// survive one). state.listBack counts the entries this page pushed since.
+// The list page is the entry right before this one. It is marked on the entry itself, so a reload keeps the mark.
+// The referrer and the entry state both survive one reload. state.listBack counts the entries that this page pushed since then.
 function markOpenedFromList() {
   if (Number(router().state().listBack) > 0 || !document.referrer) return;
   let from;
@@ -65,15 +61,14 @@ function back() {
   else window.location.assign(listHref());
 }
 
-// The address of the shape with the section's parameters (its range, the
-// runs' order and the list's filters).
+// The address of the shape holds the parameters of the section: its range, the runs' order and the list's filters.
 function writeAddress(query, history) {
   const steps = Number(router().state().listBack) || 0;
   const state = steps > 0 && history === "push" ? { listBack: steps + 1 } : undefined;
   router().write(history, null, { href: href(`${LIST_ROUTE}/${hashOf()}`, new URLSearchParams(query)), view: "shape", state });
 }
 
-// Another shape: its own page (the list's parameters travel with it).
+// Another shape has its own page. The list's parameters stay in the address.
 function openShape(hash, { replace = false } = {}) {
   const target = href(`${LIST_ROUTE}/${encodeURIComponent(hash)}`, router().current().params);
   if (replace) window.location.replace(target);
@@ -88,12 +83,12 @@ function show() {
     onQuery: (query, { history: mode = "push" } = {}) => writeAddress(query, mode),
     onOpenShape: openShape,
     onBack: back,
-    // "Open in Query": the Query page's editor, through the session draft the Query page reads on load. Never run.
+    // "Open in Query" sends the statement to the editor of the Query page. It uses the session draft that the Query page reads on load. It never runs the statement.
     onOpenSql: kit.openInQuery,
   });
 }
 
-// Back / Forward within the shape's page: its range or runs' order.
+// Back / Forward move within the shape's page. They change its range or the runs' order.
 function onPopState() {
   if (hashOf()) show();
 }
@@ -102,11 +97,11 @@ function bindShell() {
   const route = (path) => api.resolveUrl(path);
   header.setPageSelectorValue("system");
   router().on("/system", onPopState);
-  // Another host: the shape on screen reads it.
+  // Another host: the shape on screen reads the data of that host.
   window.addEventListener("chdash:host-changed", () => systemView?.refresh?.(false));
-  // A page restored from the back/forward cache is as old as the visit: it reads again.
+  // A page restored from the back/forward cache is as old as the visit. It reads the data again.
   window.addEventListener("pageshow", (event) => { if (event.persisted) systemView?.refresh?.(false); });
-  // Queries turned off (system.top_queries): the System page is what is left.
+  // When Queries is off (system.top_queries), only the System page remains.
   features?.on?.(() => {
     if (!features.get("system.enabled")) return; // app_header.js leaves the page
     if (!systemQueries.available(features.get("system"))) window.location.replace(route("system"));

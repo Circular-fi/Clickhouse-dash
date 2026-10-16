@@ -1,12 +1,13 @@
-// The adapter of src/wasm/layered.c (src/static/wasm/layered.wasm): the layered layout of app_graph_kit.js (layered()), as far
-// as the order of the cards and their rows. It runs in the page and in a Worker.
+// The adapter of src/wasm/layered.c (src/static/wasm/layered.wasm). It gives the layered layout of app_graph_kit.js
+// (layered()). It covers the order of the cards and their rows only. It runs in the page and in a Worker.
 //
 //   ops.layered.run(kernel, input)   input: { n, ne, from, to, rank, queueRank, weight, flags } (typed arrays, see pack())
 //                                    returns { status, level, order, row, back } (status 0 is done; -2: use the reference)
 //
-// ns.wasm.layered.pack(options) turns the options of kit.layered() into that input (null when the kernel cannot take them: two
-// cards with one id, two edges with one id); ns.wasm.layered.unpack(options, result) gives { columns, levels, level, backEdges,
-// lineageRows } as the reference computes them.
+// ns.wasm.layered.pack(options) turns the options of kit.layered() into that input. It returns null when the kernel
+// cannot take them: two cards with one id, or two edges with one id.
+// ns.wasm.layered.unpack(options, result) gives { columns, levels, level, backEdges, lineageRows }.
+// These values are the same as those of the reference.
 import { wasm } from "./app_wasm.js";
 
 wasm.ops.layered = {
@@ -30,7 +31,7 @@ wasm.ops.layered = {
   },
 };
 
-// The rank of every item under compare(): equal ranks for items that compare equal.
+// Each item gets a rank under compare(). Items that compare equal get equal ranks.
 function ranks(items, compare) {
   const order = items.map((item, i) => i);
   order.sort((a, b) => compare(items[a], items[b]));
@@ -99,7 +100,8 @@ function unpack(options, result) {
   return { columns, levels, level, backEdges, lineageRows };
 }
 
-// The position of a card in options.nodes, by its place in the column order (a Map built once per unpack).
+// The position of a card in options.nodes. The position follows the place of the card in the column order.
+// A Map of these positions is built once for each unpack.
 let indexCache = null;
 function index(nodes, node) {
   if (!indexCache || indexCache.nodes !== nodes) indexCache = { nodes, map: new Map(nodes.map((item, i) => [item, i])) };

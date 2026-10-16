@@ -1,7 +1,8 @@
 #pragma once
 
-// A fake ClickHouse for the native tests: a ChExecutor whose answers a test writes. A statement is answered by the first rule whose text it
-// contains; every statement that it was sent is kept, with its parameters. No server, no connection.
+// A fake ClickHouse for the native tests. A ChExecutor gives the answers that a test writes.
+// The first rule whose text is in a statement gives the answer to that statement.
+// Every statement that is sent is kept, with its parameters. There is no server and no connection.
 
 #include "ch_executor.hpp"
 
@@ -25,8 +26,8 @@ using Row = std::vector<std::string>;
 using Rows = std::vector<Row>;
 
 
-// A statement is answered by the first rule whose text it contains (a rule may answer a number of times only, or throw). Every
-// statement is kept, with its parameters.
+// The first rule whose text is in a statement gives its answer. A rule can answer only a set number of times, or it can throw.
+// Every statement is kept, with its parameters.
 class FakeDb final : public ChExecutor {
  public:
   struct Rule {
@@ -115,7 +116,7 @@ inline clickhouse::ServerException server_error(int code, const std::string& tex
   return clickhouse::ServerException(exception);
 }
 
-// The service gets its connection from a function: here, always the same fake.
+// The service gets its connection from a function. Here, the function always returns the same fake.
 class ForwardDb final : public ChExecutor {
  public:
   explicit ForwardDb(FakeDb& db) : db_(db) {}

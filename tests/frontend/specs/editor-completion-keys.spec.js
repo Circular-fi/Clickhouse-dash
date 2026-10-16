@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { openApp } from '../helpers/app.js';
 
-// The keys of the editor's completion menu (app_autocomplete.js). A menu that opens by itself while a person types must never take the Enter
-// of a newline: Enter accepts a choice only once the person has moved to it (the arrows, or Ctrl+Space), and Tab always accepts. This used to
-// be asserted by grepping the names of two variables; here the editor is driven like a person drives it.
+// The keys of the editor completion menu (app_autocomplete.js). A menu that opens by itself while a person types must never take the Enter of a newline.
+// Enter accepts a choice only after the person moves to it with the arrows or Ctrl+Space. Tab always accepts a choice.
+// An earlier version of this test grepped the names of two variables. This spec drives the editor as a person drives it.
 
 async function typeUntilMenu(page, text) {
   const editor = page.locator('#queryTextArea');
@@ -33,7 +33,7 @@ test('Enter after the arrows accepts the choice that the person moved to', async
   await page.keyboard.press('Enter');
   await expect(menu).toBeHidden();
   const value = await editor.inputValue();
-  // The choice is written whole (a function call is laid out by the editor, so the text may span lines): what Enter must not do is leave the
+  // The choice is written whole. A function call is laid out by the editor, so the text may span lines. Enter must not leave the
   // half-typed word with a newline after it.
   expect(value.startsWith('SELECT ')).toBe(true);
   expect(value.toLowerCase()).toContain(chosen.toLowerCase());

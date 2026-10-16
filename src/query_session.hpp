@@ -47,28 +47,32 @@ struct QuerySessionOptions {
   int result_rows_batch_size = 1000;
   size_t result_rows_batch_bytes = 256 * 1024;
 
-  // Coalesce several already-framed SSE events into one socket write and bound
-  // producer memory when the browser or reverse proxy is slower than ClickHouse.
+  // Coalesce several already-framed SSE events into one socket write.
+  // This bounds the producer memory when the browser or reverse proxy is slower than ClickHouse.
   size_t sse_write_batch_events = 8;
   size_t sse_write_batch_bytes = 256 * 1024;
   size_t sse_queue_max_bytes = 8 * 1024 * 1024;
 
-  // Hard limits for interactive result serialization. Massive export has its
-  // own streaming path and is intentionally not constrained by these values.
+  // These are the hard limits for interactive result serialization.
+  // The massive export has its own streaming path. These values do not limit it on purpose.
   size_t max_result_cell_bytes = 32 * 1024 * 1024;
   size_t max_result_event_bytes = 32 * 1024 * 1024;
 
-  // Compatibility plans are deterministic for a query/schema pair. Reusing a
-  // recent DESCRIBE result removes the extra round trip on repeated complex SQL.
+  // A compatibility plan is deterministic for a query and schema pair.
+  // Reuse of a recent DESCRIBE result removes the extra round trip for repeated complex SQL.
   size_t describe_cache_entries = 256;
   int describe_cache_ttl_ms = 60 * 1000;
 
-  // The ClickHouse bounds of a run (the query { } block, docs/configuration.md).
-  // 0 = the settings profile of the runner user decides. A bound is never looser
-  // than the profile (ch_query.hpp).
+  // These are the ClickHouse bounds of a run (the query { } block, docs/configuration.md).
+  // A value of 0 means that the settings profile of the runner user decides.
+  // A bound is never looser than the profile (ch_query.hpp).
   int64_t max_execution_time_s = 0;
   uint64_t max_memory_usage = 0;
   uint64_t max_rows_to_read = 0;
+  // readonly = 1 on every statement of the run.
+  // The access of humans (docs/access.md) sets it for a user who has query.run.read and not query.run.write.
+  // It is never a value of the file.
+  bool read_only_strict = false;
 };
 
 struct SessionSnapshot {
@@ -79,11 +83,11 @@ struct SessionSnapshot {
   uint64_t read_bytes_total = 0;
   uint64_t total_rows_to_read = 0;
 
-  // Result payload emitted to the browser. This is not ClickHouse write I/O.
+  // This is the result payload that goes to the browser. This is not ClickHouse write I/O.
   uint64_t result_rows_emitted = 0;
   uint64_t result_bytes_emitted = 0;
 
-  // Rows/bytes written by ClickHouse, accumulated from native Progress packets.
+  // These are the rows and bytes that ClickHouse writes. Native Progress packets give the values.
   uint64_t written_rows_total = 0;
   uint64_t written_bytes_total = 0;
 
@@ -96,20 +100,18 @@ struct SessionSnapshot {
 
   int64_t elapsed_ms = 0;
 
-  // Where the elapsed time of the result went, in milliseconds (docs/telemetry.md):
-  // receive_ms is the time inside the native client: ClickHouse producing and
-  // sending the blocks, and the decoding of their columns. encode_ms is the time
-  // in ChDash turning the rows into JSON events. backpressure_ms is the time
-  // ChDash waited because the browser had not read the events yet. The rest of
-  // elapsed_ms is the connection, USE and DESCRIBE.
+  // This shows where the elapsed time of the result went, in milliseconds (docs/telemetry.md).
+  // receive_ms is the time inside the native client. In this time, ClickHouse makes and sends the blocks, and the client decodes their columns.
+  // encode_ms is the time that ChDash takes to turn the rows into JSON events.
+  // backpressure_ms is the time that ChDash waits. The browser has not read the events yet in this time.
+  // The rest of elapsed_ms is the connection, USE and DESCRIBE.
   int64_t receive_ms = 0;
   int64_t encode_ms = 0;
   int64_t backpressure_ms = 0;
 };
 
-// High-frequency samples keep the original dashboard metrics while omitting
-// the inferred thread count. Every value comes from native Progress packets or
-// query-group ProfileEvents emitted by ClickHouse.
+// High-frequency samples keep the original dashboard metrics. They omit the inferred thread count.
+// Every value comes from native Progress packets or from query-group ProfileEvents that ClickHouse sends.
 struct SamplePoint {
   int64_t elapsed_ms = 0;
   uint64_t read_rows_total = 0;
@@ -127,8 +129,8 @@ struct KillOutcome {
   std::string error;
 };
 
-// KILL QUERY WHERE <where> ASYNC (or SYNC) on a connection of its own: a cancel never waits for a lease of
-// the pool. Labelled chdash:cancel. Never throws.
+// This runs KILL QUERY WHERE <where> ASYNC (or SYNC) on a connection of its own.
+// A cancel never waits for a lease of the pool. The statement has the label chdash:cancel. This function never throws.
 KillOutcome kill_queries(const std::string& uri, const std::string& where, bool synchronous);
 
 class QuerySession : public std::enable_shared_from_this<QuerySession> {
@@ -152,37 +154,37 @@ public:
 
   const std::string& id() const { return query_id_; }
 
-  // The group that the query thread enters when it starts and leaves at its end (worker_group.hpp): the server
-  // waits for it at shutdown. Set before start(); a closed group (the server stops) cancels the session instead.
+  // The query thread enters this group when it starts and leaves it at its end (worker_group.hpp).
+  // The server waits for the group at shutdown. Set the group before start().
+  // When the server stops, a closed group cancels the session instead.
   void set_worker_group(std::shared_ptr<WorkerGroup> group) { worker_group_ = std::move(group); }
-  // Without a cache every compatibility plan is read again.
+  // Without a cache, every compatibility plan is read again.
   void set_describe_cache(std::shared_ptr<DescribePlanCache> cache) { describe_cache_ = std::move(cache); }
 
   void start();
   void request_cancel();
 
-  // The browser-facing query id is stable, while compatibility retries may
-  // use distinct native ClickHouse ids. Cancellation must target every native
-  // attempt that belongs to this session.
+  // The browser-facing query id is stable. Compatibility retries can use distinct native ClickHouse ids.
+  // Cancellation must target every native attempt that belongs to this session.
   std::vector<std::string> native_query_ids() const;
   KillOutcome cancel_native_queries_best_effort(bool synchronous);
 
-  // A query has one consuming SSE stream. Tracking attachment lets the server
-  // reap abandoned POST /run sessions without touching active downloads.
+  // A query has one consuming SSE stream. The attachment tracking lets the server remove abandoned POST /run sessions.
+  // It does not touch active downloads.
   bool attach_stream();
   void detach_stream();
   bool should_reap(int abandoned_ttl_ms, int terminal_ttl_ms) const;
 
   SessionSnapshot snapshot() const;
 
-  // Drain (move out) any buffered high-frequency samples.
-  // To keep payload size bounded, the backend may drop older points and return
-  // at most `max_points` (defaults to 6, i.e. ~250ms worth at 40ms sampling).
+  // Move out all buffered high-frequency samples and empty the buffer.
+  // To keep the payload size bounded, the backend can drop older points. It returns at most `max_points` points.
+  // The default of `max_points` is 6. That is about 250ms of samples at 40ms sampling.
   std::vector<SamplePoint> drain_samples(size_t max_points = 6);
 
-  // Wait and coalesce produced SSE chunks from the query thread. Returns false
-  // when the session is terminal and the queue is empty. An empty output with a
-  // true return value means the wait elapsed while the query is still running.
+  // This function waits and then combines the SSE chunks that the query thread produced.
+  // It returns false when the session is terminal and the queue is empty.
+  // An empty output with a true return value means that the wait time ended while the query still runs.
   bool wait_pop_sse_batch(std::string& out, int wait_ms);
 
 private:
@@ -194,8 +196,8 @@ private:
     bool synchronous
   );
 
-  // Records a sample point at most every options_.sample_interval_ms (called from driver callbacks).
-  // Caller must hold mu_.
+  // Records a sample point at most once every options_.sample_interval_ms.
+  // The driver callbacks call this function. The caller must hold mu_.
   void maybe_record_sample_locked(const std::chrono::steady_clock::time_point& now);
 
   void push_sse_json_event(std::string_view event_name, std::string_view json);
@@ -235,9 +237,8 @@ private:
   std::chrono::steady_clock::time_point finished_at_{};
   bool stream_attached_ = false;
 
-  // First native attempt keeps the public UUID for observability. Any retry
-  // receives a unique suffix so ClickHouse never sees two concurrent queries
-  // with the same id while the previous socket is being torn down.
+  // The first native attempt keeps the public UUID for observability. Each retry gets a unique suffix.
+  // ClickHouse then never sees two concurrent queries with the same id, even when the previous socket is closed.
   std::vector<std::string> native_query_ids_;
 
   uint64_t read_rows_total_ = 0;
@@ -246,17 +247,17 @@ private:
 
   uint64_t result_rows_emitted_ = 0;
   uint64_t result_bytes_emitted_ = 0;
-  // Time split of the last SELECT attempt (SessionSnapshot::receive_ms and the two after it).
+  // This is the time split of the last SELECT attempt (SessionSnapshot::receive_ms and the two fields after it).
   int64_t receive_ns_ = 0;
   int64_t encode_ns_ = 0;
   int64_t backpressure_ns_ = 0;
   uint64_t written_rows_total_ = 0;
   uint64_t written_bytes_total_ = 0;
 
-  // The CPU time and the memory that the ProfileEvents packets report (query_run_profile.hpp). Guarded by mu_.
+  // The CPU time and the memory that the ProfileEvents packets report (query_run_profile.hpp). The mutex mu_ guards this data.
   RunProfile profile_;
 
-  // High-frequency samples embedded in the legacy-compatible tick payload.
+  // High-frequency samples that are in the legacy-compatible tick payload.
   std::deque<SamplePoint> samples_;
   std::chrono::steady_clock::time_point last_sample_at_{};
   std::chrono::steady_clock::time_point last_sample_cpu_at_{};
