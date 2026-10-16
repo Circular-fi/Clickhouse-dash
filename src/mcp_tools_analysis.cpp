@@ -216,7 +216,7 @@ std::string tool_analysis_all_usage(Ctx& ctx, const rapidjson::Value& args) {
   if (std::find(listed.begin(), listed.end(), kAllUsage) == listed.end()) {
     fail("tool_not_allowed", std::string("this key cannot use the tool ") + kAllUsage + ": its tools must name it (\"*\" does not include it)");
   }
-  reject_unknown(args, {"window", "group", "key", "method", "client", "instance", "series", "limit"});
+  reject_unknown(args, {"window", "group", "order", "key", "method", "client", "instance", "series", "limit"});
   const std::string window = window_of(server, args);
   McpUsageOverviewQuery query;
   query.group = opt_string(args, "group", 16).value_or(std::string());
@@ -224,6 +224,9 @@ std::string tool_analysis_all_usage(Ctx& ctx, const rapidjson::Value& args) {
   if (query.group != "key" && query.group != "method" && query.group != "client" && query.group != "instance") {
     fail("invalid_argument", "group must be key, method, client or instance");
   }
+  // The same orders as the page: mcp_usage_overview_check (below) refuses another one and says which are valid.
+  query.order = opt_string(args, "order", 64).value_or(std::string());
+  if (query.order.empty()) query.order = "requests";
   query.keys = opt_names(args, "key");
   query.methods = opt_names(args, "method");
   query.clients = opt_names(args, "client");

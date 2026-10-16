@@ -359,10 +359,31 @@ Group group_of(const std::string& name) {
   return Group::Method;
 }
 
-// The metrics of a point of the series, in the order of their members: the requests, the errors, the calls, the time of the calls and
-// the bytes (add_to_counters says what each one counts).
-constexpr const char* kSeriesMetrics[] = {"requests", "errors", "calls", "duration_ms_sum", "bytes"};
+// The metrics of a point of the series, in the order of their members: the requests, the errors, the calls, the time of the calls, the
+// bytes and the refusals (the 429 and what was refused before it was read; add_to_counters says what each one counts).
+constexpr const char* kSeriesMetrics[] = {"requests", "errors", "calls", "duration_ms_sum", "bytes", "refused"};
 constexpr size_t kMetrics = sizeof(kSeriesMetrics) / sizeof(kSeriesMetrics[0]);
+
+// The metrics that can rank the groups of the series (the parameter `order`). The time of the calls is a sum that the calls average, so it is
+// not one of them.
+constexpr const char* kSeriesOrders[] = {"requests", "errors", "refused", "calls", "bytes"};
+constexpr size_t kOrders = sizeof(kSeriesOrders) / sizeof(kSeriesOrders[0]);
+
+bool valid_order(const std::string& order) {
+  for (const char* name : kSeriesOrders) {
+    if (order == name) return true;
+  }
+  return false;
+}
+
+// The metric of the series that an order ranks by (the requests for a name that is not an order: the check refuses it before).
+size_t order_metric(const std::string& order) {
+  if (!valid_order(order)) return 0;
+  for (size_t metric = 0; metric < kMetrics; ++metric) {
+    if (order == kSeriesMetrics[metric]) return metric;
+  }
+  return 0;
+}
 
 // The kind of a row of the methods: a tool, a method of the protocol, or what was refused before its message was read.
 enum RowKind : uint8_t { kRowCall, kRowRequest, kRowRefused };
@@ -522,12 +543,13 @@ void tally_records(Tally& t, const Usage::Entry& entry) {
   }
 }
 
-// A cell adds to a group at one point of the series: the metrics are the counts of add_to_counters, so the groups add up to the totals.
+// A cell adds to a group at one point of the series: the metrics are the counts of add_to_counters, so the groups add up to the totals (the
+// refusals are the 429 and the rejected requests of the totals).
 void add_to_series(std::vector<uint64_t>& values, size_t points, size_t point, const Usage::Cell& cell) {
   if (values.empty()) values.assign(kMetrics * points, 0);
   Usage::Counters one;
   add_to_counters(one, cell);
-  const uint64_t counts[kMetrics] = {one.requests, one.errors, one.calls, one.duration_ms_sum, one.bytes};
+  const uint64_t counts[kMetrics] = {one.requests, one.errors, one.calls, one.duration_ms_sum, one.bytes, one.rate_limited + one.rejected};
   for (size_t metric = 0; metric < kMetrics; ++metric) values[metric * points + point] += counts[metric];
 }
 
@@ -646,11 +668,19 @@ struct InstanceRow {
   bool selected = false;
 };
 
-struct SeriesGroup {
-  std::string id;
-  std::string label;
-  uint64_t total = 0;             // its requests
-  std::vector<uint64_t> metrics;  // as the series of the tally
+// What a ranking of the series shows: its groups, and the others summed in `rest`. The metrics of a group are the counts of the tally (a pointer,
+// never a copy), so a series that is ranked several times holds them once.
+struct Ranking {
+  struct Shown {
+    std::string id;
+    std::string label;
+    uint64_t total = 0;                              // its requests
+    const std::vector<uint64_t>* metrics = nullptr;  // as the series of the tally
+  };
+  std::vector<Shown> groups;
+  size_t folded = 0;                   // the groups that are in `rest`
+  uint64_t rest_total = 0;             // their requests
+  std::vector<uint64_t> rest_metrics;  // as the series of the tally
 };
 
 // The metrics of a group, one array for each, as the members of an object.
@@ -663,16 +693,40 @@ void put_metrics(McpJsonWriter& w, const std::vector<uint64_t>& metrics, size_t 
   }
 }
 
-// The groups of the series, from the metrics that were counted at each point. A series grouped by a dimension that is filtered shows
-// the values that were chosen, in their order (a value without a request is a line of zeros); else the 8 largest groups by requests
-// (the same total: the smaller id first), and the others summed in `rest`. `id_of` names a group, `label_of` a group by its id.
-void put_series(McpJsonWriter& w, const Tally& t, const std::vector<std::string>& chosen, const std::function<std::string(size_t)>& id_of,
+// A ranking as the members `groups` and `rest` of the object that is open.
+void put_ranking(McpJsonWriter& w, const Ranking& ranking, size_t points) {
+  w.Key("groups");
+  w.StartArray();
+  for (const auto& group : ranking.groups) {
+    w.StartObject();
+    w.Key("id"); put(w, group.id);
+    w.Key("label"); put(w, group.label);
+    w.Key("total"); w.Uint64(group.total);
+    put_metrics(w, *group.metrics, points);
+    w.EndObject();
+  }
+  w.EndArray();
+  w.Key("rest");
+  w.StartObject();
+  w.Key("groups"); w.Uint64(ranking.folded);
+  w.Key("total"); w.Uint64(ranking.rest_total);
+  put_metrics(w, ranking.rest_metrics, points);
+  w.EndObject();
+}
+
+// The series: its points, then its groups as `order` ranks them, and once more for each of `orders` (`rankings`, which is only there when some
+// were asked). A series grouped by a dimension that is filtered shows the values that were chosen, in their order (a value without a request is a
+// line of zeros), whatever the metric; else the 8 largest groups by the metric over the window (the same total: the smaller id first), and the others
+// summed in `rest`: a group that has none of that metric is one of them, even when there are fewer than 8 (the results that are not errors, when the
+// errors rank). The groups are counted once, from the tally, and each ranking sorts the same counts. `id_of` names a group, `label_of` a group by its id.
+void put_series(McpJsonWriter& w, const Tally& t, const std::string& order, const std::vector<std::string>& orders,
+                const std::vector<std::string>& chosen, const std::function<std::string(size_t)>& id_of,
                 const std::function<std::string(const std::string&)>& label_of) {
   const size_t points = t.window.points;
-  // The groups that have requests, by id.
+  // The groups that have requests, by id, with their total of each metric over the window (the requests come first).
   struct Counted {
     std::string id;
-    uint64_t total = 0;
+    std::array<uint64_t, kMetrics> sums{};
     const std::vector<uint64_t>* metrics = nullptr;
   };
   std::vector<Counted> counted;
@@ -681,39 +735,49 @@ void put_series(McpJsonWriter& w, const Tally& t, const std::vector<std::string>
     if (metrics.empty()) continue;
     Counted item;
     item.id = id_of(group);
-    for (size_t point = 0; point < points; ++point) item.total += metrics[point];  // the requests come first
+    for (size_t metric = 0; metric < kMetrics; ++metric) {
+      for (size_t point = 0; point < points; ++point) item.sums[metric] += metrics[metric * points + point];
+    }
     item.metrics = &metrics;
     counted.push_back(std::move(item));
   }
-  std::vector<SeriesGroup> groups;
-  SeriesGroup rest;
-  rest.metrics.assign(kMetrics * points, 0);
-  size_t folded = 0;
-  const auto show = [&](const std::string& id, const Counted* item) {
-    SeriesGroup group;
-    group.id = id;
-    group.label = label_of(id);
-    group.total = item ? item->total : 0;
-    group.metrics = item ? *item->metrics : std::vector<uint64_t>(kMetrics * points, 0);
-    groups.push_back(std::move(group));
-  };
-  if (!chosen.empty()) {
-    for (const auto& id : chosen) {
-      const auto it = std::find_if(counted.begin(), counted.end(), [&](const Counted& item) { return item.id == id; });
-      show(id, it == counted.end() ? nullptr : &*it);
+  const std::vector<uint64_t> zeros(kMetrics * points, 0);  // a value that was chosen and has no request
+  const auto rank = [&](const std::string& by) {
+    const size_t metric = order_metric(by);
+    Ranking ranking;
+    ranking.rest_metrics.assign(kMetrics * points, 0);
+    const auto show = [&](const std::string& id, const Counted* item) {
+      Ranking::Shown group;
+      group.id = id;
+      group.label = label_of(id);
+      group.total = item ? item->sums[0] : 0;
+      group.metrics = item ? item->metrics : &zeros;
+      ranking.groups.push_back(std::move(group));
+    };
+    if (!chosen.empty()) {
+      for (const auto& id : chosen) {
+        const auto it = std::find_if(counted.begin(), counted.end(), [&](const Counted& item) { return item.id == id; });
+        show(id, it == counted.end() ? nullptr : &*it);
+      }
+      return ranking;
     }
-  } else {
-    std::sort(counted.begin(), counted.end(), [](const Counted& a, const Counted& b) { return a.total != b.total ? a.total > b.total : a.id < b.id; });
-    for (size_t i = 0; i < counted.size(); ++i) {
-      if (i < kSeriesGroups) {
-        show(counted[i].id, &counted[i]);
+    std::vector<const Counted*> sorted;
+    sorted.reserve(counted.size());
+    for (const auto& item : counted) sorted.push_back(&item);
+    std::sort(sorted.begin(), sorted.end(), [&](const Counted* a, const Counted* b) {
+      return a->sums[metric] != b->sums[metric] ? a->sums[metric] > b->sums[metric] : a->id < b->id;
+    });
+    for (size_t i = 0; i < sorted.size(); ++i) {
+      if (i < kSeriesGroups && sorted[i]->sums[metric] != 0) {
+        show(sorted[i]->id, sorted[i]);
         continue;
       }
-      ++folded;
-      rest.total += counted[i].total;
-      for (size_t m = 0; m < kMetrics * points; ++m) rest.metrics[m] += (*counted[i].metrics)[m];
+      ++ranking.folded;
+      ranking.rest_total += sorted[i]->sums[0];
+      for (size_t m = 0; m < kMetrics * points; ++m) ranking.rest_metrics[m] += (*sorted[i]->metrics)[m];
     }
-  }
+    return ranking;
+  };
   w.Key("series");
   w.StartObject();
   w.Key("step"); w.Int64(t.window.step);
@@ -721,23 +785,18 @@ void put_series(McpJsonWriter& w, const Tally& t, const std::vector<std::string>
   w.StartArray();
   for (size_t i = 0; i < points; ++i) put(w, mcp_iso_utc(t.window.from + static_cast<int64_t>(i) * t.window.step));
   w.EndArray();
-  w.Key("groups");
-  w.StartArray();
-  for (const auto& group : groups) {
+  put_ranking(w, rank(order), points);
+  if (!orders.empty()) {
+    w.Key("rankings");
     w.StartObject();
-    w.Key("id"); put(w, group.id);
-    w.Key("label"); put(w, group.label);
-    w.Key("total"); w.Uint64(group.total);
-    put_metrics(w, group.metrics, points);
+    for (const auto& name : orders) {
+      w.Key(name.c_str());
+      w.StartObject();
+      put_ranking(w, rank(name), points);
+      w.EndObject();
+    }
     w.EndObject();
   }
-  w.EndArray();
-  w.Key("rest");
-  w.StartObject();
-  w.Key("groups"); w.Uint64(folded);
-  w.Key("total"); w.Uint64(rest.total);
-  put_metrics(w, rest.metrics, points);
-  w.EndObject();
   w.EndObject();
 }
 
@@ -1025,21 +1084,22 @@ std::optional<McpValidationError> mcp_usage_overview_check(McpUsageOverviewQuery
       query->group != "instance") {
     return bad("group", "invalid", "group must be key, method, client, result, type or instance");
   }
-  const auto check = [&](const char* field, std::vector<std::string>* values, bool (*valid)(const std::string&),
-                         const char* rule) -> std::optional<McpValidationError> {
+  if (!valid_order(query->order)) return bad("order", "invalid", "order must be requests, errors, refused, calls or bytes");
+  const auto check = [&](const char* field, std::vector<std::string>* values, bool (*valid)(const std::string&), const char* rule,
+                         size_t most = kMcpUsageOverviewMaxValues) -> std::optional<McpValidationError> {
     std::vector<std::string> once;
     for (auto& value : *values) {
       if (!listed(once, value)) once.push_back(std::move(value));
     }
     *values = std::move(once);
-    if (values->size() > kMcpUsageOverviewMaxValues) {
-      return bad(field, "too_many", std::string(field) + " takes at most " + std::to_string(kMcpUsageOverviewMaxValues) + " values");
-    }
+    if (values->size() > most) return bad(field, "too_many", std::string(field) + " takes at most " + std::to_string(most) + " values");
     for (const auto& value : *values) {
       if (!valid(value)) return bad(field, "invalid", std::string(field) + " must be " + rule);
     }
     return std::nullopt;
   };
+  // The orders of the rankings: at most the 5 that there are, each one once (a sixth value cannot be one of them: the number is checked first).
+  if (const auto error = check("orders", &query->orders, valid_order, "requests, errors, refused, calls or bytes", kOrders)) return error;
   if (const auto error = check("key", &query->keys, [](const std::string& v) { return mcp_valid_key_id(v); }, "the id of a key")) return error;
   if (const auto error = check("method", &query->methods, [](const std::string& v) { return valid_method(v); }, "a tool or a method of the protocol (A-Z a-z 0-9 _ /, at most 64)")) return error;
   if (const auto error = check("client", &query->clients, [](const std::string& v) { return valid_client(v); }, "a client name (printable ASCII, 1 to 64 bytes)")) return error;
@@ -1476,6 +1536,7 @@ void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& que
   w.StartObject();
   put_head(w, window, now, since(), options_.retention_days);
   w.Key("group"); put(w, query.group);
+  w.Key("order"); put(w, query.order);
   w.Key("filters");
   w.StartObject();
   w.Key("key"); put_strings(w, query.keys);
@@ -1519,7 +1580,7 @@ void McpUsage::write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& que
       const auto it = key_names.find(id);
       return it == key_names.end() ? id : it->second;
     };
-    put_series(w, tally, *chosen, id_of, label_of);
+    put_series(w, tally, query.order, query.orders, *chosen, id_of, label_of);
   }
   put_facets(w, tally, query, live, known, source_of, limit);
   w.EndObject();

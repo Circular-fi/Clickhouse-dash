@@ -129,10 +129,17 @@ struct McpUsageInstance {
   std::string reason;
 };
 
-// The parameters of GET /api/mcp/usage/overview (its window apart): what the series is grouped by, and the filters. A value
-// of a filter keeps the requests that have it; the values of a dimension are OR, the dimensions are AND.
+// The parameters of GET /api/mcp/usage/overview (its window apart): what the series is grouped by, the metric that ranks its groups, and the
+// filters. A value of a filter keeps the requests that have it; the values of a dimension are OR, the dimensions are AND.
 struct McpUsageOverviewQuery {
   std::string group = "method";  // key, method, client, result, type or instance
+  // The metric whose total over the window ranks the groups of the series when its dimension is not filtered (the 8 largest are shown, the others
+  // are summed in `rest`): requests, errors, refused (the 429 and the refusals before the reading), calls or bytes.
+  std::string order = "requests";
+  // More metrics to rank by, in the same read: the series then has `rankings`, one member for each of them (in this order), made as `groups` and
+  // `rest` are for `order`. A page that draws a chart for each metric asks for all of them at once. A value that is repeated counts once, at most
+  // 5 (the orders that there are). Empty: no `rankings`, and the answer is the one of `order` alone.
+  std::vector<std::string> orders;
   std::vector<std::string> keys;       // the ids of keys
   std::vector<std::string> methods;    // a tool or a method of the protocol: [A-Za-z0-9_/]{1,64}
   std::vector<std::string> clients;    // a client name: printable ASCII, 1 to 64 bytes, no space at either end
@@ -154,7 +161,7 @@ struct McpUsageDetailQuery {
 };
 
 // The rules of the parameters of the overview: a value that is repeated counts once, then each one is checked. Nullopt when
-// they hold; else the field and the reason (`invalid`, or `too_many` past 20 values) of the 400.
+// they hold; else the field and the reason (`invalid`, or `too_many` past 20 values, 5 for `orders`) of the 400.
 std::optional<McpValidationError> mcp_usage_overview_check(McpUsageOverviewQuery* query);
 
 class McpUsage {
@@ -196,8 +203,9 @@ public:
                     const McpUsageDetailQuery& query = {}) const;
   // GET /api/mcp/usage/overview: the requests of every key in a window, cut by the filters of `query` (checked by
   // mcp_usage_overview_check): the totals and the series with all of them, and each facet (the keys, the methods, the clients, the
-  // instances, the results, the types) with all of them but its own. The clients are those of the cells of the window; their versions and
-  // their last sight come from the clients that the keys of the filter saw. `live` names the keys that exist. One entry at a time under the
+  // instances, the results, the types) with all of them but its own. The series ranks its groups by `query.order`, and once more by each of
+  // `query.orders` (`rankings`) from the same counts: the cells are walked once. The clients are those of the cells of the window; their versions
+  // and their last sight come from the clients that the keys of the filter saw. `live` names the keys that exist. One entry at a time under the
   // lock, as save() does.
   void write_overview(McpJsonWriter& w, const McpUsageOverviewQuery& query, const std::vector<McpUsageKeyRef>& live,
                       const McpUsageWindow& window, int64_t now) const;

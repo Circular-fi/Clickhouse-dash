@@ -1083,10 +1083,11 @@ uint64_t usage_sum(const rapidjson::Value& values) {
   return sum;
 }
 
-// What every answer holds: the groups and the rest add up to the totals, for each of the five metrics, at each point and in all; the
+// What every answer holds: the groups and the rest add up to the totals, for each of the six metrics, at each point and in all; the
 // points are the ones of the window, a step apart, and the step is a number of seconds. Returns the requests at each point.
 std::vector<uint64_t> check_series(const rapidjson::Value& doc) {
-  const char* metrics[] = {"requests", "errors", "calls", "duration_ms_sum", "bytes"};
+  const char* metrics[] = {"requests", "errors", "calls", "duration_ms_sum", "bytes", "refused"};
+  const size_t metric_count = sizeof(metrics) / sizeof(metrics[0]);
   const auto& series = doc["series"];
   const size_t points = series["t"].Size();
   CHECK(series["step"].IsInt64());
@@ -1102,10 +1103,10 @@ std::vector<uint64_t> check_series(const rapidjson::Value& doc) {
     if (p > 0) CHECK_EQ(t - before, step);
     before = t;
   }
-  uint64_t at[5][400] = {};  // 365 points at most
+  uint64_t at[metric_count][400] = {};  // 365 points at most
   uint64_t all = 0;
   const auto add = [&](const rapidjson::Value& group) {
-    for (size_t m = 0; m < 5; ++m) {
+    for (size_t m = 0; m < metric_count; ++m) {
       CHECK_EQ(group[metrics[m]].Size(), static_cast<rapidjson::SizeType>(points));
       for (size_t p = 0; p < points && p < group[metrics[m]].Size(); ++p) at[m][p] += group[metrics[m]][static_cast<rapidjson::SizeType>(p)].GetUint64();
     }
@@ -1115,11 +1116,12 @@ std::vector<uint64_t> check_series(const rapidjson::Value& doc) {
   for (const auto& group : series["groups"].GetArray()) add(group);
   add(series["rest"]);
   CHECK_EQ(all, doc["totals"]["requests"].GetUint64());
-  // The five metrics of the points add up to the tiles (the time of the calls, to the average of the tile).
-  uint64_t sums[5] = {};
+  // The six metrics of the points add up to the tiles (the time of the calls, to the average of the tile; the refusals, to the 429 and the
+  // requests that were refused before they were read).
+  uint64_t sums[metric_count] = {};
   std::vector<uint64_t> requests;
   for (size_t p = 0; p < points; ++p) {
-    for (size_t m = 0; m < 5; ++m) sums[m] += at[m][p];
+    for (size_t m = 0; m < metric_count; ++m) sums[m] += at[m][p];
     requests.push_back(at[0][p]);
   }
   const auto& totals = doc["totals"];
@@ -1127,6 +1129,7 @@ std::vector<uint64_t> check_series(const rapidjson::Value& doc) {
   CHECK_EQ(sums[1], totals["errors"].GetUint64());
   CHECK_EQ(sums[2], totals["calls"].GetUint64());
   CHECK_EQ(sums[4], totals["bytes"].GetUint64());
+  CHECK_EQ(sums[5], totals["rate_limited"].GetUint64() + totals["rejected"].GetUint64());
   if (sums[2] == 0) {
     CHECK(totals["duration_ms_avg"].IsNull());
     CHECK_EQ(sums[3], uint64_t(0));
@@ -1134,6 +1137,27 @@ std::vector<uint64_t> check_series(const rapidjson::Value& doc) {
     CHECK_EQ(totals["duration_ms_avg"].GetUint64(), (sums[3] + sums[2] / 2) / sums[2]);
   }
   return requests;
+}
+
+// The names of the members of an object, in their order.
+std::vector<std::string> usage_members(const rapidjson::Value& object) {
+  std::vector<std::string> out;
+  for (auto it = object.MemberBegin(); it != object.MemberEnd(); ++it) out.push_back(it->name.GetString());
+  return out;
+}
+
+// What a ranking of the series (`series.rankings.<order>`) holds: the counts of the series, ranked another way. At each point and for each of
+// the six metrics its groups and its `rest` add up to the tiles, as the ones of the series do (check_series, on a copy that has the ranking
+// in place of them).
+void check_ranking(const rapidjson::Value& doc, const char* order) {
+  rapidjson::Document copy;
+  copy.CopyFrom(doc, copy.GetAllocator());
+  const auto& ranking = doc["series"]["rankings"][order];
+  CHECK(ranking.IsObject());
+  CHECK(usage_members(ranking) == std::vector<std::string>({"groups", "rest"}));  // the step and the points are those of the series
+  copy["series"]["groups"].CopyFrom(ranking["groups"], copy.GetAllocator());
+  copy["series"]["rest"].CopyFrom(ranking["rest"], copy.GetAllocator());
+  check_series(copy);
 }
 
 // What every answer holds without a filter: each facet adds up to the requests.
@@ -2123,6 +2147,7 @@ void test_usage_overview() {
     CHECK(!doc.HasMember("persisted"));
     CHECK_EQ(doc["retention_days"].GetInt64(), int64_t(30));
     CHECK_EQ(std::string(doc["group"].GetString()), std::string("method"));
+    CHECK_EQ(std::string(doc["order"].GetString()), std::string("requests"));
     CHECK(!doc.HasMember("split"));
     for (const char* dimension : {"key", "method", "client", "instance", "result", "type"}) {
       CHECK(doc["filters"][dimension].IsArray());
@@ -2181,7 +2206,7 @@ void test_usage_overview() {
     CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), uint64_t(0));
     CHECK_EQ(doc["series"]["rest"]["total"].GetUint64(), uint64_t(0));
     for (const auto& group : doc["series"]["groups"].GetArray()) CHECK_EQ(std::string(group["id"].GetString()), std::string(group["label"].GetString()));
-    // The five metrics of a group at each point. list_hosts, the largest: 3 days ago k1 2 calls, yesterday the deleted key 4, today k1 3
+    // The metrics of a group at each point. list_hosts, the largest: 3 days ago k1 2 calls, yesterday the deleted key 4, today k1 3
     // and k2 2.
     const auto& hosts_group = doc["series"]["groups"][0];
     CHECK_EQ(hosts_group["total"].GetUint64(), uint64_t(11));
@@ -2212,6 +2237,14 @@ void test_usage_overview() {
     CHECK_EQ(unread_group["requests"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(2));
     CHECK_EQ(unread_group["errors"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(0));
     CHECK_EQ(unread_group["bytes"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(110));
+    // The refusals are a metric of their own, the 429 and what was refused before it was read: unread has the two that there are, and no other
+    // group has one.
+    CHECK_EQ(unread_group["refused"][static_cast<rapidjson::SizeType>(now_point)].GetUint64(), uint64_t(2));
+    CHECK_EQ(usage_sum(unread_group["refused"]), uint64_t(2));
+    for (const auto& group : doc["series"]["groups"].GetArray()) {
+      if (std::string(group["id"].GetString()) != "unread") CHECK_EQ(usage_sum(group["refused"]), uint64_t(0));
+    }
+    CHECK_EQ(usage_sum(doc["series"]["rest"]["refused"]), uint64_t(0));
 
     // The keys: the most requests first, the deleted key with when it was deleted.
     CHECK(usage_names(doc["keys"], "id") == names({"k1", "k2", "gone"}));
@@ -2431,7 +2464,7 @@ void test_usage_overview() {
     CHECK_EQ(doc["totals"]["active_keys"].GetUint64(), uint64_t(0));
     CHECK(usage_names(doc["series"]["groups"], "id") == names({"list_hosts"}));
     CHECK_EQ(doc["series"]["groups"][0]["total"].GetUint64(), uint64_t(0));
-    for (const char* metric : {"requests", "errors", "calls", "duration_ms_sum", "bytes"}) CHECK_EQ(doc["series"]["groups"][0][metric].Size(), 56u);
+    for (const char* metric : {"requests", "errors", "calls", "duration_ms_sum", "bytes", "refused"}) CHECK_EQ(doc["series"]["groups"][0][metric].Size(), 56u);
     check_series(doc);
     // methods: the requests that ended with timeout (any method), and list_hosts, which was chosen
     CHECK(usage_names(doc["methods"], "method") == names({"run_query", "list_hosts"}));
@@ -2595,7 +2628,7 @@ void test_usage_overview() {
     check_series(by_type);
   }
 
-  // A group by client: the id and the label are the name, the largest first; each group has the five metrics.
+  // A group by client: the id and the label are the name, the largest first; each group has the six metrics.
   {
     const auto doc = usage_overview(usage, live, "7d", now, usage_query("client"));
     CHECK_EQ(std::string(doc["group"].GetString()), std::string("client"));
@@ -2637,6 +2670,242 @@ void test_usage_overview() {
     const auto day_doc = usage_overview(usage, live, "24h", now, usage_query("client"));
     CHECK(usage_names(day_doc["series"]["groups"], "id") == names({"claude-code", "claude-ai"}));
     check_series(day_doc);
+  }
+
+  // The order of the groups: the metric that ranks them is `order` (the requests when it is not asked). The groups are the 8 with the most of it
+  // (the same total: the smaller id first), the others are in `rest`, and a group with none of it is in `rest` too, however few groups there
+  // are: the codes that are not errors, when the errors rank. The `total` of a group stays its requests, and the order moves no figure.
+  {
+    const auto ranked = [&](const std::string& group, const std::string& order) {
+      McpUsageOverviewQuery query = usage_query(group);
+      query.order = order;
+      return usage_overview(usage, live, "7d", now, query);
+    };
+    // What a series shows: the ids of its groups in their order, then how many groups are in `rest` and their requests.
+    const auto shows = [&](const rapidjson::Value& doc, const std::vector<std::string>& ids, uint64_t folded, uint64_t folded_requests) {
+      CHECK(usage_names(doc["series"]["groups"], "id") == ids);
+      CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), folded);
+      CHECK_EQ(doc["series"]["rest"]["total"].GetUint64(), folded_requests);
+      CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(23));
+      check_series(doc);
+    };
+    // The requests are the default, and the answer says the order next to the group.
+    shows(ranked("method", "requests"),
+          names({"list_hosts", "run_query", "initialize", "unread", "notifications/initialized", "other", "resources/list", "tools/list"}), 0, 0);
+    CHECK_EQ(std::string(ranked("method", "requests")["order"].GetString()), std::string("requests"));
+    CHECK(usage_overview(usage, live, "7d", now, usage_query("method"))["series"] == ranked("method", "requests")["series"]);
+
+    // By method, the errors: run_query has 2 (a timeout, a failed query) and resources/list 1; the 6 other methods are `rest`.
+    const auto by_errors = ranked("method", "errors");
+    CHECK_EQ(std::string(by_errors["order"].GetString()), std::string("errors"));
+    CHECK_EQ(std::string(by_errors["group"].GetString()), std::string("method"));
+    shows(by_errors, names({"run_query", "resources/list"}), 6, 18);
+    CHECK_EQ(by_errors["series"]["groups"][0]["total"].GetUint64(), uint64_t(4));  // its requests, not its errors
+    CHECK_EQ(usage_sum(by_errors["series"]["groups"][0]["errors"]), uint64_t(2));
+    CHECK_EQ(usage_sum(by_errors["series"]["rest"]["errors"]), uint64_t(0));
+    // By result: the error codes with the most errors first (the same number: by name), and ok, which has none, in `rest` with the refusals.
+    shows(ranked("result", "errors"), names({"query_failed", "rpc_error_32601", "timeout"}), 3, 20);
+    shows(ranked("result", "refused"), names({"415_unsupported_media_type", "429_rate_limited"}), 4, 21);
+    // By key, client and type.
+    shows(ranked("key", "errors"), names({"k1", "k2"}), 1, 4);
+    shows(ranked("client", "errors"), names({"claude-code", "claude-ai"}), 1, 6);
+    shows(ranked("type", "errors"), names({"call", "request"}), 2, 2);
+
+    // The refusals, the 429 and what was refused before it was read: unread has the two, k1 the 429 and k2 the other.
+    const auto by_refused = ranked("method", "refused");
+    shows(by_refused, names({"unread"}), 7, 21);
+    CHECK_EQ(usage_sum(by_refused["series"]["groups"][0]["refused"]), uint64_t(2));
+    CHECK_EQ(by_refused["series"]["groups"][0]["total"].GetUint64(), uint64_t(2));
+    CHECK_EQ(usage_sum(by_refused["series"]["rest"]["refused"]), uint64_t(0));
+    CHECK_EQ(usage_sum(by_refused["series"]["rest"]["requests"]), uint64_t(21));
+    shows(ranked("key", "refused"), names({"k1", "k2"}), 1, 4);  // the same number: by name, and the deleted key has none
+    shows(ranked("client", "refused"), names({"claude-ai", "claude-code"}), 1, 6);
+    shows(ranked("type", "refused"), names({"limited", "rejected"}), 2, 21);
+
+    // The calls (the protocol requests have none), and the bytes (the same number: by name, and no byte is `rest`).
+    shows(ranked("method", "calls"), names({"list_hosts", "run_query"}), 6, 8);
+    shows(ranked("key", "calls"), names({"k1", "gone", "k2"}), 0, 0);  // the deleted key made 4 calls, k2 3
+    shows(ranked("client", "calls"), names({"agent", "claude-code", "claude-ai"}), 0, 0);  // agent and claude-code have 6
+    shows(ranked("method", "bytes"), names({"run_query", "list_hosts", "initialize", "tools/list", "resources/list", "unread"}), 2, 2);
+    shows(ranked("type", "bytes"), names({"call", "request", "rejected", "limited"}), 0, 0);
+
+    // A dimension that is filtered keeps the values that were chosen, in their order, whatever the order and the figures.
+    for (const char* order : {"requests", "errors", "refused", "calls", "bytes"}) {
+      McpUsageOverviewQuery query = usage_query("method", {}, {"list_hosts", "run_query", "ping", "unread"});
+      query.order = order;
+      const auto doc = usage_overview(usage, live, "7d", now, query);
+      CHECK_EQ(std::string(doc["order"].GetString()), std::string(order));
+      CHECK(usage_names(doc["series"]["groups"], "id") == names({"list_hosts", "run_query", "ping", "unread"}));
+      CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), uint64_t(0));
+      CHECK_EQ(doc["series"]["rest"]["total"].GetUint64(), uint64_t(0));
+      CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(17));
+      check_series(doc);
+    }
+    // The order moves no figure of the answer but the series.
+    const auto plain = usage_overview(usage, live, "7d", now, usage_query("method"));
+    for (const char* order : {"errors", "refused", "calls", "bytes"}) {
+      const auto doc = ranked("method", order);
+      CHECK(doc["totals"] == plain["totals"]);
+      CHECK(doc["methods"] == plain["methods"]);
+      CHECK(doc["keys"] == plain["keys"]);
+      CHECK(doc["series"]["t"] == plain["series"]["t"]);
+    }
+  }
+
+  // The rankings: `orders` asks for the groups of more metrics in the same read (a chart for each metric). Each ranking is made as the `groups` and the
+  // `rest` of the series are for that order alone, from the same counts; the series keeps following `order`. Nothing asked, nothing added.
+  {
+    const auto asked = [&](const std::string& group, const std::string& order, std::vector<std::string> orders, std::vector<std::string> methods = {}) {
+      McpUsageOverviewQuery query = usage_query(group, {}, std::move(methods));
+      query.order = order;
+      query.orders = std::move(orders);
+      return usage_overview(usage, live, "7d", now, query);
+    };
+    const std::vector<std::string> every = {"requests", "errors", "refused", "calls", "bytes"};
+
+    // Without `orders` the series is what it was: its step, its points, its groups and its rest, and the answer does not name the orders.
+    const auto alone = asked("method", "requests", {});
+    CHECK(usage_members(alone["series"]) == names({"step", "t", "groups", "rest"}));
+    CHECK(!alone["series"].HasMember("rankings"));
+    CHECK(!alone.HasMember("orders"));
+    CHECK(usage_members(alone) == usage_members(asked("method", "requests", {"errors"})));  // the same members at the top: `rankings` is in the series
+
+    // One ranking: the series is the one of `order` still, and the ranking is the series of the other order.
+    {
+      const auto doc = asked("method", "requests", {"errors"});
+      CHECK(usage_members(doc["series"]) == names({"step", "t", "groups", "rest", "rankings"}));
+      CHECK(usage_members(doc["series"]["rankings"]) == names({"errors"}));
+      CHECK(doc["series"]["groups"] == alone["series"]["groups"]);
+      CHECK(doc["series"]["rest"] == alone["series"]["rest"]);
+      const auto by_errors = asked("method", "errors", {});
+      CHECK(doc["series"]["rankings"]["errors"]["groups"] == by_errors["series"]["groups"]);
+      CHECK(doc["series"]["rankings"]["errors"]["rest"] == by_errors["series"]["rest"]);
+      CHECK(usage_names(doc["series"]["rankings"]["errors"]["groups"], "id") == names({"run_query", "resources/list"}));
+      check_ranking(doc, "errors");
+      check_series(doc);
+      // Nothing else moves: the totals, the facets and the points.
+      CHECK(doc["totals"] == alone["totals"]);
+      CHECK(doc["methods"] == alone["methods"]);
+      CHECK(doc["keys"] == alone["keys"]);
+      CHECK(doc["series"]["t"] == alone["series"]["t"]);
+      CHECK(doc["series"]["step"] == alone["series"]["step"]);
+    }
+
+    // The series follows `order`, and the rankings are the other metrics: here the errors rank the series, and the rankings are the calls and the
+    // bytes (the ranking of the errors is not asked, so it is not there).
+    {
+      const auto doc = asked("method", "errors", {"calls", "bytes"});
+      CHECK(usage_names(doc["series"]["groups"], "id") == names({"run_query", "resources/list"}));
+      CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), uint64_t(6));
+      CHECK(usage_members(doc["series"]["rankings"]) == names({"calls", "bytes"}));
+      CHECK(usage_names(doc["series"]["rankings"]["calls"]["groups"], "id") == names({"list_hosts", "run_query"}));
+      CHECK(!doc["series"]["rankings"].HasMember("errors"));
+      check_series(doc);
+    }
+
+    // By method, the four metrics that the page draws next to the requests: each ranking has its own groups, the others summed in its `rest`.
+    {
+      const auto doc = asked("method", "requests", {"errors", "refused", "calls", "bytes"});
+      const auto& rankings = doc["series"]["rankings"];
+      CHECK(usage_members(rankings) == names({"errors", "refused", "calls", "bytes"}));
+      // The requests rank the series: the 8 methods, no `rest`.
+      CHECK(usage_names(doc["series"]["groups"], "id") ==
+            names({"list_hosts", "run_query", "initialize", "unread", "notifications/initialized", "other", "resources/list", "tools/list"}));
+      CHECK_EQ(doc["series"]["rest"]["groups"].GetUint64(), uint64_t(0));
+      // The errors: run_query has 2 (a timeout, a failed query) and resources/list 1.
+      CHECK(usage_names(rankings["errors"]["groups"], "id") == names({"run_query", "resources/list"}));
+      CHECK(usage_names(rankings["errors"]["groups"], "label") == names({"run_query", "resources/list"}));
+      CHECK_EQ(rankings["errors"]["groups"][0]["total"].GetUint64(), uint64_t(4));  // its requests, not its errors
+      CHECK_EQ(usage_sum(rankings["errors"]["groups"][0]["errors"]), uint64_t(2));
+      CHECK_EQ(rankings["errors"]["rest"]["groups"].GetUint64(), uint64_t(6));
+      CHECK_EQ(rankings["errors"]["rest"]["total"].GetUint64(), uint64_t(18));
+      CHECK_EQ(usage_sum(rankings["errors"]["rest"]["errors"]), uint64_t(0));
+      // The refusals (the 429 of k1 and the 415 of k2) are both `unread`.
+      CHECK(usage_names(rankings["refused"]["groups"], "id") == names({"unread"}));
+      CHECK_EQ(usage_sum(rankings["refused"]["groups"][0]["refused"]), uint64_t(2));
+      CHECK_EQ(rankings["refused"]["groups"][0]["total"].GetUint64(), uint64_t(2));
+      CHECK_EQ(rankings["refused"]["rest"]["groups"].GetUint64(), uint64_t(7));
+      CHECK_EQ(rankings["refused"]["rest"]["total"].GetUint64(), uint64_t(21));
+      CHECK_EQ(usage_sum(rankings["refused"]["rest"]["refused"]), uint64_t(0));
+      // The calls: the protocol requests have none.
+      CHECK(usage_names(rankings["calls"]["groups"], "id") == names({"list_hosts", "run_query"}));
+      CHECK_EQ(rankings["calls"]["rest"]["groups"].GetUint64(), uint64_t(6));
+      CHECK_EQ(rankings["calls"]["rest"]["total"].GetUint64(), uint64_t(8));
+      // The bytes: the methods that sent some, the most first.
+      CHECK(usage_names(rankings["bytes"]["groups"], "id") ==
+            names({"run_query", "list_hosts", "initialize", "tools/list", "resources/list", "unread"}));
+      CHECK_EQ(rankings["bytes"]["rest"]["groups"].GetUint64(), uint64_t(2));
+      CHECK_EQ(rankings["bytes"]["rest"]["total"].GetUint64(), uint64_t(2));
+      for (const char* order : {"errors", "refused", "calls", "bytes"}) check_ranking(doc, order);
+      check_series(doc);
+    }
+
+    // Every order for every group: each ranking is the series of that order alone, whichever the group, and adds up as a series does.
+    for (const char* group : {"key", "method", "client", "result", "type", "instance"}) {
+      const auto doc = asked(group, "requests", every);
+      CHECK(usage_members(doc["series"]["rankings"]) == every);
+      for (const auto& order : every) {
+        const auto by_order = asked(group, order, {});
+        CHECK(doc["series"]["rankings"][order.c_str()]["groups"] == by_order["series"]["groups"]);
+        CHECK(doc["series"]["rankings"][order.c_str()]["rest"] == by_order["series"]["rest"]);
+        check_ranking(doc, order.c_str());
+      }
+      CHECK(doc["series"]["rankings"]["requests"]["groups"] == doc["series"]["groups"]);  // the ranking of the order of the series is the series
+      CHECK(doc["series"]["rankings"]["requests"]["rest"] == doc["series"]["rest"]);
+      check_series(doc);
+    }
+    // The ranking of an order of its own is the same whatever the `order` of the series is.
+    for (const auto& order : every) {
+      const auto doc = asked("client", order, every);
+      CHECK(doc["series"]["groups"] == doc["series"]["rankings"][order.c_str()]["groups"]);
+      CHECK(doc["series"]["rest"] == doc["series"]["rankings"][order.c_str()]["rest"]);
+    }
+
+    // A value that is repeated counts once, and the members come in the order of the request.
+    {
+      const auto doc = asked("method", "requests", {"bytes", "errors", "bytes", "errors", "calls", "bytes"});
+      CHECK(usage_members(doc["series"]["rankings"]) == names({"bytes", "errors", "calls"}));
+      const auto reversed = asked("method", "requests", {"calls", "errors", "bytes"});
+      CHECK(usage_members(reversed["series"]["rankings"]) == names({"calls", "errors", "bytes"}));
+      CHECK(reversed["series"]["rankings"]["errors"] == doc["series"]["rankings"]["errors"]);
+    }
+
+    // A dimension that is filtered keeps the values that were chosen, in their order, in every ranking: the same groups for each order.
+    {
+      const auto doc = asked("method", "requests", every, {"list_hosts", "run_query", "ping", "unread"});
+      for (const auto& order : every) {
+        const auto& ranking = doc["series"]["rankings"][order.c_str()];
+        CHECK(usage_names(ranking["groups"], "id") == names({"list_hosts", "run_query", "ping", "unread"}));
+        CHECK(ranking["groups"] == doc["series"]["groups"]);
+        CHECK_EQ(ranking["rest"]["groups"].GetUint64(), uint64_t(0));
+        CHECK_EQ(ranking["rest"]["total"].GetUint64(), uint64_t(0));
+        CHECK_EQ(ranking["groups"][2]["total"].GetUint64(), uint64_t(0));  // ping: no request, a line of zeros
+        check_ranking(doc, order.c_str());
+      }
+      CHECK_EQ(doc["totals"]["requests"].GetUint64(), uint64_t(17));
+    }
+
+    // The longest window, with every order: 365 points for each metric of each group of each ranking.
+    {
+      McpUsageOptions year;
+      year.retention_days = 365;
+      McpUsage long_usage(year, now - 4 * day);
+      usage_scenario(long_usage, now);
+      McpUsageOverviewQuery query = usage_query("method");
+      query.orders = every;
+      const auto doc = usage_overview(long_usage, live, "365d", now, query);
+      CHECK_EQ(doc["series"]["t"].Size(), 365u);
+      CHECK_EQ(doc["series"]["step"].GetInt64(), int64_t(86400));
+      CHECK(usage_members(doc["series"]["rankings"]) == every);
+      for (const auto& order : every) {
+        check_ranking(doc, order.c_str());
+        for (const auto& group : doc["series"]["rankings"][order.c_str()]["groups"].GetArray()) {
+          for (const char* metric : {"requests", "errors", "calls", "duration_ms_sum", "bytes", "refused"}) CHECK_EQ(group[metric].Size(), 365u);
+        }
+      }
+      CHECK(usage_names(doc["series"]["rankings"]["refused"]["groups"], "id") == names({"unread"}));
+      check_series(doc);
+    }
   }
 
   // No usage at all: zeros, the four types, nothing else.
@@ -3195,6 +3464,79 @@ void test_usage_overview_caps() {
     check_series(everyone);
   }
 
+  // The same by the metric of `order`: the 8 with the most of it (the same total: the smaller id first) and the others in `rest`. Ten tools, whose
+  // errors rank them otherwise than their requests do: t8 ties with t5, t6 and t7 for the 8th place, and t0, which has requests, has no error.
+  {
+    McpUsage usage(options, now - day);
+    const int errors[] = {0, 3, 3, 5, 4, 2, 2, 2, 2, 6};
+    for (int i = 0; i < 10; ++i) {
+      const int well = 9 - i;  // the calls that went well, then the ones that did not
+      for (int n = 0; n < well + errors[i]; ++n) {
+        UsageCall call;
+        call.at = now;
+        call.tool = "t" + std::to_string(i);
+        if (n >= well) call.status = "failed";
+        usage_record(usage, call);
+      }
+    }
+    const auto names = [](const std::vector<std::string>& values) { return values; };
+    // The requests: t1 and t3 have 11, t2 10, t0 and t4 9, t5 and t9 6, t6 5, t7 4, t8 3.
+    const auto by_requests = usage_overview(usage, {"k1"}, "24h", now, usage_query("method"));
+    CHECK_EQ(by_requests["totals"]["requests"].GetUint64(), uint64_t(74));
+    CHECK_EQ(by_requests["totals"]["errors"].GetUint64(), uint64_t(29));
+    CHECK(usage_names(by_requests["series"]["groups"], "id") == names({"t1", "t3", "t2", "t0", "t4", "t5", "t9", "t6"}));
+    CHECK_EQ(by_requests["series"]["rest"]["groups"].GetUint64(), uint64_t(2));
+    CHECK_EQ(by_requests["series"]["rest"]["total"].GetUint64(), uint64_t(7));  // t7 and t8
+    check_series(by_requests);
+    // The errors: t9 has 6, t3 5, t4 4, t1 and t2 3, t5, t6, t7 and t8 2 (the 9th place: the smaller id wins), and t0 none.
+    McpUsageOverviewQuery query = usage_query("method");
+    query.order = "errors";
+    const auto by_errors = usage_overview(usage, {"k1"}, "24h", now, query);
+    CHECK_EQ(std::string(by_errors["order"].GetString()), std::string("errors"));
+    CHECK(usage_names(by_errors["series"]["groups"], "id") == names({"t9", "t3", "t4", "t1", "t2", "t5", "t6", "t7"}));
+    CHECK_EQ(by_errors["series"]["groups"][0]["total"].GetUint64(), uint64_t(6));  // the requests of t9 are its 6 errors
+    CHECK_EQ(by_errors["series"]["groups"][1]["total"].GetUint64(), uint64_t(11));  // t3: 5 errors out of 11
+    CHECK_EQ(by_errors["series"]["rest"]["groups"].GetUint64(), uint64_t(2));
+    CHECK_EQ(by_errors["series"]["rest"]["total"].GetUint64(), uint64_t(12));  // t8 (3) and t0 (9)
+    CHECK_EQ(by_errors["series"]["rest"]["errors"][95].GetUint64(), uint64_t(2));
+    CHECK_EQ(by_errors["series"]["rest"]["requests"][95].GetUint64(), uint64_t(12));
+    CHECK_EQ(by_errors["totals"]["requests"].GetUint64(), uint64_t(74));
+    check_series(by_errors);
+    // None of the metrics of the others: no refusal, and no byte.
+    CHECK_EQ(usage_sum(by_errors["series"]["rest"]["refused"]), uint64_t(0));
+    query.order = "refused";
+    const auto none = usage_overview(usage, {"k1"}, "24h", now, query);
+    CHECK_EQ(none["series"]["groups"].Size(), 0u);  // nobody has a refusal: every group is in `rest`
+    CHECK_EQ(none["series"]["rest"]["groups"].GetUint64(), uint64_t(10));
+    CHECK_EQ(none["series"]["rest"]["total"].GetUint64(), uint64_t(74));
+    check_series(none);
+    // The four other orders in one read: each ranking is the series of its order alone, the ties and the groups that have none of the metric
+    // included (t0 has no error; nobody has a refusal, and no call has a byte); the series itself stays the one of the requests.
+    query.order = "requests";
+    query.orders = {"errors", "refused", "calls", "bytes"};
+    const auto together = usage_overview(usage, {"k1"}, "24h", now, query);
+    CHECK(together["series"]["groups"] == by_requests["series"]["groups"]);
+    CHECK(together["series"]["rest"] == by_requests["series"]["rest"]);
+    CHECK(usage_members(together["series"]["rankings"]) == names({"errors", "refused", "calls", "bytes"}));
+    for (const char* order : {"errors", "refused", "calls", "bytes"}) {
+      McpUsageOverviewQuery one = usage_query("method");
+      one.order = order;
+      const auto by_order = usage_overview(usage, {"k1"}, "24h", now, one);
+      CHECK(together["series"]["rankings"][order]["groups"] == by_order["series"]["groups"]);
+      CHECK(together["series"]["rankings"][order]["rest"] == by_order["series"]["rest"]);
+      check_ranking(together, order);
+    }
+    CHECK(usage_names(together["series"]["rankings"]["errors"]["groups"], "id") == names({"t9", "t3", "t4", "t1", "t2", "t5", "t6", "t7"}));
+    CHECK_EQ(together["series"]["rankings"]["errors"]["rest"]["groups"].GetUint64(), uint64_t(2));
+    CHECK_EQ(together["series"]["rankings"]["errors"]["rest"]["total"].GetUint64(), uint64_t(12));
+    CHECK_EQ(together["series"]["rankings"]["refused"]["groups"].Size(), 0u);
+    CHECK_EQ(together["series"]["rankings"]["refused"]["rest"]["groups"].GetUint64(), uint64_t(10));
+    CHECK_EQ(together["series"]["rankings"]["bytes"]["groups"].Size(), 0u);
+    CHECK_EQ(together["series"]["rankings"]["bytes"]["rest"]["total"].GetUint64(), uint64_t(74));
+    CHECK(usage_names(together["series"]["rankings"]["calls"]["groups"], "id") == names({"t1", "t3", "t2", "t0", "t4", "t5", "t9", "t6"}));
+    check_series(together);
+  }
+
   // At most 200 rows for each facet, the clients too (the values that were chosen are always there); `omitted` counts what was cut.
   {
     McpUsage usage(options, now - day);
@@ -3282,6 +3624,85 @@ void test_usage_overview_check() {
     if (error) CHECK_EQ(error->message, std::string("group must be key, method, client, result, type or instance"));
   }
 
+  // The order that ranks the groups of the series: one of five metrics, the requests when it is not given. It is the same for every group.
+  CHECK_EQ(McpUsageOverviewQuery{}.order, std::string("requests"));
+  const auto ordered = [](const std::string& group, const std::string& order, std::vector<std::string> keys = {}) {
+    McpUsageOverviewQuery query = usage_query(group, std::move(keys));
+    query.order = order;
+    return query;
+  };
+  for (const char* group : {"key", "method", "client", "result", "type", "instance"}) {
+    for (const char* order : {"requests", "errors", "refused", "calls", "bytes"}) CHECK(!check(ordered(group, order)).has_value());
+  }
+  for (const char* order : {"", "Requests", "ERRORS", "request", "error", "refuse", "call", "byte", " calls", "calls ", "requests,errors", "none", "total",
+                            "duration_ms_sum", "duration_ms_avg", "rate_limited", "rejected", "limited"}) {
+    fails(ordered("method", order), "order", "invalid");
+  }
+  {
+    McpUsageOverviewQuery query = ordered("method", "nope");
+    const auto error = mcp_usage_overview_check(&query);
+    CHECK(error.has_value());
+    if (error) CHECK_EQ(error->message, std::string("order must be requests, errors, refused, calls or bytes"));
+  }
+  fails(ordered("nope", "nope"), "group", "invalid");                  // the group comes first
+  fails(ordered("key", "nope", {"Bad Key"}), "order", "invalid");      // then the order, before the filters
+  fails(ordered("key", "errors", {"Bad Key"}), "key", "invalid");
+
+  // The orders of the rankings of the series: the five metrics, each one once (so at most 5), in the order of the request. None is the default.
+  CHECK(McpUsageOverviewQuery{}.orders.empty());
+  const auto ranked_by = [](std::vector<std::string> orders, std::vector<std::string> keys = {}) {
+    McpUsageOverviewQuery query = usage_query("method", std::move(keys));
+    query.orders = std::move(orders);
+    return query;
+  };
+  CHECK(!check(ranked_by({})).has_value());
+  for (const char* order : {"requests", "errors", "refused", "calls", "bytes"}) CHECK(!check(ranked_by({order})).has_value());
+  CHECK(!check(ranked_by({"requests", "errors", "refused", "calls", "bytes"})).has_value());
+  CHECK(!check(ranked_by({"bytes", "calls", "refused", "errors", "requests", "bytes", "calls"})).has_value());  // the repeats count once: 5 values
+  for (const char* group : {"key", "method", "client", "result", "type", "instance"}) {
+    McpUsageOverviewQuery query = usage_query(group);
+    query.orders = {"errors", "refused", "calls", "bytes"};
+    CHECK(!check(query).has_value());
+  }
+  for (const char* order : {"", "Requests", "ERRORS", "request", "error", "refuse", "call", "byte", " calls", "calls ", "requests,errors", "none", "total",
+                            "duration_ms_sum", "duration_ms_avg", "rate_limited", "rejected", "limited"}) {
+    fails(ranked_by({order}), "orders", "invalid");
+    fails(ranked_by({"errors", order}), "orders", "invalid");
+  }
+  {
+    McpUsageOverviewQuery query = ranked_by({"errors", "nope"});
+    const auto error = mcp_usage_overview_check(&query);
+    CHECK(error.has_value());
+    if (error) CHECK_EQ(error->message, std::string("orders must be requests, errors, refused, calls or bytes"));
+  }
+  // Past 5 values (the repeats are not counted) it is too many, and that is said before the values are checked.
+  fails(ranked_by({"requests", "errors", "refused", "calls", "bytes", "nope"}), "orders", "too_many");
+  fails(ranked_by({"requests", "errors", "refused", "calls", "bytes", "duration_ms_sum"}), "orders", "too_many");
+  fails(ranked_by({"a", "b", "c", "d", "e", "f"}), "orders", "too_many");
+  {
+    McpUsageOverviewQuery query = ranked_by({"a", "b", "c", "d", "e", "f"});
+    const auto error = mcp_usage_overview_check(&query);
+    CHECK(error.has_value());
+    if (error) CHECK_EQ(error->message, std::string("orders takes at most 5 values"));
+  }
+  {
+    McpUsageOverviewQuery query = ranked_by({"bytes", "errors", "bytes", "calls", "errors", "requests", "bytes"});
+    CHECK(!mcp_usage_overview_check(&query).has_value());
+    CHECK(query.orders == std::vector<std::string>({"bytes", "errors", "calls", "requests"}));  // the first occurrence, in the order of the request
+  }
+  // The group comes first, then the order, then the orders, then the filters.
+  {
+    McpUsageOverviewQuery query = usage_query("nope");
+    query.order = "nope";
+    query.orders = {"nope"};
+    fails(query, "group", "invalid");
+    query = ordered("method", "nope");
+    query.orders = {"nope"};
+    fails(query, "order", "invalid");
+  }
+  fails(ranked_by({"nope"}, {"Bad Key"}), "orders", "invalid");
+  fails(ranked_by({"errors"}, {"Bad Key"}), "key", "invalid");
+
   CHECK(!check(usage_query("key", {"all-data", "ui_0a1b2c3d4e5f", "a"})).has_value());
   for (const char* key : {"", "Bad Key", "ui_xyz", "ui_0A1B2C3D4E5F", "ui_0a1b2c3d4e5", "-lead", "a/b", "has space"}) fails(usage_query("key", {key}), "key", "invalid");
   fails(usage_query("key", {std::string(33, 'a')}), "key", "invalid");
@@ -3353,7 +3774,7 @@ void test_usage_overview_check() {
     CHECK(query.clients == std::vector<std::string>({"x", "y"}));
     CHECK(query.instances == std::vector<std::string>({"i2", "i1"}));
   }
-  // The first rule that fails is the answer: the group, then the keys, the methods, the clients, the instances, the results and the types.
+  // The first rule that fails is the answer: the group, the order, the orders, then the keys, the methods, the clients, the instances, the results and the types.
   fails(usage_query("nope", {"Bad Key"}, {"has space"}), "group", "invalid");
   fails(usage_query("key", {"Bad Key"}, {"has space"}, {"A"}, {"x"}, {" x"}), "key", "invalid");
   fails(usage_query("key", {}, {"has space"}, {"A"}, {"x"}, {" x"}), "method", "invalid");
@@ -4730,7 +5151,7 @@ void test_analysis_protocol() {
     CHECK(properties(*by_name["mcp_analysis_my_limits"]).empty());  // no argument, and no `host`: the key has one
     CHECK(properties(*by_name["mcp_analysis_my_usage"]) == std::set<std::string>({"window", "series", "include_cost", "instance"}));
     CHECK(properties(*by_name["mcp_analysis_all_usage"]) ==
-          std::set<std::string>({"window", "group", "key", "method", "client", "instance", "series", "limit"}));
+          std::set<std::string>({"window", "group", "order", "key", "method", "client", "instance", "series", "limit"}));
     for (const char* name : {"mcp_analysis_my_usage", "mcp_analysis_all_usage"}) {
       const auto& props = (*by_name[name])["inputSchema"]["properties"];
       CHECK(list_of(props["window"]["enum"]) == names({"1h", "6h", "24h", "7d", "30d", "90d", "365d"}));
@@ -4745,6 +5166,9 @@ void test_analysis_protocol() {
     const auto& all = (*by_name["mcp_analysis_all_usage"])["inputSchema"]["properties"];
     CHECK(list_of(all["group"]["enum"]) == names({"key", "method", "client", "instance"}));
     CHECK_EQ(std::string(all["group"]["default"].GetString()), std::string("key"));
+    CHECK_EQ(std::string(all["order"]["type"].GetString()), std::string("string"));
+    CHECK(list_of(all["order"]["enum"]) == names({"requests", "errors", "refused", "calls", "bytes"}));
+    CHECK_EQ(std::string(all["order"]["default"].GetString()), std::string("requests"));
     CHECK_EQ(all["limit"]["minimum"].GetInt(), 1);
     CHECK_EQ(all["limit"]["maximum"].GetInt(), 200);
     CHECK_EQ(all["limit"]["default"].GetInt(), 20);
@@ -5391,6 +5815,7 @@ void test_analysis_tools() {
     CHECK_EQ(analysis.overview_calls, 1);
     CHECK_EQ(analysis.window, std::string("24h"));
     CHECK_EQ(analysis.overview.group, std::string("key"));
+    CHECK_EQ(analysis.overview.order, std::string("requests"));
     CHECK(!analysis.overview.series);
     CHECK_EQ(analysis.overview.limit, size_t(20));
     CHECK(analysis.overview.keys.empty() && analysis.overview.methods.empty() && analysis.overview.clients.empty());
@@ -5399,11 +5824,12 @@ void test_analysis_tools() {
     CHECK(o.host.empty());
     // Everything that it takes. A value that is repeated counts once.
     doc = call(tools, reader, "mcp_analysis_all_usage",
-               R"({"window":"7d","group":"instance","key":["ci-bot","ui_0a1b2c3d4e5f","ci-bot"],"method":["list_hosts","tools/list"],)"
+               R"({"window":"7d","group":"instance","order":"refused","key":["ci-bot","ui_0a1b2c3d4e5f","ci-bot"],"method":["list_hosts","tools/list"],)"
                R"("client":["claude-code"],"instance":["chdash-0"],"series":true,"limit":200})", &o);
     CHECK(!o.is_error);
     CHECK_EQ(analysis.window, std::string("7d"));
     CHECK_EQ(analysis.overview.group, std::string("instance"));
+    CHECK_EQ(analysis.overview.order, std::string("refused"));
     CHECK(analysis.overview.series);
     CHECK_EQ(analysis.overview.limit, size_t(200));
     CHECK(analysis.overview.keys == std::vector<std::string>({"ci-bot", "ui_0a1b2c3d4e5f"}));
@@ -5414,8 +5840,12 @@ void test_analysis_tools() {
       doc = call(tools, reader, "mcp_analysis_all_usage", std::string(R"({"group":")") + group + "\"}", &o);
       CHECK(!o.is_error && analysis.overview.group == group);
     }
-    doc = call(tools, reader, "mcp_analysis_all_usage", R"({"window":"","group":"","limit":1})", &o);
-    CHECK(!o.is_error && analysis.window == "24h" && analysis.overview.group == "key" && analysis.overview.limit == 1);
+    for (const char* order : {"requests", "errors", "refused", "calls", "bytes"}) {
+      doc = call(tools, reader, "mcp_analysis_all_usage", std::string(R"({"order":")") + order + "\"}", &o);
+      CHECK(!o.is_error && analysis.overview.order == order);
+    }
+    doc = call(tools, reader, "mcp_analysis_all_usage", R"({"window":"","group":"","order":"","limit":1})", &o);
+    CHECK(!o.is_error && analysis.window == "24h" && analysis.overview.group == "key" && analysis.overview.order == "requests" && analysis.overview.limit == 1);
 
     std::string many_keys = R"({"key":[)";
     for (int i = 0; i < 21; ++i) many_keys += std::string(i ? "," : "") + "\"k" + std::to_string(i) + "\"";
@@ -5425,6 +5855,10 @@ void test_analysis_tools() {
         {R"({"group":"type"})", "group must be key, method, client or instance"},
         {R"({"group":"nope"})", "group must be key, method, client or instance"},
         {R"({"group":5})", "group must be a string"},
+        {R"({"order":"nope"})", "order must be requests, errors, refused, calls or bytes"},
+        {R"({"order":"duration_ms_sum"})", "order must be requests, errors, refused, calls or bytes"},  // a metric of the series that does not rank
+        {R"({"order":"Errors"})", "order must be requests, errors, refused, calls or bytes"},
+        {R"({"order":5})", "order must be a string"},
         {R"({"limit":0})", "limit must be between 1 and 200"},
         {R"({"limit":201})", "limit must be between 1 and 200"},
         {R"({"limit":"5"})", "limit must be a whole number"},

@@ -339,7 +339,9 @@ const char* mcp_tool_input_schema(std::string_view tool) {
       ",\"include_cost\":{\"type\":\"boolean\",\"default\":false,\"description\":\"Add what the statements of your key cost ClickHouse. It reads system.query_log, so it takes longer.\"}," +
       usage_instances + "},\"additionalProperties\":false}";
   static const std::string all_usage = "{\"type\":\"object\",\"properties\":{" + usage_window +
-      ",\"group\":{\"type\":\"string\",\"enum\":[\"key\",\"method\",\"client\",\"instance\"],\"default\":\"key\",\"description\":\"What the series is grouped by.\"}," +
+      ",\"group\":{\"type\":\"string\",\"enum\":[\"key\",\"method\",\"client\",\"instance\"],\"default\":\"key\",\"description\":\"What the series is grouped by.\"}"
+      ",\"order\":{\"type\":\"string\",\"enum\":[\"requests\",\"errors\",\"refused\",\"calls\",\"bytes\"],\"default\":\"requests\","
+      "\"description\":\"The metric that ranks the groups of the series: the 8 with the most of it are listed, the others are summed in rest. refused is the 429 and the requests refused before they were read.\"}," +
       names_of("key", "Only these keys (their ids).") + "," +
       names_of("method", "Only these methods: a tool, or a method of the protocol such as tools/list.") + "," +
       names_of("client", "Only these clients (the names that they gave).") + "," + usage_instances + "," + usage_series +

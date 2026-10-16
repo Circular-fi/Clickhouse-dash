@@ -127,10 +127,11 @@ const std::vector<McpToolInfo>& mcp_tool_catalog() {
     all.push_back({"mcp_analysis_all_usage", "mcp_analysis", "Usage of all keys",
                    "What all the keys of all the ChDash instances did in a window: requests, errors and time, by key, method, client and "
                    "instance. Each list has the most requests first. `window` is 1h, 6h, 24h (default), 7d, 30d, 90d or 365d, as far as the "
-                   "retention goes. `group` is key (default), method, client or instance: what `series` is grouped by. `key` (the ids of keys), "
-                   "`method`, `client` and `instance` filter: lists of at most 20 values. `limit` is the rows of each list (20 by default, at "
-                   "most 200). `series` adds the points of the largest groups. The names, hosts and clients of other keys are in the answer; "
-                   "their ClickHouse cost never is.",
+                   "retention goes. `group` is key (default), method, client or instance: what `series` is grouped by. `order` is requests "
+                   "(default), errors, refused (the 429 and the requests refused before they were read), calls or bytes: the metric that ranks "
+                   "the groups of `series`. `key` (the ids of keys), `method`, `client` and `instance` filter: lists of at most 20 values. "
+                   "`limit` is the rows of each list (20 by default, at most 200). `series` adds the points of the 8 largest groups by `order`, "
+                   "and the others summed. The names, hosts and clients of other keys are in the answer; their ClickHouse cost never is.",
                    false, nullptr, nullptr, false, true, kMcpNeedsUsage | kMcpNeedsAllKeys});
     return all;
   }();

@@ -733,7 +733,7 @@ def test_all_usage_is_the_usage_of_every_key_for_a_key_that_names_it():
         # The overview of every key, with the shape of the page's, without the series.
         everything = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage")
         assert set(everything) == OVERVIEW_FIELDS - {"series"}, set(everything)
-        assert everything["window"] == "24h" and everything["group"] == "key"
+        assert everything["window"] == "24h" and everything["group"] == "key" and everything["order"] == "requests"
         assert everything["filters"] == {name: [] for name in OVERVIEW_FILTERS}
         assert everything["totals"]["requests"] >= 4 and everything["totals"]["keys"] >= 2
         assert len(everything["keys"]) <= 20 and len(everything["methods"]) <= 20 and len(everything["clients"]) <= 20
@@ -756,6 +756,17 @@ def test_all_usage_is_the_usage_of_every_key_for_a_key_that_names_it():
         assert series["series"]["step"] == 300 and len(series["series"]["t"]) == 72
         assert [g["id"] for g in series["series"]["groups"]] == [other["id"]] and series["series"]["groups"][0]["label"] == "analysis-other"
         check_series_adds_up(series)
+        # The metric that ranks the groups of the series: the calls of the one tool of this key, then the refusals that it has none of (every
+        # group is in `rest`). The answer says the order, as the page's does.
+        calls = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"key": [other["id"]], "group": "method", "order": "calls", "series": True})
+        assert calls["order"] == "calls" and [(g["id"], sum(g["calls"])) for g in calls["series"]["groups"]] == [("list_hosts", 3)]
+        check_series_adds_up(calls)
+        refused = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"key": [other["id"]], "group": "method", "order": "refused", "series": True})
+        assert refused["order"] == "refused" and refused["series"]["groups"] == []
+        assert (refused["series"]["rest"]["groups"], refused["series"]["rest"]["total"], sum(refused["series"]["rest"]["refused"])) == (1, 3, 0)
+        check_series_adds_up(refused)
+        for order in SERIES_ORDERS:
+            assert ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"order": order})["order"] == order
         # The rows of each list are limited, and the answer says how many were left out.
         one = ok_tool(MCP_URL, reader_secret, "mcp_analysis_all_usage", {"limit": 1})
         assert len(one["keys"]) == 1 and one["omitted"]["keys"] >= 1, one["omitted"]
@@ -776,6 +787,8 @@ def test_all_usage_is_the_usage_of_every_key_for_a_key_that_names_it():
             ({"window": "365d"}, "window must be one of"),
             ({"group": "result"}, "group must be key, method, client or instance"),
             ({"group": "nope"}, "group must be key, method, client or instance"),
+            ({"order": "nope"}, "order must be requests, errors, refused, calls or bytes"),
+            ({"order": "duration_ms_sum"}, "order must be requests, errors, refused, calls or bytes"),
             ({"limit": 0}, "limit must be between 1 and 200"),
             ({"limit": 201}, "limit must be between 1 and 200"),
             ({"key": ["Bad Key"]}, "key must be the id of a key"),
@@ -1407,10 +1420,11 @@ def test_usage_of_a_key():
         drop_key(key["id"])
 
 
-OVERVIEW_FIELDS = {"window", "from", "to", "since", "retention_days", "instances", "group", "filters", "totals", "series", "keys", "methods",
-                   "results", "types", "clients", "omitted"}
+OVERVIEW_FIELDS = {"window", "from", "to", "since", "retention_days", "instances", "group", "order", "filters", "totals", "series", "keys",
+                   "methods", "results", "types", "clients", "omitted"}
 OVERVIEW_FILTERS = ("key", "method", "client", "instance", "result", "type")
-SERIES_METRICS = ("requests", "errors", "calls", "duration_ms_sum", "bytes")
+SERIES_METRICS = ("requests", "errors", "calls", "duration_ms_sum", "bytes", "refused")
+SERIES_ORDERS = ("requests", "errors", "refused", "calls", "bytes")
 OVERVIEW_TOTALS = {"requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg", "duration_ms_max", "rows", "bytes", "active_keys", "keys"}
 OVERVIEW_KEY = {"id", "name", "host", "source", "deleted_at", "elsewhere", "requests", "calls", "errors", "rate_limited", "rejected", "duration_ms_avg",
                 "duration_ms_max", "rows", "bytes", "last_used_at"}
@@ -1440,7 +1454,7 @@ def points_of(doc: dict, metric: str = "requests") -> list:
 
 
 def check_series_adds_up(doc: dict) -> None:
-    """What every answer holds: at each point the groups and `rest` add up, for each of the five metrics, to the tiles."""
+    """What every answer holds: at each point the groups and `rest` add up, for each of the six metrics, to the tiles."""
     series, totals = doc["series"], doc["totals"]
     assert isinstance(series["step"], int) and len(series["t"]) in (60, 72, 96, 56, 90, 365)
     for group in [*series["groups"], series["rest"]]:
@@ -1448,10 +1462,27 @@ def check_series_adds_up(doc: dict) -> None:
         assert sum(group["requests"]) == group["total"]
     sums = {metric: sum(points_of(doc, metric)) for metric in SERIES_METRICS}
     assert (sums["requests"], sums["errors"], sums["calls"], sums["bytes"]) == (totals["requests"], totals["errors"], totals["calls"], totals["bytes"])
+    assert sums["refused"] == totals["rate_limited"] + totals["rejected"]  # the 429 and what was refused before it was read
     if sums["calls"]:
         assert totals["duration_ms_avg"] == (sums["duration_ms_sum"] + sums["calls"] // 2) // sums["calls"]
     else:
         assert totals["duration_ms_avg"] is None and sums["duration_ms_sum"] == 0
+
+
+def check_ranking_adds_up(doc: dict, order: str) -> None:
+    """A ranking of the series (`series.rankings[order]`) holds the counts of the series ranked another way: at each point and for each of the six
+    metrics its groups and its `rest` add up to the tiles, as the ones of the series do."""
+    ranking = doc["series"]["rankings"][order]
+    assert set(ranking) == {"groups", "rest"}  # the step and the points are those of the series
+    check_series_adds_up({**doc, "series": {**doc["series"], "groups": ranking["groups"], "rest": ranking["rest"]}})
+
+
+def ranking_shape(part: dict) -> tuple:
+    """The groups and the `rest` of a series, or of one of its rankings, by what each one sums to over the window: two reads can be a step apart
+    when the clock goes over a boundary between them, and their sums are the same."""
+    rest = part["rest"]
+    return ([(g["id"], g["label"], g["total"], *(sum(g[metric]) for metric in SERIES_METRICS)) for g in part["groups"]],
+            (rest["groups"], rest["total"], *(sum(rest[metric]) for metric in SERIES_METRICS)))
 
 
 @needs_mcp
@@ -1496,7 +1527,7 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         both = [("key", a["id"]), ("key", b["id"])]
         doc = overview(("window", "24h"), *both)
         assert set(doc) == OVERVIEW_FIELDS
-        assert doc["window"] == "24h" and doc["retention_days"] == 90 and doc["group"] == "method"
+        assert doc["window"] == "24h" and doc["retention_days"] == 90 and doc["group"] == "method" and doc["order"] == "requests"
         assert doc["from"].endswith("Z") and doc["to"].endswith("Z") and doc["since"].endswith("Z")
         assert doc["filters"] == {"key": [a["id"], b["id"]], "method": [], "client": [], "instance": [], "result": [], "type": []}
         totals = doc["totals"]
@@ -1505,7 +1536,7 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         assert totals["active_keys"] == 2 and totals["keys"] == len(api_ok(m("GET", "/api/mcp/keys"))["keys"])
         assert totals["duration_ms_max"] >= totals["duration_ms_avg"] >= 0 and totals["bytes"] > 0
         # The series: 96 points of 15 minutes (the step is a number of seconds); at most 8 groups, the others summed in `rest`; each group
-        # has the five metrics, and the bars add up to the tile, at each point.
+        # has the six metrics, and the bars add up to the tile, at each point.
         series = doc["series"]
         assert set(series) == {"step", "t", "groups", "rest"} and series["step"] == 900 and len(series["t"]) == 96
         assert all(set(group) == {"id", "label", "total", *SERIES_METRICS} for group in series["groups"])
@@ -1565,7 +1596,7 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         assert mine_instance["instance"] == "chdash-mcp-test" and mine_instance["status"] == "ok" and mine_instance["reason"] == ""
         assert (mine_instance["requests"], mine_instance["calls"], mine_instance["errors"]) == (17, 8, 6) and mine_instance["keys"] == 2
 
-        # Every group: the groups and `rest` add up to the requests, for the five metrics. The label of a key is its name.
+        # Every group: the groups and `rest` add up to the requests, for the six metrics. The label of a key is its name.
         for group in ("key", "method", "client", "result", "type", "instance"):
             by = overview(("window", "24h"), ("group", group), *both)
             assert by["group"] == group and by["totals"]["requests"] == 17
@@ -1584,6 +1615,90 @@ def test_the_usage_overview_cuts_the_requests_of_all_keys():
         assert [(g["id"], g["label"], g["total"]) for g in by_instance["groups"]] == [("chdash-mcp-test", "chdash-mcp-test", 17)]
         for group in ("key", "type", "result", "client", "instance"):
             assert points_of(overview(("window", "24h"), ("group", group), *both)) == points_of(doc)
+
+        # The order of the groups: the metric that ranks them, the requests when it is not asked. A group that has none of it is in `rest`, and the
+        # total of a group stays its requests. With group=result and order=errors the groups are the error codes that have the most errors (`ok`
+        # is in `rest`): the Usage tab, grouped by Result, draws them in its Errors and Error rate charts, each chart ranking by its own metric
+        # (`orders`, below).
+        by_errors = overview(("window", "24h"), ("group", "result"), ("order", "errors"), *both)
+        assert by_errors["group"] == "result" and by_errors["order"] == "errors" and by_errors["totals"]["requests"] == 17
+        assert [(g["id"], g["total"], sum(g["errors"])) for g in by_errors["series"]["groups"]] == [  # the same number: by name
+            ("clause_not_allowed", 1, 1), ("multiple_statements", 1, 1), ("rpc_error_32601", 1, 1), ("rpc_error_32700", 1, 1),
+            ("statement_not_allowed", 1, 1), ("table_not_allowed", 1, 1)]
+        rest = by_errors["series"]["rest"]  # ok has no error, and the refusal is no error
+        assert (rest["groups"], rest["total"], sum(rest["errors"])) == (2, 11, 0)
+        check_series_adds_up(by_errors)
+        by_refused = overview(("window", "24h"), ("group", "result"), ("order", "refused"), *both)
+        assert [(g["id"], g["total"], sum(g["refused"])) for g in by_refused["series"]["groups"]] == [("415_unsupported_media_type", 1, 1)]
+        assert (by_refused["series"]["rest"]["groups"], by_refused["series"]["rest"]["total"]) == (7, 16)
+        check_series_adds_up(by_refused)
+        by_method = overview(("window", "24h"), ("group", "method"), ("order", "errors"), *both)["series"]
+        assert [(g["id"], g["total"], sum(g["errors"])) for g in by_method["groups"]] == [
+            ("run_query", 4, 3), ("invalid", 1, 1), ("query_table", 1, 1), ("resources/list", 1, 1)]
+        assert (by_method["rest"]["groups"], by_method["rest"]["total"]) == (7, 10)
+        by_calls = overview(("window", "24h"), ("group", "method"), ("order", "calls"), *both)["series"]
+        assert [(g["id"], sum(g["calls"])) for g in by_calls["groups"]] == [("run_query", 4), ("list_hosts", 3), ("query_table", 1)]
+        assert (by_calls["rest"]["groups"], by_calls["rest"]["total"]) == (8, 9)
+        # Every order is valid for every group and moves no figure of the answer but the series. The groups are at most 8, each one has some of the
+        # metric of the order, and the most of it comes first (the key is filtered here: its groups are the ones that were chosen).
+        for group in ("key", "method", "client", "result", "type", "instance"):
+            for order in SERIES_ORDERS:
+                ranked = overview(("window", "24h"), ("group", group), ("order", order), *both)
+                assert ranked["order"] == order and ranked["group"] == group
+                assert (ranked["totals"], ranked["methods"]) == (doc["totals"], doc["methods"]), (group, order)
+                check_series_adds_up(ranked)
+                if group != "key":
+                    ranks = [sum(g[order]) for g in ranked["series"]["groups"]]
+                    assert len(ranks) <= 8 and all(ranks) and ranks == sorted(ranks, reverse=True), (group, order, ranks)
+        # A filtered dimension keeps the values that were chosen, in their order, whatever the order: key A has more errors than key B.
+        chosen = overview(("window", "24h"), ("group", "method"), ("order", "errors"), ("method", "list_hosts"), ("method", "run_query"), *both)
+        assert [g["id"] for g in chosen["series"]["groups"]] == ["list_hosts", "run_query"] and chosen["series"]["rest"]["groups"] == 0
+        reversed_keys = overview(("window", "24h"), ("group", "key"), ("order", "errors"), ("key", b["id"]), ("key", a["id"]))
+        assert [g["id"] for g in reversed_keys["series"]["groups"]] == [b["id"], a["id"]] and reversed_keys["series"]["rest"]["groups"] == 0
+
+        # The rankings: `orders` (repeatable) asks for the groups of more metrics in the same read, for the charts that rank by a metric of their
+        # own. Each ranking is the `groups` and the `rest` of the series of that order alone; the series keeps following `order`; the answer does
+        # not name the orders; without `orders` there is no `rankings`.
+        assert "rankings" not in series and "orders" not in doc
+        asked = ("errors", "refused", "calls", "bytes")
+        together = overview(("window", "24h"), ("group", "method"), *[("orders", order) for order in asked], *both)
+        assert set(together) == OVERVIEW_FIELDS and together["order"] == "requests" and together["group"] == "method"
+        assert set(together["series"]) == {"step", "t", "groups", "rest", "rankings"} and list(together["series"]["rankings"]) == list(asked)
+        assert together["series"]["step"] == 900 and len(together["series"]["t"]) == 96
+        assert (together["totals"], together["methods"]) == (doc["totals"], doc["methods"])
+        assert ranking_shape(together["series"]) == ranking_shape(series)  # the series is ranked by the requests still
+        check_series_adds_up(together)
+        for order in asked:
+            alone = overview(("window", "24h"), ("group", "method"), ("order", order), *both)["series"]
+            assert ranking_shape(together["series"]["rankings"][order]) == ranking_shape(alone), order
+            check_ranking_adds_up(together, order)
+        # The refusal of this scenario (the 415, refused before it was read) is the method `unread`, the only group that has one.
+        refusals = together["series"]["rankings"]["refused"]
+        assert [(g["id"], g["total"], sum(g["refused"])) for g in refusals["groups"]] == [("unread", 1, 1)]
+        assert (refusals["rest"]["groups"], refusals["rest"]["total"], sum(refusals["rest"]["refused"])) == (10, 16, 0)
+        # The errors by method: the same groups as the series that the errors rank (by_method above).
+        assert ranking_shape(together["series"]["rankings"]["errors"]) == ranking_shape(by_method)
+        assert ranking_shape(together["series"]["rankings"]["calls"]) == ranking_shape(by_calls)
+        # Every group takes every order: each ranking holds at most 8 groups, each one with some of its metric, the most of it first (the key is
+        # filtered here: its groups are the ones that were chosen), and the order of the series is a ranking of its own.
+        for group in ("key", "method", "client", "result", "type", "instance"):
+            every = overview(("window", "24h"), ("group", group), ("order", "bytes"), *[("orders", order) for order in SERIES_ORDERS], *both)
+            assert list(every["series"]["rankings"]) == list(SERIES_ORDERS), group
+            assert every["series"]["rankings"]["bytes"] == {"groups": every["series"]["groups"], "rest": every["series"]["rest"]}, group
+            check_series_adds_up(every)
+            for order in SERIES_ORDERS:
+                check_ranking_adds_up(every, order)
+                if group != "key":
+                    ranks = [sum(g[order]) for g in every["series"]["rankings"][order]["groups"]]
+                    assert len(ranks) <= 8 and all(ranks) and ranks == sorted(ranks, reverse=True), (group, order, ranks)
+        # A value that is repeated counts once, and the members come in the order of the request.
+        repeated = overview(("window", "24h"), ("orders", "calls"), ("orders", "errors"), ("orders", "calls"), ("orders", "errors"), *both)
+        assert list(repeated["series"]["rankings"]) == ["calls", "errors"]
+        # A filtered dimension keeps the values that were chosen, in their order, in every ranking.
+        filtered = overview(("window", "24h"), ("group", "method"), ("orders", "errors"), ("orders", "bytes"), ("method", "run_query"), ("method", "list_hosts"), *both)["series"]
+        assert [g["id"] for g in filtered["groups"]] == ["run_query", "list_hosts"]
+        for order in ("errors", "bytes"):
+            assert filtered["rankings"][order] == {"groups": filtered["groups"], "rest": filtered["rest"]} and filtered["rest"]["groups"] == 0, order
         # A filter on the instance: this one keeps everything; another one (that is not there) keeps nothing, and is in the facet at 0.
         here = overview(("window", "24h"), ("instance", "chdash-mcp-test"), *both)
         assert here["totals"]["requests"] == 17 and here["filters"]["instance"] == ["chdash-mcp-test"]
@@ -1766,6 +1881,18 @@ def test_the_usage_overview_refuses_what_it_does_not_read():
     invalid([("group", "nope")], "group", "invalid")
     invalid([("group", "Client")], "group", "invalid")
     invalid([("group", "instances")], "group", "invalid")
+    # `order` is one of five metrics (it is read as it is written, and the time of the calls does not rank).
+    for order in ("", "nope", "Errors", "ERRORS", "error", "request", "call", "byte", "duration_ms_sum", "duration_ms_avg", "rate_limited", "rejected"):
+        invalid([("order", order)], "order", "invalid")
+    # `orders` takes the same five, each one once, at most 5 (the repeats count once, so the sixth value is too many whatever it is): one value for
+    # each parameter, never a list in one.
+    for order in ("", "nope", "Errors", "ERRORS", "error", "request", "call", "byte", "duration_ms_sum", "duration_ms_avg", "rate_limited", "rejected",
+                  "requests,errors", "errors calls"):
+        invalid([("orders", order)], "orders", "invalid")
+        invalid([("orders", "errors"), ("orders", order)], "orders", "invalid")
+    invalid([("orders", order) for order in (*SERIES_ORDERS, "nope")], "orders", "too_many")
+    invalid([("orders", order) for order in (*SERIES_ORDERS, "duration_ms_sum")], "orders", "too_many")
+    invalid([("orders", order) for order in "abcdef"], "orders", "too_many")
     invalid([("nope", "1")], "nope", "unknown")
     invalid([("limit", "5")], "limit", "unknown")
     invalid([("clients", "x")], "clients", "unknown")  # the filter is `client`
@@ -1798,6 +1925,10 @@ def test_the_usage_overview_refuses_what_it_does_not_read():
     # Every value of every dimension is checked, in the order: the window, the unknown names, the group, the filters.
     invalid([("window", "48h"), ("nope", "1")], "window", "invalid")
     invalid([("nope", "1"), ("group", "x")], "nope", "unknown")
+    invalid([("group", "x"), ("order", "x")], "group", "invalid")
+    invalid([("order", "x"), ("orders", "x")], "order", "invalid")
+    invalid([("orders", "x"), ("key", "Bad Key")], "orders", "invalid")
+    invalid([("order", "x"), ("key", "Bad Key")], "order", "invalid")
     invalid([("group", "x"), ("key", "Bad Key")], "group", "invalid")
     invalid([("key", "Bad Key"), ("client", " x")], "key", "invalid")
     invalid([("client", " x"), ("instance", "a b")], "client", "invalid")
@@ -1805,7 +1936,14 @@ def test_the_usage_overview_refuses_what_it_does_not_read():
     # Without a parameter: the default window of the meta, the group by method.
     plain = overview()
     meta = api_ok(m("GET", "/api/mcp/meta"))["usage"]
-    assert plain["window"] == meta["default_window"] and plain["group"] == "method" and "split" not in plain
+    assert plain["window"] == meta["default_window"] and plain["group"] == "method" and plain["order"] == "requests" and "split" not in plain
+    for order in SERIES_ORDERS:
+        assert overview(("order", order))["order"] == order
+    # Without `orders`, no `rankings`; with them, one member for each, each one once, in the order of the request.
+    assert set(plain["series"]) == {"step", "t", "groups", "rest"}
+    assert list(overview(*[("orders", order) for order in reversed(SERIES_ORDERS)])["series"]["rankings"]) == list(reversed(SERIES_ORDERS))
+    assert list(overview(*[("orders", order) for order in SERIES_ORDERS * 3])["series"]["rankings"]) == list(SERIES_ORDERS)
+    assert list(overview(("orders", "bytes"), ("orders", "errors"), ("orders", "bytes"))["series"]["rankings"]) == ["bytes", "errors"]
     assert plain["filters"] == {"key": [], "method": [], "client": [], "instance": [], "result": [], "type": []}
     # The route of the page is a read of the page only, like the others.
     for headers in ({"Sec-Fetch-Site": "cross-site"}, {"Origin": "https://evil.example.com"}):

@@ -108,23 +108,26 @@ bool allow_from_page(const httplib::Request& req, httplib::Response& res) {
   return false;
 }
 
-// The parameters of GET /api/mcp/usage/overview besides the window: `group`, and the filters `key`, `method`, `client`, `instance`, `result`
-// and `type`, each of them repeatable, checked by mcp_usage_overview_check. A name that the route does not read is refused (400 validation,
-// reason unknown), so a typo is an error and not a filter that does nothing (the old `split` is one). Nullopt when they are valid.
+// The parameters of GET /api/mcp/usage/overview besides the window: `group`, `order` (the metric that ranks the groups of the series), `orders`
+// (the metrics of the other rankings of the series, repeatable), and the filters `key`, `method`, `client`, `instance`, `result` and `type`, each
+// of them repeatable, checked by mcp_usage_overview_check. A name that the route does not read is refused (400 validation, reason unknown), so a
+// typo is an error and not a filter that does nothing (the old `split` is one). Nullopt when they are valid.
 std::optional<McpValidationError> read_usage_overview_query(const httplib::Request& req, McpUsageOverviewQuery* query) {
   for (const auto& item : req.params) {
-    if (item.first != "window" && item.first != "group" && item.first != "key" && item.first != "method" && item.first != "client" &&
-        item.first != "instance" && item.first != "result" && item.first != "type") {
+    if (item.first != "window" && item.first != "group" && item.first != "order" && item.first != "orders" && item.first != "key" &&
+        item.first != "method" && item.first != "client" && item.first != "instance" && item.first != "result" && item.first != "type") {
       return McpValidationError{item.first, "unknown", "unknown parameter: " + item.first};
     }
   }
   if (req.has_param("group")) query->group = req.get_param_value("group");
+  if (req.has_param("order")) query->order = req.get_param_value("order");
   const auto values = [&](const char* name) {
     std::vector<std::string> out;
     const auto range = req.params.equal_range(name);
     for (auto it = range.first; it != range.second; ++it) out.push_back(it->second);
     return out;
   };
+  query->orders = values("orders");
   query->keys = values("key");
   query->methods = values("method");
   query->clients = values("client");
